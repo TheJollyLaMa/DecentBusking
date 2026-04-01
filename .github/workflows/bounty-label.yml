@@ -1,0 +1,109 @@
+# .github/workflows/bounty-label.yml
+# DecentBusking Bounty Label Workflow
+#
+# Allows maintainers to attach a $BNUT bounty to any open issue by running
+# this workflow from the GitHub Actions UI (Actions → Bounty Label → Run workflow).
+#
+# What it does:
+#   1. Creates the bounty label (e.g. "bounty: 500 BNUT") in the repo if it
+#      doesn't already exist (standard gold colour #f0c040).
+#   2. Applies that label to the specified issue.
+#   3. Posts a comment on the issue announcing the bounty and explaining how
+#      contributors can claim it.
+
+name: Bounty Label
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to label (e.g. 1)"
+        required: true
+        type: string
+      amount_bnut:
+        description: "Bounty amount in whole BNUT tokens (e.g. 500)"
+        required: true
+        type: string
+
+jobs:
+  apply-bounty-label:
+    name: Apply bounty label to issue
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - name: Create label (if needed) and apply to issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = parseInt('${{ github.event.inputs.issue_number }}', 10);
+            const amount      = '${{ github.event.inputs.amount_bnut }}';
+            const labelName   = `bounty: ${amount} BNUT`;
+            const labelColor  = 'f0c040';
+            const labelDesc   = `$BNUT bounty of ${amount} tokens for completing this issue`;
+
+            // ── 1. Ensure the label exists ──────────────────────────────────
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                name:  labelName,
+              });
+              console.log(`Label "${labelName}" already exists.`);
+            } catch (e) {
+              if (e.status === 404) {
+                await github.rest.issues.createLabel({
+                  owner:       context.repo.owner,
+                  repo:        context.repo.repo,
+                  name:        labelName,
+                  color:       labelColor,
+                  description: labelDesc,
+                });
+                console.log(`Created label "${labelName}".`);
+              } else {
+                throw e;
+              }
+            }
+
+            // ── 2. Apply the label to the issue ────────────────────────────
+            await github.rest.issues.addLabels({
+              owner:        context.repo.owner,
+              repo:         context.repo.repo,
+              issue_number: issueNumber,
+              labels:       [labelName],
+            });
+            console.log(`Applied label "${labelName}" to issue #${issueNumber}.`);
+
+            // ── 3. Post a bounty announcement comment ──────────────────────
+            const body = [
+              `🏷️ This issue now carries a **$BNUT bounty** of **${amount} BNUT**!`,
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| 💰 Bounty | **${amount} BNUT** |`,
+              `| 🏷️ Label | \`${labelName}\` |`,
+              `| 📌 Issue | #${issueNumber} |`,
+              `| 🌐 Network | Optimism Mainnet |`,
+              '',
+              '**How to claim:**',
+              '1. Comment on this issue expressing your interest.',
+              '2. Get assigned by a maintainer (`@TheJollyLaMa`).',
+              '3. Open a Pull Request that closes this issue (include `Closes #' + issueNumber + '` in the PR body).',
+              '4. Once your PR is merged, the maintainer will queue your $BNUT payout.',
+              '',
+              '> ⚠️ **Whitelist registration required:** Payouts are only sent to wallets registered in the',
+              '> contributor whitelist by `@TheJollyLaMa`. If you are not yet registered, reach out to',
+              '> `@TheJollyLaMa` directly (via video call or DM) to complete onboarding before your payout',
+              '> can be processed.',
+              `> See [CONTRIBUTING.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CONTRIBUTING.md) for onboarding instructions.`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner:        context.repo.owner,
+              repo:         context.repo.repo,
+              issue_number: issueNumber,
+              body,
+            });
+            console.log(`Bounty announcement posted on issue #${issueNumber}.`);

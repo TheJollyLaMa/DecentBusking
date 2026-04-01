@@ -1,0 +1,498 @@
+/* css/styles.css — DecentBusking */
+/* Dark space theme with warm stage lighting for the busker zone */
+
+/* ── Reset & Base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-space: #03010a;
+  --bg-stage: rgba(10, 5, 25, 0.85);
+  --gold: #f0c040;
+  --gold-dim: #b8922a;
+  --amber: #ffb347;
+  --teal: #00d4aa;
+  --purple: #7c3aed;
+  --text-primary: #f0e6c8;
+  --text-dim: #8a7a5a;
+  --border-glow: rgba(240, 192, 64, 0.35);
+  --panel-bg: rgba(5, 3, 18, 0.92);
+  --panel-border: rgba(240, 192, 64, 0.2);
+  --font-display: 'Bungee', 'Impact', sans-serif;
+  --font-body: 'Segoe UI', system-ui, sans-serif;
+  --stage-radius: 16px;
+  --transition: 0.25s ease;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  background: var(--bg-space);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ── Three.js Canvas (background) ────────────────────────────────────────── */
+#space-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+decent-header {
+  position: relative;
+  z-index: 100;
+}
+
+/* ── Main Stage ──────────────────────────────────────────────────────────── */
+#stage {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1;
+  padding: 2rem 1rem 3rem;
+  min-height: calc(100vh - 120px);
+}
+
+/* Now-playing banner */
+#busker-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+#now-playing-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold-dim);
+}
+
+#now-playing-title {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  color: var(--gold);
+  text-shadow: 0 0 18px rgba(240, 192, 64, 0.6);
+  min-height: 1.6rem;
+}
+
+#now-playing-artist {
+  font-size: 0.875rem;
+  color: var(--text-dim);
+}
+
+/* Center stage — hat & guitar case */
+#center-stage {
+  display: flex;
+  gap: 4rem;
+  align-items: flex-end;
+  justify-content: center;
+  perspective: 600px;
+}
+
+/* Hat & Guitar Case buttons */
+#hat-btn,
+#guitar-case-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 5rem;
+  line-height: 1;
+  filter: drop-shadow(0 0 14px rgba(240, 192, 64, 0.4));
+  transition: transform var(--transition), filter var(--transition);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#hat-btn:hover,
+#guitar-case-btn:hover {
+  transform: scale(1.12) translateY(-4px);
+  filter: drop-shadow(0 0 26px rgba(240, 192, 64, 0.75));
+}
+
+#hat-btn:active,
+#guitar-case-btn:active {
+  transform: scale(0.96) translateY(0);
+}
+
+/* ── Audio Player ────────────────────────────────────────────────────────── */
+#audio-player {
+  display: none;
+}
+
+/* ── NFT Detail Panel ────────────────────────────────────────────────────── */
+#nft-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 200;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--stage-radius);
+  padding: 2rem;
+  min-width: 320px;
+  max-width: 480px;
+  width: 90vw;
+  box-shadow: 0 0 40px rgba(0, 212, 170, 0.15), 0 0 80px rgba(124, 58, 237, 0.1);
+  backdrop-filter: blur(12px);
+  animation: fadeIn 0.2s ease;
+}
+
+#nft-panel-content {
+  margin-bottom: 1.25rem;
+}
+
+#nft-panel-content h3 {
+  font-family: var(--font-display);
+  color: var(--gold);
+  margin-bottom: 0.75rem;
+  font-size: 1.2rem;
+}
+
+#nft-panel-content .nft-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.4rem 1rem;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+#nft-panel-content .nft-meta dt {
+  color: var(--text-dim);
+}
+
+#nft-panel-content .nft-meta dd {
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+#nft-panel-content audio {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  accent-color: var(--teal);
+}
+
+.nft-buy-btn {
+  display: block;
+  width: 100%;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, var(--teal), var(--purple));
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.nft-buy-btn:hover {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
+#nft-panel-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: color var(--transition);
+}
+
+#nft-panel-close:hover {
+  color: var(--text-primary);
+}
+
+/* ── Mint Modal ──────────────────────────────────────────────────────────── */
+#mint-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 1, 10, 0.82);
+  backdrop-filter: blur(6px);
+  animation: fadeIn 0.2s ease;
+}
+
+#mint-modal-inner {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--stage-radius);
+  padding: 2rem;
+  width: 90vw;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 0 60px rgba(240, 192, 64, 0.12);
+}
+
+#mint-modal-inner h2 {
+  font-family: var(--font-display);
+  color: var(--gold);
+  margin-bottom: 0.5rem;
+  font-size: 1.3rem;
+}
+
+#mint-modal-inner p {
+  color: var(--text-dim);
+  font-size: 0.875rem;
+  margin-bottom: 1.25rem;
+  line-height: 1.5;
+}
+
+#mint-form label {
+  display: block;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gold-dim);
+  margin-bottom: 0.3rem;
+}
+
+#mint-form label .hint {
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-dim);
+}
+
+#mint-form input[type="text"],
+#mint-form input[type="number"],
+#mint-form input[type="file"] {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(240, 192, 64, 0.2);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+#mint-form input:focus {
+  border-color: var(--teal);
+}
+
+#mint-form input[type="file"] {
+  cursor: pointer;
+}
+
+#mint-status {
+  font-size: 0.85rem;
+  min-height: 1.2rem;
+  margin-bottom: 0.75rem;
+  color: var(--teal);
+}
+
+#mint-status.error {
+  color: #f87171;
+}
+
+.mint-form-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+#mint-submit-btn {
+  flex: 1;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, var(--gold), var(--amber));
+  color: #111;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity var(--transition);
+}
+
+#mint-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#mint-cancel-btn {
+  padding: 0.75rem 1.25rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-dim);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background var(--transition);
+}
+
+#mint-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Tip Modal ───────────────────────────────────────────────────────────── */
+#tip-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 1, 10, 0.82);
+  backdrop-filter: blur(6px);
+  animation: fadeIn 0.2s ease;
+}
+
+#tip-modal-inner {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--stage-radius);
+  padding: 2rem;
+  width: 90vw;
+  max-width: 400px;
+  box-shadow: 0 0 60px rgba(240, 192, 64, 0.12);
+}
+
+#tip-modal-inner h2 {
+  font-family: var(--font-display);
+  color: var(--gold);
+  margin-bottom: 0.5rem;
+}
+
+#tip-modal-inner p {
+  color: var(--text-dim);
+  font-size: 0.875rem;
+  margin-bottom: 1.25rem;
+}
+
+#tip-form label {
+  display: block;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gold-dim);
+  margin-bottom: 0.3rem;
+}
+
+#tip-form label .hint {
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-dim);
+}
+
+#tip-amount {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(240, 192, 64, 0.2);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+#tip-amount:focus {
+  border-color: var(--gold);
+}
+
+#tip-status {
+  font-size: 0.85rem;
+  min-height: 1.2rem;
+  margin-bottom: 0.75rem;
+  color: var(--teal);
+}
+
+#tip-status.error {
+  color: #f87171;
+}
+
+.tip-form-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+#tip-send-btn {
+  flex: 1;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, var(--gold), var(--amber));
+  color: #111;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity var(--transition);
+}
+
+#tip-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#tip-cancel-btn {
+  padding: 0.75rem 1.25rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-dim);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background var(--transition);
+}
+
+#tip-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+decent-foot {
+  position: relative;
+  z-index: 100;
+}
+
+/* ── Utility ──────────────────────────────────────────────────────────────── */
+.hidden {
+  display: none !important;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 10px)); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+/* Non-translate fadeIn for modals */
+#mint-modal,
+#tip-modal {
+  animation: overlayFadeIn 0.2s ease;
+}
+
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
