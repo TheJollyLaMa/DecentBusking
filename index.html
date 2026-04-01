@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>🎸 Decent Busking</title>
+  <link rel="icon" type="image/png" href="./img/hat.png" />
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+
+  <!-- CDN dependencies -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <!-- W3Up IPFS browser bundle -->
+  <script src="https://bafybeicqxq54ncvkxvwdbov6ljgtyyrcpmek3ic2fxrwwsigmh4ud4s2mu.ipfs.w3s.link/browser.min.js"></script>
+
+  <!-- App config — must load before modules -->
+  <script src="decent.config.js"></script>
+</head>
+<body>
+
+  <!-- HEADER: DecentHead web component -->
+  <decent-header></decent-header>
+
+  <!-- MAIN STAGE -->
+  <main id="stage">
+    <div id="busker-info">
+      <span id="now-playing-label">🎵 Now Playing</span>
+      <span id="now-playing-title">—</span>
+      <span id="now-playing-artist"></span>
+    </div>
+    <div id="center-stage">
+      <button id="hat-btn" title="Tip the busker 🎩" aria-label="Tip the busker">🎩</button>
+      <button id="guitar-case-btn" title="Mint your busk 💼" aria-label="Mint your busk">💼</button>
+    </div>
+    <audio id="audio-player" autoplay></audio>
+  </main>
+
+  <!-- NFT detail panel -->
+  <div id="nft-panel" class="hidden">
+    <div id="nft-panel-content"></div>
+    <button id="nft-panel-close">✕</button>
+  </div>
+
+  <!-- Mint modal -->
+  <div id="mint-modal" class="hidden">
+    <div id="mint-modal-inner">
+      <h2>🎸 Open Your Guitar Case</h2>
+      <p>Mint your audio busk to the blockchain. It plays live the moment it's minted — right here in the town square.</p>
+      <form id="mint-form">
+        <label for="mint-title">Track Title</label>
+        <input id="mint-title" type="text" placeholder="What are you playing?" required />
+
+        <label for="mint-file">Audio File <span class="hint">(mp3, wav, ogg, flac, m4a)</span></label>
+        <input id="mint-file" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,audio/*" required />
+
+        <label for="mint-parent">Covers / References Token ID <span class="hint">(optional)</span></label>
+        <input id="mint-parent" type="number" placeholder="Parent token ID" min="0" />
+
+        <label for="mint-tip-wallet">Your Tip Wallet Address <span class="hint">(where listeners send tips)</span></label>
+        <input id="mint-tip-wallet" type="text" placeholder="0x…" />
+
+        <div id="mint-status"></div>
+        <div class="mint-form-actions">
+          <button type="submit" id="mint-submit-btn">🎵 Mint &amp; Busk</button>
+          <button type="button" id="mint-cancel-btn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Tip modal -->
+  <div id="tip-modal" class="hidden">
+    <div id="tip-modal-inner">
+      <h2>🎩 Throw Some Coins In</h2>
+      <p id="tip-to-label">Tip the busker directly, wallet to wallet.</p>
+      <div id="tip-form">
+        <label for="tip-amount">Amount <span class="hint">(MATIC or ERC-20)</span></label>
+        <input id="tip-amount" type="number" step="0.01" min="0.01" value="1.0" />
+        <div id="tip-status"></div>
+        <div class="tip-form-actions">
+          <button id="tip-send-btn">💸 Send Tip</button>
+          <button id="tip-cancel-btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER: DecentFoot web component -->
+  <decent-foot></decent-foot>
+
+  <!-- Load DecentHead component -->
+  <script type="module" src="https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@main/js/components/Header.js"></script>
+
+  <!-- Main app entry point -->
+  <script type="module" src="js/main.js"></script>
+
+</body>
+</html>
