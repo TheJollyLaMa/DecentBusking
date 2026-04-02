@@ -1,0 +1,205 @@
+# .github/workflows/bounty-audit.yml
+# DecentBusking Bounty Audit Bot
+#
+# Periodically scans for open issues that are referenced by merged PRs but were
+# NOT automatically closed (missing "Closes #N" keyword).  When found, posts a
+# maintainer alert on the issue so the team can retroactively queue the payout
+# via the manual-bounty-queue.yml workflow.
+#
+# Triggers:
+#   - Scheduled: every Monday at 09:00 UTC
+#   - Manual:    workflow_dispatch (for immediate on-demand audit)
+
+name: Bounty Audit
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Every Monday at 09:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — report findings without posting comments'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  audit-merged-prs:
+    name: Audit merged PRs for missing close tags
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Scan for unlinked merged PRs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
+            console.log(`Running bounty audit (dry_run=${dryRun})…`);
+
+            // ── Helpers ───────────────────────────────────────────────────────
+            const CLOSE_KEYWORDS = /(?:closes?|fixes?|resolves?)\s+(?:[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)?#(\d+)/gi;
+            const AUDIT_LABEL    = 'bounty-audit: needs manual close';
+
+            /** Strip markdown code blocks and inline code from text before scanning. */
+            function stripCode(text) {
+              return text
+                .replace(/```[\s\S]*?```/g, '')
+                .replace(/`[^`]*`/g, '')
+                .replace(/https?:\/\/\S+/g, '');
+            }
+
+            /** Extract all issue numbers from a string using a pattern. */
+            function extractNums(text, re) {
+              const nums = new Set();
+              let m;
+              re.lastIndex = 0;
+              while ((m = re.exec(text)) !== null) nums.add(parseInt(m[1], 10));
+              return nums;
+            }
+
+            /** Extract bare #N refs (not preceded by alphanumeric). */
+            function extractBareRefs(text) {
+              const cleaned = stripCode(text);
+              const re = /(?<![a-zA-Z0-9_])#(\d+)/g;
+              return extractNums(cleaned, re);
+            }
+
+            // ── Fetch recent merged PRs (up to 100) ───────────────────────────
+            const { data: mergedPRs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              sort: 'updated',
+              direction: 'desc',
+              per_page: 100,
+            });
+
+            const merged = mergedPRs.filter(pr => pr.merged_at);
+            console.log(`Found ${merged.length} recently merged PRs to check.`);
+
+            const findings = [];
+
+            for (const pr of merged) {
+              const body  = pr.body  || '';
+              const title = pr.title || '';
+              const combined = `${title}\n${body}`;
+
+              const closedByKeyword = extractNums(combined, CLOSE_KEYWORDS);
+              const allReferenced = extractBareRefs(combined);
+              const unlinked = [...allReferenced].filter(n => !closedByKeyword.has(n));
+
+              if (unlinked.length === 0) continue;
+
+              for (const issueNumber of unlinked) {
+                let issue;
+                try {
+                  issue = (await github.rest.issues.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                  })).data;
+                } catch (_) {
+                  continue;
+                }
+
+                if (issue.state !== 'open') continue;
+                if (issue.pull_request) continue;
+
+                const labels = issue.labels.map(l => l.name);
+                const hasBounty = labels.some(l => /^bounty:\s*\d+\s*BNUT$/i.test(l));
+                if (!hasBounty) continue;
+
+                findings.push({ issue, pr, labels });
+
+                if (dryRun) {
+                  console.log(`[DRY RUN] Issue #${issueNumber} ("${issue.title}") is still open and referenced (but not closed) by merged PR #${pr.number} — would post alert.`);
+                  continue;
+                }
+
+                const { data: existingComments } = await github.rest.issues.listComments({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  per_page: 100,
+                });
+                const alreadyAlerted = existingComments.some(
+                  c => c.body && c.body.includes('<!-- bounty-audit-alert -->')
+                );
+                if (alreadyAlerted) {
+                  console.log(`Issue #${issueNumber} already has an audit alert comment. Skipping.`);
+                  continue;
+                }
+
+                try {
+                  await github.rest.issues.getLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: AUDIT_LABEL,
+                  });
+                } catch (_) {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: AUDIT_LABEL,
+                    color: 'e11d48',
+                    description: 'Issue was referenced but not closed by a merged PR — needs manual close & bounty queue',
+                  });
+                }
+                try {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    labels: [AUDIT_LABEL],
+                  });
+                } catch (e) {
+                  console.warn(`Could not add label to issue #${issueNumber}: ${e.message}`);
+                }
+
+                const bountyLabel = labels.find(l => /^bounty:\s*\d+\s*BNUT$/i.test(l));
+                const commentBody = [
+                  '<!-- bounty-audit-alert -->',
+                  '## ⚠️ Bounty Audit Alert',
+                  '',
+                  `This issue has a **${bountyLabel}** and appears to have been implemented by merged PR #${pr.number} ("${pr.title}"), but it was **not automatically closed** because the PR did not include a \`Closes #${issueNumber}\` keyword.`,
+                  '',
+                  '**Action required for @TheJollyLaMa:**',
+                  `1. Confirm that PR #${pr.number} fully implements this issue.`,
+                  `2. Close this issue manually if confirmed.`,
+                  `3. Use the [**Manual Bounty Queue**](../../actions/workflows/bounty-payout.yml) workflow to retroactively queue the payout:`,
+                  `   - Set \`issue_number\` = \`${issueNumber}\``,
+                  `   - Set \`pr_number\` = \`${pr.number}\``,
+                  '',
+                  '> 💡 To prevent this in future PRs, contributors should use `Closes #N` in the PR description.',
+                ].join('\n');
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: commentBody,
+                });
+
+                console.log(`Posted audit alert on issue #${issueNumber} (referenced by PR #${pr.number}).`);
+              }
+            }
+
+            if (findings.length === 0) {
+              console.log('✅ No open bounty issues with unlinked merged PRs found.');
+            } else {
+              console.log(`\n📋 Audit summary: ${findings.length} finding(s):`);
+              for (const { issue, pr } of findings) {
+                console.log(`  - Issue #${issue.number} ("${issue.title}") ← PR #${pr.number} ("${pr.title}")`);
+              }
+            }

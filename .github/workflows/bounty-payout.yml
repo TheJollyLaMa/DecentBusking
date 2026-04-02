@@ -1,0 +1,167 @@
+# .github/workflows/bounty-payout.yml
+# DecentBusking Bounty Payout — Queue Workflow
+#
+# Manually triggered by @TheJollyLaMa to queue a $BNUT payout after a
+# contributor completes a bounty issue and their PR has been merged.
+#
+# ── No private key required ──────────────────────────────────────────────────
+# This workflow does NOT execute on-chain transactions.  Instead it appends
+# the payout request to `payroll-queue.json` and commits that file back to the
+# repo.  The owner visits the DecentBusking app, connects MetaMask, and
+# clicks "Settle Payroll" — all queued payouts are then sent directly from the
+# owner's wallet (no secret key stored anywhere in CI).
+
+name: Bounty Payout
+
+on:
+  workflow_dispatch:
+    inputs:
+      contributor_address:
+        description: "Contributor wallet address (0x…)"
+        required: true
+        type: string
+      amount_bnut:
+        description: "Amount of BNUT to pay (whole tokens, e.g. 500)"
+        required: true
+        type: string
+      issue_number:
+        description: "GitHub issue number being paid out (e.g. 1)"
+        required: true
+        type: string
+      contributor_github:
+        description: "Contributor GitHub username (e.g. octocat) — for the queue record"
+        required: false
+        type: string
+
+jobs:
+  queue-payout:
+    name: Queue $BNUT Payout
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      # ── 1. Log payout details ──────────────────────────────────────────────
+      - name: Log payout details
+        run: |
+          echo "════════════════════════════════════"
+          echo "  DecentBusking Bounty — Queue Payout"
+          echo "════════════════════════════════════"
+          echo "  Issue number       : #${{ github.event.inputs.issue_number }}"
+          echo "  Contributor address: ${{ github.event.inputs.contributor_address }}"
+          echo "  BNUT amount        : ${{ github.event.inputs.amount_bnut }} BNUT"
+          echo "  Queued by          : ${{ github.actor }}"
+          echo "════════════════════════════════════"
+
+      # ── 2. Checkout repository ─────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 3. Append entry to payroll-queue.json ─────────────────────────────
+      - name: Update payroll queue
+        id: queue
+        uses: actions/github-script@v7
+        env:
+          CONTRIBUTOR_ADDRESS: ${{ github.event.inputs.contributor_address }}
+          AMOUNT_BNUT: ${{ github.event.inputs.amount_bnut }}
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+          CONTRIBUTOR_GITHUB: ${{ github.event.inputs.contributor_github }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = 'payroll-queue.json';
+
+            let queue = { pending: [], settled: [] };
+            if (fs.existsSync(path)) {
+              try { queue = JSON.parse(fs.readFileSync(path, 'utf8')); } catch (_) {}
+            }
+            if (!Array.isArray(queue.pending))  queue.pending  = [];
+            if (!Array.isArray(queue.settled))  queue.settled  = [];
+
+            const issueNumber       = process.env.ISSUE_NUMBER;
+            const contributorGithub = process.env.CONTRIBUTOR_GITHUB || '';
+            const repoFull          = `${context.repo.owner}/${context.repo.repo}`;
+            const issueRef          = `${repoFull}#${issueNumber}`;
+
+            const alreadyQueued =
+              queue.pending.some(e => e.issueRef === issueRef && e.contributorGithub === contributorGithub) ||
+              queue.settled.some(e => e.issueRef === issueRef && e.contributorGithub === contributorGithub);
+            if (alreadyQueued) {
+              console.log(`⚠️  Issue ${issueRef} for @${contributorGithub} is already in the pending queue.`);
+              core.setOutput('already_queued', 'true');
+              return;
+            }
+
+            const entry = {
+              issueRef,
+              contributor: process.env.CONTRIBUTOR_ADDRESS,
+              contributorGithub,
+              amount: process.env.AMOUNT_BNUT,
+              queuedAt: new Date().toISOString(),
+              queuedBy: context.actor,
+            };
+
+            queue.pending.push(entry);
+            fs.writeFileSync(path, JSON.stringify(queue, null, 2) + '\n');
+            console.log(`✅  Queued ${entry.amount} BNUT → ${entry.contributor} for ${issueRef} (@${contributorGithub || 'unknown'})`);
+            core.setOutput('already_queued', 'false');
+
+      # ── 4. Commit updated queue file ───────────────────────────────────────
+      - name: Commit payroll-queue.json
+        if: steps.queue.outputs.already_queued == 'false'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add payroll-queue.json
+          git commit -m "chore: queue BNUT payout for issue #${{ github.event.inputs.issue_number }}"
+          git push
+
+      # ── 5. Post comment on the GitHub issue ───────────────────────────────
+      - name: Post queue confirmation comment
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+          CONTRIBUTOR_ADDRESS: ${{ github.event.inputs.contributor_address }}
+          CONTRIBUTOR_GITHUB: ${{ github.event.inputs.contributor_github }}
+          AMOUNT_BNUT: ${{ github.event.inputs.amount_bnut }}
+          ALREADY_QUEUED: ${{ steps.queue.outputs.already_queued }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber       = parseInt(process.env.ISSUE_NUMBER, 10);
+            const address           = process.env.CONTRIBUTOR_ADDRESS;
+            const contributorGithub = process.env.CONTRIBUTOR_GITHUB || '';
+            const amount            = process.env.AMOUNT_BNUT;
+            const approver          = context.actor;
+            const alreadyQueued     = process.env.ALREADY_QUEUED === 'true';
+
+            const contributorDisplay = contributorGithub ? `@${contributorGithub}` : `\`${address}\``;
+
+            const body = alreadyQueued
+              ? `⚠️ Issue #${issueNumber} for ${contributorDisplay} was already in the payroll queue — no duplicate entry added.`
+              : [
+                  `⏳ **$BNUT Payout Queued** by @${approver}`,
+                  '',
+                  `| | |`,
+                  `|---|---|`,
+                  `| 💰 Amount | **${amount} BNUT** |`,
+                  contributorGithub ? `| 👤 Contributor | ${contributorDisplay} |` : null,
+                  `| 👛 Wallet | \`${address}\` |`,
+                  `| 🌐 Network | Optimism Mainnet |`,
+                  `| 📋 Status | Queued — will be settled in the next weekly payroll run |`,
+                  '',
+                  `> 💡 @${approver} — visit the [DecentBusking app](https://thejollylama.github.io/DecentBusking/) and click **💸 Payroll** to settle all pending payouts with MetaMask.`,
+                ].filter(l => l !== null).join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: issueNumber,
+              body,
+            });
+
+            console.log(`Comment posted on issue #${issueNumber}`);

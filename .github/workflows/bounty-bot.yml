@@ -1,0 +1,1270 @@
+# DecentBusking Bounty Bot
+#
+# Automates $BNUT bounty notifications for GitHub issues:
+#
+#   1. When an issue is ASSIGNED:
+#      - Parses the bounty amount from a label like "bounty: 500 BNUT"
+#      - Posts a comment on the issue announcing the bounty to the assignee
+#
+#   2. When a PR is MERGED that closes an issue:
+#      - Auto-appends a correctly-formatted entry to payroll-queue.json
+#      - Increments bnutPending and issuesClosed in contributor-accounts.json
+#      - Skips (deduplicates) if the issue is already queued
+#      - Posts a status comment (success or needs manual attention)
+#      - Manual queue via bounty-payout.yml is still available as a fallback
+#
+# Related issues: #45 (bounty bot), #46 (bounty label system)
+#
+# Required GitHub Secrets (set in repo Settings → Secrets → Actions):
+#   GITHUB_TOKEN — automatically provided by GitHub Actions
+
+name: Bounty Bot
+
+on:
+  issues:
+    types: [assigned]
+  pull_request_target:
+    types: [closed]
+  push:
+    branches: [main]
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 1: Notify assignee when an issue with a bounty label is assigned
+  # ────────────────────────────────────────────────────────────────────────────
+  announce-bounty:
+    name: Announce bounty to assignee
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'assigned'
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Parse bounty label and post comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const issue = context.payload.issue;
+            const assignee = context.payload.assignee;
+            const labels = issue.labels.map(l => l.name);
+
+            // Normalize known bot/agent login aliases to their canonical contributor account names.
+            const CONTRIBUTOR_ALIAS_MAP = {
+              'copilot-swe-agent': 'copilot',
+            };
+
+            // Find a label matching the pattern "bounty: <amount> BNUT"
+            // Label format example: "bounty: 500 BNUT"
+            const bountyLabel = labels.find(l => /^bounty:\s*\d+\s*BNUT$/i.test(l));
+
+            if (!bountyLabel) {
+              console.log('No bounty label found on this issue. Skipping.');
+              return;
+            }
+
+            // Extract the numeric amount from the label.
+            const match = bountyLabel.match(/(\d+)\s*BNUT/i);
+            const amount = match ? match[1] : 'unknown';
+
+            // Load contributor accounts to check if this is a returning contributor.
+            let accounts = { contributors: [] };
+            try {
+              accounts = JSON.parse(fs.readFileSync('contributor-accounts.json', 'utf8'));
+            } catch (e) {
+              console.warn('Could not read contributor-accounts.json:', e.message);
+            }
+            const contribRecord = (accounts.contributors || []).find(
+              c => c.github.toLowerCase() === (CONTRIBUTOR_ALIAS_MAP[assignee.login.toLowerCase()] || assignee.login).toLowerCase()
+            );
+            const isReturning = !!contribRecord;
+
+            // Scene art pool — one is chosen based on issue number for variety.
+            const scenes = [
+              [
+                '```',
+                '....♆..⚯.....♆.♅...☉...🌓.....☉....♅..⚯..♆...',
+                '☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️',
+                '🌲🌲🌲🌳🌳🌳🌳🌳🌳🌳🌲🌴🌴🏝️',
+                '~~🦀~~~~~~~~🐢~~~~~~~~~~🌊',
+                '~~~~~~~~~~~~🐢~~~~ 🐟 ~~~🌊',
+                '~~~~~~~🐢~~~~~~~~🐢~~~~~🌊✨✨✨',
+                '~~🐢 ~~~~~~~ 🐬 ~~~~~~~🐢 🌊((( ☿🔥🏕️',
+                '```',
+              ].join('\n'),
+              [
+                '```',
+                '  🌙 ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦  🌙',
+                '☁️          ☁️       ☁️         ☁️',
+                '🌲🌲🌳🌳🏔️🏔️⛰️⛰️🗻🗻⛰️⛰️🌳🌳🌲🌲',
+                '🌿🌿🌿🌱🌱🍄🌱🌱🌿🌿🌿🌿🌱🌱🍄🌿',
+                '~~🐸~~~🦋~~~~🐝~~~🌸~~~~🦎~~🌼~~',
+                '```',
+              ].join('\n'),
+              [
+                '```',
+                '🌞  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  🌞',
+                '☁️☁️     ☁️         ☁️☁️      ☁️',
+                '🌴🏝️🌴🌴🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊',
+                '~~~🐬~~~~🐠~~~🐠~~~🐡~~~🦈~~~~🌊',
+                '~~~~🐙~~~🦀~~~🐢~~~~🐟~~~🌊✨',
+                '🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸',
+                '```',
+              ].join('\n'),
+            ];
+            const scene = scenes[issue.number % scenes.length];
+
+            let body;
+            if (isReturning) {
+              // Short, personalized, stat-rich comment for returning/whitelisted contributors.
+              const issuesCompleted = Array.isArray(contribRecord.issuesClosed)
+                ? contribRecord.issuesClosed.length
+                : 0;
+              const totalEarned = (contribRecord.bnutEarned || 0) + (contribRecord.bnutPending || 0);
+              const hasWallet = !!(contribRecord.walletAddress);
+
+              body = [
+                `🏅 Welcome back, @${assignee.login}! You've completed **${issuesCompleted} issue${issuesCompleted !== 1 ? 's' : ''}** and earned **${totalEarned} BNUT** so far! \\♆//`,
+                '',
+                `| | |`,
+                `|---|---|`,
+                `| 💰 This bounty | **${amount} BNUT** |`,
+                `| 📌 Issue | #${issue.number} |`,
+                '',
+                'Payout will be queued automatically when your PR is merged. Keep up the great work! 🌊✨',
+                '',
+                ...(hasWallet ? [] : [
+                  '> ⚠️ **No wallet on file yet.** Contact `@TheJollyLaMa` to register your Optimism Mainnet address before payout can be processed.',
+                  '',
+                ]),
+                scene,
+              ].join('\n');
+            } else {
+              // Full onboarding comment for first-time / non-whitelisted contributors.
+              body = [
+                `👋 Hey @${assignee.login}! This issue has a **$BNUT bounty** attached. 🎉`,
+                '',
+                `| | |`,
+                `|---|---|`,
+                `| 💰 Bounty | **${amount} BNUT** |`,
+                `| 🏷️ Label | \`${bountyLabel}\` |`,
+                `| 📌 Issue | #${issue.number} |`,
+                '',
+                '**How to claim your bounty:**',
+                '1. Complete the work described in this issue.',
+                '2. Open a Pull Request that closes this issue (use `Closes #' + issue.number + '` in the PR body).',
+                '3. Once your PR is merged, @TheJollyLaMa will approve the $BNUT payout.',
+                '',
+                '> ⚠️ **Whitelist registration required:** Payouts are only sent to wallets registered in the',
+                '> contributor whitelist by `@TheJollyLaMa`. If you are not yet whitelisted, contact',
+                '> `@TheJollyLaMa` directly (via video call or DM) to complete onboarding before your payout',
+                '> can be processed. **Do not share your wallet address publicly in this issue.**',
+                '',
+                '> ℹ️ Payouts are sent in $BNUT on **Optimism Mainnet** via the BigNutenTreasury smart contract.',
+                `> See [CONTRIBUTING.md](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md) for onboarding and whitelist registration details.`,
+              ].join('\n');
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body,
+            });
+
+            console.log(`Bounty announcement posted for issue #${issue.number} — ${amount} BNUT (${isReturning ? 'returning' : 'new'} contributor)`);
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 2: When a PR is merged, auto-queue payouts and update contributor data
+  # ────────────────────────────────────────────────────────────────────────────
+  auto-queue-payout:
+    name: Auto-queue payout on merged PR
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: read
+
+    steps:
+      # ── 1. Checkout repository ─────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 1b. Check bounty-bot-config.json — exit early if bot is paused ─────
+      - name: Check bot pause state
+        id: bot_config
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let config = { enabled: true, pauseMessage: '' };
+            try {
+              config = JSON.parse(fs.readFileSync('bounty-bot-config.json', 'utf8'));
+            } catch (_) {}
+
+            if (config.enabled === false) {
+              const pr = context.payload.pull_request;
+              const prBody = pr ? (pr.body || '') : '';
+              const closePattern = /(?:closes?|fixes?|resolves?)\s+(?:[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)?#(\d+)/gi;
+              let m;
+              while ((m = closePattern.exec(prBody)) !== null) {
+                const issueNumber = parseInt(m[1], 10);
+                try {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    body: config.pauseMessage || '⏸ The bounty bot is temporarily paused. Your contribution has been noted and the payout will be queued once the bot is re-enabled.',
+                  });
+                } catch (e) {
+                  console.warn(`Could not post pause comment on issue #${issueNumber}: ${e.message}`);
+                }
+              }
+              core.setOutput('paused', 'true');
+            } else {
+              core.setOutput('paused', 'false');
+            }
+
+      # ── 1c. Send low-treasury email alert when bot is paused ───────────────
+      - name: Send treasury low alert email
+        if: steps.bot_config.outputs.paused == 'true'
+        uses: dawidd6/action-send-mail@v3
+        continue-on-error: true
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "🚨 DecentBusking Bounty Bot Paused — Treasury Needs Attention"
+          to: ${{ secrets.ALERT_EMAIL || 'jrlamanna@gmail.com' }}
+          from: BigNuten Bot <${{ secrets.MAIL_USERNAME }}>
+          body: |
+            The BigNuten bounty bot has been paused because the treasury is running low.
+
+            A PR was just merged but the payout was NOT queued.
+
+            Please visit the DecentBusking app and top up the treasury:
+              https://thejollylama.github.io/DecentBusking/
+
+            Steps:
+              1. Open the Admin Panel → $BNUT Admin → Quick Mint
+              2. Or: Admin Panel → Treasury Admin → Transfer to Treasury
+              3. Once funded, re-enable the bot by toggling it on in the Payroll panel
+                 (or set "enabled": true in bounty-bot-config.json).
+
+            — BigNuten Bot 🤖
+
+      # ── Exit early if bot is paused ────────────────────────────────────────
+      - name: Skip if bot is paused
+        if: steps.bot_config.outputs.paused == 'true'
+        run: |
+          echo "⏸ Bounty bot is paused. Skipping auto-queue."
+          exit 0
+
+      # ── 2. Auto-queue payouts and update contributor accounts ──────────────
+      - name: Auto-queue payouts and update contributor accounts
+        if: steps.bot_config.outputs.paused != 'true'
+        id: auto_queue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const pr = context.payload.pull_request;
+            const prBody = pr.body || '';
+            const prNumber = pr.number;
+
+            // Normalize known bot/agent login aliases to their canonical contributor account names.
+            // e.g. GitHub Copilot SWE agent opens PRs as "copilot-swe-agent", but the contributor
+            // account (and wallet address) is registered under "copilot".
+            const CONTRIBUTOR_ALIAS_MAP = {
+              'copilot-swe-agent': 'copilot',
+            };
+            function normalizeContributorLogin(login) {
+              return CONTRIBUTOR_ALIAS_MAP[login.toLowerCase()] || login;
+            }
+
+            const prAuthor = normalizeContributorLogin(pr.user.login);
+            const repoFull = `${context.repo.owner}/${context.repo.repo}`;
+
+            // Parse "Closes #N", "Fixes #N", "Resolves #N" from PR body.
+            // Also handles cross-repo format: "Fixes owner/repo#N"
+            const closePattern = /(?:closes?|fixes?|resolves?)\s+(?:[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)?#(\d+)/gi;
+            const closedIssues = [];
+            let m;
+            while ((m = closePattern.exec(prBody)) !== null) {
+              closedIssues.push(parseInt(m[1], 10));
+            }
+
+            // Also scan PR title for bare #N references (e.g. "Fix #211: add feature").
+            // Fallback: catches cases where the issue number appears in the title but not with a
+            // closing keyword in the body.
+            const prTitle = pr.title || '';
+            const titleRefPattern = /#(\d+)/g;
+            while ((m = titleRefPattern.exec(prTitle)) !== null) {
+              const n = parseInt(m[1], 10);
+              if (!closedIssues.includes(n)) closedIssues.push(n);
+            }
+
+            // Also use GitHub's official linked-issues list via GraphQL (closingIssuesReferences).
+            // This catches issues linked via the GitHub sidebar ("Development" section) or any
+            // mechanism that registers a closing link without an explicit keyword in the body.
+            try {
+              const linked = await github.graphql(
+                `query($owner: String!, $repo: String!, $pr: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $pr) {
+                      closingIssuesReferences(first: 25) {
+                        nodes { number }
+                      }
+                    }
+                  }
+                }`,
+                { owner: context.repo.owner, repo: context.repo.repo, pr: prNumber }
+              );
+              for (const node of linked.repository.pullRequest.closingIssuesReferences.nodes) {
+                if (!closedIssues.includes(node.number)) {
+                  closedIssues.push(node.number);
+                  console.log(`Issue #${node.number} found via GraphQL closingIssuesReferences.`);
+                }
+              }
+            } catch (e) {
+              console.warn(`GraphQL linked-issues query failed (non-fatal): ${e.message}`);
+            }
+
+            if (closedIssues.length === 0) {
+              console.log('No closed issue references found in PR body, title, or linked issues. Skipping auto-queue.');
+              core.setOutput('files_changed', 'false');
+              return;
+            }
+
+            console.log(`PR #${prNumber} references issues (body/title/linked): ${closedIssues.join(', ')}`);
+
+            // Load payroll-queue.json
+            let queue = { pending: [], settled: [] };
+            const queuePath = 'payroll-queue.json';
+            if (fs.existsSync(queuePath)) {
+              try {
+                queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+              } catch (e) {
+                core.setFailed(`Failed to parse ${queuePath}: ${e.message}`);
+                return;
+              }
+            }
+            if (!Array.isArray(queue.pending)) queue.pending = [];
+            if (!Array.isArray(queue.settled)) queue.settled = [];
+
+            // Load contributor-accounts.json
+            let accounts = { contributors: [] };
+            const accountsPath = 'contributor-accounts.json';
+            if (fs.existsSync(accountsPath)) {
+              try {
+                accounts = JSON.parse(fs.readFileSync(accountsPath, 'utf8'));
+              } catch (e) {
+                core.setFailed(`Failed to parse ${accountsPath}: ${e.message}`);
+                return;
+              }
+            }
+            if (!Array.isArray(accounts.contributors)) accounts.contributors = [];
+
+            let filesChanged = false;
+
+            for (const issueNumber of closedIssues) {
+              // Fetch the issue to check for a bounty label and get all assignees.
+              let issue;
+              try {
+                issue = (await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                })).data;
+              } catch (e) {
+                console.warn(`Could not fetch issue #${issueNumber}: ${e.message}`);
+                continue;
+              }
+
+              const labels = issue.labels.map(l => l.name);
+              const bountyLabel = labels.find(l => /^bounty:\s*\d+\s*BNUT$/i.test(l));
+              if (!bountyLabel) {
+                console.log(`No bounty label on issue #${issueNumber}. Skipping auto-queue.`);
+                continue;
+              }
+
+              const match = bountyLabel.match(/(\d+)\s*BNUT/i);
+              const amount = match ? match[1] : null;
+              if (!amount) continue;
+
+              const issueRef = `${repoFull}#${issueNumber}`;
+
+              // ── Idea-credit detection ─────────────────────────────────────
+              // If the issue carries an "idea-credit: @<username>" label (applied by
+              // idea-label.yml), split the bounty: 20% to the idea originator and
+              // 80% to the implementer(s).
+              const creditLabel = labels.find(l => /^idea-credit:\s*@?([-\w]+)$/i.test(l));
+              const ideaOriginatorRaw = creditLabel
+                ? creditLabel.match(/^idea-credit:\s*@?([-\w]+)$/i)[1]
+                : null;
+
+              const totalAmount = parseFloat(amount);
+              // Per-implementer 80/20 split: each implementer's bounty of `amount` BNUT is
+              // split 80% to the implementer and 20% to the idea originator.  The originator
+              // entry is accumulated after counting all successfully queued implementers.
+              // Decimal amounts are supported (e.g. 0.2 BNUT for a 1 BNUT bounty split).
+              const perImplementerOriginatorShare = ideaOriginatorRaw
+                ? parseFloat((totalAmount * 0.2).toFixed(4))
+                : 0;
+              const implementerAmount = ideaOriginatorRaw
+                ? String(parseFloat((totalAmount * 0.8).toFixed(4)))
+                : amount;
+
+              // Collect all contributors: PR author + all issue assignees (deduplicated).
+              // Normalize each login so aliases (e.g. copilot-swe-agent) map to canonical accounts.
+              const issueAssignees = (issue.assignees || []).map(a => normalizeContributorLogin(a.login));
+              const allContributors = [...new Set([prAuthor, ...issueAssignees])];
+
+              const queued = [];
+              const skipped = [];
+              const missing = [];
+              let queuedImplementerCount = 0;
+              let originatorNewlyQueued = false;
+              let queuedOriginatorGithub = null;
+              let queuedOriginatorAmount = 0;
+
+              for (const contributorGithub of allContributors) {
+                // Case-insensitive lookup so e.g. "Copilot" matches "copilot" in contributor-accounts.json.
+                const contribRecord = accounts.contributors.find(
+                  c => c.github.toLowerCase() === contributorGithub.toLowerCase()
+                );
+                // Use the canonical name from the account record (preserves stored casing).
+                const canonicalGithub = contribRecord ? contribRecord.github : contributorGithub;
+
+                // Deduplication: skip if this contributor is already in pending or settled for this issue.
+                // For idea-credit splits we check specifically for the 'implementer' role so that a
+                // contributor who also originated the idea isn't incorrectly skipped just because their
+                // 'idea-originator' entry already exists in the queue.
+                const alreadyQueued = ideaOriginatorRaw
+                  ? (queue.pending.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub && e.role === 'implementer') ||
+                     queue.settled.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub && e.role === 'implementer'))
+                  : (queue.pending.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub) ||
+                     queue.settled.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub));
+                if (alreadyQueued) {
+                  console.log(`Issue ${issueRef} for @${canonicalGithub} is already in the payroll queue. Skipping.`);
+                  skipped.push(canonicalGithub);
+                  continue;
+                }
+
+                const walletAddress = contribRecord ? (contribRecord.walletAddress || '') : '';
+
+                if (!walletAddress) {
+                  missing.push(canonicalGithub);
+                }
+
+                // When an idea-credit exists and the implementer amount is 0 (bounty too small
+                // to split), skip adding a zero-amount implementer entry.
+                const entryAmount = implementerAmount;
+                if (parseFloat(entryAmount) <= 0) {
+                  console.log(`Implementer amount for @${canonicalGithub} is zero — skipping implementer entry.`);
+                  skipped.push(canonicalGithub);
+                  continue;
+                }
+
+                // Append entry to payroll queue using canonical github name.
+                const entry = {
+                  issueRef,
+                  contributor: walletAddress,
+                  contributorGithub: canonicalGithub,
+                  amount: entryAmount,
+                  queuedAt: new Date().toISOString(),
+                  queuedBy: 'github-actions[bot]',
+                };
+                // Tag the role when an idea-credit split is in effect.
+                if (ideaOriginatorRaw) entry.role = 'implementer';
+
+                queue.pending.push(entry);
+                filesChanged = true;
+                queuedImplementerCount++;
+
+                // Update bnutPending and issuesClosed in contributor-accounts.json.
+                if (contribRecord) {
+                  contribRecord.bnutPending = parseFloat(((contribRecord.bnutPending || 0) + parseFloat(entryAmount)).toFixed(4));
+                  if (!Array.isArray(contribRecord.issuesClosed)) contribRecord.issuesClosed = [];
+                  if (!contribRecord.issuesClosed.includes(issueRef)) {
+                    contribRecord.issuesClosed.push(issueRef);
+                  }
+                }
+
+                queued.push({ github: canonicalGithub, wallet: walletAddress, role: ideaOriginatorRaw ? 'implementer' : 'contributor' });
+                console.log(`Auto-queued ${entryAmount} BNUT for @${canonicalGithub} (${walletAddress || 'NO WALLET'}) as implementer — ${issueRef}`);
+              }
+
+              // ── Queue idea originator payout (20% × number of implementers) ──
+              const totalOriginatorAmount = parseFloat((perImplementerOriginatorShare * queuedImplementerCount).toFixed(4));
+              if (ideaOriginatorRaw && totalOriginatorAmount > 0) {
+                // Normalize alias and canonicalise against contributor-accounts.json.
+                const normalizedOriginator = normalizeContributorLogin(ideaOriginatorRaw);
+                const originatorRecord = accounts.contributors.find(
+                  c => c.github.toLowerCase() === normalizedOriginator.toLowerCase()
+                );
+                const canonicalOriginator = originatorRecord ? originatorRecord.github : normalizedOriginator;
+                const originatorWallet   = originatorRecord ? (originatorRecord.walletAddress || '') : '';
+
+                // Deduplication: skip if originator is already in queue for this issue.
+                const originatorQueued =
+                  queue.pending.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalOriginator && e.role === 'idea-originator') ||
+                  queue.settled.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalOriginator && e.role === 'idea-originator');
+
+                if (originatorQueued) {
+                  console.log(`Idea originator @${canonicalOriginator} already queued for ${issueRef}. Skipping.`);
+                } else {
+                  if (!originatorWallet) missing.push(canonicalOriginator);
+
+                  queue.pending.push({
+                    issueRef,
+                    contributor: originatorWallet,
+                    contributorGithub: canonicalOriginator,
+                    amount: String(totalOriginatorAmount),
+                    role: 'idea-originator',
+                    queuedAt: new Date().toISOString(),
+                    queuedBy: 'github-actions[bot]',
+                  });
+                  filesChanged = true;
+
+                  // Update originator's bnutPending and ideasCredited in contributor-accounts.json.
+                  if (originatorRecord) {
+                    originatorRecord.bnutPending = parseFloat(((originatorRecord.bnutPending || 0) + totalOriginatorAmount).toFixed(4));
+                    if (!Array.isArray(originatorRecord.ideasCredited)) originatorRecord.ideasCredited = [];
+                    if (!originatorRecord.ideasCredited.includes(issueRef)) {
+                      originatorRecord.ideasCredited.push(issueRef);
+                    }
+                    if (!Array.isArray(originatorRecord.issuesClosed)) originatorRecord.issuesClosed = [];
+                    if (!originatorRecord.issuesClosed.includes(issueRef)) {
+                      originatorRecord.issuesClosed.push(issueRef);
+                    }
+                  }
+
+                  queued.push({ github: canonicalOriginator, wallet: originatorWallet, role: 'idea-originator' });
+                  console.log(`Auto-queued ${totalOriginatorAmount} BNUT (20% idea-credit × ${queuedImplementerCount} implementer(s)) for @${canonicalOriginator} (${originatorWallet || 'NO WALLET'}) as idea-originator — ${issueRef}`);
+                  originatorNewlyQueued = true;
+                  queuedOriginatorGithub = canonicalOriginator;
+                  queuedOriginatorAmount = totalOriginatorAmount;
+                }
+              }
+
+              // Scene art pool — chosen by issue number for variety.
+              const scenes = [
+                [
+                  '```',
+                  '....♆..⚯.....♆.♅...☉...🌓.....☉....♅..⚯..♆...',
+                  '☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️',
+                  '🌲🌲🌲🌳🌳🌳🌳🌳🌳🌳🌲🌴🌴🏝️',
+                  '~~🦀~~~~~~~~🐢~~~~~~~~~~🌊',
+                  '~~~~~~~~~~~~🐢~~~~ 🐟 ~~~🌊',
+                  '~~~~~~~🐢~~~~~~~~🐢~~~~~🌊✨✨✨',
+                  '~~🐢 ~~~~~~~ 🐬 ~~~~~~~🐢 🌊((( ☿🔥🏕️',
+                  '```',
+                ].join('\n'),
+                [
+                  '```',
+                  '  🌙 ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦  🌙',
+                  '☁️          ☁️       ☁️         ☁️',
+                  '🌲🌲🌳🌳🏔️🏔️⛰️⛰️🗻🗻⛰️⛰️🌳🌳🌲🌲',
+                  '🌿🌿🌿🌱🌱🍄🌱🌱🌿🌿🌿🌿🌱🌱🍄🌿',
+                  '~~🐸~~~🦋~~~~🐝~~~🌸~~~~🦎~~🌼~~',
+                  '```',
+                ].join('\n'),
+                [
+                  '```',
+                  '🌞  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  🌞',
+                  '☁️☁️     ☁️         ☁️☁️      ☁️',
+                  '🌴🏝️🌴🌴🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊',
+                  '~~~🐬~~~~🐠~~~🐠~~~🐡~~~🦈~~~~🌊',
+                  '~~~~🐙~~~🦀~~~🐢~~~~🐟~~~🌊✨',
+                  '🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸',
+                  '```',
+                ].join('\n'),
+              ];
+              const scene = scenes[issueNumber % scenes.length];
+
+              // Build and post a single status comment for the issue.
+              // For returning (whitelisted) contributors: short, personalized, stat-rich comment.
+              // For new/unregistered contributors: full instructional comment.
+
+              // Determine if ALL newly queued contributors are returning contributors.
+              const returningQueued = queued.filter(({ github: gh }) =>
+                accounts.contributors.some(c => c.github.toLowerCase() === gh.toLowerCase())
+              );
+              const newQueued = queued.filter(({ github: gh }) =>
+                !accounts.contributors.some(c => c.github.toLowerCase() === gh.toLowerCase())
+              );
+
+              const lines = [];
+
+              if (queued.length === 0 && skipped.length > 0) {
+                // All contributors were already queued — dedup notice only.
+                lines.push(`⚠️ Payout for \`${issueRef}\` is already in the payroll queue for all contributors — no duplicate entries added.`);
+              } else {
+                // Idea-credit split summary (shown when applicable).
+                if (ideaOriginatorRaw && totalOriginatorAmount > 0) {
+                  lines.push(`💡 **Idea-Credit Split Applied** — **${amount} BNUT** per implementer, 80/20 split:`);
+                  lines.push('');
+                  lines.push(`| Role | Recipient | Amount |`);
+                  lines.push(`|---|---|---|`);
+                  lines.push(`| 💡 Idea Originator (20% × ${queuedImplementerCount} implementer${queuedImplementerCount !== 1 ? 's' : ''}) | @${ideaOriginatorRaw} | **${totalOriginatorAmount} BNUT** |`);
+                  const implementerLabel = allContributors.length > 1
+                    ? `**${implementerAmount} BNUT** each (${allContributors.length} implementers)`
+                    : `**${implementerAmount} BNUT**`;
+                  lines.push(`| 🔨 Implementer (80%) | ${allContributors.map(g => `@${g}`).join(', ')} | ${implementerLabel} |`);
+                  lines.push('');
+                }
+
+                // Personalized welcome-back block for returning contributors.
+                for (const { github: gh, role } of returningQueued) {
+                  const rec = accounts.contributors.find(
+                    c => c.github.toLowerCase() === gh.toLowerCase()
+                  );
+                  const issuesCompleted = Array.isArray(rec.issuesClosed) ? rec.issuesClosed.length : 0;
+                  const totalEarned = (rec.bnutEarned || 0) + (rec.bnutPending || 0);
+                  const hasWallet = !!(rec.walletAddress);
+                  const entryAmt = role === 'idea-originator' ? totalOriginatorAmount : implementerAmount;
+                  const roleLabel = role === 'idea-originator' ? ' 💡 *(idea originator)*' : '';
+                  lines.push(`🏅 Great work, @${gh}${roleLabel}! That's **${issuesCompleted} issue${issuesCompleted !== 1 ? 's' : ''} completed** and **${totalEarned} BNUT** earned so far! \\♆//`);
+                  lines.push('');
+                  lines.push(`**${entryAmt} BNUT** for \`${issueRef}\` (PR #${prNumber}) has been added to the payroll queue. Payout coming soon! 🌊✨`);
+                  if (!hasWallet) {
+                    lines.push('');
+                    lines.push(`> ⚠️ No wallet address on file for @${gh}. Contact \`@TheJollyLaMa\` to register before payout can be processed.`);
+                  }
+                  lines.push('');
+                  lines.push(scene);
+                  lines.push('');
+                }
+
+                // Standard block for new/unregistered contributors.
+                if (newQueued.length > 0) {
+                  lines.push(`🤖 **Payroll Auto-Queue Update** for \`${issueRef}\` (PR #${prNumber})`);
+                  lines.push('');
+                  lines.push(`| Contributor | Role | Wallet | Amount | Status |`);
+                  lines.push(`|---|---|---|---|---|`);
+                  for (const { github: gh, wallet, role } of newQueued) {
+                    const walletDisplay = wallet ? `\`${wallet}\`` : '⚠️ *no wallet on file*';
+                    const roleDisplay = role === 'idea-originator' ? '💡 Idea Originator' : '🔨 Implementer';
+                    const entryAmt = role === 'idea-originator' ? totalOriginatorAmount : implementerAmount;
+                    lines.push(`| @${gh} | ${roleDisplay} | ${walletDisplay} | **${entryAmt} BNUT** | ⏳ Queued |`);
+                  }
+                  lines.push('');
+                }
+
+                // Maintenance note for the owner (always shown when something was queued).
+                if (queued.length > 0) {
+                  lines.push(`> 💡 @TheJollyLaMa — visit the [DecentBusking app](https://thejollylama.github.io/DecentBusking/) and click **💸 Payroll** to settle all pending payouts with MetaMask. No private key required!`);
+                }
+
+                if (skipped.length > 0) {
+                  lines.push('');
+                  lines.push(`ℹ️ Already queued (skipped): ${skipped.map(g => `@${g}`).join(', ')}`);
+                }
+
+                if (missing.length > 0) {
+                  lines.push('');
+                  lines.push(`⚠️ The following contributors are not yet registered or have no wallet address in \`contributor-accounts.json\`: ${missing.map(g => `@${g}`).join(', ')}`);
+                  lines.push(`@TheJollyLaMa — please complete onboarding for these contributors and update their wallet addresses before the next payroll run.`);
+                }
+              }
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: lines.join('\n'),
+              });
+
+              // Post a separate idea-credit celebration comment when an originator was newly queued.
+              if (originatorNewlyQueued && queuedOriginatorGithub && queuedOriginatorAmount > 0) {
+                const implementersDisplay = allContributors.map(g => `@${g}`).join(', ');
+                const ideaCreditBody = [
+                  '💡✨ IDEA CREDIT AWARDED ✨💡',
+                  '',
+                  scene,
+                  '',
+                  '🌱 **Your idea grew into a feature!** 🌳',
+                  '',
+                  '| | |',
+                  '|---|---|',
+                  `| 💡 Idea Originator | @${queuedOriginatorGithub} |`,
+                  `| 🔨 Implemented by | ${implementersDisplay} |`,
+                  `| 💰 Idea Credit | **${queuedOriginatorAmount} BNUT** (20%) |`,
+                  `| 🌐 Network | Optimism Mainnet |`,
+                  '',
+                  `Your spark of inspiration planted a seed that ${implementersDisplay} brought to life.`,
+                  `**${queuedOriginatorAmount} BNUT** has been queued to your wallet — thank you for making DecentBusking better! 🌊✨ \\♆//`,
+                ].join('\n');
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: ideaCreditBody,
+                });
+                console.log(`Idea-credit celebration comment posted for @${queuedOriginatorGithub} on issue #${issueNumber}`);
+              }
+
+              const allParticipants = [...allContributors, ...(ideaOriginatorRaw ? [ideaOriginatorRaw] : [])];
+              console.log(`Auto-queue status posted on issue #${issueNumber} — ${amount} BNUT for ${allParticipants.map(g => '@'+g).join(', ')}`);
+            }
+
+            if (filesChanged) {
+              fs.writeFileSync('payroll-queue.json', JSON.stringify(queue, null, 2) + '\n');
+              fs.writeFileSync('contributor-accounts.json', JSON.stringify(accounts, null, 2) + '\n');
+            }
+            core.setOutput('files_changed', filesChanged ? 'true' : 'false');
+
+      # ── 3. Commit updated JSON files ───────────────────────────────────────
+      - name: Commit updated JSON files
+        if: steps.auto_queue.outputs.files_changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add payroll-queue.json contributor-accounts.json
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: auto-queue BNUT payout for PR #${{ github.event.pull_request.number }}"
+          # Retry push with rebase to handle concurrent workflow runs.
+          for i in 1 2 3; do
+            git push && break
+            echo "Push attempt $i failed — rebasing and retrying…"
+            git pull --rebase
+          done
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 3: Push-triggered auto-queue (fires as repo owner — no approval gate)
+  # ────────────────────────────────────────────────────────────────────────────
+  auto-queue-payout-on-push:
+    name: Auto-queue payout on push to main
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: read
+
+    steps:
+      # ── 1. Checkout repository ─────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 1b. Check bounty-bot-config.json — exit early if bot is paused ─────
+      - name: Check bot pause state
+        id: bot_config
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let config = { enabled: true };
+            try {
+              config = JSON.parse(fs.readFileSync('bounty-bot-config.json', 'utf8'));
+            } catch (_) {}
+            core.setOutput('paused', config.enabled === false ? 'true' : 'false');
+
+      # ── 1c. Send low-treasury email alert when bot is paused ───────────────
+      - name: Send treasury low alert email
+        if: steps.bot_config.outputs.paused == 'true'
+        uses: dawidd6/action-send-mail@v3
+        continue-on-error: true
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "🚨 DecentBusking Bounty Bot Paused — Treasury Needs Attention"
+          to: ${{ secrets.ALERT_EMAIL || 'jrlamanna@gmail.com' }}
+          from: BigNuten Bot <${{ secrets.MAIL_USERNAME }}>
+          body: |
+            The BigNuten bounty bot has been paused because the treasury is running low.
+
+            A push to main was detected but the payout was NOT queued.
+
+            Please visit the DecentBusking app and top up the treasury:
+              https://thejollylama.github.io/DecentBusking/
+
+            Steps:
+              1. Open the Admin Panel → $BNUT Admin → Quick Mint
+              2. Or: Admin Panel → Treasury Admin → Transfer to Treasury
+              3. Once funded, re-enable the bot by toggling it on in the Payroll panel
+                 (or set "enabled": true in bounty-bot-config.json).
+
+            — BigNuten Bot 🤖
+
+      # ── Exit early if bot is paused ────────────────────────────────────────
+      - name: Skip if bot is paused
+        if: steps.bot_config.outputs.paused == 'true'
+        run: |
+          echo "⏸ Bounty bot is paused. Skipping auto-queue."
+          exit 0
+
+      # ── 2. Auto-queue payouts and update contributor accounts ──────────────
+      - name: Auto-queue payouts and update contributor accounts
+        if: steps.bot_config.outputs.paused != 'true'
+        id: auto_queue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            // Look up the PR associated with this push commit.
+            let pr;
+            try {
+              const prsForCommit = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: context.sha,
+              });
+              // Find the first merged PR that targeted main.
+              pr = prsForCommit.data.find(p => p.merged_at && p.base.ref === 'main');
+            } catch (e) {
+              console.log(`Could not find PR for commit ${context.sha}: ${e.message}`);
+              core.setOutput('files_changed', 'false');
+              return;
+            }
+
+            if (!pr) {
+              console.log(`No merged PR targeting main found for commit ${context.sha}. Skipping auto-queue.`);
+              core.setOutput('files_changed', 'false');
+              return;
+            }
+
+            const prBody = pr.body || '';
+            const prNumber = pr.number;
+
+            // Normalize known bot/agent login aliases to their canonical contributor account names.
+            const CONTRIBUTOR_ALIAS_MAP = {
+              'copilot-swe-agent': 'copilot',
+            };
+            function normalizeContributorLogin(login) {
+              return CONTRIBUTOR_ALIAS_MAP[login.toLowerCase()] || login;
+            }
+
+            const prAuthor = normalizeContributorLogin(pr.user.login);
+            const repoFull = `${context.repo.owner}/${context.repo.repo}`;
+
+            // Parse "Closes #N", "Fixes #N", "Resolves #N" from PR body.
+            const closePattern = /(?:closes?|fixes?|resolves?)\s+(?:[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)?#(\d+)/gi;
+            const closedIssues = [];
+            let m;
+            while ((m = closePattern.exec(prBody)) !== null) {
+              closedIssues.push(parseInt(m[1], 10));
+            }
+
+            // Also scan PR title for bare #N references (e.g. "Fix #211: add feature").
+            const prTitle = pr.title || '';
+            const titleRefPattern = /#(\d+)/g;
+            while ((m = titleRefPattern.exec(prTitle)) !== null) {
+              const n = parseInt(m[1], 10);
+              if (!closedIssues.includes(n)) closedIssues.push(n);
+            }
+
+            // Also use GitHub's official linked-issues list via GraphQL (closingIssuesReferences).
+            // This catches issues linked via the GitHub sidebar or any mechanism that registers a
+            // closing link without an explicit keyword in the body.
+            try {
+              const linked = await github.graphql(
+                `query($owner: String!, $repo: String!, $pr: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $pr) {
+                      closingIssuesReferences(first: 25) {
+                        nodes { number }
+                      }
+                    }
+                  }
+                }`,
+                { owner: context.repo.owner, repo: context.repo.repo, pr: prNumber }
+              );
+              for (const node of linked.repository.pullRequest.closingIssuesReferences.nodes) {
+                if (!closedIssues.includes(node.number)) {
+                  closedIssues.push(node.number);
+                  console.log(`Issue #${node.number} found via GraphQL closingIssuesReferences.`);
+                }
+              }
+            } catch (e) {
+              console.warn(`GraphQL linked-issues query failed (non-fatal): ${e.message}`);
+            }
+
+            if (closedIssues.length === 0) {
+              console.log('No closed issue references found in PR body, title, or linked issues. Skipping auto-queue.');
+              core.setOutput('files_changed', 'false');
+              return;
+            }
+
+            console.log(`PR #${prNumber} references issues (body/title/linked): ${closedIssues.join(', ')}`);
+
+            // Load payroll-queue.json
+            let queue = { pending: [], settled: [] };
+            const queuePath = 'payroll-queue.json';
+            if (fs.existsSync(queuePath)) {
+              try {
+                queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+              } catch (e) {
+                core.setFailed(`Failed to parse ${queuePath}: ${e.message}`);
+                return;
+              }
+            }
+            if (!Array.isArray(queue.pending)) queue.pending = [];
+            if (!Array.isArray(queue.settled)) queue.settled = [];
+
+            // Load contributor-accounts.json
+            let accounts = { contributors: [] };
+            const accountsPath = 'contributor-accounts.json';
+            if (fs.existsSync(accountsPath)) {
+              try {
+                accounts = JSON.parse(fs.readFileSync(accountsPath, 'utf8'));
+              } catch (e) {
+                core.setFailed(`Failed to parse ${accountsPath}: ${e.message}`);
+                return;
+              }
+            }
+            if (!Array.isArray(accounts.contributors)) accounts.contributors = [];
+
+            let filesChanged = false;
+
+            for (const issueNumber of closedIssues) {
+              // Fetch the issue to check for a bounty label and get all assignees.
+              let issue;
+              try {
+                issue = (await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                })).data;
+              } catch (e) {
+                console.warn(`Could not fetch issue #${issueNumber}: ${e.message}`);
+                continue;
+              }
+
+              const labels = issue.labels.map(l => l.name);
+              const bountyLabel = labels.find(l => /^bounty:\s*\d+\s*BNUT$/i.test(l));
+              if (!bountyLabel) {
+                console.log(`No bounty label on issue #${issueNumber}. Skipping auto-queue.`);
+                continue;
+              }
+
+              const match = bountyLabel.match(/(\d+)\s*BNUT/i);
+              const amount = match ? match[1] : null;
+              if (!amount) continue;
+
+              const issueRef = `${repoFull}#${issueNumber}`;
+
+              // ── Idea-credit detection ─────────────────────────────────────
+              const creditLabel = labels.find(l => /^idea-credit:\s*@?([-\w]+)$/i.test(l));
+              const ideaOriginatorRaw = creditLabel
+                ? creditLabel.match(/^idea-credit:\s*@?([-\w]+)$/i)[1]
+                : null;
+
+              const totalAmount = parseFloat(amount);
+              const perImplementerOriginatorShare = ideaOriginatorRaw
+                ? parseFloat((totalAmount * 0.2).toFixed(4))
+                : 0;
+              const implementerAmount = ideaOriginatorRaw
+                ? String(parseFloat((totalAmount * 0.8).toFixed(4)))
+                : amount;
+
+              // Collect all contributors: PR author + all issue assignees (deduplicated).
+              const issueAssignees = (issue.assignees || []).map(a => normalizeContributorLogin(a.login));
+              const allContributors = [...new Set([prAuthor, ...issueAssignees])];
+
+              const queued = [];
+              const skipped = [];
+              const missing = [];
+              let queuedImplementerCount = 0;
+              let originatorNewlyQueued = false;
+              let queuedOriginatorGithub = null;
+              let queuedOriginatorAmount = 0;
+
+              for (const contributorGithub of allContributors) {
+                const contribRecord = accounts.contributors.find(
+                  c => c.github.toLowerCase() === contributorGithub.toLowerCase()
+                );
+                const canonicalGithub = contribRecord ? contribRecord.github : contributorGithub;
+
+                // Deduplication: skip if already in pending or settled for this issue.
+                // For idea-credit splits we check specifically for the 'implementer' role so that a
+                // contributor who also originated the idea isn't incorrectly skipped just because their
+                // 'idea-originator' entry already exists in the queue.
+                const alreadyQueued = ideaOriginatorRaw
+                  ? (queue.pending.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub && e.role === 'implementer') ||
+                     queue.settled.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub && e.role === 'implementer'))
+                  : (queue.pending.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub) ||
+                     queue.settled.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub));
+                if (alreadyQueued) {
+                  console.log(`Issue ${issueRef} for @${canonicalGithub} is already in the payroll queue. Skipping.`);
+                  skipped.push(canonicalGithub);
+                  continue;
+                }
+
+                const walletAddress = contribRecord ? (contribRecord.walletAddress || '') : '';
+                if (!walletAddress) missing.push(canonicalGithub);
+
+                const entryAmount = implementerAmount;
+                if (parseFloat(entryAmount) <= 0) {
+                  console.log(`Implementer amount for @${canonicalGithub} is zero — skipping implementer entry.`);
+                  skipped.push(canonicalGithub);
+                  continue;
+                }
+
+                const entry = {
+                  issueRef,
+                  contributor: walletAddress,
+                  contributorGithub: canonicalGithub,
+                  amount: entryAmount,
+                  queuedAt: new Date().toISOString(),
+                  queuedBy: 'github-actions[bot]',
+                };
+                if (ideaOriginatorRaw) entry.role = 'implementer';
+
+                queue.pending.push(entry);
+                filesChanged = true;
+                queuedImplementerCount++;
+
+                if (contribRecord) {
+                  contribRecord.bnutPending = parseFloat(((contribRecord.bnutPending || 0) + parseFloat(entryAmount)).toFixed(4));
+                  if (!Array.isArray(contribRecord.issuesClosed)) contribRecord.issuesClosed = [];
+                  if (!contribRecord.issuesClosed.includes(issueRef)) contribRecord.issuesClosed.push(issueRef);
+                }
+
+                queued.push({ github: canonicalGithub, wallet: walletAddress, role: ideaOriginatorRaw ? 'implementer' : 'contributor' });
+                console.log(`Auto-queued ${entryAmount} BNUT for @${canonicalGithub} (${walletAddress || 'NO WALLET'}) as implementer — ${issueRef}`);
+              }
+
+              // ── Queue idea originator payout (20% × number of implementers) ──
+              const totalOriginatorAmount = parseFloat((perImplementerOriginatorShare * queuedImplementerCount).toFixed(4));
+              if (ideaOriginatorRaw && totalOriginatorAmount > 0) {
+                const normalizedOriginator = normalizeContributorLogin(ideaOriginatorRaw);
+                const originatorRecord = accounts.contributors.find(
+                  c => c.github.toLowerCase() === normalizedOriginator.toLowerCase()
+                );
+                const canonicalOriginator = originatorRecord ? originatorRecord.github : normalizedOriginator;
+                const originatorWallet   = originatorRecord ? (originatorRecord.walletAddress || '') : '';
+
+                const originatorQueued =
+                  queue.pending.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalOriginator && e.role === 'idea-originator') ||
+                  queue.settled.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalOriginator && e.role === 'idea-originator');
+
+                if (originatorQueued) {
+                  console.log(`Idea originator @${canonicalOriginator} already queued for ${issueRef}. Skipping.`);
+                } else {
+                  if (!originatorWallet) missing.push(canonicalOriginator);
+
+                  queue.pending.push({
+                    issueRef,
+                    contributor: originatorWallet,
+                    contributorGithub: canonicalOriginator,
+                    amount: String(totalOriginatorAmount),
+                    role: 'idea-originator',
+                    queuedAt: new Date().toISOString(),
+                    queuedBy: 'github-actions[bot]',
+                  });
+                  filesChanged = true;
+
+                  if (originatorRecord) {
+                    originatorRecord.bnutPending = parseFloat(((originatorRecord.bnutPending || 0) + totalOriginatorAmount).toFixed(4));
+                    if (!Array.isArray(originatorRecord.ideasCredited)) originatorRecord.ideasCredited = [];
+                    if (!originatorRecord.ideasCredited.includes(issueRef)) originatorRecord.ideasCredited.push(issueRef);
+                    if (!Array.isArray(originatorRecord.issuesClosed)) originatorRecord.issuesClosed = [];
+                    if (!originatorRecord.issuesClosed.includes(issueRef)) originatorRecord.issuesClosed.push(issueRef);
+                  }
+
+                  queued.push({ github: canonicalOriginator, wallet: originatorWallet, role: 'idea-originator' });
+                  console.log(`Auto-queued ${totalOriginatorAmount} BNUT (20% idea-credit × ${queuedImplementerCount} implementer(s)) for @${canonicalOriginator} (${originatorWallet || 'NO WALLET'}) as idea-originator — ${issueRef}`);
+                  originatorNewlyQueued = true;
+                  queuedOriginatorGithub = canonicalOriginator;
+                  queuedOriginatorAmount = totalOriginatorAmount;
+                }
+              }
+
+              // Scene art pool — chosen by issue number for variety.
+              const scenes = [
+                [
+                  '```',
+                  '....♆..⚯.....♆.♅...☉...🌓.....☉....♅..⚯..♆...',
+                  '☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️',
+                  '🌲🌲🌲🌳🌳🌳🌳🌳🌳🌳🌲🌴🌴🏝️',
+                  '~~🦀~~~~~~~~🐢~~~~~~~~~~🌊',
+                  '~~~~~~~~~~~~🐢~~~~ 🐟 ~~~🌊',
+                  '~~~~~~~🐢~~~~~~~~🐢~~~~~🌊✨✨✨',
+                  '~~🐢 ~~~~~~~ 🐬 ~~~~~~~🐢 🌊((( ☿🔥🏕️',
+                  '```',
+                ].join('\n'),
+                [
+                  '```',
+                  '  🌙 ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦  🌙',
+                  '☁️          ☁️       ☁️         ☁️',
+                  '🌲🌲🌳🌳🏔️🏔️⛰️⛰️🗻🗻⛰️⛰️🌳🌳🌲🌲',
+                  '🌿🌿🌿🌱🌱🍄🌱🌱🌿🌿🌿🌿🌱🌱🍄🌿',
+                  '~~🐸~~~🦋~~~~🐝~~~🌸~~~~🦎~~🌼~~',
+                  '```',
+                ].join('\n'),
+                [
+                  '```',
+                  '🌞  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  🌞',
+                  '☁️☁️     ☁️         ☁️☁️      ☁️',
+                  '🌴🏝️🌴🌴🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊',
+                  '~~~🐬~~~~🐠~~~🐠~~~🐡~~~🦈~~~~🌊',
+                  '~~~~🐙~~~🦀~~~🐢~~~~🐟~~~🌊✨',
+                  '🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸🪸',
+                  '```',
+                ].join('\n'),
+              ];
+              const scene = scenes[issueNumber % scenes.length];
+
+              // Build and post the main status comment.
+              const returningQueued = queued.filter(({ github: gh }) =>
+                accounts.contributors.some(c => c.github.toLowerCase() === gh.toLowerCase())
+              );
+              const newQueued = queued.filter(({ github: gh }) =>
+                !accounts.contributors.some(c => c.github.toLowerCase() === gh.toLowerCase())
+              );
+
+              const lines = [];
+
+              if (queued.length === 0 && skipped.length > 0) {
+                lines.push(`⚠️ Payout for \`${issueRef}\` is already in the payroll queue for all contributors — no duplicate entries added.`);
+              } else {
+                if (ideaOriginatorRaw && totalOriginatorAmount > 0) {
+                  lines.push(`💡 **Idea-Credit Split Applied** — **${amount} BNUT** per implementer, 80/20 split:`);
+                  lines.push('');
+                  lines.push(`| Role | Recipient | Amount |`);
+                  lines.push(`|---|---|---|`);
+                  lines.push(`| 💡 Idea Originator (20% × ${queuedImplementerCount} implementer${queuedImplementerCount !== 1 ? 's' : ''}) | @${ideaOriginatorRaw} | **${totalOriginatorAmount} BNUT** |`);
+                  const implementerLabel = allContributors.length > 1
+                    ? `**${implementerAmount} BNUT** each (${allContributors.length} implementers)`
+                    : `**${implementerAmount} BNUT**`;
+                  lines.push(`| 🔨 Implementer (80%) | ${allContributors.map(g => `@${g}`).join(', ')} | ${implementerLabel} |`);
+                  lines.push('');
+                }
+
+                for (const { github: gh, role } of returningQueued) {
+                  const rec = accounts.contributors.find(
+                    c => c.github.toLowerCase() === gh.toLowerCase()
+                  );
+                  const issuesCompleted = Array.isArray(rec.issuesClosed) ? rec.issuesClosed.length : 0;
+                  const totalEarned = (rec.bnutEarned || 0) + (rec.bnutPending || 0);
+                  const hasWallet = !!(rec.walletAddress);
+                  const entryAmt = role === 'idea-originator' ? totalOriginatorAmount : implementerAmount;
+                  const roleLabel = role === 'idea-originator' ? ' 💡 *(idea originator)*' : '';
+                  lines.push(`🏅 Great work, @${gh}${roleLabel}! That's **${issuesCompleted} issue${issuesCompleted !== 1 ? 's' : ''} completed** and **${totalEarned} BNUT** earned so far! \\♆//`);
+                  lines.push('');
+                  lines.push(`**${entryAmt} BNUT** for \`${issueRef}\` (PR #${prNumber}) has been added to the payroll queue. Payout coming soon! 🌊✨`);
+                  if (!hasWallet) {
+                    lines.push('');
+                    lines.push(`> ⚠️ No wallet address on file for @${gh}. Contact \`@TheJollyLaMa\` to register before payout can be processed.`);
+                  }
+                  lines.push('');
+                  lines.push(scene);
+                  lines.push('');
+                }
+
+                if (newQueued.length > 0) {
+                  lines.push(`🤖 **Payroll Auto-Queue Update** for \`${issueRef}\` (PR #${prNumber})`);
+                  lines.push('');
+                  lines.push(`| Contributor | Role | Wallet | Amount | Status |`);
+                  lines.push(`|---|---|---|---|---|`);
+                  for (const { github: gh, wallet, role } of newQueued) {
+                    const walletDisplay = wallet ? `\`${wallet}\`` : '⚠️ *no wallet on file*';
+                    const roleDisplay = role === 'idea-originator' ? '💡 Idea Originator' : '🔨 Implementer';
+                    const entryAmt = role === 'idea-originator' ? totalOriginatorAmount : implementerAmount;
+                    lines.push(`| @${gh} | ${roleDisplay} | ${walletDisplay} | **${entryAmt} BNUT** | ⏳ Queued |`);
+                  }
+                  lines.push('');
+                }
+
+                if (queued.length > 0) {
+                  lines.push(`> 💡 @TheJollyLaMa — visit the [DecentBusking app](https://thejollylama.github.io/DecentBusking/) and click **💸 Payroll** to settle all pending payouts with MetaMask. No private key required!`);
+                }
+
+                if (skipped.length > 0) {
+                  lines.push('');
+                  lines.push(`ℹ️ Already queued (skipped): ${skipped.map(g => `@${g}`).join(', ')}`);
+                }
+
+                if (missing.length > 0) {
+                  lines.push('');
+                  lines.push(`⚠️ The following contributors are not yet registered or have no wallet address in \`contributor-accounts.json\`: ${missing.map(g => `@${g}`).join(', ')}`);
+                  lines.push(`@TheJollyLaMa — please complete onboarding for these contributors and update their wallet addresses before the next payroll run.`);
+                }
+              }
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: lines.join('\n'),
+              });
+
+              // Post a separate idea-credit celebration comment when an originator was newly queued.
+              if (originatorNewlyQueued && queuedOriginatorGithub && queuedOriginatorAmount > 0) {
+                const implementersDisplay = allContributors.map(g => `@${g}`).join(', ');
+                const ideaCreditBody = [
+                  '💡✨ IDEA CREDIT AWARDED ✨💡',
+                  '',
+                  scene,
+                  '',
+                  '🌱 **Your idea grew into a feature!** 🌳',
+                  '',
+                  '| | |',
+                  '|---|---|',
+                  `| 💡 Idea Originator | @${queuedOriginatorGithub} |`,
+                  `| 🔨 Implemented by | ${implementersDisplay} |`,
+                  `| 💰 Idea Credit | **${queuedOriginatorAmount} BNUT** (20%) |`,
+                  `| 🌐 Network | Optimism Mainnet |`,
+                  '',
+                  `Your spark of inspiration planted a seed that ${implementersDisplay} brought to life.`,
+                  `**${queuedOriginatorAmount} BNUT** has been queued to your wallet — thank you for making DecentBusking better! 🌊✨ \\♆//`,
+                ].join('\n');
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: ideaCreditBody,
+                });
+                console.log(`Idea-credit celebration comment posted for @${queuedOriginatorGithub} on issue #${issueNumber}`);
+              }
+
+              const allParticipants = [...allContributors, ...(ideaOriginatorRaw ? [ideaOriginatorRaw] : [])];
+              console.log(`Auto-queue status posted on issue #${issueNumber} — ${amount} BNUT for ${allParticipants.map(g => '@'+g).join(', ')}`);
+            }
+
+            if (filesChanged) {
+              fs.writeFileSync('payroll-queue.json', JSON.stringify(queue, null, 2) + '\n');
+              fs.writeFileSync('contributor-accounts.json', JSON.stringify(accounts, null, 2) + '\n');
+            }
+            core.setOutput('files_changed', filesChanged ? 'true' : 'false');
+
+      # ── 3. Commit updated JSON files ───────────────────────────────────────
+      - name: Commit updated JSON files
+        if: steps.auto_queue.outputs.files_changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add payroll-queue.json contributor-accounts.json
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: auto-queue BNUT payout for push ${{ github.sha }}"
+          # Retry push with rebase to handle concurrent workflow runs.
+          for i in 1 2 3; do
+            git push && break
+            echo "Push attempt $i failed — rebasing and retrying…"
+            git pull --rebase
+          done
