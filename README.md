@@ -7,7 +7,7 @@
 
 ## What Is This?
 
-DecentBusking is a decentralised audio busking platform on Polygon. Artists **mint audio NFTs** that appear at the centre of a 3-D space field the moment they're minted — playing live, right in the town square. As they age they drift further and further back into space. After a month they fade from view but can still be flown to and purchased.
+DecentBusking is a decentralised audio busking platform on **Optimism**. Artists **mint audio NFTs** that appear at the centre of a 3-D space field the moment they're minted — playing live, right in the town square. As they age they drift further and further back into space. After a month they fade from view but can still be flown to and purchased.
 
 Anyone who records a busker can **add a track on top**, referencing the original NFT. Royalties flow back through the chain automatically.
 
@@ -24,7 +24,9 @@ DecentBusking/
 │   ├── stage.js            ← Hat + guitar case + tip flow
 │   ├── space.js            ← Three.js NFT asteroid field
 │   ├── mint.js             ← Minting audio → DecentNFT contract
-│   └── nft-card.js         ← NFT detail panel (mirrors DecentMarket)
+│   ├── nft-card.js         ← NFT detail panel (mirrors DecentMarket)
+│   └── components/
+│       └── about-override.js ← DecentBusking About Modal (Peacock 🦚)
 ├── css/
 │   └── styles.css
 ├── img/
@@ -48,7 +50,7 @@ DecentBusking/
 
 | UI Element | Action |
 |---|---|
-| 🎩 Hat button | Open tip modal — throw pocket change in the jar (MetaMask → MATIC) |
+| 🎩 Hat button | Open tip modal — throw pocket change in the jar (MetaMask → ETH on Optimism) |
 | 💼 Guitar Case button | Open mint modal — busk your audio onto the blockchain |
 | NFT tile in space | Click to open details, listen, and buy |
 | Tab key | Toggle orbit ↔ fly-through spaceship mode |
@@ -64,11 +66,11 @@ Fill in the `TODO` fields:
 
 ```js
 window.DecentConfig = {
-  chainId: 137,                          // Polygon Mainnet
+  chainId: 10,                           // Optimism Mainnet
   contractAddress: "0x...",              // DecentNFT contract from DecentMarket
   w3upSpaceDID: "did:key:...",           // w3up IPFS space DID
   ipfsGateway: "https://w3s.link/ipfs/",
-  tokenSymbol: "MATIC",
+  tokenSymbol: "ETH",
   discord: "https://discord.gg/...",
   github: "https://github.com/TheJollyLaMa/DecentBusking",
 };
@@ -117,6 +119,7 @@ Each token references its parent. Royalty distribution is handled by the DecentN
 
 ## Links
 
-- 💬 Discord: see `decent.config.js`
+- 💬 Discord: https://discord.gg/5XJtJYdhz
 - 🐙 GitHub: https://github.com/TheJollyLaMa/DecentBusking
 - 🛒 DecentMarket: https://github.com/TheJollyLaMa/DecentMarket
+- 🔗 Optimism Explorer: https://optimistic.etherscan.io

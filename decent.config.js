@@ -7,8 +7,8 @@
 // Fields:
 //   appName        — Display name shown in DecentHead
 //   subtitle       — Subtitle beneath the app name
-//   chainId        — EVM chain ID (137 = Polygon Mainnet, 80002 = Polygon Amoy testnet)
-//   contractAddress— DecentNFT contract address (already deployed in DecentMarket)
+//   chainId        — EVM chain ID (10 = Optimism Mainnet)
+//   contractAddress— DecentNFT contract address (deployed via DecentMarket on Optimism)
 //   w3upSpaceDID   — w3up IPFS space DID for audio file uploads
 //   ipfsGateway    — IPFS HTTP gateway for playback and image display
 //   tokenSymbol    — Native currency symbol used for tips
@@ -24,13 +24,13 @@ window.DecentConfig = {
   subtitle: "🎸 The Web3 Digital Town Square",
 
   // Chain — Optimism Mainnet
-  chainId: 10,                                      // TODO: change to 80002 for Amoy testnet during dev
+  chainId: 10,
 
-  // DecentNFT contract already deployed via DecentMarket
-  contractAddress: "0xe870f7b1D10C41dbc6b75598a5308B9a2Bb52958", // TODO: replace with DecentNFT contract address
+  // DecentNFT contract deployed on Optimism via DecentMarket
+  contractAddress: "0xe870f7b1D10C41dbc6b75598a5308B9a2Bb52958",
 
   // IPFS / w3up
-  w3upSpaceDID: "did:key:z6MktU4rpHu5Z4nXjXufa4uivwBLN1DcK4r2xfGhizr4bndB",               // TODO: replace with your w3up space DID
+  w3upSpaceDID: "did:key:z6MktU4rpHu5Z4nXjXufa4uivwBLN1DcK4r2xfGhizr4bndB",
   ipfsGateway: "https://w3s.link/ipfs/",
 
   // Currency
@@ -41,6 +41,6 @@ window.DecentConfig = {
   tokenAddress: "",                                  // TODO: add ERC-20 tip token address if desired
 
   // Community links
-  discord: "https://discord.gg/5XJtJYdhz",       // TODO: replace with actual Discord invite
+  discord: "https://discord.gg/5XJtJYdhz",
   github: "https://github.com/TheJollyLaMa/DecentBusking",
 };

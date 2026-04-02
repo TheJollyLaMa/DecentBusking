@@ -35,7 +35,7 @@ export function renderNFTCard(nft) {
   _loadLivePrice(nft).then(priceEth => {
     const priceEl = content.querySelector('.nft-price-value');
     if (priceEl && priceEth !== null) {
-      priceEl.textContent = `${priceEth} MATIC`;
+      priceEl.textContent = `${priceEth} ETH`;
     }
   });
 }
@@ -90,7 +90,7 @@ async function _loadLivePrice(nft) {
 
   try {
     const provider = new ethers.JsonRpcProvider(
-      `https://polygon-mainnet.g.alchemy.com/v2/demo`
+      `https://mainnet.optimism.io`
     );
     const contract = new ethers.Contract(cfg.contractAddress, BUY_ABI, provider);
     const priceWei = await contract.getPrice(nft.tokenId);
@@ -123,8 +123,8 @@ async function _handleBuy(nft) {
     const signer = await provider.getSigner();
 
     const network = await provider.getNetwork();
-    if (Number(network.chainId) !== (cfg.chainId || 137)) {
-      alert(`⚠️ Switch MetaMask to chain ID ${cfg.chainId || 137} (Polygon).`);
+    if (Number(network.chainId) !== (cfg.chainId || 10)) {
+      alert(`⚠️ Switch MetaMask to chain ID ${cfg.chainId || 10} (Optimism).`);
       if (buyBtn) buyBtn.disabled = false;
       return;
     }

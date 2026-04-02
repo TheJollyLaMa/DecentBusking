@@ -121,8 +121,8 @@ async function _handleSendTip() {
     const signer = await provider.getSigner();
 
     const chainId = (await provider.getNetwork()).chainId;
-    if (Number(chainId) !== (cfg.chainId || 137)) {
-      _showStatus('tip-status', `⚠️ Switch MetaMask to chain ID ${cfg.chainId || 137} (Polygon).`, true);
+    if (Number(chainId) !== (cfg.chainId || 10)) {
+      _showStatus('tip-status', `⚠️ Switch MetaMask to chain ID ${cfg.chainId || 10} (Optimism).`, true);
       sendBtn.disabled = false;
       return;
     }
