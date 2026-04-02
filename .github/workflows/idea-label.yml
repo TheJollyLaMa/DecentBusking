@@ -11,7 +11,7 @@
 #   4. Posts a standardised credit announcement comment on the issue.
 #
 # On PR merge (handled by bounty-bot.yml), the bot reads the "idea-credit: @username"
-# label to add a 20% BNUT payout entry for the idea originator alongside the
+# label to add a 20% ETH payout entry for the idea originator alongside the
 # implementer's 80% entry.
 
 name: Idea Adopted Label
@@ -123,7 +123,7 @@ jobs:
               `|---|---|`,
               `| 💡 Idea Originator | @${originatorLogin} |`,
               `| 🏷️ Status | \`idea-adopted\` |`,
-              `| 💰 Credit Split | **20% BNUT** to idea originator · **80% BNUT** to implementer |`,
+              `| 💰 Credit Split | **20% ETH** to idea originator · **80% ETH** to implementer |`,
               dnftLine,
               '',
               `**What happens next:**`,
@@ -131,7 +131,7 @@ jobs:
               `2. When their PR is merged, the payout is **automatically split**: 20% goes to @${originatorLogin} (you!) and 80% goes to the implementer.`,
               isMajor ? `3. As a major feature, a **Feature Originator DNFT** will be minted and sent to your wallet via the admin Payroll panel after merge.` : null,
               '',
-              `> 💡 @${originatorLogin} — if you are not yet registered in the contributor whitelist, contact \`@TheJollyLaMa\` to complete onboarding and register your Optimism Mainnet wallet address so your $BNUT payout can be processed.`,
+              `> 💡 @${originatorLogin} — if you are not yet registered in the contributor whitelist, contact \`@TheJollyLaMa\` to complete onboarding and register your Optimism Mainnet wallet address so your ETH payout can be processed.`,
             ].filter(l => l !== null).join('\n');
 
             await github.rest.issues.createComment({

@@ -34,6 +34,7 @@
     <div id="center-stage">
       <button id="hat-btn" title="Tip the busker 🎩" aria-label="Tip the busker">🎩</button>
       <button id="guitar-case-btn" title="Mint your busk 💼" aria-label="Mint your busk">💼</button>
+      <button id="payroll-open-btn" title="Payroll panel 💸" aria-label="Open payroll panel">💸 Payroll</button>
     </div>
     <audio id="audio-player" autoplay></audio>
   </main>
@@ -91,6 +92,65 @@
   <!-- FOOTER: DecentFoot web component -->
   <decent-foot></decent-foot>
 
+  <!-- Payroll modal overlay -->
+  <div id="payroll-overlay" class="hidden"></div>
+
+  <!-- Payroll modal -->
+  <div id="payroll-modal" class="hidden">
+    <div id="payroll-modal-inner">
+      <div id="payroll-modal-header">
+        <h2>💸 Payroll</h2>
+        <button id="payroll-close-btn" aria-label="Close payroll panel">✕</button>
+      </div>
+      <p class="payroll-description">
+        View pending ETH bounty payouts and settle them directly from your wallet on Optimism Mainnet.
+        Only the repo owner can send payments.
+      </p>
+
+      <!-- Wallet connection -->
+      <div id="payroll-connect-section">
+        <div id="payroll-connect-row">
+          <button id="payroll-connect-btn" class="payroll-btn payroll-btn-primary">🔌 Connect MetaMask</button>
+          <span id="payroll-connected-addr" class="payroll-addr"></span>
+        </div>
+        <div id="payroll-owner-warning" class="payroll-warning" style="display:none;"></div>
+        <div id="payroll-wallet-status" class="payroll-status"></div>
+      </div>
+
+      <!-- Payroll queue table -->
+      <div id="payroll-queue-section" style="display:none;">
+        <div id="payroll-queue-header">
+          <h3>Pending Payouts</h3>
+          <button id="payroll-refresh-btn" class="payroll-btn payroll-btn-secondary" title="Refresh queue">🔄 Refresh</button>
+        </div>
+        <div id="payroll-empty-msg" class="payroll-empty" style="display:none;">
+          ✅ No pending payouts. All bounties are settled!
+        </div>
+        <div class="payroll-table-wrap">
+          <table id="payroll-table" class="payroll-table">
+            <thead>
+              <tr>
+                <th>Contributor</th>
+                <th>Wallet</th>
+                <th>Amount</th>
+                <th>Issue</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="payroll-table-body"></tbody>
+          </table>
+        </div>
+        <div id="payroll-queue-status" class="payroll-status"></div>
+        <div id="payroll-settle-hint" class="payroll-hint" style="display:none;"></div>
+        <div id="payroll-settle-all-row">
+          <button id="payroll-settle-all-btn" class="payroll-btn payroll-btn-primary" disabled>
+            💸 Settle All
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Load DecentHead component -->
   <script type="module" src="https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@main/js/components/Header.js"></script>
 
@@ -99,6 +159,13 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/main.js"></script>
+
+  <!-- Payroll panel -->
+  <script type="module" src="js/payroll.js"></script>
+  <script type="module">
+    import { initPayroll } from './js/payroll.js';
+    document.addEventListener('DOMContentLoaded', initPayroll);
+  </script>
 
 </body>
 </html>

@@ -1,7 +1,7 @@
 # .github/workflows/bounty-payout.yml
 # DecentBusking Bounty Payout — Queue Workflow
 #
-# Manually triggered by @TheJollyLaMa to queue a $BNUT payout after a
+# Manually triggered by @TheJollyLaMa to queue an ETH payout after a
 # contributor completes a bounty issue and their PR has been merged.
 #
 # ── No private key required ──────────────────────────────────────────────────
@@ -20,8 +20,8 @@ on:
         description: "Contributor wallet address (0x…)"
         required: true
         type: string
-      amount_bnut:
-        description: "Amount of BNUT to pay (whole tokens, e.g. 500)"
+      amount_eth:
+        description: "Amount of ETH to pay (e.g. 0.00001)"
         required: true
         type: string
       issue_number:
@@ -35,7 +35,7 @@ on:
 
 jobs:
   queue-payout:
-    name: Queue $BNUT Payout
+    name: Queue ETH Payout
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -50,7 +50,7 @@ jobs:
           echo "════════════════════════════════════"
           echo "  Issue number       : #${{ github.event.inputs.issue_number }}"
           echo "  Contributor address: ${{ github.event.inputs.contributor_address }}"
-          echo "  BNUT amount        : ${{ github.event.inputs.amount_bnut }} BNUT"
+          echo "  ETH amount         : ${{ github.event.inputs.amount_eth }} ETH"
           echo "  Queued by          : ${{ github.actor }}"
           echo "════════════════════════════════════"
 
@@ -66,7 +66,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           CONTRIBUTOR_ADDRESS: ${{ github.event.inputs.contributor_address }}
-          AMOUNT_BNUT: ${{ github.event.inputs.amount_bnut }}
+          AMOUNT_ETH: ${{ github.event.inputs.amount_eth }}
           ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
           CONTRIBUTOR_GITHUB: ${{ github.event.inputs.contributor_github }}
         with:
@@ -100,14 +100,14 @@ jobs:
               issueRef,
               contributor: process.env.CONTRIBUTOR_ADDRESS,
               contributorGithub,
-              amount: process.env.AMOUNT_BNUT,
+              amount: process.env.AMOUNT_ETH,
               queuedAt: new Date().toISOString(),
               queuedBy: context.actor,
             };
 
             queue.pending.push(entry);
             fs.writeFileSync(path, JSON.stringify(queue, null, 2) + '\n');
-            console.log(`✅  Queued ${entry.amount} BNUT → ${entry.contributor} for ${issueRef} (@${contributorGithub || 'unknown'})`);
+            console.log(`✅  Queued ${entry.amount} ETH → ${entry.contributor} for ${issueRef} (@${contributorGithub || 'unknown'})`);
             core.setOutput('already_queued', 'false');
 
       # ── 4. Commit updated queue file ───────────────────────────────────────
@@ -117,7 +117,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add payroll-queue.json
-          git commit -m "chore: queue BNUT payout for issue #${{ github.event.inputs.issue_number }}"
+          git commit -m "chore: queue ETH payout for issue #${{ github.event.inputs.issue_number }}"
           git push
 
       # ── 5. Post comment on the GitHub issue ───────────────────────────────
@@ -127,7 +127,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
           CONTRIBUTOR_ADDRESS: ${{ github.event.inputs.contributor_address }}
           CONTRIBUTOR_GITHUB: ${{ github.event.inputs.contributor_github }}
-          AMOUNT_BNUT: ${{ github.event.inputs.amount_bnut }}
+          AMOUNT_ETH: ${{ github.event.inputs.amount_eth }}
           ALREADY_QUEUED: ${{ steps.queue.outputs.already_queued }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -135,7 +135,7 @@ jobs:
             const issueNumber       = parseInt(process.env.ISSUE_NUMBER, 10);
             const address           = process.env.CONTRIBUTOR_ADDRESS;
             const contributorGithub = process.env.CONTRIBUTOR_GITHUB || '';
-            const amount            = process.env.AMOUNT_BNUT;
+            const amount            = process.env.AMOUNT_ETH;
             const approver          = context.actor;
             const alreadyQueued     = process.env.ALREADY_QUEUED === 'true';
 
@@ -144,15 +144,15 @@ jobs:
             const body = alreadyQueued
               ? `⚠️ Issue #${issueNumber} for ${contributorDisplay} was already in the payroll queue — no duplicate entry added.`
               : [
-                  `⏳ **$BNUT Payout Queued** by @${approver}`,
+                  `⏳ **ETH Payout Queued** by @${approver}`,
                   '',
                   `| | |`,
                   `|---|---|`,
-                  `| 💰 Amount | **${amount} BNUT** |`,
+                  `| 💰 Amount | **${amount} ETH** |`,
                   contributorGithub ? `| 👤 Contributor | ${contributorDisplay} |` : null,
                   `| 👛 Wallet | \`${address}\` |`,
                   `| 🌐 Network | Optimism Mainnet |`,
-                  `| 📋 Status | Queued — will be settled in the next weekly payroll run |`,
+                  `| 📋 Status | Queued — will be settled in the next payroll run |`,
                   '',
                   `> 💡 @${approver} — visit the [DecentBusking app](https://thejollylama.github.io/DecentBusking/) and click **💸 Payroll** to settle all pending payouts with MetaMask.`,
                 ].filter(l => l !== null).join('\n');

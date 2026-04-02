@@ -1,0 +1,171 @@
+# .github/workflows/settle-payroll.yml
+# DecentBusking Settle Payroll — Queue Update Workflow
+#
+# Manually triggered by @TheJollyLaMa after on-chain ETH transfers have been
+# sent via the app's Payroll panel.  This workflow moves the matching entry
+# (or ALL pending entries) from `pending[]` to `settled[]` in
+# payroll-queue.json and commits the update back to the repo.
+#
+# Why this exists:
+#   payroll-queue.json lives in the repo and is served as a static file.
+#   The browser app cannot write back to GitHub, so settling on-chain does not
+#   automatically update the file.  This workflow closes that gap.
+#
+# Usage:
+#   Run from GitHub Actions → Settle Payroll → Run workflow.
+#   Provide a contributor GitHub username to settle a single entry, or leave
+#   blank to settle ALL pending entries at once.
+
+name: Settle Payroll
+
+on:
+  workflow_dispatch:
+    inputs:
+      contributor_github:
+        description: "Contributor GitHub username to settle (leave blank to settle ALL pending)"
+        required: false
+        type: string
+      issue_ref:
+        description: "Issue ref to settle (e.g. TheJollyLaMa/DecentBusking#5) — used with contributor to disambiguate"
+        required: false
+        type: string
+      tx_hash:
+        description: "On-chain transaction hash (optional, for record-keeping)"
+        required: false
+        type: string
+
+jobs:
+  settle:
+    name: Settle Payroll Queue
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      # ── 1. Checkout repository ─────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 2. Move entries from pending → settled ─────────────────────────────
+      - name: Update payroll queue
+        id: settle
+        uses: actions/github-script@v7
+        env:
+          CONTRIBUTOR_GITHUB: ${{ github.event.inputs.contributor_github }}
+          ISSUE_REF: ${{ github.event.inputs.issue_ref }}
+          TX_HASH: ${{ github.event.inputs.tx_hash }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = 'payroll-queue.json';
+
+            let queue = { pending: [], settled: [] };
+            if (fs.existsSync(path)) {
+              try { queue = JSON.parse(fs.readFileSync(path, 'utf8')); } catch (_) {}
+            }
+            if (!Array.isArray(queue.pending)) queue.pending = [];
+            if (!Array.isArray(queue.settled)) queue.settled = [];
+
+            const contributorGithub = (process.env.CONTRIBUTOR_GITHUB || '').trim();
+            const issueRef          = (process.env.ISSUE_REF || '').trim();
+            const txHash            = (process.env.TX_HASH || '').trim();
+            const settledAt         = new Date().toISOString();
+            const settledBy         = context.actor;
+
+            // Determine which entries to settle.
+            let toSettle, remaining;
+            if (!contributorGithub) {
+              // Settle ALL pending entries.
+              toSettle  = [...queue.pending];
+              remaining = [];
+              console.log(`Settling ALL ${toSettle.length} pending entries.`);
+            } else {
+              // Settle entries matching the given contributor (+ optional issueRef).
+              toSettle  = queue.pending.filter(e =>
+                e.contributorGithub === contributorGithub &&
+                (!issueRef || e.issueRef === issueRef)
+              );
+              remaining = queue.pending.filter(e =>
+                !(e.contributorGithub === contributorGithub &&
+                  (!issueRef || e.issueRef === issueRef))
+              );
+              console.log(`Settling ${toSettle.length} entr${toSettle.length === 1 ? 'y' : 'ies'} for @${contributorGithub}.`);
+            }
+
+            if (toSettle.length === 0) {
+              console.log('⚠️  No matching pending entries found — nothing to settle.');
+              core.setOutput('count', '0');
+              return;
+            }
+
+            // Annotate each settled entry.
+            const nowSettled = toSettle.map(e => ({
+              ...e,
+              settledAt,
+              settledBy,
+              ...(txHash ? { txHash } : {}),
+            }));
+
+            queue.pending = remaining;
+            queue.settled = [...queue.settled, ...nowSettled];
+
+            fs.writeFileSync(path, JSON.stringify(queue, null, 2) + '\n');
+            console.log(`✅  Moved ${nowSettled.length} entr${nowSettled.length === 1 ? 'y' : 'ies'} to settled.`);
+            core.setOutput('count', String(nowSettled.length));
+            core.setOutput('entries', JSON.stringify(nowSettled));
+
+      # ── 3. Commit updated queue file ───────────────────────────────────────
+      - name: Commit payroll-queue.json
+        if: steps.settle.outputs.count != '0'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add payroll-queue.json
+          git commit -m "chore: mark ${{ steps.settle.outputs.count }} payroll entry/entries as settled"
+          git push
+
+      # ── 4. Post confirmation comment on the related issue (if known) ───────
+      - name: Post settlement comment
+        if: steps.settle.outputs.count != '0' && github.event.inputs.issue_ref != ''
+        uses: actions/github-script@v7
+        env:
+          ISSUE_REF: ${{ github.event.inputs.issue_ref }}
+          TX_HASH: ${{ github.event.inputs.tx_hash }}
+          SETTLED_COUNT: ${{ steps.settle.outputs.count }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueRef = process.env.ISSUE_REF;
+            const txHash   = process.env.TX_HASH || '';
+            const count    = process.env.SETTLED_COUNT;
+
+            // Parse issue number from ref like "owner/repo#123"
+            const match = issueRef.match(/#(\d+)$/);
+            if (!match) return;
+            const issueNumber = parseInt(match[1], 10);
+
+            const txLine = txHash
+              ? `\n| 🔗 Tx Hash | [\`${txHash.slice(0,12)}…\`](https://optimistic.etherscan.io/tx/${txHash}) |`
+              : '';
+
+            const body = [
+              `✅ **ETH Payroll Settled** by @${context.actor}`,
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| 📋 Entries settled | **${count}** |`,
+              `| 🌐 Network | Optimism Mainnet |`,
+              `| 🗂️ Status | Moved to \`settled[]\` in \`payroll-queue.json\` |`,
+              txLine,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: issueNumber,
+              body,
+            });
