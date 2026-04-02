@@ -1,5 +1,5 @@
 // js/mint.js — DecentBusking
-// Handles minting an audio file as a DecentNFT on Polygon via the contract
+// Handles minting an audio file as a DecentNFT on Optimism via the contract
 // already deployed by DecentMarket.
 //
 // Flow:
@@ -98,8 +98,8 @@ async function _handleMint(e) {
 
     // 2. Check chain
     const network = await provider.getNetwork();
-    if (Number(network.chainId) !== (cfg.chainId || 137)) {
-      _setStatus(`⚠️ Switch MetaMask to chain ID ${cfg.chainId || 137} (Polygon).`, true);
+    if (Number(network.chainId) !== (cfg.chainId || 10)) {
+      _setStatus(`⚠️ Switch MetaMask to chain ID ${cfg.chainId || 10} (Optimism).`, true);
       submitBtn.disabled = false;
       return;
     }
