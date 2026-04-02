@@ -23,24 +23,24 @@ window.DecentConfig = {
   appName: "DecentBusking",
   subtitle: "🎸 The Web3 Digital Town Square",
 
-  // Chain — Polygon Mainnet
-  chainId: 137,                                      // TODO: change to 80002 for Amoy testnet during dev
+  // Chain — Optimism Mainnet
+  chainId: 10,                                      // TODO: change to 80002 for Amoy testnet during dev
 
   // DecentNFT contract already deployed via DecentMarket
-  contractAddress: "0x0000000000000000000000000000000000000000", // TODO: replace with DecentNFT contract address
+  contractAddress: "0xe870f7b1D10C41dbc6b75598a5308B9a2Bb52958", // TODO: replace with DecentNFT contract address
 
   // IPFS / w3up
-  w3upSpaceDID: "did:key:placeholder",               // TODO: replace with your w3up space DID
+  w3upSpaceDID: "did:key:z6MktU4rpHu5Z4nXjXufa4uivwBLN1DcK4r2xfGhizr4bndB",               // TODO: replace with your w3up space DID
   ipfsGateway: "https://w3s.link/ipfs/",
 
   // Currency
-  tokenSymbol: "MATIC",
+  tokenSymbol: "ETH",
 
   // Optional — right-ankh Uniswap link
   uniswapUrl: "",                                    // TODO: add Uniswap pool URL if desired
   tokenAddress: "",                                  // TODO: add ERC-20 tip token address if desired
 
   // Community links
-  discord: "https://discord.gg/decentbusking",       // TODO: replace with actual Discord invite
+  discord: "https://discord.gg/5XJtJYdhz",       // TODO: replace with actual Discord invite
   github: "https://github.com/TheJollyLaMa/DecentBusking",
 };
