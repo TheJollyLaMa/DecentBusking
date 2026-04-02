@@ -207,15 +207,15 @@ export async function loadPayrollQueue() {
   });
 
   // Enable/disable Settle All button
-  const payableCount = _pendingEntries.filter(e => isOwner && e.contributor && ETH_ADDR_RE(e.contributor)).length;
+  const payableCount = _pendingEntries.filter(e => isOwner && e.contributor && isValidEthAddress(e.contributor)).length;
   if (settleBtn) {
     settleBtn.disabled = payableCount === 0;
     settleBtn.textContent = `💸 Settle All (${payableCount} payable)`;
   }
 }
 
-function ETH_ADDR_RE(addr) {
-  return addr && /^0x[0-9a-fA-F]{40}$/.test(addr);
+function isValidEthAddress(addr) {
+  return !!addr && /^0x[0-9a-fA-F]{40}$/.test(addr);
 }
 
 // ─── Send a single ETH payment ────────────────────────────────────────────────
@@ -278,7 +278,7 @@ async function _settleAll() {
     return;
   }
 
-  const payable = _pendingEntries.filter(e => ETH_ADDR_RE(e.contributor));
+  const payable = _pendingEntries.filter(e => isValidEthAddress(e.contributor));
   if (payable.length === 0) {
     _setStatus(statusEl, '⚠️ No payable entries (all missing wallet addresses).', true);
     return;
@@ -317,7 +317,7 @@ async function _settleAll() {
 
 function _buildTxParams(entry) {
   const to = entry.contributor || '';
-  if (!ETH_ADDR_RE(to)) return { to: null, amountWei: null };
+  if (!isValidEthAddress(to)) return { to: null, amountWei: null };
   const amountWei = ethers.parseEther(String(entry.amount));
   return { to, amountWei };
 }
