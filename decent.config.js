@@ -20,7 +20,7 @@
 // DecentHead web component reads window.DECENT_CONFIG; alias both names.
 window.DECENT_CONFIG =
 window.DecentConfig = {
-  appName: "DecentBusking",
+  appName: "Decent Busking",
   subtitle: "🎸 The Web3 Digital Town Square",
 
   // Chain — Optimism Mainnet
