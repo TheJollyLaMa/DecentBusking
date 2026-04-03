@@ -116,19 +116,28 @@ async function _loadNFTs() {
     const rpcUrl = cfg.rpcUrl || 'https://mainnet.optimism.io';
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const abi = [
-      'function totalSupply() view returns (uint256)',
-      'function tokenURI(uint256) view returns (string)',
-      'function ownerOf(uint256) view returns (address)',
+      // DecentNFT v0.2 (ERC-1155) read helpers
+      'function nextTokenId() view returns (uint256)',
+      'function uri(uint256 tokenId) view returns (string)',
+      'function creatorOf(uint256 tokenId) view returns (address)',
+      'function totalMinted(uint256 tokenId) view returns (uint256)',
     ];
     const contract = new ethers.Contract(contractAddress, abi, provider);
-    const total = Number(await contract.totalSupply());
 
-    for (let tokenId = 1; tokenId <= total; tokenId++) {
+    // Token IDs are 0-based; nextTokenId() returns the next ID to be assigned.
+    const nextId = Number(await contract.nextTokenId());
+
+    for (let tokenId = 0; tokenId < nextId; tokenId++) {
       try {
-        const uri = await contract.tokenURI(tokenId);
+        // Skip tokens that were registered but never minted
+        const minted = Number(await contract.totalMinted(tokenId));
+        if (minted === 0) continue;
+
+        const uri = await contract.uri(tokenId);
+        const creator = await contract.creatorOf(tokenId);
         const meta = await _fetchMetadata(uri);
         if (meta) {
-          _spawnMesh({ tokenId, ...meta }, false);
+          _spawnMesh({ tokenId, ...meta, creator }, false);
         }
       } catch (_) {
         // Individual token failures are non-fatal
