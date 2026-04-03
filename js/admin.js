@@ -67,7 +67,7 @@ async function _connectWallet() {
     const signer  = await provider.getSigner();
     const address = await signer.getAddress();
 
-    _connectedAddr.textContent = address;
+    if (_connectedAddr) _connectedAddr.textContent = address;
 
     // Check that connected wallet is DEFAULT_ADMIN_ROLE on the contract
     const cfg      = window.DecentConfig || {};
@@ -85,7 +85,7 @@ async function _connectWallet() {
 
     _setStatus('✅ Wallet connected. You have DEFAULT_ADMIN_ROLE.');
     _roleSection?.classList.remove('hidden');
-    _connectBtn.disabled = true;
+    if (_connectBtn) _connectBtn.disabled = true;
   } catch (err) {
     _setStatus(`❌ ${err.message || 'Wallet connection failed'}`, true);
   }
@@ -121,18 +121,18 @@ async function _grantRole() {
     }
 
     _setStatus(`⏳ Granting ${roleName} to ${target} — confirm in MetaMask…`);
-    _grantBtn.disabled = true;
+    if (_grantBtn) _grantBtn.disabled = true;
 
     const tx = await contract.grantRole(roleBytes, target);
     _setStatus(`⏳ Waiting for confirmation…`);
     await tx.wait();
 
     _setStatus(`✅ ${roleName} granted to ${target}.`);
-    _targetAddr.value = '';
+    if (_targetAddr) _targetAddr.value = '';
   } catch (err) {
     _setStatus(`❌ ${err.message || 'Grant role failed'}`, true);
   } finally {
-    _grantBtn.disabled = false;
+    if (_grantBtn) _grantBtn.disabled = false;
   }
 }
 
