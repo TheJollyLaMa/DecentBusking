@@ -156,7 +156,7 @@ function patchAboutModal() {
         <div class="modal-box">
           <button class="close-btn" id="about-close">✕</button>
 
-          <h2>🎸🦚 DecentBusking</h2>
+          <h2>Decent🦚Busking</h2>
           <p class="mission">The Web3 Digital Town Square — mint audio NFTs, tip artists, fly through space.</p>
 
           <p>
