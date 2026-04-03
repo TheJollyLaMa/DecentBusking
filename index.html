@@ -34,7 +34,6 @@
     <div id="center-stage">
       <button id="hat-btn" title="Tip the busker 🎩" aria-label="Tip the busker">🎩</button>
       <button id="guitar-case-btn" title="Mint your busk 💼" aria-label="Mint your busk">💼</button>
-      <button id="payroll-open-btn" title="Payroll panel 💸" aria-label="Open payroll panel">💸 Payroll</button>
     </div>
     <audio id="audio-player" autoplay></audio>
   </main>
@@ -153,6 +152,9 @@
 
   <!-- Load DecentHead component -->
   <script type="module" src="https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@main/js/components/Header.js"></script>
+
+  <!-- Inject 💸 Payroll link into left ankh header dropdown -->
+  <script type="module" src="js/components/header-payroll-inject.js"></script>
 
   <!-- DecentBusking About Modal — patches the CDN about-modal once defined -->
   <script type="module" src="js/components/about-override.js"></script>
