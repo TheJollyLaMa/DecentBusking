@@ -326,7 +326,8 @@ function _flyShip() {
 
 // ── Input Handlers ────────────────────────────────────────────────────────
 function _onKeyDown(e) {
-  const key = e.key.toLowerCase();
+  const key = e.key?.toLowerCase();
+  if (!key) return;
   _keysDown[key] = true;
 
   // Toggle flight mode with Tab
@@ -338,7 +339,9 @@ function _onKeyDown(e) {
 }
 
 function _onKeyUp(e) {
-  _keysDown[e.key.toLowerCase()] = false;
+  const key = e.key?.toLowerCase();
+  if (!key) return;
+  _keysDown[key] = false;
 }
 
 function _onMouseMove(e) {

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Decent🦚Busking</title>
-  <link rel="icon" type="image/png" href="./img/hat.png" />
+  <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css" />
 
@@ -91,7 +91,41 @@
   <!-- FOOTER: DecentFoot web component -->
   <decent-foot></decent-foot>
 
-  <!-- Payroll modal overlay -->
+  <!-- Admin role-grant modal -->
+  <div id="admin-modal" class="hidden">
+    <div id="admin-modal-inner">
+      <div id="admin-modal-header">
+        <h2>🔑 Admin: Grant Role</h2>
+        <button id="admin-close-btn" aria-label="Close admin panel">✕</button>
+      </div>
+      <p class="admin-description">
+        Grant <strong>MINTER_ROLE</strong> or <strong>DEFAULT_ADMIN_ROLE</strong> to a wallet address.
+        Only the current <code>DEFAULT_ADMIN_ROLE</code> holder can perform this action.
+      </p>
+      <div id="admin-connect-section">
+        <button id="admin-connect-btn" class="admin-btn admin-btn-primary">🔌 Connect Wallet</button>
+        <span id="admin-connected-addr" class="admin-addr"></span>
+      </div>
+      <div id="admin-role-section" class="hidden">
+        <div class="admin-field">
+          <label for="admin-target-addr">Wallet Address to Grant Role</label>
+          <input id="admin-target-addr" type="text" placeholder="0x…" />
+        </div>
+        <div class="admin-field">
+          <label for="admin-role-select">Role to Grant</label>
+          <select id="admin-role-select">
+            <option value="minter">MINTER_ROLE</option>
+            <option value="admin">DEFAULT_ADMIN_ROLE</option>
+          </select>
+        </div>
+        <div id="admin-status" class="admin-status"></div>
+        <div class="admin-actions">
+          <button id="admin-grant-btn" class="admin-btn admin-btn-primary">✅ Grant Role</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="payroll-overlay" class="hidden"></div>
 
   <!-- Payroll modal -->
@@ -165,7 +199,10 @@
   <!-- Main app entry point -->
   <script type="module" src="js/main.js"></script>
 
-  <!-- Payroll panel -->
+  <!-- Admin role-grant panel -->
+  <script type="module" src="js/components/header-admin-inject.js"></script>
+  <script type="module" src="js/admin.js"></script>
+
   <script type="module" src="js/payroll.js"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js';
