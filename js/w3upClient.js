@@ -1,5 +1,4 @@
 // js/w3upClient.js — DecentBusking
-// Ported from BigNuten_Vanilla (js/w3upClient.js).
 //
 // Provides two public functions:
 //   connectW3upClient()       — prompts for email, logs in, returns { client, spaceDid }

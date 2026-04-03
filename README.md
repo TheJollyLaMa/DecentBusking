@@ -98,12 +98,12 @@ Push to `main` — GitHub Pages serves the site automatically.
 
 ## Bounty System
 
-This repo uses the same `$BNUT` bounty bot as [BigNuten_Vanilla](https://github.com/TheJollyLaMa/BigNuten_Vanilla).
+DecentBusking uses an automated ETH bounty bot to reward contributors.
 
 - **Maintainer** labels issues with `bounty: N BNUT` via the **Bounty Label** workflow.
 - **Contributors** claim by commenting, getting assigned, and opening a PR with `Closes #N`.
 - On merge the bot auto-queues the payout in `payroll-queue.json`.
-- **Maintainer** settles weekly via MetaMask in the BigNuten Payroll panel.
+- **Maintainer** settles weekly via MetaMask in the DecentBusking Payroll panel.
 
 To register as a contributor, contact `@TheJollyLaMa` directly.
 

@@ -4,11 +4,11 @@
 import { initStage } from './stage.js';
 import { initSpace } from './space.js';
 
-// The DecentHead web component is loaded in index.html as a CDN module.
-// The DecentFoot web component is loaded below once the DOM is ready.
+// The shared header (decent-header) web component is loaded in index.html as a CDN module.
+// The shared footer (decent-foot) web component is loaded below once the DOM is ready.
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Load DecentFoot web component (mirrors pattern used for DecentHead)
+  // Load the shared footer web component (mirrors pattern used for decent-header)
   const footScript = document.createElement('script');
   footScript.type = 'module';
   footScript.src = 'https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@main/js/components/Footer.js';
