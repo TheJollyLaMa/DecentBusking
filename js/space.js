@@ -113,9 +113,8 @@ async function _loadNFTs() {
   }
 
   try {
-    const provider = new ethers.JsonRpcProvider(
-      `https://polygon-mainnet.g.alchemy.com/v2/demo`
-    );
+    const rpcUrl = cfg.rpcUrl || 'https://mainnet.optimism.io';
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
     const abi = [
       'function totalSupply() view returns (uint256)',
       'function tokenURI(uint256) view returns (string)',
