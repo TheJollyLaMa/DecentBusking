@@ -8,7 +8,9 @@
       "walletAddress": "0x807061DF657A7697c04045dA7d16D941861cAABc",
       "ethEarned": 0,
       "ethPending": 0,
-      "issuesClosed": [],
+      "issuesClosed": [
+        "TheJollyLaMa/DecentBusking#8"
+      ],
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "Repo owner and maintainer.",
       "ideasCredited": []
@@ -20,7 +22,9 @@
       "walletAddress": "0x23A457AD3C33d68E4fAd2FCa7c5d9a511E0C350e",
       "ethEarned": 0,
       "ethPending": 0,
-      "issuesClosed": [],
+      "issuesClosed": [
+        "TheJollyLaMa/DecentBusking#8"
+      ],
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "GitHub Copilot AI contributor."
     }
