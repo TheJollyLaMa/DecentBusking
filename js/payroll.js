@@ -346,12 +346,15 @@ export function initPayroll() {
   const modal       = document.getElementById('payroll-modal');
   const overlay     = document.getElementById('payroll-overlay');
 
-  if (openBtn) {
-    openBtn.addEventListener('click', () => {
-      if (modal)   modal.classList.remove('hidden');
-      if (overlay) overlay.classList.remove('hidden');
-    });
+  // Open via the legacy inline button (if still present) or via the
+  // "open-payroll" custom event dispatched by the header dropdown link.
+  function openPayroll() {
+    if (modal)   modal.classList.remove('hidden');
+    if (overlay) overlay.classList.remove('hidden');
   }
+
+  if (openBtn) openBtn.addEventListener('click', openPayroll);
+  document.addEventListener('open-payroll', openPayroll);
 
   function closePayroll() {
     if (modal)   modal.classList.add('hidden');
