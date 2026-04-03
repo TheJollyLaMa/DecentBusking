@@ -25,8 +25,11 @@ DecentBusking/
 │   ├── space.js            ← Three.js NFT asteroid field
 │   ├── mint.js             ← Minting audio → DecentNFT contract
 │   ├── nft-card.js         ← NFT detail panel (mirrors DecentMarket)
+│   ├── w3upClient.js       ← w3up/Storacha IPFS client (connect + auto-restore)
 │   └── components/
-│       └── about-override.js ← DecentBusking About Modal (Peacock 🦚)
+│       ├── about-override.js         ← DecentBusking About Modal (Peacock 🦚)
+│       ├── header-ipfs-inject.js     ← Injects 🔗 IPFS Connect into header dropdown
+│       └── header-payroll-inject.js  ← Injects 💸 Payroll into header dropdown
 ├── css/
 │   └── styles.css
 ├── img/
@@ -67,6 +70,7 @@ Fill in the `TODO` fields:
 ```js
 window.DecentConfig = {
   chainId: 10,                           // Optimism Mainnet
+  rpcUrl: "https://mainnet.optimism.io", // Public Optimism RPC (no API key required)
   contractAddress: "0x...",              // DecentNFT contract from DecentMarket
   w3upSpaceDID: "did:key:...",           // w3up IPFS space DID
   ipfsGateway: "https://w3s.link/ipfs/",
@@ -123,3 +127,38 @@ Each token references its parent. Royalty distribution is handled by the DecentN
 - 🐙 GitHub: https://github.com/TheJollyLaMa/DecentBusking
 - 🛒 DecentMarket: https://github.com/TheJollyLaMa/DecentMarket
 - 🔗 Optimism Explorer: https://optimistic.etherscan.io
+
+---
+
+## Developer Notes
+
+### RPC / CORS
+
+`js/space.js` loads all minted NFTs on start-up using a read-only `ethers.JsonRpcProvider`.
+The provider URL is read from `window.DecentConfig.rpcUrl`, falling back to the **public Optimism RPC** (`https://mainnet.optimism.io`).
+
+> ⚠️ **Do NOT use a Polygon or Alchemy "demo" key** here.  The contract is deployed on Optimism,
+> not Polygon.  Using the wrong chain causes a CORS error because `polygon-mainnet.g.alchemy.com`
+> rejects cross-origin requests from browser frontends without a valid paid API key.
+
+If you need a private/high-throughput RPC, set `rpcUrl` in `decent.config.js` to your own
+Alchemy/Infura/QuickNode Optimism endpoint.
+
+### IPFS / w3up Connection
+
+Minting audio to IPFS is handled by the [Storacha / web3.storage w3up client](https://web3.storage).
+The browser bundle is loaded via CDN in `index.html` and exposes `window.w3up`.
+
+The connection flow is wired through three files:
+
+| File | Role |
+|---|---|
+| `js/w3upClient.js` | `connectW3upClient()` (email login) + `tryAutoRestoreW3upClient()` (silent restore) |
+| `js/components/header-ipfs-inject.js` | Injects **🔗 Connect IPFS** into the left-ankh dropdown; calls the above on click |
+| `index.html` line 17 | Loads the w3up browser bundle from IPFS |
+
+On first visit a user must click **☥ → 🔗 Connect IPFS** and enter their web3.storage email.
+On subsequent visits the session is restored silently from local IndexedDB.
+
+`window._w3upClient` and `window._w3upSpaceDid` are set on successful connection and are
+read by `js/mint.js` during the upload steps.

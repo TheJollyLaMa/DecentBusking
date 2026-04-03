@@ -25,6 +25,7 @@ window.DecentConfig = {
 
   // Chain — Optimism Mainnet
   chainId: 10,
+  rpcUrl: "https://mainnet.optimism.io",
 
   // DecentNFT contract deployed on Optimism via DecentMarket
   contractAddress: "0xe870f7b1D10C41dbc6b75598a5308B9a2Bb52958",
