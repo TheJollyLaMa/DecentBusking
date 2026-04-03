@@ -1,0 +1,360 @@
+# .github/workflows/manual-bounty-queue.yml
+# DecentBusking Manual Bounty Queue — Admin Retroactive Payout Tool
+#
+# Administrative workflow for @TheJollyLaMa to retroactively close an issue
+# and queue its ETH bounty payout, even when the merged PR did NOT include a
+# "Closes #N" keyword (causing the bounty bot to miss the payout).
+#
+# This workflow intentionally BYPASSES the bot pause/low-balance check so
+# that retroactive admin actions are never silently dropped.
+#
+# Steps performed:
+#   1. Fetch the issue, verify it has an ETH bounty label.
+#   2. Look up the contributor wallet(s) in contributor-accounts.json.
+#   3. Append payout entries to payroll-queue.json (deduplicates automatically).
+#   4. Update ethPending / issuesClosed in contributor-accounts.json.
+#   5. Optionally close the GitHub issue (default: yes).
+#   6. Post a transparency comment on the issue.
+
+name: Manual Bounty Queue
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to retroactively close and pay (e.g. 5)'
+        required: true
+        type: string
+      pr_number:
+        description: 'Merged PR number that implemented the issue (for transparency comment)'
+        required: false
+        type: string
+      close_issue:
+        description: 'Also close the GitHub issue after queueing the payout?'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      override_contributors:
+        description: 'Comma-separated list of GitHub usernames to pay (leave blank to use issue assignees + PR author)'
+        required: false
+        type: string
+      reason:
+        description: 'Reason / notes for the retroactive queue (shown in the transparency comment)'
+        required: false
+        type: string
+
+jobs:
+  retroactive-queue:
+    name: Retroactively queue ETH bounty payout
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Queue retroactive payout
+        id: queue
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
+          CLOSE_ISSUE: ${{ github.event.inputs.close_issue }}
+          OVERRIDE_CONTRIBUTORS: ${{ github.event.inputs.override_contributors }}
+          REASON: ${{ github.event.inputs.reason }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            const CONTRIBUTOR_ALIAS_MAP = {
+              'copilot-swe-agent': 'copilot',
+            };
+            function normalizeLogin(login) {
+              return CONTRIBUTOR_ALIAS_MAP[login.toLowerCase()] || login;
+            }
+
+            const issueNumber = parseInt(process.env.ISSUE_NUMBER, 10);
+            const prNumber    = process.env.PR_NUMBER ? parseInt(process.env.PR_NUMBER, 10) : null;
+            const closeIssue  = process.env.CLOSE_ISSUE !== 'false';
+            const reason      = process.env.REASON || '';
+            const repoFull    = `${context.repo.owner}/${context.repo.repo}`;
+            const issueRef    = `${repoFull}#${issueNumber}`;
+
+            // ── Fetch the issue ───────────────────────────────────────────────
+            let issue;
+            try {
+              issue = (await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+              })).data;
+            } catch (e) {
+              core.setFailed(`Could not fetch issue #${issueNumber}: ${e.message}`);
+              return;
+            }
+
+            const labels = issue.labels.map(l => l.name);
+            const bountyLabel = labels.find(l => /^bounty:\s*[\d.]+\s*ETH$/i.test(l));
+            if (!bountyLabel) {
+              core.setFailed(`Issue #${issueNumber} does not have an ETH bounty label. Aborting.`);
+              return;
+            }
+            const bountyMatch = bountyLabel.match(/([\d.]+)\s*ETH/i);
+            const amount = bountyMatch ? bountyMatch[1] : null;
+            if (!amount) {
+              core.setFailed(`Could not parse bounty amount from label "${bountyLabel}". Aborting.`);
+              return;
+            }
+
+            // ── Load contributor accounts ─────────────────────────────────────
+            let accounts = { contributors: [] };
+            const accountsPath = 'contributor-accounts.json';
+            if (fs.existsSync(accountsPath)) {
+              try { accounts = JSON.parse(fs.readFileSync(accountsPath, 'utf8')); } catch (e) {
+                core.setFailed(`Failed to parse ${accountsPath}: ${e.message}`); return;
+              }
+            }
+            if (!Array.isArray(accounts.contributors)) accounts.contributors = [];
+
+            // ── Load payroll queue ────────────────────────────────────────────
+            let queue = { pending: [], settled: [] };
+            const queuePath = 'payroll-queue.json';
+            if (fs.existsSync(queuePath)) {
+              try { queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch (e) {
+                core.setFailed(`Failed to parse ${queuePath}: ${e.message}`); return;
+              }
+            }
+            if (!Array.isArray(queue.pending)) queue.pending = [];
+            if (!Array.isArray(queue.settled)) queue.settled = [];
+
+            // ── Determine contributors to pay ─────────────────────────────────
+            let contributors = [];
+
+            if (process.env.OVERRIDE_CONTRIBUTORS && process.env.OVERRIDE_CONTRIBUTORS.trim()) {
+              contributors = process.env.OVERRIDE_CONTRIBUTORS
+                .split(',')
+                .map(s => normalizeLogin(s.trim()))
+                .filter(Boolean);
+              console.log(`Using override contributor list: ${contributors.join(', ')}`);
+            } else {
+              const issueAssignees = (issue.assignees || []).map(a => normalizeLogin(a.login));
+              contributors = [...issueAssignees];
+
+              if (prNumber) {
+                try {
+                  const pr = (await github.rest.pulls.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: prNumber,
+                  })).data;
+                  const prAuthor = normalizeLogin(pr.user.login);
+                  if (!contributors.includes(prAuthor)) contributors.push(prAuthor);
+                } catch (e) {
+                  console.warn(`Could not fetch PR #${prNumber}: ${e.message}`);
+                }
+              }
+
+              if (contributors.length === 0) {
+                core.setFailed(`No contributors found for issue #${issueNumber} and no override list provided. Aborting.`);
+                return;
+              }
+              contributors = [...new Set(contributors)];
+              console.log(`Derived contributor list: ${contributors.join(', ')}`);
+            }
+
+            // ── Idea-credit detection ─────────────────────────────────────────
+            const creditLabel = labels.find(l => /^idea-credit:\s*@?([-\w]+)$/i.test(l));
+            const ideaOriginatorRaw = creditLabel
+              ? creditLabel.match(/^idea-credit:\s*@?([-\w]+)$/i)[1]
+              : null;
+            const totalAmount = parseFloat(amount);
+            const perImplementerOriginatorShare = ideaOriginatorRaw
+              ? parseFloat((totalAmount * 0.2).toFixed(8))
+              : 0;
+            const implementerAmount = ideaOriginatorRaw
+              ? String(parseFloat((totalAmount * 0.8).toFixed(8)))
+              : amount;
+
+            // ── Queue payout entries ──────────────────────────────────────────
+            const queued   = [];
+            const skipped  = [];
+            const missing  = [];
+            let queuedImplementerCount = 0;
+
+            for (const contributorGithub of contributors) {
+              const contribRecord = accounts.contributors.find(
+                c => c.github.toLowerCase() === contributorGithub.toLowerCase()
+              );
+              const canonicalGithub = contribRecord ? contribRecord.github : contributorGithub;
+
+              const alreadyQueued = ideaOriginatorRaw
+                ? (queue.pending.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub && e.role === 'implementer') ||
+                   queue.settled.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub && e.role === 'implementer'))
+                : (queue.pending.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub) ||
+                   queue.settled.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalGithub));
+              if (alreadyQueued) {
+                console.log(`Issue ${issueRef} for @${canonicalGithub} is already in the payroll queue. Skipping.`);
+                skipped.push(canonicalGithub);
+                continue;
+              }
+
+              const walletAddress = contribRecord ? (contribRecord.walletAddress || '') : '';
+              if (!walletAddress) missing.push(canonicalGithub);
+
+              if (parseFloat(implementerAmount) <= 0) {
+                skipped.push(canonicalGithub);
+                continue;
+              }
+
+              const entry = {
+                issueRef,
+                contributor: walletAddress,
+                contributorGithub: canonicalGithub,
+                amount: implementerAmount,
+                queuedAt: new Date().toISOString(),
+                queuedBy: context.actor,
+                retroactive: true,
+              };
+              if (ideaOriginatorRaw) entry.role = 'implementer';
+              if (prNumber) entry.prNumber = prNumber;
+
+              queue.pending.push(entry);
+              queuedImplementerCount++;
+
+              if (contribRecord) {
+                contribRecord.ethPending = parseFloat(
+                  ((contribRecord.ethPending || 0) + parseFloat(implementerAmount)).toFixed(8)
+                );
+                if (!Array.isArray(contribRecord.issuesClosed)) contribRecord.issuesClosed = [];
+                if (!contribRecord.issuesClosed.includes(issueRef)) contribRecord.issuesClosed.push(issueRef);
+              }
+
+              queued.push({ github: canonicalGithub, wallet: walletAddress, role: ideaOriginatorRaw ? 'implementer' : 'contributor', amount: implementerAmount });
+              console.log(`Queued ${implementerAmount} ETH for @${canonicalGithub} (${walletAddress || 'NO WALLET'}) — ${issueRef}`);
+            }
+
+            // ── Queue idea-originator payout ──────────────────────────────────
+            const totalOriginatorAmount = parseFloat(
+              (perImplementerOriginatorShare * queuedImplementerCount).toFixed(8)
+            );
+            if (ideaOriginatorRaw && totalOriginatorAmount > 0) {
+              const normalizedOriginator = normalizeLogin(ideaOriginatorRaw);
+              const originatorRecord = accounts.contributors.find(
+                c => c.github.toLowerCase() === normalizedOriginator.toLowerCase()
+              );
+              const canonicalOriginator = originatorRecord ? originatorRecord.github : normalizedOriginator;
+              const originatorWallet    = originatorRecord ? (originatorRecord.walletAddress || '') : '';
+
+              const originatorQueued =
+                queue.pending.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalOriginator && e.role === 'idea-originator') ||
+                queue.settled.some(e => e.issueRef === issueRef && e.contributorGithub === canonicalOriginator && e.role === 'idea-originator');
+
+              if (!originatorQueued) {
+                if (!originatorWallet) missing.push(canonicalOriginator);
+                queue.pending.push({
+                  issueRef,
+                  contributor: originatorWallet,
+                  contributorGithub: canonicalOriginator,
+                  amount: String(totalOriginatorAmount),
+                  role: 'idea-originator',
+                  queuedAt: new Date().toISOString(),
+                  queuedBy: context.actor,
+                  retroactive: true,
+                });
+                if (originatorRecord) {
+                  originatorRecord.ethPending = parseFloat(
+                    ((originatorRecord.ethPending || 0) + totalOriginatorAmount).toFixed(8)
+                  );
+                  if (!Array.isArray(originatorRecord.ideasCredited)) originatorRecord.ideasCredited = [];
+                  if (!originatorRecord.ideasCredited.includes(issueRef)) originatorRecord.ideasCredited.push(issueRef);
+                  if (!Array.isArray(originatorRecord.issuesClosed)) originatorRecord.issuesClosed = [];
+                  if (!originatorRecord.issuesClosed.includes(issueRef)) originatorRecord.issuesClosed.push(issueRef);
+                }
+                queued.push({ github: canonicalOriginator, wallet: originatorWallet, role: 'idea-originator', amount: String(totalOriginatorAmount) });
+                console.log(`Queued ${totalOriginatorAmount} ETH (20% idea-credit) for @${canonicalOriginator} — ${issueRef}`);
+              }
+            }
+
+            // ── Write updated files ───────────────────────────────────────────
+            if (queued.length > 0) {
+              fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2) + '\n');
+              fs.writeFileSync(accountsPath, JSON.stringify(accounts, null, 2) + '\n');
+              core.setOutput('files_changed', 'true');
+            } else {
+              core.setOutput('files_changed', 'false');
+            }
+
+            core.setOutput('queued_count', String(queued.length));
+            core.setOutput('skipped_count', String(skipped.length));
+            core.setOutput('missing_wallets', missing.join(','));
+            core.setOutput('queued_contributors', queued.map(q => q.github).join(','));
+            core.setOutput('amount', amount);
+
+            // ── Optionally close the issue ────────────────────────────────────
+            if (closeIssue && issue.state === 'open') {
+              try {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  state: 'closed',
+                  state_reason: 'completed',
+                });
+                console.log(`Closed issue #${issueNumber}.`);
+                core.setOutput('issue_closed', 'true');
+              } catch (e) {
+                console.warn(`Could not close issue #${issueNumber}: ${e.message}`);
+                core.setOutput('issue_closed', 'false');
+              }
+            } else {
+              core.setOutput('issue_closed', 'false');
+            }
+
+            // ── Post transparency comment ─────────────────────────────────────
+            const queuedDisplay = queued.length > 0
+              ? queued.map(q => `@${q.github} — **${q.amount} ETH**`).join(', ')
+              : '_none (already queued or no wallet on file)_';
+
+            const lines = [
+              '## 📋 Retroactive Bounty Queue — Admin Action',
+              '',
+              `This issue was retroactively closed and its bounty queued by @${context.actor}`,
+              reason ? `\n> **Reason:** ${reason}` : '',
+              '',
+              '| | |',
+              '|---|---|',
+              `| 🏷️ Bounty label | \`${bountyLabel}\` |`,
+              prNumber ? `| 🔀 Implementing PR | #${prNumber} |` : null,
+              `| 👥 Payouts queued | ${queuedDisplay} |`,
+              skipped.length > 0 ? `| ⏭️ Already queued | ${skipped.map(g => `@${g}`).join(', ')} |` : null,
+              missing.length > 0 ? `| ⚠️ No wallet on file | ${missing.map(g => `@${g}`).join(', ')} |` : null,
+              '',
+              '> 💡 @TheJollyLaMa — visit the [DecentBusking app](https://thejollylama.github.io/DecentBusking/) and click **💸 Payroll** to settle all pending ETH payouts with MetaMask.',
+            ].filter(l => l !== null).join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: lines,
+            });
+
+            console.log(`Transparency comment posted on issue #${issueNumber}.`);
+
+      - name: Commit updated queue and accounts
+        if: steps.queue.outputs.files_changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add payroll-queue.json contributor-accounts.json
+          git commit -m "chore: retroactively queue ETH bounty for issue #${{ github.event.inputs.issue_number }} [admin]"
+          git push

@@ -117,7 +117,7 @@ jobs:
                 if (issue.pull_request) continue;
 
                 const labels = issue.labels.map(l => l.name);
-                const hasBounty = labels.some(l => /^bounty:\s*\d+\s*BNUT$/i.test(l));
+                const hasBounty = labels.some(l => /^bounty:\s*[\d.]+\s*ETH$/i.test(l));
                 if (!hasBounty) continue;
 
                 findings.push({ issue, pr, labels });
@@ -167,7 +167,7 @@ jobs:
                   console.warn(`Could not add label to issue #${issueNumber}: ${e.message}`);
                 }
 
-                const bountyLabel = labels.find(l => /^bounty:\s*\d+\s*BNUT$/i.test(l));
+                const bountyLabel = labels.find(l => /^bounty:\s*[\d.]+\s*ETH$/i.test(l));
                 const commentBody = [
                   '<!-- bounty-audit-alert -->',
                   '## ⚠️ Bounty Audit Alert',

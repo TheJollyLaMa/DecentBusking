@@ -1,13 +1,13 @@
 {
-  "_comment": "Whitelist of registered contributor accounts for the $BNUT bounty system. Entries are added exclusively by the maintainer (@TheJollyLaMa) after personal onboarding (video call or direct contact). Do NOT submit PRs to self-register. Each entry tracks a contributor's GitHub username, their Optimism Mainnet wallet address, and cumulative BNUT earnings. Wallet addresses are required before any payout can be queued.",
+  "_comment": "Whitelist of registered contributor accounts for the ETH bounty system. Entries are added exclusively by the maintainer (@TheJollyLaMa) after personal onboarding (video call or direct contact). Do NOT submit PRs to self-register. Each entry tracks a contributor's GitHub username, their Optimism Mainnet wallet address, and cumulative ETH earnings. Wallet addresses are required before any payout can be queued.",
   "contributors": [
     {
       "github": "TheJollyLaMa",
       "displayName": "TheJollyLaMa",
       "role": "owner",
       "walletAddress": "0x807061DF657A7697c04045dA7d16D941861cAABc",
-      "bnutEarned": 0,
-      "bnutPending": 0,
+      "ethEarned": 0,
+      "ethPending": 0,
       "issuesClosed": [],
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "Repo owner and maintainer.",
@@ -18,8 +18,8 @@
       "displayName": "Copilot RoboSoul",
       "role": "contributor",
       "walletAddress": "0x23A457AD3C33d68E4fAd2FCa7c5d9a511E0C350e",
-      "bnutEarned": 0,
-      "bnutPending": 0,
+      "ethEarned": 0,
+      "ethPending": 0,
       "issuesClosed": [],
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "GitHub Copilot AI contributor."

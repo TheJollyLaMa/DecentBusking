@@ -1,14 +1,14 @@
 # DecentBusking Bounty Bot
 #
-# Automates $BNUT bounty notifications for GitHub issues:
+# Automates ETH bounty notifications for GitHub issues:
 #
 #   1. When an issue is ASSIGNED:
-#      - Parses the bounty amount from a label like "bounty: 500 BNUT"
+#      - Parses the bounty amount from a label like "bounty: 0.00001 ETH" (ETH on Optimism)
 #      - Posts a comment on the issue announcing the bounty to the assignee
 #
 #   2. When a PR is MERGED that closes an issue:
 #      - Auto-appends a correctly-formatted entry to payroll-queue.json
-#      - Increments bnutPending and issuesClosed in contributor-accounts.json
+#      - Increments ethPending and issuesClosed in contributor-accounts.json
 #      - Skips (deduplicates) if the issue is already queued
 #      - Posts a status comment (success or needs manual attention)
 #      - Manual queue via bounty-payout.yml is still available as a fallback
@@ -59,9 +59,9 @@ jobs:
               'copilot-swe-agent': 'copilot',
             };
 
-            // Find a label matching the pattern "bounty: <amount> BNUT"
-            // Label format example: "bounty: 500 BNUT"
-            const bountyLabel = labels.find(l => /^bounty:\s*\d+\s*BNUT$/i.test(l));
+            // Find a label matching the pattern "bounty: <amount> ETH"
+            // Label format example: "bounty: 0.00001 ETH"
+            const bountyLabel = labels.find(l => /^bounty:\s*[\d.]+\s*ETH$/i.test(l));
 
             if (!bountyLabel) {
               console.log('No bounty label found on this issue. Skipping.');
@@ -69,7 +69,7 @@ jobs:
             }
 
             // Extract the numeric amount from the label.
-            const match = bountyLabel.match(/(\d+)\s*BNUT/i);
+            const match = bountyLabel.match(/([\d.]+)\s*ETH/i);
             const amount = match ? match[1] : 'unknown';
 
             // Load contributor accounts to check if this is a returning contributor.
@@ -125,15 +125,15 @@ jobs:
               const issuesCompleted = Array.isArray(contribRecord.issuesClosed)
                 ? contribRecord.issuesClosed.length
                 : 0;
-              const totalEarned = (contribRecord.bnutEarned || 0) + (contribRecord.bnutPending || 0);
+              const totalEarned = (contribRecord.ethEarned || 0) + (contribRecord.ethPending || 0);
               const hasWallet = !!(contribRecord.walletAddress);
 
               body = [
-                `🏅 Welcome back, @${assignee.login}! You've completed **${issuesCompleted} issue${issuesCompleted !== 1 ? 's' : ''}** and earned **${totalEarned} BNUT** so far! \\♆//`,
+                `🏅 Welcome back, @${assignee.login}! You've completed **${issuesCompleted} issue${issuesCompleted !== 1 ? 's' : ''}** and earned **${totalEarned} ETH** so far! \\♆//`,
                 '',
                 `| | |`,
                 `|---|---|`,
-                `| 💰 This bounty | **${amount} BNUT** |`,
+                `| 💰 This bounty | **${amount} ETH** |`,
                 `| 📌 Issue | #${issue.number} |`,
                 '',
                 'Payout will be queued automatically when your PR is merged. Keep up the great work! 🌊✨',
@@ -147,25 +147,25 @@ jobs:
             } else {
               // Full onboarding comment for first-time / non-whitelisted contributors.
               body = [
-                `👋 Hey @${assignee.login}! This issue has a **$BNUT bounty** attached. 🎉`,
+                `👋 Hey @${assignee.login}! This issue has a **ETH bounty** attached. 🎉`,
                 '',
                 `| | |`,
                 `|---|---|`,
-                `| 💰 Bounty | **${amount} BNUT** |`,
+                `| 💰 Bounty | **${amount} ETH** |`,
                 `| 🏷️ Label | \`${bountyLabel}\` |`,
                 `| 📌 Issue | #${issue.number} |`,
                 '',
                 '**How to claim your bounty:**',
                 '1. Complete the work described in this issue.',
                 '2. Open a Pull Request that closes this issue (use `Closes #' + issue.number + '` in the PR body).',
-                '3. Once your PR is merged, @TheJollyLaMa will approve the $BNUT payout.',
+                '3. Once your PR is merged, @TheJollyLaMa will approve the ETH payout.',
                 '',
                 '> ⚠️ **Whitelist registration required:** Payouts are only sent to wallets registered in the',
                 '> contributor whitelist by `@TheJollyLaMa`. If you are not yet whitelisted, contact',
                 '> `@TheJollyLaMa` directly (via video call or DM) to complete onboarding before your payout',
                 '> can be processed. **Do not share your wallet address publicly in this issue.**',
                 '',
-                '> ℹ️ Payouts are sent in $BNUT on **Optimism Mainnet** via the BigNutenTreasury smart contract.',
+                '> ℹ️ Payouts are sent in ETH on **Optimism Mainnet** via the Optimism Mainnet.',
                 `> See [CONTRIBUTING.md](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md) for onboarding and whitelist registration details.`,
               ].join('\n');
             }
@@ -177,7 +177,7 @@ jobs:
               body,
             });
 
-            console.log(`Bounty announcement posted for issue #${issue.number} — ${amount} BNUT (${isReturning ? 'returning' : 'new'} contributor)`);
+            console.log(`Bounty announcement posted for issue #${issue.number} — ${amount}${amount} ETH (${isReturning ? 'returning' : 'new'} contributor)`);
 
   # ────────────────────────────────────────────────────────────────────────────
   # Job 2: When a PR is merged, auto-queue payouts and update contributor data
@@ -250,9 +250,9 @@ jobs:
           password: ${{ secrets.MAIL_PASSWORD }}
           subject: "🚨 DecentBusking Bounty Bot Paused — Treasury Needs Attention"
           to: ${{ secrets.ALERT_EMAIL || 'jrlamanna@gmail.com' }}
-          from: BigNuten Bot <${{ secrets.MAIL_USERNAME }}>
+          from: DecentBusking Bot <${{ secrets.MAIL_USERNAME }}>
           body: |
-            The BigNuten bounty bot has been paused because the treasury is running low.
+            The DecentBusking bounty bot has been paused because the treasury is running low.
 
             A PR was just merged but the payout was NOT queued.
 
@@ -260,12 +260,12 @@ jobs:
               https://thejollylama.github.io/DecentBusking/
 
             Steps:
-              1. Open the Admin Panel → $BNUT Admin → Quick Mint
+              1. Open the DecentBusking app Payroll panel
               2. Or: Admin Panel → Treasury Admin → Transfer to Treasury
               3. Once funded, re-enable the bot by toggling it on in the Payroll panel
                  (or set "enabled": true in bounty-bot-config.json).
 
-            — BigNuten Bot 🤖
+            — DecentBusking Bot 🤖
 
       # ── Exit early if bot is paused ────────────────────────────────────────
       - name: Skip if bot is paused
@@ -397,13 +397,13 @@ jobs:
               }
 
               const labels = issue.labels.map(l => l.name);
-              const bountyLabel = labels.find(l => /^bounty:\s*\d+\s*BNUT$/i.test(l));
+              const bountyLabel = labels.find(l => /^bounty:\s*[\d.]+\s*ETH$/i.test(l));
               if (!bountyLabel) {
                 console.log(`No bounty label on issue #${issueNumber}. Skipping auto-queue.`);
                 continue;
               }
 
-              const match = bountyLabel.match(/(\d+)\s*BNUT/i);
+              const match = bountyLabel.match(/([\d.]+)\s*ETH/i);
               const amount = match ? match[1] : null;
               if (!amount) continue;
 
@@ -419,10 +419,10 @@ jobs:
                 : null;
 
               const totalAmount = parseFloat(amount);
-              // Per-implementer 80/20 split: each implementer's bounty of `amount` BNUT is
+              // Per-implementer 80/20 split: each implementer's bounty of `amount` ETH is
               // split 80% to the implementer and 20% to the idea originator.  The originator
               // entry is accumulated after counting all successfully queued implementers.
-              // Decimal amounts are supported (e.g. 0.2 BNUT for a 1 BNUT bounty split).
+              // Decimal amounts are supported (e.g. 0.000002 ETH for a 0.00001 ETH bounty split).
               const perImplementerOriginatorShare = ideaOriginatorRaw
                 ? parseFloat((totalAmount * 0.2).toFixed(4))
                 : 0;
@@ -497,9 +497,9 @@ jobs:
                 filesChanged = true;
                 queuedImplementerCount++;
 
-                // Update bnutPending and issuesClosed in contributor-accounts.json.
+                // Update ethPending and issuesClosed in contributor-accounts.json.
                 if (contribRecord) {
-                  contribRecord.bnutPending = parseFloat(((contribRecord.bnutPending || 0) + parseFloat(entryAmount)).toFixed(4));
+                  contribRecord.ethPending = parseFloat(((contribRecord.ethPending || 0) + parseFloat(entryAmount)).toFixed(4));
                   if (!Array.isArray(contribRecord.issuesClosed)) contribRecord.issuesClosed = [];
                   if (!contribRecord.issuesClosed.includes(issueRef)) {
                     contribRecord.issuesClosed.push(issueRef);
@@ -507,7 +507,7 @@ jobs:
                 }
 
                 queued.push({ github: canonicalGithub, wallet: walletAddress, role: ideaOriginatorRaw ? 'implementer' : 'contributor' });
-                console.log(`Auto-queued ${entryAmount} BNUT for @${canonicalGithub} (${walletAddress || 'NO WALLET'}) as implementer — ${issueRef}`);
+                console.log(`Auto-queued ${entryAmount} ETH for @${canonicalGithub} (${walletAddress || 'NO WALLET'}) as implementer — ${issueRef}`);
               }
 
               // ── Queue idea originator payout (20% × number of implementers) ──
@@ -542,9 +542,9 @@ jobs:
                   });
                   filesChanged = true;
 
-                  // Update originator's bnutPending and ideasCredited in contributor-accounts.json.
+                  // Update originator's ethPending and ideasCredited in contributor-accounts.json.
                   if (originatorRecord) {
-                    originatorRecord.bnutPending = parseFloat(((originatorRecord.bnutPending || 0) + totalOriginatorAmount).toFixed(4));
+                    originatorRecord.ethPending = parseFloat(((originatorRecord.ethPending || 0) + totalOriginatorAmount).toFixed(4));
                     if (!Array.isArray(originatorRecord.ideasCredited)) originatorRecord.ideasCredited = [];
                     if (!originatorRecord.ideasCredited.includes(issueRef)) {
                       originatorRecord.ideasCredited.push(issueRef);
@@ -556,7 +556,7 @@ jobs:
                   }
 
                   queued.push({ github: canonicalOriginator, wallet: originatorWallet, role: 'idea-originator' });
-                  console.log(`Auto-queued ${totalOriginatorAmount} BNUT (20% idea-credit × ${queuedImplementerCount} implementer(s)) for @${canonicalOriginator} (${originatorWallet || 'NO WALLET'}) as idea-originator — ${issueRef}`);
+                  console.log(`Auto-queued ${totalOriginatorAmount} ETH (20% idea-credit × ${queuedImplementerCount} implementer(s)) for @${canonicalOriginator} (${originatorWallet || 'NO WALLET'}) as idea-originator — ${issueRef}`);
                   originatorNewlyQueued = true;
                   queuedOriginatorGithub = canonicalOriginator;
                   queuedOriginatorAmount = totalOriginatorAmount;
@@ -618,14 +618,14 @@ jobs:
               } else {
                 // Idea-credit split summary (shown when applicable).
                 if (ideaOriginatorRaw && totalOriginatorAmount > 0) {
-                  lines.push(`💡 **Idea-Credit Split Applied** — **${amount} BNUT** per implementer, 80/20 split:`);
+                  lines.push(`💡 **Idea-Credit Split Applied** — **${amount} ETH** per implementer, 80/20 split:`);
                   lines.push('');
                   lines.push(`| Role | Recipient | Amount |`);
                   lines.push(`|---|---|---|`);
-                  lines.push(`| 💡 Idea Originator (20% × ${queuedImplementerCount} implementer${queuedImplementerCount !== 1 ? 's' : ''}) | @${ideaOriginatorRaw} | **${totalOriginatorAmount} BNUT** |`);
+                  lines.push(`| 💡 Idea Originator (20% × ${queuedImplementerCount} implementer${queuedImplementerCount !== 1 ? 's' : ''}) | @${ideaOriginatorRaw} | **${totalOriginatorAmount} ETH** |`);
                   const implementerLabel = allContributors.length > 1
-                    ? `**${implementerAmount} BNUT** each (${allContributors.length} implementers)`
-                    : `**${implementerAmount} BNUT**`;
+                    ? `**${implementerAmount} ETH** each (${allContributors.length} implementers)`
+                    : `**${implementerAmount} ETH**`;
                   lines.push(`| 🔨 Implementer (80%) | ${allContributors.map(g => `@${g}`).join(', ')} | ${implementerLabel} |`);
                   lines.push('');
                 }
@@ -636,13 +636,13 @@ jobs:
                     c => c.github.toLowerCase() === gh.toLowerCase()
                   );
                   const issuesCompleted = Array.isArray(rec.issuesClosed) ? rec.issuesClosed.length : 0;
-                  const totalEarned = (rec.bnutEarned || 0) + (rec.bnutPending || 0);
+                  const totalEarned = (rec.ethEarned || 0) + (rec.ethPending || 0);
                   const hasWallet = !!(rec.walletAddress);
                   const entryAmt = role === 'idea-originator' ? totalOriginatorAmount : implementerAmount;
                   const roleLabel = role === 'idea-originator' ? ' 💡 *(idea originator)*' : '';
-                  lines.push(`🏅 Great work, @${gh}${roleLabel}! That's **${issuesCompleted} issue${issuesCompleted !== 1 ? 's' : ''} completed** and **${totalEarned} BNUT** earned so far! \\♆//`);
+                  lines.push(`🏅 Great work, @${gh}${roleLabel}! That's **${issuesCompleted} issue${issuesCompleted !== 1 ? 's' : ''} completed** and **${totalEarned} ETH** earned so far! \\♆//`);
                   lines.push('');
-                  lines.push(`**${entryAmt} BNUT** for \`${issueRef}\` (PR #${prNumber}) has been added to the payroll queue. Payout coming soon! 🌊✨`);
+                  lines.push(`**${entryAmt} ETH** for \`${issueRef}\` (PR #${prNumber}) has been added to the payroll queue. Payout coming soon! 🌊✨`);
                   if (!hasWallet) {
                     lines.push('');
                     lines.push(`> ⚠️ No wallet address on file for @${gh}. Contact \`@TheJollyLaMa\` to register before payout can be processed.`);
@@ -662,7 +662,7 @@ jobs:
                     const walletDisplay = wallet ? `\`${wallet}\`` : '⚠️ *no wallet on file*';
                     const roleDisplay = role === 'idea-originator' ? '💡 Idea Originator' : '🔨 Implementer';
                     const entryAmt = role === 'idea-originator' ? totalOriginatorAmount : implementerAmount;
-                    lines.push(`| @${gh} | ${roleDisplay} | ${walletDisplay} | **${entryAmt} BNUT** | ⏳ Queued |`);
+                    lines.push(`| @${gh} | ${roleDisplay} | ${walletDisplay} | **${entryAmt} ETH** | ⏳ Queued |`);
                   }
                   lines.push('');
                 }
@@ -705,11 +705,11 @@ jobs:
                   '|---|---|',
                   `| 💡 Idea Originator | @${queuedOriginatorGithub} |`,
                   `| 🔨 Implemented by | ${implementersDisplay} |`,
-                  `| 💰 Idea Credit | **${queuedOriginatorAmount} BNUT** (20%) |`,
+                  `| 💰 Idea Credit | **${queuedOriginatorAmount} ETH** (20%) |`,
                   `| 🌐 Network | Optimism Mainnet |`,
                   '',
                   `Your spark of inspiration planted a seed that ${implementersDisplay} brought to life.`,
-                  `**${queuedOriginatorAmount} BNUT** has been queued to your wallet — thank you for making DecentBusking better! 🌊✨ \\♆//`,
+                  `**${queuedOriginatorAmount} ETH** has been queued to your wallet — thank you for making DecentBusking better! 🌊✨ \\♆//`,
                 ].join('\n');
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
@@ -721,7 +721,7 @@ jobs:
               }
 
               const allParticipants = [...allContributors, ...(ideaOriginatorRaw ? [ideaOriginatorRaw] : [])];
-              console.log(`Auto-queue status posted on issue #${issueNumber} — ${amount} BNUT for ${allParticipants.map(g => '@'+g).join(', ')}`);
+              console.log(`Auto-queue status posted on issue #${issueNumber} — ${amount} ETH for ${allParticipants.map(g => '@'+g).join(', ')}`);
             }
 
             if (filesChanged) {
@@ -738,7 +738,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add payroll-queue.json contributor-accounts.json
           git diff --cached --quiet && exit 0
-          git commit -m "chore: auto-queue BNUT payout for PR #${{ github.event.pull_request.number }}"
+          git commit -m "chore: auto-queue ETH payout for PR #${{ github.event.pull_request.number }}"
           # Retry push with rebase to handle concurrent workflow runs.
           for i in 1 2 3; do
             git push && break
@@ -792,9 +792,9 @@ jobs:
           password: ${{ secrets.MAIL_PASSWORD }}
           subject: "🚨 DecentBusking Bounty Bot Paused — Treasury Needs Attention"
           to: ${{ secrets.ALERT_EMAIL || 'jrlamanna@gmail.com' }}
-          from: BigNuten Bot <${{ secrets.MAIL_USERNAME }}>
+          from: DecentBusking Bot <${{ secrets.MAIL_USERNAME }}>
           body: |
-            The BigNuten bounty bot has been paused because the treasury is running low.
+            The DecentBusking bounty bot has been paused because the treasury is running low.
 
             A push to main was detected but the payout was NOT queued.
 
@@ -802,12 +802,12 @@ jobs:
               https://thejollylama.github.io/DecentBusking/
 
             Steps:
-              1. Open the Admin Panel → $BNUT Admin → Quick Mint
+              1. Open the DecentBusking app Payroll panel
               2. Or: Admin Panel → Treasury Admin → Transfer to Treasury
               3. Once funded, re-enable the bot by toggling it on in the Payroll panel
                  (or set "enabled": true in bounty-bot-config.json).
 
-            — BigNuten Bot 🤖
+            — DecentBusking Bot 🤖
 
       # ── Exit early if bot is paused ────────────────────────────────────────
       - name: Skip if bot is paused
@@ -956,13 +956,13 @@ jobs:
               }
 
               const labels = issue.labels.map(l => l.name);
-              const bountyLabel = labels.find(l => /^bounty:\s*\d+\s*BNUT$/i.test(l));
+              const bountyLabel = labels.find(l => /^bounty:\s*[\d.]+\s*ETH$/i.test(l));
               if (!bountyLabel) {
                 console.log(`No bounty label on issue #${issueNumber}. Skipping auto-queue.`);
                 continue;
               }
 
-              const match = bountyLabel.match(/(\d+)\s*BNUT/i);
+              const match = bountyLabel.match(/([\d.]+)\s*ETH/i);
               const amount = match ? match[1] : null;
               if (!amount) continue;
 
@@ -1040,13 +1040,13 @@ jobs:
                 queuedImplementerCount++;
 
                 if (contribRecord) {
-                  contribRecord.bnutPending = parseFloat(((contribRecord.bnutPending || 0) + parseFloat(entryAmount)).toFixed(4));
+                  contribRecord.ethPending = parseFloat(((contribRecord.ethPending || 0) + parseFloat(entryAmount)).toFixed(4));
                   if (!Array.isArray(contribRecord.issuesClosed)) contribRecord.issuesClosed = [];
                   if (!contribRecord.issuesClosed.includes(issueRef)) contribRecord.issuesClosed.push(issueRef);
                 }
 
                 queued.push({ github: canonicalGithub, wallet: walletAddress, role: ideaOriginatorRaw ? 'implementer' : 'contributor' });
-                console.log(`Auto-queued ${entryAmount} BNUT for @${canonicalGithub} (${walletAddress || 'NO WALLET'}) as implementer — ${issueRef}`);
+                console.log(`Auto-queued ${entryAmount} ETH for @${canonicalGithub} (${walletAddress || 'NO WALLET'}) as implementer — ${issueRef}`);
               }
 
               // ── Queue idea originator payout (20% × number of implementers) ──
@@ -1080,7 +1080,7 @@ jobs:
                   filesChanged = true;
 
                   if (originatorRecord) {
-                    originatorRecord.bnutPending = parseFloat(((originatorRecord.bnutPending || 0) + totalOriginatorAmount).toFixed(4));
+                    originatorRecord.ethPending = parseFloat(((originatorRecord.ethPending || 0) + totalOriginatorAmount).toFixed(4));
                     if (!Array.isArray(originatorRecord.ideasCredited)) originatorRecord.ideasCredited = [];
                     if (!originatorRecord.ideasCredited.includes(issueRef)) originatorRecord.ideasCredited.push(issueRef);
                     if (!Array.isArray(originatorRecord.issuesClosed)) originatorRecord.issuesClosed = [];
@@ -1088,7 +1088,7 @@ jobs:
                   }
 
                   queued.push({ github: canonicalOriginator, wallet: originatorWallet, role: 'idea-originator' });
-                  console.log(`Auto-queued ${totalOriginatorAmount} BNUT (20% idea-credit × ${queuedImplementerCount} implementer(s)) for @${canonicalOriginator} (${originatorWallet || 'NO WALLET'}) as idea-originator — ${issueRef}`);
+                  console.log(`Auto-queued ${totalOriginatorAmount} ETH (20% idea-credit × ${queuedImplementerCount} implementer(s)) for @${canonicalOriginator} (${originatorWallet || 'NO WALLET'}) as idea-originator — ${issueRef}`);
                   originatorNewlyQueued = true;
                   queuedOriginatorGithub = canonicalOriginator;
                   queuedOriginatorAmount = totalOriginatorAmount;
@@ -1144,14 +1144,14 @@ jobs:
                 lines.push(`⚠️ Payout for \`${issueRef}\` is already in the payroll queue for all contributors — no duplicate entries added.`);
               } else {
                 if (ideaOriginatorRaw && totalOriginatorAmount > 0) {
-                  lines.push(`💡 **Idea-Credit Split Applied** — **${amount} BNUT** per implementer, 80/20 split:`);
+                  lines.push(`💡 **Idea-Credit Split Applied** — **${amount} ETH** per implementer, 80/20 split:`);
                   lines.push('');
                   lines.push(`| Role | Recipient | Amount |`);
                   lines.push(`|---|---|---|`);
-                  lines.push(`| 💡 Idea Originator (20% × ${queuedImplementerCount} implementer${queuedImplementerCount !== 1 ? 's' : ''}) | @${ideaOriginatorRaw} | **${totalOriginatorAmount} BNUT** |`);
+                  lines.push(`| 💡 Idea Originator (20% × ${queuedImplementerCount} implementer${queuedImplementerCount !== 1 ? 's' : ''}) | @${ideaOriginatorRaw} | **${totalOriginatorAmount} ETH** |`);
                   const implementerLabel = allContributors.length > 1
-                    ? `**${implementerAmount} BNUT** each (${allContributors.length} implementers)`
-                    : `**${implementerAmount} BNUT**`;
+                    ? `**${implementerAmount} ETH** each (${allContributors.length} implementers)`
+                    : `**${implementerAmount} ETH**`;
                   lines.push(`| 🔨 Implementer (80%) | ${allContributors.map(g => `@${g}`).join(', ')} | ${implementerLabel} |`);
                   lines.push('');
                 }
@@ -1161,13 +1161,13 @@ jobs:
                     c => c.github.toLowerCase() === gh.toLowerCase()
                   );
                   const issuesCompleted = Array.isArray(rec.issuesClosed) ? rec.issuesClosed.length : 0;
-                  const totalEarned = (rec.bnutEarned || 0) + (rec.bnutPending || 0);
+                  const totalEarned = (rec.ethEarned || 0) + (rec.ethPending || 0);
                   const hasWallet = !!(rec.walletAddress);
                   const entryAmt = role === 'idea-originator' ? totalOriginatorAmount : implementerAmount;
                   const roleLabel = role === 'idea-originator' ? ' 💡 *(idea originator)*' : '';
-                  lines.push(`🏅 Great work, @${gh}${roleLabel}! That's **${issuesCompleted} issue${issuesCompleted !== 1 ? 's' : ''} completed** and **${totalEarned} BNUT** earned so far! \\♆//`);
+                  lines.push(`🏅 Great work, @${gh}${roleLabel}! That's **${issuesCompleted} issue${issuesCompleted !== 1 ? 's' : ''} completed** and **${totalEarned} ETH** earned so far! \\♆//`);
                   lines.push('');
-                  lines.push(`**${entryAmt} BNUT** for \`${issueRef}\` (PR #${prNumber}) has been added to the payroll queue. Payout coming soon! 🌊✨`);
+                  lines.push(`**${entryAmt} ETH** for \`${issueRef}\` (PR #${prNumber}) has been added to the payroll queue. Payout coming soon! 🌊✨`);
                   if (!hasWallet) {
                     lines.push('');
                     lines.push(`> ⚠️ No wallet address on file for @${gh}. Contact \`@TheJollyLaMa\` to register before payout can be processed.`);
@@ -1186,7 +1186,7 @@ jobs:
                     const walletDisplay = wallet ? `\`${wallet}\`` : '⚠️ *no wallet on file*';
                     const roleDisplay = role === 'idea-originator' ? '💡 Idea Originator' : '🔨 Implementer';
                     const entryAmt = role === 'idea-originator' ? totalOriginatorAmount : implementerAmount;
-                    lines.push(`| @${gh} | ${roleDisplay} | ${walletDisplay} | **${entryAmt} BNUT** | ⏳ Queued |`);
+                    lines.push(`| @${gh} | ${roleDisplay} | ${walletDisplay} | **${entryAmt} ETH** | ⏳ Queued |`);
                   }
                   lines.push('');
                 }
@@ -1228,11 +1228,11 @@ jobs:
                   '|---|---|',
                   `| 💡 Idea Originator | @${queuedOriginatorGithub} |`,
                   `| 🔨 Implemented by | ${implementersDisplay} |`,
-                  `| 💰 Idea Credit | **${queuedOriginatorAmount} BNUT** (20%) |`,
+                  `| 💰 Idea Credit | **${queuedOriginatorAmount} ETH** (20%) |`,
                   `| 🌐 Network | Optimism Mainnet |`,
                   '',
                   `Your spark of inspiration planted a seed that ${implementersDisplay} brought to life.`,
-                  `**${queuedOriginatorAmount} BNUT** has been queued to your wallet — thank you for making DecentBusking better! 🌊✨ \\♆//`,
+                  `**${queuedOriginatorAmount} ETH** has been queued to your wallet — thank you for making DecentBusking better! 🌊✨ \\♆//`,
                 ].join('\n');
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
@@ -1244,7 +1244,7 @@ jobs:
               }
 
               const allParticipants = [...allContributors, ...(ideaOriginatorRaw ? [ideaOriginatorRaw] : [])];
-              console.log(`Auto-queue status posted on issue #${issueNumber} — ${amount} BNUT for ${allParticipants.map(g => '@'+g).join(', ')}`);
+              console.log(`Auto-queue status posted on issue #${issueNumber} — ${amount} ETH for ${allParticipants.map(g => '@'+g).join(', ')}`);
             }
 
             if (filesChanged) {
@@ -1261,7 +1261,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add payroll-queue.json contributor-accounts.json
           git diff --cached --quiet && exit 0
-          git commit -m "chore: auto-queue BNUT payout for push ${{ github.sha }}"
+          git commit -m "chore: auto-queue ETH payout for push ${{ github.sha }}"
           # Retry push with rebase to handle concurrent workflow runs.
           for i in 1 2 3; do
             git push && break

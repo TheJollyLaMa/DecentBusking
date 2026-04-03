@@ -1,0 +1,46 @@
+# .github/workflows/validate-payroll-queue.yml
+# Validates payroll-queue.json on every push and pull request.
+#
+# Checks performed by scripts/validatePayrollQueue.js:
+#   - Required fields present on every entry
+#   - issueRef follows canonical format (<owner>/<repo>#<number>)
+#   - contributor is a valid Ethereum address (or empty pending registration)
+#   - amount is a positive number (ETH, supports decimals like 0.00001)
+#   - No duplicate (issueRef, contributorGithub) pairs
+#   - contributorGithub exists in contributor-accounts.json
+#   - Wallet addresses match contributor-accounts.json registrations
+
+name: Validate Payroll Queue
+
+on:
+  push:
+    paths:
+      - 'payroll-queue.json'
+      - 'contributor-accounts.json'
+      - 'scripts/validatePayrollQueue.js'
+      - '.github/workflows/validate-payroll-queue.yml'
+  pull_request:
+    paths:
+      - 'payroll-queue.json'
+      - 'contributor-accounts.json'
+      - 'scripts/validatePayrollQueue.js'
+      - '.github/workflows/validate-payroll-queue.yml'
+
+jobs:
+  validate:
+    name: Validate payroll-queue.json
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run payroll queue validator
+        run: node scripts/validatePayrollQueue.js

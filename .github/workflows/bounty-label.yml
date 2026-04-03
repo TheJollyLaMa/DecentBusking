@@ -1,11 +1,11 @@
 # .github/workflows/bounty-label.yml
 # DecentBusking Bounty Label Workflow
 #
-# Allows maintainers to attach a $BNUT bounty to any open issue by running
+# Allows maintainers to attach an ETH bounty to any open issue by running
 # this workflow from the GitHub Actions UI (Actions → Bounty Label → Run workflow).
 #
 # What it does:
-#   1. Creates the bounty label (e.g. "bounty: 500 BNUT") in the repo if it
+#   1. Creates the bounty label (e.g. "bounty: 0.00001 ETH") in the repo if it
 #      doesn't already exist (standard gold colour #f0c040).
 #   2. Applies that label to the specified issue.
 #   3. Posts a comment on the issue announcing the bounty and explaining how
@@ -20,8 +20,8 @@ on:
         description: "Issue number to label (e.g. 1)"
         required: true
         type: string
-      amount_bnut:
-        description: "Bounty amount in whole BNUT tokens (e.g. 500)"
+      amount_eth:
+        description: "Bounty amount in ETH (e.g. 0.00001)"
         required: true
         type: string
 
@@ -39,10 +39,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const issueNumber = parseInt('${{ github.event.inputs.issue_number }}', 10);
-            const amount      = '${{ github.event.inputs.amount_bnut }}';
-            const labelName   = `bounty: ${amount} BNUT`;
+            const amount      = '${{ github.event.inputs.amount_eth }}';
+            const labelName   = `bounty: ${amount} ETH`;
             const labelColor  = 'f0c040';
-            const labelDesc   = `$BNUT bounty of ${amount} tokens for completing this issue`;
+            const labelDesc   = `ETH bounty of ${amount} for completing this issue`;
 
             // ── 1. Ensure the label exists ──────────────────────────────────
             try {
@@ -78,11 +78,11 @@ jobs:
 
             // ── 3. Post a bounty announcement comment ──────────────────────
             const body = [
-              `🏷️ This issue now carries a **$BNUT bounty** of **${amount} BNUT**!`,
+              `🏷️ This issue now carries an **ETH bounty** of **${amount} ETH**!`,
               '',
               `| | |`,
               `|---|---|`,
-              `| 💰 Bounty | **${amount} BNUT** |`,
+              `| 💰 Bounty | **${amount} ETH** |`,
               `| 🏷️ Label | \`${labelName}\` |`,
               `| 📌 Issue | #${issueNumber} |`,
               `| 🌐 Network | Optimism Mainnet |`,
@@ -91,7 +91,7 @@ jobs:
               '1. Comment on this issue expressing your interest.',
               '2. Get assigned by a maintainer (`@TheJollyLaMa`).',
               '3. Open a Pull Request that closes this issue (include `Closes #' + issueNumber + '` in the PR body).',
-              '4. Once your PR is merged, the maintainer will queue your $BNUT payout.',
+              '4. Once your PR is merged, the maintainer will queue your ETH payout.',
               '',
               '> ⚠️ **Whitelist registration required:** Payouts are only sent to wallets registered in the',
               '> contributor whitelist by `@TheJollyLaMa`. If you are not yet registered, reach out to',
