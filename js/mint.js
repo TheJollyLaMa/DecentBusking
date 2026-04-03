@@ -1,27 +1,63 @@
 // js/mint.js — DecentBusking
 // Handles minting an audio file as a DecentNFT on Optimism via the contract
-// already deployed by DecentMarket.
+// already deployed by DecentMarket (DecentNFT_v0.2, ERC-1155).
 //
-// Flow:
+// Contract access model
+// ─────────────────────
+//   DEFAULT_ADMIN_ROLE  Can call registerToken() to create a new token ID and
+//                       can call mintProduct() to issue editions.
+//   MINTER_ROLE         Can call mintAchievement() to issue editions of a token
+//                       ID that has already been registered by an admin.
+//
+// Busk minting flow (requires DEFAULT_ADMIN_ROLE on the contract)
+// ──────────────────────────────────────────────────────────────
 //  1. User opens guitar-case modal, fills in title + audio file.
 //  2. Audio file is uploaded to IPFS via w3up.
 //  3. A JSON metadata blob is created and uploaded to IPFS.
-//  4. mint(metadataURI, parentTokenId) is called on the DecentNFT contract.
-//  5. On success the new NFT is injected into the space field.
+//  4. registerToken(0, metadataURI, Achievement, artist, 500) is called →
+//     returns a new tokenId.
+//  5. mintAchievement(artist, tokenId, 1) mints the single edition.
+//  6. On success the new NFT is injected into the space field.
+//
+// If the connected wallet lacks DEFAULT_ADMIN_ROLE a clear error is shown
+// and no transaction is sent.
 
 import { addNFTToSpace } from './space.js';
 
-// Minimal DecentNFT ABI — only what we need for minting
+// DecentNFT v0.2 ABI — ERC-1155 with role-based minting
+// Source: https://github.com/TheJollyLaMa/DecentMarket/blob/main/abis/DecentNFT_v0.2.json
 const DECENT_NFT_ABI = [
-  // Standard ERC-721 mint with tokenURI
-  'function mint(string memory tokenURI) external returns (uint256)',
-  // Extended: mint with parent reference for royalty chain
-  'function mintWithParent(string memory tokenURI, uint256 parentTokenId) external returns (uint256)',
-  // Read total supply so we can determine new tokenId optimistically
-  'function totalSupply() view returns (uint256)',
-  // Events
-  'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
+  // ── Role helpers ──────────────────────────────────────────────────────────
+  'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
+  'function MINTER_ROLE() view returns (bytes32)',
+  'function hasRole(bytes32 role, address account) view returns (bool)',
+
+  // ── Token registration — DEFAULT_ADMIN_ROLE only ─────────────────────────
+  // kind_: 0 = Product, 1 = Achievement
+  'function registerToken(uint256 maxSupply_, string calldata tokenURI_, uint8 kind_, address royaltyReceiver, uint96 royaltyFeeBps) external returns (uint256 tokenId)',
+
+  // ── Minting ───────────────────────────────────────────────────────────────
+  // Achievement editions — MINTER_ROLE (also usable by DEFAULT_ADMIN_ROLE)
+  'function mintAchievement(address to, uint256 tokenId, uint256 amount) external',
+  // Product editions — DEFAULT_ADMIN_ROLE only
+  'function mintProduct(address to, uint256 tokenId, uint256 amount) external',
+
+  // ── Read helpers ──────────────────────────────────────────────────────────
+  'function nextTokenId() view returns (uint256)',
+  'function uri(uint256 tokenId) view returns (string)',
+  'function creatorOf(uint256 tokenId) view returns (address)',
+  'function totalMinted(uint256 tokenId) view returns (uint256)',
+
+  // ── Events ────────────────────────────────────────────────────────────────
+  'event TokenRegistered(uint256 indexed tokenId, address indexed creator, uint256 maxSupply, uint8 kind, string uri)',
+  'event EditionMinted(uint256 indexed tokenId, address indexed to, uint256 amount, address indexed minter)',
+  'event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)',
 ];
+
+// ── Mint constants ────────────────────────────────────────────────────────────
+const UNLIMITED_SUPPLY      = 0;   // maxSupply 0 = no edition cap
+const TOKEN_KIND_ACHIEVEMENT = 1;  // TokenKind enum: 0 = Product, 1 = Achievement
+const DEFAULT_ROYALTY_BPS   = 500; // 5 % secondary-sale royalty
 
 // ── Public API ───────────────────────────────────────────────────────────
 export function openMintModal() {
@@ -133,36 +169,80 @@ async function _handleMint(e) {
       return;
     }
 
-    // 5. Mint on-chain
-    _setStatus('⏳ Minting NFT — confirm in MetaMask…');
+    // 5. Role pre-flight check
+    _setStatus('⏳ Checking on-chain permissions…');
     const contract = new ethers.Contract(cfg.contractAddress, DECENT_NFT_ABI, signer);
 
-    let tx;
-    if (parentId > 0) {
-      tx = await contract.mintWithParent(metadataUrl, parentId);
-    } else {
-      tx = await contract.mint(metadataUrl);
+    const adminRole  = await contract.DEFAULT_ADMIN_ROLE();
+    const minterRole = await contract.MINTER_ROLE();
+    const isAdmin    = await contract.hasRole(adminRole,  address);
+    const isMinter   = await contract.hasRole(minterRole, address);
+
+    if (!isAdmin && !isMinter) {
+      _setStatus(
+        '❌ Your wallet lacks minting permission. ' +
+        'The contract admin must grant your address MINTER_ROLE (or DEFAULT_ADMIN_ROLE) ' +
+        'via the contract's grantRole() function before you can mint.',
+        true,
+      );
+      submitBtn.disabled = false;
+      return;
     }
 
-    _setStatus('⏳ Waiting for confirmation…');
-    const receipt = await tx.wait();
+    if (!isAdmin) {
+      // MINTER_ROLE alone cannot register new token IDs — registration is admin-only.
+      _setStatus(
+        '❌ Your wallet has MINTER_ROLE but token registration requires DEFAULT_ADMIN_ROLE. ' +
+        'Ask the contract admin to register a token ID for you first.',
+        true,
+      );
+      submitBtn.disabled = false;
+      return;
+    }
 
-    // Parse tokenId from Transfer event
+    // 6. Register a new token on-chain (admin-only step that returns the tokenId)
+    _setStatus('⏳ Registering token — confirm in MetaMask… (tx 1/2)');
+    // TokenKind.Achievement = 1 — allows future MINTER_ROLE wallets to mint editions.
+    // maxSupply 0 = unlimited; royalty 5 % to the artist's wallet.
+    const regTx = await contract.registerToken(
+      UNLIMITED_SUPPLY,       // maxSupply: 0 = unlimited
+      metadataUrl,            // per-token URI — the IPFS metadata JSON
+      TOKEN_KIND_ACHIEVEMENT, // kind: 1 = Achievement
+      address,                // royaltyReceiver: the minting artist
+      DEFAULT_ROYALTY_BPS,    // royaltyFeeBps: 5 %
+    );
+
+    _setStatus('⏳ Waiting for registration confirmation… (tx 1/2)');
+    const regReceipt = await regTx.wait();
+
     const iface = new ethers.Interface(DECENT_NFT_ABI);
     let tokenId = null;
-    for (const log of receipt.logs) {
+    for (const log of regReceipt.logs) {
       try {
         const parsed = iface.parseLog(log);
-        if (parsed?.name === 'Transfer') {
+        if (parsed?.name === 'TokenRegistered') {
           tokenId = Number(parsed.args.tokenId);
           break;
         }
       } catch (_) {}
     }
 
-    _setStatus(`✅ Minted! Token #${tokenId ?? '?'} is now live in the town square. 🎵`);
+    if (tokenId === null) {
+      _setStatus('❌ Token registration failed — could not parse TokenRegistered event.', true);
+      submitBtn.disabled = false;
+      return;
+    }
 
-    // 6. Inject into space field
+    // 7. Mint a single edition of the newly-registered token to the artist's wallet
+    _setStatus(`⏳ Minting edition of token #${tokenId} — confirm in MetaMask… (tx 2/2)`);
+    const mintTx = await contract.mintAchievement(address, tokenId, 1);
+
+    _setStatus('⏳ Waiting for mint confirmation… (tx 2/2)');
+    await mintTx.wait();
+
+    _setStatus(`✅ Minted! Token #${tokenId} is now live in the town square. 🎵`);
+
+    // 8. Inject into space field
     addNFTToSpace({
       tokenId,
       name: title,

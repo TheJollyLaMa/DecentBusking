@@ -109,6 +109,44 @@ To register as a contributor, contact `@TheJollyLaMa` directly.
 
 ---
 
+## Minting Access Model
+
+DecentBusking uses **[DecentNFT v0.2](https://github.com/TheJollyLaMa/DecentMarket/blob/main/contracts/DecentNFT_v0.2.sol)** — an ERC-1155 contract with role-based minting on Optimism.
+
+### Roles
+
+| Role | Who | Capabilities |
+|------|-----|--------------|
+| `DEFAULT_ADMIN_ROLE` | Contract deployer / Decent Agency admin | Register new token IDs (`registerToken`), mint Product editions (`mintProduct`), manage all roles |
+| `MINTER_ROLE` | Authorised dapp / artist wallets | Mint Achievement editions (`mintAchievement`) for pre-registered token IDs |
+
+### Busk Minting Flow
+
+Minting a new audio busk requires **two on-chain transactions** and `DEFAULT_ADMIN_ROLE`:
+
+1. **`registerToken(0, metadataURI, Achievement, artistWallet, 500)`** — creates a unique token ID on-chain, stores the IPFS metadata URI, and sets the artist as the ERC-2981 royalty receiver (5 %).
+2. **`mintAchievement(artistWallet, tokenId, 1)`** — issues the single edition to the artist's wallet.
+
+### Granting Minting Access to Artists
+
+An artist's wallet must hold `DEFAULT_ADMIN_ROLE` to self-register new token IDs (required for the full busk flow). To grant access via [Remix](https://remix.ethereum.org) or the [block explorer write tab](https://optimistic.etherscan.io/address/0xe870f7b1D10C41dbc6b75598a5308B9a2Bb52958#writeContract):
+
+```solidity
+// Connect the deployer/admin wallet, then call:
+// 1. Get the role hash (or use the hex value directly)
+bytes32 adminRole = DEFAULT_ADMIN_ROLE(); // 0x0000...0000
+// 2. Grant the role to the artist's wallet
+grantRole(adminRole, <artistWalletAddress>)
+```
+
+> ⚠️ Granting `DEFAULT_ADMIN_ROLE` gives full contract control. For a least-privilege setup, have the platform admin run the two-step registration + mint on behalf of artists, or explore a future contract upgrade that allows public token registration.
+
+### Why the Old `mint(string)` Call Failed
+
+The contract does **not** expose a `mint(string tokenURI)` function. Calling it caused an immediate revert because no matching function selector exists on the ERC-1155 contract. The correct call sequence is `registerToken` → `mintAchievement` (or `mintProduct`).
+
+---
+
 ## NFT Royalty Chain
 
 ```
