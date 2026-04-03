@@ -1,7 +1,7 @@
 // js/components/header-payroll-inject.js — DecentBusking
 //
 // Injects a "💸 Payroll" link into AppTitle's left ankh dropdown
-// (the ☥ icon on the left side of the DecentHead header).
+// (the ☥ icon on the left side of the shared header component).
 //
 // Uses the same prototype-patching pattern as about-override.js so the
 // injection survives any future re-renders of the AppTitle component.

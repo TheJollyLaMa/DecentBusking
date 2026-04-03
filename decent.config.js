@@ -5,7 +5,7 @@
 // synchronously via window.DecentConfig before any module scripts run.
 //
 // Fields:
-//   appName        — Display name shown in DecentHead
+//   appName        — Display name shown in the app header
 //   subtitle       — Subtitle beneath the app name
 //   chainId        — EVM chain ID (10 = Optimism Mainnet)
 //   contractAddress— DecentNFT contract address (deployed via DecentMarket on Optimism)
@@ -14,10 +14,10 @@
 //   tokenSymbol    — Native currency symbol used for tips
 //   uniswapUrl     — (optional) Uniswap link shown in the right-ankh dropdown
 //   tokenAddress   — (optional) ERC-20 token address for tips / right-ankh balance
-//   discord        — Discord invite link (shown in DecentFoot)
-//   github         — GitHub repo URL (shown in DecentFoot)
+//   discord        — Discord invite link (shown in the footer)
+//   github         — GitHub repo URL (shown in the footer)
 
-// DecentHead web component reads window.DECENT_CONFIG; alias both names.
+// The header web component reads window.DECENT_CONFIG; alias both names.
 window.DECENT_CONFIG =
 window.DecentConfig = {
   appName: "Decent Busking",

@@ -1,6 +1,6 @@
 // js/components/about-override.js — DecentBusking
 //
-// The DecentHead CDN registers a generic 'about-modal' web component.
+// The shared CDN header component registers a generic 'about-modal' web component.
 // This module waits for that registration and then patches the prototype
 // to render DecentBusking-specific content:
 //   • Project mission & description
