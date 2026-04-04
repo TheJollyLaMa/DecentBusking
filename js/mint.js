@@ -22,7 +22,7 @@
 // If the connected wallet lacks DEFAULT_ADMIN_ROLE a clear error is shown
 // and no transaction is sent.
 
-import { addNFTToSpace } from './space.js';
+import { addNFTToSpace, fetchNFTMetaById } from './space.js';
 
 // DecentNFT v0.2 ABI — ERC-1155 with role-based minting
 // Source: https://github.com/TheJollyLaMa/DecentMarket/blob/main/abis/DecentNFT_v0.2.json
@@ -73,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('mint-form');
   const cancelBtn = document.getElementById('mint-cancel-btn');
   const modal = document.getElementById('mint-modal');
+  const parentInput = document.getElementById('mint-parent');
 
   if (form) form.addEventListener('submit', _handleMint);
 
@@ -86,6 +87,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.target === modal) modal.classList.add('hidden');
     });
   }
+
+  // Parent token preview — fetch when user enters a valid token ID
+  if (parentInput) {
+    let _previewTimer;
+    parentInput.addEventListener('input', () => {
+      clearTimeout(_previewTimer);
+      _previewTimer = setTimeout(() => _updateParentPreview(parentInput.value), 600);
+    });
+  }
 });
 
 // ── Mint Handler ─────────────────────────────────────────────────────────
@@ -97,12 +107,14 @@ async function _handleMint(e) {
   const fileInput = document.getElementById('mint-file');
   const parentInput = document.getElementById('mint-parent');
   const tipInput = document.getElementById('mint-tip-wallet');
+  const royaltyInput = document.getElementById('mint-royalty-pct');
   const submitBtn = document.getElementById('mint-submit-btn');
 
   const title = titleInput?.value.trim();
   const file = fileInput?.files?.[0];
   const parentId = parseInt(parentInput?.value || '0') || 0;
   const tipWallet = tipInput?.value.trim() || '';
+  const royaltyPct = Math.min(50, Math.max(0, parseFloat(royaltyInput?.value || '10') || 10));
 
   if (!title) {
     _setStatus('⚠️ Please enter a track title.', true);
@@ -164,7 +176,13 @@ async function _handleMint(e) {
       creator: address,
       tipWallet: tipWallet || address,
       mintedAt: new Date().toISOString(),
-      ...(parentId > 0 ? { parentTokenId: parentId } : {}),
+      ...(parentId > 0 ? {
+        parentTokenId: parentId,
+        royaltyChain: {
+          parentTokenId: parentId,
+          royaltyPct,
+        },
+      } : {}),
     };
     const metadataUrl = await _uploadMetadataToIPFS(metadata, `${_slugify(title)}.json`);
     if (!metadataUrl) {
@@ -257,6 +275,7 @@ async function _handleMint(e) {
       metadataUri: metadataUrl,
       mintedAt: new Date().toISOString(),
       parentTokenId: parentId || undefined,
+      royaltyChain: parentId > 0 ? { parentTokenId: parentId, royaltyPct } : undefined,
     });
 
     // Close modal after a moment
@@ -269,6 +288,46 @@ async function _handleMint(e) {
   } catch (err) {
     _setStatus(`❌ ${err.message || 'Minting failed'}`, true);
     submitBtn.disabled = false;
+  }
+}
+
+// ── Parent NFT Preview ────────────────────────────────────────────────────
+async function _updateParentPreview(rawValue) {
+  const preview = document.getElementById('mint-parent-preview');
+  const titleEl = document.getElementById('mint-parent-preview-title');
+  const artistEl = document.getElementById('mint-parent-preview-artist');
+  const audioEl = document.getElementById('mint-parent-preview-audio');
+
+  const parentId = Math.max(0, parseInt(rawValue) || 0);
+
+  if (!parentId) {
+    preview?.classList.add('hidden');
+    return;
+  }
+
+  // Show loading state
+  if (preview) preview.classList.remove('hidden');
+  if (titleEl) titleEl.textContent = '⏳ Loading…';
+  if (artistEl) artistEl.textContent = '';
+  if (audioEl) audioEl.src = '';
+
+  try {
+    const meta = await fetchNFTMetaById(parentId);
+    if (!meta) {
+      if (titleEl) titleEl.textContent = `⚠️ Token #${parentId} not found`;
+      return;
+    }
+    const cfg = window.DecentConfig || {};
+    const gateway = cfg.ipfsGateway || 'https://w3s.link/ipfs/';
+    const audioUrl = (meta.audioUrl || meta.animation_url || '')
+      .replace('ipfs://', gateway);
+
+    if (titleEl) titleEl.textContent = meta.name || meta.title || `Track #${parentId}`;
+    if (artistEl) artistEl.textContent = meta.artist || meta.creator || '';
+    if (audioEl && audioUrl) audioEl.src = audioUrl;
+  } catch (err) {
+    if (titleEl) titleEl.textContent = `⚠️ Could not load token #${parentId}`;
+    console.warn('[mint] parent preview fetch failed:', err.message);
   }
 }
 
@@ -320,6 +379,9 @@ function _resetForm() {
   const form = document.getElementById('mint-form');
   if (form) form.reset();
   _setStatus('');
+  document.getElementById('mint-parent-preview')?.classList.add('hidden');
+  const audioEl = document.getElementById('mint-parent-preview-audio');
+  if (audioEl) audioEl.src = '';
 }
 
 function _slugify(str) {

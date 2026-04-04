@@ -8,6 +8,7 @@ export function initStage() {
   _bindHat();
   _bindGuitarCase();
   _bindTipModal();
+  _bindNowPlayingBtn();
 }
 
 // Update the "Now Playing" banner (called from space.js when an NFT is clicked
@@ -16,16 +17,38 @@ export function setNowPlaying({ title = '—', artist = '', audioUrl = '' } = {}
   const titleEl = document.getElementById('now-playing-title');
   const artistEl = document.getElementById('now-playing-artist');
   const player = document.getElementById('audio-player');
+  const playBtn = document.getElementById('now-playing-play-btn');
 
   if (titleEl) titleEl.textContent = title;
   if (artistEl) artistEl.textContent = artist;
 
   if (player && audioUrl) {
     player.src = audioUrl;
-    player.play().catch(() => {
-      // Autoplay blocked by browser — user interaction will trigger playback
+    player.play().then(() => {
+      // Autoplay succeeded — hide manual play button
+      if (playBtn) playBtn.classList.add('hidden');
+    }).catch(() => {
+      // Autoplay blocked — show play button so user can start it manually
+      if (playBtn) playBtn.classList.remove('hidden');
     });
   }
+}
+
+// ── Now Playing play button (autoplay fallback) ───────────────────────────
+function _bindNowPlayingBtn() {
+  const playBtn = document.getElementById('now-playing-play-btn');
+  if (!playBtn) return;
+
+  playBtn.addEventListener('click', () => {
+    const player = document.getElementById('audio-player');
+    if (player && player.src) {
+      player.play().then(() => {
+        playBtn.classList.add('hidden');
+      }).catch(err => {
+        console.warn('[stage] Manual play failed:', err.message);
+      });
+    }
+  });
 }
 
 // ── Hat (tip) ─────────────────────────────────────────────────────────────

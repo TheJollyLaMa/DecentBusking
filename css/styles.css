@@ -99,6 +99,31 @@ decent-header {
   color: var(--text-dim);
 }
 
+/* Now Playing — play button (shown when autoplay is blocked) */
+#now-playing-play-btn {
+  background: linear-gradient(135deg, var(--teal), var(--purple));
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 0.35rem 1rem;
+  font-size: 0.8rem;
+  font-family: var(--font-display);
+  cursor: pointer;
+  margin-top: 0.25rem;
+  transition: opacity var(--transition), transform var(--transition);
+  animation: pulse-glow 1.8s ease-in-out infinite;
+}
+
+#now-playing-play-btn:hover {
+  opacity: 0.88;
+  transform: scale(1.05);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 212, 170, 0.4); }
+  50%       { box-shadow: 0 0 20px rgba(0, 212, 170, 0.85); }
+}
+
 /* Center stage — hat & guitar case */
 #center-stage {
   display: flex;
@@ -208,6 +233,58 @@ decent-header {
 .nft-buy-btn:hover {
   opacity: 0.88;
   transform: translateY(-1px);
+}
+
+/* ── NFT Parent / Remix section ──────────────────────────────────────────── */
+.nft-parent-section {
+  margin-bottom: 0.75rem;
+}
+
+.nft-parent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  background: rgba(124, 58, 237, 0.1);
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.82rem;
+}
+
+.nft-parent-card.nft-parent-loading {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.nft-parent-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--purple);
+  font-weight: bold;
+}
+
+.nft-parent-artist {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.nft-royalty-badge {
+  display: inline-block;
+  background: rgba(240, 192, 64, 0.15);
+  border: 1px solid rgba(240, 192, 64, 0.3);
+  border-radius: 12px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.72rem;
+  color: var(--gold);
+  margin-top: 0.15rem;
+  width: fit-content;
+}
+
+.nft-parent-audio {
+  width: 100%;
+  margin-top: 0.4rem;
+  accent-color: var(--purple);
 }
 
 #nft-panel-close {
@@ -351,6 +428,45 @@ decent-header {
 
 #mint-cancel-btn:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Mint Parent Preview ─────────────────────────────────────────────────── */
+#mint-parent-preview {
+  margin-bottom: 1rem;
+}
+
+#mint-parent-preview-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: rgba(0, 212, 170, 0.07);
+  border: 1px solid rgba(0, 212, 170, 0.25);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+#mint-parent-preview-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--teal);
+}
+
+#mint-parent-preview-title {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  color: var(--gold);
+}
+
+#mint-parent-preview-artist {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+#mint-parent-preview-audio {
+  width: 100%;
+  margin-top: 0.35rem;
+  accent-color: var(--teal);
 }
 
 /* ── Tip Modal ───────────────────────────────────────────────────────────── */
