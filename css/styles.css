@@ -42,10 +42,6 @@ body {
   min-height: 100vh;
 }
 
-/* ── DecentBusking skin overrides ───────────────────────────────────────── */
-.title-main { color: #ff8c00 !important; text-shadow: 0 0 10px rgba(255,140,0,0.6), 0 0 3px #00ffff; }
-
-
 /* ── Three.js Canvas (background) ────────────────────────────────────────── */
 #space-canvas {
   position: fixed;
@@ -1048,3 +1044,6 @@ decent-foot {
 @media (max-width: 600px) {
   #admin-modal-inner { padding: 1.2rem 1rem; }
 }
+
+/* ── DecentBusking skin overrides ───────────────────────────────────────── */
+.title-main { color: #ff8c00 !important; text-shadow: 0 0 10px rgba(255,140,0,0.6), 0 0 3px #00ffff; }
