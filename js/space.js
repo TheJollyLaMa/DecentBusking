@@ -17,10 +17,10 @@
 import { renderNFTCard } from './nft-card.js';
 import { setNowPlaying } from './stage.js';
 
-const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+const ONE_MONTH_MS = 90 * 24 * 60 * 60 * 1000;   // 90 days before NFT becomes invisible
 const DRIFT_SPEED = 0.004;         // units per frame after age normalisation
 const MAX_DRIFT_RADIUS = 120;      // maximum distance from origin
-const FADE_START_DAYS = 25;        // days before invisibility fade begins
+const FADE_START_DAYS = 75;        // days before invisibility fade begins
 
 // Global spaceship state
 const _ship = {
@@ -48,6 +48,33 @@ export function initSpace() {
 // Called by mint.js after a new busk is minted to inject it into the field.
 export function addNFTToSpace(nft) {
   _spawnMesh(nft, true /* isNew */);
+}
+
+// Fetch metadata for a single token by ID — used by mint.js for parent preview.
+export async function fetchNFTMetaById(tokenId) {
+  const cfg = window.DecentConfig || {};
+  const contractAddress = cfg.contractAddress;
+  if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') return null;
+
+  try {
+    const rpcUrl = cfg.rpcUrl || 'https://mainnet.optimism.io';
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const abi = [
+      'function uri(uint256 tokenId) view returns (string)',
+      'function creatorOf(uint256 tokenId) view returns (address)',
+      'function totalMinted(uint256 tokenId) view returns (uint256)',
+    ];
+    const contract = new ethers.Contract(contractAddress, abi, provider);
+    const minted = Number(await contract.totalMinted(tokenId));
+    if (minted === 0) return null;
+    const uri = await contract.uri(tokenId);
+    const creator = await contract.creatorOf(tokenId);
+    const meta = await _fetchMetadata(uri);
+    return meta ? { tokenId, ...meta, creator } : null;
+  } catch (err) {
+    console.warn('[space] fetchNFTMetaById failed:', err.message);
+    return null;
+  }
 }
 
 // ── Scene Bootstrap ─────────────────────────────────────────────────────────
