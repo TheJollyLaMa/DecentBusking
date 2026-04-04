@@ -1,0 +1,19 @@
+{
+  "name": "decentbusking-jukebox-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that watches #jukebox for audio uploads, pins them to IPFS via w3up, and replies with a pre-filled DecentBusking mint link.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@web3-storage/w3up-client": "^17.3.0",
+    "discord.js": "^14.16.0",
+    "dotenv": "^16.4.0"
+  }
+}
