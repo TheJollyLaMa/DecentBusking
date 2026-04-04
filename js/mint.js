@@ -182,7 +182,7 @@ async function _handleMint(e) {
       _setStatus(
         '❌ Your wallet lacks minting permission. ' +
         'The contract admin must grant your address MINTER_ROLE (or DEFAULT_ADMIN_ROLE) ' +
-        'via the contract's grantRole() function before you can mint.',
+        'via the contract\'s grantRole() function before you can mint.',
         true,
       );
       submitBtn.disabled = false;
