@@ -126,7 +126,7 @@ async function handleAudioAttachment(message, attachment, config) {
     console.log(`[jukebox-bot] Pinned to IPFS: ${ipfsCid}`);
 
     // 3. Build pre-filled mint URL
-    const mintUrl = buildMintUrl(config.siteUrl, title, ipfsCid);
+    const mintUrl = buildMintUrl(config.siteUrl, title, ipfsCid, uploaderTag);
 
     // 4. Reply with rich embed
     const embed = buildMintEmbed({ title, ipfsCid, mintUrl, uploaderTag });
@@ -156,10 +156,12 @@ async function handleAudioAttachment(message, attachment, config) {
  * @param {string} siteUrl  - e.g. "https://thejollylama.github.io/DecentBusking"
  * @param {string} title    - Track title
  * @param {string} ipfsCid  - Raw CID (no ipfs:// prefix)
+ * @param {string} [artist] - Discord uploader tag (optional)
  * @returns {string}
  */
-export function buildMintUrl(siteUrl, title, ipfsCid) {
+export function buildMintUrl(siteUrl, title, ipfsCid, artist) {
   const params = new URLSearchParams({ title, ipfs: ipfsCid });
+  if (artist) params.set('artist', artist);
   return `${siteUrl}/?${params.toString()}`;
 }
 
