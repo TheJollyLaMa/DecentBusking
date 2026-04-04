@@ -34,7 +34,6 @@ const OPTIMISM_CHAIN_ID = 10;
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 
-let _connectedAddress = null;
 let _pendingEntries   = [];
 let _ownerAddress     = null;
 
@@ -77,63 +76,62 @@ async function _loadOwnerAddress() {
   }
 }
 
-// ─── Connect MetaMask ─────────────────────────────────────────────────────────
+// ─── React to global wallet connection ────────────────────────────────────────
 
-async function connectPayrollWallet() {
+async function _onWalletConnected({ detail } = {}) {
   const statusEl  = document.getElementById('payroll-wallet-status');
   const addrEl    = document.getElementById('payroll-connected-addr');
   const warningEl = document.getElementById('payroll-owner-warning');
-  const connectBtn = document.getElementById('payroll-connect-btn');
   const queueSection = document.getElementById('payroll-queue-section');
 
-  if (!window.ethereum) {
-    _setStatus(statusEl, '⚠️ MetaMask not detected. Please install MetaMask.', true);
+  const connectedAddress = detail?.address || window._wallet?.address || null;
+  const chainId = detail?.chainId ?? window._wallet?.chainId ?? null;
+
+  if (!connectedAddress) return;
+
+  if (chainId !== null && chainId !== OPTIMISM_CHAIN_ID) {
+    _setStatus(statusEl, `⚠️ Wrong network (chain ${chainId}). Please switch MetaMask to Optimism Mainnet (chain 10).`, true);
     return;
   }
 
-  try {
-    _setStatus(statusEl, '⏳ Connecting MetaMask…');
-    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-    _connectedAddress = accounts[0];
+  if (addrEl) addrEl.textContent = connectedAddress;
 
-    const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
-    const chainId = parseInt(chainIdHex, 16);
-    if (chainId !== OPTIMISM_CHAIN_ID) {
-      _setStatus(statusEl, `⚠️ Wrong network (chain ${chainId}). Please switch MetaMask to Optimism Mainnet (chain 10).`, true);
-      return;
+  // Check if connected wallet matches the owner's registered address
+  if (!_ownerAddress) _ownerAddress = await _loadOwnerAddress();
+
+  const isOwner = _ownerAddress &&
+    _ownerAddress.toLowerCase() === connectedAddress.toLowerCase();
+
+  if (warningEl) {
+    if (!isOwner) {
+      warningEl.textContent =
+        '⚠️ Warning: Connected wallet is not the registered repo owner wallet. ' +
+        'Only @TheJollyLaMa should settle payroll.';
+      warningEl.style.display = 'block';
+    } else {
+      warningEl.style.display = 'none';
     }
-
-    if (addrEl) addrEl.textContent = _connectedAddress;
-    if (connectBtn) connectBtn.textContent = '✅ Connected';
-
-    // Check if connected wallet matches the owner's registered address
-    if (!_ownerAddress) _ownerAddress = await _loadOwnerAddress();
-
-    const isOwner = _ownerAddress &&
-      _ownerAddress.toLowerCase() === _connectedAddress.toLowerCase();
-
-    if (warningEl) {
-      if (!isOwner) {
-        warningEl.textContent =
-          '⚠️ Warning: Connected wallet is not the registered repo owner wallet. ' +
-          'Only @TheJollyLaMa should settle payroll.';
-        warningEl.style.display = 'block';
-      } else {
-        warningEl.style.display = 'none';
-      }
-    }
-
-    _setStatus(statusEl, isOwner
-      ? '✅ Connected as repo owner — ready to settle payroll.'
-      : '✅ Connected (read-only view — settle disabled for non-owner wallets).');
-
-    // Load and display the payroll queue
-    if (queueSection) queueSection.style.display = 'block';
-    await loadPayrollQueue();
-
-  } catch (err) {
-    _setStatus(statusEl, `❌ ${err.message}`, true);
   }
+
+  _setStatus(statusEl, isOwner
+    ? '✅ Connected as repo owner — ready to settle payroll.'
+    : '✅ Connected (read-only view — settle disabled for non-owner wallets).');
+
+  // Load and display the payroll queue
+  if (queueSection) queueSection.style.display = 'block';
+  await loadPayrollQueue();
+}
+
+function _onWalletDisconnected() {
+  const addrEl    = document.getElementById('payroll-connected-addr');
+  const statusEl  = document.getElementById('payroll-wallet-status');
+  const warningEl = document.getElementById('payroll-owner-warning');
+  const queueSection = document.getElementById('payroll-queue-section');
+
+  if (addrEl)       addrEl.textContent = '';
+  if (warningEl)    warningEl.style.display = 'none';
+  if (queueSection) queueSection.style.display = 'none';
+  _setStatus(statusEl, '');
 }
 
 // ─── Load and render payroll queue ────────────────────────────────────────────
@@ -165,8 +163,8 @@ export async function loadPayrollQueue() {
 
   if (emptyMsg) emptyMsg.style.display = 'none';
 
-  const isOwner = _ownerAddress && _connectedAddress &&
-    _ownerAddress.toLowerCase() === _connectedAddress.toLowerCase();
+  const isOwner = _ownerAddress && window._wallet?.address &&
+    _ownerAddress.toLowerCase() === window._wallet.address.toLowerCase();
 
   tableBody.innerHTML = _pendingEntries.map((entry, i) => {
     const wallet = entry.contributor || '';
@@ -207,7 +205,11 @@ export async function loadPayrollQueue() {
   });
 
   // Enable/disable Settle All button
-  const payableCount = _pendingEntries.filter(e => isOwner && e.contributor && isValidEthAddress(e.contributor)).length;
+  const isOwner = !!(_ownerAddress && window._wallet?.address &&
+    _ownerAddress.toLowerCase() === window._wallet.address.toLowerCase());
+  const payableCount = _pendingEntries.filter(e =>
+    isOwner && e.contributor && isValidEthAddress(e.contributor)
+  ).length;
   if (settleBtn) {
     settleBtn.disabled = payableCount === 0;
     settleBtn.textContent = `💸 Settle All (${payableCount} payable)`;
@@ -225,8 +227,10 @@ async function _paySingle(index, btn) {
   const statusEl = document.getElementById('payroll-queue-status');
 
   if (!entry) return;
-  if (!window.ethereum) {
-    _setStatus(statusEl, '⚠️ MetaMask not available.', true);
+
+  const signer = window._wallet?.signer;
+  if (!signer) {
+    _setStatus(statusEl, '⚠️ Please connect your wallet via the header first.', true);
     return;
   }
 
@@ -239,9 +243,6 @@ async function _paySingle(index, btn) {
   try {
     if (btn) btn.disabled = true;
     _setStatus(statusEl, `⏳ Sending ${entry.amount} ETH to @${entry.contributorGithub}…`);
-
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const signer   = await provider.getSigner();
 
     const tx = await signer.sendTransaction({ to, value: amountWei });
     _setStatus(statusEl, `⏳ Waiting for confirmation… tx: ${tx.hash.slice(0, 12)}…`);
@@ -273,8 +274,9 @@ async function _settleAll() {
   const statusEl = document.getElementById('payroll-queue-status');
   const settleBtn = document.getElementById('payroll-settle-all-btn');
 
-  if (!window.ethereum) {
-    _setStatus(statusEl, '⚠️ MetaMask not available.', true);
+  const signer = window._wallet?.signer;
+  if (!signer) {
+    _setStatus(statusEl, '⚠️ Please connect your wallet via the header first.', true);
     return;
   }
 
@@ -290,8 +292,6 @@ async function _settleAll() {
 
   try {
     if (settleBtn) settleBtn.disabled = true;
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const signer   = await provider.getSigner();
 
     const hashes = [];
     for (const entry of payable) {
@@ -338,7 +338,6 @@ function _showSettleWorkflowHint(txHash) {
 // ─── Initialise the payroll panel ─────────────────────────────────────────────
 
 export function initPayroll() {
-  const connectBtn  = document.getElementById('payroll-connect-btn');
   const settleBtn   = document.getElementById('payroll-settle-all-btn');
   const refreshBtn  = document.getElementById('payroll-refresh-btn');
   const openBtn     = document.getElementById('payroll-open-btn');
@@ -351,6 +350,11 @@ export function initPayroll() {
   function openPayroll() {
     if (modal)   modal.classList.remove('hidden');
     if (overlay) overlay.classList.remove('hidden');
+
+    // If wallet is already connected when the panel opens, populate immediately.
+    if (window._wallet?.address) {
+      _onWalletConnected({ detail: { address: window._wallet.address, chainId: window._wallet.chainId } });
+    }
   }
 
   if (openBtn) openBtn.addEventListener('click', openPayroll);
@@ -363,9 +367,12 @@ export function initPayroll() {
 
   if (closeBtn)  closeBtn.addEventListener('click', closePayroll);
   if (overlay)   overlay.addEventListener('click', closePayroll);
-  if (connectBtn) connectBtn.addEventListener('click', connectPayrollWallet);
   if (settleBtn)  settleBtn.addEventListener('click', _settleAll);
   if (refreshBtn) refreshBtn.addEventListener('click', loadPayrollQueue);
+
+  // React to global wallet events.
+  document.addEventListener('wallet-connected',    _onWalletConnected);
+  document.addEventListener('wallet-disconnected', _onWalletDisconnected);
 
   // Pre-load owner address in background
   _loadOwnerAddress().then(addr => { _ownerAddress = addr; });

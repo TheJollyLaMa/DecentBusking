@@ -125,16 +125,19 @@ async function _handleMint(e) {
   submitBtn.disabled = true;
 
   try {
-    // 1. Connect wallet
+    // 1. Use the global wallet signer
     _setStatus('⏳ Connecting wallet…');
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send('eth_requestAccounts', []);
-    const signer = await provider.getSigner();
+    const signer = window._wallet?.signer;
+    if (!signer) {
+      _setStatus('🦊 Please connect your wallet via the header first.', true);
+      submitBtn.disabled = false;
+      return;
+    }
     const address = await signer.getAddress();
 
     // 2. Check chain
-    const network = await provider.getNetwork();
-    if (Number(network.chainId) !== (cfg.chainId || 10)) {
+    const chainId = window._wallet.chainId;
+    if (chainId !== null && chainId !== (cfg.chainId || 10)) {
       _setStatus(`⚠️ Switch MetaMask to chain ID ${cfg.chainId || 10} (Optimism).`, true);
       submitBtn.disabled = false;
       return;

@@ -1,6 +1,7 @@
 // js/main.js — DecentBusking boot loader
 // Initialises the header, footer, stage interactions, and the 3-D space field.
 
+import { initWallet } from './wallet.js';
 import { initStage } from './stage.js';
 import { initSpace } from './space.js';
 
@@ -8,6 +9,9 @@ import { initSpace } from './space.js';
 // The shared footer (decent-foot) web component is loaded below once the DOM is ready.
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Initialise global MetaMask wallet state (auto-connect + event listeners)
+  initWallet();
+
   // Load the shared footer web component (mirrors pattern used for decent-header)
   const footScript = document.createElement('script');
   footScript.type = 'module';
