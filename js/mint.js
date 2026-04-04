@@ -60,12 +60,46 @@ const TOKEN_KIND_PRODUCT  = 0;   // TokenKind enum: 0 = Product — used for aud
 // const TOKEN_KIND_ACHIEVEMENT = 1; // TokenKind enum: 1 = Achievement — reserved for future badge/reward NFTs (requires MINTER_ROLE)
 const DEFAULT_ROYALTY_BPS = 500; // 5 % secondary-sale royalty
 
+// ── Query-param pre-fill (set by Discord Jukebox Bot) ────────────────────
+// Stores the ipfs:// URI when the page is opened via the bot's mint link.
+// When set, the file-upload step is skipped and this URI is used directly.
+let _prefilledIpfsUri = null;
+
 // ── Public API ───────────────────────────────────────────────────────────
 export function openMintModal() {
   const modal = document.getElementById('mint-modal');
   if (!modal) return;
   _resetForm();
   modal.classList.remove('hidden');
+
+  // Pre-fill form fields from URL query params (?title=, ?ipfs=, ?artist=).
+  // These params are set by the Discord Jukebox Bot after pinning an audio
+  // file to IPFS so artists can mint in one click without re-uploading.
+  const params  = new URLSearchParams(window.location.search);
+  const qTitle  = params.get('title');
+  const qIpfs   = params.get('ipfs');
+  const qArtist = params.get('artist');
+
+  if (qTitle) {
+    const titleInput = document.getElementById('mint-title');
+    if (titleInput) titleInput.value = decodeURIComponent(qTitle);
+  }
+
+  if (qArtist) {
+    // ?artist= carries the Discord uploader tag; pre-fill tip wallet as a starting point
+    // so the artist can confirm or correct their Ethereum address before minting.
+    const tipInput = document.getElementById('mint-tip-wallet');
+    if (tipInput) tipInput.value = decodeURIComponent(qArtist);
+  }
+
+  if (qIpfs) {
+    _prefilledIpfsUri = `ipfs://${decodeURIComponent(qIpfs)}`;
+    // File upload is not needed — remove the required constraint and hint
+    const fileInput = document.getElementById('mint-file');
+    if (fileInput) fileInput.removeAttribute('required');
+    const cidDisplay = qIpfs.length > 20 ? `${qIpfs.slice(0, 20)}…` : qIpfs;
+    _setStatus(`✅ Audio already pinned to IPFS by DecentBusking Bot — CID: ${cidDisplay}`);
+  }
 }
 
 // ── DOM Wiring ───────────────────────────────────────────────────────────
@@ -96,6 +130,12 @@ document.addEventListener('DOMContentLoaded', () => {
       _previewTimer = setTimeout(() => _updateParentPreview(parentInput.value), 600);
     });
   }
+
+  // Auto-open the mint modal when the page was opened via the Discord Bot's
+  // pre-filled mint link (i.e. the URL contains ?ipfs=<CID>).
+  if (new URLSearchParams(window.location.search).get('ipfs')) {
+    openMintModal();
+  }
 });
 
 // ── Mint Handler ─────────────────────────────────────────────────────────
@@ -120,7 +160,8 @@ async function _handleMint(e) {
     _setStatus('⚠️ Please enter a track title.', true);
     return;
   }
-  if (!file) {
+  // Require a file only when no IPFS URI was pre-filled by the Discord Bot
+  if (!file && !_prefilledIpfsUri) {
     _setStatus('⚠️ Please select an audio file.', true);
     return;
   }
@@ -156,13 +197,18 @@ async function _handleMint(e) {
       return;
     }
 
-    // 3. Upload audio to IPFS
-    _setStatus('⏳ Uploading audio to IPFS…');
-    const audioUrl = await _uploadToIPFS(file);
-    if (!audioUrl) {
-      _setStatus('❌ IPFS upload failed. Check your w3up connection.', true);
-      submitBtn.disabled = false;
-      return;
+    // 3. Upload audio to IPFS — or reuse the CID provided by the Discord Bot
+    let audioUrl;
+    if (_prefilledIpfsUri) {
+      audioUrl = _prefilledIpfsUri;
+    } else {
+      _setStatus('⏳ Uploading audio to IPFS…');
+      audioUrl = await _uploadToIPFS(file);
+      if (!audioUrl) {
+        _setStatus('❌ IPFS upload failed. Check your w3up connection.', true);
+        submitBtn.disabled = false;
+        return;
+      }
     }
 
     // 4. Build + upload metadata
@@ -376,8 +422,12 @@ function _setStatus(msg, isError = false) {
 }
 
 function _resetForm() {
+  _prefilledIpfsUri = null;
   const form = document.getElementById('mint-form');
   if (form) form.reset();
+  // Restore the file-input required attribute in case it was removed for a bot upload
+  const fileInput = document.getElementById('mint-file');
+  if (fileInput) fileInput.setAttribute('required', '');
   _setStatus('');
   document.getElementById('mint-parent-preview')?.classList.add('hidden');
   const audioEl = document.getElementById('mint-parent-preview-audio');
