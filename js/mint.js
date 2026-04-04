@@ -55,9 +55,10 @@ const DECENT_NFT_ABI = [
 ];
 
 // ── Mint constants ────────────────────────────────────────────────────────────
-const UNLIMITED_SUPPLY      = 0;   // maxSupply 0 = no edition cap
-const TOKEN_KIND_ACHIEVEMENT = 1;  // TokenKind enum: 0 = Product, 1 = Achievement
-const DEFAULT_ROYALTY_BPS   = 500; // 5 % secondary-sale royalty
+const UNLIMITED_SUPPLY    = 0;   // maxSupply 0 = no edition cap
+const TOKEN_KIND_PRODUCT  = 0;   // TokenKind enum: 0 = Product — used for audio busks (requires DEFAULT_ADMIN_ROLE)
+// const TOKEN_KIND_ACHIEVEMENT = 1; // TokenKind enum: 1 = Achievement — reserved for future badge/reward NFTs (requires MINTER_ROLE)
+const DEFAULT_ROYALTY_BPS = 500; // 5 % secondary-sale royalty
 
 // ── Public API ───────────────────────────────────────────────────────────
 export function openMintModal() {
@@ -204,15 +205,15 @@ async function _handleMint(e) {
     }
 
     // 6. Register a new token on-chain (admin-only step that returns the tokenId)
-    _setStatus('⏳ Registering token — confirm in MetaMask… (tx 1/2)');
-    // TokenKind.Achievement = 1 — allows future MINTER_ROLE wallets to mint editions.
+    _setStatus('⏳ Registering audio busk product — confirm in MetaMask… (tx 1/2)');
+    // TokenKind.Product = 0 — audio busk NFTs minted by the artist via mintProduct() with DEFAULT_ADMIN_ROLE.
     // maxSupply 0 = unlimited; royalty 5 % to the artist's wallet.
     const regTx = await contract.registerToken(
-      UNLIMITED_SUPPLY,       // maxSupply: 0 = unlimited
-      metadataUrl,            // per-token URI — the IPFS metadata JSON
-      TOKEN_KIND_ACHIEVEMENT, // kind: 1 = Achievement
-      address,                // royaltyReceiver: the minting artist
-      DEFAULT_ROYALTY_BPS,    // royaltyFeeBps: 5 %
+      UNLIMITED_SUPPLY,    // maxSupply: 0 = unlimited
+      metadataUrl,         // per-token URI — the IPFS metadata JSON
+      TOKEN_KIND_PRODUCT,  // kind: 0 = Product (audio busk)
+      address,             // royaltyReceiver: the minting artist
+      DEFAULT_ROYALTY_BPS, // royaltyFeeBps: 5 %
     );
 
     _setStatus('⏳ Waiting for registration confirmation… (tx 1/2)');
@@ -236,9 +237,9 @@ async function _handleMint(e) {
       return;
     }
 
-    // 7. Mint a single edition of the newly-registered token to the artist's wallet
-    _setStatus(`⏳ Minting edition of token #${tokenId} — confirm in MetaMask… (tx 2/2)`);
-    const mintTx = await contract.mintAchievement(address, tokenId, 1);
+    // 7. Mint a single edition of the newly-registered product token to the artist's wallet
+    _setStatus(`⏳ Minting audio busk product #${tokenId} — confirm in MetaMask… (tx 2/2)`);
+    const mintTx = await contract.mintProduct(address, tokenId, 1);
 
     _setStatus('⏳ Waiting for mint confirmation… (tx 2/2)');
     await mintTx.wait();
