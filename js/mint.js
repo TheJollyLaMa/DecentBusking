@@ -147,14 +147,12 @@ async function _handleMint(e) {
   const fileInput = document.getElementById('mint-file');
   const parentInput = document.getElementById('mint-parent');
   const tipInput = document.getElementById('mint-tip-wallet');
-  const royaltyInput = document.getElementById('mint-royalty-pct');
   const submitBtn = document.getElementById('mint-submit-btn');
 
   const title = titleInput?.value.trim();
   const file = fileInput?.files?.[0];
   const parentId = parseInt(parentInput?.value || '0') || 0;
   const tipWallet = tipInput?.value.trim() || '';
-  const royaltyPct = Math.min(50, Math.max(0, parseFloat(royaltyInput?.value || '10') || 10));
 
   if (!title) {
     _setStatus('⚠️ Please enter a track title.', true);
@@ -226,7 +224,6 @@ async function _handleMint(e) {
         parentTokenId: parentId,
         royaltyChain: {
           parentTokenId: parentId,
-          royaltyPct,
         },
       } : {}),
     };
@@ -321,7 +318,7 @@ async function _handleMint(e) {
       metadataUri: metadataUrl,
       mintedAt: new Date().toISOString(),
       parentTokenId: parentId || undefined,
-      royaltyChain: parentId > 0 ? { parentTokenId: parentId, royaltyPct } : undefined,
+      royaltyChain: parentId > 0 ? { parentTokenId: parentId } : undefined,
     });
 
     // Close modal after a moment
