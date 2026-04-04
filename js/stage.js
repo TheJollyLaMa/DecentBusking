@@ -117,11 +117,15 @@ async function _handleSendTip() {
     sendBtn.disabled = true;
     _showStatus('tip-status', '⏳ Waiting for MetaMask…');
 
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const signer = await provider.getSigner();
+    const signer = window._wallet?.signer;
+    if (!signer) {
+      _showStatus('tip-status', '🦊 Please connect your wallet via the header first.', true);
+      sendBtn.disabled = false;
+      return;
+    }
 
-    const chainId = (await provider.getNetwork()).chainId;
-    if (Number(chainId) !== (cfg.chainId || 10)) {
+    const chainId = window._wallet.chainId;
+    if (chainId !== null && Number(chainId) !== (cfg.chainId || 10)) {
       _showStatus('tip-status', `⚠️ Switch MetaMask to chain ID ${cfg.chainId || 10} (Optimism).`, true);
       sendBtn.disabled = false;
       return;

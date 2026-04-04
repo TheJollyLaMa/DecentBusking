@@ -118,12 +118,15 @@ async function _handleBuy(nft) {
   try {
     if (buyBtn) buyBtn.disabled = true;
 
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send('eth_requestAccounts', []);
-    const signer = await provider.getSigner();
+    const signer = window._wallet?.signer;
+    if (!signer) {
+      alert('🦊 Please connect your wallet via the header first.');
+      if (buyBtn) buyBtn.disabled = false;
+      return;
+    }
 
-    const network = await provider.getNetwork();
-    if (Number(network.chainId) !== (cfg.chainId || 10)) {
+    const chainId = window._wallet.chainId;
+    if (chainId !== null && Number(chainId) !== (cfg.chainId || 10)) {
       alert(`⚠️ Switch MetaMask to chain ID ${cfg.chainId || 10} (Optimism).`);
       if (buyBtn) buyBtn.disabled = false;
       return;
