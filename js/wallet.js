@@ -122,5 +122,7 @@ export function initWallet() {
         _applyAccounts(accounts);
       }
     })
-    .catch(() => {});
+    .catch(err => {
+      console.warn('[wallet] auto-connect check failed:', err.message);
+    });
 }

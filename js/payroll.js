@@ -205,11 +205,11 @@ export async function loadPayrollQueue() {
   });
 
   // Enable/disable Settle All button
-  const payableCount = _pendingEntries.filter(e => {
-    const isOwner = _ownerAddress && window._wallet?.address &&
-      _ownerAddress.toLowerCase() === window._wallet.address.toLowerCase();
-    return isOwner && e.contributor && isValidEthAddress(e.contributor);
-  }).length;
+  const isOwner = !!(_ownerAddress && window._wallet?.address &&
+    _ownerAddress.toLowerCase() === window._wallet.address.toLowerCase());
+  const payableCount = _pendingEntries.filter(e =>
+    isOwner && e.contributor && isValidEthAddress(e.contributor)
+  ).length;
   if (settleBtn) {
     settleBtn.disabled = payableCount === 0;
     settleBtn.textContent = `💸 Settle All (${payableCount} payable)`;
