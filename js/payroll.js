@@ -205,8 +205,6 @@ export async function loadPayrollQueue() {
   });
 
   // Enable/disable Settle All button
-  const isOwner = !!(_ownerAddress && window._wallet?.address &&
-    _ownerAddress.toLowerCase() === window._wallet.address.toLowerCase());
   const payableCount = _pendingEntries.filter(e =>
     isOwner && e.contributor && isValidEthAddress(e.contributor)
   ).length;
