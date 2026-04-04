@@ -32,7 +32,7 @@ window.DecentConfig = {
 
   // IPFS / w3up
   w3upSpaceDID: "did:key:z6MktU4rpHu5Z4nXjXufa4uivwBLN1DcK4r2xfGhizr4bndB",
-  ipfsGateway: "https://w3s.link/ipfs/",
+  ipfsGateway: "https://dweb.link/ipfs/",
 
   // Currency
   tokenSymbol: "ETH",
