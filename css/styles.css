@@ -1046,4 +1046,7 @@ decent-foot {
 }
 
 /* ── DecentBusking skin overrides ───────────────────────────────────────── */
-.title-main { color: #ff8c00 !important; text-shadow: 0 0 10px rgba(255,140,0,0.6), 0 0 3px #00ffff; }
+/* NOTE: .title-main lives inside the AppTitle Shadow DOM, so this rule has  */
+/* no effect here. The actual orange override is injected via JS in           */
+/* js/components/header-title-color-override.js                               */
+/* .title-main { color: #ff8c00 !important; ... } */
