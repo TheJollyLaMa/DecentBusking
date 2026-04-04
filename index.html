@@ -54,8 +54,14 @@
         <label for="mint-title">Track Title</label>
         <input id="mint-title" type="text" placeholder="What are you playing?" required />
 
-        <label for="mint-file">Audio File <span class="hint">(mp3, wav, ogg, flac, m4a)</span></label>
+        <label id="mint-file-label" for="mint-file">Audio File <span class="hint">(mp3, wav, ogg, flac, m4a)</span></label>
         <input id="mint-file" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,audio/*" required />
+
+        <div id="mint-cid-section" class="hidden">
+          <p id="mint-cid-bot-msg" style="color:#00d26a;margin:0 0 0.5rem 0;">✅ Audio already pinned to IPFS by DecentBusking Bot</p>
+          <label for="mint-cid-input">IPFS CID <span class="hint">(pre-filled by bot — edit if needed)</span></label>
+          <input id="mint-cid-input" type="text" placeholder="bafy..." />
+        </div>
 
         <label for="mint-parent">Covers / References Token ID <span class="hint">(optional — remix or cover of another busk)</span></label>
         <input id="mint-parent" type="number" placeholder="Parent token ID" min="0" />
@@ -73,7 +79,7 @@
         <p class="hint">ℹ️ Remix lineage is recorded in token metadata. On-chain royalty splitting for parent creators may be supported in a future contract upgrade.</p>
 
         <label for="mint-tip-wallet">Your Tip Wallet Address <span class="hint">(where listeners send tips)</span></label>
-        <input id="mint-tip-wallet" type="text" placeholder="0x…" />
+        <input id="mint-tip-wallet" type="text" placeholder="0x… or ENS.eth" />
 
         <div id="mint-status"></div>
         <div class="mint-form-actions">

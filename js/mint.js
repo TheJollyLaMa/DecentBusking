@@ -86,19 +86,29 @@ export function openMintModal() {
   }
 
   if (qArtist) {
-    // ?artist= carries the Discord uploader tag; pre-fill tip wallet as a starting point
-    // so the artist can confirm or correct their Ethereum address before minting.
-    const tipInput = document.getElementById('mint-tip-wallet');
-    if (tipInput) tipInput.value = decodeURIComponent(qArtist);
+    // Only prefill the tip wallet if ?artist= looks like an Ethereum address or ENS name.
+    // Discord usernames and other strings are silently ignored.
+    const artist = decodeURIComponent(qArtist);
+    const isEthAddress = /^0x[0-9a-fA-F]{40}$/.test(artist);
+    const isEns = artist.endsWith('.eth');
+    if (isEthAddress || isEns) {
+      const tipInput = document.getElementById('mint-tip-wallet');
+      if (tipInput) tipInput.value = artist;
+    }
   }
 
   if (qIpfs) {
-    _prefilledIpfsUri = `ipfs://${decodeURIComponent(qIpfs)}`;
-    // File upload is not needed — remove the required constraint and hint
+    const cid = decodeURIComponent(qIpfs);
+    _prefilledIpfsUri = `ipfs://${cid}`;
+    // Hide the file input and its label; show the CID section pre-filled with the bot's CID
     const fileInput = document.getElementById('mint-file');
-    if (fileInput) fileInput.removeAttribute('required');
-    const cidDisplay = qIpfs.length > 20 ? `${qIpfs.slice(0, 20)}…` : qIpfs;
-    _setStatus(`✅ Audio already pinned to IPFS by DecentBusking Bot — CID: ${cidDisplay}`);
+    const fileLabel = document.getElementById('mint-file-label');
+    const cidSection = document.getElementById('mint-cid-section');
+    const cidInput = document.getElementById('mint-cid-input');
+    if (fileInput) { fileInput.removeAttribute('required'); fileInput.classList.add('hidden'); }
+    if (fileLabel) fileLabel.classList.add('hidden');
+    if (cidSection) cidSection.classList.remove('hidden');
+    if (cidInput) cidInput.value = cid;
   }
 }
 
@@ -197,7 +207,11 @@ async function _handleMint(e) {
 
     // 3. Upload audio to IPFS — or reuse the CID provided by the Discord Bot
     let audioUrl;
-    if (_prefilledIpfsUri) {
+    const cidSection = document.getElementById('mint-cid-section');
+    const cidInput = document.getElementById('mint-cid-input');
+    if (cidSection && !cidSection.classList.contains('hidden') && cidInput && cidInput.value.trim()) {
+      audioUrl = `ipfs://${cidInput.value.trim()}`;
+    } else if (_prefilledIpfsUri) {
       audioUrl = _prefilledIpfsUri;
     } else {
       _setStatus('⏳ Uploading audio to IPFS…');
@@ -422,9 +436,13 @@ function _resetForm() {
   _prefilledIpfsUri = null;
   const form = document.getElementById('mint-form');
   if (form) form.reset();
-  // Restore the file-input required attribute in case it was removed for a bot upload
+  // Restore the file-input and its label; hide the CID section
   const fileInput = document.getElementById('mint-file');
-  if (fileInput) fileInput.setAttribute('required', '');
+  const fileLabel = document.getElementById('mint-file-label');
+  const cidSection = document.getElementById('mint-cid-section');
+  if (fileInput) { fileInput.setAttribute('required', ''); fileInput.classList.remove('hidden'); }
+  if (fileLabel) fileLabel.classList.remove('hidden');
+  if (cidSection) cidSection.classList.add('hidden');
   _setStatus('');
   document.getElementById('mint-parent-preview')?.classList.add('hidden');
   const audioEl = document.getElementById('mint-parent-preview-audio');
