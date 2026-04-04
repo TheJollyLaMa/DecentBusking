@@ -114,7 +114,7 @@ async function _handleMint(e) {
   const file = fileInput?.files?.[0];
   const parentId = parseInt(parentInput?.value || '0') || 0;
   const tipWallet = tipInput?.value.trim() || '';
-  const royaltyPct = Math.min(50, Math.max(0, parseFloat(royaltyInput?.value || '10') || 0));
+  const royaltyPct = Math.min(50, Math.max(0, parseFloat(royaltyInput?.value || '10') || 10));
 
   if (!title) {
     _setStatus('⚠️ Please enter a track title.', true);
@@ -298,9 +298,9 @@ async function _updateParentPreview(rawValue) {
   const artistEl = document.getElementById('mint-parent-preview-artist');
   const audioEl = document.getElementById('mint-parent-preview-audio');
 
-  const parentId = parseInt(rawValue || '0') || 0;
+  const parentId = Math.max(0, parseInt(rawValue) || 0);
 
-  if (!parentId || parentId < 0) {
+  if (!parentId) {
     preview?.classList.add('hidden');
     return;
   }

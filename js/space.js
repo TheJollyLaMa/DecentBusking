@@ -4,7 +4,7 @@
 // Behaviour:
 //  • Each minted DecentNFT appears at stage-centre (0,0,0) and drifts outward
 //    into space as it ages.
-//  • After ONE_MONTH_MS the mesh becomes invisible but its position is retained
+//  • After NINETY_DAYS_MS the mesh becomes invisible but its position is retained
 //    so the spaceship can still fly to it and the NFT can still be purchased.
 //  • Clicking on a visible NFT mesh opens the NFT detail panel.
 //  • Arrow-key / WASD controls (defined via DecentFoot or here as fallback)
@@ -17,7 +17,7 @@
 import { renderNFTCard } from './nft-card.js';
 import { setNowPlaying } from './stage.js';
 
-const ONE_MONTH_MS = 90 * 24 * 60 * 60 * 1000;   // 90 days before NFT becomes invisible
+const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;   // 90 days before NFT becomes invisible
 const DRIFT_SPEED = 0.004;         // units per frame after age normalisation
 const MAX_DRIFT_RADIUS = 120;      // maximum distance from origin
 const FADE_START_DAYS = 75;        // days before invisibility fade begins
@@ -193,7 +193,7 @@ async function _fetchMetadata(uri) {
 function _spawnMesh(nft, isNew) {
   const mintedAt = nft.mintedAt ? new Date(nft.mintedAt).getTime() : Date.now();
   const ageMs = Date.now() - mintedAt;
-  const ageFraction = Math.min(ageMs / ONE_MONTH_MS, 1);
+  const ageFraction = Math.min(ageMs / NINETY_DAYS_MS, 1);
 
   // Deterministic position derived from tokenId so page refreshes are stable
   const seed = nft.tokenId || Math.random() * 9999;
@@ -219,7 +219,7 @@ function _spawnMesh(nft, isNew) {
   // Fade out near-invisible NFTs older than FADE_START_DAYS
   const fadeDays = FADE_START_DAYS * 24 * 60 * 60 * 1000;
   if (!isNew && ageMs > fadeDays) {
-    const fadeProgress = Math.min((ageMs - fadeDays) / (ONE_MONTH_MS - fadeDays), 1);
+    const fadeProgress = Math.min((ageMs - fadeDays) / (NINETY_DAYS_MS - fadeDays), 1);
     mat.opacity = 1 - fadeProgress;
   }
 
@@ -317,7 +317,7 @@ function _animate() {
     ud.ageMs = now - ud.mintedAt;
     const fadeDays = FADE_START_DAYS * 24 * 60 * 60 * 1000;
     if (ud.ageMs > fadeDays) {
-      const fadeProgress = Math.min((ud.ageMs - fadeDays) / (ONE_MONTH_MS - fadeDays), 1);
+      const fadeProgress = Math.min((ud.ageMs - fadeDays) / (NINETY_DAYS_MS - fadeDays), 1);
       mesh.material.opacity = Math.max(0, 1 - fadeProgress);
     }
 
