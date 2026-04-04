@@ -17,6 +17,11 @@ import { buildMintEmbed } from './embed.js';
 const AUDIO_MIME_PREFIXES  = ['audio/'];
 const AUDIO_EXTENSIONS_RE  = /\.(mp3|wav|ogg|flac|m4a|aac|opus|weba)$/i;
 
+// Maximum audio file size the bot will download (50 MB).
+// Discord's own upload cap for non-nitro servers is 25 MB, but allow some
+// headroom for boosted servers (up to 100 MB) while still preventing abuse.
+const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB
+
 /**
  * Return true if the attachment looks like an audio file.
  * Discord reports contentType as null for some uploads, so we also
@@ -79,7 +84,7 @@ async function handleAudioAttachment(message, attachment, config) {
   // Derive a human-readable title from the filename (strip extension)
   const title = filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || filename;
 
-  const uploaderTag = message.author.tag ?? message.author.username;
+  const uploaderTag = message.author.tag || message.author.username || 'Unknown User';
 
   console.log(`[jukebox-bot] Audio detected: "${filename}" from ${uploaderTag}`);
 
@@ -92,7 +97,15 @@ async function handleAudioAttachment(message, attachment, config) {
   }
 
   try {
-    // 1. Download the file
+    // 1. Guard against oversized files before downloading
+    if (attachment.size > MAX_FILE_BYTES) {
+      throw new Error(
+        `File is too large (${(attachment.size / 1024 / 1024).toFixed(1)} MB). ` +
+        `Maximum allowed size is ${MAX_FILE_BYTES / 1024 / 1024} MB.`
+      );
+    }
+
+    // 2. Download the file
     const response = await fetch(attachment.url);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status} downloading attachment`);

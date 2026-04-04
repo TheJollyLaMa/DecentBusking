@@ -51,7 +51,12 @@ w3 space create my-jukebox-space   # or: w3 space use <existing-did>
 
 # Create a delegated proof for the agent key above and base64-encode it
 # Replace <agent-did> with the "did" field from `w3 key create`
+# Linux:
 w3 delegation create <agent-did> --can 'store/add' --can 'upload/add' | base64 -w0
+# macOS:
+w3 delegation create <agent-did> --can 'store/add' --can 'upload/add' | base64
+# Cross-platform alternative:
+w3 delegation create <agent-did> --can 'store/add' --can 'upload/add' | base64 | tr -d '\n'
 # Copy the output into W3UP_PROOF
 ```
 

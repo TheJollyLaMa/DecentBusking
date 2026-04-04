@@ -27,9 +27,9 @@ async function buildClient(encodedKey, encodedProof) {
   const store     = new StoreMemory();
   const client    = await create({ principal, store });
 
-  const proof = await Proof.parse(encodedProof);
-  const space = await client.addSpace(proof);
-  await client.setCurrentSpace(space.did());
+  const proof         = await Proof.parse(encodedProof);
+  const delegatedSpace = await client.addSpace(proof);
+  await client.setCurrentSpace(delegatedSpace.did());
 
   return client;
 }
