@@ -142,8 +142,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Auto-open the mint modal when the page was opened via the Discord Bot's
-  // pre-filled mint link (i.e. the URL contains ?ipfs=<CID>).
-  if (new URLSearchParams(window.location.search).get('ipfs')) {
+  // pre-filled mint link.  Triggers on ?ipfs= (bot flow) or ?title= (manual
+  // deep-link) — the modal will pre-fill whichever params are present.
+  const _autoParams = new URLSearchParams(window.location.search);
+  if (_autoParams.get('ipfs') || _autoParams.get('title')) {
     openMintModal();
   }
 });

@@ -51,9 +51,19 @@
       <span>🎵 DNFT Archive</span>
       <span id="dnft-list-count"></span>
     </div>
+    <!-- Spinner shown while the initial batch is loading -->
+    <div id="dnft-list-spinner" class="dnft-list-spinner hidden" aria-label="Loading tracks…">
+      <span class="dnft-spinner-dot"></span>
+      <span class="dnft-spinner-dot"></span>
+      <span class="dnft-spinner-dot"></span>
+    </div>
     <ul id="dnft-list-items">
       <li class="dnft-list-empty">Loading tracks…</li>
     </ul>
+    <!-- Show All Now — hidden once all tokens are fetched -->
+    <button id="dnft-show-all-btn" class="dnft-show-all-btn" title="Load the full DNFT archive now">
+      ⚡ Show All Now
+    </button>
   </div>
 
   <!-- Timeline Navigation Controls -->

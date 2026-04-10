@@ -10,9 +10,14 @@
 //  • The right-side DNFT list panel lists all loaded NFTs sorted newest-first.
 //    Clicking an item selects it, plays its audio, and pans the timeline window
 //    to show that NFT.
-//  • Clicking a visible NFT mesh in 3-D also selects and plays it.
-//  • Arrow-key / WASD controls (press Tab to toggle) let the user fly through
-//    the field.
+//  • Only music NFTs (those with audioUrl, audio-extension animation_url, or a
+//    bare ipfs:// animation_url) are shown — non-audio tokens are silently
+//    skipped.  See _isMusicNFT().
+//  • NFTs load lazily: the 4 newest load immediately, then 4 more every 30 s.
+//    The "Show All Now" button forces an immediate full load.
+//  • WASD / Arrow keys always fly the camera (no toggle required).  Tab
+//    additionally disables mouse-orbit (pure ship mode).  Q/E move vertically.
+//  • Mouse orbit is always available; full vertical range (0–180°) is allowed.
 //
 // Dependencies (loaded via CDN in index.html):
 //   • THREE  (three.js r128)
@@ -31,12 +36,29 @@ const MAX_NAV_DAYS    = 365;        // how far back the slider can go
 // Camera home position (z offset ahead of the timeline centre)
 const CAM_Z_OFFSET = 28;
 
+// ── NFT lazy-loading constants ────────────────────────────────────────────
+// Adjust these values to tune how many NFTs load at startup and how quickly
+// subsequent pages are fetched.
+const INITIAL_BATCH    = 4;         // NFTs to load immediately on startup
+const PAGE_BATCH       = 4;         // NFTs fetched per subsequent auto-page
+const PAGE_INTERVAL_MS = 30_000;    // milliseconds between auto-pages (30 s)
+
+// Yield time (ms) between rapid batch loads triggered by "Show All Now".
+// Keeps the browser event loop responsive during fast loading.
+const BATCH_YIELD_MS   = 200;
+
+// Music-filter: an animation_url with one of these extensions is an audio NFT.
+// ipfs:// links without an extension are also accepted (this dapp's native format).
+const AUDIO_EXT_RE = /\.(mp3|wav|flac|m4a|ogg|opus|aac)(\?|#|$)/i;
+
 // ── Global state ──────────────────────────────────────────────────────────
 let _renderer, _scene, _camera, _controls;
 let _nftMeshes = [];
 let _raycaster, _mouse;
 
-let _shipMode  = false;   // true = WASD fly, false = OrbitControls
+// Keyboard flight is always active alongside OrbitControls.
+// Tab still toggles "pure ship mode" (disables OrbitControls mouse orbit).
+let _shipMode  = false;   // true = Tab-activated pure fly, false = hybrid (WASD + orbit)
 let _keysDown  = {};
 let _animFrameId;
 
@@ -50,6 +72,16 @@ let _activeId  = null;         // currently selected tokenId
 // Spaceship
 const _ship = { speed: 0.12 };
 
+// ── NFT paging state ──────────────────────────────────────────────────────
+// Shared contract instance reused across lazy-load pages.
+let _contract        = null;
+// Next tokenId to attempt loading (counts DOWN from nextTokenId-1 → 0).
+let _nextTokenToLoad = -1;
+// Timer for the 30-second auto-page interval.
+let _pageTimerId     = null;
+// Set to true once all tokens have been iterated.
+let _allLoaded       = false;
+
 // ── Public API ────────────────────────────────────────────────────────────
 export function initSpace() {
   _buildScene();
@@ -58,6 +90,7 @@ export function initSpace() {
   _loadNFTs();
   _animate();
   _bindTimelineNav();
+  _bindShowAllBtn();
   window.addEventListener('resize', _onResize);
   window.addEventListener('keydown', _onKeyDown);
   window.addEventListener('keyup', _onKeyUp);
@@ -152,6 +185,12 @@ function _buildControls() {
     _controls.dampingFactor = 0.07;
     _controls.minDistance = 5;
     _controls.maxDistance = 250;
+    // Allow full vertical orbit (0 = top, π = bottom) so the user can swing
+    // the camera below the NFT field and look up, fully circling the space.
+    _controls.minPolarAngle = 0;
+    _controls.maxPolarAngle = Math.PI;
+    // Enable panning so the user can slide the view along the Z timeline.
+    _controls.enablePan = true;
   }
 }
 
@@ -182,6 +221,16 @@ function _addTimelineLine() {
 }
 
 // ── NFT Loading ────────────────────────────────────────────────────────────
+//
+// Loading strategy (tunable via INITIAL_BATCH / PAGE_BATCH / PAGE_INTERVAL_MS):
+//   1. Fetch nextTokenId from the contract to know the total token count.
+//   2. Show a spinner in the DNFT list while loading.
+//   3. Iterate from the newest token (nextTokenId-1) downward, loading only
+//      music NFTs (see _isMusicNFT).  Stop after INITIAL_BATCH matches.
+//   4. After PAGE_INTERVAL_MS (30 s) auto-load PAGE_BATCH more, repeating
+//      until the full list is loaded.
+//   5. The "Show All Now" button short-circuits the timer and loads the rest
+//      in rapid bursts.
 async function _loadNFTs() {
   const cfg = window.DecentConfig || {};
   const contractAddress = cfg.contractAddress;
@@ -190,6 +239,8 @@ async function _loadNFTs() {
     _markListEmpty('No contract configured.');
     return;
   }
+
+  _showSpinner(true);
 
   try {
     const rpcUrl = cfg.rpcUrl || 'https://mainnet.optimism.io';
@@ -200,34 +251,120 @@ async function _loadNFTs() {
       'function creatorOf(uint256 tokenId) view returns (address)',
       'function totalMinted(uint256 tokenId) view returns (uint256)',
     ];
-    const contract = new ethers.Contract(contractAddress, abi, provider);
-    const nextId = Number(await contract.nextTokenId());
+    _contract = new ethers.Contract(contractAddress, abi, provider);
+    const nextId = Number(await _contract.nextTokenId());
 
-    let loaded = 0;
-    for (let tokenId = 0; tokenId < nextId; tokenId++) {
-      try {
-        const minted = Number(await contract.totalMinted(tokenId));
-        if (minted === 0) continue;
-
-        const uri = await contract.uri(tokenId);
-        const creator = await contract.creatorOf(tokenId);
-        const meta = await _fetchMetadata(uri);
-        if (meta) {
-          _spawnMesh({ tokenId, ...meta, creator }, false);
-          loaded++;
-        }
-      } catch (_) {
-        // Non-fatal per-token failure
-      }
+    if (nextId === 0) {
+      _showSpinner(false);
+      _markListEmpty('No tracks minted yet.');
+      return;
     }
 
-    if (loaded === 0) {
-      _markListEmpty('No tracks minted yet.');
+    // Start from the newest token and work backwards (highest tokenId first).
+    _nextTokenToLoad = nextId - 1;
+    _allLoaded = false;
+
+    // Load the initial batch so the UI is populated quickly.
+    await _loadBatch(INITIAL_BATCH);
+    _showSpinner(false);
+
+    if (_allNFTs.length === 0 && _allLoaded) {
+      _markListEmpty('No music tracks found yet.');
+      return;
+    }
+
+    // Schedule subsequent pages if tokens still remain.
+    if (!_allLoaded) {
+      _scheduleNextPage();
     }
   } catch (err) {
+    _showSpinner(false);
     console.warn('[space] NFT load failed:', err.message);
     _markListEmpty('Could not load tracks.');
   }
+}
+
+// Load up to `count` music NFTs, working down from _nextTokenToLoad.
+async function _loadBatch(count) {
+  let loaded = 0;
+  while (_nextTokenToLoad >= 0 && loaded < count) {
+    const didLoad = await _tryLoadToken(_nextTokenToLoad);
+    _nextTokenToLoad--;
+    if (didLoad) loaded++;
+  }
+  if (_nextTokenToLoad < 0) _allLoaded = true;
+  return loaded;
+}
+
+// Try to load a single token. Returns true if the token was a music NFT and
+// was successfully spawned, false otherwise.
+async function _tryLoadToken(tokenId) {
+  try {
+    const minted = Number(await _contract.totalMinted(tokenId));
+    if (minted === 0) return false;
+
+    const uri     = await _contract.uri(tokenId);
+    const creator = await _contract.creatorOf(tokenId);
+    const meta    = await _fetchMetadata(uri);
+
+    // Skip non-music tokens (images, text NFTs, etc.)
+    if (!meta || !_isMusicNFT(meta)) return false;
+
+    _spawnMesh({ tokenId, ...meta, creator }, false);
+    return true;
+  } catch (_) {
+    return false; // Non-fatal per-token failure
+  }
+}
+
+// Schedule the next auto-page load after PAGE_INTERVAL_MS milliseconds.
+function _scheduleNextPage() {
+  if (_allLoaded || _nextTokenToLoad < 0) return;
+  _pageTimerId = setTimeout(async () => {
+    await _loadBatch(PAGE_BATCH);
+    if (!_allLoaded) _scheduleNextPage();
+  }, PAGE_INTERVAL_MS);
+}
+
+// Called by the "Show All Now" button — cancels the timer and loads the rest
+// of the tokens in rapid PAGE_BATCH bursts (with a small yield between each).
+async function _loadAllNow() {
+  if (_allLoaded || _nextTokenToLoad < 0) return;
+  if (_pageTimerId !== null) {
+    clearTimeout(_pageTimerId);
+    _pageTimerId = null;
+  }
+  _showSpinner(true);
+  const runNext = async () => {
+    if (_nextTokenToLoad < 0 || _allLoaded) {
+      _showSpinner(false);
+      return;
+    }
+    await _loadBatch(PAGE_BATCH);
+    // Yield to the browser between bursts so the UI stays responsive.
+    setTimeout(runNext, BATCH_YIELD_MS);
+  };
+  await runNext();
+}
+
+// ── Music NFT filter ───────────────────────────────────────────────────────
+// Returns true for tokens that contain playable audio.
+// Logic:
+//  • meta.audioUrl present → always music
+//  • meta.animation_url ends with a known audio extension → music
+//  • meta.animation_url starts with ipfs:// without an extension → assumed
+//    audio (this dapp's native format; non-audio IPFS links would include an
+//    explicit extension like .png or .json)
+function _isMusicNFT(meta) {
+  if (!meta) return false;
+  if (meta.audioUrl) return true;
+  const anim = (meta.animation_url || '').toLowerCase();
+  if (!anim) return false;
+  if (AUDIO_EXT_RE.test(anim)) return true;
+  // ipfs:// links without a recognised extension → treat as audio
+  // ({2,5} covers extensions like js, mp3, json, flac, etc.)
+  if (anim.startsWith('ipfs://') && !/\.[a-z]{2,5}(\?|#|$)/.test(anim)) return true;
+  return false;
 }
 
 async function _fetchMetadata(uri) {
@@ -433,6 +570,26 @@ function _markListEmpty(msg) {
   list.innerHTML = `<li class="dnft-list-empty">${_esc(msg)}</li>`;
 }
 
+// Show or hide the spinner inside the DNFT list panel.
+function _showSpinner(show) {
+  const spinner = document.getElementById('dnft-list-spinner');
+  if (!spinner) return;
+  spinner.classList.toggle('hidden', !show);
+}
+
+// Wire the "Show All Now" button.  The button is hidden once all tokens are loaded.
+function _bindShowAllBtn() {
+  const btn = document.getElementById('dnft-show-all-btn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    btn.disabled = true;
+    btn.textContent = '⏳ Loading…';
+    _loadAllNow().then(() => {
+      btn.classList.add('hidden');
+    });
+  });
+}
+
 // ── NFT Selection ──────────────────────────────────────────────────────────
 function _selectNFT(nft, mesh, listItem, showCard = true) {
   _activeId = nft.tokenId;
@@ -480,29 +637,47 @@ function _animate() {
     }
   }
 
-  if (_shipMode) {
-    _flyShip();
-  } else if (_controls) {
+  // WASD / Arrow keys are always active — they move the camera AND the
+  // OrbitControls target together so the orbit centre follows the flight.
+  // Tab-activated ship mode additionally disables mouse orbit.
+  _processFlyKeys();
+
+  if (_controls) {
     _controls.update();
   }
 
   _renderer.render(_scene, _camera);
 }
 
-function _flyShip() {
+// Move the camera (and, in non-ship mode, the OrbitControls target) via
+// keyboard input.  Moving both together preserves the orbit reference point
+// so the user can still orbit with the mouse after flying.
+function _processFlyKeys() {
   const forward = new THREE.Vector3();
   _camera.getWorldDirection(forward);
-
-  if (_keysDown['w'] || _keysDown['arrowup'])    _camera.position.addScaledVector(forward, _ship.speed);
-  if (_keysDown['s'] || _keysDown['arrowdown'])  _camera.position.addScaledVector(forward, -_ship.speed);
 
   const right = new THREE.Vector3();
   right.crossVectors(forward, _camera.up).normalize();
 
-  if (_keysDown['a'] || _keysDown['arrowleft'])  _camera.position.addScaledVector(right, -_ship.speed);
-  if (_keysDown['d'] || _keysDown['arrowright']) _camera.position.addScaledVector(right, _ship.speed);
-  if (_keysDown['q'])                             _camera.position.y += _ship.speed;
-  if (_keysDown['e'])                             _camera.position.y -= _ship.speed;
+  const up = new THREE.Vector3(0, 1, 0);
+
+  const delta = new THREE.Vector3();
+
+  if (_keysDown['w'] || _keysDown['arrowup'])    delta.addScaledVector(forward, _ship.speed);
+  if (_keysDown['s'] || _keysDown['arrowdown'])  delta.addScaledVector(forward, -_ship.speed);
+  if (_keysDown['a'] || _keysDown['arrowleft'])  delta.addScaledVector(right, -_ship.speed);
+  if (_keysDown['d'] || _keysDown['arrowright']) delta.addScaledVector(right, _ship.speed);
+  if (_keysDown['q'])                             delta.addScaledVector(up, _ship.speed);
+  if (_keysDown['e'])                             delta.addScaledVector(up, -_ship.speed);
+
+  if (delta.lengthSq() > 0) {
+    _camera.position.add(delta);
+    // In hybrid mode keep the orbit target in sync so mouse-orbit still works
+    // naturally after flying.  In pure ship mode the target is irrelevant.
+    if (!_shipMode && _controls) {
+      _controls.target.add(delta);
+    }
+  }
 }
 
 // ── Input Handlers ─────────────────────────────────────────────────────────
@@ -511,6 +686,8 @@ function _onKeyDown(e) {
   if (!key) return;
   _keysDown[key] = true;
 
+  // Tab toggles "pure ship mode": disables OrbitControls mouse orbit so the
+  // user can look around freely.  WASD movement works in both modes.
   if (key === 'tab') {
     e.preventDefault();
     _shipMode = !_shipMode;

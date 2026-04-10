@@ -404,6 +404,57 @@ decent-header {
   font-style: italic;
 }
 
+/* ── DNFT list spinner ────────────────────────────────────────────────────── */
+.dnft-list-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0.75rem 0;
+  list-style: none;
+}
+
+.dnft-spinner-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gold);
+  animation: dnftPulse 1.2s ease-in-out infinite;
+}
+.dnft-spinner-dot:nth-child(2) { animation-delay: 0.2s; }
+.dnft-spinner-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes dnftPulse {
+  0%, 80%, 100% { opacity: 0.2; transform: scale(0.7); }
+  40%            { opacity: 1;   transform: scale(1);   }
+}
+
+/* ── "Show All Now" button ────────────────────────────────────────────────── */
+.dnft-show-all-btn {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.85rem;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--panel-border);
+  color: var(--teal);
+  font-size: 0.72rem;
+  font-family: var(--font-body);
+  cursor: pointer;
+  text-align: center;
+  letter-spacing: 0.04em;
+  transition: background var(--transition), color var(--transition);
+  flex-shrink: 0;
+}
+.dnft-show-all-btn:hover {
+  background: rgba(0, 212, 170, 0.07);
+  color: #00d4aa;
+}
+.dnft-show-all-btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
 /* ── Timeline Navigation Controls ────────────────────────────────────────── */
 #timeline-nav {
   position: fixed;
