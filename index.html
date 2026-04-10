@@ -45,6 +45,27 @@
     <button id="nft-panel-close">✕</button>
   </div>
 
+  <!-- DNFT right-side list panel -->
+  <div id="dnft-list">
+    <div id="dnft-list-header">
+      <span>🎵 DNFT Archive</span>
+      <span id="dnft-list-count"></span>
+    </div>
+    <ul id="dnft-list-items">
+      <li class="dnft-list-empty">Loading tracks…</li>
+    </ul>
+  </div>
+
+  <!-- Timeline Navigation Controls -->
+  <div id="timeline-nav">
+    <button id="timeline-back-btn" title="Go back in time" aria-label="Go back in time">◀</button>
+    <div id="timeline-slider-wrap">
+      <input id="timeline-slider" type="range" min="0" max="335" value="0" step="1" aria-label="Timeline position" />
+      <span id="timeline-label">🕐 Now</span>
+    </div>
+    <button id="timeline-forward-btn" title="Go forward (toward now)" aria-label="Go forward in time">▶</button>
+  </div>
+
   <!-- Mint modal -->
   <div id="mint-modal" class="hidden">
     <div id="mint-modal-inner">

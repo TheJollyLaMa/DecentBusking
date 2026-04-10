@@ -47,7 +47,10 @@ body {
   position: fixed;
   inset: 0;
   z-index: 0;
-  pointer-events: none;
+  /* pointer-events enabled so raycaster can detect clicks on 3-D NFT meshes.
+     UI elements (z-index ≥ 10) capture their own clicks first. */
+  pointer-events: auto;
+  cursor: default;
 }
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
@@ -304,7 +307,173 @@ decent-header {
 }
 
 /* ── Mint Modal ──────────────────────────────────────────────────────────── */
-#mint-modal {
+
+/* ── DNFT Right-side List Panel ──────────────────────────────────────────── */
+#dnft-list {
+  position: fixed;
+  right: 0;
+  top: 60px;
+  bottom: 60px;
+  width: 230px;
+  z-index: 50;
+  background: rgba(5, 3, 18, 0.88);
+  border-left: 1px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  transition: transform var(--transition);
+}
+
+#dnft-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  color: var(--gold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+#dnft-list-count {
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+#dnft-list-items {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  padding: 0.35rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gold-dim) transparent;
+}
+
+#dnft-list-items::-webkit-scrollbar { width: 4px; }
+#dnft-list-items::-webkit-scrollbar-thumb { background: var(--gold-dim); border-radius: 2px; }
+
+.dnft-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  padding: 0.55rem 0.85rem;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(240, 192, 64, 0.07);
+  transition: background var(--transition), border-left var(--transition);
+  border-left: 2px solid transparent;
+}
+
+.dnft-list-item:hover {
+  background: rgba(240, 192, 64, 0.06);
+  border-left-color: var(--gold-dim);
+}
+
+.dnft-list-item.active {
+  background: rgba(0, 212, 170, 0.08);
+  border-left-color: var(--teal);
+}
+
+.dnft-list-item-title {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dnft-list-item-meta {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dnft-list-empty {
+  padding: 1rem 0.85rem;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
+/* ── Timeline Navigation Controls ────────────────────────────────────────── */
+#timeline-nav {
+  position: fixed;
+  bottom: 72px;
+  /* Shift left by ~half the list-panel width (230px / 2 ≈ 115px) so the nav
+     appears centred in the main viewport area, not under the right-side panel. */
+  left: calc(50% - 115px);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(5, 3, 18, 0.88);
+  border: 1px solid var(--panel-border);
+  border-radius: 28px;
+  padding: 0.45rem 0.9rem;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0 20px rgba(240, 192, 64, 0.08);
+}
+
+#timeline-nav button {
+  background: none;
+  border: none;
+  color: var(--gold-dim);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.2rem 0.35rem;
+  border-radius: 50%;
+  transition: color var(--transition), background var(--transition);
+}
+
+#timeline-nav button:hover {
+  color: var(--gold);
+  background: rgba(240, 192, 64, 0.1);
+}
+
+#timeline-nav button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+#timeline-slider-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+#timeline-slider {
+  width: 180px;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
+#timeline-label {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  text-align: center;
+  min-width: 90px;
+  letter-spacing: 0.03em;
+}
+
+/* Shrink stage right-padding when list panel is present */
+@media (min-width: 600px) {
+  #stage {
+    padding-right: 240px;
+  }
+}
+
+/* ── Mint Modal ──────────────────────────────────────────────────────────── */
   position: fixed;
   inset: 0;
   z-index: 300;
