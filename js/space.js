@@ -43,6 +43,10 @@ const INITIAL_BATCH    = 4;         // NFTs to load immediately on startup
 const PAGE_BATCH       = 4;         // NFTs fetched per subsequent auto-page
 const PAGE_INTERVAL_MS = 30_000;    // milliseconds between auto-pages (30 s)
 
+// Yield time (ms) between rapid batch loads triggered by "Show All Now".
+// Keeps the browser event loop responsive during fast loading.
+const BATCH_YIELD_MS   = 200;
+
 // Music-filter: an animation_url with one of these extensions is an audio NFT.
 // ipfs:// links without an extension are also accepted (this dapp's native format).
 const AUDIO_EXT_RE = /\.(mp3|wav|flac|m4a|ogg|opus|aac)(\?|#|$)/i;
@@ -338,7 +342,7 @@ async function _loadAllNow() {
     }
     await _loadBatch(PAGE_BATCH);
     // Yield to the browser between bursts so the UI stays responsive.
-    setTimeout(runNext, 200);
+    setTimeout(runNext, BATCH_YIELD_MS);
   };
   await runNext();
 }
@@ -358,6 +362,7 @@ function _isMusicNFT(meta) {
   if (!anim) return false;
   if (AUDIO_EXT_RE.test(anim)) return true;
   // ipfs:// links without a recognised extension → treat as audio
+  // ({2,5} covers extensions like js, mp3, json, flac, etc.)
   if (anim.startsWith('ipfs://') && !/\.[a-z]{2,5}(\?|#|$)/.test(anim)) return true;
   return false;
 }
