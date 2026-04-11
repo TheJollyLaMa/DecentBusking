@@ -79,6 +79,22 @@
       "amount": "0.00001",
       "queuedAt": "2026-04-03T19:39:56.007Z",
       "queuedBy": "github-actions[bot]"
+    },
+    {
+      "issueRef": "TheJollyLaMa/DecentBusking#58",
+      "contributor": "0x23A457AD3C33d68E4fAd2FCa7c5d9a511E0C350e",
+      "contributorGithub": "copilot",
+      "amount": "0.00001",
+      "queuedAt": "2026-04-11T08:17:59.694Z",
+      "queuedBy": "github-actions[bot]"
+    },
+    {
+      "issueRef": "TheJollyLaMa/DecentBusking#58",
+      "contributor": "0x807061DF657A7697c04045dA7d16D941861cAABc",
+      "contributorGithub": "TheJollyLaMa",
+      "amount": "0.00001",
+      "queuedAt": "2026-04-11T08:17:59.694Z",
+      "queuedBy": "github-actions[bot]"
     }
   ],
   "settled": []
