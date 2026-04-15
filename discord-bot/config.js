@@ -9,6 +9,7 @@ import 'dotenv/config';
  * @property {string} discordToken       - Discord bot token (DISCORD_TOKEN)
  * @property {string} jukeboxChannelId   - Discord channel ID to watch (JUKEBOX_CHANNEL_ID)
  * @property {string} siteUrl            - DecentBusking site URL (SITE_URL)
+ * @property {string} ipfsGateway        - IPFS HTTP gateway base URL (IPFS_GATEWAY)
  * @property {string} w3upKey            - w3up agent key – base64-encoded UCAN delegation (W3UP_KEY)
  * @property {string} w3upProof          - w3up space proof – base64-encoded UCAN delegation (W3UP_PROOF)
  */
@@ -28,6 +29,7 @@ export function loadConfig() {
     discordToken:     process.env.DISCORD_TOKEN,
     jukeboxChannelId: process.env.JUKEBOX_CHANNEL_ID,
     siteUrl:          (process.env.SITE_URL || 'https://thejollylama.github.io/DecentBusking').replace(/\/$/, ''),
+    ipfsGateway:      (process.env.IPFS_GATEWAY || 'https://w3s.link').replace(/\/$/, ''),
     w3upKey:          process.env.W3UP_KEY,
     w3upProof:        process.env.W3UP_PROOF,
   };
