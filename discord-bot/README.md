@@ -1,10 +1,12 @@
 # DecentBusking Jukebox Bot
 
-A Node.js Discord bot with two modes:
+A Node.js Discord bot with three modes:
 
-1. **Upload → IPFS Pin** — watches the `#jukebox` channel for audio file uploads, pins them to IPFS via [w3up (web3.storage / Storacha)](https://web3.storage), and replies with a rich embed containing a one-click **🎸 Mint This As A DNFT** link pre-filled with the track title and IPFS CID.
+1. **Upload → IPFS Pin** — watches the `#DecentJukebox` channel for audio file uploads, pins them to IPFS via [w3up (web3.storage / Storacha)](https://web3.storage), and replies with a rich embed containing a one-click **🎸 Mint This As A DNFT** link pre-filled with the track title and IPFS CID.
 
 2. **IPFS Radio & Personal Jukebox** — slash commands that stream an IPFS album directory to a Discord voice channel (`/radio`) or send you a private numbered playlist via DM (`/jukebox`).
+
+3. **JukeLoop** — 24/7 community radio that continuously plays every audio file posted in `#DecentJukebox` in the `JukeLoop` voice channel. Track order is influenced by 👍/👎 reactions so popular tracks appear more often.
 
 The bot does **not** mint on-chain — the artist still connects MetaMask and confirms the transaction in the browser.
 
@@ -15,7 +17,7 @@ The bot does **not** mint on-chain — the artist still connects MetaMask and co
 ### 1. Prerequisites
 
 - Node.js ≥ 18
-- **FFmpeg** installed and available on the system `PATH` (required for `/radio` voice streaming)
+- **FFmpeg** installed and available on the system `PATH` (required for `/radio` and JukeLoop voice streaming)
   - Ubuntu/Debian: `sudo apt install ffmpeg`
   - macOS: `brew install ffmpeg`
   - Windows: download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to `PATH`
@@ -37,15 +39,19 @@ cp .env.example .env
 # Edit .env with your values
 ```
 
-| Variable             | Required | Description |
-|----------------------|----------|-------------|
-| `DISCORD_TOKEN`      | ✅        | Bot token from the [Discord Developer Portal](https://discord.com/developers/applications) |
-| `JUKEBOX_CHANNEL_ID` | ✅        | Numeric ID of the `#jukebox` channel to watch for uploads |
-| `W3UP_KEY`           | ✅        | ed25519 agent private key (`w3 key create`) |
-| `W3UP_PROOF`         | ✅        | Base64-encoded UCAN delegation (`w3 delegation create … | base64`) |
-| `SITE_URL`           | ❌        | DecentBusking site URL (default: `https://thejollylama.github.io/DecentBusking`) |
-| `IPFS_GATEWAY`       | ❌        | IPFS HTTP gateway base URL (default: `https://w3s.link`) |
-| `FFMPEG_PATH`        | ❌        | Path to `ffmpeg` binary (default: `ffmpeg` from `PATH`) |
+| Variable                     | Required | Description |
+|------------------------------|----------|-------------|
+| `DISCORD_TOKEN`              | ✅        | Bot token from the [Discord Developer Portal](https://discord.com/developers/applications) |
+| `JUKEBOX_CHANNEL_ID`         | ✅        | Numeric ID of the `#DecentJukebox` channel to watch for uploads |
+| `W3UP_KEY`                   | ✅        | ed25519 agent private key (`w3 key create`) |
+| `W3UP_PROOF`                 | ✅        | Base64-encoded UCAN delegation (`w3 delegation create … | base64`) |
+| `SITE_URL`                   | ❌        | DecentBusking site URL (default: `https://thejollylama.github.io/DecentBusking`) |
+| `IPFS_GATEWAY`               | ❌        | IPFS HTTP gateway base URL (default: `https://w3s.link`) |
+| `FFMPEG_PATH`                | ❌        | Path to `ffmpeg` binary (default: `ffmpeg` from `PATH`) |
+| `JUKE_LOOP_VOICE_CHANNEL_ID` | ❌        | Numeric ID of the `JukeLoop` **voice** channel — enables 24/7 radio |
+| `JUKE_LOOP_TEXT_CHANNEL_ID`  | ❌        | Numeric ID of the `JukeLoop` **text** channel — where "Now Playing" posts go |
+
+> JukeLoop is **opt-in**: omit `JUKE_LOOP_VOICE_CHANNEL_ID` / `JUKE_LOOP_TEXT_CHANNEL_ID` (or leave them blank) to keep the bot running without it.
 
 ### 4. Generate w3up credentials
 
@@ -112,14 +118,73 @@ Fetch a numbered playlist of direct stream links from an IPFS album directory an
 
 The CID must point to an **IPFS directory** containing audio files (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.flac`, `.aac`, `.opus`).
 
+### 📻 `/jukeloop` — JukeLoop Admin Commands
+
+Manage the 24/7 community radio playlist.  Most subcommands are available to everyone; `remove` requires the **Manage Messages** permission.
+
+| Command | Permission | Description |
+|---------|------------|-------------|
+| `/jukeloop stats` | Everyone | Show the top 10 rated tracks (likes, dislikes, plays, score). |
+| `/jukeloop remove <title>` | Manage Messages | Remove a track from the JukeLoop playlist by searching its title. |
+
+---
+
+## JukeLoop — 24/7 Community Radio
+
+JukeLoop automatically streams every audio file posted in `#DecentJukebox` to the `JukeLoop` voice channel, non-stop.
+
+### How it works
+
+```
+Bot starts up
+    ↓
+Loads playlist from jukeloop-playlist.json (persisted across restarts)
+    ↓
+Scans ALL historic messages in #DecentJukebox for audio attachments (backfill)
+    ↓
+Joins the JukeLoop voice channel
+    ↓
+Builds a weighted-random playlist (higher-rated tracks play sooner/more often)
+    ↓
+Plays each track, announces it in the JukeLoop text channel, adds 👍 / 👎 buttons
+    ↓
+When the next track starts, reads the reaction counts and updates ratings
+    ↓
+After each full loop, reshuffles using fresh weights → repeat forever
+```
+
+### Rating system
+
+| Reaction | Effect |
+|----------|--------|
+| 👍 | +1 to the track's score |
+| 👎 | −0.5 to the track's score |
+
+Track weight = `max(0.1, 1 + likes − dislikes × 0.5)`.  A brand-new track has weight 1.0.  Higher weight = higher probability of appearing earlier in each loop pass.  Even heavily down-voted tracks still appear occasionally (weight floor: 0.1).
+
+Ratings **accumulate** across plays and **persist to disk** (`jukeloop-playlist.json`) so they survive bot restarts.
+
+### Setting up JukeLoop
+
+1. Create a `JukeLoop` voice channel and a `JukeLoop` text channel in your server.
+2. Copy both channel IDs (Developer Mode → right-click → Copy Channel ID).
+3. Add to `.env`:
+   ```
+   JUKE_LOOP_VOICE_CHANNEL_ID=<voice-channel-id>
+   JUKE_LOOP_TEXT_CHANNEL_ID=<text-channel-id>
+   ```
+4. Restart the bot — it will backfill existing tracks automatically.
+
 ---
 
 ## Upload → IPFS Pin Flow
 
 ```
-User posts audio in #jukebox
+User posts audio in #DecentJukebox
     ↓
 Bot detects message attachments with audio MIME type or extension
+    ↓
+Track is immediately added to the JukeLoop playlist (if JukeLoop is enabled)
     ↓
 Bot downloads the file buffer via fetch
     ↓
@@ -195,12 +260,15 @@ pm2 save && pm2 startup
 
 ```
 discord-bot/
-  index.js       ← bot entry point (message handler + slash command router)
-  radio.js       ← IPFS track fetcher + per-guild RadioSession (voice streaming)
-  ipfs.js        ← w3up Node.js upload helper
-  embed.js       ← Discord EmbedBuilder for mint-link replies
-  config.js      ← environment variable loader with validation
-  package.json   ← Node.js manifest
-  .env.example   ← template for required environment variables
-  README.md      ← this file
+  index.js                 ← bot entry point (message handler + slash command router)
+  radio.js                 ← IPFS track fetcher + per-guild RadioSession (voice streaming)
+  jukeloop.js              ← JukeLoopSession (24/7 radio) + channel backfill helper
+  playlist-store.js        ← persistent playlist with 👍/👎 ratings and weighted shuffle
+  jukeloop-playlist.json   ← runtime data: playlist + ratings (auto-created, gitignored)
+  ipfs.js                  ← w3up Node.js upload helper
+  embed.js                 ← Discord EmbedBuilder for mint-link replies
+  config.js                ← environment variable loader with validation
+  package.json             ← Node.js manifest
+  .env.example             ← template for required environment variables
+  README.md                ← this file
 ```

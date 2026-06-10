@@ -2,13 +2,18 @@
 // DecentBusking Discord Bot — entry point
 //
 // Features:
-//  • Watches #jukebox for audio file uploads, pins them to IPFS via w3up, and
-//    replies with a rich embed containing a one-click "🎸 Mint This As A DNFT"
-//    deep-link into the DecentBusking UI with the mint form pre-filled.
+//  • Watches #DecentJukebox for audio file uploads, pins them to IPFS via w3up,
+//    replies with a rich embed containing a "🎸 Mint This As A DNFT" deep-link,
+//    AND adds the track to the JukeLoop playlist.
+//  • JukeLoop: 24/7 audio stream in the JukeLoop voice channel, sourced from
+//    #DecentJukebox uploads, ordered by 👍/👎 weighted ratings.
 //  • /radio play <cid>  — bot joins your voice channel and streams all tracks
 //                         from an IPFS album directory; announces each track.
 //  • /radio skip|pause|stop — playback controls for the active radio session.
 //  • /jukebox play <cid> — bot DMs you a numbered playlist of stream links.
+//  • /jukeloop remove <title> — admin: remove a track from the JukeLoop playlist.
+//  • /jukeloop stats          — show the top-rated JukeLoop tracks.
+//  • /jukeloop volume <level> — (currently informational; voice volume is fixed).
 //
 // The bot does NOT mint on-chain.  The user still connects MetaMask and
 // confirms the transaction in the browser.
@@ -26,6 +31,17 @@ import { loadConfig }    from './config.js';
 import { uploadToIPFS }  from './ipfs.js';
 import { buildMintEmbed } from './embed.js';
 import { fetchTrackList, createSession, getSession } from './radio.js';
+import {
+  loadPlaylist,
+  addTrack,
+  getPlaylist,
+  getTopTracks,
+  removeTrack,
+} from './playlist-store.js';
+import {
+  createJukeLoopSession,
+  backfillFromChannel,
+} from './jukeloop.js';
 
 // ── Audio MIME-type detection ─────────────────────────────────────────────────
 const AUDIO_MIME_PREFIXES  = ['audio/'];
@@ -97,11 +113,34 @@ const SLASH_COMMANDS = [
             .setRequired(true),
         ),
     ),
+
+  new SlashCommandBuilder()
+    .setName('jukeloop')
+    .setDescription('JukeLoop admin commands — manage the community radio playlist')
+    .addSubcommand((sub) =>
+      sub
+        .setName('stats')
+        .setDescription('Show the top-rated tracks in the JukeLoop playlist'),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('remove')
+        .setDescription('(Admin) Remove a track from the JukeLoop playlist by title')
+        .addStringOption((opt) =>
+          opt
+            .setName('title')
+            .setDescription('Part of the track title to search for (case-insensitive)')
+            .setRequired(true),
+        ),
+    ),
 ].map((cmd) => cmd.toJSON());
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 async function main() {
   const config = loadConfig();
+
+  // Load the persisted JukeLoop playlist before the client connects
+  loadPlaylist();
 
   const client = new Client({
     intents: [
@@ -124,6 +163,16 @@ async function main() {
     } catch (err) {
       console.error('[jukebox-bot] Failed to register slash commands:', err.message);
     }
+
+    // ── JukeLoop startup ───────────────────────────────────────────────────────
+    if (config.jukeLoopVoiceChannelId && config.jukeLoopTextChannelId) {
+      await startJukeLoop(readyClient, config);
+    } else {
+      console.log(
+        '[jukeloop] JUKE_LOOP_VOICE_CHANNEL_ID or JUKE_LOOP_TEXT_CHANNEL_ID not set — ' +
+        'JukeLoop disabled.',
+      );
+    }
   });
 
   client.on(Events.MessageCreate, async (message) => {
@@ -135,6 +184,21 @@ async function main() {
     if (!audioAttachments.length) return;
 
     for (const attachment of audioAttachments) {
+      // ── JukeLoop: queue the new upload ──────────────────────────────────────
+      if (config.jukeLoopVoiceChannelId) {
+        const filename = attachment.name || 'track.mp3';
+        const title    = filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || filename;
+        addTrack({
+          messageId:  message.id,
+          channelId:  message.channelId,
+          filename,
+          title,
+          uploader:   message.author.tag ?? message.author.username ?? 'Unknown',
+          uploaderId: message.author.id,
+        });
+      }
+
+      // ── Existing IPFS / mint flow ────────────────────────────────────────────
       await handleAudioAttachment(message, attachment, config);
     }
   });
@@ -147,6 +211,8 @@ async function main() {
       await handleRadioCommand(interaction, config);
     } else if (interaction.commandName === 'jukebox') {
       await handleJukeboxCommand(interaction, config);
+    } else if (interaction.commandName === 'jukeloop') {
+      await handleJukeLoopCommand(interaction, config);
     }
   });
 
@@ -390,6 +456,131 @@ export function buildMintUrl(siteUrl, title, ipfsCid, artist) {
   const params = new URLSearchParams({ title, ipfs: ipfsCid });
   if (artist) params.set('artist', artist);
   return `${siteUrl}/?${params.toString()}`;
+}
+
+// ── JukeLoop startup helper ───────────────────────────────────────────────────
+
+/**
+ * Resolve JukeLoop channels, backfill historic tracks, and start the session.
+ *
+ * @param {import('discord.js').Client} client
+ * @param {ReturnType<typeof loadConfig>} config
+ */
+async function startJukeLoop(client, config) {
+  try {
+    const voiceChannel = await client.channels.fetch(config.jukeLoopVoiceChannelId).catch(() => null);
+    const textChannel  = await client.channels.fetch(config.jukeLoopTextChannelId).catch(() => null);
+    const jukeboxCh    = await client.channels.fetch(config.jukeboxChannelId).catch(() => null);
+
+    if (!voiceChannel) {
+      console.error('[jukeloop] Could not find voice channel:', config.jukeLoopVoiceChannelId);
+      return;
+    }
+    if (!textChannel) {
+      console.error('[jukeloop] Could not find text channel:', config.jukeLoopTextChannelId);
+      return;
+    }
+
+    // Backfill all historic uploads from #DecentJukebox
+    if (jukeboxCh) {
+      await backfillFromChannel(jukeboxCh);
+    } else {
+      console.warn('[jukeloop] Could not access #DecentJukebox for backfill:', config.jukeboxChannelId);
+    }
+
+    const session = createJukeLoopSession(voiceChannel.guild.id, {
+      voiceChannel,
+      textChannel,
+      client,
+    });
+
+    await session.connect();
+    console.log('[jukeloop] Connected to voice channel, starting playback…');
+    await textChannel
+      .send('📻 **JukeLoop is live!** The community radio is starting up — tracks from #DecentJukebox are on the way.')
+      .catch(() => {});
+    await session.start();
+  } catch (err) {
+    console.error('[jukeloop] Failed to start JukeLoop:', err.message);
+  }
+}
+
+// ── /jukeloop command handler ─────────────────────────────────────────────────
+
+/**
+ * Handle all `/jukeloop` subcommands.
+ *
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @param {ReturnType<typeof loadConfig>} config
+ */
+async function handleJukeLoopCommand(interaction, config) {
+  const sub = interaction.options.getSubcommand();
+
+  if (sub === 'stats') {
+    const top = getTopTracks(10);
+    if (top.length === 0) {
+      await interaction.reply({ content: '📭 The JukeLoop playlist is empty.', ephemeral: true });
+      return;
+    }
+
+    const lines = top.map((t, i) => {
+      const score  = (t.likes - t.dislikes * 0.5).toFixed(1);
+      const rating = `👍 ${t.likes}  👎 ${t.dislikes}  ▶️ ${t.plays}`;
+      return `**${i + 1}.** ${t.title} — *${t.uploader}*\n  ${rating}  (score: ${score})`;
+    });
+
+    const embed = new EmbedBuilder()
+      .setColor(0x9b59b6)
+      .setTitle('📊 JukeLoop — Top Tracks')
+      .setDescription(lines.join('\n\n'))
+      .setFooter({ text: `${getPlaylist().length} track(s) total · DecentBusking JukeLoop` })
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+    return;
+  }
+
+  if (sub === 'remove') {
+    // Admin-only: requires ManageMessages permission
+    if (!interaction.memberPermissions?.has('ManageMessages')) {
+      await interaction.reply({
+        content: '🔒 You need the **Manage Messages** permission to remove JukeLoop tracks.',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const query   = interaction.options.getString('title', true).toLowerCase();
+    const matches = getPlaylist().filter((t) => t.title.toLowerCase().includes(query));
+
+    if (matches.length === 0) {
+      await interaction.reply({
+        content: `❌ No JukeLoop tracks found matching **"${query}"**.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (matches.length > 1) {
+      const list = matches.slice(0, 5).map((t) => `• **${t.title}** by ${t.uploader}`).join('\n');
+      await interaction.reply({
+        content: `⚠️ Multiple tracks match **"${query}"** — please be more specific:\n${list}`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const removed = removeTrack(matches[0].messageId);
+    if (removed) {
+      await interaction.reply({
+        content: `🗑️ Removed **${removed.title}** by *${removed.uploader}* from the JukeLoop playlist.`,
+        ephemeral: true,
+      });
+    } else {
+      await interaction.reply({ content: '❌ Track could not be removed.', ephemeral: true });
+    }
+    return;
+  }
 }
 
 main().catch((err) => {
