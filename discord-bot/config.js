@@ -14,6 +14,7 @@ import 'dotenv/config';
  * @property {string}      w3upProof               - w3up space proof (W3UP_PROOF)
  * @property {string|null} jukeLoopVoiceChannelId  - JukeLoop voice channel ID (JUKE_LOOP_VOICE_CHANNEL_ID) — optional
  * @property {string|null} jukeLoopTextChannelId   - JukeLoop announcement text channel ID (JUKE_LOOP_TEXT_CHANNEL_ID) — optional
+ * @property {boolean}     disableMintFlow         - Skip IPFS pinning and mint embed (DISABLE_MINT_FLOW) — optional, default false
  */
 
 /**
@@ -36,5 +37,6 @@ export function loadConfig() {
     w3upProof:              process.env.W3UP_PROOF,
     jukeLoopVoiceChannelId: process.env.JUKE_LOOP_VOICE_CHANNEL_ID || null,
     jukeLoopTextChannelId:  process.env.JUKE_LOOP_TEXT_CHANNEL_ID  || null,
+    disableMintFlow:        process.env.DISABLE_MINT_FLOW === 'true',
   };
 }

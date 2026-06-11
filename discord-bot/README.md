@@ -50,6 +50,7 @@ cp .env.example .env
 | `FFMPEG_PATH`                | ❌        | Path to `ffmpeg` binary (default: `ffmpeg` from `PATH`) |
 | `JUKE_LOOP_VOICE_CHANNEL_ID` | ❌        | Numeric ID of the `JukeLoop` **voice** channel — enables 24/7 radio |
 | `JUKE_LOOP_TEXT_CHANNEL_ID`  | ❌        | Numeric ID of the `JukeLoop` **text** channel — where "Now Playing" posts go |
+| `DISABLE_MINT_FLOW`          | ❌        | Set to `true` to skip IPFS pinning and the Mint embed (JukeLoop-only mode). Default: `false` |
 
 > JukeLoop is **opt-in**: omit `JUKE_LOOP_VOICE_CHANNEL_ID` / `JUKE_LOOP_TEXT_CHANNEL_ID` (or leave them blank) to keep the bot running without it.
 

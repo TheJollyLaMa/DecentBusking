@@ -198,8 +198,10 @@ async function main() {
         });
       }
 
-      // ── Existing IPFS / mint flow ────────────────────────────────────────────
-      await handleAudioAttachment(message, attachment, config);
+      // ── Existing IPFS / mint flow (opt-out with DISABLE_MINT_FLOW=true) ──────
+      if (!config.disableMintFlow) {
+        await handleAudioAttachment(message, attachment, config);
+      }
     }
   });
 
