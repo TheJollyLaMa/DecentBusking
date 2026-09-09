@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Decent Busking Catalog</title>
+  <style>
+    body { background: #0f111a; color: #fff; font-family: sans-serif; text-align: center; padding: 50px; }
+    h1 { color: #ffd700; }
+    .album-grid { display: flex; justify-content: center; gap: 20px; margin-top: 30px; flex-wrap: wrap; }
+    .album-card { background: #1a1d2e; padding: 20px; border-radius: 12px; border: 1px solid #333850; text-decoration: none; color: white; width: 200px; }
+    .album-card:hover { border-color: #ffd700; transform: translateY(-3px); transition: all 0.2s; }
+  </style>
+</head>
+<body>
+  <h1>Decent Busking Catalog</h1>
+  <p>Select an album to launch its player:</p>
+
+  <div class="album-grid">
+    <!-- Album AA -->
+    <a class="album-card" href="https://ipfs.io/ipfs/bafybeidxx4rufx7xrn5lmt3npyaej6doupxajyh53ibb4fp43whdvgfm2u">
+      <h3>Jones Drive Sessions AA</h3>
+      <p>▶ Play Album</p>
+    </a>
+
+    <!-- Album AB -->
+    <a class="album-card" href="https://ipfs.io/ipfs/bafybeicsbobnagvxy7tw47kqahluncyv52umlvieplkmr643covtfimnua">
+      <h3>Jones Drive Sessions AB</h3>
+      <p>▶ Play Album</p>
+    </a>
+  </div>
+
+  
+  <script>
+    // If someone visits with a #/ipfs/ CID hash directly, redirect them to load that album player
+    if (window.location.hash.startsWith('#/ipfs/')) {
+      const cid = window.location.hash.replace('#/ipfs/', '');
+      window.location.href = `https://ipfs.io/ipfs/${cid}/`;
+    }
+  </script>
+</body>
+</html>
