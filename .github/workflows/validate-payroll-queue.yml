@@ -1,46 +1,51 @@
-# .github/workflows/validate-payroll-queue.yml
-# Validates payroll-queue.json on every push and pull request.
-#
-# Checks performed by scripts/validatePayrollQueue.js:
-#   - Required fields present on every entry
-#   - issueRef follows canonical format (<owner>/<repo>#<number>)
-#   - contributor is a valid Ethereum address (or empty pending registration)
-#   - amount is a positive number (ETH, supports decimals like 0.00001)
-#   - No duplicate (issueRef, contributorGithub) pairs
-#   - contributorGithub exists in contributor-accounts.json
-#   - Wallet addresses match contributor-accounts.json registrations
-
 name: Validate Payroll Queue
 
 on:
   push:
+    branches: [main]
     paths:
-      - 'payroll-queue.json'
-      - 'contributor-accounts.json'
-      - 'scripts/validatePayrollQueue.js'
-      - '.github/workflows/validate-payroll-queue.yml'
+      - payroll-queue.json
+      - contributor-accounts.json
+      - scripts/commentArt.js
+      - scripts/githubApi.js
+      - scripts/payroll.js
+      - scripts/processMergedBounty.js
+      - scripts/processTestingBounty.js
+      - scripts/sendContributorAlert.js
+      - scripts/settlePayroll.js
+      - scripts/validatePayrollQueue.js
+      - test/automation.test.js
+      - test/commentArt.test.js
+      - test/payroll.test.js
+      - .github/workflows/bounty-bot.yml
+      - .github/workflows/testing-bounty.yml
+      - .github/workflows/settle-payroll.yml
+      - .github/workflows/validate-payroll-queue.yml
   pull_request:
+    branches: [main]
     paths:
-      - 'payroll-queue.json'
-      - 'contributor-accounts.json'
-      - 'scripts/validatePayrollQueue.js'
-      - '.github/workflows/validate-payroll-queue.yml'
+      - payroll-queue.json
+      - contributor-accounts.json
+      - scripts/**
+      - test/**
+      - js/payroll.js
+      - .github/workflows/**
+
+permissions:
+  contents: read
 
 jobs:
   validate:
-    name: Validate payroll-queue.json
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout revision
+        run: |
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "$GITHUB_REF"
+          git checkout --detach FETCH_HEAD
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Run payroll queue validator
-        run: node scripts/validatePayrollQueue.js
+      - name: Validate ledger and tests
+        run: |
+          node scripts/validatePayrollQueue.js
+          node --test test/payroll.test.js test/commentArt.test.js test/automation.test.js

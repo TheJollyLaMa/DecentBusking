@@ -1,0 +1,44 @@
+name: Contributor Request
+description: Request to contribute to DecentBusking as a builder or tester
+title: "Contributor request: "
+labels: ["contributor-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep this brief and technical. No interview, biography, or background essay is required.
+
+  - type: input
+    id: github
+    attributes:
+      label: GitHub username
+      description: Your GitHub handle
+      placeholder: e.g. yourname
+    validations:
+      required: true
+
+  - type: input
+    id: wallet
+    attributes:
+      label: Wallet address
+      description: Ethereum-compatible wallet address for ART ledger settlement
+      placeholder: 0x...
+    validations:
+      required: true
+
+  - type: textarea
+    id: skills
+    attributes:
+      label: What you want to help with
+      description: Name the technical area or task you want to contribute to.
+      placeholder: Frontend, contracts, tooling, testing, research, etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: links
+    attributes:
+      label: Relevant links / repos / past work
+      description: Optional technical work samples
+    validations:
+      required: false

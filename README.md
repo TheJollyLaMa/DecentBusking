@@ -37,11 +37,9 @@ DecentBusking/
 │   └── guitar-case.svg
 ├── .github/
 │   └── workflows/
-│       ├── bounty-bot.yml      ← Auto-announces & queues $BNUT payouts
-│       ├── bounty-audit.yml    ← Weekly scan for missed close tags
-│       ├── bounty-label.yml    ← Label issues with bounty amounts
-│       ├── bounty-payout.yml   ← Manual payout queue
-│       └── idea-label.yml      ← Credit community ideas (20/80 split)
+│       ├── bounty-bot.yml      ← Queues merged and recovered ART payouts
+│       ├── testing-bounty.yml  ← Handles tester completion and approval
+│       └── settle-payroll.yml  ← Records external ART/legacy ETH settlement
 ├── bounty-bot-config.json
 ├── contributor-accounts.json
 └── README.md
@@ -98,14 +96,16 @@ Push to `main` — GitHub Pages serves the site automatically.
 
 ## Bounty System
 
-DecentBusking uses an automated ETH bounty bot to reward contributors.
+DecentBusking records new contributor rewards in ART through local Node automation.
 
-- **Maintainer** labels issues with `bounty: N BNUT` via the **Bounty Label** workflow.
+- **Maintainer** labels issues with exactly `bounty: N ART` or `bounty: N $ART`.
 - **Contributors** claim by commenting, getting assigned, and opening a PR with `Closes #N`.
-- On merge the bot auto-queues the payout in `payroll-queue.json`.
-- **Maintainer** settles weekly via MetaMask in the DecentBusking Payroll panel.
+- On merge the bot adds a currency-tagged ART entry to `payroll-queue.json`.
+- **Maintainer** pays ART externally and records settlement with the workflow.
+- Historical currency-less queue entries remain legacy ETH and can still use the existing MetaMask panel.
+- ART entries are visible in that panel but guarded as ledger-only; they are never sent as ETH.
 
-To register as a contributor, contact `@TheJollyLaMa` directly.
+Use the Contributor Request issue form to register without an interview or biography. See [docs/PAYROLL.md](docs/PAYROLL.md) for labels, testing rewards, recovery, and settlement.
 
 ---
 

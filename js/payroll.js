@@ -167,13 +167,15 @@ export async function loadPayrollQueue() {
     _ownerAddress.toLowerCase() === window._wallet.address.toLowerCase();
 
   tableBody.innerHTML = _pendingEntries.map((entry, i) => {
+    const currency = _entryCurrency(entry);
+    const isArt = currency === 'ART';
     const wallet = entry.contributor || '';
     const walletDisplay = wallet
       ? `<a href="https://optimistic.etherscan.io/address/${_esc(wallet)}" target="_blank" rel="noopener" class="payroll-addr-link" title="${_esc(wallet)}">${_esc(_shortAddr(wallet))}</a>`
       : '<span class="payroll-no-wallet">⚠️ No wallet</span>';
-    const canPay = isOwner && wallet && wallet.startsWith('0x') && wallet.length === 42;
+    const canPay = isOwner && _isEthPayableEntry(entry);
     return `
-      <tr data-index="${i}" class="payroll-row">
+      <tr data-index="${i}" class="payroll-row${isArt ? ' payroll-row-ledger-only' : ''}">
         <td class="payroll-td">
           <a href="https://github.com/${_esc(entry.contributorGithub)}" target="_blank" rel="noopener" class="payroll-github-link">
             <img src="https://github.com/${_esc(entry.contributorGithub)}.png?size=20" class="payroll-avatar" onerror="this.style.display='none'" />
@@ -181,14 +183,19 @@ export async function loadPayrollQueue() {
           </a>
         </td>
         <td class="payroll-td">${walletDisplay}</td>
-        <td class="payroll-td payroll-amount"><strong>${_esc(entry.amount)} ETH</strong></td>
+        <td class="payroll-td payroll-amount">
+          <strong>${_esc(entry.amount)} ${_esc(currency)}</strong>
+          ${isArt ? '<br><small>Ledger-only / manual ART settlement</small>' : ''}
+        </td>
         <td class="payroll-td payroll-issue">
           <a href="https://github.com/${_esc(entry.issueRef.replace('#', '/issues/'))}" target="_blank" rel="noopener" class="payroll-issue-link">
             ${_esc(entry.issueRef)}
           </a>
         </td>
         <td class="payroll-td">
-          ${canPay
+          ${isArt
+            ? '<span class="payroll-pay-disabled" title="ART entries are ledger-only until an ART payment path is configured">Manual</span>'
+            : canPay
             ? `<button class="payroll-pay-btn" data-index="${i}">💸 Pay</button>`
             : `<span class="payroll-pay-disabled">${isOwner ? '⚠️ No wallet' : '🔒'}</span>`
           }
@@ -206,7 +213,7 @@ export async function loadPayrollQueue() {
 
   // Enable/disable Settle All button
   const payableCount = _pendingEntries.filter(e =>
-    isOwner && e.contributor && isValidEthAddress(e.contributor)
+    isOwner && _isEthPayableEntry(e)
   ).length;
   if (settleBtn) {
     settleBtn.disabled = payableCount === 0;
@@ -218,6 +225,14 @@ function isValidEthAddress(addr) {
   return !!addr && /^0x[0-9a-fA-F]{40}$/.test(addr);
 }
 
+function _entryCurrency(entry) {
+  return String(entry?.currency || 'ETH').trim().toUpperCase();
+}
+
+function _isEthPayableEntry(entry) {
+  return _entryCurrency(entry) === 'ETH' && isValidEthAddress(entry?.contributor);
+}
+
 // ─── Send a single ETH payment ────────────────────────────────────────────────
 
 async function _paySingle(index, btn) {
@@ -225,6 +240,14 @@ async function _paySingle(index, btn) {
   const statusEl = document.getElementById('payroll-queue-status');
 
   if (!entry) return;
+  if (!_isEthPayableEntry(entry)) {
+    _setStatus(
+      statusEl,
+      `⚠️ ${_entryCurrency(entry)} entries are ledger-only and cannot use the ETH payment path.`,
+      true
+    );
+    return;
+  }
 
   const signer = window._wallet?.signer;
   if (!signer) {
@@ -278,9 +301,9 @@ async function _settleAll() {
     return;
   }
 
-  const payable = _pendingEntries.filter(e => isValidEthAddress(e.contributor));
+  const payable = _pendingEntries.filter(_isEthPayableEntry);
   if (payable.length === 0) {
-    _setStatus(statusEl, '⚠️ No payable entries (all missing wallet addresses).', true);
+    _setStatus(statusEl, '⚠️ No payable ETH entries. ART entries require manual ledger settlement.', true);
     return;
   }
 
@@ -314,6 +337,7 @@ async function _settleAll() {
 }
 
 function _buildTxParams(entry) {
+  if (!_isEthPayableEntry(entry)) return { to: null, amountWei: null };
   const to = entry.contributor || '';
   if (!isValidEthAddress(to)) return { to: null, amountWei: null };
   const amountWei = ethers.parseEther(String(entry.amount));

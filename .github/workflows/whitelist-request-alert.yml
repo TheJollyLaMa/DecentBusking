@@ -1,0 +1,26 @@
+name: Contributor Request Alert
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  notify-admin:
+    if: contains(github.event.issue.labels.*.name, 'contributor-request')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        run: |
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin main
+          git checkout --detach FETCH_HEAD
+
+      - name: Post GitHub-native alert
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/sendContributorAlert.js
