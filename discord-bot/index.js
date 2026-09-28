@@ -43,6 +43,18 @@ import {
   backfillFromChannel,
 } from './jukeloop.js';
 
+const { Client, GatewayIntentBits } = require('discord.js');
+const http = require('http'); // Add this import
+
+// --- Render Health Check Server ---
+const PORT = process.env.PORT || 10000;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Discord bot is active');
+}).listen(PORT, () => {
+  console.log(`Health check server listening on port ${PORT}`);
+});
+
 // ── Audio MIME-type detection ─────────────────────────────────────────────────
 const AUDIO_MIME_PREFIXES  = ['audio/'];
 const AUDIO_EXTENSIONS_RE  = /\.(mp3|wav|ogg|flac|m4a|aac|opus|weba)$/i;
