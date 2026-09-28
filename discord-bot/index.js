@@ -27,6 +27,9 @@ import {
   SlashCommandBuilder,
   EmbedBuilder,
 } from 'discord.js';
+
+import http from 'http'; 
+
 import { loadConfig }    from './config.js';
 import { uploadToIPFS }  from './ipfs.js';
 import { buildMintEmbed } from './embed.js';
@@ -43,10 +46,6 @@ import {
   backfillFromChannel,
 } from './jukeloop.js';
 
-const { Client, GatewayIntentBits } = require('discord.js');
-const http = require('http'); // Add this import
-
-// --- Render Health Check Server ---
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
