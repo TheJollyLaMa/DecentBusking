@@ -3,9 +3,7 @@
 **A Web3 town square for live sound, generous tips, and busker-made audio NFTs.**
 
 <p align="center">
-  <img src="img/hat.svg" width="112" alt="A top hat for artist tips" />
-  &nbsp;&nbsp;&nbsp;
-  <img src="img/guitar-case.svg" width="112" alt="An open guitar case for busking" />
+  <img src="img/DBusker_in_Town_Square.jpeg" width="100%" alt="A DecentBusker performing in the town square" />
 </p>
 
 Come listen, leave a tip, share a recording, or help build the stage. **The town square is better when more people show up.**
@@ -17,6 +15,10 @@ Visit the [DecentBusking town square](https://thejollylama.github.io/DecentBuski
 Join the [Discord](https://discord.gg/5XJtJYdhz) to share audio in **#DecentJukebox** and join the JukeLoop community radio. When the upload flow is enabled, tracks are pinned to IPFS and shared to the radio playlist; an optional mint link is provided for eligible tracks.
 
 ## Busk
+
+<p align="center">
+  <img src="img/D_Busker.jpeg" width="320" alt="A DecentBusker sharing a live performance" />
+</p>
 
 Bring your own sound. Connect IPFS from the site, open the guitar case, and add a recording to the town square. Audio NFTs are minted on Optimism. Minting is currently permissioned, so a platform-authorized wallet is required; opening up self-service artist minting is a welcome contribution.
 
