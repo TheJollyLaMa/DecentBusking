@@ -27,6 +27,9 @@ import {
   SlashCommandBuilder,
   EmbedBuilder,
 } from 'discord.js';
+
+import http from 'http'; 
+
 import { loadConfig }    from './config.js';
 import { uploadToIPFS }  from './ipfs.js';
 import { buildMintEmbed } from './embed.js';
@@ -42,6 +45,14 @@ import {
   createJukeLoopSession,
   backfillFromChannel,
 } from './jukeloop.js';
+
+const PORT = process.env.PORT || 10000;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Discord bot is active');
+}).listen(PORT, () => {
+  console.log(`Health check server listening on port ${PORT}`);
+});
 
 // ── Audio MIME-type detection ─────────────────────────────────────────────────
 const AUDIO_MIME_PREFIXES  = ['audio/'];
