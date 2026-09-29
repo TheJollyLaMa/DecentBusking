@@ -3,17 +3,17 @@
  *
  * Provides the owner with a browser-side payroll UI to:
  *   1. Load the pending payroll queue from payroll-queue.json.
- *   2. Connect MetaMask and verify the connected wallet is the repo owner.
- *   3. Send ETH directly to each contributor's Optimism wallet (no treasury
- *      contract needed — direct ETH transfers from owner's wallet).
- *   4. Mark settled entries after payment.
+ *   2. Verify the connected wallet is the repo owner.
+ *   3. Settle configured ERC-20 rewards through the shared Base Settlement Router.
+ *   4. Preserve direct Optimism ETH payouts for historical queue entries.
  *
  * Usage:
  *   - Owner clicks the 💸 Payroll button in the app.
- *   - Connects MetaMask (must be on Optimism Mainnet, chain ID 10).
+ *   - Connects MetaMask; the payout action switches to Base for configured
+ *     router assets or Optimism for historical ETH entries.
  *   - Sees pending payouts with amounts, contributors, and wallet addresses.
- *   - Clicks "Settle All" or individual "Pay" buttons to send ETH.
- *   - After settling, runs the `settle-payroll.yml` workflow to update the repo.
+ *   - Clicks "Settle All" or individual "Pay" buttons to settle eligible work.
+ *   - ART payments are recorded on-chain and cannot be paid twice.
  *
  * Security note:
  *   A warning is shown if the connected wallet does NOT match the repo owner's
@@ -29,13 +29,27 @@ const PAYROLL_QUEUE_URL =
 const ACCOUNTS_URL =
   'https://raw.githubusercontent.com/TheJollyLaMa/DecentBusking/main/contributor-accounts.json';
 
-/** Optimism Mainnet chain ID */
+const BASE_CHAIN_ID = 8453;
 const OPTIMISM_CHAIN_ID = 10;
+const PAYROLL_ASSETS_URL = new URL('../payroll-assets.json', import.meta.url).toString();
+const ROUTER_ABI = [
+  'function PAYROLL_ROLE() view returns (bytes32)',
+  'function CONTRIBUTOR_ADMIN_ROLE() view returns (bytes32)',
+  'function hasRole(bytes32 role, address account) view returns (bool)',
+  'function funds(bytes32 fundId) view returns (string metadataUri, bool active, bool exists)',
+  'function fundBalances(bytes32 fundId, address asset) view returns (uint256)',
+  'function approvedAssets(address asset) view returns (bool)',
+  'function contributors(address wallet) view returns (bytes32 githubIdHash, bool approved, bool exists)',
+  'function setContributorApproved(address wallet, bytes32 githubIdHash, bool approved)',
+  'function completedWorkReferences(bytes32 workReference) view returns (bool)',
+  'function payout(bytes32 fundId, address asset, address recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)',
+];
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 
 let _pendingEntries   = [];
 let _ownerAddress     = null;
+let _payrollAssetConfig = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -89,11 +103,6 @@ async function _onWalletConnected({ detail } = {}) {
 
   if (!connectedAddress) return;
 
-  if (chainId !== null && chainId !== OPTIMISM_CHAIN_ID) {
-    _setStatus(statusEl, `⚠️ Wrong network (chain ${chainId}). Please switch MetaMask to Optimism Mainnet (chain 10).`, true);
-    return;
-  }
-
   if (addrEl) addrEl.textContent = connectedAddress;
 
   // Check if connected wallet matches the owner's registered address
@@ -114,7 +123,7 @@ async function _onWalletConnected({ detail } = {}) {
   }
 
   _setStatus(statusEl, isOwner
-    ? '✅ Connected as repo owner — ready to settle payroll.'
+    ? '✅ Repo owner connected — configured tokens settle on Base; legacy ETH settles on Optimism.'
     : '✅ Connected (read-only view — settle disabled for non-owner wallets).');
 
   // Load and display the payroll queue
@@ -147,8 +156,31 @@ export async function loadPayrollQueue() {
   if (statusEl) statusEl.textContent = '';
 
   try {
+    _payrollAssetConfig = await _fetchJSON(PAYROLL_ASSETS_URL);
+  } catch (err) {
+    _payrollAssetConfig = null;
+    if (statusEl) statusEl.textContent = `⚠️ Payroll asset configuration unavailable; Base-token settlements are disabled: ${_esc(err.message)}`;
+  }
+
+  try {
     const queue = await _fetchJSON(PAYROLL_QUEUE_URL);
-    _pendingEntries = Array.isArray(queue.pending) ? queue.pending : [];
+    const pending = Array.isArray(queue.pending) ? queue.pending : [];
+    _pendingEntries = pending;
+
+    if (_isRouterConfigured() && pending.some(entry => _entryCurrency(entry) !== 'ETH')) {
+      try {
+        const router = _readOnlyRouter();
+        const paid = await Promise.all(pending.map(async entry => {
+          if (_entryCurrency(entry) === 'ETH' || !_getAssetConfig(_entryCurrency(entry))) return false;
+          return router.completedWorkReferences(_artWorkReference(entry));
+        }));
+        _pendingEntries = pending.filter((entry, index) => !paid[index]);
+      } catch (err) {
+        if (statusEl) {
+          statusEl.textContent = `⚠️ Could not check Base settlement status; configured-token entries remain visible: ${_esc(err.message)}`;
+        }
+      }
+    }
   } catch (err) {
     tableBody.innerHTML = `<tr><td colspan="5" class="payroll-loading payroll-error">❌ ${_esc(err.message)}</td></tr>`;
     return;
@@ -168,14 +200,15 @@ export async function loadPayrollQueue() {
 
   tableBody.innerHTML = _pendingEntries.map((entry, i) => {
     const currency = _entryCurrency(entry);
-    const isArt = currency === 'ART';
+    const isRouterEntry = currency !== 'ETH';
     const wallet = entry.contributor || '';
+    const explorerBase = isRouterEntry ? 'https://basescan.org/address/' : 'https://optimistic.etherscan.io/address/';
     const walletDisplay = wallet
-      ? `<a href="https://optimistic.etherscan.io/address/${_esc(wallet)}" target="_blank" rel="noopener" class="payroll-addr-link" title="${_esc(wallet)}">${_esc(_shortAddr(wallet))}</a>`
+      ? `<a href="${explorerBase}${_esc(wallet)}" target="_blank" rel="noopener" class="payroll-addr-link" title="${_esc(wallet)}">${_esc(_shortAddr(wallet))}</a>`
       : '<span class="payroll-no-wallet">⚠️ No wallet</span>';
-    const canPay = isOwner && _isEthPayableEntry(entry);
+    const canPay = isOwner && _isPayableEntry(entry);
     return `
-      <tr data-index="${i}" class="payroll-row${isArt ? ' payroll-row-ledger-only' : ''}">
+      <tr data-index="${i}" class="payroll-row${isRouterEntry ? ' payroll-row-art' : ''}">
         <td class="payroll-td">
           <a href="https://github.com/${_esc(entry.contributorGithub)}" target="_blank" rel="noopener" class="payroll-github-link">
             <img src="https://github.com/${_esc(entry.contributorGithub)}.png?size=20" class="payroll-avatar" onerror="this.style.display='none'" />
@@ -185,7 +218,7 @@ export async function loadPayrollQueue() {
         <td class="payroll-td">${walletDisplay}</td>
         <td class="payroll-td payroll-amount">
           <strong>${_esc(entry.amount)} ${_esc(currency)}</strong>
-          ${isArt ? '<br><small>Ledger-only / manual ART settlement</small>' : ''}
+          ${isRouterEntry ? `<br><small>Base · ${_esc(entry.fund || _payrollAssetConfig?.fundSlug || '')}</small>` : ''}
         </td>
         <td class="payroll-td payroll-issue">
           <a href="https://github.com/${_esc(entry.issueRef.replace('#', '/issues/'))}" target="_blank" rel="noopener" class="payroll-issue-link">
@@ -193,11 +226,9 @@ export async function loadPayrollQueue() {
           </a>
         </td>
         <td class="payroll-td">
-          ${isArt
-            ? '<span class="payroll-pay-disabled" title="ART entries are ledger-only until an ART payment path is configured">Manual</span>'
-            : canPay
+          ${canPay
             ? `<button class="payroll-pay-btn" data-index="${i}">💸 Pay</button>`
-            : `<span class="payroll-pay-disabled">${isOwner ? '⚠️ No wallet' : '🔒'}</span>`
+            : `<span class="payroll-pay-disabled">${!isOwner ? '🔒' : !wallet ? '⚠️ No wallet' : isRouterEntry ? '⚠️ Router/token not configured' : '⚠️ Invalid wallet'}</span>`
           }
         </td>
       </tr>`;
@@ -212,9 +243,7 @@ export async function loadPayrollQueue() {
   });
 
   // Enable/disable Settle All button
-  const payableCount = _pendingEntries.filter(e =>
-    isOwner && _isEthPayableEntry(e)
-  ).length;
+  const payableCount = _pendingEntries.filter(e => isOwner && _isPayableEntry(e)).length;
   if (settleBtn) {
     settleBtn.disabled = payableCount === 0;
     settleBtn.textContent = `💸 Settle All (${payableCount} payable)`;
@@ -233,58 +262,191 @@ function _isEthPayableEntry(entry) {
   return _entryCurrency(entry) === 'ETH' && isValidEthAddress(entry?.contributor);
 }
 
-// ─── Send a single ETH payment ────────────────────────────────────────────────
+function _getAssetConfig(currency) {
+  const asset = _payrollAssetConfig?.assets?.[String(currency || '').toUpperCase()];
+  return asset && isValidEthAddress(asset.address) && Number.isInteger(asset.decimals) && asset.decimals >= 0 && asset.decimals <= 36
+    ? asset
+    : null;
+}
+
+function _isRouterConfigured() {
+  return isValidEthAddress(_payrollAssetConfig?.routerAddress) && Number.isInteger(_payrollAssetConfig?.chainId);
+}
+
+function _isPayableEntry(entry) {
+  return isValidEthAddress(entry?.contributor) && (
+    _isEthPayableEntry(entry) || (_entryCurrency(entry) !== 'ETH' && _isRouterConfigured() && _getAssetConfig(_entryCurrency(entry)))
+  );
+}
+
+function _readOnlyRouter() {
+  const provider = new ethers.JsonRpcProvider(_payrollAssetConfig.rpcUrl, _payrollAssetConfig.chainId, { batchMaxCount: 1 });
+  return new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, provider);
+}
+
+function _artWorkReference(entry) {
+  const role = entry.role || 'contributor';
+  const base = `${entry.issueRef}:${entry.contributorGithub}:${role}`;
+  const currency = _entryCurrency(entry);
+  return ethers.keccak256(ethers.toUtf8Bytes(currency === 'ART' ? base : `${base}:${currency}`));
+}
+
+async function _switchNetwork(chainId) {
+  if (!window.ethereum) throw new Error('MetaMask is not available.');
+  const baseChainId = Number(_payrollAssetConfig?.chainId || BASE_CHAIN_ID);
+  const chainHex = `0x${chainId.toString(16)}`;
+  const activeChain = Number.parseInt(await window.ethereum.request({ method: 'eth_chainId' }), 16);
+  if (activeChain === chainId) return;
+
+  try {
+    await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] });
+  } catch (err) {
+    if (err.code !== 4902) throw err;
+    const network = chainId === baseChainId
+      ? { chainName: 'Base', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: [_payrollAssetConfig?.rpcUrl || 'https://base-rpc.publicnode.com'], blockExplorerUrls: ['https://basescan.org'] }
+      : { chainName: 'Optimism', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://mainnet.optimism.io'], blockExplorerUrls: ['https://optimistic.etherscan.io'] };
+    await window.ethereum.request({
+      method: 'wallet_addEthereumChain',
+      params: [{ chainId: chainHex, ...network }],
+    });
+  }
+}
+
+async function _getSigner(chainId) {
+  await _switchNetwork(chainId);
+  const provider = new ethers.BrowserProvider(window.ethereum);
+  return provider.getSigner();
+}
+
+async function _payTokenEntry(entry) {
+  if (!_isRouterConfigured()) throw new Error('Payroll Settlement Router is not configured.');
+  const currency = _entryCurrency(entry);
+  const asset = _getAssetConfig(currency);
+  if (!asset) throw new Error(`No configured Base token matches ${currency}.`);
+  const fundSlug = String(entry.fund || _payrollAssetConfig.fundSlug || '').trim().toLowerCase();
+  if (!fundSlug || fundSlug !== String(_payrollAssetConfig.fundSlug || '').trim().toLowerCase()) {
+    throw new Error(`Unexpected payroll fund: ${fundSlug || '(missing)'}`);
+  }
+
+  const statusEl = document.getElementById('payroll-queue-status');
+  const signer = await _getSigner(Number(_payrollAssetConfig.chainId));
+  const owner = await signer.getAddress();
+  if (!_ownerAddress || owner.toLowerCase() !== _ownerAddress.toLowerCase()) {
+    throw new Error('Connect the registered repo owner wallet before settling payroll.');
+  }
+
+  const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
+  const provider = signer.provider;
+  const routerCode = await provider.getCode(_payrollAssetConfig.routerAddress);
+  if (!routerCode || routerCode === '0x') throw new Error('No Settlement Router contract is deployed at the configured Base address.');
+
+  const [payrollRole, contributorAdminRole, fundId, assetApproved] = await Promise.all([
+    router.PAYROLL_ROLE(),
+    router.CONTRIBUTOR_ADMIN_ROLE(),
+    ethers.keccak256(ethers.toUtf8Bytes(fundSlug)),
+    router.approvedAssets(asset.address),
+  ]);
+  const hasPayrollRole = await router.hasRole(payrollRole, owner);
+  if (!hasPayrollRole) throw new Error('The connected wallet does not have PAYROLL_ROLE on the shared Settlement Router.');
+  if (!assetApproved) throw new Error(`${currency} is not approved as a payout asset on the shared Settlement Router.`);
+
+  const workReference = _artWorkReference(entry);
+  if (await router.completedWorkReferences(workReference)) {
+    throw new Error('This work reference is already paid on-chain. Refresh the queue.');
+  }
+
+  const fund = await router.funds(fundId);
+  if (!(fund.exists ?? fund[2])) throw new Error(`Create the ${fundSlug} allocation on the shared router before paying.`);
+  if (!(fund.active ?? fund[1])) throw new Error(`The ${fundSlug} allocation is inactive.`);
+
+  const recipient = ethers.getAddress(entry.contributor);
+  const contributorHash = ethers.id(String(entry.contributorGithub).trim());
+  const contributor = await router.contributors(recipient);
+  const registeredHash = String(contributor.githubIdHash ?? contributor[0]).toLowerCase();
+  if (registeredHash !== ethers.ZeroHash.toLowerCase() && registeredHash !== contributorHash.toLowerCase()) {
+    throw new Error(`This wallet is already associated with a different GitHub identity on the shared router.`);
+  }
+  if (!(contributor.approved ?? contributor[1])) {
+    if (!(await router.hasRole(contributorAdminRole, owner))) {
+      throw new Error('The connected wallet cannot approve contributors on the shared Settlement Router.');
+    }
+    _setStatus(statusEl, `⏳ Approving @${entry.contributorGithub} on the shared router… confirm in MetaMask.`);
+    await (await router.setContributorApproved(recipient, contributorHash, true)).wait();
+  }
+
+  const amount = ethers.parseUnits(String(entry.amount), asset.decimals);
+  const available = await router.fundBalances(fundId, asset.address);
+  if (available < amount) {
+    throw new Error(`The ${fundSlug} fund has insufficient ${currency}. Available: ${ethers.formatUnits(available, asset.decimals)} ${currency}.`);
+  }
+
+  const repository = String(entry.issueRef).split('#')[0];
+  const metadataUri = `https://github.com/${entry.issueRef.replace('#', '/issues/')}`;
+  const metadataHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify({
+    issueRef: entry.issueRef,
+    contributorGithub: entry.contributorGithub,
+    role: entry.role || 'contributor',
+    amount: String(entry.amount),
+    currency,
+    fund: fundSlug,
+  })));
+  const payoutArgs = [
+    fundId,
+    asset.address,
+    recipient,
+    amount,
+    workReference,
+    ethers.id(repository),
+    contributorHash,
+    metadataUri,
+    metadataHash,
+  ];
+
+  await router.payout.staticCall(...payoutArgs);
+  _setStatus(statusEl, `⏳ Paying ${entry.amount} ${currency} to @${entry.contributorGithub} from ${fundSlug}… confirm in MetaMask.`);
+  const tx = await router.payout(...payoutArgs);
+  await tx.wait();
+  return tx.hash;
+}
+
+async function _payEthEntry(entry) {
+  const signer = await _getSigner(OPTIMISM_CHAIN_ID);
+  const { to, amountWei } = _buildTxParams(entry);
+  if (!to) throw new Error(`No valid wallet address for @${entry.contributorGithub}.`);
+  const tx = await signer.sendTransaction({ to, value: amountWei });
+  await tx.wait();
+  return tx.hash;
+}
+
+// ─── Settle a single queue entry ──────────────────────────────────────────────
 
 async function _paySingle(index, btn) {
   const entry    = _pendingEntries[index];
   const statusEl = document.getElementById('payroll-queue-status');
 
   if (!entry) return;
-  if (!_isEthPayableEntry(entry)) {
-    _setStatus(
-      statusEl,
-      `⚠️ ${_entryCurrency(entry)} entries are ledger-only and cannot use the ETH payment path.`,
-      true
-    );
+  if (!_isPayableEntry(entry)) {
+    _setStatus(statusEl, `⚠️ No supported payout route for @${entry.contributorGithub}.`, true);
     return;
   }
-
-  const signer = window._wallet?.signer;
-  if (!signer) {
-    _setStatus(statusEl, '⚠️ Please connect your wallet via the header first.', true);
-    return;
-  }
-
-  const { to, amountWei } = _buildTxParams(entry);
-  if (!to) {
-    _setStatus(statusEl, `⚠️ No wallet address for @${entry.contributorGithub}.`, true);
+  if (!window.ethereum) {
+    _setStatus(statusEl, '⚠️ Please connect MetaMask first.', true);
     return;
   }
 
   try {
     if (btn) btn.disabled = true;
-    _setStatus(statusEl, `⏳ Sending ${entry.amount} ETH to @${entry.contributorGithub}…`);
+    const txHash = _entryCurrency(entry) !== 'ETH'
+      ? await _payTokenEntry(entry)
+      : await _payEthEntry(entry);
+    const explorer = _entryCurrency(entry) !== 'ETH' ? 'https://basescan.org/tx/' : 'https://optimistic.etherscan.io/tx/';
+    _setStatus(statusEl, `✅ ${entry.amount} ${_entryCurrency(entry)} paid to @${entry.contributorGithub}. ${explorer}${txHash}`);
 
-    const tx = await signer.sendTransaction({ to, value: amountWei });
-    _setStatus(statusEl, `⏳ Waiting for confirmation… tx: ${tx.hash.slice(0, 12)}…`);
-    await tx.wait();
-
-    _setStatus(statusEl,
-      `✅ Sent ${entry.amount} ETH to @${entry.contributorGithub}! ` +
-      `<a href="https://optimistic.etherscan.io/tx/${tx.hash}" target="_blank" rel="noopener">View on Etherscan ↗</a>`
-    );
-
-    // Mark row as paid
-    const row = document.querySelector(`#payroll-table-body tr[data-index="${index}"]`);
-    if (row) {
-      row.classList.add('payroll-row-paid');
-      if (btn) btn.textContent = '✅ Paid';
-    }
-
-    _showSettleWorkflowHint(tx.hash);
+    _showSettleWorkflowHint(txHash);
+    await loadPayrollQueue();
 
   } catch (err) {
-    _setStatus(statusEl, `❌ Payment failed: ${err.message}`, true);
+    _setStatus(statusEl, `❌ ${_entryCurrency(entry)} settlement failed: ${err.message}`, true);
     if (btn) btn.disabled = false;
   }
 }
@@ -295,19 +457,23 @@ async function _settleAll() {
   const statusEl = document.getElementById('payroll-queue-status');
   const settleBtn = document.getElementById('payroll-settle-all-btn');
 
-  const signer = window._wallet?.signer;
-  if (!signer) {
-    _setStatus(statusEl, '⚠️ Please connect your wallet via the header first.', true);
+  if (!window.ethereum) {
+    _setStatus(statusEl, '⚠️ Please connect MetaMask first.', true);
     return;
   }
 
-  const payable = _pendingEntries.filter(_isEthPayableEntry);
+  const payable = _pendingEntries.filter(_isPayableEntry);
   if (payable.length === 0) {
-    _setStatus(statusEl, '⚠️ No payable ETH entries. ART entries require manual ledger settlement.', true);
+    _setStatus(statusEl, '⚠️ No eligible configured-token or legacy ETH entries are available to settle.', true);
     return;
   }
 
-  if (!confirm(`Send ETH to ${payable.length} contributor(s) on Optimism Mainnet? This cannot be undone.`)) {
+  const counts = new Map();
+  for (const entry of payable) counts.set(_entryCurrency(entry), (counts.get(_entryCurrency(entry)) || 0) + 1);
+  const networks = [...counts].map(([currency, count]) => currency === 'ETH'
+    ? `${count} legacy ETH on Optimism`
+    : `${count} ${currency} on Base`).join(' and ');
+  if (!confirm(`Settle ${networks}? Each transaction is final.`)) {
     return;
   }
 
@@ -316,18 +482,16 @@ async function _settleAll() {
 
     const hashes = [];
     for (const entry of payable) {
-      const { to, amountWei } = _buildTxParams(entry);
-      _setStatus(statusEl, `⏳ Sending ${entry.amount} ETH to @${entry.contributorGithub}…`);
-      const tx = await signer.sendTransaction({ to, value: amountWei });
-      await tx.wait();
-      hashes.push(tx.hash);
-      console.log(`✅ Sent ${entry.amount} ETH to ${entry.contributor} (${entry.contributorGithub}) — ${tx.hash}`);
+      const txHash = _entryCurrency(entry) !== 'ETH'
+        ? await _payTokenEntry(entry)
+        : await _payEthEntry(entry);
+      hashes.push(txHash);
+      console.log(`✅ Settled ${entry.amount} ${_entryCurrency(entry)} to ${entry.contributor} (${entry.contributorGithub}) — ${txHash}`);
     }
 
-    _setStatus(statusEl, `✅ All ${payable.length} payment(s) sent! Tx hashes: ${hashes.map(h => h.slice(0,10)).join(', ')}…`);
+    _setStatus(statusEl, `✅ All ${payable.length} payroll transaction(s) confirmed.`);
     _showSettleWorkflowHint(hashes[hashes.length - 1]);
 
-    // Reload to reflect updated state
     await loadPayrollQueue();
 
   } catch (err) {
@@ -349,10 +513,9 @@ function _buildTxParams(entry) {
 function _showSettleWorkflowHint(txHash) {
   const hintEl = document.getElementById('payroll-settle-hint');
   if (!hintEl) return;
-  const txParam = txHash ? `&tx_hash=${encodeURIComponent(txHash)}` : '';
   hintEl.innerHTML =
-    `💡 Run the <a href="https://github.com/TheJollyLaMa/DecentBusking/actions/workflows/settle-payroll.yml" ` +
-    `target="_blank" rel="noopener" class="payroll-link">Settle Payroll workflow</a> to mark entries as settled in the repo.` +
+    `Confirmed on-chain. Run the <a href="https://github.com/TheJollyLaMa/DecentBusking/actions/workflows/settle-payroll.yml" ` +
+    `target="_blank" rel="noopener" class="payroll-link">Settle Payroll workflow</a> to mirror the transaction in the repository ledger.` +
     (txHash ? `<br><small>Last tx: <code>${txHash}</code></small>` : '');
   hintEl.style.display = 'block';
 }

@@ -9,7 +9,9 @@ const {
   extractIssueNumbers,
   isDuplicate,
   normalizeCurrency,
+  normalizeAmount,
   parseAmountLabel,
+  parseAmountLabels,
   pickWhitelistedTester,
   settleEntries,
   splitIdeaCredit,
@@ -37,13 +39,67 @@ function fixture(overrides = {}) {
   };
 }
 
-test('accepts exact ART labels and rejects other currencies or trailing text', () => {
+test('accepts configured token labels and rejects unconfigured currencies or trailing text', () => {
   assert.equal(parseAmountLabel({ labels: ['bounty: 100 ART'] }).amount, '100');
   assert.equal(parseAmountLabel({ labels: ['bounty: 2.50 $ART'] }).amount, '2.5');
-  assert.equal(parseAmountLabel({ labels: ['test-bounty: 10 ART'] }, TEST_BOUNTY_LABEL_RE).amount, '10');
+  assert.deepEqual(
+    [
+      parseAmountLabel({ labels: ['test-bounty: 10 ART'] }, TEST_BOUNTY_LABEL_RE).amount,
+      parseAmountLabel({ labels: ['test-bounty: 0.5 USDC'] }, TEST_BOUNTY_LABEL_RE).currency,
+    ],
+    ['10', 'USDC']
+  );
   assert.match('bounty: 1 ART', BOUNTY_LABEL_RE);
   assert.equal(parseAmountLabel({ labels: ['bounty: 1 ETH'] }), null);
+  assert.equal(parseAmountLabel({ labels: ['bounty: 1 DJUKE'] }), null);
   assert.equal(parseAmountLabel({ labels: ['bounty: 1 ART bonus'] }), null);
+});
+
+test('a configured future ERC-20 symbol works from its bounty label', () => {
+  const futureAssets = { DJUKE: { decimals: 18, ledgerDecimals: 4 } };
+  const issue = {
+    number: 42,
+    labels: ['bounty: 12.3456 DJUKE'],
+    assignees: [{ login: owner.github }],
+  };
+  assert.deepEqual(parseAmountLabels(issue, BOUNTY_LABEL_RE, futureAssets), [
+    { label: 'bounty: 12.3456 DJUKE', amount: '12.3456', currency: 'DJUKE' },
+  ]);
+  assert.throws(
+    () => parseAmountLabels({ ...issue, labels: ['bounty: 1.23456 DJUKE'] }, BOUNTY_LABEL_RE, futureAssets),
+    /DJUKE payouts support at most 4 decimal places/
+  );
+
+  const result = createBountyEntries({
+    ...fixture({ issue }),
+    assetRegistry: futureAssets,
+  });
+  assert.equal(result.entries[0].currency, 'DJUKE');
+  assert.equal(result.entries[0].fund, 'dbusk-repo-dev');
+});
+
+test('USDC labels and account balances use six-decimal precision', () => {
+  const bounty = parseAmountLabel({ labels: ['bounty: 12.345678 USDC'] });
+  assert.deepEqual([bounty.amount, bounty.currency], ['12.345678', 'USDC']);
+  assert.throws(() => normalizeAmount('1.0000001', 'USDC'), /at most 6 decimal places/);
+
+  const accounts = { contributors: [{ ...owner }] };
+  const entry = {
+    issueRef: 'TheJollyLaMa/DecentBusking#43',
+    contributorGithub: owner.github,
+    contributor: owner.walletAddress,
+    amount: '12.345678',
+    currency: 'USDC',
+    fund: 'dbusk-repo-dev',
+    role: 'contributor',
+  };
+  applyAccountAccrual(accounts, [entry]);
+  assert.equal(accounts.contributors[0].usdcPending, 12.345678);
+
+  const queue = { pending: [entry], settled: [] };
+  settleEntries({ queue, accounts, currency: 'USDC', settledAt: 'now', settledBy: owner.github });
+  assert.equal(accounts.contributors[0].usdcPending, 0);
+  assert.equal(accounts.contributors[0].usdcEarned, 12.345678);
 });
 
 test('combines manual, body, title, and linked issue references', () => {
@@ -59,15 +115,18 @@ test('creates only ART entries and falls back from bot author to whitelisted ass
   const result = createBountyEntries(fixture());
   assert.equal(result.entries.length, 1);
   assert.equal(result.entries[0].currency, 'ART');
+  assert.equal(result.entries[0].fund, 'dbusk-repo-dev');
   assert.equal(result.entries[0].contributorGithub, owner.github);
 });
 
-test('splits idea credit exactly 80/20, including precision expansion', () => {
+test('splits idea credit exactly 80/20 at eight decimal places', () => {
   assert.deepEqual(splitIdeaCredit('100'), { implementer: '80', originator: '20' });
-  assert.deepEqual(splitIdeaCredit('0.00000001'), {
-    implementer: '0.000000008',
-    originator: '0.000000002',
+  assert.deepEqual(splitIdeaCredit('0.00000005'), {
+    implementer: '0.00000004',
+    originator: '0.00000001',
   });
+  assert.throws(() => splitIdeaCredit('0.00000001'), /cannot be split exactly at 8 decimal places/);
+  assert.throws(() => splitIdeaCredit('0.000000009'), /at most 8 decimal places/);
 
   const result = createBountyEntries(fixture({
     issue: {
@@ -153,4 +212,35 @@ test('currency-filtered settlement updates only matching account fields', () => 
     [accounts.contributors[0].artPending, accounts.contributors[0].artEarned],
     [0, 11]
   );
+});
+
+test('role-filtered settlement touches only the selected work credit', () => {
+  const implementer = {
+    issueRef: 'TheJollyLaMa/DecentBusking#44',
+    contributorGithub: owner.github,
+    contributor: owner.walletAddress,
+    amount: '80',
+    currency: 'ART',
+    role: 'implementer',
+  };
+  const originator = { ...implementer, amount: '20', role: 'idea-originator' };
+  const queue = { pending: [implementer, originator], settled: [] };
+  const accounts = { contributors: [{ ...owner, artPending: 100, artEarned: 0 }] };
+
+  const settled = settleEntries({
+    queue,
+    accounts,
+    contributorGithub: owner.github,
+    issueRef: implementer.issueRef,
+    role: 'implementer',
+    currency: 'ART',
+    txHash: `0x${'a'.repeat(64)}`,
+    settledAt: 'now',
+    settledBy: owner.github,
+  });
+
+  assert.equal(settled.length, 1);
+  assert.equal(queue.pending[0].role, 'idea-originator');
+  assert.equal(accounts.contributors[0].artPending, 20);
+  assert.equal(accounts.contributors[0].artEarned, 80);
 });

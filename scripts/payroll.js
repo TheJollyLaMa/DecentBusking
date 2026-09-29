@@ -1,9 +1,13 @@
-const BOUNTY_LABEL_RE = /^bounty:\s*(\d+(?:\.\d+)?)\s*\$?ART$/i;
-const TEST_BOUNTY_LABEL_RE = /^test-bounty:\s*(\d+(?:\.\d+)?)\s*\$?ART$/i;
+const PAYROLL_ASSET_CONFIG = require('../payroll-assets.json');
+const SUPPORTED_CURRENCIES = Object.keys(PAYROLL_ASSET_CONFIG.assets || {});
+const BOUNTY_LABEL_RE = /^bounty:\s*(\d+(?:\.\d+)?)\s*\$?([A-Za-z][A-Za-z0-9]{1,9})$/i;
+const TEST_BOUNTY_LABEL_RE = /^test-bounty:\s*(\d+(?:\.\d+)?)\s*\$?([A-Za-z][A-Za-z0-9]{1,9})$/i;
 const IDEA_CREDIT_LABEL_RE = /^idea-credit:\s*@?([-\w]+)$/i;
 const CLOSING_ISSUE_RE = /(?:closes?|fixes?|resolves?)\s+(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#(\d+)/gi;
 const TITLE_ISSUE_RE = /#(\d+)/g;
 const AMOUNT_RE = /^\d+(?:\.\d+)?$/;
+const LEGACY_CURRENCIES = PAYROLL_ASSET_CONFIG.legacy || {};
+const DBUSK_REPO_FUND = PAYROLL_ASSET_CONFIG.fundSlug;
 
 const CONTRIBUTOR_ALIASES = {
   'copilot-swe-agent': 'copilot',
@@ -26,23 +30,53 @@ function labelNames(issue) {
   return (issue.labels || []).map(label => typeof label === 'string' ? label : label.name);
 }
 
-function normalizeAmount(value) {
+function currencyDecimals(currency = 'ART', assetRegistry = PAYROLL_ASSET_CONFIG.assets) {
+  const symbol = String(currency || 'ART').toUpperCase();
+  const decimals = assetRegistry?.[symbol]?.ledgerDecimals ?? LEGACY_CURRENCIES[symbol]?.ledgerDecimals;
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) {
+    throw new Error(`Unsupported payroll currency: ${currency}`);
+  }
+  return decimals;
+}
+
+function normalizeAmount(value, currency = 'ART', assetRegistry = PAYROLL_ASSET_CONFIG.assets) {
   const input = String(value).trim();
   if (!AMOUNT_RE.test(input)) throw new Error(`Invalid payout amount: ${value}`);
 
   let [whole, fraction = ''] = input.split('.');
   whole = whole.replace(/^0+(?=\d)/, '');
   fraction = fraction.replace(/0+$/, '');
+  const decimals = currencyDecimals(currency, assetRegistry);
+  if (fraction.length > decimals) {
+    throw new Error(`${String(currency).toUpperCase()} payouts support at most ${decimals} decimal places: ${value}`);
+  }
   if (BigInt(`${whole}${fraction}` || '0') <= 0n) throw new Error(`Invalid payout amount: ${value}`);
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
-function parseAmountLabel(issue, pattern = BOUNTY_LABEL_RE) {
+function parseAmountLabel(issue, pattern = BOUNTY_LABEL_RE, assetRegistry = PAYROLL_ASSET_CONFIG.assets) {
   for (const label of labelNames(issue)) {
     const match = String(label || '').match(pattern);
-    if (match) return { label, amount: normalizeAmount(match[1]) };
+    if (match) {
+      const currency = String(match[2] || 'ART').toUpperCase();
+      if (!assetRegistry?.[currency]) continue;
+      return { label, amount: normalizeAmount(match[1], currency, assetRegistry), currency };
+    }
   }
   return null;
+}
+
+function parseAmountLabels(issue, pattern = BOUNTY_LABEL_RE, assetRegistry = PAYROLL_ASSET_CONFIG.assets) {
+  const bounties = new Map();
+  for (const label of labelNames(issue)) {
+    const match = String(label || '').match(pattern);
+    if (!match) continue;
+    const currency = String(match[2] || 'ART').toUpperCase();
+    if (!assetRegistry?.[currency]) continue;
+    if (bounties.has(currency)) throw new Error(`Issue has more than one ${currency} bounty label`);
+    bounties.set(currency, { label, amount: normalizeAmount(match[1], currency, assetRegistry), currency });
+  }
+  return [...bounties.values()];
 }
 
 function parseIdeaCredit(issue) {
@@ -68,29 +102,33 @@ function extractIssueNumbers({ body = '', title = '', linked = [], override = []
   return [...numbers];
 }
 
-function decimalParts(value) {
-  const normalized = normalizeAmount(value);
+function amountToUnits(value, currency = 'ART', assetRegistry = PAYROLL_ASSET_CONFIG.assets) {
+  if (/^0(?:\.0+)?$/.test(String(value).trim())) return 0n;
+  const normalized = normalizeAmount(value, currency, assetRegistry);
   const [whole, fraction = ''] = normalized.split('.');
-  return { units: BigInt(`${whole}${fraction}`), scale: fraction.length };
+  const decimals = currencyDecimals(currency, assetRegistry);
+  const scale = 10n ** BigInt(decimals);
+  return BigInt(whole) * scale + BigInt(fraction.padEnd(decimals, '0') || '0');
 }
 
-function formatDecimal(units, scale) {
-  const digits = units.toString().padStart(scale + 1, '0');
-  if (scale === 0) return digits;
-  return normalizeAmount(`${digits.slice(0, -scale)}.${digits.slice(-scale)}`);
+function unitsToAmount(units, currency = 'ART', assetRegistry = PAYROLL_ASSET_CONFIG.assets) {
+  const decimals = currencyDecimals(currency, assetRegistry);
+  const scale = 10n ** BigInt(decimals);
+  const whole = units / scale;
+  const fraction = (units % scale).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : String(whole);
 }
 
-function splitIdeaCredit(amount) {
-  let { units, scale } = decimalParts(amount);
-  while (units % 5n !== 0n && scale < 18) {
-    units *= 10n;
-    scale += 1;
+function splitIdeaCredit(amount, currency = 'ART', assetRegistry = PAYROLL_ASSET_CONFIG.assets) {
+  const units = amountToUnits(amount, currency, assetRegistry);
+  const decimals = currencyDecimals(currency, assetRegistry);
+  if (units % 5n !== 0n) {
+    throw new Error(`Payout amount cannot be split exactly at ${decimals} decimal places: ${amount}`);
   }
-  if (units % 5n !== 0n) throw new Error(`Payout amount cannot be split exactly at 18 decimals: ${amount}`);
   const originatorUnits = units / 5n;
   return {
-    implementer: formatDecimal(units - originatorUnits, scale),
-    originator: formatDecimal(originatorUnits, scale),
+    implementer: unitsToAmount(units - originatorUnits, currency, assetRegistry),
+    originator: unitsToAmount(originatorUnits, currency, assetRegistry),
   };
 }
 
@@ -152,9 +190,9 @@ function pickWhitelistedTester({ assigneeLogins = [], accounts, commenter = '' }
   return eligible[0];
 }
 
-function createBountyEntries({ issue, pr, accounts, queue, repoSlug, queuedAt, queuedBy }) {
-  const bounty = parseAmountLabel(issue);
-  if (!bounty) return { entries: [], reason: 'missing-bounty-label' };
+function createBountyEntries({ issue, pr, accounts, queue, repoSlug, queuedAt, queuedBy, assetRegistry = PAYROLL_ASSET_CONFIG.assets }) {
+  const bounties = parseAmountLabels(issue, BOUNTY_LABEL_RE, assetRegistry);
+  if (!bounties.length) return { entries: [], reason: 'missing-bounty-label' };
 
   const prAuthor = normalizeLogin(pr.user && pr.user.login);
   const assignees = (issue.assignees || []).map(assignee => normalizeLogin(assignee.login));
@@ -165,48 +203,35 @@ function createBountyEntries({ issue, pr, accounts, queue, repoSlug, queuedAt, q
   );
   const ideaOriginatorLogin = parseIdeaCredit(issue);
   const issueRef = `${repoSlug}#${issue.number}`;
-  const common = {
-    issueRef,
-    currency: 'ART',
-    queuedAt,
-    queuedBy,
-    prNumber: pr.number,
-  };
-
-  let entries;
-  if (ideaOriginatorLogin) {
-    const originator = requireWhitelistedAccount(accounts, [ideaOriginatorLogin], 'idea originator');
-    const split = splitIdeaCredit(bounty.amount);
-    entries = [
-      {
-        ...common,
-        contributor: implementer.walletAddress,
-        contributorGithub: implementer.github,
-        amount: split.implementer,
-        role: 'implementer',
-      },
-      {
-        ...common,
-        contributor: originator.walletAddress,
-        contributorGithub: originator.github,
-        amount: split.originator,
-        role: 'idea-originator',
-      },
-    ];
-  } else {
-    entries = [{
-      ...common,
-      contributor: implementer.walletAddress,
-      contributorGithub: implementer.github,
-      amount: bounty.amount,
-    }];
+  const originator = ideaOriginatorLogin
+    ? requireWhitelistedAccount(accounts, [ideaOriginatorLogin], 'idea originator')
+    : null;
+  const entries = [];
+  for (const bounty of bounties) {
+    const common = {
+      issueRef,
+      currency: bounty.currency,
+      fund: PAYROLL_ASSET_CONFIG.fundSlug,
+      queuedAt,
+      queuedBy,
+      prNumber: pr.number,
+    };
+    if (originator) {
+      const split = splitIdeaCredit(bounty.amount, bounty.currency, assetRegistry);
+      entries.push(
+        { ...common, contributor: implementer.walletAddress, contributorGithub: implementer.github, amount: split.implementer, role: 'implementer' },
+        { ...common, contributor: originator.walletAddress, contributorGithub: originator.github, amount: split.originator, role: 'idea-originator' },
+      );
+    } else {
+      entries.push({ ...common, contributor: implementer.walletAddress, contributorGithub: implementer.github, amount: bounty.amount });
+    }
   }
 
   const newEntries = entries.filter(entry => !isDuplicate(queue, entry));
   return {
     entries: newEntries,
     skippedDuplicates: entries.length - newEntries.length,
-    bountyLabel: bounty.label,
+    bountyLabel: bounties.map(bounty => bounty.label).join(', '),
   };
 }
 
@@ -214,9 +239,16 @@ function accountField(currency, suffix) {
   return `${currency.toLowerCase()}${suffix}`;
 }
 
-function updateAccountTotal(account, field, delta, floorAtZero = false) {
-  const next = Number(((Number(account[field]) || 0) + Number(delta)).toFixed(8));
-  account[field] = floorAtZero ? Math.max(0, next) : next;
+function updateAccountTotal(account, field, amount, currency, subtract = false) {
+  const current = Number(account[field]) || 0;
+  const decimals = currencyDecimals(currency);
+  const currentUnits = amountToUnits(Math.max(0, current).toFixed(decimals), currency);
+  const deltaUnits = amountToUnits(amount, currency);
+  const nextUnits = subtract
+    ? (currentUnits > deltaUnits ? currentUnits - deltaUnits : 0n)
+    : currentUnits + deltaUnits;
+  if (nextUnits < 0n) throw new Error(`Payroll balance cannot be negative: ${field}`);
+  account[field] = Number(unitsToAmount(nextUnits, currency));
 }
 
 function applyAccountAccrual(accounts, entries) {
@@ -224,7 +256,7 @@ function applyAccountAccrual(accounts, entries) {
     const account = findAccount(accounts, entry.contributorGithub);
     if (!account) continue;
     const currency = normalizeCurrency(entry);
-    updateAccountTotal(account, accountField(currency, 'Pending'), entry.amount);
+    updateAccountTotal(account, accountField(currency, 'Pending'), entry.amount, currency);
     if (!Array.isArray(account.issuesClosed)) account.issuesClosed = [];
     if (!account.issuesClosed.includes(entry.issueRef)) account.issuesClosed.push(entry.issueRef);
     if (entry.role === 'idea-originator') {
@@ -239,6 +271,7 @@ function settleEntries({
   accounts,
   contributorGithub = '',
   issueRef = '',
+  role = '',
   currency = '',
   txHash = '',
   settledAt,
@@ -246,10 +279,12 @@ function settleEntries({
 }) {
   const contributorFilter = String(contributorGithub).trim().toLowerCase();
   const issueFilter = String(issueRef).trim();
+  const roleFilter = String(role).trim().toLowerCase();
   const currencyFilter = String(currency).trim().toUpperCase();
   const matches = entry =>
     (!contributorFilter || String(entry.contributorGithub || '').trim().toLowerCase() === contributorFilter) &&
     (!issueFilter || String(entry.issueRef || '').trim() === issueFilter) &&
+    (!roleFilter || entryRole(entry) === roleFilter) &&
     (!currencyFilter || normalizeCurrency(entry) === currencyFilter);
   const selected = (queue.pending || []).filter(matches);
   queue.pending = (queue.pending || []).filter(entry => !matches(entry));
@@ -267,14 +302,17 @@ function settleEntries({
     const account = findAccount(accounts, entry.contributorGithub);
     if (!account) continue;
     const entryCurrency = normalizeCurrency(entry);
-    updateAccountTotal(account, accountField(entryCurrency, 'Pending'), -Number(entry.amount), true);
-    updateAccountTotal(account, accountField(entryCurrency, 'Earned'), entry.amount);
+    updateAccountTotal(account, accountField(entryCurrency, 'Pending'), entry.amount, entryCurrency, true);
+    updateAccountTotal(account, accountField(entryCurrency, 'Earned'), entry.amount, entryCurrency);
   }
   return settled;
 }
 
 module.exports = {
   BOUNTY_LABEL_RE,
+  DBUSK_REPO_FUND,
+  PAYROLL_ASSET_CONFIG,
+  SUPPORTED_CURRENCIES,
   TEST_BOUNTY_LABEL_RE,
   applyAccountAccrual,
   createBountyEntries,
@@ -282,6 +320,7 @@ module.exports = {
   findAccount,
   isDuplicate,
   normalizeAmount,
+  parseAmountLabels,
   normalizeCurrency,
   normalizeLogin,
   parseAmountLabel,

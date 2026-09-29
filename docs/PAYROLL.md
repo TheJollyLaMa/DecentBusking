@@ -1,45 +1,63 @@
 # DecentBusking Payroll
 
-DecentBusking records new contributor rewards in ART. GitHub Actions manages an off-chain ledger only; it does not hold keys or send tokens.
+DecentBusking follows the ArtFi contribution-payroll model. GitHub Actions records bounty credits in the repository ledger; the repo owner sends configured ERC-20 rewards through the existing ArtFi Settlement Router on Base. DecentBusking uses its own `dbusk-repo-dev` fund on that shared router and does not deploy a second router.
 
 ## Labels
 
-Only exact labels are payable:
+Use exact labels whose symbol is present in `payroll-assets.json`:
 
 - `bounty: 100 ART` or `bounty: 100 $ART`
-- `test-bounty: 10 ART` or `test-bounty: 10 $ART`
-- `idea-credit: @username` for the exact 80% implementer / 20% originator split
+- `bounty: 25 USDC` or `bounty: 25 $USDC`
+- `test-bounty: 10 SYMBOL` or `test-bounty: 10 $SYMBOL`
+- `idea-credit: @username` for an exact 80% implementer / 20% originator split
 
-ETH bounty labels are ignored by new automation. Every newly generated queue entry includes `"currency": "ART"`.
+New queue entries include the token symbol in `currency` and `fund: dbusk-repo-dev`. `payroll-assets.json` is shared by the Node automation and browser panel. Each asset entry defines its Base ERC-20 address, contract decimals, and maximum ledger precision. ART uses eight ledger decimals and USDC uses six. Idea-credit splits that cannot be represented exactly at the selected token's precision are rejected rather than rounded.
+
+To add a future token such as DJuke or DBusk, add its uppercase symbol, Base ERC-20 address, on-chain `decimals`, and `ledgerDecimals` to `payroll-assets.json`, then approve that token on the shared router. After that, labels using the symbol are parsed and settled by the existing flow; no currency-specific code path is required.
+
+## One-Time Fund Setup
+
+The fund must be created and funded on the already-deployed shared router before token payouts can succeed. Use ArtFi's Treasury Admin on Base with the router and asset addresses from `payroll-assets.json`:
+
+1. Create the `dbusk-repo-dev` fund with IPFS metadata describing DecentBusking repo payroll.
+2. Deposit the token(s) you intend to pay into that fund. The queue can accrue credits while the allocation is empty, but payments require enough available balance for the selected token.
+3. Confirm the repo owner wallet has `PAYROLL_ROLE` and `CONTRIBUTOR_ADMIN_ROLE` on the shared router.
+
+The fund ID is `keccak256(UTF-8("dbusk-repo-dev"))`. Do not deploy a router or remove contributors from its shared allowlist; other repositories use the same contract.
 
 ## Merge And Recovery
 
-The Bounty Bot runs when a pull request merges into `main`. It combines closing references in the PR body, references in the title, and GitHub-linked closing issues. The manual workflow dispatch accepts a PR number and optional comma-separated issue numbers for recovery.
+The Bounty Bot runs when a pull request merges into `main`. It combines closing references in the PR body, references in the title, and GitHub-linked closing issues. Manual recovery accepts only a PR that is already merged.
 
-Contributors must already have a wallet in `contributor-accounts.json`. A known bot login falls back to a whitelisted issue assignee. Duplicate checks include currency, so an ART reward can coexist with an old ETH reward for the same issue and contributor.
+Contributors request access using the Contributor Request issue form. After the maintainer verifies their GitHub handle and wallet, the maintainer adds the account to `contributor-accounts.json`. A known bot login falls back to a registered issue assignee. Duplicate checks include currency, so rewards in different configured tokens can coexist for the same issue and contributor, as can a new token reward and a historical ETH reward.
 
 ## Testing Rewards
 
-An assigned tester posts `/test-complete`. The repository owner posts `/test-approved`, optionally followed by `@tester`. With no explicit tester, the latest assigned tester who posted `/test-complete` is selected. Ambiguous assignments fail instead of choosing a wallet silently.
+An assigned tester posts `/test-complete`. The repository owner posts `/test-approved`, optionally followed by `@tester`. With no explicit tester, the latest assigned tester who posted `/test-complete` is selected. Ambiguous assignments fail instead of choosing a wallet silently. Approved test rewards also use `dbusk-repo-dev`.
 
 ## Settlement
 
-Run the Settle Payroll workflow after external settlement. Filters are optional:
+From the payroll panel, the owner connects the registered wallet and settles configured tokens on Base. The panel checks the shared router, selected token approval, fund balance, contributor allowlist, and work-reference replay status before sending the transaction. If the wallet is not yet approved on the shared router, the panel adds that contributor by GitHub-ID hash; it never revokes other repositories' contributors. The router's `PayrollPaid` event and `completedWorkReferences` mapping are the on-chain source of truth, and already-paid entries are hidden on refresh.
+
+After a confirmed transaction, run the Settle Payroll workflow to mirror the specific entry in `payroll-queue.json` and update account totals. The workflow requires the contributor, issue, role, currency, and transaction hash, and is restricted to the repository owner. Do not use it to mark a payment before the transaction confirms.
+
+The settlement workflow supports these required filters:
 
 - Contributor GitHub username
 - Issue reference such as `TheJollyLaMa/DecentBusking#14`
-- Currency: `ART` or `ETH`
-- Transaction hash or external payment reference
+- Role (`contributor`, `implementer`, `idea-originator`, or `tester`)
+- Currency (an asset in `payroll-assets.json`, or legacy `ETH`)
+- Confirmed transaction hash
 
-A blank currency filter matches both currencies. Prefer an explicit currency when recording a payment batch. ART settlement updates `artPending` and `artEarned`; legacy ETH settlement updates `ethPending` and `ethEarned`. ART fields are added lazily and default to zero in calculations.
+Settlements update per-currency `<symbol>Pending` and `<symbol>Earned` account fields using that asset's configured ledger precision. Legacy ETH settlement updates `ethPending` and `ethEarned`.
 
 ## Legacy ETH Compatibility
 
-Historical queue entries are preserved exactly. An entry without `currency` is interpreted as legacy ETH in validation, deduplication, settlement, and the browser. The existing browser payroll panel can continue sending legacy or explicit ETH entries on Optimism. ART entries are displayed as ledger-only and are blocked from every ETH transaction path.
+Historical queue entries are preserved exactly. An entry without `currency` is interpreted as legacy ETH in validation, deduplication, settlement, and the browser. Those entries continue to send native ETH on Optimism. Configured ERC-20 entries are paid only through the Base router and are never sent through the ETH path.
 
 ## Contributor Requests
 
-Use the Contributor Request issue form. It asks only for a GitHub handle, wallet, technical area, and optional work links. Opening the form posts a GitHub mention and Actions summary for the maintainer; there is no interview, biography, SMTP secret, or third-party notification dependency.
+Use the Contributor Request issue form. It asks only for a GitHub handle, wallet, technical area, and optional work links. Opening the form posts a GitHub mention and Actions summary for the maintainer; there is no interview, biography, SMTP secret, or third-party notification dependency. After approval, being assigned to a bounty and opening a linked PR is enough to earn the issue's configured token credit when the PR merges.
 
 ## Local Verification
 

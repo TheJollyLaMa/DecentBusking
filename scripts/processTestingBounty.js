@@ -5,6 +5,7 @@ const { renderArtFiComment } = require('./commentArt');
 const { githubRequest, postIssueComment, repositoryCoordinates } = require('./githubApi');
 const {
   TEST_BOUNTY_LABEL_RE,
+  DBUSK_REPO_FUND,
   applyAccountAccrual,
   isDuplicate,
   normalizeLogin,
@@ -52,7 +53,7 @@ async function main() {
   const issue = await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}`);
   const bounty = parseAmountLabel(issue, TEST_BOUNTY_LABEL_RE);
   if (!bounty) {
-    console.log(`Issue #${issueNumber} has no label matching "test-bounty: <amount> ART".`);
+    console.log(`Issue #${issueNumber} has no supported "test-bounty: <amount> SYMBOL" label.`);
     return;
   }
 
@@ -90,7 +91,8 @@ async function main() {
     contributor: tester.walletAddress,
     contributorGithub: tester.github,
     amount: bounty.amount,
-    currency: 'ART',
+    currency: bounty.currency,
+    fund: DBUSK_REPO_FUND,
     role: 'tester',
     queuedAt: new Date().toISOString(),
     queuedBy: process.env.GITHUB_ACTOR || commenter,
@@ -105,7 +107,7 @@ async function main() {
   writeJson(QUEUE_PATH, queue);
   writeJson(ACCOUNTS_PATH, accounts);
   await postIssueComment(owner, repo, issueNumber, buildTestingComment(
-    `✅ Queued ${entry.amount} ART testing bounty for @${entry.contributorGithub}, pending administrator settlement.`,
+    `✅ Queued ${entry.amount} ${entry.currency} testing bounty for @${entry.contributorGithub}, pending administrator settlement.`,
     issueNumber,
     'test-approved'
   ));

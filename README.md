@@ -37,9 +37,9 @@ DecentBusking/
 │   └── guitar-case.svg
 ├── .github/
 │   └── workflows/
-│       ├── bounty-bot.yml      ← Queues merged and recovered ART payouts
+│       ├── bounty-bot.yml      ← Queues merged, registry-backed token payouts
 │       ├── testing-bounty.yml  ← Handles tester completion and approval
-│       └── settle-payroll.yml  ← Records external ART/legacy ETH settlement
+│       └── settle-payroll.yml  ← Mirrors confirmed token/legacy ETH payments
 ├── bounty-bot-config.json
 ├── contributor-accounts.json
 └── README.md
@@ -94,18 +94,18 @@ Push to `main` — GitHub Pages serves the site automatically.
 
 ---
 
-## Bounty System
+## Contributor Payroll
 
-DecentBusking records new contributor rewards in ART through local Node automation.
+Contributors can request access with the **Contributor Request** issue form, claim an assigned bounty, and earn tokens for a merged contribution. New rewards are paid from the `dbusk-repo-dev` allocation on the same Base Settlement Router used by ArtFi; DecentBusking does not deploy another router. The connected repo owner settles from the payroll panel, and the router records each payment on-chain with duplicate-work protection.
 
-- **Maintainer** labels issues with exactly `bounty: N ART` or `bounty: N $ART`.
-- **Contributors** claim by commenting, getting assigned, and opening a PR with `Closes #N`.
-- On merge the bot adds a currency-tagged ART entry to `payroll-queue.json`.
-- **Maintainer** pays ART externally and records settlement with the workflow.
-- Historical currency-less queue entries remain legacy ETH and can still use the existing MetaMask panel.
-- ART entries are visible in that panel but guarded as ledger-only; they are never sent as ETH.
+- Maintainers label issues `bounty: N SYMBOL` and link merged PRs with `Closes #N`. `ART` and `USDC` are configured initially.
+- Approved test work uses `test-bounty: N SYMBOL`, `/test-complete`, and maintainer `/test-approved`.
+- To add another ERC-20 symbol, add its Base contract address, on-chain decimals, and ledger precision to `payroll-assets.json`, then approve that asset on the shared router.
+- An `idea-credit: @username` label splits a bounty 80/20 between implementer and originator, exactly within that token's configured ledger precision.
+- Contributor wallets are reviewed through the request form, registered in `contributor-accounts.json`, and approved on the shared router when the owner settles their first token reward.
+- Existing currency-less queue entries remain legacy ETH payouts on Optimism; configured ERC-20 bounties are paid on Base.
 
-Use the Contributor Request issue form to register without an interview or biography. See [docs/PAYROLL.md](docs/PAYROLL.md) for labels, testing rewards, recovery, and settlement.
+The `dbusk-repo-dev` fund must be created and funded once on the shared router before payouts can succeed. See [docs/PAYROLL.md](docs/PAYROLL.md) for setup, contributor workflow, settlement, and legacy ETH handling.
 
 ---
 

@@ -19,15 +19,19 @@ function writeJson(filePath, value) {
 
 function buildMergedPayrollComment({ entries, isManual, prNumber, issueNumber }) {
   const lines = entries.map(entry =>
-    `- **${entry.amount} ART** to @${entry.contributorGithub}${entry.role ? ` (${entry.role})` : ''}`
+    `- **${entry.amount} ${entry.currency || 'ART'}** from ${entry.fund || 'dbusk-repo-dev'} to @${entry.contributorGithub}${entry.role ? ` (${entry.role})` : ''}`
   );
   return renderArtFiComment([
     `✅ Payroll queued from ${isManual ? 'manual recovery for' : 'merged'} PR #${prNumber}:`,
     '',
     ...lines,
     '',
-    'The entries are ledger-only until an administrator completes ART settlement.',
+    'The entries are queued for settlement from the dbusk-repo-dev fund on the shared Base Settlement Router.',
   ].join('\n'), issueNumber, 'merged-payroll');
+}
+
+function canQueueMergedPullRequest(pr) {
+  return pr?.merged === true;
 }
 
 async function linkedIssueNumbers(owner, repo, prNumber) {
@@ -63,7 +67,10 @@ async function main() {
     : null);
 
   if (!pr) throw new Error('A pull request payload or pr_number input is required');
-  if (!isManual && !pr.merged) {
+  if (!canQueueMergedPullRequest(pr)) {
+    if (isManual) {
+      throw new Error(`PR #${pr.number} has not been merged; refusing manual payroll recovery.`);
+    }
     console.log(`PR #${pr.number} was closed without merge; no payout was queued.`);
     return;
   }
@@ -106,7 +113,7 @@ async function main() {
       queuedBy: process.env.GITHUB_ACTOR || 'github-actions[bot]',
     });
     if (result.reason === 'missing-bounty-label') {
-      console.log(`Skipping issue #${issueNumber}: no label matching "bounty: <amount> ART".`);
+      console.log(`Skipping issue #${issueNumber}: no supported "bounty: <amount> SYMBOL" label.`);
       continue;
     }
     if (isManual) result.entries.forEach(entry => { entry.retroactive = true; });
@@ -133,9 +140,9 @@ async function main() {
     }));
   }
   if (process.env.GITHUB_STEP_SUMMARY) {
-    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Payroll queue updated\n\nQueued ${planned.length} ART payout entries from PR #${pr.number}.\n`);
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Payroll queue updated\n\nQueued ${planned.length} token payout entries from PR #${pr.number}.\n`);
   }
-  console.log(`Queued ${planned.length} ART payout entries from PR #${pr.number}.`);
+  console.log(`Queued ${planned.length} token payout entries from PR #${pr.number}.`);
 }
 
 if (require.main === module) {
@@ -145,4 +152,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildMergedPayrollComment };
+module.exports = { buildMergedPayrollComment, canQueueMergedPullRequest };
