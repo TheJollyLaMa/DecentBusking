@@ -1,0 +1,25 @@
+{
+  "chainId": 8453,
+  "rpcUrl": "https://base-rpc.publicnode.com",
+  "routerAddress": "0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5",
+  "fundSlug": "dbusk-repo-dev",
+  "assets": {
+    "ART": {
+      "address": "0x44c4516768e47cd97cfF2561B81a74699F23f8Ec",
+      "decimals": 18,
+      "ledgerDecimals": 8
+    },
+    "USDC": {
+      "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "decimals": 6,
+      "ledgerDecimals": 6
+    }
+  },
+  "legacy": {
+    "ETH": {
+      "chainId": 10,
+      "decimals": 18,
+      "ledgerDecimals": 8
+    }
+  }
+}
