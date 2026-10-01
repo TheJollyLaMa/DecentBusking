@@ -49,7 +49,7 @@ test('uploads tagged state and prunes snapshots older than the newest three', as
   const upload = requests.find((request) => request.url.includes('uploads.pinata.cloud'));
   assert.equal(upload.options.body.get('name'), 'decentbusking-jukeloop-state.json');
   assert.deepEqual(JSON.parse(upload.options.body.get('keyvalues')), {
-    keyvalues: { app: 'decentbusking', kind: 'jukeloop-state', schema: '1' },
+    app: 'decentbusking', kind: 'jukeloop-state', schema: '1',
   });
   const snapshot = JSON.parse(await upload.options.body.get('file').text());
   assert.equal(snapshot.schemaVersion, 1);

@@ -20,6 +20,12 @@ function extractFiles(result) {
   return result.data?.files || result.files || [];
 }
 
+async function responseError(response, fallback) {
+  const result = await response.json().catch(() => ({}));
+  const detail = result.error?.message || result.error;
+  return detail ? `${fallback} (${response.status}): ${detail}` : `${fallback} (${response.status})`;
+}
+
 export function createPinataStateStore({
   pinataJwt,
   uploadUrl = 'https://uploads.pinata.cloud/v3/files',
@@ -32,7 +38,7 @@ export function createPinataStateStore({
 
   async function listSnapshots(limit = 100) {
     const response = await fetchImpl(buildListUrl(filesApiUrl, limit), { headers });
-    if (!response.ok) throw new Error(`Pinata state listing failed (${response.status})`);
+    if (!response.ok) throw new Error(await responseError(response, 'Pinata state listing failed'));
     return extractFiles(await response.json());
   }
 
@@ -59,10 +65,10 @@ export function createPinataStateStore({
     form.append('file', new Blob([JSON.stringify(snapshot)], { type: 'application/json' }), STATE_FILE_NAME);
     form.append('network', 'public');
     form.append('name', STATE_FILE_NAME);
-    form.append('keyvalues', JSON.stringify({ keyvalues: STATE_KEYVALUES }));
+    form.append('keyvalues', JSON.stringify(STATE_KEYVALUES));
 
     const response = await fetchImpl(uploadUrl, { method: 'POST', headers, body: form });
-    if (!response.ok) throw new Error(`Pinata state upload failed (${response.status})`);
+    if (!response.ok) throw new Error(await responseError(response, 'Pinata state upload failed'));
     const result = await response.json();
     const cid = result.data?.cid || result.cid || result.IpfsHash;
     if (!cid) throw new Error('Pinata state upload did not return a CID');
