@@ -16,6 +16,9 @@ import 'dotenv/config';
  * @property {string[]}    allowedOrigins          - Browser origins allowed to request signed URLs
  * @property {string}      mintOwnerWallet         - Wallet allowed to authorize browser uploads
  * @property {string}      publicWorkerUrl         - Public Render service URL used in approval links
+ * @property {string}      nftContractAddress      - Base DecentNFT contract address
+ * @property {string}      baseRpcUrl              - Base JSON-RPC endpoint
+ * @property {string}      blockExplorerUrl        - Base block explorer root URL
  * @property {string|null} jukeLoopVoiceChannelId  - JukeLoop voice channel ID (JUKE_LOOP_VOICE_CHANNEL_ID) — optional
  * @property {string|null} jukeLoopTextChannelId   - JukeLoop announcement text channel ID (JUKE_LOOP_TEXT_CHANNEL_ID) — optional
  * @property {boolean}     disableMintFlow         - Skip IPFS pinning and mint embed (DISABLE_MINT_FLOW) — optional, default false
@@ -53,6 +56,9 @@ export function loadConfig() {
     allowedOrigins:         (process.env.IPFS_ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean),
     mintOwnerWallet:        process.env.MINT_OWNER_WALLET || '',
     publicWorkerUrl:        (process.env.PUBLIC_WORKER_URL || '').replace(/\/$/, ''),
+    nftContractAddress:     process.env.DECENT_NFT_CONTRACT_ADDRESS || '0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B',
+    baseRpcUrl:             process.env.BASE_RPC_URL || 'https://mainnet.base.org',
+    blockExplorerUrl:       (process.env.BLOCK_EXPLORER_URL || 'https://basescan.org').replace(/\/$/, ''),
     jukeLoopVoiceChannelId: process.env.JUKE_LOOP_VOICE_CHANNEL_ID || null,
     jukeLoopTextChannelId:  process.env.JUKE_LOOP_TEXT_CHANNEL_ID  || null,
     disableMintFlow:        process.env.DISABLE_MINT_FLOW === 'true',

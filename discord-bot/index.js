@@ -33,7 +33,7 @@ import http from 'http';
 import { loadConfig }    from './config.js';
 import { uploadToIPFS }  from './ipfs.js';
 import { createPinataStateStore } from './ipfs-state.js';
-import { createWorkerRequestHandler } from './ipfs-worker.js';
+import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed } from './embed.js';
 import { fetchTrackList, createSession, getSession } from './radio.js';
 import {
@@ -185,11 +185,36 @@ const SLASH_COMMANDS = [
 async function main() {
   const config = loadConfig();
 
+  let client;
+  const verifyMintTransaction = createMintTransactionVerifier({
+    rpcUrl: config.baseRpcUrl,
+    contractAddress: config.nftContractAddress,
+    ownerWallet: config.mintOwnerWallet,
+  });
+  const reconcileMint = async ({ trackId, tokenId, txHash }) => {
+    const pendingTrack = getPlaylist().find((track) => track.trackId === trackId && track.mintStatus === 'requested');
+    if (!pendingTrack) throw new Error('No pending mint request has that track ID');
+    const verified = await verifyMintTransaction({ tokenId, txHash });
+    if (verified.recipient.toLowerCase() !== pendingTrack.mintRecipient.toLowerCase()) {
+      throw new Error('Mint recipient does not match the requested artist wallet');
+    }
+    await announceCompletedMint(client, config, {
+      ...pendingTrack,
+      tokenId: String(tokenId),
+      mintTxHash: txHash,
+    });
+    const completedTrack = completeTrackMint(trackId, { tokenId, txHash });
+    if (!completedTrack) throw new Error('Mint request could not be reconciled');
+    return completedTrack;
+  };
+
   const requestHandler = createWorkerRequestHandler({
     allowedOrigins: config.allowedOrigins,
     ownerWallet: config.mintOwnerWallet || '0x0000000000000000000000000000000000000000',
     pinataJwt: config.pinataJwt,
     pinataSignUrl: config.pinataSignUrl,
+    verifyMintTransaction,
+    onMintComplete: reconcileMint,
   });
   const port = process.env.PORT || 10000;
   http.createServer(requestHandler).listen(port, () => {
@@ -224,7 +249,7 @@ async function main() {
     loadPlaylist();
   }
 
-  const client = new Client({
+  client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
@@ -299,7 +324,7 @@ async function main() {
     } else if (interaction.commandName === 'jukebox') {
       await handleJukeboxCommand(interaction, config);
     } else if (interaction.commandName === 'jukeloop') {
-      await handleJukeLoopCommand(interaction, config);
+      await handleJukeLoopCommand(interaction, config, { reconcileMint });
     }
   });
 
@@ -412,9 +437,10 @@ async function handleJukeboxCommand(interaction, config) {
 
     await interaction.reply({
       content:
-        `✅ **${track.title}** is queued for owner approval.\n` +
+        `✅ Mint request submitted for **${track.title}** — no NFT has been minted yet.\n` +
         `Recipient and royalty wallet: \`${wallet}\`\n` +
-        'The NFT will mint directly to that wallet; the owner wallet only authorizes the transaction and pays gas.',
+        'Next, the contract owner must approve it from `/jukeloop mint-queue`. ' +
+        'After both Base transactions confirm, the NFT will mint directly to that wallet and the bot will announce it publicly.',
       ephemeral: true,
     });
     return;
@@ -614,11 +640,37 @@ async function handleAudioAttachment(message, attachment, config, trackId) {
  * @param {string} [artist] - Discord uploader tag (optional)
  * @returns {string}
  */
-export function buildMintUrl(siteUrl, title, ipfsCid, artist, workerUrl) {
+export function buildMintUrl(siteUrl, title, ipfsCid, artist, workerUrl, trackId) {
   const params = new URLSearchParams({ title, ipfs: ipfsCid });
   if (artist) params.set('recipient', artist);
   if (workerUrl) params.set('worker', workerUrl);
+  if (trackId) params.set('track', trackId);
   return `${siteUrl}/?${params.toString()}`;
+}
+
+async function announceCompletedMint(client, config, track) {
+  const txUrl = `${config.blockExplorerUrl}/tx/${track.mintTxHash}`;
+  const archiveUrl = `${config.siteUrl}/`;
+  const embed = new EmbedBuilder()
+    .setColor(0xf0c040)
+    .setTitle(`🎉 New DecentNFT minted: ${track.title}`)
+    .setDescription(
+      `<@${track.uploaderId}>'s track is now live on Base and in the DecentBusking archive.\n` +
+      `[Open DecentBusking](${archiveUrl}) · [View transaction](${txUrl})`,
+    )
+    .addFields(
+      { name: 'Token', value: `#${track.tokenId}`, inline: true },
+      { name: 'Artist wallet', value: `\`${track.mintRecipient}\``, inline: false },
+    )
+    .setTimestamp();
+
+  const channelIds = new Set([config.jukeboxChannelId, config.jukeLoopTextChannelId].filter(Boolean));
+  const results = await Promise.all([...channelIds].map(async (channelId) => {
+    const channel = await client?.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isTextBased()) return false;
+    return channel.send({ embeds: [embed] }).then(() => true).catch(() => false);
+  }));
+  if (!results.some(Boolean)) throw new Error('Mint verified, but no public Discord channel accepted the announcement');
 }
 
 // ── JukeLoop startup helper ───────────────────────────────────────────────────
@@ -677,7 +729,7 @@ async function startJukeLoop(client, config) {
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  * @param {ReturnType<typeof loadConfig>} config
  */
-async function handleJukeLoopCommand(interaction, config) {
+async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
   const sub = interaction.options.getSubcommand();
 
   if (sub === 'mint-queue' || sub === 'mark-minted') {
@@ -694,13 +746,15 @@ async function handleJukeLoopCommand(interaction, config) {
         await interaction.reply({ content: '❌ Enter a numeric token ID and a full transaction hash.', ephemeral: true });
         return;
       }
-      const track = completeTrackMint(trackId, { tokenId, txHash });
-      await interaction.reply({
-        content: track
-          ? `✅ Recorded **${track.title}** as DecentNFT #${tokenId}.`
-          : '❌ No pending mint request has that track ID.',
-        ephemeral: true,
-      });
+      try {
+        const track = await reconcileMint({ trackId, tokenId, txHash });
+        await interaction.reply({
+          content: `✅ Verified and announced **${track.title}** as DecentNFT #${tokenId}.`,
+          ephemeral: true,
+        });
+      } catch (err) {
+        await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+      }
       return;
     }
 
@@ -716,14 +770,17 @@ async function handleJukeLoopCommand(interaction, config) {
         track.ipfsCid,
         track.mintRecipient,
         config.publicWorkerUrl,
+        track.trackId,
       );
       return (
         `**${index + 1}. ${track.title}** by ${track.uploader}\n` +
-        `Track: \`${track.trackId}\` · Recipient: \`${track.mintRecipient}\` · [approve mint](${approvalUrl})`
+        `Track: \`${track.trackId}\` · Recipient: \`${track.mintRecipient}\` · [mint with owner wallet](${approvalUrl})`
       );
     });
     await interaction.reply({
-      content: `🔑 **Owner-wallet mint queue**\n\n${lines.join('\n\n')}`,
+      content:
+        `🔑 **Owner-wallet mint queue**\n\n${lines.join('\n\n')}\n\n` +
+        'Open a link, connect the contract owner wallet, and confirm both Base transactions. Completion is verified and announced automatically.',
       ephemeral: true,
     });
     return;

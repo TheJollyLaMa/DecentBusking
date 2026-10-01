@@ -1,7 +1,10 @@
-import { verifyMessage } from 'ethers';
+import { Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_SIGNATURE_AGE_MS = 5 * 60 * 1000;
+const MINT_EVENT_ABI = [
+  'event EditionMinted(uint256 indexed tokenId, address indexed to, uint256 amount, address indexed minter)',
+];
 
 export function buildUploadAuthorizationMessage({ address, origin, name, size, type, issuedAt }) {
   return [
@@ -55,11 +58,45 @@ export async function requestPinataSignedUrl({ pinataJwt, pinataSignUrl, name, s
   return url;
 }
 
+export function createMintTransactionVerifier({ rpcUrl, contractAddress, ownerWallet, provider }) {
+  const rpcProvider = provider || new JsonRpcProvider(rpcUrl);
+  const contract = contractAddress.toLowerCase();
+  const owner = ownerWallet.toLowerCase();
+  const iface = new Interface(MINT_EVENT_ABI);
+
+  return async function verifyMint({ tokenId, txHash }) {
+    const [transaction, receipt] = await Promise.all([
+      rpcProvider.getTransaction(txHash),
+      rpcProvider.getTransactionReceipt(txHash),
+    ]);
+    if (!transaction || !receipt || receipt.status !== 1) throw new Error('Mint transaction is not confirmed');
+    if (transaction.to?.toLowerCase() !== contract || transaction.from.toLowerCase() !== owner) {
+      throw new Error('Mint transaction was not sent by the configured owner to DecentNFT');
+    }
+
+    for (const log of receipt.logs) {
+      if (log.address.toLowerCase() !== contract) continue;
+      try {
+        const event = iface.parseLog(log);
+        if (event?.name === 'EditionMinted' && event.args.tokenId.toString() === String(tokenId)) {
+          if (event.args.minter.toLowerCase() !== owner) throw new Error('Edition was not minted by the configured owner');
+          return { recipient: event.args.to, amount: event.args.amount.toString() };
+        }
+      } catch (error) {
+        if (error.message.includes('configured owner')) throw error;
+      }
+    }
+    throw new Error('Mint transaction does not contain the claimed EditionMinted event');
+  };
+}
+
 export function createWorkerRequestHandler({
   allowedOrigins,
   ownerWallet,
   pinataJwt,
   pinataSignUrl = 'https://uploads.pinata.cloud/v3/files/sign',
+  verifyMintTransaction,
+  onMintComplete,
   fetchImpl = fetch,
   now = () => Date.now(),
 }) {
@@ -84,6 +121,19 @@ export function createWorkerRequestHandler({
       }
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
         sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured' });
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/mint-complete') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!verifyMintTransaction || !onMintComplete) throw new Error('Mint reconciliation is not configured');
+        const body = await readJson(request);
+        const { trackId, tokenId, txHash } = body;
+        if (!trackId || !/^\d+$/.test(String(tokenId)) || !/^0x[0-9a-fA-F]{64}$/.test(String(txHash))) {
+          throw new Error('Invalid mint completion payload');
+        }
+        const verified = await verifyMintTransaction({ tokenId: String(tokenId), txHash });
+        await onMintComplete({ trackId, tokenId: String(tokenId), txHash, recipient: verified.recipient });
+        sendJson(response, 200, { ok: true }, corsOrigin);
         return;
       }
       if (request.method !== 'POST' || requestUrl.pathname !== '/api/ipfs/upload-url') {

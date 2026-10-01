@@ -24,6 +24,7 @@
 
 import { addNFTToSpace, fetchNFTMetaById } from './space.js';
 import { uploadFileToIPFS } from './ipfs-upload.js';
+import { reportMintCompletion } from './mint-reconciliation.js';
 
 // DecentNFT v0.2 ABI — ERC-1155 with role-based minting
 // Source: https://github.com/TheJollyLaMa/DecentMarket/blob/main/abis/DecentNFT_v0.2.json
@@ -342,9 +343,8 @@ async function _handleMint(e) {
     const mintTx = await contract.mintProduct(recipient, tokenId, 1);
 
     _setStatus('⏳ Waiting for mint confirmation… (tx 2/2)');
-    await mintTx.wait();
-
-    _setStatus(`✅ Minted token #${tokenId} directly to ${recipient}.`);
+    const mintReceipt = await mintTx.wait();
+    const mintTxHash = mintReceipt.hash || mintTx.hash;
 
     // 8. Inject into space field
     addNFTToSpace({
@@ -359,6 +359,28 @@ async function _handleMint(e) {
       parentTokenId: parentId || undefined,
       royaltyChain: parentId > 0 ? { parentTokenId: parentId } : undefined,
     });
+
+    const completionParams = new URLSearchParams(window.location.search);
+    const trackId = completionParams.get('track');
+    try {
+      const announced = await reportMintCompletion({
+        serviceUrl: completionParams.get('worker') || cfg.ipfsUploadServiceUrl,
+        trackId,
+        tokenId,
+        txHash: mintTxHash,
+      });
+      _setStatus(
+        announced
+          ? `✅ Minted token #${tokenId} to ${recipient} and announced it in Discord.`
+          : `✅ Minted token #${tokenId} directly to ${recipient}.`,
+      );
+    } catch (reportError) {
+      console.warn('[mint] Discord reconciliation failed:', reportError.message);
+      _setStatus(
+        `✅ Minted token #${tokenId}, but Discord sync failed. ` +
+        `Run /jukeloop mark-minted with track ${trackId}, token ${tokenId}, and tx ${mintTxHash}.`,
+      );
+    }
 
     // Close modal after a moment
     setTimeout(() => {
