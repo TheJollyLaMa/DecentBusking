@@ -134,7 +134,7 @@ Manage the 24/7 community radio playlist.  Most subcommands are available to eve
 
 Wallet addresses submitted in Discord are community claims, not cryptographic proof of wallet ownership. During this manual bootstrap phase, the owner must verify unexpected or disputed addresses before approving a mint.
 
-`/jukebox request-mint` only queues a request; it does not submit a blockchain transaction. The owner opens the private `/jukeloop mint-queue`, follows the track's approval link, and confirms token registration plus product minting in MetaMask. The browser then reports the confirmed mint transaction to the Render worker. After the worker verifies the owner, contract, recipient, token ID, and `EditionMinted` event on Base, the bot removes the item from the backlog and announces the NFT in both configured public text channels. `/jukeloop mark-minted` remains a verified recovery path if browser reporting fails.
+`/jukebox request-mint` only queues a request; it does not submit a blockchain transaction. The contract owner opens **Admin** in the DecentBusking dapp, connects the `DEFAULT_ADMIN_ROLE` wallet, and signs once to load the private queue. Each request supports optional artwork and an individual Mint action. Multiple selected requests can be processed sequentially; the current contract has no batch registration method, so MetaMask still requires two Base transaction confirmations per track. The browser reports each confirmed mint to the Render worker. After the worker verifies the owner, contract, recipient, token ID, and `EditionMinted` event on Base, the bot removes the item from the backlog and announces the NFT in both configured public text channels. `/jukeloop mint-queue` and `/jukeloop mark-minted` remain recovery tools.
 
 ---
 

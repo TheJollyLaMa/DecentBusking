@@ -18,6 +18,15 @@ export function buildUploadAuthorizationMessage({ address, origin, name, size, t
   ].join('\n');
 }
 
+export function buildAdminAuthorizationMessage({ address, origin, issuedAt }) {
+  return [
+    'DecentBusking admin mint queue',
+    `Wallet: ${address.toLowerCase()}`,
+    `Origin: ${origin}`,
+    `Issued At: ${issuedAt}`,
+  ].join('\n');
+}
+
 async function readJson(request) {
   const chunks = [];
   let size = 0;
@@ -97,6 +106,7 @@ export function createWorkerRequestHandler({
   pinataSignUrl = 'https://uploads.pinata.cloud/v3/files/sign',
   verifyMintTransaction,
   onMintComplete,
+  getMintQueue,
   fetchImpl = fetch,
   now = () => Date.now(),
 }) {
@@ -121,6 +131,22 @@ export function createWorkerRequestHandler({
       }
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
         sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured' });
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/mint-queue') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!getMintQueue) throw new Error('Mint queue is not configured');
+        const body = await readJson(request);
+        const { address, signature, issuedAt } = body;
+        const issuedAtMs = Date.parse(issuedAt);
+        if (!address || !signature || !Number.isFinite(issuedAtMs)) throw new Error('Incomplete admin authorization');
+        if (Math.abs(now() - issuedAtMs) > MAX_SIGNATURE_AGE_MS) throw new Error('Admin authorization has expired');
+        const message = buildAdminAuthorizationMessage({ address, origin, issuedAt });
+        const recovered = verifyMessage(message, signature).toLowerCase();
+        if (recovered !== address.toLowerCase() || recovered !== expectedOwner) {
+          throw new Error('Admin authorization is not from the mint owner');
+        }
+        sendJson(response, 200, { requests: await getMintQueue() }, corsOrigin);
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/mint-complete') {

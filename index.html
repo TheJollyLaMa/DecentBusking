@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/styles.css?v=20261001-admin-queue-2" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -148,18 +148,34 @@
   <div id="admin-modal" class="hidden">
     <div id="admin-modal-inner">
       <div id="admin-modal-header">
-        <h2>🔑 Admin: Grant Role</h2>
+        <h2>🔑 DecentBusking Admin</h2>
         <button id="admin-close-btn" aria-label="Close admin panel">✕</button>
       </div>
       <p class="admin-description">
-        Grant <strong>MINTER_ROLE</strong> or <strong>DEFAULT_ADMIN_ROLE</strong> to a wallet address.
-        Only the current <code>DEFAULT_ADMIN_ROLE</code> holder can perform this action.
+        Review community mint requests, add optional artwork, and mint directly to each artist wallet.
+        Only the current <code>DEFAULT_ADMIN_ROLE</code> holder can access these operations; contract role management is available below the queue.
       </p>
       <div id="admin-connect-section">
         <button id="admin-connect-btn" class="admin-btn admin-btn-primary">🔌 Connect Wallet</button>
         <span id="admin-connected-addr" class="admin-addr"></span>
       </div>
+      <section id="admin-mint-section" class="hidden">
+        <div class="admin-section-header">
+          <div>
+            <h3>Pending NFT Requests</h3>
+            <p>Select one or more tracks. Selected requests run sequentially with two Base transactions per track.</p>
+          </div>
+          <button id="admin-mint-refresh-btn" class="admin-btn admin-btn-secondary" type="button">Refresh</button>
+        </div>
+        <div id="admin-mint-queue" class="admin-mint-queue"></div>
+        <div class="admin-mint-toolbar">
+          <label><input id="admin-mint-select-all" type="checkbox" /> Select all</label>
+          <button id="admin-mint-selected-btn" class="admin-btn admin-btn-primary" type="button">Mint selected sequentially</button>
+        </div>
+        <div id="admin-mint-status" class="admin-status"></div>
+      </section>
       <div id="admin-role-section" class="hidden">
+        <h3>Contract Roles</h3>
         <div class="admin-field">
           <label for="admin-target-addr">Wallet Address to Grant Role</label>
           <input id="admin-target-addr" type="text" placeholder="0x…" />

@@ -151,3 +151,32 @@ test('verifies the owner transaction and EditionMinted event on Base', async () 
 
   assert.deepEqual(await verify({ tokenId: '42', txHash }), { recipient, amount: '1' });
 });
+
+test('returns the pending queue only to the mint owner', async () => {
+  const { buildAdminAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+  const owner = Wallet.createRandom();
+  const issuedAt = '2026-10-01T12:00:00.000Z';
+  const authorization = {
+    address: owner.address,
+    origin: 'https://busking.example',
+    issuedAt,
+  };
+  const signature = await owner.signMessage(buildAdminAuthorizationMessage(authorization));
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: [authorization.origin],
+    ownerWallet: owner.address,
+    pinataJwt: 'server-secret',
+    now: () => Date.parse(issuedAt),
+    getMintQueue: async () => [{ trackId: 'track-1', title: 'Track One' }],
+  });
+
+  await withServer(handler, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/mint-queue`, {
+      method: 'POST',
+      headers: { origin: authorization.origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...authorization, signature }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).requests, [{ trackId: 'track-1', title: 'Track One' }]);
+  });
+});

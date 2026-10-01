@@ -35,9 +35,9 @@ window.DecentConfig = {
   contractAddress: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B",
   marketUrl: "https://thejollylama.github.io/DecentMarket/",
 
-  // IPFS uploads. The Render URL is supplied by Discord approval links in production.
+  // IPFS uploads. This public URL never contains the server-side Pinata JWT.
   ipfsUploadProvider: "pinata",
-  ipfsUploadServiceUrl: "",
+  ipfsUploadServiceUrl: "https://decentbusking.onrender.com",
   ipfsApiUrl: "http://127.0.0.1:5001",
   ipfsGateway: "https://dweb.link/ipfs/",
 

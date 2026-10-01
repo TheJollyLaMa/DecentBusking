@@ -215,6 +215,15 @@ async function main() {
     pinataSignUrl: config.pinataSignUrl,
     verifyMintTransaction,
     onMintComplete: reconcileMint,
+    getMintQueue: async () => getMintRequests().map((track) => ({
+      trackId: track.trackId,
+      title: track.title,
+      uploader: track.uploader,
+      uploaderId: track.uploaderId,
+      recipient: track.mintRecipient,
+      ipfsCid: track.ipfsCid,
+      requestedAt: track.mintRequestedAt,
+    })),
   });
   const port = process.env.PORT || 10000;
   http.createServer(requestHandler).listen(port, () => {
