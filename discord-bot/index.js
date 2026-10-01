@@ -59,11 +59,13 @@ import {
 // ── Audio MIME-type detection ─────────────────────────────────────────────────
 const AUDIO_MIME_PREFIXES  = ['audio/'];
 const AUDIO_EXTENSIONS_RE  = /\.(mp3|wav|ogg|flac|m4a|aac|opus|weba)$/i;
+const IMAGE_EXTENSIONS_RE  = /\.(png|jpe?g|webp|gif)$/i;
 
 // Maximum audio file size the bot will download (50 MB).
 // Discord's own upload cap for non-nitro servers is 25 MB, but allow some
 // headroom for boosted servers (up to 100 MB) while still preventing abuse.
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB
+const MAX_ARTWORK_BYTES = 10 * 1024 * 1024; // 10 MB
 
 /**
  * Return true if the attachment looks like an audio file.
@@ -76,6 +78,10 @@ function isAudioAttachment(attachment) {
   const mime = attachment.contentType || '';
   if (AUDIO_MIME_PREFIXES.some((p) => mime.startsWith(p))) return true;
   return AUDIO_EXTENSIONS_RE.test(attachment.name || '');
+}
+
+function isImageAttachment(attachment) {
+  return (attachment.contentType || '').startsWith('image/') || IMAGE_EXTENSIONS_RE.test(attachment.name || '');
 }
 
 // ── Slash command definitions ─────────────────────────────────────────────────
@@ -140,6 +146,9 @@ const SLASH_COMMANDS = [
         )
         .addStringOption((opt) =>
           opt.setName('wallet').setDescription('Base wallet that receives the NFT and royalties').setRequired(true),
+        )
+        .addAttachmentOption((opt) =>
+          opt.setName('artwork').setDescription('Optional PNG, JPEG, WebP, or GIF NFT artwork'),
         ),
     ),
 
@@ -222,6 +231,7 @@ async function main() {
       uploaderId: track.uploaderId,
       recipient: track.mintRecipient,
       ipfsCid: track.ipfsCid,
+      artworkCid: track.artworkCid || null,
       requestedAt: track.mintRequestedAt,
     })),
   });
@@ -430,24 +440,70 @@ async function handleJukeboxCommand(interaction, config) {
   if (sub === 'request-mint') {
     const trackId = interaction.options.getString('track_id', true).trim();
     const wallet = interaction.options.getString('wallet', true).trim();
+    const artwork = interaction.options.getAttachment('artwork');
     if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
       await interaction.reply({ content: '❌ Enter a valid `0x` Base wallet address.', ephemeral: true });
       return;
     }
 
-    const track = requestTrackMint(trackId, interaction.user.id, wallet);
-    if (!track) {
+    const ownedTrack = getPlaylist().find((track) =>
+      track.trackId === trackId &&
+      track.uploaderId === interaction.user.id &&
+      track.pinStatus === 'pinned' &&
+      track.ipfsCid &&
+      track.mintStatus !== 'minted'
+    );
+    if (!ownedTrack) {
       await interaction.reply({
         content: '❌ That track is not yours, is not pinned to IPFS yet, or has already been minted.',
         ephemeral: true,
       });
       return;
     }
+    if (artwork && (!isImageAttachment(artwork) || artwork.size > MAX_ARTWORK_BYTES)) {
+      await interaction.reply({
+        content: '❌ Artwork must be a PNG, JPEG, WebP, or GIF no larger than 10 MB.',
+        ephemeral: true,
+      });
+      return;
+    }
 
-    await interaction.reply({
+    await interaction.deferReply({ ephemeral: true });
+    let artworkCid;
+    try {
+      if (artwork) {
+        const response = await fetch(artwork.url);
+        if (!response.ok) throw new Error(`HTTP ${response.status} downloading artwork`);
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const artworkUri = await uploadToIPFS(
+          buffer,
+          artwork.name || 'artwork.png',
+          artwork.contentType || 'image/png',
+          {
+            provider: config.ipfsUploadProvider,
+            pinataJwt: config.pinataJwt,
+            pinataApiUrl: config.pinataApiUrl,
+            ipfsApiUrl: config.ipfsApiUrl,
+          },
+        );
+        artworkCid = artworkUri.replace('ipfs://', '');
+      }
+    } catch (err) {
+      await interaction.editReply(`❌ Artwork upload failed: ${err.message}`);
+      return;
+    }
+
+    const track = requestTrackMint(trackId, interaction.user.id, wallet, artworkCid);
+    if (!track) {
+      await interaction.editReply('❌ The mint request changed while the artwork was uploading. Please retry.');
+      return;
+    }
+
+    await interaction.editReply({
       content:
         `✅ Mint request submitted for **${track.title}** — no NFT has been minted yet.\n` +
         `Recipient and royalty wallet: \`${wallet}\`\n` +
+        (track.artworkCid ? `Artwork CID: \`${track.artworkCid}\`\n` : '') +
         'Next, the contract owner must approve it from `/jukeloop mint-queue`. ' +
         'After both Base transactions confirm, the NFT will mint directly to that wallet and the bot will announce it publicly.',
       ephemeral: true,

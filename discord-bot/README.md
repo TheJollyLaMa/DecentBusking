@@ -112,7 +112,7 @@ Fetch a numbered playlist of direct stream links from an IPFS album directory an
 |---------|-------------|
 | `/jukebox play <cid>` | Receive a private numbered playlist with clickable gateway stream links. |
 | `/jukebox backlog` | Privately list your tracked uploads that have not been minted yet. |
-| `/jukebox request-mint <track_id> <wallet>` | Queue one of your pinned tracks for owner approval. |
+| `/jukebox request-mint <track_id> <wallet> [artwork]` | Queue one of your pinned tracks with optional NFT artwork for owner approval. |
 
 **Example:**
 ```
@@ -134,7 +134,9 @@ Manage the 24/7 community radio playlist.  Most subcommands are available to eve
 
 Wallet addresses submitted in Discord are community claims, not cryptographic proof of wallet ownership. During this manual bootstrap phase, the owner must verify unexpected or disputed addresses before approving a mint.
 
-`/jukebox request-mint` only queues a request; it does not submit a blockchain transaction. The contract owner opens **Admin** in the DecentBusking dapp, connects the `DEFAULT_ADMIN_ROLE` wallet, and signs once to load the private queue. Each request supports optional artwork and an individual Mint action. Multiple selected requests can be processed sequentially; the current contract has no batch registration method, so MetaMask still requires two Base transaction confirmations per track. The browser reports each confirmed mint to the Render worker. After the worker verifies the owner, contract, recipient, token ID, and `EditionMinted` event on Base, the bot removes the item from the backlog and announces the NFT in both configured public text channels. `/jukeloop mint-queue` and `/jukeloop mark-minted` remain recovery tools.
+`/jukebox request-mint` only queues a request; it does not submit a blockchain transaction. Artists may attach PNG, JPEG, WebP, or GIF artwork up to 10 MB; the bot pins it immediately and stores its CID with the request. The contract owner opens **Admin** in the DecentBusking dapp, connects the `DEFAULT_ADMIN_ROLE` wallet, and signs once to load the private queue. Artist artwork is previewed and preloaded, with an optional replacement control. Each request has an individual Mint action. Multiple selected requests can be processed sequentially; the current contract has no batch registration method, so MetaMask still requires two Base transaction confirmations per track. The browser reports each confirmed mint to the Render worker. After the worker verifies the owner, contract, recipient, token ID, and `EditionMinted` event on Base, the bot removes the item from the backlog and announces the NFT in both configured public text channels. `/jukeloop mint-queue` and `/jukeloop mark-minted` remain recovery tools.
+
+A true one-confirmation batch is possible through a separately deployed `BatchProductMinter` helper contract holding `DEFAULT_ADMIN_ROLE`: it can loop over requests and use each `registerToken` return value immediately in `mintProduct`. That privileged helper requires its own Solidity project, review, deployment, and explicit role grant before the dapp should use it.
 
 ---
 

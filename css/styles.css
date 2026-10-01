@@ -1281,6 +1281,16 @@ decent-foot {
   margin-top: 0.45rem;
 }
 
+.admin-artwork-preview {
+  float: left;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  margin: 0 0.65rem 0.45rem 0;
+  border: 1px solid rgba(160, 224, 255, 0.25);
+  border-radius: 4px;
+}
+
 .admin-mint-empty {
   color: var(--text-dim);
   text-align: center;

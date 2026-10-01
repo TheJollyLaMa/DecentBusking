@@ -48,8 +48,10 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
     'attachment-1',
     'user-1',
     '0x1111111111111111111111111111111111111111',
+    'bafy-artwork',
   );
   assert.equal(request.mintStatus, 'requested');
+  assert.equal(request.artworkCid, 'bafy-artwork');
   assert.equal(store.getMintRequests().length, 1);
 
   const minted = store.completeTrackMint('attachment-1', {

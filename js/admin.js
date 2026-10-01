@@ -160,10 +160,11 @@ async function _connectWallet() {
       <div class="admin-mint-request">
         <input class="admin-mint-check" type="checkbox" data-index="${index}" aria-label="Select ${_esc(track.title)}" />
         <div>
+          ${track.artworkCid ? `<img class="admin-artwork-preview" src="${_esc(_gatewayUrl(track.artworkCid))}" alt="Artwork for ${_esc(track.title)}" />` : ''}
           <strong>${_esc(track.title)}</strong>
           <span>by ${_esc(track.uploader)} · ${_esc(track.requestedAt ? new Date(track.requestedAt).toLocaleString() : '')}</span>
           <span>${_esc(track.recipient)}</span>
-          <label class="admin-artwork-label">Optional artwork
+          <label class="admin-artwork-label">${track.artworkCid ? 'Replace artwork' : 'Optional artwork'}
             <input class="admin-artwork" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-index="${index}" />
           </label>
         </div>
@@ -221,7 +222,7 @@ async function _connectWallet() {
       origin: window.location.origin,
     });
 
-    let image = '';
+    let image = track.artworkCid ? `ipfs://${track.artworkCid}` : '';
     if (artwork) {
       _setMintStatus(`Uploading artwork for ${track.title}…`);
       image = await upload(artwork);
@@ -295,6 +296,11 @@ async function _connectWallet() {
 
   function _slugify(value) {
     return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'track';
+  }
+
+  function _gatewayUrl(cid) {
+    const gateway = (window.DecentConfig?.ipfsGateway || 'https://dweb.link/ipfs/').replace(/\/$/, '');
+    return `${gateway}${gateway.endsWith('/ipfs') ? '' : '/ipfs'}/${cid}`;
   }
 
   function _esc(value) {

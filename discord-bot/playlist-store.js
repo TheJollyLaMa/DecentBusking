@@ -32,6 +32,7 @@ const STORE_PATH = process.env.JUKELOOP_PLAYLIST_PATH || join(__dirname, 'jukelo
  * @property {'unminted'|'requested'|'minted'} mintStatus
  * @property {string} [mintRecipient] - Artist wallet requested as the mint and royalty recipient
  * @property {string} [mintRequestedAt] - ISO-8601 request timestamp
+ * @property {string} [artworkCid] - Artist-supplied NFT artwork CID
  * @property {string} [tokenId] - On-chain token ID after owner approval
  * @property {string} [mintTxHash] - Product mint transaction hash
  * @property {number} likes      - Cumulative 👍 reactions counted across all plays
@@ -161,7 +162,7 @@ export function updateTrackPin(trackId, result) {
 }
 
 /** Queue a pinned track for manual owner-wallet mint approval. */
-export function requestTrackMint(trackId, uploaderId, recipient) {
+export function requestTrackMint(trackId, uploaderId, recipient, artworkCid) {
   const track = _playlist.find((entry) => entry.trackId === trackId);
   if (!track || track.uploaderId !== uploaderId) return null;
   if (track.pinStatus !== 'pinned' || !track.ipfsCid || track.mintStatus === 'minted') return null;
@@ -169,6 +170,7 @@ export function requestTrackMint(trackId, uploaderId, recipient) {
   track.mintStatus = 'requested';
   track.mintRecipient = recipient;
   track.mintRequestedAt = new Date().toISOString();
+  if (artworkCid) track.artworkCid = artworkCid;
   _save();
   return track;
 }
