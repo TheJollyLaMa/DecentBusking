@@ -7,28 +7,27 @@ import { EmbedBuilder } from 'discord.js';
 const EMBED_COLOUR = 0x00d26a;
 
 /**
- * Build a rich Discord embed with a one-click "🎸 Mint This As A DNFT" link.
+ * Build the upload confirmation and point the artist to the private mint queue.
  *
  * @param {object} opts
  * @param {string} opts.title       - Track title (from filename)
  * @param {string} opts.ipfsCid     - Raw CID string (without ipfs:// prefix)
- * @param {string} opts.mintUrl     - Full pre-filled DecentBusking mint URL
+ * @param {string} opts.trackId     - Stable track ID used for a mint request
  * @param {string} opts.uploaderTag - Discord username of the person who uploaded
  * @returns {EmbedBuilder}
  */
-export function buildMintEmbed({ title, ipfsCid, mintUrl, uploaderTag }) {
+export function buildMintEmbed({ title, ipfsCid, trackId, uploaderTag }) {
   return new EmbedBuilder()
     .setColor(EMBED_COLOUR)
     .setTitle('🎶 Audio pinned to IPFS!')
     .setDescription(
       `**${title}** has been uploaded to the decentralised web.\n` +
-      `Click the button below to mint it as a DecentNFT — ` +
-      `your wallet stays in control until you confirm in the browser.`
+      'Use `/jukebox request-mint` to submit your Base wallet for owner approval.'
     )
     .addFields(
       { name: '🎵 Track',    value: title,                             inline: true  },
       { name: '📌 IPFS CID', value: `\`${ipfsCid}\``,                 inline: false },
-      { name: '🔗 Mint URL', value: `[Open pre-filled mint form](${mintUrl})`, inline: false },
+      { name: '🪪 Track ID', value: `\`${trackId}\``,                  inline: false },
     )
     .setFooter({ text: `Uploaded by ${uploaderTag} · DecentBusking Jukebox Bot` })
     .setTimestamp();

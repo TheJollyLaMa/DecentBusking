@@ -14,16 +14,26 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const STORE_PATH = join(__dirname, 'jukeloop-playlist.json');
+const STORE_PATH = process.env.JUKELOOP_PLAYLIST_PATH || join(__dirname, 'jukeloop-playlist.json');
 
 /**
  * @typedef {Object} TrackEntry
+ * @property {string} trackId    - Stable playlist identity (Discord attachment ID when available)
  * @property {string} messageId  - Discord message ID of the original upload
+ * @property {string} [attachmentId] - Discord attachment ID
  * @property {string} channelId  - Discord channel ID where the file was posted
  * @property {string} filename   - Original attachment filename (e.g. "song.mp3")
  * @property {string} title      - Human-readable title (filename without extension)
  * @property {string} uploader   - Discord username/tag of the uploader
  * @property {string} uploaderId - Discord user ID of the uploader
+ * @property {'pending'|'pinned'|'failed'|'disabled'|'untracked'} pinStatus
+ * @property {string} [ipfsCid]  - Raw audio CID after a successful pin
+ * @property {string} [pinError] - Last IPFS pin error, when pinStatus is failed
+ * @property {'unminted'|'requested'|'minted'} mintStatus
+ * @property {string} [mintRecipient] - Artist wallet requested as the mint and royalty recipient
+ * @property {string} [mintRequestedAt] - ISO-8601 request timestamp
+ * @property {string} [tokenId] - On-chain token ID after owner approval
+ * @property {string} [mintTxHash] - Product mint transaction hash
  * @property {number} likes      - Cumulative 👍 reactions counted across all plays
  * @property {number} dislikes   - Cumulative 👎 reactions counted across all plays
  * @property {number} plays      - Total number of times the track has been played
@@ -32,15 +42,34 @@ const STORE_PATH = join(__dirname, 'jukeloop-playlist.json');
 
 /** @type {TrackEntry[]} */
 let _playlist = [];
+let _remoteSaver = null;
+let _remoteSaveQueue = Promise.resolve();
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
-/** Load the playlist from disk. Call once at startup. */
-export function loadPlaylist() {
-  if (existsSync(STORE_PATH)) {
+function _normalizePlaylist(playlist) {
+  return playlist.map((track) => ({
+    ...track,
+    trackId: track.trackId || getTrackId(track),
+    pinStatus: track.pinStatus || (track.ipfsCid ? 'pinned' : 'untracked'),
+    mintStatus: track.mintStatus || 'unminted',
+  }));
+}
+
+/** Load the playlist from a restored snapshot or the local runtime cache. */
+export function loadPlaylist(restoredPlaylist = null) {
+  if (Array.isArray(restoredPlaylist)) {
+    _playlist = _normalizePlaylist(restoredPlaylist);
+    console.log(`[playlist-store] Restored ${_playlist.length} track(s) from IPFS`);
+    try {
+      writeFileSync(STORE_PATH, JSON.stringify(_playlist, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[playlist-store] Could not refresh local playlist cache:', err.message);
+    }
+  } else if (existsSync(STORE_PATH)) {
     try {
       const raw = readFileSync(STORE_PATH, 'utf8');
-      _playlist = JSON.parse(raw);
+      _playlist = _normalizePlaylist(JSON.parse(raw));
       console.log(`[playlist-store] Loaded ${_playlist.length} track(s) from ${STORE_PATH}`);
     } catch (err) {
       console.error('[playlist-store] Failed to parse playlist file, starting empty:', err.message);
@@ -52,26 +81,58 @@ export function loadPlaylist() {
   return _playlist;
 }
 
+/** Configure the durable snapshot writer used after every mutation. */
+export function configureRemotePersistence(saveSnapshot) {
+  _remoteSaver = saveSnapshot;
+  _remoteSaveQueue = Promise.resolve();
+}
+
+/** Wait until all queued remote snapshots have completed. */
+export function waitForRemotePersistence() {
+  return _remoteSaveQueue;
+}
+
 function _save() {
   try {
     writeFileSync(STORE_PATH, JSON.stringify(_playlist, null, 2), 'utf8');
   } catch (err) {
     console.error('[playlist-store] Failed to save playlist:', err.message);
   }
+  if (_remoteSaver) {
+    const snapshot = structuredClone(_playlist);
+    _remoteSaveQueue = _remoteSaveQueue
+      .then(() => _remoteSaver(snapshot))
+      .catch((err) => console.error('[playlist-store] Failed to checkpoint playlist to IPFS:', err.message));
+  }
 }
 
 // ── Mutations ─────────────────────────────────────────────────────────────────
 
 /**
- * Add a track to the playlist (idempotent — keyed on messageId).
+ * Return the stable identity for a playlist entry.
+ * New Discord uploads use the attachment snowflake; legacy entries fall back
+ * to message ID + filename so multiple attachments from one message survive.
+ *
+ * @param {{ attachmentId?: string, messageId: string, filename: string }} track
+ * @returns {string}
+ */
+export function getTrackId(track) {
+  return track.attachmentId || `${track.messageId}:${track.filename}`;
+}
+
+/**
+ * Add a track to the playlist (idempotent — keyed on attachment identity).
  *
  * @param {Omit<TrackEntry, 'likes'|'dislikes'|'plays'|'addedAt'>} track
  * @returns {boolean} true if the track was newly added, false if already present
  */
 export function addTrack(track) {
-  if (_playlist.some((t) => t.messageId === track.messageId)) return false;
+  const trackId = getTrackId(track);
+  if (_playlist.some((existing) => existing.trackId === trackId)) return false;
   _playlist.push({
     ...track,
+    trackId,
+    mintStatus: track.mintStatus || 'unminted',
     likes:    0,
     dislikes: 0,
     plays:    0,
@@ -82,12 +143,56 @@ export function addTrack(track) {
 }
 
 /**
+ * Persist the outcome of an IPFS pin attempt.
+ * @param {string} trackId
+ * @param {{ status: 'pending'|'pinned'|'failed'|'disabled'|'untracked', ipfsCid?: string, error?: string }} result
+ * @returns {TrackEntry|null}
+ */
+export function updateTrackPin(trackId, result) {
+  const track = _playlist.find((entry) => entry.trackId === trackId);
+  if (!track) return null;
+
+  track.pinStatus = result.status;
+  if (result.ipfsCid) track.ipfsCid = result.ipfsCid;
+  if (result.error) track.pinError = result.error;
+  else delete track.pinError;
+  _save();
+  return track;
+}
+
+/** Queue a pinned track for manual owner-wallet mint approval. */
+export function requestTrackMint(trackId, uploaderId, recipient) {
+  const track = _playlist.find((entry) => entry.trackId === trackId);
+  if (!track || track.uploaderId !== uploaderId) return null;
+  if (track.pinStatus !== 'pinned' || !track.ipfsCid || track.mintStatus === 'minted') return null;
+
+  track.mintStatus = 'requested';
+  track.mintRecipient = recipient;
+  track.mintRequestedAt = new Date().toISOString();
+  _save();
+  return track;
+}
+
+/** Record a manually approved owner-wallet mint. */
+export function completeTrackMint(trackId, { tokenId, txHash }) {
+  const track = _playlist.find((entry) => entry.trackId === trackId);
+  if (!track || track.mintStatus !== 'requested') return null;
+
+  track.mintStatus = 'minted';
+  track.tokenId = String(tokenId);
+  track.mintTxHash = txHash;
+  track.mintedAt = new Date().toISOString();
+  _save();
+  return track;
+}
+
+/**
  * Remove a track by its Discord upload message ID.
  * @param {string} messageId
  * @returns {TrackEntry|null} The removed entry, or null if not found.
  */
-export function removeTrack(messageId) {
-  const idx = _playlist.findIndex((t) => t.messageId === messageId);
+export function removeTrack(trackId) {
+  const idx = _playlist.findIndex((track) => track.trackId === trackId);
   if (idx === -1) return null;
   const [removed] = _playlist.splice(idx, 1);
   _save();
@@ -102,8 +207,8 @@ export function removeTrack(messageId) {
  * @param {number} newLikes    - Net new 👍 since last collection
  * @param {number} newDislikes - Net new 👎 since last collection
  */
-export function applyRating(messageId, newLikes, newDislikes) {
-  const track = _playlist.find((t) => t.messageId === messageId);
+export function applyRating(trackId, newLikes, newDislikes) {
+  const track = _playlist.find((entry) => entry.trackId === trackId);
   if (!track) return;
   track.likes    += newLikes;
   track.dislikes += newDislikes;
@@ -116,6 +221,20 @@ export function applyRating(messageId, newLikes, newDislikes) {
 /** Return a shallow copy of the raw (unsorted) playlist. */
 export function getPlaylist() {
   return [..._playlist];
+}
+
+/** Return unminted uploads belonging to one Discord user, newest first. */
+export function getMintBacklog(uploaderId) {
+  return _playlist
+    .filter((track) => track.uploaderId === uploaderId && track.mintStatus !== 'minted')
+    .sort((first, second) => Date.parse(second.addedAt) - Date.parse(first.addedAt));
+}
+
+/** Return owner-wallet mint requests, oldest first. */
+export function getMintRequests() {
+  return _playlist
+    .filter((track) => track.mintStatus === 'requested')
+    .sort((first, second) => Date.parse(first.mintRequestedAt) - Date.parse(second.mintRequestedAt));
 }
 
 /**

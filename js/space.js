@@ -108,7 +108,7 @@ export async function fetchNFTMetaById(tokenId) {
   if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') return null;
 
   try {
-    const rpcUrl = cfg.rpcUrl || 'https://mainnet.optimism.io';
+    const rpcUrl = cfg.rpcUrl || 'https://mainnet.base.org';
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const abi = [
       'function uri(uint256 tokenId) view returns (string)',
@@ -243,7 +243,7 @@ async function _loadNFTs() {
   _showSpinner(true);
 
   try {
-    const rpcUrl = cfg.rpcUrl || 'https://mainnet.optimism.io';
+    const rpcUrl = cfg.rpcUrl || 'https://mainnet.base.org';
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const abi = [
       'function nextTokenId() view returns (uint256)',

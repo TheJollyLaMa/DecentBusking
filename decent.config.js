@@ -7,9 +7,11 @@
 // Fields:
 //   appName        — Display name shown in the app header
 //   subtitle       — Subtitle beneath the app name
-//   chainId        — EVM chain ID (10 = Optimism Mainnet)
-//   contractAddress— DecentNFT contract address (deployed via DecentMarket on Optimism)
-//   w3upSpaceDID   — w3up IPFS space DID for audio file uploads
+//   chainId        — EVM chain ID (8453 = Base Mainnet)
+//   contractAddress— DecentNFT contract address deployed via DecentMarket
+//   ipfsUploadProvider — "pinata" in production or "local" for IPFS Desktop
+//   ipfsUploadServiceUrl — Render worker URL; approval links can override it
+//   ipfsApiUrl     — local Kubo API URL used when provider is "local"
 //   ipfsGateway    — IPFS HTTP gateway for playback and image display
 //   tokenSymbol    — Native currency symbol used for tips
 //   uniswapUrl     — (optional) Uniswap link shown in the right-ankh dropdown
@@ -23,15 +25,20 @@ window.DecentConfig = {
   appName: "Decent Busking",
   subtitle: "🎸 The Web3 Digital Town Square",
 
-  // Chain — Optimism Mainnet
-  chainId: 10,
-  rpcUrl: "https://mainnet.optimism.io",
+  // Chain — Base Mainnet
+  chainId: 8453,
+  chainName: "Base Mainnet",
+  rpcUrl: "https://mainnet.base.org",
+  blockExplorerUrl: "https://basescan.org",
 
-  // DecentNFT contract deployed on Optimism via DecentMarket
-  contractAddress: "0xe870f7b1D10C41dbc6b75598a5308B9a2Bb52958",
+  // DecentNFT v0.2 deployed on Base via DecentMarket
+  contractAddress: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B",
+  marketUrl: "https://thejollylama.github.io/DecentMarket/",
 
-  // IPFS / w3up
-  w3upSpaceDID: "did:key:z6MktU4rpHu5Z4nXjXufa4uivwBLN1DcK4r2xfGhizr4bndB",
+  // IPFS uploads. The Render URL is supplied by Discord approval links in production.
+  ipfsUploadProvider: "pinata",
+  ipfsUploadServiceUrl: "",
+  ipfsApiUrl: "http://127.0.0.1:5001",
   ipfsGateway: "https://dweb.link/ipfs/",
 
   // Currency

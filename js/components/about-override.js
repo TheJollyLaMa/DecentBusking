@@ -591,7 +591,7 @@ class DecentBuskingAboutModal extends HTMLElement {
           <div class="about-section">
             <p><strong>${appName}</strong> is a Web3 digital town square where musicians mint their audio busks directly to the Optimism blockchain as Decent NFTs.</p>
             <p>Each busk minted here is a live, on-chain audio NFT — visible in the asteroid field the moment it's minted, playable by anyone, and purchasable trustlessly via the DecentEscrow contract.</p>
-            <p>Built on <strong>Optimism Mainnet</strong>, powered by <strong>IPFS / Web3.Storage</strong>, and integrated with <strong>MetaMask</strong> for seamless wallet connectivity.</p>
+            <p>Built on <strong>Base Mainnet</strong>, powered by <strong>IPFS</strong>, and integrated with <strong>MetaMask</strong> for wallet connectivity.</p>
           </div>
 
           <div class="buy-section">
@@ -652,7 +652,7 @@ class DecentBuskingAboutModal extends HTMLElement {
               <li>🚀 Live asteroid field — each busk spawns in the 3-D space the moment it's minted</li>
               <li>🎩 Tip buskers wallet-to-wallet with ETH</li>
               <li>🎟️ Supporter DNFTs available on DecentEscrow</li>
-              <li>📡 IPFS audio &amp; metadata via Web3.Storage (W3Up)</li>
+              <li>📡 IPFS audio &amp; metadata via Pinata or local Kubo</li>
             </ul>
           </div>
 

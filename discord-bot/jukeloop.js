@@ -51,6 +51,12 @@ const BETWEEN_TRACK_DELAY_MS = 1_500;
 // How long to wait before retrying when the playlist is empty (ms).
 const EMPTY_PLAYLIST_RETRY_MS = 60_000;
 
+/** Build a gateway URL for a raw IPFS CID. */
+export function buildIpfsGatewayUrl(gateway, cid) {
+  const base = gateway.replace(/\/$/, '');
+  return `${base}${base.endsWith('/ipfs') ? '' : '/ipfs'}/${cid}`;
+}
+
 // ── Per-guild session registry ────────────────────────────────────────────────
 
 /** @type {Map<string, JukeLoopSession>} guildId → active session */
@@ -122,10 +128,11 @@ export class JukeLoopSession {
    * @param {import('discord.js').TextBasedChannel}  opts.textChannel   - JukeLoop text channel
    * @param {import('discord.js').Client}            opts.client        - Discord client (for re-fetching CDN URLs)
    */
-  constructor({ voiceChannel, textChannel, client }) {
+  constructor({ voiceChannel, textChannel, client, ipfsGateway }) {
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
+    this.ipfsGateway  = ipfsGateway;
 
     this._destroyed   = false;
     this._ffmpeg      = null;
@@ -210,6 +217,10 @@ export class JukeLoopSession {
    * @returns {Promise<string|null>}
    */
   async _getFreshUrl(track) {
+    if (track.ipfsCid) {
+      return buildIpfsGatewayUrl(this.ipfsGateway, track.ipfsCid);
+    }
+
     try {
       const channel = await this.client.channels.fetch(track.channelId).catch(() => null);
       if (!channel) return null;
@@ -281,11 +292,12 @@ export class JukeLoopSession {
 
       // Announce the track and add reaction buttons
       const totalTracks = getPlaylist().length;
+      const listenLink = track.ipfsCid ? `\n[Open IPFS audio](${url})` : '';
       const msg = await this.textChannel
         .send(
           `🎵 Now playing: **${track.title}** by *${track.uploader}* ` +
           `(${this._queueIndex}/${totalTracks}) — rate this track!\n` +
-          `React 👍 to boost it or 👎 to send it lower in the rotation.`,
+          `React 👍 to boost it or 👎 to send it lower in the rotation.${listenLink}`,
         )
         .catch(() => null);
 
@@ -332,7 +344,7 @@ export class JukeLoopSession {
       const likes    = Math.max(0, (thumbsUp?.count   ?? 0) - 1);
       const dislikes = Math.max(0, (thumbsDown?.count ?? 0) - 1);
 
-      applyRating(trackRef.messageId, likes, dislikes);
+      applyRating(trackRef.trackId, likes, dislikes);
 
       if (likes > 0 || dislikes > 0) {
         console.log(
@@ -401,12 +413,14 @@ export async function backfillFromChannel(jukeboxChannel) {
           .trim() || filename;
 
         const wasAdded = addTrack({
+          attachmentId: attachment.id,
           messageId:  msg.id,
           channelId:  jukeboxChannel.id,
           filename,
           title,
           uploader:   msg.author.tag ?? msg.author.username ?? 'Unknown',
           uploaderId: msg.author.id,
+          pinStatus:  'untracked',
         });
 
         if (wasAdded) added++;

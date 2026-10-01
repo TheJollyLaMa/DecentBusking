@@ -1,5 +1,5 @@
 // js/mint.js — DecentBusking
-// Handles minting an audio file as a DecentNFT on Optimism via the contract
+// Handles minting an audio file as a DecentNFT on the configured chain via the contract
 // already deployed by DecentMarket (DecentNFT_v0.2, ERC-1155).
 //
 // Contract access model
@@ -12,7 +12,7 @@
 // Busk minting flow (requires DEFAULT_ADMIN_ROLE on the contract)
 // ──────────────────────────────────────────────────────────────
 //  1. User opens guitar-case modal, fills in title + audio file.
-//  2. Audio file is uploaded to IPFS via w3up.
+//  2. Audio file is uploaded through Pinata or a local Kubo node.
 //  3. A JSON metadata blob is created and uploaded to IPFS.
 //  4. registerToken(0, metadataURI, Achievement, artist, 500) is called →
 //     returns a new tokenId.
@@ -23,6 +23,7 @@
 // and no transaction is sent.
 
 import { addNFTToSpace, fetchNFTMetaById } from './space.js';
+import { uploadFileToIPFS } from './ipfs-upload.js';
 
 // DecentNFT v0.2 ABI — ERC-1155 with role-based minting
 // Source: https://github.com/TheJollyLaMa/DecentMarket/blob/main/abis/DecentNFT_v0.2.json
@@ -72,28 +73,26 @@ export function openMintModal() {
   _resetForm();
   modal.classList.remove('hidden');
 
-  // Pre-fill form fields from URL query params (?title=, ?ipfs=, ?artist=).
+  // Pre-fill form fields from URL query params (?title=, ?ipfs=, ?recipient=).
   // These params are set by the Discord Jukebox Bot after pinning an audio
   // file to IPFS so artists can mint in one click without re-uploading.
   const params  = new URLSearchParams(window.location.search);
   const qTitle  = params.get('title');
   const qIpfs   = params.get('ipfs');
-  const qArtist = params.get('artist');
+  const qRecipient = params.get('recipient') || params.get('artist');
 
   if (qTitle) {
     const titleInput = document.getElementById('mint-title');
     if (titleInput) titleInput.value = decodeURIComponent(qTitle);
   }
 
-  if (qArtist) {
-    // Only prefill the tip wallet if ?artist= looks like an Ethereum address or ENS name.
-    // Discord usernames and other strings are silently ignored.
-    const artist = decodeURIComponent(qArtist);
-    const isEthAddress = /^0x[0-9a-fA-F]{40}$/.test(artist);
-    const isEns = artist.endsWith('.eth');
-    if (isEthAddress || isEns) {
+  if (qRecipient) {
+    const recipient = decodeURIComponent(qRecipient);
+    if (/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
+      const recipientInput = document.getElementById('mint-recipient');
       const tipInput = document.getElementById('mint-tip-wallet');
-      if (tipInput) tipInput.value = artist;
+      if (recipientInput) recipientInput.value = recipient;
+      if (tipInput) tipInput.value = recipient;
     }
   }
 
@@ -157,13 +156,17 @@ async function _handleMint(e) {
   const cfg = window.DecentConfig || {};
   const titleInput = document.getElementById('mint-title');
   const fileInput = document.getElementById('mint-file');
+  const imageInput = document.getElementById('mint-image');
   const parentInput = document.getElementById('mint-parent');
+  const recipientInput = document.getElementById('mint-recipient');
   const tipInput = document.getElementById('mint-tip-wallet');
   const submitBtn = document.getElementById('mint-submit-btn');
 
   const title = titleInput?.value.trim();
   const file = fileInput?.files?.[0];
+  const image = imageInput?.files?.[0];
   const parentId = parseInt(parentInput?.value || '0') || 0;
+  const requestedRecipient = recipientInput?.value.trim() || '';
   const tipWallet = tipInput?.value.trim() || '';
 
   if (!title) {
@@ -198,11 +201,17 @@ async function _handleMint(e) {
       return;
     }
     const address = await signer.getAddress();
+    const recipient = requestedRecipient || address;
+    if (!ethers.isAddress(recipient)) {
+      _setStatus('⚠️ Enter a valid 0x artist wallet address.', true);
+      submitBtn.disabled = false;
+      return;
+    }
 
     // 2. Check chain
     const chainId = window._wallet.chainId;
-    if (chainId !== null && chainId !== (cfg.chainId || 10)) {
-      _setStatus(`⚠️ Switch MetaMask to chain ID ${cfg.chainId || 10} (Optimism).`, true);
+    if (chainId !== null && chainId !== (cfg.chainId || 8453)) {
+      _setStatus(`⚠️ Switch MetaMask to ${cfg.chainName || 'Base Mainnet'} (chain ID ${cfg.chainId || 8453}).`, true);
       submitBtn.disabled = false;
       return;
     }
@@ -219,22 +228,36 @@ async function _handleMint(e) {
       _setStatus('⏳ Uploading audio to IPFS…');
       audioUrl = await _uploadToIPFS(file);
       if (!audioUrl) {
-        _setStatus('❌ IPFS upload failed. Check your w3up connection.', true);
+        _setStatus('❌ IPFS upload failed. Check the configured IPFS provider.', true);
         submitBtn.disabled = false;
         return;
       }
     }
 
-    // 4. Build + upload metadata
+    // 4. Upload optional artwork, then build + upload metadata
+    _setStatus('⏳ Uploading metadata to IPFS…');
+    let imageUrl = '';
+    if (image) {
+      _setStatus('⏳ Uploading NFT artwork to IPFS…');
+      imageUrl = await _uploadToIPFS(image);
+      if (!imageUrl) {
+        _setStatus('❌ Artwork upload failed. Check the configured IPFS provider.', true);
+        submitBtn.disabled = false;
+        return;
+      }
+    }
+
     _setStatus('⏳ Uploading metadata to IPFS…');
     const metadata = {
       name: title,
       description: `Busked live on DecentBusking — ${new Date().toLocaleDateString()}`,
       animation_url: audioUrl,      // ERC-721 standard for audio/video NFTs
       audioUrl,                     // convenience duplicate
-      artist: address,
-      creator: address,
-      tipWallet: tipWallet || address,
+      ...(imageUrl ? { image: imageUrl } : {}),
+      artist: recipient,
+      creator: recipient,
+      tipWallet: tipWallet || recipient,
+      registeredBy: address,
       mintedAt: new Date().toISOString(),
       ...(parentId > 0 ? {
         parentTokenId: parentId,
@@ -289,7 +312,7 @@ async function _handleMint(e) {
       UNLIMITED_SUPPLY,    // maxSupply: 0 = unlimited
       metadataUrl,         // per-token URI — the IPFS metadata JSON
       TOKEN_KIND_PRODUCT,  // kind: 0 = Product (audio busk)
-      address,             // royaltyReceiver: the minting artist
+      recipient,           // royaltyReceiver: the artist, not the admin signer
       DEFAULT_ROYALTY_BPS, // royaltyFeeBps: 5 %
     );
 
@@ -314,23 +337,23 @@ async function _handleMint(e) {
       return;
     }
 
-    // 7. Mint a single edition of the newly-registered product token to the artist's wallet
+    // 7. Mint a single edition directly to the artist's wallet
     _setStatus(`⏳ Minting audio busk product #${tokenId} — confirm in MetaMask… (tx 2/2)`);
-    const mintTx = await contract.mintProduct(address, tokenId, 1);
+    const mintTx = await contract.mintProduct(recipient, tokenId, 1);
 
     _setStatus('⏳ Waiting for mint confirmation… (tx 2/2)');
     await mintTx.wait();
 
-    _setStatus(`✅ Minted! Token #${tokenId} is now live in the town square. 🎵`);
+    _setStatus(`✅ Minted token #${tokenId} directly to ${recipient}.`);
 
     // 8. Inject into space field
     addNFTToSpace({
       tokenId,
       name: title,
-      artist: address,
-      creator: address,
+      artist: recipient,
+      creator: recipient,
       audioUrl,
-      tipWallet: tipWallet || address,
+      tipWallet: tipWallet || recipient,
       metadataUri: metadataUrl,
       mintedAt: new Date().toISOString(),
       parentTokenId: parentId || undefined,
@@ -392,38 +415,24 @@ async function _updateParentPreview(rawValue) {
 
 // ── IPFS Uploads ──────────────────────────────────────────────────────────
 async function _uploadToIPFS(file) {
-  // Use w3up client if available (loaded via CDN in index.html)
-  if (window.w3up && window._w3upClient) {
-    try {
-      // uploadFile returns the CID of the file itself — no path suffix needed
-      const cid = await window._w3upClient.uploadFile(file);
-      return `ipfs://${cid}`;
-    } catch (err) {
-      console.error('[mint] w3up upload failed:', err);
-      return null;
-    }
+  try {
+    return await uploadFileToIPFS(file);
+  } catch (err) {
+    console.error('[mint] IPFS upload failed:', err);
+    return null;
   }
-
-  console.warn('[mint] w3up client not ready. Connect IPFS via the header first.');
-  return null;
 }
 
 async function _uploadMetadataToIPFS(metadata, filename) {
   const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
   const file = new File([blob], filename, { type: 'application/json' });
 
-  if (window.w3up && window._w3upClient) {
-    try {
-      const cid = await window._w3upClient.uploadFile(file);
-      return `ipfs://${cid}`;
-    } catch (err) {
-      console.error('[mint] w3up metadata upload failed:', err);
-      return null;
-    }
+  try {
+    return await uploadFileToIPFS(file);
+  } catch (err) {
+    console.error('[mint] IPFS metadata upload failed:', err);
+    return null;
   }
-
-  console.warn('[mint] w3up client not ready for metadata upload.');
-  return null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

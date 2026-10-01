@@ -20,7 +20,7 @@ Join the [Discord](https://discord.gg/5XJtJYdhz) to share audio in **#DecentJuke
   <img src="img/D_Busker.jpeg" width="320" alt="A DecentBusker sharing a live performance" />
 </p>
 
-Bring your own sound. Connect IPFS from the site, open the guitar case, and add a recording to the town square. Audio NFTs are minted on Optimism. Minting is currently permissioned, so a platform-authorized wallet is required; opening up self-service artist minting is a welcome contribution.
+Bring your own sound. Connect IPFS from the site, open the guitar case, and add a recording to the town square. Audio NFTs use the DecentNFT v0.2 deployment on Base. Product registration and minting remain permissioned by the current contract, so self-service artist minting requires an authorization or contract upgrade before it can be opened safely.
 
 ## Contribute
 
@@ -34,7 +34,7 @@ Use the [Contributor Request form](https://github.com/TheJollyLaMa/DecentBusking
 npx serve .
 ```
 
-Open the local URL, connect your wallet and IPFS account, and explore. DecentBusking’s stage and NFT contracts use Optimism; contributor payroll uses Base.
+Open the local URL, connect your wallet and IPFS account, and explore. DecentBusking’s current NFT contract and contributor payroll use Base; historical payroll entries may still settle on Optimism.
 
 ## Links
 

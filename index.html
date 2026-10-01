@@ -13,9 +13,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
-  <!-- W3Up IPFS browser bundle -->
-  <script src="https://bafybeicqxq54ncvkxvwdbov6ljgtyyrcpmek3ic2fxrwwsigmh4ud4s2mu.ipfs.w3s.link/browser.min.js"></script>
-
   <!-- App config — must load before modules -->
   <script src="decent.config.js"></script>
 </head>
@@ -80,13 +77,16 @@
   <div id="mint-modal" class="hidden">
     <div id="mint-modal-inner">
       <h2>🎸 Open Your Guitar Case</h2>
-      <p>Mint your audio busk to the blockchain. It plays live the moment it's minted — right here in the town square.</p>
+      <p>An authorized owner wallet registers the track and mints it directly to the artist on Base.</p>
       <form id="mint-form">
         <label for="mint-title">Track Title</label>
         <input id="mint-title" type="text" placeholder="What are you playing?" required />
 
         <label id="mint-file-label" for="mint-file">Audio File <span class="hint">(mp3, wav, ogg, flac, m4a)</span></label>
         <input id="mint-file" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,audio/*" required />
+
+        <label for="mint-image">NFT Artwork <span class="hint">(optional image)</span></label>
+        <input id="mint-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
 
         <div id="mint-cid-section" class="hidden">
           <p id="mint-cid-bot-msg" style="color:#00d26a;margin:0 0 0.5rem 0;">✅ Audio already pinned to IPFS by DecentBusking Bot</p>
@@ -108,6 +108,9 @@
         </div>
 
         <p class="hint">ℹ️ Remix lineage is recorded in token metadata. On-chain royalty splitting for parent creators may be supported in a future contract upgrade.</p>
+
+        <label for="mint-recipient">Artist Wallet <span class="hint">(receives the NFT and ERC-2981 royalties)</span></label>
+        <input id="mint-recipient" type="text" placeholder="0x… · defaults to the connected wallet" />
 
         <label for="mint-tip-wallet">Your Tip Wallet Address <span class="hint">(where listeners send tips)</span></label>
         <input id="mint-tip-wallet" type="text" placeholder="0x… or ENS.eth" />
@@ -239,14 +242,11 @@
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
   <script type="module" src="js/components/header-right-ankh-override.js"></script>
 
-  <!-- Load shared header web component from CDN -->
-  <script type="module" src="https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@main/js/components/Header.js"></script>
+  <!-- Load DecentHead components without its legacy IPFS status widget -->
+  <script type="module" src="js/components/header.js"></script>
 
   <!-- Inject 💸 Payroll link into left ankh header dropdown -->
   <script type="module" src="js/components/header-payroll-inject.js"></script>
-
-  <!-- Inject 🔗 IPFS Connect button into left ankh header dropdown -->
-  <script type="module" src="js/components/header-ipfs-inject.js"></script>
 
   <!-- Override .title-main color to DecentBusking orange inside AppTitle shadow root -->
   <script type="module" src="js/components/header-title-color-override.js"></script>

@@ -174,8 +174,8 @@ async function _handleSendTip() {
     }
 
     const chainId = window._wallet.chainId;
-    if (chainId !== null && Number(chainId) !== (cfg.chainId || 10)) {
-      _showStatus('tip-status', `⚠️ Switch MetaMask to chain ID ${cfg.chainId || 10} (Optimism).`, true);
+    if (chainId !== null && Number(chainId) !== (cfg.chainId || 8453)) {
+      _showStatus('tip-status', `⚠️ Switch MetaMask to ${cfg.chainName || 'Base Mainnet'} (chain ID ${cfg.chainId || 8453}).`, true);
       sendBtn.disabled = false;
       return;
     }

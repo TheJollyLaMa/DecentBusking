@@ -4,13 +4,6 @@
 
 import { fetchNFTMetaById } from './space.js';
 
-// Minimal DecentNFT ABI — only what we need for buying
-const BUY_ABI = [
-  'function buy(uint256 tokenId) external payable',
-  'function getPrice(uint256 tokenId) view returns (uint256)',
-  'function ownerOf(uint256 tokenId) view returns (address)',
-];
-
 // ── Public API ───────────────────────────────────────────────────────────
 export function renderNFTCard(nft) {
   const panel = document.getElementById('nft-panel');
@@ -27,25 +20,11 @@ export function renderNFTCard(nft) {
     closeBtn.onclick = () => panel.classList.add('hidden');
   }
 
-  // Wire buy button (rendered inside content)
-  const buyBtn = content.querySelector('.nft-buy-btn');
-  if (buyBtn) {
-    buyBtn.addEventListener('click', () => _handleBuy(nft));
-  }
-
   // Wire parent-play button if present
   const parentPlayBtn = content.querySelector('.nft-parent-play-btn');
   if (parentPlayBtn) {
     parentPlayBtn.addEventListener('click', () => _playParent(nft.parentTokenId));
   }
-
-  // Fetch live price if contract configured
-  _loadLivePrice(nft).then(priceEth => {
-    const priceEl = content.querySelector('.nft-price-value');
-    if (priceEl && priceEth !== null) {
-      priceEl.textContent = `${priceEth} ETH`;
-    }
-  });
 
   // Fetch and render parent NFT info if this is a remix
   if (nft.parentTokenId) {
@@ -97,6 +76,7 @@ function _buildCardHTML(nft) {
          <div class="nft-parent-card nft-parent-loading">⏳ Loading parent track #${nft.parentTokenId}…</div>
        </div>`
     : '';
+  const marketUrl = _marketUrl(nft);
 
   return `
     <h3>🎵 ${_esc(nft.name || nft.title || `Track #${nft.tokenId}`)}</h3>
@@ -114,11 +94,7 @@ function _buildCardHTML(nft) {
       ${nft.tipWallet ? `<dt>Tip Wallet</dt><dd style="font-size:0.8em">${_esc(_shortAddr(nft.tipWallet))}</dd>` : ''}
     </dl>
 
-    <p class="nft-price">
-      Price: <strong class="nft-price-value">loading…</strong>
-    </p>
-
-    <button class="nft-buy-btn">🎵 Buy &amp; Support</button>
+    <a class="nft-buy-btn" href="${_esc(marketUrl)}" target="_blank" rel="noopener">View in DecentMarket</a>
   `;
 }
 
@@ -138,73 +114,13 @@ async function _playParent(parentTokenId) {
   });
 }
 
-// ── Live Price Fetch ───────────────────────────────────────────────────────
-async function _loadLivePrice(nft) {
+function _marketUrl(nft) {
   const cfg = window.DecentConfig || {};
-  if (!cfg.contractAddress || cfg.contractAddress === '0x0000000000000000000000000000000000000000') {
-    return null;
-  }
-  if (!nft.tokenId) return null;
-
-  try {
-    const provider = new ethers.JsonRpcProvider(
-      `https://mainnet.optimism.io`
-    );
-    const contract = new ethers.Contract(cfg.contractAddress, BUY_ABI, provider);
-    const priceWei = await contract.getPrice(nft.tokenId);
-    return ethers.formatEther(priceWei);
-  } catch {
-    return null;
-  }
-}
-
-// ── Buy Handler ───────────────────────────────────────────────────────────
-async function _handleBuy(nft) {
-  const cfg = window.DecentConfig || {};
-  const buyBtn = document.querySelector('.nft-buy-btn');
-
-  if (!window.ethereum) {
-    alert('🦊 MetaMask not detected. Install it to buy NFTs.');
-    return;
-  }
-
-  if (!cfg.contractAddress || cfg.contractAddress === '0x0000000000000000000000000000000000000000') {
-    alert('⚠️ Contract address not configured.');
-    return;
-  }
-
-  try {
-    if (buyBtn) buyBtn.disabled = true;
-
-    const signer = window._wallet?.signer;
-    if (!signer) {
-      alert('🦊 Please connect your wallet via the header first.');
-      if (buyBtn) buyBtn.disabled = false;
-      return;
-    }
-
-    const chainId = window._wallet.chainId;
-    if (chainId !== null && Number(chainId) !== (cfg.chainId || 10)) {
-      alert(`⚠️ Switch MetaMask to chain ID ${cfg.chainId || 10} (Optimism).`);
-      if (buyBtn) buyBtn.disabled = false;
-      return;
-    }
-
-    const contract = new ethers.Contract(cfg.contractAddress, BUY_ABI, signer);
-    const priceWei = await contract.getPrice(nft.tokenId);
-
-    const tx = await contract.buy(nft.tokenId, { value: priceWei });
-    if (buyBtn) buyBtn.textContent = '⏳ Confirming…';
-    await tx.wait();
-
-    if (buyBtn) buyBtn.textContent = '✅ Purchased!';
-    setTimeout(() => {
-      document.getElementById('nft-panel')?.classList.add('hidden');
-    }, 2000);
-  } catch (err) {
-    alert(`❌ Purchase failed: ${err.message}`);
-    if (buyBtn) buyBtn.disabled = false;
-  }
+  const url = new URL(cfg.marketUrl || 'https://thejollylama.github.io/DecentMarket/');
+  if (cfg.chainId) url.searchParams.set('chainId', String(cfg.chainId));
+  if (cfg.contractAddress) url.searchParams.set('contract', cfg.contractAddress);
+  if (nft.tokenId != null) url.searchParams.set('tokenId', String(nft.tokenId));
+  return url.toString();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

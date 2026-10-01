@@ -2,7 +2,7 @@
 // DecentBusking Discord Bot — entry point
 //
 // Features:
-//  • Watches #DecentJukebox for audio file uploads, pins them to IPFS via w3up,
+//  • Watches #DecentJukebox for audio file uploads and pins them to IPFS,
 //    replies with a rich embed containing a "🎸 Mint This As A DNFT" deep-link,
 //    AND adds the track to the JukeLoop playlist.
 //  • JukeLoop: 24/7 audio stream in the JukeLoop voice channel, sourced from
@@ -15,8 +15,8 @@
 //  • /jukeloop stats          — show the top-rated JukeLoop tracks.
 //  • /jukeloop volume <level> — (currently informational; voice volume is fixed).
 //
-// The bot does NOT mint on-chain.  The user still connects MetaMask and
-// confirms the transaction in the browser.
+// The bot does NOT hold an on-chain signing key. Artists queue mint requests;
+// an authorized owner reviews them and confirms transactions in the browser.
 
 import {
   Client,
@@ -32,27 +32,29 @@ import http from 'http';
 
 import { loadConfig }    from './config.js';
 import { uploadToIPFS }  from './ipfs.js';
+import { createPinataStateStore } from './ipfs-state.js';
+import { createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed } from './embed.js';
 import { fetchTrackList, createSession, getSession } from './radio.js';
 import {
   loadPlaylist,
+  configureRemotePersistence,
+  waitForRemotePersistence,
   addTrack,
+  getTrackId,
   getPlaylist,
+  getMintBacklog,
+  getMintRequests,
   getTopTracks,
   removeTrack,
+  requestTrackMint,
+  completeTrackMint,
+  updateTrackPin,
 } from './playlist-store.js';
 import {
   createJukeLoopSession,
   backfillFromChannel,
 } from './jukeloop.js';
-
-const PORT = process.env.PORT || 10000;
-http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Discord bot is active');
-}).listen(PORT, () => {
-  console.log(`Health check server listening on port ${PORT}`);
-});
 
 // ── Audio MIME-type detection ─────────────────────────────────────────────────
 const AUDIO_MIME_PREFIXES  = ['audio/'];
@@ -123,6 +125,22 @@ const SLASH_COMMANDS = [
             .setDescription('IPFS CID or ipfs:// URL of the album directory')
             .setRequired(true),
         ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('backlog')
+        .setDescription('Show your audio uploads that have not been minted yet'),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('request-mint')
+        .setDescription('Request an owner-approved mint to your wallet')
+        .addStringOption((opt) =>
+          opt.setName('track_id').setDescription('Track ID shown in /jukebox backlog').setRequired(true),
+        )
+        .addStringOption((opt) =>
+          opt.setName('wallet').setDescription('Base wallet that receives the NFT and royalties').setRequired(true),
+        ),
     ),
 
   new SlashCommandBuilder()
@@ -143,6 +161,23 @@ const SLASH_COMMANDS = [
             .setDescription('Part of the track title to search for (case-insensitive)')
             .setRequired(true),
         ),
+    )
+    .addSubcommand((sub) =>
+      sub.setName('mint-queue').setDescription('(Admin) Show pending owner-wallet mint requests'),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('mark-minted')
+        .setDescription('(Admin) Record a completed owner-wallet mint')
+        .addStringOption((opt) =>
+          opt.setName('track_id').setDescription('Track ID from the mint queue').setRequired(true),
+        )
+        .addStringOption((opt) =>
+          opt.setName('token_id').setDescription('Minted DecentNFT token ID').setRequired(true),
+        )
+        .addStringOption((opt) =>
+          opt.setName('tx_hash').setDescription('Base mint transaction hash').setRequired(true),
+        ),
     ),
 ].map((cmd) => cmd.toJSON());
 
@@ -150,8 +185,44 @@ const SLASH_COMMANDS = [
 async function main() {
   const config = loadConfig();
 
-  // Load the persisted JukeLoop playlist before the client connects
-  loadPlaylist();
+  const requestHandler = createWorkerRequestHandler({
+    allowedOrigins: config.allowedOrigins,
+    ownerWallet: config.mintOwnerWallet || '0x0000000000000000000000000000000000000000',
+    pinataJwt: config.pinataJwt,
+    pinataSignUrl: config.pinataSignUrl,
+  });
+  const port = process.env.PORT || 10000;
+  http.createServer(requestHandler).listen(port, () => {
+    console.log(`Health check and IPFS worker listening on port ${port}`);
+  });
+
+  // Restore durable state before Discord backfill or JukeLoop starts.
+  if (config.ipfsUploadProvider === 'pinata') {
+    const stateStore = createPinataStateStore({
+      pinataJwt: config.pinataJwt,
+      uploadUrl: config.pinataApiUrl,
+      filesApiUrl: config.pinataFilesApiUrl,
+      gateway: config.ipfsGateway,
+    });
+    let restoredPlaylist = null;
+    try {
+      restoredPlaylist = await stateStore.restore();
+    } catch (err) {
+      console.warn('[ipfs-state] Remote restore failed; using local cache:', err.message);
+    }
+    loadPlaylist(restoredPlaylist);
+    configureRemotePersistence(stateStore.save);
+    if (!restoredPlaylist && getPlaylist().length > 0) {
+      try {
+        await stateStore.save(getPlaylist());
+        console.log('[ipfs-state] Seeded Pinata from the local playlist cache.');
+      } catch (err) {
+        console.warn('[ipfs-state] Could not seed initial checkpoint:', err.message);
+      }
+    }
+  } else {
+    loadPlaylist();
+  }
 
   const client = new Client({
     intents: [
@@ -195,23 +266,26 @@ async function main() {
     if (!audioAttachments.length) return;
 
     for (const attachment of audioAttachments) {
-      // ── JukeLoop: queue the new upload ──────────────────────────────────────
-      if (config.jukeLoopVoiceChannelId) {
-        const filename = attachment.name || 'track.mp3';
-        const title    = filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || filename;
-        addTrack({
-          messageId:  message.id,
-          channelId:  message.channelId,
-          filename,
-          title,
-          uploader:   message.author.tag ?? message.author.username ?? 'Unknown',
-          uploaderId: message.author.id,
-        });
-      }
+      const filename = attachment.name || 'track.mp3';
+      const title    = filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || filename;
+      const track = {
+        attachmentId: attachment.id,
+        messageId:  message.id,
+        channelId:  message.channelId,
+        filename,
+        title,
+        uploader:   message.author.tag ?? message.author.username ?? 'Unknown',
+        uploaderId: message.author.id,
+        pinStatus:  config.disableMintFlow ? 'disabled' : 'pending',
+      };
+      const trackId = getTrackId(track);
+
+      // Persist upload provenance even when voice playback is temporarily disabled.
+      addTrack(track);
 
       // ── Existing IPFS / mint flow (opt-out with DISABLE_MINT_FLOW=true) ──────
       if (!config.disableMintFlow) {
-        await handleAudioAttachment(message, attachment, config);
+        await handleAudioAttachment(message, attachment, config, trackId);
       }
     }
   });
@@ -230,6 +304,15 @@ async function main() {
   });
 
   await client.login(config.discordToken);
+
+  const shutdown = async (signal) => {
+    console.log(`[jukebox-bot] ${signal} received; flushing IPFS state checkpoint.`);
+    await waitForRemotePersistence();
+    client.destroy();
+    process.exit(0);
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 // ── /radio command handler ────────────────────────────────────────────────────
@@ -309,6 +392,69 @@ async function handleRadioCommand(interaction, config) {
  */
 async function handleJukeboxCommand(interaction, config) {
   const sub = interaction.options.getSubcommand();
+
+  if (sub === 'request-mint') {
+    const trackId = interaction.options.getString('track_id', true).trim();
+    const wallet = interaction.options.getString('wallet', true).trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+      await interaction.reply({ content: '❌ Enter a valid `0x` Base wallet address.', ephemeral: true });
+      return;
+    }
+
+    const track = requestTrackMint(trackId, interaction.user.id, wallet);
+    if (!track) {
+      await interaction.reply({
+        content: '❌ That track is not yours, is not pinned to IPFS yet, or has already been minted.',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await interaction.reply({
+      content:
+        `✅ **${track.title}** is queued for owner approval.\n` +
+        `Recipient and royalty wallet: \`${wallet}\`\n` +
+        'The NFT will mint directly to that wallet; the owner wallet only authorizes the transaction and pays gas.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (sub === 'backlog') {
+    const tracks = getMintBacklog(interaction.user.id);
+    if (tracks.length === 0) {
+      await interaction.reply({
+        content: '✅ You have no unminted DecentJukebox uploads in the tracked playlist.',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const lines = tracks.slice(0, 20).map((track, index) => {
+      if (track.mintStatus === 'requested') {
+        return `**${index + 1}. ${track.title}** — awaiting owner approval for \`${track.mintRecipient}\``;
+      }
+      if (track.pinStatus === 'pinned' && track.ipfsCid) {
+        return `**${index + 1}. ${track.title}** — ready · track ID: \`${track.trackId}\``;
+      }
+      if (track.pinStatus === 'failed') {
+        return `**${index + 1}. ${track.title}** — IPFS pin failed; retry support is pending`;
+      }
+      if (track.pinStatus === 'pending') {
+        return `**${index + 1}. ${track.title}** — IPFS pin in progress`;
+      }
+      return `**${index + 1}. ${track.title}** — legacy upload; IPFS backfill required`;
+    });
+    const more = tracks.length > 20 ? `\n\n…and ${tracks.length - 20} more upload(s).` : '';
+    await interaction.reply({
+      content:
+        `🎸 **Your unminted track backlog**\n\n${lines.join('\n')}${more}\n\n` +
+        'For a ready track, use `/jukebox request-mint track_id:<id> wallet:<your Base wallet>`.',
+      ephemeral: true,
+    });
+    return;
+  }
+
   if (sub !== 'play') return;
 
   const cid = interaction.options.getString('cid', true).trim();
@@ -383,7 +529,7 @@ async function handleJukeboxCommand(interaction, config) {
  * @param {import('discord.js').Attachment} attachment
  * @param {ReturnType<typeof loadConfig>}   config
  */
-async function handleAudioAttachment(message, attachment, config) {
+async function handleAudioAttachment(message, attachment, config, trackId) {
   const filename = attachment.name || 'track.mp3';
   const mimeType = attachment.contentType || 'audio/mpeg';
 
@@ -424,25 +570,28 @@ async function handleAudioAttachment(message, attachment, config) {
       buffer,
       filename,
       mimeType,
-      config.w3upKey,
-      config.w3upProof,
+      {
+        provider: config.ipfsUploadProvider,
+        pinataJwt: config.pinataJwt,
+        pinataApiUrl: config.pinataApiUrl,
+        ipfsApiUrl: config.ipfsApiUrl,
+      },
     );
     // ipfsUri is "ipfs://<CID>"
     const ipfsCid = ipfsUri.replace('ipfs://', '');
     console.log(`[jukebox-bot] Pinned to IPFS: ${ipfsCid}`);
+    updateTrackPin(trackId, { status: 'pinned', ipfsCid });
 
-    // 3. Build pre-filled mint URL
-    const mintUrl = buildMintUrl(config.siteUrl, title, ipfsCid, uploaderTag);
-
-    // 4. Reply with rich embed
-    const embed = buildMintEmbed({ title, ipfsCid, mintUrl, uploaderTag });
+    // 3. Reply with the track ID used by the private owner-approval queue
+    const embed = buildMintEmbed({ title, ipfsCid, trackId, uploaderTag });
     await message.reply({ embeds: [embed] });
 
-    // 5. Clean up the working message
+    // 4. Clean up the working message
     if (workingMsg) await workingMsg.delete().catch(() => {});
 
   } catch (err) {
     console.error(`[jukebox-bot] Error processing "${filename}":`, err);
+    updateTrackPin(trackId, { status: 'failed', error: err.message });
     const errText = `❌ Failed to pin **${title}** to IPFS: ${err.message}`;
     try {
       if (workingMsg) {
@@ -465,9 +614,10 @@ async function handleAudioAttachment(message, attachment, config) {
  * @param {string} [artist] - Discord uploader tag (optional)
  * @returns {string}
  */
-export function buildMintUrl(siteUrl, title, ipfsCid, artist) {
+export function buildMintUrl(siteUrl, title, ipfsCid, artist, workerUrl) {
   const params = new URLSearchParams({ title, ipfs: ipfsCid });
-  if (artist) params.set('artist', artist);
+  if (artist) params.set('recipient', artist);
+  if (workerUrl) params.set('worker', workerUrl);
   return `${siteUrl}/?${params.toString()}`;
 }
 
@@ -505,6 +655,7 @@ async function startJukeLoop(client, config) {
       voiceChannel,
       textChannel,
       client,
+      ipfsGateway: config.ipfsGateway,
     });
 
     await session.connect();
@@ -528,6 +679,55 @@ async function startJukeLoop(client, config) {
  */
 async function handleJukeLoopCommand(interaction, config) {
   const sub = interaction.options.getSubcommand();
+
+  if (sub === 'mint-queue' || sub === 'mark-minted') {
+    if (!interaction.memberPermissions?.has('ManageMessages')) {
+      await interaction.reply({ content: '🔒 You need **Manage Messages** to manage mint requests.', ephemeral: true });
+      return;
+    }
+
+    if (sub === 'mark-minted') {
+      const trackId = interaction.options.getString('track_id', true).trim();
+      const tokenId = interaction.options.getString('token_id', true).trim();
+      const txHash = interaction.options.getString('tx_hash', true).trim();
+      if (!/^\d+$/.test(tokenId) || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+        await interaction.reply({ content: '❌ Enter a numeric token ID and a full transaction hash.', ephemeral: true });
+        return;
+      }
+      const track = completeTrackMint(trackId, { tokenId, txHash });
+      await interaction.reply({
+        content: track
+          ? `✅ Recorded **${track.title}** as DecentNFT #${tokenId}.`
+          : '❌ No pending mint request has that track ID.',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const requests = getMintRequests();
+    if (requests.length === 0) {
+      await interaction.reply({ content: '✅ The owner-wallet mint queue is empty.', ephemeral: true });
+      return;
+    }
+    const lines = requests.slice(0, 10).map((track, index) => {
+      const approvalUrl = buildMintUrl(
+        config.siteUrl,
+        track.title,
+        track.ipfsCid,
+        track.mintRecipient,
+        config.publicWorkerUrl,
+      );
+      return (
+        `**${index + 1}. ${track.title}** by ${track.uploader}\n` +
+        `Track: \`${track.trackId}\` · Recipient: \`${track.mintRecipient}\` · [approve mint](${approvalUrl})`
+      );
+    });
+    await interaction.reply({
+      content: `🔑 **Owner-wallet mint queue**\n\n${lines.join('\n\n')}`,
+      ephemeral: true,
+    });
+    return;
+  }
 
   if (sub === 'stats') {
     const top = getTopTracks(10);
@@ -583,7 +783,7 @@ async function handleJukeLoopCommand(interaction, config) {
       return;
     }
 
-    const removed = removeTrack(matches[0].messageId);
+    const removed = removeTrack(matches[0].trackId);
     if (removed) {
       await interaction.reply({
         content: `🗑️ Removed **${removed.title}** by *${removed.uploader}* from the JukeLoop playlist.`,

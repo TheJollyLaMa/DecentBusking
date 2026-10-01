@@ -2,13 +2,13 @@
 
 A Node.js Discord bot with three modes:
 
-1. **Upload → IPFS Pin** — watches the `#DecentJukebox` channel for audio file uploads, pins them to IPFS via [w3up (web3.storage / Storacha)](https://web3.storage), and replies with a rich embed containing a one-click **🎸 Mint This As A DNFT** link pre-filled with the track title and IPFS CID.
+1. **Upload → IPFS Pin → Mint Request** — watches the `#DecentJukebox` channel for audio file uploads, pins them through Pinata (or a local Kubo node), and lets the uploader request an owner-approved Base mint.
 
 2. **IPFS Radio & Personal Jukebox** — slash commands that stream an IPFS album directory to a Discord voice channel (`/radio`) or send you a private numbered playlist via DM (`/jukebox`).
 
-3. **JukeLoop** — 24/7 community radio that continuously plays every audio file posted in `#DecentJukebox` in the `JukeLoop` voice channel. Track order is influenced by 👍/👎 reactions so popular tracks appear more often.
+3. **JukeLoop** — 24/7 community radio that continuously plays every audio file posted in `#DecentJukebox` in the `JukeLoop` voice channel. New tracks play from their stored IPFS CID, with Discord attachment fallback for legacy records. Track order is influenced by 👍/👎 reactions so popular tracks appear more often.
 
-The bot does **not** mint on-chain — the artist still connects MetaMask and confirms the transaction in the browser.
+The bot holds **no on-chain private key**. An authorized owner reviews the queue and confirms each mint in MetaMask. The NFT is minted directly to the artist wallet, which is also configured as the ERC-2981 royalty receiver.
 
 ---
 
@@ -23,7 +23,7 @@ The bot does **not** mint on-chain — the artist still connects MetaMask and co
   - Windows: download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to `PATH`
   - Or set `FFMPEG_PATH` in `.env` to point to a custom binary
 - A Discord bot application with the **Message Content** privileged intent enabled
-- A [web3.storage](https://console.web3.storage) account with a space and a server-side delegation
+- A Pinata account and server-side JWT for production, or a local Kubo/IPFS Desktop node
 
 ### 2. Install dependencies
 
@@ -43,8 +43,15 @@ cp .env.example .env
 |------------------------------|----------|-------------|
 | `DISCORD_TOKEN`              | ✅        | Bot token from the [Discord Developer Portal](https://discord.com/developers/applications) |
 | `JUKEBOX_CHANNEL_ID`         | ✅        | Numeric ID of the `#DecentJukebox` channel to watch for uploads |
-| `W3UP_KEY`                   | ✅        | ed25519 agent private key (`w3 key create`) |
-| `W3UP_PROOF`                 | ✅        | Base64-encoded UCAN delegation (`w3 delegation create … | base64`) |
+| `IPFS_UPLOAD_PROVIDER`       | ✅        | `pinata` on Render or `local` with Kubo/IPFS Desktop |
+| `PINATA_JWT`                 | Pinata    | Server-only Pinata JWT; never expose it in browser code |
+| `PUBLIC_WORKER_URL`          | Pinata    | Public URL of this Render service |
+| `IPFS_ALLOWED_ORIGINS`       | Pinata    | Comma-separated browser origins allowed to request upload URLs |
+| `MINT_OWNER_WALLET`          | Pinata    | Base admin wallet allowed to authorize browser uploads |
+| `PINATA_API_URL`             | ❌        | Direct upload API; defaults to Pinata v3 |
+| `PINATA_SIGN_URL`            | ❌        | Signed upload API; defaults to Pinata v3 |
+| `PINATA_FILES_API_URL`       | ❌        | Files API used to discover the latest JukeLoop state snapshot |
+| `IPFS_API_URL`               | Local     | Kubo RPC API; defaults to `http://127.0.0.1:5001` |
 | `SITE_URL`                   | ❌        | DecentBusking site URL (default: `https://thejollylama.github.io/DecentBusking`) |
 | `IPFS_GATEWAY`               | ❌        | IPFS HTTP gateway base URL (default: `https://w3s.link`) |
 | `FFMPEG_PATH`                | ❌        | Path to `ffmpeg` binary (default: `ffmpeg` from `PATH`) |
@@ -54,29 +61,22 @@ cp .env.example .env
 
 > JukeLoop is **opt-in**: omit `JUKE_LOOP_VOICE_CHANNEL_ID` / `JUKE_LOOP_TEXT_CHANNEL_ID` (or leave them blank) to keep the bot running without it.
 
-### 4. Generate w3up credentials
+### 4. Configure IPFS uploads
 
 ```bash
-# Install the w3 CLI (one-time)
-npm install -g @web3-storage/w3cli
+# Render / production
+IPFS_UPLOAD_PROVIDER=pinata
+PINATA_JWT=<server-only JWT from Pinata>
+PUBLIC_WORKER_URL=https://<service>.onrender.com
+IPFS_ALLOWED_ORIGINS=https://thejollylama.github.io
+MINT_OWNER_WALLET=0x...
 
-# Create a new agent key — copy the "key" field into W3UP_KEY
-w3 key create
-
-# Log in and create / select a space
-w3 login your@email.com
-w3 space create my-jukebox-space   # or: w3 space use <existing-did>
-
-# Create a delegated proof for the agent key above and base64-encode it
-# Replace <agent-did> with the "did" field from `w3 key create`
-# Linux:
-w3 delegation create <agent-did> --can 'store/add' --can 'upload/add' | base64 -w0
-# macOS:
-w3 delegation create <agent-did> --can 'store/add' --can 'upload/add' | base64
-# Cross-platform alternative:
-w3 delegation create <agent-did> --can 'store/add' --can 'upload/add' | base64 | tr -d '\n'
-# Copy the output into W3UP_PROOF
+# Local alternative
+IPFS_UPLOAD_PROVIDER=local
+IPFS_API_URL=http://127.0.0.1:5001
 ```
+
+In Pinata mode, the playlist, ratings, IPFS CIDs, and mint queue are checkpointed as tagged JSON on IPFS. On startup the bot discovers and restores the newest snapshot through Pinata's Files API. The newest three snapshots are retained, so Render's persistent disk is not required and `JUKELOOP_PLAYLIST_PATH` should be omitted on the free tier.
 
 ### 5. Run the bot
 
@@ -111,6 +111,8 @@ Fetch a numbered playlist of direct stream links from an IPFS album directory an
 | Command | Description |
 |---------|-------------|
 | `/jukebox play <cid>` | Receive a private numbered playlist with clickable gateway stream links. |
+| `/jukebox backlog` | Privately list your tracked uploads that have not been minted yet. |
+| `/jukebox request-mint <track_id> <wallet>` | Queue one of your pinned tracks for owner approval. |
 
 **Example:**
 ```
@@ -127,6 +129,10 @@ Manage the 24/7 community radio playlist.  Most subcommands are available to eve
 |---------|------------|-------------|
 | `/jukeloop stats` | Everyone | Show the top 10 rated tracks (likes, dislikes, plays, score). |
 | `/jukeloop remove <title>` | Manage Messages | Remove a track from the JukeLoop playlist by searching its title. |
+| `/jukeloop mint-queue` | Manage Messages | Show pending requests and owner approval links. |
+| `/jukeloop mark-minted <track_id> <token_id> <tx_hash>` | Manage Messages | Reconcile a completed Base mint with the playlist. |
+
+Wallet addresses submitted in Discord are community claims, not cryptographic proof of wallet ownership. During this manual bootstrap phase, the owner must verify unexpected or disputed addresses before approving a mint.
 
 ---
 
@@ -189,7 +195,7 @@ Track is immediately added to the JukeLoop playlist (if JukeLoop is enabled)
     ↓
 Bot downloads the file buffer via fetch
     ↓
-Bot uploads to IPFS via w3up → receives CID
+Bot uploads through Pinata or local Kubo → receives CID
     ↓
 Bot builds mint URL:
   https://thejollylama.github.io/DecentBusking/?title=<track>&ipfs=<CID>
@@ -238,7 +244,7 @@ Supported audio formats: `mp3`, `wav`, `ogg`, `flac`, `m4a`, `aac`, `opus`, `web
 ```bash
 cd discord-bot
 fly launch --name decentbusking-jukebox-bot
-fly secrets set DISCORD_TOKEN=... JUKEBOX_CHANNEL_ID=... W3UP_KEY=... W3UP_PROOF=...
+fly secrets set DISCORD_TOKEN=... JUKEBOX_CHANNEL_ID=... PINATA_JWT=... MINT_OWNER_WALLET=...
 fly deploy
 ```
 
@@ -266,7 +272,8 @@ discord-bot/
   jukeloop.js              ← JukeLoopSession (24/7 radio) + channel backfill helper
   playlist-store.js        ← persistent playlist with 👍/👎 ratings and weighted shuffle
   jukeloop-playlist.json   ← runtime data: playlist + ratings (auto-created, gitignored)
-  ipfs.js                  ← w3up Node.js upload helper
+    ipfs.js                  ← Pinata/local Kubo upload adapters
+    ipfs-worker.js           ← owner-authenticated Pinata upload URL endpoint
   embed.js                 ← Discord EmbedBuilder for mint-link replies
   config.js                ← environment variable loader with validation
   package.json             ← Node.js manifest
