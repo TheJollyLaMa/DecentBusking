@@ -26,6 +26,7 @@ import {
   Routes,
   SlashCommandBuilder,
   EmbedBuilder,
+  MessageFlags,
 } from 'discord.js';
 
 import http from 'http'; 
@@ -373,7 +374,7 @@ async function handleRadioCommand(interaction, config) {
   if (sub === 'skip' || sub === 'pause' || sub === 'stop') {
     const session = getSession(interaction.guildId);
     if (!session) {
-      await interaction.reply({ content: '📻 No radio session is active right now.', ephemeral: true });
+      await interaction.reply({ content: '📻 No radio session is active right now.', flags: MessageFlags.Ephemeral });
       return;
     }
     if (sub === 'skip') {
@@ -397,7 +398,7 @@ async function handleRadioCommand(interaction, config) {
   if (!voiceChannel) {
     await interaction.reply({
       content: '🎙️ You must be in a voice channel to start the radio.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -442,7 +443,7 @@ async function handleJukeboxCommand(interaction, config) {
     const wallet = interaction.options.getString('wallet', true).trim();
     const artwork = interaction.options.getAttachment('artwork');
     if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
-      await interaction.reply({ content: '❌ Enter a valid `0x` Base wallet address.', ephemeral: true });
+      await interaction.reply({ content: '❌ Enter a valid `0x` Base wallet address.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -456,19 +457,19 @@ async function handleJukeboxCommand(interaction, config) {
     if (!ownedTrack) {
       await interaction.reply({
         content: '❌ That track is not yours, is not pinned to IPFS yet, or has already been minted.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
     if (artwork && (!isImageAttachment(artwork) || artwork.size > MAX_ARTWORK_BYTES)) {
       await interaction.reply({
         content: '❌ Artwork must be a PNG, JPEG, WebP, or GIF no larger than 10 MB.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     let artworkCid;
     try {
       if (artwork) {
@@ -506,7 +507,7 @@ async function handleJukeboxCommand(interaction, config) {
         (track.artworkCid ? `Artwork CID: \`${track.artworkCid}\`\n` : '') +
         'Next, the contract owner must approve it from `/jukeloop mint-queue`. ' +
         'After both Base transactions confirm, the NFT will mint directly to that wallet and the bot will announce it publicly.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -516,7 +517,7 @@ async function handleJukeboxCommand(interaction, config) {
     if (tracks.length === 0) {
       await interaction.reply({
         content: '✅ You have no unminted DecentJukebox uploads in the tracked playlist.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -541,7 +542,7 @@ async function handleJukeboxCommand(interaction, config) {
       content:
         `🎸 **Your unminted track backlog**\n\n${lines.join('\n')}${more}\n\n` +
         'For a ready track, use `/jukebox request-mint track_id:<id> wallet:<your Base wallet>`.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -550,7 +551,7 @@ async function handleJukeboxCommand(interaction, config) {
 
   const cid = interaction.options.getString('cid', true).trim();
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
     const tracks = await fetchTrackList(cid, config.ipfsGateway);
@@ -602,7 +603,7 @@ async function handleJukeboxCommand(interaction, config) {
       // DMs disabled — reply ephemerally in the channel
       await interaction.editReply({ embeds: [buildEmbed(chunks[0], true)] });
       for (const chunk of chunks.slice(1)) {
-        await interaction.followUp({ embeds: [buildEmbed(chunk, false)], ephemeral: true });
+        await interaction.followUp({ embeds: [buildEmbed(chunk, false)], flags: MessageFlags.Ephemeral });
       }
     }
   } catch (err) {
@@ -799,7 +800,7 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
 
   if (sub === 'mint-queue' || sub === 'mark-minted') {
     if (!interaction.memberPermissions?.has('ManageMessages')) {
-      await interaction.reply({ content: '🔒 You need **Manage Messages** to manage mint requests.', ephemeral: true });
+      await interaction.reply({ content: '🔒 You need **Manage Messages** to manage mint requests.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -808,24 +809,24 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
       const tokenId = interaction.options.getString('token_id', true).trim();
       const txHash = interaction.options.getString('tx_hash', true).trim();
       if (!/^\d+$/.test(tokenId) || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
-        await interaction.reply({ content: '❌ Enter a numeric token ID and a full transaction hash.', ephemeral: true });
+        await interaction.reply({ content: '❌ Enter a numeric token ID and a full transaction hash.', flags: MessageFlags.Ephemeral });
         return;
       }
       try {
         const track = await reconcileMint({ trackId, tokenId, txHash });
         await interaction.reply({
           content: `✅ Verified and announced **${track.title}** as DecentNFT #${tokenId}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } catch (err) {
-        await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+        await interaction.reply({ content: `❌ ${err.message}`, flags: MessageFlags.Ephemeral });
       }
       return;
     }
 
     const requests = getMintRequests();
     if (requests.length === 0) {
-      await interaction.reply({ content: '✅ The owner-wallet mint queue is empty.', ephemeral: true });
+      await interaction.reply({ content: '✅ The owner-wallet mint queue is empty.', flags: MessageFlags.Ephemeral });
       return;
     }
     const lines = requests.slice(0, 10).map((track, index) => {
@@ -846,7 +847,7 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
       content:
         `🔑 **Owner-wallet mint queue**\n\n${lines.join('\n\n')}\n\n` +
         'Open a link, connect the contract owner wallet, and confirm both Base transactions. Completion is verified and announced automatically.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -854,7 +855,7 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
   if (sub === 'stats') {
     const top = getTopTracks(10);
     if (top.length === 0) {
-      await interaction.reply({ content: '📭 The JukeLoop playlist is empty.', ephemeral: true });
+      await interaction.reply({ content: '📭 The JukeLoop playlist is empty.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -871,7 +872,7 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
       .setFooter({ text: `${getPlaylist().length} track(s) total · DecentBusking JukeLoop` })
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -880,7 +881,7 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
     if (!interaction.memberPermissions?.has('ManageMessages')) {
       await interaction.reply({
         content: '🔒 You need the **Manage Messages** permission to remove JukeLoop tracks.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -891,7 +892,7 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
     if (matches.length === 0) {
       await interaction.reply({
         content: `❌ No JukeLoop tracks found matching **"${query}"**.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -900,7 +901,7 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
       const list = matches.slice(0, 5).map((t) => `• **${t.title}** by ${t.uploader}`).join('\n');
       await interaction.reply({
         content: `⚠️ Multiple tracks match **"${query}"** — please be more specific:\n${list}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -909,10 +910,10 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
     if (removed) {
       await interaction.reply({
         content: `🗑️ Removed **${removed.title}** by *${removed.uploader}* from the JukeLoop playlist.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } else {
-      await interaction.reply({ content: '❌ Track could not be removed.', ephemeral: true });
+      await interaction.reply({ content: '❌ Track could not be removed.', flags: MessageFlags.Ephemeral });
     }
     return;
   }
