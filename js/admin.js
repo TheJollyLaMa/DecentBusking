@@ -129,8 +129,9 @@ async function _connectWallet() {
   } catch (err) {
     _setStatus(`❌ ${err.message || 'Wallet connection failed'}`, true);
   }
+}
 
-  // ── NFT Mint Queue ───────────────────────────────────────────────────────────
+// ── NFT Mint Queue ───────────────────────────────────────────────────────────
   async function _loadMintQueue() {
     if (!_adminSigner || !_adminAddress || _mintBusy) return;
     _setMintStatus('Sign once to refresh the private mint queue.');
@@ -311,7 +312,6 @@ async function _connectWallet() {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
   }
-}
 
 // ── Grant Role ────────────────────────────────────────────────────────────────
 async function _grantRole() {

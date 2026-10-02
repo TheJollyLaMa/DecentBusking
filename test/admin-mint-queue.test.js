@@ -26,3 +26,29 @@ test('signs and fetches the owner mint queue', async () => {
   assert.equal(authorization.signature, '0xsigned');
   assert.equal(signed[0], buildAdminAuthorizationMessage(authorization));
 });
+
+test('admin DOM initialization can bind every queue handler', async (t) => {
+  let readyHandler;
+  const element = {
+    addEventListener() {},
+    classList: { add() {}, remove() {}, toggle() {} },
+    querySelectorAll: () => [],
+  };
+  global.document = {
+    addEventListener(event, handler) {
+      if (event === 'DOMContentLoaded') readyHandler = handler;
+    },
+    getElementById: () => element,
+  };
+  global.window = {};
+  t.after(() => {
+    delete global.document;
+    delete global.window;
+  });
+
+  const adminUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'admin.js'));
+  adminUrl.searchParams.set('test', String(Date.now()));
+  await import(adminUrl.href);
+  assert.equal(typeof readyHandler, 'function');
+  assert.doesNotThrow(() => readyHandler());
+});
