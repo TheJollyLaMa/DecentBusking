@@ -37,6 +37,7 @@ import {
   reconcileRatings,
   getWeightedShuffledPlaylist,
   getPlaylist,
+  restoreTrackTitles,
 } from './playlist-store.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -54,6 +55,14 @@ const EMPTY_PLAYLIST_RETRY_MS = 60_000;
 
 export function getVoiceRetryDelay(attempt) {
   return Math.min(15_000 * (2 ** Math.max(0, attempt - 1)), 5 * 60_000);
+}
+
+/** Display title for an upload; Discord strips emoji and accents from `name` but keeps them in `title`. */
+export function getAttachmentTitle(attachment) {
+  const original = (attachment.title || '').replace(AUDIO_EXTENSIONS_RE, '').trim();
+  if (original) return original;
+  const filename = attachment.name || '';
+  return filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || filename || 'Untitled';
 }
 
 /** Build a gateway URL for a raw IPFS CID. */
@@ -566,6 +575,7 @@ export class JukeLoopSession {
 export async function backfillFromChannel(jukeboxChannel) {
   let added   = 0;
   let lastId  = undefined;
+  const titles = [];
 
   console.log(`[jukeloop] Backfilling historic uploads from #${jukeboxChannel.name ?? jukeboxChannel.id}…`);
 
@@ -585,10 +595,8 @@ export async function backfillFromChannel(jukeboxChannel) {
         if (!AUDIO_EXTENSIONS_RE.test(attachment.name ?? '')) continue;
 
         const filename = attachment.name;
-        const title    = filename
-          .replace(/\.[^.]+$/, '')
-          .replace(/[-_]+/g, ' ')
-          .trim() || filename;
+        const title    = getAttachmentTitle(attachment);
+        titles.push({ trackId: attachment.id, legacyTrackId: `${msg.id}:${filename}`, title });
 
         const wasAdded = addTrack({
           attachmentId: attachment.id,
@@ -609,6 +617,8 @@ export async function backfillFromChannel(jukeboxChannel) {
     if (batch.size < 100) break;
   }
 
+  const retitled = restoreTrackTitles(titles);
+  if (retitled) console.log(`[jukeloop] Restored ${retitled} original track title(s) with emoji/accents.`);
   console.log(`[jukeloop] Backfill complete — added ${added} new track(s).`);
   return added;
 }

@@ -62,6 +62,7 @@ import {
   getVoiceRetryDelay,
   reconcileJukeLoopHistory,
   backfillFromChannel,
+  getAttachmentTitle,
 } from './jukeloop.js';
 
 const _jukeLoopRestartTimers = new Map();
@@ -390,7 +391,7 @@ async function main() {
 
     for (const attachment of audioAttachments) {
       const filename = attachment.name || 'track.mp3';
-      const title    = filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || filename;
+      const title    = getAttachmentTitle(attachment);
       const track = {
         attachmentId: attachment.id,
         messageId:  message.id,
@@ -702,9 +703,7 @@ async function handleJukeboxCommand(interaction, config) {
 async function handleAudioAttachment(message, attachment, config, trackId) {
   const filename = attachment.name || 'track.mp3';
   const mimeType = attachment.contentType || 'audio/mpeg';
-
-  // Derive a human-readable title from the filename (strip extension)
-  const title = filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || filename;
+  const title = getAttachmentTitle(attachment);
 
   const uploaderTag = message.author.tag || message.author.username || 'Unknown User';
 
