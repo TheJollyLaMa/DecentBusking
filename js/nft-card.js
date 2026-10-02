@@ -2,7 +2,7 @@
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js?v=20261002-nft-loader';
+import { fetchNFTMetaById } from './space.js?v=20261002-archive-drawer';
 
 // ── Public API ───────────────────────────────────────────────────────────
 export function renderNFTCard(nft) {

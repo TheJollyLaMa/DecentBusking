@@ -23,7 +23,7 @@
 window.DECENT_CONFIG =
 window.DecentConfig = {
   appName: "Decent Busking",
-  subtitle: "🎸 The Web3 Digital Town Square",
+  subtitle: "🎙️⚸ ♀︎🎸 The Web3 Digital Town Square 🔊 🎶 🎶 🎶",
 
   // Chain — Base Mainnet
   chainId: 8453,

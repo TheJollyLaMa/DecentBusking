@@ -180,3 +180,21 @@ test('returns the pending queue only to the mint owner', async () => {
     assert.deepEqual((await response.json()).requests, [{ trackId: 'track-1', title: 'Track One' }]);
   });
 });
+
+test('public health check is readable from local and hosted dapp origins', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: ['https://busking.example'],
+    ownerWallet: '0x1111111111111111111111111111111111111111',
+    pinataJwt: 'server-secret',
+  });
+
+  await withServer(handler, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/health`, {
+      headers: { origin: 'http://localhost:4173' },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.deepEqual(await response.json(), { ok: true, ipfsProvider: 'pinata' });
+  });
+});

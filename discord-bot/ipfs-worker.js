@@ -130,7 +130,7 @@ export function createWorkerRequestHandler({
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
-        sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured' });
+        sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured' }, '*');
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/mint-queue') {
