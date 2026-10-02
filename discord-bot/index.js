@@ -176,6 +176,9 @@ const SLASH_COMMANDS = [
       sub.setName('mint-queue').setDescription('(Admin) Show pending owner-wallet mint requests'),
     )
     .addSubcommand((sub) =>
+      sub.setName('restart').setDescription('(Admin) Reconnect and restart JukeLoop radio'),
+    )
+    .addSubcommand((sub) =>
       sub
         .setName('mark-minted')
         .setDescription('(Admin) Record a completed owner-wallet mint')
@@ -755,11 +758,11 @@ async function startJukeLoop(client, config) {
 
     if (!voiceChannel) {
       console.error('[jukeloop] Could not find voice channel:', config.jukeLoopVoiceChannelId);
-      return;
+      return false;
     }
     if (!textChannel) {
       console.error('[jukeloop] Could not find text channel:', config.jukeLoopTextChannelId);
-      return;
+      return false;
     }
 
     // Backfill all historic uploads from #DecentJukebox
@@ -774,6 +777,17 @@ async function startJukeLoop(client, config) {
       textChannel,
       client,
       ipfsGateway: config.ipfsGateway,
+      onTerminalDisconnect: () => {
+        setTimeout(() => {
+          startJukeLoop(client, config)
+            .then((restarted) => {
+              if (!restarted) console.error('[jukeloop] Automatic restart did not reconnect.');
+            })
+            .catch((restartError) =>
+              console.error('[jukeloop] Automatic restart failed:', restartError.message),
+            );
+        }, 15_000);
+      },
     });
 
     await session.connect();
@@ -782,8 +796,10 @@ async function startJukeLoop(client, config) {
       .send('📻 **JukeLoop is live!** The community radio is starting up — tracks from #DecentJukebox are on the way.')
       .catch(() => {});
     await session.start();
+    return true;
   } catch (err) {
     console.error('[jukeloop] Failed to start JukeLoop:', err.message);
+    return false;
   }
 }
 
@@ -797,6 +813,28 @@ async function startJukeLoop(client, config) {
  */
 async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
   const sub = interaction.options.getSubcommand();
+
+  if (sub === 'restart') {
+    if (!interaction.memberPermissions?.has('ManageMessages')) {
+      await interaction.reply({
+        content: '🔒 You need **Manage Messages** to restart JukeLoop.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const restarted = await startJukeLoop(interaction.client, config);
+      await interaction.editReply(
+        restarted
+          ? '✅ JukeLoop reconnected and restarted.'
+          : '❌ JukeLoop could not reconnect. Check the configured voice/text channels and Render logs.',
+      );
+    } catch (err) {
+      await interaction.editReply(`❌ JukeLoop restart failed: ${err.message}`);
+    }
+    return;
+  }
 
   if (sub === 'mint-queue' || sub === 'mark-minted') {
     if (!interaction.memberPermissions?.has('ManageMessages')) {

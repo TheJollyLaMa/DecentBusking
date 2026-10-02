@@ -127,12 +127,14 @@ export class JukeLoopSession {
    * @param {import('discord.js').VoiceBasedChannel} opts.voiceChannel  - JukeLoop voice channel
    * @param {import('discord.js').TextBasedChannel}  opts.textChannel   - JukeLoop text channel
    * @param {import('discord.js').Client}            opts.client        - Discord client (for re-fetching CDN URLs)
+    * @param {() => void} [opts.onTerminalDisconnect] - Called after Discord voice recovery fails
    */
-  constructor({ voiceChannel, textChannel, client, ipfsGateway }) {
+    constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect }) {
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
     this.ipfsGateway  = ipfsGateway;
+    this.onTerminalDisconnect = onTerminalDisconnect;
 
     this._destroyed   = false;
     this._ffmpeg      = null;
@@ -189,7 +191,11 @@ export class JukeLoopSession {
           entersState(this.connection, VoiceConnectionStatus.Connecting, 5_000),
         ]);
       } catch {
-        if (!this._destroyed) this.destroy();
+        if (!this._destroyed) {
+          console.warn('[jukeloop] Voice reconnect timed out; scheduling a fresh session.');
+          this.destroy();
+          this.onTerminalDisconnect?.();
+        }
       }
     });
   }

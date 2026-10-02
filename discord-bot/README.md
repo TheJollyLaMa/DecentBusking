@@ -131,6 +131,7 @@ Manage the 24/7 community radio playlist.  Most subcommands are available to eve
 | `/jukeloop remove <title>` | Manage Messages | Remove a track from the JukeLoop playlist by searching its title. |
 | `/jukeloop mint-queue` | Manage Messages | Show pending requests and owner approval links. |
 | `/jukeloop mark-minted <track_id> <token_id> <tx_hash>` | Manage Messages | Reconcile a completed Base mint with the playlist. |
+| `/jukeloop restart` | Manage Messages | Reconnect and restart JukeLoop without redeploying the bot. |
 
 Wallet addresses submitted in Discord are community claims, not cryptographic proof of wallet ownership. During this manual bootstrap phase, the owner must verify unexpected or disputed addresses before approving a mint.
 
