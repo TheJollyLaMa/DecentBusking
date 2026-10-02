@@ -152,6 +152,36 @@ test('verifies the owner transaction and EditionMinted event on Base', async () 
   assert.deepEqual(await verify({ tokenId: '42', txHash }), { recipient, amount: '1' });
 });
 
+test('accepts owner mints routed through a smart-account delegation contract', async () => {
+  const { createMintTransactionVerifier } = await import(moduleUrl);
+  const owner = '0x1111111111111111111111111111111111111111';
+  const recipient = '0x2222222222222222222222222222222222222222';
+  const contract = '0x3333333333333333333333333333333333333333';
+  const delegationManager = '0x4444444444444444444444444444444444444444';
+  const iface = new Interface([
+    'event EditionMinted(uint256 indexed tokenId, address indexed to, uint256 amount, address indexed minter)',
+  ]);
+  const verifierFor = (minter, logAddress = contract) => {
+    const encoded = iface.encodeEventLog(iface.getEvent('EditionMinted'), [8, recipient, 1, minter]);
+    return createMintTransactionVerifier({
+      contractAddress: contract,
+      ownerWallet: owner,
+      provider: {
+        getTransaction: async () => ({ from: owner, to: delegationManager }),
+        getTransactionReceipt: async () => ({
+          status: 1,
+          logs: [{ address: logAddress, topics: encoded.topics, data: encoded.data }],
+        }),
+      },
+    });
+  };
+  const txHash = `0x${'cd'.repeat(32)}`;
+
+  assert.deepEqual(await verifierFor(owner)({ tokenId: '8', txHash }), { recipient, amount: '1' });
+  await assert.rejects(verifierFor(recipient)({ tokenId: '8', txHash }), /not minted by the configured owner/);
+  await assert.rejects(verifierFor(owner, delegationManager)({ tokenId: '8', txHash }), /does not contain the claimed EditionMinted/);
+});
+
 test('returns the pending queue only to the mint owner', async () => {
   const { buildAdminAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom();
