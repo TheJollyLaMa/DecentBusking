@@ -62,6 +62,37 @@ export function buildIpfsGatewayUrl(gateway, cid) {
   return `${base}${base.endsWith('/ipfs') ? '' : '/ipfs'}/${cid}`;
 }
 
+/** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
+export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recentLimit = 10 }) {
+  const recent = [...playlist]
+    .sort((first, second) => Date.parse(second.addedAt) - Date.parse(first.addedAt))
+    .slice(0, recentLimit)
+    .map((track) => ({
+      trackId: track.trackId,
+      title: track.title,
+      uploader: track.uploader,
+      filename: track.filename || null,
+      ipfsCid: track.ipfsCid || null,
+      addedAt: track.addedAt,
+    }));
+  return {
+    serverTime: now,
+    nowPlaying: nowPlaying
+      ? {
+          playId: `${nowPlaying.trackId}:${nowPlaying.startedAt}`,
+          trackId: nowPlaying.trackId,
+          title: nowPlaying.title,
+          uploader: nowPlaying.uploader,
+          filename: nowPlaying.filename || null,
+          ipfsCid: nowPlaying.ipfsCid || null,
+          startedAt: nowPlaying.startedAt,
+          positionMs: Math.max(0, now - nowPlaying.startedAt),
+        }
+      : null,
+    recent,
+  };
+}
+
 export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true }) {
   const listenLink = track.ipfsCid ? `\n[Open IPFS audio](${url})` : '';
   const votingLine = votingOpen
@@ -136,6 +167,14 @@ const _sessions = new Map();
  */
 export function getJukeLoopSession(guildId) {
   return _sessions.get(guildId) ?? null;
+}
+
+/** The track currently audible in any JukeLoop voice session, or null. */
+export function getJukeLoopNowPlaying() {
+  for (const session of _sessions.values()) {
+    if (session._nowPlaying) return { ...session._nowPlaying };
+  }
+  return null;
 }
 
 /**
@@ -217,8 +256,22 @@ export class JukeLoopSession {
     this._announcementContext = null;
     /** The track entry currently playing (so we can store ratings when it ends) */
     this._currentTrack    = null;
+    /** Audible track and start time, published to the DecentBusking site. */
+    this._nowPlaying      = null;
+
+    this.player.on('stateChange', (oldState, newState) => {
+      if (
+        newState.status === AudioPlayerStatus.Playing &&
+        oldState.status === AudioPlayerStatus.Buffering &&
+        this._nowPlaying && !this._nowPlaying.audible
+      ) {
+        this._nowPlaying.startedAt = Date.now();
+        this._nowPlaying.audible = true;
+      }
+    });
 
     this.player.on(AudioPlayerStatus.Idle, () => {
+      this._nowPlaying = null;
       if (!this._destroyed) {
         setTimeout(() => {
           this._playNext().catch((err) =>
@@ -364,6 +417,15 @@ export class JukeLoopSession {
 
       const resource = createAudioResource(stream, { inputType: StreamType.Raw });
       this.player.play(resource);
+      this._nowPlaying = {
+        trackId: track.trackId,
+        title: track.title,
+        uploader: track.uploader,
+        filename: track.filename || null,
+        ipfsCid: track.ipfsCid || null,
+        startedAt: Date.now(),
+        audible: false,
+      };
 
       // Announce the track and add reaction buttons
       const totalTracks = getPlaylist().length;
@@ -445,7 +507,8 @@ export class JukeLoopSession {
   /** Stop all playback and disconnect from the voice channel. */
   destroy() {
     this._destroyed = true;
-    _sessions.delete(this.voiceChannel.guild.id);
+    this._nowPlaying = null;
+    if (_sessions.get(this.voiceChannel.guild.id) === this) _sessions.delete(this.voiceChannel.guild.id);
     if (this._ffmpeg) {
       try { this._ffmpeg.kill(); } catch {}
       this._ffmpeg = null;

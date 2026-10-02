@@ -211,6 +211,52 @@ decent-header {
   transform: scale(1.05);
 }
 
+.now-playing-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+#now-playing-radio-btn {
+  pointer-events: auto;
+  background: rgba(5, 3, 18, 0.75);
+  color: var(--gold);
+  border: 1px solid var(--gold-dim);
+  border-radius: 20px;
+  padding: 0.35rem 1rem;
+  font-size: 0.8rem;
+  font-family: var(--font-display);
+  cursor: pointer;
+  margin-top: 0.25rem;
+  transition: background var(--transition), transform var(--transition);
+}
+
+#now-playing-radio-btn:hover {
+  background: rgba(240, 192, 64, 0.15);
+  transform: scale(1.05);
+}
+
+#radio-activity {
+  max-width: min(88vw, 420px);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--teal);
+  min-height: 1rem;
+}
+
+#radio-activity.radio-activity-flash {
+  animation: radio-activity-in 0.6s ease-out;
+}
+
+@keyframes radio-activity-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #radio-activity.radio-activity-flash { animation: none; }
+}
+
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 8px rgba(0, 212, 170, 0.4); }
   50%       { box-shadow: 0 0 20px rgba(0, 212, 170, 0.85); }

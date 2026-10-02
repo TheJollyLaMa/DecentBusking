@@ -107,6 +107,7 @@ export function createWorkerRequestHandler({
   verifyMintTransaction,
   onMintComplete,
   getMintQueue,
+  getRadioState,
   fetchImpl = fetch,
   now = () => Date.now(),
 }) {
@@ -131,6 +132,14 @@ export function createWorkerRequestHandler({
       }
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
         sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured' }, '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/radio') {
+        if (!getRadioState) {
+          sendJson(response, 404, { error: 'Radio is not configured' }, '*');
+          return;
+        }
+        sendJson(response, 200, await getRadioState(), '*');
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/mint-queue') {

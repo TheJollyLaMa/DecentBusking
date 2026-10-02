@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261002-bottom-layout-final" />
+  <link rel="stylesheet" href="css/styles.css?v=20261002-radio-sync" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -24,16 +24,20 @@
   <!-- MAIN STAGE -->
   <main id="stage">
     <div id="busker-info">
-      <span id="now-playing-label">🎵 Now Playing</span>
+      <span id="now-playing-label">📻 Live on JukeLoop</span>
       <span id="now-playing-title">—</span>
       <span id="now-playing-artist"></span>
-      <button id="now-playing-play-btn" class="hidden" title="Play track" aria-label="Play track">▶ Play</button>
+      <span id="radio-activity" role="status" aria-live="polite"></span>
+      <div class="now-playing-actions">
+        <button id="now-playing-play-btn" class="hidden" title="Tune in to the radio" aria-label="Tune in to the radio">▶ Tune in</button>
+        <button id="now-playing-radio-btn" class="hidden" title="Return to the live JukeLoop radio" aria-label="Return to the live JukeLoop radio">📻 Back to radio</button>
+      </div>
     </div>
     <div id="center-stage">
       <button id="hat-btn" title="Tip the busker 🎩" aria-label="Tip the busker">🎩</button>
       <button id="guitar-case-btn" title="Mint your busk 💼" aria-label="Mint your busk">💼</button>
     </div>
-    <audio id="audio-player" autoplay></audio>
+    <audio id="audio-player"></audio>
   </main>
 
   <!-- NFT detail panel -->

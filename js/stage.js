@@ -2,79 +2,32 @@
 // Hat (tip) + Guitar Case (mint) interactions and the now-playing banner.
 
 import { openMintModal } from './mint.js';
+import { initRadioSync, playArchiveTrack } from './radio-sync.js';
 
 // ── Public API ────────────────────────────────────────────────────────────
 export function initStage() {
   _bindHat();
   _bindGuitarCase();
   _bindTipModal();
-  _bindNowPlayingBtn();
+  initRadioSync();
 }
 
-// Update the "Now Playing" banner (called from space.js when an NFT is clicked
-// or auto-advances to the nearest busking audio).
+// Play a selected archive NFT; the synced JukeLoop radio is muted until the
+// listener returns to it.
 export function setNowPlaying({ title = '—', artist = '', audioUrl = '' } = {}) {
-  const titleEl = document.getElementById('now-playing-title');
-  const artistEl = document.getElementById('now-playing-artist');
-  const player = document.getElementById('audio-player');
-  const playBtn = document.getElementById('now-playing-play-btn');
+  if (!audioUrl) return;
+  const cfg = window.DecentConfig || {};
+  const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
+  // Browsers cannot play ipfs:// directly.
+  const httpUrl = /^ipfs:\/\//i.test(audioUrl)
+    ? audioUrl.replace(/^ipfs:\/\//i, gateway)
+    : audioUrl;
 
-  if (titleEl) titleEl.textContent = title;
-  if (artistEl) artistEl.textContent = artist;
-
-  if (player && audioUrl) {
-    // Ensure ipfs:// URIs are resolved to an HTTP gateway URL before handing
-    // them to the <audio> element — browsers cannot play ipfs:// directly.
-    const cfg = window.DecentConfig || {};
-    const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
-    const httpUrl = /^ipfs:\/\//i.test(audioUrl)
-      ? audioUrl.replace(/^ipfs:\/\//i, gateway)
-      : audioUrl;
-
-    // Guard: only accept http/https URLs to prevent unexpected protocol schemes
-    if (!/^https?:\/\//i.test(httpUrl)) {
-      console.warn('[stage] setNowPlaying: rejected non-HTTP(S) audio URL:', httpUrl);
-      return;
-    }
-
-    // Remove any stale <source> children and clear the src attribute so the
-    // browser sees a clean slate before we add the new source.
-    player.removeAttribute('src');
-    Array.from(player.querySelectorAll('source')).forEach(s => s.remove());
-
-    const mime = _mimeType(httpUrl);
-    const source = document.createElement('source');
-    source.src = httpUrl;
-    if (mime) source.type = mime; // Gives browser format hint; prevents 'no supported source' on m4a/mp3
-    player.appendChild(source);
-
-    player.load(); // Reset element state so the new source is picked up reliably
-    player.play().then(() => {
-      // Autoplay succeeded — hide manual play button
-      if (playBtn) playBtn.classList.add('hidden');
-    }).catch(() => {
-      // Autoplay blocked — show play button so user can start it manually
-      if (playBtn) playBtn.classList.remove('hidden');
-    });
+  if (!/^https?:\/\//i.test(httpUrl)) {
+    console.warn('[stage] setNowPlaying: rejected non-HTTP(S) audio URL:', httpUrl);
+    return;
   }
-}
-
-// ── Now Playing play button (autoplay fallback) ───────────────────────────
-function _bindNowPlayingBtn() {
-  const playBtn = document.getElementById('now-playing-play-btn');
-  if (!playBtn) return;
-
-  playBtn.addEventListener('click', () => {
-    const player = document.getElementById('audio-player');
-    if (player && player.querySelector('source')) {
-      player.load(); // Ensure element state is fresh before playing
-      player.play().then(() => {
-        playBtn.classList.add('hidden');
-      }).catch(err => {
-        console.warn('[stage] Manual play failed:', err.message);
-      });
-    }
-  });
+  playArchiveTrack({ title, artist, audioUrl: httpUrl });
 }
 
 // ── Hat (tip) ─────────────────────────────────────────────────────────────
@@ -208,14 +161,4 @@ function _showStatus(elId, msg, isError = false) {
 
 function _shortAddr(addr = '') {
   return addr.length > 10 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
-}
-
-// ── MIME type helper ──────────────────────────────────────────────────────
-function _mimeType(url) {
-  if (/\.mp3(\?|$)/i.test(url)) return 'audio/mpeg';
-  if (/\.m4a(\?|$)/i.test(url)) return 'audio/mp4';
-  if (/\.ogg(\?|$)/i.test(url)) return 'audio/ogg';
-  if (/\.wav(\?|$)/i.test(url)) return 'audio/wav';
-  if (/\.flac(\?|$)/i.test(url)) return 'audio/flac';
-  return '';
 }
