@@ -212,3 +212,31 @@ test('admin batch queue requests every archived unminted upload by one artist, o
   ]);
   assert.equal(store.queueUploaderMints('artist', wallet).queued.length, 0);
 });
+
+test('track titles keep the emoji and accents Discord strips from filenames', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-titles-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
+  t.after(() => {
+    delete process.env.JUKELOOP_PLAYLIST_PATH;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+  const { getAttachmentTitle } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js')).href);
+  assert.equal(getAttachmentTitle({ name: '561_.m4a', title: '561 🐄 🐮 🐄' }), '561 🐄 🐮 🐄');
+  assert.equal(getAttachmentTitle({ name: '576_deja_vu.m4a', title: '576 déjà vu.m4a' }), '576 déjà vu');
+  assert.equal(getAttachmentTitle({ name: 'old_track-name.mp3', title: null }), 'old track name');
+
+  const storeUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'playlist-store.js'));
+  storeUrl.searchParams.set('title-test', String(Date.now()));
+  const store = await import(storeUrl.href);
+  store.loadPlaylist([
+    { trackId: 'attachment-561', title: '561', addedAt: '2026-10-01T00:00:00Z' },
+    { trackId: 'message-1:592_i_cant_dance.m4a', title: '592 i cant dance', addedAt: '2026-10-01T00:00:00Z' },
+  ]);
+  assert.equal(store.restoreTrackTitles([
+    { trackId: 'attachment-561', title: '561 🐄 🐮 🐄' },
+    { trackId: 'attachment-592', legacyTrackId: 'message-1:592_i_cant_dance.m4a', title: '592 i can’t dance' },
+    { trackId: 'missing', title: 'Nope' },
+  ]), 2);
+  assert.deepEqual(store.getPlaylist().map((track) => track.title), ['561 🐄 🐮 🐄', '592 i can’t dance']);
+  assert.equal(store.restoreTrackTitles([{ trackId: 'attachment-561', title: '561 🐄 🐮 🐄' }]), 0);
+});

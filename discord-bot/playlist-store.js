@@ -168,6 +168,19 @@ export function savePlaylist() {
   _save();
 }
 
+/** Apply corrected display titles in one checkpoint; returns how many changed. */
+export function restoreTrackTitles(updates) {
+  let changed = 0;
+  for (const { trackId, legacyTrackId, title } of updates) {
+    const track = _playlist.find((entry) => entry.trackId === trackId || entry.trackId === legacyTrackId);
+    if (!track || !title || track.title === title) continue;
+    track.title = title;
+    changed++;
+  }
+  if (changed) _save();
+  return changed;
+}
+
 /** Queue a pinned track for manual owner-wallet mint approval. */
 export function requestTrackMint(trackId, uploaderId, recipient, artworkCid) {
   const track = _playlist.find((entry) => entry.trackId === trackId);
