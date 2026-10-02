@@ -9,6 +9,7 @@
 import { fetchMintQueue } from './admin-mint-queue.js';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { reportMintCompletion } from './mint-reconciliation.js';
+import { addNFTToSpace } from './space.js';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -275,6 +276,7 @@ async function _connectWallet() {
         tokenId,
         txHash,
       });
+      addNFTToSpace({ tokenId, metadataUri: metadataUrl, ...metadata });
     } catch (err) {
       throw new Error(
         `Token #${tokenId} minted, but Discord sync failed. Use /jukeloop mark-minted with ` +
