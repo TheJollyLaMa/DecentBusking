@@ -176,6 +176,8 @@ Track weight = `max(0.1, 1 + likes − dislikes × 0.5)`.  A brand-new track has
 
 Ratings **accumulate** across plays and **persist to disk** (`jukeloop-playlist.json`) so they survive bot restarts.
 
+Each Now Playing message displays cumulative likes, dislikes, and playback announcements. Reactions on the current message are per-play inputs; when the next track begins, the bot adds them to the cumulative totals, edits the message with the updated totals, and removes the closed reaction buttons. Discord announcement IDs are persisted as idempotency keys. On startup, JukeLoop scans up to 500 recent announcements and reconciles any that were abandoned by a restart, then writes one Pinata-backed checkpoint without double-counting previously processed messages.
+
 ### Setting up JukeLoop
 
 1. Create a `JukeLoop` voice channel and a `JukeLoop` text channel in your server.

@@ -62,10 +62,23 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
   assert.equal(minted.tokenId, '42');
   assert.equal(store.getMintBacklog('user-1').length, 1);
 
-  const rated = store.applyRating('attachment-2', 2, 1);
+  const rated = store.applyRating('attachment-2', 2, 1, 'rating-message-1');
   assert.deepEqual(
     { likes: rated.likes, dislikes: rated.dislikes, plays: rated.plays },
     { likes: 2, dislikes: 1, plays: 1 },
+  );
+  store.applyRating('attachment-2', 2, 1, 'rating-message-1');
+  assert.deepEqual(
+    { likes: rated.likes, dislikes: rated.dislikes, plays: rated.plays },
+    { likes: 2, dislikes: 1, plays: 1 },
+  );
+  assert.equal(store.reconcileRatings([
+    { trackId: 'attachment-2', likes: 1, dislikes: 0, messageId: 'rating-message-1' },
+    { trackId: 'attachment-2', likes: 1, dislikes: 0, messageId: 'rating-message-2' },
+  ]), 1);
+  assert.deepEqual(
+    { likes: rated.likes, dislikes: rated.dislikes, plays: rated.plays },
+    { likes: 3, dislikes: 1, plays: 2 },
   );
 
   const snapshots = [];
@@ -83,7 +96,12 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
 
 test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages', async () => {
   const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'));
-  const { buildIpfsGatewayUrl, buildNowPlayingMessage, getVoiceRetryDelay } = await import(moduleUrl.href);
+  const {
+    buildIpfsGatewayUrl,
+    buildNowPlayingMessage,
+    getVoiceRetryDelay,
+    parseNowPlayingMessage,
+  } = await import(moduleUrl.href);
 
   assert.equal(
     buildIpfsGatewayUrl('https://w3s.link', 'bafy-audio'),
@@ -95,6 +113,7 @@ test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages
   );
 
   const message = buildNowPlayingMessage({
+    trackId: 'attachment-1',
     title: 'Track', uploader: 'artist', ipfsCid: 'bafy-audio', likes: 12, dislikes: 3, plays: 8,
   }, {
     queueIndex: 2,
@@ -103,6 +122,13 @@ test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages
   });
   assert.match(message, /All-time:\*\* 👍 12 · 👎 3 · ▶️ 8/);
   assert.match(message, /React 👍 to boost it/);
+  assert.match(message, /Track ID: \|\|attachment-1\|\|/);
+  assert.deepEqual(parseNowPlayingMessage(
+    '🎵 Now playing: **Track** by *artist* (1/10)\nTrack ID: ||attachment-1||',
+  ), { title: 'Track', uploader: 'artist', trackId: 'attachment-1' });
+  assert.deepEqual(parseNowPlayingMessage(
+    '🎵 Now playing: **Legacy Track** by *legacy_artist* (1/10) — rate this track!',
+  ), { title: 'Legacy Track', uploader: 'legacy_artist', trackId: null });
   assert.equal(getVoiceRetryDelay(1), 15_000);
   assert.equal(getVoiceRetryDelay(2), 30_000);
   assert.equal(getVoiceRetryDelay(10), 5 * 60_000);

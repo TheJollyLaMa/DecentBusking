@@ -38,6 +38,7 @@ const STORE_PATH = process.env.JUKELOOP_PLAYLIST_PATH || join(__dirname, 'jukelo
  * @property {number} likes      - Cumulative 👍 reactions counted across all plays
  * @property {number} dislikes   - Cumulative 👎 reactions counted across all plays
  * @property {number} plays      - Total number of times the track has been played
+ * @property {string[]} [ratedMessageIds] - Discord announcements already included in totals
  * @property {string} addedAt    - ISO-8601 timestamp when the track was first added
  */
 
@@ -209,14 +210,32 @@ export function removeTrack(trackId) {
  * @param {number} newLikes    - Net new 👍 since last collection
  * @param {number} newDislikes - Net new 👎 since last collection
  */
-export function applyRating(trackId, newLikes, newDislikes) {
+export function applyRating(trackId, newLikes, newDislikes, messageId) {
   const track = _playlist.find((entry) => entry.trackId === trackId);
   if (!track) return null;
+  if (messageId && track.ratedMessageIds?.includes(messageId)) return track;
   track.likes    += newLikes;
   track.dislikes += newDislikes;
   track.plays    += 1;
+  if (messageId) track.ratedMessageIds = [...(track.ratedMessageIds || []), messageId].slice(-500);
   _save();
   return track;
+}
+
+/** Reconcile many Discord announcements atomically and checkpoint once. */
+export function reconcileRatings(events) {
+  let reconciled = 0;
+  for (const { trackId, likes, dislikes, messageId } of events) {
+    const track = _playlist.find((entry) => entry.trackId === trackId);
+    if (!track || !messageId || track.ratedMessageIds?.includes(messageId)) continue;
+    track.likes += likes;
+    track.dislikes += dislikes;
+    track.plays += 1;
+    track.ratedMessageIds = [...(track.ratedMessageIds || []), messageId].slice(-500);
+    reconciled++;
+  }
+  if (reconciled > 0) _save();
+  return reconciled;
 }
 
 // ── Read helpers ──────────────────────────────────────────────────────────────

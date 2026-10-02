@@ -56,6 +56,7 @@ import {
   createJukeLoopSession,
   getJukeLoopSession,
   getVoiceRetryDelay,
+  reconcileJukeLoopHistory,
   backfillFromChannel,
 } from './jukeloop.js';
 
@@ -803,6 +804,11 @@ async function startJukeLoop(client, config) {
       await backfillFromChannel(jukeboxCh);
     } else {
       console.warn('[jukeloop] Could not access #DecentJukebox for backfill:', config.jukeboxChannelId);
+    }
+
+    const recoveredRatings = await reconcileJukeLoopHistory(textChannel, client.user.id);
+    if (recoveredRatings > 0) {
+      console.log(`[jukeloop] Reconciled ${recoveredRatings} historical playback announcement(s).`);
     }
 
     const session = createJukeLoopSession(guildId, {

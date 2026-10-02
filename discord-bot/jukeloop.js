@@ -34,6 +34,7 @@ import {
   loadPlaylist,
   addTrack,
   applyRating,
+  reconcileRatings,
   getWeightedShuffledPlaylist,
   getPlaylist,
 } from './playlist-store.js';
@@ -70,8 +71,57 @@ export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, vo
     `🎵 Now playing: **${track.title}** by *${track.uploader}* ` +
     `(${queueIndex}/${totalTracks})\n` +
     `**All-time:** 👍 ${track.likes ?? 0} · 👎 ${track.dislikes ?? 0} · ▶️ ${track.plays ?? 0}\n` +
+    `Track ID: ||${track.trackId}||\n` +
     `${votingLine}${listenLink}`
   );
+}
+
+export function parseNowPlayingMessage(content) {
+  const match = content.match(/^🎵 Now playing: \*\*(.+?)\*\* by \*(.+?)\*/);
+  if (!match) return null;
+  const trackId = content.match(/Track ID: \|\|(.+?)\|\|/)?.[1] || null;
+  return { title: match[1], uploader: match[2], trackId };
+}
+
+function reactionCount(message, emoji) {
+  const reaction = message.reactions.cache.find((entry) => entry.emoji.name === emoji);
+  return Math.max(0, (reaction?.count || 0) - (reaction?.me ? 1 : 0));
+}
+
+/** Recover announcements that were abandoned by a restart before normal collection. */
+export async function reconcileJukeLoopHistory(textChannel, botUserId, maxMessages = 500) {
+  const playlist = getPlaylist();
+  const events = [];
+  let before;
+  let scanned = 0;
+
+  while (scanned < maxMessages) {
+    const limit = Math.min(100, maxMessages - scanned);
+    const batch = await textChannel.messages.fetch({ limit, ...(before ? { before } : {}) }).catch(() => null);
+    if (!batch?.size) break;
+    for (const message of batch.values()) {
+      if (message.author.id !== botUserId) continue;
+      const parsed = parseNowPlayingMessage(message.content);
+      if (!parsed) continue;
+      let track = parsed.trackId ? playlist.find((entry) => entry.trackId === parsed.trackId) : null;
+      if (!track) {
+        const matches = playlist.filter((entry) => entry.title === parsed.title && entry.uploader === parsed.uploader);
+        if (matches.length === 1) [track] = matches;
+      }
+      if (!track) continue;
+      events.push({
+        trackId: track.trackId,
+        messageId: message.id,
+        likes: reactionCount(message, '👍'),
+        dislikes: reactionCount(message, '👎'),
+      });
+    }
+    scanned += batch.size;
+    before = batch.last()?.id;
+    if (batch.size < limit) break;
+  }
+
+  return reconcileRatings(events);
 }
 
 // ── Per-guild session registry ────────────────────────────────────────────────
@@ -373,7 +423,7 @@ export class JukeLoopSession {
       const likes    = Math.max(0, (thumbsUp?.count   ?? 0) - 1);
       const dislikes = Math.max(0, (thumbsDown?.count ?? 0) - 1);
 
-      const updatedTrack = applyRating(trackRef.trackId, likes, dislikes);
+      const updatedTrack = applyRating(trackRef.trackId, likes, dislikes, fresh.id);
       if (updatedTrack && announcementContext) {
         await fresh.edit(buildNowPlayingMessage(updatedTrack, {
           ...announcementContext,
