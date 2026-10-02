@@ -93,6 +93,7 @@ export function initSpace() {
   _animate();
   _bindTimelineNav();
   _bindShowAllBtn();
+  _bindArchiveDrawer();
   window.addEventListener('resize', _onResize);
   window.addEventListener('keydown', _onKeyDown);
   window.addEventListener('keyup', _onKeyUp);
@@ -520,6 +521,36 @@ function _updateNavUI() {
   }
 }
 
+// ── Archive drawer ─────────────────────────────────────────────────────────
+function _bindArchiveDrawer() {
+  const toggle = document.getElementById('dnft-archive-toggle');
+  const close = document.getElementById('dnft-list-close');
+  const backdrop = document.getElementById('dnft-list-backdrop');
+  if (!toggle) return;
+
+  toggle.addEventListener('click', () => {
+    _setArchiveOpen(toggle.getAttribute('aria-expanded') !== 'true');
+  });
+  close?.addEventListener('click', () => _setArchiveOpen(false));
+  backdrop?.addEventListener('click', () => _setArchiveOpen(false));
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') _setArchiveOpen(false);
+  });
+}
+
+function _setArchiveOpen(open) {
+  const panel = document.getElementById('dnft-list');
+  const toggle = document.getElementById('dnft-archive-toggle');
+  const backdrop = document.getElementById('dnft-list-backdrop');
+  if (!panel || !toggle) return;
+
+  panel.classList.toggle('is-open', open);
+  panel.setAttribute('aria-hidden', String(!open));
+  toggle.setAttribute('aria-expanded', String(open));
+  toggle.setAttribute('aria-label', open ? 'Close music archive' : 'Open music archive');
+  backdrop?.classList.toggle('hidden', !open);
+}
+
 // ── Right-side List Panel ──────────────────────────────────────────────────
 function _addListItem(nft, mesh) {
   const list = document.getElementById('dnft-list-items');
@@ -544,7 +575,10 @@ function _addListItem(nft, mesh) {
     <span class="dnft-list-item-meta">${artist ? _esc(artist) : ''}${dateStr ? ` · ${dateStr}` : ''}</span>
   `;
 
-  li.addEventListener('click', () => _selectNFT(nft, mesh, li, true));
+  li.addEventListener('click', () => {
+    _selectNFT(nft, mesh, li, true);
+    _setArchiveOpen(false);
+  });
 
   // Prepend so newest is at the top (items are pushed via unshift in _spawnMesh)
   list.prepend(li);
@@ -552,12 +586,16 @@ function _addListItem(nft, mesh) {
   // Update count badge
   const countEl = document.getElementById('dnft-list-count');
   if (countEl) countEl.textContent = `${_allNFTs.length} track${_allNFTs.length !== 1 ? 's' : ''}`;
+  const badge = document.getElementById('dnft-list-count-badge');
+  if (badge) badge.textContent = String(_allNFTs.length);
 }
 
 function _markListEmpty(msg) {
   const list = document.getElementById('dnft-list-items');
   if (!list) return;
   list.innerHTML = `<li class="dnft-list-empty">${_esc(msg)}</li>`;
+  const badge = document.getElementById('dnft-list-count-badge');
+  if (badge) badge.textContent = '0';
 }
 
 // Show or hide the spinner inside the DNFT list panel.

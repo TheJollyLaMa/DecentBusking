@@ -3,7 +3,7 @@
 
 import { initWallet } from './wallet.js';
 import { initStage } from './stage.js';
-import { initSpace } from './space.js?v=20261002-nft-loader';
+import { initSpace } from './space.js?v=20261002-archive-drawer';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.
 // The shared footer (decent-foot) web component is loaded below once the DOM is ready.

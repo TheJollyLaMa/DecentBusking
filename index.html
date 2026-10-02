@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261001-admin-artwork" />
+  <link rel="stylesheet" href="css/styles.css?v=20261002-bottom-layout-final" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -14,7 +14,7 @@
   <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
   <!-- App config — must load before modules -->
-  <script src="decent.config.js?v=20261002-nft-loader"></script>
+  <script src="decent.config.js?v=20261002-venus-subtitle"></script>
 </head>
 <body>
 
@@ -42,11 +42,18 @@
     <button id="nft-panel-close">✕</button>
   </div>
 
-  <!-- DNFT right-side list panel -->
-  <div id="dnft-list">
+  <!-- DNFT archive drawer -->
+  <button id="dnft-archive-toggle" type="button" aria-controls="dnft-list" aria-expanded="false" aria-label="Open music archive">
+    <span aria-hidden="true">♫</span>
+    <span>Archive</span>
+    <span id="dnft-list-count-badge" aria-hidden="true"></span>
+  </button>
+  <button id="dnft-list-backdrop" class="hidden" type="button" aria-label="Close music archive"></button>
+  <aside id="dnft-list" aria-label="DecentBusking music archive" aria-hidden="true">
     <div id="dnft-list-header">
       <span>🎵 DNFT Archive</span>
       <span id="dnft-list-count"></span>
+      <button id="dnft-list-close" type="button" aria-label="Close archive">✕</button>
     </div>
     <!-- Spinner shown while the initial batch is loading -->
     <div id="dnft-list-spinner" class="dnft-list-spinner hidden" aria-label="Loading tracks…">
@@ -61,7 +68,7 @@
     <button id="dnft-show-all-btn" class="dnft-show-all-btn" title="Load the full DNFT archive now">
       ⚡ Show All Now
     </button>
-  </div>
+  </aside>
 
   <!-- Timeline Navigation Controls -->
   <div id="timeline-nav">
@@ -72,6 +79,11 @@
     </div>
     <button id="timeline-forward-btn" title="Go forward (toward now)" aria-label="Go forward in time">▶</button>
   </div>
+
+  <a id="mobile-discord-link" href="https://discord.gg/5XJtJYdhz" target="_blank" rel="noopener noreferrer" aria-label="Join the DecentBusking Discord">
+    <span aria-hidden="true">💬</span>
+    <span>Join Discord</span>
+  </a>
 
   <!-- Mint modal -->
   <div id="mint-modal" class="hidden">
@@ -253,26 +265,26 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js"></script>
+  <script type="module" src="js/components/about-override.js?v=20261002-about-refresh-3"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
   <script type="module" src="js/components/header-right-ankh-override.js"></script>
 
   <!-- Load DecentHead components without its legacy IPFS status widget -->
-  <script type="module" src="js/components/header.js"></script>
+  <script type="module" src="js/components/header.js?v=20261002-venus-subtitle"></script>
 
   <!-- Inject 💸 Payroll link into left ankh header dropdown -->
   <script type="module" src="js/components/header-payroll-inject.js"></script>
 
   <!-- Override .title-main color to DecentBusking orange inside AppTitle shadow root -->
-  <script type="module" src="js/components/header-title-color-override.js"></script>
+  <script type="module" src="js/components/header-title-color-override.js?v=20261002-header-refresh-5"></script>
 
   <!-- Main app entry point -->
-  <script type="module" src="js/main.js?v=20261002-nft-loader"></script>
+  <script type="module" src="js/main.js?v=20261002-archive-drawer"></script>
 
   <!-- Admin role-grant panel -->
   <script type="module" src="js/components/header-admin-inject.js"></script>
-  <script type="module" src="js/admin.js?v=20261002-nft-loader"></script>
+  <script type="module" src="js/admin.js?v=20261002-archive-drawer"></script>
 
   <script type="module" src="js/payroll.js"></script>
   <script type="module">
