@@ -32,7 +32,8 @@ import {
 import http from 'http'; 
 
 import { loadConfig }    from './config.js';
-import { uploadToIPFS }  from './ipfs.js';
+import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
+import { backfillIpfsPins } from './ipfs-backfill.js';
 import { createPinataStateStore } from './ipfs-state.js';
 import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed } from './embed.js';
@@ -55,6 +56,8 @@ import {
 import {
   createJukeLoopSession,
   getJukeLoopSession,
+  getJukeLoopNowPlaying,
+  buildRadioState,
   getVoiceRetryDelay,
   reconcileJukeLoopHistory,
   backfillFromChannel,
@@ -62,6 +65,32 @@ import {
 
 const _jukeLoopRestartTimers = new Map();
 const _jukeLoopRestartAttempts = new Map();
+const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** Pin Discord-only uploads in the background and announce what was archived. */
+function runIpfsBackfill(client, config) {
+  if (config.disableMintFlow) return;
+  backfillIpfsPins({
+    client,
+    upload: createIpfsUploader({
+      provider: config.ipfsUploadProvider,
+      pinataJwt: config.pinataJwt,
+      pinataApiUrl: config.pinataApiUrl,
+      ipfsApiUrl: config.ipfsApiUrl,
+    }),
+    maxBytes: MAX_FILE_BYTES,
+  })
+    .then(async ({ pinned, remaining }) => {
+      if (!pinned || !config.jukeLoopTextChannelId) return;
+      const channel = await client.channels.fetch(config.jukeLoopTextChannelId).catch(() => null);
+      await channel?.send(
+        `📌 Archived **${pinned}** past #DecentJukebox upload${pinned === 1 ? '' : 's'} to IPFS — ` +
+        `${pinned === 1 ? 'it' : 'they'} can now stream on DecentBusking.` +
+        (remaining ? ` ${remaining} upload${remaining === 1 ? '' : 's'} couldn’t be archived yet; retrying later.` : ''),
+      ).catch(() => {});
+    })
+    .catch((err) => console.error('[ipfs-backfill] Run failed:', err.message));
+}
 
 function clearScheduledJukeLoopRestart(config) {
   const key = config.jukeLoopVoiceChannelId;
@@ -267,6 +296,10 @@ async function main() {
       artworkCid: track.artworkCid || null,
       requestedAt: track.mintRequestedAt,
     })),
+    getRadioState: async () => buildRadioState({
+      nowPlaying: getJukeLoopNowPlaying(),
+      playlist: getPlaylist(),
+    }),
   });
   const port = process.env.PORT || 10000;
   http.createServer(requestHandler).listen(port, () => {
@@ -332,6 +365,7 @@ async function main() {
         'JukeLoop disabled.',
       );
     }
+    setInterval(() => runIpfsBackfill(readyClient, config), IPFS_BACKFILL_INTERVAL_MS);
   });
 
   client.on(Events.MessageCreate, async (message) => {
@@ -562,12 +596,12 @@ async function handleJukeboxCommand(interaction, config) {
         return `**${index + 1}. ${track.title}** — ready · track ID: \`${track.trackId}\``;
       }
       if (track.pinStatus === 'failed') {
-        return `**${index + 1}. ${track.title}** — IPFS pin failed; retry support is pending`;
+        return `**${index + 1}. ${track.title}** — IPFS pin failed; retrying automatically`;
       }
       if (track.pinStatus === 'pending') {
         return `**${index + 1}. ${track.title}** — IPFS pin in progress`;
       }
-      return `**${index + 1}. ${track.title}** — legacy upload; IPFS backfill required`;
+      return `**${index + 1}. ${track.title}** — queued for IPFS archiving`;
     });
     const more = tracks.length > 20 ? `\n\n…and ${tracks.length - 20} more upload(s).` : '';
     await interaction.reply({
@@ -802,6 +836,7 @@ async function startJukeLoop(client, config) {
     // Backfill all historic uploads from #DecentJukebox
     if (jukeboxCh) {
       await backfillFromChannel(jukeboxCh);
+      runIpfsBackfill(client, config);
     } else {
       console.warn('[jukeloop] Could not access #DecentJukebox for backfill:', config.jukeboxChannelId);
     }

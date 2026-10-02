@@ -198,3 +198,18 @@ test('public health check is readable from local and hosted dapp origins', async
     assert.deepEqual(await response.json(), { ok: true, ipfsProvider: 'pinata' });
   });
 });
+test('radio state is public and readable from any dapp origin', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: ['https://busking.example'],
+    ownerWallet: '0x1111111111111111111111111111111111111111',
+    getRadioState: async () => ({ serverTime: 1, nowPlaying: null, recent: [] }),
+  });
+
+  await withServer(handler, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/radio`, { headers: { origin: 'http://localhost:4173' } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.deepEqual(await response.json(), { serverTime: 1, nowPlaying: null, recent: [] });
+  });
+});

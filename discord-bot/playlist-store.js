@@ -148,9 +148,10 @@ export function addTrack(track) {
  * Persist the outcome of an IPFS pin attempt.
  * @param {string} trackId
  * @param {{ status: 'pending'|'pinned'|'failed'|'disabled'|'untracked', ipfsCid?: string, error?: string }} result
+ * @param {{ save?: boolean }} [options] - Pass save:false when batching, then call savePlaylist()
  * @returns {TrackEntry|null}
  */
-export function updateTrackPin(trackId, result) {
+export function updateTrackPin(trackId, result, { save = true } = {}) {
   const track = _playlist.find((entry) => entry.trackId === trackId);
   if (!track) return null;
 
@@ -158,8 +159,13 @@ export function updateTrackPin(trackId, result) {
   if (result.ipfsCid) track.ipfsCid = result.ipfsCid;
   if (result.error) track.pinError = result.error;
   else delete track.pinError;
-  _save();
+  if (save) _save();
   return track;
+}
+
+/** Persist batched mutations locally and to the remote checkpoint. */
+export function savePlaylist() {
+  _save();
 }
 
 /** Queue a pinned track for manual owner-wallet mint approval. */

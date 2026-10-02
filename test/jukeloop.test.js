@@ -133,3 +133,33 @@ test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages
   assert.equal(getVoiceRetryDelay(2), 30_000);
   assert.equal(getVoiceRetryDelay(10), 5 * 60_000);
 });
+test('radio state publishes the audible track position and newest uploads', async () => {
+  const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'));
+  const { buildRadioState } = await import(moduleUrl.href);
+
+  const state = buildRadioState({
+    now: 100_000,
+    nowPlaying: {
+      trackId: 'track-1', title: 'Song', uploader: 'artist', filename: 'song.m4a',
+      ipfsCid: 'bafy-song', startedAt: 40_000, audible: true,
+    },
+    playlist: [
+      { trackId: 'old', title: 'Old', uploader: 'a', filename: 'old.mp3', ipfsCid: 'bafy-old', addedAt: '2026-10-01T00:00:00.000Z', uploaderId: 'secret' },
+      { trackId: 'new', title: 'New', uploader: 'b', filename: 'new.mp3', addedAt: '2026-10-02T00:00:00.000Z' },
+    ],
+  });
+
+  assert.deepEqual(state.nowPlaying, {
+    playId: 'track-1:40000',
+    trackId: 'track-1',
+    title: 'Song',
+    uploader: 'artist',
+    filename: 'song.m4a',
+    ipfsCid: 'bafy-song',
+    startedAt: 40_000,
+    positionMs: 60_000,
+  });
+  assert.deepEqual(state.recent.map((track) => [track.trackId, track.ipfsCid]), [['new', null], ['old', 'bafy-old']]);
+  assert.equal('uploaderId' in state.recent[1], false);
+  assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).nowPlaying, null);
+});
