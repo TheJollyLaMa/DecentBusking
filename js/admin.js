@@ -9,7 +9,7 @@
 import { fetchMintQueue } from './admin-mint-queue.js';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { reportMintCompletion } from './mint-reconciliation.js';
-import { addNFTToSpace } from './space.js';
+import { addNFTToSpace } from './space.js?v=20261002-nft-loader';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -302,7 +302,7 @@ async function _connectWallet() {
   }
 
   function _gatewayUrl(cid) {
-    const gateway = (window.DecentConfig?.ipfsGateway || 'https://dweb.link/ipfs/').replace(/\/$/, '');
+    const gateway = (window.DecentConfig?.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/').replace(/\/$/, '');
     return `${gateway}${gateway.endsWith('/ipfs') ? '' : '/ipfs'}/${cid}`;
   }
 

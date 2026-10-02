@@ -26,7 +26,7 @@ export function setNowPlaying({ title = '—', artist = '', audioUrl = '' } = {}
     // Ensure ipfs:// URIs are resolved to an HTTP gateway URL before handing
     // them to the <audio> element — browsers cannot play ipfs:// directly.
     const cfg = window.DecentConfig || {};
-    const gateway = cfg.ipfsGateway || 'https://w3s.link/ipfs/';
+    const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
     const httpUrl = /^ipfs:\/\//i.test(audioUrl)
       ? audioUrl.replace(/^ipfs:\/\//i, gateway)
       : audioUrl;

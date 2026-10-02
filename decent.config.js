@@ -39,7 +39,7 @@ window.DecentConfig = {
   ipfsUploadProvider: "pinata",
   ipfsUploadServiceUrl: "https://decentbusking.onrender.com",
   ipfsApiUrl: "http://127.0.0.1:5001",
-  ipfsGateway: "https://dweb.link/ipfs/",
+  ipfsGateway: "https://gateway.pinata.cloud/ipfs/",
 
   // Currency
   tokenSymbol: "ETH",

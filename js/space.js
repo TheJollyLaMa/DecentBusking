@@ -25,6 +25,8 @@
 
 import { renderNFTCard } from './nft-card.js';
 import { setNowPlaying } from './stage.js';
+import { fetchIpfsJson } from './ipfs-gateway.js';
+import { loadMintedToken } from './nft-loader.js';
 
 // ── Timeline constants ────────────────────────────────────────────────────
 const UNITS_PER_DAY   = 5;          // 3-D units per day on the Z-axis
@@ -116,12 +118,7 @@ export async function fetchNFTMetaById(tokenId) {
       'function totalMinted(uint256 tokenId) view returns (uint256)',
     ];
     const contract = new ethers.Contract(contractAddress, abi, provider);
-    const minted = Number(await contract.totalMinted(tokenId));
-    if (minted === 0) return null;
-    const uri = await contract.uri(tokenId);
-    const creator = await contract.creatorOf(tokenId);
-    const meta = await _fetchMetadata(uri);
-    return meta ? { tokenId, ...meta, creator } : null;
+    return await loadMintedToken({ contract, tokenId, fetchMetadata: _fetchMetadata });
   } catch (err) {
     console.warn('[space] fetchNFTMetaById failed:', err.message);
     return null;
@@ -300,19 +297,19 @@ async function _loadBatch(count) {
 // was successfully spawned, false otherwise.
 async function _tryLoadToken(tokenId) {
   try {
-    const minted = Number(await _contract.totalMinted(tokenId));
-    if (minted === 0) return false;
-
-    const uri     = await _contract.uri(tokenId);
-    const creator = await _contract.creatorOf(tokenId);
-    const meta    = await _fetchMetadata(uri);
+    const nft = await loadMintedToken({
+      contract: _contract,
+      tokenId,
+      fetchMetadata: _fetchMetadata,
+    });
 
     // Skip non-music tokens (images, text NFTs, etc.)
-    if (!meta || !_isMusicNFT(meta)) return false;
+    if (!nft || !_isMusicNFT(nft)) return false;
 
-    _spawnMesh({ tokenId, ...meta, creator }, false);
+    _spawnMesh(nft, false);
     return true;
-  } catch (_) {
+  } catch (error) {
+    console.warn(`[space] Could not load token #${tokenId}:`, error.message);
     return false; // Non-fatal per-token failure
   }
 }
@@ -369,16 +366,9 @@ function _isMusicNFT(meta) {
 
 async function _fetchMetadata(uri) {
   const cfg = window.DecentConfig || {};
-  const gateway = cfg.ipfsGateway || 'https://w3s.link/ipfs/';
-  const url = uri.startsWith('ipfs://')
-    ? uri.replace('ipfs://', gateway)
-    : uri;
-  try {
-    const res = await fetch(url);
-    return await res.json();
-  } catch {
-    return null;
-  }
+  return fetchIpfsJson(uri, {
+    primaryGateway: cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/',
+  });
 }
 
 // ── Mesh Spawning ──────────────────────────────────────────────────────────
@@ -753,7 +743,7 @@ function _esc(str = '') {
 
 function _playNFT(nft) {
   const cfg = window.DecentConfig || {};
-  const gateway = cfg.ipfsGateway || 'https://w3s.link/ipfs/';
+  const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
   const audioUrl = (nft.audioUrl || nft.animation_url || '')
     .replace('ipfs://', gateway);
 

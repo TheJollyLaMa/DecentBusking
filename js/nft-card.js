@@ -2,7 +2,7 @@
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js';
+import { fetchNFTMetaById } from './space.js?v=20261002-nft-loader';
 
 // ── Public API ───────────────────────────────────────────────────────────
 export function renderNFTCard(nft) {
@@ -32,7 +32,7 @@ export function renderNFTCard(nft) {
       const parentSection = content.querySelector('.nft-parent-section');
       if (!parentSection || !parentMeta) return;
       const cfg = window.DecentConfig || {};
-      const gateway = cfg.ipfsGateway || 'https://w3s.link/ipfs/';
+      const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
       const parentAudioUrl = (parentMeta.audioUrl || parentMeta.animation_url || '')
         .replace('ipfs://', gateway);
       const parentTitle = _esc(parentMeta.name || parentMeta.title || `Track #${nft.parentTokenId}`);
@@ -53,7 +53,7 @@ export function renderNFTCard(nft) {
 // ── Card HTML ─────────────────────────────────────────────────────────────
 function _buildCardHTML(nft) {
   const cfg = window.DecentConfig || {};
-  const gateway = cfg.ipfsGateway || 'https://w3s.link/ipfs/';
+  const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
 
   const audioUrl = (nft.audioUrl || nft.animation_url || '')
     .replace('ipfs://', gateway);
@@ -105,7 +105,7 @@ async function _playParent(parentTokenId) {
   const meta = await fetchNFTMetaById(parentTokenId);
   if (!meta) return;
   const cfg = window.DecentConfig || {};
-  const gateway = cfg.ipfsGateway || 'https://w3s.link/ipfs/';
+  const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
   const audioUrl = (meta.audioUrl || meta.animation_url || '').replace('ipfs://', gateway);
   setNowPlaying({
     title: meta.name || meta.title || `Track #${parentTokenId}`,

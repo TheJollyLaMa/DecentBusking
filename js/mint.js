@@ -22,7 +22,7 @@
 // If the connected wallet lacks DEFAULT_ADMIN_ROLE a clear error is shown
 // and no transaction is sent.
 
-import { addNFTToSpace, fetchNFTMetaById } from './space.js';
+import { addNFTToSpace, fetchNFTMetaById } from './space.js?v=20261002-nft-loader';
 import { uploadFileToIPFS } from './ipfs-upload.js';
 import { reportMintCompletion } from './mint-reconciliation.js';
 
@@ -422,7 +422,7 @@ async function _updateParentPreview(rawValue) {
       return;
     }
     const cfg = window.DecentConfig || {};
-    const gateway = cfg.ipfsGateway || 'https://w3s.link/ipfs/';
+    const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
     const audioUrl = (meta.audioUrl || meta.animation_url || '')
       .replace('ipfs://', gateway);
 
