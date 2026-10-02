@@ -181,3 +181,34 @@ test('JukeLoop falls back to Pinata when the configured IPFS gateway cannot stre
   assert.deepEqual(requested, ['https://dweb.link/ipfs/bafy-song', 'https://gateway.pinata.cloud/ipfs/bafy-song']);
   assert.equal(await resolveStreamableIpfsUrl('https://dweb.link', 'bafy-song', async () => new Response('', { status: 429 })), null);
 });
+
+test('admin batch queue requests every archived unminted upload by one artist, oldest first', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-queue-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
+  t.after(() => {
+    delete process.env.JUKELOOP_PLAYLIST_PATH;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+  const storeUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'playlist-store.js'));
+  storeUrl.searchParams.set('queue-test', String(Date.now()));
+  const store = await import(storeUrl.href);
+  store.loadPlaylist([
+    { trackId: 'newer', uploaderId: 'artist', pinStatus: 'pinned', ipfsCid: 'bafy-2', mintStatus: 'unminted', addedAt: '2026-10-02T00:00:00Z' },
+    { trackId: 'older', uploaderId: 'artist', pinStatus: 'pinned', ipfsCid: 'bafy-1', mintStatus: 'unminted', addedAt: '2026-10-01T00:00:00Z' },
+    { trackId: 'not-archived', uploaderId: 'artist', pinStatus: 'failed', mintStatus: 'unminted', addedAt: '2026-10-01T00:00:00Z' },
+    { trackId: 'minted', uploaderId: 'artist', pinStatus: 'pinned', ipfsCid: 'bafy-m', mintStatus: 'minted', addedAt: '2026-09-01T00:00:00Z' },
+    { trackId: 'already-requested', uploaderId: 'artist', pinStatus: 'pinned', ipfsCid: 'bafy-r', mintStatus: 'requested', mintRecipient: '0xabc', mintRequestedAt: '2026-09-02T00:00:00Z', addedAt: '2026-09-01T00:00:00Z' },
+    { trackId: 'someone-else', uploaderId: 'other', pinStatus: 'pinned', ipfsCid: 'bafy-o', mintStatus: 'unminted', addedAt: '2026-10-01T00:00:00Z' },
+  ]);
+
+  const wallet = '0x1111111111111111111111111111111111111111';
+  const { queued, skipped } = store.queueUploaderMints('artist', wallet, Date.parse('2026-10-03T00:00:00Z'));
+  assert.deepEqual(queued.map((track) => track.trackId), ['older', 'newer']);
+  assert.equal(skipped, 1);
+  assert.deepEqual(store.getMintRequests().map((track) => [track.trackId, track.mintRecipient]), [
+    ['already-requested', '0xabc'],
+    ['older', wallet],
+    ['newer', wallet],
+  ]);
+  assert.equal(store.queueUploaderMints('artist', wallet).queued.length, 0);
+});

@@ -182,6 +182,26 @@ export function requestTrackMint(trackId, uploaderId, recipient, artworkCid) {
   return track;
 }
 
+/**
+ * Queue every pinned, unminted, not-yet-requested upload by one Discord user,
+ * oldest first, for owner-wallet minting to `recipient`. Checkpoints once.
+ * @returns {{ queued: TrackEntry[], skipped: number }} skipped = uploads not on IPFS yet
+ */
+export function queueUploaderMints(uploaderId, recipient, now = Date.now()) {
+  const uploads = _playlist
+    .filter((track) => track.uploaderId === uploaderId && track.mintStatus === 'unminted')
+    .sort((first, second) => Date.parse(first.addedAt) - Date.parse(second.addedAt));
+  const ready = uploads.filter((track) => track.pinStatus === 'pinned' && track.ipfsCid);
+  ready.forEach((track, index) => {
+    track.mintStatus = 'requested';
+    track.mintRecipient = recipient;
+    // Offset by index so the queue keeps posting order.
+    track.mintRequestedAt = new Date(now + index).toISOString();
+  });
+  if (ready.length) _save();
+  return { queued: ready, skipped: uploads.length - ready.length };
+}
+
 /** Record a manually approved owner-wallet mint. */
 export function completeTrackMint(trackId, { tokenId, txHash }) {
   const track = _playlist.find((entry) => entry.trackId === trackId);
