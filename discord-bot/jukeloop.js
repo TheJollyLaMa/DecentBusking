@@ -62,6 +62,33 @@ export function buildIpfsGatewayUrl(gateway, cid) {
   return `${base}${base.endsWith('/ipfs') ? '' : '/ipfs'}/${cid}`;
 }
 
+const FALLBACK_IPFS_GATEWAY = 'https://gateway.pinata.cloud';
+const GATEWAY_PROBE_TIMEOUT_MS = 15_000;
+
+/** True when the URL serves audio bytes; public gateways often answer 429 or redirect to dead hosts. */
+export async function isUrlStreamable(url, fetchImpl = fetch) {
+  try {
+    const response = await fetchImpl(url, {
+      headers: { range: 'bytes=0-0' },
+      signal: AbortSignal.timeout(GATEWAY_PROBE_TIMEOUT_MS),
+    });
+    await response.body?.cancel().catch(() => {});
+    return response.status === 200 || response.status === 206;
+  } catch {
+    return false;
+  }
+}
+
+/** First gateway URL (configured, then Pinata) that can actually stream the CID, or null. */
+export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch) {
+  const gateways = [...new Set([gateway, FALLBACK_IPFS_GATEWAY].filter(Boolean))];
+  for (const candidate of gateways) {
+    const url = buildIpfsGatewayUrl(candidate, cid);
+    if (await isUrlStreamable(url, fetchImpl)) return url;
+  }
+  return null;
+}
+
 /** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
 export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recentLimit = 10 }) {
   const recent = [...playlist]
@@ -94,7 +121,7 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
 }
 
 export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true }) {
-  const listenLink = track.ipfsCid ? `\n[Open IPFS audio](${url})` : '';
+  const listenLink = track.ipfsCid && /\/ipfs\//.test(url || '') ? `\n[Open IPFS audio](${url})` : '';
   const votingLine = votingOpen
     ? 'React 👍 to boost it or 👎 to send it lower in the rotation.'
     : 'Voting for this play is closed. Totals include this completed play.';
@@ -345,17 +372,19 @@ export class JukeLoopSession {
    */
   async _getFreshUrl(track) {
     if (track.ipfsCid) {
-      return buildIpfsGatewayUrl(this.ipfsGateway, track.ipfsCid);
+      const ipfsUrl = await resolveStreamableIpfsUrl(this.ipfsGateway, track.ipfsCid);
+      if (ipfsUrl) return ipfsUrl;
+      console.warn(`[jukeloop] No IPFS gateway could stream "${track.title}"; using the Discord upload.`);
     }
+    if (!track.channelId || !track.messageId) return null;
 
     try {
       const channel = await this.client.channels.fetch(track.channelId).catch(() => null);
       if (!channel) return null;
       const msg = await channel.messages.fetch(track.messageId).catch(() => null);
       if (!msg) return null;
-      const attachment = msg.attachments.find(
-        (a) => a.name === track.filename,
-      );
+      const attachment = msg.attachments.get(track.attachmentId)
+        ?? msg.attachments.find((a) => a.name === track.filename);
       return attachment?.url ?? null;
     } catch {
       return null;

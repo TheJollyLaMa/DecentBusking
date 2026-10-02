@@ -163,3 +163,21 @@ test('radio state publishes the audible track position and newest uploads', asyn
   assert.equal('uploaderId' in state.recent[1], false);
   assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).nowPlaying, null);
 });
+
+test('JukeLoop falls back to Pinata when the configured IPFS gateway cannot stream', async () => {
+  const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'));
+  const { resolveStreamableIpfsUrl } = await import(moduleUrl.href);
+  const requested = [];
+  const fetchImpl = async (url, options) => {
+    requested.push(url);
+    assert.equal(options.headers.range, 'bytes=0-0');
+    return new Response('x', { status: url.startsWith('https://dweb.link') ? 429 : 206 });
+  };
+
+  assert.equal(
+    await resolveStreamableIpfsUrl('https://dweb.link', 'bafy-song', fetchImpl),
+    'https://gateway.pinata.cloud/ipfs/bafy-song',
+  );
+  assert.deepEqual(requested, ['https://dweb.link/ipfs/bafy-song', 'https://gateway.pinata.cloud/ipfs/bafy-song']);
+  assert.equal(await resolveStreamableIpfsUrl('https://dweb.link', 'bafy-song', async () => new Response('', { status: 429 })), null);
+});
