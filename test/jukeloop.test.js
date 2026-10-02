@@ -62,6 +62,12 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
   assert.equal(minted.tokenId, '42');
   assert.equal(store.getMintBacklog('user-1').length, 1);
 
+  const rated = store.applyRating('attachment-2', 2, 1);
+  assert.deepEqual(
+    { likes: rated.likes, dislikes: rated.dislikes, plays: rated.plays },
+    { likes: 2, dislikes: 1, plays: 1 },
+  );
+
   const snapshots = [];
   store.configureRemotePersistence(async (playlist) => {
     snapshots.push(playlist.map((track) => track.pinStatus));
@@ -75,9 +81,9 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
   ]);
 });
 
-test('JukeLoop builds canonical IPFS gateway URLs', async () => {
+test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages', async () => {
   const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'));
-  const { buildIpfsGatewayUrl } = await import(moduleUrl.href);
+  const { buildIpfsGatewayUrl, buildNowPlayingMessage } = await import(moduleUrl.href);
 
   assert.equal(
     buildIpfsGatewayUrl('https://w3s.link', 'bafy-audio'),
@@ -87,4 +93,14 @@ test('JukeLoop builds canonical IPFS gateway URLs', async () => {
     buildIpfsGatewayUrl('https://dweb.link/ipfs/', 'bafy-audio'),
     'https://dweb.link/ipfs/bafy-audio',
   );
+
+  const message = buildNowPlayingMessage({
+    title: 'Track', uploader: 'artist', ipfsCid: 'bafy-audio', likes: 12, dislikes: 3, plays: 8,
+  }, {
+    queueIndex: 2,
+    totalTracks: 10,
+    url: 'https://gateway.example/ipfs/bafy-audio',
+  });
+  assert.match(message, /All-time:\*\* 👍 12 · 👎 3 · ▶️ 8/);
+  assert.match(message, /React 👍 to boost it/);
 });

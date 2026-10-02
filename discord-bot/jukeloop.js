@@ -57,6 +57,19 @@ export function buildIpfsGatewayUrl(gateway, cid) {
   return `${base}${base.endsWith('/ipfs') ? '' : '/ipfs'}/${cid}`;
 }
 
+export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true }) {
+  const listenLink = track.ipfsCid ? `\n[Open IPFS audio](${url})` : '';
+  const votingLine = votingOpen
+    ? 'React 👍 to boost it or 👎 to send it lower in the rotation.'
+    : 'Voting for this play is closed. Totals include this completed play.';
+  return (
+    `🎵 Now playing: **${track.title}** by *${track.uploader}* ` +
+    `(${queueIndex}/${totalTracks})\n` +
+    `**All-time:** 👍 ${track.likes ?? 0} · 👎 ${track.dislikes ?? 0} · ▶️ ${track.plays ?? 0}\n` +
+    `${votingLine}${listenLink}`
+  );
+}
+
 // ── Per-guild session registry ────────────────────────────────────────────────
 
 /** @type {Map<string, JukeLoopSession>} guildId → active session */
@@ -147,6 +160,7 @@ export class JukeLoopSession {
 
     /** The "Now Playing" announcement message for the track *currently* playing */
     this._announcementMsg = null;
+    this._announcementContext = null;
     /** The track entry currently playing (so we can store ratings when it ends) */
     this._currentTrack    = null;
 
@@ -276,6 +290,7 @@ export class JukeLoopSession {
     this._queueIndex++;
     this._currentTrack    = track;
     this._announcementMsg = null;
+    this._announcementContext = null;
 
     // Resolve a fresh CDN URL
     const url = await this._getFreshUrl(track);
@@ -298,19 +313,20 @@ export class JukeLoopSession {
 
       // Announce the track and add reaction buttons
       const totalTracks = getPlaylist().length;
-      const listenLink = track.ipfsCid ? `\n[Open IPFS audio](${url})` : '';
+      const announcementContext = {
+        queueIndex: this._queueIndex,
+        totalTracks,
+        url,
+      };
       const msg = await this.textChannel
-        .send(
-          `🎵 Now playing: **${track.title}** by *${track.uploader}* ` +
-          `(${this._queueIndex}/${totalTracks}) — rate this track!\n` +
-          `React 👍 to boost it or 👎 to send it lower in the rotation.${listenLink}`,
-        )
+        .send(buildNowPlayingMessage(track, announcementContext))
         .catch(() => null);
 
       if (msg) {
         await msg.react('👍').catch(() => {});
         await msg.react('👎').catch(() => {});
         this._announcementMsg = msg;
+        this._announcementContext = announcementContext;
       }
 
       console.log(`[jukeloop] Now playing: "${track.title}" by ${track.uploader}`);
@@ -321,6 +337,7 @@ export class JukeLoopSession {
         .catch(() => {});
       this._currentTrack    = null;
       this._announcementMsg = null;
+      this._announcementContext = null;
       await this._playNext();
     }
   }
@@ -334,10 +351,12 @@ export class JukeLoopSession {
 
     const msgRef   = this._announcementMsg;
     const trackRef = this._currentTrack;
+    const announcementContext = this._announcementContext;
 
     // Clear refs first so any re-entrant call is a no-op
     this._announcementMsg = null;
     this._currentTrack    = null;
+    this._announcementContext = null;
 
     try {
       const fresh = await msgRef.fetch().catch(() => null);
@@ -350,7 +369,14 @@ export class JukeLoopSession {
       const likes    = Math.max(0, (thumbsUp?.count   ?? 0) - 1);
       const dislikes = Math.max(0, (thumbsDown?.count ?? 0) - 1);
 
-      applyRating(trackRef.trackId, likes, dislikes);
+      const updatedTrack = applyRating(trackRef.trackId, likes, dislikes);
+      if (updatedTrack && announcementContext) {
+        await fresh.edit(buildNowPlayingMessage(updatedTrack, {
+          ...announcementContext,
+          votingOpen: false,
+        })).catch(() => {});
+        await fresh.reactions.removeAll().catch(() => {});
+      }
 
       if (likes > 0 || dislikes > 0) {
         console.log(

@@ -211,11 +211,12 @@ export function removeTrack(trackId) {
  */
 export function applyRating(trackId, newLikes, newDislikes) {
   const track = _playlist.find((entry) => entry.trackId === trackId);
-  if (!track) return;
+  if (!track) return null;
   track.likes    += newLikes;
   track.dislikes += newDislikes;
   track.plays    += 1;
   _save();
+  return track;
 }
 
 // ── Read helpers ──────────────────────────────────────────────────────────────
