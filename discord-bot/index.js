@@ -47,6 +47,7 @@ import {
   getPlaylist,
   getMintBacklog,
   getMintRequests,
+  queueUploaderMints,
   getTopTracks,
   removeTrack,
   requestTrackMint,
@@ -232,6 +233,17 @@ const SLASH_COMMANDS = [
     )
     .addSubcommand((sub) =>
       sub.setName('mint-queue').setDescription('(Admin) Show pending owner-wallet mint requests'),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('queue-uploads')
+        .setDescription('(Admin) Queue every archived, unminted upload by one artist for minting')
+        .addUserOption((opt) =>
+          opt.setName('uploader').setDescription('Discord member whose uploads should be queued').setRequired(true),
+        )
+        .addStringOption((opt) =>
+          opt.setName('wallet').setDescription('Artist Base wallet that receives the NFTs and royalties').setRequired(true),
+        ),
     )
     .addSubcommand((sub) =>
       sub.setName('restart').setDescription('(Admin) Reconnect and restart JukeLoop radio'),
@@ -907,9 +919,29 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
     return;
   }
 
-  if (sub === 'mint-queue' || sub === 'mark-minted') {
+  if (sub === 'mint-queue' || sub === 'mark-minted' || sub === 'queue-uploads') {
     if (!interaction.memberPermissions?.has('ManageMessages')) {
       await interaction.reply({ content: '🔒 You need **Manage Messages** to manage mint requests.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (sub === 'queue-uploads') {
+      const uploader = interaction.options.getUser('uploader', true);
+      const wallet = interaction.options.getString('wallet', true).trim();
+      if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+        await interaction.reply({ content: '❌ Enter a valid `0x` Base wallet address.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const { queued, skipped } = queueUploaderMints(uploader.id, wallet);
+      await interaction.reply({
+        content: queued.length
+          ? `✅ Queued **${queued.length}** upload${queued.length === 1 ? '' : 's'} by ${uploader} for minting to \`${wallet}\`, oldest first.\n` +
+            (skipped ? `${skipped} more aren’t on IPFS yet and will need queueing again after they’re archived.\n` : '') +
+            'Click through them in the DecentBusking Admin panel or `/jukeloop mint-queue`.'
+          : `ℹ️ No archived, unminted uploads by ${uploader} to queue` +
+            (skipped ? ` (${skipped} still waiting for IPFS archiving).` : '.'),
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
 
@@ -938,7 +970,11 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
       await interaction.reply({ content: '✅ The owner-wallet mint queue is empty.', flags: MessageFlags.Ephemeral });
       return;
     }
-    const lines = requests.slice(0, 10).map((track, index) => {
+    const footer = 'Open a link, connect the contract owner wallet, and confirm both Base transactions. ' +
+      'Completion is verified and announced automatically. The DecentBusking Admin panel lists every request.';
+    const lines = [];
+    let length = footer.length + 120;
+    for (const [index, track] of requests.entries()) {
       const approvalUrl = buildMintUrl(
         config.siteUrl,
         track.title,
@@ -947,15 +983,17 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
         config.publicWorkerUrl,
         track.trackId,
       );
-      return (
+      const line =
         `**${index + 1}. ${track.title}** by ${track.uploader}\n` +
-        `Track: \`${track.trackId}\` · Recipient: \`${track.mintRecipient}\` · [mint with owner wallet](${approvalUrl})`
-      );
-    });
+        `Track: \`${track.trackId}\` · Recipient: \`${track.mintRecipient}\` · [mint with owner wallet](${approvalUrl})`;
+      if (lines.length && length + line.length + 2 > 2000) break;
+      lines.push(line);
+      length += line.length + 2;
+    }
+    const shown = lines.length < requests.length ? `, showing the oldest ${lines.length}` : '';
     await interaction.reply({
       content:
-        `🔑 **Owner-wallet mint queue**\n\n${lines.join('\n\n')}\n\n` +
-        'Open a link, connect the contract owner wallet, and confirm both Base transactions. Completion is verified and announced automatically.',
+        `🔑 **Owner-wallet mint queue** (${requests.length} pending${shown})\n\n${lines.join('\n\n')}\n\n${footer}`,
       flags: MessageFlags.Ephemeral,
     });
     return;
