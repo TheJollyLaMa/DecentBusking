@@ -83,7 +83,7 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
 
 test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages', async () => {
   const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'));
-  const { buildIpfsGatewayUrl, buildNowPlayingMessage } = await import(moduleUrl.href);
+  const { buildIpfsGatewayUrl, buildNowPlayingMessage, getVoiceRetryDelay } = await import(moduleUrl.href);
 
   assert.equal(
     buildIpfsGatewayUrl('https://w3s.link', 'bafy-audio'),
@@ -103,4 +103,7 @@ test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages
   });
   assert.match(message, /All-time:\*\* 👍 12 · 👎 3 · ▶️ 8/);
   assert.match(message, /React 👍 to boost it/);
+  assert.equal(getVoiceRetryDelay(1), 15_000);
+  assert.equal(getVoiceRetryDelay(2), 30_000);
+  assert.equal(getVoiceRetryDelay(10), 5 * 60_000);
 });

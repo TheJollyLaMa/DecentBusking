@@ -54,8 +54,36 @@ import {
 } from './playlist-store.js';
 import {
   createJukeLoopSession,
+  getJukeLoopSession,
+  getVoiceRetryDelay,
   backfillFromChannel,
 } from './jukeloop.js';
+
+const _jukeLoopRestartTimers = new Map();
+const _jukeLoopRestartAttempts = new Map();
+
+function clearScheduledJukeLoopRestart(config) {
+  const key = config.jukeLoopVoiceChannelId;
+  const timer = _jukeLoopRestartTimers.get(key);
+  if (timer) clearTimeout(timer);
+  _jukeLoopRestartTimers.delete(key);
+}
+
+function scheduleJukeLoopRestart(client, config, reason) {
+  const key = config.jukeLoopVoiceChannelId;
+  if (!key || _jukeLoopRestartTimers.has(key)) return;
+  const attempt = (_jukeLoopRestartAttempts.get(key) || 0) + 1;
+  _jukeLoopRestartAttempts.set(key, attempt);
+  const delayMs = getVoiceRetryDelay(attempt);
+  console.warn(`[jukeloop] ${reason}; retrying voice connection in ${Math.round(delayMs / 1000)}s.`);
+  const timer = setTimeout(() => {
+    _jukeLoopRestartTimers.delete(key);
+    startJukeLoop(client, config).catch((error) =>
+      console.error('[jukeloop] Scheduled restart failed:', error.message),
+    );
+  }, delayMs);
+  _jukeLoopRestartTimers.set(key, timer);
+}
 
 // ── Audio MIME-type detection ─────────────────────────────────────────────────
 const AUDIO_MIME_PREFIXES  = ['audio/'];
@@ -751,6 +779,8 @@ async function announceCompletedMint(client, config, track) {
  * @param {ReturnType<typeof loadConfig>} config
  */
 async function startJukeLoop(client, config) {
+  clearScheduledJukeLoopRestart(config);
+  let guildId = null;
   try {
     const voiceChannel = await client.channels.fetch(config.jukeLoopVoiceChannelId).catch(() => null);
     const textChannel  = await client.channels.fetch(config.jukeLoopTextChannelId).catch(() => null);
@@ -758,12 +788,15 @@ async function startJukeLoop(client, config) {
 
     if (!voiceChannel) {
       console.error('[jukeloop] Could not find voice channel:', config.jukeLoopVoiceChannelId);
+      scheduleJukeLoopRestart(client, config, 'Voice channel lookup failed');
       return false;
     }
     if (!textChannel) {
       console.error('[jukeloop] Could not find text channel:', config.jukeLoopTextChannelId);
+      scheduleJukeLoopRestart(client, config, 'Text channel lookup failed');
       return false;
     }
+    guildId = voiceChannel.guild.id;
 
     // Backfill all historic uploads from #DecentJukebox
     if (jukeboxCh) {
@@ -772,21 +805,13 @@ async function startJukeLoop(client, config) {
       console.warn('[jukeloop] Could not access #DecentJukebox for backfill:', config.jukeboxChannelId);
     }
 
-    const session = createJukeLoopSession(voiceChannel.guild.id, {
+    const session = createJukeLoopSession(guildId, {
       voiceChannel,
       textChannel,
       client,
       ipfsGateway: config.ipfsGateway,
       onTerminalDisconnect: () => {
-        setTimeout(() => {
-          startJukeLoop(client, config)
-            .then((restarted) => {
-              if (!restarted) console.error('[jukeloop] Automatic restart did not reconnect.');
-            })
-            .catch((restartError) =>
-              console.error('[jukeloop] Automatic restart failed:', restartError.message),
-            );
-        }, 15_000);
+        scheduleJukeLoopRestart(client, config, 'Voice reconnect timed out');
       },
     });
 
@@ -796,9 +821,12 @@ async function startJukeLoop(client, config) {
       .send('📻 **JukeLoop is live!** The community radio is starting up — tracks from #DecentJukebox are on the way.')
       .catch(() => {});
     await session.start();
+    _jukeLoopRestartAttempts.delete(config.jukeLoopVoiceChannelId);
     return true;
   } catch (err) {
     console.error('[jukeloop] Failed to start JukeLoop:', err.message);
+    if (guildId) getJukeLoopSession(guildId)?.destroy();
+    scheduleJukeLoopRestart(client, config, `Voice startup failed: ${err.message}`);
     return false;
   }
 }
@@ -824,6 +852,8 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
     }
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
+      clearScheduledJukeLoopRestart(config);
+      _jukeLoopRestartAttempts.delete(config.jukeLoopVoiceChannelId);
       const restarted = await startJukeLoop(interaction.client, config);
       await interaction.editReply(
         restarted

@@ -51,6 +51,10 @@ const BETWEEN_TRACK_DELAY_MS = 1_500;
 // How long to wait before retrying when the playlist is empty (ms).
 const EMPTY_PLAYLIST_RETRY_MS = 60_000;
 
+export function getVoiceRetryDelay(attempt) {
+  return Math.min(15_000 * (2 ** Math.max(0, attempt - 1)), 5 * 60_000);
+}
+
 /** Build a gateway URL for a raw IPFS CID. */
 export function buildIpfsGatewayUrl(gateway, cid) {
   const base = gateway.replace(/\/$/, '');
