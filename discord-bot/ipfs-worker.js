@@ -79,9 +79,7 @@ export function createMintTransactionVerifier({ rpcUrl, contractAddress, ownerWa
       rpcProvider.getTransactionReceipt(txHash),
     ]);
     if (!transaction || !receipt || receipt.status !== 1) throw new Error('Mint transaction is not confirmed');
-    if (transaction.to?.toLowerCase() !== contract || transaction.from.toLowerCase() !== owner) {
-      throw new Error('Mint transaction was not sent by the configured owner to DecentNFT');
-    }
+    // Smart accounts (EIP-7702) route through delegation contracts, so trust DecentNFT's own event, not tx.to/from.
 
     for (const log of receipt.logs) {
       if (log.address.toLowerCase() !== contract) continue;
