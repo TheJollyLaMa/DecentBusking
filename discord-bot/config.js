@@ -51,7 +51,7 @@ export function loadConfig() {
     pinataJwt:              process.env.PINATA_JWT || null,
     pinataApiUrl:           process.env.PINATA_API_URL || 'https://uploads.pinata.cloud/v3/files',
     pinataSignUrl:          process.env.PINATA_SIGN_URL || 'https://uploads.pinata.cloud/v3/files/sign',
-    pinataFilesApiUrl:      process.env.PINATA_FILES_API_URL || 'https://api.pinata.cloud/v3/files/public',
+    pinataFilesApiUrl:      (process.env.PINATA_FILES_API_URL || 'https://api.pinata.cloud/v3/files').replace(/\/public\/?$/, ''),
     ipfsApiUrl:             process.env.IPFS_API_URL || 'http://127.0.0.1:5001',
     allowedOrigins:         (process.env.IPFS_ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean),
     mintOwnerWallet:        process.env.MINT_OWNER_WALLET || '',

@@ -8,9 +8,7 @@ const SNAPSHOTS_TO_KEEP = 3;
 
 function buildListUrl(filesApiUrl, limit = 100) {
   const url = new URL(filesApiUrl);
-  url.searchParams.set('keyvalues[app]', STATE_KEYVALUES.app);
-  url.searchParams.set('keyvalues[kind]', STATE_KEYVALUES.kind);
-  url.searchParams.set('keyvalues[schema]', STATE_KEYVALUES.schema);
+  url.searchParams.set('network', 'public');
   url.searchParams.set('order', 'DESC');
   url.searchParams.set('limit', String(limit));
   return url.toString();
@@ -18,6 +16,15 @@ function buildListUrl(filesApiUrl, limit = 100) {
 
 function extractFiles(result) {
   return result.data?.files || result.files || [];
+}
+
+function isStateSnapshot(file) {
+  const keyvalues = file.keyvalues || {};
+  return (
+    keyvalues.app === STATE_KEYVALUES.app &&
+    keyvalues.kind === STATE_KEYVALUES.kind &&
+    keyvalues.schema === STATE_KEYVALUES.schema
+  ) || file.name === STATE_FILE_NAME;
 }
 
 async function responseError(response, fallback) {
@@ -29,7 +36,7 @@ async function responseError(response, fallback) {
 export function createPinataStateStore({
   pinataJwt,
   uploadUrl = 'https://uploads.pinata.cloud/v3/files',
-  filesApiUrl = 'https://api.pinata.cloud/v3/files/public',
+  filesApiUrl = 'https://api.pinata.cloud/v3/files',
   gateway = 'https://dweb.link',
   fetchImpl = globalThis.fetch,
 } = {}) {
@@ -37,13 +44,16 @@ export function createPinataStateStore({
   const headers = { authorization: `Bearer ${pinataJwt}` };
 
   async function listSnapshots(limit = 100) {
-    const response = await fetchImpl(buildListUrl(filesApiUrl, limit), { headers });
+    const normalizedFilesUrl = filesApiUrl.replace(/\/public\/?$/, '');
+    const response = await fetchImpl(buildListUrl(normalizedFilesUrl, limit), { headers });
     if (!response.ok) throw new Error(await responseError(response, 'Pinata state listing failed'));
-    return extractFiles(await response.json());
+    return extractFiles(await response.json())
+      .filter(isStateSnapshot)
+      .sort((first, second) => Date.parse(second.created_at || 0) - Date.parse(first.created_at || 0));
   }
 
   async function restore() {
-    const [latest] = await listSnapshots(1);
+    const [latest] = await listSnapshots();
     if (!latest?.cid) return null;
 
     const response = await fetchImpl(`${gateway.replace(/\/$/, '')}/ipfs/${latest.cid}`);
@@ -74,9 +84,10 @@ export function createPinataStateStore({
     if (!cid) throw new Error('Pinata state upload did not return a CID');
 
     const snapshots = await listSnapshots();
+    const normalizedFilesUrl = filesApiUrl.replace(/\/public\/?$/, '');
     await Promise.all(snapshots.slice(SNAPSHOTS_TO_KEEP).map(async ({ id }) => {
       if (!id) return;
-      const deleteResponse = await fetchImpl(`${filesApiUrl}/${id}`, { method: 'DELETE', headers });
+      const deleteResponse = await fetchImpl(`${normalizedFilesUrl}/${id}`, { method: 'DELETE', headers });
       if (!deleteResponse.ok) console.warn(`[ipfs-state] Failed to prune snapshot ${id}: ${deleteResponse.status}`);
     }));
     return `ipfs://${cid}`;

@@ -13,7 +13,11 @@ test('restores the newest tagged JukeLoop snapshot from Pinata', async () => {
     fetchImpl: async (url, options = {}) => {
       requests.push({ url, options });
       if (url.startsWith('https://api.pinata.cloud/')) {
-        return new Response(JSON.stringify({ data: { files: [{ cid: 'bafystate' }] } }), { status: 200 });
+        return new Response(JSON.stringify({ data: { files: [{
+          cid: 'bafystate',
+          name: 'decentbusking-jukeloop-state.json',
+          created_at: '2026-10-01T12:00:00.000Z',
+        }] } }), { status: 200 });
       }
       return new Response(JSON.stringify({ schemaVersion: 1, playlist: [{ trackId: 'track-1' }] }), { status: 200 });
     },
@@ -21,10 +25,10 @@ test('restores the newest tagged JukeLoop snapshot from Pinata', async () => {
 
   assert.deepEqual(await store.restore(), [{ trackId: 'track-1' }]);
   const listUrl = new URL(requests[0].url);
-  assert.equal(listUrl.searchParams.get('keyvalues[app]'), 'decentbusking');
-  assert.equal(listUrl.searchParams.get('keyvalues[kind]'), 'jukeloop-state');
+  assert.equal(listUrl.pathname, '/v3/files');
+  assert.equal(listUrl.searchParams.get('network'), 'public');
   assert.equal(listUrl.searchParams.get('order'), 'DESC');
-  assert.equal(listUrl.searchParams.get('limit'), '1');
+  assert.equal(listUrl.searchParams.get('limit'), '100');
   assert.equal(requests[1].url, 'https://dweb.link/ipfs/bafystate');
 });
 
@@ -40,7 +44,12 @@ test('uploads tagged state and prunes snapshots older than the newest three', as
       }
       if (options.method === 'DELETE') return new Response('{}', { status: 200 });
       return new Response(JSON.stringify({
-        data: { files: ['new', 'two', 'three', 'old'].map((id) => ({ id, cid: `bafy${id}` })) },
+        data: { files: ['new', 'two', 'three', 'old'].map((id, index) => ({
+          id,
+          cid: `bafy${id}`,
+          name: 'decentbusking-jukeloop-state.json',
+          created_at: `2026-10-01T12:00:0${3 - index}.000Z`,
+        })) },
       }), { status: 200 });
     },
   });
@@ -56,6 +65,6 @@ test('uploads tagged state and prunes snapshots older than the newest three', as
   assert.deepEqual(snapshot.playlist, [{ trackId: 'track-1' }]);
   assert.deepEqual(
     requests.filter((request) => request.options.method === 'DELETE').map((request) => request.url),
-    ['https://api.pinata.cloud/v3/files/public/old'],
+    ['https://api.pinata.cloud/v3/files/old'],
   );
 });
