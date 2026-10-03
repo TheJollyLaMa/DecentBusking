@@ -138,6 +138,38 @@ const IMAGE_EXTENSIONS_RE  = /\.(png|jpe?g|webp|gif)$/i;
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB
 const MAX_ARTWORK_BYTES = 10 * 1024 * 1024; // 10 MB
 
+// Keyed by avatar hash so a changed Discord avatar is pinned again.
+const _avatarCids = new Map();
+
+/** Pin a member's Discord avatar to IPFS as default NFT artwork; returns its CID or null. */
+async function pinDiscordAvatar(user, config) {
+  const cacheKey = `${user.id}:${user.avatar || 'default'}`;
+  if (_avatarCids.has(cacheKey)) return _avatarCids.get(cacheKey);
+  try {
+    const response = await fetch(user.displayAvatarURL({ extension: 'png', size: 1024 }));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const contentType = response.headers.get('content-type') || 'image/png';
+    const extension = contentType.includes('gif') ? 'gif' : 'png';
+    const uri = await uploadToIPFS(
+      Buffer.from(await response.arrayBuffer()),
+      `discord-avatar-${user.id}.${extension}`,
+      contentType,
+      {
+        provider: config.ipfsUploadProvider,
+        pinataJwt: config.pinataJwt,
+        pinataApiUrl: config.pinataApiUrl,
+        ipfsApiUrl: config.ipfsApiUrl,
+      },
+    );
+    const cid = uri.replace('ipfs://', '');
+    _avatarCids.set(cacheKey, cid);
+    return cid;
+  } catch (err) {
+    console.warn(`[mint] Could not pin Discord avatar for ${user.tag ?? user.id}:`, err.message);
+    return null;
+  }
+}
+
 /**
  * Return true if the attachment looks like an audio file.
  * Discord reports contentType as null for some uploads, so we also
@@ -583,6 +615,8 @@ async function handleJukeboxCommand(interaction, config) {
           },
         );
         artworkCid = artworkUri.replace('ipfs://', '');
+      } else {
+        artworkCid = await pinDiscordAvatar(interaction.user, config) || undefined;
       }
     } catch (err) {
       await interaction.editReply(`❌ Artwork upload failed: ${err.message}`);
@@ -947,15 +981,17 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
         await interaction.reply({ content: '❌ Enter a valid `0x` Base wallet address.', flags: MessageFlags.Ephemeral });
         return;
       }
-      const { queued, skipped } = queueUploaderMints(uploader.id, wallet);
-      await interaction.reply({
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const artworkCid = await pinDiscordAvatar(uploader, config);
+      const { queued, skipped } = queueUploaderMints(uploader.id, wallet, { artworkCid });
+      await interaction.editReply({
         content: queued.length
           ? `✅ Queued **${queued.length}** upload${queued.length === 1 ? '' : 's'} by ${uploader} for minting to \`${wallet}\`, oldest first.\n` +
+            (artworkCid ? `Default artwork: ${uploader}’s Discord avatar (pinned to IPFS).\n` : '') +
             (skipped ? `${skipped} more aren’t on IPFS yet and will need queueing again after they’re archived.\n` : '') +
             'Click through them in the DecentBusking Admin panel or `/jukeloop mint-queue`.'
           : `ℹ️ No archived, unminted uploads by ${uploader} to queue` +
             (skipped ? ` (${skipped} still waiting for IPFS archiving).` : '.'),
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }

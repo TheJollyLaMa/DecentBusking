@@ -202,9 +202,13 @@ test('admin batch queue requests every archived unminted upload by one artist, o
   ]);
 
   const wallet = '0x1111111111111111111111111111111111111111';
-  const { queued, skipped } = store.queueUploaderMints('artist', wallet, Date.parse('2026-10-03T00:00:00Z'));
+  const { queued, skipped } = store.queueUploaderMints('artist', wallet, { artworkCid: 'bafy-avatar', now: Date.parse('2026-10-03T00:00:00Z') });
   assert.deepEqual(queued.map((track) => track.trackId), ['older', 'newer']);
   assert.equal(skipped, 1);
+  assert.deepEqual(
+    store.getMintRequests().map((track) => [track.trackId, track.artworkCid ?? null]),
+    [['already-requested', 'bafy-avatar'], ['older', 'bafy-avatar'], ['newer', 'bafy-avatar']],
+  );
   assert.deepEqual(store.getMintRequests().map((track) => [track.trackId, track.mintRecipient]), [
     ['already-requested', '0xabc'],
     ['older', wallet],
