@@ -4,7 +4,7 @@
 // archive selections mute the radio until the listener returns to it.
 
 const POLL_MS = 8_000;
-const FADE_MS = 1_200;
+const FADE_IN_MS = 1_500;
 const PREVIEW_MS = 30_000;
 const DRIFT_TOLERANCE_S = 8;
 const LOAD_TIMEOUT_MS = 20_000;
@@ -17,6 +17,7 @@ let _radio = null;
 let _radioReachable = true;
 let _loadedPlayId = null;
 let _seen = null;
+let _seenSince = 0;
 const _takeoverQueue = [];
 let _takeover = null;
 let _burst = false;
@@ -82,7 +83,7 @@ async function _poll() {
     const state = await response.json();
     _radioReachable = true;
     _radio = state.nowPlaying ? { ...state.nowPlaying, receivedAt: performance.now() } : null;
-    _detectNewUploads(Array.isArray(state.recent) ? state.recent : []);
+    _detectNewUploads(Array.isArray(state.recent) ? state.recent : [], state.serverTime);
     if (_mode === 'radio') _syncRadio();
   } catch (err) {
     console.warn('[radio] Could not reach the JukeLoop radio:', err.message);
@@ -94,17 +95,25 @@ async function _poll() {
   _pollTimer = setTimeout(_poll, POLL_MS);
 }
 
-function _detectNewUploads(recent) {
+// Discord snowflake IDs encode their creation time.
+function _postedAt(track) {
+  if (/^\d{15,}$/.test(track.trackId || '')) return Number((BigInt(track.trackId) >> 22n) + 1420070400000n);
+  return Date.parse(track.addedAt) || 0;
+}
+
+function _detectNewUploads(recent, serverTime) {
   if (!_seen) {
     _seen = new Set(recent.map((track) => track.trackId));
+    _seenSince = serverTime || Date.now();
     return;
   }
-  const fresh = recent.filter((track) => track.ipfsCid && !_seen.has(track.trackId)).reverse();
+  // A bot restart can re-list old tracks; only posts made after this page loaded count as new.
+  const fresh = recent
+    .filter((track) => track.ipfsCid && !_seen.has(track.trackId) && _postedAt(track) > _seenSince)
+    .reverse();
+  recent.forEach((track) => { if (track.ipfsCid) _seen.add(track.trackId); });
   if (!fresh.length) return;
-  fresh.forEach((track) => {
-    _seen.add(track.trackId);
-    _takeoverQueue.push(track);
-  });
+  fresh.forEach((track) => _takeoverQueue.push(track));
 
   if (_mode === 'takeover') {
     _capTakeoverToPreview();
@@ -125,7 +134,7 @@ function _radioPositionS() {
 function _syncRadio(message) {
   _setLabel('📻 Live on JukeLoop');
   if (!_radio) {
-    if (_loadedPlayId || !_audio.paused) _fadeOutAndStop();
+    if (_loadedPlayId || !_audio.paused) _stopAudio();
     _loadedPlayId = null;
     _setTrack('—', '');
     _setActivity(message || '🌙 The JukeLoop is between tracks — waiting for the next song');
@@ -140,7 +149,7 @@ function _syncRadio(message) {
 
   _loadedPlayId = _radio.playId;
   if (!_radio.ipfsCid) {
-    _fadeOutAndStop();
+    _stopAudio();
     _setTrack(_radio.title, _radio.uploader);
     _setActivity('🎧 Playing in Discord — this track isn’t on IPFS yet, so it can’t stream here');
     return;
@@ -229,8 +238,6 @@ function _gatewayUrl(cid) {
 async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = () => 0 }) {
   const token = ++_switchToken;
   _setTrack(title, artist);
-  if (!_audio.paused) await _fade(0, token);
-  if (token !== _switchToken) return;
 
   _audio.pause();
   _audio.volume = 0;
@@ -261,7 +268,7 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     _playBtn?.classList.remove('hidden');
     return;
   }
-  await _fade(1, token);
+  await _fadeIn(token);
 }
 
 // Gateways without HTTP range support restart from 0 on seek, so only seek inside seekable ranges.
@@ -292,15 +299,16 @@ function _waitForMetadata() {
   });
 }
 
-// Time-based steps keep fades finishing in throttled background tabs.
-function _fade(target, token = _switchToken, ms = FADE_MS) {
-  const from = _audio.volume;
+// Silence-to-music fade on every start; time-based steps keep it finishing in throttled background tabs.
+function _fadeIn(token = _switchToken, ms = FADE_IN_MS) {
+  _audio.volume = 0;
   const start = performance.now();
   return new Promise((resolve) => {
     const step = () => {
       if (token !== _switchToken) return resolve();
       const t = Math.min(1, (performance.now() - start) / ms);
-      _audio.volume = from + (target - from) * t;
+      // Squared ramp sounds even to the ear; a linear ramp jumps in loudness early.
+      _audio.volume = t * t;
       if (t < 1) setTimeout(step, 40);
       else resolve();
     };
@@ -308,10 +316,9 @@ function _fade(target, token = _switchToken, ms = FADE_MS) {
   });
 }
 
-async function _fadeOutAndStop() {
-  const token = ++_switchToken;
-  if (!_audio.paused) await _fade(0, token);
-  if (token === _switchToken) _audio.pause();
+function _stopAudio() {
+  ++_switchToken;
+  _audio.pause();
 }
 
 async function _unlock() {
@@ -324,7 +331,7 @@ async function _unlock() {
   }
   _blocked = false;
   _playBtn?.classList.add('hidden');
-  await _fade(1);
+  await _fadeIn();
 }
 
 // ── Banner text ───────────────────────────────────────────────────────────

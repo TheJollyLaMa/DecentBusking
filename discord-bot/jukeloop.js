@@ -249,6 +249,8 @@ function createFFmpegStream(url) {
     '-analyzeduration',     '0',
     '-loglevel',            '0',
     '-vn',
+    // Ease each song in from silence so tracks never pop in at full volume.
+    '-af', 'afade=t=in:st=0:d=1.5:curve=qsin',
     '-f',  's16le',
     '-ar', '48000',
     '-ac', '2',
