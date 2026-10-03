@@ -115,7 +115,7 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
     serverTime: now,
     nowPlaying: nowPlaying
       ? {
-          playId: `${nowPlaying.trackId}:${nowPlaying.startedAt}`,
+          playId: nowPlaying.playId || `${nowPlaying.trackId}:${nowPlaying.startedAt}`,
           trackId: nowPlaying.trackId,
           title: nowPlaying.title,
           uploader: nowPlaying.uploader,
@@ -458,6 +458,8 @@ export class JukeLoopSession {
       const resource = createAudioResource(stream, { inputType: StreamType.Raw });
       this.player.play(resource);
       this._nowPlaying = {
+        // Fixed at play start; startedAt is refined once audio flows, which must not look like a new song.
+        playId: `${track.trackId}:${Date.now()}`,
         trackId: track.trackId,
         title: track.title,
         uploader: track.uploader,
