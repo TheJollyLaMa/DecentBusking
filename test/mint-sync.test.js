@@ -74,3 +74,54 @@ test('CLI mint metadata matches the Admin panel format', async () => {
   });
   assert.equal(buildTrackMetadata({ ...track, artworkCid: 'bafy-art' }, '0xowner').image, 'ipfs://bafy-art');
 });
+
+test('CLI retries lagging mint estimates at the confirmed registration block without broadcasting', async () => {
+  const { estimateRegisteredMint } = await import(pathToFileURL(path.join(__dirname, '../discord-bot/mint-queue.js')).href);
+  let calls = 0;
+  const contract = { mintProduct: { estimateGas: async (recipient, tokenId, amount, options) => {
+    assert.equal(options.blockTag, 123);
+    assert.equal(tokenId, '12');
+    assert.equal(amount, 1);
+    if (++calls === 1) throw new Error('DecentNFT: token not registered');
+    return 100000n;
+  } } };
+  assert.equal(await estimateRegisteredMint({ contract, recipient: '0xartist', tokenId: '12', blockNumber: 123, delayMs: 0 }), 100000n);
+  assert.equal(calls, 2);
+});
+
+test('CLI resumes only an unminted registration matching the queued audio, recipient, and owner', async () => {
+  const { validateResumeToken } = await import(pathToFileURL(path.join(__dirname, '../discord-bot/mint-queue.js')).href);
+  const contract = { totalMinted: async () => 0n, uri: async () => 'ipfs://metadata' };
+  const track = { ipfsCid: 'bafy-audio', recipient: '0xartist' };
+  const fetchImpl = async () => new Response(JSON.stringify({ audioUrl: 'ipfs://bafy-audio', artist: '0xartist', registeredBy: '0xowner' }));
+  await validateResumeToken({ contract, tokenId: '12', track, owner: '0xowner', fetchImpl });
+  await assert.rejects(validateResumeToken({ contract, tokenId: '12', track: { ...track, ipfsCid: 'different' }, owner: '0xowner', fetchImpl }), /does not match/);
+  await assert.rejects(validateResumeToken({ contract: { ...contract, totalMinted: async () => 1n }, tokenId: '12', track, owner: '0xowner', fetchImpl }), /already minted/);
+});
+
+test('CLI resume checks recover from transient RPC errors before any mint', async () => {
+  const { validateResumeToken } = await import(pathToFileURL(path.join(__dirname, '../discord-bot/mint-queue.js')).href);
+  const calls = { totalMinted: 0, uri: 0 };
+  const contract = {
+    totalMinted: async () => {
+      if (++calls.totalMinted === 1) throw new Error('missing revert data');
+      return 0n;
+    },
+    uri: async () => {
+      if (++calls.uri === 1) throw new Error('over rate limit');
+      return 'ipfs://metadata';
+    },
+  };
+  const options = {
+    contract, tokenId: '12', track: { ipfsCid: 'bafy-audio', recipient: '0xartist' }, owner: '0xowner',
+    retry: { baseDelayMs: 0 },
+    fetchImpl: async () => new Response(JSON.stringify({ audioUrl: 'ipfs://bafy-audio', artist: '0xartist', registeredBy: '0xowner' })),
+  };
+  await validateResumeToken(options);
+  assert.deepEqual(calls, { totalMinted: 2, uri: 2 });
+  await assert.rejects(validateResumeToken({
+    ...options,
+    contract: { totalMinted: async () => { throw new Error('missing revert data'); } },
+    retry: { attempts: 2, baseDelayMs: 0 },
+  }), /Resume token #12: totalMinted lookup failed after retries.*No mint was sent/);
+});

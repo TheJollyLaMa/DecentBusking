@@ -12,7 +12,7 @@ const NFT_ABI = [
 const METADATA_GATEWAYS = ['https://gateway.pinata.cloud/ipfs/', 'https://ipfs.io/ipfs/'];
 
 // The public Base RPC answers bursts with "over rate limit", so retry with backoff.
-async function withRetry(call, { attempts = 5, baseDelayMs = 1_000 } = {}) {
+export async function withRetry(call, { attempts = 5, baseDelayMs = 1_000 } = {}) {
   for (let attempt = 1; ; attempt++) {
     try {
       return await call();

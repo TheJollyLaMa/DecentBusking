@@ -247,9 +247,11 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
   source.src = url;
   if (mime) source.type = mime;
   _audio.appendChild(source);
+  _audio.preload = 'auto';
+  const metadataReady = _waitForMetadata();
   _audio.load();
 
-  const loaded = await _waitForMetadata();
+  const loaded = await metadataReady;
   if (token !== _switchToken) return;
   if (!loaded) {
     _setActivity('⚠️ Couldn’t load this track from IPFS — waiting for the next one');
@@ -257,7 +259,7 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
   }
 
   const at = offset();
-  if (at > 0) _seekTo(at);
+  if (at > 0 && !await _prepareRadioSeek(offset, token)) return;
 
   try {
     await _audio.play();
@@ -271,16 +273,38 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
   await _fadeIn(token);
 }
 
+async function _prepareRadioSeek(offset, token) {
+  const deadline = performance.now() + LOAD_TIMEOUT_MS;
+  while (token === _switchToken && performance.now() < deadline) {
+    const target = offset();
+    if (Number.isFinite(_audio.duration) && target >= _audio.duration - 1) return false;
+    if (_seekTo(target)) {
+      while (_audio.seeking && token === _switchToken && performance.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      }
+      if (token === _switchToken && !_audio.seeking) return true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  if (token === _switchToken) {
+    _loadedPlayId = null;
+    _setActivity('Waiting for the audio gateway to sync this track…');
+  }
+  return false;
+}
+
 // Gateways without HTTP range support restart from 0 on seek, so only seek inside seekable ranges.
 function _seekTo(seconds) {
-  if (!Number.isFinite(_audio.duration) || seconds >= _audio.duration - 1) return;
+  if (!Number.isFinite(_audio.duration) || seconds >= _audio.duration - 1) return false;
   const ranges = _audio.seekable;
   for (let i = 0; i < ranges.length; i += 1) {
     if (seconds >= ranges.start(i) && seconds <= ranges.end(i)) {
       _audio.currentTime = seconds;
-      return;
+      return true;
     }
   }
+  return false;
 }
 
 function _waitForMetadata() {
@@ -322,7 +346,8 @@ function _stopAudio() {
 }
 
 async function _unlock() {
-  if (_mode === 'radio' && _radio) _seekTo(_radioPositionS());
+  _audio.volume = 0;
+  if (_mode === 'radio' && _radio && !await _prepareRadioSeek(_radioPositionS, _switchToken)) return;
   try {
     await _audio.play();
   } catch (err) {

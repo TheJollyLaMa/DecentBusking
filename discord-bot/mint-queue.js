@@ -14,7 +14,7 @@ import { Contract, JsonRpcProvider, Wallet } from 'ethers';
 import { loadConfig } from './config.js';
 import { uploadToIPFS } from './ipfs.js';
 import { buildAdminAuthorizationMessage } from './ipfs-worker.js';
-import { readMintedAudioCids } from './mint-sync.js';
+import { readMintedAudioCids, audioCidFromMetadata, withRetry } from './mint-sync.js';
 
 const NFT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -47,6 +47,40 @@ function slugify(value) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'track';
 }
 
+export async function validateResumeToken({ contract, tokenId, track, owner, fetchImpl = fetch, retry = {} }) {
+  const read = async (method) => {
+    try {
+      return await withRetry(() => contract[method](tokenId), retry);
+    } catch (error) {
+      const detail = error.info?.error?.message || error.shortMessage || error.message;
+      throw new Error(`Resume token #${tokenId}: ${method} lookup failed after retries: ${detail}. No mint was sent.`);
+    }
+  };
+  if (Number(await read('totalMinted')) !== 0) throw new Error('Resume token is already minted');
+  const uri = await read('uri');
+  const response = await fetchImpl(uri.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'));
+  if (!response.ok) throw new Error('Could not verify resume token metadata');
+  const metadata = await response.json();
+  if (audioCidFromMetadata(metadata) !== track.ipfsCid ||
+      metadata.artist?.toLowerCase() !== track.recipient.toLowerCase() ||
+      metadata.registeredBy?.toLowerCase() !== owner.toLowerCase()) {
+    throw new Error('Resume token does not match this queued track, recipient, and owner');
+  }
+}
+
+export async function estimateRegisteredMint({ contract, recipient, tokenId, blockNumber, delayMs = 1000 }) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await contract.mintProduct.estimateGas(recipient, tokenId, 1, { blockTag: blockNumber });
+    } catch (error) {
+      if (attempt >= 4 || !/token not registered|rate limit|header not found|unknown block/i.test(
+        `${error.shortMessage || ''} ${error.message || ''} ${error.info?.error?.message || ''}`,
+      )) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+    }
+  }
+}
+
 async function postJson(url, body, origin) {
   const response = await fetch(url, {
     method: 'POST',
@@ -63,6 +97,9 @@ async function main() {
   const shouldMint = args.includes('--mint');
   const limitArg = args.indexOf('--limit');
   const limit = limitArg >= 0 ? Number(args[limitArg + 1]) : Infinity;
+  const resumeArg = args.indexOf('--resume-token');
+  const resumeToken = resumeArg >= 0 ? args[resumeArg + 1] : null;
+  if (resumeArg >= 0 && !/^\d+$/.test(resumeToken || '')) throw new Error('--resume-token requires a token ID');
 
   const privateKey = process.env.MINT_OWNER_PRIVATE_KEY;
   if (!privateKey) throw new Error('Set MINT_OWNER_PRIVATE_KEY in discord-bot/.env (local only).');
@@ -103,6 +140,14 @@ async function main() {
   let minted = 0;
   for (const [index, track] of pending.entries()) {
     const label = `[${index + 1}/${pending.length}] ${track.title}`;
+    let tokenId;
+    let registrationBlock;
+    if (index === 0 && resumeToken !== null) {
+      await validateResumeToken({ contract, tokenId: resumeToken, track, owner: wallet.address });
+      tokenId = resumeToken;
+      registrationBlock = await provider.getBlockNumber();
+      console.log(`${label}: reusing registered token #${tokenId}`);
+    } else {
     const metadata = buildTrackMetadata(track, wallet.address);
     const metadataUri = await uploadToIPFS(
       Buffer.from(JSON.stringify(metadata, null, 2)),
@@ -116,9 +161,21 @@ async function main() {
       .map((log) => { try { return contract.interface.parseLog(log); } catch { return null; } })
       .find((event) => event?.name === 'TokenRegistered');
     if (!registered) throw new Error(`${label}: could not read the registered token ID`);
-    const tokenId = registered.args.tokenId.toString();
+    tokenId = registered.args.tokenId.toString();
+    registrationBlock = registration.blockNumber;
+    console.log(`${label}: registered token #${tokenId} in block ${registrationBlock}`);
+    }
 
-    const mintReceipt = await (await contract.mintProduct(track.recipient, tokenId, 1)).wait();
+    let mintReceipt;
+    try {
+      const estimate = await estimateRegisteredMint({ contract, recipient: track.recipient, tokenId, blockNumber: registrationBlock });
+      mintReceipt = await (await contract.mintProduct(track.recipient, tokenId, 1, {
+        gasLimit: estimate * 120n / 100n,
+      })).wait();
+    } catch (error) {
+      throw new Error(`${label}: token #${tokenId} is registered; mint failed: ${error.shortMessage || error.message}. ` +
+        `Do not register it again. Resume with --mint --resume-token ${tokenId} --limit 1.`);
+    }
     minted++;
     try {
       await postJson(`${serviceUrl}/api/mint-complete`, { trackId: track.trackId, tokenId, txHash: mintReceipt.hash }, origin);
