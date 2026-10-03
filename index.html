@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261003-coins-radio-votes" />
+  <link rel="stylesheet" href="css/styles.css?v=20261003-close-radio-votes" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -169,17 +169,19 @@
       <a id="footer-discord-link" href="https://discord.gg/5XJtJYdhz" target="_blank" rel="noopener noreferrer">💬 Discord</a>
       <div id="busker-info">
         <span id="now-playing-label">📻 Live on JukeLoop</span>
-        <div class="radio-title-window"><span id="now-playing-title">—</span></div>
+        <div class="radio-track-row">
+          <div class="radio-title-window"><span id="now-playing-title">—</span></div>
+          <div id="radio-voting" role="group" aria-label="Vote on the current radio play">
+            <button id="radio-vote-up" type="button" data-radio-vote="1" aria-label="Thumbs up current radio play" aria-pressed="false" title="Like this listen? Vote thumbs up to boost the song in the JukeLoop rotation. One vote per play." disabled>👍</button>
+            <button id="radio-vote-down" type="button" data-radio-vote="-1" aria-label="Thumbs down current radio play" aria-pressed="false" title="Not enjoying this listen? Vote thumbs down to lower the song in the JukeLoop rotation. One vote per play." disabled>👎</button>
+            <span id="radio-vote-status" role="status" aria-live="polite"></span>
+          </div>
+        </div>
         <span id="now-playing-artist"></span>
         <div class="now-playing-actions">
           <button id="now-playing-play-btn" class="hidden" title="Tune in" aria-label="Tune in">▶ Tune in</button>
           <button id="now-playing-radio-btn" class="hidden" title="Return to radio" aria-label="Return to radio">📻 Radio</button>
         </div>
-      </div>
-      <div id="radio-voting" role="group" aria-label="Vote on the current radio play">
-        <button id="radio-vote-up" type="button" data-radio-vote="1" aria-label="Thumbs up current radio play" aria-pressed="false" title="Thumbs up this play" disabled>👍</button>
-        <button id="radio-vote-down" type="button" data-radio-vote="-1" aria-label="Thumbs down current radio play" aria-pressed="false" title="Thumbs down this play" disabled>👎</button>
-        <span id="radio-vote-status" role="status" aria-live="polite"></span>
       </div>
       <span id="radio-activity" role="status" aria-live="polite" hidden></span>
     </footer>
