@@ -244,3 +244,13 @@ test('track titles keep the emoji and accents Discord strips from filenames', as
   assert.deepEqual(store.getPlaylist().map((track) => track.title), ['561 🐄 🐮 🐄', '592 i can’t dance']);
   assert.equal(store.restoreTrackTitles([{ trackId: 'attachment-561', title: '561 🐄 🐮 🐄' }]), 0);
 });
+
+test('radio play ID stays stable when the audible start time is refined', async () => {
+  const { buildRadioState } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js')).href);
+  const playing = { playId: 'track-1:1000', trackId: 'track-1', title: 'Song', uploader: 'artist', startedAt: 1000 };
+  const before = buildRadioState({ nowPlaying: playing, playlist: [], now: 1500 });
+  const after = buildRadioState({ nowPlaying: { ...playing, startedAt: 1800, audible: true }, playlist: [], now: 2000 });
+  assert.equal(before.nowPlaying.playId, 'track-1:1000');
+  assert.equal(after.nowPlaying.playId, 'track-1:1000');
+  assert.equal(after.nowPlaying.positionMs, 200);
+});
