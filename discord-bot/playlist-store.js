@@ -218,9 +218,10 @@ export function requestTrackMint(trackId, uploaderId, recipient, artworkCid) {
 /**
  * Queue every pinned, unminted, not-yet-requested upload by one Discord user,
  * oldest first, for owner-wallet minting to `recipient`. Checkpoints once.
+ * `artworkCid` becomes the default image for queued and already-requested tracks without artwork.
  * @returns {{ queued: TrackEntry[], skipped: number }} skipped = uploads not on IPFS yet
  */
-export function queueUploaderMints(uploaderId, recipient, now = Date.now()) {
+export function queueUploaderMints(uploaderId, recipient, { artworkCid, now = Date.now() } = {}) {
   const uploads = _playlist
     .filter((track) => track.uploaderId === uploaderId && track.mintStatus === 'unminted')
     .sort((first, second) => Date.parse(first.addedAt) - Date.parse(second.addedAt));
@@ -231,7 +232,15 @@ export function queueUploaderMints(uploaderId, recipient, now = Date.now()) {
     // Offset by index so the queue keeps posting order.
     track.mintRequestedAt = new Date(now + index).toISOString();
   });
-  if (ready.length) _save();
+  let artworkAdded = 0;
+  if (artworkCid) {
+    for (const track of _playlist) {
+      if (track.uploaderId !== uploaderId || track.mintStatus !== 'requested' || track.artworkCid) continue;
+      track.artworkCid = artworkCid;
+      artworkAdded++;
+    }
+  }
+  if (ready.length || artworkAdded) _save();
   return { queued: ready, skipped: uploads.length - ready.length };
 }
 

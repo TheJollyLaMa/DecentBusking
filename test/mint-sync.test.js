@@ -57,3 +57,20 @@ test('marks tracks minted from Base so lost state cannot re-queue an existing NF
   ]);
   assert.equal(store.getMintRequests().length, 0);
 });
+
+test('CLI mint metadata matches the Admin panel format', async () => {
+  const { buildTrackMetadata } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'mint-queue.js')).href);
+  const track = { title: '561 🐄 🐮 🐄', uploader: 'thejollylama', ipfsCid: 'bafy-audio', recipient: '0xabc' };
+  assert.deepEqual(buildTrackMetadata(track, '0xowner', new Date('2026-10-03T00:00:00Z')), {
+    name: '561 🐄 🐮 🐄',
+    description: 'Shared through DecentJukebox by thejollylama',
+    animation_url: 'ipfs://bafy-audio',
+    audioUrl: 'ipfs://bafy-audio',
+    artist: '0xabc',
+    creator: '0xabc',
+    tipWallet: '0xabc',
+    registeredBy: '0xowner',
+    mintedAt: '2026-10-03T00:00:00.000Z',
+  });
+  assert.equal(buildTrackMetadata({ ...track, artworkCid: 'bafy-art' }, '0xowner').image, 'ipfs://bafy-art');
+});
