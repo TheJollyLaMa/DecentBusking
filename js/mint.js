@@ -22,7 +22,7 @@
 // If the connected wallet lacks DEFAULT_ADMIN_ROLE a clear error is shown
 // and no transaction is sent.
 
-import { addNFTToSpace, fetchNFTMetaById } from './space.js?v=20261002-archive-drawer';
+import { addNFTToSpace, fetchNFTMetaById } from './space.js?v=20261003-coins-radio-votes';
 import { uploadFileToIPFS } from './ipfs-upload.js';
 import { reportMintCompletion } from './mint-reconciliation.js';
 

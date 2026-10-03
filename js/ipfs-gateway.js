@@ -1,5 +1,6 @@
 const FALLBACK_GATEWAYS = [
   'https://gateway.pinata.cloud/ipfs/',
+  'https://peach-fast-pike-16.mypinata.cloud/ipfs/',
 ];
 
 function gatewayUrl(gateway, cid) {
@@ -13,11 +14,11 @@ export function buildIpfsGatewayUrls(uri, primaryGateway) {
   return [...new Set([primaryGateway, ...FALLBACK_GATEWAYS].filter(Boolean).map((gateway) => gatewayUrl(gateway, cid)))];
 }
 
-export async function fetchIpfsJson(uri, { primaryGateway, fetchImpl = globalThis.fetch } = {}) {
+export async function fetchIpfsJson(uri, { primaryGateway, fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}) {
   const urls = buildIpfsGatewayUrls(uri, primaryGateway);
   for (const url of urls) {
     try {
-      const response = await fetchImpl(url);
+      const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
       if (!response.ok) continue;
       return await response.json();
     } catch (_) {}

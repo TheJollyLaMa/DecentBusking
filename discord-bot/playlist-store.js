@@ -290,6 +290,16 @@ export function applyRating(trackId, newLikes, newDislikes, messageId) {
   return track;
 }
 
+export function applySiteVote(trackId, vote) {
+  if (vote !== 1 && vote !== -1) throw new Error('Invalid vote');
+  const track = _playlist.find((entry) => entry.trackId === trackId);
+  if (!track) throw new Error('Track is no longer in the playlist');
+  if (vote === 1) track.likes += 1;
+  else track.dislikes += 1;
+  _save();
+  return track;
+}
+
 /** Reconcile many Discord announcements atomically and checkpoint once. */
 export function reconcileRatings(events) {
   let reconciled = 0;
