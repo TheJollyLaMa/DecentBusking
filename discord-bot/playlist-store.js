@@ -168,6 +168,26 @@ export function savePlaylist() {
   _save();
 }
 
+/**
+ * Mark tracks minted from on-chain DecentNFT records (audio CID → token ID),
+ * so lost local state can never re-queue an existing NFT. Checkpoints once.
+ * @param {Map<string, string>} tokenIdByAudioCid
+ * @returns {number} Tracks newly marked minted
+ */
+export function applyOnChainMints(tokenIdByAudioCid) {
+  let changed = 0;
+  for (const track of _playlist) {
+    const tokenId = track.ipfsCid && tokenIdByAudioCid.get(track.ipfsCid);
+    if (!tokenId || track.mintStatus === 'minted') continue;
+    track.mintStatus = 'minted';
+    track.tokenId = tokenId;
+    track.mintedAt ??= new Date().toISOString();
+    changed++;
+  }
+  if (changed) _save();
+  return changed;
+}
+
 /** Apply corrected display titles in one checkpoint; returns how many changed. */
 export function restoreTrackTitles(updates) {
   let changed = 0;
