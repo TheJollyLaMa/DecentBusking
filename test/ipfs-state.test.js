@@ -25,11 +25,33 @@ test('restores the newest tagged JukeLoop snapshot from Pinata', async () => {
 
   assert.deepEqual(await store.restore(), [{ trackId: 'track-1' }]);
   const listUrl = new URL(requests[0].url);
-  assert.equal(listUrl.pathname, '/v3/files');
-  assert.equal(listUrl.searchParams.get('network'), 'public');
+  assert.equal(listUrl.pathname, '/v3/files/public');
+  assert.equal(listUrl.searchParams.get('name'), 'decentbusking-jukeloop-state.json');
+  assert.equal(listUrl.searchParams.get('network'), null);
   assert.equal(listUrl.searchParams.get('order'), 'DESC');
   assert.equal(listUrl.searchParams.get('limit'), '100');
   assert.equal(requests[1].url, 'https://dweb.link/ipfs/bafystate');
+});
+
+test('restore falls back to the Pinata gateway when the configured gateway is rate-limited', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  const fetched = [];
+  const store = createPinataStateStore({
+    pinataJwt: 'test-jwt',
+    filesApiUrl: 'https://api.pinata.cloud/v3/files/public',
+    fetchImpl: async (url) => {
+      fetched.push(url);
+      if (url.startsWith('https://api.pinata.cloud/')) {
+        return new Response(JSON.stringify({ data: { files: [{ cid: 'bafystate', name: 'decentbusking-jukeloop-state.json', created_at: '2026-10-01T12:00:00Z' }] } }));
+      }
+      if (url.startsWith('https://dweb.link')) return new Response('', { status: 429 });
+      return new Response(JSON.stringify({ schemaVersion: 1, playlist: [{ trackId: 'kept' }] }));
+    },
+  });
+
+  assert.deepEqual(await store.restore(), [{ trackId: 'kept' }]);
+  assert.equal(new URL(fetched[0]).pathname, '/v3/files/public');
+  assert.deepEqual(fetched.slice(1), ['https://dweb.link/ipfs/bafystate', 'https://gateway.pinata.cloud/ipfs/bafystate']);
 });
 
 test('uploads tagged state and prunes snapshots older than the newest three', async () => {
@@ -65,6 +87,6 @@ test('uploads tagged state and prunes snapshots older than the newest three', as
   assert.deepEqual(snapshot.playlist, [{ trackId: 'track-1' }]);
   assert.deepEqual(
     requests.filter((request) => request.options.method === 'DELETE').map((request) => request.url),
-    ['https://api.pinata.cloud/v3/files/old'],
+    ['https://api.pinata.cloud/v3/files/public/old'],
   );
 });

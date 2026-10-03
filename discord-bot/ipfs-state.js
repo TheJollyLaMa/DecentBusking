@@ -5,10 +5,14 @@ const STATE_KEYVALUES = {
   schema: '1',
 };
 const SNAPSHOTS_TO_KEEP = 3;
+// Bounded so a large backlog is pruned across several saves without tripping Pinata rate limits.
+const MAX_PRUNE_PER_SAVE = 10;
+const FALLBACK_GATEWAY = 'https://gateway.pinata.cloud';
 
+// Pinata v3 only filters by network in the path; `?network=public` silently returns no files.
 function buildListUrl(filesApiUrl, limit = 100) {
-  const url = new URL(filesApiUrl);
-  url.searchParams.set('network', 'public');
+  const url = new URL(`${filesApiUrl.replace(/\/(public|private)?\/?$/, '')}/public`);
+  url.searchParams.set('name', STATE_FILE_NAME);
   url.searchParams.set('order', 'DESC');
   url.searchParams.set('limit', String(limit));
   return url.toString();
@@ -44,8 +48,7 @@ export function createPinataStateStore({
   const headers = { authorization: `Bearer ${pinataJwt}` };
 
   async function listSnapshots(limit = 100) {
-    const normalizedFilesUrl = filesApiUrl.replace(/\/public\/?$/, '');
-    const response = await fetchImpl(buildListUrl(normalizedFilesUrl, limit), { headers });
+    const response = await fetchImpl(buildListUrl(filesApiUrl, limit), { headers });
     if (!response.ok) throw new Error(await responseError(response, 'Pinata state listing failed'));
     return extractFiles(await response.json())
       .filter(isStateSnapshot)
@@ -56,13 +59,20 @@ export function createPinataStateStore({
     const [latest] = await listSnapshots();
     if (!latest?.cid) return null;
 
-    const response = await fetchImpl(`${gateway.replace(/\/$/, '')}/ipfs/${latest.cid}`);
-    if (!response.ok) throw new Error(`IPFS state restore failed (${response.status})`);
-    const snapshot = await response.json();
-    if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.playlist)) {
-      throw new Error('IPFS state snapshot has an unsupported format');
+    let lastStatus = 0;
+    for (const base of [...new Set([gateway, FALLBACK_GATEWAY])]) {
+      const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${latest.cid}`).catch(() => null);
+      if (!response?.ok) {
+        lastStatus = response?.status || 0;
+        continue;
+      }
+      const snapshot = await response.json();
+      if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.playlist)) {
+        throw new Error('IPFS state snapshot has an unsupported format');
+      }
+      return snapshot.playlist;
     }
-    return snapshot.playlist;
+    throw new Error(`IPFS state restore failed (${lastStatus})`);
   }
 
   async function save(playlist) {
@@ -84,10 +94,11 @@ export function createPinataStateStore({
     if (!cid) throw new Error('Pinata state upload did not return a CID');
 
     const snapshots = await listSnapshots();
-    const normalizedFilesUrl = filesApiUrl.replace(/\/public\/?$/, '');
-    await Promise.all(snapshots.slice(SNAPSHOTS_TO_KEEP).map(async ({ id }) => {
+    const normalizedFilesUrl = filesApiUrl.replace(/\/(public|private)?\/?$/, '');
+    const stale = snapshots.slice(SNAPSHOTS_TO_KEEP).slice(-MAX_PRUNE_PER_SAVE);
+    await Promise.all(stale.map(async ({ id }) => {
       if (!id) return;
-      const deleteResponse = await fetchImpl(`${normalizedFilesUrl}/${id}`, { method: 'DELETE', headers });
+      const deleteResponse = await fetchImpl(`${normalizedFilesUrl}/public/${id}`, { method: 'DELETE', headers });
       if (!deleteResponse.ok) console.warn(`[ipfs-state] Failed to prune snapshot ${id}: ${deleteResponse.status}`);
     }));
     return `ipfs://${cid}`;

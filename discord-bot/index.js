@@ -34,6 +34,7 @@ import http from 'http';
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
+import { syncMintedTracksFromChain } from './mint-sync.js';
 import { createPinataStateStore } from './ipfs-state.js';
 import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed } from './embed.js';
@@ -68,6 +69,14 @@ import {
 const _jukeLoopRestartTimers = new Map();
 const _jukeLoopRestartAttempts = new Map();
 const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const STATE_RESTORE_ATTEMPTS = 3;
+
+function syncMintedTracks(config) {
+  return syncMintedTracksFromChain({
+    rpcUrl: config.baseRpcUrl,
+    contractAddress: config.nftContractAddress,
+  }).catch((err) => console.warn('[mint-sync] Could not read DecentNFT mints:', err.message));
+}
 
 /** Pin Discord-only uploads in the background and announce what was archived. */
 function runIpfsBackfill(client, config) {
@@ -83,6 +92,7 @@ function runIpfsBackfill(client, config) {
     maxBytes: MAX_FILE_BYTES,
   })
     .then(async ({ pinned, remaining }) => {
+      await syncMintedTracks(config);
       if (!pinned || !config.jukeLoopTextChannelId) return;
       const channel = await client.channels.fetch(config.jukeLoopTextChannelId).catch(() => null);
       await channel?.send(
@@ -328,10 +338,15 @@ async function main() {
       gateway: config.ipfsGateway,
     });
     let restoredPlaylist = null;
-    try {
-      restoredPlaylist = await stateStore.restore();
-    } catch (err) {
-      console.warn('[ipfs-state] Remote restore failed; using local cache:', err.message);
+    // An empty start would checkpoint over the real playlist, so retry transient failures first.
+    for (let attempt = 1; attempt <= STATE_RESTORE_ATTEMPTS; attempt++) {
+      try {
+        restoredPlaylist = await stateStore.restore();
+        break;
+      } catch (err) {
+        console.warn(`[ipfs-state] Remote restore attempt ${attempt} failed:`, err.message);
+        if (attempt < STATE_RESTORE_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 5_000 * attempt));
+      }
     }
     loadPlaylist(restoredPlaylist);
     configureRemotePersistence(stateStore.save);
@@ -346,6 +361,7 @@ async function main() {
   } else {
     loadPlaylist();
   }
+  syncMintedTracks(config);
 
   client = new Client({
     intents: [
