@@ -243,3 +243,27 @@ test('radio state is public and readable from any dapp origin', async () => {
     assert.deepEqual(await response.json(), { serverTime: 1, nowPlaying: null, recent: [] });
   });
 });
+
+test('radio votes need no wallet but require an allowed origin', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const ballots = [];
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: ['https://busking.example'],
+    ownerWallet: '0x1111111111111111111111111111111111111111',
+    onRadioVote: (ballot) => { ballots.push(ballot); return { ...ballot, duplicate: false }; },
+  });
+  await withServer(handler, async (baseUrl) => {
+    const body = JSON.stringify({ playId: 'track:1000', voterId: 'browser-123456789', vote: 1 });
+    const accepted = await fetch(`${baseUrl}/api/radio/vote`, {
+      method: 'POST', headers: { origin: 'https://busking.example', 'content-type': 'application/json' }, body,
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.headers.get('access-control-allow-origin'), 'https://busking.example');
+    assert.equal((await accepted.json()).vote, 1);
+    const rejected = await fetch(`${baseUrl}/api/radio/vote`, {
+      method: 'POST', headers: { origin: 'https://other.example', 'content-type': 'application/json' }, body,
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal(ballots.length, 1);
+  });
+});

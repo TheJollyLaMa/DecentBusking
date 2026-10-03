@@ -59,6 +59,7 @@ import {
   createJukeLoopSession,
   getJukeLoopSession,
   getJukeLoopNowPlaying,
+  submitJukeLoopVote,
   buildRadioState,
   getVoiceRetryDelay,
   reconcileJukeLoopHistory,
@@ -355,6 +356,7 @@ async function main() {
       nowPlaying: getJukeLoopNowPlaying(),
       playlist: getPlaylist(),
     }),
+    onRadioVote: submitJukeLoopVote,
   });
   const port = process.env.PORT || 10000;
   http.createServer(requestHandler).listen(port, () => {

@@ -92,6 +92,12 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
     ['pinned', 'failed'],
     ['pinned', 'pinned'],
   ]);
+  const beforeVote = { likes: rated.likes, dislikes: rated.dislikes, plays: rated.plays };
+  store.applySiteVote('attachment-2', 1);
+  store.applySiteVote('attachment-2', -1);
+  assert.equal(rated.likes, beforeVote.likes + 1);
+  assert.equal(rated.dislikes, beforeVote.dislikes + 1);
+  assert.equal(rated.plays, beforeVote.plays);
 });
 
 test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages', async () => {
@@ -253,4 +259,31 @@ test('radio play ID stays stable when the audible start time is refined', async 
   assert.equal(before.nowPlaying.playId, 'track-1:1000');
   assert.equal(after.nowPlaying.playId, 'track-1:1000');
   assert.equal(after.nowPlaying.positionMs, 200);
+});
+
+test('site radio waits until Discord is audible instead of playing a premature intro', async () => {
+  const { buildRadioState } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js')).href);
+  const track = { playId: 'track:1000', trackId: 'track', title: 'Song', uploader: 'Artist', startedAt: 1000, audible: false };
+  assert.equal(buildRadioState({ nowPlaying: track, playlist: [], now: 6000 }).nowPlaying, null);
+  const started = buildRadioState({ nowPlaying: { ...track, audible: true, startedAt: 6000 }, playlist: [], now: 6100 });
+  assert.equal(started.nowPlaying.playId, 'track:1000');
+  assert.equal(started.nowPlaying.positionMs, 100);
+});
+
+test('anonymous site votes are idempotent per browser and only accepted for the active play', async (t) => {
+  const { createJukeLoopSession, submitJukeLoopVote } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js')).href);
+  const session = createJukeLoopSession('site-vote-test', { voiceChannel: { guild: { id: 'site-vote-test' } }, textChannel: {}, client: {} });
+  t.after(() => session.destroy());
+  session._nowPlaying = { playId: 'track:1000', trackId: 'track', audible: true };
+  const calls = [];
+  const saveVote = (...args) => calls.push(args);
+  const ballot = { playId: 'track:1000', voterId: 'anonymous-browser-123', vote: 1 };
+  assert.equal(submitJukeLoopVote(ballot, saveVote).duplicate, false);
+  assert.deepEqual(submitJukeLoopVote({ ...ballot, vote: -1 }, saveVote), { playId: 'track:1000', vote: 1, duplicate: true });
+  assert.equal(calls.length, 1);
+  assert.throws(() => submitJukeLoopVote({ ...ballot, playId: 'old-play' }, saveVote), /ended/);
+  assert.throws(() => submitJukeLoopVote({ ...ballot, vote: 0 }, saveVote), /Invalid/);
+  session._nowPlaying = { playId: 'track:2000', trackId: 'track', audible: true };
+  assert.equal(submitJukeLoopVote({ ...ballot, playId: 'track:2000', vote: -1 }, saveVote).duplicate, false);
+  assert.deepEqual(calls, [['track', 1], ['track', -1]]);
 });

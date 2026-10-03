@@ -106,6 +106,7 @@ export function createWorkerRequestHandler({
   onMintComplete,
   getMintQueue,
   getRadioState,
+  onRadioVote,
   fetchImpl = fetch,
   now = () => Date.now(),
 }) {
@@ -138,6 +139,13 @@ export function createWorkerRequestHandler({
           return;
         }
         sendJson(response, 200, await getRadioState(), '*');
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/radio/vote') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!onRadioVote) throw new Error('Radio voting is not configured');
+        const { playId, voterId, vote } = await readJson(request);
+        sendJson(response, 200, await onRadioVote({ playId, voterId, vote }), corsOrigin);
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/mint-queue') {

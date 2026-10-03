@@ -23,16 +23,16 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js';
-import { setNowPlaying } from './stage.js';
-import { fetchIpfsJson } from './ipfs-gateway.js';
-import { loadMintedToken } from './nft-loader.js';
+import { renderNFTCard } from './nft-card.js?v=20261003-coins-radio-votes';
+import { setNowPlaying } from './stage.js?v=20261003-coins-radio-votes';
+import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
+import { loadMintedToken, readCachedMintedTokens, readNftContract } from './nft-loader.js?v=20261003-space-artwork';
 
 // ── Timeline constants ────────────────────────────────────────────────────
 const UNITS_PER_DAY   = 5;          // 3-D units per day on the Z-axis
 const SPREAD_RADIUS   = 6;          // XY scatter radius to avoid overlap
 const WINDOW_DAYS     = 30;         // how many days the default view covers
-const NAV_STEP_DAYS   = 7;          // days moved per arrow-button press
+const NAV_STEP_DAYS   = 1;
 const MAX_NAV_DAYS    = 365;        // how far back the slider can go
 
 // Camera home position (z offset ahead of the timeline centre)
@@ -43,7 +43,7 @@ const CAM_Z_OFFSET = 28;
 // subsequent pages are fetched.
 const INITIAL_BATCH    = 4;         // NFTs to load immediately on startup
 const PAGE_BATCH       = 4;         // NFTs fetched per subsequent auto-page
-const PAGE_INTERVAL_MS = 30_000;    // milliseconds between auto-pages (30 s)
+const PAGE_INTERVAL_MS = 500;
 
 // Yield time (ms) between rapid batch loads triggered by "Show All Now".
 // Keeps the browser event loop responsive during fast loading.
@@ -72,23 +72,28 @@ let _allNFTs   = [];           // { nft, mesh } for every loaded token
 let _activeId  = null;         // currently selected tokenId
 
 // Spaceship
-const _ship = { speed: 0.12 };
+const _ship = { speed: 0.3 };
 
 // ── NFT paging state ──────────────────────────────────────────────────────
 // Shared contract instance reused across lazy-load pages.
 let _contract        = null;
 // Next tokenId to attempt loading (counts DOWN from nextTokenId-1 → 0).
 let _nextTokenToLoad = -1;
-// Timer for the 30-second auto-page interval.
+// Timer for the auto-page interval.
 let _pageTimerId     = null;
 // Set to true once all tokens have been iterated.
 let _allLoaded       = false;
+let _archiveCacheKey = '';
+let _batchInFlight = null;
+let _pointerStart = null;
+let _activeArtist = '';
 
 // ── Public API ────────────────────────────────────────────────────────────
 export function initSpace() {
   _buildScene();
   _buildControls();
   _addTimelineLine();
+  _bindArtistFilters();
   _loadNFTs();
   _animate();
   _bindTimelineNav();
@@ -97,6 +102,7 @@ export function initSpace() {
   window.addEventListener('resize', _onResize);
   window.addEventListener('keydown', _onKeyDown);
   window.addEventListener('keyup', _onKeyUp);
+  window.addEventListener('blur', () => { _keysDown = {}; });
 }
 
 // Called by mint.js after a new busk is minted — places it at the front.
@@ -153,7 +159,7 @@ function _buildScene() {
 
   // Camera
   _camera = new THREE.PerspectiveCamera(60, _aspect(), 0.1, 800);
-  _camera.position.set(0, 8, CAM_Z_OFFSET);
+  _camera.position.set(0, 8, _homeCameraDistance());
 
   // Renderer — sits at the bottom of the stacking context
   _renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -173,6 +179,9 @@ function _buildScene() {
   _mouse = new THREE.Vector2();
 
   _renderer.domElement.addEventListener('click', _onCanvasClick);
+  _renderer.domElement.addEventListener('pointerdown', (event) => {
+    _pointerStart = { x: event.clientX, y: event.clientY };
+  });
   _renderer.domElement.addEventListener('mousemove', _onMouseMove);
 }
 
@@ -189,6 +198,10 @@ function _buildControls() {
     _controls.maxPolarAngle = Math.PI;
     // Enable panning so the user can slide the view along the Z timeline.
     _controls.enablePan = true;
+    _controls.rotateSpeed = 1.35;
+    _controls.zoomSpeed = 1.6;
+    _controls.panSpeed = 1.5;
+    _controls.screenSpacePanning = true;
   }
 }
 
@@ -225,7 +238,7 @@ function _addTimelineLine() {
 //   2. Show a spinner in the DNFT list while loading.
 //   3. Iterate from the newest token (nextTokenId-1) downward, loading only
 //      music NFTs (see _isMusicNFT).  Stop after INITIAL_BATCH matches.
-//   4. After PAGE_INTERVAL_MS (30 s) auto-load PAGE_BATCH more, repeating
+//   4. After PAGE_INTERVAL_MS auto-load PAGE_BATCH more, repeating
 //      until the full list is loaded.
 //   5. The "Show All Now" button short-circuits the timer and loads the rest
 //      in rapid bursts.
@@ -240,6 +253,11 @@ async function _loadNFTs() {
 
   _showSpinner(true);
 
+  _archiveCacheKey = `${cfg.chainId || 8453}:${contractAddress.toLowerCase()}`;
+  for (const nft of readCachedMintedTokens({ cacheKey: _archiveCacheKey })) {
+    if (_isMusicNFT(nft) && !_allNFTs.some((entry) => entry.nft.tokenId === nft.tokenId)) _spawnMesh(nft, false);
+  }
+
   try {
     const rpcUrl = cfg.rpcUrl || 'https://mainnet.base.org';
     const provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -250,7 +268,7 @@ async function _loadNFTs() {
       'function totalMinted(uint256 tokenId) view returns (uint256)',
     ];
     _contract = new ethers.Contract(contractAddress, abi, provider);
-    const nextId = Number(await _contract.nextTokenId());
+    const nextId = Number(await readNftContract(() => _contract.nextTokenId()));
 
     if (nextId === 0) {
       _showSpinner(false);
@@ -278,17 +296,26 @@ async function _loadNFTs() {
   } catch (err) {
     _showSpinner(false);
     console.warn('[space] NFT load failed:', err.message);
-    _markListEmpty('Could not load tracks.');
+    if (_allNFTs.length === 0) _markListEmpty('Could not load tracks.');
   }
 }
 
 // Load up to `count` music NFTs, working down from _nextTokenToLoad.
 async function _loadBatch(count) {
+  if (_batchInFlight) return _batchInFlight;
+  _batchInFlight = _loadBatchEntries(count).finally(() => { _batchInFlight = null; });
+  return _batchInFlight;
+}
+
+async function _loadBatchEntries(count) {
   let loaded = 0;
   while (_nextTokenToLoad >= 0 && loaded < count) {
-    const didLoad = await _tryLoadToken(_nextTokenToLoad);
-    _nextTokenToLoad--;
-    if (didLoad) loaded++;
+    const tokenIds = [];
+    while (_nextTokenToLoad >= 0 && tokenIds.length < Math.min(2, count - loaded)) {
+      tokenIds.push(_nextTokenToLoad--);
+    }
+    const results = await Promise.all(tokenIds.map(_tryLoadToken));
+    loaded += results.filter(Boolean).length;
   }
   if (_nextTokenToLoad < 0) _allLoaded = true;
   return loaded;
@@ -302,11 +329,13 @@ async function _tryLoadToken(tokenId) {
       contract: _contract,
       tokenId,
       fetchMetadata: _fetchMetadata,
+      cacheKey: _archiveCacheKey,
     });
 
     // Skip non-music tokens (images, text NFTs, etc.)
     if (!nft || !_isMusicNFT(nft)) return false;
 
+    if (_allNFTs.some((entry) => entry.nft.tokenId === nft.tokenId)) return true;
     _spawnMesh(nft, false);
     return true;
   } catch (error) {
@@ -384,15 +413,16 @@ function _spawnMesh(nft, isNew) {
   // Deterministic XY spread using golden-angle per tokenId to prevent overlap.
   const seed  = nft.tokenId ?? (Math.random() * 9999);
   const angle = (seed * 137.508) * (Math.PI / 180);
-  const x = Math.cos(angle) * SPREAD_RADIUS;
-  const y = Math.sin(angle) * SPREAD_RADIUS * 0.3;
+  const radius = SPREAD_RADIUS + (seed % 4) * 2.5;
+  const x = Math.cos(angle) * radius;
+  const y = Math.sin(angle) * radius * 0.6;
 
   const pos = new THREE.Vector3(x, y, z);
 
   // Tile geometry
-  const geo     = new THREE.PlaneGeometry(3.2, 1.8);
+  const geo     = new THREE.CircleGeometry(1.8, 96);
   const texture = _makeNFTTexture(nft);
-  const mat     = new THREE.MeshStandardMaterial({
+  const mat     = new THREE.MeshBasicMaterial({
     map: texture,
     transparent: true,
     side: THREE.DoubleSide,
@@ -418,6 +448,8 @@ function _spawnMesh(nft, isNew) {
   // Track for list panel (newest first — prepend)
   _allNFTs.unshift({ nft, mesh });
   _addListItem(nft, mesh);
+  _refreshArtistFilters();
+  _updateVisibility();
 
   // Newly minted busk: auto-play and mark as active.
   if (isNew) {
@@ -432,33 +464,74 @@ function _spawnMesh(nft, isNew) {
 function _makeNFTTexture(nft) {
   const canvas = document.createElement('canvas');
   canvas.width  = 512;
-  canvas.height = 288;
+  canvas.height = 512;
   const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = '#0d0820';
-  ctx.fillRect(0, 0, 512, 288);
-  ctx.strokeStyle = 'rgba(240,192,64,0.5)';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(2, 2, 508, 284);
-
-  ctx.fillStyle = '#f0c040';
-  ctx.font = 'bold 32px Bungee, Impact, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(_truncate(nft.name || nft.title || `Track #${nft.tokenId}`, 28), 256, 72);
-
-  ctx.fillStyle = '#a08050';
-  ctx.font = '22px sans-serif';
-  ctx.fillText(_truncate(nft.artist || nft.creator || '', 34), 256, 110);
-
-  ctx.fillStyle = '#4a4060';
-  ctx.font = '18px monospace';
-  ctx.fillText(`#${nft.tokenId ?? '?'}`, 256, 240);
-
-  ctx.fillStyle = 'rgba(0,212,170,0.25)';
-  ctx.font = '80px sans-serif';
-  ctx.fillText('🎵', 256, 190);
-
-  return new THREE.CanvasTexture(canvas);
+  const texture = new THREE.CanvasTexture(canvas);
+  const drawFace = (image) => {
+    ctx.clearRect(0, 0, 512, 512);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(256, 256, 246, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = '#10121a';
+    ctx.fillRect(0, 0, 512, 512);
+    if (image) {
+      const scale = Math.max(512 / image.width, 512 / image.height);
+      ctx.globalAlpha = .55;
+      ctx.drawImage(image, (512 - image.width * scale) / 2, (512 - image.height * scale) / 2,
+        image.width * scale, image.height * scale);
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = 'rgba(3,5,12,.38)';
+    ctx.fillRect(46, 110, 420, 294);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff8df';
+    ctx.font = 'bold 30px Bungee, Impact, sans-serif';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 5;
+    const words = String(nft.name || nft.title || `Track #${nft.tokenId}`).split(/\s+/);
+    const lines = [];
+    let line = '';
+    for (const word of words) {
+      if (line && ctx.measureText(`${line} ${word}`).width > 350) { lines.push(line); line = word; }
+      else line = line ? `${line} ${word}` : word;
+    }
+    if (line) lines.push(line);
+    lines.slice(0, 4).forEach((text, index) => ctx.fillText(text, 256, 156 + index * 38, 350));
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillStyle = '#a5f1d8';
+    ctx.fillText(_artistLabel(nft).split(' · ')[0], 256, 334, 350);
+    ctx.font = '21px sans-serif';
+    ctx.fillStyle = '#fff8df';
+    const date = nft.mintedAt ? new Date(nft.mintedAt).toLocaleDateString() : '—';
+    ctx.fillText(date, 256, 375, 320);
+    ctx.font = '18px monospace';
+    ctx.fillText(`#${nft.tokenId}`, 256, 431);
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(256, 256, 246, 0, Math.PI * 2);
+    ctx.strokeStyle = '#e1bf72';
+    ctx.lineWidth = 10;
+    ctx.stroke();
+    texture.needsUpdate = true;
+  };
+  drawFace(null);
+  if (nft.image) {
+    const cfg = window.DecentConfig || {};
+    const imageUrls = buildIpfsGatewayUrls(nft.image, cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/')
+      .filter((url) => /^https?:\/\//i.test(url));
+    if (imageUrls.length) {
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.onload = () => drawFace(image);
+      let attempt = 0;
+      image.onerror = () => {
+        if (++attempt < imageUrls.length) image.src = imageUrls[attempt];
+      };
+      image.src = imageUrls[0];
+    }
+  }
+  return texture;
 }
 
 // ── Timeline / Visibility ──────────────────────────────────────────────────
@@ -469,13 +542,75 @@ function _isInWindow(ageDays) {
 function _updateVisibility() {
   for (const { mesh } of _allNFTs) {
     const { ageDays } = mesh.userData;
-    mesh.visible = _isInWindow(ageDays);
+    mesh.visible = _isInWindow(ageDays) && _matchesArtist(mesh.userData.nft);
+  }
+  let matched = 0;
+  for (const { nft } of _allNFTs) {
+    const visible = _matchesArtist(nft);
+    if (visible) matched++;
+    const row = document.querySelector(`.dnft-list-item[data-token-id="${nft.tokenId}"]`);
+    if (row) row.hidden = !visible;
+  }
+  const count = document.getElementById('dnft-list-count');
+  if (count) count.textContent = `${matched} of ${_allNFTs.length} tracks`;
+  const badge = document.getElementById('dnft-list-count-badge');
+  if (badge) badge.textContent = String(matched);
+  const summary = document.getElementById('artist-filter-count');
+  if (summary) summary.textContent = `${matched} track${matched === 1 ? '' : 's'}`;
+}
+
+function _artistKey(nft) {
+  return String(nft.artist || nft.creator || nft.uploader || 'Unknown artist').trim().toLowerCase();
+}
+
+function _artistLabel(nft) {
+  const name = nft.artistName || nft.uploader || nft.description?.match(/^Shared through DecentJukebox by (.+)$/)?.[1];
+  const address = nft.artist || nft.creator || '';
+  return name ? `${name}${address ? ` · ${_shortAddr(address)}` : ''}` : _shortAddr(address) || 'Unknown artist';
+}
+
+function _matchesArtist(nft) {
+  return !_activeArtist || _artistKey(nft) === _activeArtist;
+}
+
+function _refreshArtistFilters() {
+  const artists = new Map(_allNFTs.map(({ nft }) => [_artistKey(nft), _artistLabel(nft)]));
+  const entries = [...artists].sort((first, second) => first[1].localeCompare(second[1]));
+  for (const id of ['scene-artist-filter', 'archive-artist-filter']) {
+    const select = document.getElementById(id);
+    if (!select) continue;
+    select.replaceChildren(new Option('All artists', ''), ...entries.map(([value, label]) => new Option(label, value)));
+    select.value = _activeArtist;
+  }
+}
+
+function _bindArtistFilters() {
+  for (const id of ['scene-artist-filter', 'archive-artist-filter']) {
+    document.getElementById(id)?.addEventListener('change', (event) => {
+      _activeArtist = event.target.value;
+      _refreshArtistFilters();
+      _updateVisibility();
+    });
+  }
+  const header = document.querySelector('decent-header');
+  if (header && typeof ResizeObserver !== 'undefined') {
+    customElements.whenDefined('decent-header').then(() => {
+      const shell = header.shadowRoot?.querySelector('header') || header;
+      const measure = () => {
+        const bottom = Math.max(header.getBoundingClientRect().bottom, shell.getBoundingClientRect().bottom, 1);
+        document.documentElement.style.setProperty('--header-height', `${bottom}px`);
+      };
+      const observer = new ResizeObserver(measure);
+      observer.observe(header);
+      observer.observe(shell);
+      measure();
+    });
   }
 }
 
 function _moveCameraToOffset() {
   const targetZ = -_timelineOffsetDays * UNITS_PER_DAY;
-  _camera.position.set(_camera.position.x, _camera.position.y, targetZ + CAM_Z_OFFSET);
+  _camera.position.set(_camera.position.x, _camera.position.y, targetZ + _homeCameraDistance());
   if (_controls) {
     _controls.target.set(0, 0, targetZ);
     _controls.update();
@@ -497,6 +632,25 @@ function _bindTimelineNav() {
   if (slider) {
     slider.addEventListener('input', () => setTimelineOffset(Number(slider.value)));
   }
+  document.querySelectorAll('[data-camera-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (!_controls) return;
+      const action = button.dataset.cameraAction;
+      const offset = _camera.position.clone().sub(_controls.target);
+      if (action === 'left' || action === 'right') {
+        offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), action === 'left' ? Math.PI / 12 : -Math.PI / 12);
+      } else if (action === 'in' || action === 'out') {
+        offset.multiplyScalar(action === 'in' ? .8 : 1.25);
+        offset.clampLength(_controls.minDistance, _controls.maxDistance);
+      } else {
+        _camera.position.set(0, 8, _homeCameraDistance());
+        _moveCameraToOffset();
+        return;
+      }
+      _camera.position.copy(_controls.target).add(offset);
+      _controls.update();
+    });
+  });
 
   _updateNavUI();
 }
@@ -644,6 +798,11 @@ function _selectNFT(nft, mesh, listItem, showCard = true) {
 
   _playNFT(nft);
   if (showCard) {
+    if (_controls) {
+      _controls.target.copy(mesh.position);
+      _camera.position.copy(mesh.position).add(new THREE.Vector3(0, 2, 10));
+      _controls.update();
+    }
     renderNFTCard(nft);
     window._currentBuskerWallet = nft.tipWallet || '';
   }
@@ -681,6 +840,7 @@ function _animate() {
 // keyboard input.  Moving both together preserves the orbit reference point
 // so the user can still orbit with the mouse after flying.
 function _processFlyKeys() {
+  if (document.querySelector('dialog[open]')) return;
   const forward = new THREE.Vector3();
   _camera.getWorldDirection(forward);
 
@@ -710,17 +870,13 @@ function _processFlyKeys() {
 
 // ── Input Handlers ─────────────────────────────────────────────────────────
 function _onKeyDown(e) {
+  if (e.target?.closest?.('input, textarea, select, button, dialog, [contenteditable="true"]')) return;
+  if (document.querySelector('dialog[open]')) return;
   const key = e.key?.toLowerCase();
   if (!key) return;
   _keysDown[key] = true;
 
-  // Tab toggles "pure ship mode": disables OrbitControls mouse orbit so the
-  // user can look around freely.  WASD movement works in both modes.
-  if (key === 'tab') {
-    e.preventDefault();
-    _shipMode = !_shipMode;
-    if (_controls) _controls.enabled = !_shipMode;
-  }
+  if (key.startsWith('arrow')) e.preventDefault();
 }
 
 function _onKeyUp(e) {
@@ -737,6 +893,7 @@ function _onMouseMove(e) {
 function _onCanvasClick(e) {
   // Ignore clicks that land on DOM elements layered above the canvas
   if (e.target !== _renderer.domElement) return;
+  if (_pointerStart && Math.hypot(e.clientX - _pointerStart.x, e.clientY - _pointerStart.y) > 6) return;
 
   _mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
   _mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -760,6 +917,10 @@ function _onResize() {
 // ── Helpers ────────────────────────────────────────────────────────────────
 function _aspect() {
   return window.innerWidth / window.innerHeight;
+}
+
+function _homeCameraDistance() {
+  return CAM_Z_OFFSET / Math.min(1, _aspect());
 }
 
 function _truncate(str, len) {

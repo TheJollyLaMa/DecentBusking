@@ -24,6 +24,84 @@ let _burst = false;
 let _blocked = false;
 let _switchToken = 0;
 let _pollTimer = null;
+let _listenerId = null;
+let _voteButtons = [];
+let _voteStatusEl;
+let _votePending = false;
+let _votingPlayId = null;
+const _votedPlays = new Map();
+
+export async function sendRadioVote({ radioUrl, playId, voterId, vote, fetchImpl = fetch }) {
+  const response = await fetchImpl(`${radioUrl}/vote`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ playId, voterId, vote }),
+    signal: AbortSignal.timeout(10000),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || `Voting failed (${response.status})`);
+  return result;
+}
+
+function _anonymousListenerId() {
+  if (_listenerId) return _listenerId;
+  try {
+    const saved = localStorage.getItem('decentbusking:listener:v1');
+    if (/^[a-zA-Z0-9_-]{16,128}$/.test(saved || '')) _listenerId = saved;
+  } catch {}
+  if (!_listenerId) {
+    _listenerId = crypto.randomUUID();
+    try { localStorage.setItem('decentbusking:listener:v1', _listenerId); } catch {}
+  }
+  return _listenerId;
+}
+
+function _restoreVotes() {
+  try {
+    const votes = JSON.parse(localStorage.getItem(`decentbusking:votes:v1:${_radioUrl()}`) || '[]');
+    if (!Array.isArray(votes)) return;
+    for (const entry of votes.slice(-100)) {
+      if (Array.isArray(entry) && typeof entry[0] === 'string' && (entry[1] === 1 || entry[1] === -1)) {
+        _votedPlays.set(entry[0], entry[1]);
+      }
+    }
+  } catch {}
+}
+
+function _renderVoting() {
+  if (!_voteButtons.length) return;
+  const playId = _radio?.playId || null;
+  const active = _mode === 'radio' && _radioReachable && playId && _radio?.ipfsCid;
+  const choice = _votedPlays.get(playId);
+  if (_votingPlayId !== playId) {
+    _votingPlayId = playId;
+    if (_voteStatusEl) _voteStatusEl.textContent = choice ? 'Vote recorded' : '';
+  }
+  for (const button of _voteButtons) {
+    button.disabled = !active || _votePending || choice !== undefined;
+    button.setAttribute('aria-pressed', String(choice === Number(button.dataset.radioVote)));
+  }
+}
+
+async function _castRadioVote(vote) {
+  const playId = _radio?.playId;
+  if (_mode !== 'radio' || !playId || _votePending || _votedPlays.has(playId)) return;
+  _votePending = true;
+  _renderVoting();
+  try {
+    const result = await sendRadioVote({ radioUrl: _radioUrl(), playId, voterId: _anonymousListenerId(), vote });
+    if (result.playId !== playId || (result.vote !== 1 && result.vote !== -1)) throw new Error('Invalid vote response');
+    _votedPlays.set(playId, result.vote);
+    while (_votedPlays.size > 100) _votedPlays.delete(_votedPlays.keys().next().value);
+    try { localStorage.setItem(`decentbusking:votes:v1:${_radioUrl()}`, JSON.stringify([..._votedPlays])); } catch {}
+    if (_radio?.playId === playId && _voteStatusEl) _voteStatusEl.textContent = 'Vote recorded';
+  } catch (error) {
+    if (_radio?.playId === playId && _voteStatusEl) _voteStatusEl.textContent = error.message;
+  } finally {
+    _votePending = false;
+    _renderVoting();
+  }
+}
 
 export function initRadioSync() {
   _audio = document.getElementById('audio-player');
@@ -34,6 +112,11 @@ export function initRadioSync() {
   _playBtn = document.getElementById('now-playing-play-btn');
   _radioBtn = document.getElementById('now-playing-radio-btn');
   if (!_audio || !_radioUrl()) return;
+  _voteButtons = [...document.querySelectorAll('[data-radio-vote]')];
+  _voteStatusEl = document.getElementById('radio-vote-status');
+  _restoreVotes();
+  _voteButtons.forEach((button) => button.addEventListener('click', () => _castRadioVote(Number(button.dataset.radioVote))));
+  _renderVoting();
 
   _audio.addEventListener('ended', _onEnded);
   _playBtn?.addEventListener('click', _unlock);
@@ -51,6 +134,7 @@ export function playArchiveTrack({ title, artist, audioUrl }) {
   _clearTakeover();
   _burst = _takeoverQueue.length > 1;
   _mode = 'archive';
+  _renderVoting();
   _loadedPlayId = null;
   _setLabel('🎧 From the Archive');
   _radioBtn?.classList.remove('hidden');
@@ -65,6 +149,7 @@ export function returnToRadio() {
   _loadedPlayId = null;
   if (_takeoverQueue.length) _startNextTakeover();
   else _syncRadio('📻 Back in sync with the Discord JukeLoop');
+  _renderVoting();
 }
 
 // ── Polling ───────────────────────────────────────────────────────────────
@@ -92,6 +177,7 @@ async function _poll() {
     }
     _radioReachable = false;
   }
+  _renderVoting();
   _pollTimer = setTimeout(_poll, POLL_MS);
 }
 
@@ -133,6 +219,7 @@ function _radioPositionS() {
 
 function _syncRadio(message) {
   _setLabel('📻 Live on JukeLoop');
+  _renderVoting();
   if (!_radio) {
     if (_loadedPlayId || !_audio.paused) _stopAudio();
     _loadedPlayId = null;
@@ -178,6 +265,7 @@ function _startNextTakeover() {
   }
 
   _mode = 'takeover';
+  _renderVoting();
   if (_takeoverQueue.length > 0) _burst = true;
   const preview = _burst;
   const queued = _takeoverQueue.length;
@@ -270,6 +358,11 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     _playBtn?.classList.remove('hidden');
     return;
   }
+  if (token !== _switchToken) return;
+  if (at > 0 && !await _prepareRadioSeek(offset, token)) {
+    if (token === _switchToken) _audio.pause();
+    return;
+  }
   await _fadeIn(token);
 }
 
@@ -278,12 +371,13 @@ async function _prepareRadioSeek(offset, token) {
   while (token === _switchToken && performance.now() < deadline) {
     const target = offset();
     if (Number.isFinite(_audio.duration) && target >= _audio.duration - 1) return false;
+    if (!_audio.seeking && _audio.readyState >= 3 && Math.abs(_audio.currentTime - target) <= 0.75) return true;
     if (_seekTo(target)) {
-      while (_audio.seeking && token === _switchToken && performance.now() < deadline) {
+      while ((_audio.seeking || _audio.readyState < 3) && token === _switchToken && performance.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 40));
       }
-      if (token === _switchToken && !_audio.seeking) return true;
-      break;
+      if (token !== _switchToken) return false;
+      if (performance.now() >= deadline) break;
     }
     await new Promise((resolve) => setTimeout(resolve, 40));
   }
@@ -356,6 +450,10 @@ async function _unlock() {
   }
   _blocked = false;
   _playBtn?.classList.add('hidden');
+  if (_mode === 'radio' && _radio && !await _prepareRadioSeek(_radioPositionS, _switchToken)) {
+    _audio.pause();
+    return;
+  }
   await _fadeIn();
 }
 
@@ -371,10 +469,13 @@ function _setTrack(title, artist) {
 }
 
 function _setActivity(text) {
+  if (/in sync with|mirroring the Discord JukeLoop/i.test(text)) text = '';
   if (!_activityEl) return;
   const message = _blocked ? `${text} · tap ▶ Tune in to listen` : text;
+  _activityEl.hidden = !message;
   if (_activityEl.textContent === message) return;
   _activityEl.textContent = message;
+  _activityEl.title = message;
   _activityEl.classList.remove('radio-activity-flash');
   void _activityEl.offsetWidth;
   _activityEl.classList.add('radio-activity-flash');

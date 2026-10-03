@@ -34,6 +34,7 @@ import {
   loadPlaylist,
   addTrack,
   applyRating,
+  applySiteVote,
   reconcileRatings,
   getWeightedShuffledPlaylist,
   getPlaylist,
@@ -113,7 +114,7 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
     }));
   return {
     serverTime: now,
-    nowPlaying: nowPlaying
+    nowPlaying: nowPlaying && nowPlaying.audible !== false
       ? {
           playId: nowPlaying.playId || `${nowPlaying.trackId}:${nowPlaying.startedAt}`,
           trackId: nowPlaying.trackId,
@@ -203,6 +204,25 @@ const _sessions = new Map();
  */
 export function getJukeLoopSession(guildId) {
   return _sessions.get(guildId) ?? null;
+}
+
+export function submitJukeLoopVote({ playId, voterId, vote }, saveVote = applySiteVote) {
+  if (typeof playId !== 'string' || playId.length > 160 ||
+      typeof voterId !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(voterId) ||
+      (vote !== 1 && vote !== -1)) throw new Error('Invalid radio vote');
+  const session = [..._sessions.values()].find((entry) =>
+    !entry._destroyed && entry._nowPlaying?.audible && entry._nowPlaying.playId === playId);
+  if (!session) throw new Error('This radio play has ended or is not audible yet');
+  if (session._siteVotePlayId !== playId) {
+    session._siteVotePlayId = playId;
+    session._siteVoters = new Map();
+  }
+  const previous = session._siteVoters.get(voterId);
+  if (previous !== undefined) return { playId, vote: previous, duplicate: true };
+  if (session._siteVoters.size >= 5000) throw new Error('Voting capacity reached for this play');
+  saveVote(session._nowPlaying.trackId, vote);
+  session._siteVoters.set(voterId, vote);
+  return { playId, vote, duplicate: false };
 }
 
 /** The track currently audible in any JukeLoop voice session, or null. */

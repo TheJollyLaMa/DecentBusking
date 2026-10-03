@@ -2,7 +2,7 @@
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js?v=20261002-archive-drawer';
+import { fetchNFTMetaById } from './space.js?v=20261003-coins-radio-votes';
 
 // ── Public API ───────────────────────────────────────────────────────────
 export function renderNFTCard(nft) {
@@ -14,11 +14,35 @@ export function renderNFTCard(nft) {
 
   content.innerHTML = _buildCardHTML(nft);
   panel.classList.remove('hidden');
+  if (!panel.open) panel.showModal();
+  panel.oncancel = (event) => {
+    event.preventDefault();
+    panel.close();
+  };
+  panel.onkeydown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      panel.close();
+    }
+  };
+  panel.onclose = () => {
+    panel.classList.add('hidden');
+    content.querySelectorAll('audio').forEach((audio) => audio.pause());
+  };
+  panel.onclick = (event) => {
+    const bounds = panel.getBoundingClientRect();
+    if (event.target === panel && (event.clientX < bounds.left || event.clientX > bounds.right ||
+        event.clientY < bounds.top || event.clientY > bounds.bottom)) panel.close();
+  };
 
   // Wire close button
   if (closeBtn) {
-    closeBtn.onclick = () => panel.classList.add('hidden');
+    closeBtn.onclick = () => panel.close();
   }
+  content.querySelector('.nft-listen-btn')?.addEventListener('click', async () => {
+    const { setNowPlaying } = await import('./stage.js?v=20261003-coins-radio-votes');
+    setNowPlaying({ title: nft.name || nft.title, artist: nft.artist || nft.creator, audioUrl: nft.audioUrl || nft.animation_url });
+  });
 
   // Wire parent-play button if present
   const parentPlayBtn = content.querySelector('.nft-parent-play-btn');
@@ -77,23 +101,38 @@ function _buildCardHTML(nft) {
        </div>`
     : '';
   const marketUrl = _marketUrl(nft);
+  const imageUrl = (nft.image || '').replace('ipfs://', gateway);
+  const metadataUrl = (nft.metadataUri || '').replace('ipfs://', gateway);
+  const explorerUrl = `${cfg.blockExplorerUrl || 'https://basescan.org'}/token/${cfg.contractAddress}?a=${encodeURIComponent(nft.tokenId)}`;
 
   return `
-    <h3>🎵 ${_esc(nft.name || nft.title || `Track #${nft.tokenId}`)}</h3>
+    ${/^https?:\/\//i.test(imageUrl) ? `<img class="nft-detail-image" src="${_esc(imageUrl)}" alt="Artwork for ${_esc(nft.name || nft.title || 'this NFT')}" />` : ''}
+    <h3 id="nft-detail-title">${_esc(nft.name || nft.title || `Track #${nft.tokenId}`)}</h3>
 
-    ${audioUrl ? `<audio controls src="${_esc(audioUrl)}"></audio>` : ''}
+    ${audioUrl ? '<button class="nft-listen-btn nft-buy-btn" type="button">▶ Play Track</button>' : ''}
 
     ${parentSection}
 
     <dl class="nft-meta">
-      <dt>Token ID</dt><dd>#${nft.tokenId ?? '?'}</dd>
-      ${shortCreator ? `<dt>Artist</dt><dd>${_esc(shortCreator)}</dd>` : ''}
+      <dt>Token ID</dt><dd>#${_esc(String(nft.tokenId ?? '?'))}</dd>
+      <dt>Network</dt><dd>${_esc(cfg.chainName || 'Base Mainnet')}</dd>
+      ${nft.mintedSupply != null ? `<dt>Minted Editions</dt><dd>${_esc(String(nft.mintedSupply))}</dd>` : ''}
+      <dt>Contract</dt><dd>${_esc(cfg.contractAddress || '')}</dd>
+      ${shortCreator ? `<dt>Artist</dt><dd>${_esc(nft.artist || nft.creator)}</dd>` : ''}
       ${shortOwner   ? `<dt>Owner</dt><dd>${_esc(shortOwner)}</dd>`   : ''}
       <dt>Minted</dt><dd>${_esc(mintedDate)} ${ageLabel ? `<em style="color:var(--text-dim)">(${_esc(ageLabel)})</em>` : ''}</dd>
       ${royaltyRow}
       ${nft.tipWallet ? `<dt>Tip Wallet</dt><dd style="font-size:0.8em">${_esc(_shortAddr(nft.tipWallet))}</dd>` : ''}
+      ${nft.description ? `<dt>Description</dt><dd>${_esc(nft.description)}</dd>` : ''}
+      ${nft.audioUrl || nft.animation_url ? `<dt>Audio URI</dt><dd>${_esc(nft.audioUrl || nft.animation_url)}</dd>` : ''}
+      ${nft.metadataUri ? `<dt>Metadata URI</dt><dd>${_esc(nft.metadataUri)}</dd>` : ''}
     </dl>
 
+    <div class="nft-detail-links">
+      <a href="${_esc(explorerUrl)}" target="_blank" rel="noopener noreferrer">BaseScan ↗</a>
+      ${/^https?:\/\//i.test(metadataUrl) ? `<a href="${_esc(metadataUrl)}" target="_blank" rel="noopener noreferrer">Metadata ↗</a>` : ''}
+      ${/^https?:\/\//i.test(audioUrl) ? `<a href="${_esc(audioUrl)}" target="_blank" rel="noopener noreferrer">IPFS Audio ↗</a>` : ''}
+    </div>
     <a class="nft-buy-btn" href="${_esc(marketUrl)}" target="_blank" rel="noopener">View in DecentMarket</a>
   `;
 }
@@ -101,7 +140,7 @@ function _buildCardHTML(nft) {
 // ── Parent Track Playback ─────────────────────────────────────────────────
 async function _playParent(parentTokenId) {
   if (!parentTokenId) return;
-  const { setNowPlaying } = await import('./stage.js');
+  const { setNowPlaying } = await import('./stage.js?v=20261003-coins-radio-votes');
   const meta = await fetchNFTMetaById(parentTokenId);
   if (!meta) return;
   const cfg = window.DecentConfig || {};
