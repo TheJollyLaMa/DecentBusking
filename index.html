@@ -256,9 +256,9 @@
         Only the current <code>DEFAULT_ADMIN_ROLE</code> holder can access these operations; contract role management is available below the queue.
       </p>
       <div id="admin-connect-section">
-        <button id="admin-connect-btn" class="admin-btn admin-btn-primary">🔌 Connect Wallet</button>
         <span id="admin-connected-addr" class="admin-addr"></span>
       </div>
+      <div id="admin-status" class="admin-status" role="status"></div>
       <section id="admin-mint-section" class="hidden">
         <div class="admin-section-header">
           <div>
@@ -287,7 +287,6 @@
             <option value="admin">DEFAULT_ADMIN_ROLE</option>
           </select>
         </div>
-        <div id="admin-status" class="admin-status"></div>
         <div class="admin-actions">
           <button id="admin-grant-btn" class="admin-btn admin-btn-primary">✅ Grant Role</button>
         </div>
@@ -372,7 +371,7 @@
 
   <!-- Admin role-grant panel -->
   <script type="module" src="js/components/header-admin-inject.js"></script>
-  <script type="module" src="js/admin.js?v=20261005-mp4"></script>
+  <script type="module" src="js/admin.js?v=20261005-shared-wallet"></script>
 
   <script type="module" src="js/payroll.js"></script>
   <script type="module" src="js/radio-history.js?v=20261005-tally-votes"></script>

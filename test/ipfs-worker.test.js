@@ -39,6 +39,10 @@ test('worker issues a Pinata URL only for a fresh owner signature', async () => 
     now: () => Date.parse(issuedAt),
     fetchImpl: async (_url, options) => {
       assert.equal(options.headers.authorization, 'Bearer server-secret');
+      const request = JSON.parse(options.body);
+      assert.deepEqual(request.allow_mime_types, ['video/mp4']);
+      assert.equal(request.max_file_size, authorization.size + 64 * 1024);
+      assert.equal('mime_types' in request, false);
       return new Response(JSON.stringify({ data: 'https://uploads.pinata.example/signed' }), { status: 200 });
     },
   });
@@ -106,7 +110,7 @@ test('artist MP4 uploads use separate authorization and cannot access owner uplo
   const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: Wallet.createRandom().address,
     now: () => Date.parse(issuedAt), pinataJwt: 'secret',
     fetchImpl: async (_url, options) => {
-      assert.deepEqual(JSON.parse(options.body).mime_types, ['video/mp4']);
+      assert.deepEqual(JSON.parse(options.body).allow_mime_types, ['video/mp4']);
       return new Response(JSON.stringify({ data: 'https://uploads.example/signed' }));
     } });
   await withServer(handler, async baseUrl => {

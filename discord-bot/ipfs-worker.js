@@ -2,6 +2,7 @@ import { Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const SIGNED_UPLOAD_OVERHEAD_BYTES = 64 * 1024;
 const MAX_SIGNATURE_AGE_MS = 5 * 60 * 1000;
 const MINT_EVENT_ABI = [
   'event EditionMinted(uint256 indexed tokenId, address indexed to, uint256 amount, address indexed minter)',
@@ -56,8 +57,8 @@ export async function requestPinataSignedUrl({ pinataJwt, pinataSignUrl, name, s
       network: 'public',
       date: Math.floor(Date.now() / 1000),
       expires: 60,
-      max_file_size: size,
-      mime_types: [type],
+      max_file_size: size + SIGNED_UPLOAD_OVERHEAD_BYTES,
+      allow_mime_types: [type],
       filename: name,
     }),
   });

@@ -48,3 +48,14 @@ test('browser uploader supports local Kubo without a wallet signer', async () =>
   assert.equal(await upload(new File(['{}'], 'meta.json', { type: 'application/json' })), 'ipfs://bafydesktop');
   assert.match(endpoint, /127\.0\.0\.1:5001\/api\/v0\/add/);
 });
+
+test('failed artwork upload reports the filename and Pinata rejection reason', async () => {
+  const { createBrowserIpfsUploader } = await import(moduleUrl);
+  const upload = createBrowserIpfsUploader({ serviceUrl: 'https://worker.example',
+    signer: { signMessage: async () => 'signature' }, address: '0x1111111111111111111111111111111111111111', origin: 'https://site.example',
+    fetchImpl: async url => url.endsWith('/api/ipfs/upload-url')
+      ? new Response(JSON.stringify({ url: 'https://uploads.example/signed' }))
+      : new Response(JSON.stringify({ error: { reason: 'File size exceeds signed limit' } }), { status: 400 }),
+  });
+  await assert.rejects(upload(new File(['image'], 'cover.png', { type: 'image/png' })), /400.*cover\.png.*File size exceeds signed limit/);
+});
