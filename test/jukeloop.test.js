@@ -65,12 +65,12 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
   const rated = store.applyRating('attachment-2', 2, 1, 'rating-message-1');
   assert.deepEqual(
     { likes: rated.likes, dislikes: rated.dislikes, plays: rated.plays },
-    { likes: 2, dislikes: 1, plays: 1 },
+    { likes: 2, dislikes: 1, plays: 0 },
   );
   store.applyRating('attachment-2', 2, 1, 'rating-message-1');
   assert.deepEqual(
     { likes: rated.likes, dislikes: rated.dislikes, plays: rated.plays },
-    { likes: 2, dislikes: 1, plays: 1 },
+    { likes: 2, dislikes: 1, plays: 0 },
   );
   assert.equal(store.reconcileRatings([
     { trackId: 'attachment-2', likes: 1, dislikes: 0, messageId: 'rating-message-1' },
@@ -78,8 +78,20 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
   ]), 1);
   assert.deepEqual(
     { likes: rated.likes, dislikes: rated.dislikes, plays: rated.plays },
-    { likes: 3, dislikes: 1, plays: 2 },
+    { likes: 3, dislikes: 1, plays: 1 },
   );
+  const audible = store.recordAudiblePlay('attachment-2', {
+    playId: 'play-attachment-2-1',
+    startedAt: Date.parse('2026-10-05T12:00:00Z'),
+    endedAt: Date.parse('2026-10-05T12:04:00Z'),
+    audibleMs: 240_000,
+  });
+  assert.equal(audible.counted, true);
+  assert.equal(audible.week, '2026-W41');
+  assert.equal(rated.plays, 2);
+  assert.equal(store.recordAudiblePlay('attachment-2', {
+    playId: 'play-attachment-2-1', startedAt: 0, endedAt: 240_000, audibleMs: 240_000,
+  }).reason, 'duplicate');
 
   const snapshots = [];
   store.configureRemotePersistence(async (playlist) => {

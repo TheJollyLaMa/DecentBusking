@@ -79,6 +79,17 @@ function _injectPayrollLink(shadowRoot) {
   });
 
   leftMenu.appendChild(li);
+
+  const historyItem = document.createElement('li');
+  historyItem.className = 'payroll-nav-item';
+  historyItem.dataset.playHistoryTotalsItem = '1';
+  historyItem.textContent = '📊 JukeLoop Play Totals';
+  historyItem.addEventListener('click', (event) => {
+    event.stopPropagation();
+    leftMenu.style.display = 'none';
+    document.dispatchEvent(new CustomEvent('open-radio-history', { detail: { mode: 'totals' } }));
+  });
+  leftMenu.appendChild(historyItem);
 }
 
 // Shadow-DOM aware traversal — same helper pattern as about-override.js.

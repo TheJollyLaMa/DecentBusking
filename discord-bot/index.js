@@ -54,7 +54,12 @@ import {
   requestTrackMint,
   completeTrackMint,
   updateTrackPin,
+  getWeeklyPlayHistory,
+  getWeeklyPlayReport,
+  getWeeklyPlayWeeks,
+  getUtcWeekKey,
 } from './playlist-store.js';
+import { buildWeeklyPlayReportMessage } from './weekly-play-report.js';
 import {
   createJukeLoopSession,
   getJukeLoopSession,
@@ -71,6 +76,48 @@ const _jukeLoopRestartTimers = new Map();
 const _jukeLoopRestartAttempts = new Map();
 const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_RESTORE_ATTEMPTS = 3;
+const WEEKLY_REPORT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+async function runWeeklyPlayReport(client, config) {
+  const channelId = config.jukeLoopTextChannelId;
+  if (!channelId) return;
+  const now = Date.now();
+  const currentWeek = getUtcWeekKey(new Date(now));
+  const previousWeek = getUtcWeekKey(new Date(now - 7 * 24 * 60 * 60 * 1000));
+  const [currentYear, currentWeekNumber] = currentWeek.split('-W').map(Number);
+  const weekStart = new Date(Date.UTC(currentYear, 0, 4 + (currentWeekNumber - 1) * 7));
+  weekStart.setUTCDate(weekStart.getUTCDate() - ((weekStart.getUTCDay() + 6) % 7));
+  if (now < weekStart.getTime() + 5 * 60 * 1000) return;
+  if (!getWeeklyPlayWeeks().includes(previousWeek)) return;
+  const report = getWeeklyPlayReport(previousWeek);
+  if (!report.totalPlays) return;
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.messages) return;
+  const marker = `jukeloop-weekly-report:${previousWeek}`;
+  const monday = new Date(`${previousWeek.slice(0, 4)}-01-04T00:00:00Z`);
+  monday.setUTCDate(monday.getUTCDate() + (Number(previousWeek.slice(6)) - 1) * 7 - ((monday.getUTCDay() + 6) % 7));
+  let before;
+  let alreadyPosted = false;
+  for (let page = 0; page < 40; page++) {
+    const messages = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) }).catch((err) => {
+      console.warn('[weekly-play-report] Could not check existing reports:', err.message);
+      return null;
+    });
+    if (messages === null) return;
+    if (!messages?.size) break;
+    for (const message of messages.values()) {
+      if (message.content?.includes(marker)) { alreadyPosted = true; break; }
+    }
+    if (alreadyPosted) break;
+    const last = messages.last();
+    before = last?.id;
+    if (!last || last.createdTimestamp < monday.getTime() || messages.size < 100) break;
+  }
+  if (alreadyPosted) return;
+  await channel.send(buildWeeklyPlayReportMessage(report));
+  console.log(`[weekly-play-report] Posted ${previousWeek}: ${report.totalPlays} qualifying plays.`);
+}
 
 function syncMintedTracks(config) {
   return syncMintedTracksFromChain({
@@ -356,6 +403,7 @@ async function main() {
       nowPlaying: getJukeLoopNowPlaying(),
       playlist: getPlaylist(),
     }),
+    getRadioHistory: async ({ weeks, wallet }) => getWeeklyPlayHistory({ weeks, wallet }),
     onRadioVote: submitJukeLoopVote,
   });
   const port = process.env.PORT || 10000;
@@ -429,6 +477,8 @@ async function main() {
       );
     }
     setInterval(() => runIpfsBackfill(readyClient, config), IPFS_BACKFILL_INTERVAL_MS);
+    runWeeklyPlayReport(readyClient, config).catch((err) => console.error('[weekly-play-report] Failed:', err.message));
+    setInterval(() => runWeeklyPlayReport(readyClient, config).catch((err) => console.error('[weekly-play-report] Failed:', err.message)), WEEKLY_REPORT_CHECK_INTERVAL_MS);
   });
 
   client.on(Events.MessageCreate, async (message) => {

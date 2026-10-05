@@ -4,7 +4,7 @@
 // archive selections mute the radio until the listener returns to it.
 
 const POLL_MS = 8_000;
-const FADE_IN_MS = 1_500;
+const FADE_IN_MS = 600;
 const PREVIEW_MS = 30_000;
 const DRIFT_TOLERANCE_S = 8;
 const LOAD_TIMEOUT_MS = 20_000;

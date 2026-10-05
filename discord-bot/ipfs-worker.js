@@ -106,6 +106,7 @@ export function createWorkerRequestHandler({
   onMintComplete,
   getMintQueue,
   getRadioState,
+  getRadioHistory,
   onRadioVote,
   fetchImpl = fetch,
   now = () => Date.now(),
@@ -139,6 +140,18 @@ export function createWorkerRequestHandler({
           return;
         }
         sendJson(response, 200, await getRadioState(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/radio/history') {
+        if (!getRadioHistory) {
+          sendJson(response, 404, { error: 'Radio history is not configured' }, '*');
+          return;
+        }
+        const requestedWeeks = Number(requestUrl.searchParams.get('weeks') || 12);
+        const weeks = Number.isFinite(requestedWeeks) ? Math.max(1, Math.min(52, Math.floor(requestedWeeks))) : 12;
+        const wallet = requestUrl.searchParams.get('wallet');
+        if (wallet && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Invalid wallet filter');
+        sendJson(response, 200, { weeks: await getRadioHistory({ weeks, wallet }) }, '*');
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/radio/vote') {

@@ -34,6 +34,7 @@ import {
   loadPlaylist,
   addTrack,
   applyRating,
+  recordAudiblePlay,
   applySiteVote,
   reconcileRatings,
   getWeightedShuffledPlaylist,
@@ -50,6 +51,7 @@ const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
 // Gives Discord a moment to flush the connection before the next resource
 // is attached and provides a natural pause for listeners.
 const BETWEEN_TRACK_DELAY_MS = 1_500;
+const FADE_IN_SECONDS = 0.6;
 
 // How long to wait before retrying when the playlist is empty (ms).
 const EMPTY_PLAYLIST_RETRY_MS = 60_000;
@@ -270,7 +272,7 @@ function createFFmpegStream(url) {
     '-loglevel',            '0',
     '-vn',
     // Ease each song in from silence so tracks never pop in at full volume.
-    '-af', 'afade=t=in:st=0:d=1.5:curve=qsin',
+    '-af', `afade=t=in:st=0:d=${FADE_IN_SECONDS}:curve=qsin`,
     '-f',  's16le',
     '-ar', '48000',
     '-ac', '2',
@@ -314,6 +316,7 @@ export class JukeLoopSession {
     this._announcementContext = null;
     /** The track entry currently playing (so we can store ratings when it ends) */
     this._currentTrack    = null;
+    this._completedPlay   = null;
     /** Audible track and start time, published to the DecentBusking site. */
     this._nowPlaying      = null;
 
@@ -329,6 +332,17 @@ export class JukeLoopSession {
     });
 
     this.player.on(AudioPlayerStatus.Idle, () => {
+      if (this._nowPlaying?.audible) {
+        const endedAt = Date.now();
+        this._completedPlay = {
+          playId: this._nowPlaying.playId,
+          trackId: this._nowPlaying.trackId,
+          startedAt: this._nowPlaying.startedAt,
+          endedAt,
+          audibleMs: Math.max(0, endedAt - this._nowPlaying.startedAt),
+          firstWeekBonus: this._nowPlaying.firstWeekBonus,
+        };
+      }
       this._nowPlaying = null;
       if (!this._destroyed) {
         setTimeout(() => {
@@ -485,12 +499,13 @@ export class JukeLoopSession {
         uploader: track.uploader,
         filename: track.filename || null,
         ipfsCid: track.ipfsCid || null,
+        firstWeekBonus: track.firstWeekBonus === true,
         startedAt: Date.now(),
         audible: false,
       };
 
       // Announce the track and add reaction buttons
-      const totalTracks = getPlaylist().length;
+      const totalTracks = this._queue.length;
       const announcementContext = {
         queueIndex: this._queueIndex,
         totalTracks,
@@ -525,16 +540,24 @@ export class JukeLoopSession {
    * Called automatically when the next track is about to start.
    */
   async _collectReactions() {
-    if (!this._announcementMsg || !this._currentTrack) return;
-
-    const msgRef   = this._announcementMsg;
     const trackRef = this._currentTrack;
+    const completedPlay = this._completedPlay;
+    this._completedPlay = null;
+    const msgRef   = this._announcementMsg;
     const announcementContext = this._announcementContext;
 
     // Clear refs first so any re-entrant call is a no-op
     this._announcementMsg = null;
     this._currentTrack    = null;
     this._announcementContext = null;
+
+    if (trackRef && completedPlay?.trackId === trackRef.trackId) {
+      const recorded = recordAudiblePlay(trackRef.trackId, completedPlay);
+      if (recorded.counted) {
+        console.log(`[jukeloop] Counted weekly play for "${trackRef.title}" (${recorded.week}, ${Math.round(completedPlay.audibleMs / 1000)}s audible).`);
+      }
+    }
+    if (!msgRef || !trackRef) return;
 
     try {
       const fresh = await msgRef.fetch().catch(() => null);
