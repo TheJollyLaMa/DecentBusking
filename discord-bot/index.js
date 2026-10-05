@@ -37,7 +37,8 @@ import { backfillIpfsPins } from './ipfs-backfill.js';
 import { syncMintedTracksFromChain, createVerifiedMintQueueReader } from './mint-sync.js';
 import { createPinataStateStore } from './ipfs-state.js';
 import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
-import { buildMintEmbed } from './embed.js';
+import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
+import { createMintRequestInteractionHandler } from './mint-interactions.js';
 import { mediaTypeFor, normalizeMediaCid, MEDIA_TYPES, DISCORD_UPLOAD_MAX_BYTES, isDiscordAttachmentWithinLimit } from './media.js';
 import { fetchTrackList, createSession, getSession } from './radio.js';
 import {
@@ -381,6 +382,27 @@ async function main() {
     },
     getRequests: getMintRequests,
   });
+  const handleMintRequestInteraction = createMintRequestInteractionHandler({
+    getPlaylist,
+    requestTrackMint,
+    waitForPersistence: waitForRemotePersistence,
+    getDefaultArtwork: user => pinDiscordAvatar(user, config),
+    uploadArtwork: async artwork => {
+      const response = await fetch(artwork.url, { signal: AbortSignal.timeout(30_000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status} downloading artwork`);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length > MAX_ARTWORK_BYTES) throw new Error('Artwork is larger than 10 MB');
+      const extension = (artwork.name || '').split('.').pop().toLowerCase();
+      const type = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' }[extension] || artwork.contentType;
+      const uri = await uploadToIPFS(buffer, artwork.name || 'artwork.png', type, {
+        provider: config.ipfsUploadProvider,
+        pinataJwt: config.pinataJwt,
+        pinataApiUrl: config.pinataApiUrl,
+        ipfsApiUrl: config.ipfsApiUrl,
+      });
+      return uri.replace('ipfs://', '');
+    },
+  });
   const verifyMintTransaction = createMintTransactionVerifier({
     rpcUrl: config.baseRpcUrl,
     contractAddress: config.nftContractAddress,
@@ -553,6 +575,15 @@ async function main() {
 
   // ── Slash command interactions ───────────────────────────────────────────────
   client.on(Events.InteractionCreate, async (interaction) => {
+    try {
+      if (await handleMintRequestInteraction(interaction)) return;
+    } catch (error) {
+      console.error('[mint-request] Interaction failed:', error.message);
+      if (interaction.isRepliable?.() && !interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: 'Could not open the NFT request. Please retry.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      }
+      return;
+    }
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === 'radio') {
@@ -915,7 +946,7 @@ async function handleAudioAttachment(message, attachment, config, trackId) {
 
     // 3. Reply with the track ID used by the private owner-approval queue
     const embed = buildMintEmbed({ title, ipfsCid, trackId, uploaderTag });
-    await message.reply({ embeds: [embed] });
+    await message.reply({ embeds: [embed], components: buildMintRequestComponents(trackId) });
 
     // 4. Clean up the working message
     if (workingMsg) await workingMsg.delete().catch(() => {});
