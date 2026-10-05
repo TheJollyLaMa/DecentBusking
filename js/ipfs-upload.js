@@ -19,7 +19,12 @@ async function uploadForm(endpoint, file, fetchImpl, includeNetwork = false) {
   form.append('file', file, file.name);
   if (includeNetwork) form.append('network', 'public');
   const response = await fetchImpl(endpoint, { method: 'POST', body: form });
-  if (!response.ok) throw new Error(`IPFS upload failed (${response.status})`);
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    const detail = typeof result.error === 'string' ? result.error
+      : result.error?.message || result.error?.reason || result.message || result.Message;
+    throw new Error(`IPFS upload failed (${response.status}) for ${file.name}${typeof detail === 'string' ? `: ${detail.slice(0, 400)}` : ''}`);
+  }
   const cid = extractCid(await response.json());
   if (!cid) throw new Error('IPFS upload response did not include a CID');
   return `ipfs://${cid}`;

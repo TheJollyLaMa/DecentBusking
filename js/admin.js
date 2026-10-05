@@ -6,8 +6,8 @@
 // The panel is opened by dispatching a custom "open-admin" DOM event (wired up
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
-import { fetchMintQueue } from './admin-mint-queue.js';
-import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-mp4';
+import { fetchMintQueue, clearMintQueueAuthorization } from './admin-mint-queue.js?v=20261005-shared-wallet';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261005-mp4';
 
@@ -22,7 +22,7 @@ const ROLE_GRANT_ABI = [
 ];
 
 // ── DOM references (resolved after DOMContentLoaded) ─────────────────────────
-let _modal, _connectBtn, _connectedAddr, _roleSection,
+let _modal, _connectedAddr, _roleSection,
   _targetAddr, _roleSelect, _statusEl, _grantBtn, _closeBtn,
   _mintSection, _mintQueueEl, _mintRefreshBtn, _mintSelectedBtn,
   _mintSelectAll, _mintStatusEl;
@@ -30,11 +30,12 @@ let _adminSigner = null;
 let _adminAddress = null;
 let _mintQueue = [];
 let _mintBusy = false;
+let _adminOpen = false;
+let _walletCheckId = 0;
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   _modal        = document.getElementById('admin-modal');
-  _connectBtn   = document.getElementById('admin-connect-btn');
   _connectedAddr = document.getElementById('admin-connected-addr');
   _roleSection  = document.getElementById('admin-role-section');
   _targetAddr   = document.getElementById('admin-target-addr');
@@ -51,7 +52,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (!_modal) return; // guard: panel HTML not present
 
-  _connectBtn?.addEventListener('click', _connectWallet);
   _grantBtn?.addEventListener('click', _grantRole);
   _closeBtn?.addEventListener('click', _closeModal);
   _mintRefreshBtn?.addEventListener('click', _loadMintQueue);
@@ -73,34 +73,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Listen for the open event dispatched by the header inject script
   document.addEventListener('open-admin', _openModal);
+  document.addEventListener('wallet-connected', () => {
+    _resetAdminWallet();
+    if (_adminOpen) _connectWallet();
+  });
+  document.addEventListener('wallet-disconnected', () => {
+    _resetAdminWallet();
+    if (_adminOpen) _setStatus('Connect your wallet in the header to use admin tools.');
+  });
 });
 
 // ── Open / Close ──────────────────────────────────────────────────────────────
 function _openModal() {
+  _adminOpen = true;
   _modal?.classList.remove('hidden');
+  return _connectWallet();
 }
 
 function _closeModal() {
+  _adminOpen = false;
   _modal?.classList.add('hidden');
   _setStatus('');
 }
 
 // ── Connect Wallet ────────────────────────────────────────────────────────────
 async function _connectWallet() {
-  if (!window.ethereum) {
-    _setStatus('🦊 MetaMask not detected. Install it to continue.', true);
+  const wallet = window._wallet;
+  if (!wallet?.signer || !wallet.address) {
+    _resetAdminWallet();
+    _setStatus('Connect your wallet in the header to use admin tools.');
     return;
   }
 
+  const checkId = ++_walletCheckId;
   try {
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send('eth_requestAccounts', []);
-    const signer  = await provider.getSigner();
-    const address = await signer.getAddress();
-    const network = await provider.getNetwork();
+    const signer = wallet.signer;
+    const address = wallet.address;
     const cfg = window.DecentConfig || {};
 
-    if (Number(network.chainId) !== (cfg.chainId || 8453)) {
+    if (wallet.chainId !== (cfg.chainId || 8453)) {
+      _resetAdminWallet();
       _setStatus(`⚠️ Switch MetaMask to ${cfg.chainName || 'Base Mainnet'} before using admin tools.`, true);
       return;
     }
@@ -111,8 +123,10 @@ async function _connectWallet() {
     const contract = new ethers.Contract(cfg.contractAddress, ROLE_GRANT_ABI, signer);
     const adminRole = await contract.DEFAULT_ADMIN_ROLE();
     const isAdmin   = await contract.hasRole(adminRole, address);
+    if (checkId !== _walletCheckId || !_adminOpen) return;
 
     if (!isAdmin) {
+      _resetAdminWallet();
       _setStatus(
         '⛔ Your wallet does not hold DEFAULT_ADMIN_ROLE on this contract and cannot grant roles.',
         true,
@@ -122,32 +136,46 @@ async function _connectWallet() {
 
     _adminSigner = signer;
     _adminAddress = address;
-    _setStatus('✅ Wallet connected. You have DEFAULT_ADMIN_ROLE.');
+    _setStatus('✅ Connected wallet has DEFAULT_ADMIN_ROLE.');
     _mintSection?.classList.remove('hidden');
     _roleSection?.classList.remove('hidden');
-    if (_connectBtn) _connectBtn.disabled = true;
     await _loadMintQueue();
   } catch (err) {
-    _setStatus(`❌ ${err.message || 'Wallet connection failed'}`, true);
+    if (checkId === _walletCheckId) _setStatus(`❌ ${err.message || 'Wallet verification failed'}`, true);
   }
+}
+
+function _resetAdminWallet() {
+  ++_walletCheckId;
+  clearMintQueueAuthorization();
+  _adminSigner = null;
+  _adminAddress = null;
+  _mintQueue = [];
+  if (_connectedAddr) _connectedAddr.textContent = '';
+  _mintQueueEl?.replaceChildren();
+  _mintSection?.classList.add('hidden');
+  _roleSection?.classList.add('hidden');
 }
 
 // ── NFT Mint Queue ───────────────────────────────────────────────────────────
   async function _loadMintQueue() {
     if (!_adminSigner || !_adminAddress || _mintBusy) return;
-    _setMintStatus('Sign once to refresh the private mint queue.');
+    const checkId = _walletCheckId;
+    _setMintStatus('Loading private mint queue…');
     try {
       const cfg = window.DecentConfig || {};
-      _mintQueue = await fetchMintQueue({
+      const requests = await fetchMintQueue({
         serviceUrl: cfg.ipfsUploadServiceUrl,
         signer: _adminSigner,
         address: _adminAddress,
         origin: window.location.origin,
       });
+      if (checkId !== _walletCheckId) return;
+      _mintQueue = requests;
       _renderMintQueue();
       _setMintStatus(_mintQueue.length ? `${_mintQueue.length} pending request(s).` : 'The mint queue is empty.');
     } catch (err) {
-      _setMintStatus(`❌ ${err.message}`, true);
+      if (checkId === _walletCheckId) _setMintStatus(`❌ ${err.message}`, true);
     }
   }
 

@@ -155,6 +155,8 @@ Site submissions join the existing private owner mint queue. They remain outside
 
 A true one-confirmation batch is possible through a separately deployed `BatchProductMinter` helper contract holding `DEFAULT_ADMIN_ROLE`: it can loop over requests and use each `registerToken` return value immediately in `mintProduct`. That privileged helper requires its own Solidity project, review, deployment, and explicit role grant before the dapp should use it.
 
+Admin reuses the wallet connected in the site header; opening the panel checks the on-chain admin role without another connection request. Loading the private queue still requires an owner-wallet message signature, since a public address alone is not proof of ownership. That authorization is reused in memory for four minutes (within the worker's five-minute validity window), then refreshed when needed. It is cleared on account/network changes or disconnect and never stored in browser storage. Upload authorizations and on-chain mint transactions remain separate approvals.
+
 ---
 
 ## JukeLoop — 24/7 Community Radio
