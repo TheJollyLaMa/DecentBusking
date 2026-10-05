@@ -77,6 +77,9 @@ class CleanRightAnkh extends HTMLElement {
             <li class="wallet-item">
               <span class="wallet-addr" id="wallet-addr-display" style="display:none;"></span>
             </li>
+            <li class="wallet-item">
+              <button class="wallet-btn" id="radio-history-btn" style="display:none;">📊 My Play History</button>
+            </li>
           </ul>
         </div>
         <span class="sparkle sparkle-top">✨</span>
@@ -89,6 +92,7 @@ class CleanRightAnkh extends HTMLElement {
     const coin = this.shadowRoot.querySelector('.ankh-coin');
     const popup = this.shadowRoot.querySelector('.dropdown-menu.right-ankh-menu');
     const connectBtn = this.shadowRoot.querySelector('#wallet-connect-btn');
+    const historyBtn = this.shadowRoot.querySelector('#radio-history-btn');
     const addrDisplay = this.shadowRoot.querySelector('#wallet-addr-display');
 
     // Wire the Connect Wallet button.
@@ -98,11 +102,21 @@ class CleanRightAnkh extends HTMLElement {
         window._wallet.connect();
       }
     });
+    historyBtn?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (popup) popup.style.display = 'none';
+      if (window._wallet?.address) {
+        document.dispatchEvent(new CustomEvent('open-radio-history', {
+          detail: { mode: 'personal', wallet: window._wallet.address },
+        }));
+      }
+    });
 
     // Update button + address display when the global wallet state changes.
     const _onConnected = (ev) => {
       const addr = ev.detail?.address || '';
       if (connectBtn) connectBtn.textContent = '✅ Wallet Connected';
+      if (historyBtn) historyBtn.style.display = addr ? 'block' : 'none';
       if (addrDisplay) {
         addrDisplay.textContent = addr
           ? `${addr.slice(0, 6)}…${addr.slice(-4)}`
@@ -112,6 +126,7 @@ class CleanRightAnkh extends HTMLElement {
     };
     const _onDisconnected = () => {
       if (connectBtn) connectBtn.textContent = '🦊 Connect Wallet';
+      if (historyBtn) historyBtn.style.display = 'none';
       if (addrDisplay) {
         addrDisplay.textContent = '';
         addrDisplay.style.display = 'none';

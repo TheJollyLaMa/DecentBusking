@@ -15,6 +15,18 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STORE_PATH = process.env.JUKELOOP_PLAYLIST_PATH || join(__dirname, 'jukeloop-playlist.json');
+const MIN_WEEKLY_PLAY_MS = 30_000;
+const NEW_TRACK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function getUtcWeekKey(date = new Date()) {
+  const day = new Date(date);
+  day.setUTCHours(0, 0, 0, 0);
+  day.setUTCDate(day.getUTCDate() + 4 - (day.getUTCDay() || 7));
+  const year = day.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const week = Math.ceil((((day - yearStart) / 86400000) + 1) / 7);
+  return `${year}-W${String(week).padStart(2, '0')}`;
+}
 
 /**
  * @typedef {Object} TrackEntry
@@ -284,7 +296,6 @@ export function applyRating(trackId, newLikes, newDislikes, messageId) {
   if (messageId && track.ratedMessageIds?.includes(messageId)) return track;
   track.likes    += newLikes;
   track.dislikes += newDislikes;
-  track.plays    += 1;
   if (messageId) track.ratedMessageIds = [...(track.ratedMessageIds || []), messageId].slice(-500);
   _save();
   return track;
@@ -314,6 +325,80 @@ export function reconcileRatings(events) {
   }
   if (reconciled > 0) _save();
   return reconciled;
+}
+
+/** Count one completed, audible play in its UTC week; retries are idempotent by playId. */
+export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audibleMs, firstWeekBonus = false } = {}) {
+  if (!playId || !Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return { counted: false, reason: 'invalid-event' };
+  if (!Number.isFinite(audibleMs) || audibleMs < MIN_WEEKLY_PLAY_MS) return { counted: false, reason: 'under-30-seconds' };
+  const track = _playlist.find((entry) => entry.trackId === trackId);
+  if (!track) return { counted: false, reason: 'track-not-found' };
+  const week = getUtcWeekKey(new Date(endedAt));
+  track.weeklyPlayIds ||= {};
+  track.weeklyPlayIds[week] ||= [];
+  if (track.weeklyPlayIds[week].includes(playId)) return { counted: false, reason: 'duplicate' };
+  track.recordedPlayIds ||= [];
+  if (track.recordedPlayIds.includes(playId)) return { counted: false, reason: 'duplicate' };
+  track.weeklyPlays ||= {};
+  track.weeklyPlays[week] = (track.weeklyPlays[week] || 0) + 1;
+  track.plays = (track.plays || 0) + 1;
+  track.weeklyPlayIds[week].push(playId);
+  track.weeklyPlayIds[week] = track.weeklyPlayIds[week].slice(-5000);
+  if (firstWeekBonus) track.firstWeekBonusUsed = true;
+  track.recordedPlayIds.push(playId);
+  track.recordedPlayIds = track.recordedPlayIds.slice(-5000);
+  _save();
+  return { counted: true, week, weeklyPlays: track.weeklyPlays[week] };
+}
+
+export function getWeeklyPlayReport(week, { wallet } = {}) {
+  const targetWallet = typeof wallet === 'string' ? wallet.toLowerCase() : null;
+  const tracks = _playlist
+    .filter((track) => (track.weeklyPlays?.[week] || 0) > 0)
+    .filter((track) => !targetWallet || track.mintRecipient?.toLowerCase() === targetWallet)
+    .map((track) => ({
+      trackId: track.trackId,
+      title: track.title,
+      artist: track.uploader,
+      wallet: track.mintRecipient || null,
+      uploadedAt: track.addedAt || null,
+      plays: track.weeklyPlays[week],
+    }))
+    .sort((first, second) => second.plays - first.plays || first.title.localeCompare(second.title));
+  const artists = new Map();
+  for (const track of tracks) {
+    const artist = artists.get(track.artist) || { artist: track.artist, wallet: track.wallet, plays: 0, tracks: 0 };
+    artist.plays += track.plays;
+    artist.tracks++;
+    artists.set(track.artist, artist);
+  }
+  return {
+    week,
+    qualification: 'Completed Discord playback with at least 30 audible seconds; one event per play ID.',
+    totalPlays: tracks.reduce((total, track) => total + track.plays, 0),
+    trackCount: tracks.length,
+    artists: [...artists.values()].sort((first, second) => second.plays - first.plays),
+    tracks,
+  };
+}
+
+export function getWeeklyPlayWeeks() {
+  return [...new Set(_playlist.flatMap((track) => Object.keys(track.weeklyPlays || {})))].sort();
+}
+
+export function getWeeklyPlayHistory({ weeks = 12, now = Date.now(), wallet } = {}) {
+  const current = getUtcWeekKey(new Date(now));
+  const [year, weekNumber] = current.split('-W').map(Number);
+  const monday = new Date(Date.UTC(year, 0, 4 + (weekNumber - 1) * 7));
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+  const history = [];
+  for (let offset = Math.max(1, Math.min(52, Number(weeks) || 12)) - 1; offset >= 0; offset--) {
+    const start = new Date(monday);
+    start.setUTCDate(start.getUTCDate() - offset * 7);
+    const week = getUtcWeekKey(start);
+    history.push({ ...getWeeklyPlayReport(week, { wallet }), current: week === current });
+  }
+  return history;
 }
 
 // ── Read helpers ──────────────────────────────────────────────────────────────
@@ -362,7 +447,7 @@ export function getWeight(track) {
  *
  * @returns {TrackEntry[]}
  */
-export function getWeightedShuffledPlaylist() {
+export function getWeightedShuffledPlaylist(now = Date.now()) {
   if (_playlist.length === 0) return [];
 
   // Build mutable candidate array with weights
@@ -384,6 +469,13 @@ export function getWeightedShuffledPlaylist() {
     candidates.splice(chosen, 1);
   }
 
+  const fresh = result
+    .map((track, index) => ({ track, index, addedAt: Date.parse(track.addedAt || 0) }))
+    .filter((entry) => !entry.track.firstWeekBonusUsed && entry.addedAt > 0 && now >= entry.addedAt && now - entry.addedAt < NEW_TRACK_WINDOW_MS);
+  for (const entry of fresh.sort((first, second) => second.index - first.index)) {
+    const target = (entry.index + Math.floor(result.length / 2)) % result.length;
+    result.splice(target, 0, { ...entry.track, firstWeekBonus: true });
+  }
   return result;
 }
 
