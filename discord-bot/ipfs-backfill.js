@@ -7,6 +7,7 @@ const STALE_PENDING_MS = 10 * 60_000;
 const AUDIO_MIME_TYPES = {
   mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg',
   flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', weba: 'audio/webm',
+  mp4: 'video/mp4',
 };
 
 let _running = null;

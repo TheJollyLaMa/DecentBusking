@@ -32,6 +32,7 @@ test('only Discord-only tracks need IPFS pins; fresh uploads stay with the live 
   assert.equal(needsIpfsPin({ pinStatus: 'pending', addedAt: '2026-10-02T11:58:00Z' }, now), false);
   assert.equal(needsIpfsPin({ pinStatus: 'pending', addedAt: '2026-10-02T11:00:00Z' }, now), true);
   assert.equal(audioMimeType('Song.M4A'), 'audio/mp4');
+  assert.equal(audioMimeType('Video.MP4'), 'video/mp4');
   assert.equal(audioMimeType('unknown'), 'audio/mpeg');
 });
 
@@ -77,4 +78,18 @@ test('backfill pins legacy uploads, records missing originals, and checkpoints i
   ]);
   assert.equal(playlist[3].pinError, 'Original Discord upload no longer exists');
   assert.equal(store.saves, 2);
+});
+
+test('Discord pin backfill rejects attachments above 10 MB before downloading', async () => {
+  const { backfillIpfsPins } = await import(moduleUrl);
+  const { store, playlist } = createStore([{ trackId: 'too-large', title: 'Large', filename: 'large.mp4', pinStatus: 'untracked' }]);
+  let downloaded = false;
+  const result = await backfillIpfsPins({ client: {}, store, maxBytes: 10 * 1024 * 1024, delayMs: 0,
+    log: { log() {}, warn() {} },
+    fetchAttachment: async () => ({ size: 10 * 1024 * 1024 + 1, url: 'https://cdn.example/large.mp4' }),
+    fetchImpl: async () => { downloaded = true; }, upload: async () => { throw new Error('Must not upload'); },
+  });
+  assert.equal(downloaded, false);
+  assert.equal(result.failed, 1);
+  assert.equal(playlist[0].pinStatus, 'failed');
 });

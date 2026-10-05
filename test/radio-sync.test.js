@@ -124,6 +124,39 @@ test('site votes post only the current play and anonymous browser ID, with no wa
     fetchImpl: async () => new Response(JSON.stringify({ error: 'This play has ended' }), { status: 400 }) }), /ended/);
 });
 
+test('MP4 playback uses one video stream and returns cleanly to audio with radio preferences intact', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const makePlayer = () => {
+    const player = new EventTarget();
+    Object.assign(player, { volume: 0, muted: false, duration: 180, currentTime: 0, paused: true,
+      readyState: 4, seeking: false, seekable: { length: 1, start: () => 0, end: () => 180 },
+      pause() { this.paused = true; }, removeAttribute() {}, querySelectorAll: () => [], appendChild() {},
+      load() { setTimeout(() => this.dispatchEvent(new Event('loadedmetadata')), 0); },
+      async play() { this.paused = false; } });
+    return player;
+  };
+  const audio = makePlayer();
+  const video = makePlayer();
+  const stage = { hidden: true };
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console, audio, video, stage,
+    document: { createElement: () => ({}) } });
+  vm.runInContext(`${source}\n_audio = audio; _audioPlayer = audio; _videoPlayer = video; _videoStage = stage;
+    _radioMuted = true; _radioVolume = 0.4; globalThis.switchTrack = _switchTo;`, context);
+  await context.switchTrack({ title: 'Video', artist: 'Artist', url: 'https://media.example/movie', mime: 'video/mp4', offset: () => 25 });
+  assert.equal(audio.paused, true);
+  assert.equal(video.paused, false);
+  assert.equal(video.currentTime, 25);
+  assert.equal(video.muted, true);
+  assert.equal(video.volume, 0.4);
+  assert.equal(stage.hidden, false);
+  await context.switchTrack({ title: 'Audio', artist: 'Artist', url: 'https://media.example/song.mp3' });
+  assert.equal(video.paused, true);
+  assert.equal(audio.paused, false);
+  assert.equal(audio.muted, true);
+  assert.equal(audio.volume, 0.4);
+  assert.equal(stage.hidden, true);
+});
+
 test('radio volume survives fades and mute does not affect archive playback', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
   const audio = { volume: 0, muted: false };

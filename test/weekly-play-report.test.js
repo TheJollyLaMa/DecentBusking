@@ -31,6 +31,15 @@ test('weekly ledger counts only completed 30-second audible plays once by UTC we
   const report = store.getWeeklyPlayReport('2026-W41');
   assert.equal(report.totalPlays, 1);
   assert.deepEqual(report.artists.map((artist) => [artist.artist, artist.plays, artist.wallet]), [['artist-a', 1, '0xartist-a']]);
+  store.applySiteVote('song-b', 1);
+  store.applySiteVote('song-b', 1);
+  store.applySiteVote('song-b', -1);
+  const votedReport = store.getWeeklyPlayReport('2026-W41', { wallet: '0xARTIST-A' });
+  assert.equal(votedReport.tracks[0].likes, 2);
+  assert.equal(votedReport.tracks[0].dislikes, 1);
+  assert.equal(votedReport.artists[0].likes, 2);
+  assert.equal(votedReport.artists[0].dislikes, 1);
+  assert.equal(votedReport.totalPlays, 1);
   assert.equal(store.getPlaylist().find((track) => track.trackId === 'song-a').plays, 1);
   assert.deepEqual(store.getWeeklyPlayHistory({ weeks: 12, wallet: '0xARTIST-A', now: Date.parse('2026-10-05T12:00:00Z') })
     .at(-1).tracks.map((track) => track.trackId), ['song-b']);

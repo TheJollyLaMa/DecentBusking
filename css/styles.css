@@ -1903,6 +1903,20 @@ decent-foot {
 .radio-history-header h2 { margin: 0; color: var(--gold); font-size: 1.15rem; }
 #radio-history-close { width: 36px; height: 36px; color: var(--text-primary); background: #141720; border: 1px solid var(--panel-border); border-radius: 4px; cursor: pointer; }
 .radio-history-note { color: var(--text-dim); font-size: .8rem; }
+#radio-history-rewards { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding: 12px 0; margin: 0; border-bottom: 1px solid var(--panel-border); font-size: .85rem; }
+#radio-history-rewards[hidden] { display: none; }
+#radio-history-rewards dt { color: var(--text-dim); }
+#radio-history-rewards dd { margin: 0; color: var(--gold); }
+#radio-video-stage { position: fixed; inset: 150px 8vw calc(var(--radio-footer-height, 96px) + 100px); z-index: 40; display: grid; place-items: center; pointer-events: none; }
+#radio-video-stage[hidden] { display: none; }
+#radio-video-player { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; max-width: 1000px; object-fit: contain; opacity: .84; }
+#radio-video-toggle { display: grid; place-items: center; width: 32px; height: 28px; padding: 0; border: 1px solid var(--panel-border); border-radius: 4px; background: #10121a; cursor: pointer; }
+#radio-video-toggle img { filter: invert(1); }
+.mint-source-controls { display: flex; flex-wrap: wrap; gap: 16px; border: 0; padding: 0; margin: 12px 0; }
+#mint-form .mint-source-controls label { display: flex; align-items: center; gap: 6px; margin: 0; }
+#mint-form .mint-source-controls input { width: auto; margin: 0; }
+#mint-form select { width: 100%; padding: 10px; font: inherit; color: var(--text-primary); background: #10121a; border: 1px solid var(--panel-border); border-radius: 4px; }
+#mint-file-section[hidden], #mint-cid-section[hidden] { display: none; }
 .radio-history-filters { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 10px; margin: 14px 0; }
 .radio-history-filters label { display: grid; min-width: 0; gap: 5px; color: var(--text-dim); font-size: .78rem; }
 .radio-history-filters input, .radio-history-filters select { width: 100%; min-width: 0; min-height: 38px; padding: 6px 8px; color: var(--text-primary); background: #10121a; border: 1px solid var(--panel-border); border-radius: 4px; }
@@ -1911,11 +1925,15 @@ decent-foot {
 .radio-history-total { padding: 12px; color: var(--teal); background: rgba(0, 212, 170, .08); border-left: 2px solid var(--teal); }
 #radio-history-content h3 { margin: 20px 0 8px; color: var(--gold); font-size: .9rem; }
 .radio-history-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.radio-history-table-scroll { max-width: 100%; overflow-x: auto; }
+.radio-history-song-table { min-width: 570px; }
+.radio-history-table .radio-history-number { text-align: right; font-variant-numeric: tabular-nums; }
 .radio-history-table th, .radio-history-table td { padding: 8px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.08); overflow-wrap: anywhere; }
 .radio-history-table th:last-child, .radio-history-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .radio-history-empty { color: var(--text-dim); }
 @media (max-width: 600px) {
   #radio-history-dialog { width: calc(100vw - 20px); max-height: 84dvh; padding: 18px 14px; }
+  #radio-video-stage { inset: 140px 12px calc(var(--radio-footer-height, 96px) + 100px); }
   .radio-history-filters { grid-template-columns: 1fr 1fr; }
   .radio-history-table { font-size: .75rem; }
   .radio-history-table th, .radio-history-table td { padding: 7px 4px; }

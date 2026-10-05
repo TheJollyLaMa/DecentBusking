@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261005-radio-volume" />
+  <link rel="stylesheet" href="css/styles.css?v=20261005-tally-votes" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -14,7 +14,7 @@
   <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
   <!-- App config — must load before modules -->
-  <script src="decent.config.js?v=20261002-venus-subtitle"></script>
+  <script src="decent.config.js?v=20261005-discord-invite"></script>
 </head>
 <body>
 
@@ -90,31 +90,57 @@
     <button id="timeline-forward-btn" title="Go forward (toward now)" aria-label="Go forward in time">▶</button>
   </div>
 
-  <a id="mobile-discord-link" href="https://discord.gg/5XJtJYdhz" target="_blank" rel="noopener noreferrer" aria-label="Join the DecentBusking Discord">
+  <a id="mobile-discord-link" href="https://discord.gg/SCtcBggHPa" target="_blank" rel="noopener noreferrer" aria-label="Join the DecentBusking Discord">
     <span aria-hidden="true">💬</span>
     <span>Join Discord</span>
   </a>
 
+  <section id="radio-video-stage" aria-label="Current track video" hidden>
+    <video id="radio-video-player" playsinline preload="auto" aria-label="Current track video"></video>
+  </section>
+
   <!-- Mint modal -->
   <div id="mint-modal" class="hidden">
     <div id="mint-modal-inner">
-      <h2>🎸 Open Your Guitar Case</h2>
-      <p>An authorized owner wallet registers the track and mints it directly to the artist on Base.</p>
+      <h2>Submit Your Busk</h2>
       <form id="mint-form">
         <label for="mint-title">Track Title</label>
-        <input id="mint-title" type="text" placeholder="What are you playing?" required />
+        <input id="mint-title" type="text" placeholder="What are you playing?" maxlength="120" required />
 
-        <label id="mint-file-label" for="mint-file">Audio File <span class="hint">(mp3, wav, ogg, flac, m4a)</span></label>
-        <input id="mint-file" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,audio/*" required />
+        <label for="mint-artist">Artist Name</label>
+        <input id="mint-artist" type="text" maxlength="80" placeholder="Artist or band" />
+
+        <fieldset class="mint-source-controls">
+          <legend>Media Source</legend>
+          <label><input id="mint-source-file" type="radio" name="mint-source" value="file" checked /> Upload file</label>
+          <label><input id="mint-source-cid" type="radio" name="mint-source" value="cid" /> IPFS CID</label>
+        </fieldset>
+
+        <div id="mint-file-section">
+          <label id="mint-file-label" for="mint-file">Audio or MP4 <span class="hint">(up to 50 MB)</span></label>
+          <input id="mint-file" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,.weba,.mp4,audio/*,video/mp4" required />
+        </div>
+
+        <div id="mint-cid-section" hidden>
+          <label for="mint-cid-input">IPFS File CID</label>
+          <input id="mint-cid-input" type="text" placeholder="bafy... or ipfs://..." />
+        </div>
+
+        <label for="mint-media-type">Media Format</label>
+        <select id="mint-media-type">
+          <option value="audio/mpeg">MP3</option>
+          <option value="video/mp4">MP4 Video</option>
+          <option value="audio/mp4">M4A</option>
+          <option value="audio/wav">WAV</option>
+          <option value="audio/ogg">OGG / Opus</option>
+          <option value="audio/flac">FLAC</option>
+          <option value="audio/aac">AAC</option>
+          <option value="audio/webm">WebM Audio</option>
+        </select>
 
         <label for="mint-image">NFT Artwork <span class="hint">(optional image)</span></label>
         <input id="mint-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
 
-        <div id="mint-cid-section" class="hidden">
-          <p id="mint-cid-bot-msg" style="color:#00d26a;margin:0 0 0.5rem 0;">✅ Audio already pinned to IPFS by DecentBusking Bot</p>
-          <label for="mint-cid-input">IPFS CID <span class="hint">(pre-filled by bot — edit if needed)</span></label>
-          <input id="mint-cid-input" type="text" placeholder="bafy..." />
-        </div>
 
         <label for="mint-parent">Covers / References Token ID <span class="hint">(optional — remix or cover of another busk)</span></label>
         <input id="mint-parent" type="number" placeholder="Parent token ID" min="0" />
@@ -125,21 +151,19 @@
             <span id="mint-parent-preview-label">🎵 Referencing:</span>
             <span id="mint-parent-preview-title"></span>
             <span id="mint-parent-preview-artist"></span>
-            <audio id="mint-parent-preview-audio" controls></audio>
           </div>
         </div>
 
-        <p class="hint">ℹ️ Remix lineage is recorded in token metadata. On-chain royalty splitting for parent creators may be supported in a future contract upgrade.</p>
 
         <label for="mint-recipient">Artist Wallet <span class="hint">(receives the NFT and ERC-2981 royalties)</span></label>
         <input id="mint-recipient" type="text" placeholder="0x… · defaults to the connected wallet" />
 
         <label for="mint-tip-wallet">Your Tip Wallet Address <span class="hint">(where listeners send tips)</span></label>
-        <input id="mint-tip-wallet" type="text" placeholder="0x… or ENS.eth" />
+        <input id="mint-tip-wallet" type="text" placeholder="0x… · defaults to the artist wallet" />
 
         <div id="mint-status"></div>
         <div class="mint-form-actions">
-          <button type="submit" id="mint-submit-btn">🎵 Mint &amp; Busk</button>
+          <button type="submit" id="mint-submit-btn">Submit for Approval</button>
           <button type="button" id="mint-cancel-btn">Cancel</button>
         </div>
       </form>
@@ -166,7 +190,7 @@
   <!-- FOOTER: DecentFoot web component -->
   <decent-foot>
     <footer id="radio-footer">
-      <a id="footer-discord-link" href="https://discord.gg/5XJtJYdhz" target="_blank" rel="noopener noreferrer">💬 Discord</a>
+      <a id="footer-discord-link" href="https://discord.gg/SCtcBggHPa" target="_blank" rel="noopener noreferrer">💬 Discord</a>
       <div id="busker-info">
         <span id="now-playing-label">📻 Live on JukeLoop</span>
         <div class="radio-track-row">
@@ -188,6 +212,9 @@
         </div>
         <span id="now-playing-artist"></span>
         <div class="now-playing-actions">
+          <button id="radio-video-toggle" type="button" class="hidden" title="Hide video" aria-label="Hide video" aria-pressed="true">
+            <img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/video.svg" width="18" height="18" alt="" />
+          </button>
           <button id="now-playing-play-btn" class="hidden" title="Tune in" aria-label="Tune in">▶ Tune in</button>
           <button id="now-playing-radio-btn" class="hidden" title="Return to radio" aria-label="Return to radio">📻 Radio</button>
         </div>
@@ -198,10 +225,14 @@
 
   <dialog id="radio-history-dialog" aria-labelledby="radio-history-title">
     <header class="radio-history-header">
-      <h2 id="radio-history-title">📊 JukeLoop Play History</h2>
-      <button id="radio-history-close" type="button" aria-label="Close play history">✕</button>
+      <h2 id="radio-history-title">Playback Tally</h2>
+      <button id="radio-history-close" type="button" aria-label="Close playback tally">✕</button>
     </header>
     <p class="radio-history-note">Completed Discord plays with at least 30 audible seconds · UTC weeks</p>
+    <dl id="radio-history-rewards" hidden>
+      <dt>Redeemable tokens</dt>
+      <dd>Not configured</dd>
+    </dl>
     <div class="radio-history-filters">
       <label>Song <input id="radio-history-search" type="search" placeholder="Search songs" /></label>
       <label>Artist <select id="radio-history-artist"><option value="">All artists</option></select></label>
@@ -210,7 +241,7 @@
     </div>
     <label class="radio-history-week-label" for="radio-history-week">Week</label>
     <select id="radio-history-week"></select>
-    <div id="radio-history-content" aria-live="polite">Loading play history…</div>
+    <div id="radio-history-content" aria-live="polite">Loading playback tally…</div>
   </dialog>
 
   <!-- Admin role-grant modal -->
@@ -325,26 +356,26 @@
   <script type="module" src="js/components/about-override.js?v=20261002-about-refresh-3"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
-  <script type="module" src="js/components/header-right-ankh-override.js?v=20261005-weekly-play-history"></script>
+  <script type="module" src="js/components/header-right-ankh-override.js?v=20261005-playback-tally"></script>
 
   <!-- Load DecentHead components without its legacy IPFS status widget -->
   <script type="module" src="js/components/header.js?v=20261002-venus-subtitle"></script>
 
   <!-- Inject 💸 Payroll link into left ankh header dropdown -->
-  <script type="module" src="js/components/header-payroll-inject.js"></script>
+  <script type="module" src="js/components/header-payroll-inject.js?v=20261005-playback-tally"></script>
 
   <!-- Override .title-main color to DecentBusking orange inside AppTitle shadow root -->
   <script type="module" src="js/components/header-title-color-override.js?v=20261002-header-refresh-5"></script>
 
   <!-- Main app entry point -->
-  <script type="module" src="js/main.js?v=20261005-radio-volume"></script>
+  <script type="module" src="js/main.js?v=20261005-tally-votes"></script>
 
   <!-- Admin role-grant panel -->
   <script type="module" src="js/components/header-admin-inject.js"></script>
-  <script type="module" src="js/admin.js?v=20261003-coins-radio-votes"></script>
+  <script type="module" src="js/admin.js?v=20261005-mp4"></script>
 
   <script type="module" src="js/payroll.js"></script>
-  <script type="module" src="js/radio-history.js?v=20261005-wallet-history-3"></script>
+  <script type="module" src="js/radio-history.js?v=20261005-tally-votes"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js';
     document.addEventListener('DOMContentLoaded', initPayroll);

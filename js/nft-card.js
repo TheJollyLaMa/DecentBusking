@@ -2,7 +2,7 @@
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js?v=20261003-coins-radio-votes';
+import { fetchNFTMetaById } from './space.js?v=20261005-mp4';
 
 // ── Public API ───────────────────────────────────────────────────────────
 export function renderNFTCard(nft) {
@@ -40,8 +40,10 @@ export function renderNFTCard(nft) {
     closeBtn.onclick = () => panel.close();
   }
   content.querySelector('.nft-listen-btn')?.addEventListener('click', async () => {
-    const { setNowPlaying } = await import('./stage.js?v=20261003-coins-radio-votes');
-    setNowPlaying({ title: nft.name || nft.title, artist: nft.artist || nft.creator, audioUrl: nft.audioUrl || nft.animation_url });
+    const { setNowPlaying } = await import('./stage.js?v=20261005-mp4');
+    setNowPlaying({ title: nft.name || nft.title, artist: nft.artist || nft.creator,
+      audioUrl: nft.videoUrl || nft.audioUrl || nft.animation_url, mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : '') });
+    if (nft.videoUrl || nft.mediaType === 'video/mp4') panel.close();
   });
 
   // Wire parent-play button if present
@@ -79,7 +81,7 @@ function _buildCardHTML(nft) {
   const cfg = window.DecentConfig || {};
   const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
 
-  const audioUrl = (nft.audioUrl || nft.animation_url || '')
+  const audioUrl = (nft.videoUrl || nft.audioUrl || nft.animation_url || '')
     .replace('ipfs://', gateway);
 
   const shortCreator = _shortAddr(nft.artist || nft.creator || '');
@@ -124,14 +126,14 @@ function _buildCardHTML(nft) {
       ${royaltyRow}
       ${nft.tipWallet ? `<dt>Tip Wallet</dt><dd style="font-size:0.8em">${_esc(_shortAddr(nft.tipWallet))}</dd>` : ''}
       ${nft.description ? `<dt>Description</dt><dd>${_esc(nft.description)}</dd>` : ''}
-      ${nft.audioUrl || nft.animation_url ? `<dt>Audio URI</dt><dd>${_esc(nft.audioUrl || nft.animation_url)}</dd>` : ''}
+      ${audioUrl ? `<dt>${nft.videoUrl || nft.mediaType === 'video/mp4' ? 'Video' : 'Audio'} URI</dt><dd>${_esc(nft.videoUrl || nft.audioUrl || nft.animation_url)}</dd>` : ''}
       ${nft.metadataUri ? `<dt>Metadata URI</dt><dd>${_esc(nft.metadataUri)}</dd>` : ''}
     </dl>
 
     <div class="nft-detail-links">
       <a href="${_esc(explorerUrl)}" target="_blank" rel="noopener noreferrer">BaseScan ↗</a>
       ${/^https?:\/\//i.test(metadataUrl) ? `<a href="${_esc(metadataUrl)}" target="_blank" rel="noopener noreferrer">Metadata ↗</a>` : ''}
-      ${/^https?:\/\//i.test(audioUrl) ? `<a href="${_esc(audioUrl)}" target="_blank" rel="noopener noreferrer">IPFS Audio ↗</a>` : ''}
+      ${/^https?:\/\//i.test(audioUrl) ? `<a href="${_esc(audioUrl)}" target="_blank" rel="noopener noreferrer">IPFS ${nft.videoUrl || nft.mediaType === 'video/mp4' ? 'Video' : 'Audio'} ↗</a>` : ''}
     </div>
     <a class="nft-buy-btn" href="${_esc(marketUrl)}" target="_blank" rel="noopener">View in DecentMarket</a>
   `;
@@ -140,16 +142,17 @@ function _buildCardHTML(nft) {
 // ── Parent Track Playback ─────────────────────────────────────────────────
 async function _playParent(parentTokenId) {
   if (!parentTokenId) return;
-  const { setNowPlaying } = await import('./stage.js?v=20261003-coins-radio-votes');
+  const { setNowPlaying } = await import('./stage.js?v=20261005-mp4');
   const meta = await fetchNFTMetaById(parentTokenId);
   if (!meta) return;
   const cfg = window.DecentConfig || {};
   const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
-  const audioUrl = (meta.audioUrl || meta.animation_url || '').replace('ipfs://', gateway);
+  const audioUrl = (meta.videoUrl || meta.audioUrl || meta.animation_url || '').replace('ipfs://', gateway);
   setNowPlaying({
     title: meta.name || meta.title || `Track #${parentTokenId}`,
     artist: meta.artist || meta.creator || '',
     audioUrl,
+    mediaType: meta.mediaType || (meta.videoUrl ? 'video/mp4' : ''),
   });
 }
 

@@ -2,8 +2,8 @@
 // Initialises the header, footer, stage interactions, and the 3-D space field.
 
 import { initWallet } from './wallet.js';
-import { initStage } from './stage.js?v=20261005-radio-volume';
-import { initSpace } from './space.js?v=20261003-coins-radio-votes';
+import { initStage } from './stage.js?v=20261005-mp4';
+import { initSpace } from './space.js?v=20261005-mp4';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.
 
@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initWallet();
 
   const discordLink = document.getElementById('footer-discord-link');
-  if (discordLink) discordLink.href = window.DecentConfig?.discord || 'https://discord.gg/5XJtJYdhz';
+  if (discordLink) discordLink.href = window.DecentConfig?.discord || 'https://discord.gg/SCtcBggHPa';
   const footer = document.getElementById('radio-footer');
   if (footer && typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(() => {

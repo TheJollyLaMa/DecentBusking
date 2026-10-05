@@ -156,6 +156,17 @@ export function addTrack(track) {
   return true;
 }
 
+export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId }) {
+  const trackId = `site:${address.toLowerCase()}:${ipfsCid}`;
+  const existing = _playlist.find(track => track.trackId === trackId);
+  if (existing) return existing;
+  addTrack({ attachmentId: trackId, source: 'site', uploaderId: `wallet:${address.toLowerCase()}`,
+    uploader: artist, title, ipfsCid, mediaType, filename, pinStatus: 'pinned', artworkCid,
+    tipWallet: tipWallet || recipient, parentTokenId,
+    mintStatus: 'requested', mintRecipient: recipient, mintRequestedAt: new Date().toISOString() });
+  return _playlist.find(track => track.trackId === trackId);
+}
+
 /**
  * Persist the outcome of an IPFS pin attempt.
  * @param {string} trackId
@@ -363,12 +374,16 @@ export function getWeeklyPlayReport(week, { wallet } = {}) {
       wallet: track.mintRecipient || null,
       uploadedAt: track.addedAt || null,
       plays: track.weeklyPlays[week],
+      likes: track.likes || 0,
+      dislikes: track.dislikes || 0,
     }))
     .sort((first, second) => second.plays - first.plays || first.title.localeCompare(second.title));
   const artists = new Map();
   for (const track of tracks) {
-    const artist = artists.get(track.artist) || { artist: track.artist, wallet: track.wallet, plays: 0, tracks: 0 };
+    const artist = artists.get(track.artist) || { artist: track.artist, wallet: track.wallet, plays: 0, tracks: 0, likes: 0, dislikes: 0 };
     artist.plays += track.plays;
+    artist.likes += track.likes;
+    artist.dislikes += track.dislikes;
     artist.tracks++;
     artists.set(track.artist, artist);
   }
@@ -448,10 +463,11 @@ export function getWeight(track) {
  * @returns {TrackEntry[]}
  */
 export function getWeightedShuffledPlaylist(now = Date.now()) {
-  if (_playlist.length === 0) return [];
+  const eligible = _playlist.filter(track => track.source !== 'site' || track.mintStatus === 'minted');
+  if (eligible.length === 0) return [];
 
   // Build mutable candidate array with weights
-  const candidates = _playlist.map((track) => ({ track, weight: getWeight(track) }));
+  const candidates = eligible.map((track) => ({ track, weight: getWeight(track) }));
   const result = [];
 
   while (candidates.length > 0) {
@@ -492,10 +508,11 @@ export function getTopTracks(n = 10) {
 
 /** The message ID of the most recently added track (for incremental backfill). */
 export function getLatestMessageId() {
-  if (_playlist.length === 0) return null;
+  const discordTracks = _playlist.filter(track => /^\d+$/.test(track.messageId || ''));
+  if (discordTracks.length === 0) return null;
   // Messages with larger IDs are newer (Discord snowflake IDs are monotonically
   // increasing and sortable as BigInt).
-  return _playlist.reduce((latest, t) => {
+  return discordTracks.reduce((latest, t) => {
     return BigInt(t.messageId) > BigInt(latest) ? t.messageId : latest;
-  }, _playlist[0].messageId);
+  }, discordTracks[0].messageId);
 }

@@ -1,6 +1,6 @@
-export function buildUploadAuthorizationMessage({ address, origin, name, size, type, issuedAt }) {
+export function buildUploadAuthorizationMessage({ address, origin, name, size, type, issuedAt, purpose }) {
   return [
-    'DecentBusking IPFS upload authorization',
+    purpose === 'submission' ? 'DecentBusking artist media upload authorization' : 'DecentBusking IPFS upload authorization',
     `Wallet: ${address.toLowerCase()}`,
     `Origin: ${origin}`,
     `File: ${name}`,
@@ -32,6 +32,7 @@ export function createBrowserIpfsUploader({
   signer,
   address,
   origin,
+  purpose,
   fetchImpl = globalThis.fetch,
 }) {
   return async function upload(file) {
@@ -41,7 +42,7 @@ export function createBrowserIpfsUploader({
     }
     if (provider !== 'pinata') throw new Error(`Unsupported IPFS upload provider: ${provider}`);
     if (!serviceUrl) throw new Error('The Render IPFS worker URL is not configured');
-    if (!signer || !address) throw new Error('Connect the mint owner wallet before uploading');
+    if (!signer || !address) throw new Error('Connect your wallet before uploading');
 
     const issuedAt = new Date().toISOString();
     const authorization = {
@@ -51,9 +52,11 @@ export function createBrowserIpfsUploader({
       size: file.size,
       type: file.type || 'application/octet-stream',
       issuedAt,
+      ...(purpose === 'submission' ? { purpose } : {}),
     };
     const signature = await signer.signMessage(buildUploadAuthorizationMessage(authorization));
-    const signingResponse = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/ipfs/upload-url`, {
+    const endpoint = purpose === 'submission' ? 'submission-upload-url' : 'upload-url';
+    const signingResponse = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/ipfs/${endpoint}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...authorization, signature }),

@@ -73,6 +73,12 @@ test('CLI mint metadata matches the Admin panel format', async () => {
     mintedAt: '2026-10-03T00:00:00.000Z',
   });
   assert.equal(buildTrackMetadata({ ...track, artworkCid: 'bafy-art' }, '0xowner').image, 'ipfs://bafy-art');
+  const video = buildTrackMetadata({ ...track, filename: 'performance.mp4', mediaType: 'video/mp4',
+    tipWallet: '0xtip', parentTokenId: 12 }, '0xowner');
+  assert.equal(video.videoUrl, 'ipfs://bafy-audio');
+  assert.equal(video.mediaType, 'video/mp4');
+  assert.equal(video.tipWallet, '0xtip');
+  assert.deepEqual(video.royaltyChain, { parentTokenId: 12 });
 });
 
 test('CLI retries lagging mint estimates at the confirmed registration block without broadcasting', async () => {

@@ -12,6 +12,8 @@ let searchInput;
 let artistSelect;
 let fromInput;
 let toInput;
+let rewardsEl;
+let requestId = 0;
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -24,7 +26,7 @@ function renderWeek() {
   const report = reports.find((entry) => entry.week === weekSelect.value);
   content.replaceChildren();
   if (!report) {
-    content.append(element('p', 'radio-history-empty', 'No weekly play data has been recorded yet.'));
+    content.append(element('p', 'radio-history-empty', 'No playback tally has been recorded yet.'));
     return;
   }
 
@@ -54,11 +56,14 @@ function renderWeek() {
     ? `${filteredTotal} matching plays across ${filtered.length} songs (${report.totalPlays} total this week)`
     : `${report.totalPlays} qualifying plays across ${report.trackCount} songs`;
   content.append(element('p', 'radio-history-total', countMessage));
+  content.append(element('p', 'radio-history-note', 'Likes and dislikes are all-time totals; plays are for the selected UTC week.'));
 
   const artistTotals = new Map();
   for (const track of filtered) {
-    const artist = artistTotals.get(track.artist) || { artist: track.artist, plays: 0, tracks: 0 };
+    const artist = artistTotals.get(track.artist) || { artist: track.artist, plays: 0, tracks: 0, likes: 0, dislikes: 0 };
     artist.plays += track.plays;
+    artist.likes += track.likes || 0;
+    artist.dislikes += track.dislikes || 0;
     artist.tracks++;
     artistTotals.set(track.artist, artist);
   }
@@ -66,55 +71,66 @@ function renderWeek() {
   const artistTable = element('table', 'radio-history-table');
   const artistHead = element('thead');
   const artistHeader = element('tr');
-  for (const title of ['Artist', 'Songs', 'Plays']) artistHeader.append(element('th', '', title));
+  for (const title of ['Artist', 'Songs', 'Plays', 'Likes', 'Dislikes']) artistHeader.append(element('th', '', title));
   artistHead.append(artistHeader);
   const artistBody = element('tbody');
   for (const artist of [...artistTotals.values()].sort((first, second) => second.plays - first.plays)) {
     const row = element('tr');
-    row.append(element('td', '', artist.artist), element('td', '', String(artist.tracks)), element('td', '', String(artist.plays)));
+    row.append(element('td', '', artist.artist), element('td', '', String(artist.tracks)), element('td', '', String(artist.plays)),
+      element('td', 'radio-history-number', String(artist.likes)), element('td', 'radio-history-number', String(artist.dislikes)));
     artistBody.append(row);
   }
   artistTable.append(artistHead, artistBody);
-  content.append(artistHeading, artistTable);
+  const artistScroll = element('div', 'radio-history-table-scroll');
+  artistScroll.append(artistTable);
+  content.append(artistHeading, artistScroll);
 
   const trackHeading = element('h3', '', 'By Song');
-  const trackTable = element('table', 'radio-history-table');
+  const trackTable = element('table', 'radio-history-table radio-history-song-table');
   const trackHead = element('thead');
   const trackHeader = element('tr');
-  for (const title of ['Song', 'Artist', 'Uploaded', 'Plays']) trackHeader.append(element('th', '', title));
+  for (const title of ['Song', 'Artist', 'Uploaded', 'Plays', 'Likes', 'Dislikes']) trackHeader.append(element('th', '', title));
   trackHead.append(trackHeader);
   const trackBody = element('tbody');
   for (const track of filtered) {
     const row = element('tr');
     const uploadDate = track.uploadedAt ? new Date(track.uploadedAt).toLocaleDateString() : '—';
-    row.append(element('td', '', track.title), element('td', '', track.artist), element('td', '', uploadDate), element('td', '', String(track.plays)));
+    row.append(element('td', '', track.title), element('td', '', track.artist), element('td', '', uploadDate), element('td', '', String(track.plays)),
+      element('td', 'radio-history-number', String(track.likes || 0)), element('td', 'radio-history-number', String(track.dislikes || 0)));
     trackBody.append(row);
   }
   trackTable.append(trackHead, trackBody);
-  content.append(trackHeading, trackTable);
+  const trackScroll = element('div', 'radio-history-table-scroll');
+  trackScroll.append(trackTable);
+  content.append(trackHeading, trackScroll);
 }
 
 async function openHistory(event) {
+  const currentRequest = ++requestId;
   mode = event?.detail?.mode === 'personal' ? 'personal' : 'totals';
-  wallet = mode === 'personal' ? String(event?.detail?.wallet || '') : '';
+  wallet = mode === 'personal' ? String(window._wallet?.address || '') : '';
+  reports = [];
+  weekSelect.replaceChildren();
   searchInput.value = '';
   artistSelect.value = '';
   fromInput.value = '';
   toInput.value = '';
   if (!dialog.open) dialog.showModal();
-  content.textContent = 'Loading play history…';
-  if (titleEl) titleEl.textContent = mode === 'personal' ? '👤 My JukeLoop Play History' : '📊 JukeLoop Play Totals';
+  content.textContent = 'Loading playback tally…';
+  if (titleEl) titleEl.textContent = mode === 'personal' ? 'My Playback Tally' : 'Playback Tally';
+  if (rewardsEl) rewardsEl.hidden = mode !== 'personal' || !/^0x[0-9a-fA-F]{40}$/.test(wallet);
   if (noteEl) noteEl.textContent = mode === 'personal'
     ? `Plays for connected wallet ${wallet.slice(0, 6)}…${wallet.slice(-4)} · completed Discord plays with at least 30 audible seconds · UTC weeks`
     : 'Community totals · completed Discord plays with at least 30 audible seconds · UTC weeks';
   try {
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
-    if (!service) throw new Error('Play history service is not configured');
-    if (mode === 'personal' && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Connect your wallet to view personal play history.');
+    if (!service) throw new Error('Playback tally service is not configured');
+    if (mode === 'personal' && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Connect your wallet to view My Playback Tally.');
     const query = new URLSearchParams({ weeks: '12' });
     if (wallet) query.set('wallet', wallet);
     const response = await fetch(`${service}/api/radio/history?${query}`, { cache: 'no-store' });
     const result = await response.json();
+    if (currentRequest !== requestId) return;
     if (!response.ok) throw new Error(result.error || `History unavailable (${response.status})`);
     reports = Array.isArray(result.weeks) ? result.weeks : [];
     weekSelect.replaceChildren(...reports.slice().reverse().map((report) => {
@@ -124,13 +140,13 @@ async function openHistory(event) {
       return option;
     }));
     if (!reports.length) {
-      content.textContent = 'No weekly play data has been recorded yet.';
+      content.textContent = 'No playback tally has been recorded yet.';
       return;
     }
     weekSelect.value = reports.at(-1).week;
     renderWeek();
   } catch (error) {
-    content.textContent = error.message;
+    if (currentRequest === requestId) content.textContent = error.message;
   }
 }
 
@@ -144,8 +160,22 @@ function init() {
   artistSelect = document.getElementById('radio-history-artist');
   fromInput = document.getElementById('radio-history-from');
   toInput = document.getElementById('radio-history-to');
+  rewardsEl = document.getElementById('radio-history-rewards');
   if (!dialog || !weekSelect || !content) return;
   document.addEventListener('open-radio-history', openHistory);
+  document.addEventListener('wallet-connected', () => {
+    if (dialog.open && mode === 'personal') openHistory({ detail: { mode: 'personal' } });
+  });
+  document.addEventListener('wallet-disconnected', () => {
+    if (mode !== 'personal') return;
+    ++requestId;
+    reports = [];
+    wallet = '';
+    content.replaceChildren();
+    weekSelect.replaceChildren();
+    if (rewardsEl) rewardsEl.hidden = true;
+    if (dialog.open) dialog.close();
+  });
   document.getElementById('radio-history-close')?.addEventListener('click', () => dialog.close());
   weekSelect.addEventListener('change', renderWeek);
   searchInput?.addEventListener('input', renderWeek);

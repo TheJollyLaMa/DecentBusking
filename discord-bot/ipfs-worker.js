@@ -1,4 +1,5 @@
 import { Interface, JsonRpcProvider, verifyMessage } from 'ethers';
+import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_SIGNATURE_AGE_MS = 5 * 60 * 1000;
@@ -6,9 +7,9 @@ const MINT_EVENT_ABI = [
   'event EditionMinted(uint256 indexed tokenId, address indexed to, uint256 amount, address indexed minter)',
 ];
 
-export function buildUploadAuthorizationMessage({ address, origin, name, size, type, issuedAt }) {
+export function buildUploadAuthorizationMessage({ address, origin, name, size, type, issuedAt, purpose }) {
   return [
-    'DecentBusking IPFS upload authorization',
+    purpose === 'submission' ? 'DecentBusking artist media upload authorization' : 'DecentBusking IPFS upload authorization',
     `Wallet: ${address.toLowerCase()}`,
     `Origin: ${origin}`,
     `File: ${name}`,
@@ -108,12 +109,34 @@ export function createWorkerRequestHandler({
   getRadioState,
   getRadioHistory,
   onRadioVote,
+  onMediaSubmission,
   fetchImpl = fetch,
   now = () => Date.now(),
 }) {
   const origins = new Set(allowedOrigins);
   const expectedOwner = ownerWallet.toLowerCase();
-  const consumedSignatures = new Set();
+  const consumedSignatures = new Map();
+  function hasConsumedSignature(signature) {
+    const time = now();
+    for (const [key, expires] of consumedSignatures) {
+      if (expires < time) consumedSignatures.delete(key);
+    }
+    return consumedSignatures.has(signature);
+  }
+  const artistLimits = new Map();
+  function limitArtist(address) {
+    const time = now();
+    for (const [key, entry] of artistLimits) {
+      if (entry.until <= time) artistLimits.delete(key);
+    }
+    const key = address.toLowerCase();
+    const entry = artistLimits.get(key) || { count: 0, until: time + 60 * 60 * 1000 };
+    if (entry.count >= 20 || (!artistLimits.has(key) && artistLimits.size >= 2000)) {
+      throw new Error('Artist submission limit reached; try again later');
+    }
+    entry.count++;
+    artistLimits.set(key, entry);
+  }
 
   return async function handleRequest(request, response) {
     const requestUrl = new URL(request.url, 'http://localhost');
@@ -177,6 +200,43 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, { requests: await getMintQueue() }, corsOrigin);
         return;
       }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/media/submit') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!onMediaSubmission) throw new Error('Media submissions are not configured');
+        const body = await readJson(request);
+        const { address, signature, issuedAt, title, artist, mediaType, filename, recipient,
+          artworkCid = '', tipWallet = '', parentTokenId = 0 } = body;
+        if (!/^0x[0-9a-fA-F]{40}$/.test(address || '') || !signature ||
+            !Number.isFinite(Date.parse(issuedAt)) || Math.abs(now() - Date.parse(issuedAt)) > MAX_SIGNATURE_AGE_MS) {
+          throw new Error('Invalid or expired submission authorization');
+        }
+        if (typeof title !== 'string' || !title.trim() || title.length > 120 ||
+            typeof artist !== 'string' || !artist.trim() || artist.length > 80 ||
+            typeof filename !== 'string' || filename.length > 160 || /[\/\\\r\n]/.test(filename) ||
+            !Object.values(MEDIA_TYPES).includes(mediaType) || mediaTypeFor(filename) !== mediaType) throw new Error('Invalid media details');
+        if (!/^0x[0-9a-fA-F]{40}$/.test(recipient || '') ||
+            (address.toLowerCase() !== expectedOwner && recipient.toLowerCase() !== address.toLowerCase())) {
+          throw new Error('Artists must submit to their own connected wallet');
+        }
+        if ((tipWallet && !/^0x[0-9a-fA-F]{40}$/.test(tipWallet)) ||
+            !Number.isSafeInteger(parentTokenId) || parentTokenId < 0) throw new Error('Invalid tip wallet or parent token');
+        const ipfsCid = normalizeMediaCid(body.ipfsCid);
+        if (artworkCid) normalizeMediaCid(artworkCid);
+        const recovered = verifyMessage(buildSubmissionAuthorizationMessage({ ...body, origin }), signature).toLowerCase();
+        if (recovered !== address.toLowerCase()) throw new Error('Submission signature does not match the artist wallet');
+        if (hasConsumedSignature(signature)) throw new Error('Submission authorization has already been used');
+        limitArtist(address);
+        consumedSignatures.set(signature, now() + MAX_SIGNATURE_AGE_MS);
+        try {
+          const track = await onMediaSubmission({ address, title: title.trim(), artist: artist.trim(), ipfsCid,
+            mediaType, filename, recipient, artworkCid: artworkCid ? normalizeMediaCid(artworkCid) : '', tipWallet, parentTokenId });
+          sendJson(response, 200, { trackId: track.trackId, status: track.mintStatus }, corsOrigin);
+        } catch (error) {
+          consumedSignatures.delete(signature);
+          throw error;
+        }
+        return;
+      }
       if (request.method === 'POST' && requestUrl.pathname === '/api/mint-complete') {
         if (!corsOrigin) throw new Error('Origin is not allowed');
         if (!verifyMintTransaction || !onMintComplete) throw new Error('Mint reconciliation is not configured');
@@ -190,7 +250,8 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, { ok: true }, corsOrigin);
         return;
       }
-      if (request.method !== 'POST' || requestUrl.pathname !== '/api/ipfs/upload-url') {
+      const artistUpload = requestUrl.pathname === '/api/ipfs/submission-upload-url';
+      if (request.method !== 'POST' || (!artistUpload && requestUrl.pathname !== '/api/ipfs/upload-url')) {
         sendJson(response, 404, { error: 'Not found' }, corsOrigin);
         return;
       }
@@ -198,23 +259,27 @@ export function createWorkerRequestHandler({
 
       const body = await readJson(request);
       const { address, signature, name, size, type, issuedAt } = body;
-      if (!address || !signature || !name || !type || !issuedAt) throw new Error('Incomplete upload authorization');
+      if (!/^0x[0-9a-fA-F]{40}$/.test(address || '') || !signature || typeof name !== 'string' || !name || name.length > 160 || typeof type !== 'string' || !issuedAt) throw new Error('Incomplete upload authorization');
       if (!Number.isInteger(size) || size < 1 || size > MAX_UPLOAD_BYTES) throw new Error('Invalid upload size');
-      if (!['application/json'].includes(type) && !type.startsWith('audio/') && !type.startsWith('image/')) {
+      if (!['application/json', 'video/mp4'].includes(type) && !type.startsWith('audio/') && !type.startsWith('image/')) {
         throw new Error('Unsupported upload type');
+      }
+      if (artistUpload && !Object.values(MEDIA_TYPES).includes(type) && !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(type)) {
+        throw new Error('Artist uploads must be supported audio, MP4, or artwork');
       }
       const issuedAtMs = Date.parse(issuedAt);
       if (!Number.isFinite(issuedAtMs) || Math.abs(now() - issuedAtMs) > MAX_SIGNATURE_AGE_MS) {
         throw new Error('Upload authorization has expired');
       }
 
-      const message = buildUploadAuthorizationMessage({ address, origin, name, size, type, issuedAt });
+      const message = buildUploadAuthorizationMessage({ address, origin, name, size, type, issuedAt, purpose: artistUpload ? 'submission' : undefined });
       const recovered = verifyMessage(message, signature).toLowerCase();
-      if (recovered !== address.toLowerCase() || recovered !== expectedOwner) {
+      if (recovered !== address.toLowerCase() || (!artistUpload && recovered !== expectedOwner)) {
         throw new Error('Upload authorization is not from the mint owner');
       }
-      if (consumedSignatures.has(signature)) throw new Error('Upload authorization has already been used');
-      consumedSignatures.add(signature);
+      if (hasConsumedSignature(signature)) throw new Error('Upload authorization has already been used');
+      if (artistUpload) limitArtist(address);
+      consumedSignatures.set(signature, now() + MAX_SIGNATURE_AGE_MS);
 
       const url = await requestPinataSignedUrl({
         pinataJwt,

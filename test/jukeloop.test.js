@@ -119,7 +119,10 @@ test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages
     buildNowPlayingMessage,
     getVoiceRetryDelay,
     parseNowPlayingMessage,
+    getAttachmentTitle,
   } = await import(moduleUrl.href);
+
+  assert.equal(getAttachmentTitle({ name: 'performance.mp4', title: 'Performance.mp4' }), 'Performance');
 
   assert.equal(
     buildIpfsGatewayUrl('https://w3s.link', 'bafy-audio'),
@@ -151,6 +154,32 @@ test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages
   assert.equal(getVoiceRetryDelay(2), 30_000);
   assert.equal(getVoiceRetryDelay(10), 5 * 60_000);
 });
+
+test('site MP4 submissions stay out of radio until owner-approved mint completion', async (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-video-queue-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(temp, { recursive: true, force: true }); });
+  const moduleUrl = pathToFileURL(path.join(__dirname, '../discord-bot/playlist-store.js'));
+  moduleUrl.searchParams.set('video-queue', Date.now());
+  const store = await import(moduleUrl.href);
+  store.loadPlaylist([]);
+  const media = { address: '0x1111111111111111111111111111111111111111', title: 'Video', artist: 'Artist',
+    recipient: '0x1111111111111111111111111111111111111111', ipfsCid: 'bafy-video',
+    mediaType: 'video/mp4', filename: 'video.mp4', parentTokenId: 3, artworkCid: 'bafy-art' };
+  const track = store.submitMediaTrack(media);
+  assert.equal(track.mintStatus, 'requested');
+  assert.equal(store.getMintRequests().length, 1);
+  assert.equal(store.getLatestMessageId(), null);
+  assert.equal(store.submitMediaTrack({ ...media, title: 'Duplicate' }).trackId, track.trackId);
+  assert.equal(store.getPlaylist().length, 1);
+  assert.equal(store.getWeightedShuffledPlaylist().length, 0);
+  const { buildRadioState } = await import(pathToFileURL(path.join(__dirname, '../discord-bot/jukeloop.js')).href);
+  assert.equal(buildRadioState({ playlist: store.getPlaylist(), nowPlaying: null }).recent.length, 0);
+  store.completeTrackMint(track.trackId, { tokenId: '42', txHash: '0xmint' });
+  assert.ok(store.getWeightedShuffledPlaylist().every(entry => entry.mediaType === 'video/mp4'));
+  const recent = buildRadioState({ playlist: store.getPlaylist(), nowPlaying: null }).recent;
+  assert.equal(recent[0].mediaType, 'video/mp4');
+});
 test('radio state publishes the audible track position and newest uploads', async () => {
   const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'));
   const { buildRadioState } = await import(moduleUrl.href);
@@ -173,6 +202,7 @@ test('radio state publishes the audible track position and newest uploads', asyn
     title: 'Song',
     uploader: 'artist',
     filename: 'song.m4a',
+    mediaType: 'audio/mp4',
     ipfsCid: 'bafy-song',
     startedAt: 40_000,
     positionMs: 60_000,
@@ -180,6 +210,30 @@ test('radio state publishes the audible track position and newest uploads', asyn
   assert.deepEqual(state.recent.map((track) => [track.trackId, track.ipfsCid]), [['new', null], ['old', 'bafy-old']]);
   assert.equal('uploaderId' in state.recent[1], false);
   assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).nowPlaying, null);
+});
+
+test('historic MP4 discovery accepts exactly 10 MB, skips larger attachments, and remains wallet-unassigned', async () => {
+  const { backfillFromChannel } = await import(pathToFileURL(path.join(__dirname, '../discord-bot/jukeloop.js')).href);
+  const { DISCORD_UPLOAD_MAX_BYTES, isDiscordAttachmentWithinLimit } = await import(pathToFileURL(path.join(__dirname, '../discord-bot/media.js')).href);
+  assert.equal(DISCORD_UPLOAD_MAX_BYTES, 10 * 1024 * 1024);
+  assert.equal(isDiscordAttachmentWithinLimit({ size: DISCORD_UPLOAD_MAX_BYTES }), true);
+  assert.equal(isDiscordAttachmentWithinLimit({ size: DISCORD_UPLOAD_MAX_BYTES + 1 }), false);
+  const attachments = new Map([
+    ['small', { id: 'small', name: 'Performance.MP4', size: DISCORD_UPLOAD_MAX_BYTES }],
+    ['large', { id: 'large', name: 'TooLarge.mp4', size: DISCORD_UPLOAD_MAX_BYTES + 1 }],
+  ]);
+  const message = { id: '123', author: { bot: false, id: 'artist', username: 'Artist' }, attachments };
+  const batch = new Map([['123', message]]);
+  batch.last = () => message;
+  const tracks = [];
+  const channel = { id: 'channel', messages: { fetch: async () => batch } };
+  const added = await backfillFromChannel(channel, {
+    addTrack: track => { tracks.push(track); return true; }, restoreTrackTitles: () => 0,
+  });
+  assert.equal(added, 1);
+  assert.equal(tracks[0].attachmentId, 'small');
+  assert.equal(tracks[0].uploaderId, 'artist');
+  assert.equal(tracks[0].mintRecipient, undefined);
 });
 
 test('JukeLoop falls back to Pinata when the configured IPFS gateway cannot stream', async () => {

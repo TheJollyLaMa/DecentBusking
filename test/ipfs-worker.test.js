@@ -26,9 +26,9 @@ test('worker issues a Pinata URL only for a fresh owner signature', async () => 
   const authorization = {
     address: owner.address,
     origin: 'https://busking.example',
-    name: 'cover.png',
-    size: 5,
-    type: 'image/png',
+    name: 'performance.mp4',
+    size: 12 * 1024 * 1024,
+    type: 'video/mp4',
     issuedAt,
   };
   const signature = await owner.signMessage(buildUploadAuthorizationMessage(authorization));
@@ -92,6 +92,77 @@ test('worker rejects a valid signature from a non-owner wallet', async () => {
     });
     assert.equal(response.status, 400);
     assert.match((await response.json()).error, /not from the mint owner/);
+  });
+});
+
+test('artist MP4 uploads use separate authorization and cannot access owner upload permissions', async () => {
+  const { buildUploadAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+  const artist = Wallet.createRandom();
+  const issuedAt = '2026-10-05T12:00:00Z';
+  const origin = 'https://busking.example';
+  const payload = { address: artist.address, origin, issuedAt, name: 'performance.mp4',
+    type: 'video/mp4', size: 12 * 1024 * 1024, purpose: 'submission' };
+  const signature = await artist.signMessage(buildUploadAuthorizationMessage(payload));
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: Wallet.createRandom().address,
+    now: () => Date.parse(issuedAt), pinataJwt: 'secret',
+    fetchImpl: async (_url, options) => {
+      assert.deepEqual(JSON.parse(options.body).mime_types, ['video/mp4']);
+      return new Response(JSON.stringify({ data: 'https://uploads.example/signed' }));
+    } });
+  await withServer(handler, async baseUrl => {
+    const post = (endpoint, body) => fetch(`${baseUrl}/api/ipfs/${endpoint}`, {
+      method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    assert.equal((await post('upload-url', { ...payload, signature })).status, 400);
+    assert.equal((await post('submission-upload-url', { ...payload, signature })).status, 200);
+    assert.equal((await post('submission-upload-url', { ...payload, signature })).status, 400);
+    assert.equal((await post('submission-upload-url', { ...payload, signature, size: 51 * 1024 * 1024 })).status, 400);
+  });
+});
+
+test('signed CID submissions validate the artist, media, expiry, origin, and replay protection', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const mediaModule = pathToFileURL(path.join(__dirname, '../discord-bot/media.js')).href;
+  const { buildSubmissionAuthorizationMessage } = await import(mediaModule);
+  const browserModule = pathToFileURL(path.join(__dirname, '../js/mint-submission.js')).href;
+  const browser = await import(browserModule);
+  const artist = Wallet.createRandom();
+  const other = Wallet.createRandom();
+  const origin = 'https://busking.example';
+  const issuedAt = '2026-10-05T12:00:00Z';
+  const payload = { address: artist.address, origin, issuedAt, title: 'Performance', artist: 'Artist',
+    ipfsCid: 'bafybeifynaihnl2t37s3nfez3k5vbwwziaqyvayadqwt4bou3yv6jstxye',
+    mediaType: 'video/mp4', filename: 'performance.mp4', recipient: artist.address,
+    artworkCid: '', tipWallet: artist.address, parentTokenId: 7 };
+  assert.equal(browser.buildSubmissionAuthorizationMessage(payload), buildSubmissionAuthorizationMessage(payload));
+  const submissions = [];
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: other.address,
+    now: () => Date.parse(issuedAt), onMediaSubmission: async submission => {
+      submissions.push(submission);
+      return { trackId: 'queued-video', mintStatus: 'requested' };
+    } });
+  await withServer(handler, async baseUrl => {
+    const post = async (body, requestOrigin = origin, signer = artist) => fetch(`${baseUrl}/api/media/submit`, {
+      method: 'POST', headers: { origin: requestOrigin, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, signature: await signer.signMessage(buildSubmissionAuthorizationMessage(body)) }),
+    });
+    const accepted = await post(payload);
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(await accepted.json(), { trackId: 'queued-video', status: 'requested' });
+    assert.equal(submissions[0].mediaType, 'video/mp4');
+    assert.equal(submissions[0].parentTokenId, 7);
+    assert.equal((await post(payload)).status, 400);
+    for (const invalid of [
+      { ...payload, recipient: Wallet.createRandom().address },
+      { ...payload, ipfsCid: `${payload.ipfsCid}/movie.mp4` },
+      { ...payload, ipfsCid: 'not-a-cid' },
+      { ...payload, filename: 'movie.mp3' },
+      { ...payload, issuedAt: '2026-10-01T00:00:00Z' },
+      { ...payload, parentTokenId: -1 },
+    ]) assert.equal((await post(invalid)).status, 400);
+    assert.equal((await post({ ...payload, title: 'Forged' }, origin, other)).status, 400);
+    assert.equal((await post(payload, 'https://other.example')).status, 400);
+    assert.equal(submissions.length, 1);
   });
 });
 
