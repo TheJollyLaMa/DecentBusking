@@ -34,7 +34,7 @@ import http from 'http';
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
-import { syncMintedTracksFromChain } from './mint-sync.js';
+import { syncMintedTracksFromChain, createVerifiedMintQueueReader } from './mint-sync.js';
 import { createPinataStateStore } from './ipfs-state.js';
 import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed } from './embed.js';
@@ -76,6 +76,7 @@ import {
 
 const _jukeLoopRestartTimers = new Map();
 const _jukeLoopRestartAttempts = new Map();
+let _mintSyncTask = null;
 const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_RESTORE_ATTEMPTS = 3;
 const WEEKLY_REPORT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -121,11 +122,15 @@ async function runWeeklyPlayReport(client, config) {
   console.log(`[weekly-play-report] Posted ${previousWeek}: ${report.totalPlays} qualifying plays.`);
 }
 
-function syncMintedTracks(config) {
-  return syncMintedTracksFromChain({
-    rpcUrl: config.baseRpcUrl,
-    contractAddress: config.nftContractAddress,
-  }).catch((err) => console.warn('[mint-sync] Could not read DecentNFT mints:', err.message));
+function syncMintedTracks(config, { required = false } = {}) {
+  if (!_mintSyncTask) {
+    _mintSyncTask = syncMintedTracksFromChain({
+      rpcUrl: config.baseRpcUrl,
+      contractAddress: config.nftContractAddress,
+    }).finally(() => { _mintSyncTask = null; });
+  }
+  return required ? _mintSyncTask
+    : _mintSyncTask.catch((err) => console.warn('[mint-sync] Could not read DecentNFT mints:', err.message));
 }
 
 /** Pin Discord-only uploads in the background and announce what was archived. */
@@ -369,6 +374,13 @@ async function main() {
 
   let client;
   let playlistReady = false;
+  const getVerifiedMintRequests = createVerifiedMintQueueReader({
+    reconcile: async () => {
+      if (!playlistReady) throw new Error('Playlist is restoring; please retry shortly');
+      await syncMintedTracks(config, { required: true });
+    },
+    getRequests: getMintRequests,
+  });
   const verifyMintTransaction = createMintTransactionVerifier({
     rpcUrl: config.baseRpcUrl,
     contractAddress: config.nftContractAddress,
@@ -404,7 +416,7 @@ async function main() {
       await waitForRemotePersistence();
       return track;
     },
-    getMintQueue: async () => getMintRequests().map((track) => ({
+    getMintQueue: async () => (await getVerifiedMintRequests()).map((track) => ({
       trackId: track.trackId,
       title: track.title,
       uploader: track.uploader,
