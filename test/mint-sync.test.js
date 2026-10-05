@@ -28,6 +28,7 @@ test('marks tracks minted from Base so lost state cannot re-queue an existing NF
     { trackId: 'flowers', ipfsCid: 'bafy-flowers', mintStatus: 'requested', addedAt: '2026-10-01T00:00:00Z' },
     { trackId: 'party', ipfsCid: 'bafy-party', mintStatus: 'minted', tokenId: '8', addedAt: '2026-10-01T00:00:00Z' },
     { trackId: 'fresh', ipfsCid: 'bafy-fresh', mintStatus: 'unminted', addedAt: '2026-10-01T00:00:00Z' },
+    { trackId: 'video', ipfsCid: 'bafy-video', filename: 'performance.mp4', mintStatus: 'requested', addedAt: '2026-10-01T00:00:00Z' },
   ]);
 
   const supply = { 0: 0, 4: 1, 5: 1, 8: 1 };
@@ -54,8 +55,9 @@ test('marks tracks minted from Base so lost state cannot re-queue an existing NF
     ['flowers', 'minted', '4'],
     ['party', 'minted', '8'],
     ['fresh', 'unminted', null],
+    ['video', 'requested', null],
   ]);
-  assert.equal(store.getMintRequests().length, 0);
+  assert.deepEqual(store.getMintRequests().map(track => track.trackId), ['video']);
 });
 
 test('CLI mint metadata matches the Admin panel format', async () => {
@@ -79,6 +81,39 @@ test('CLI mint metadata matches the Admin panel format', async () => {
   assert.equal(video.mediaType, 'video/mp4');
   assert.equal(video.tipWallet, '0xtip');
   assert.deepEqual(video.royaltyChain, { parentTokenId: 12 });
+});
+
+test('unavailable minted metadata fails reconciliation instead of treating minted content as new', async () => {
+  const { syncMintedTracksFromChain } = await import(moduleUrl);
+  let applied = false;
+  const contract = { nextTokenId: async () => 1n, totalMinted: async () => 1n, uri: async () => 'ipfs://unavailable' };
+  await assert.rejects(syncMintedTracksFromChain({ contract, pauseMs: 0,
+    fetchImpl: async () => new Response('', { status: 503 }),
+    store: { applyOnChainMints: () => { applied = true; } },
+  }), /metadata could not be verified/);
+  assert.equal(applied, false);
+});
+
+test('private queue waits for reconciliation, shares in-flight work, and rejects stale state on failure', async () => {
+  const { createVerifiedMintQueueReader } = await import(moduleUrl);
+  let complete;
+  let scans = 0;
+  let queueReads = 0;
+  const read = createVerifiedMintQueueReader({
+    reconcile: () => { scans++; return new Promise(resolve => { complete = resolve; }); },
+    getRequests: () => { queueReads++; return [{ trackId: 'video' }]; },
+  });
+  const first = read();
+  const second = read();
+  await Promise.resolve();
+  assert.equal(scans, 1);
+  assert.equal(queueReads, 0);
+  complete();
+  assert.deepEqual(await first, [{ trackId: 'video' }]);
+  assert.deepEqual(await second, [{ trackId: 'video' }]);
+  const failed = createVerifiedMintQueueReader({ reconcile: async () => { throw new Error('Base RPC unavailable'); },
+    getRequests: () => { throw new Error('Must not expose unverified requests'); } });
+  await assert.rejects(failed(), /Base RPC unavailable/);
 });
 
 test('CLI retries lagging mint estimates at the confirmed registration block without broadcasting', async () => {

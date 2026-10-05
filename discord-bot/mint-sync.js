@@ -33,9 +33,12 @@ async function fetchMetadata(uri, fetchImpl) {
   const urls = /^https?:\/\//.test(uri) ? [uri] : METADATA_GATEWAYS.map((gateway) => `${gateway}${cidPath}`);
   for (const url of urls) {
     const response = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-    if (response?.ok) return response.json().catch(() => null);
+    if (response?.ok) {
+      const metadata = await response.json().catch(() => null);
+      if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) return metadata;
+    }
   }
-  return null;
+  throw new Error('NFT metadata could not be verified through any IPFS gateway');
 }
 
 /** Map audio CID → lowest minted token ID for every minted DecentNFT token. */
@@ -67,4 +70,13 @@ export async function syncMintedTracksFromChain({
   const changed = store.applyOnChainMints(minted);
   if (changed) log.log(`[mint-sync] Marked ${changed} track(s) minted from DecentNFT on Base.`);
   return changed;
+}
+
+export function createVerifiedMintQueueReader({ reconcile, getRequests }) {
+  let pending = null;
+  return async () => {
+    if (!pending) pending = Promise.resolve().then(reconcile).finally(() => { pending = null; });
+    await pending;
+    return getRequests();
+  };
 }
