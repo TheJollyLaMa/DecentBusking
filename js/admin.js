@@ -7,9 +7,9 @@
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
 import { fetchMintQueue } from './admin-mint-queue.js';
-import { createBrowserIpfsUploader } from './ipfs-upload.js';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-mp4';
 import { reportMintCompletion } from './mint-reconciliation.js';
-import { addNFTToSpace } from './space.js?v=20261003-coins-radio-votes';
+import { addNFTToSpace } from './space.js?v=20261005-mp4';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -166,6 +166,7 @@ async function _connectWallet() {
           <strong>${_esc(track.title)}</strong>
           <span>by ${_esc(track.uploader)} · ${_esc(track.requestedAt ? new Date(track.requestedAt).toLocaleString() : '')}</span>
           <span>${_esc(track.recipient)}</span>
+          <a href="${_esc(_gatewayUrl(track.ipfsCid))}" target="_blank" rel="noopener noreferrer">Open ${track.mediaType === 'video/mp4' ? 'video' : 'audio'}</a>
           <label class="admin-artwork-label">${track.artworkCid ? 'Replace artwork' : 'Optional artwork'}
             <input class="admin-artwork" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-index="${index}" />
           </label>
@@ -234,10 +235,13 @@ async function _connectWallet() {
       description: `Shared through DecentJukebox by ${track.uploader}`,
       animation_url: `ipfs://${track.ipfsCid}`,
       audioUrl: `ipfs://${track.ipfsCid}`,
+      ...(track.mediaType ? { mediaType: track.mediaType } : {}),
+      ...(track.mediaType === 'video/mp4' ? { videoUrl: `ipfs://${track.ipfsCid}` } : {}),
       ...(image ? { image } : {}),
       artist: track.recipient,
       creator: track.recipient,
-      tipWallet: track.recipient,
+      tipWallet: track.tipWallet || track.recipient,
+      ...(track.parentTokenId > 0 ? { parentTokenId: track.parentTokenId, royaltyChain: { parentTokenId: track.parentTokenId } } : {}),
       registeredBy: _adminAddress,
       mintedAt: new Date().toISOString(),
     };

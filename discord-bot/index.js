@@ -38,12 +38,14 @@ import { syncMintedTracksFromChain } from './mint-sync.js';
 import { createPinataStateStore } from './ipfs-state.js';
 import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed } from './embed.js';
+import { mediaTypeFor, normalizeMediaCid, MEDIA_TYPES, DISCORD_UPLOAD_MAX_BYTES, isDiscordAttachmentWithinLimit } from './media.js';
 import { fetchTrackList, createSession, getSession } from './radio.js';
 import {
   loadPlaylist,
   configureRemotePersistence,
   waitForRemotePersistence,
   addTrack,
+  submitMediaTrack,
   getTrackId,
   getPlaylist,
   getMintBacklog,
@@ -177,13 +179,10 @@ function scheduleJukeLoopRestart(client, config, reason) {
 
 // ── Audio MIME-type detection ─────────────────────────────────────────────────
 const AUDIO_MIME_PREFIXES  = ['audio/'];
-const AUDIO_EXTENSIONS_RE  = /\.(mp3|wav|ogg|flac|m4a|aac|opus|weba)$/i;
+const AUDIO_EXTENSIONS_RE  = /\.(mp3|wav|ogg|flac|m4a|aac|opus|weba|mp4)$/i;
 const IMAGE_EXTENSIONS_RE  = /\.(png|jpe?g|webp|gif)$/i;
 
-// Maximum audio file size the bot will download (50 MB).
-// Discord's own upload cap for non-nitro servers is 25 MB, but allow some
-// headroom for boosted servers (up to 100 MB) while still preventing abuse.
-const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB
+const MAX_FILE_BYTES = DISCORD_UPLOAD_MAX_BYTES;
 const MAX_ARTWORK_BYTES = 10 * 1024 * 1024; // 10 MB
 
 // Keyed by avatar hash so a changed Discord avatar is pinned again.
@@ -227,6 +226,7 @@ async function pinDiscordAvatar(user, config) {
  */
 function isAudioAttachment(attachment) {
   const mime = attachment.contentType || '';
+  if (mime === 'video/mp4') return true;
   if (AUDIO_MIME_PREFIXES.some((p) => mime.startsWith(p))) return true;
   return AUDIO_EXTENSIONS_RE.test(attachment.name || '');
 }
@@ -287,6 +287,14 @@ const SLASH_COMMANDS = [
       sub
         .setName('backlog')
         .setDescription('Show your audio uploads that have not been minted yet'),
+    )
+    .addSubcommand((sub) =>
+      sub.setName('submit').setDescription('Submit an IPFS audio or MP4 file for owner-approved minting')
+        .addStringOption(opt => opt.setName('cid').setDescription('File CID or ipfs://CID (for uploads over the Discord limit)').setRequired(true))
+        .addStringOption(opt => opt.setName('title').setDescription('Track title').setRequired(true).setMaxLength(120))
+        .addStringOption(opt => opt.setName('wallet').setDescription('Artist Base wallet').setRequired(true))
+        .addStringOption(opt => opt.setName('format').setDescription('Media format').setRequired(true)
+          .addChoices(...Object.entries(MEDIA_TYPES).map(([extension, type]) => ({ name: extension.toUpperCase(), value: extension })))),
     )
     .addSubcommand((sub) =>
       sub
@@ -360,6 +368,7 @@ async function main() {
   const config = loadConfig();
 
   let client;
+  let playlistReady = false;
   const verifyMintTransaction = createMintTransactionVerifier({
     rpcUrl: config.baseRpcUrl,
     contractAddress: config.nftContractAddress,
@@ -389,6 +398,12 @@ async function main() {
     pinataSignUrl: config.pinataSignUrl,
     verifyMintTransaction,
     onMintComplete: reconcileMint,
+    onMediaSubmission: async (submission) => {
+      if (!playlistReady) throw new Error('Playlist is restoring; please retry shortly');
+      const track = submitMediaTrack(submission);
+      await waitForRemotePersistence();
+      return track;
+    },
     getMintQueue: async () => getMintRequests().map((track) => ({
       trackId: track.trackId,
       title: track.title,
@@ -397,6 +412,10 @@ async function main() {
       recipient: track.mintRecipient,
       ipfsCid: track.ipfsCid,
       artworkCid: track.artworkCid || null,
+      filename: track.filename,
+      mediaType: mediaTypeFor(track.filename, track.mediaType),
+      tipWallet: track.tipWallet || track.mintRecipient,
+      parentTokenId: track.parentTokenId || 0,
       requestedAt: track.mintRequestedAt,
     })),
     getRadioState: async () => buildRadioState({
@@ -443,6 +462,7 @@ async function main() {
   } else {
     loadPlaylist();
   }
+  playlistReady = true;
   syncMintedTracks(config);
 
   client = new Client({
@@ -490,6 +510,10 @@ async function main() {
     if (!audioAttachments.length) return;
 
     for (const attachment of audioAttachments) {
+      if (!isDiscordAttachmentWithinLimit(attachment)) {
+        await message.reply('Discord media attachments must be no larger than 10 MB. Use /jukebox submit with a file CID, or upload through DecentBusking instead.').catch(() => {});
+        continue;
+      }
       const filename = attachment.name || 'track.mp3';
       const title    = getAttachmentTitle(attachment);
       const track = {
@@ -497,6 +521,7 @@ async function main() {
         messageId:  message.id,
         channelId:  message.channelId,
         filename,
+        mediaType: mediaTypeFor(filename, attachment.contentType),
         title,
         uploader:   message.author.tag ?? message.author.username ?? 'Unknown',
         uploaderId: message.author.id,
@@ -616,6 +641,29 @@ async function handleRadioCommand(interaction, config) {
  */
 async function handleJukeboxCommand(interaction, config) {
   const sub = interaction.options.getSubcommand();
+
+  if (sub === 'submit') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const ipfsCid = normalizeMediaCid(interaction.options.getString('cid', true));
+      const recipient = interaction.options.getString('wallet', true).trim();
+      if (!/^0x[0-9a-fA-F]{40}$/.test(recipient)) throw new Error('Enter a valid Base wallet address');
+      const extension = interaction.options.getString('format', true);
+      if (!MEDIA_TYPES[extension]) throw new Error('Unsupported media format');
+      const track = { attachmentId: `cid:${interaction.user.id}:${ipfsCid}`, messageId: interaction.id,
+        channelId: config.jukeboxChannelId, filename: `track.${extension}`, mediaType: MEDIA_TYPES[extension],
+        title: interaction.options.getString('title', true).trim(), uploader: interaction.user.tag || interaction.user.username,
+        uploaderId: interaction.user.id, pinStatus: 'pinned', ipfsCid };
+      addTrack(track);
+      const queued = requestTrackMint(getTrackId(track), interaction.user.id, recipient);
+      if (!queued) throw new Error('That file is already minted or cannot be queued');
+      await waitForRemotePersistence();
+      await interaction.editReply(`Queued **${queued.title}** for owner approval. Track ID: \`${queued.trackId}\`. MP4 audio plays in voice; video plays on DecentBusking.`);
+    } catch (error) {
+      await interaction.editReply(`Submission failed: ${error.message}`);
+    }
+    return;
+  }
 
   if (sub === 'request-mint') {
     const trackId = interaction.options.getString('track_id', true).trim();
@@ -804,7 +852,7 @@ async function handleJukeboxCommand(interaction, config) {
  */
 async function handleAudioAttachment(message, attachment, config, trackId) {
   const filename = attachment.name || 'track.mp3';
-  const mimeType = attachment.contentType || 'audio/mpeg';
+  const mimeType = mediaTypeFor(filename, attachment.contentType) || 'audio/mpeg';
   const title = getAttachmentTitle(attachment);
 
   const uploaderTag = message.author.tag || message.author.username || 'Unknown User';
@@ -824,7 +872,7 @@ async function handleAudioAttachment(message, attachment, config, trackId) {
     if (attachment.size > MAX_FILE_BYTES) {
       throw new Error(
         `File is too large (${(attachment.size / 1024 / 1024).toFixed(1)} MB). ` +
-        `Maximum allowed size is ${MAX_FILE_BYTES / 1024 / 1024} MB.`
+        `Maximum Discord attachment size is 10 MB. Use /jukebox submit with the file CID, or upload through DecentBusking instead.`
       );
     }
 
@@ -900,7 +948,7 @@ async function announceCompletedMint(client, config, track) {
     .setColor(0xf0c040)
     .setTitle(`🎉 New DecentNFT minted: ${track.title}`)
     .setDescription(
-      `<@${track.uploaderId}>'s track is now live on Base and in the DecentBusking archive.\n` +
+      `${track.source === 'site' ? 'An artist' : `<@${track.uploaderId}>`}'s track is now live on Base and in the DecentBusking archive.\n` +
       `[Open DecentBusking](${archiveUrl}) · [View transaction](${txUrl})`,
     )
     .addFields(

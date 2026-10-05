@@ -12,7 +12,7 @@ DecentBusking is a community listening room, a 3D timeline of music NFTs, and a 
 
 Open the [DecentBusking town square](https://thejollylama.github.io/DecentBusking/) and explore the 3D music timeline. Select a track in the archive to listen, inspect its NFT details, and tip the artist. Connect MetaMask on Base when you want to send a tip.
 
-Join [DecentBusking on Discord](https://discord.gg/5XJtJYdhz), head to **#DecentJukebox**, and tune in to the **JukeLoop** voice channel. The radio rotates community uploads; listeners can react 👍 or 👎. The bot tracks cumulative votes and plays, and the ratings influence future rotation.
+Join [DecentBusking on Discord](https://discord.gg/SCtcBggHPa), head to **#DecentJukebox**, and tune in to the **JukeLoop** voice channel. The radio rotates community uploads; listeners can react 👍 or 👎. The bot tracks cumulative votes and plays, and the ratings influence future rotation.
 
 ## Bring A Track
 
@@ -74,7 +74,7 @@ The static dapp can be explored without a wallet. Connect MetaMask on Base for w
 ## Links
 
 - [Listen in the DecentBusking town square](https://thejollylama.github.io/DecentBusking/)
-- [Join the Discord community](https://discord.gg/5XJtJYdhz)
+- [Join the Discord community](https://discord.gg/SCtcBggHPa)
 - [View DecentNFT on BaseScan](https://basescan.org/address/0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B)
 - [DecentMarket](https://thejollylama.github.io/DecentMarket/)
 - [DecentBusking issues](https://github.com/TheJollyLaMa/DecentBusking/issues)

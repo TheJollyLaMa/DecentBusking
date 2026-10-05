@@ -41,10 +41,11 @@ import {
   getPlaylist,
   restoreTrackTitles,
 } from './playlist-store.js';
+import { mediaTypeFor, isDiscordAttachmentWithinLimit } from './media.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const AUDIO_EXTENSIONS_RE = /\.(mp3|m4a|wav|ogg|flac|aac|opus|weba)$/i;
+const AUDIO_EXTENSIONS_RE = /\.(mp3|m4a|wav|ogg|flac|aac|opus|weba|mp4)$/i;
 const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
 
 // Delay between the end of one track and the start of the next (ms).
@@ -103,7 +104,7 @@ export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch) 
 
 /** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
 export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recentLimit = 10 }) {
-  const recent = [...playlist]
+  const recent = playlist.filter(track => track.source !== 'site' || track.mintStatus === 'minted')
     .sort((first, second) => Date.parse(second.addedAt) - Date.parse(first.addedAt))
     .slice(0, recentLimit)
     .map((track) => ({
@@ -111,6 +112,7 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
       title: track.title,
       uploader: track.uploader,
       filename: track.filename || null,
+      mediaType: mediaTypeFor(track.filename, track.mediaType),
       ipfsCid: track.ipfsCid || null,
       addedAt: track.addedAt,
     }));
@@ -123,6 +125,7 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
           title: nowPlaying.title,
           uploader: nowPlaying.uploader,
           filename: nowPlaying.filename || null,
+          mediaType: mediaTypeFor(nowPlaying.filename, nowPlaying.mediaType),
           ipfsCid: nowPlaying.ipfsCid || null,
           startedAt: nowPlaying.startedAt,
           positionMs: Math.max(0, now - nowPlaying.startedAt),
@@ -498,6 +501,7 @@ export class JukeLoopSession {
         title: track.title,
         uploader: track.uploader,
         filename: track.filename || null,
+        mediaType: mediaTypeFor(track.filename, track.mediaType),
         ipfsCid: track.ipfsCid || null,
         firstWeekBonus: track.firstWeekBonus === true,
         startedAt: Date.now(),
@@ -619,7 +623,7 @@ export class JukeLoopSession {
  * @param {import('discord.js').TextBasedChannel} jukeboxChannel
  * @returns {Promise<number>} Number of new tracks added to the store
  */
-export async function backfillFromChannel(jukeboxChannel) {
+export async function backfillFromChannel(jukeboxChannel, store = { addTrack, restoreTrackTitles }) {
   let added   = 0;
   let lastId  = undefined;
   const titles = [];
@@ -640,12 +644,13 @@ export async function backfillFromChannel(jukeboxChannel) {
 
       for (const attachment of msg.attachments.values()) {
         if (!AUDIO_EXTENSIONS_RE.test(attachment.name ?? '')) continue;
+        if (!isDiscordAttachmentWithinLimit(attachment)) continue;
 
         const filename = attachment.name;
         const title    = getAttachmentTitle(attachment);
         titles.push({ trackId: attachment.id, legacyTrackId: `${msg.id}:${filename}`, title });
 
-        const wasAdded = addTrack({
+        const wasAdded = store.addTrack({
           attachmentId: attachment.id,
           messageId:  msg.id,
           channelId:  jukeboxChannel.id,
@@ -664,7 +669,7 @@ export async function backfillFromChannel(jukeboxChannel) {
     if (batch.size < 100) break;
   }
 
-  const retitled = restoreTrackTitles(titles);
+  const retitled = store.restoreTrackTitles(titles);
   if (retitled) console.log(`[jukeloop] Restored ${retitled} original track title(s) with emoji/accents.`);
   console.log(`[jukeloop] Backfill complete — added ${added} new track(s).`);
   return added;

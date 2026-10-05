@@ -59,12 +59,6 @@ class CleanRightAnkh extends HTMLElement {
           text-align: left;
         }
         .wallet-btn:hover { opacity: 0.8; }
-        .wallet-addr {
-          display: block;
-          font-size: 0.75em;
-          opacity: 0.7;
-          padding: 0 1rem 0.4rem;
-        }
       </style>
       <div class="ankh-wrapper">
         <div class="ankh-container">
@@ -72,13 +66,7 @@ class CleanRightAnkh extends HTMLElement {
           <ul class="dropdown-menu right-ankh-menu"
               style="display:none; list-style:none; padding:0; margin:0; position:absolute; top:100%; left:50%; transform:translateX(-50%);">
             <li class="wallet-item">
-              <button class="wallet-btn" id="wallet-connect-btn">🦊 Connect Wallet</button>
-            </li>
-            <li class="wallet-item">
-              <span class="wallet-addr" id="wallet-addr-display" style="display:none;"></span>
-            </li>
-            <li class="wallet-item">
-              <button class="wallet-btn" id="radio-history-btn" style="display:none;">📊 My Play History</button>
+              <button class="wallet-btn" id="radio-history-btn" style="display:none;">My Playback Tally</button>
             </li>
           </ul>
         </div>
@@ -91,17 +79,7 @@ class CleanRightAnkh extends HTMLElement {
 
     const coin = this.shadowRoot.querySelector('.ankh-coin');
     const popup = this.shadowRoot.querySelector('.dropdown-menu.right-ankh-menu');
-    const connectBtn = this.shadowRoot.querySelector('#wallet-connect-btn');
     const historyBtn = this.shadowRoot.querySelector('#radio-history-btn');
-    const addrDisplay = this.shadowRoot.querySelector('#wallet-addr-display');
-
-    // Wire the Connect Wallet button.
-    connectBtn?.addEventListener('click', e => {
-      e.stopPropagation();
-      if (window._wallet?.connect) {
-        window._wallet.connect();
-      }
-    });
     historyBtn?.addEventListener('click', (event) => {
       event.stopPropagation();
       if (popup) popup.style.display = 'none';
@@ -112,25 +90,13 @@ class CleanRightAnkh extends HTMLElement {
       }
     });
 
-    // Update button + address display when the global wallet state changes.
     const _onConnected = (ev) => {
       const addr = ev.detail?.address || '';
-      if (connectBtn) connectBtn.textContent = '✅ Wallet Connected';
       if (historyBtn) historyBtn.style.display = addr ? 'block' : 'none';
-      if (addrDisplay) {
-        addrDisplay.textContent = addr
-          ? `${addr.slice(0, 6)}…${addr.slice(-4)}`
-          : '';
-        addrDisplay.style.display = addr ? 'block' : 'none';
-      }
     };
     const _onDisconnected = () => {
-      if (connectBtn) connectBtn.textContent = '🦊 Connect Wallet';
       if (historyBtn) historyBtn.style.display = 'none';
-      if (addrDisplay) {
-        addrDisplay.textContent = '';
-        addrDisplay.style.display = 'none';
-      }
+      if (popup) popup.style.display = 'none';
     };
 
     document.addEventListener('wallet-connected',    _onConnected);
@@ -147,7 +113,7 @@ class CleanRightAnkh extends HTMLElement {
     this._onDisconnected = _onDisconnected;
 
     coin?.addEventListener('click', e => {
-      if (!popup) return;
+      if (!popup || !window._wallet?.address) return;
       popup.style.display = popup.style.display === 'block' ? 'none' : 'block';
       e.stopPropagation();
     });

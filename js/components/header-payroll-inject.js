@@ -83,7 +83,7 @@ function _injectPayrollLink(shadowRoot) {
   const historyItem = document.createElement('li');
   historyItem.className = 'payroll-nav-item';
   historyItem.dataset.playHistoryTotalsItem = '1';
-  historyItem.textContent = '📊 JukeLoop Play Totals';
+  historyItem.textContent = 'Playback Tally';
   historyItem.addEventListener('click', (event) => {
     event.stopPropagation();
     leftMenu.style.display = 'none';

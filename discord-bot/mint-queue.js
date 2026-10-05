@@ -15,6 +15,7 @@ import { loadConfig } from './config.js';
 import { uploadToIPFS } from './ipfs.js';
 import { buildAdminAuthorizationMessage } from './ipfs-worker.js';
 import { readMintedAudioCids, audioCidFromMetadata, withRetry } from './mint-sync.js';
+import { mediaTypeFor } from './media.js';
 
 const NFT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -34,10 +35,13 @@ export function buildTrackMetadata(track, registeredBy, now = new Date()) {
     description: `Shared through DecentJukebox by ${track.uploader}`,
     animation_url: `ipfs://${track.ipfsCid}`,
     audioUrl: `ipfs://${track.ipfsCid}`,
+    ...(mediaTypeFor(track.filename, track.mediaType) ? { mediaType: mediaTypeFor(track.filename, track.mediaType) } : {}),
+    ...(mediaTypeFor(track.filename, track.mediaType) === 'video/mp4' ? { videoUrl: `ipfs://${track.ipfsCid}` } : {}),
     ...(track.artworkCid ? { image: `ipfs://${track.artworkCid}` } : {}),
     artist: track.recipient,
     creator: track.recipient,
-    tipWallet: track.recipient,
+    tipWallet: track.tipWallet || track.recipient,
+    ...(track.parentTokenId > 0 ? { parentTokenId: track.parentTokenId, royaltyChain: { parentTokenId: track.parentTokenId } } : {}),
     registeredBy,
     mintedAt: now.toISOString(),
   };

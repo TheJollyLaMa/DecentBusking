@@ -23,8 +23,8 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261003-coins-radio-votes';
-import { setNowPlaying } from './stage.js?v=20261003-coins-radio-votes';
+import { renderNFTCard } from './nft-card.js?v=20261005-mp4';
+import { setNowPlaying } from './stage.js?v=20261005-mp4';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, readCachedMintedTokens, readNftContract } from './nft-loader.js?v=20261003-space-artwork';
 
@@ -51,7 +51,7 @@ const BATCH_YIELD_MS   = 200;
 
 // Music-filter: an animation_url with one of these extensions is an audio NFT.
 // ipfs:// links without an extension are also accepted (this dapp's native format).
-const AUDIO_EXT_RE = /\.(mp3|wav|flac|m4a|ogg|opus|aac)(\?|#|$)/i;
+const AUDIO_EXT_RE = /\.(mp3|mp4|wav|flac|m4a|ogg|opus|aac|weba)(\?|#|$)/i;
 
 // ── Global state ──────────────────────────────────────────────────────────
 let _renderer, _scene, _camera, _controls;
@@ -384,7 +384,7 @@ async function _loadAllNow() {
 //    explicit extension like .png or .json)
 function _isMusicNFT(meta) {
   if (!meta) return false;
-  if (meta.audioUrl) return true;
+  if (meta.audioUrl || meta.videoUrl || meta.mediaType === 'video/mp4') return true;
   const anim = (meta.animation_url || '').toLowerCase();
   if (!anim) return false;
   if (AUDIO_EXT_RE.test(anim)) return true;
@@ -943,12 +943,13 @@ function _esc(str = '') {
 function _playNFT(nft) {
   const cfg = window.DecentConfig || {};
   const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
-  const audioUrl = (nft.audioUrl || nft.animation_url || '')
+  const audioUrl = (nft.videoUrl || nft.audioUrl || nft.animation_url || '')
     .replace('ipfs://', gateway);
 
   setNowPlaying({
     title:    nft.name || nft.title || `Track #${nft.tokenId}`,
     artist:   nft.artist || nft.creator || '',
     audioUrl,
+    mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : ''),
   });
 }

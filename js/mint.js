@@ -1,487 +1,152 @@
-// js/mint.js — DecentBusking
-// Handles minting an audio file as a DecentNFT on the configured chain via the contract
-// already deployed by DecentMarket (DecentNFT_v0.2, ERC-1155).
-//
-// Contract access model
-// ─────────────────────
-//   DEFAULT_ADMIN_ROLE  Can call registerToken() to create a new token ID and
-//                       can call mintProduct() to issue editions.
-//   MINTER_ROLE         Can call mintAchievement() to issue editions of a token
-//                       ID that has already been registered by an admin.
-//
-// Busk minting flow (requires DEFAULT_ADMIN_ROLE on the contract)
-// ──────────────────────────────────────────────────────────────
-//  1. User opens guitar-case modal, fills in title + audio file.
-//  2. Audio file is uploaded through Pinata or a local Kubo node.
-//  3. A JSON metadata blob is created and uploaded to IPFS.
-//  4. registerToken(0, metadataURI, Achievement, artist, 500) is called →
-//     returns a new tokenId.
-//  5. mintAchievement(artist, tokenId, 1) mints the single edition.
-//  6. On success the new NFT is injected into the space field.
-//
-// If the connected wallet lacks DEFAULT_ADMIN_ROLE a clear error is shown
-// and no transaction is sent.
+import { fetchNFTMetaById } from './space.js?v=20261005-mp4';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-mp4';
+import { submitMediaForApproval } from './mint-submission.js';
 
-import { addNFTToSpace, fetchNFTMetaById } from './space.js?v=20261003-coins-radio-votes';
-import { uploadFileToIPFS } from './ipfs-upload.js';
-import { reportMintCompletion } from './mint-reconciliation.js';
+const MEDIA_TYPES = {
+  mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg',
+  flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', weba: 'audio/webm', mp4: 'video/mp4',
+};
+let pending = false;
 
-// DecentNFT v0.2 ABI — ERC-1155 with role-based minting
-// Source: https://github.com/TheJollyLaMa/DecentMarket/blob/main/abis/DecentNFT_v0.2.json
-const DECENT_NFT_ABI = [
-  // ── Role helpers ──────────────────────────────────────────────────────────
-  'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
-  'function MINTER_ROLE() view returns (bytes32)',
-  'function hasRole(bytes32 role, address account) view returns (bool)',
+function setSource() {
+  const cidMode = document.getElementById('mint-source-cid')?.checked;
+  const file = document.getElementById('mint-file');
+  file.disabled = cidMode;
+  file.required = !cidMode;
+  document.getElementById('mint-file-section').hidden = cidMode;
+  document.getElementById('mint-cid-section').hidden = !cidMode;
+  document.getElementById('mint-cid-input').required = cidMode;
+  document.getElementById('mint-media-type').disabled = !cidMode;
+}
 
-  // ── Token registration — DEFAULT_ADMIN_ROLE only ─────────────────────────
-  // kind_: 0 = Product, 1 = Achievement
-  'function registerToken(uint256 maxSupply_, string calldata tokenURI_, uint8 kind_, address royaltyReceiver, uint96 royaltyFeeBps) external returns (uint256 tokenId)',
-
-  // ── Minting ───────────────────────────────────────────────────────────────
-  // Achievement editions — MINTER_ROLE (also usable by DEFAULT_ADMIN_ROLE)
-  'function mintAchievement(address to, uint256 tokenId, uint256 amount) external',
-  // Product editions — DEFAULT_ADMIN_ROLE only
-  'function mintProduct(address to, uint256 tokenId, uint256 amount) external',
-
-  // ── Read helpers ──────────────────────────────────────────────────────────
-  'function nextTokenId() view returns (uint256)',
-  'function uri(uint256 tokenId) view returns (string)',
-  'function creatorOf(uint256 tokenId) view returns (address)',
-  'function totalMinted(uint256 tokenId) view returns (uint256)',
-
-  // ── Events ────────────────────────────────────────────────────────────────
-  'event TokenRegistered(uint256 indexed tokenId, address indexed creator, uint256 maxSupply, uint8 kind, string uri)',
-  'event EditionMinted(uint256 indexed tokenId, address indexed to, uint256 amount, address indexed minter)',
-  'event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)',
-];
-
-// ── Mint constants ────────────────────────────────────────────────────────────
-const UNLIMITED_SUPPLY    = 0;   // maxSupply 0 = no edition cap
-const TOKEN_KIND_PRODUCT  = 0;   // TokenKind enum: 0 = Product — used for audio busks (requires DEFAULT_ADMIN_ROLE)
-// const TOKEN_KIND_ACHIEVEMENT = 1; // TokenKind enum: 1 = Achievement — reserved for future badge/reward NFTs (requires MINTER_ROLE)
-const DEFAULT_ROYALTY_BPS = 500; // 5 % secondary-sale royalty
-
-// ── Query-param pre-fill (set by Discord Jukebox Bot) ────────────────────
-// Stores the ipfs:// URI when the page is opened via the bot's mint link.
-// When set, the file-upload step is skipped and this URI is used directly.
-let _prefilledIpfsUri = null;
-
-// ── Public API ───────────────────────────────────────────────────────────
 export function openMintModal() {
+  if (pending) return;
   const modal = document.getElementById('mint-modal');
   if (!modal) return;
-  _resetForm();
-  modal.classList.remove('hidden');
-
-  // Pre-fill form fields from URL query params (?title=, ?ipfs=, ?recipient=).
-  // These params are set by the Discord Jukebox Bot after pinning an audio
-  // file to IPFS so artists can mint in one click without re-uploading.
-  const params  = new URLSearchParams(window.location.search);
-  const qTitle  = params.get('title');
-  const qIpfs   = params.get('ipfs');
-  const qRecipient = params.get('recipient') || params.get('artist');
-
-  if (qTitle) {
-    const titleInput = document.getElementById('mint-title');
-    if (titleInput) titleInput.value = decodeURIComponent(qTitle);
-  }
-
-  if (qRecipient) {
-    const recipient = decodeURIComponent(qRecipient);
-    if (/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
-      const recipientInput = document.getElementById('mint-recipient');
-      const tipInput = document.getElementById('mint-tip-wallet');
-      if (recipientInput) recipientInput.value = recipient;
-      if (tipInput) tipInput.value = recipient;
-    }
-  }
-
-  if (qIpfs) {
-    const cid = decodeURIComponent(qIpfs);
-    _prefilledIpfsUri = `ipfs://${cid}`;
-    // Hide the file input and its label; show the CID section pre-filled with the bot's CID
-    const fileInput = document.getElementById('mint-file');
-    const fileLabel = document.getElementById('mint-file-label');
-    const cidSection = document.getElementById('mint-cid-section');
-    const cidInput = document.getElementById('mint-cid-input');
-    if (fileInput) { fileInput.removeAttribute('required'); fileInput.classList.add('hidden'); }
-    if (fileLabel) fileLabel.classList.add('hidden');
-    if (cidSection) cidSection.classList.remove('hidden');
-    if (cidInput) cidInput.value = cid;
-  }
-}
-
-// ── DOM Wiring ───────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  const form = document.getElementById('mint-form');
-  const cancelBtn = document.getElementById('mint-cancel-btn');
-  const modal = document.getElementById('mint-modal');
-  const parentInput = document.getElementById('mint-parent');
-
-  if (form) form.addEventListener('submit', _handleMint);
-
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', () => modal?.classList.add('hidden'));
-  }
-
-  // Close on backdrop click
-  if (modal) {
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.classList.add('hidden');
-    });
-  }
-
-  // Parent token preview — fetch when user enters a valid token ID
-  if (parentInput) {
-    let _previewTimer;
-    parentInput.addEventListener('input', () => {
-      clearTimeout(_previewTimer);
-      _previewTimer = setTimeout(() => _updateParentPreview(parentInput.value), 600);
-    });
-  }
-
-  // Auto-open the mint modal when the page was opened via the Discord Bot's
-  // pre-filled mint link.  Triggers on ?ipfs= (bot flow) or ?title= (manual
-  // deep-link) — the modal will pre-fill whichever params are present.
-  const _autoParams = new URLSearchParams(window.location.search);
-  if (_autoParams.get('ipfs') || _autoParams.get('title')) {
-    openMintModal();
-  }
-});
-
-// ── Mint Handler ─────────────────────────────────────────────────────────
-async function _handleMint(e) {
-  e.preventDefault();
-
-  const cfg = window.DecentConfig || {};
-  const titleInput = document.getElementById('mint-title');
-  const fileInput = document.getElementById('mint-file');
-  const imageInput = document.getElementById('mint-image');
-  const parentInput = document.getElementById('mint-parent');
-  const recipientInput = document.getElementById('mint-recipient');
-  const tipInput = document.getElementById('mint-tip-wallet');
-  const submitBtn = document.getElementById('mint-submit-btn');
-
-  const title = titleInput?.value.trim();
-  const file = fileInput?.files?.[0];
-  const image = imageInput?.files?.[0];
-  const parentId = parseInt(parentInput?.value || '0') || 0;
-  const requestedRecipient = recipientInput?.value.trim() || '';
-  const tipWallet = tipInput?.value.trim() || '';
-
-  if (!title) {
-    _setStatus('⚠️ Please enter a track title.', true);
-    return;
-  }
-  // Require a file only when no IPFS URI was pre-filled by the Discord Bot
-  if (!file && !_prefilledIpfsUri) {
-    _setStatus('⚠️ Please select an audio file.', true);
-    return;
-  }
-
-  if (!window.ethereum) {
-    _setStatus('🦊 MetaMask not detected. Install it to mint.', true);
-    return;
-  }
-
-  if (!cfg.contractAddress || cfg.contractAddress === '0x0000000000000000000000000000000000000000') {
-    _setStatus('⚠️ Contract address not configured in decent.config.js.', true);
-    return;
-  }
-
-  submitBtn.disabled = true;
-
-  try {
-    // 1. Use the global wallet signer
-    _setStatus('⏳ Connecting wallet…');
-    const signer = window._wallet?.signer;
-    if (!signer) {
-      _setStatus('🦊 Please connect your wallet via the header first.', true);
-      submitBtn.disabled = false;
-      return;
-    }
-    const address = await signer.getAddress();
-    const recipient = requestedRecipient || address;
-    if (!ethers.isAddress(recipient)) {
-      _setStatus('⚠️ Enter a valid 0x artist wallet address.', true);
-      submitBtn.disabled = false;
-      return;
-    }
-
-    // 2. Check chain
-    const chainId = window._wallet.chainId;
-    if (chainId !== null && chainId !== (cfg.chainId || 8453)) {
-      _setStatus(`⚠️ Switch MetaMask to ${cfg.chainName || 'Base Mainnet'} (chain ID ${cfg.chainId || 8453}).`, true);
-      submitBtn.disabled = false;
-      return;
-    }
-
-    // 3. Upload audio to IPFS — or reuse the CID provided by the Discord Bot
-    let audioUrl;
-    const cidSection = document.getElementById('mint-cid-section');
-    const cidInput = document.getElementById('mint-cid-input');
-    if (cidSection && !cidSection.classList.contains('hidden') && cidInput && cidInput.value.trim()) {
-      audioUrl = `ipfs://${cidInput.value.trim()}`;
-    } else if (_prefilledIpfsUri) {
-      audioUrl = _prefilledIpfsUri;
-    } else {
-      _setStatus('⏳ Uploading audio to IPFS…');
-      audioUrl = await _uploadToIPFS(file);
-      if (!audioUrl) {
-        _setStatus('❌ IPFS upload failed. Check the configured IPFS provider.', true);
-        submitBtn.disabled = false;
-        return;
-      }
-    }
-
-    // 4. Upload optional artwork, then build + upload metadata
-    _setStatus('⏳ Uploading metadata to IPFS…');
-    let imageUrl = '';
-    if (image) {
-      _setStatus('⏳ Uploading NFT artwork to IPFS…');
-      imageUrl = await _uploadToIPFS(image);
-      if (!imageUrl) {
-        _setStatus('❌ Artwork upload failed. Check the configured IPFS provider.', true);
-        submitBtn.disabled = false;
-        return;
-      }
-    }
-
-    _setStatus('⏳ Uploading metadata to IPFS…');
-    const metadata = {
-      name: title,
-      description: `Busked live on DecentBusking — ${new Date().toLocaleDateString()}`,
-      animation_url: audioUrl,      // ERC-721 standard for audio/video NFTs
-      audioUrl,                     // convenience duplicate
-      ...(imageUrl ? { image: imageUrl } : {}),
-      artist: recipient,
-      creator: recipient,
-      tipWallet: tipWallet || recipient,
-      registeredBy: address,
-      mintedAt: new Date().toISOString(),
-      ...(parentId > 0 ? {
-        parentTokenId: parentId,
-        royaltyChain: {
-          parentTokenId: parentId,
-        },
-      } : {}),
-    };
-    const metadataUrl = await _uploadMetadataToIPFS(metadata, `${_slugify(title)}.json`);
-    if (!metadataUrl) {
-      _setStatus('❌ Metadata upload failed.', true);
-      submitBtn.disabled = false;
-      return;
-    }
-
-    // 5. Role pre-flight check
-    _setStatus('⏳ Checking on-chain permissions…');
-    const contract = new ethers.Contract(cfg.contractAddress, DECENT_NFT_ABI, signer);
-
-    const adminRole  = await contract.DEFAULT_ADMIN_ROLE();
-    const minterRole = await contract.MINTER_ROLE();
-    const isAdmin    = await contract.hasRole(adminRole,  address);
-    const isMinter   = await contract.hasRole(minterRole, address);
-
-    if (!isAdmin && !isMinter) {
-      _setStatus(
-        '❌ Your wallet lacks minting permission. ' +
-        'The contract admin must grant your address MINTER_ROLE (or DEFAULT_ADMIN_ROLE) ' +
-        'via the contract\'s grantRole() function before you can mint.',
-        true,
-      );
-      submitBtn.disabled = false;
-      return;
-    }
-
-    if (!isAdmin) {
-      // MINTER_ROLE alone cannot register new token IDs — registration is admin-only.
-      _setStatus(
-        '❌ Your wallet has MINTER_ROLE but token registration requires DEFAULT_ADMIN_ROLE. ' +
-        'Ask the contract admin to register a token ID for you first.',
-        true,
-      );
-      submitBtn.disabled = false;
-      return;
-    }
-
-    // 6. Register a new token on-chain (admin-only step that returns the tokenId)
-    _setStatus('⏳ Registering audio busk product — confirm in MetaMask… (tx 1/2)');
-    // TokenKind.Product = 0 — audio busk NFTs minted by the artist via mintProduct() with DEFAULT_ADMIN_ROLE.
-    // maxSupply 0 = unlimited; royalty 5 % to the artist's wallet.
-    const regTx = await contract.registerToken(
-      UNLIMITED_SUPPLY,    // maxSupply: 0 = unlimited
-      metadataUrl,         // per-token URI — the IPFS metadata JSON
-      TOKEN_KIND_PRODUCT,  // kind: 0 = Product (audio busk)
-      recipient,           // royaltyReceiver: the artist, not the admin signer
-      DEFAULT_ROYALTY_BPS, // royaltyFeeBps: 5 %
-    );
-
-    _setStatus('⏳ Waiting for registration confirmation… (tx 1/2)');
-    const regReceipt = await regTx.wait();
-
-    const iface = new ethers.Interface(DECENT_NFT_ABI);
-    let tokenId = null;
-    for (const log of regReceipt.logs) {
-      try {
-        const parsed = iface.parseLog(log);
-        if (parsed?.name === 'TokenRegistered') {
-          tokenId = Number(parsed.args.tokenId);
-          break;
-        }
-      } catch (_) {}
-    }
-
-    if (tokenId === null) {
-      _setStatus('❌ Token registration failed — could not parse TokenRegistered event.', true);
-      submitBtn.disabled = false;
-      return;
-    }
-
-    // 7. Mint a single edition directly to the artist's wallet
-    _setStatus(`⏳ Minting audio busk product #${tokenId} — confirm in MetaMask… (tx 2/2)`);
-    const mintTx = await contract.mintProduct(recipient, tokenId, 1);
-
-    _setStatus('⏳ Waiting for mint confirmation… (tx 2/2)');
-    const mintReceipt = await mintTx.wait();
-    const mintTxHash = mintReceipt.hash || mintTx.hash;
-
-    // 8. Inject into space field
-    addNFTToSpace({
-      tokenId,
-      name: title,
-      artist: recipient,
-      creator: recipient,
-      audioUrl,
-      tipWallet: tipWallet || recipient,
-      metadataUri: metadataUrl,
-      mintedAt: new Date().toISOString(),
-      parentTokenId: parentId || undefined,
-      royaltyChain: parentId > 0 ? { parentTokenId: parentId } : undefined,
-    });
-
-    const completionParams = new URLSearchParams(window.location.search);
-    const trackId = completionParams.get('track');
-    try {
-      const announced = await reportMintCompletion({
-        serviceUrl: completionParams.get('worker') || cfg.ipfsUploadServiceUrl,
-        trackId,
-        tokenId,
-        txHash: mintTxHash,
-      });
-      _setStatus(
-        announced
-          ? `✅ Minted token #${tokenId} to ${recipient} and announced it in Discord.`
-          : `✅ Minted token #${tokenId} directly to ${recipient}.`,
-      );
-    } catch (reportError) {
-      console.warn('[mint] Discord reconciliation failed:', reportError.message);
-      _setStatus(
-        `✅ Minted token #${tokenId}, but Discord sync failed. ` +
-        `Run /jukeloop mark-minted with track ${trackId}, token ${tokenId}, and tx ${mintTxHash}.`,
-      );
-    }
-
-    // Close modal after a moment
-    setTimeout(() => {
-      document.getElementById('mint-modal')?.classList.add('hidden');
-      _resetForm();
-      submitBtn.disabled = false;
-    }, 3000);
-
-  } catch (err) {
-    _setStatus(`❌ ${err.message || 'Minting failed'}`, true);
-    submitBtn.disabled = false;
-  }
-}
-
-// ── Parent NFT Preview ────────────────────────────────────────────────────
-async function _updateParentPreview(rawValue) {
-  const preview = document.getElementById('mint-parent-preview');
-  const titleEl = document.getElementById('mint-parent-preview-title');
-  const artistEl = document.getElementById('mint-parent-preview-artist');
-  const audioEl = document.getElementById('mint-parent-preview-audio');
-
-  const parentId = Math.max(0, parseInt(rawValue) || 0);
-
-  if (!parentId) {
-    preview?.classList.add('hidden');
-    return;
-  }
-
-  // Show loading state
-  if (preview) preview.classList.remove('hidden');
-  if (titleEl) titleEl.textContent = '⏳ Loading…';
-  if (artistEl) artistEl.textContent = '';
-  if (audioEl) audioEl.src = '';
-
-  try {
-    const meta = await fetchNFTMetaById(parentId);
-    if (!meta) {
-      if (titleEl) titleEl.textContent = `⚠️ Token #${parentId} not found`;
-      return;
-    }
-    const cfg = window.DecentConfig || {};
-    const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
-    const audioUrl = (meta.audioUrl || meta.animation_url || '')
-      .replace('ipfs://', gateway);
-
-    if (titleEl) titleEl.textContent = meta.name || meta.title || `Track #${parentId}`;
-    if (artistEl) artistEl.textContent = meta.artist || meta.creator || '';
-    if (audioEl && audioUrl) audioEl.src = audioUrl;
-  } catch (err) {
-    if (titleEl) titleEl.textContent = `⚠️ Could not load token #${parentId}`;
-    console.warn('[mint] parent preview fetch failed:', err.message);
-  }
-}
-
-// ── IPFS Uploads ──────────────────────────────────────────────────────────
-async function _uploadToIPFS(file) {
-  try {
-    return await uploadFileToIPFS(file);
-  } catch (err) {
-    console.error('[mint] IPFS upload failed:', err);
-    return null;
-  }
-}
-
-async function _uploadMetadataToIPFS(metadata, filename) {
-  const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
-  const file = new File([blob], filename, { type: 'application/json' });
-
-  try {
-    return await uploadFileToIPFS(file);
-  } catch (err) {
-    console.error('[mint] IPFS metadata upload failed:', err);
-    return null;
-  }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────
-function _setStatus(msg, isError = false) {
-  const el = document.getElementById('mint-status');
-  if (!el) return;
-  el.textContent = msg;
-  el.classList.toggle('error', isError);
-}
-
-function _resetForm() {
-  _prefilledIpfsUri = null;
-  const form = document.getElementById('mint-form');
-  if (form) form.reset();
-  // Restore the file-input and its label; hide the CID section
-  const fileInput = document.getElementById('mint-file');
-  const fileLabel = document.getElementById('mint-file-label');
-  const cidSection = document.getElementById('mint-cid-section');
-  if (fileInput) { fileInput.setAttribute('required', ''); fileInput.classList.remove('hidden'); }
-  if (fileLabel) fileLabel.classList.remove('hidden');
-  if (cidSection) cidSection.classList.add('hidden');
-  _setStatus('');
+  document.getElementById('mint-form').reset();
   document.getElementById('mint-parent-preview')?.classList.add('hidden');
-  const audioEl = document.getElementById('mint-parent-preview-audio');
-  if (audioEl) audioEl.src = '';
+  setStatus('');
+  const params = new URLSearchParams(window.location.search);
+  document.getElementById('mint-title').value = params.get('title') || '';
+  document.getElementById('mint-recipient').value = params.get('recipient') || window._wallet?.address || '';
+  if (params.get('ipfs')) {
+    document.getElementById('mint-source-cid').checked = true;
+    document.getElementById('mint-cid-input').value = params.get('ipfs').replace(/^ipfs:\/\//i, '');
+  }
+  if (params.get('type') === 'video/mp4') document.getElementById('mint-media-type').value = 'video/mp4';
+  setSource();
+  modal.classList.remove('hidden');
 }
 
-function _slugify(str) {
-  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+async function handleSubmission(event) {
+  event.preventDefault();
+  if (pending) return;
+  const cfg = window.DecentConfig || {};
+  const signer = window._wallet?.signer;
+  const address = window._wallet?.address;
+  const button = document.getElementById('mint-submit-btn');
+  try {
+    if (!signer || !address) throw new Error('Connect your artist wallet in the header first');
+    const title = document.getElementById('mint-title').value.trim();
+    const artist = document.getElementById('mint-artist').value.trim() || address;
+    const recipient = document.getElementById('mint-recipient').value.trim() || address;
+    const tipWallet = document.getElementById('mint-tip-wallet').value.trim() || recipient;
+    const parentTokenId = Number(document.getElementById('mint-parent').value || 0);
+    if (!title) throw new Error('Enter a track title');
+    if (!/^0x[0-9a-fA-F]{40}$/.test(recipient) || !/^0x[0-9a-fA-F]{40}$/.test(tipWallet)) {
+      throw new Error('Enter valid 0x artist and tip wallet addresses');
+    }
+    if (!Number.isSafeInteger(parentTokenId) || parentTokenId < 0) throw new Error('Enter a valid parent token ID');
+    const cidMode = document.getElementById('mint-source-cid').checked;
+    const file = document.getElementById('mint-file').files?.[0];
+    const artwork = document.getElementById('mint-image').files?.[0];
+    let mediaType = document.getElementById('mint-media-type').value;
+    let filename;
+    let ipfsCid = document.getElementById('mint-cid-input').value.trim().replace(/^ipfs:\/\//i, '');
+    if (cidMode) {
+      if (!ipfsCid || /[\/\s]/.test(ipfsCid)) throw new Error('Enter a file CID, not a directory path or gateway URL');
+      const extension = Object.keys(MEDIA_TYPES).find(key => MEDIA_TYPES[key] === mediaType);
+      filename = `track.${extension}`;
+    } else {
+      if (!file) throw new Error('Select an audio or MP4 file');
+      mediaType = MEDIA_TYPES[file.name.split('.').pop().toLowerCase()];
+      if (!mediaType) throw new Error('Choose a supported audio format or MP4');
+      if (file.size > 50 * 1024 * 1024) throw new Error('Uploads are limited to 50 MB; use an already-pinned file CID instead');
+      filename = file.name;
+    }
+    if (artwork && (artwork.size > 10 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(artwork.type))) {
+      throw new Error('Artwork must be PNG, JPEG, WebP, or GIF, up to 10 MB');
+    }
+    pending = true;
+    button.disabled = true;
+    const upload = createBrowserIpfsUploader({ provider: cfg.ipfsUploadProvider || 'pinata',
+      serviceUrl: cfg.ipfsUploadServiceUrl, ipfsApiUrl: cfg.ipfsApiUrl, signer, address,
+      origin: window.location.origin, purpose: 'submission' });
+    if (!cidMode) {
+      setStatus('Uploading media to IPFS...');
+      ipfsCid = (await upload(new File([file], file.name, { type: mediaType }))).replace('ipfs://', '');
+      document.getElementById('mint-cid-input').value = ipfsCid;
+    }
+    let artworkCid = '';
+    if (artwork) {
+      setStatus('Uploading artwork to IPFS...');
+      artworkCid = (await upload(artwork)).replace('ipfs://', '');
+    }
+    setStatus('Sign your submission for owner approval...');
+    const result = await submitMediaForApproval({ serviceUrl: cfg.ipfsUploadServiceUrl, signer, address,
+      origin: window.location.origin,
+      media: { title, artist, recipient, tipWallet, parentTokenId, filename, mediaType, ipfsCid, artworkCid } });
+    setStatus(`${result.status === 'minted' ? 'Already minted' : 'Queued for owner approval'}. IPFS CID: ${ipfsCid}`);
+  } catch (error) {
+    setStatus(error.message || 'Submission failed', true);
+  } finally {
+    pending = false;
+    button.disabled = false;
+  }
 }
+
+function setStatus(message, error = false) {
+  const status = document.getElementById('mint-status');
+  status.textContent = message;
+  status.classList.toggle('error', error);
+}
+
+async function updateParentPreview(value) {
+  const preview = document.getElementById('mint-parent-preview');
+  const title = document.getElementById('mint-parent-preview-title');
+  const artist = document.getElementById('mint-parent-preview-artist');
+  const parentTokenId = Number(value);
+  if (!Number.isSafeInteger(parentTokenId) || parentTokenId <= 0) {
+    preview.classList.add('hidden');
+    return;
+  }
+  preview.classList.remove('hidden');
+  title.textContent = 'Loading...';
+  artist.textContent = '';
+  try {
+    const meta = await fetchNFTMetaById(parentTokenId);
+    title.textContent = meta?.name || `Token #${parentTokenId}`;
+    artist.textContent = meta?.artist || meta?.creator || '';
+  } catch {
+    title.textContent = 'Could not load parent token';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const modal = document.getElementById('mint-modal');
+  document.getElementById('mint-form')?.addEventListener('submit', handleSubmission);
+  document.getElementById('mint-cancel-btn')?.addEventListener('click', () => modal.classList.add('hidden'));
+  modal?.addEventListener('click', event => { if (event.target === modal) modal.classList.add('hidden'); });
+  document.querySelectorAll('[name="mint-source"]').forEach(input => input.addEventListener('change', setSource));
+  document.getElementById('mint-file')?.addEventListener('change', event => {
+    const file = event.target.files?.[0];
+    if (file) document.getElementById('mint-media-type').value = MEDIA_TYPES[file.name.split('.').pop().toLowerCase()] || 'audio/mpeg';
+  });
+  let previewTimer;
+  document.getElementById('mint-parent')?.addEventListener('input', event => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => updateParentPreview(event.target.value), 600);
+  });
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('ipfs') || params.get('title')) openMintModal();
+});

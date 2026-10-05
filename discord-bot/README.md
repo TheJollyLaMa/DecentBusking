@@ -135,6 +135,22 @@ Manage the 24/7 community radio playlist.  Most subcommands are available to eve
 
 Wallet addresses submitted in Discord are community claims, not cryptographic proof of wallet ownership. During this manual bootstrap phase, the owner must verify unexpected or disputed addresses before approving a mint.
 
+### MP4 Videos and CID Submissions
+
+Discord audio and MP4 attachments are accepted up to and including 10 MB; larger attachments are rejected before playlist ingestion or IPFS pinning. Restart backfill also discovers older MP4 posts within that cap. Attachments enter the artist's `/jukebox backlog`, not the mint queue automatically: use `/jukebox request-mint` to supply the artist wallet, or have the owner run `/jukeloop queue-uploads uploader:<artist> wallet:<artist Base wallet>` for the full pinned backlog. FFmpeg extracts only the audio (`-vn`) for the JukeLoop Discord voice channel. DecentBusking plays the MP4 video above the NFT scene at 84% opacity, with the same synchronized position and radio mute/volume controls. The video button hides or shows the picture without creating a second audio stream. Use H.264 video with AAC audio for broad browser compatibility; silent videos have no voice-channel audio, and other MP4 codecs may not play in every browser.
+
+For files over the 10 MB Discord attachment limit, pin the file to IPFS and use:
+
+```text
+/jukebox submit cid:<file CID> title:<title> wallet:<artist Base wallet> format:mp4
+```
+
+The CID must identify the media file itself, not an album directory or a gateway URL. The command queues owner approval without downloading or re-uploading the file. Existing `/jukebox request-mint` can add artwork to that request.
+
+The site's briefcase supports audio/MP4 file uploads up to 50 MB, or an existing file CID for larger media. Artwork accepts PNG, JPEG, WebP, or GIF up to 10 MB. An artist signs the upload and submission with their connected wallet; this grants no on-chain mint permission. The submitted recipient must match that wallet unless the owner is submitting. Artist uploads are restricted to supported media/artwork, allowed site origins, fresh signatures, replay protection, and 20 upload/submission requests per wallet per hour. These limits are in memory and reset when the service restarts; monitor Pinata quotas for this public upload service.
+
+Site submissions join the existing private owner mint queue. They remain outside radio rotation and new-upload previews until the owner mints and the verified transaction is reconciled. The owner Admin panel and CLI preserve video type, artwork, tip wallet, and parent-token lineage in NFT metadata. Neither a submission nor an upload sends a blockchain transaction. Redeploy the Render bot/worker and publish the static frontend together to enable these routes; no new environment variables are required.
+
 `/jukebox request-mint` only queues a request; it does not submit a blockchain transaction. Artists may attach PNG, JPEG, WebP, or GIF artwork up to 10 MB; the bot pins it immediately and stores its CID with the request. The contract owner opens **Admin** in the DecentBusking dapp, connects the `DEFAULT_ADMIN_ROLE` wallet, and signs once to load the private queue. Artist artwork is previewed and preloaded, with an optional replacement control. Each request has an individual Mint action. Multiple selected requests can be processed sequentially; the current contract has no batch registration method, so MetaMask still requires two Base transaction confirmations per track. The browser reports each confirmed mint to the Render worker. After the worker verifies the owner, contract, recipient, token ID, and `EditionMinted` event on Base, the bot removes the item from the backlog and announces the NFT in both configured public text channels. `/jukeloop mint-queue` and `/jukeloop mark-minted` remain recovery tools.
 
 A true one-confirmation batch is possible through a separately deployed `BatchProductMinter` helper contract holding `DEFAULT_ADMIN_ROLE`: it can loop over requests and use each `registerToken` return value immediately in `mintProduct`. That privileged helper requires its own Solidity project, review, deployment, and explicit role grant before the dapp should use it.

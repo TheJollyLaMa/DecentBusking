@@ -1,8 +1,8 @@
 // js/stage.js — DecentBusking
 // Hat (tip) + Guitar Case (mint) interactions and the now-playing banner.
 
-import { openMintModal } from './mint.js';
-import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261005-radio-volume';
+import { openMintModal } from './mint.js?v=20261005-mp4';
+import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261005-mp4';
 
 // ── Public API ────────────────────────────────────────────────────────────
 export function initStage() {
@@ -14,7 +14,7 @@ export function initStage() {
 
 // Play a selected archive NFT; the synced JukeLoop radio is muted until the
 // listener returns to it.
-export function setNowPlaying({ title = '—', artist = '', audioUrl = '' } = {}) {
+export function setNowPlaying({ title = '—', artist = '', audioUrl = '', mediaType = '' } = {}) {
   if (!audioUrl) return;
   const cfg = window.DecentConfig || {};
   const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
@@ -27,7 +27,7 @@ export function setNowPlaying({ title = '—', artist = '', audioUrl = '' } = {}
     console.warn('[stage] setNowPlaying: rejected non-HTTP(S) audio URL:', httpUrl);
     return;
   }
-  playArchiveTrack({ title, artist, audioUrl: httpUrl });
+  playArchiveTrack({ title, artist, audioUrl: httpUrl, mediaType });
 }
 
 // ── Hat (tip) ─────────────────────────────────────────────────────────────
