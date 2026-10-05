@@ -124,6 +124,33 @@ test('site votes post only the current play and anonymous browser ID, with no wa
     fetchImpl: async () => new Response(JSON.stringify({ error: 'This play has ended' }), { status: 400 }) }), /ended/);
 });
 
+test('radio volume survives fades and mute does not affect archive playback', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const audio = { volume: 0, muted: false };
+  const saved = new Map();
+  const context = vm.createContext({ performance, setTimeout, console, audio,
+    localStorage: { setItem: (key, value) => saved.set(key, value) } });
+  vm.runInContext(`${source}\n_audio = audio; _setRadioVolume(0.3); globalThis.fade = () => _fadeIn(0, 1);`, context);
+  await context.fade();
+  assert.equal(audio.volume, 0.3);
+  vm.runInContext('_radioMuted = true; _saveAudioPreferences();', context);
+  await context.fade();
+  assert.equal(audio.muted, true);
+  assert.equal(audio.volume, 0.3);
+  assert.deepEqual(JSON.parse(saved.get('decentbusking:radio-audio:v1')), { volume: 0.3, muted: true });
+  vm.runInContext("_mode = 'archive';", context);
+  await context.fade();
+  assert.equal(audio.muted, false);
+  assert.equal(audio.volume, 1);
+  vm.runInContext("_mode = 'radio';", context);
+  await context.fade();
+  assert.equal(audio.muted, true);
+  assert.equal(audio.volume, 0.3);
+  vm.runInContext('_setRadioVolume(0.65);', context);
+  assert.equal(audio.muted, false);
+  assert.equal(audio.volume, 0.65);
+});
+
 test('recorded browser votes survive reload and reset only for another radio play', () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
   const buttons = [1, -1].map((vote) => ({ dataset: { radioVote: String(vote) }, attributes: {},

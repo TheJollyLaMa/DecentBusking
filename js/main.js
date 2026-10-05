@@ -2,7 +2,7 @@
 // Initialises the header, footer, stage interactions, and the 3-D space field.
 
 import { initWallet } from './wallet.js';
-import { initStage } from './stage.js?v=20261003-coins-radio-votes';
+import { initStage } from './stage.js?v=20261005-radio-volume';
 import { initSpace } from './space.js?v=20261003-coins-radio-votes';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.

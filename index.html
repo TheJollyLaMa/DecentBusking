@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261005-weekly-play-history" />
+  <link rel="stylesheet" href="css/styles.css?v=20261005-radio-volume" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -170,6 +170,15 @@
       <div id="busker-info">
         <span id="now-playing-label">📻 Live on JukeLoop</span>
         <div class="radio-track-row">
+          <div class="radio-audio-controls" role="group" aria-label="DBusk radio sound">
+            <button id="radio-mute" type="button" aria-label="Mute DBusk radio" aria-pressed="false" title="Mute DBusk radio">
+              <img data-volume-on src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/volume-2.svg" alt="" width="20" height="20" />
+              <img data-volume-off src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/volume-x.svg" alt="" width="20" height="20" hidden />
+            </button>
+            <div id="radio-volume-dial" title="DBusk radio volume: 100%">
+              <input id="radio-volume" type="range" min="0" max="100" step="1" value="100" aria-label="DBusk radio volume" aria-valuetext="100%" />
+            </div>
+          </div>
           <div class="radio-title-window"><span id="now-playing-title">—</span></div>
           <div id="radio-voting" role="group" aria-label="Vote on the current radio play">
             <button id="radio-vote-up" type="button" data-radio-vote="1" aria-label="Thumbs up current radio play" aria-pressed="false" title="Like this listen? Vote thumbs up to boost the song in the JukeLoop rotation. One vote per play." disabled>👍</button>
@@ -328,7 +337,7 @@
   <script type="module" src="js/components/header-title-color-override.js?v=20261002-header-refresh-5"></script>
 
   <!-- Main app entry point -->
-  <script type="module" src="js/main.js?v=20261003-coins-radio-votes"></script>
+  <script type="module" src="js/main.js?v=20261005-radio-volume"></script>
 
   <!-- Admin role-grant panel -->
   <script type="module" src="js/components/header-admin-inject.js"></script>

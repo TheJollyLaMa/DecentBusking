@@ -30,6 +30,83 @@ let _voteStatusEl;
 let _votePending = false;
 let _votingPlayId = null;
 const _votedPlays = new Map();
+let _radioVolume = 1;
+let _radioMuted = false;
+let _fadeLevel = 0;
+let _muteBtn, _volumeInput, _volumeDial;
+
+function _applyRadioVolume() {
+  if (!_audio) return;
+  _audio.muted = _mode !== 'archive' && _radioMuted;
+  _audio.volume = _fadeLevel * (_mode === 'archive' ? 1 : _radioVolume);
+}
+
+function _renderAudioControls() {
+  if (_muteBtn) {
+    const silent = _radioMuted || _radioVolume === 0;
+    _muteBtn.setAttribute('aria-pressed', String(silent));
+    _muteBtn.setAttribute('aria-label', silent ? 'Unmute DBusk radio' : 'Mute DBusk radio');
+    _muteBtn.title = silent ? 'Unmute DBusk radio' : 'Mute DBusk radio';
+    _muteBtn.querySelector('[data-volume-on]').hidden = silent;
+    _muteBtn.querySelector('[data-volume-off]').hidden = !silent;
+  }
+  if (_volumeInput) {
+    _volumeInput.value = String(Math.round(_radioVolume * 100));
+    _volumeInput.setAttribute('aria-valuetext', `${_volumeInput.value}%`);
+  }
+  if (_volumeDial) {
+    _volumeDial.style.setProperty('--volume-angle', `${-135 + _radioVolume * 270}deg`);
+    _volumeDial.title = `DBusk radio volume: ${Math.round(_radioVolume * 100)}%`;
+  }
+}
+
+function _saveAudioPreferences() {
+  try {
+    localStorage.setItem('decentbusking:radio-audio:v1', JSON.stringify({ volume: _radioVolume, muted: _radioMuted }));
+  } catch {}
+  _applyRadioVolume();
+  _renderAudioControls();
+}
+
+function _setRadioVolume(value) {
+  if (!Number.isFinite(value)) return;
+  _radioVolume = Math.max(0, Math.min(1, value));
+  if (_radioVolume > 0) _radioMuted = false;
+  _saveAudioPreferences();
+}
+
+function _initAudioControls() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('decentbusking:radio-audio:v1') || 'null');
+    if (saved && Number.isFinite(saved.volume)) _radioVolume = Math.max(0, Math.min(1, saved.volume));
+    _radioMuted = saved?.muted === true;
+  } catch {}
+  _muteBtn = document.getElementById('radio-mute');
+  _volumeInput = document.getElementById('radio-volume');
+  _volumeDial = document.getElementById('radio-volume-dial');
+  _muteBtn?.addEventListener('click', () => {
+    if (_radioMuted || _radioVolume === 0) {
+      _radioMuted = false;
+      if (_radioVolume === 0) _radioVolume = 0.5;
+    } else _radioMuted = true;
+    _saveAudioPreferences();
+  });
+  _volumeInput?.addEventListener('input', () => _setRadioVolume(Number(_volumeInput.value) / 100));
+  let drag;
+  _volumeDial?.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    drag = { pointerId: event.pointerId, y: event.clientY, volume: _radioVolume };
+    _volumeDial.setPointerCapture(event.pointerId);
+    _volumeInput.focus();
+    event.preventDefault();
+  });
+  _volumeDial?.addEventListener('pointermove', (event) => {
+    if (drag?.pointerId === event.pointerId) _setRadioVolume(drag.volume + (drag.y - event.clientY) / 120);
+  });
+  _volumeDial?.addEventListener('lostpointercapture', () => { drag = null; });
+  _renderAudioControls();
+  _applyRadioVolume();
+}
 
 export async function sendRadioVote({ radioUrl, playId, voterId, vote, fetchImpl = fetch }) {
   const response = await fetchImpl(`${radioUrl}/vote`, {
@@ -112,6 +189,7 @@ export function initRadioSync() {
   _playBtn = document.getElementById('now-playing-play-btn');
   _radioBtn = document.getElementById('now-playing-radio-btn');
   if (!_audio || !_radioUrl()) return;
+  _initAudioControls();
   _voteButtons = [...document.querySelectorAll('[data-radio-vote]')];
   _voteStatusEl = document.getElementById('radio-vote-status');
   _restoreVotes();
@@ -328,7 +406,8 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
   _setTrack(title, artist);
 
   _audio.pause();
-  _audio.volume = 0;
+  _fadeLevel = 0;
+  _applyRadioVolume();
   _audio.removeAttribute('src');
   _audio.querySelectorAll('source').forEach((source) => source.remove());
   const source = document.createElement('source');
@@ -419,14 +498,16 @@ function _waitForMetadata() {
 
 // Silence-to-music fade on every start; time-based steps keep it finishing in throttled background tabs.
 function _fadeIn(token = _switchToken, ms = FADE_IN_MS) {
-  _audio.volume = 0;
+  _fadeLevel = 0;
+  _applyRadioVolume();
   const start = performance.now();
   return new Promise((resolve) => {
     const step = () => {
       if (token !== _switchToken) return resolve();
       const t = Math.min(1, (performance.now() - start) / ms);
       // Squared ramp sounds even to the ear; a linear ramp jumps in loudness early.
-      _audio.volume = t * t;
+      _fadeLevel = t * t;
+      _applyRadioVolume();
       if (t < 1) setTimeout(step, 40);
       else resolve();
     };
@@ -440,7 +521,8 @@ function _stopAudio() {
 }
 
 async function _unlock() {
-  _audio.volume = 0;
+  _fadeLevel = 0;
+  _applyRadioVolume();
   if (_mode === 'radio' && _radio && !await _prepareRadioSeek(_radioPositionS, _switchToken)) return;
   try {
     await _audio.play();
