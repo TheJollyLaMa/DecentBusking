@@ -1,14 +1,18 @@
 # DecentBusking Payroll
 
-## Legacy Optimism Payment Review
+## Base Payroll Panel
 
-Legacy ETH payments are direct wallet transfers, not replay-protected router payouts. Paying did not update the repository JSON automatically, so previously paid rows could reappear on Refresh. Do not send another transfer solely because a row is visible.
+Active payroll is Base-only. Historical records are preserved outside the active queue; see [retired payroll history](LEGACY-PAYROLL.md). The public Left Ankh entry is Playback Tally; Admin Nft Mint and Payroll are visible only to the configured admin wallet. UI visibility does not replace transaction-level owner and role checks.
 
-The panel now requires explicit unpaid review for legacy rows. To reconcile an existing payment, enter its Optimism transaction hash in the matching row and verify it. Verification requires chain 10, the registered owner as sender, the exact recipient and value, and a successful receipt. A confirmed row is hidden on refresh, a pending/unresolved broadcast stays locked, and the same transaction cannot be assigned to two entries in that browser's receipt log. Matching value/recipient alone does not prove which issue was paid when multiple bounties have identical amounts; the owner must make that assignment.
+The panel is ordered Playback Payroll, Top 10 Prize Payouts, then Repo Dev Bot Payouts. The first two sections are USDC allocation previews, not claimable rewards or enabled payouts. Budgets start at zero and require owner input; no funds are deposited and no contracts are deployed by opening or previewing the panel.
 
-Receipt assignments are stored in this browser's local storage, not a global on-chain paid-reference mapping. Record each verified transaction through the existing Settle Payroll workflow to update the repository ledger for other devices and contributors. Clearing browser storage or changing devices loses local assignments; legacy entries start locked again until reviewed. Base router payouts continue to use their on-chain `completedWorkReferences` protection.
+Playback drafts group qualified weekly plays by verified artist wallet and distribute the selected budget proportionally with exact six-decimal token-unit rounding. Amounts below the selected minimum and rounding remainder stay unallocated. Unverified wallets are excluded. Current weeks remain provisional.
 
-The panel is ordered Playback Payroll, Top 10 Prize Payouts, then Repo Dev Bot Payouts. Playback and prize allocations remain unconfigured and cannot send payments yet. The public Left Ankh entry is Playback Tally; Admin Nft Mint and Payroll are visible only for the configured admin wallet in this release. UI visibility is not a substitute for transaction-level role and owner checks.
+The proposed Top 10 policy ranks unique artist wallets by qualified weekly plays, ties by wallet address, and shares the prize budget equally among up to ten artists. It is explicitly a draft, not an adopted contractual promise. One artist receives at most one rank. Likes, historical announcement counts, and all-time totals are not used for allocation.
+
+Read-only treasury status checks USDC approval, fund existence/activity and balances, plus the owner's Base ETH gas balance. Separate proposed fund slugs are `dbusk-playback` and `dbusk-top10`; the existing development fund is not used as the radio budget. These fund IDs are configuration only and are not automatically created or funded. Fund setup, eligibility review, finalized weekly receipts, replay protection, and artist payout authorization are required before enabling radio settlement.
+
+For a $10 start, a conservative example is $3 for a playback pilot and $7 retained for gas/operations, with no cash Top 10 budget yet. Preserve free radio; seek supporter tips, small fixed-price sponsor slots, or optional paid requests before committing recurring cash rewards. Paid queues and sponsorship fulfillment need reviewed contracts and clear refund/service rules; neither is implemented by this payroll preview.
 
 DecentBusking follows the ArtFi contribution-payroll model. GitHub Actions records bounty credits in the repository ledger; the repo owner sends configured ERC-20 rewards through the existing ArtFi Settlement Router on Base. DecentBusking uses its own `dbusk-repo-dev` fund on that shared router and does not deploy a second router.
 
@@ -56,14 +60,14 @@ The settlement workflow supports these required filters:
 - Contributor GitHub username
 - Issue reference such as `TheJollyLaMa/DecentBusking#14`
 - Role (`contributor`, `implementer`, `idea-originator`, or `tester`)
-- Currency (an asset in `payroll-assets.json`, or legacy `ETH`)
+- Currency (a configured Base asset in `payroll-assets.json`)
 - Confirmed transaction hash
 
-Settlements update per-currency `<symbol>Pending` and `<symbol>Earned` account fields using that asset's configured ledger precision. Legacy ETH settlement updates `ethPending` and `ethEarned`.
+Settlements update per-currency `<symbol>Pending` and `<symbol>Earned` account fields using that asset's configured ledger precision. Retired accounting is documented separately in the historical audit notes.
 
-## Legacy ETH Compatibility
+## Historical Records
 
-Historical queue entries are preserved exactly. An entry without `currency` is interpreted as legacy ETH in validation, deduplication, settlement, and the browser. Those entries continue to send native ETH on Optimism. Configured ERC-20 entries are paid only through the Base router and are never sent through the ETH path.
+Historical queue entries and account totals are preserved exactly for audit. Entries without currency remain historical ETH records in offline tooling, but are excluded from the active panel. They are not converted to USDC or paid again. Configured ERC-20 development rewards continue through the Base router.
 
 ## Contributor Requests
 

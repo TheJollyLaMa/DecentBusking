@@ -5,12 +5,11 @@
  *   1. Load the pending payroll queue from payroll-queue.json.
  *   2. Verify the connected wallet is the repo owner.
  *   3. Settle configured ERC-20 rewards through the shared Base Settlement Router.
- *   4. Preserve direct Optimism ETH payouts for historical queue entries.
+ *   4. Preview budget-capped artist and prize allocations on Base.
  *
  * Usage:
  *   - Owner clicks the 💸 Payroll button in the app.
- *   - Connects MetaMask; the payout action switches to Base for configured
- *     router assets or Optimism for historical ETH entries.
+ *   - Connects MetaMask; configured-token settlement uses Base.
  *   - Sees pending payouts with amounts, contributors, and wallet addresses.
  *   - Clicks "Settle All" or individual "Pay" buttons to settle eligible work.
  *   - ART payments are recorded on-chain and cannot be paid twice.
@@ -21,8 +20,8 @@
  *   payroll.
  */
 
-import { createLegacyReceiptStore, verifyLegacyPayment } from './legacy-payroll.mjs';
 import { isAdminWallet } from './admin-access.mjs';
+import { previewPlaybackPayroll, previewTopTenPayroll } from './radio-payroll.mjs';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -33,7 +32,6 @@ const ACCOUNTS_URL =
   'https://raw.githubusercontent.com/TheJollyLaMa/DecentBusking/main/contributor-accounts.json';
 
 const BASE_CHAIN_ID = 8453;
-const OPTIMISM_CHAIN_ID = 10;
 const PAYROLL_ASSETS_URL = new URL('../payroll-assets.json', import.meta.url).toString();
 const ROUTER_ABI = [
   'function PAYROLL_ROLE() view returns (bytes32)',
@@ -54,12 +52,9 @@ let _pendingEntries   = [];
 let _ownerAddress     = null;
 let _payrollAssetConfig = null;
 let _settling = false;
-let _legacyReceipts;
-
-function _legacyStore() {
-  _legacyReceipts ||= createLegacyReceiptStore(localStorage);
-  return _legacyReceipts;
-}
+let _radioReports = [];
+let _radioRefreshId = 0;
+let _radioBalances = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -137,15 +132,25 @@ async function _onWalletConnected({ detail } = {}) {
   }
 
   _setStatus(statusEl, isOwner
-    ? '✅ Repo owner connected — configured tokens settle on Base; legacy ETH settles on Optimism.'
+    ? '✅ Repo owner connected — configured tokens settle on Base.'
     : '✅ Connected (read-only view — settle disabled for non-owner wallets).');
 
   // Load and display the payroll queue
   if (queueSection) queueSection.style.display = 'block';
   await loadPayrollQueue();
+  await _refreshRadioPayroll();
 }
 
 function _onWalletDisconnected() {
+  ++_radioRefreshId;
+  _radioReports = [];
+  _radioBalances = null;
+  for (const id of ['radio-playback-balance', 'radio-prize-balance', 'radio-gas-balance']) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = 'Not loaded';
+  }
+  document.getElementById('radio-playback-preview')?.replaceChildren();
+  document.getElementById('radio-prize-preview')?.replaceChildren();
   document.getElementById('payroll-modal')?.classList.add('hidden');
   document.getElementById('payroll-overlay')?.classList.add('hidden');
   const addrEl    = document.getElementById('payroll-connected-addr');
@@ -180,23 +185,8 @@ export async function loadPayrollQueue() {
 
   try {
     const queue = await _fetchJSON(PAYROLL_QUEUE_URL);
-    const pending = Array.isArray(queue.pending) ? queue.pending : [];
+    const pending = Array.isArray(queue.pending) ? queue.pending.filter(entry => _entryCurrency(entry) !== 'ETH') : [];
     _pendingEntries = pending;
-    const optimism = new ethers.JsonRpcProvider('https://optimism-rpc.publicnode.com', OPTIMISM_CHAIN_ID);
-    const verifiedLegacy = new Set();
-    for (const entry of pending.filter(entry => _entryCurrency(entry) === 'ETH')) {
-      const saved = _legacyStore().get(entry);
-      if (!saved?.txHash) continue;
-      try {
-        const result = await verifyLegacyPayment({ provider: optimism, txHash: saved.txHash, owner: _ownerAddress,
-          recipient: entry.contributor, amountWei: ethers.parseEther(String(entry.amount)) });
-        _legacyStore().set(entry, { ...result, owner: _ownerAddress });
-        if (result.status === 'confirmed') verifiedLegacy.add(entry);
-      } catch {
-        if (statusEl) statusEl.textContent = 'Some Optimism receipts could not be verified. Those entries remain locked; do not repay them.';
-      }
-    }
-    _pendingEntries = pending.filter(entry => !verifiedLegacy.has(entry));
 
     if (_isRouterConfigured() && pending.some(entry => _entryCurrency(entry) !== 'ETH')) {
       try {
@@ -234,13 +224,11 @@ export async function loadPayrollQueue() {
     const currency = _entryCurrency(entry);
     const isRouterEntry = currency !== 'ETH';
     const wallet = entry.contributor || '';
-    const explorerBase = isRouterEntry ? 'https://basescan.org/address/' : 'https://optimistic.etherscan.io/address/';
+    const explorerBase = 'https://basescan.org/address/';
     const walletDisplay = wallet
       ? `<a href="${explorerBase}${_esc(wallet)}" target="_blank" rel="noopener" class="payroll-addr-link" title="${_esc(wallet)}">${_esc(_shortAddr(wallet))}</a>`
       : '<span class="payroll-no-wallet">⚠️ No wallet</span>';
     const canPay = isOwner && _isPayableEntry(entry);
-    const legacy = !isRouterEntry && isOwner;
-    const receipt = legacy ? _legacyStore().get(entry) : null;
     return `
       <tr data-index="${i}" class="payroll-row${isRouterEntry ? ' payroll-row-art' : ''}">
         <td class="payroll-td">
@@ -264,11 +252,6 @@ export async function loadPayrollQueue() {
             ? `<button class="payroll-pay-btn" data-index="${i}">💸 Pay</button>`
             : `<span class="payroll-pay-disabled">${!isOwner ? '🔒' : !wallet ? '⚠️ No wallet' : isRouterEntry ? '⚠️ Router/token not configured' : 'Review prior payment'}</span>`
           }
-          ${legacy ? `<div class="payroll-legacy-review">
-            <input class="payroll-tx-hash" data-index="${i}" aria-label="Existing Optimism transaction for ${_esc(entry.issueRef)}" placeholder="Existing Optimism tx hash" value="${_esc(receipt?.txHash || '')}" />
-            <button class="payroll-verify-btn" data-index="${i}" type="button">Verify Existing Payment</button>
-            ${!receipt || receipt.status === 'reviewed-unpaid' ? `<label><input class="payroll-reviewed-unpaid" data-index="${i}" type="checkbox" ${receipt?.status === 'reviewed-unpaid' ? 'checked' : ''} /> I checked history: this entry is unpaid</label>` : `<span>Payment ${_esc(receipt.status)}. Do not send again.</span>`}
-          </div>` : ''}
         </td>
       </tr>`;
   }).join('');
@@ -283,29 +266,6 @@ export async function loadPayrollQueue() {
       await _paySingle(idx, btn);
     });
   });
-  tableBody.querySelectorAll('.payroll-verify-btn').forEach(button => button.addEventListener('click', async () => {
-    const index = Number(button.dataset.index);
-    const entry = _pendingEntries[index];
-    const txHash = tableBody.querySelector(`.payroll-tx-hash[data-index="${index}"]`).value.trim();
-    try {
-      button.disabled = true;
-      const provider = new ethers.JsonRpcProvider('https://optimism-rpc.publicnode.com', OPTIMISM_CHAIN_ID);
-      const verified = await verifyLegacyPayment({ provider, txHash, owner: _ownerAddress,
-        recipient: entry.contributor, amountWei: ethers.parseEther(String(entry.amount)) });
-      _legacyStore().set(entry, { ...verified, owner: _ownerAddress });
-      _showSettleWorkflowHint(txHash);
-      await loadPayrollQueue();
-    } catch (error) {
-      _setStatus(statusEl, error.message, true);
-      button.disabled = false;
-    }
-  }));
-  tableBody.querySelectorAll('.payroll-reviewed-unpaid').forEach(checkbox => checkbox.addEventListener('change', async () => {
-    const entry = _pendingEntries[Number(checkbox.dataset.index)];
-    if (checkbox.checked) _legacyStore().set(entry, { status: 'reviewed-unpaid', owner: _ownerAddress });
-    else _legacyStore().remove(entry);
-    await loadPayrollQueue();
-  }));
 
   // Enable/disable Settle All button
   const payableCount = _pendingEntries.filter(e => isOwner && _isPayableEntry(e)).length;
@@ -323,10 +283,6 @@ function _entryCurrency(entry) {
   return String(entry?.currency || 'ETH').trim().toUpperCase();
 }
 
-function _isEthPayableEntry(entry) {
-  return _entryCurrency(entry) === 'ETH' && isValidEthAddress(entry?.contributor) && _legacyStore().get(entry)?.status === 'reviewed-unpaid';
-}
-
 function _getAssetConfig(currency) {
   const asset = _payrollAssetConfig?.assets?.[String(currency || '').toUpperCase()];
   return asset && isValidEthAddress(asset.address) && Number.isInteger(asset.decimals) && asset.decimals >= 0 && asset.decimals <= 36
@@ -335,13 +291,11 @@ function _getAssetConfig(currency) {
 }
 
 function _isRouterConfigured() {
-  return isValidEthAddress(_payrollAssetConfig?.routerAddress) && Number.isInteger(_payrollAssetConfig?.chainId);
+  return isValidEthAddress(_payrollAssetConfig?.routerAddress) && _payrollAssetConfig?.chainId === BASE_CHAIN_ID;
 }
 
 function _isPayableEntry(entry) {
-  return isValidEthAddress(entry?.contributor) && (
-    _isEthPayableEntry(entry) || (_entryCurrency(entry) !== 'ETH' && _isRouterConfigured() && _getAssetConfig(_entryCurrency(entry)))
-  );
+  return isValidEthAddress(entry?.contributor) && _entryCurrency(entry) !== 'ETH' && _isRouterConfigured() && Boolean(_getAssetConfig(_entryCurrency(entry)));
 }
 
 function _readOnlyRouter() {
@@ -357,8 +311,8 @@ function _artWorkReference(entry) {
 }
 
 async function _switchNetwork(chainId) {
+  if (chainId !== BASE_CHAIN_ID) throw new Error('Active payroll settlement is Base-only');
   if (!window.ethereum) throw new Error('MetaMask is not available.');
-  const baseChainId = Number(_payrollAssetConfig?.chainId || BASE_CHAIN_ID);
   const chainHex = `0x${chainId.toString(16)}`;
   const activeChain = Number.parseInt(await window.ethereum.request({ method: 'eth_chainId' }), 16);
   if (activeChain === chainId) return;
@@ -367,9 +321,7 @@ async function _switchNetwork(chainId) {
     await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] });
   } catch (err) {
     if (err.code !== 4902) throw err;
-    const network = chainId === baseChainId
-      ? { chainName: 'Base', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: [_payrollAssetConfig?.rpcUrl || 'https://base-rpc.publicnode.com'], blockExplorerUrls: ['https://basescan.org'] }
-      : { chainName: 'Optimism', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://mainnet.optimism.io'], blockExplorerUrls: ['https://optimistic.etherscan.io'] };
+    const network = { chainName: 'Base', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: [_payrollAssetConfig?.rpcUrl || 'https://base-rpc.publicnode.com'], blockExplorerUrls: ['https://basescan.org'] };
     await window.ethereum.request({
       method: 'wallet_addEthereumChain',
       params: [{ chainId: chainHex, ...network }],
@@ -474,28 +426,6 @@ async function _payTokenEntry(entry) {
   return tx.hash;
 }
 
-async function _payEthEntry(entry) {
-  if (_legacyStore().get(entry)?.status !== 'reviewed-unpaid') throw new Error('Review existing Optimism payments before sending ETH. Verify an existing receipt instead of paying again.');
-  const signer = await _getSigner(OPTIMISM_CHAIN_ID);
-  const owner = await signer.getAddress();
-  if (!_ownerAddress || owner.toLowerCase() !== _ownerAddress.toLowerCase()) throw new Error('Connect the registered owner wallet before settling payroll');
-  const { to, amountWei } = _buildTxParams(entry);
-  if (!to) throw new Error(`No valid wallet address for @${entry.contributorGithub}.`);
-  _legacyStore().set(entry, { status: 'awaiting-wallet', owner });
-  let tx;
-  try {
-    tx = await signer.sendTransaction({ to, value: amountWei });
-  } catch (error) {
-    if (error.code === 4001 || error.code === 'ACTION_REJECTED') _legacyStore().remove(entry);
-    throw error;
-  }
-  _legacyStore().set(entry, { status: 'pending', owner, txHash: tx.hash });
-  await tx.wait();
-  const verified = await verifyLegacyPayment({ provider: signer.provider, txHash: tx.hash, owner, recipient: to, amountWei });
-  _legacyStore().set(entry, { ...verified, owner });
-  return tx.hash;
-}
-
 // ─── Settle a single queue entry ──────────────────────────────────────────────
 
 async function _paySingle(index, btn) {
@@ -516,10 +446,8 @@ async function _paySingle(index, btn) {
   try {
     _settling = true;
     if (btn) btn.disabled = true;
-    const txHash = _entryCurrency(entry) !== 'ETH'
-      ? await _payTokenEntry(entry)
-      : await _payEthEntry(entry);
-    const explorer = _entryCurrency(entry) !== 'ETH' ? 'https://basescan.org/tx/' : 'https://optimistic.etherscan.io/tx/';
+    const txHash = await _payTokenEntry(entry);
+    const explorer = 'https://basescan.org/tx/';
     _setStatus(statusEl, `✅ ${entry.amount} ${_entryCurrency(entry)} paid to @${entry.contributorGithub}. ${explorer}${txHash}`);
 
     _showSettleWorkflowHint(txHash);
@@ -527,7 +455,7 @@ async function _paySingle(index, btn) {
 
   } catch (err) {
     _setStatus(statusEl, `❌ ${_entryCurrency(entry)} settlement failed: ${err.message}`, true);
-    if (btn) btn.disabled = _entryCurrency(entry) === 'ETH' && Boolean(_legacyStore().get(entry));
+    if (btn) btn.disabled = false;
   } finally {
     _settling = false;
   }
@@ -547,15 +475,13 @@ async function _settleAll() {
 
   const payable = _pendingEntries.filter(_isPayableEntry);
   if (payable.length === 0) {
-    _setStatus(statusEl, '⚠️ No eligible configured-token or legacy ETH entries are available to settle.', true);
+    _setStatus(statusEl, 'No eligible Base token entries are available to settle.', true);
     return;
   }
 
   const counts = new Map();
   for (const entry of payable) counts.set(_entryCurrency(entry), (counts.get(_entryCurrency(entry)) || 0) + 1);
-  const networks = [...counts].map(([currency, count]) => currency === 'ETH'
-    ? `${count} legacy ETH on Optimism`
-    : `${count} ${currency} on Base`).join(' and ');
+  const networks = [...counts].map(([currency, count]) => `${count} ${currency} on Base`).join(' and ');
   if (!confirm(`Settle ${networks}? Each transaction is final.`)) {
     return;
   }
@@ -566,9 +492,7 @@ async function _settleAll() {
 
     const hashes = [];
     for (const entry of payable) {
-      const txHash = _entryCurrency(entry) !== 'ETH'
-        ? await _payTokenEntry(entry)
-        : await _payEthEntry(entry);
+      const txHash = await _payTokenEntry(entry);
       hashes.push(txHash);
       console.log(`✅ Settled ${entry.amount} ${_entryCurrency(entry)} to ${entry.contributor} (${entry.contributorGithub}) — ${txHash}`);
     }
@@ -586,14 +510,6 @@ async function _settleAll() {
   }
 }
 
-function _buildTxParams(entry) {
-  if (_entryCurrency(entry) !== 'ETH') return { to: null, amountWei: null };
-  const to = entry.contributor || '';
-  if (!isValidEthAddress(to)) return { to: null, amountWei: null };
-  const amountWei = ethers.parseEther(String(entry.amount));
-  return { to, amountWei };
-}
-
 // ─── Post-settlement hint ─────────────────────────────────────────────────────
 
 function _showSettleWorkflowHint(txHash) {
@@ -606,9 +522,115 @@ function _showSettleWorkflowHint(txHash) {
   hintEl.style.display = 'block';
 }
 
+async function _refreshRadioPayroll() {
+  const select = document.getElementById('radio-payroll-week');
+  const status = document.getElementById('radio-payroll-status');
+  if (!select || !isAdminWallet()) return;
+  const selectedWeek = select.value;
+  const refreshId = ++_radioRefreshId;
+  _radioReports = [];
+  _radioBalances = null;
+  document.getElementById('radio-playback-preview')?.replaceChildren();
+  document.getElementById('radio-prize-preview')?.replaceChildren();
+  for (const id of ['radio-playback-balance', 'radio-prize-balance', 'radio-gas-balance']) {
+    document.getElementById(id).textContent = 'Loading...';
+  }
+  _setStatus(status, 'Loading qualified weekly plays and Base treasury...');
+  try {
+    const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+    if (!service) throw new Error('Playback service is not configured');
+    const response = await fetch(`${service}/api/radio/history?weeks=12`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Playback history unavailable (${response.status})`);
+    const history = await response.json();
+    if (refreshId !== _radioRefreshId) return;
+    _radioReports = (history.weeks || []).filter(report => report.week !== 'all-time');
+    select.replaceChildren(..._radioReports.slice().reverse().map(report => {
+      const option = document.createElement('option');
+      option.value = report.week;
+      option.textContent = `${report.week}${report.current ? ' · current draft' : ' · completed week'}`;
+      return option;
+    }));
+    select.value = _radioReports.some(report => report.week === selectedWeek) ? selectedWeek : _radioReports.at(-1)?.week || '';
+    _setStatus(status, 'Draft preview ready. No claims or transfers enabled.');
+    if (!_isRouterConfigured() || !_getAssetConfig('USDC')) throw new Error('Base USDC treasury configuration unavailable');
+    const router = _readOnlyRouter();
+    const asset = _getAssetConfig('USDC');
+    const slugs = _payrollAssetConfig.radioFunds || {};
+    const fundStatus = async slug => {
+      if (!slug) return { available: 0n, active: false, exists: false };
+      const id = ethers.id(slug);
+      const fund = await router.funds(id);
+      const exists = Boolean(fund.exists ?? fund[2]);
+      const available = exists ? await router.fundBalances(id, asset.address) : 0n;
+      return { available, exists, active: Boolean(fund.active ?? fund[1]) };
+    };
+    const [playback, prizes, approved, gas] = await Promise.all([
+      fundStatus(slugs.playback), fundStatus(slugs.topTen), router.approvedAssets(asset.address), router.runner.getBalance(_ownerAddress),
+    ]);
+    if (refreshId !== _radioRefreshId) return;
+    _radioBalances = { playback, prizes, approved };
+    document.getElementById('radio-gas-balance').textContent = `${ethers.formatEther(gas)} ETH`;
+    document.getElementById('radio-playback-balance').textContent = playback.exists ? `${ethers.formatUnits(playback.available, asset.decimals)} USDC` : 'Fund not created';
+    document.getElementById('radio-prize-balance').textContent = prizes.exists ? `${ethers.formatUnits(prizes.available, asset.decimals)} USDC` : 'Fund not created';
+  } catch (error) {
+    if (refreshId === _radioRefreshId) _setStatus(status, `${error.message}. Preview only; settlement remains disabled.`, true);
+  }
+}
+
+function _previewRadioPayroll() {
+  if (!isAdminWallet()) return;
+  const status = document.getElementById('radio-payroll-status');
+  try {
+    const report = _radioReports.find(report => report.week === document.getElementById('radio-payroll-week').value);
+    if (!report) throw new Error('Refresh playback history before previewing');
+    const asset = _getAssetConfig('USDC');
+    if (!asset || asset.decimals !== 6) throw new Error('USDC precision is not configured correctly');
+    const units = id => ethers.parseUnits(document.getElementById(id).value || '0', asset.decimals);
+    const minimumUnits = units('radio-minimum-payout');
+    const playbackBudget = units('radio-playback-budget');
+    const prizeBudget = units('radio-prize-budget');
+    const playback = previewPlaybackPayroll({ tracks: report.tracks, budgetUnits: playbackBudget, minimumUnits });
+    const prizes = previewTopTenPayroll({ tracks: report.tracks, budgetUnits: prizeBudget, minimumUnits });
+    const render = (id, plan) => {
+      const target = document.getElementById(id);
+      target.replaceChildren();
+      const total = document.createElement('p');
+      total.textContent = `${ethers.formatUnits(plan.allocatedUnits, 6)} USDC allocated · ${ethers.formatUnits(plan.remainderUnits, 6)} USDC held/unallocated`;
+      target.append(total);
+      for (const entry of plan.entries) {
+        const row = document.createElement('div');
+        row.className = 'radio-payroll-artist';
+        const name = document.createElement('span');
+        name.textContent = `${entry.rank ? `${entry.rank}. ` : ''}${entry.artist || _shortAddr(entry.wallet)} · ${entry.plays} plays · ${_shortAddr(entry.wallet)}`;
+        const amount = document.createElement('strong');
+        amount.textContent = `${ethers.formatUnits(entry.amountUnits, 6)} USDC${entry.payable ? '' : entry.amountUnits === 0n ? ' · no payout' : ' · held below minimum'}`;
+        row.append(name, amount);
+        target.append(row);
+      }
+    };
+    render('radio-playback-preview', playback);
+    render('radio-prize-preview', prizes);
+    const funded = _radioBalances?.approved &&
+      (playbackBudget === 0n || (_radioBalances.playback.active && _radioBalances.playback.available >= playbackBudget)) &&
+      (prizeBudget === 0n || (_radioBalances.prizes.active && _radioBalances.prizes.available >= prizeBudget));
+    const excluded = report.tracks.filter(track => !isValidEthAddress(track.wallet)).length;
+    _setStatus(status, `Draft ${report.week}${report.current ? ' (week still in progress)' : ''}. ` +
+      `${funded ? 'Budgets within available funds' : 'Budgets are not confirmed funded'}. ` +
+      `${excluded ? `${excluded} tracks excluded for missing verified wallets. ` : ''}No claims or transfers enabled.`);
+  } catch (error) {
+    _setStatus(status, error.message, true);
+  }
+}
+
 // ─── Initialise the payroll panel ─────────────────────────────────────────────
 
 export function initPayroll() {
+  document.getElementById('radio-payroll-refresh')?.addEventListener('click', _refreshRadioPayroll);
+  document.getElementById('radio-payroll-preview')?.addEventListener('click', _previewRadioPayroll);
+  document.getElementById('radio-payroll-week')?.addEventListener('change', () => {
+    document.getElementById('radio-playback-preview')?.replaceChildren();
+    document.getElementById('radio-prize-preview')?.replaceChildren();
+  });
   const settleBtn   = document.getElementById('payroll-settle-all-btn');
   const refreshBtn  = document.getElementById('payroll-refresh-btn');
   const openBtn     = document.getElementById('payroll-open-btn');

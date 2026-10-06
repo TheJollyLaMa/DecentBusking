@@ -34,5 +34,6 @@ test('frontend routes configured tokens through the shared Base router', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'payroll.js'), 'utf8');
   assert.match(source, /_getAssetConfig/);
   assert.match(source, /_payTokenEntry/);
-  assert.match(source, /_isEthPayableEntry/);
+  assert.match(source, /Active payroll settlement is Base-only/);
+  assert.doesNotMatch(source, /OPTIMISM_CHAIN_ID|_payEthEntry|sendTransaction/);
 });

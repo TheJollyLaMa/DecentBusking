@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261006-payroll-review" />
+  <link rel="stylesheet" href="css/styles.css?v=20261006-base-radio-payroll" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -304,7 +304,7 @@
         <button id="payroll-close-btn" aria-label="Close payroll panel">✕</button>
       </div>
       <p class="payroll-description">
-        Base rewards and legacy Optimism payments. Owner settlement only.
+        Base treasury and owner-reviewed USDC allocation drafts.
       </p>
 
       <!-- Wallet connection status — populated by the global wallet module -->
@@ -318,11 +318,25 @@
 
       <section class="payroll-section" aria-labelledby="playback-payroll-title">
         <h3 id="playback-payroll-title">Playback Payroll</h3>
-        <dl class="payroll-allocation"><dt>Weekly allocation</dt><dd>Not configured</dd><dt>Settlement network</dt><dd>Base</dd></dl>
+        <div class="radio-payroll-controls">
+          <label>UTC week<select id="radio-payroll-week"></select></label>
+          <label>Playback budget (USDC)<input id="radio-playback-budget" type="number" min="0" step="0.01" value="0" /></label>
+          <label>Minimum payout (USDC)<input id="radio-minimum-payout" type="number" min="0" step="0.01" value="1" /></label>
+        </div>
+        <div class="radio-payroll-actions">
+          <button id="radio-payroll-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Treasury &amp; Plays</button>
+          <button id="radio-payroll-preview" class="payroll-btn payroll-btn-primary" type="button">Preview Allocation</button>
+        </div>
+        <p id="radio-payroll-status" class="payroll-status" role="status">Draft allocations only. No claims or transfers enabled.</p>
+        <dl class="payroll-allocation"><dt>Base gas balance</dt><dd id="radio-gas-balance">Not loaded</dd><dt>Playback fund USDC</dt><dd id="radio-playback-balance">Not loaded</dd></dl>
+        <div id="radio-playback-preview" class="radio-payroll-preview"></div>
       </section>
       <section class="payroll-section" aria-labelledby="top-ten-payroll-title">
         <h3 id="top-ten-payroll-title">Top 10 Prize Payouts</h3>
-        <dl class="payroll-allocation"><dt>Prize allocation</dt><dd>Not configured</dd><dt>Settlement network</dt><dd>Base</dd></dl>
+        <div class="radio-payroll-controls"><label>Prize budget (USDC)<input id="radio-prize-budget" type="number" min="0" step="0.01" value="0" /></label></div>
+        <p class="payroll-description">Draft: top 10 artist wallets by qualified weekly plays. Equal prize shares; one place per artist.</p>
+        <dl class="payroll-allocation"><dt>Prize fund USDC</dt><dd id="radio-prize-balance">Not loaded</dd></dl>
+        <div id="radio-prize-preview" class="radio-payroll-preview"></div>
       </section>
 
       <!-- Payroll queue table -->
@@ -331,10 +345,8 @@
           <h3>Repo Dev Bot Payouts</h3>
           <button id="payroll-refresh-btn" class="payroll-btn payroll-btn-secondary" title="Refresh queue">🔄 Refresh</button>
         </div>
-        <p class="payroll-legacy-warning">Legacy Optimism entries require payment review before sending. Verify an existing transaction if paid; do not send again.</p>
-        <a class="payroll-link" href="https://optimistic.etherscan.io/address/0x807061DF657A7697c04045dA7d16D941861cAABc" target="_blank" rel="noopener noreferrer">Optimism owner transaction history</a>
         <div id="payroll-empty-msg" class="payroll-empty" style="display:none;">
-          ✅ No pending payouts. All bounties are settled!
+          No pending Base repository payouts.
         </div>
         <div class="payroll-table-wrap">
           <table id="payroll-table" class="payroll-table">
@@ -382,10 +394,10 @@
   <!-- Admin role-grant panel -->
   <script type="module" src="js/admin.js?v=20261006-owner-payroll"></script>
 
-  <script type="module" src="js/payroll.js?v=20261006-payroll-review"></script>
+  <script type="module" src="js/payroll.js?v=20261006-base-radio-payroll"></script>
   <script type="module" src="js/radio-history.js?v=20261006-all-time-tally"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261006-payroll-review';
+    import { initPayroll } from './js/payroll.js?v=20261006-base-radio-payroll';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 
