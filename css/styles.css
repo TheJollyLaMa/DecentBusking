@@ -1193,9 +1193,35 @@ decent-foot {
 
 /* Table */
 .payroll-table-wrap {
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
   border-radius: 8px;
   border: 1px solid var(--panel-border);
+}
+
+.payroll-section { padding: 16px 0; border-top: 1px solid var(--panel-border); }
+.payroll-section h3 { margin: 0 0 10px; font-size: 1rem; }
+.payroll-allocation { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; margin: 0; font-size: .85rem; }
+.payroll-allocation dt { color: var(--text-dim); }
+.payroll-allocation dd { margin: 0; }
+.payroll-legacy-warning { color: var(--gold); font-size: .85rem; }
+.payroll-legacy-review { display: grid; min-width: 220px; gap: 8px; margin-top: 8px; }
+.payroll-legacy-review input[type="text"], .payroll-tx-hash { min-width: 0; width: 100%; padding: 8px; border: 1px solid var(--panel-border); border-radius: 4px; background: #10121a; color: var(--text-primary); font: inherit; }
+.payroll-legacy-review label { font-size: .75rem; white-space: normal; }
+.payroll-verify-btn { padding: 6px 8px; border: 1px solid var(--panel-border); border-radius: 4px; color: var(--text-primary); background: #10121a; cursor: pointer; }
+#payroll-connect-section, #payroll-queue-section { min-width: 0; max-width: 100%; }
+#payroll-modal .payroll-addr { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+#payroll-settle-hint { min-width: 0; overflow-wrap: anywhere; }
+#payroll-settle-hint code { word-break: break-all; }
+@media (max-width: 600px) {
+  #payroll-table thead { display: none; }
+  #payroll-table, #payroll-table tbody { display: block; width: 100%; }
+  #payroll-table .payroll-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--panel-border); }
+  #payroll-table .payroll-td { display: block; min-width: 0; border: 0; }
+  #payroll-table .payroll-td:nth-child(2), #payroll-table .payroll-td:nth-child(4), #payroll-table .payroll-td:nth-child(5) { grid-column: 1 / -1; }
+  #payroll-table .payroll-td:nth-child(3) { grid-column: 2; grid-row: 1; }
+  #payroll-table .payroll-legacy-review { min-width: 0; }
 }
 .payroll-table {
   width: 100%;

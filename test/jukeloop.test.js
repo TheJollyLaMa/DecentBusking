@@ -73,7 +73,7 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
     { likes: 2, dislikes: 1, plays: 0 },
   );
   assert.equal(store.reconcileRatings([
-    { trackId: 'attachment-2', likes: 1, dislikes: 0, messageId: 'rating-message-1' },
+    { trackId: 'attachment-2', likes: 2, dislikes: 1, messageId: 'rating-message-1' },
     { trackId: 'attachment-2', likes: 1, dislikes: 0, messageId: 'rating-message-2' },
   ]), 1);
   assert.deepEqual(
@@ -88,6 +88,11 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
   });
   assert.equal(audible.counted, true);
   assert.equal(audible.week, '2026-W41');
+  assert.equal(rated.plays, 2);
+  store.applyRating('attachment-2', 3, 1, 'rating-message-1');
+  assert.equal(rated.likes, 4);
+  store.applyRating('attachment-2', 3, 1, 'rating-message-1');
+  assert.equal(rated.likes, 4);
   assert.equal(rated.plays, 2);
   assert.equal(store.recordAudiblePlay('attachment-2', {
     playId: 'play-attachment-2-1', startedAt: 0, endedAt: 240_000, audibleMs: 240_000,
@@ -210,6 +215,79 @@ test('radio state publishes the audible track position and newest uploads', asyn
   assert.deepEqual(state.recent.map((track) => [track.trackId, track.ipfsCid]), [['new', null], ['old', 'bafy-old']]);
   assert.equal('uploaderId' in state.recent[1], false);
   assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).nowPlaying, null);
+});
+
+test('Discord and site votes update one track ledger without bot votes or duplicate plays', async (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-master-votes-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(temp, { recursive: true, force: true }); });
+  const storeUrl = pathToFileURL(path.join(__dirname, '../discord-bot/playlist-store.js'));
+  storeUrl.searchParams.set('master-votes', Date.now());
+  const store = await import(storeUrl.href);
+  const { synchronizeDiscordRating, parseNowPlayingMessage, buildNowPlayingMessage } = await import(pathToFileURL(path.join(__dirname, '../discord-bot/jukeloop.js')).href);
+  const synchronize = (message, options) => synchronizeDiscordRating(message, 'bot', { ...options, store });
+  store.loadPlaylist([{ trackId: 'track', title: 'Song', uploader: 'Artist', uploaderId: 'artist', messageId: 'upload',
+    mintRecipient: '0x1111111111111111111111111111111111111111', likes: 0, dislikes: 0, plays: 0 }]);
+  const content = buildNowPlayingMessage(store.getPlaylist()[0], { queueIndex: 1, totalTracks: 1, playId: 'play-1', votingOpen: false });
+  assert.equal(parseNowPlayingMessage(content).playId, 'play-1');
+  const reactions = new Map([
+    ['up', { emoji: { name: '👍' }, count: 2, me: true }],
+    ['tone', { emoji: { name: '👍🏻' }, count: 1, me: false }],
+    ['down', { emoji: { name: '👎' }, count: 1, me: true }],
+  ]);
+  const message = { id: 'announcement', author: { id: 'bot', bot: true }, content, reactions: { cache: reactions } };
+  synchronize(message);
+  synchronize(message);
+  store.applySiteVote('track', 1);
+  assert.equal(store.getPlaylist()[0].likes, 3);
+  assert.equal(store.getPlaylist()[0].plays, 0);
+  reactions.get('up').count = 3;
+  synchronize(message, { change: 1, emoji: '👍' });
+  assert.equal(store.getPlaylist()[0].likes, 4);
+  reactions.get('up').count = 2;
+  synchronize(message, { change: -1, emoji: '👍' });
+  assert.equal(store.getPlaylist()[0].likes, 3);
+  synchronize({ id: 'upload', author: { id: 'artist', bot: false }, content: '',
+    reactions: { cache: new Map([['up', { emoji: { name: '👍' }, count: 1, me: false }]]) } }, { change: 1, emoji: '👍' });
+  assert.equal(store.getPlaylist()[0].likes, 4);
+  store.recordAudiblePlay('track', { playId: 'play-1', announcementId: 'announcement', startedAt: 0, endedAt: 60000, audibleMs: 60000 });
+  const plays = store.getPlaylist()[0].plays;
+  store.reconcileRatings([{ trackId: 'track', messageId: 'announcement', playId: 'play-1', likes: 2, dislikes: 0 }]);
+  assert.equal(store.getPlaylist()[0].plays, plays);
+});
+
+test('historical printed totals restore one master floor and never create qualified weekly playbacks', async (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-master-history-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(temp, { recursive: true, force: true }); });
+  const url = pathToFileURL(path.join(__dirname, '../discord-bot/playlist-store.js'));
+  url.searchParams.set('master-history', Date.now());
+  const store = await import(url.href);
+  store.loadPlaylist([{ trackId: 'track', title: 'Song', uploader: 'Artist', likes: 2, dislikes: 0, plays: 5 }]);
+  const events = [{ trackId: 'track', messageId: 'old', likes: 0, dislikes: 0, legacyTotals: { likes: 14, dislikes: 2, plays: 30 } }];
+  store.reconcileRatings(events);
+  store.reconcileRatings(events);
+  const track = store.getPlaylist()[0];
+  assert.equal(track.likes, 14);
+  assert.equal(track.dislikes, 2);
+  assert.equal(track.plays, 30);
+  assert.equal(track.weeklyPlays, undefined);
+  store.applyRating('track', 1, 0, 'old');
+  assert.equal(track.likes, 15);
+  store.reconcileRatings([{ trackId: 'track', messageId: 'new-modern', playId: 'short-play', likes: 0, dislikes: 0 }]);
+  assert.equal(track.plays, 30);
+  store.recordAudiblePlay('track', { playId: 'completed', announcementId: 'abandoned', startedAt: 0, endedAt: 60000, audibleMs: 60000 });
+  store.reconcileRatings([{ trackId: 'track', messageId: 'abandoned', likes: 0, dislikes: 0 }]);
+  assert.equal(track.plays, 31);
+  assert.equal(track.weeklyPlays['1970-W01'], 1);
+  store.loadPlaylist([{ trackId: 'visible', title: 'Visible', likes: 1, dislikes: 0, plays: 4 }]);
+  const visible = [{ trackId: 'visible', messageId: 'old-visible', likes: 8, dislikes: 1,
+    legacyTotals: { likes: 2, dislikes: 0, plays: 4 } }];
+  store.reconcileRatings(visible);
+  store.reconcileRatings(visible);
+  assert.equal(store.getPlaylist()[0].likes, 8);
+  assert.equal(store.getPlaylist()[0].dislikes, 1);
+  assert.equal(store.getPlaylist()[0].plays, 4);
 });
 
 test('historic MP4 discovery accepts exactly 10 MB, skips larger attachments, and remains wallet-unassigned', async () => {

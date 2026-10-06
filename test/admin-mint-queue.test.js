@@ -104,6 +104,7 @@ test('Admin reuses the header signer, checks roles without reconnecting, and cle
       Contract: class { constructor(_address, _abi, runner) { assert.equal(runner, signer); }
         async DEFAULT_ADMIN_ROLE() { return 'admin'; } async hasRole() { return allowed; } } },
     fetchMintQueue: async options => { assert.equal(options.signer, signer); queueCalls++; return []; }, clearMintQueueAuthorization() {},
+    isAdminWallet: () => true,
   });
   const source = fs.readFileSync(path.join(__dirname, '../js/admin.js'), 'utf8').replace(/^import .*;\n/gm, '');
   vm.runInContext(`${source}\nglobalThis.checkWallet = _connectWallet; globalThis.getSigner = () => _adminSigner;`, context);

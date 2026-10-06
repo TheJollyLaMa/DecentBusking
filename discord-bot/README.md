@@ -196,7 +196,13 @@ Track weight = `max(0.1, 1 + likes − dislikes × 0.5)`.  A brand-new track has
 
 Ratings **accumulate** across plays and **persist to disk** (`jukeloop-playlist.json`) so they survive bot restarts.
 
-Each Now Playing message displays cumulative likes, dislikes, and playback announcements. Reactions on the current message are per-play inputs; when the next track begins, the bot adds them to the cumulative totals, edits the message with the updated totals, and removes the closed reaction buttons. Discord announcement IDs are persisted as idempotency keys. On startup, JukeLoop scans up to 500 recent announcements and reconciles any that were abandoned by a restart, then writes one Pinata-backed checkpoint without double-counting previously processed messages.
+The playlist is the single master tally. The local runtime file and tagged Pinata snapshots are copies of that ledger, not independent vote lists. Both Playback Tally panels read its counters; the personal panel filters by the artist wallet.
+
+Site votes, Now Playing reactions, and reactions on an original upload that identifies exactly one track update the same track totals. Discord reaction additions/removals are synchronized live; each message has a persisted count baseline, so rereading it adds only the difference. Thumb skin-tone variants count, and the bot's own seed reactions do not. Reactions remain available after a play finishes. Multi-track upload posts are not assigned a vote arbitrarily; listeners can react on each track's Now Playing message instead.
+
+On startup, JukeLoop scans up to 500 recent announcements and checkpoints recovered changes. For older messages, readable reactions and bot-published cumulative counters establish a one-time conservative minimum; those two representations are not added together. Reactions erased by older bot versions cannot be reconstructed. New announcements carry a Play ID, and completed audible plays retain their announcement ID, preventing recovery from adding the same play twice. Historical totals do not create qualified weekly playback credits.
+
+For the first playback payroll, use the qualified UTC-week playback ledger (completed Discord audio with at least 30 audible seconds) and verified artist wallets. Do not pay against historical announcement totals or anonymous likes. Currency, funded weekly budget, distribution rules, review/finalization, and settlement authorization must be decided before any claimable amounts or transactions are enabled.
 
 ### Setting up JukeLoop
 

@@ -303,21 +303,27 @@ export function removeTrack(trackId) {
 }
 
 /**
- * Record 👍 / 👎 reaction counts and increment the play counter for a track.
- * The counts are *added* to the stored totals (they accumulate over time).
+ * Merge a Discord message's current reaction counts into the master vote totals.
+ * Repeated snapshots apply only their delta; this never increments play counts.
  *
+ * @param {string} trackId
+ * @param {number} newLikes    - Current human 👍 count for this message
+ * @param {number} newDislikes - Current human 👎 count for this message
  * @param {string} messageId
- * @param {number} newLikes    - Net new 👍 since last collection
- * @param {number} newDislikes - Net new 👎 since last collection
  */
-export function applyRating(trackId, newLikes, newDislikes, messageId) {
+export function applyRating(trackId, newLikes, newDislikes, messageId, { initialCounts, save = true } = {}) {
   const track = _playlist.find((entry) => entry.trackId === trackId);
   if (!track) return null;
-  if (messageId && track.ratedMessageIds?.includes(messageId)) return track;
-  track.likes    += newLikes;
-  track.dislikes += newDislikes;
-  if (messageId) track.ratedMessageIds = [...(track.ratedMessageIds || []), messageId].slice(-500);
-  _save();
+  const likes = Math.max(0, Number(newLikes) || 0);
+  const dislikes = Math.max(0, Number(newDislikes) || 0);
+  track.discordRatings ||= {};
+  const previous = messageId && Object.hasOwn(track.discordRatings, messageId) ? track.discordRatings[messageId] : initialCounts;
+  const legacy = messageId && track.ratedMessageIds?.includes(messageId) && !previous;
+  track.likes = Math.max(0, (track.likes || 0) + (legacy ? 0 : likes - (previous?.likes || 0)));
+  track.dislikes = Math.max(0, (track.dislikes || 0) + (legacy ? 0 : dislikes - (previous?.dislikes || 0)));
+  if (messageId) track.discordRatings[messageId] = { likes, dislikes };
+  if (messageId && !track.ratedMessageIds?.includes(messageId)) track.ratedMessageIds = [...(track.ratedMessageIds || []), messageId].slice(-500);
+  if (save) _save();
   return track;
 }
 
@@ -334,21 +340,47 @@ export function applySiteVote(trackId, vote) {
 /** Reconcile many Discord announcements atomically and checkpoint once. */
 export function reconcileRatings(events) {
   let reconciled = 0;
-  for (const { trackId, likes, dislikes, messageId } of events) {
-    const track = _playlist.find((entry) => entry.trackId === trackId);
-    if (!track || !messageId || track.ratedMessageIds?.includes(messageId)) continue;
-    track.likes += likes;
-    track.dislikes += dislikes;
-    track.plays += 1;
-    track.ratedMessageIds = [...(track.ratedMessageIds || []), messageId].slice(-500);
+  const floors = new Map();
+  const observed = new Map();
+  const recoveredTracks = new Set();
+  for (const { trackId, likes, dislikes } of events) {
+    const counts = observed.get(trackId) || { likes: 0, dislikes: 0 };
+    counts.likes += Math.max(0, Number(likes) || 0);
+    counts.dislikes += Math.max(0, Number(dislikes) || 0);
+    observed.set(trackId, counts);
+  }
+  for (const { trackId, legacyTotals } of events) {
+    if (!legacyTotals) continue;
+    const floor = floors.get(trackId) || { likes: 0, dislikes: 0, plays: 0 };
+    for (const field of ['likes', 'dislikes', 'plays']) floor[field] = Math.max(floor[field], Number(legacyTotals[field]) || 0);
+    floors.set(trackId, floor);
+  }
+  for (const track of _playlist) {
+    const floor = floors.get(track.trackId);
+    if (!floor || track.discordLegacyTotalsRecovered) continue;
+    floor.likes = Math.max(floor.likes, observed.get(track.trackId)?.likes || 0);
+    floor.dislikes = Math.max(floor.dislikes, observed.get(track.trackId)?.dislikes || 0);
+    for (const field of ['likes', 'dislikes', 'plays']) track[field] = Math.max(track[field] || 0, floor[field]);
+    track.discordLegacyTotalsRecovered = true;
+    recoveredTracks.add(track.trackId);
     reconciled++;
+  }
+  for (const { trackId, likes, dislikes, messageId, playId, legacyTotals } of events) {
+    const track = _playlist.find((entry) => entry.trackId === trackId);
+    if (!track || !messageId) continue;
+    const alreadyRated = track.ratedMessageIds?.includes(messageId) || Object.hasOwn(track.discordRatings || {}, messageId);
+    const before = JSON.stringify([track.likes, track.dislikes, track.discordRatings?.[messageId]]);
+    applyRating(trackId, likes, dislikes, messageId, { save: false,
+      initialCounts: legacyTotals || recoveredTracks.has(trackId) ? { likes, dislikes } : undefined });
+    if (!alreadyRated && !playId && !legacyTotals && !track.audibleMessageIds?.includes(messageId)) track.plays = (track.plays || 0) + 1;
+    if (!alreadyRated || before !== JSON.stringify([track.likes, track.dislikes, track.discordRatings?.[messageId]])) reconciled++;
   }
   if (reconciled > 0) _save();
   return reconciled;
 }
 
 /** Count one completed, audible play in its UTC week; retries are idempotent by playId. */
-export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audibleMs, firstWeekBonus = false } = {}) {
+export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audibleMs, firstWeekBonus = false, announcementId } = {}) {
   if (!playId || !Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return { counted: false, reason: 'invalid-event' };
   if (!Number.isFinite(audibleMs) || audibleMs < MIN_WEEKLY_PLAY_MS) return { counted: false, reason: 'under-30-seconds' };
   const track = _playlist.find((entry) => entry.trackId === trackId);
@@ -362,6 +394,7 @@ export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audible
   track.weeklyPlays ||= {};
   track.weeklyPlays[week] = (track.weeklyPlays[week] || 0) + 1;
   track.plays = (track.plays || 0) + 1;
+  if (announcementId) track.audibleMessageIds = [...new Set([...(track.audibleMessageIds || []), announcementId])].slice(-5000);
   track.weeklyPlayIds[week].push(playId);
   track.weeklyPlayIds[week] = track.weeklyPlayIds[week].slice(-5000);
   if (firstWeekBonus) track.firstWeekBonusUsed = true;

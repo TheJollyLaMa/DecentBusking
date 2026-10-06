@@ -33,6 +33,7 @@ window.DecentConfig = {
 
   // DecentNFT v0.2 deployed on Base via DecentMarket
   contractAddress: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B",
+  adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",
   marketUrl: "https://thejollylama.github.io/DecentMarket/",
 
   // IPFS uploads. This public URL never contains the server-side Pinata JWT.

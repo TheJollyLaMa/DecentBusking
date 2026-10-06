@@ -10,6 +10,7 @@ import { fetchMintQueue, clearMintQueueAuthorization } from './admin-mint-queue.
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261005-mp4';
+import { isAdminWallet } from './admin-access.mjs';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -85,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── Open / Close ──────────────────────────────────────────────────────────────
 function _openModal() {
+  if (!isAdminWallet()) return;
   _adminOpen = true;
   _modal?.classList.remove('hidden');
   return _connectWallet();
@@ -99,6 +101,11 @@ function _closeModal() {
 // ── Connect Wallet ────────────────────────────────────────────────────────────
 async function _connectWallet() {
   const wallet = window._wallet;
+  if (!isAdminWallet(wallet?.address)) {
+    _resetAdminWallet();
+    _closeModal();
+    return;
+  }
   if (!wallet?.signer || !wallet.address) {
     _resetAdminWallet();
     _setStatus('Connect your wallet in the header to use admin tools.');
