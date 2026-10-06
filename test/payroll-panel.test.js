@@ -12,7 +12,7 @@ test('active payroll is Base-only and radio drafts cannot send transactions', as
   assert.doesNotMatch(source, /Optimism|optimism|legacy-payroll|sendTransaction|_payEthEntry/);
   const preview = source.slice(source.indexOf('function _previewRadioPayroll()'), source.indexOf('// ─── Initialise'));
   assert.doesNotMatch(preview, /signMessage|sendTransaction|await router\.payout|_getSigner/);
-  assert.match(preview, /No claims or transfers enabled/);
+  assert.match(preview, /Preview only; settlement uses the frozen reviewed receipt/);
 });
 
 test('Base payroll excludes retired legacy entries without sending or verifying payments', async () => {

@@ -1209,6 +1209,13 @@ decent-foot {
 .radio-payroll-controls label { display: grid; gap: 6px; font-size: .8rem; color: var(--text-dim); }
 .radio-payroll-controls input, .radio-payroll-controls select { min-width: 0; width: 100%; min-height: 38px; padding: 8px; font: inherit; color: var(--text-primary); background: #10121a; border: 1px solid var(--panel-border); border-radius: 4px; }
 .radio-payroll-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settlement-router-section summary { cursor: pointer; font-weight: 700; margin-bottom: 16px; }
+.settlement-router-section .payroll-allocation dd { min-width: 0; overflow-wrap: anywhere; max-width: 100%; }
+.settlement-router-section .payroll-allocation { grid-template-columns: auto minmax(0, 1fr); }
+.router-metadata-label { grid-column: 1 / -1; }
+.settlement-router-section .radio-payroll-controls { grid-template-columns: minmax(0, 1fr); }
+.settlement-router-section select { width: 100%; min-width: 0; }
+.settlement-router-section #router-fund-status { overflow-wrap: anywhere; }
 .radio-payroll-artist { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--panel-border); font-size: .8rem; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .radio-payroll-artist { grid-template-columns: minmax(0, 1fr); } }
 .payroll-legacy-warning { color: var(--gold); font-size: .85rem; }
