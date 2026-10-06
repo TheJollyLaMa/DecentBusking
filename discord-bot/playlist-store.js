@@ -197,15 +197,24 @@ export function savePlaylist() {
  * @param {Map<string, string>} tokenIdByAudioCid
  * @returns {number} Tracks newly marked minted
  */
-export function applyOnChainMints(tokenIdByAudioCid) {
+export function applyOnChainMints(tokenIdByAudioCid, { artistWalletByAudioCid = new Map() } = {}) {
   let changed = 0;
   for (const track of _playlist) {
     const tokenId = track.ipfsCid && tokenIdByAudioCid.get(track.ipfsCid);
-    if (!tokenId || track.mintStatus === 'minted') continue;
-    track.mintStatus = 'minted';
-    track.tokenId = tokenId;
-    track.mintedAt ??= new Date().toISOString();
-    changed++;
+    if (!tokenId) continue;
+    let updated = false;
+    if (track.mintStatus !== 'minted') {
+      track.mintStatus = 'minted';
+      track.tokenId = tokenId;
+      track.mintedAt ??= new Date().toISOString();
+      updated = true;
+    }
+    const artistWallet = artistWalletByAudioCid.get(track.ipfsCid);
+    if (!track.mintRecipient && /^0x[0-9a-fA-F]{40}$/.test(artistWallet || '')) {
+      track.mintRecipient = artistWallet;
+      updated = true;
+    }
+    if (updated) changed++;
   }
   if (changed) _save();
   return changed;
@@ -363,9 +372,18 @@ export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audible
 }
 
 export function getWeeklyPlayReport(week, { wallet } = {}) {
+  return buildPlayReport(week, wallet);
+}
+
+export function getAllTimePlayReport({ wallet } = {}) {
+  return buildPlayReport(null, wallet);
+}
+
+function buildPlayReport(week, wallet) {
+  const allTime = week === null;
   const targetWallet = typeof wallet === 'string' ? wallet.toLowerCase() : null;
   const tracks = _playlist
-    .filter((track) => (track.weeklyPlays?.[week] || 0) > 0)
+    .filter((track) => allTime ? (track.plays || track.likes || track.dislikes || 0) > 0 : (track.weeklyPlays?.[week] || 0) > 0)
     .filter((track) => !targetWallet || track.mintRecipient?.toLowerCase() === targetWallet)
     .map((track) => ({
       trackId: track.trackId,
@@ -373,7 +391,7 @@ export function getWeeklyPlayReport(week, { wallet } = {}) {
       artist: track.uploader,
       wallet: track.mintRecipient || null,
       uploadedAt: track.addedAt || null,
-      plays: track.weeklyPlays[week],
+      plays: allTime ? track.plays || 0 : track.weeklyPlays[week],
       likes: track.likes || 0,
       dislikes: track.dislikes || 0,
     }))
@@ -388,8 +406,9 @@ export function getWeeklyPlayReport(week, { wallet } = {}) {
     artists.set(track.artist, artist);
   }
   return {
-    week,
-    qualification: 'Completed Discord playback with at least 30 audible seconds; one event per play ID.',
+    week: allTime ? 'all-time' : week,
+    qualification: allTime ? 'All-time recorded plays, including legacy Discord announcement counts. Votes are all-time.'
+      : 'Completed Discord playback with at least 30 audible seconds; one event per play ID.',
     totalPlays: tracks.reduce((total, track) => total + track.plays, 0),
     trackCount: tracks.length,
     artists: [...artists.values()].sort((first, second) => second.plays - first.plays),
@@ -401,7 +420,7 @@ export function getWeeklyPlayWeeks() {
   return [...new Set(_playlist.flatMap((track) => Object.keys(track.weeklyPlays || {})))].sort();
 }
 
-export function getWeeklyPlayHistory({ weeks = 12, now = Date.now(), wallet } = {}) {
+export function getWeeklyPlayHistory({ weeks = 12, now = Date.now(), wallet, includeAllTime = false } = {}) {
   const current = getUtcWeekKey(new Date(now));
   const [year, weekNumber] = current.split('-W').map(Number);
   const monday = new Date(Date.UTC(year, 0, 4 + (weekNumber - 1) * 7));
@@ -413,6 +432,7 @@ export function getWeeklyPlayHistory({ weeks = 12, now = Date.now(), wallet } = 
     const week = getUtcWeekKey(start);
     history.push({ ...getWeeklyPlayReport(week, { wallet }), current: week === current });
   }
+  if (includeAllTime) history.push(getAllTimePlayReport({ wallet }));
   return history;
 }
 

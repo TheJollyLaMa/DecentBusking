@@ -77,6 +77,33 @@ test('first-week track gets one extra spaced slot and consumes its bonus only af
   }
 });
 
+test('wallet all-time tally retains legacy plays and votes without inventing weekly entries', async (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'jukeloop-lifetime-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(temp, { recursive: true, force: true }); });
+  const url = new URL(storeModule);
+  url.searchParams.set('lifetime-test', Date.now());
+  const store = await import(url.href);
+  const wallet = `0x${'1'.repeat(40)}`;
+  store.loadPlaylist([
+    { trackId: 'legacy', title: 'Legacy', uploader: 'Artist', mintRecipient: wallet, plays: 12, likes: 3, dislikes: 1 },
+    { trackId: 'votes-only', title: 'Votes', uploader: 'Artist', mintRecipient: wallet, plays: 0, likes: 2 },
+    { trackId: 'other', title: 'Other', uploader: 'Other', mintRecipient: `0x${'2'.repeat(40)}`, plays: 40, likes: 10 },
+  ]);
+  const report = store.getAllTimePlayReport({ wallet: wallet.toUpperCase() });
+  assert.equal(report.totalPlays, 12);
+  assert.equal(report.trackCount, 2);
+  assert.equal(report.artists[0].likes, 5);
+  assert.equal(report.artists[0].dislikes, 1);
+  const history = store.getWeeklyPlayHistory({ weeks: 2, wallet, includeAllTime: true, now: Date.parse('2026-10-06T00:00:00Z') });
+  assert.equal(history.length, 3);
+  assert.equal(history.at(-1).week, 'all-time');
+  assert.equal(history.at(-1).totalPlays, 12);
+  assert.equal(history[0].totalPlays, 0);
+  assert.equal(history[1].totalPlays, 0);
+  assert.equal(store.getWeeklyPlayHistory({ weeks: 2, wallet }).length, 2);
+});
+
 test('weekly report is explicit about UTC, 30-second eligibility, and is Discord-sized', async () => {
   const { buildWeeklyPlayReportMessage } = await import(reportModule);
   const report = { week: '2026-W41', totalPlays: 20, trackCount: 12,

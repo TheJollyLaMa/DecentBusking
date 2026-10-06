@@ -88,6 +88,28 @@ test('My Playback Tally uses only the connected wallet and refreshes on account 
   assert.match(page.node('radio-history-content').textContent, /Connect your wallet/);
 });
 
+test('personal tally defaults to historical all-time plays and preserves weekly filtering', async () => {
+  let requestedUrl;
+  const allTime = { ...week, week: 'all-time', totalPlays: 518, tracks: [{ ...week.tracks[0], plays: 518 }] };
+  const page = historyPage(async url => {
+    requestedUrl = new URL(url);
+    return { ok: true, json: async () => ({ weeks: [{ ...week, totalPlays: 0, trackCount: 0, tracks: [] }, allTime] }) };
+  });
+  await page.open('personal');
+  assert.equal(requestedUrl.searchParams.get('wallet'), walletA);
+  assert.equal(requestedUrl.searchParams.get('includeAllTime'), '1');
+  assert.equal(page.node('radio-history-week').value, 'all-time');
+  assert.match(page.node('radio-history-content').textContent, /518 recorded plays/);
+  assert.match(page.node('radio-history-content').textContent, /legacy Discord announcement counts/);
+  page.node('radio-history-search').value = 'Song A';
+  page.node('radio-history-search').listeners.get('input')();
+  assert.match(page.node('radio-history-content').textContent, /518 matching plays.*518 total all time/);
+  page.node('radio-history-search').value = '';
+  page.node('radio-history-week').value = week.week;
+  page.node('radio-history-week').listeners.get('change')();
+  assert.match(page.node('radio-history-content').textContent, /0 qualifying plays/);
+});
+
 test('a late personal response cannot overwrite public totals or reopen disconnected data', async () => {
   let complete;
   const page = historyPage(url => new URL(url).searchParams.has('wallet')

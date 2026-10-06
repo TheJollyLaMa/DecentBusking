@@ -1,7 +1,7 @@
 // Recovers which playlist tracks are already DecentNFT editions by reading Base,
 // the source of truth when bot state is lost (e.g. a Render restart).
 
-import { Contract, JsonRpcProvider } from 'ethers';
+import { Contract, JsonRpcProvider, isAddress } from 'ethers';
 import * as playlistStore from './playlist-store.js';
 
 const NFT_ABI = [
@@ -42,7 +42,7 @@ async function fetchMetadata(uri, fetchImpl) {
 }
 
 /** Map audio CID → lowest minted token ID for every minted DecentNFT token. */
-export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry = {}, pauseMs = 250 }) {
+export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry = {}, pauseMs = 250, artistWalletByAudioCid }) {
   const tokenIdByAudioCid = new Map();
   const nextTokenId = Number(await withRetry(() => contract.nextTokenId(), retry));
   for (let tokenId = 0; tokenId < nextTokenId; tokenId++) {
@@ -51,7 +51,10 @@ export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry =
     const uri = await withRetry(() => contract.uri(tokenId), retry);
     const metadata = await fetchMetadata(uri, fetchImpl);
     const cid = audioCidFromMetadata(metadata || {});
-    if (cid && !tokenIdByAudioCid.has(cid)) tokenIdByAudioCid.set(cid, String(tokenId));
+    if (cid && !tokenIdByAudioCid.has(cid)) {
+      tokenIdByAudioCid.set(cid, String(tokenId));
+      if (typeof metadata.artist === 'string' && isAddress(metadata.artist)) artistWalletByAudioCid?.set(cid, metadata.artist);
+    }
   }
   return tokenIdByAudioCid;
 }
@@ -66,8 +69,9 @@ export async function syncMintedTracksFromChain({
   log = console,
   pauseMs,
 }) {
-  const minted = await readMintedAudioCids({ contract, fetchImpl, pauseMs });
-  const changed = store.applyOnChainMints(minted);
+  const artistWalletByAudioCid = new Map();
+  const minted = await readMintedAudioCids({ contract, fetchImpl, pauseMs, artistWalletByAudioCid });
+  const changed = store.applyOnChainMints(minted, { artistWalletByAudioCid });
   if (changed) log.log(`[mint-sync] Marked ${changed} track(s) minted from DecentNFT on Base.`);
   return changed;
 }
