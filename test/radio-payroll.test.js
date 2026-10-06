@@ -33,3 +33,84 @@ test('Top 10 preview ranks unique artists and splits only its capped prize budge
   assert.equal(many.allocatedUnits, 10000000n);
   assert.throws(() => previewTopTenPayroll({ tracks: [], budgetUnits: -1n }), /nonnegative/);
 });
+
+test('finalization excludes live/all-time weeks and freezes stable identities independently of budget', async () => {
+  const { finalizeRadioAllocation, radioWorkReferenceText } = await import(url);
+  const args = { report: { week: '2026-W40', current: false, tracks: [track(1, 3)] }, category: 'playback',
+    budgetUnits: 3000000n, minimumUnits: 1000000n, fundSlug: 'dbusk-playback', routerAddress: track(2, 1).wallet,
+    assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-06T00:00:00Z') };
+  const receipt = finalizeRadioAllocation(args);
+  assert.equal(receipt.entries[0].amountUnits, '3000000');
+  assert.equal(finalizeRadioAllocation({ ...args, budgetUnits: 5000000n }).entries[0].workReferenceText, receipt.entries[0].workReferenceText);
+  assert.throws(() => finalizeRadioAllocation({ ...args, report: { ...args.report, current: true } }), /completed/);
+  assert.throws(() => finalizeRadioAllocation({ ...args, report: { ...args.report, week: '2026-W41', current: false } }), /not completed/);
+  assert.notEqual(radioWorkReferenceText({ week: receipt.week, category: 'top10', wallet: track(1, 1).wallet }), receipt.entries[0].workReferenceText);
+});
+
+test('radio settlement skips paid references and retry does not pay confirmed entries twice', async () => {
+  const { finalizeRadioAllocation, settleRadioAllocation } = await import(url);
+  const owner = track(9, 1).wallet;
+  const allocation = finalizeRadioAllocation({ report: { week: '2026-W40', current: false, tracks: [track(1, 1), track(2, 1)] },
+    category: 'playback', budgetUnits: 2000000n, minimumUnits: 0n, fundSlug: 'dbusk-playback', routerAddress: track(3, 1).wallet,
+    assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-06T00:00:00Z') });
+  const paid = new Set();
+  let sent = 0;
+  const payout = async (...args) => ({ hash: `tx-${++sent}`, wait: async () => { paid.add(args[4]); return { status: 1 }; } });
+  payout.staticCall = async () => {};
+  const options = { allocation, metadataUri: 'ipfs://bafy-receipt', metadataHash: `0x${'1'.repeat(64)}`, owner,
+    signer: { provider: { getNetwork: async () => ({ chainId: 8453 }) }, getAddress: async () => owner }, hashReference: value => value,
+    router: { target: allocation.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll', hasRole: async () => true,
+      approvedAssets: async () => true, funds: async () => ({ exists: true, active: true }), contributors: async () => ({ approved: true }),
+      completedWorkReferences: async key => paid.has(key), fundBalances: async () => 2000000n, payout } };
+  assert.equal((await settleRadioAllocation(options)).confirmed.length, 2);
+  assert.equal((await settleRadioAllocation(options)).skipped, 2);
+  assert.equal(sent, 2);
+  options.router.hasRole = async () => false;
+  await assert.rejects(settleRadioAllocation(options), /PAYROLL_ROLE/);
+});
+
+test('receipt imports reject changed totals, funds, live weeks, and duplicate entries', async () => {
+  const { finalizeRadioAllocation, validateRadioReceipt } = await import(url);
+  const config = { routerAddress: track(3, 1).wallet, assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    funds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' } };
+  const allocation = finalizeRadioAllocation({ report: { week: '2026-W40', current: false, tracks: [track(1, 1)] },
+    category: 'playback', budgetUnits: 1000000n, minimumUnits: 0n, fundSlug: config.funds.playback,
+    ...config, now: Date.parse('2026-10-06T00:00:00Z') });
+  assert.equal(validateRadioReceipt(allocation, config), allocation);
+  assert.throws(() => validateRadioReceipt({ ...allocation, allocatedUnits: '2' }, config), /totals/);
+  assert.throws(() => validateRadioReceipt({ ...allocation, fundSlug: 'other-fund' }, config), /does not match/);
+  assert.throws(() => validateRadioReceipt({ ...allocation, entries: [allocation.entries[0], allocation.entries[0]] }, config), /duplicate/);
+});
+
+test('partial radio settlement resumes only unpaid recipients and preflight failures send nothing', async () => {
+  const { finalizeRadioAllocation, settleRadioAllocation } = await import(url);
+  const owner = track(9, 1).wallet;
+  const allocation = finalizeRadioAllocation({ report: { week: '2026-W40', current: false, tracks: [track(1, 1), track(2, 1)] },
+    category: 'top10', budgetUnits: 2000000n, minimumUnits: 0n, fundSlug: 'dbusk-top10', routerAddress: track(3, 1).wallet,
+    assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-06T00:00:00Z') });
+  const paid = new Set();
+  let attempts = 0;
+  let interrupt = true;
+  const payout = async (...args) => {
+    attempts++;
+    if (attempts === 2 && interrupt) throw new Error('Wallet cancelled second payout');
+    return { hash: `tx-${attempts}`, wait: async () => { paid.add(args[4]); return { status: 1 }; } };
+  };
+  payout.staticCall = async () => {};
+  const options = { allocation, metadataUri: 'ipfs://bafy-receipt', metadataHash: `0x${'1'.repeat(64)}`, owner,
+    signer: { provider: { getNetwork: async () => ({ chainId: 8453 }) }, getAddress: async () => owner }, hashReference: value => value,
+    router: { target: allocation.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll', hasRole: async () => true,
+      approvedAssets: async () => true, funds: async () => ({ exists: true, active: true }), contributors: async () => ({ approved: true }),
+      completedWorkReferences: async key => paid.has(key), fundBalances: async () => 2000000n, payout } };
+  await assert.rejects(settleRadioAllocation({ ...options, router: { ...options.router, contributors: async () => ({ approved: false }) } }), /not approved/);
+  await assert.rejects(settleRadioAllocation({ ...options, router: { ...options.router, fundBalances: async () => 0n } }), /insufficient/);
+  assert.equal(attempts, 0);
+  await assert.rejects(settleRadioAllocation(options), /cancelled/);
+  assert.equal(paid.size, 1);
+  interrupt = false;
+  const resumed = await settleRadioAllocation(options);
+  assert.equal(resumed.confirmed.length, 1);
+  assert.equal(resumed.skipped, 1);
+  assert.equal(paid.size, 2);
+  assert.equal(attempts, 3);
+});

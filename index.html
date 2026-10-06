@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261006-base-radio-payroll" />
+  <link rel="stylesheet" href="css/styles.css?v=20261006-radio-settlement" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -316,6 +316,34 @@
         <div id="payroll-wallet-status" class="payroll-status"></div>
       </div>
 
+      <details id="settlement-router-section" class="payroll-section settlement-router-section">
+        <summary>Settlements Router</summary>
+        <dl class="payroll-allocation">
+          <dt>Network</dt><dd>Base</dd>
+          <dt>Router</dt><dd><a id="router-address-link" class="payroll-link" target="_blank" rel="noopener noreferrer">Not loaded</a></dd>
+          <dt>Admin permission</dt><dd id="router-admin-role">Not checked</dd>
+        </dl>
+        <div class="radio-payroll-controls">
+          <label>Fund<select id="router-fund-select"></select></label>
+          <label class="router-metadata-label">Metadata URI<input id="router-fund-metadata" type="text" maxlength="2048" placeholder="https://... or ipfs://..." /></label>
+        </div>
+        <dl class="payroll-allocation">
+          <dt>Fund ID</dt><dd id="router-fund-id">Not loaded</dd>
+          <dt>State</dt><dd id="router-fund-state">Not loaded</dd>
+          <dt>Balance</dt><dd id="router-fund-balance">Not loaded</dd>
+        </dl>
+        <div class="radio-payroll-actions">
+          <button id="router-fund-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Fund</button>
+          <button id="router-create-fund" class="payroll-btn payroll-btn-primary" type="button" disabled>Create Fund on Base</button>
+        </div>
+        <p id="router-fund-status" class="payroll-status" role="status">Creating a fund does not deposit USDC or enable payouts.</p>
+        <div class="radio-payroll-controls"><label>USDC deposit amount<input id="router-deposit-amount" type="number" min="0" step="0.01" value="0" /></label></div>
+        <button id="router-deposit-usdc" class="payroll-btn payroll-btn-primary" type="button" disabled>Deposit USDC into Selected Fund</button>
+        <p id="router-deposit-pending" class="payroll-status"></p>
+        <div class="radio-payroll-controls"><label>Unresolved/replacement transaction hash<input id="router-deposit-recovery-hash" type="text" placeholder="0x... · optional if hash already recorded" /></label></div>
+        <button id="router-deposit-check" class="payroll-btn payroll-btn-secondary" type="button">Check Pending Deposit Receipt</button>
+      </details>
+
       <section class="payroll-section" aria-labelledby="playback-payroll-title">
         <h3 id="playback-payroll-title">Playback Payroll</h3>
         <div class="radio-payroll-controls">
@@ -327,7 +355,7 @@
           <button id="radio-payroll-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Treasury &amp; Plays</button>
           <button id="radio-payroll-preview" class="payroll-btn payroll-btn-primary" type="button">Preview Allocation</button>
         </div>
-        <p id="radio-payroll-status" class="payroll-status" role="status">Draft allocations only. No claims or transfers enabled.</p>
+        <p id="radio-payroll-status" class="payroll-status" role="status">Preview live weeks; finalize completed weeks before settlement.</p>
         <dl class="payroll-allocation"><dt>Base gas balance</dt><dd id="radio-gas-balance">Not loaded</dd><dt>Playback fund USDC</dt><dd id="radio-playback-balance">Not loaded</dd></dl>
         <div id="radio-playback-preview" class="radio-payroll-preview"></div>
       </section>
@@ -337,6 +365,16 @@
         <p class="payroll-description">Draft: top 10 artist wallets by qualified weekly plays. Equal prize shares; one place per artist.</p>
         <dl class="payroll-allocation"><dt>Prize fund USDC</dt><dd id="radio-prize-balance">Not loaded</dd></dl>
         <div id="radio-prize-preview" class="radio-payroll-preview"></div>
+      </section>
+      <section class="payroll-section" aria-labelledby="radio-review-title">
+        <h3 id="radio-review-title">Reviewed Weekly Settlement</h3>
+        <button id="radio-payroll-finalize" class="payroll-btn payroll-btn-secondary" type="button" disabled>Finalize Selected Week to IPFS</button>
+        <div id="radio-reviewed-receipts"></div>
+        <div class="radio-payroll-controls"><label>Import reviewed receipt backup<input id="radio-receipt-import" type="file" accept="application/json,.json" /></label></div>
+        <div class="radio-payroll-actions">
+          <button id="radio-settle-playback" class="payroll-btn payroll-btn-primary" type="button" disabled>Settle Reviewed Playback</button>
+          <button id="radio-settle-top10" class="payroll-btn payroll-btn-primary" type="button" disabled>Settle Reviewed Top 10</button>
+        </div>
       </section>
 
       <!-- Payroll queue table -->
@@ -394,10 +432,10 @@
   <!-- Admin role-grant panel -->
   <script type="module" src="js/admin.js?v=20261006-owner-payroll"></script>
 
-  <script type="module" src="js/payroll.js?v=20261006-base-radio-payroll"></script>
+  <script type="module" src="js/payroll.js?v=20261006-radio-settlement"></script>
   <script type="module" src="js/radio-history.js?v=20261006-all-time-tally"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261006-base-radio-payroll';
+    import { initPayroll } from './js/payroll.js?v=20261006-radio-settlement';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

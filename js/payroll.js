@@ -21,7 +21,9 @@
  */
 
 import { isAdminWallet } from './admin-access.mjs';
-import { previewPlaybackPayroll, previewTopTenPayroll } from './radio-payroll.mjs';
+import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt } from './radio-payroll.mjs';
+import { configuredSettlementFunds, createConfiguredSettlementFund, depositSettlementUsdc } from './settlement-funds.mjs';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -34,6 +36,11 @@ const ACCOUNTS_URL =
 const BASE_CHAIN_ID = 8453;
 const PAYROLL_ASSETS_URL = new URL('../payroll-assets.json', import.meta.url).toString();
 const ROUTER_ABI = [
+  'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
+  'function createFund(bytes32 fundId, string metadataUri)',
+  'function paused() view returns (bool)',
+  'function fundToken(bytes32 fundId, address asset, uint256 amount)',
+  'event FundFunded(bytes32 indexed fundId, address indexed asset, address indexed funder, uint256 amount)',
   'function PAYROLL_ROLE() view returns (bytes32)',
   'function CONTRIBUTOR_ADMIN_ROLE() view returns (bytes32)',
   'function hasRole(bytes32 role, address account) view returns (bool)',
@@ -45,6 +52,9 @@ const ROUTER_ABI = [
   'function completedWorkReferences(bytes32 workReference) view returns (bool)',
   'function payout(bytes32 fundId, address asset, address recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)',
 ];
+const USDC_ABI = ['function decimals() view returns (uint8)', 'function balanceOf(address) view returns (uint256)',
+  'function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)',
+  'event Approval(address indexed owner, address indexed spender, uint256 value)'];
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 
@@ -55,6 +65,23 @@ let _settling = false;
 let _radioReports = [];
 let _radioRefreshId = 0;
 let _radioBalances = null;
+let _routerRefreshId = 0;
+let _routerCreateAllowed = false;
+let _radioReviews = {};
+
+function _reviewKey(category, week) {
+  return JSON.stringify([8453, _payrollAssetConfig.routerAddress.toLowerCase(), _ownerAddress.toLowerCase(), category, week]);
+}
+
+function _reviewRecords() {
+  const result = JSON.parse(localStorage.getItem('decentbusking:radio-payroll-reviews:v1') || '{}');
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('Saved radio receipts are invalid; review them before settlement');
+  return result;
+}
+
+function _depositKey() {
+  return `decentbusking:deposit:v1:${_payrollAssetConfig.routerAddress.toLowerCase()}:${_ownerAddress.toLowerCase()}:${document.getElementById('router-fund-select').value}`;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -138,10 +165,21 @@ async function _onWalletConnected({ detail } = {}) {
   // Load and display the payroll queue
   if (queueSection) queueSection.style.display = 'block';
   await loadPayrollQueue();
+  _populateSettlementFunds();
+  await _refreshSettlementFund();
   await _refreshRadioPayroll();
 }
 
 function _onWalletDisconnected() {
+  _radioReviews = {};
+  document.getElementById('radio-reviewed-receipts')?.replaceChildren();
+  for (const id of ['router-deposit-usdc', 'radio-payroll-finalize', 'radio-settle-playback', 'radio-settle-top10']) {
+    const button = document.getElementById(id); if (button) button.disabled = true;
+  }
+  ++_routerRefreshId;
+  _routerCreateAllowed = false;
+  const createButton = document.getElementById('router-create-fund');
+  if (createButton) createButton.disabled = true;
   ++_radioRefreshId;
   _radioReports = [];
   _radioBalances = null;
@@ -530,6 +568,11 @@ async function _refreshRadioPayroll() {
   const refreshId = ++_radioRefreshId;
   _radioReports = [];
   _radioBalances = null;
+  _radioReviews = {};
+  document.getElementById('radio-reviewed-receipts')?.replaceChildren();
+  for (const id of ['radio-payroll-finalize', 'radio-settle-playback', 'radio-settle-top10']) {
+    const button = document.getElementById(id); if (button) button.disabled = true;
+  }
   document.getElementById('radio-playback-preview')?.replaceChildren();
   document.getElementById('radio-prize-preview')?.replaceChildren();
   for (const id of ['radio-playback-balance', 'radio-prize-balance', 'radio-gas-balance']) {
@@ -551,7 +594,7 @@ async function _refreshRadioPayroll() {
       return option;
     }));
     select.value = _radioReports.some(report => report.week === selectedWeek) ? selectedWeek : _radioReports.at(-1)?.week || '';
-    _setStatus(status, 'Draft preview ready. No claims or transfers enabled.');
+    _setStatus(status, 'Preview ready. Finalize completed weeks for owner-reviewed settlement.');
     if (!_isRouterConfigured() || !_getAssetConfig('USDC')) throw new Error('Base USDC treasury configuration unavailable');
     const router = _readOnlyRouter();
     const asset = _getAssetConfig('USDC');
@@ -572,8 +615,339 @@ async function _refreshRadioPayroll() {
     document.getElementById('radio-gas-balance').textContent = `${ethers.formatEther(gas)} ETH`;
     document.getElementById('radio-playback-balance').textContent = playback.exists ? `${ethers.formatUnits(playback.available, asset.decimals)} USDC` : 'Fund not created';
     document.getElementById('radio-prize-balance').textContent = prizes.exists ? `${ethers.formatUnits(prizes.available, asset.decimals)} USDC` : 'Fund not created';
+    _loadRadioReviews();
   } catch (error) {
-    if (refreshId === _radioRefreshId) _setStatus(status, `${error.message}. Preview only; settlement remains disabled.`, true);
+    if (refreshId === _radioRefreshId) _setStatus(status, `${error.message}. Refresh before finalizing or settling.`, true);
+  }
+}
+
+function _populateSettlementFunds() {
+  const select = document.getElementById('router-fund-select');
+  if (!select) return;
+  const previous = select.value;
+  const funds = configuredSettlementFunds(_payrollAssetConfig || {});
+  select.replaceChildren(...funds.map(fund => {
+    const option = document.createElement('option');
+    option.value = fund.slug;
+    option.textContent = `${fund.label} · ${fund.slug}`;
+    return option;
+  }));
+  select.value = funds.some(fund => fund.slug === previous) ? previous : funds[0]?.slug || '';
+  _setDefaultFundMetadata();
+}
+
+function _setDefaultFundMetadata() {
+  const select = document.getElementById('router-fund-select');
+  const input = document.getElementById('router-fund-metadata');
+  if (!select || !input) return;
+  const uri = new URL(PAYROLL_ASSETS_URL.startsWith('https:') ? PAYROLL_ASSETS_URL
+    : 'https://thejollylama.github.io/DecentBusking/payroll-assets.json');
+  uri.hash = select.value;
+  input.value = uri.toString();
+}
+
+async function _refreshSettlementFund() {
+  const select = document.getElementById('router-fund-select');
+  const status = document.getElementById('router-fund-status');
+  const createButton = document.getElementById('router-create-fund');
+  if (!select || !createButton) return;
+  const refreshId = ++_routerRefreshId;
+  _routerCreateAllowed = false;
+  createButton.disabled = true;
+  const depositButton = document.getElementById('router-deposit-usdc');
+  if (depositButton) depositButton.disabled = true;
+  _setStatus(status, 'Checking Base router and fund permissions...');
+  try {
+    if (!isAdminWallet() || !_isRouterConfigured()) throw new Error('Connect the configured admin wallet; Base router configuration is required');
+    const slug = select.value;
+    if (!configuredSettlementFunds(_payrollAssetConfig).some(fund => fund.slug === slug)) throw new Error('Select a configured fund');
+    const router = _readOnlyRouter();
+    const id = ethers.id(slug);
+    const address = window._wallet.address;
+    const [role, fund] = await Promise.all([router.DEFAULT_ADMIN_ROLE(), router.funds(id)]);
+    const allowed = await router.hasRole(role, address);
+    const usdc = _getAssetConfig('USDC');
+    const exists = Boolean(fund.exists ?? fund[2]);
+    const active = Boolean(fund.active ?? fund[1]);
+    const balance = exists && usdc ? await router.fundBalances(id, usdc.address) : 0n;
+    if (refreshId !== _routerRefreshId || !isAdminWallet(address) || window._wallet?.address?.toLowerCase() !== address.toLowerCase()) return;
+    const link = document.getElementById('router-address-link');
+    link.href = `https://basescan.org/address/${_payrollAssetConfig.routerAddress}`;
+    link.textContent = _shortAddr(_payrollAssetConfig.routerAddress);
+    document.getElementById('router-fund-id').textContent = id;
+    document.getElementById('router-admin-role').textContent = allowed ? 'DEFAULT_ADMIN_ROLE verified' : 'DEFAULT_ADMIN_ROLE required';
+    document.getElementById('router-fund-state').textContent = exists ? active ? 'Created · active' : 'Created · inactive' : 'Not created';
+    document.getElementById('router-fund-balance').textContent = usdc ? `${ethers.formatUnits(balance, usdc.decimals)} USDC` : 'USDC not configured';
+    _routerCreateAllowed = allowed && !exists;
+    createButton.disabled = !_routerCreateAllowed || _settling;
+    const pendingDeposit = localStorage.getItem(_depositKey());
+    if (depositButton) depositButton.disabled = !exists || !active || _settling || Boolean(pendingDeposit);
+    const pendingText = document.getElementById('router-deposit-pending');
+    if (pendingText) pendingText.textContent = pendingDeposit ? 'A prior deposit/approval is unresolved. Check its receipt before sending again.' : '';
+    _setStatus(status, exists ? 'Fund exists. USDC deposits and reviewed closed-week settlements are separate transactions.'
+      : allowed ? 'Ready to create an empty Base fund. One transaction confirmation is required.' : 'The connected wallet cannot create funds on this router.', !allowed);
+  } catch (error) {
+    if (refreshId === _routerRefreshId) _setStatus(status, error.message, true);
+  }
+}
+
+async function _depositUsdc() {
+  const status = document.getElementById('router-fund-status');
+  const button = document.getElementById('router-deposit-usdc');
+  if (_settling || !isAdminWallet()) return;
+  let failed = false;
+  try {
+    const slug = document.getElementById('router-fund-select').value;
+    if (!configuredSettlementFunds(_payrollAssetConfig).some(fund => fund.slug === slug)) throw new Error('Select a configured fund');
+    const asset = _getAssetConfig('USDC');
+    if (!asset || asset.decimals !== 6) throw new Error('Native Base USDC is not configured');
+    const amountUnits = ethers.parseUnits(document.getElementById('router-deposit-amount').value || '0', 6);
+    if (amountUnits <= 0n) throw new Error('Enter a positive USDC deposit amount');
+    const operationKey = _depositKey();
+    if (localStorage.getItem(operationKey)) throw new Error('A prior deposit is unresolved; verify it before retrying');
+    if (!confirm(`Deposit ${ethers.formatUnits(amountUnits, 6)} USDC into ${slug} on Base? This moves funds from your wallet; it does not pay artists.`)) return;
+    _settling = true; button.disabled = true;
+    const operationDetails = { owner: _ownerAddress, router: _payrollAssetConfig.routerAddress,
+      asset: asset.address, fundId: ethers.id(slug), amountUnits: amountUnits.toString() };
+    const signer = await _getSigner(BASE_CHAIN_ID);
+    const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
+    const token = new ethers.Contract(asset.address, USDC_ABI, signer);
+    const result = await depositSettlementUsdc({ router, token, signer, owner: _ownerAddress, fundId: ethers.id(slug), amountUnits,
+      onStep: message => _setStatus(status, message), onBroadcast: record => {
+        const operation = JSON.parse(localStorage.getItem(operationKey));
+        localStorage.setItem(operationKey, JSON.stringify({ ...operation, ...record }));
+      }, onStage: stage => {
+        localStorage.setItem(operationKey, JSON.stringify({ ...operationDetails, stage, txHash: null }));
+      } });
+    localStorage.removeItem(operationKey);
+    await _refreshSettlementFund(); await _refreshRadioPayroll();
+    _setStatus(status, `USDC deposit confirmed: ${result.txHash}`);
+  } catch (error) {
+    failed = true;
+    const key = _depositKey();
+    const operation = JSON.parse(localStorage.getItem(key) || 'null');
+    if (operation && !operation.txHash && (error.code === 4001 || error.code === 'ACTION_REJECTED')) localStorage.removeItem(key);
+    _setStatus(status, `${error.message}. Check any unresolved receipt before depositing again.`, true);
+  }
+  finally {
+    _settling = false;
+    const message = status.textContent;
+    await _refreshSettlementFund();
+    _setStatus(status, message, failed);
+  }
+}
+
+async function _checkPendingDeposit() {
+  const status = document.getElementById('router-fund-status');
+  if (!isAdminWallet() || _settling) return;
+  try {
+    const key = _depositKey();
+    const operation = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!operation) throw new Error('No unresolved deposit is recorded for this fund');
+    const txHash = document.getElementById('router-deposit-recovery-hash').value.trim() || operation.txHash;
+    if (!/^0x[0-9a-fA-F]{64}$/.test(txHash || '')) throw new Error('Enter the transaction hash from your wallet history; do not repeat an uncertain transfer');
+    const provider = new ethers.JsonRpcProvider(_payrollAssetConfig.rpcUrl, BASE_CHAIN_ID);
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (!receipt) throw new Error('Transaction is still unresolved; deposit remains locked');
+    if (receipt.status !== 1) {
+      if (!operation.txHash || txHash.toLowerCase() !== operation.txHash.toLowerCase()) throw new Error('Unmatched failed receipt; the operation remains locked');
+      localStorage.removeItem(key);
+      await _refreshSettlementFund();
+      _setStatus(status, 'Recorded transaction reverted; no USDC was deposited by that transaction. Review before retrying.');
+      return;
+    }
+    const iface = new ethers.Interface([...ROUTER_ABI, ...USDC_ABI]);
+    let deposit = false;
+    let approval = false;
+    for (const log of receipt.logs) {
+      let event; try { event = iface.parseLog(log); } catch { continue; }
+      if (log.address.toLowerCase() === operation.router.toLowerCase() && event?.name === 'FundFunded' &&
+          event.args.fundId === operation.fundId && event.args.asset.toLowerCase() === operation.asset.toLowerCase() &&
+          event.args.funder.toLowerCase() === operation.owner.toLowerCase() && event.args.amount === BigInt(operation.amountUnits)) deposit = true;
+      if (log.address.toLowerCase() === operation.asset.toLowerCase() && event?.name === 'Approval' &&
+          event.args.owner.toLowerCase() === operation.owner.toLowerCase() && event.args.spender.toLowerCase() === operation.router.toLowerCase() &&
+          event.args.value === BigInt(operation.amountUnits)) approval = true;
+    }
+    if (!deposit && !(approval && operation.stage !== 'deposit')) throw new Error('Receipt does not match this recorded operation; deposit remains locked');
+    localStorage.removeItem(key);
+    await _refreshSettlementFund(); await _refreshRadioPayroll();
+    _setStatus(status, deposit ? 'Matching USDC deposit confirmed. Do not send it again.' : 'Approval confirmed, but no deposit occurred. Continue Deposit; existing allowance will be reused.');
+  } catch (error) { _setStatus(status, error.message, true); }
+}
+
+function _loadRadioReviews() {
+  const week = document.getElementById('radio-payroll-week')?.value;
+  if (!week || !isAdminWallet() || !_ownerAddress) return;
+  const records = _reviewRecords();
+  _radioReviews = {};
+  for (const category of ['playback', 'top10']) {
+    const saved = records[_reviewKey(category, week)];
+    if (saved) _radioReviews[category] = saved;
+  }
+  _renderRadioReviews();
+}
+
+function _renderRadioReviews() {
+  const target = document.getElementById('radio-reviewed-receipts');
+  if (!target) return;
+  target.replaceChildren();
+  const report = _radioReports.find(entry => entry.week === document.getElementById('radio-payroll-week').value);
+  const finalize = document.getElementById('radio-payroll-finalize');
+  if (finalize) finalize.disabled = !report || report.current || _settling;
+  for (const category of ['playback', 'top10']) {
+    const button = document.getElementById(`radio-settle-${category}`);
+    const saved = _radioReviews[category];
+    if (button) button.disabled = !saved || _settling;
+    if (!saved) continue;
+    const heading = document.createElement('h4'); heading.textContent = `${category === 'playback' ? 'Playback' : 'Top 10'} · ${saved.allocation.week} · frozen receipt`;
+    const link = document.createElement('a'); link.className = 'payroll-link'; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.href = saved.metadataUri.replace('ipfs://', window.DecentConfig?.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/');
+    link.textContent = 'Open reviewed allocation';
+    const exportButton = document.createElement('button'); exportButton.type = 'button'; exportButton.className = 'payroll-btn payroll-btn-secondary'; exportButton.textContent = 'Export Receipt Backup';
+    exportButton.addEventListener('click', () => {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(saved, null, 2)], { type: 'application/json' }));
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${saved.allocation.week}-${category}-receipt.json`; anchor.click(); URL.revokeObjectURL(url);
+    });
+    target.append(heading, link, exportButton);
+    for (const entry of saved.allocation.entries) {
+      const row = document.createElement('div'); row.className = 'radio-payroll-artist';
+      const label = document.createElement('span'); label.textContent = `${entry.artist} · ${_shortAddr(entry.wallet)} · ${ethers.formatUnits(entry.amountUnits, 6)} USDC`;
+      const identity = document.createElement('input'); identity.type = 'text'; identity.placeholder = 'Verified contributor identity';
+      identity.setAttribute('aria-label', `Contributor identity for ${entry.wallet}`);
+      const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'payroll-btn payroll-btn-secondary'; approve.textContent = 'Approve Recipient';
+      approve.addEventListener('click', () => _approveRadioRecipient(entry.wallet, identity.value));
+      row.append(label, identity, approve); target.append(row);
+    }
+  }
+}
+
+async function _finalizeRadioPayroll() {
+  const status = document.getElementById('radio-payroll-status');
+  if (_settling || !isAdminWallet()) return;
+  try {
+    const report = _radioReports.find(entry => entry.week === document.getElementById('radio-payroll-week').value);
+    const asset = _getAssetConfig('USDC');
+    if (!report || report.current || report.week === 'all-time') throw new Error('Select a completed UTC week');
+    if (!asset || asset.decimals !== 6) throw new Error('Native Base USDC is required');
+    const minimumUnits = ethers.parseUnits(document.getElementById('radio-minimum-payout').value || '0', 6);
+    const records = _reviewRecords();
+    const plans = [];
+    for (const [category, input, slug] of [['playback', 'radio-playback-budget', _payrollAssetConfig.radioFunds?.playback], ['top10', 'radio-prize-budget', _payrollAssetConfig.radioFunds?.topTen]]) {
+      const budgetUnits = ethers.parseUnits(document.getElementById(input).value || '0', 6);
+      if (budgetUnits === 0n) continue;
+      if (records[_reviewKey(category, report.week)]) continue;
+      plans.push(finalizeRadioAllocation({ report, category, budgetUnits, minimumUnits, fundSlug: slug,
+        routerAddress: _payrollAssetConfig.routerAddress, assetAddress: asset.address }));
+    }
+    if (!plans.length) throw new Error('Set a positive budget, or use the saved reviewed receipt');
+    if (!confirm(`Freeze ${plans.length} allocation receipt(s) for ${report.week}? Recipient amounts will be saved; no payouts are sent yet.`)) return;
+    _settling = true;
+    const signer = await _getSigner(BASE_CHAIN_ID);
+    const address = await signer.getAddress();
+    if (address.toLowerCase() !== _ownerAddress.toLowerCase()) throw new Error('Connect the owner wallet');
+    const upload = createBrowserIpfsUploader({ provider: window.DecentConfig?.ipfsUploadProvider || 'pinata',
+      serviceUrl: window.DecentConfig?.ipfsUploadServiceUrl, signer, address, origin: window.location.origin });
+    for (const allocation of plans) {
+      const json = JSON.stringify(allocation);
+      _setStatus(status, `Uploading frozen ${allocation.category} receipt — sign the IPFS upload authorization`);
+      const metadataUri = await upload(new File([json], `${allocation.week}-${allocation.category}.json`, { type: 'application/json' }));
+      records[_reviewKey(allocation.category, allocation.week)] = { allocation, metadataUri, metadataHash: ethers.id(json) };
+      localStorage.setItem('decentbusking:radio-payroll-reviews:v1', JSON.stringify(records));
+    }
+    _loadRadioReviews();
+    _setStatus(status, 'Reviewed receipts saved. Approve any missing recipients, then settle each funded category.');
+  } catch (error) { _setStatus(status, error.message, true); }
+  finally { _settling = false; _renderRadioReviews(); }
+}
+
+async function _approveRadioRecipient(wallet, rawIdentity) {
+  const status = document.getElementById('radio-payroll-status');
+  if (_settling || !isAdminWallet()) return;
+  try {
+    const identity = rawIdentity.trim();
+    _settling = true;
+    const signer = await _getSigner(BASE_CHAIN_ID);
+    const owner = await signer.getAddress();
+    if (owner.toLowerCase() !== _ownerAddress.toLowerCase()) throw new Error('Connect the owner wallet');
+    const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
+    const current = await router.contributors(wallet);
+    if (current.approved ?? current[1]) { _setStatus(status, 'Recipient already approved; no transaction needed.'); return; }
+    if (!identity || identity.length > 100) throw new Error('Enter the verified contributor identity first');
+    const hash = String(current.githubIdHash ?? current[0]);
+    const desired = ethers.id(identity);
+    if (hash !== ethers.ZeroHash && hash.toLowerCase() !== desired.toLowerCase()) throw new Error('This wallet is already registered to a different identity; do not overwrite it');
+    if (!await router.hasRole(await router.CONTRIBUTOR_ADMIN_ROLE(), owner)) throw new Error('CONTRIBUTOR_ADMIN_ROLE is required');
+    _setStatus(status, 'Confirm the recipient approval transaction in your wallet');
+    if ((await (await router.setContributorApproved(wallet, desired, true)).wait())?.status !== 1) throw new Error('Recipient approval did not confirm');
+    _setStatus(status, 'Recipient approved on the shared router.');
+  } catch (error) { _setStatus(status, error.message, true); }
+  finally { _settling = false; _renderRadioReviews(); }
+}
+
+async function _settleRadioPayroll(category) {
+  const status = document.getElementById('radio-payroll-status');
+  if (_settling || !isAdminWallet()) return;
+  try {
+    const saved = _radioReviews[category];
+    if (!saved || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash) throw new Error('The frozen receipt is missing or changed; do not pay');
+    validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress,
+      assetAddress: _getAssetConfig('USDC').address, funds: _payrollAssetConfig.radioFunds });
+    if (!confirm(`Settle reviewed ${category} for ${saved.allocation.week}? Each unpaid recipient requires a Base transaction. Already-paid references are skipped.`)) return;
+    _settling = true;
+    const signer = await _getSigner(BASE_CHAIN_ID);
+    const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
+    const result = await settleRadioAllocation({ ...saved, router, signer, owner: _ownerAddress, hashReference: ethers.id,
+      onStep: message => _setStatus(status, message) });
+    await _refreshRadioPayroll();
+    _setStatus(status, `${result.confirmed.length} payouts confirmed; ${result.skipped} already-paid references skipped. Frozen IPFS receipt retained.`);
+  } catch (error) { _setStatus(status, `${error.message}. Retry only the same reviewed receipt; on-chain paid references are protected.`, true); }
+  finally { _settling = false; _renderRadioReviews(); }
+}
+
+async function _importRadioReceipt(file) {
+  const status = document.getElementById('radio-payroll-status');
+  if (!file || !isAdminWallet() || _settling) return;
+  try {
+    if (file.size > 1024 * 1024) throw new Error('Receipt backup is too large');
+    const saved = JSON.parse(await file.text());
+    const allocation = validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress,
+      assetAddress: _getAssetConfig('USDC').address, funds: _payrollAssetConfig.radioFunds });
+    if (!/^ipfs:\/\/[^/\s]+$/.test(saved.metadataUri || '') || ethers.id(JSON.stringify(allocation)) !== saved.metadataHash) throw new Error('Backup hash or IPFS receipt is invalid');
+    const records = _reviewRecords();
+    const key = _reviewKey(allocation.category, allocation.week);
+    if (records[key] && records[key].metadataHash !== saved.metadataHash) throw new Error('A different receipt for this category/week is already stored; review before replacing');
+    records[key] = saved;
+    localStorage.setItem('decentbusking:radio-payroll-reviews:v1', JSON.stringify(records));
+    document.getElementById('radio-payroll-week').value = allocation.week;
+    _loadRadioReviews();
+    _setStatus(status, 'Receipt backup restored. Review it before settlement; on-chain references will skip paid recipients.');
+  } catch (error) { _setStatus(status, error.message, true); }
+}
+
+async function _createSettlementFund() {
+  const status = document.getElementById('router-fund-status');
+  const button = document.getElementById('router-create-fund');
+  if (_settling || !_routerCreateAllowed || !isAdminWallet()) return;
+  try {
+    const slug = document.getElementById('router-fund-select').value;
+    if (!configuredSettlementFunds(_payrollAssetConfig).some(fund => fund.slug === slug)) throw new Error('Select a configured fund');
+    const metadataUri = document.getElementById('router-fund-metadata').value.trim();
+    _settling = true;
+    button.disabled = true;
+    _setStatus(status, `Creating ${slug} on Base — confirm the fund creation transaction in your wallet...`);
+    const signer = await _getSigner(BASE_CHAIN_ID);
+    const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
+    const result = await createConfiguredSettlementFund({ router, signer, owner: _ownerAddress,
+      fundId: ethers.id(slug), metadataUri });
+    await _refreshRadioPayroll();
+    await _refreshSettlementFund();
+    _setStatus(status, result.alreadyExists ? `${slug} already exists; no creation transaction sent.`
+      : `${slug} created. Empty fund; no USDC deposited.${result.txHash ? ` Transaction: ${result.txHash}` : ''}`);
+  } catch (error) {
+    _setStatus(status, error.message || 'Fund creation failed', true);
+  } finally {
+    _settling = false;
+    button.disabled = !_routerCreateAllowed;
   }
 }
 
@@ -616,7 +990,7 @@ function _previewRadioPayroll() {
     const excluded = report.tracks.filter(track => !isValidEthAddress(track.wallet)).length;
     _setStatus(status, `Draft ${report.week}${report.current ? ' (week still in progress)' : ''}. ` +
       `${funded ? 'Budgets within available funds' : 'Budgets are not confirmed funded'}. ` +
-      `${excluded ? `${excluded} tracks excluded for missing verified wallets. ` : ''}No claims or transfers enabled.`);
+      `${excluded ? `${excluded} tracks excluded for missing verified wallets. ` : ''}Preview only; settlement uses the frozen reviewed receipt.`);
   } catch (error) {
     _setStatus(status, error.message, true);
   }
@@ -625,11 +999,24 @@ function _previewRadioPayroll() {
 // ─── Initialise the payroll panel ─────────────────────────────────────────────
 
 export function initPayroll() {
+  document.getElementById('radio-receipt-import')?.addEventListener('change', event => _importRadioReceipt(event.target.files?.[0]));
+  document.getElementById('router-deposit-usdc')?.addEventListener('click', _depositUsdc);
+  document.getElementById('router-deposit-check')?.addEventListener('click', _checkPendingDeposit);
+  document.getElementById('radio-payroll-finalize')?.addEventListener('click', _finalizeRadioPayroll);
+  document.getElementById('radio-settle-playback')?.addEventListener('click', () => _settleRadioPayroll('playback'));
+  document.getElementById('radio-settle-top10')?.addEventListener('click', () => _settleRadioPayroll('top10'));
+  document.getElementById('router-create-fund')?.addEventListener('click', _createSettlementFund);
+  document.getElementById('router-fund-refresh')?.addEventListener('click', _refreshSettlementFund);
+  document.getElementById('router-fund-select')?.addEventListener('change', () => {
+    _setDefaultFundMetadata();
+    _refreshSettlementFund();
+  });
   document.getElementById('radio-payroll-refresh')?.addEventListener('click', _refreshRadioPayroll);
   document.getElementById('radio-payroll-preview')?.addEventListener('click', _previewRadioPayroll);
   document.getElementById('radio-payroll-week')?.addEventListener('change', () => {
     document.getElementById('radio-playback-preview')?.replaceChildren();
     document.getElementById('radio-prize-preview')?.replaceChildren();
+    _loadRadioReviews();
   });
   const settleBtn   = document.getElementById('payroll-settle-all-btn');
   const refreshBtn  = document.getElementById('payroll-refresh-btn');

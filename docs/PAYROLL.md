@@ -4,13 +4,30 @@
 
 Active payroll is Base-only. Historical records are preserved outside the active queue; see [retired payroll history](LEGACY-PAYROLL.md). The public Left Ankh entry is Playback Tally; Admin Nft Mint and Payroll are visible only to the configured admin wallet. UI visibility does not replace transaction-level owner and role checks.
 
-The panel is ordered Playback Payroll, Top 10 Prize Payouts, then Repo Dev Bot Payouts. The first two sections are USDC allocation previews, not claimable rewards or enabled payouts. Budgets start at zero and require owner input; no funds are deposited and no contracts are deployed by opening or previewing the panel.
+The panel includes Settlements Router, Playback Payroll, Top 10 Prize Payouts, Reviewed Weekly Settlement, then Repo Dev Bot Payouts. Budgets start at zero and require owner input. Opening or previewing the panel never moves funds. Current-week previews are provisional; only completed UTC weeks can produce reviewed receipts and owner-authorized payouts.
 
 Playback drafts group qualified weekly plays by verified artist wallet and distribute the selected budget proportionally with exact six-decimal token-unit rounding. Amounts below the selected minimum and rounding remainder stay unallocated. Unverified wallets are excluded. Current weeks remain provisional.
 
-The proposed Top 10 policy ranks unique artist wallets by qualified weekly plays, ties by wallet address, and shares the prize budget equally among up to ten artists. It is explicitly a draft, not an adopted contractual promise. One artist receives at most one rank. Likes, historical announcement counts, and all-time totals are not used for allocation.
+The v1 Top 10 policy ranks unique artist wallets by qualified weekly plays, ties by wallet address, and shares the reviewed prize budget equally among up to ten artists. One artist receives at most one rank. Likes, historical announcement counts, and all-time totals are not used for allocation. The owner must review the actual recipients and amounts before finalization.
 
-Read-only treasury status checks USDC approval, fund existence/activity and balances, plus the owner's Base ETH gas balance. Separate proposed fund slugs are `dbusk-playback` and `dbusk-top10`; the existing development fund is not used as the radio budget. These fund IDs are configuration only and are not automatically created or funded. Fund setup, eligibility review, finalized weekly receipts, replay protection, and artist payout authorization are required before enabling radio settlement.
+Read-only treasury status checks USDC approval, fund existence/activity and balances, plus the owner's Base ETH gas balance. Separate fund slugs are `dbusk-playback` and `dbusk-top10`; the development fund is not used as the radio budget. Funds are never automatically created or funded.
+
+### USDC Deposits
+
+Select an existing active fund in Settlements Router, enter the deposit amount, and confirm the deposit action. The app verifies native Base USDC, six decimals, asset approval, wallet balance, and Base network. It requests an ERC-20 approval only if the current allowance is insufficient, for the exact intended amount rather than an unlimited allowance; then it requests the `fundToken` transaction. Approval is not a deposit. Depositing into a fund is not an artist payout.
+
+Pending approval/deposit stages and hashes are kept in browser storage. An unresolved operation locks another deposit to that fund. Check its receipt or supply the replacement transaction hash; unlocking requires a successful matching Approval/FundFunded event, or the exact recorded reverted transaction. An approval cannot unlock an operation already marked as a deposit. Unknown broadcasts remain locked for wallet-history review. This journal is browser-local: changing devices or clearing storage loses it, so always check wallet history before retrying an uncertain deposit.
+
+### Reviewed Radio Settlement
+
+1. Select a completed UTC week and review qualified plays, verified wallets, category budgets and minimum payout.
+2. Finalize the selected positive-budget categories. The app freezes the allocation JSON to IPFS, including exact amounts, fund/router/asset, category and week. This signs an upload authorization, not a payout. Budgets or live counters changing later do not change the saved receipt.
+3. Export the receipt backup. It contains the IPFS URI and metadata hash and can be imported on another browser after validation. Keep using the same receipt when resuming a partial settlement.
+4. Confirm any missing recipient allowlist approvals separately. Enter the verified identity; the app does not infer identities from artist display names, overwrite another registered identity, or revoke other apps' recipients. Existing approved recipients need no approval transaction. The owner needs `CONTRIBUTOR_ADMIN_ROLE` for new approvals.
+5. Settle the reviewed Playback or Top 10 receipt. Each unpaid recipient uses a separate router payout transaction. The app checks Base owner, `PAYROLL_ROLE`, native USDC approval, router pause state, active fund, exact reviewed totals and sufficient balance, then static-preflights each payout.
+6. Refresh and resume the same receipt after any interruption. `completedWorkReferences` skips confirmed payments on-chain. References identify station/version/chain, week, category and recipient, not the amount or budget, so changing those does not permit paying that recipient twice for the same category/week.
+
+Receipts are owner-reviewed, not trustless claims: the bot attests playback and the owner controls treasury/roles. The shared router enforces per-reference replay protection but does not freeze a station-wide weekly budget/root. Never finalize a different receipt for the same week/category on another device after partial payment; import the original backup. Different new recipients can otherwise create additional owner-authorized obligations. Amounts below the minimum remain in the fund as unallocated capital, not automatic artist arrears. Current-week and historical all-time counts cannot be paid through this flow.
 
 For a $10 start, a conservative example is $3 for a playback pilot and $7 retained for gas/operations, with no cash Top 10 budget yet. Preserve free radio; seek supporter tips, small fixed-price sponsor slots, or optional paid requests before committing recurring cash rewards. Paid queues and sponsorship fulfillment need reviewed contracts and clear refund/service rules; neither is implemented by this payroll preview.
 
@@ -31,11 +48,14 @@ To add a future token such as DJuke or DBusk, add its uppercase symbol, Base ERC
 
 ## One-Time Fund Setup
 
-The fund must be created and funded on the already-deployed shared router before token payouts can succeed. Use ArtFi's Treasury Admin on Base with the router and asset addresses from `payroll-assets.json`:
+The fund must be created and funded on the already-deployed shared router before token payouts can succeed. The Payroll panel's collapsible **Settlements Router** section can create this app's configured funds directly on Base:
 
-1. Create the `dbusk-repo-dev` fund with IPFS metadata describing DecentBusking repo payroll.
-2. Deposit the token(s) you intend to pay into that fund. The queue can accrue credits while the allocation is empty, but payments require enough available balance for the selected token.
-3. Confirm the repo owner wallet has `PAYROLL_ROLE` and `CONTRIBUTOR_ADMIN_ROLE` on the shared router.
+1. Select Playback Payroll (`dbusk-playback`), Top 10 Prize Payouts (`dbusk-top10`), or Repo Dev Bot Payouts (`dbusk-repo-dev`). The fund ID is derived from that exact configured slug.
+2. Review the metadata URI. It defaults to this site's payroll configuration with a fund-specific fragment; a valid HTTPS or IPFS URI can be supplied instead.
+3. Refresh the fund status. Creation is enabled only when the connected configured admin wallet holds the router's `DEFAULT_ADMIN_ROLE` and the fund does not exist.
+4. Click **Create Fund on Base** and confirm the transaction in the wallet. The panel rechecks the chain, account, deployed router, role, and existence, performs a static preflight, then waits for a successful receipt and verifies the created fund.
+5. Use the USDC deposit controls to fund an existing active allocation. Creation itself deposits nothing and grants no roles.
+6. For existing repo payouts, confirm the owner also has `PAYROLL_ROLE` and `CONTRIBUTOR_ADMIN_ROLE` on the shared router.
 
 The fund ID is `keccak256(UTF-8("dbusk-repo-dev"))`. Do not deploy a router or remove contributors from its shared allowlist; other repositories use the same contract.
 
