@@ -16,21 +16,26 @@ Join [DecentBusking on Discord](https://discord.gg/SCtcBggHPa), head to **#Decen
 
 ## Bring A Track
 
-Post an audio file in **#DecentJukebox**. The bot adds it to the JukeLoop playlist and pins it to IPFS; no personal Pinata account or IPFS setup is needed.
+**New here? Start with one song.** Post audio or MP4 in [#DecentJukebox](https://discord.gg/SCtcBggHPa), or click the guitar case on the site. Discord attachments can be up to 10 MB. The site accepts files up to 50 MB, or an existing IPFS file CID for larger media. You do not need a Pinata account.
 
-To request a DecentNFT:
+After a Discord upload is pinned, click **Request NFT** beneath the bot's reply. For the site guitar case, connect your artist wallet, enter the track details, and submit. In either flow, choose your Base artist wallet. The request goes to the owner; it does not mint automatically.
 
-1. Run `/jukebox backlog` and copy the track ID for your upload.
-2. Run `/jukebox request-mint` with that track ID and the Base wallet that should receive the NFT and royalties.
-3. Optionally attach PNG, JPEG, WebP, or GIF artwork up to 10 MB. The bot pins it to IPFS, and the owner sees it preloaded in the mint queue. The owner can replace it before minting.
+Artwork is optional. Attach PNG, JPEG, WebP, or GIF up to 10 MB, enter an IPFS image CID for a larger image, or leave it blank to use your Discord profile image. The owner reviews the request and mints approved NFTs directly to the artist wallet.
 
-Example:
+## Earn From Radio Plays
 
-```text
-/jukebox request-mint track_id:<your-track-id> wallet:<your-Base-address> artwork:<optional-image>
-```
+Use the same Base wallet for your music NFT and artist payout. A qualifying play is a completed, audible Discord playback of at least 30 seconds. Likes and dislikes influence rotation; they are not paid plays.
 
-The bot replies privately to confirm the request. That means **queued, not minted**. The NFT is minted only after an authorized collection owner approves it.
+Playback rewards are paid only from a funded weekly USDC budget. The owner reviews the completed week's allocation before paying on Base. **Playback Tally counts activity; it does not guarantee a payout.** If no budget is funded or approved, no playback payment is due.
+
+## Build And Earn
+
+1. [Choose an open issue](https://github.com/TheJollyLaMa/DecentBusking/issues) and ask to be assigned. If you are new to the project, start with a small issue and ask questions.
+2. Work on it and open a pull request that includes `Closes #issue-number`.
+3. Use the bounty amount and token shown on the issue, for example `bounty: 10 USDC` or `bounty: 10 ART`. Do not guess an amount or add a payout label yourself.
+4. After the pull request is merged, the repo reward enters the payout queue. The owner reviews and settles eligible rewards from the funded Base treasury.
+
+Contributor payouts are separate from radio playback rewards. See [Contributor Payroll](docs/PAYROLL.md) and the [Contributor Request form](https://github.com/TheJollyLaMa/DecentBusking/issues/new?template=whitelist-request.yml). Participating is free; rewards depend on an approved bounty and a funded treasury.
 
 ## Owner Mint Queue
 
@@ -55,7 +60,7 @@ Minted music appears in the DecentBusking 3D timeline and archive for listening 
 - **JukeLoop:** Discord voice radio plays community tracks and applies vote-weighted rotation.
 - **3D archive:** Base music NFTs are placed on a timeline by mint date; select an archive entry to listen and view details.
 - **Pinata + IPFS:** Audio, artwork, and metadata use the shared upload service. The bot checkpoints playlist, vote, and mint-queue state to IPFS so the Render free-tier service does not require a persistent disk.
-- **Owner controls:** The dapp Admin panel handles the mint queue. Discord `/jukeloop restart` can reconnect the radio; `/jukeloop stats` shows top-rated tracks.
+- **Owner controls:** Admin handles the NFT mint queue. Payroll shows repo rewards and weekly radio payout drafts; the owner approves reviewed payouts from funded Base funds. Discord `/jukeloop restart` reconnects the radio; `/jukeloop stats` shows track ratings.
 
 ## Build With Us
 
