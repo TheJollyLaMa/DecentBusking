@@ -7,7 +7,15 @@ const { pathToFileURL } = require('node:url');
 const { createRequire } = require('node:module');
 const ethers = createRequire(path.join(__dirname, '../discord-bot/package.json'))('ethers');
 
-test('payroll refresh hides verified Optimism receipts and leaves unreviewed entries locked', async () => {
+test('active payroll is Base-only and radio drafts cannot send transactions', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/payroll.js'), 'utf8');
+  assert.doesNotMatch(source, /Optimism|optimism|legacy-payroll|sendTransaction|_payEthEntry/);
+  const preview = source.slice(source.indexOf('function _previewRadioPayroll()'), source.indexOf('// ─── Initialise'));
+  assert.doesNotMatch(preview, /signMessage|sendTransaction|await router\.payout|_getSigner/);
+  assert.match(preview, /No claims or transfers enabled/);
+});
+
+test('Base payroll excludes retired legacy entries without sending or verifying payments', async () => {
   const { createLegacyReceiptStore, verifyLegacyPayment } = await import(pathToFileURL(path.join(__dirname, '../js/legacy-payroll.mjs')).href);
   const owner = '0x807061DF657A7697c04045dA7d16D941861cAABc';
   const recipient = `0x${'1'.repeat(40)}`;
@@ -36,13 +44,12 @@ test('payroll refresh hides verified Optimism receipts and leaves unreviewed ent
     .replace(/export /g, '');
   vm.runInContext(`${source}\n_ownerAddress = owner; globalThis.refresh = loadPayrollQueue; globalThis.rows = () => _pendingEntries;`, context);
   await context.refresh();
-  assert.equal(context.rows().length, 1);
-  assert.equal(context.rows()[0].issueRef, unpaid.issueRef);
+  assert.equal(context.rows().length, 0);
   assert.equal(node('payroll-settle-all-btn').disabled, true);
   assert.doesNotMatch(node('payroll-table-body').innerHTML, /class="payroll-pay-btn"/);
-  assert.match(node('payroll-table-body').innerHTML, /Verify Existing Payment/);
+  assert.doesNotMatch(node('payroll-table-body').innerHTML, /Verify Existing Payment/);
   await context.refresh();
-  assert.equal(context.rows().length, 1);
+  assert.equal(context.rows().length, 0);
 });
 
 test('Left Ankh has public tally first and owner-only NFT Admin and Payroll in order', () => {

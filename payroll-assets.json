@@ -3,6 +3,10 @@
   "rpcUrl": "https://base-rpc.publicnode.com",
   "routerAddress": "0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5",
   "fundSlug": "dbusk-repo-dev",
+  "radioFunds": {
+    "playback": "dbusk-playback",
+    "topTen": "dbusk-top10"
+  },
   "assets": {
     "ART": {
       "address": "0x44c4516768e47cd97cfF2561B81a74699F23f8Ec",
