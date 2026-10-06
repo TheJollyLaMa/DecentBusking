@@ -836,8 +836,21 @@ class DecentBuskingAboutModal extends HTMLElement {
 
             <div class="about-section">
               <h3>🎧 Make the loop</h3>
-              <p>Drop a song in <strong>#DecentJukebox</strong>. JukeLoop pins it to IPFS and plays community tracks in Discord. Vote on each play to shape what comes around next.</p>
-              <p>Request a mint with <code>/jukebox backlog</code> and <code>/jukebox request-mint</code>. The collection owner reviews requests in the dapp Admin panel; approved NFTs mint directly to the artist’s Base wallet.</p>
+              <p>Upload audio or a video in <strong>#DecentJukebox</strong>, or use the guitar case on this site. Discord files can be up to 10 MB; the site supports uploads up to 50 MB or an existing IPFS file CID.</p>
+              <p>After a Discord upload is pinned, click <strong>Request NFT</strong>. Confirm your Base wallet, then attach an image up to 10 MB or enter an IPFS image CID. Leave artwork blank to use your Discord profile image. The owner reviews every request before minting.</p>
+            </div>
+
+            <div class="about-section">
+              <h3>🎙️ Earn from radio plays</h3>
+              <p>Use the same artist wallet on your mint request. A radio play counts after at least 30 seconds of completed, audible Discord playback. Votes help guide the rotation; they do not add paid plays.</p>
+              <p>When a weekly budget is funded, the owner reviews and settles eligible payouts in USDC on Base. A tally is not a promise of payment: no funded budget means no playback payout. Check <strong>My Playback Tally</strong> for recorded plays and the Payroll panel for the current weekly draft.</p>
+            </div>
+
+            <div class="about-section">
+              <h3>🛠️ Build and earn</h3>
+              <p>Pick an open GitHub issue, ask to be assigned, and submit a pull request that says <code>Closes #issue-number</code>. Add the bounty label shown on the issue, such as <code>bounty: 10 USDC</code> or <code>bounty: 10 ART</code>.</p>
+              <p>After the pull request is merged, the reward enters the repo payout queue. The owner reviews and pays approved rewards from the funded Base treasury. Joining is free; a listed bounty is not paid until it is reviewed and settled.</p>
+              <p><a href="https://github.com/TheJollyLaMa/DecentBusking/issues" target="_blank" rel="noopener noreferrer">Browse beginner-friendly issues ↗</a> · <a href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/docs/PAYROLL.md" target="_blank" rel="noopener noreferrer">Read contributor payout details ↗</a></p>
             </div>
 
           <section class="artizen-support" aria-labelledby="artizen-support-title">
