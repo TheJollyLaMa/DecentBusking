@@ -175,7 +175,8 @@ export function createWorkerRequestHandler({
         const weeks = Number.isFinite(requestedWeeks) ? Math.max(1, Math.min(52, Math.floor(requestedWeeks))) : 12;
         const wallet = requestUrl.searchParams.get('wallet');
         if (wallet && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Invalid wallet filter');
-        sendJson(response, 200, { weeks: await getRadioHistory({ weeks, wallet }) }, '*');
+        const includeAllTime = requestUrl.searchParams.get('includeAllTime') === '1';
+        sendJson(response, 200, { weeks: await getRadioHistory({ weeks, wallet, includeAllTime }) }, '*');
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/radio/vote') {

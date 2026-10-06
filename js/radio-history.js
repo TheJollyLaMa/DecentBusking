@@ -52,11 +52,14 @@ function renderWeek() {
     return textMatch && artistMatch && (!from || uploadDate >= from) && (!to || uploadDate <= to);
   });
   const filteredTotal = filtered.reduce((sum, track) => sum + track.plays, 0);
+  const allTime = report.week === 'all-time';
   const countMessage = query || artistKey || from || to
-    ? `${filteredTotal} matching plays across ${filtered.length} songs (${report.totalPlays} total this week)`
-    : `${report.totalPlays} qualifying plays across ${report.trackCount} songs`;
+    ? `${filteredTotal} matching plays across ${filtered.length} songs (${report.totalPlays} total ${allTime ? 'all time' : 'this week'})`
+    : `${report.totalPlays} ${allTime ? 'recorded' : 'qualifying'} plays across ${report.trackCount} songs`;
   content.append(element('p', 'radio-history-total', countMessage));
-  content.append(element('p', 'radio-history-note', 'Likes and dislikes are all-time totals; plays are for the selected UTC week.'));
+  content.append(element('p', 'radio-history-note', allTime
+    ? 'All-time plays, likes, and dislikes. Historical plays include legacy Discord announcement counts.'
+    : 'Likes and dislikes are all-time totals; plays are for the selected UTC week.'));
 
   const artistTotals = new Map();
   for (const track of filtered) {
@@ -120,13 +123,13 @@ async function openHistory(event) {
   if (titleEl) titleEl.textContent = mode === 'personal' ? 'My Playback Tally' : 'Playback Tally';
   if (rewardsEl) rewardsEl.hidden = mode !== 'personal' || !/^0x[0-9a-fA-F]{40}$/.test(wallet);
   if (noteEl) noteEl.textContent = mode === 'personal'
-    ? `Plays for connected wallet ${wallet.slice(0, 6)}…${wallet.slice(-4)} · completed Discord plays with at least 30 audible seconds · UTC weeks`
-    : 'Community totals · completed Discord plays with at least 30 audible seconds · UTC weeks';
+    ? `Playback tally for connected wallet ${wallet.slice(0, 6)}…${wallet.slice(-4)}`
+    : 'Community playback tally';
   try {
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service) throw new Error('Playback tally service is not configured');
     if (mode === 'personal' && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Connect your wallet to view My Playback Tally.');
-    const query = new URLSearchParams({ weeks: '12' });
+    const query = new URLSearchParams({ weeks: '12', includeAllTime: '1' });
     if (wallet) query.set('wallet', wallet);
     const response = await fetch(`${service}/api/radio/history?${query}`, { cache: 'no-store' });
     const result = await response.json();
@@ -136,14 +139,14 @@ async function openHistory(event) {
     weekSelect.replaceChildren(...reports.slice().reverse().map((report) => {
       const option = document.createElement('option');
       option.value = report.week;
-      option.textContent = `${report.week}${report.current ? ' · current' : ''}`;
+      option.textContent = report.week === 'all-time' ? 'All Time' : `${report.week}${report.current ? ' · current' : ''}`;
       return option;
     }));
     if (!reports.length) {
       content.textContent = 'No playback tally has been recorded yet.';
       return;
     }
-    weekSelect.value = reports.at(-1).week;
+    weekSelect.value = (reports.find(report => report.week === 'all-time') || reports.at(-1)).week;
     renderWeek();
   } catch (error) {
     if (currentRequest === requestId) content.textContent = error.message;

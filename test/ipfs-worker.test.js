@@ -347,10 +347,11 @@ test('weekly radio history is public and clamps the requested range', async () =
   const { createWorkerRequestHandler } = await import(moduleUrl);
   let receivedWeeks;
   let receivedWallet;
+  let receivedAllTime;
   const handler = createWorkerRequestHandler({
     allowedOrigins: [],
     ownerWallet: '0x1111111111111111111111111111111111111111',
-    getRadioHistory: async ({ weeks, wallet }) => { receivedWeeks = weeks; receivedWallet = wallet; return [{ week: '2026-W41', totalPlays: 4 }]; },
+    getRadioHistory: async ({ weeks, wallet, includeAllTime }) => { receivedWeeks = weeks; receivedWallet = wallet; receivedAllTime = includeAllTime; return [{ week: '2026-W41', totalPlays: 4 }]; },
   });
   await withServer(handler, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/radio/history?weeks=500&wallet=0x1111111111111111111111111111111111111111`, { headers: { origin: 'http://localhost:8765' } });
@@ -358,6 +359,11 @@ test('weekly radio history is public and clamps the requested range', async () =
     assert.equal(response.headers.get('access-control-allow-origin'), '*');
     assert.deepEqual(await response.json(), { weeks: [{ week: '2026-W41', totalPlays: 4 }] });
     assert.equal(receivedWeeks, 52);
+    assert.equal(receivedWallet, '0x1111111111111111111111111111111111111111');
+    assert.equal(receivedAllTime, false);
+    const allTime = await fetch(`${baseUrl}/api/radio/history?includeAllTime=1&wallet=0x1111111111111111111111111111111111111111`);
+    assert.equal(allTime.status, 200);
+    assert.equal(receivedAllTime, true);
     assert.equal(receivedWallet, '0x1111111111111111111111111111111111111111');
     const invalid = await fetch(`${baseUrl}/api/radio/history?wallet=not-a-wallet`);
     assert.equal(invalid.status, 400);

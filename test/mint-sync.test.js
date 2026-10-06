@@ -94,6 +94,35 @@ test('unavailable minted metadata fails reconciliation instead of treating minte
   assert.equal(applied, false);
 });
 
+test('reconciliation restores missing artist wallets, including already-minted tracks, without guessing from creator', async (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-artist-restore-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(temp, { recursive: true, force: true }); });
+  const url = pathToFileURL(path.join(__dirname, '../discord-bot/playlist-store.js'));
+  url.searchParams.set('artist-restore', Date.now());
+  const store = await import(url.href);
+  const wallet = `0x${'1'.repeat(40)}`;
+  const knownWallet = `0x${'2'.repeat(40)}`;
+  store.loadPlaylist([
+    { trackId: 'missing', ipfsCid: 'bafy-a', mintStatus: 'minted', tokenId: '0', plays: 12, likes: 3 },
+    { trackId: 'known', ipfsCid: 'bafy-b', mintStatus: 'minted', tokenId: '1', mintRecipient: knownWallet },
+    { trackId: 'admin-creator', ipfsCid: 'bafy-c', mintStatus: 'minted', tokenId: '2' },
+  ]);
+  const contract = { nextTokenId: async () => 3n, totalMinted: async () => 1n, uri: async tokenId => `ipfs://meta-${tokenId}` };
+  const metadata = [{ audioUrl: 'ipfs://bafy-a', artist: wallet }, { audioUrl: 'ipfs://bafy-b', artist: wallet },
+    { audioUrl: 'ipfs://bafy-c', creator: wallet }];
+  const { syncMintedTracksFromChain } = await import(moduleUrl);
+  const changed = await syncMintedTracksFromChain({ contract, store, pauseMs: 0, log: { log() {} },
+    fetchImpl: async uri => new Response(JSON.stringify(metadata[Number(uri.split('meta-')[1])])) });
+  assert.equal(changed, 1);
+  const tracks = store.getPlaylist();
+  assert.equal(tracks[0].mintRecipient, wallet);
+  assert.equal(tracks[0].plays, 12);
+  assert.equal(tracks[0].likes, 3);
+  assert.equal(tracks[1].mintRecipient, knownWallet);
+  assert.equal(tracks[2].mintRecipient, undefined);
+});
+
 test('private queue waits for reconciliation, shares in-flight work, and rejects stale state on failure', async () => {
   const { createVerifiedMintQueueReader } = await import(moduleUrl);
   let complete;

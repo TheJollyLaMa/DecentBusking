@@ -456,7 +456,7 @@ async function main() {
       nowPlaying: getJukeLoopNowPlaying(),
       playlist: getPlaylist(),
     }),
-    getRadioHistory: async ({ weeks, wallet }) => getWeeklyPlayHistory({ weeks, wallet }),
+    getRadioHistory: async ({ weeks, wallet, includeAllTime }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime }),
     onRadioVote: submitJukeLoopVote,
   });
   const port = process.env.PORT || 10000;
