@@ -21,6 +21,9 @@
  *   payroll.
  */
 
+import { createLegacyReceiptStore, verifyLegacyPayment } from './legacy-payroll.mjs';
+import { isAdminWallet } from './admin-access.mjs';
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAYROLL_QUEUE_URL =
@@ -50,6 +53,13 @@ const ROUTER_ABI = [
 let _pendingEntries   = [];
 let _ownerAddress     = null;
 let _payrollAssetConfig = null;
+let _settling = false;
+let _legacyReceipts;
+
+function _legacyStore() {
+  _legacyReceipts ||= createLegacyReceiptStore(localStorage);
+  return _legacyReceipts;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -93,6 +103,10 @@ async function _loadOwnerAddress() {
 // ─── React to global wallet connection ────────────────────────────────────────
 
 async function _onWalletConnected({ detail } = {}) {
+  if (!isAdminWallet(detail?.address || window._wallet?.address)) {
+    _onWalletDisconnected();
+    return;
+  }
   const statusEl  = document.getElementById('payroll-wallet-status');
   const addrEl    = document.getElementById('payroll-connected-addr');
   const warningEl = document.getElementById('payroll-owner-warning');
@@ -132,6 +146,8 @@ async function _onWalletConnected({ detail } = {}) {
 }
 
 function _onWalletDisconnected() {
+  document.getElementById('payroll-modal')?.classList.add('hidden');
+  document.getElementById('payroll-overlay')?.classList.add('hidden');
   const addrEl    = document.getElementById('payroll-connected-addr');
   const statusEl  = document.getElementById('payroll-wallet-status');
   const warningEl = document.getElementById('payroll-owner-warning');
@@ -166,15 +182,31 @@ export async function loadPayrollQueue() {
     const queue = await _fetchJSON(PAYROLL_QUEUE_URL);
     const pending = Array.isArray(queue.pending) ? queue.pending : [];
     _pendingEntries = pending;
+    const optimism = new ethers.JsonRpcProvider('https://optimism-rpc.publicnode.com', OPTIMISM_CHAIN_ID);
+    const verifiedLegacy = new Set();
+    for (const entry of pending.filter(entry => _entryCurrency(entry) === 'ETH')) {
+      const saved = _legacyStore().get(entry);
+      if (!saved?.txHash) continue;
+      try {
+        const result = await verifyLegacyPayment({ provider: optimism, txHash: saved.txHash, owner: _ownerAddress,
+          recipient: entry.contributor, amountWei: ethers.parseEther(String(entry.amount)) });
+        _legacyStore().set(entry, { ...result, owner: _ownerAddress });
+        if (result.status === 'confirmed') verifiedLegacy.add(entry);
+      } catch {
+        if (statusEl) statusEl.textContent = 'Some Optimism receipts could not be verified. Those entries remain locked; do not repay them.';
+      }
+    }
+    _pendingEntries = pending.filter(entry => !verifiedLegacy.has(entry));
 
     if (_isRouterConfigured() && pending.some(entry => _entryCurrency(entry) !== 'ETH')) {
       try {
         const router = _readOnlyRouter();
-        const paid = await Promise.all(pending.map(async entry => {
+        const visible = _pendingEntries;
+        const paid = await Promise.all(visible.map(async entry => {
           if (_entryCurrency(entry) === 'ETH' || !_getAssetConfig(_entryCurrency(entry))) return false;
           return router.completedWorkReferences(_artWorkReference(entry));
         }));
-        _pendingEntries = pending.filter((entry, index) => !paid[index]);
+        _pendingEntries = visible.filter((entry, index) => !paid[index]);
       } catch (err) {
         if (statusEl) {
           statusEl.textContent = `⚠️ Could not check Base settlement status; configured-token entries remain visible: ${_esc(err.message)}`;
@@ -207,6 +239,8 @@ export async function loadPayrollQueue() {
       ? `<a href="${explorerBase}${_esc(wallet)}" target="_blank" rel="noopener" class="payroll-addr-link" title="${_esc(wallet)}">${_esc(_shortAddr(wallet))}</a>`
       : '<span class="payroll-no-wallet">⚠️ No wallet</span>';
     const canPay = isOwner && _isPayableEntry(entry);
+    const legacy = !isRouterEntry && isOwner;
+    const receipt = legacy ? _legacyStore().get(entry) : null;
     return `
       <tr data-index="${i}" class="payroll-row${isRouterEntry ? ' payroll-row-art' : ''}">
         <td class="payroll-td">
@@ -228,19 +262,50 @@ export async function loadPayrollQueue() {
         <td class="payroll-td">
           ${canPay
             ? `<button class="payroll-pay-btn" data-index="${i}">💸 Pay</button>`
-            : `<span class="payroll-pay-disabled">${!isOwner ? '🔒' : !wallet ? '⚠️ No wallet' : isRouterEntry ? '⚠️ Router/token not configured' : '⚠️ Invalid wallet'}</span>`
+            : `<span class="payroll-pay-disabled">${!isOwner ? '🔒' : !wallet ? '⚠️ No wallet' : isRouterEntry ? '⚠️ Router/token not configured' : 'Review prior payment'}</span>`
           }
+          ${legacy ? `<div class="payroll-legacy-review">
+            <input class="payroll-tx-hash" data-index="${i}" aria-label="Existing Optimism transaction for ${_esc(entry.issueRef)}" placeholder="Existing Optimism tx hash" value="${_esc(receipt?.txHash || '')}" />
+            <button class="payroll-verify-btn" data-index="${i}" type="button">Verify Existing Payment</button>
+            ${!receipt || receipt.status === 'reviewed-unpaid' ? `<label><input class="payroll-reviewed-unpaid" data-index="${i}" type="checkbox" ${receipt?.status === 'reviewed-unpaid' ? 'checked' : ''} /> I checked history: this entry is unpaid</label>` : `<span>Payment ${_esc(receipt.status)}. Do not send again.</span>`}
+          </div>` : ''}
         </td>
       </tr>`;
   }).join('');
 
   // Attach individual Pay button listeners
+  const renderedEntries = _pendingEntries.slice();
   tableBody.querySelectorAll('.payroll-pay-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const idx = Number(btn.dataset.index);
+      const entry = renderedEntries[Number(btn.dataset.index)];
+      const idx = _pendingEntries.indexOf(entry);
+      if (idx < 0) return;
       await _paySingle(idx, btn);
     });
   });
+  tableBody.querySelectorAll('.payroll-verify-btn').forEach(button => button.addEventListener('click', async () => {
+    const index = Number(button.dataset.index);
+    const entry = _pendingEntries[index];
+    const txHash = tableBody.querySelector(`.payroll-tx-hash[data-index="${index}"]`).value.trim();
+    try {
+      button.disabled = true;
+      const provider = new ethers.JsonRpcProvider('https://optimism-rpc.publicnode.com', OPTIMISM_CHAIN_ID);
+      const verified = await verifyLegacyPayment({ provider, txHash, owner: _ownerAddress,
+        recipient: entry.contributor, amountWei: ethers.parseEther(String(entry.amount)) });
+      _legacyStore().set(entry, { ...verified, owner: _ownerAddress });
+      _showSettleWorkflowHint(txHash);
+      await loadPayrollQueue();
+    } catch (error) {
+      _setStatus(statusEl, error.message, true);
+      button.disabled = false;
+    }
+  }));
+  tableBody.querySelectorAll('.payroll-reviewed-unpaid').forEach(checkbox => checkbox.addEventListener('change', async () => {
+    const entry = _pendingEntries[Number(checkbox.dataset.index)];
+    if (checkbox.checked) _legacyStore().set(entry, { status: 'reviewed-unpaid', owner: _ownerAddress });
+    else _legacyStore().remove(entry);
+    await loadPayrollQueue();
+  }));
 
   // Enable/disable Settle All button
   const payableCount = _pendingEntries.filter(e => isOwner && _isPayableEntry(e)).length;
@@ -259,7 +324,7 @@ function _entryCurrency(entry) {
 }
 
 function _isEthPayableEntry(entry) {
-  return _entryCurrency(entry) === 'ETH' && isValidEthAddress(entry?.contributor);
+  return _entryCurrency(entry) === 'ETH' && isValidEthAddress(entry?.contributor) && _legacyStore().get(entry)?.status === 'reviewed-unpaid';
 }
 
 function _getAssetConfig(currency) {
@@ -410,17 +475,31 @@ async function _payTokenEntry(entry) {
 }
 
 async function _payEthEntry(entry) {
+  if (_legacyStore().get(entry)?.status !== 'reviewed-unpaid') throw new Error('Review existing Optimism payments before sending ETH. Verify an existing receipt instead of paying again.');
   const signer = await _getSigner(OPTIMISM_CHAIN_ID);
+  const owner = await signer.getAddress();
+  if (!_ownerAddress || owner.toLowerCase() !== _ownerAddress.toLowerCase()) throw new Error('Connect the registered owner wallet before settling payroll');
   const { to, amountWei } = _buildTxParams(entry);
   if (!to) throw new Error(`No valid wallet address for @${entry.contributorGithub}.`);
-  const tx = await signer.sendTransaction({ to, value: amountWei });
+  _legacyStore().set(entry, { status: 'awaiting-wallet', owner });
+  let tx;
+  try {
+    tx = await signer.sendTransaction({ to, value: amountWei });
+  } catch (error) {
+    if (error.code === 4001 || error.code === 'ACTION_REJECTED') _legacyStore().remove(entry);
+    throw error;
+  }
+  _legacyStore().set(entry, { status: 'pending', owner, txHash: tx.hash });
   await tx.wait();
+  const verified = await verifyLegacyPayment({ provider: signer.provider, txHash: tx.hash, owner, recipient: to, amountWei });
+  _legacyStore().set(entry, { ...verified, owner });
   return tx.hash;
 }
 
 // ─── Settle a single queue entry ──────────────────────────────────────────────
 
 async function _paySingle(index, btn) {
+  if (_settling) return;
   const entry    = _pendingEntries[index];
   const statusEl = document.getElementById('payroll-queue-status');
 
@@ -435,6 +514,7 @@ async function _paySingle(index, btn) {
   }
 
   try {
+    _settling = true;
     if (btn) btn.disabled = true;
     const txHash = _entryCurrency(entry) !== 'ETH'
       ? await _payTokenEntry(entry)
@@ -447,13 +527,16 @@ async function _paySingle(index, btn) {
 
   } catch (err) {
     _setStatus(statusEl, `❌ ${_entryCurrency(entry)} settlement failed: ${err.message}`, true);
-    if (btn) btn.disabled = false;
+    if (btn) btn.disabled = _entryCurrency(entry) === 'ETH' && Boolean(_legacyStore().get(entry));
+  } finally {
+    _settling = false;
   }
 }
 
 // ─── Settle All ───────────────────────────────────────────────────────────────
 
 async function _settleAll() {
+  if (_settling) return;
   const statusEl = document.getElementById('payroll-queue-status');
   const settleBtn = document.getElementById('payroll-settle-all-btn');
 
@@ -478,6 +561,7 @@ async function _settleAll() {
   }
 
   try {
+    _settling = true;
     if (settleBtn) settleBtn.disabled = true;
 
     const hashes = [];
@@ -497,11 +581,13 @@ async function _settleAll() {
   } catch (err) {
     _setStatus(statusEl, `❌ Settlement failed: ${err.message}`, true);
     if (settleBtn) settleBtn.disabled = false;
+  } finally {
+    _settling = false;
   }
 }
 
 function _buildTxParams(entry) {
-  if (!_isEthPayableEntry(entry)) return { to: null, amountWei: null };
+  if (_entryCurrency(entry) !== 'ETH') return { to: null, amountWei: null };
   const to = entry.contributor || '';
   if (!isValidEthAddress(to)) return { to: null, amountWei: null };
   const amountWei = ethers.parseEther(String(entry.amount));
@@ -533,6 +619,7 @@ export function initPayroll() {
   // Open via the legacy inline button (if still present) or via the
   // "open-payroll" custom event dispatched by the header dropdown link.
   function openPayroll() {
+    if (!isAdminWallet()) return;
     if (modal)   modal.classList.remove('hidden');
     if (overlay) overlay.classList.remove('hidden');
 

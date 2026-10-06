@@ -27,6 +27,7 @@ import {
   SlashCommandBuilder,
   EmbedBuilder,
   MessageFlags,
+  Partials,
 } from 'discord.js';
 
 import http from 'http'; 
@@ -73,6 +74,7 @@ import {
   reconcileJukeLoopHistory,
   backfillFromChannel,
   getAttachmentTitle,
+  synchronizeDiscordRating,
 } from './jukeloop.js';
 
 const _jukeLoopRestartTimers = new Map();
@@ -505,8 +507,25 @@ async function main() {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.GuildVoiceStates,
       GatewayIntentBits.MessageContent,
+      GatewayIntentBits.GuildMessageReactions,
     ],
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction],
   });
+
+  const reactionUpdates = new Map();
+  const handleReaction = change => (reaction, user) => {
+    const emoji = reaction.emoji.name?.startsWith('👍') ? '👍' : reaction.emoji.name?.startsWith('👎') ? '👎' : null;
+    if (user.bot || !emoji || ![config.jukeLoopTextChannelId, config.jukeboxChannelId].includes(reaction.message.channelId)) return;
+    const key = reaction.message.id;
+    const pending = (reactionUpdates.get(key) || Promise.resolve()).then(async () => {
+      const message = await reaction.message.fetch();
+      synchronizeDiscordRating(message, client.user.id, { change, emoji });
+    }).catch(error => console.warn('[ratings] Could not synchronize Discord reaction:', error.message));
+    reactionUpdates.set(key, pending);
+    pending.finally(() => { if (reactionUpdates.get(key) === pending) reactionUpdates.delete(key); });
+  };
+  client.on(Events.MessageReactionAdd, handleReaction(1));
+  client.on(Events.MessageReactionRemove, handleReaction(-1));
 
   client.once(Events.ClientReady, async (readyClient) => {
     console.log(`[jukebox-bot] Logged in as ${readyClient.user.tag}`);

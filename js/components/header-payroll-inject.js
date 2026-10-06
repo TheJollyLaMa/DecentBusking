@@ -11,6 +11,8 @@
 // Styles injected into the AppTitle shadow root. Inline styles are avoided
 // in favour of a scoped <style> element so rules stay maintainable and
 // consistent with the app's CSS custom properties.
+import { isAdminWallet } from '../admin-access.mjs';
+
 const PAYROLL_LINK_STYLE = `
   .payroll-nav-item {
     list-style: none;
@@ -24,6 +26,7 @@ const PAYROLL_LINK_STYLE = `
   .payroll-nav-item:hover {
     background: rgba(240, 192, 64, 0.12);
   }
+  .payroll-nav-item[hidden] { display: none; }
 `;
 
 function patchAppTitle() {
@@ -65,21 +68,6 @@ function _injectPayrollLink(shadowRoot) {
   // to append instead of replace.
   leftMenu.innerHTML = '';
 
-  const li = document.createElement('li');
-  li.className = 'payroll-nav-item';
-  li.dataset.payrollItem = '1';
-  li.textContent = '💸 Payroll';
-
-  li.addEventListener('click', e => {
-    e.stopPropagation();
-    // Close the dropdown using the same style-based mechanism the CDN
-    // component itself uses for show/hide.
-    leftMenu.style.display = 'none';
-    document.dispatchEvent(new CustomEvent('open-payroll'));
-  });
-
-  leftMenu.appendChild(li);
-
   const historyItem = document.createElement('li');
   historyItem.className = 'payroll-nav-item';
   historyItem.dataset.playHistoryTotalsItem = '1';
@@ -90,6 +78,23 @@ function _injectPayrollLink(shadowRoot) {
     document.dispatchEvent(new CustomEvent('open-radio-history', { detail: { mode: 'totals' } }));
   });
   leftMenu.appendChild(historyItem);
+  for (const [label, eventName, datasetKey] of [
+    ['Admin Nft Mint', 'open-admin', 'adminItem'], ['Payroll', 'open-payroll', 'payrollItem'],
+  ]) {
+    const item = document.createElement('li');
+    item.className = 'payroll-nav-item';
+    item.dataset[datasetKey] = '1';
+    item.dataset.adminOnly = '1';
+    item.textContent = label;
+    item.hidden = !isAdminWallet();
+    item.addEventListener('click', event => {
+      event.stopPropagation();
+      if (!isAdminWallet()) return;
+      leftMenu.style.display = 'none';
+      document.dispatchEvent(new CustomEvent(eventName));
+    });
+    leftMenu.appendChild(item);
+  }
 }
 
 // Shadow-DOM aware traversal — same helper pattern as about-override.js.
@@ -111,3 +116,11 @@ if (customElements.get('app-title')) {
 } else {
   customElements.whenDefined('app-title').then(patchAppTitle);
 }
+
+function updateAdminItems() {
+  for (const title of _findAllAppTitles()) {
+    title.shadowRoot?.querySelectorAll('[data-admin-only]').forEach(item => { item.hidden = !isAdminWallet(); });
+  }
+}
+document.addEventListener('wallet-connected', updateAdminItems);
+document.addEventListener('wallet-disconnected', updateAdminItems);

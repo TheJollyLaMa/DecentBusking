@@ -135,16 +135,17 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
   };
 }
 
-export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true }) {
+export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true, playId }) {
   const listenLink = track.ipfsCid && /\/ipfs\//.test(url || '') ? `\n[Open IPFS audio](${url})` : '';
   const votingLine = votingOpen
     ? 'React 👍 to boost it or 👎 to send it lower in the rotation.'
-    : 'Voting for this play is closed. Totals include this completed play.';
+    : 'This play has finished. Your 👍 / 👎 reactions still update the master tally.';
   return (
     `🎵 Now playing: **${track.title}** by *${track.uploader}* ` +
     `(${queueIndex}/${totalTracks})\n` +
     `**All-time:** 👍 ${track.likes ?? 0} · 👎 ${track.dislikes ?? 0} · ▶️ ${track.plays ?? 0}\n` +
     `Track ID: ||${track.trackId}||\n` +
+    (playId ? `Play ID: ||${playId}||\n` : '') +
     `${votingLine}${listenLink}`
   );
 }
@@ -153,12 +154,30 @@ export function parseNowPlayingMessage(content) {
   const match = content.match(/^🎵 Now playing: \*\*(.+?)\*\* by \*(.+?)\*/);
   if (!match) return null;
   const trackId = content.match(/Track ID: \|\|(.+?)\|\|/)?.[1] || null;
-  return { title: match[1], uploader: match[2], trackId };
+  const playId = content.match(/Play ID: \|\|(.+?)\|\|/)?.[1];
+  return { title: match[1], uploader: match[2], trackId, ...(playId ? { playId } : {}) };
 }
 
 function reactionCount(message, emoji) {
-  const reaction = message.reactions.cache.find((entry) => entry.emoji.name === emoji);
-  return Math.max(0, (reaction?.count || 0) - (reaction?.me ? 1 : 0));
+  return [...message.reactions.cache.values()]
+    .filter(entry => entry.emoji.name?.startsWith(emoji))
+    .reduce((total, reaction) => total + Math.max(0, (reaction.count || 0) - (reaction.me ? 1 : 0)), 0);
+}
+
+export function synchronizeDiscordRating(message, botUserId, { change, emoji, store = { getPlaylist, applyRating } } = {}) {
+  const playlist = store.getPlaylist();
+  const parsed = message.author?.id === botUserId ? parseNowPlayingMessage(message.content || '') : null;
+  const uploads = message.author?.bot ? [] : playlist.filter(entry => entry.messageId === message.id && entry.uploaderId === message.author?.id);
+  const track = parsed?.trackId ? playlist.find(entry => entry.trackId === parsed.trackId)
+    : uploads.length === 1 ? uploads[0] : null;
+  if (!track) return null;
+  const likes = reactionCount(message, '👍');
+  const dislikes = reactionCount(message, '👎');
+  const initialCounts = change ? {
+    likes: Math.max(0, likes - (emoji === '👍' ? change : 0)),
+    dislikes: Math.max(0, dislikes - (emoji === '👎' ? change : 0)),
+  } : undefined;
+  return store.applyRating(track.trackId, likes, dislikes, message.id, { initialCounts });
 }
 
 /** Recover announcements that were abandoned by a restart before normal collection. */
@@ -187,6 +206,11 @@ export async function reconcileJukeLoopHistory(textChannel, botUserId, maxMessag
         messageId: message.id,
         likes: reactionCount(message, '👍'),
         dislikes: reactionCount(message, '👎'),
+        playId: parsed.playId,
+        legacyTotals: !parsed.playId ? (() => {
+          const totals = message.content.match(/\*\*All-time:\*\* 👍 (\d+) · 👎 (\d+) · ▶️ (\d+)/);
+          return totals ? { likes: Number(totals[1]), dislikes: Number(totals[2]), plays: Number(totals[3]) } : undefined;
+        })() : undefined,
       });
     }
     scanned += batch.size;
@@ -344,6 +368,7 @@ export class JukeLoopSession {
           endedAt,
           audibleMs: Math.max(0, endedAt - this._nowPlaying.startedAt),
           firstWeekBonus: this._nowPlaying.firstWeekBonus,
+          announcementId: this._announcementMsg?.id,
         };
       }
       this._nowPlaying = null;
@@ -511,6 +536,7 @@ export class JukeLoopSession {
       // Announce the track and add reaction buttons
       const totalTracks = this._queue.length;
       const announcementContext = {
+        playId: this._nowPlaying.playId,
         queueIndex: this._queueIndex,
         totalTracks,
         url,
@@ -567,12 +593,8 @@ export class JukeLoopSession {
       const fresh = await msgRef.fetch().catch(() => null);
       if (!fresh) return;
 
-      const thumbsUp   = fresh.reactions.cache.get('👍');
-      const thumbsDown = fresh.reactions.cache.get('👎');
-
-      // Subtract 1 to exclude the bot's own seed reaction
-      const likes    = Math.max(0, (thumbsUp?.count   ?? 0) - 1);
-      const dislikes = Math.max(0, (thumbsDown?.count ?? 0) - 1);
+      const likes = reactionCount(fresh, '👍');
+      const dislikes = reactionCount(fresh, '👎');
 
       const updatedTrack = applyRating(trackRef.trackId, likes, dislikes, fresh.id);
       if (updatedTrack && announcementContext) {
@@ -580,7 +602,6 @@ export class JukeLoopSession {
           ...announcementContext,
           votingOpen: false,
         })).catch(() => {});
-        await fresh.reactions.removeAll().catch(() => {});
       }
 
       if (likes > 0 || dislikes > 0) {

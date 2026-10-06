@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261005-tally-votes" />
+  <link rel="stylesheet" href="css/styles.css?v=20261006-payroll-review" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -14,7 +14,7 @@
   <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
   <!-- App config — must load before modules -->
-  <script src="decent.config.js?v=20261005-discord-invite"></script>
+  <script src="decent.config.js?v=20261006-owner-payroll"></script>
 </head>
 <body>
 
@@ -304,8 +304,7 @@
         <button id="payroll-close-btn" aria-label="Close payroll panel">✕</button>
       </div>
       <p class="payroll-description">
-        View contributor rewards. Configured token payouts use the shared Base Settlement Router and dbusk-repo-dev fund; historical ETH payouts remain on Optimism.
-        Only the repo owner can settle payments.
+        Base rewards and legacy Optimism payments. Owner settlement only.
       </p>
 
       <!-- Wallet connection status — populated by the global wallet module -->
@@ -317,12 +316,23 @@
         <div id="payroll-wallet-status" class="payroll-status"></div>
       </div>
 
+      <section class="payroll-section" aria-labelledby="playback-payroll-title">
+        <h3 id="playback-payroll-title">Playback Payroll</h3>
+        <dl class="payroll-allocation"><dt>Weekly allocation</dt><dd>Not configured</dd><dt>Settlement network</dt><dd>Base</dd></dl>
+      </section>
+      <section class="payroll-section" aria-labelledby="top-ten-payroll-title">
+        <h3 id="top-ten-payroll-title">Top 10 Prize Payouts</h3>
+        <dl class="payroll-allocation"><dt>Prize allocation</dt><dd>Not configured</dd><dt>Settlement network</dt><dd>Base</dd></dl>
+      </section>
+
       <!-- Payroll queue table -->
       <div id="payroll-queue-section" style="display:none;">
         <div id="payroll-queue-header">
-          <h3>Pending Payouts</h3>
+          <h3>Repo Dev Bot Payouts</h3>
           <button id="payroll-refresh-btn" class="payroll-btn payroll-btn-secondary" title="Refresh queue">🔄 Refresh</button>
         </div>
+        <p class="payroll-legacy-warning">Legacy Optimism entries require payment review before sending. Verify an existing transaction if paid; do not send again.</p>
+        <a class="payroll-link" href="https://optimistic.etherscan.io/address/0x807061DF657A7697c04045dA7d16D941861cAABc" target="_blank" rel="noopener noreferrer">Optimism owner transaction history</a>
         <div id="payroll-empty-msg" class="payroll-empty" style="display:none;">
           ✅ No pending payouts. All bounties are settled!
         </div>
@@ -361,7 +371,7 @@
   <script type="module" src="js/components/header.js?v=20261002-venus-subtitle"></script>
 
   <!-- Inject 💸 Payroll link into left ankh header dropdown -->
-  <script type="module" src="js/components/header-payroll-inject.js?v=20261005-playback-tally"></script>
+  <script type="module" src="js/components/header-payroll-inject.js?v=20261006-owner-payroll"></script>
 
   <!-- Override .title-main color to DecentBusking orange inside AppTitle shadow root -->
   <script type="module" src="js/components/header-title-color-override.js?v=20261002-header-refresh-5"></script>
@@ -370,13 +380,12 @@
   <script type="module" src="js/main.js?v=20261005-tally-votes"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/components/header-admin-inject.js"></script>
-  <script type="module" src="js/admin.js?v=20261005-shared-wallet"></script>
+  <script type="module" src="js/admin.js?v=20261006-owner-payroll"></script>
 
-  <script type="module" src="js/payroll.js"></script>
+  <script type="module" src="js/payroll.js?v=20261006-payroll-review"></script>
   <script type="module" src="js/radio-history.js?v=20261006-all-time-tally"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js';
+    import { initPayroll } from './js/payroll.js?v=20261006-payroll-review';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

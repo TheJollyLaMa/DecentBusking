@@ -1,5 +1,15 @@
 # DecentBusking Payroll
 
+## Legacy Optimism Payment Review
+
+Legacy ETH payments are direct wallet transfers, not replay-protected router payouts. Paying did not update the repository JSON automatically, so previously paid rows could reappear on Refresh. Do not send another transfer solely because a row is visible.
+
+The panel now requires explicit unpaid review for legacy rows. To reconcile an existing payment, enter its Optimism transaction hash in the matching row and verify it. Verification requires chain 10, the registered owner as sender, the exact recipient and value, and a successful receipt. A confirmed row is hidden on refresh, a pending/unresolved broadcast stays locked, and the same transaction cannot be assigned to two entries in that browser's receipt log. Matching value/recipient alone does not prove which issue was paid when multiple bounties have identical amounts; the owner must make that assignment.
+
+Receipt assignments are stored in this browser's local storage, not a global on-chain paid-reference mapping. Record each verified transaction through the existing Settle Payroll workflow to update the repository ledger for other devices and contributors. Clearing browser storage or changing devices loses local assignments; legacy entries start locked again until reviewed. Base router payouts continue to use their on-chain `completedWorkReferences` protection.
+
+The panel is ordered Playback Payroll, Top 10 Prize Payouts, then Repo Dev Bot Payouts. Playback and prize allocations remain unconfigured and cannot send payments yet. The public Left Ankh entry is Playback Tally; Admin Nft Mint and Payroll are visible only for the configured admin wallet in this release. UI visibility is not a substitute for transaction-level role and owner checks.
+
 DecentBusking follows the ArtFi contribution-payroll model. GitHub Actions records bounty credits in the repository ledger; the repo owner sends configured ERC-20 rewards through the existing ArtFi Settlement Router on Base. DecentBusking uses its own `dbusk-repo-dev` fund on that shared router and does not deploy a second router.
 
 ## Labels
