@@ -68,6 +68,28 @@ test('custom fund slugs allow purpose names while rejecting malformed and config
   }
 });
 
+test('purpose metadata includes validated Base fund identity and optional HTTPS website', async () => {
+  const { buildSettlementFundMetadata } = await import(url);
+  const input = { slug: 'referral-prizes', name: ' Referral Prizes ', description: ' Rewards for verified referrals. ',
+    routerAddress: `0x${'1'.repeat(40)}`, owner: `0x${'2'.repeat(40)}`, fundId: `0x${'3'.repeat(64)}`, createdAt: '2026-10-07T12:00:00Z' };
+  const metadata = buildSettlementFundMetadata(input);
+  assert.equal(metadata.name, 'Referral Prizes');
+  assert.equal(metadata.description, 'Rewards for verified referrals.');
+  assert.equal(metadata.fundSlug, input.slug);
+  assert.equal(metadata.chainId, 8453);
+  assert.equal(metadata.routerAddress, input.routerAddress);
+  assert.equal(metadata.owner, input.owner);
+  assert.equal(metadata.fundId, input.fundId);
+  assert.equal(metadata.createdAt, '2026-10-07T12:00:00.000Z');
+  assert.equal(metadata.external_url, undefined);
+  assert.equal(buildSettlementFundMetadata({ ...input, website: 'https://example.org/referrals' }).external_url, 'https://example.org/referrals');
+  for (const invalid of [{ name: '' }, { name: 'x'.repeat(121) }, { description: '' }, { description: 'x'.repeat(2001) },
+    { website: 'javascript:alert(1)' }, { website: 'https://user:password@example.org' }, { routerAddress: 'wrong' },
+    { owner: '' }, { fundId: 'wrong' }, { createdAt: 'not-a-date' }, { slug: 'bad--slug' }]) {
+    assert.throws(() => buildSettlementFundMetadata({ ...input, ...invalid }));
+  }
+});
+
 test('failed creation receipts do not report a created fund', async () => {
   const { createConfiguredSettlementFund } = await import(url);
   const options = fixture();

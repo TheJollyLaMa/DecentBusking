@@ -326,7 +326,18 @@
         <div class="radio-payroll-controls">
           <label>Fund<select id="router-fund-select"></select></label>
           <label id="router-custom-fund-label" hidden>New fund slug<input id="router-custom-fund-slug" type="text" minlength="3" maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="dmtv-referrals" autocomplete="off" /><span class="payroll-field-hint">3–64 lowercase letters, numbers, and single hyphens. This name becomes the on-chain accounting ID.</span></label>
-          <label class="router-metadata-label">Purpose metadata URI<input id="router-fund-metadata" type="text" maxlength="2048" placeholder="https://... or ipfs://..." /><span class="payroll-field-hint">For a custom fund, enter an HTTPS or IPFS URI describing its purpose.</span></label>
+        </div>
+        <form id="router-custom-fund-form" hidden>
+          <div class="radio-payroll-controls">
+            <label>Fund name<input id="router-fund-name" type="text" maxlength="120" required placeholder="Newcomer &amp; Referral Prizes" /></label>
+            <label>Purpose<textarea id="router-fund-purpose" rows="4" maxlength="2000" required placeholder="Rewards for verified referrals and first-time performers."></textarea></label>
+            <label>Website (optional)<input id="router-fund-website" type="url" maxlength="2048" placeholder="https://..." /></label>
+          </div>
+          <button id="router-save-metadata" class="payroll-btn payroll-btn-secondary" type="submit" disabled><img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/cloud-upload.svg" width="18" height="18" alt="" /> Save Metadata to IPFS</button>
+          <p id="router-metadata-status" class="payroll-status" role="status"></p>
+        </form>
+        <div class="radio-payroll-controls">
+          <label class="router-metadata-label">Purpose metadata URI<input id="router-fund-metadata" type="text" maxlength="2048" placeholder="ipfs://... or https://..." /></label>
         </div>
         <dl class="payroll-allocation">
           <dt>Fund ID</dt><dd id="router-fund-id">Not loaded</dd>
@@ -433,10 +444,10 @@
   <!-- Admin role-grant panel -->
   <script type="module" src="js/admin.js?v=20261006-owner-payroll"></script>
 
-  <script type="module" src="js/payroll.js?v=20261006-radio-settlement"></script>
+  <script type="module" src="js/payroll.js?v=20261007-fund-metadata"></script>
   <script type="module" src="js/radio-history.js?v=20261006-all-time-tally"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261006-radio-settlement';
+    import { initPayroll } from './js/payroll.js?v=20261007-fund-metadata';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

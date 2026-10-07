@@ -29,6 +29,26 @@ export function resolveSettlementFundSlug(selection, customSlug, config = {}, kn
   return slug;
 }
 
+export function buildSettlementFundMetadata({ slug, name, description, website = '', routerAddress, owner, fundId, createdAt }) {
+  const fundSlug = validateSettlementFundSlug(slug);
+  const title = String(name || '').trim();
+  const purpose = String(description || '').trim();
+  if (!title || title.length > 120) throw new Error('Enter a fund name of 1-120 characters');
+  if (!purpose || purpose.length > 2000) throw new Error('Enter a fund purpose of 1-2000 characters');
+  if (!/^0x[0-9a-fA-F]{40}$/.test(routerAddress || '') || !/^0x[0-9a-fA-F]{40}$/.test(owner || '')) throw new Error('Valid router and owner addresses are required');
+  if (!/^0x[0-9a-fA-F]{64}$/.test(fundId || '') || /^0x0{64}$/.test(fundId)) throw new Error('Invalid fund ID');
+  if (!createdAt || !Number.isFinite(Date.parse(createdAt))) throw new Error('Valid metadata creation time is required');
+  const link = String(website || '').trim();
+  if (link) {
+    let url;
+    try { url = new URL(link); } catch { throw new Error('Fund website must be an HTTPS URL'); }
+    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || link.length > 2048) throw new Error('Fund website must be an HTTPS URL');
+  }
+  return { schema: 'decentbusking/settlement-fund/v1', name: title, description: purpose, fundSlug,
+    chainId: 8453, routerAddress, owner, fundId, createdAt: new Date(createdAt).toISOString(),
+    ...(link ? { external_url: link } : {}) };
+}
+
 export async function createConfiguredSettlementFund({ router, signer, owner, fundId, metadataUri }) {
   if (!signer?.provider) throw new Error('Connect the owner wallet first');
   const network = await signer.provider.getNetwork();
