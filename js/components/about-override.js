@@ -848,9 +848,17 @@ class DecentBuskingAboutModal extends HTMLElement {
 
             <div class="about-section">
               <h3>🛠️ Build and earn</h3>
-              <p>Pick an open GitHub issue, ask to be assigned, and submit a pull request that says <code>Closes #issue-number</code>. Add the bounty label shown on the issue, such as <code>bounty: 10 USDC</code> or <code>bounty: 10 ART</code>.</p>
-              <p>After the pull request is merged, the reward enters the repo payout queue. The owner reviews and pays approved rewards from the funded Base treasury. Joining is free; a listed bounty is not paid until it is reviewed and settled.</p>
+              <p>Pick an open GitHub issue, ask to be assigned, and submit a pull request that says <code>Closes #issue-number</code>. Only work with a bounty label, such as <code>bounty: 10 USDC</code> or <code>bounty: 10 ART</code>, enters the repo payout queue after the pull request merges.</p>
+              <p>The owner reviews and settles eligible rewards from the funded Base treasury. No bounty label means no automatic repo payout; never add or guess a bounty amount yourself.</p>
               <p><a href="https://github.com/TheJollyLaMa/DecentBusking/issues" target="_blank" rel="noopener noreferrer">Browse beginner-friendly issues ↗</a> · <a href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/docs/PAYROLL.md" target="_blank" rel="noopener noreferrer">Read contributor payout details ↗</a></p>
+            </div>
+
+            <div class="about-section">
+              <h3>🎨 Help without coding</h3>
+              <p><strong>Make or share art:</strong> offer original, shareable cover art, posters, or video assets. Artists can add optional cover art to a mint request. For project-wide art, open an issue first and tell us how we may use it.</p>
+              <p><strong>Help with the gallery:</strong> suggest an artist spotlight, a themed listening playlist, or a better way to show community artwork in the archive. The gallery is an idea to help shape, not a separate paid feature today.</p>
+              <p><strong>Test and welcome people:</strong> listen, vote, try the site on your phone, report a clear bug, invite an artist, or host a listening session. These are welcome contributions, but are not automatically paid.</p>
+              <p>Want payment for a specific art, testing, or outreach task? Ask the maintainer to agree on the task and bounty <strong>before starting</strong>. It must be tracked through an eligible GitHub issue and accepted submission; repo payroll does not pay for informal activity.</p>
             </div>
 
           <section class="artizen-support" aria-labelledby="artizen-support-title">
