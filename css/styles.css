@@ -1213,6 +1213,7 @@ decent-foot {
 .settlement-router-section .payroll-allocation dd { min-width: 0; overflow-wrap: anywhere; max-width: 100%; }
 .settlement-router-section .payroll-allocation { grid-template-columns: auto minmax(0, 1fr); }
 .router-metadata-label { grid-column: 1 / -1; }
+#router-custom-fund-label[hidden] { display: none; }
 .settlement-router-section .radio-payroll-controls { grid-template-columns: minmax(0, 1fr); }
 .settlement-router-section select { width: 100%; min-width: 0; }
 .settlement-router-section #router-fund-status { overflow-wrap: anywhere; }

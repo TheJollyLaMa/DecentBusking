@@ -57,6 +57,8 @@ The fund must be created and funded on the already-deployed shared router before
 5. Use the USDC deposit controls to fund an existing active allocation. Creation itself deposits nothing and grants no roles.
 6. For existing repo payouts, confirm the owner also has `PAYROLL_ROLE` and `CONTRIBUTOR_ADMIN_ROLE` on the shared router.
 
+The selector also offers **Create a custom fund** for purpose-specific funds such as referrals or newcomer prizes. Use a 3–64 character lowercase slug made of letters/numbers separated by single hyphens; it is the permanent on-chain accounting ID. Provide an HTTPS or IPFS metadata URI describing the custom fund. Created custom slugs are remembered in this browser. On another device, choose the custom option and re-enter the slug to inspect an existing fund. Creating a fund does not deposit USDC or connect it to playback, prize, or repo payout rules; those flows require explicit configuration.
+
 The fund ID is `keccak256(UTF-8("dbusk-repo-dev"))`. Do not deploy a router or remove contributors from its shared allowlist; other repositories use the same contract.
 
 ## Merge And Recovery
