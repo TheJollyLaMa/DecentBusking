@@ -149,7 +149,7 @@ test('both tally modes show all-time song votes and recompute filtered artist to
   }
 });
 
-test('Right Ankh contains only My Playback Tally and hides it on disconnect', () => {
+test('Right Ankh contains only My Playbacks and hides it on disconnect', () => {
   const nodes = new Map(['.ankh-coin', '.dropdown-menu.right-ankh-menu', '#radio-history-btn'].map(selector => [selector, new Node()]));
   const root = { innerHTML: '', querySelector: selector => nodes.get(selector) };
   const events = new Map();
@@ -162,7 +162,7 @@ test('Right Ankh contains only My Playback Tally and hides it on disconnect', ()
   const source = fs.readFileSync(path.join(__dirname, '../js/components/header-right-ankh-override.js'), 'utf8');
   vm.runInContext(`${source}\nnew CleanRightAnkh().connectedCallback();`, context);
   assert.equal((root.innerHTML.match(/<li /g) || []).length, 1);
-  assert.match(root.innerHTML, /My Playback Tally/);
+  assert.match(root.innerHTML, /My Playbacks/);
   assert.doesNotMatch(root.innerHTML, /wallet-connect-btn|wallet-addr-display/);
   const button = nodes.get('#radio-history-btn');
   assert.equal(button.style.display, 'block');
@@ -173,4 +173,15 @@ test('Right Ankh contains only My Playback Tally and hides it on disconnect', ()
   events.get('wallet-disconnected')();
   assert.equal(button.style.display, 'none');
   assert.equal(nodes.get('.dropdown-menu.right-ankh-menu').style.display, 'none');
+});
+
+test('header registers the local Right Ankh before CDN imports without loading the legacy dropdown', () => {
+  const registered = new Map();
+  const context = vm.createContext({ customElements: { get: name => registered.get(name), define: (name, constructor) => registered.set(name, constructor) },
+    HTMLElement: class {} });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/components/header-right-ankh-override.js'), 'utf8'), context);
+  assert.equal(registered.get('right-ankh').name, 'CleanRightAnkh');
+  const header = fs.readFileSync(path.join(__dirname, '../js/components/header.js'), 'utf8');
+  assert.match(header, /^import '\.\/header-right-ankh-override\.js\?v=20261007-my-playbacks';/);
+  assert.doesNotMatch(header, /import\([^\n]*RightAnkhDropdown/);
 });

@@ -1,3 +1,5 @@
+import './header-right-ankh-override.js?v=20261007-my-playbacks';
+
 const DECENT_HEAD_BASE = 'https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@main/';
 const DBUSKER_AVATAR_URL = new URL('../../img/D_Busker.jpeg', import.meta.url).href;
 const IPFS_LOGO_URL = new URL('../../img/IPFS_Logo.png', import.meta.url).href;
@@ -361,7 +363,6 @@ function injectStyle(shadowRoot, id, textContent) {
 await Promise.all([
   import(`${DECENT_HEAD_BASE}js/components/Header/AppTitle.js`),
   import(`${DECENT_HEAD_BASE}js/components/Header/WalletConnect.js`),
-  import(`${DECENT_HEAD_BASE}js/components/Header/RightAnkhDropdown.js`),
   import(`${DECENT_HEAD_BASE}js/components/Header/AboutModal.js`),
   import(`${DECENT_HEAD_BASE}js/components/Header/SubscriptionModal.js`),
 ]);
