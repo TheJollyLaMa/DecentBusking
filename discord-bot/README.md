@@ -202,7 +202,13 @@ Site votes, Now Playing reactions, and reactions on an original upload that iden
 
 On startup, JukeLoop scans up to 500 recent announcements and checkpoints recovered changes. For older messages, readable reactions and bot-published cumulative counters establish a one-time conservative minimum; those two representations are not added together. Reactions erased by older bot versions cannot be reconstructed. New announcements carry a Play ID, and completed audible plays retain their announcement ID, preventing recovery from adding the same play twice. Historical totals do not create qualified weekly playback credits.
 
-For the first playback payroll, use the qualified UTC-week playback ledger (completed Discord audio with at least 30 audible seconds) and verified artist wallets. Do not pay against historical announcement totals or anonymous likes. Currency, funded weekly budget, distribution rules, review/finalization, and settlement authorization must be decided before any claimable amounts or transactions are enabled.
+Playback payroll uses qualified UTC-week plays (completed Discord audio with at least 30 audible seconds) and verified artist wallets. Top 10 prizes use live weekly net-vote buckets, not historic/all-time totals. Each UTC week starts new buckets without deleting lifetime totals. Site votes are anonymous; prize recipients still require owner review.
+
+### Payment Proof Service
+
+`GET /api/payroll/ledger` exposes verified Base payments and IPFS snapshot status. Allowed browser origins can submit a transaction hash to `POST /api/payroll/reconcile`; the worker accepts only successful, canonical, twice-confirmed `PayrollPaid` events from the configured router and DecentBusking repository namespace. No signing key is held by the bot. A 15-second comparator discovers new events, rechecks saved proofs and retries pending backups. Tagged payment snapshots are retained independently of playlist snapshots. Radio state advertises this endpoint for DJuke/DBusk consumers.
+
+Optional server variables: `PAYROLL_START_BLOCK` specifies historical scan coverage (default: startup head minus 2,000 unless restoring); `PAYROLL_GITHUB_TOKEN` is an owner credential with Actions-write permission for automatic dispatch of verified repo-dev ledger updates. Never put it in browser configuration. Without it, the GitHub ledger workflow remains manual. See [payroll procedures](../docs/PAYROLL.md) for confirmation, backup, history and batch limitations.
 
 ### Setting up JukeLoop
 

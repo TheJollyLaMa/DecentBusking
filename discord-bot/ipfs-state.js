@@ -10,9 +10,9 @@ const MAX_PRUNE_PER_SAVE = 10;
 const FALLBACK_GATEWAY = 'https://gateway.pinata.cloud';
 
 // Pinata v3 only filters by network in the path; `?network=public` silently returns no files.
-function buildListUrl(filesApiUrl, limit = 100) {
+function buildListUrl(filesApiUrl, limit = 100, name = STATE_FILE_NAME) {
   const url = new URL(`${filesApiUrl.replace(/\/(public|private)?\/?$/, '')}/public`);
-  url.searchParams.set('name', STATE_FILE_NAME);
+  url.searchParams.set('name', name);
   url.searchParams.set('order', 'DESC');
   url.searchParams.set('limit', String(limit));
   return url.toString();
@@ -22,13 +22,13 @@ function extractFiles(result) {
   return result.data?.files || result.files || [];
 }
 
-function isStateSnapshot(file) {
+function isStateSnapshot(file, name = STATE_FILE_NAME, tags = STATE_KEYVALUES) {
   const keyvalues = file.keyvalues || {};
   return (
-    keyvalues.app === STATE_KEYVALUES.app &&
-    keyvalues.kind === STATE_KEYVALUES.kind &&
-    keyvalues.schema === STATE_KEYVALUES.schema
-  ) || file.name === STATE_FILE_NAME;
+    keyvalues.app === tags.app &&
+    keyvalues.kind === tags.kind &&
+    keyvalues.schema === tags.schema
+  ) || file.name === name;
 }
 
 async function responseError(response, fallback) {
@@ -43,15 +43,23 @@ export function createPinataStateStore({
   filesApiUrl = 'https://api.pinata.cloud/v3/files',
   gateway = 'https://dweb.link',
   fetchImpl = globalThis.fetch,
+  name = STATE_FILE_NAME,
+  tags = STATE_KEYVALUES,
+  retainSnapshots = SNAPSHOTS_TO_KEEP,
+  serialize = playlist => ({ schemaVersion: 1, savedAt: new Date().toISOString(), playlist }),
+  deserialize = snapshot => {
+    if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.playlist)) throw new Error('IPFS state snapshot has an unsupported format');
+    return snapshot.playlist;
+  },
 } = {}) {
   if (!pinataJwt) throw new Error('PINATA_JWT is required for playlist checkpoints');
   const headers = { authorization: `Bearer ${pinataJwt}` };
 
   async function listSnapshots(limit = 100) {
-    const response = await fetchImpl(buildListUrl(filesApiUrl, limit), { headers });
+    const response = await fetchImpl(buildListUrl(filesApiUrl, limit, name), { headers });
     if (!response.ok) throw new Error(await responseError(response, 'Pinata state listing failed'));
     return extractFiles(await response.json())
-      .filter(isStateSnapshot)
+      .filter(file => isStateSnapshot(file, name, tags))
       .sort((first, second) => Date.parse(second.created_at || 0) - Date.parse(first.created_at || 0));
   }
 
@@ -67,25 +75,18 @@ export function createPinataStateStore({
         continue;
       }
       const snapshot = await response.json();
-      if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.playlist)) {
-        throw new Error('IPFS state snapshot has an unsupported format');
-      }
-      return snapshot.playlist;
+      return deserialize(snapshot, `ipfs://${latest.cid}`);
     }
     throw new Error(`IPFS state restore failed (${lastStatus})`);
   }
 
   async function save(playlist) {
-    const snapshot = {
-      schemaVersion: 1,
-      savedAt: new Date().toISOString(),
-      playlist,
-    };
+    const snapshot = serialize(playlist);
     const form = new FormData();
-    form.append('file', new Blob([JSON.stringify(snapshot)], { type: 'application/json' }), STATE_FILE_NAME);
+    form.append('file', new Blob([JSON.stringify(snapshot)], { type: 'application/json' }), name);
     form.append('network', 'public');
-    form.append('name', STATE_FILE_NAME);
-    form.append('keyvalues', JSON.stringify(STATE_KEYVALUES));
+    form.append('name', name);
+    form.append('keyvalues', JSON.stringify(tags));
 
     const response = await fetchImpl(uploadUrl, { method: 'POST', headers, body: form });
     if (!response.ok) throw new Error(await responseError(response, 'Pinata state upload failed'));
@@ -95,7 +96,7 @@ export function createPinataStateStore({
 
     const snapshots = await listSnapshots();
     const normalizedFilesUrl = filesApiUrl.replace(/\/(public|private)?\/?$/, '');
-    const stale = snapshots.slice(SNAPSHOTS_TO_KEEP).slice(-MAX_PRUNE_PER_SAVE);
+    const stale = retainSnapshots === Infinity ? [] : snapshots.slice(retainSnapshots).slice(-MAX_PRUNE_PER_SAVE);
     await Promise.all(stale.map(async ({ id }) => {
       if (!id) return;
       const deleteResponse = await fetchImpl(`${normalizedFilesUrl}/public/${id}`, { method: 'DELETE', headers });

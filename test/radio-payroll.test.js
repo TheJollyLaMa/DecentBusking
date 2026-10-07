@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const url = pathToFileURL(path.join(__dirname, '../js/radio-payroll.mjs')).href;
-const track = (wallet, plays) => ({ wallet: `0x${String(wallet).repeat(40)}`, plays, artist: `Artist ${wallet}` });
+const track = (wallet, plays) => ({ wallet: `0x${String(wallet).repeat(40)}`, plays, votes: plays, artist: `Artist ${wallet}` });
 
 test('playback preview groups artists, caps its budget, and retains dust and rounding', async () => {
   const { previewPlaybackPayroll } = await import(url);
@@ -21,7 +21,7 @@ test('playback preview groups artists, caps its budget, and retains dust and rou
   assert.equal(zeroAddress.entries.length, 0);
 });
 
-test('Top 10 preview ranks unique artists and splits only its capped prize budget', async () => {
+test('Top 10 preview ranks unique artists by votes and splits only its capped prize budget', async () => {
   const { previewTopTenPayroll } = await import(url);
   const result = previewTopTenPayroll({ tracks: [track(1, 5), track(1, 4), track(2, 8), track(3, 2)], budgetUnits: 1000001n });
   assert.equal(result.entries.length, 3);
@@ -32,6 +32,11 @@ test('Top 10 preview ranks unique artists and splits only its capped prize budge
   assert.equal(many.entries.length, 10);
   assert.equal(many.allocatedUnits, 10000000n);
   assert.throws(() => previewTopTenPayroll({ tracks: [], budgetUnits: -1n }), /nonnegative/);
+  const byVotes = previewTopTenPayroll({ tracks: [{ ...track(1, 100), votes: 1 }, { ...track(2, 0), votes: 9 },
+    { ...track(3, 50), votes: -2 }, { ...track(4, 40), votes: undefined }], budgetUnits: 1000000n });
+  assert.equal(byVotes.entries[0].wallet, track(2, 0).wallet);
+  assert.equal(byVotes.entries.length, 2);
+  assert.equal(previewTopTenPayroll({ tracks: [track(1, 1), { ...track(1, 1), votes: -1 }], budgetUnits: 1n }).entries.length, 0);
 });
 
 test('finalization excludes live/all-time weeks and freezes stable identities independently of budget', async () => {
@@ -80,6 +85,15 @@ test('receipt imports reject changed totals, funds, live weeks, and duplicate en
   assert.throws(() => validateRadioReceipt({ ...allocation, allocatedUnits: '2' }, config), /totals/);
   assert.throws(() => validateRadioReceipt({ ...allocation, fundSlug: 'other-fund' }, config), /does not match/);
   assert.throws(() => validateRadioReceipt({ ...allocation, entries: [allocation.entries[0], allocation.entries[0]] }, config), /duplicate/);
+  const legacyTopTen = finalizeRadioAllocation({ report: { week: '2026-W40', current: false, tracks: [track(1, 1)] },
+    category: 'top10', ranking: 'plays', budgetUnits: 1000000n, minimumUnits: 0n, fundSlug: config.funds.topTen,
+    ...config, now: Date.parse('2026-10-06T00:00:00Z') });
+  legacyTopTen.schemaVersion = 1;
+  delete legacyTopTen.ranking;
+  assert.equal(validateRadioReceipt(legacyTopTen, config), legacyTopTen);
+  assert.equal(legacyTopTen.entries[0].workReferenceText,
+    finalizeRadioAllocation({ report: { week: '2026-W40', current: false, tracks: [track(1, 1)] }, category: 'top10',
+      budgetUnits: 1000000n, minimumUnits: 0n, fundSlug: config.funds.topTen, ...config, now: Date.parse('2026-10-06T00:00:00Z') }).entries[0].workReferenceText);
 });
 
 test('partial radio settlement resumes only unpaid recipients and preflight failures send nothing', async () => {

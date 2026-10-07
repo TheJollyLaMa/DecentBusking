@@ -68,6 +68,9 @@ let _radioBalances = null;
 let _routerRefreshId = 0;
 let _routerCreateAllowed = false;
 let _radioReviews = {};
+let _radioRecipientStates = new Map();
+let _recipientCheckId = 0;
+let _paymentSyncTask = null;
 let _fundMetadataRevision = 0;
 const _customFundSlugs = new Set();
 
@@ -266,9 +269,12 @@ async function _onWalletConnected({ detail } = {}) {
   _populateSettlementFunds();
   await _refreshSettlementFund();
   await _refreshRadioPayroll();
+  _syncPaymentLedger();
 }
 
 function _onWalletDisconnected() {
+  ++_recipientCheckId;
+  _radioRecipientStates.clear();
   _invalidateFundMetadata();
   _radioReviews = {};
   document.getElementById('radio-reviewed-receipts')?.replaceChildren();
@@ -559,7 +565,8 @@ async function _payTokenEntry(entry) {
   await router.payout.staticCall(...payoutArgs);
   _setStatus(statusEl, `⏳ Paying ${entry.amount} ${currency} to @${entry.contributorGithub} from ${fundSlug}… confirm in MetaMask.`);
   const tx = await router.payout(...payoutArgs);
-  await tx.wait();
+  if ((await tx.wait())?.status !== 1) throw new Error('Repository payout was not confirmed successfully');
+  _queuePaymentProof(tx.hash);
   return tx.hash;
 }
 
@@ -692,7 +699,8 @@ async function _refreshRadioPayroll() {
       option.textContent = `${report.week}${report.current ? ' · current draft' : ' · completed week'}`;
       return option;
     }));
-    select.value = _radioReports.some(report => report.week === selectedWeek) ? selectedWeek : _radioReports.at(-1)?.week || '';
+    select.value = _radioReports.some(report => report.week === selectedWeek) ? selectedWeek
+      : _radioReports.filter(report => !report.current && report.tracks?.length).at(-1)?.week || _radioReports.at(-1)?.week || '';
     _setStatus(status, 'Preview ready. Finalize completed weeks for owner-reviewed settlement.');
     if (!_isRouterConfigured() || !_getAssetConfig('USDC')) throw new Error('Base USDC treasury configuration unavailable');
     const router = _readOnlyRouter();
@@ -715,6 +723,7 @@ async function _refreshRadioPayroll() {
     document.getElementById('radio-playback-balance').textContent = playback.exists ? `${ethers.formatUnits(playback.available, asset.decimals)} USDC` : 'Fund not created';
     document.getElementById('radio-prize-balance').textContent = prizes.exists ? `${ethers.formatUnits(prizes.available, asset.decimals)} USDC` : 'Fund not created';
     _loadRadioReviews();
+    _previewRadioPayroll();
   } catch (error) {
     if (refreshId === _radioRefreshId) _setStatus(status, `${error.message}. Refresh before finalizing or settling.`, true);
   }
@@ -899,6 +908,77 @@ async function _checkPendingDeposit() {
   } catch (error) { _setStatus(status, error.message, true); }
 }
 
+function _queuePaymentProof(txHash) {
+  try {
+    const hashes = JSON.parse(localStorage.getItem('decentbusking:pending-payment-proofs:v1') || '[]');
+    localStorage.setItem('decentbusking:pending-payment-proofs:v1', JSON.stringify([...new Set([...hashes, txHash])]));
+  } catch (error) { console.warn('Payment confirmed, but local proof queue could not be saved:', error.message); }
+  document.dispatchEvent(new CustomEvent('payroll-updated', { detail: { txHash, chainId: BASE_CHAIN_ID } }));
+  _syncPaymentLedger();
+}
+
+async function _syncPaymentLedger() {
+  if (_paymentSyncTask || !isAdminWallet()) return _paymentSyncTask;
+  const status = document.getElementById('payroll-ledger-status');
+  const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+  if (!service) return;
+  _paymentSyncTask = (async () => {
+    try {
+      const hashes = JSON.parse(localStorage.getItem('decentbusking:pending-payment-proofs:v1') || '[]');
+      for (const txHash of hashes) {
+        const response = await fetch(`${service}/api/payroll/reconcile`, { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ txHash }), signal: AbortSignal.timeout(15000) });
+        if (!response.ok) continue;
+        const result = await response.json();
+        if (result.pending || result.backupPending) continue;
+        const current = JSON.parse(localStorage.getItem('decentbusking:pending-payment-proofs:v1') || '[]');
+        localStorage.setItem('decentbusking:pending-payment-proofs:v1', JSON.stringify(current.filter(hash => hash !== txHash)));
+      }
+      const response = await fetch(`${service}/api/payroll/ledger`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error(`Payment ledger unavailable (${response.status}); confirmed payments remain protected on-chain`);
+      const ledger = await response.json();
+      if (!isAdminWallet()) return;
+      if (ledger.chainId !== BASE_CHAIN_ID || ledger.routerAddress?.toLowerCase() !== _payrollAssetConfig?.routerAddress.toLowerCase()) throw new Error('Payment ledger does not match this Base router');
+      const target = document.getElementById('payroll-ledger-entries');
+      target?.replaceChildren();
+      for (const entry of (ledger.entries || []).slice().sort((first, second) => second.blockNumber - first.blockNumber)) {
+        const row = document.createElement('div'); row.className = 'radio-payroll-artist';
+        const asset = Object.entries(_payrollAssetConfig.assets || {}).find(([, value]) => value.address.toLowerCase() === entry.asset.toLowerCase());
+        const fund = [...configuredSettlementFunds(_payrollAssetConfig), ...[..._customFundSlugs].map(slug => ({ slug, label: slug }))].find(value => ethers.id(value.slug) === entry.fundId);
+        const label = document.createElement('span');
+        label.textContent = `${entry.paidAt} · ${fund?.label || _shortAddr(entry.fundId)} · ${_shortAddr(entry.recipient)} · ${asset ? `${ethers.formatUnits(entry.amountUnits, asset[1].decimals)} ${asset[0]}` : `${entry.amountUnits} base units`} · ${entry.verification}`;
+        const link = document.createElement('a'); link.className = 'payroll-link'; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        link.href = `https://basescan.org/tx/${entry.txHash}`; link.textContent = 'Base proof';
+        row.append(label, link); target?.append(row);
+      }
+      const backup = document.getElementById('payroll-ledger-backup');
+      if (backup) { backup.hidden = !ledger.snapshotUri; backup.href = (ledger.snapshotUri || '').replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'); }
+      _setStatus(status, !ledger.ready ? 'Payment ledger restoring; awaiting chain comparison.'
+        : `${ledger.entries.length} recorded payments · compared ${ledger.lastCheckedAt || 'not yet'} · blocks ${ledger.scannedFrom}-${ledger.scannedThrough}` +
+          (ledger.backupPending || !ledger.snapshotUri ? ' · IPFS backup pending' : ' · IPFS backup saved') +
+          (ledger.repositorySync ? ` · Repo ledger: ${ledger.repositorySync}` : '') + (ledger.lastError ? ` · ${ledger.lastError}` : ''), Boolean(ledger.lastError));
+      document.dispatchEvent(new CustomEvent('payroll-ledger-synced', { detail: ledger }));
+    } catch (error) { if (isAdminWallet()) _setStatus(status, error.message, true); }
+  })().finally(() => { _paymentSyncTask = null; });
+  return _paymentSyncTask;
+}
+
+async function _checkRadioRecipients() {
+  const check = ++_recipientCheckId;
+  _radioRecipientStates.clear();
+  _renderRadioReviews();
+  try {
+    const router = _readOnlyRouter();
+    const states = await Promise.all(Object.values(_radioReviews).flatMap(saved => saved.allocation.entries).map(async entry => {
+      const [paid, recipient] = await Promise.all([router.completedWorkReferences(ethers.id(entry.workReferenceText)), router.contributors(entry.wallet)]);
+      return [entry.workReferenceText, { paid, approved: Boolean(recipient.approved ?? recipient[1]) }];
+    }));
+    if (check !== _recipientCheckId || !isAdminWallet()) return;
+    _radioRecipientStates = new Map(states);
+    _renderRadioReviews();
+  } catch (error) { _setStatus(document.getElementById('radio-payroll-status'), `Recipient checks failed: ${error.message}`, true); }
+}
+
 function _loadRadioReviews() {
   const week = document.getElementById('radio-payroll-week')?.value;
   if (!week || !isAdminWallet() || !_ownerAddress) return;
@@ -908,7 +988,7 @@ function _loadRadioReviews() {
     const saved = records[_reviewKey(category, week)];
     if (saved) _radioReviews[category] = saved;
   }
-  _renderRadioReviews();
+  _checkRadioRecipients();
 }
 
 function _renderRadioReviews() {
@@ -917,12 +997,20 @@ function _renderRadioReviews() {
   target.replaceChildren();
   const report = _radioReports.find(entry => entry.week === document.getElementById('radio-payroll-week').value);
   const finalize = document.getElementById('radio-payroll-finalize');
-  if (finalize) finalize.disabled = !report || report.current || _settling;
+  const positiveBudget = ['radio-playback-budget', 'radio-prize-budget'].some(id => Number(document.getElementById(id)?.value) > 0);
+  if (finalize) finalize.disabled = !report || report.current || !positiveBudget || _settling;
   for (const category of ['playback', 'top10']) {
     const button = document.getElementById(`radio-settle-${category}`);
     const saved = _radioReviews[category];
-    if (button) button.disabled = !saved || _settling;
-    if (!saved) continue;
+    const unpaid = saved?.allocation.entries.filter(entry => !_radioRecipientStates.get(entry.workReferenceText)?.paid) || [];
+    const ready = saved && unpaid.length > 0 && unpaid.every(entry => _radioRecipientStates.get(entry.workReferenceText)?.approved);
+    if (button) { button.disabled = !ready || _settling; button.textContent = `${category === 'playback' ? 'Playback' : 'Top 10'}: Pay ${unpaid.length} / Resume Batch`; }
+    if (!saved) {
+      const empty = document.createElement('p'); empty.className = 'payroll-status';
+      empty.textContent = `${category === 'playback' ? 'Playback' : 'Top 10'}: no saved allocation for ${report?.week || 'the selected week'}.`;
+      target.append(empty);
+      continue;
+    }
     const heading = document.createElement('h4'); heading.textContent = `${category === 'playback' ? 'Playback' : 'Top 10'} · ${saved.allocation.week} · frozen receipt`;
     const link = document.createElement('a'); link.className = 'payroll-link'; link.target = '_blank'; link.rel = 'noopener noreferrer';
     link.href = saved.metadataUri.replace('ipfs://', window.DecentConfig?.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/');
@@ -933,14 +1021,21 @@ function _renderRadioReviews() {
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${saved.allocation.week}-${category}-receipt.json`; anchor.click(); URL.revokeObjectURL(url);
     });
     target.append(heading, link, exportButton);
+    const summary = document.createElement('p'); summary.className = 'payroll-status';
+    summary.textContent = `${saved.allocation.entries.length - unpaid.length} paid · ${unpaid.length} unpaid · ${saved.allocation.ranking || 'legacy play-ranked receipt'}`;
+    target.append(summary);
     for (const entry of saved.allocation.entries) {
       const row = document.createElement('div'); row.className = 'radio-payroll-artist';
       const label = document.createElement('span'); label.textContent = `${entry.artist} · ${_shortAddr(entry.wallet)} · ${ethers.formatUnits(entry.amountUnits, 6)} USDC`;
+      const state = _radioRecipientStates.get(entry.workReferenceText);
+      label.textContent += state?.paid ? ' · Paid on Base' : state?.approved ? ' · Approved / unpaid' : state ? ' · Approval required' : ' · Checking Base';
+      row.append(label);
+      if (!state || state.paid || state.approved) { target.append(row); continue; }
       const identity = document.createElement('input'); identity.type = 'text'; identity.placeholder = 'Verified contributor identity';
       identity.setAttribute('aria-label', `Contributor identity for ${entry.wallet}`);
       const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'payroll-btn payroll-btn-secondary'; approve.textContent = 'Approve Recipient';
       approve.addEventListener('click', () => _approveRadioRecipient(entry.wallet, identity.value));
-      row.append(label, identity, approve); target.append(row);
+      row.append(identity, approve); target.append(row);
     }
   }
 }
@@ -981,7 +1076,7 @@ async function _finalizeRadioPayroll() {
     _loadRadioReviews();
     _setStatus(status, 'Reviewed receipts saved. Approve any missing recipients, then settle each funded category.');
   } catch (error) { _setStatus(status, error.message, true); }
-  finally { _settling = false; _renderRadioReviews(); }
+  finally { _settling = false; _checkRadioRecipients(); }
 }
 
 async function _approveRadioRecipient(wallet, rawIdentity) {
@@ -1005,7 +1100,7 @@ async function _approveRadioRecipient(wallet, rawIdentity) {
     if ((await (await router.setContributorApproved(wallet, desired, true)).wait())?.status !== 1) throw new Error('Recipient approval did not confirm');
     _setStatus(status, 'Recipient approved on the shared router.');
   } catch (error) { _setStatus(status, error.message, true); }
-  finally { _settling = false; _renderRadioReviews(); }
+  finally { _settling = false; _checkRadioRecipients(); }
 }
 
 async function _settleRadioPayroll(category) {
@@ -1021,11 +1116,11 @@ async function _settleRadioPayroll(category) {
     const signer = await _getSigner(BASE_CHAIN_ID);
     const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
     const result = await settleRadioAllocation({ ...saved, router, signer, owner: _ownerAddress, hashReference: ethers.id,
-      onStep: message => _setStatus(status, message) });
+      onStep: message => _setStatus(status, message), onConfirmed: entry => { _queuePaymentProof(entry.txHash); _checkRadioRecipients(); } });
     await _refreshRadioPayroll();
     _setStatus(status, `${result.confirmed.length} payouts confirmed; ${result.skipped} already-paid references skipped. Frozen IPFS receipt retained.`);
   } catch (error) { _setStatus(status, `${error.message}. Retry only the same reviewed receipt; on-chain paid references are protected.`, true); }
-  finally { _settling = false; _renderRadioReviews(); }
+  finally { _settling = false; await _checkRadioRecipients(); _syncPaymentLedger(); }
 }
 
 async function _importRadioReceipt(file) {
@@ -1105,7 +1200,7 @@ function _previewRadioPayroll() {
         const row = document.createElement('div');
         row.className = 'radio-payroll-artist';
         const name = document.createElement('span');
-        name.textContent = `${entry.rank ? `${entry.rank}. ` : ''}${entry.artist || _shortAddr(entry.wallet)} · ${entry.plays} plays · ${_shortAddr(entry.wallet)}`;
+        name.textContent = `${entry.rank ? `${entry.rank}. ` : ''}${entry.artist || _shortAddr(entry.wallet)} · ${entry.votes !== undefined ? `${entry.votes} weekly net votes` : `${entry.plays} plays`} · ${_shortAddr(entry.wallet)}`;
         const amount = document.createElement('strong');
         amount.textContent = `${ethers.formatUnits(entry.amountUnits, 6)} USDC${entry.payable ? '' : entry.amountUnits === 0n ? ' · no payout' : ' · held below minimum'}`;
         row.append(name, amount);
@@ -1121,6 +1216,7 @@ function _previewRadioPayroll() {
     _setStatus(status, `Draft ${report.week}${report.current ? ' (week still in progress)' : ''}. ` +
       `${funded ? 'Budgets within available funds' : 'Budgets are not confirmed funded'}. ` +
       `${excluded ? `${excluded} tracks excluded for missing verified wallets. ` : ''}Preview only; settlement uses the frozen reviewed receipt.`);
+    _renderRadioReviews();
   } catch (error) {
     _setStatus(status, error.message, true);
   }
@@ -1176,7 +1272,21 @@ export function initPayroll() {
     document.getElementById('radio-playback-preview')?.replaceChildren();
     document.getElementById('radio-prize-preview')?.replaceChildren();
     _loadRadioReviews();
+    _previewRadioPayroll();
   });
+  for (const id of ['radio-playback-budget', 'radio-prize-budget', 'radio-minimum-payout']) {
+    document.getElementById(id)?.addEventListener('input', _previewRadioPayroll);
+  }
+  document.getElementById('payroll-ledger-refresh')?.addEventListener('click', () => { _syncPaymentLedger(); _checkRadioRecipients(); });
+  setInterval(() => {
+    if (!isAdminWallet() || _settling) return;
+    const payrollOpen = !document.getElementById('payroll-modal')?.classList.contains('hidden');
+    const adminOpen = !document.getElementById('admin-modal')?.classList.contains('hidden');
+    if (!payrollOpen && !adminOpen) return;
+    if (document.getElementById('radio-reviewed-receipts')?.contains(document.activeElement)) return;
+    _syncPaymentLedger();
+    if (payrollOpen) _checkRadioRecipients();
+  }, 5000);
   const settleBtn   = document.getElementById('payroll-settle-all-btn');
   const refreshBtn  = document.getElementById('payroll-refresh-btn');
   const openBtn     = document.getElementById('payroll-open-btn');

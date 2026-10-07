@@ -53,6 +53,9 @@ jobs:
           git fetch --depth=1 origin main
           git checkout -B main FETCH_HEAD
 
+      - name: Install proof verifier dependencies
+        run: npm ci --prefix discord-bot --ignore-scripts
+
       - name: Settle matching ledger entries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
