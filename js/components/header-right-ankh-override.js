@@ -1,36 +1,7 @@
 // js/components/header-right-ankh-override.js — DecentBusking
 //
-// Intercepts the CDN DecentHead 'right-ankh' custom element definition
-// and replaces it with a clean, empty implementation.
-//
-// The CDN's RightAnkhDropdown.js hard-codes OMMM token lookups and a Uniswap
-// link that are not relevant to DecentBusking.  By defining our own clean
-// 'right-ankh' element BEFORE the CDN script runs (achieved by listing this
-// module first in index.html), or by intercepting customElements.define, we
-// prevent the OMMM contract call from ever executing.
-//
-// The override preserves the visual ankh-coin (☥) and sparkle structure that
-// the DecentHead CSS already styles, but renders an empty dropdown so the
-// right-hand side of the header looks consistent with the left.  New menu
-// items can be added here as DecentBusking features grow.
-
-(function interceptRightAnkh() {
-  // Only intercept if 'right-ankh' has not already been registered.
-  // This guards against double-execution or conflicts with other overrides.
-  if (customElements.get('right-ankh')) return;
-
-  const originalDefine = CustomElementRegistry.prototype.define.bind(customElements);
-
-  CustomElementRegistry.prototype.define = function (name, constructor, options) {
-    if (name === 'right-ankh') {
-      // Restore the original define immediately after intercepting so that
-      // no other element registrations are affected.
-      CustomElementRegistry.prototype.define = originalDefine;
-      return originalDefine(name, CleanRightAnkh, options);
-    }
-    return originalDefine(name, constructor, options);
-  };
-})();
+// Owns the wallet-specific playback menu. header.js imports this module before
+// loading DecentHead components, so the legacy token dropdown is never needed.
 
 class CleanRightAnkh extends HTMLElement {
   constructor() {
@@ -46,6 +17,19 @@ class CleanRightAnkh extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <link rel="stylesheet" href="${cdnBase}css/header.css" />
       <style>
+        .ankh-container { position: relative; }
+        .dropdown-menu.right-ankh-menu {
+          position: absolute;
+          top: 100%;
+          right: 0;
+          left: auto;
+          transform: none;
+          width: max-content;
+          max-width: calc(100vw - 24px);
+          list-style: none;
+          padding: 0;
+          margin: 0;
+        }
         .wallet-item { list-style: none; }
         .wallet-btn {
           background: none;
@@ -64,9 +48,9 @@ class CleanRightAnkh extends HTMLElement {
         <div class="ankh-container">
           <span class="ankh-coin" role="button" aria-haspopup="true" aria-label="Right menu">☥</span>
           <ul class="dropdown-menu right-ankh-menu"
-              style="display:none; list-style:none; padding:0; margin:0; position:absolute; top:100%; left:50%; transform:translateX(-50%);">
+              style="display:none;">
             <li class="wallet-item">
-              <button class="wallet-btn" id="radio-history-btn" style="display:none;">My Playback Tally</button>
+              <button class="wallet-btn" id="radio-history-btn" style="display:none;">My Playbacks</button>
             </li>
           </ul>
         </div>
@@ -138,3 +122,5 @@ class CleanRightAnkh extends HTMLElement {
     }
   }
 }
+
+if (!customElements.get('right-ankh')) customElements.define('right-ankh', CleanRightAnkh);
