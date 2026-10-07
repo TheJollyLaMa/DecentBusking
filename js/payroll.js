@@ -1082,14 +1082,12 @@ export function initPayroll() {
     const input = document.getElementById('router-custom-fund-slug');
     try {
       input.setCustomValidity('');
-      validateSettlementFundSlug(input.value);
-      _setDefaultFundMetadata();
-      _refreshSettlementFund();
+      _selectedFundSlug();
     } catch (error) {
       input.setCustomValidity(error.message);
-      _routerCreateAllowed = false;
-      document.getElementById('router-create-fund').disabled = true;
     }
+    _setDefaultFundMetadata();
+    _refreshSettlementFund();
   });
   document.getElementById('router-fund-metadata')?.addEventListener('input', _refreshSettlementFund);
   document.getElementById('radio-payroll-refresh')?.addEventListener('click', _refreshRadioPayroll);

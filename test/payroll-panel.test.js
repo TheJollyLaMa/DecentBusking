@@ -52,6 +52,47 @@ test('Base payroll excludes retired legacy entries without sending or verifying 
   assert.equal(context.rows().length, 0);
 });
 
+test('invalid custom slug changes disable deposits and invalidate earlier fund responses', async () => {
+  const funds = await import(pathToFileURL(path.join(__dirname, '../js/settlement-funds.mjs')).href);
+  const nodes = new Map();
+  const node = id => {
+    if (!nodes.has(id)) nodes.set(id, { value: '', textContent: '', dataset: {}, style: {}, listeners: new Map(),
+      addEventListener(name, listener) { this.listeners.set(name, listener); }, setCustomValidity(message) { this.validationMessage = message; } });
+    return nodes.get(id);
+  };
+  node('router-fund-select').value = funds.CUSTOM_FUND_OPTION;
+  node('router-custom-fund-slug').value = 'referral-prizes';
+  node('router-fund-metadata').value = 'https://site.example/referrals.json';
+  let releaseRole;
+  let roleRequested;
+  const requested = new Promise(resolve => { roleRequested = resolve; });
+  const router = { DEFAULT_ADMIN_ROLE: async () => 'admin', funds: async () => ({ exists: true, active: true }),
+    hasRole: () => { roleRequested(); return new Promise(resolve => { releaseRole = resolve; }); }, fundBalances: async () => 0n };
+  const context = vm.createContext({ ...funds, URL, ethers, isAdminWallet: () => true,
+    window: { _wallet: { address: '0xowner' } }, document: { getElementById: node },
+    localStorage: { getItem: () => null }, router });
+  const source = fs.readFileSync(path.join(__dirname, '../js/payroll.js'), 'utf8').replace(/^import .*;\n/gm, '')
+    .replace('new URL(\'../payroll-assets.json\', import.meta.url).toString()', "'https://site.example/payroll-assets.json'")
+    .replace(/export /g, '');
+  const handler = source.slice(source.indexOf("  document.getElementById('router-custom-fund-slug')?.addEventListener"),
+    source.indexOf("  document.getElementById('router-fund-metadata')?.addEventListener"));
+  vm.runInContext(`${source}\n_payrollAssetConfig = { routerAddress: '0xrouter', chainId: 8453 };
+    _isRouterConfigured = () => true; _readOnlyRouter = () => router; _getAssetConfig = () => null;
+    globalThis.refreshFund = _refreshSettlementFund;\n${handler}`, context);
+  const pending = context.refreshFund();
+  await requested;
+  node('router-deposit-usdc').disabled = false;
+  node('router-custom-fund-slug').value = 'invalid--slug';
+  node('router-custom-fund-slug').listeners.get('input')();
+  assert.equal(node('router-create-fund').disabled, true);
+  assert.equal(node('router-deposit-usdc').disabled, true);
+  releaseRole(true);
+  await pending;
+  assert.equal(node('router-create-fund').disabled, true);
+  assert.equal(node('router-deposit-usdc').disabled, true);
+  assert.match(node('router-fund-status').textContent, /Fund slug must be/);
+});
+
 test('Left Ankh has public tally first and owner-only NFT Admin and Payroll in order', () => {
   const wallet = { address: null };
   const events = new Map();
