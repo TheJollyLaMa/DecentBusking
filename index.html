@@ -102,7 +102,10 @@
   <!-- Mint modal -->
   <div id="mint-modal" class="hidden">
     <div id="mint-modal-inner">
-      <h2>Submit Your Busk</h2>
+      <div class="mint-modal-heading">
+        <h2>Submit Your Busk</h2>
+        <button id="submission-policy-open" class="submission-policy-icon" type="button" aria-label="Upload rights and public storage policy" aria-haspopup="dialog" title="Upload rights and public storage"><img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/info.svg" width="20" height="20" alt="" /></button>
+      </div>
       <form id="mint-form">
         <label for="mint-title">Track Title</label>
         <input id="mint-title" type="text" placeholder="What are you playing?" maxlength="120" required />
@@ -171,6 +174,19 @@
   </div>
 
   <!-- Tip modal -->
+  <dialog id="submission-policy-dialog" aria-labelledby="submission-policy-title">
+    <div class="submission-policy-heading">
+      <h2 id="submission-policy-title">Your Music &amp; Public Uploads</h2>
+      <button id="submission-policy-close" class="submission-policy-icon" type="button" aria-label="Close upload policy" title="Close"><img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/x.svg" width="20" height="20" alt="" /></button>
+    </div>
+    <p><strong>Rights.</strong> IPFS storage or minting first does not, by itself, transfer copyright. NFT ownership is not ownership of the music rights. A rights licence needs a separate agreement.</p>
+    <p><strong>Radio.</strong> Submissions are reviewed for an NFT sent to the artist wallet. Approved playlist tracks may play on DecentBusking / JukeLoop radio. This form does not yet have a separate radio-consent or opt-out control. If you do not want radio playback, contact the admins before submitting.</p>
+    <p><strong>AI &amp; reuse.</strong> This notice grants no permission for AI training or unrelated reuse. It cannot prevent third parties from downloading, scraping, or misusing public files.</p>
+    <p><strong>Public storage.</strong> IPFS files can be copied and pinned by others. You can request that we stop future radio playback or unpin our copy, but removal from our service cannot guarantee removal of other copies or immutable NFT records.</p>
+    <p><a href="https://discord.gg/SCtcBggHPa" target="_blank" rel="noopener noreferrer">Contact the admins on Discord</a></p>
+    <p class="submission-policy-note">Information notice, not a signed licence or consent record. Submit only material you have the right to share.</p>
+  </dialog>
+
   <div id="tip-modal" class="hidden">
     <div id="tip-modal-inner">
       <h2>🎩 Throw Some Coins In</h2>
@@ -444,6 +460,7 @@
   <script type="module" src="js/components/header-title-color-override.js?v=20261002-header-refresh-5"></script>
 
   <!-- Main app entry point -->
+  <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
   <script type="module" src="js/main.js?v=20261005-tally-votes"></script>
 
   <!-- Admin role-grant panel -->
