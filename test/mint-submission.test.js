@@ -67,6 +67,35 @@ test('briefcase CID mode does not require or upload a Discord-sized attachment',
   assert.equal(page.submissions[0].media.mediaType, 'video/mp4');
 });
 
+test('upload information opens a policy dialog without submitting or claiming AI/removal protection', () => {
+  const nodes = new Map();
+  const node = id => {
+    if (!nodes.has(id)) nodes.set(id, { listeners: new Map(), addEventListener(name, listener) { this.listeners.set(name, listener); },
+      showModal() { this.open = true; }, close() { this.open = false; } });
+    return nodes.get(id);
+  };
+  let ready;
+  const context = vm.createContext({ URLSearchParams, window: { location: { search: '' } },
+    document: { getElementById: node, querySelectorAll: () => [], addEventListener: (_name, listener) => { ready = listener; } } });
+  const source = fs.readFileSync(path.join(__dirname, '../js/submission-policy.js'), 'utf8');
+  vm.runInContext(source, context);
+  ready();
+  const dialog = node('submission-policy-dialog');
+  node('submission-policy-open').listeners.get('click')();
+  assert.equal(dialog.open, true);
+  node('submission-policy-close').listeners.get('click')();
+  assert.equal(dialog.open, false);
+  node('submission-policy-open').listeners.get('click')();
+  dialog.listeners.get('click')({ target: dialog });
+  assert.equal(dialog.open, false);
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /does not, by itself, transfer copyright/);
+  assert.match(html, /grants no permission for AI training/);
+  assert.match(html, /cannot guarantee removal of other copies/);
+  assert.match(html, /not a signed licence or consent record/);
+  assert.match(html, /does not yet have a separate radio-consent or opt-out control/);
+});
+
 test('briefcase rejects oversized media and directory CIDs before requesting uploads', async () => {
   const oversized = formPage({ file: { name: 'large.mp4', size: 51 * 1024 * 1024 } });
   await oversized.submit();
