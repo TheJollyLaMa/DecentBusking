@@ -22,7 +22,7 @@
 
 import { isAdminWallet } from './admin-access.mjs';
 import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt } from './radio-payroll.mjs';
-import { configuredSettlementFunds, createConfiguredSettlementFund, depositSettlementUsdc } from './settlement-funds.mjs';
+import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc } from './settlement-funds.mjs';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -68,6 +68,44 @@ let _radioBalances = null;
 let _routerRefreshId = 0;
 let _routerCreateAllowed = false;
 let _radioReviews = {};
+const _customFundSlugs = new Set();
+
+function _selectedFundSlug() {
+  return resolveSettlementFundSlug(document.getElementById('router-fund-select')?.value,
+    document.getElementById('router-custom-fund-slug')?.value, _payrollAssetConfig || {}, [..._customFundSlugs]);
+}
+
+function _customFundStorageKey() {
+  return `decentbusking:custom-router-funds:v1:${String(_payrollAssetConfig?.routerAddress || '').toLowerCase()}`;
+}
+
+function _loadCustomFundSlugs() {
+  _customFundSlugs.clear();
+  try {
+    const saved = JSON.parse(localStorage.getItem(_customFundStorageKey()) || '[]');
+    if (!Array.isArray(saved)) return;
+    const configured = new Set(configuredSettlementFunds(_payrollAssetConfig || {}).map(fund => fund.slug));
+    for (const value of saved) {
+      try {
+        const slug = validateSettlementFundSlug(value);
+        if (!configured.has(slug)) _customFundSlugs.add(slug);
+      } catch {}
+    }
+  } catch {}
+}
+
+function _rememberCustomFund(slug) {
+  _customFundSlugs.add(slug);
+  try { localStorage.setItem(_customFundStorageKey(), JSON.stringify([..._customFundSlugs])); } catch {}
+}
+
+function _metadataUriReady() {
+  const value = document.getElementById('router-fund-metadata')?.value.trim() || '';
+  try {
+    const uri = new URL(value);
+    return value.length <= 2048 && ['https:', 'ipfs:'].includes(uri.protocol) && Boolean(uri.hostname);
+  } catch { return false; }
+}
 
 function _reviewKey(category, week) {
   return JSON.stringify([8453, _payrollAssetConfig.routerAddress.toLowerCase(), _ownerAddress.toLowerCase(), category, week]);
@@ -80,7 +118,7 @@ function _reviewRecords() {
 }
 
 function _depositKey() {
-  return `decentbusking:deposit:v1:${_payrollAssetConfig.routerAddress.toLowerCase()}:${_ownerAddress.toLowerCase()}:${document.getElementById('router-fund-select').value}`;
+  return `decentbusking:deposit:v1:${_payrollAssetConfig.routerAddress.toLowerCase()}:${_ownerAddress.toLowerCase()}:${_selectedFundSlug()}`;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -165,6 +203,7 @@ async function _onWalletConnected({ detail } = {}) {
   // Load and display the payroll queue
   if (queueSection) queueSection.style.display = 'block';
   await loadPayrollQueue();
+  _loadCustomFundSlugs();
   _populateSettlementFunds();
   await _refreshSettlementFund();
   await _refreshRadioPayroll();
@@ -626,13 +665,22 @@ function _populateSettlementFunds() {
   if (!select) return;
   const previous = select.value;
   const funds = configuredSettlementFunds(_payrollAssetConfig || {});
-  select.replaceChildren(...funds.map(fund => {
+  const options = funds.map(fund => {
     const option = document.createElement('option');
     option.value = fund.slug;
     option.textContent = `${fund.label} · ${fund.slug}`;
     return option;
-  }));
-  select.value = funds.some(fund => fund.slug === previous) ? previous : funds[0]?.slug || '';
+  });
+  for (const slug of _customFundSlugs) {
+    const option = document.createElement('option'); option.value = slug; option.textContent = `Custom · ${slug}`; options.push(option);
+  }
+  const createCustom = document.createElement('option'); createCustom.value = CUSTOM_FUND_OPTION;
+  createCustom.textContent = 'Create a custom fund…'; options.push(createCustom);
+  select.replaceChildren(...options);
+  select.value = [...funds.map(fund => fund.slug), ..._customFundSlugs].includes(previous) || previous === CUSTOM_FUND_OPTION
+    ? previous : funds[0]?.slug || CUSTOM_FUND_OPTION;
+  const customLabel = document.getElementById('router-custom-fund-label');
+  if (customLabel) customLabel.hidden = select.value !== CUSTOM_FUND_OPTION;
   _setDefaultFundMetadata();
 }
 
@@ -640,10 +688,21 @@ function _setDefaultFundMetadata() {
   const select = document.getElementById('router-fund-select');
   const input = document.getElementById('router-fund-metadata');
   if (!select || !input) return;
+  const selection = select.value;
+  const slug = selection === CUSTOM_FUND_OPTION ? document.getElementById('router-custom-fund-slug')?.value.trim().toLowerCase() : selection;
+  if (selection === CUSTOM_FUND_OPTION) {
+    const priorDefault = input.dataset.autoValue;
+    if (!input.value || input.value === priorDefault) input.value = '';
+    input.dataset.autoValue = '';
+    return;
+  }
+  if (!slug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return;
   const uri = new URL(PAYROLL_ASSETS_URL.startsWith('https:') ? PAYROLL_ASSETS_URL
     : 'https://thejollylama.github.io/DecentBusking/payroll-assets.json');
-  uri.hash = select.value;
-  input.value = uri.toString();
+  uri.hash = slug;
+  const priorDefault = input.dataset.autoValue;
+  if (!input.value || input.value === priorDefault) input.value = uri.toString();
+  input.dataset.autoValue = uri.toString();
 }
 
 async function _refreshSettlementFund() {
@@ -659,8 +718,7 @@ async function _refreshSettlementFund() {
   _setStatus(status, 'Checking Base router and fund permissions...');
   try {
     if (!isAdminWallet() || !_isRouterConfigured()) throw new Error('Connect the configured admin wallet; Base router configuration is required');
-    const slug = select.value;
-    if (!configuredSettlementFunds(_payrollAssetConfig).some(fund => fund.slug === slug)) throw new Error('Select a configured fund');
+    const slug = _selectedFundSlug();
     const router = _readOnlyRouter();
     const id = ethers.id(slug);
     const address = window._wallet.address;
@@ -678,14 +736,16 @@ async function _refreshSettlementFund() {
     document.getElementById('router-admin-role').textContent = allowed ? 'DEFAULT_ADMIN_ROLE verified' : 'DEFAULT_ADMIN_ROLE required';
     document.getElementById('router-fund-state').textContent = exists ? active ? 'Created · active' : 'Created · inactive' : 'Not created';
     document.getElementById('router-fund-balance').textContent = usdc ? `${ethers.formatUnits(balance, usdc.decimals)} USDC` : 'USDC not configured';
-    _routerCreateAllowed = allowed && !exists;
+    _routerCreateAllowed = allowed && !exists && _metadataUriReady();
     createButton.disabled = !_routerCreateAllowed || _settling;
     const pendingDeposit = localStorage.getItem(_depositKey());
     if (depositButton) depositButton.disabled = !exists || !active || _settling || Boolean(pendingDeposit);
     const pendingText = document.getElementById('router-deposit-pending');
     if (pendingText) pendingText.textContent = pendingDeposit ? 'A prior deposit/approval is unresolved. Check its receipt before sending again.' : '';
     _setStatus(status, exists ? 'Fund exists. USDC deposits and reviewed closed-week settlements are separate transactions.'
-      : allowed ? 'Ready to create an empty Base fund. One transaction confirmation is required.' : 'The connected wallet cannot create funds on this router.', !allowed);
+      : !allowed ? 'The connected wallet cannot create funds on this router.'
+      : !_metadataUriReady() ? 'Enter an HTTPS or IPFS metadata URI describing this fund purpose before creation.'
+      : `Ready to create empty fund ${slug}. Confirm once on Base; this does not deposit funds.`);
   } catch (error) {
     if (refreshId === _routerRefreshId) _setStatus(status, error.message, true);
   }
@@ -697,8 +757,7 @@ async function _depositUsdc() {
   if (_settling || !isAdminWallet()) return;
   let failed = false;
   try {
-    const slug = document.getElementById('router-fund-select').value;
-    if (!configuredSettlementFunds(_payrollAssetConfig).some(fund => fund.slug === slug)) throw new Error('Select a configured fund');
+    const slug = _selectedFundSlug();
     const asset = _getAssetConfig('USDC');
     if (!asset || asset.decimals !== 6) throw new Error('Native Base USDC is not configured');
     const amountUnits = ethers.parseUnits(document.getElementById('router-deposit-amount').value || '0', 6);
@@ -929,8 +988,7 @@ async function _createSettlementFund() {
   const button = document.getElementById('router-create-fund');
   if (_settling || !_routerCreateAllowed || !isAdminWallet()) return;
   try {
-    const slug = document.getElementById('router-fund-select').value;
-    if (!configuredSettlementFunds(_payrollAssetConfig).some(fund => fund.slug === slug)) throw new Error('Select a configured fund');
+    const slug = _selectedFundSlug();
     const metadataUri = document.getElementById('router-fund-metadata').value.trim();
     _settling = true;
     button.disabled = true;
@@ -939,6 +997,13 @@ async function _createSettlementFund() {
     const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
     const result = await createConfiguredSettlementFund({ router, signer, owner: _ownerAddress,
       fundId: ethers.id(slug), metadataUri });
+    if (document.getElementById('router-fund-select').value === CUSTOM_FUND_OPTION) {
+      _rememberCustomFund(slug);
+      _populateSettlementFunds();
+      document.getElementById('router-fund-select').value = slug;
+      document.getElementById('router-custom-fund-label').hidden = true;
+      _setDefaultFundMetadata();
+    }
     await _refreshRadioPayroll();
     await _refreshSettlementFund();
     _setStatus(status, result.alreadyExists ? `${slug} already exists; no creation transaction sent.`
@@ -1008,9 +1073,25 @@ export function initPayroll() {
   document.getElementById('router-create-fund')?.addEventListener('click', _createSettlementFund);
   document.getElementById('router-fund-refresh')?.addEventListener('click', _refreshSettlementFund);
   document.getElementById('router-fund-select')?.addEventListener('change', () => {
+    const customLabel = document.getElementById('router-custom-fund-label');
+    if (customLabel) customLabel.hidden = document.getElementById('router-fund-select').value !== CUSTOM_FUND_OPTION;
     _setDefaultFundMetadata();
     _refreshSettlementFund();
   });
+  document.getElementById('router-custom-fund-slug')?.addEventListener('input', () => {
+    const input = document.getElementById('router-custom-fund-slug');
+    try {
+      input.setCustomValidity('');
+      validateSettlementFundSlug(input.value);
+      _setDefaultFundMetadata();
+      _refreshSettlementFund();
+    } catch (error) {
+      input.setCustomValidity(error.message);
+      _routerCreateAllowed = false;
+      document.getElementById('router-create-fund').disabled = true;
+    }
+  });
+  document.getElementById('router-fund-metadata')?.addEventListener('input', _refreshSettlementFund);
   document.getElementById('radio-payroll-refresh')?.addEventListener('click', _refreshRadioPayroll);
   document.getElementById('radio-payroll-preview')?.addEventListener('click', _previewRadioPayroll);
   document.getElementById('radio-payroll-week')?.addEventListener('change', () => {

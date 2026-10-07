@@ -325,7 +325,8 @@
         </dl>
         <div class="radio-payroll-controls">
           <label>Fund<select id="router-fund-select"></select></label>
-          <label class="router-metadata-label">Metadata URI<input id="router-fund-metadata" type="text" maxlength="2048" placeholder="https://... or ipfs://..." /></label>
+          <label id="router-custom-fund-label" hidden>New fund slug<input id="router-custom-fund-slug" type="text" minlength="3" maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="dmtv-referrals" autocomplete="off" /><span class="payroll-field-hint">3–64 lowercase letters, numbers, and single hyphens. This name becomes the on-chain accounting ID.</span></label>
+          <label class="router-metadata-label">Purpose metadata URI<input id="router-fund-metadata" type="text" maxlength="2048" placeholder="https://... or ipfs://..." /><span class="payroll-field-hint">For a custom fund, enter an HTTPS or IPFS URI describing its purpose.</span></label>
         </div>
         <dl class="payroll-allocation">
           <dt>Fund ID</dt><dd id="router-fund-id">Not loaded</dd>
@@ -336,7 +337,7 @@
           <button id="router-fund-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Fund</button>
           <button id="router-create-fund" class="payroll-btn payroll-btn-primary" type="button" disabled>Create Fund on Base</button>
         </div>
-        <p id="router-fund-status" class="payroll-status" role="status">Creating a fund does not deposit USDC or enable payouts.</p>
+        <p id="router-fund-status" class="payroll-status" role="status">Create a configured fund or choose Create a custom fund for a new purpose. Fund creation does not deposit USDC or enable payouts.</p>
         <div class="radio-payroll-controls"><label>USDC deposit amount<input id="router-deposit-amount" type="number" min="0" step="0.01" value="0" /></label></div>
         <button id="router-deposit-usdc" class="payroll-btn payroll-btn-primary" type="button" disabled>Deposit USDC into Selected Fund</button>
         <p id="router-deposit-pending" class="payroll-status"></p>

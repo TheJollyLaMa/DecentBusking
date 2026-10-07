@@ -6,6 +6,29 @@ export function configuredSettlementFunds(config = {}) {
   ].filter(fund => typeof fund.slug === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fund.slug));
 }
 
+export const CUSTOM_FUND_OPTION = '__custom_fund__';
+
+export function validateSettlementFundSlug(value) {
+  const slug = String(value || '').trim().toLowerCase();
+  if (slug.length < 3 || slug.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    throw new Error('Fund slug must be 3–64 lowercase letters/numbers with single hyphens');
+  }
+  return slug;
+}
+
+export function resolveSettlementFundSlug(selection, customSlug, config = {}, knownCustomFunds = []) {
+  if (selection === CUSTOM_FUND_OPTION) {
+    const slug = validateSettlementFundSlug(customSlug);
+    if (configuredSettlementFunds(config).some(fund => fund.slug === slug)) throw new Error('Select this configured fund from the list');
+    return slug;
+  }
+  const slug = validateSettlementFundSlug(selection);
+  if (!configuredSettlementFunds(config).some(fund => fund.slug === slug) && !knownCustomFunds.includes(slug)) {
+    throw new Error('Select a configured fund or choose Create a custom fund');
+  }
+  return slug;
+}
+
 export async function createConfiguredSettlementFund({ router, signer, owner, fundId, metadataUri }) {
   if (!signer?.provider) throw new Error('Connect the owner wallet first');
   const network = await signer.provider.getNetwork();
