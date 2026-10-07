@@ -311,7 +311,7 @@ export function removeTrack(trackId) {
  * @param {number} newDislikes - Current human 👎 count for this message
  * @param {string} messageId
  */
-export function applyRating(trackId, newLikes, newDislikes, messageId, { initialCounts, save = true } = {}) {
+export function applyRating(trackId, newLikes, newDislikes, messageId, { initialCounts, save = true, weekly = true, now = Date.now() } = {}) {
   const track = _playlist.find((entry) => entry.trackId === trackId);
   if (!track) return null;
   const likes = Math.max(0, Number(newLikes) || 0);
@@ -319,6 +319,12 @@ export function applyRating(trackId, newLikes, newDislikes, messageId, { initial
   track.discordRatings ||= {};
   const previous = messageId && Object.hasOwn(track.discordRatings, messageId) ? track.discordRatings[messageId] : initialCounts;
   const legacy = messageId && track.ratedMessageIds?.includes(messageId) && !previous;
+  const delta = legacy ? 0 : likes - (previous?.likes || 0) - dislikes + (previous?.dislikes || 0);
+  if (weekly && delta) {
+    const week = getUtcWeekKey(new Date(now));
+    track.weeklyVotes ||= {};
+    track.weeklyVotes[week] = (track.weeklyVotes[week] || 0) + delta;
+  }
   track.likes = Math.max(0, (track.likes || 0) + (legacy ? 0 : likes - (previous?.likes || 0)));
   track.dislikes = Math.max(0, (track.dislikes || 0) + (legacy ? 0 : dislikes - (previous?.dislikes || 0)));
   if (messageId) track.discordRatings[messageId] = { likes, dislikes };
@@ -327,12 +333,15 @@ export function applyRating(trackId, newLikes, newDislikes, messageId, { initial
   return track;
 }
 
-export function applySiteVote(trackId, vote) {
+export function applySiteVote(trackId, vote, { now = Date.now() } = {}) {
   if (vote !== 1 && vote !== -1) throw new Error('Invalid vote');
   const track = _playlist.find((entry) => entry.trackId === trackId);
   if (!track) throw new Error('Track is no longer in the playlist');
   if (vote === 1) track.likes += 1;
   else track.dislikes += 1;
+  const week = getUtcWeekKey(new Date(now));
+  track.weeklyVotes ||= {};
+  track.weeklyVotes[week] = (track.weeklyVotes[week] || 0) + vote;
   _save();
   return track;
 }
@@ -370,7 +379,7 @@ export function reconcileRatings(events) {
     if (!track || !messageId) continue;
     const alreadyRated = track.ratedMessageIds?.includes(messageId) || Object.hasOwn(track.discordRatings || {}, messageId);
     const before = JSON.stringify([track.likes, track.dislikes, track.discordRatings?.[messageId]]);
-    applyRating(trackId, likes, dislikes, messageId, { save: false,
+    applyRating(trackId, likes, dislikes, messageId, { save: false, weekly: false,
       initialCounts: legacyTotals || recoveredTracks.has(trackId) ? { likes, dislikes } : undefined });
     if (!alreadyRated && !playId && !legacyTotals && !track.audibleMessageIds?.includes(messageId)) track.plays = (track.plays || 0) + 1;
     if (!alreadyRated || before !== JSON.stringify([track.likes, track.dislikes, track.discordRatings?.[messageId]])) reconciled++;
@@ -416,7 +425,7 @@ function buildPlayReport(week, wallet) {
   const allTime = week === null;
   const targetWallet = typeof wallet === 'string' ? wallet.toLowerCase() : null;
   const tracks = _playlist
-    .filter((track) => allTime ? (track.plays || track.likes || track.dislikes || 0) > 0 : (track.weeklyPlays?.[week] || 0) > 0)
+    .filter((track) => allTime ? (track.plays || track.likes || track.dislikes || 0) > 0 : (track.weeklyPlays?.[week] || 0) > 0 || Boolean(track.weeklyVotes?.[week]))
     .filter((track) => !targetWallet || track.mintRecipient?.toLowerCase() === targetWallet)
     .map((track) => ({
       trackId: track.trackId,
@@ -424,7 +433,8 @@ function buildPlayReport(week, wallet) {
       artist: track.uploader,
       wallet: track.mintRecipient || null,
       uploadedAt: track.addedAt || null,
-      plays: allTime ? track.plays || 0 : track.weeklyPlays[week],
+      plays: allTime ? track.plays || 0 : track.weeklyPlays?.[week] || 0,
+      votes: allTime ? (track.likes || 0) - (track.dislikes || 0) : track.weeklyVotes?.[week] || 0,
       likes: track.likes || 0,
       dislikes: track.dislikes || 0,
     }))
@@ -450,7 +460,7 @@ function buildPlayReport(week, wallet) {
 }
 
 export function getWeeklyPlayWeeks() {
-  return [...new Set(_playlist.flatMap((track) => Object.keys(track.weeklyPlays || {})))].sort();
+  return [...new Set(_playlist.flatMap((track) => [...Object.keys(track.weeklyPlays || {}), ...Object.keys(track.weeklyVotes || {})]))].sort();
 }
 
 export function getWeeklyPlayHistory({ weeks = 12, now = Date.now(), wallet, includeAllTime = false } = {}) {

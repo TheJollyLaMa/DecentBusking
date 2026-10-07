@@ -54,6 +54,28 @@ test('restore falls back to the Pinata gateway when the configured gateway is ra
   assert.deepEqual(fetched.slice(1), ['https://dweb.link/ipfs/bafystate', 'https://gateway.pinata.cloud/ipfs/bafystate']);
 });
 
+test('payment snapshot namespace is separate and immutable payment backups are retained', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  const requests = [];
+  const snapshot = { schemaVersion: 1, chainId: 8453, entries: [{ txHash: 'proof' }] };
+  const store = createPinataStateStore({ pinataJwt: 'test', name: 'decentbusking-payment-ledger.json',
+    tags: { app: 'decentbusking', kind: 'payment-ledger', schema: '1' }, retainSnapshots: Infinity,
+    serialize: value => value, deserialize: (value, uri) => ({ ...value, snapshotUri: uri }),
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      if (options.method === 'POST') {
+        assert.deepEqual(JSON.parse(await options.body.get('file').text()), snapshot);
+        return new Response(JSON.stringify({ data: { cid: 'ledger' } }));
+      }
+      if (url.includes('/ipfs/')) return new Response(JSON.stringify(snapshot));
+      assert.equal(new URL(url).searchParams.get('name'), 'decentbusking-payment-ledger.json');
+      return new Response(JSON.stringify({ data: { files: Array.from({ length: 5 }, (_, index) => ({ id: String(index), cid: 'ledger', name: 'decentbusking-payment-ledger.json' })) } }));
+    } });
+  assert.equal(await store.save(snapshot), 'ipfs://ledger');
+  assert.deepEqual(await store.restore(), { ...snapshot, snapshotUri: 'ipfs://ledger' });
+  assert.equal(requests.some(value => value.options.method === 'DELETE'), false);
+});
+
 test('uploads tagged state and prunes snapshots older than the newest three', async () => {
   const { createPinataStateStore } = await import(moduleUrl);
   const requests = [];

@@ -46,6 +46,31 @@ test('weekly ledger counts only completed 30-second audible plays once by UTC we
   assert.deepEqual(store.getWeeklyPlayHistory({ weeks: 2, now: Date.parse('2026-10-05T12:00:00Z') }).map(week => week.week), ['2026-W40', '2026-W41']);
 });
 
+test('weekly votes reset at UTC Monday while lifetime totals and historic weeks survive', async (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'jukeloop-weekly-votes-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(temp, { recursive: true, force: true }); });
+  const store = await import(`${storeModule}?votes=${Date.now()}`);
+  store.loadPlaylist([{ trackId: 'song', title: 'Song', uploader: 'Artist', likes: 10, dislikes: 2, plays: 100 }]);
+  store.applySiteVote('song', 1, { now: Date.parse('2026-10-04T23:59:00Z') });
+  store.applyRating('song', 2, 0, 'message', { now: Date.parse('2026-10-04T23:59:30Z') });
+  store.applyRating('song', 2, 0, 'message', { now: Date.parse('2026-10-05T00:00:30Z') });
+  assert.equal(store.getWeeklyPlayReport('2026-W40').tracks[0].votes, 3);
+  assert.equal(store.getWeeklyPlayReport('2026-W41').tracks.length, 0);
+  store.applySiteVote('song', 1, { now: Date.parse('2026-10-05T00:01:00Z') });
+  store.applySiteVote('song', -1, { now: Date.parse('2026-10-05T00:02:00Z') });
+  store.applySiteVote('song', 1, { now: Date.parse('2026-10-05T00:03:00Z') });
+  assert.equal(store.getWeeklyPlayReport('2026-W41').tracks[0].votes, 1);
+  assert.equal(store.getWeeklyPlayReport('2026-W40').tracks[0].votes, 3);
+  assert.equal(store.getAllTimePlayReport().tracks[0].likes, 15);
+  assert.equal(store.getAllTimePlayReport().totalPlays, 100);
+  store.reconcileRatings([{ trackId: 'song', messageId: 'historical', likes: 5, dislikes: 0 }]);
+  assert.equal(store.getWeeklyPlayReport('2026-W41').tracks[0].votes, 1);
+  const saved = structuredClone(store.getPlaylist());
+  store.loadPlaylist(saved);
+  assert.equal(store.getWeeklyPlayReport('2026-W40').tracks[0].votes, 3);
+});
+
 test('first-week track gets one extra spaced slot and consumes its bonus only after qualifying', async (t) => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'jukeloop-boost-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');

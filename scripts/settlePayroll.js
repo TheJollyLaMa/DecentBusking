@@ -42,6 +42,13 @@ async function main() {
 
   const queue = readJson(QUEUE_PATH);
   const accounts = readJson(ACCOUNTS_PATH);
+  if (currency === 'ETH') throw new Error('Legacy ETH cannot be settled by the active Base workflow');
+  const candidates = (queue.pending || []).filter(entry => String(entry.contributorGithub || '').trim().toLowerCase() === contributorGithub.toLowerCase() && String(entry.issueRef || '').trim() === issueRef &&
+    String(entry.role || 'contributor').trim().toLowerCase() === role && String(entry.currency || '').trim().toUpperCase() === currency);
+  if (!candidates.length) { console.log('No matching pending Base entries found.'); return; }
+  const config = readJson(path.join(ROOT, 'payroll-assets.json'));
+  const { verifyRepositoryPayment } = await import('../discord-bot/payment-ledger.js');
+  for (const entry of candidates) await verifyRepositoryPayment({ entry, config, txHash });
   const settled = settleEntries({
     queue,
     accounts,

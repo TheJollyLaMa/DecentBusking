@@ -31,6 +31,9 @@ import {
 } from 'discord.js';
 
 import http from 'http'; 
+import fs from 'node:fs';
+import { JsonRpcProvider, id } from 'ethers';
+import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
 
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
@@ -427,6 +430,52 @@ async function main() {
     return completedTrack;
   };
 
+  const payrollAssets = JSON.parse(fs.readFileSync(new URL('../payroll-assets.json', import.meta.url), 'utf8'));
+  const paymentStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+    uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+    name: 'decentbusking-payment-ledger.json', tags: { app: 'decentbusking', kind: 'payment-ledger', schema: '1' },
+    retainSnapshots: Infinity, serialize: value => value, deserialize: (value, uri) => ({ ...value, snapshotUri: uri }) }) : null;
+  const paymentProvider = new JsonRpcProvider(payrollAssets.rpcUrl);
+  const dispatchedPayments = new Set();
+  let repositorySyncError = '';
+  const syncRepositoryLedger = async payment => {
+    const token = process.env.PAYROLL_GITHUB_TOKEN;
+    if (!token || dispatchedPayments.has(payment.workReference) || payment.fundId !== id(payrollAssets.fundSlug)) return;
+    try {
+      const queueResponse = await fetch('https://raw.githubusercontent.com/TheJollyLaMa/DecentBusking/main/payroll-queue.json', { cache: 'no-store' });
+      if (!queueResponse.ok) throw new Error('Repository queue unavailable');
+      const queue = await queueResponse.json();
+      for (const entry of queue.pending || []) {
+        const currency = String(entry.currency || '').toUpperCase();
+        if (!payrollAssets.assets[currency]) continue;
+        const base = `${entry.issueRef}:${entry.contributorGithub}:${entry.role || 'contributor'}`;
+        if (id(currency === 'ART' ? base : `${base}:${currency}`) !== payment.workReference) continue;
+        await verifyRepositoryPayment({ entry, config: payrollAssets, txHash: payment.txHash, provider: paymentProvider });
+        const response = await fetch('https://api.github.com/repos/TheJollyLaMa/DecentBusking/actions/workflows/settle-payroll.yml/dispatches', {
+          method: 'POST', headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json' },
+          body: JSON.stringify({ ref: 'main', inputs: { contributor_github: entry.contributorGithub, issue_ref: entry.issueRef,
+            role: entry.role || 'contributor', currency, tx_hash: payment.txHash } }) });
+        if (!response.ok) throw new Error(`Repository ledger dispatch failed (${response.status})`);
+        dispatchedPayments.add(payment.workReference);
+      }
+      repositorySyncError = '';
+    } catch (error) { repositorySyncError = error.message; console.warn('[repository-ledger]', error.message); }
+  };
+  const paymentLedger = createPaymentLedger({ provider: paymentProvider,
+    routerAddress: payrollAssets.routerAddress, startBlock: process.env.PAYROLL_START_BLOCK ? Number(process.env.PAYROLL_START_BLOCK) : undefined,
+    restore: paymentStore ? paymentStore.restore : undefined, save: paymentStore ? paymentStore.save : undefined, onVerified: syncRepositoryLedger });
+  let paymentLedgerReady = false;
+  let paymentLedgerTask = null;
+  const comparePayments = () => {
+    if (!paymentLedgerTask) paymentLedgerTask = (paymentLedgerReady ? paymentLedger.compare() : paymentLedger.initialize())
+      .then(() => { paymentLedgerReady = true; })
+      .catch(error => console.warn('[payment-ledger]', error.message))
+      .finally(() => { paymentLedgerTask = null; });
+    return paymentLedgerTask;
+  };
+  comparePayments();
+  setInterval(comparePayments, 15_000).unref();
+
   const requestHandler = createWorkerRequestHandler({
     allowedOrigins: config.allowedOrigins,
     ownerWallet: config.mintOwnerWallet || '0x0000000000000000000000000000000000000000',
@@ -454,11 +503,18 @@ async function main() {
       parentTokenId: track.parentTokenId || 0,
       requestedAt: track.mintRequestedAt,
     })),
-    getRadioState: async () => buildRadioState({
+    getRadioState: async () => ({ ...buildRadioState({
       nowPlaying: getJukeLoopNowPlaying(),
       playlist: getPlaylist(),
-    }),
+    }), paymentLedger: { endpoint: '/api/payroll/ledger', snapshotUri: paymentLedger.getState().snapshotUri,
+      lastCheckedAt: paymentLedger.getState().lastCheckedAt, ready: paymentLedgerReady } }),
     getRadioHistory: async ({ weeks, wallet, includeAllTime }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime }),
+    getPaymentLedger: () => ({ ...paymentLedger.getState(), ready: paymentLedgerReady,
+      repositorySync: process.env.PAYROLL_GITHUB_TOKEN ? repositorySyncError || 'automatic dispatch configured' : 'manual GitHub ledger workflow; PAYROLL_GITHUB_TOKEN not configured' }),
+    reconcilePayment: async txHash => {
+      if (!paymentLedgerReady) throw new Error('Payment ledger is restoring; retry shortly');
+      return paymentLedger.reconcile(txHash);
+    },
     onRadioVote: submitJukeLoopVote,
   });
   const port = process.env.PORT || 10000;

@@ -109,6 +109,8 @@ export function createWorkerRequestHandler({
   getMintQueue,
   getRadioState,
   getRadioHistory,
+  getPaymentLedger,
+  reconcilePayment,
   onRadioVote,
   onMediaSubmission,
   fetchImpl = fetch,
@@ -125,6 +127,7 @@ export function createWorkerRequestHandler({
     return consumedSignatures.has(signature);
   }
   const artistLimits = new Map();
+  const paymentLimits = new Map();
   function limitArtist(address) {
     const time = now();
     for (const [key, entry] of artistLimits) {
@@ -164,6 +167,23 @@ export function createWorkerRequestHandler({
           return;
         }
         sendJson(response, 200, await getRadioState(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/ledger') {
+        if (!getPaymentLedger) throw new Error('Payment ledger is not configured');
+        sendJson(response, 200, await getPaymentLedger(), '*');
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/payroll/reconcile') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!reconcilePayment) throw new Error('Payment reconciliation is not configured');
+        const { txHash } = await readJson(request);
+        if (!/^0x[0-9a-fA-F]{64}$/.test(txHash || '')) throw new Error('Invalid payment transaction hash');
+        const limit = paymentLimits.get(origin) || { count: 0, until: now() + 60_000 };
+        if (limit.until <= now()) { limit.count = 0; limit.until = now() + 60_000; }
+        if (++limit.count > 120) throw new Error('Payment reconciliation limit reached; retry shortly');
+        paymentLimits.set(origin, limit);
+        sendJson(response, 200, await reconcilePayment(txHash), corsOrigin);
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/radio/history') {

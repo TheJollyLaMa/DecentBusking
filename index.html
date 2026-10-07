@@ -259,6 +259,7 @@
         <span id="admin-connected-addr" class="admin-addr"></span>
       </div>
       <div id="admin-status" class="admin-status" role="status"></div>
+      <p id="admin-payment-ledger-status" class="admin-status" role="status">Payment proofs not loaded.</p>
       <section id="admin-mint-section" class="hidden">
         <div class="admin-section-header">
           <div>
@@ -356,8 +357,9 @@
         <button id="router-deposit-check" class="payroll-btn payroll-btn-secondary" type="button">Check Pending Deposit Receipt</button>
       </details>
 
-      <section class="payroll-section" aria-labelledby="playback-payroll-title">
-        <h3 id="playback-payroll-title">Playback Payroll</h3>
+      <section class="payroll-section" aria-labelledby="weekly-payroll-title">
+        <h3 id="weekly-payroll-title">Weekly Artist Payments</h3>
+        <h4 id="playback-payroll-title">Playback Payroll</h4>
         <div class="radio-payroll-controls">
           <label>UTC week<select id="radio-payroll-week"></select></label>
           <label>Playback budget (USDC)<input id="radio-playback-budget" type="number" min="0" step="0.01" value="0" /></label>
@@ -370,23 +372,26 @@
         <p id="radio-payroll-status" class="payroll-status" role="status">Preview live weeks; finalize completed weeks before settlement.</p>
         <dl class="payroll-allocation"><dt>Base gas balance</dt><dd id="radio-gas-balance">Not loaded</dd><dt>Playback fund USDC</dt><dd id="radio-playback-balance">Not loaded</dd></dl>
         <div id="radio-playback-preview" class="radio-payroll-preview"></div>
-      </section>
-      <section class="payroll-section" aria-labelledby="top-ten-payroll-title">
-        <h3 id="top-ten-payroll-title">Top 10 Prize Payouts</h3>
+        <h4 id="top-ten-payroll-title">Top 10 Vote Prizes</h4>
         <div class="radio-payroll-controls"><label>Prize budget (USDC)<input id="radio-prize-budget" type="number" min="0" step="0.01" value="0" /></label></div>
-        <p class="payroll-description">Draft: top 10 artist wallets by qualified weekly plays. Equal prize shares; one place per artist.</p>
+        <p id="radio-vote-policy" class="payroll-description">Weekly net votes (upvotes minus downvotes). Equal prize shares; one place per artist wallet.</p>
         <dl class="payroll-allocation"><dt>Prize fund USDC</dt><dd id="radio-prize-balance">Not loaded</dd></dl>
         <div id="radio-prize-preview" class="radio-payroll-preview"></div>
-      </section>
-      <section class="payroll-section" aria-labelledby="radio-review-title">
-        <h3 id="radio-review-title">Reviewed Weekly Settlement</h3>
-        <button id="radio-payroll-finalize" class="payroll-btn payroll-btn-secondary" type="button" disabled>Finalize Selected Week to IPFS</button>
+        <h4 id="radio-review-title">Review &amp; Pay</h4>
+        <button id="radio-payroll-finalize" class="payroll-btn payroll-btn-secondary" type="button" disabled>Save Allocation &amp; Review Recipients</button>
         <div id="radio-reviewed-receipts"></div>
-        <div class="radio-payroll-controls"><label>Import reviewed receipt backup<input id="radio-receipt-import" type="file" accept="application/json,.json" /></label></div>
         <div class="radio-payroll-actions">
-          <button id="radio-settle-playback" class="payroll-btn payroll-btn-primary" type="button" disabled>Settle Reviewed Playback</button>
-          <button id="radio-settle-top10" class="payroll-btn payroll-btn-primary" type="button" disabled>Settle Reviewed Top 10</button>
+          <button id="radio-settle-playback" class="payroll-btn payroll-btn-primary" type="button" disabled>Pay Playback Batch</button>
+          <button id="radio-settle-top10" class="payroll-btn payroll-btn-primary" type="button" disabled>Pay Top 10 Batch</button>
         </div>
+        <details class="payroll-recovery"><summary>Restore Allocation Backup</summary><div class="radio-payroll-controls"><label>Allocation receipt<input id="radio-receipt-import" type="file" accept="application/json,.json" /></label></div></details>
+      </section>
+      <section class="payroll-section" aria-labelledby="payment-ledger-title">
+        <h3 id="payment-ledger-title">Payment History &amp; Proofs</h3>
+        <button id="payroll-ledger-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Payment Proofs</button>
+        <p id="payroll-ledger-status" class="payroll-status" role="status">Payment proofs not loaded.</p>
+        <a id="payroll-ledger-backup" class="payroll-link" target="_blank" rel="noopener noreferrer" hidden>Open IPFS Payment Snapshot</a>
+        <div id="payroll-ledger-entries"></div>
       </section>
 
       <!-- Payroll queue table -->
@@ -442,12 +447,12 @@
   <script type="module" src="js/main.js?v=20261005-tally-votes"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261006-owner-payroll"></script>
+  <script type="module" src="js/admin.js?v=20261007-payment-ledger"></script>
 
-  <script type="module" src="js/payroll.js?v=20261007-fund-metadata"></script>
+  <script type="module" src="js/payroll.js?v=20261007-payment-workspace"></script>
   <script type="module" src="js/radio-history.js?v=20261006-all-time-tally"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261007-fund-metadata';
+    import { initPayroll } from './js/payroll.js?v=20261007-payment-workspace';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

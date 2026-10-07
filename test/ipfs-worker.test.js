@@ -19,6 +19,25 @@ async function withServer(handler, callback) {
   }
 }
 
+test('payment ledger is public but reconciliation requires an allowed origin and a valid hash', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const hashes = [];
+  const handler = createWorkerRequestHandler({ allowedOrigins: ['https://busking.example'], ownerWallet: Wallet.createRandom().address,
+    getPaymentLedger: () => ({ chainId: 8453, entries: [] }),
+    reconcilePayment: async hash => { hashes.push(hash); return { pending: false, entries: [] }; } });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/payroll/ledger`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    const txHash = `0x${'1'.repeat(64)}`;
+    for (const [origin, hash, expected] of [['https://other.example', txHash, 400], ['https://busking.example', 'bad', 400], ['https://busking.example', txHash, 200]]) {
+      const result = await fetch(`${base}/api/payroll/reconcile`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ txHash: hash }) });
+      assert.equal(result.status, expected);
+    }
+    assert.deepEqual(hashes, [txHash]);
+  });
+});
+
 test('worker issues a Pinata URL only for a fresh owner signature', async () => {
   const { buildUploadAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom();
