@@ -99,6 +99,37 @@ test('failed creation receipts do not report a created fund', async () => {
   await assert.rejects(createConfiguredSettlementFund(options), /not confirmed successfully/);
 });
 
+test('USDC recovery goes only to the owner and verifies exact recovery and transfer events even while paused', async () => {
+  const { recoverSettlementUsdc, verifySettlementRecoveryReceipt, BASE_USDC_ADDRESS } = await import(url);
+  const options = fixture();
+  let sent = 0;
+  options.token = { target: BASE_USDC_ADDRESS, decimals: async () => 6, balanceOf: async () => 1000000n,
+    interface: { parseLog: log => log.event } };
+  const logs = [
+    { address: options.router.target, event: { name: 'FundRecovered', args: { fundId: options.fundId, asset: BASE_USDC_ADDRESS, recipient: options.owner, amount: 1000000n } } },
+    { address: BASE_USDC_ADDRESS, event: { name: 'Transfer', args: { from: options.router.target, to: options.owner, value: 1000000n } } },
+  ];
+  const recoverFund = async (fund, asset, recipient, amount) => {
+    assert.equal(fund, options.fundId); assert.equal(asset, BASE_USDC_ADDRESS); assert.equal(recipient, options.owner); assert.equal(amount, 1000000n);
+    sent++; return { hash: 'recovery', wait: async () => ({ status: 1, logs }) };
+  };
+  recoverFund.staticCall = async () => {};
+  options.router = { ...options.router, funds: async () => ({ exists: true, active: false }), paused: async () => true,
+    fundBalances: async () => 1000000n, recoverFund, interface: { parseLog: log => log.event } };
+  const input = { ...options, amountUnits: 1000000n };
+  assert.equal((await recoverSettlementUsdc(input)).recipient, options.owner);
+  assert.equal(sent, 1);
+  assert.throws(() => verifySettlementRecoveryReceipt({ ...input, receipt: { status: 1, logs: logs.slice(0, 1) } }), /does not prove/);
+  for (const change of [
+    value => { value.owner = 'other'; }, value => { value.amountUnits = 1000001n; },
+    value => { value.amountUnits = 0n; }, value => { value.signer = { ...options.signer, provider: { ...options.signer.provider, getNetwork: async () => ({ chainId: 10 }) } }; },
+    value => { value.router = { ...options.router, hasRole: async () => false }; },
+  ]) {
+    const value = { ...input }; change(value); await assert.rejects(recoverSettlementUsdc(value));
+  }
+  assert.equal(sent, 1);
+});
+
 test('USDC deposits approve only the exact shortfall-needed amount and skip sufficient allowances', async () => {
   const { depositSettlementUsdc, BASE_USDC_ADDRESS } = await import(url);
   for (const allowance of [0n, 3000000n]) {

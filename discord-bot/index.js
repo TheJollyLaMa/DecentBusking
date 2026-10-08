@@ -32,8 +32,10 @@ import {
 
 import http from 'http'; 
 import fs from 'node:fs';
-import { JsonRpcProvider, id } from 'ethers';
+import { Contract, JsonRpcProvider, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
+import { createWeeklyPayflow } from './weekly-payflow.js';
+import { payrollPeriodFromKey } from '../js/payroll-week.mjs';
 
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
@@ -476,6 +478,56 @@ async function main() {
   comparePayments();
   setInterval(comparePayments, 15_000).unref();
 
+  const payflowStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+    uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+    name: 'decentbusking-weekly-payflow.json', tags: { app: 'decentbusking', kind: 'weekly-payflow', schema: '1' },
+    retainSnapshots: Infinity, serialize: value => value, deserialize: value => value }) : null;
+  const payflowRouter = new Contract(payrollAssets.routerAddress, [
+    'function funds(bytes32) view returns(string metadataUri,bool active,bool exists)',
+    'function fundBalances(bytes32,address) view returns(uint256)',
+    'function approvedAssets(address) view returns(bool)',
+    'function completedWorkReferences(bytes32) view returns(bool)',
+  ], paymentProvider);
+  const closingBlocks = new Map();
+  const getClosingBalance = async ({ report, fundSlug, allocations }) => {
+    if (!closingBlocks.has(report.week)) {
+      const end = Date.parse(payrollPeriodFromKey(report.week).endAt) / 1000;
+      let low = 0; let high = await paymentProvider.getBlockNumber();
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        const block = await paymentProvider.getBlock(middle);
+        if (!block) throw new Error('Closing block could not be verified');
+        if (Number(block.timestamp) < end) low = middle; else high = middle - 1;
+      }
+      closingBlocks.set(report.week, low);
+    }
+    const blockTag = closingBlocks.get(report.week);
+    if (await paymentProvider.getCode(payrollAssets.routerAddress, blockTag) === '0x') return 0n;
+    const balance = await payflowRouter.fundBalances(id(fundSlug), payrollAssets.assets.USDC.address, { blockTag });
+    let reserved = 0n;
+    for (const record of allocations) for (const entry of record.allocation.entries) {
+      if (!await payflowRouter.completedWorkReferences(id(entry.workReferenceText), { blockTag })) reserved += BigInt(entry.amountUnits);
+    }
+    return balance > reserved ? balance - reserved : 0n;
+  };
+  const payflow = createWeeklyPayflow({ router: payflowRouter, config: payrollAssets,
+    getReports: () => getWeeklyPlayHistory({ weeks: 12, calendar: 'new-york' }),
+    upload: createIpfsUploader({ provider: config.ipfsUploadProvider, pinataJwt: config.pinataJwt, pinataApiUrl: config.pinataApiUrl, ipfsApiUrl: config.ipfsApiUrl }),
+    restore: payflowStore ? payflowStore.restore : undefined,
+    getClosingBalance,
+    save: payflowStore ? payflowStore.save : async () => { throw new Error('Durable weekly payflow requires configured Pinata snapshots'); } });
+  let payflowReady = false;
+  let payflowTask = null;
+  const refreshPayflow = () => {
+    if (!playlistReady) return Promise.resolve();
+    if (!payflowTask) payflowTask = (payflowReady ? payflow.tick() : payflow.initialize())
+      .then(() => { payflowReady = true; })
+      .catch(error => console.warn('[weekly-payflow]', error.message))
+      .finally(() => { payflowTask = null; });
+    return payflowTask;
+  };
+  setInterval(refreshPayflow, 15_000).unref();
+
   const requestHandler = createWorkerRequestHandler({
     allowedOrigins: config.allowedOrigins,
     ownerWallet: config.mintOwnerWallet || '0x0000000000000000000000000000000000000000',
@@ -508,7 +560,8 @@ async function main() {
       playlist: getPlaylist(),
     }), paymentLedger: { endpoint: '/api/payroll/ledger', snapshotUri: paymentLedger.getState().snapshotUri,
       lastCheckedAt: paymentLedger.getState().lastCheckedAt, ready: paymentLedgerReady } }),
-    getRadioHistory: async ({ weeks, wallet, includeAllTime }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime }),
+    getRadioHistory: async ({ weeks, wallet, includeAllTime, calendar }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime, calendar }),
+    getWeeklyPayflow: ({ wallet }) => payflow.getState({ wallet }),
     getPaymentLedger: () => ({ ...paymentLedger.getState(), ready: paymentLedgerReady,
       repositorySync: process.env.PAYROLL_GITHUB_TOKEN ? repositorySyncError || 'automatic dispatch configured' : 'manual GitHub ledger workflow; PAYROLL_GITHUB_TOKEN not configured' }),
     reconcilePayment: async txHash => {
@@ -555,6 +608,7 @@ async function main() {
     loadPlaylist();
   }
   playlistReady = true;
+  refreshPayflow();
   syncMintedTracks(config);
 
   client = new Client({

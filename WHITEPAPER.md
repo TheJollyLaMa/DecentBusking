@@ -2,7 +2,7 @@
 
 **A digital town square for music, direct artist support, and accountable community radio.**
 
-Version 0.1 | 8 October 2026 | Implementation-grounded working document
+Version 0.2 | 8 October 2026 | Implementation-grounded working document
 
 This paper describes the current DecentBusking implementation and its intended development direction. It is not an independent security audit, a rights licence, a token offering, or a promise of investment returns. Features marked as planned are not available merely because they appear here. Configuration and deployed software can change; source files and on-chain records should be checked when making operational decisions.
 
@@ -68,7 +68,7 @@ The guitar case opens submissions; the hat opens tipping. The Left Ankh exposes 
 
 Discord reactions and website votes update a shared track tally. Repeated Discord count snapshots apply their delta rather than adding the same observations again. Website votes are limited per browser and active play. Ratings affect rotation, but public browser identities are not proof of unique humans.
 
-A qualified playback event requires at least 30 audible seconds of completed Discord playback and an idempotent play identifier. Playback and live vote changes use UTC ISO-week buckets. A new week starts at zero while previous buckets and all-time totals remain. Historical recovery can restore conservative lifetime totals without manufacturing past weekly prize eligibility.
+A qualified playback event requires at least 30 audible seconds of completed Discord playback and an idempotent play identifier. New payout buckets close Monday at 00:00 in `America/New_York`, with daylight-saving transitions handled by timezone data. Previous UTC buckets and all-time totals remain intact. New York accounting starts at deployment; its first week is labelled partial rather than inventing timestamp detail for old UTC aggregates. A new week starts at zero without deleting old buckets. Historical recovery can restore conservative lifetime totals without manufacturing past weekly prize eligibility.
 
 ## 4. Technical Architecture
 
@@ -147,13 +147,17 @@ The shared router uses distinct DecentBusking funds: `dbusk-playback`, `dbusk-to
 
 The USDC deposit workflow checks the configured owner, network, asset, fund activity, token balance, and allowance. It requests an approval for the intended deposit rather than an unlimited allowance when approval is needed. Approval and deposit are separate transactions; depositing into a fund is not an artist payment.
 
+The owner-only recovery control calls the deployed router's `recoverFund` to return a selected amount of remaining native Base USDC to the configured owner wallet. It requires router admin permission, checks actual/fund balances, preflights the transaction, and verifies exact `FundRecovered` and USDC `Transfer` events. Unresolved operations remain locally locked until receipt review. Recovery can work while paused or inactive, but can reduce funding for unpaid proposals. This is not wallet-equivalent custody or a refund of already-paid money.
+
 ### Playback And Top 10 Payments
 
 Playback drafts group eligible qualified weekly plays by verified artist wallet and distribute the selected USDC budget proportionally in integer token units. Each artist's provisional share is rounded down. Shares below the chosen minimum and rounding remainder stay unallocated in the fund; they do not automatically become artist debt.
 
 New Top 10 drafts rank artist wallets by positive weekly net votes: upvotes minus downvotes, with ties ordered by wallet address. Up to ten artist wallets share the reviewed prize budget equally. An artist receives at most one place. Lifetime votes and historical backfill are not retroactively assigned to a prize week. Older play-ranked receipts remain historical receipts with their original replay-protection identities.
 
-Only completed UTC weeks can be finalized. The owner saves the allocation JSON to IPFS, reviews exact recipients and amounts, approves missing recipients separately, and authorizes payouts. A frozen allocation receipt is a proposal, not proof that money was paid. Current multi-artist batches are resumable sequences of wallet transactions; the router's `payoutBatch` groups multiple work items for one recipient, not many artists in one transaction.
+After a New York week closes, the running worker automatically prepares IPFS allocation receipts and a retained schedule checkpoint. The default policy offers 100% of unreserved funds, a 0.01 USDC payout minimum, and a warning when average provisional shares are below 1 USDC. Policy values live in `payroll-assets.json`. Budgets are capped by verified closing-block balances and current unreserved money, so later deposits cannot retroactively enlarge an old week. Unpaid receipts are reserved in service accounting; this is not an enforceable on-chain escrow reservation. RPC/IPFS failures stop preparation rather than producing payable guesses. A stopped or sleeping service catches up when running again; there is no guaranteed exact-second execution.
+
+The owner reviews the prepared recipients and amounts, approves missing recipients separately, and authorizes each payout. No server signing key or automatic transfer is introduced. Existing UTC receipts remain importable; payments with overlapping legacy paid references require manual reconciliation. The dashboard and My Playbacks display current fund balances, estimated artist/song contributions and warnings, not debt or a claimable balance. Current multi-artist batches are resumable sequences of wallet transactions; the router's `payoutBatch` groups multiple work items for one recipient, not many artists in one transaction.
 
 Work-reference replay protection skips confirmed payments when resuming the same receipt. It does not freeze a station-wide weekly budget on-chain or prevent the owner from authorizing different new recipients across conflicting receipts. The original reviewed receipt should be retained throughout partial settlement.
 
@@ -209,8 +213,8 @@ Roadmap phases identify outcomes, not committed delivery dates. Funding, technic
 
 | Phase | Status / intended outcomes | Evidence of completion |
 | --- | --- | --- |
-| **1. Working community loop** | Current: site/Discord ingestion, owner-reviewed Base music NFTs, radio, archive, direct tips, tallies, purpose funds, budgeted payment queues and proof snapshots. | Deployed interfaces, configuration, source/tests, and inspectable chain records. |
-| **2. Reliability and artist control** | Planned: faster verified queue loads, explicit versioned radio/rights consent, withdrawal workflow, better gateway resilience, historical audit/backfill controls, and newcomer onboarding. | Failure/recovery tests, consent records, accessible workflows, visible audit coverage, and published operating procedures. |
+| **1. Working community loop** | Current: site/Discord ingestion, owner-reviewed Base music NFTs, radio, archive, direct tips, tallies, purpose funds, USDC recovery, New York weekly draft preparation, funding/share dashboards, owner payout queues and proof snapshots. | Deployed interfaces, configuration, source/tests, and inspectable chain records. |
+| **2. Reliability and artist control** | Planned: faster verified queue loads, explicit versioned radio/rights consent, better gateway resilience, historical audit/backfill controls, and newcomer onboarding. | Failure/recovery tests, consent records, accessible workflows, visible audit coverage, and published operating procedures. |
 | **3. Distribution and richer collaboration** | Research/planned: music-marketplace integration, improved creator permissions and mint batching, multi-artist royalty design, external client integrations, and broader performance/curation tools. | Contract specifications and tests, threat models, deployment addresses, interoperable APIs, and user-tested releases. |
 
 Multi-artist live stages, cross-chain tips, on-chain governance, new storage providers, and physical/digital hybrid tools are potential research directions, not implemented commitments. Mobile layout and browser checks already exist; mobile usability remains ongoing work rather than a wholly future feature.

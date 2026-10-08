@@ -109,6 +109,7 @@ export function createWorkerRequestHandler({
   getMintQueue,
   getRadioState,
   getRadioHistory,
+  getWeeklyPayflow,
   getPaymentLedger,
   reconcilePayment,
   onRadioVote,
@@ -174,6 +175,13 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, await getPaymentLedger(), '*');
         return;
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/weekly') {
+        if (!getWeeklyPayflow) throw new Error('Weekly payflow is not configured');
+        const wallet = requestUrl.searchParams.get('wallet');
+        if (wallet && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Invalid artist wallet');
+        sendJson(response, 200, await getWeeklyPayflow({ wallet }), '*');
+        return;
+      }
       if (request.method === 'POST' && requestUrl.pathname === '/api/payroll/reconcile') {
         if (!corsOrigin) throw new Error('Origin is not allowed');
         if (!reconcilePayment) throw new Error('Payment reconciliation is not configured');
@@ -196,7 +204,8 @@ export function createWorkerRequestHandler({
         const wallet = requestUrl.searchParams.get('wallet');
         if (wallet && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Invalid wallet filter');
         const includeAllTime = requestUrl.searchParams.get('includeAllTime') === '1';
-        sendJson(response, 200, { weeks: await getRadioHistory({ weeks, wallet, includeAllTime }) }, '*');
+        const calendar = requestUrl.searchParams.get('calendar') === 'new-york' ? 'new-york' : undefined;
+        sendJson(response, 200, { weeks: await getRadioHistory({ weeks, wallet, includeAllTime, ...(calendar ? { calendar } : {}) }) }, '*');
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/radio/vote') {

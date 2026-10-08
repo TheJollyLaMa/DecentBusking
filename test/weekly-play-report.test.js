@@ -71,6 +71,23 @@ test('weekly votes reset at UTC Monday while lifetime totals and historic weeks 
   assert.equal(store.getWeeklyPlayReport('2026-W40').tracks[0].votes, 3);
 });
 
+test('New York payout buckets roll four hours after UTC midnight without deleting either history or totals', async (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'jukeloop-ny-payroll-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(temp, { recursive: true, force: true }); });
+  const store = await import(`${storeModule}?ny=${Date.now()}`);
+  store.loadPlaylist([{ trackId: 'song', title: 'Song', uploader: 'Artist', plays: 100, likes: 10, dislikes: 0 }]);
+  for (const [playId, endedAt] of [['sunday', '2026-10-12T03:59:00Z'], ['monday', '2026-10-12T04:01:00Z']]) {
+    store.recordAudiblePlay('song', { playId, startedAt: Date.parse(endedAt) - 60000, endedAt: Date.parse(endedAt), audibleMs: 60000 });
+    store.applySiteVote('song', 1, { now: Date.parse(endedAt) });
+  }
+  const reports = store.getWeeklyPlayHistory({ weeks: 2, calendar: 'new-york', now: Date.parse('2026-10-12T05:00:00Z') });
+  assert.deepEqual(reports.map(report => [report.week, report.totalPlays, report.tracks[0].votes]), [['NY-2026-10-05', 1, 1], ['NY-2026-10-12', 1, 1]]);
+  assert.equal(store.getAllTimePlayReport().totalPlays, 102);
+  assert.equal(store.getAllTimePlayReport().tracks[0].likes, 12);
+  assert.equal(store.getWeeklyPlayReport('2026-W42').totalPlays, 2);
+});
+
 test('first-week track gets one extra spaced slot and consumes its bonus only after qualifying', async (t) => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'jukeloop-boost-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');

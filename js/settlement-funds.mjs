@@ -77,6 +77,52 @@ export async function createConfiguredSettlementFund({ router, signer, owner, fu
 
 export const BASE_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
+export async function recoverSettlementUsdc({ router, token, signer, owner, fundId, amountUnits, onStage = () => {}, onBroadcast = () => {} }) {
+  if (!signer?.provider) throw new Error('Connect the owner wallet first');
+  if (typeof amountUnits !== 'bigint' || amountUnits <= 0n) throw new Error('Enter a positive USDC recovery amount');
+  if (!/^0x[0-9a-fA-F]{64}$/.test(fundId || '') || /^0x0{64}$/.test(fundId)) throw new Error('Invalid fund ID');
+  const address = await signer.getAddress();
+  if (!owner || address.toLowerCase() !== owner.toLowerCase()) throw new Error('Recover only to the configured owner wallet');
+  if (Number((await signer.provider.getNetwork()).chainId) !== 8453) throw new Error('Fund recovery is Base-only');
+  if (token.target.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase() || Number(await token.decimals()) !== 6) throw new Error('Recovery supports native Base USDC only');
+  const code = await signer.provider.getCode(router.target);
+  if (!code || code === '0x') throw new Error('Settlement router is not deployed');
+  if (!await router.hasRole(await router.DEFAULT_ADMIN_ROLE(), address)) throw new Error('DEFAULT_ADMIN_ROLE is required to recover funds');
+  const fund = await router.funds(fundId);
+  if (!(fund.exists ?? fund[2])) throw new Error('Selected fund does not exist');
+  if (await router.fundBalances(fundId, token.target) < amountUnits) throw new Error('Recovery exceeds the selected fund balance');
+  if (await token.balanceOf(router.target) < amountUnits) throw new Error('Router has insufficient actual USDC');
+  await router.recoverFund.staticCall(fundId, token.target, address, amountUnits);
+  onStage();
+  const transaction = await router.recoverFund(fundId, token.target, address, amountUnits);
+  onBroadcast(transaction.hash);
+  const receipt = await transaction.wait();
+  if (receipt?.status !== 1) throw new Error('Recovery was not confirmed successfully; check its receipt before retrying');
+  verifySettlementRecoveryReceipt({ receipt, router, token, owner: address, fundId, amountUnits });
+  return { txHash: transaction.hash, recipient: address };
+}
+
+export function verifySettlementRecoveryReceipt({ receipt, router, token, owner, fundId, amountUnits }) {
+  if (receipt?.status !== 1) throw new Error('A successful recovery receipt is required');
+  let recovered = false;
+  let transferred = false;
+  for (const log of receipt.logs || []) {
+    try {
+      if (log.address.toLowerCase() === router.target.toLowerCase()) {
+        const event = router.interface.parseLog(log);
+        if (event?.name === 'FundRecovered' && event.args.fundId === fundId && event.args.asset.toLowerCase() === token.target.toLowerCase() &&
+            event.args.recipient.toLowerCase() === owner.toLowerCase() && event.args.amount === amountUnits) recovered = true;
+      }
+      if (log.address.toLowerCase() === token.target.toLowerCase()) {
+        const event = token.interface.parseLog(log);
+        if (event?.name === 'Transfer' && event.args.from.toLowerCase() === router.target.toLowerCase() &&
+            event.args.to.toLowerCase() === owner.toLowerCase() && event.args.value === amountUnits) transferred = true;
+      }
+    } catch {}
+  }
+  if (!recovered || !transferred) throw new Error('Receipt does not prove the exact selected-fund recovery and USDC transfer; recovery remains locked');
+}
+
 export async function depositSettlementUsdc({ router, token, signer, owner, fundId, amountUnits, onStep = () => {}, onStage = () => {}, onBroadcast = () => {} }) {
   if (typeof amountUnits !== 'bigint' || amountUnits <= 0n) throw new Error('Enter a positive USDC amount');
   if (!/^0x[0-9a-fA-F]{64}$/.test(fundId || '') || /^0x0{64}$/.test(fundId)) throw new Error('Invalid fund ID');
