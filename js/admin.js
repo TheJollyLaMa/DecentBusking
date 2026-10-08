@@ -6,7 +6,7 @@
 // The panel is opened by dispatching a custom "open-admin" DOM event (wired up
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
-import { fetchMintQueue, clearMintQueueAuthorization } from './admin-mint-queue.js?v=20261005-shared-wallet';
+import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork } from './admin-mint-queue.js?v=20261008-artwork-options';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261005-mp4';
@@ -33,6 +33,9 @@ let _mintQueue = [];
 let _mintBusy = false;
 let _adminOpen = false;
 let _walletCheckId = 0;
+const _artworkPreviewUrls = new Map();
+const _artworkPreviewGenerations = new Map();
+let _artworkPreviewId = 0;
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -65,6 +68,9 @@ document.addEventListener('DOMContentLoaded', () => {
   _mintQueueEl?.addEventListener('click', (event) => {
     const button = event.target.closest('.admin-mint-one');
     if (button) _processQueue([Number(button.dataset.index)]);
+  });
+  _mintQueueEl?.addEventListener('change', event => {
+    if (event.target.matches('.admin-artwork, .admin-artwork-cid')) _updateArtworkPreview(Number(event.target.dataset.index));
   });
 
   // Close on backdrop click
@@ -209,6 +215,10 @@ function _resetAdminWallet() {
   }
 
   function _renderMintQueue() {
+    ++_artworkPreviewId;
+    _artworkPreviewGenerations.clear();
+    for (const url of _artworkPreviewUrls.values()) URL.revokeObjectURL(url);
+    _artworkPreviewUrls.clear();
     if (!_mintQueueEl) return;
     if (_mintQueue.length === 0) {
       _mintQueueEl.innerHTML = '<div class="admin-mint-empty">No pending NFT requests.</div>';
@@ -219,14 +229,18 @@ function _resetAdminWallet() {
       <div class="admin-mint-request">
         <input class="admin-mint-check" type="checkbox" data-index="${index}" aria-label="Select ${_esc(track.title)}" />
         <div>
-          ${track.artworkCid ? `<img class="admin-artwork-preview" src="${_esc(_gatewayUrl(track.artworkCid))}" alt="Artwork for ${_esc(track.title)}" />` : ''}
+          <img class="admin-artwork-preview" data-index="${index}" ${track.artworkCid ? `src="${_esc(_gatewayUrl(track.artworkCid))}"` : 'hidden'} alt="Artwork for ${_esc(track.title)}" />
           <strong>${_esc(track.title)}</strong>
           <span>by ${_esc(track.uploader)} · ${_esc(track.requestedAt ? new Date(track.requestedAt).toLocaleString() : '')}</span>
           <span>${_esc(track.recipient)}</span>
           <a href="${_esc(_gatewayUrl(track.ipfsCid))}" target="_blank" rel="noopener noreferrer">Open ${track.mediaType === 'video/mp4' ? 'video' : 'audio'}</a>
-          <label class="admin-artwork-label">${track.artworkCid ? 'Replace artwork' : 'Optional artwork'}
+          <label class="admin-artwork-label">${track.artworkCid ? 'Replace default artwork (up to 10 MB)' : 'Choose artwork (up to 10 MB)'}
             <input class="admin-artwork" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-index="${index}" />
           </label>
+          <label class="admin-artwork-label">Image / GIF file CID (optional, including files over 10 MB)
+            <input class="admin-artwork-cid" type="text" maxlength="160" placeholder="bafy... or ipfs://..." data-index="${index}" />
+          </label>
+          <span class="admin-artwork-status" data-index="${index}" role="status">${track.artworkCid ? 'Queued artwork is selected by default. Leave both fields empty to keep it.' : 'No default image available; select artwork before minting.'}</span>
         </div>
         <button class="admin-btn admin-btn-secondary admin-mint-one" type="button" data-index="${index}">Mint</button>
       </div>
@@ -242,6 +256,31 @@ function _resetAdminWallet() {
       return;
     }
     _processQueue(selected);
+  }
+
+  async function _updateArtworkPreview(index) {
+    const track = _mintQueue[index];
+    if (!track || _mintBusy) return;
+    const generation = ++_artworkPreviewId;
+    _artworkPreviewGenerations.set(index, generation);
+    const image = _mintQueueEl.querySelector(`.admin-artwork-preview[data-index="${index}"]`);
+    const status = _mintQueueEl.querySelector(`.admin-artwork-status[data-index="${index}"]`);
+    try {
+      const file = _mintQueueEl.querySelector(`.admin-artwork[data-index="${index}"]`)?.files?.[0];
+      const cid = _mintQueueEl.querySelector(`.admin-artwork-cid[data-index="${index}"]`)?.value || '';
+      const uri = await resolveMintArtwork({ file, cid, defaultCid: track.artworkCid,
+        serviceUrl: window.DecentConfig?.ipfsUploadServiceUrl, upload: async value => {
+          const prior = _artworkPreviewUrls.get(index); if (prior) URL.revokeObjectURL(prior);
+          const url = URL.createObjectURL(value); _artworkPreviewUrls.set(index, url); return url;
+        } });
+      if (_artworkPreviewGenerations.get(index) !== generation) return;
+      image.src = uri.startsWith('ipfs://') ? _gatewayUrl(uri.slice(7)) : uri;
+      image.hidden = false;
+      status.textContent = file ? 'New upload preview; it will be pinned when you mint.' : cid ? 'IPFS image preview; no new file upload required.' : 'Queued default artwork selected.';
+    } catch (error) {
+      if (_artworkPreviewGenerations.get(index) !== generation) return;
+      status.textContent = error.message;
+    }
   }
 
   async function _processQueue(indices) {
@@ -282,11 +321,12 @@ function _resetAdminWallet() {
       origin: window.location.origin,
     });
 
-    let image = track.artworkCid ? `ipfs://${track.artworkCid}` : '';
-    if (artwork) {
-      _setMintStatus(`Uploading artwork for ${track.title}…`);
-      image = await upload(artwork);
-    }
+    const artworkCid = _mintQueueEl?.querySelector(`.admin-artwork-cid[data-index="${index}"]`)?.value || '';
+    const image = await resolveMintArtwork({ file: artwork, cid: artworkCid, defaultCid: track.artworkCid,
+      serviceUrl: cfg.ipfsUploadServiceUrl, upload: async file => {
+        _setMintStatus(`Uploading artwork for ${track.title}…`);
+        return upload(file);
+      } });
     const metadata = {
       name: track.title,
       description: `Shared through DecentJukebox by ${track.uploader}`,

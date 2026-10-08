@@ -1556,6 +1556,9 @@ decent-foot {
   border-radius: 4px;
 }
 
+.admin-artwork-label { display: grid; clear: both; gap: 6px; margin-top: 12px; font-size: .8rem; line-height: 1.4; }
+.admin-artwork-cid { box-sizing: border-box; min-width: 0; width: 100%; padding: 8px; color: var(--text-primary); background: #10121a; border: 1px solid var(--panel-border); border-radius: 4px; font: inherit; }
+
 .admin-mint-empty {
   color: var(--text-dim);
   text-align: center;

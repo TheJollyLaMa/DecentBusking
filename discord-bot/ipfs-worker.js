@@ -162,6 +162,12 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured' }, '*');
         return;
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/ipfs/artwork-cid') {
+        const value = requestUrl.searchParams.get('cid') || '';
+        if (!value || value.length > 160) throw new Error('Enter a valid image file CID');
+        sendJson(response, 200, { cid: normalizeMediaCid(value) }, '*');
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/radio') {
         if (!getRadioState) {
           sendJson(response, 404, { error: 'Radio is not configured' }, '*');

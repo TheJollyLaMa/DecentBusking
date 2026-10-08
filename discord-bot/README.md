@@ -206,6 +206,12 @@ Playback payroll uses qualified plays (completed Discord audio with at least 30 
 
 `GET /api/payroll/weekly` exposes the current New York period, closing time, funding/commitments, warnings and published closed-week receipts; `?wallet=0x...` filters provisional artist/song shares. The running worker prepares drafts every 15 seconds, using historical closing balances and current unreserved funds. IPFS schedule checkpoints are retained independently of playlist/payment snapshots. Defaults in `payroll-assets.json.radioPayflow`: 100% unreserved budget, 0.01 USDC minimum, 1 USDC average-share warning. It never signs payouts. Historical RPC or backup failure stops preparation; after downtime, older eligible periods are processed first. Use `calendar=new-york` on `/api/radio/history` for the new buckets; default UTC history is preserved.
 
+### NFT Artwork Defaults
+
+Discord NFT requests and `/jukebox submit` default to the submitting user's pinned Discord profile image, including an animated avatar when available. Existing custom artwork is preserved. Missing profile defaults on pending Discord requests are recovered when the private Admin queue is read. The Discord modal cannot prefill its native file upload with an existing avatar; the optional upload/CID fields replace the default, and the confirmation shows the selected image.
+
+Admin previews the queued image and supports PNG/JPEG/WebP/GIF uploads up to 10 MB or an existing image/GIF file CID with no upload-size cap. Choose one replacement source, not both. `/api/ipfs/artwork-cid` validates/normalizes a file CID; it does not fetch/pin the entire image or guarantee its availability/type. Larger GIFs may render slowly depending on gateway/browser resources. A website-only submission does not establish a Discord identity.
+
 ### Payment Proof Service
 
 `GET /api/payroll/ledger` exposes verified Base payments and IPFS snapshot status. Allowed browser origins can submit a transaction hash to `POST /api/payroll/reconcile`; the worker accepts only successful, canonical, twice-confirmed `PayrollPaid` events from the configured router and DecentBusking repository namespace. No signing key is held by the bot. A 15-second comparator discovers new events, rechecks saved proofs and retries pending backups. Tagged payment snapshots are retained independently of playlist snapshots. Radio state advertises this endpoint for DJuke/DBusk consumers.

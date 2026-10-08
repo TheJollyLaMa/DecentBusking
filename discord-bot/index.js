@@ -44,7 +44,7 @@ import { syncMintedTracksFromChain, createVerifiedMintQueueReader } from './mint
 import { createPinataStateStore } from './ipfs-state.js';
 import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
-import { createMintRequestInteractionHandler } from './mint-interactions.js';
+import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
 import { mediaTypeFor, normalizeMediaCid, MEDIA_TYPES, DISCORD_UPLOAD_MAX_BYTES, isDiscordAttachmentWithinLimit } from './media.js';
 import { fetchTrackList, createSession, getSession } from './radio.js';
 import {
@@ -206,7 +206,7 @@ async function pinDiscordAvatar(user, config) {
   const cacheKey = `${user.id}:${user.avatar || 'default'}`;
   if (_avatarCids.has(cacheKey)) return _avatarCids.get(cacheKey);
   try {
-    const response = await fetch(user.displayAvatarURL({ extension: 'png', size: 1024 }));
+    const response = await fetch(user.displayAvatarURL({ extension: user.avatar?.startsWith('a_') ? 'gif' : 'png', size: 1024 }), { signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const contentType = response.headers.get('content-type') || 'image/png';
     const extension = contentType.includes('gif') ? 'gif' : 'png';
@@ -541,7 +541,9 @@ async function main() {
       await waitForRemotePersistence();
       return track;
     },
-    getMintQueue: async () => (await getVerifiedMintRequests()).map((track) => ({
+    getMintQueue: async () => (await ensureDefaultMintArtwork({ requests: await getVerifiedMintRequests(),
+      getUser: userId => client?.users.fetch(userId).catch(() => null), getDefaultArtwork: user => pinDiscordAvatar(user, config),
+      requestTrackMint, waitForPersistence: waitForRemotePersistence })).map((track) => ({
       trackId: track.trackId,
       title: track.title,
       uploader: track.uploader,
@@ -827,10 +829,13 @@ async function handleJukeboxCommand(interaction, config) {
         title: interaction.options.getString('title', true).trim(), uploader: interaction.user.tag || interaction.user.username,
         uploaderId: interaction.user.id, pinStatus: 'pinned', ipfsCid };
       addTrack(track);
-      const queued = requestTrackMint(getTrackId(track), interaction.user.id, recipient);
+      const existing = getPlaylist().find(entry => entry.trackId === getTrackId(track));
+      const artworkCid = existing?.artworkCid || await pinDiscordAvatar(interaction.user, config);
+      if (!artworkCid) throw new Error('Could not archive your Discord profile image; retry or use Request NFT with custom artwork');
+      const queued = requestTrackMint(getTrackId(track), interaction.user.id, recipient, artworkCid);
       if (!queued) throw new Error('That file is already minted or cannot be queued');
       await waitForRemotePersistence();
-      await interaction.editReply(`Queued **${queued.title}** for owner approval. Track ID: \`${queued.trackId}\`. MP4 audio plays in voice; video plays on DecentBusking.`);
+      await interaction.editReply(`Queued **${queued.title}** for owner approval. Track ID: \`${queued.trackId}\`. Artwork: ${existing?.artworkCid ? 'existing image' : 'your Discord profile image'}. You can replace it with a 10 MB image upload or image/GIF CID in Admin. MP4 audio plays in voice; video plays on DecentBusking.`);
     } catch (error) {
       await interaction.editReply(`Submission failed: ${error.message}`);
     }

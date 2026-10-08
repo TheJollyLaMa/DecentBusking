@@ -2,7 +2,7 @@
 
 **A digital town square for music, direct artist support, and accountable community radio.**
 
-Version 0.2 | 8 October 2026 | Implementation-grounded working document
+Version 0.3 | 8 October 2026 | Implementation-grounded working document
 
 This paper describes the current DecentBusking implementation and its intended development direction. It is not an independent security audit, a rights licence, a token offering, or a promise of investment returns. Features marked as planned are not available merely because they appear here. Configuration and deployed software can change; source files and on-chain records should be checked when making operational decisions.
 
@@ -59,6 +59,8 @@ The value of Web3 here is verifiable transaction settlement and content-addresse
 ### Artist Submission And Archive
 
 The site accepts supported audio and MP4 files up to 50 MB, or an existing IPFS file CID. The Discord attachment flow is bounded at 10 MB. Artwork is optional. Site submissions and explicit NFT requests enter an owner-review queue; they do not automatically mint. Discord ingestion and radio discovery are separate from the NFT-request step.
+
+Discord NFT requests, including media-CID submissions, default to a pinned copy of the uploader's Discord profile image; animated profile images are retained when available. Admin previews the queued artwork and can replace it with PNG/JPEG/WebP/GIF up to 10 MB or an existing image/GIF file CID with no attachment-size cap. CID selection references an already-uploaded file rather than uploading it again; parsing the CID does not guarantee its image type, gateway availability, pin retention, or efficient rendering. Native file selectors cannot be prefilled with a profile image, so the preview shows the default separately. Website-only submissions do not establish a Discord identity and cannot infer its profile image.
 
 For approved requests, the owner registers a DecentNFT product and mints an edition directly to the chosen artist wallet. The archive reads minted tokens and their metadata from Base/IPFS. The current mint workflow uses separate registration and mint transactions, not an atomic multi-artist mint batch. MP4 playback is audio-only in Discord voice; the site can display synchronized video.
 
