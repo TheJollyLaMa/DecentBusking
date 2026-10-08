@@ -829,13 +829,16 @@ class DecentBuskingAboutModal extends HTMLElement {
               <div>
                 <p class="about-kicker">Listen · Loop · Busk</p>
                 <h1>${_esc(appName)}</h1>
-                <p class="about-hero-copy">A community listening room, a living 3D music timeline, and a path from shared track to on-chain music NFT.</p>
+                <p class="about-hero-copy">A community listening room, a 3D music archive, and direct artist support using Base and public IPFS.</p>
                 <div class="about-status-row"><span class="about-status">Base Mainnet</span><span class="about-status">IPFS · Pinata</span><span class="about-status">JukeLoop Radio</span></div>
               </div>
             </header>
 
             <div class="about-section">
               <h3>🎧 Make the loop</h3>
+              <p>Listen and explore without a wallet. Artists submit tracks for owner review; listeners can support the chosen artist wallet directly. This is a hybrid system: Discord and the operator run the radio, while Base records NFTs and treasury payments.</p>
+              <p>Minting does not itself transfer copyright. Public IPFS can be copied by others, and plays or votes do not guarantee income. Our whitepaper explains the architecture, current safeguards, and what is still planned.</p>
+              <p><a id="whitepaper-link" href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/WHITEPAPER.md" target="_blank" rel="noopener noreferrer">Read Full Whitepaper</a></p>
               <p>Upload audio or a video in <strong>#DecentJukebox</strong>, or use the guitar case on this site. Discord files can be up to 10 MB; the site supports uploads up to 50 MB or an existing IPFS file CID.</p>
               <p>After a Discord upload is pinned, click <strong>Request NFT</strong>. Confirm your Base wallet, then attach an image up to 10 MB or enter an IPFS image CID. Leave artwork blank to use your Discord profile image. The owner reviews every request before minting.</p>
             </div>
