@@ -7,6 +7,12 @@
     "playback": "dbusk-playback",
     "topTen": "dbusk-top10"
   },
+  "radioPayflow": {
+    "timeZone": "America/New_York",
+    "fundShareBps": 10000,
+    "minimumPayoutUnits": "10000",
+    "significantShareUnits": "1000000"
+  },
   "assets": {
     "ART": {
       "address": "0x44c4516768e47cd97cfF2561B81a74699F23f8Ec",

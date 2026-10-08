@@ -38,6 +38,23 @@ test('payment ledger is public but reconciliation requires an allowed origin and
   });
 });
 
+test('weekly payflow endpoint filters artists and New York history calendar is explicit', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const wallet = Wallet.createRandom().address;
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: wallet,
+    getWeeklyPayflow: options => ({ ready: true, timeZone: 'America/New_York', wallet: options.wallet }),
+    getRadioHistory: options => [{ calendar: options.calendar }] });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/payroll/weekly?wallet=${wallet}`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).wallet, wallet);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.equal((await fetch(`${base}/api/payroll/weekly?wallet=bad`)).status, 400);
+    const history = await (await fetch(`${base}/api/radio/history?calendar=new-york`)).json();
+    assert.equal(history.weeks[0].calendar, 'new-york');
+  });
+});
+
 test('worker issues a Pinata URL only for a fresh owner signature', async () => {
   const { buildUploadAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom();

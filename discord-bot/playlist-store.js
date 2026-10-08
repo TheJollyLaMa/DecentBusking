@@ -12,6 +12,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { currentPayrollPeriod, payrollPeriods } from '../js/payroll-week.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STORE_PATH = process.env.JUKELOOP_PLAYLIST_PATH || join(__dirname, 'jukeloop-playlist.json');
@@ -67,6 +68,7 @@ function _normalizePlaylist(playlist) {
     trackId: track.trackId || getTrackId(track),
     pinStatus: track.pinStatus || (track.ipfsCid ? 'pinned' : 'untracked'),
     mintStatus: track.mintStatus || 'unminted',
+    payrollTrackingStartedAt: track.payrollTrackingStartedAt || new Date().toISOString(),
   }));
 }
 
@@ -107,6 +109,7 @@ export function waitForRemotePersistence() {
 }
 
 function _save() {
+  for (const track of _playlist) track.payrollTrackingStartedAt ||= new Date().toISOString();
   try {
     writeFileSync(STORE_PATH, JSON.stringify(_playlist, null, 2), 'utf8');
   } catch (err) {
@@ -324,6 +327,9 @@ export function applyRating(trackId, newLikes, newDislikes, messageId, { initial
     const week = getUtcWeekKey(new Date(now));
     track.weeklyVotes ||= {};
     track.weeklyVotes[week] = (track.weeklyVotes[week] || 0) + delta;
+    const payrollWeek = currentPayrollPeriod(now).week;
+    track.payrollVotes ||= {};
+    track.payrollVotes[payrollWeek] = (track.payrollVotes[payrollWeek] || 0) + delta;
   }
   track.likes = Math.max(0, (track.likes || 0) + (legacy ? 0 : likes - (previous?.likes || 0)));
   track.dislikes = Math.max(0, (track.dislikes || 0) + (legacy ? 0 : dislikes - (previous?.dislikes || 0)));
@@ -342,6 +348,9 @@ export function applySiteVote(trackId, vote, { now = Date.now() } = {}) {
   const week = getUtcWeekKey(new Date(now));
   track.weeklyVotes ||= {};
   track.weeklyVotes[week] = (track.weeklyVotes[week] || 0) + vote;
+  const payrollWeek = currentPayrollPeriod(now).week;
+  track.payrollVotes ||= {};
+  track.payrollVotes[payrollWeek] = (track.payrollVotes[payrollWeek] || 0) + vote;
   _save();
   return track;
 }
@@ -402,6 +411,9 @@ export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audible
   if (track.recordedPlayIds.includes(playId)) return { counted: false, reason: 'duplicate' };
   track.weeklyPlays ||= {};
   track.weeklyPlays[week] = (track.weeklyPlays[week] || 0) + 1;
+  const payrollWeek = currentPayrollPeriod(endedAt).week;
+  track.payrollPlays ||= {};
+  track.payrollPlays[payrollWeek] = (track.payrollPlays[payrollWeek] || 0) + 1;
   track.plays = (track.plays || 0) + 1;
   if (announcementId) track.audibleMessageIds = [...new Set([...(track.audibleMessageIds || []), announcementId])].slice(-5000);
   track.weeklyPlayIds[week].push(playId);
@@ -463,7 +475,22 @@ export function getWeeklyPlayWeeks() {
   return [...new Set(_playlist.flatMap((track) => [...Object.keys(track.weeklyPlays || {}), ...Object.keys(track.weeklyVotes || {})]))].sort();
 }
 
-export function getWeeklyPlayHistory({ weeks = 12, now = Date.now(), wallet, includeAllTime = false } = {}) {
+export function getWeeklyPlayHistory({ weeks = 12, now = Date.now(), wallet, includeAllTime = false, calendar } = {}) {
+  if (calendar === 'new-york') {
+    const current = currentPayrollPeriod(now);
+    const history = payrollPeriods(weeks, now).map(period => {
+      const tracks = _playlist.filter(track => !wallet || track.mintRecipient?.toLowerCase() === wallet.toLowerCase())
+        .filter(track => (track.payrollPlays?.[period.week] || 0) > 0 || Boolean(track.payrollVotes?.[period.week]))
+        .map(track => ({ trackId: track.trackId, title: track.title, artist: track.uploader, wallet: track.mintRecipient || null,
+          uploadedAt: track.addedAt || null, plays: track.payrollPlays?.[period.week] || 0, votes: track.payrollVotes?.[period.week] || 0,
+          likes: track.likes || 0, dislikes: track.dislikes || 0 }));
+      const startedAt = _playlist.map(track => track.payrollTrackingStartedAt).filter(Boolean).sort()[0] || new Date(now).toISOString();
+      return { ...period, current: period.week === current.week, tracks, artists: [], accountingStartedAt: startedAt,
+        partial: Date.parse(startedAt) > Date.parse(period.startAt), totalPlays: tracks.reduce((sum, track) => sum + track.plays, 0), trackCount: tracks.length };
+    });
+    if (includeAllTime) history.push(getAllTimePlayReport({ wallet }));
+    return history;
+  }
   const current = getUtcWeekKey(new Date(now));
   const [year, weekNumber] = current.split('-W').map(Number);
   const monday = new Date(Date.UTC(year, 0, 4 + (weekNumber - 1) * 7));

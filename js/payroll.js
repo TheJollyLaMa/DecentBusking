@@ -22,7 +22,7 @@
 
 import { isAdminWallet } from './admin-access.mjs';
 import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt } from './radio-payroll.mjs';
-import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc } from './settlement-funds.mjs';
+import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -40,6 +40,8 @@ const ROUTER_ABI = [
   'function createFund(bytes32 fundId, string metadataUri)',
   'function paused() view returns (bool)',
   'function fundToken(bytes32 fundId, address asset, uint256 amount)',
+  'function recoverFund(bytes32 fundId, address asset, address recipient, uint256 amount)',
+  'event FundRecovered(bytes32 indexed fundId, address indexed asset, address indexed recipient, uint256 amount)',
   'event FundFunded(bytes32 indexed fundId, address indexed asset, address indexed funder, uint256 amount)',
   'function PAYROLL_ROLE() view returns (bytes32)',
   'function CONTRIBUTOR_ADMIN_ROLE() view returns (bytes32)',
@@ -55,6 +57,7 @@ const ROUTER_ABI = [
 const USDC_ABI = ['function decimals() view returns (uint8)', 'function balanceOf(address) view returns (uint256)',
   'function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)',
   'event Approval(address indexed owner, address indexed spender, uint256 value)'];
+USDC_ABI.push('event Transfer(address indexed from, address indexed to, uint256 value)');
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 
@@ -71,6 +74,9 @@ let _radioReviews = {};
 let _radioRecipientStates = new Map();
 let _recipientCheckId = 0;
 let _paymentSyncTask = null;
+let _weeklyPayflow = null;
+let _weeklyPayflowTask = null;
+let _weeklyHistoryRefreshedAt = 0;
 let _fundMetadataRevision = 0;
 const _customFundSlugs = new Set();
 
@@ -183,6 +189,70 @@ function _depositKey() {
   return `decentbusking:deposit:v1:${_payrollAssetConfig.routerAddress.toLowerCase()}:${_ownerAddress.toLowerCase()}:${_selectedFundSlug()}`;
 }
 
+function _recoveryKey() {
+  return `decentbusking:recovery:v1:8453:${_payrollAssetConfig.routerAddress.toLowerCase()}:${_ownerAddress.toLowerCase()}:${_selectedFundSlug()}`;
+}
+
+async function _recoverUsdc() {
+  const status = document.getElementById('router-recovery-status');
+  if (_settling || !isAdminWallet()) return;
+  let operationKey;
+  try {
+    const slug = _selectedFundSlug();
+    operationKey = _recoveryKey();
+    if (localStorage.getItem(operationKey) || localStorage.getItem(_depositKey())) throw new Error('Resolve the pending recovery or deposit receipt first');
+    const asset = _getAssetConfig('USDC');
+    if (!asset || asset.decimals !== 6) throw new Error('Native Base USDC is not configured');
+    const amountUnits = ethers.parseUnits(document.getElementById('router-recovery-amount').value || '0', 6);
+    if (amountUnits <= 0n) throw new Error('Enter a positive recovery amount');
+    if (!confirm(`Recover ${ethers.formatUnits(amountUnits, 6)} USDC from ${slug} to your owner wallet ${_ownerAddress}? This reduces the funds available for artist payouts.`)) return;
+    _settling = true;
+    document.getElementById('router-recover-usdc').disabled = true;
+    const signer = await _getSigner(BASE_CHAIN_ID);
+    const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
+    const token = new ethers.Contract(asset.address, USDC_ABI, signer);
+    const record = { owner: _ownerAddress, router: router.target, asset: token.target, fundId: ethers.id(slug), amountUnits: amountUnits.toString(), txHash: null };
+    _setStatus(status, 'Verify the owner destination and confirm the recovery in your wallet.');
+    const result = await recoverSettlementUsdc({ router, token, signer, owner: _ownerAddress, fundId: record.fundId, amountUnits,
+      onStage: () => localStorage.setItem(operationKey, JSON.stringify(record)),
+      onBroadcast: txHash => localStorage.setItem(operationKey, JSON.stringify({ ...record, txHash })) });
+    localStorage.removeItem(operationKey);
+    _setStatus(status, `Recovery confirmed to the owner wallet: ${result.txHash}`);
+    await _refreshRadioPayroll();
+  } catch (error) {
+    if (operationKey && ['ACTION_REJECTED', 4001].includes(error.code)) {
+      const record = JSON.parse(localStorage.getItem(operationKey) || 'null');
+      if (record && !record.txHash) localStorage.removeItem(operationKey);
+    }
+    _setStatus(status, `${error.message}. Check any unresolved recovery receipt before retrying.`, true);
+  } finally { _settling = false; await _refreshSettlementFund(); }
+}
+
+async function _checkRecoveryReceipt() {
+  const status = document.getElementById('router-recovery-status');
+  if (_settling || !isAdminWallet()) return;
+  try {
+    const key = _recoveryKey();
+    const record = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!record) throw new Error('No unresolved recovery is recorded for this fund');
+    const hash = document.getElementById('router-recovery-hash').value.trim() || record.txHash;
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash || '')) throw new Error('Enter the recovery transaction hash from wallet history');
+    const provider = new ethers.JsonRpcProvider(_payrollAssetConfig.rpcUrl, BASE_CHAIN_ID);
+    const receipt = await provider.getTransactionReceipt(hash);
+    if (!receipt) throw new Error('Recovery remains unresolved; do not resend');
+    if (receipt.status !== 1) {
+      if (!record.txHash || hash.toLowerCase() !== record.txHash.toLowerCase()) throw new Error('Failed receipt does not match the recorded recovery');
+    } else {
+      const router = new ethers.Contract(record.router, ROUTER_ABI, provider);
+      const token = new ethers.Contract(record.asset, USDC_ABI, provider);
+      verifySettlementRecoveryReceipt({ receipt, router, token, owner: record.owner, fundId: record.fundId, amountUnits: BigInt(record.amountUnits) });
+    }
+    localStorage.removeItem(key);
+    await _refreshSettlementFund(); await _refreshRadioPayroll();
+    _setStatus(status, receipt.status === 1 ? 'Exact USDC recovery verified. Do not send it again.' : 'Recorded recovery reverted; no recovery occurred.');
+  } catch (error) { _setStatus(status, error.message, true); }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function _esc(str) {
@@ -278,7 +348,7 @@ function _onWalletDisconnected() {
   _invalidateFundMetadata();
   _radioReviews = {};
   document.getElementById('radio-reviewed-receipts')?.replaceChildren();
-  for (const id of ['router-save-metadata', 'router-deposit-usdc', 'radio-payroll-finalize', 'radio-settle-playback', 'radio-settle-top10']) {
+  for (const id of ['router-recover-usdc', 'router-save-metadata', 'router-deposit-usdc', 'radio-payroll-finalize', 'radio-settle-playback', 'radio-settle-top10']) {
     const button = document.getElementById(id); if (button) button.disabled = true;
   }
   ++_routerRefreshId;
@@ -667,6 +737,7 @@ function _showSettleWorkflowHint(txHash) {
 }
 
 async function _refreshRadioPayroll() {
+  _weeklyHistoryRefreshedAt = Date.now();
   const select = document.getElementById('radio-payroll-week');
   const status = document.getElementById('radio-payroll-status');
   if (!select || !isAdminWallet()) return;
@@ -688,20 +759,25 @@ async function _refreshRadioPayroll() {
   try {
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service) throw new Error('Playback service is not configured');
-    const response = await fetch(`${service}/api/radio/history?weeks=12`, { cache: 'no-store' });
+    const response = await fetch(`${service}/api/radio/history?weeks=12&calendar=new-york`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`Playback history unavailable (${response.status})`);
     const history = await response.json();
     if (refreshId !== _radioRefreshId) return;
     _radioReports = (history.weeks || []).filter(report => report.week !== 'all-time');
+    for (const saved of Object.values(_reviewRecords())) {
+      if (saved?.allocation && !_radioReports.some(report => report.week === saved.allocation.week)) {
+        _radioReports.push({ week: saved.allocation.week, current: false, legacy: true, tracks: saved.allocation.entries });
+      }
+    }
     select.replaceChildren(..._radioReports.slice().reverse().map(report => {
       const option = document.createElement('option');
       option.value = report.week;
-      option.textContent = `${report.week}${report.current ? ' · current draft' : ' · completed week'}`;
+      option.textContent = `${report.week}${report.current ? ' · current estimate' : ' · completed'}${report.partial ? ' · partial migration week' : ''}${report.legacy ? ' · legacy receipt' : ''}`;
       return option;
     }));
     select.value = _radioReports.some(report => report.week === selectedWeek) ? selectedWeek
       : _radioReports.filter(report => !report.current && report.tracks?.length).at(-1)?.week || _radioReports.at(-1)?.week || '';
-    _setStatus(status, 'Preview ready. Finalize completed weeks for owner-reviewed settlement.');
+    _setStatus(status, 'New York weekly shares; payments still require owner wallet confirmation.');
     if (!_isRouterConfigured() || !_getAssetConfig('USDC')) throw new Error('Base USDC treasury configuration unavailable');
     const router = _readOnlyRouter();
     const asset = _getAssetConfig('USDC');
@@ -722,11 +798,79 @@ async function _refreshRadioPayroll() {
     document.getElementById('radio-gas-balance').textContent = `${ethers.formatEther(gas)} ETH`;
     document.getElementById('radio-playback-balance').textContent = playback.exists ? `${ethers.formatUnits(playback.available, asset.decimals)} USDC` : 'Fund not created';
     document.getElementById('radio-prize-balance').textContent = prizes.exists ? `${ethers.formatUnits(prizes.available, asset.decimals)} USDC` : 'Fund not created';
+    await _refreshWeeklyPayflow();
+    _applyScheduledBudgets();
     _loadRadioReviews();
     _previewRadioPayroll();
   } catch (error) {
     if (refreshId === _radioRefreshId) _setStatus(status, `${error.message}. Refresh before finalizing or settling.`, true);
   }
+}
+
+function _applyScheduledBudgets() {
+  const week = document.getElementById('radio-payroll-week')?.value;
+  const automatic = Boolean(week?.startsWith('NY-'));
+  for (const [category, id] of [['playback', 'radio-playback-budget'], ['top10', 'radio-prize-budget']]) {
+    const input = document.getElementById(id);
+    if (!input) continue;
+    input.readOnly = automatic;
+    if (automatic) {
+      const receipt = _weeklyPayflow?.allocations?.find(record => record.allocation.week === week && record.allocation.category === category);
+      const budget = receipt?.allocation.budgetUnits || (week === _weeklyPayflow?.currentPeriod.week ? _weeklyPayflow.funds?.[category]?.budgetUnits : '0') || '0';
+      input.value = ethers.formatUnits(budget, 6);
+    }
+  }
+  const minimum = document.getElementById('radio-minimum-payout');
+  if (minimum) { minimum.readOnly = automatic; if (automatic) minimum.value = ethers.formatUnits(_weeklyPayflow?.minimumPayoutUnits || '10000', 6); }
+}
+
+async function _refreshWeeklyPayflow() {
+  if (_weeklyPayflowTask || !isAdminWallet()) return _weeklyPayflowTask;
+  const status = document.getElementById('radio-weekly-schedule-status');
+  _weeklyPayflowTask = (async () => {
+    try {
+      const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+      const response = await fetch(`${service}/api/payroll/weekly`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error(`Weekly preparation unavailable (${response.status})`);
+      const state = await response.json();
+      if (!isAdminWallet()) return;
+      if (state.chainId !== BASE_CHAIN_ID || state.routerAddress?.toLowerCase() !== _payrollAssetConfig?.routerAddress.toLowerCase() || state.timeZone !== 'America/New_York') throw new Error('Weekly payflow does not match this Base router and New York schedule');
+      _weeklyPayflow = state;
+      const records = _reviewRecords();
+      for (const saved of state.allocations || []) {
+        validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress, assetAddress: _getAssetConfig('USDC').address, funds: _payrollAssetConfig.radioFunds });
+        if (saved.allocation.schemaVersion !== 3 || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(saved.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
+        const key = _reviewKey(saved.allocation.category, saved.allocation.week);
+        if (records[key] && records[key].metadataHash !== saved.metadataHash) throw new Error('A conflicting reviewed receipt exists; manual reconciliation required');
+        records[key] = saved;
+      }
+      localStorage.setItem('decentbusking:radio-payroll-reviews:v1', JSON.stringify(records));
+      const close = new Date(state.nextCloseAt).toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
+      _setStatus(status, !state.ready ? 'Weekly schedule restoring; no automatic payments.' :
+        `Next close: ${close} · ${(state.fundShareBps / 100).toFixed(0)}% of unreserved closing funds · ${state.partial ? 'partial first week; old totals retained' : 'New York weeks'}${state.backupPending ? ' · receipt backup pending' : ''}${state.lastError ? ` · ${state.lastError}` : ''}`, Boolean(state.lastError));
+      const target = document.getElementById('radio-funding-dashboard');
+      target?.replaceChildren();
+      for (const [category, fund] of Object.entries(state.funds || {})) {
+        const block = document.createElement('div'); block.className = 'payroll-funding-band';
+        const title = document.createElement('h4'); title.textContent = category === 'playback' ? 'Playback fund' : 'Top 10 prize fund';
+        const balance = BigInt(fund.balanceUnits);
+        const goal = BigInt(state.significantShareUnits) * BigInt(Math.max(1, fund.recipientCount || fund.estimatedShares?.length || 0));
+        const meter = document.createElement('meter'); meter.min = 0; meter.max = 100; meter.value = Number((balance < goal ? balance : goal) * 10000n / goal) / 100;
+        meter.setAttribute('aria-label', `${title.textContent}: balance toward ${ethers.formatUnits(goal, 6)} USDC significant-share target`);
+        const text = document.createElement('p');
+        text.textContent = `${ethers.formatUnits(balance, 6)} USDC balance · ${ethers.formatUnits(fund.reservedUnits, 6)} pending commitments · ${ethers.formatUnits(fund.availableUnits, 6)} unreserved · target ${ethers.formatUnits(goal, 6)} USDC`;
+        const warning = document.createElement('p'); warning.className = 'payroll-funding-warning'; warning.textContent = fund.warning || '';
+        block.append(title, meter, text, warning); target?.append(block);
+      }
+      _applyScheduledBudgets();
+      _loadRadioReviews();
+      _previewRadioPayroll();
+    } catch (error) {
+      _weeklyPayflow = null;
+      _setStatus(status, `${error.message}. New York payouts require a saved server-prepared receipt.`, true);
+    }
+  })().finally(() => { _weeklyPayflowTask = null; });
+  return _weeklyPayflowTask;
 }
 
 function _populateSettlementFunds() {
@@ -786,6 +930,8 @@ async function _refreshSettlementFund() {
   createButton.disabled = true;
   const depositButton = document.getElementById('router-deposit-usdc');
   if (depositButton) depositButton.disabled = true;
+  const recoverButton = document.getElementById('router-recover-usdc');
+  if (recoverButton) recoverButton.disabled = true;
   const saveButton = document.getElementById('router-save-metadata');
   if (saveButton) saveButton.disabled = true;
   _setStatus(status, 'Checking Base router and fund permissions...');
@@ -813,7 +959,13 @@ async function _refreshSettlementFund() {
     if (saveButton) saveButton.disabled = !allowed || exists || _settling || select.value !== CUSTOM_FUND_OPTION;
     createButton.disabled = !_routerCreateAllowed || _settling;
     const pendingDeposit = localStorage.getItem(_depositKey());
-    if (depositButton) depositButton.disabled = !exists || !active || _settling || Boolean(pendingDeposit);
+    const pendingRecovery = localStorage.getItem(_recoveryKey());
+    if (depositButton) depositButton.disabled = !exists || !active || _settling || Boolean(pendingDeposit || pendingRecovery);
+    if (recoverButton) recoverButton.disabled = !allowed || !exists || balance <= 0n || _settling || Boolean(pendingDeposit || pendingRecovery);
+    const recoveryOwner = document.getElementById('router-recovery-owner');
+    if (recoveryOwner) recoveryOwner.textContent = _ownerAddress || '';
+    const recoveryPending = document.getElementById('router-recovery-pending');
+    if (recoveryPending) recoveryPending.textContent = pendingRecovery ? 'Unresolved recovery. Check its receipt before another withdrawal or deposit.' : '';
     const pendingText = document.getElementById('router-deposit-pending');
     if (pendingText) pendingText.textContent = pendingDeposit ? 'A prior deposit/approval is unresolved. Check its receipt before sending again.' : '';
     _setStatus(status, exists ? 'Fund exists. USDC deposits and reviewed closed-week settlements are separate transactions.'
@@ -999,12 +1151,16 @@ function _renderRadioReviews() {
   const finalize = document.getElementById('radio-payroll-finalize');
   const positiveBudget = ['radio-playback-budget', 'radio-prize-budget'].some(id => Number(document.getElementById(id)?.value) > 0);
   if (finalize) finalize.disabled = !report || report.current || !positiveBudget || _settling;
+  if (finalize && report?.week.startsWith('NY-')) { finalize.disabled = true; finalize.textContent = 'Weekly allocations prepared automatically'; }
+  else if (finalize) finalize.textContent = 'Save Allocation & Review Recipients';
   for (const category of ['playback', 'top10']) {
     const button = document.getElementById(`radio-settle-${category}`);
     const saved = _radioReviews[category];
     const unpaid = saved?.allocation.entries.filter(entry => !_radioRecipientStates.get(entry.workReferenceText)?.paid) || [];
     const ready = saved && unpaid.length > 0 && unpaid.every(entry => _radioRecipientStates.get(entry.workReferenceText)?.approved);
     if (button) { button.disabled = !ready || _settling; button.textContent = `${category === 'playback' ? 'Playback' : 'Top 10'}: Pay ${unpaid.length} / Resume Batch`; }
+    if (button && report?.week.startsWith('NY-')) { button.hidden = !saved; if (!_weeklyPayflow?.ready || _weeklyPayflow.lastError) button.disabled = true; }
+    else if (button) button.hidden = false;
     if (!saved) {
       const empty = document.createElement('p'); empty.className = 'payroll-status';
       empty.textContent = `${category === 'playback' ? 'Playback' : 'Top 10'}: no saved allocation for ${report?.week || 'the selected week'}.`;
@@ -1046,7 +1202,8 @@ async function _finalizeRadioPayroll() {
   try {
     const report = _radioReports.find(entry => entry.week === document.getElementById('radio-payroll-week').value);
     const asset = _getAssetConfig('USDC');
-    if (!report || report.current || report.week === 'all-time') throw new Error('Select a completed UTC week');
+    if (!report || report.current || report.week === 'all-time') throw new Error('Select a completed week');
+    if (report.week.startsWith('NY-')) throw new Error('New York allocations are prepared automatically; use the published weekly receipt');
     if (!asset || asset.decimals !== 6) throw new Error('Native Base USDC is required');
     const minimumUnits = ethers.parseUnits(document.getElementById('radio-minimum-payout').value || '0', 6);
     const records = _reviewRecords();
@@ -1225,6 +1382,8 @@ function _previewRadioPayroll() {
 // ─── Initialise the payroll panel ─────────────────────────────────────────────
 
 export function initPayroll() {
+  document.getElementById('router-recover-usdc')?.addEventListener('click', _recoverUsdc);
+  document.getElementById('router-recovery-check')?.addEventListener('click', _checkRecoveryReceipt);
   document.getElementById('radio-receipt-import')?.addEventListener('change', event => _importRadioReceipt(event.target.files?.[0]));
   document.getElementById('router-deposit-usdc')?.addEventListener('click', _depositUsdc);
   document.getElementById('router-deposit-check')?.addEventListener('click', _checkPendingDeposit);
@@ -1272,6 +1431,7 @@ export function initPayroll() {
     document.getElementById('radio-playback-preview')?.replaceChildren();
     document.getElementById('radio-prize-preview')?.replaceChildren();
     _loadRadioReviews();
+    _applyScheduledBudgets();
     _previewRadioPayroll();
   });
   for (const id of ['radio-playback-budget', 'radio-prize-budget', 'radio-minimum-payout']) {
@@ -1285,6 +1445,8 @@ export function initPayroll() {
     if (!payrollOpen && !adminOpen) return;
     if (document.getElementById('radio-reviewed-receipts')?.contains(document.activeElement)) return;
     _syncPaymentLedger();
+    _refreshWeeklyPayflow();
+    if (payrollOpen && Date.now() - _weeklyHistoryRefreshedAt > 60000) _refreshRadioPayroll();
     if (payrollOpen) _checkRadioRecipients();
   }, 5000);
   const settleBtn   = document.getElementById('payroll-settle-all-btn');

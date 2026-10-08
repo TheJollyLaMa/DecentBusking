@@ -1,4 +1,5 @@
 import { BASE_USDC_ADDRESS } from './settlement-funds.mjs';
+import { payrollPeriodFromKey, PAYROLL_TIME_ZONE, overlappingUtcWeeks } from './payroll-week.mjs';
 
 const WALLET = /^0x[0-9a-fA-F]{40}$/;
 
@@ -64,27 +65,35 @@ export function previewTopTenPayroll({ tracks, budgetUnits, minimumUnits = 0n, r
 }
 
 export function radioWorkReferenceText({ week, category, wallet }) {
-  if (!/^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$/.test(week || '') || !['playback', 'top10'].includes(category) || !WALLET.test(wallet || '')) {
+  const ny = String(week || '').startsWith('NY-');
+  if (ny) payrollPeriodFromKey(week);
+  if ((!ny && !/^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$/.test(week || '')) || !['playback', 'top10'].includes(category) || !WALLET.test(wallet || '')) {
     throw new Error('Invalid radio payout identity');
   }
-  return `decentbusking:radio:v1:8453:${week}:${category}:${wallet.toLowerCase()}`;
+  return `decentbusking:radio:${ny ? 'v3' : 'v1'}:8453:${week}:${category}:${wallet.toLowerCase()}`;
 }
 
 export function finalizeRadioAllocation({ report, category, budgetUnits, minimumUnits, fundSlug, routerAddress, assetAddress, ranking = 'votes', now = Date.now() }) {
-  if (!report || report.current || report.week === 'all-time') throw new Error('Only a completed UTC week can be finalized');
+  if (!report || report.current || report.week === 'all-time') throw new Error('Only a completed week can be finalized');
   radioWorkReferenceText({ week: report.week, category, wallet: `0x${'1'.repeat(40)}` });
-  const [year, week] = report.week.split('-W').map(Number);
-  const monday = new Date(Date.UTC(year, 0, 4));
-  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7) + (week - 1) * 7);
-  const thursday = new Date(monday); thursday.setUTCDate(thursday.getUTCDate() + 3);
-  if (thursday.getUTCFullYear() !== year || now < monday.getTime() + 7 * 86400000) throw new Error('The selected UTC week has not completed');
+  const period = report.week.startsWith('NY-') ? payrollPeriodFromKey(report.week) : null;
+  if (period) {
+    if (now < Date.parse(period.endAt)) throw new Error('The selected New York week has not completed');
+  } else {
+    const [year, week] = report.week.split('-W').map(Number);
+    const monday = new Date(Date.UTC(year, 0, 4));
+    monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7) + (week - 1) * 7);
+    const thursday = new Date(monday); thursday.setUTCDate(thursday.getUTCDate() + 3);
+    if (thursday.getUTCFullYear() !== year || now < monday.getTime() + 7 * 86400000) throw new Error('The selected UTC week has not completed');
+  }
   if (!WALLET.test(routerAddress || '') || !WALLET.test(assetAddress || '') || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fundSlug || '')) throw new Error('Invalid settlement configuration');
   if (budgetUnits <= 0n) throw new Error('Set a positive reviewed budget');
   const plan = category === 'playback' ? previewPlaybackPayroll({ tracks: report.tracks, budgetUnits, minimumUnits })
     : previewTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking });
   const entries = plan.entries.filter(entry => entry.payable);
   if (!entries.length) throw new Error('No payouts meet the minimum threshold');
-  return { schemaVersion: 2, ranking: category === 'playback' ? 'qualified-plays' : ranking, station: 'decentbusking', chainId: 8453, category, week: report.week,
+  return { schemaVersion: period ? 3 : 2, ...(period ? { timeZone: PAYROLL_TIME_ZONE, startAt: period.startAt, endAt: period.endAt, partial: Boolean(report.partial) } : {}),
+    ranking: category === 'playback' ? 'qualified-plays' : ranking, station: 'decentbusking', chainId: 8453, category, week: report.week,
     routerAddress, assetAddress, fundSlug, budgetUnits: budgetUnits.toString(), minimumUnits: minimumUnits.toString(),
     allocatedUnits: plan.allocatedUnits.toString(), remainderUnits: plan.remainderUnits.toString(),
     finalizedAt: new Date(now).toISOString(),
@@ -120,6 +129,12 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     reviewedTotal += BigInt(entry.amountUnits);
     const workReference = hashReference(identity);
     if (await router.completedWorkReferences(workReference)) continue;
+    if (allocation.schemaVersion === 3) {
+      for (const legacyWeek of overlappingUtcWeeks(payrollPeriodFromKey(allocation.week))) {
+        const legacy = radioWorkReferenceText({ week: legacyWeek, category: allocation.category, wallet: entry.wallet });
+        if (await router.completedWorkReferences(hashReference(legacy))) throw new Error('A paid legacy UTC receipt overlaps this New York period; manual reconciliation required');
+      }
+    }
     const recipient = await router.contributors(entry.wallet);
     if (!(recipient.approved ?? recipient[1])) throw new Error(`Recipient ${entry.wallet} is not approved on the shared router`);
     unpaid.push({ ...entry, workReference });
@@ -143,11 +158,15 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
 }
 
 export function validateRadioReceipt(allocation, { routerAddress, assetAddress, funds }) {
-  if (!allocation || ![1, 2].includes(allocation.schemaVersion) || allocation.chainId !== 8453 ||
+  if (!allocation || ![1, 2, 3].includes(allocation.schemaVersion) || allocation.chainId !== 8453 ||
       !['playback', 'top10'].includes(allocation.category) || allocation.station !== 'decentbusking' ||
       allocation.routerAddress?.toLowerCase() !== routerAddress.toLowerCase() || allocation.assetAddress?.toLowerCase() !== assetAddress.toLowerCase() ||
       allocation.fundSlug !== (allocation.category === 'playback' ? funds.playback : funds.topTen)) throw new Error('Receipt does not match this station, fund, asset, and router');
   if (!Array.isArray(allocation.entries) || !allocation.entries.length || allocation.entries.length > 1000) throw new Error('Invalid receipt entries');
+  if (allocation.schemaVersion === 3) {
+    const period = payrollPeriodFromKey(allocation.week);
+    if (allocation.timeZone !== PAYROLL_TIME_ZONE || allocation.startAt !== period.startAt || allocation.endAt !== period.endAt) throw new Error('Receipt payroll timezone or boundaries do not match');
+  } else if (String(allocation.week).startsWith('NY-')) throw new Error('New York receipts require the new payroll schema');
   finalizeRadioAllocation({ report: { week: allocation.week, current: false,
     tracks: allocation.entries },
     category: allocation.category, budgetUnits: BigInt(allocation.budgetUnits), minimumUnits: BigInt(allocation.minimumUnits),

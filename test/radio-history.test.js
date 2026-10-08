@@ -18,6 +18,7 @@ class Node {
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.text = ''; this.children = children; }
   addEventListener(name, callback) { this.listeners.set(name, callback); }
+  setAttribute(name, value) { this[name] = value; }
   showModal() { this.open = true; }
   close() { this.open = false; }
 }
@@ -27,7 +28,7 @@ const walletB = `0x${'2'.repeat(40)}`;
 const week = { week: '2026-W41', current: true, totalPlays: 7, trackCount: 1,
   tracks: [{ title: 'Song A', artist: 'Artist A', uploadedAt: '2026-10-01T00:00:00Z', plays: 7, likes: 12, dislikes: 2 }] };
 
-function historyPage(fetchImpl) {
+function historyPage(fetchImpl, funding) {
   const nodes = new Map();
   const node = id => {
     if (!nodes.has(id)) nodes.set(id, new Node());
@@ -36,7 +37,8 @@ function historyPage(fetchImpl) {
   const events = new Map();
   node('radio-history-dialog').querySelector = () => node('note');
   const window = { _wallet: { address: walletA }, DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example' } };
-  const context = vm.createContext({ window, URLSearchParams, fetch: fetchImpl,
+  const context = vm.createContext({ window, URLSearchParams, AbortSignal, setInterval: () => {}, fetch: url => new URL(url).pathname === '/api/payroll/weekly'
+    ? Promise.resolve({ ok: Boolean(funding), json: async () => funding || {} }) : fetchImpl(url),
     document: { getElementById: node, createElement: () => new Node(),
       addEventListener: (name, callback) => events.set(name, callback) } });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/radio-history.js'), 'utf8'), context);
@@ -108,6 +110,20 @@ test('personal tally defaults to historical all-time plays and preserves weekly 
   page.node('radio-history-week').value = week.week;
   page.node('radio-history-week').listeners.get('change')();
   assert.match(page.node('radio-history-content').textContent, /0 qualifying plays/);
+});
+
+test('My Playbacks funding panel shows provisional wallet/song shares without a redeem promise', async () => {
+  const state = { ready: true, chainId: 8453, timeZone: 'America/New_York', currentPeriod: { week: 'NY-2026-10-05' },
+    nextCloseAt: '2026-10-12T04:00:00Z', funds: { playback: { balanceUnits: '10000000', availableUnits: '10000000', budgetUnits: '10000000',
+      warning: '', estimatedShares: [{ wallet: walletA, amountUnits: '2500000', payable: true }] } },
+    currentSongs: [{ title: 'Song A', plays: 7, votes: 3, estimatedPlaybackUnits: '2500000' }] };
+  const page = historyPage(async () => ({ ok: true, json: async () => ({ weeks: [week] }) }), state);
+  await page.open('personal');
+  await Promise.resolve(); await Promise.resolve();
+  assert.match(page.node('radio-history-rewards').textContent, /10 USDC in the fund/);
+  assert.match(page.node('radio-history-rewards').textContent, /2.5 USDC estimated artist share \(25%\)/);
+  assert.match(page.node('radio-history-rewards').textContent, /not accrued debt or a claimable balance/);
+  assert.match(page.node('radio-history-rewards').textContent, /Song A: 7 New York-week plays/);
 });
 
 test('a late personal response cannot overwrite public totals or reopen disconnected data', async () => {

@@ -244,11 +244,8 @@
       <h2 id="radio-history-title">Playback Tally</h2>
       <button id="radio-history-close" type="button" aria-label="Close playback tally">✕</button>
     </header>
-    <p class="radio-history-note">Completed Discord plays with at least 30 audible seconds · UTC weeks</p>
-    <dl id="radio-history-rewards" hidden>
-      <dt>Redeemable tokens</dt>
-      <dd>Not configured</dd>
-    </dl>
+    <p class="radio-history-note">Completed Discord plays with at least 30 audible seconds · New York payout weeks</p>
+    <section id="radio-history-rewards" aria-label="Current weekly funding and provisional artist shares" hidden></section>
     <div class="radio-history-filters">
       <label>Song <input id="radio-history-search" type="search" placeholder="Search songs" /></label>
       <label>Artist <select id="radio-history-artist"><option value="">All artists</option></select></label>
@@ -371,21 +368,33 @@
         <p id="router-deposit-pending" class="payroll-status"></p>
         <div class="radio-payroll-controls"><label>Unresolved/replacement transaction hash<input id="router-deposit-recovery-hash" type="text" placeholder="0x... · optional if hash already recorded" /></label></div>
         <button id="router-deposit-check" class="payroll-btn payroll-btn-secondary" type="button">Check Pending Deposit Receipt</button>
+        <details class="payroll-recovery">
+          <summary>Recover USDC to Owner Wallet</summary>
+          <p id="router-recovery-owner" class="payroll-status"></p>
+          <div class="radio-payroll-controls"><label>USDC recovery amount<input id="router-recovery-amount" type="number" min="0" step="0.01" value="0" /></label></div>
+          <button id="router-recover-usdc" class="payroll-btn payroll-btn-secondary" type="button" disabled>Recover USDC to Owner</button>
+          <p id="router-recovery-status" class="payroll-status" role="status"></p>
+          <p id="router-recovery-pending" class="payroll-status"></p>
+          <div class="radio-payroll-controls"><label>Unresolved/replacement recovery hash<input id="router-recovery-hash" type="text" placeholder="0x..." /></label></div>
+          <button id="router-recovery-check" class="payroll-btn payroll-btn-secondary" type="button">Check Recovery Receipt</button>
+        </details>
       </details>
 
       <section class="payroll-section" aria-labelledby="weekly-payroll-title">
         <h3 id="weekly-payroll-title">Weekly Artist Payments</h3>
+        <p id="radio-weekly-schedule-status" class="payroll-status" role="status">Monday 00:00 America/New_York. Preparing weekly shares does not send payments.</p>
+        <div id="radio-funding-dashboard"></div>
         <h4 id="playback-payroll-title">Playback Payroll</h4>
         <div class="radio-payroll-controls">
-          <label>UTC week<select id="radio-payroll-week"></select></label>
+          <label>New York week<select id="radio-payroll-week"></select></label>
           <label>Playback budget (USDC)<input id="radio-playback-budget" type="number" min="0" step="0.01" value="0" /></label>
-          <label>Minimum payout (USDC)<input id="radio-minimum-payout" type="number" min="0" step="0.01" value="1" /></label>
+          <label>Minimum payout (USDC)<input id="radio-minimum-payout" type="number" min="0" step="0.01" value="0.01" /></label>
         </div>
         <div class="radio-payroll-actions">
           <button id="radio-payroll-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Treasury &amp; Plays</button>
           <button id="radio-payroll-preview" class="payroll-btn payroll-btn-primary" type="button">Preview Allocation</button>
         </div>
-        <p id="radio-payroll-status" class="payroll-status" role="status">Preview live weeks; finalize completed weeks before settlement.</p>
+        <p id="radio-payroll-status" class="payroll-status" role="status">Current shares are estimates. Published closed-week receipts require owner-authorized payments.</p>
         <dl class="payroll-allocation"><dt>Base gas balance</dt><dd id="radio-gas-balance">Not loaded</dd><dt>Playback fund USDC</dt><dd id="radio-playback-balance">Not loaded</dd></dl>
         <div id="radio-playback-preview" class="radio-payroll-preview"></div>
         <h4 id="top-ten-payroll-title">Top 10 Vote Prizes</h4>
@@ -466,10 +475,10 @@
   <!-- Admin role-grant panel -->
   <script type="module" src="js/admin.js?v=20261007-payment-ledger"></script>
 
-  <script type="module" src="js/payroll.js?v=20261007-payment-workspace"></script>
-  <script type="module" src="js/radio-history.js?v=20261006-all-time-tally"></script>
+  <script type="module" src="js/payroll.js?v=20261008-ny-recovery-payflow"></script>
+  <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261007-payment-workspace';
+    import { initPayroll } from './js/payroll.js?v=20261008-ny-recovery-payflow';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

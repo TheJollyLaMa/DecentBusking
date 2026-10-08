@@ -14,12 +14,52 @@ let fromInput;
 let toInput;
 let rewardsEl;
 let requestId = 0;
+let fundingRequestId = 0;
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text != null) node.textContent = text;
   return node;
+}
+
+function usdc(units) {
+  const value = BigInt(units || '0');
+  const fraction = (value % 1000000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return `${value / 1000000n}${fraction ? `.${fraction}` : ''}`;
+}
+
+async function loadArtistFunding(service, currentRequest, address, showLoading = true) {
+  if (!rewardsEl || mode !== 'personal') return;
+  const fundingRequest = ++fundingRequestId;
+  if (showLoading) rewardsEl.replaceChildren(element('p', '', 'Loading current-week funding estimates...'));
+  try {
+    const response = await fetch(`${service}/api/payroll/weekly?${new URLSearchParams({ wallet: address })}`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+    const state = await response.json();
+    if (currentRequest !== requestId || fundingRequest !== fundingRequestId || mode !== 'personal' || window._wallet?.address?.toLowerCase() !== address.toLowerCase()) return;
+    if (!response.ok || !state.ready || state.chainId !== 8453 || state.timeZone !== 'America/New_York' || state.lastError) throw new Error(state.lastError || 'Funding estimates are not available yet');
+    rewardsEl.replaceChildren(element('h3', '', `Current New York week: ${state.currentPeriod.week}`),
+      element('p', '', `Closes ${new Date(state.nextCloseAt).toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' })}`));
+    for (const [category, fund] of Object.entries(state.funds || {})) {
+      const title = category === 'playback' ? 'Playback' : 'Top 10 prizes';
+      const share = fund.estimatedShares.find(entry => entry.wallet.toLowerCase() === address.toLowerCase());
+      const amount = BigInt(share?.amountUnits || '0');
+      const budget = BigInt(fund.budgetUnits);
+      const percentage = budget ? Number(amount * 10000n / budget) / 100 : 0;
+      const band = element('div', 'payroll-funding-band');
+      const meter = element('meter'); meter.min = 0; meter.max = 100; meter.value = percentage;
+      meter.setAttribute('aria-label', `${title}: your estimated ${percentage}% share of the unreserved budget`);
+      band.append(element('h4', '', title), element('p', '', `${usdc(fund.balanceUnits)} USDC in the fund; ${usdc(fund.availableUnits)} unreserved`),
+        meter, element('p', '', `${usdc(amount)} USDC estimated artist share (${percentage}%)${share && !share.payable ? ' - below payout minimum; held' : ''}`));
+      if (fund.warning) band.append(element('p', 'payroll-funding-warning', fund.warning));
+      rewardsEl.append(band);
+    }
+    for (const song of state.currentSongs || []) rewardsEl.append(element('p', 'radio-history-note',
+      `${song.title}: ${song.plays} New York-week plays; ${song.votes} net votes; ${usdc(song.estimatedPlaybackUnits)} USDC indicative playback contribution`));
+    rewardsEl.append(element('p', 'radio-history-note', `${state.partial ? 'Partial migration week. ' : ''}Provisional estimates, not accrued debt or a claimable balance. Shares change with activity, deposits, recoveries and earlier unpaid allocations. Owner reviews and pays after close. The tally period below is separate.`));
+  } catch (error) {
+    if (currentRequest === requestId && fundingRequest === fundingRequestId && mode === 'personal') rewardsEl.replaceChildren(element('p', 'radio-history-note', `${error.message}. Song totals remain available.`));
+  }
 }
 
 function renderWeek() {
@@ -130,6 +170,7 @@ async function openHistory(event) {
     if (!service) throw new Error('Playback tally service is not configured');
     if (mode === 'personal' && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Connect your wallet to view My Playback Tally.');
     const query = new URLSearchParams({ weeks: '12', includeAllTime: '1' });
+    query.set('calendar', 'new-york');
     if (wallet) query.set('wallet', wallet);
     const response = await fetch(`${service}/api/radio/history?${query}`, { cache: 'no-store' });
     const result = await response.json();
@@ -148,6 +189,7 @@ async function openHistory(event) {
     }
     weekSelect.value = (reports.find(report => report.week === 'all-time') || reports.at(-1)).week;
     renderWeek();
+    if (mode === 'personal') await loadArtistFunding(service, currentRequest, wallet);
   } catch (error) {
     if (currentRequest === requestId) content.textContent = error.message;
   }
@@ -165,6 +207,11 @@ function init() {
   toInput = document.getElementById('radio-history-to');
   rewardsEl = document.getElementById('radio-history-rewards');
   if (!dialog || !weekSelect || !content) return;
+  setInterval(() => {
+    if (!dialog.open || mode !== 'personal' || !wallet) return;
+    const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+    if (service) loadArtistFunding(service, requestId, wallet, false);
+  }, 15000);
   document.addEventListener('open-radio-history', openHistory);
   document.addEventListener('wallet-connected', () => {
     if (dialog.open && mode === 'personal') openHistory({ detail: { mode: 'personal' } });
