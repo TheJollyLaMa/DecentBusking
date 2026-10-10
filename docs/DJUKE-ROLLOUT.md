@@ -1,8 +1,9 @@
 # DJuke and DNft rollout
 
-Status: core rollout and listen PRs are merged. The optional community-pin UI and
-the final pinner-fund allocation are local, unpushed changes. No contracts are
-deployed, no album tracks imported or minted, and DJuke payments remain off.
+Status: core rollout and listen PRs are merged. Community pinning follow-up is in
+PR #110 and the final 8/2/90 contract allocation is in DecentMarket PR #49. No
+contracts are deployed, no album tracks imported or minted, and DJuke payments
+remain off.
 
 ## Go-live checklist (you enter keys and execute)
 
@@ -34,8 +35,8 @@ the on-chain steps (3, 4, 6), which cost Base gas.
    batches of 25. Watch for `[djuke] Registered` in the logs. The admin-only
    `configure:djuke:base` script remains for changing an existing song's payees.
 7. **Open payments.** Set `DJUKE_PAYMENTS_ENABLED=true` on Render. Each payment
-    splits 90% to artists, 8% to pinners and 2% to repo-dev. A 0.25 USDC bump/listen
-    sends 0.225 / 0.020 / 0.005 USDC. Confirm all three router balances.
+  splits 90% to artists, 8% to pinners and 2% to repo-dev. A 0.25 USDC bump/listen
+  sends 0.225 / 0.020 / 0.005 USDC. Confirm all three router balances.
 8. **Batch minting (optional, later).** Switch `contractAddress` to the v0.3 address,
    move the old address into `additionalNftContractAddresses`, set
    `DECENT_NFT_CONTRACT_ADDRESS` and `DECENT_NFT_ADDITIONAL_ADDRESSES` on Render, and
