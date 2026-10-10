@@ -29,6 +29,31 @@ function usdc(units) {
   return `${value / 1000000n}${fraction ? `.${fraction}` : ''}`;
 }
 
+function renderFundingTable(rows, headers, className) {
+  const table = element('table', `radio-history-table radio-history-funding-table ${className}`);
+  const head = element('thead');
+  const headerRow = element('tr');
+  for (const label of headers) headerRow.append(element('th', '', label));
+  head.append(headerRow);
+  const body = element('tbody');
+  if (!rows.length) {
+    const row = element('tr');
+    const cell = element('td', 'radio-history-empty', 'No eligible songs recorded for this New York week yet.');
+    cell.setAttribute('colspan', String(headers.length));
+    row.append(cell); body.append(row);
+  } else {
+    for (const values of rows) {
+      const row = element('tr');
+      for (const [index, value] of values.entries()) row.append(element('td', index > 0 ? 'radio-history-number' : '', value));
+      body.append(row);
+    }
+  }
+  table.append(head, body);
+  const scroll = element('div', 'radio-history-table-scroll');
+  scroll.append(table);
+  return scroll;
+}
+
 async function loadArtistFunding(service, currentRequest, address, showLoading = true) {
   if (!rewardsEl || mode !== 'personal') return;
   const fundingRequest = ++fundingRequestId;
@@ -38,25 +63,26 @@ async function loadArtistFunding(service, currentRequest, address, showLoading =
     const state = await response.json();
     if (currentRequest !== requestId || fundingRequest !== fundingRequestId || mode !== 'personal' || window._wallet?.address?.toLowerCase() !== address.toLowerCase()) return;
     if (!response.ok || !state.ready || state.chainId !== 8453 || state.timeZone !== 'America/New_York' || state.lastError) throw new Error(state.lastError || 'Funding estimates are not available yet');
-    rewardsEl.replaceChildren(element('h3', '', `Current New York week: ${state.currentPeriod.week}`),
-      element('p', '', `Closes ${new Date(state.nextCloseAt).toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' })}`));
-    for (const [category, fund] of Object.entries(state.funds || {})) {
-      const title = category === 'playback' ? 'Playback' : 'Top 10 prizes';
+    rewardsEl.replaceChildren(element('h3', '', `Weekly funding & estimates · ${state.currentPeriod.week}`),
+      element('p', 'radio-history-note', `Next close: ${new Date(state.nextCloseAt).toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' })}${state.partial ? ' · partial first tracking week' : ''}`));
+    const funds = Object.entries(state.funds || {});
+    const fundingRows = funds.map(([category, fund]) => {
       const share = fund.estimatedShares.find(entry => entry.wallet.toLowerCase() === address.toLowerCase());
       const amount = BigInt(share?.amountUnits || '0');
-      const budget = BigInt(fund.budgetUnits);
-      const percentage = budget ? Number(amount * 10000n / budget) / 100 : 0;
-      const band = element('div', 'payroll-funding-band');
-      const meter = element('meter'); meter.min = 0; meter.max = 100; meter.value = percentage;
-      meter.setAttribute('aria-label', `${title}: your estimated ${percentage}% share of the unreserved budget`);
-      band.append(element('h4', '', title), element('p', '', `${usdc(fund.balanceUnits)} USDC in the fund; ${usdc(fund.availableUnits)} unreserved`),
-        meter, element('p', '', `${usdc(amount)} USDC estimated artist share (${percentage}%)${share && !share.payable ? ' - below payout minimum; held' : ''}`));
-      if (fund.warning) band.append(element('p', 'payroll-funding-warning', fund.warning));
-      rewardsEl.append(band);
-    }
-    for (const song of state.currentSongs || []) rewardsEl.append(element('p', 'radio-history-note',
-      `${song.title}: ${song.plays} New York-week plays; ${song.votes} net votes; ${usdc(song.estimatedPlaybackUnits)} USDC indicative playback contribution`));
-    rewardsEl.append(element('p', 'radio-history-note', `${state.partial ? 'Partial migration week. ' : ''}Provisional estimates, not accrued debt or a claimable balance. Shares change with activity, deposits, recoveries and earlier unpaid allocations. Owner reviews and pays after close. The tally period below is separate.`));
+      return [category === 'playback' ? 'Playback' : 'Top 10 votes', `${usdc(fund.balanceUnits)} USDC`,
+        `${usdc(fund.reservedUnits)} USDC`, `${usdc(fund.availableUnits)} USDC`, `${usdc(amount)} USDC${share && !share.payable ? ' · below minimum' : ''}`];
+    });
+    rewardsEl.append(element('h4', '', 'Allocation funds'), renderFundingTable(fundingRows,
+      ['Fund', 'Balance', 'Committed', 'Available', 'Your estimate'], 'radio-history-fund-balances'));
+    const warnings = funds.filter(([, fund]) => fund.warning).map(([category, fund]) =>
+      `${category === 'playback' ? 'Playback' : 'Top 10'}: ${fund.warning}`);
+    if (warnings.length) rewardsEl.append(element('p', 'payroll-funding-warning', warnings.join(' · ')));
+    rewardsEl.append(element('h4', '', 'Your song estimates · playback only'));
+    const songs = (state.currentSongs || []).slice().sort((first, second) => BigInt(second.estimatedPlaybackUnits || '0') > BigInt(first.estimatedPlaybackUnits || '0') ? 1
+      : BigInt(second.estimatedPlaybackUnits || '0') < BigInt(first.estimatedPlaybackUnits || '0') ? -1 : first.title.localeCompare(second.title));
+    rewardsEl.append(renderFundingTable(songs.map(song => [song.title, String(song.plays), String(song.votes), `${usdc(song.estimatedPlaybackUnits || '0')} USDC`]),
+      ['Song', 'Plays', 'Net votes', 'Est. playback share'], 'radio-history-song-estimates'));
+    rewardsEl.append(element('p', 'radio-history-note', 'Top 10 prize estimates are per artist wallet, ranked by weekly net votes; they are not per-song playback amounts. All estimates are provisional, not accrued debt or claimable funds. Activity, available funds and earlier commitments can change the result. Owner review and wallet-confirmed payout are required after close. The tally period below is separate.'));
   } catch (error) {
     if (currentRequest === requestId && fundingRequest === fundingRequestId && mode === 'personal') rewardsEl.replaceChildren(element('p', 'radio-history-note', `${error.message}. Song totals remain available.`));
   }

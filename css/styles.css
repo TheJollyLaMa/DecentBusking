@@ -1971,10 +1971,14 @@ decent-foot {
 .radio-history-header h2 { margin: 0; color: var(--gold); font-size: 1.15rem; }
 #radio-history-close { width: 36px; height: 36px; color: var(--text-primary); background: #141720; border: 1px solid var(--panel-border); border-radius: 4px; cursor: pointer; }
 .radio-history-note { color: var(--text-dim); font-size: .8rem; }
-#radio-history-rewards { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding: 12px 0; margin: 0; border-bottom: 1px solid var(--panel-border); font-size: .85rem; }
+#radio-history-rewards { display: block; min-width: 0; padding: 12px 0; margin: 0; border-bottom: 1px solid var(--panel-border); font-size: .85rem; }
 #radio-history-rewards[hidden] { display: none; }
-#radio-history-rewards dt { color: var(--text-dim); }
-#radio-history-rewards dd { margin: 0; color: var(--gold); }
+#radio-history-rewards h3 { margin: 0 0 6px; color: var(--gold); font-size: .95rem; }
+#radio-history-rewards h4 { margin: 16px 0 6px; color: var(--text-primary); font-size: .82rem; }
+#radio-history-rewards .radio-history-note { margin: 6px 0 12px; line-height: 1.45; overflow-wrap: anywhere; }
+#radio-history-rewards .radio-history-table-scroll { margin: 0 0 12px; }
+.radio-history-funding-table { min-width: 500px; }
+.radio-history-song-estimates { min-width: 420px; }
 #radio-video-stage { position: fixed; inset: 150px 8vw calc(var(--radio-footer-height, 96px) + 100px); z-index: 40; display: grid; place-items: center; pointer-events: none; }
 #radio-video-stage[hidden] { display: none; }
 #radio-video-player { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; max-width: 1000px; object-fit: contain; opacity: .84; }

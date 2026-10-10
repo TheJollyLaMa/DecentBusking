@@ -114,16 +114,30 @@ test('personal tally defaults to historical all-time plays and preserves weekly 
 
 test('My Playbacks funding panel shows provisional wallet/song shares without a redeem promise', async () => {
   const state = { ready: true, chainId: 8453, timeZone: 'America/New_York', currentPeriod: { week: 'NY-2026-10-05' },
-    nextCloseAt: '2026-10-12T04:00:00Z', funds: { playback: { balanceUnits: '10000000', availableUnits: '10000000', budgetUnits: '10000000',
-      warning: '', estimatedShares: [{ wallet: walletA, amountUnits: '2500000', payable: true }] } },
+    nextCloseAt: '2026-10-12T04:00:00Z', funds: {
+      playback: { balanceUnits: '10000000', reservedUnits: '1000000', availableUnits: '9000000', budgetUnits: '9000000',
+        warning: '', estimatedShares: [{ wallet: walletA, amountUnits: '2500000', payable: true }] },
+      top10: { balanceUnits: '2000000', reservedUnits: '0', availableUnits: '2000000', budgetUnits: '2000000',
+        warning: '', estimatedShares: [{ wallet: walletA, amountUnits: '1000000', payable: true }] },
+    },
     currentSongs: [{ title: 'Song A', plays: 7, votes: 3, estimatedPlaybackUnits: '2500000' }] };
   const page = historyPage(async () => ({ ok: true, json: async () => ({ weeks: [week] }) }), state);
   await page.open('personal');
   await Promise.resolve(); await Promise.resolve();
-  assert.match(page.node('radio-history-rewards').textContent, /10 USDC in the fund/);
-  assert.match(page.node('radio-history-rewards').textContent, /2.5 USDC estimated artist share \(25%\)/);
-  assert.match(page.node('radio-history-rewards').textContent, /not accrued debt or a claimable balance/);
-  assert.match(page.node('radio-history-rewards').textContent, /Song A: 7 New York-week plays/);
+  const panel = page.node('radio-history-rewards');
+  assert.match(panel.textContent, /Allocation funds/);
+  assert.match(panel.textContent, /10 USDC.*1 USDC.*9 USDC.*2.5 USDC/);
+  const fundScroll = panel.children.find(node => node.className?.includes('radio-history-table-scroll') && node.children[0]?.className?.includes('radio-history-fund-balances'));
+  assert.deepEqual(fundScroll.children[0].children[1].children.map(row => row.children.map(cell => cell.textContent)), [
+    ['Playback', '10 USDC', '1 USDC', '9 USDC', '2.5 USDC'], ['Top 10 votes', '2 USDC', '0 USDC', '2 USDC', '1 USDC'],
+  ]);
+  assert.match(panel.textContent, /Your song estimates · playback only/);
+  const songScroll = panel.children.find(node => node.className?.includes('radio-history-table-scroll') && node.children[0]?.className?.includes('radio-history-song-estimates'));
+  assert.ok(songScroll);
+  const songTable = songScroll.children[0];
+  assert.deepEqual(songTable.children[1].children[0].children.map(cell => cell.textContent), ['Song A', '7', '3', '2.5 USDC']);
+  assert.match(panel.textContent, /Top 10 prize estimates are per artist wallet/);
+  assert.match(panel.textContent, /not accrued debt or claimable funds/);
 });
 
 test('a late personal response cannot overwrite public totals or reopen disconnected data', async () => {
