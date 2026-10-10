@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261006-radio-settlement" />
+  <link rel="stylesheet" href="css/styles.css?v=20261010-public-top-ten" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -20,6 +20,19 @@
 
   <!-- HEADER: shared CDN web component (decent-header) -->
   <decent-header></decent-header>
+
+  <button id="top-ten-tab" type="button" aria-controls="top-ten-panel" aria-expanded="false" aria-label="Open Top 10 Songs" title="Open public weekly song chart">
+    <span aria-hidden="true">♫</span><span>Top 10</span>
+  </button>
+  <aside id="top-ten-panel" aria-label="Public Top 10 Songs" aria-hidden="true">
+    <div class="top-ten-panel-heading">
+      <div><h2>Top 10 Songs</h2><p id="top-ten-week">Weekly vote chart</p></div>
+      <button id="top-ten-panel-close" type="button" aria-label="Fold away Top 10 Songs">‹</button>
+    </div>
+    <p class="top-ten-chart-note">Weekly net votes · upvotes minus downvotes · current song stays highlighted</p>
+    <p id="top-ten-status" role="status" aria-live="polite">Open the tab to load this week’s votes.</p>
+    <div id="top-ten-content"></div>
+  </aside>
 
   <div id="artist-filter-bar" role="group" aria-label="Filter NFTs by artist">
     <label for="scene-artist-filter">Artist</label>
@@ -477,6 +490,7 @@
 
   <script type="module" src="js/payroll.js?v=20261008-ny-recovery-payflow"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
+  <script type="module" src="js/top-ten-board.mjs?v=20261010-top-ten-songs"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js?v=20261008-ny-recovery-payflow';
     document.addEventListener('DOMContentLoaded', initPayroll);

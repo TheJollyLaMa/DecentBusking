@@ -2,7 +2,7 @@
 
 **A digital town square for music, direct artist support, and accountable community radio.**
 
-Version 0.3 | 8 October 2026 | Implementation-grounded working document
+Version 0.4 | 10 October 2026 | Implementation-grounded working document
 
 This paper describes the current DecentBusking implementation and its intended development direction. It is not an independent security audit, a rights licence, a token offering, or a promise of investment returns. Features marked as planned are not available merely because they appear here. Configuration and deployed software can change; source files and on-chain records should be checked when making operational decisions.
 
@@ -68,7 +68,7 @@ The guitar case opens submissions; the hat opens tipping. The Left Ankh exposes 
 
 ### Audience Participation
 
-Discord reactions and website votes update a shared track tally. Repeated Discord count snapshots apply their delta rather than adding the same observations again. Website votes are limited per browser and active play. Ratings affect rotation, but public browser identities are not proof of unique humans.
+Discord reactions and website votes update a shared track tally. Repeated Discord count snapshots apply their delta rather than adding the same observations again. Website votes are limited per browser and active play. Ratings affect rotation, but public browser identities are not proof of unique humans. A fold-away public Top 10 Songs drawer ranks individual songs by New York-week net votes and highlights the live song; this discovery chart is distinct from the payout rule, which ranks eligible artist wallets for prizes.
 
 A qualified playback event requires at least 30 audible seconds of completed Discord playback and an idempotent play identifier. New payout buckets close Monday at 00:00 in `America/New_York`, with daylight-saving transitions handled by timezone data. Previous UTC buckets and all-time totals remain intact. New York accounting starts at deployment; its first week is labelled partial rather than inventing timestamp detail for old UTC aggregates. A new week starts at zero without deleting old buckets. Historical recovery can restore conservative lifetime totals without manufacturing past weekly prize eligibility.
 

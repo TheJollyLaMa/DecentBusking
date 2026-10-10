@@ -16,6 +16,8 @@ Open the [DecentBusking town square](https://thejollylama.github.io/DecentBuskin
 
 Join [DecentBusking on Discord](https://discord.gg/SCtcBggHPa), head to **#DecentJukebox**, and tune in to the **JukeLoop** voice channel. The radio rotates community uploads; listeners can react 👍 or 👎. The bot tracks cumulative votes and plays, and the ratings influence future rotation.
 
+Open the **Top 10** pull-tab on the upper-left to see this New York week's most-voted songs. The live track is highlighted. This public song chart is a discovery view; Top 10 prize drafts rank artist wallets separately.
+
 ## Bring A Track
 
 **New here? Start with one song.** Post audio or MP4 in [#DecentJukebox](https://discord.gg/SCtcBggHPa), or click the guitar case on the site. Discord attachments can be up to 10 MB. The site accepts files up to 50 MB, or an existing IPFS file CID for larger media. You do not need a Pinata account.
