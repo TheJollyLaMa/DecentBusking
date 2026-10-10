@@ -1398,6 +1398,8 @@ decent-foot {
 .payroll-allocation dd { margin: 0; }
 .radio-payroll-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 12px 0; }
 .radio-payroll-controls label { display: grid; gap: 6px; font-size: .8rem; color: var(--text-dim); }
+.payroll-fund-guide { margin: 10px 0; padding: 10px 12px; color: var(--text-dim); background: rgba(0,212,170,.06); border-left: 2px solid var(--teal); font-size: .78rem; line-height: 1.5; }
+.payroll-field-hint { color: var(--text-dim); font-size: .7rem; line-height: 1.4; }
 .radio-payroll-controls input, .radio-payroll-controls select, .radio-payroll-controls textarea { min-width: 0; width: 100%; min-height: 38px; padding: 8px; font: inherit; color: var(--text-primary); background: #10121a; border: 1px solid var(--panel-border); border-radius: 4px; }
 .radio-payroll-controls textarea { resize: vertical; }
 .radio-payroll-actions { display: flex; flex-wrap: wrap; gap: 8px; }

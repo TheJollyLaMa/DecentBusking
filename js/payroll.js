@@ -22,7 +22,7 @@
 
 import { isAdminWallet } from './admin-access.mjs';
 import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt } from './radio-payroll.mjs';
-import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs';
+import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -906,6 +906,20 @@ function _setDefaultFundMetadata() {
   if (form) form.hidden = selection !== CUSTOM_FUND_OPTION;
   const slug = selection === CUSTOM_FUND_OPTION ? document.getElementById('router-custom-fund-slug')?.value.trim().toLowerCase() : selection;
   if (selection === CUSTOM_FUND_OPTION) {
+    if (slug) {
+      try {
+        const defaults = defaultSettlementFundMetadata(slug);
+        const name = document.getElementById('router-fund-name');
+        const purpose = document.getElementById('router-fund-purpose');
+        const website = document.getElementById('router-fund-website');
+        if (name && (!name.value || name.value === name.dataset.autoValue)) name.value = defaults.name;
+        if (purpose && (!purpose.value || purpose.value === purpose.dataset.autoValue)) purpose.value = defaults.description;
+        if (website && (!website.value || website.value === website.dataset.autoValue)) website.value = 'https://thejollylama.github.io/DecentBusking/';
+        if (name) name.dataset.autoValue = defaults.name;
+        if (purpose) purpose.dataset.autoValue = defaults.description;
+        if (website) website.dataset.autoValue = 'https://thejollylama.github.io/DecentBusking/';
+      } catch {}
+    }
     const priorDefault = input.dataset.autoValue;
     if (!input.value || input.value === priorDefault) input.value = '';
     input.dataset.autoValue = '';
@@ -934,6 +948,10 @@ async function _refreshSettlementFund() {
   if (recoverButton) recoverButton.disabled = true;
   const saveButton = document.getElementById('router-save-metadata');
   if (saveButton) saveButton.disabled = true;
+  if (select.value === CUSTOM_FUND_OPTION && !document.getElementById('router-custom-fund-slug')?.value.trim()) {
+    _setStatus(status, 'Enter a purpose slug to preview this new fund. Project defaults above already have their own permanent slugs.');
+    return;
+  }
   _setStatus(status, 'Checking Base router and fund permissions...');
   try {
     if (!isAdminWallet() || !_isRouterConfigured()) throw new Error('Connect the configured admin wallet; Base router configuration is required');

@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261010-listens" />
+  <link rel="stylesheet" href="css/styles.css?v=20261010-listens-pinner-fund-form" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -399,15 +399,16 @@
         </dl>
         <div class="radio-payroll-controls">
           <label>Fund<select id="router-fund-select"></select></label>
-          <label id="router-custom-fund-label" hidden>New fund slug<input id="router-custom-fund-slug" type="text" minlength="3" maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="dmtv-referrals" autocomplete="off" /><span class="payroll-field-hint">3–64 lowercase letters, numbers, and single hyphens. This name becomes the on-chain accounting ID.</span></label>
+          <label id="router-custom-fund-label" hidden>New fund slug<input id="router-custom-fund-slug" type="text" minlength="3" maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="community-grants" autocomplete="off" /><span class="payroll-field-hint">Choose a short purpose ID: lowercase letters/numbers with single hyphens. Example: <code>community-grants</code>. This becomes the permanent on-chain fund ID.</span></label>
         </div>
         <form id="router-custom-fund-form" hidden>
+          <p class="payroll-fund-guide">Create in two steps: review the suggested public name and purpose, save that metadata to IPFS, then confirm <strong>Create Fund on Base</strong>. Creation makes an empty allocation only; it does not deposit USDC or start payouts.</p>
           <div class="radio-payroll-controls">
-            <label>Fund name<input id="router-fund-name" type="text" maxlength="120" required placeholder="Newcomer &amp; Referral Prizes" /></label>
-            <label>Purpose<textarea id="router-fund-purpose" rows="4" maxlength="2000" required placeholder="Rewards for verified referrals and first-time performers."></textarea></label>
-            <label>Website (optional)<input id="router-fund-website" type="url" maxlength="2048" placeholder="https://..." /></label>
+            <label>Public fund name<input id="router-fund-name" type="text" maxlength="120" required placeholder="Suggested from your fund slug" /><span class="payroll-field-hint">Prefilled from the slug; edit it to make the purpose clear to contributors.</span></label>
+            <label>Purpose and payout scope<textarea id="router-fund-purpose" rows="4" maxlength="2000" required placeholder="Suggested from your fund slug"></textarea><span class="payroll-field-hint">Explain what this allocation supports and who may be paid from it. This text is public metadata.</span></label>
+            <label>Project or policy link (optional)<input id="router-fund-website" type="url" maxlength="2048" placeholder="https://..." /><span class="payroll-field-hint">Optional public reference for this fund.</span></label>
           </div>
-          <button id="router-save-metadata" class="payroll-btn payroll-btn-secondary" type="submit" disabled><img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/cloud-upload.svg" width="18" height="18" alt="" /> Save Metadata to IPFS</button>
+          <button id="router-save-metadata" class="payroll-btn payroll-btn-secondary" type="submit" disabled><img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/cloud-upload.svg" width="18" height="18" alt="" /> Save Public Metadata to IPFS</button>
           <p id="router-metadata-status" class="payroll-status" role="status"></p>
         </form>
         <div class="radio-payroll-controls">
@@ -422,7 +423,7 @@
           <button id="router-fund-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Fund</button>
           <button id="router-create-fund" class="payroll-btn payroll-btn-primary" type="button" disabled>Create Fund on Base</button>
         </div>
-        <p id="router-fund-status" class="payroll-status" role="status">Create a configured fund or choose Create a custom fund for a new purpose. Fund creation does not deposit USDC or enable payouts.</p>
+        <p id="router-fund-status" class="payroll-status" role="status">Choose a project fund, or create a custom fund for a new purpose. Fund creation does not deposit USDC or enable payouts.</p>
         <div class="radio-payroll-controls"><label>USDC deposit amount<input id="router-deposit-amount" type="number" min="0" step="0.01" value="0" /></label></div>
         <button id="router-deposit-usdc" class="payroll-btn payroll-btn-primary" type="button" disabled>Deposit USDC into Selected Fund</button>
         <p id="router-deposit-pending" class="payroll-status"></p>
@@ -535,13 +536,13 @@
   <!-- Admin role-grant panel -->
   <script type="module" src="js/admin.js?v=20261010-listens"></script>
 
-  <script type="module" src="js/payroll.js?v=20261008-ny-recovery-payflow"></script>
+  <script type="module" src="js/payroll.js?v=20261010-pinner-fund-form"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261010-left-djuke"></script>
   <script type="module" src="js/djuke.mjs?v=20261010-djuke-pay"></script>
   <script type="module" src="js/listens.mjs?v=20261010-listens"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261008-ny-recovery-payflow';
+    import { initPayroll } from './js/payroll.js?v=20261010-pinner-fund-form';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 
