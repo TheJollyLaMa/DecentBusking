@@ -80,6 +80,29 @@ test('signs and fetches the owner mint queue', async () => {
   assert.equal(signed[0], buildAdminAuthorizationMessage(authorization));
 });
 
+test('signs reviewed album import and returns queue counts without claiming mints', async () => {
+  const { buildReviewedAlbumImportAuthorizationMessage, importReviewedAlbums } = await import(moduleUrl);
+  let signedMessage;
+  let request;
+  const result = await importReviewedAlbums({
+    serviceUrl: 'https://worker.example/',
+    signer: { signMessage: async message => { signedMessage = message; return '0ximport-signature'; } },
+    address: '0x1111111111111111111111111111111111111111',
+    origin: 'https://busking.example',
+    now: () => Date.parse('2026-10-10T12:00:00.000Z'),
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return new Response(JSON.stringify({ added: 190, queued: 190, skipped: 0, minted: 0 }), { status: 200 });
+    },
+  });
+  const authorization = JSON.parse(request.options.body);
+  assert.equal(request.url, 'https://worker.example/api/admin/reviewed-album-import');
+  assert.equal(authorization.signature, '0ximport-signature');
+  assert.equal(signedMessage, buildReviewedAlbumImportAuthorizationMessage(authorization));
+  assert.deepEqual(result, { added: 190, queued: 190, skipped: 0, minted: 0 });
+  await assert.rejects(importReviewedAlbums({ serviceUrl: 'https://worker.example', signer: null, address: '0x1' }), /Connect the owner wallet/);
+});
+
 test('admin DOM initialization can bind every queue handler', async (t) => {
   let readyHandler;
   const element = {

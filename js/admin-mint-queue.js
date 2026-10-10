@@ -7,6 +7,33 @@ export function buildAdminAuthorizationMessage({ address, origin, issuedAt }) {
   ].join('\n');
 }
 
+export function buildReviewedAlbumImportAuthorizationMessage({ address, origin, issuedAt }) {
+  return [
+    'DecentBusking reviewed album import and owner mint queue',
+    `Wallet: ${address.toLowerCase()}`,
+    `Origin: ${origin}`,
+    `Issued At: ${issuedAt}`,
+  ].join('\n');
+}
+
+export async function importReviewedAlbums({ serviceUrl, signer, address, origin, fetchImpl = globalThis.fetch, now = Date.now }) {
+  if (!serviceUrl || !signer || !address) throw new Error('Connect the owner wallet before importing reviewed albums');
+  const issuedAt = new Date(now()).toISOString();
+  const authorization = { address, origin, issuedAt };
+  const signature = await signer.signMessage(buildReviewedAlbumImportAuthorizationMessage(authorization));
+  const response = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/admin/reviewed-album-import`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...authorization, signature }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || `Reviewed album import failed (${response.status})`);
+  if (!Number.isSafeInteger(result.added) || !Number.isSafeInteger(result.queued) || !Number.isSafeInteger(result.skipped) || result.minted !== 0) {
+    throw new Error('Invalid reviewed album import response');
+  }
+  return result;
+}
+
 export const PRODUCT_BATCH_ABI = [
   'function registerAndMintProductsBatch((address recipient,uint256 amount,uint256 maxSupply,string tokenURI,address royaltyReceiver,uint96 royaltyFeeBps)[] products) returns (uint256[] tokenIds)',
   'event TokenRegistered(uint256 indexed tokenId,address indexed creator,uint256 maxSupply,uint8 kind,string uri)',

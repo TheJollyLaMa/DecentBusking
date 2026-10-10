@@ -16,14 +16,15 @@ the on-chain steps (3, 4, 6), which cost Base gas.
 1. **Ship the code.** Push the reviewed branch; GitHub Pages and Render redeploy.
   Expected: Top 10 and DJuke tabs stacked on the left; the deployed contract
   address is public, but paid requests remain gated by worker status.
-2. **Album import and owner mint queue.** Set `DBUSK_IMPORT_REVIEWED_ALBUMS=true`
-  on Render for the next restart and keep the authenticated Mac mirror available.
-  The 190-track title-reviewed, dual-pinned candidate plan is rechecked against the current restored playlist at worker
-  startup; exact current title/CID duplicates are skipped. The matching uploader
-  identity and previously reviewed owner wallet are required, and conflicting
+2. **Album import and owner mint queue.** After Render deploys the new worker and
+  the authenticated Mac mirror is online, connect the configured owner wallet to
+  Admin and click **Import and queue reviewed albums**. This submits a fresh
+  owner signature; the worker rechecks the 190-track title-reviewed, dual-pinned
+  plan against the latest playlist, skips current title/CID duplicates, and
+  requires the previously reviewed uploader ID and owner wallet. Conflicting
   wallet assignments stop the import. New songs enter the owner mint queue; no
-  NFT is minted automatically. Confirm `[album-import] Added …; queued …`, then
-  set the flag to `false` to prevent future retries.
+  NFT is minted by this action. Startup automation remains off unless
+  `DBUSK_IMPORT_REVIEWED_ALBUMS=true` is explicitly set on Render.
 3. **Create the pinners fund (admin wallet, one transaction).** Done 2026-10-10:
   `dbusk-pinners` is active, with public purpose metadata at
   `https://thejollylama.github.io/DecentBusking/payroll-assets.json#dbusk-pinners`.

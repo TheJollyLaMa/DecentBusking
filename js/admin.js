@@ -6,7 +6,7 @@
 // The panel is opened by dispatching a custom "open-admin" DOM event (wired up
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
-import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261010-batch-chunked';
+import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, importReviewedAlbums, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261010-album-batch-queue';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261010-listens';
@@ -28,7 +28,7 @@ const ROLE_GRANT_ABI = [
 let _modal, _connectedAddr, _roleSection,
   _targetAddr, _roleSelect, _statusEl, _grantBtn, _closeBtn,
   _mintSection, _mintQueueEl, _mintRefreshBtn, _mintSelectedBtn,
-  _mintSelectAll, _mintStatusEl;
+  _mintSelectAll, _mintStatusEl, _albumImportSection, _albumImportButton, _albumImportStatus;
 let _adminSigner = null;
 let _adminAddress = null;
 let _mintQueue = [];
@@ -55,11 +55,15 @@ document.addEventListener('DOMContentLoaded', () => {
   _mintSelectedBtn = document.getElementById('admin-mint-selected-btn');
   _mintSelectAll = document.getElementById('admin-mint-select-all');
   _mintStatusEl = document.getElementById('admin-mint-status');
+  _albumImportSection = document.getElementById('admin-reviewed-album-import');
+  _albumImportButton = document.getElementById('admin-reviewed-album-import-btn');
+  _albumImportStatus = document.getElementById('admin-reviewed-album-status');
 
   if (!_modal) return; // guard: panel HTML not present
 
   _grantBtn?.addEventListener('click', _grantRole);
   _closeBtn?.addEventListener('click', _closeModal);
+  _albumImportButton?.addEventListener('click', _importReviewedAlbums);
   _mintRefreshBtn?.addEventListener('click', _loadMintQueue);
   _mintSelectedBtn?.addEventListener('click', _mintSelected);
   _mintSelectAll?.addEventListener('change', () => {
@@ -176,6 +180,7 @@ async function _connectWallet() {
     _setStatus('✅ Connected wallet has DEFAULT_ADMIN_ROLE.');
     _mintSection?.classList.remove('hidden');
     _roleSection?.classList.remove('hidden');
+    _albumImportSection?.classList.remove('hidden');
     await _loadMintQueue();
   } catch (err) {
     if (checkId === _walletCheckId) _setStatus(`❌ ${err.message || 'Wallet verification failed'}`, true);
@@ -192,6 +197,32 @@ function _resetAdminWallet() {
   _mintQueueEl?.replaceChildren();
   _mintSection?.classList.add('hidden');
   _roleSection?.classList.add('hidden');
+  _albumImportSection?.classList.add('hidden');
+  if (_albumImportStatus) _albumImportStatus.textContent = '';
+}
+
+async function _importReviewedAlbums() {
+  if (!_adminSigner || !_adminAddress || _mintBusy || !_albumImportButton) return;
+  const signer = _adminSigner;
+  const address = _adminAddress;
+  const walletCheck = _walletCheckId;
+  _albumImportButton.disabled = true;
+  if (_albumImportStatus) _albumImportStatus.textContent = 'Sign to recheck the reviewed album plan and queue eligible songs. This action does not mint NFTs.';
+  try {
+    const result = await importReviewedAlbums({
+      serviceUrl: window.DecentConfig?.ipfsUploadServiceUrl,
+      signer,
+      address,
+      origin: window.location.origin,
+    });
+    if (walletCheck !== _walletCheckId || signer !== _adminSigner || address !== _adminAddress) return;
+    await _loadMintQueue();
+    if (_albumImportStatus) _albumImportStatus.textContent = `${result.added} added, ${result.queued} queued, ${result.skipped} held as duplicates. ${result.minted} minted; owner confirmation is still required.`;
+  } catch (error) {
+    if (walletCheck === _walletCheckId && _albumImportStatus) _albumImportStatus.textContent = error.message;
+  } finally {
+    if (walletCheck === _walletCheckId && _adminSigner && _albumImportButton) _albumImportButton.disabled = false;
+  }
 }
 
 // ── NFT Mint Queue ───────────────────────────────────────────────────────────

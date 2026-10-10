@@ -155,6 +155,29 @@ test('worker rejects a valid signature from a non-owner wallet', async () => {
     issuedAt,
   };
   const signature = await stranger.signMessage(buildUploadAuthorizationMessage(authorization));
+  test('reviewed album import requires a fresh owner signature and returns queued counts without minting', async () => {
+    const { buildReviewedAlbumImportAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+    const owner = Wallet.createRandom();
+    const origin = 'https://busking.example';
+    const issuedAt = new Date().toISOString();
+    let calls = 0;
+    const result = { added: 190, queued: 190, skipped: 0, checkpointUri: 'ipfs://playlist-checkpoint', minted: 0 };
+    const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address,
+      onReviewedAlbumImport: async () => { calls++; return result; } });
+    const authorization = { address: owner.address, origin, issuedAt };
+    const signature = await owner.signMessage(buildReviewedAlbumImportAuthorizationMessage(authorization));
+    await withServer(handler, async base => {
+      const request = () => fetch(`${base}/api/admin/reviewed-album-import`, { method: 'POST',
+        headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ ...authorization, signature }) });
+      const response = await request();
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), result);
+      assert.equal(calls, 1);
+      assert.equal((await request()).status, 400);
+      assert.equal(calls, 1);
+    });
+  });
+
   const handler = createWorkerRequestHandler({
     allowedOrigins: [authorization.origin],
     ownerWallet: owner.address,
@@ -378,6 +401,28 @@ test('returns the pending queue only to the mint owner', async () => {
     });
     assert.equal(response.status, 200);
     assert.deepEqual((await response.json()).requests, [{ trackId: 'track-1', title: 'Track One' }]);
+  });
+});
+
+test('reviewed album import requires fresh owner authorization and rejects replay', async () => {
+  const { buildReviewedAlbumImportAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+  const owner = Wallet.createRandom();
+  const origin = 'https://busking.example';
+  const issuedAt = new Date().toISOString();
+  let imports = 0;
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address,
+    onReviewedAlbumImport: async () => { imports++; return { added: 190, queued: 190, skipped: 0, minted: 0 }; } });
+  const authorization = { address: owner.address, origin, issuedAt };
+  const signature = await owner.signMessage(buildReviewedAlbumImportAuthorizationMessage(authorization));
+  await withServer(handler, async baseUrl => {
+    const send = () => fetch(`${baseUrl}/api/admin/reviewed-album-import`, { method: 'POST',
+      headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ ...authorization, signature }) });
+    const response = await send();
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { added: 190, queued: 190, skipped: 0, minted: 0 });
+    assert.equal(imports, 1);
+    assert.equal((await send()).status, 400);
+    assert.equal(imports, 1);
   });
 });
 

@@ -29,6 +29,15 @@ export function buildAdminAuthorizationMessage({ address, origin, issuedAt }) {
   ].join('\n');
 }
 
+export function buildReviewedAlbumImportAuthorizationMessage({ address, origin, issuedAt }) {
+  return [
+    'DecentBusking reviewed album import and owner mint queue',
+    `Wallet: ${address.toLowerCase()}`,
+    `Origin: ${origin}`,
+    `Issued At: ${issuedAt}`,
+  ].join('\n');
+}
+
 async function readJson(request) {
   const chunks = [];
   let size = 0;
@@ -111,6 +120,7 @@ export function createWorkerRequestHandler({
   verifyMintTransaction,
   onMintComplete,
   getMintQueue,
+  onReviewedAlbumImport,
   getRadioState,
   getDjukeState,
   checkpointMirror,
@@ -259,6 +269,23 @@ export function createWorkerRequestHandler({
           throw new Error('Admin authorization is not from the mint owner');
         }
         sendJson(response, 200, { requests: await getMintQueue() }, corsOrigin);
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/admin/reviewed-album-import') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!onReviewedAlbumImport) throw new Error('Reviewed album import is not configured');
+        const body = await readJson(request);
+        const issuedAt = Date.parse(body.issuedAt);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') || typeof body.signature !== 'string' ||
+            !Number.isFinite(issuedAt) || Math.abs(now() - issuedAt) > MAX_SIGNATURE_AGE_MS) {
+          throw new Error('Invalid or expired album-import authorization');
+        }
+        if (hasConsumedSignature(body.signature)) throw new Error('Album-import authorization has already been used');
+        const message = buildReviewedAlbumImportAuthorizationMessage({ address: body.address, origin, issuedAt: body.issuedAt });
+        const recovered = verifyMessage(message, body.signature).toLowerCase();
+        if (recovered !== body.address.toLowerCase() || recovered !== expectedOwner) throw new Error('Album-import authorization is not from the configured owner');
+        consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
+        sendJson(response, 200, await onReviewedAlbumImport(), corsOrigin);
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/media/submit') {

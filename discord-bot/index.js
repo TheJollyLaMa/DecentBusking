@@ -389,6 +389,10 @@ async function main() {
 
   let client;
   let playlistReady = false;
+  let queueReviewedAlbumImport = null;
+  let albumImportTask = null;
+  let queueReviewedAlbumImport = null;
+  let albumImportTask = null;
   const getVerifiedMintRequests = createVerifiedMintQueueReader({
     reconcile: async () => {
       if (!playlistReady) throw new Error('Playlist is restoring; please retry shortly');
@@ -573,6 +577,18 @@ async function main() {
   const requestHandler = createWorkerRequestHandler({
     checkpointMirror,
     getDjukeState: readDjukeState,
+    onReviewedAlbumImport: async () => {
+      if (!playlistReady) throw new Error('Playlist is restoring; retry shortly');
+      if (!queueReviewedAlbumImport) throw new Error('Reviewed album import is not configured');
+      albumImportTask ||= queueReviewedAlbumImport().finally(() => { albumImportTask = null; });
+      return albumImportTask;
+    },
+    onReviewedAlbumImport: async () => {
+      if (!playlistReady) throw new Error('Playlist is restoring; retry shortly');
+      if (!queueReviewedAlbumImport) throw new Error('Reviewed album import is not configured');
+      albumImportTask ||= queueReviewedAlbumImport().finally(() => { albumImportTask = null; });
+      return albumImportTask;
+    },
     allowedOrigins: config.allowedOrigins,
     ownerWallet: config.mintOwnerWallet || '0x0000000000000000000000000000000000000000',
     pinataJwt: config.pinataJwt,
@@ -643,24 +659,26 @@ async function main() {
     }
     loadPlaylist(restoredPlaylist);
     configureRemotePersistence(stateStore.save);
-    if (process.env.DBUSK_IMPORT_REVIEWED_ALBUMS !== 'false') {
-      try {
-        if (!Array.isArray(restoredPlaylist) || !restoredPlaylist.length) throw new Error('Verified remote playlist restore required for album import');
-        const plan = JSON.parse(fs.readFileSync(new URL('../docs/reports/album-import-candidates.json', import.meta.url), 'utf8'));
-        const artist = resolveAlbumArtist(restoredPlaylist, { name: 'thejollylama', wallet: config.mintOwnerWallet });
-        const imported = await checkpointReviewedAlbumImport({ playlist: restoredPlaylist, plan, artist, save: stateStore.save,
-          queueForMint: true,
-          mirrorBeforePublication: true,
-          verifyMirrorAvailable: async () => {
-            if (!checkpointMirror) throw new Error('CHECKPOINT_MIRROR_SECRET is required before album import');
-            await checkpointMirror.waitAvailable();
-          },
-        });
-        if (imported.added.length || imported.queued.length) loadPlaylist(imported.playlist);
-        console.log(`[album-import] Added ${imported.added.length}; queued ${imported.queued.length}; skipped ${imported.skipped.length}. No NFTs minted. Checkpoint: ${imported.checkpointUri || 'already imported'}`);
-      } catch (error) {
-        console.warn('[album-import] No album state adopted:', error.message);
-      }
+    queueReviewedAlbumImport = async () => {
+      if (!Array.isArray(getPlaylist()) || !getPlaylist().length) throw new Error('Verified nonempty playlist restore required for album import');
+      const plan = JSON.parse(fs.readFileSync(new URL('../docs/reports/album-import-candidates.json', import.meta.url), 'utf8'));
+      const artist = resolveAlbumArtist(getPlaylist(), { name: 'thejollylama', wallet: config.mintOwnerWallet });
+      const imported = await checkpointReviewedAlbumImport({ playlist: getPlaylist(), plan, artist, save: stateStore.save,
+        queueForMint: true,
+        mirrorBeforePublication: true,
+        verifyMirrorAvailable: async () => {
+          if (!checkpointMirror) throw new Error('CHECKPOINT_MIRROR_SECRET is required before album import');
+          await checkpointMirror.waitAvailable();
+        },
+      });
+      if (imported.added.length || imported.queued.length) loadPlaylist(imported.playlist);
+      console.log(`[album-import] Added ${imported.added.length}; queued ${imported.queued.length}; skipped ${imported.skipped.length}. No NFTs minted. Checkpoint: ${imported.checkpointUri || 'already imported'}`);
+      return { added: imported.added.length, queued: imported.queued.length, skipped: imported.skipped.length,
+        checkpointUri: imported.checkpointUri, minted: 0 };
+    };
+    if (process.env.DBUSK_IMPORT_REVIEWED_ALBUMS === 'true') {
+      try { await queueReviewedAlbumImport(); }
+      catch (error) { console.warn('[album-import] No album state adopted:', error.message); }
     }
     if (!restoredPlaylist && getPlaylist().length > 0) {
       try {
@@ -673,25 +691,28 @@ async function main() {
   } else {
     loadPlaylist();
   }
-  playlistReady = true;
-  refreshPayflow();
-  syncMintedTracks(config);
-
-  client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.GuildVoiceStates,
-      GatewayIntentBits.MessageContent,
-      GatewayIntentBits.GuildMessageReactions,
-    ],
-    partials: [Partials.Message, Partials.Channel, Partials.Reaction],
-  });
-
-  const reactionUpdates = new Map();
-  const handleReaction = change => (reaction, user) => {
-    const emoji = reaction.emoji.name?.startsWith('👍') ? '👍' : reaction.emoji.name?.startsWith('👎') ? '👎' : null;
-    if (user.bot || !emoji || ![config.jukeLoopTextChannelId, config.jukeboxChannelId].includes(reaction.message.channelId)) return;
+    queueReviewedAlbumImport = async () => {
+      const playlist = getPlaylist();
+      if (!Array.isArray(playlist) || !playlist.length) throw new Error('Verified nonempty playlist restore required for album import');
+      const plan = JSON.parse(fs.readFileSync(new URL('../docs/reports/album-import-candidates.json', import.meta.url), 'utf8'));
+      const artist = resolveAlbumArtist(playlist, { name: 'thejollylama', wallet: config.mintOwnerWallet });
+      const imported = await checkpointReviewedAlbumImport({ playlist, plan, artist, save: stateStore.save,
+        queueForMint: true,
+        mirrorBeforePublication: true,
+        verifyMirrorAvailable: async () => {
+          if (!checkpointMirror) throw new Error('CHECKPOINT_MIRROR_SECRET is required before album import');
+          await checkpointMirror.waitAvailable();
+        },
+      });
+      if (imported.added.length || imported.queued.length) loadPlaylist(imported.playlist);
+      console.log(`[album-import] Added ${imported.added.length}; queued ${imported.queued.length}; skipped ${imported.skipped.length}. No NFTs minted. Checkpoint: ${imported.checkpointUri || 'already imported'}`);
+      return { added: imported.added.length, queued: imported.queued.length, skipped: imported.skipped.length,
+        checkpointUri: imported.checkpointUri, minted: 0 };
+    };
+    if (process.env.DBUSK_IMPORT_REVIEWED_ALBUMS === 'true') {
+      try { await queueReviewedAlbumImport(); }
+      catch (error) { console.warn('[album-import] No album state adopted:', error.message); }
+    }
     const key = reaction.message.id;
     const pending = (reactionUpdates.get(key) || Promise.resolve()).then(async () => {
       const message = await reaction.message.fetch();

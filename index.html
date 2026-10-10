@@ -333,6 +333,11 @@
       </div>
       <div id="admin-status" class="admin-status" role="status"></div>
       <p id="admin-payment-ledger-status" class="admin-status" role="status">Payment proofs not loaded.</p>
+      <section id="admin-reviewed-album-import" class="hidden admin-reviewed-album-import" aria-labelledby="admin-reviewed-album-title">
+        <div><h3 id="admin-reviewed-album-title">Reviewed Album Queue</h3><p>Recheck the approved 190-song candidate plan against the latest playlist and queue eligible tracks for owner review. This does not mint.</p></div>
+        <button id="admin-reviewed-album-import-btn" class="admin-btn admin-btn-secondary" type="button">Import and queue reviewed albums</button>
+        <p id="admin-reviewed-album-status" class="admin-status" role="status"></p>
+      </section>
       <section id="admin-mint-section" class="hidden">
         <div class="admin-section-header">
           <div>
@@ -534,7 +539,7 @@
   <script type="module" src="js/main.js?v=20261010-listens"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261010-v03-batch"></script>
+  <script type="module" src="js/admin.js?v=20261010-v03-album-queue"></script>
 
   <script type="module" src="js/payroll.js?v=20261010-pinner-fund-form"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
