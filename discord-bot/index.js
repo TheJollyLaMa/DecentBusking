@@ -652,7 +652,9 @@ async function main() {
     loadPlaylist(restoredPlaylist);
     configureRemotePersistence(stateStore.save);
     queueReviewedAlbumImport = async () => {
-      if (!Array.isArray(getPlaylist()) || !getPlaylist().length) throw new Error('Verified nonempty playlist restore required for album import');
+      if (!Array.isArray(restoredPlaylist) || !restoredPlaylist.length || !getPlaylist().length) {
+        throw new Error('Verified nonempty Pinata playlist restore required for album import');
+      }
       const plan = JSON.parse(fs.readFileSync(new URL('../docs/reports/album-import-candidates.json', import.meta.url), 'utf8'));
       const artist = resolveAlbumArtist(getPlaylist(), { name: 'thejollylama', wallet: config.mintOwnerWallet });
       const imported = await checkpointReviewedAlbumImport({ playlist: getPlaylist(), plan, artist, save: stateStore.save,
@@ -668,8 +670,10 @@ async function main() {
       return { added: imported.added.length, queued: imported.queued.length, skipped: imported.skipped.length,
         checkpointUri: imported.checkpointUri, minted: 0 };
     };
+    playlistReady = true;
     if (process.env.DBUSK_IMPORT_REVIEWED_ALBUMS === 'true') {
-      try { await queueReviewedAlbumImport(); }
+      albumImportTask ||= queueReviewedAlbumImport().finally(() => { albumImportTask = null; });
+      try { await albumImportTask; }
       catch (error) { console.warn('[album-import] No album state adopted:', error.message); }
     }
     if (!restoredPlaylist && getPlaylist().length > 0) {
@@ -682,8 +686,8 @@ async function main() {
     }
   } else {
     loadPlaylist();
+    playlistReady = true;
   }
-  playlistReady = true;
 
   client.once(Events.ClientReady, async (readyClient) => {
     console.log(`[jukebox-bot] Logged in as ${readyClient.user.tag}`);
