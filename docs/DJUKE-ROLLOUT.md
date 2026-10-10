@@ -1,8 +1,10 @@
 # DJuke and DNft rollout
 
-Status: code complete and rehearsed locally and on a Base fork, 2026-10-10. Nothing has
-been pushed, deployed, broadcast, imported or minted. Every new feature is off by
-default, so shipping the code changes nothing live except the left-tab layout.
+Status (2026-10-10): DecentNFT v0.3 and DecentJukeBox v0.1 are deployed on Base;
+the `dbusk-pinners` fund is active. DJuke payment requests remain disabled until
+the worker environment is configured and radio fulfillment is verified. The
+existing DecentNFT v0.2 remains primary, batch minting is off, and no album
+tracks have been imported or minted.
 
 ## Go-live checklist (you enter keys and execute)
 
@@ -10,32 +12,39 @@ Never paste keys or secrets into chat. Each step is independent and reversible u
 the on-chain steps (3, 4, 6), which cost Base gas.
 
 1. **Ship the code.** Push the reviewed branch; GitHub Pages and Render redeploy.
-   Expected: Top 10 and DJuke tabs stacked on the left; DJuke shows "DJuke queue is
-   not live yet"; radio unchanged.
+  Expected: Top 10 and DJuke tabs stacked on the left; the deployed contract
+  address is public, but paid requests remain gated by worker status.
 2. **Album import (no wallet).** Generate a secret locally, e.g. `openssl rand -hex 32`.
    Set it as `CHECKPOINT_MIRROR_SECRET` on Render and in your Mac `discord-bot/.env`.
    Start IPFS Desktop and run `npm run checkpoint-mirror -- --watch` in `discord-bot`.
    Set `DBUSK_IMPORT_REVIEWED_ALBUMS=true` on Render, restart, confirm the log line
    `[album-import] Added 190`, then set it back to `false`.
-3. **Create the repo-dev fund (admin wallet, one transaction).** Done 2026-10-10: the
-   router's `dbusk-repo-dev` fund exists, is active and holds 0 USDC, so the first
-   DJuke deposits are easy to verify.
-4. **Deploy contracts (admin key in your shell only).** In DecentMarket:
-   `BASE_RPC_URL=… PRIVATE_KEY=… DBUSK_FULFILLER=<new fulfiller address> npm run deploy:dbusk:base`
-   (dry run: checks fund, USDC, router, gas). Re-run with `CONFIRM_DEPLOY=yes`.
-   Addresses are written to `deployments/dbusk-base.json`. Use a brand-new wallet
-   for the worker and fund it with about 0.005 Base ETH; it only fulfills plays and
-   registers new songs (it can never change an existing song's payees).
-5. **Point the app at the contracts (no wallet).** Set `djukeContractAddress` in
-   `decent.config.js`. On Render set `DJUKE_CONTRACT_ADDRESS`,
-   `DJUKE_FULFILLER_PRIVATE_KEY`, and leave `DJUKE_PAYMENTS_ENABLED=false`.
+3. **Create the pinners fund (admin wallet, one transaction).** Done 2026-10-10:
+  `dbusk-pinners` is active, with public purpose metadata at
+  `https://thejollylama.github.io/DecentBusking/payroll-assets.json#dbusk-pinners`.
+  It is empty until revenue is routed to it.
+4. **Deploy contracts.** Done 2026-10-10 on Base: DecentNFT v0.3 at
+  `0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3` and DecentJukeBox v0.1 at
+  `0x153ef59a57C9A88cbB7822252B5d9D0B11E48F0E`. The deployment script's final
+  role-read raced RPC indexing; both contracts and the two confirmed worker role
+  grants were independently verified. Receipts and addresses are recorded in
+  DecentMarket `deployments/dbusk-base.json`. The deployer has about 0.00246 Base
+  ETH remaining; budget more before future transactions.
+5. **Point the worker at DJuke (Render admin required).** Public config now
+  includes the deployed address. Set `DJUKE_CONTRACT_ADDRESS` and the dedicated
+  `DJUKE_FULFILLER_PRIVATE_KEY` on Render; the worker key must match the address
+  granted `FULFILLER_ROLE` and `REGISTRAR_ROLE`. Render is not configured from
+  this workspace, so this step remains outstanding. Keep
+  `DJUKE_PAYMENTS_ENABLED=false` until queue reads, song registration and a full
+  playback/fulfillment test are verified.
 6. **Songs register automatically.** With the worker key set, the bot registers every
    radio-eligible song that has an artist wallet: a one-time catch-up shortly after
    start, then new Discord uploads and briefcase submissions every two minutes, in
    batches of 25. Watch for `[djuke] Registered` in the logs. The admin-only
    `configure:djuke:base` script remains for changing an existing song's payees.
-7. **Open payments.** Set `DJUKE_PAYMENTS_ENABLED=true` on Render. Make one 0.25 USDC
-   bump yourself and confirm it plays next and the repo fund receives 0.025 USDC.
+7. **Open payments (not yet).** Only after the Render worker is configured and a
+  full test passes, set `DJUKE_PAYMENTS_ENABLED=true`. Verify one 0.25 USDC bump
+  and the 0.225 / 0.020 / 0.005 artist/pinner/repo split in router balances.
 8. **Batch minting (optional, later).** Switch `contractAddress` to the v0.3 address,
    move the old address into `additionalNftContractAddresses`, set
    `DECENT_NFT_CONTRACT_ADDRESS` and `DECENT_NFT_ADDITIONAL_ADDRESSES` on Render, and

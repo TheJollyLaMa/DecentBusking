@@ -82,9 +82,13 @@ test('DJuke payment refuses wrong networks, price increases and low balances bef
 
 test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
+  const config = require('node:fs').readFileSync(require('node:path').join(__dirname, '../decent.config.js'), 'utf8');
   for (const id of ['djuke-tab', 'djuke-panel', 'djuke-queue', 'djuke-price-tiers', 'djuke-connect']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /id="djuke-pay"[^>]*disabled/);
   assert.match(html, /id="djuke-panel"[^>]*inert/);
+  assert.match(config, /contractAddress: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B"/);
+  assert.match(config, /djukeContractAddress: "0x153ef59a57C9A88cbB7822252B5d9D0B11E48F0E"/);
+  assert.match(config, /nftBatchMintEnabled: false/);
 });

@@ -31,12 +31,12 @@ window.DecentConfig = {
   rpcUrl: "https://mainnet.base.org",
   blockExplorerUrl: "https://basescan.org",
 
-  // DecentNFT v0.2 deployed on Base via DecentMarket
+  // Keep DecentNFT v0.2 primary; v0.3 is deployed but batch minting remains off.
   contractAddress: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B",
   additionalNftContractAddresses: [],
   nftBatchMintEnabled: false,
-  // Set after deploying DecentJukeBox_v0_1; payments also need the worker's DJUKE_PAYMENTS_ENABLED.
-  djukeContractAddress: "",
+  // Deployed DJuke address. Purchases stay disabled until the worker enables them.
+  djukeContractAddress: "0x153ef59a57C9A88cbB7822252B5d9D0B11E48F0E",
   adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",
   marketUrl: "https://thejollylama.github.io/DecentMarket/",
 
