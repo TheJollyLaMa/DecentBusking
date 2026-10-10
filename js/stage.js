@@ -2,7 +2,7 @@
 // Hat (tip) + Guitar Case (mint) interactions and the now-playing banner.
 
 import { openMintModal } from './mint.js?v=20261005-mp4';
-import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261005-mp4';
+import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261010-listens';
 
 // ── Public API ────────────────────────────────────────────────────────────
 export function initStage() {

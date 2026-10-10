@@ -23,8 +23,8 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261010-collections';
-import { setNowPlaying } from './stage.js?v=20261005-mp4';
+import { renderNFTCard } from './nft-card.js?v=20261010-listens';
+import { setNowPlaying } from './stage.js?v=20261010-listens';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, readCachedMintedTokens, readNftContract, configuredNftCollections } from './nft-loader.js?v=20261010-collections';
 
@@ -970,6 +970,8 @@ function _esc(str = '') {
 }
 
 function _playNFT(nft) {
+  const handled = !document.dispatchEvent(new CustomEvent('dbusk-listen', { cancelable: true, detail: { nft } }));
+  if (handled) return;
   const cfg = window.DecentConfig || {};
   const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
   const audioUrl = (nft.videoUrl || nft.audioUrl || nft.animation_url || '')
