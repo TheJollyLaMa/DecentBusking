@@ -683,6 +683,7 @@ async function main() {
   } else {
     loadPlaylist();
   }
+  playlistReady = true;
 
   client.once(Events.ClientReady, async (readyClient) => {
     console.log(`[jukebox-bot] Logged in as ${readyClient.user.tag}`);
