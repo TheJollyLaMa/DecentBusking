@@ -2,7 +2,7 @@
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js?v=20261005-mp4';
+import { fetchNFTMetaById } from './space.js?v=20261010-collections';
 
 // ── Public API ───────────────────────────────────────────────────────────
 export function renderNFTCard(nft) {
@@ -105,7 +105,8 @@ function _buildCardHTML(nft) {
   const marketUrl = _marketUrl(nft);
   const imageUrl = (nft.image || '').replace('ipfs://', gateway);
   const metadataUrl = (nft.metadataUri || '').replace('ipfs://', gateway);
-  const explorerUrl = `${cfg.blockExplorerUrl || 'https://basescan.org'}/token/${cfg.contractAddress}?a=${encodeURIComponent(nft.tokenId)}`;
+  const contractAddress = nft.contractAddress || cfg.contractAddress;
+  const explorerUrl = `${cfg.blockExplorerUrl || 'https://basescan.org'}/token/${contractAddress}?a=${encodeURIComponent(nft.tokenId)}`;
 
   return `
     ${/^https?:\/\//i.test(imageUrl) ? `<img class="nft-detail-image" src="${_esc(imageUrl)}" alt="Artwork for ${_esc(nft.name || nft.title || 'this NFT')}" />` : ''}
@@ -119,7 +120,7 @@ function _buildCardHTML(nft) {
       <dt>Token ID</dt><dd>#${_esc(String(nft.tokenId ?? '?'))}</dd>
       <dt>Network</dt><dd>${_esc(cfg.chainName || 'Base Mainnet')}</dd>
       ${nft.mintedSupply != null ? `<dt>Minted Editions</dt><dd>${_esc(String(nft.mintedSupply))}</dd>` : ''}
-      <dt>Contract</dt><dd>${_esc(cfg.contractAddress || '')}</dd>
+      <dt>Contract</dt><dd>${_esc(contractAddress || '')}</dd>
       ${shortCreator ? `<dt>Artist</dt><dd>${_esc(nft.artist || nft.creator)}</dd>` : ''}
       ${shortOwner   ? `<dt>Owner</dt><dd>${_esc(shortOwner)}</dd>`   : ''}
       <dt>Minted</dt><dd>${_esc(mintedDate)} ${ageLabel ? `<em style="color:var(--text-dim)">(${_esc(ageLabel)})</em>` : ''}</dd>
@@ -160,7 +161,7 @@ function _marketUrl(nft) {
   const cfg = window.DecentConfig || {};
   const url = new URL(cfg.marketUrl || 'https://thejollylama.github.io/DecentMarket/');
   if (cfg.chainId) url.searchParams.set('chainId', String(cfg.chainId));
-  if (cfg.contractAddress) url.searchParams.set('contract', cfg.contractAddress);
+  if (nft.contractAddress || cfg.contractAddress) url.searchParams.set('contract', nft.contractAddress || cfg.contractAddress);
   if (nft.tokenId != null) url.searchParams.set('tokenId', String(nft.tokenId));
   return url.toString();
 }

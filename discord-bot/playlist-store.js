@@ -200,7 +200,9 @@ export function savePlaylist() {
  * @param {Map<string, string>} tokenIdByAudioCid
  * @returns {number} Tracks newly marked minted
  */
-export function applyOnChainMints(tokenIdByAudioCid, { artistWalletByAudioCid = new Map() } = {}) {
+export function applyOnChainMints(tokenIdByAudioCid, {
+  artistWalletByAudioCid = new Map(), tokenReferencesByAudioCid = new Map(),
+} = {}) {
   let changed = 0;
   for (const track of _playlist) {
     const tokenId = track.ipfsCid && tokenIdByAudioCid.get(track.ipfsCid);
@@ -210,6 +212,11 @@ export function applyOnChainMints(tokenIdByAudioCid, { artistWalletByAudioCid = 
       track.mintStatus = 'minted';
       track.tokenId = tokenId;
       track.mintedAt ??= new Date().toISOString();
+      updated = true;
+    }
+    const references = tokenReferencesByAudioCid.get(track.ipfsCid);
+    if (references && JSON.stringify(track.nftReferences) !== JSON.stringify(references)) {
+      track.nftReferences = references.map(reference => ({ ...reference }));
       updated = true;
     }
     const artistWallet = artistWalletByAudioCid.get(track.ipfsCid);
@@ -280,13 +287,14 @@ export function queueUploaderMints(uploaderId, recipient, { artworkCid, now = Da
 }
 
 /** Record a manually approved owner-wallet mint. */
-export function completeTrackMint(trackId, { tokenId, txHash }) {
+export function completeTrackMint(trackId, { tokenId, txHash, contractAddress }) {
   const track = _playlist.find((entry) => entry.trackId === trackId);
   if (!track || track.mintStatus !== 'requested') return null;
 
   track.mintStatus = 'minted';
   track.tokenId = String(tokenId);
   track.mintTxHash = txHash;
+  if (contractAddress) track.nftReferences = [{ chainId: 8453, contractAddress, tokenId: String(tokenId) }];
   track.mintedAt = new Date().toISOString();
   _save();
   return track;

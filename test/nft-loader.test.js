@@ -8,6 +8,27 @@ const vm = require('node:vm');
 const gatewayUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'ipfs-gateway.js')).href;
 const loaderUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'nft-loader.js')).href;
 
+test('NFT identities and caches distinguish identical token IDs across collections', async () => {
+  const { loadMintedToken, nftIdentity, configuredNftCollections } = await import(loaderUrl);
+  const oldAddress = `0x${'1'.repeat(40)}`;
+  const newAddress = `0x${'2'.repeat(40)}`;
+  const values = new Map();
+  const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) };
+  const contract = { totalMinted: async () => 1n, uri: async () => 'ipfs://metadata', creatorOf: async () => '' };
+  const tokens = [];
+  for (const contractAddress of [oldAddress, newAddress]) {
+    tokens.push(await loadMintedToken({ contract, tokenId: 0, contractAddress, storage,
+      cacheKey: `8453:${contractAddress}`, fetchMetadata: async () => ({ name: contractAddress }) }));
+  }
+  assert.notEqual(tokens[0].nftId, tokens[1].nftId);
+  assert.equal(tokens[0].contractAddress, oldAddress);
+  assert.equal(tokens[1].contractAddress, newAddress);
+  assert.equal(values.size, 2);
+  assert.throws(() => nftIdentity({ contractAddress: 'invalid', tokenId: 0 }));
+  assert.deepEqual(configuredNftCollections({ contractAddress: oldAddress,
+    additionalNftContractAddresses: [oldAddress, newAddress] }).map(entry => entry.contractAddress), [oldAddress, newAddress]);
+});
+
 test('falls back to the Pinata browser gateway for IPFS metadata', async () => {
   const { fetchIpfsJson } = await import(gatewayUrl);
   const requested = [];
@@ -110,7 +131,7 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
     window: { DecentConfig: { chainName: 'Base Mainnet', contractAddress: '0xcontract' } }, URL,
   });
   vm.runInContext(source, context);
-  context.renderNFTCard({ tokenId: 12, name: '<script>bad</script>', image: 'ipfs://artwork',
+  context.renderNFTCard({ tokenId: 12, contractAddress: '0xsecondcollection', name: '<script>bad</script>', image: 'ipfs://artwork',
     audioUrl: 'ipfs://audio', metadataUri: 'ipfs://metadata', artist: '0xartist', description: '<b>description</b>' });
   assert.equal(panel.open, true);
   assert.equal(classes.has('hidden'), false);
@@ -118,6 +139,8 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   assert.match(content.innerHTML, /&lt;script&gt;bad&lt;\/script&gt;/);
   assert.match(content.innerHTML, /ipfs:\/\/metadata/);
   assert.match(content.innerHTML, /Base Mainnet/);
+  assert.match(content.innerHTML, /token\/0xsecondcollection\?a=12/);
+  assert.doesNotMatch(content.innerHTML, /token\/0xcontract\?/);
   assert.doesNotMatch(content.innerHTML, /<audio/);
   close.onclick();
   assert.equal(panel.open, false);
@@ -149,6 +172,9 @@ test('artist filtering hides other artists in both the 3D scene and archive', ()
   vm.runInContext("_activeArtist = ''; _updateVisibility();", context);
   assert.equal(rows[2].hidden, false);
   assert.equal(entries[1].mesh.visible, true);
+  assert.notEqual(context._nftSpreadSeed({ tokenId: 0, contractAddress: `0x${'1'.repeat(40)}` }),
+    context._nftSpreadSeed({ tokenId: 0, contractAddress: `0x${'2'.repeat(40)}` }));
+  assert.equal(context._nftSpreadSeed({ tokenId: 12, contractAddress: '0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B' }), 12);
 });
 
 test('coin face clips translucent artwork to a circle and draws song, artist, and mint date', () => {

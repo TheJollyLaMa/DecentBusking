@@ -6,10 +6,10 @@
 // The panel is opened by dispatching a custom "open-admin" DOM event (wired up
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
-import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork } from './admin-mint-queue.js?v=20261008-artwork-options';
+import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, mintPreparedProductsBatch, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261010-batch';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 import { reportMintCompletion } from './mint-reconciliation.js';
-import { addNFTToSpace } from './space.js?v=20261005-mp4';
+import { addNFTToSpace } from './space.js?v=20261010-collections';
 import { isAdminWallet } from './admin-access.mjs';
 
 const ROLE_GRANT_ABI = [
@@ -20,6 +20,8 @@ const ROLE_GRANT_ABI = [
   'function registerToken(uint256 maxSupply_, string calldata tokenURI_, uint8 kind_, address royaltyReceiver, uint96 royaltyFeeBps) external returns (uint256 tokenId)',
   'function mintProduct(address to, uint256 tokenId, uint256 amount) external',
   'event TokenRegistered(uint256 indexed tokenId, address indexed creator, uint256 maxSupply, uint8 kind, string uri)',
+  ...PRODUCT_BATCH_ABI.slice(0, 1),
+  PRODUCT_BATCH_ABI[2],
 ];
 
 // ── DOM references (resolved after DOMContentLoaded) ─────────────────────────
@@ -289,7 +291,9 @@ function _resetAdminWallet() {
     _setMintControlsDisabled(true);
     let completed = false;
     try {
-      for (let position = 0; position < indices.length; position++) {
+      if (window.DecentConfig?.nftBatchMintEnabled === true) {
+        await _mintQueuedBatch(indices);
+      } else for (let position = 0; position < indices.length; position++) {
         const index = indices[position];
         const track = _mintQueue[index];
         if (!track) continue;
@@ -309,7 +313,7 @@ function _resetAdminWallet() {
     }
   }
 
-  async function _mintQueuedTrack(track, index) {
+  async function _prepareQueuedTrack(track, index) {
     const cfg = window.DecentConfig || {};
     const artwork = _mintQueueEl?.querySelector(`.admin-artwork[data-index="${index}"]`)?.files?.[0];
     const upload = createBrowserIpfsUploader({
@@ -349,7 +353,12 @@ function _resetAdminWallet() {
     );
     _setMintStatus(`Uploading metadata for ${track.title}…`);
     const metadataUrl = await upload(metadataFile);
+    return { metadata, metadataUrl };
+  }
 
+  async function _mintQueuedTrack(track, index) {
+    const cfg = window.DecentConfig || {};
+    const { metadata, metadataUrl } = await _prepareQueuedTrack(track, index);
     const contract = new ethers.Contract(cfg.contractAddress, ROLE_GRANT_ABI, _adminSigner);
     _setMintStatus(`Registering ${track.title} — confirm transaction 1/2…`);
     const registration = await contract.registerToken(0, metadataUrl, 0, track.recipient, 500);
@@ -377,13 +386,51 @@ function _resetAdminWallet() {
         tokenId,
         txHash,
       });
-      addNFTToSpace({ tokenId, metadataUri: metadataUrl, ...metadata });
+      addNFTToSpace({ tokenId: Number(tokenId), contractAddress: cfg.contractAddress,
+        chainId: cfg.chainId, metadataUri: metadataUrl, ...metadata });
     } catch (err) {
       throw new Error(
         `Token #${tokenId} minted, but Discord sync failed. Use /jukeloop mark-minted with ` +
         `track ${track.trackId}, token ${tokenId}, and tx ${txHash}. ${err.message}`,
       );
     }
+  }
+
+  async function _mintQueuedBatch(indices) {
+    if (indices.length > 20) throw new Error('Select up to 20 songs per batch');
+    const cfg = window.DecentConfig || {};
+    const signer = _adminSigner;
+    const owner = _adminAddress;
+    const walletCheck = _walletCheckId;
+    const prepared = [];
+    for (const index of indices) {
+      const track = _mintQueue[index];
+      if (!track) throw new Error('Mint queue changed; reload before minting');
+      prepared.push({ track, ...await _prepareQueuedTrack(track, index) });
+      if (walletCheck !== _walletCheckId) throw new Error('Wallet changed during batch preparation');
+    }
+    if (Number((await signer.provider.getNetwork()).chainId) !== 8453) throw new Error('Batch minting is Base-only');
+    if (walletCheck !== _walletCheckId || signer !== _adminSigner || cfg.contractAddress !== window.DecentConfig?.contractAddress) {
+      throw new Error('Wallet or contract changed; reload before minting');
+    }
+    const contract = new ethers.Contract(cfg.contractAddress, ROLE_GRANT_ABI, signer);
+    const products = prepared.map(({ track, metadataUrl }) => ({ recipient: track.recipient,
+      amount: 1, maxSupply: 0, tokenURI: metadataUrl, royaltyReceiver: track.recipient, royaltyFeeBps: 500 }));
+    _setMintStatus(`Confirm one batch transaction for ${products.length} songs…`);
+    const result = await mintPreparedProductsBatch({ contract, products, owner,
+      onBroadcast: hash => _setMintStatus(`Batch submitted: ${hash}. Waiting for confirmation…`) });
+    const failures = [];
+    for (let index = 0; index < prepared.length; index++) {
+      const { track, metadata, metadataUrl } = prepared[index];
+      const tokenId = result.tokenIds[index];
+      addNFTToSpace({ ...metadata, tokenId: Number(tokenId), contractAddress: cfg.contractAddress,
+        chainId: 8453, metadataUri: metadataUrl });
+      try {
+        await reportMintCompletion({ serviceUrl: cfg.ipfsUploadServiceUrl, trackId: track.trackId,
+          tokenId, txHash: result.txHash });
+      } catch (error) { failures.push(`${track.trackId}: token ${tokenId} (${error.message})`); }
+    }
+    if (failures.length) throw new Error(`Batch already minted: ${result.txHash}. Do not mint again. Pending Discord sync: ${failures.join('; ')}`);
   }
 
   function _setMintControlsDisabled(disabled) {

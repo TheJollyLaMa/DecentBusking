@@ -2,6 +2,7 @@
 // the source of truth when bot state is lost (e.g. a Render restart).
 
 import { Contract, JsonRpcProvider, isAddress } from 'ethers';
+import { CID } from 'multiformats/cid';
 import * as playlistStore from './playlist-store.js';
 
 const NFT_ABI = [
@@ -25,7 +26,12 @@ export async function withRetry(call, { attempts = 5, baseDelayMs = 1_000 } = {}
 
 export function audioCidFromMetadata(metadata = {}) {
   const uri = metadata.animation_url || metadata.audioUrl || '';
-  return uri.match(/^ipfs:\/\/(?:ipfs\/)?([^/?#]+)/)?.[1] ?? uri.match(/\/ipfs\/([^/?#]+)/)?.[1] ?? null;
+  const path = uri.match(/^ipfs:\/\/(?:ipfs\/)?([^?#]+)/)?.[1] ?? uri.match(/\/ipfs\/([^?#]+)/)?.[1];
+  if (!path) return null;
+  const [root, ...segments] = path.split('/');
+  let normalized = root;
+  try { normalized = CID.parse(root).toV1().toString(); } catch {}
+  return [normalized, ...segments].join('/');
 }
 
 async function fetchMetadata(uri, fetchImpl) {
@@ -60,18 +66,56 @@ export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry =
 }
 
 /** Mark playlist tracks whose audio is already minted on Base. */
+export async function readMintedCollections({ collections, fetchImpl = fetch, pauseMs, retry }) {
+  if (!Array.isArray(collections) || !collections.length) throw new Error('NFT collections are required');
+  const minted = new Map();
+  const artistWalletByAudioCid = new Map();
+  const tokenReferencesByAudioCid = new Map();
+  const seen = new Set();
+  for (const collection of collections) {
+    const address = collection.contractAddress;
+    if (!isAddress(address) || seen.has(address.toLowerCase())) throw new Error('Invalid or duplicate NFT collection');
+    seen.add(address.toLowerCase());
+    const artists = new Map();
+    const tokens = await readMintedAudioCids({ contract: collection.contract, fetchImpl, pauseMs, retry,
+      artistWalletByAudioCid: artists });
+    for (const [cid, tokenId] of tokens) {
+      if (!minted.has(cid)) minted.set(cid, tokenId);
+      if (!artistWalletByAudioCid.has(cid) && artists.has(cid)) artistWalletByAudioCid.set(cid, artists.get(cid));
+      const references = tokenReferencesByAudioCid.get(cid) || [];
+      references.push({ chainId: 8453, contractAddress: address, tokenId });
+      tokenReferencesByAudioCid.set(cid, references);
+    }
+  }
+  return { minted, artistWalletByAudioCid, tokenReferencesByAudioCid };
+}
+
 export async function syncMintedTracksFromChain({
   rpcUrl,
   contractAddress,
-  contract = new Contract(contractAddress, NFT_ABI, new JsonRpcProvider(rpcUrl)),
+  contract,
+  contractAddresses,
+  collections,
   fetchImpl = fetch,
   store = playlistStore,
   log = console,
   pauseMs,
 }) {
-  const artistWalletByAudioCid = new Map();
-  const minted = await readMintedAudioCids({ contract, fetchImpl, pauseMs, artistWalletByAudioCid });
-  const changed = store.applyOnChainMints(minted, { artistWalletByAudioCid });
+  let result;
+  if (collections || contractAddresses?.length) {
+    const provider = collections ? null : new JsonRpcProvider(rpcUrl);
+    result = await readMintedCollections({ collections: collections || contractAddresses.map(address => ({
+      contractAddress: address, contract: new Contract(address, NFT_ABI, provider),
+    })), fetchImpl, pauseMs });
+  } else {
+    const artistWalletByAudioCid = new Map();
+    const minted = await readMintedAudioCids({
+      contract: contract || new Contract(contractAddress, NFT_ABI, new JsonRpcProvider(rpcUrl)),
+      fetchImpl, pauseMs, artistWalletByAudioCid,
+    });
+    result = { minted, artistWalletByAudioCid };
+  }
+  const changed = store.applyOnChainMints(result.minted, result);
   if (changed) log.log(`[mint-sync] Marked ${changed} track(s) minted from DecentNFT on Base.`);
   return changed;
 }

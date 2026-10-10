@@ -23,10 +23,10 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261005-mp4';
+import { renderNFTCard } from './nft-card.js?v=20261010-collections';
 import { setNowPlaying } from './stage.js?v=20261005-mp4';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
-import { loadMintedToken, readCachedMintedTokens, readNftContract } from './nft-loader.js?v=20261003-space-artwork';
+import { loadMintedToken, readCachedMintedTokens, readNftContract, configuredNftCollections } from './nft-loader.js?v=20261010-collections';
 
 // ── Timeline constants ────────────────────────────────────────────────────
 const UNITS_PER_DAY   = 5;          // 3-D units per day on the Z-axis
@@ -76,14 +76,13 @@ const _ship = { speed: 0.3 };
 
 // ── NFT paging state ──────────────────────────────────────────────────────
 // Shared contract instance reused across lazy-load pages.
-let _contract        = null;
+let _collections = [];
 // Next tokenId to attempt loading (counts DOWN from nextTokenId-1 → 0).
 let _nextTokenToLoad = -1;
 // Timer for the auto-page interval.
 let _pageTimerId     = null;
 // Set to true once all tokens have been iterated.
 let _allLoaded       = false;
-let _archiveCacheKey = '';
 let _batchInFlight = null;
 let _pointerStart = null;
 let _activeArtist = '';
@@ -111,9 +110,9 @@ export function addNFTToSpace(nft) {
 }
 
 // Fetch metadata for a single token by ID — used by mint.js for parent preview.
-export async function fetchNFTMetaById(tokenId) {
+export async function fetchNFTMetaById(tokenId, collectionAddress) {
   const cfg = window.DecentConfig || {};
-  const contractAddress = cfg.contractAddress;
+  const contractAddress = collectionAddress || cfg.contractAddress;
   if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') return null;
 
   try {
@@ -125,7 +124,8 @@ export async function fetchNFTMetaById(tokenId) {
       'function totalMinted(uint256 tokenId) view returns (uint256)',
     ];
     const contract = new ethers.Contract(contractAddress, abi, provider);
-    return await loadMintedToken({ contract, tokenId, fetchMetadata: _fetchMetadata });
+    return await loadMintedToken({ contract, tokenId, fetchMetadata: _fetchMetadata,
+      contractAddress, chainId: cfg.chainId || 8453 });
   } catch (err) {
     console.warn('[space] fetchNFTMetaById failed:', err.message);
     return null;
@@ -253,11 +253,6 @@ async function _loadNFTs() {
 
   _showSpinner(true);
 
-  _archiveCacheKey = `${cfg.chainId || 8453}:${contractAddress.toLowerCase()}`;
-  for (const nft of readCachedMintedTokens({ cacheKey: _archiveCacheKey })) {
-    if (_isMusicNFT(nft) && !_allNFTs.some((entry) => entry.nft.tokenId === nft.tokenId)) _spawnMesh(nft, false);
-  }
-
   try {
     const rpcUrl = cfg.rpcUrl || 'https://mainnet.base.org';
     const provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -267,8 +262,19 @@ async function _loadNFTs() {
       'function creatorOf(uint256 tokenId) view returns (address)',
       'function totalMinted(uint256 tokenId) view returns (uint256)',
     ];
-    _contract = new ethers.Contract(contractAddress, abi, provider);
-    const nextId = Number(await readNftContract(() => _contract.nextTokenId()));
+    _collections = [];
+    for (const collection of configuredNftCollections(cfg)) {
+      const cacheKey = `${collection.chainId}:${collection.contractAddress}`;
+      for (const cached of readCachedMintedTokens({ cacheKey })) {
+        const nft = { ...cached, ...collection };
+        if (_isMusicNFT(nft) && !_allNFTs.some(entry => _nftKey(entry.nft) === _nftKey(nft))) _spawnMesh(nft, false);
+      }
+      const contract = new ethers.Contract(collection.contractAddress, abi, provider);
+      const nextId = Number(await readNftContract(() => contract.nextTokenId()));
+      if (!Number.isSafeInteger(nextId) || nextId < 0) throw new Error('Invalid NFT token count');
+      _collections.push({ ...collection, contract, cacheKey, nextTokenId: nextId - 1 });
+    }
+    const nextId = _collections.reduce((total, collection) => total + collection.nextTokenId + 1, 0);
 
     if (nextId === 0) {
       _showSpinner(false);
@@ -310,11 +316,14 @@ async function _loadBatch(count) {
 async function _loadBatchEntries(count) {
   let loaded = 0;
   while (_nextTokenToLoad >= 0 && loaded < count) {
-    const tokenIds = [];
-    while (_nextTokenToLoad >= 0 && tokenIds.length < Math.min(2, count - loaded)) {
-      tokenIds.push(_nextTokenToLoad--);
+    const entries = [];
+    while (_nextTokenToLoad >= 0 && entries.length < Math.min(2, count - loaded)) {
+      const collection = _collections.find(entry => entry.nextTokenId >= 0);
+      if (!collection) { _nextTokenToLoad = -1; break; }
+      entries.push({ collection, tokenId: collection.nextTokenId-- });
+      _nextTokenToLoad--;
     }
-    const results = await Promise.all(tokenIds.map(_tryLoadToken));
+    const results = await Promise.all(entries.map(_tryLoadToken));
     loaded += results.filter(Boolean).length;
   }
   if (_nextTokenToLoad < 0) _allLoaded = true;
@@ -323,19 +332,21 @@ async function _loadBatchEntries(count) {
 
 // Try to load a single token. Returns true if the token was a music NFT and
 // was successfully spawned, false otherwise.
-async function _tryLoadToken(tokenId) {
+async function _tryLoadToken({ collection, tokenId }) {
   try {
     const nft = await loadMintedToken({
-      contract: _contract,
+      contract: collection.contract,
       tokenId,
       fetchMetadata: _fetchMetadata,
-      cacheKey: _archiveCacheKey,
+      cacheKey: collection.cacheKey,
+      contractAddress: collection.contractAddress,
+      chainId: collection.chainId,
     });
 
     // Skip non-music tokens (images, text NFTs, etc.)
     if (!nft || !_isMusicNFT(nft)) return false;
 
-    if (_allNFTs.some((entry) => entry.nft.tokenId === nft.tokenId)) return true;
+    if (_allNFTs.some((entry) => _nftKey(entry.nft) === _nftKey(nft))) return true;
     _spawnMesh(nft, false);
     return true;
   } catch (error) {
@@ -411,7 +422,7 @@ function _spawnMesh(nft, isNew) {
   const z = isNew ? 0 : -ageDays * UNITS_PER_DAY;
 
   // Deterministic XY spread using golden-angle per tokenId to prevent overlap.
-  const seed  = nft.tokenId ?? (Math.random() * 9999);
+  const seed = _nftSpreadSeed(nft);
   const angle = (seed * 137.508) * (Math.PI / 180);
   const radius = SPREAD_RADIUS + (seed % 4) * 2.5;
   const x = Math.cos(angle) * radius;
@@ -539,6 +550,23 @@ function _isInWindow(ageDays) {
   return ageDays >= _timelineOffsetDays && ageDays < (_timelineOffsetDays + WINDOW_DAYS);
 }
 
+function _nftKey(nft) {
+  return nft.contractAddress ? `${nft.chainId || 8453}:${nft.contractAddress.toLowerCase()}:${nft.tokenId}` : String(nft.tokenId);
+}
+
+function _nftSpreadSeed(nft) {
+  if (!nft.contractAddress || nft.contractAddress.toLowerCase() === '0xe63ec9f8228720baac2fd528c0a6d06b3dc5439b') return nft.tokenId ?? 0;
+  let seed = 0;
+  for (const character of _nftKey(nft)) seed = (Math.imul(seed, 31) + character.charCodeAt(0)) >>> 0;
+  return seed;
+}
+
+function _nftRow(nft) {
+  return document.querySelector(nft.contractAddress
+    ? `.dnft-list-item[data-nft-id="${_nftKey(nft)}"]`
+    : `.dnft-list-item[data-token-id="${nft.tokenId}"]`);
+}
+
 function _updateVisibility() {
   for (const { mesh } of _allNFTs) {
     const { ageDays } = mesh.userData;
@@ -548,7 +576,7 @@ function _updateVisibility() {
   for (const { nft } of _allNFTs) {
     const visible = _matchesArtist(nft);
     if (visible) matched++;
-    const row = document.querySelector(`.dnft-list-item[data-token-id="${nft.tokenId}"]`);
+    const row = _nftRow(nft);
     if (row) row.hidden = !visible;
   }
   const count = document.getElementById('dnft-list-count');
@@ -717,6 +745,7 @@ function _addListItem(nft, mesh) {
   const li = document.createElement('li');
   li.className = 'dnft-list-item';
   li.dataset.tokenId = String(nft.tokenId);
+  li.dataset.nftId = _nftKey(nft);
 
   const title    = nft.name || nft.title || `Track #${nft.tokenId}`;
   const artist   = nft.artist || _shortAddr(nft.creator || '');
@@ -774,7 +803,7 @@ function _bindShowAllBtn() {
 
 // ── NFT Selection ──────────────────────────────────────────────────────────
 function _selectNFT(nft, mesh, listItem, showCard = true) {
-  _activeId = nft.tokenId;
+  _activeId = _nftKey(nft);
 
   // Highlight active list item
   document.querySelectorAll('.dnft-list-item').forEach(el => el.classList.remove('active'));
@@ -783,7 +812,7 @@ function _selectNFT(nft, mesh, listItem, showCard = true) {
     listItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   } else {
     // Find by tokenId and highlight
-    const found = document.querySelector(`.dnft-list-item[data-token-id="${nft.tokenId}"]`);
+    const found = _nftRow(nft);
     if (found) {
       found.classList.add('active');
       found.scrollIntoView({ block: 'nearest', behavior: 'smooth' });

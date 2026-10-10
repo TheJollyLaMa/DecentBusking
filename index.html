@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261010-public-top-ten" />
+  <link rel="stylesheet" href="css/styles.css?v=20261010-left-djuke" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -14,7 +14,7 @@
   <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
   <!-- App config — must load before modules -->
-  <script src="decent.config.js?v=20261006-owner-payroll"></script>
+  <script src="decent.config.js?v=20261010-djuke-pay"></script>
 </head>
 <body>
 
@@ -32,6 +32,35 @@
     <p class="top-ten-chart-note">Weekly net votes · upvotes minus downvotes · current song stays highlighted</p>
     <p id="top-ten-status" role="status" aria-live="polite">Open the tab to load this week’s votes.</p>
     <div id="top-ten-content"></div>
+  </aside>
+
+  <button id="djuke-tab" type="button" aria-controls="djuke-panel" aria-expanded="false" aria-label="Open DJuke" title="Open DJuke">
+    <span data-djuke-icon="Disc3" aria-hidden="true">♫</span><span>DJuke</span>
+  </button>
+  <aside id="djuke-panel" aria-label="DJuke jukebox" aria-hidden="true" inert>
+    <div class="djuke-heading">
+      <div class="djuke-brand"><img src="img/hat.svg" alt="" width="36" height="36"><h2>DJuke</h2></div>
+      <button id="djuke-close" type="button" aria-label="Close DJuke" title="Close DJuke"><span data-djuke-icon="X" aria-hidden="true">×</span></button>
+    </div>
+    <div class="djuke-body">
+      <div class="djuke-price-display"><span>Next Play</span><strong id="djuke-price">—</strong><span>USDC · Base</span></div>
+      <div class="djuke-queue-heading"><h3>Paid Queue <span id="djuke-count">—</span></h3><button id="djuke-refresh" type="button" aria-label="Refresh DJuke queue" title="Refresh queue"><span data-djuke-icon="RefreshCw" aria-hidden="true">↻</span></button></div>
+      <ol id="djuke-queue" aria-label="Pending paid requests"></ol>
+      <p id="djuke-queue-state" role="status" aria-live="polite">Queue unavailable</p>
+      <label class="djuke-song-label" for="djuke-song">Song</label>
+      <select id="djuke-song" disabled><option value="">Song catalog unavailable</option></select>
+      <div class="djuke-wallet-actions">
+        <button id="djuke-connect" type="button"><span data-djuke-icon="Wallet" aria-hidden="true">◇</span><span>Connect Wallet</span></button>
+        <button id="djuke-pay" type="button" disabled title="DJuke payment contract is not deployed">Queue Song</button>
+      </div>
+      <p id="djuke-payment-state" role="status" aria-live="polite">Payments not live</p>
+      <details class="djuke-tiers" open>
+        <summary>Price Model</summary>
+        <table><thead><tr><th scope="col">Pending requests</th><th scope="col">USDC</th></tr></thead><tbody id="djuke-price-tiers"></tbody></table>
+      </details>
+      <dl class="djuke-split"><div><dt>Repo-dev-fund</dt><dd>10%</dd></div><div><dt>Artist / collaborators</dt><dd>90%</dd></div></dl>
+    </div>
+    <div class="djuke-speaker" aria-hidden="true"></div>
   </aside>
 
   <div id="artist-filter-bar" role="group" aria-label="Filter NFTs by artist">
@@ -483,14 +512,15 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261005-tally-votes"></script>
+  <script type="module" src="js/main.js?v=20261010-collections"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261008-artwork-options"></script>
+  <script type="module" src="js/admin.js?v=20261010-batch"></script>
 
   <script type="module" src="js/payroll.js?v=20261008-ny-recovery-payflow"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
-  <script type="module" src="js/top-ten-board.mjs?v=20261010-top-ten-songs"></script>
+  <script type="module" src="js/top-ten-board.mjs?v=20261010-left-djuke"></script>
+  <script type="module" src="js/djuke.mjs?v=20261010-djuke-pay"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js?v=20261008-ny-recovery-payflow';
     document.addEventListener('DOMContentLoaded', initPayroll);

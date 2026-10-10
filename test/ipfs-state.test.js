@@ -112,3 +112,27 @@ test('uploads tagged state and prunes snapshots older than the newest three', as
     ['https://api.pinata.cloud/v3/files/public/old'],
   );
 });
+
+test('checkpoint bytes must be mirrored before publication and match the Pinata CID', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  let mirrored;
+  let uploads = 0;
+  const store = createPinataStateStore({ pinataJwt: 'test', beforeUpload: async bytes => {
+    mirrored = Buffer.from(bytes); return 'mirrored-cid';
+  }, fetchImpl: async (url, options = {}) => {
+    if (options.method === 'POST') {
+      uploads++;
+      assert.deepEqual(Buffer.from(await options.body.get('file').arrayBuffer()), mirrored);
+      return new Response(JSON.stringify({ data: { cid: 'mirrored-cid' } }));
+    }
+    return new Response(JSON.stringify({ data: { files: [] } }));
+  } });
+  assert.equal(await store.save([{ trackId: 'song' }]), 'ipfs://mirrored-cid');
+  const offline = createPinataStateStore({ pinataJwt: 'test', beforeUpload: async () => { throw new Error('Mirror offline'); },
+    fetchImpl: async () => { uploads++; throw new Error('Must not publish'); } });
+  await assert.rejects(offline.save([]), /Mirror offline/);
+  assert.equal(uploads, 1);
+  const mismatch = createPinataStateStore({ pinataJwt: 'test', beforeUpload: async () => 'local',
+    fetchImpl: async () => new Response(JSON.stringify({ data: { cid: 'different' } })) });
+  await assert.rejects(mismatch.save([]), /differs from locally mirrored/);
+});

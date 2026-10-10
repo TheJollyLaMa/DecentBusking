@@ -12,6 +12,38 @@ test('extracts the audio CID from DecentNFT metadata', async () => {
   assert.equal(audioCidFromMetadata({ animation_url: 'ipfs://bafy-audio' }), 'bafy-audio');
   assert.equal(audioCidFromMetadata({ audioUrl: 'https://gateway.pinata.cloud/ipfs/bafy-http' }), 'bafy-http');
   assert.equal(audioCidFromMetadata({ name: 'Achievement' }), null);
+  const root = 'bafybeidxx4rufx7xrn5lmt3npyaej6doupxajyh53ibb4fp43whdvgfm2u';
+  assert.equal(audioCidFromMetadata({ audioUrl: `ipfs://${root}/one.mp3` }), `${root}/one.mp3`);
+  assert.equal(audioCidFromMetadata({ audioUrl: `https://ipfs.io/ipfs/${root}/two.mp3?download=1` }), `${root}/two.mp3`);
+  assert.notEqual(audioCidFromMetadata({ audioUrl: `ipfs://${root}/one.mp3` }),
+    audioCidFromMetadata({ audioUrl: `ipfs://${root}/two.mp3` }));
+});
+
+test('multi-collection reconciliation preserves contract identity and waits for every scan', async () => {
+  const { readMintedCollections, syncMintedTracksFromChain } = await import(moduleUrl);
+  const oldAddress = `0x${'1'.repeat(40)}`;
+  const newAddress = `0x${'2'.repeat(40)}`;
+  const contract = suffix => ({ nextTokenId: async () => 1n, totalMinted: async () => 1n,
+    uri: async () => `ipfs://meta-${suffix}` });
+  const collections = [{ contractAddress: oldAddress, contract: contract('old') },
+    { contractAddress: newAddress, contract: contract('new') }];
+  const fetchImpl = async () => new Response(JSON.stringify({ audioUrl: 'ipfs://same-recording' }));
+  const result = await readMintedCollections({ collections, fetchImpl, pauseMs: 0 });
+  assert.equal(result.minted.get('same-recording'), '0');
+  assert.deepEqual(result.tokenReferencesByAudioCid.get('same-recording'), [
+    { chainId: 8453, contractAddress: oldAddress, tokenId: '0' },
+    { chainId: 8453, contractAddress: newAddress, tokenId: '0' },
+  ]);
+  let applied = false;
+  const broken = [...collections.slice(0, 1), { contractAddress: newAddress,
+    contract: { ...contract('new'), uri: async () => 'ipfs://unavailable' } }];
+  await assert.rejects(syncMintedTracksFromChain({ collections: broken, pauseMs: 0,
+    fetchImpl: async url => url.includes('unavailable') ? new Response('', { status: 503 }) : fetchImpl(),
+    store: { applyOnChainMints: () => { applied = true; } },
+  }), /metadata could not be verified/);
+  assert.equal(applied, false);
+  await assert.rejects(readMintedCollections({ collections: [collections[0], collections[0]], pauseMs: 0, fetchImpl }),
+    /duplicate NFT collection/);
 });
 
 test('marks tracks minted from Base so lost state cannot re-queue an existing NFT', async (t) => {

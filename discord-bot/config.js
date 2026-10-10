@@ -57,6 +57,11 @@ export function loadConfig() {
     mintOwnerWallet:        process.env.MINT_OWNER_WALLET || '',
     publicWorkerUrl:        (process.env.PUBLIC_WORKER_URL || '').replace(/\/$/, ''),
     nftContractAddress:     process.env.DECENT_NFT_CONTRACT_ADDRESS || '0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B',
+    nftContractAddresses:   [...new Set([
+      '0xe63ec9f8228720baac2fd528c0a6d06b3dc5439b',
+      process.env.DECENT_NFT_CONTRACT_ADDRESS,
+      ...(process.env.DECENT_NFT_ADDITIONAL_ADDRESSES || '').split(','),
+    ].filter(Boolean).map(address => address.trim().toLowerCase()).filter(Boolean))],
     baseRpcUrl:             process.env.BASE_RPC_URL || 'https://mainnet.base.org',
     blockExplorerUrl:       (process.env.BLOCK_EXPLORER_URL || 'https://basescan.org').replace(/\/$/, ''),
     jukeLoopVoiceChannelId: process.env.JUKE_LOOP_VOICE_CHANNEL_ID || null,

@@ -46,6 +46,7 @@ export function createPinataStateStore({
   name = STATE_FILE_NAME,
   tags = STATE_KEYVALUES,
   retainSnapshots = SNAPSHOTS_TO_KEEP,
+  beforeUpload,
   serialize = playlist => ({ schemaVersion: 1, savedAt: new Date().toISOString(), playlist }),
   deserialize = snapshot => {
     if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.playlist)) throw new Error('IPFS state snapshot has an unsupported format');
@@ -82,8 +83,10 @@ export function createPinataStateStore({
 
   async function save(playlist) {
     const snapshot = serialize(playlist);
+    const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
+    const mirroredCid = beforeUpload ? await beforeUpload(bytes) : null;
     const form = new FormData();
-    form.append('file', new Blob([JSON.stringify(snapshot)], { type: 'application/json' }), name);
+    form.append('file', new Blob([bytes], { type: 'application/json' }), name);
     form.append('network', 'public');
     form.append('name', name);
     form.append('keyvalues', JSON.stringify(tags));
@@ -93,6 +96,7 @@ export function createPinataStateStore({
     const result = await response.json();
     const cid = result.data?.cid || result.cid || result.IpfsHash;
     if (!cid) throw new Error('Pinata state upload did not return a CID');
+    if (mirroredCid && cid !== mirroredCid) throw new Error(`Pinata checkpoint ${cid} differs from locally mirrored ${mirroredCid}; do not adopt this state`);
 
     const snapshots = await listSnapshots();
     const normalizedFilesUrl = filesApiUrl.replace(/\/(public|private)?\/?$/, '');

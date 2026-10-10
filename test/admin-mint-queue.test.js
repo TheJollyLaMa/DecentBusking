@@ -1,5 +1,32 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+
+test('prepared batch uses one transaction and reads actual token IDs from matching contract events', async () => {
+  const { mintPreparedProductsBatch } = await import('../js/admin-mint-queue.js');
+  const owner = `0x${'1'.repeat(40)}`;
+  const recipient = `0x${'2'.repeat(40)}`;
+  const address = `0x${'3'.repeat(40)}`;
+  const products = ['a', 'b'].map(suffix => ({ recipient, amount: 1, maxSupply: 0,
+    tokenURI: `ipfs://${suffix}`, royaltyReceiver: recipient, royaltyFeeBps: 500 }));
+  const logs = products.flatMap((product, index) => [
+    { address, name: 'TokenRegistered', args: { tokenId: BigInt(index + 70), creator: owner, kind: 0n, uri: product.tokenURI } },
+    { address, name: 'EditionMinted', args: { tokenId: BigInt(index + 70), to: recipient, minter: owner, amount: 1n } },
+  ]);
+  let transactions = 0;
+  const send = async (_products, options) => {
+    transactions++;
+    assert.equal(options.gasLimit, 120000n);
+    return { hash: '0xbatch', wait: async () => ({ status: 1, hash: '0xbatch', logs }) };
+  };
+  send.estimateGas = async () => 100000n;
+  const contract = { target: address, registerAndMintProductsBatch: send, interface: { parseLog: log => log } };
+  assert.deepEqual(await mintPreparedProductsBatch({ contract, products, owner }), { tokenIds: ['70', '71'], txHash: '0xbatch' });
+  assert.equal(transactions, 1);
+  logs[0].address = recipient;
+  await assert.rejects(mintPreparedProductsBatch({ contract, products, owner }), /ambiguous registration/);
+  await assert.rejects(mintPreparedProductsBatch({ contract, products, owner, maxGas: 1n }), /select fewer/);
+  assert.equal(transactions, 2);
+});
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
@@ -114,6 +141,7 @@ test('Admin reuses the header signer, checks roles without reconnecting, and cle
   let queueCalls = 0;
   let allowed = true;
   const context = vm.createContext({
+    PRODUCT_BATCH_ABI: (await import(moduleUrl)).PRODUCT_BATCH_ABI,
     window: { _wallet: { signer, address, chainId: 8453 }, DecentConfig: { chainId: 8453, contractAddress: 'contract' }, location: { origin: 'https://site.example' } },
     document: { getElementById: element, addEventListener: (name, callback) => events.set(name, callback) },
     ethers: { BrowserProvider: class { constructor() { throw new Error('Must not reconnect'); } },

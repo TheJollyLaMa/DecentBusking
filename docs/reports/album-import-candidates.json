@@ -1,0 +1,2493 @@
+{
+  "schemaVersion": 1,
+  "applyEnabled": false,
+  "sourceGeneratedAt": "2026-10-10T14:41:08.132Z",
+  "duplicateMode": "title",
+  "uploadsRequired": 0,
+  "nftVerification": "not-performed-by-user-request",
+  "tracks": [
+    {
+      "title": "JonesDr 419 rainbow walk",
+      "filename": "JonesDr_419_rainbow_walk.m4a",
+      "ipfsCid": "bafybeif47uo7zo2jt6ufi74xnqwpos6y6xgyj5ayjip6u4zoli2ymu3oym",
+      "sha256": "8cd9cbd76f178f09c82bf3b3160fe355677cca24255846413d45fd033a174217",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_419_rainbow_walk.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr 431 friend of the devil2",
+      "filename": "JonesDr_431_friend_of_the_devil2.m4a",
+      "ipfsCid": "bafybeihyxnvrimrmfs4fcvay2gqhpimbcasr7fs3gr45mdq2wm47jlfabi",
+      "sha256": "fa38b6ac513aa0620b9836e4f54068227e6089a06d1bcf9ac096a9de85d705b8",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_431_friend_of_the_devil2.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr 431 i shall be released",
+      "filename": "JonesDr_431_i_shall_be_released.m4a",
+      "ipfsCid": "bafybeifdmdhq3xd3cfix7dzioijkot4mde5hmmm73xjlm6zcvesm2knonm",
+      "sha256": "f220aae258c709b45dfc473eddbbef507bd1aa05eef84bb4b9a2a0d6816d59b3",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_431_i_shall_be_released.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr 431 my style2",
+      "filename": "JonesDr_431_my_style2.m4a",
+      "ipfsCid": "bafybeigsygk6lvpbfy6aes6vgtwbz5h3oey3e5o3bfbg3g4sq6ryrvpqim",
+      "sha256": "e36228f8c9989af9efccf1e3dabc4590a2c6e40c77f9989312072dd187347a93",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_431_my_style2.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr 436 strange game",
+      "filename": "JonesDr_436_strange_game.m4a",
+      "ipfsCid": "bafybeifsxvyyu2lspfaairhjkews6d4yutlh5y6g2svfcfqg6f6uvdefem",
+      "sha256": "4cbbd0b0cc153010c8e42261e9f529fbec155554fa1acb82312f029cc5a8825e",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_436_strange_game.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr 438 ball and chain2",
+      "filename": "JonesDr_438_ball_and_chain2.m4a",
+      "ipfsCid": "bafybeicumlh3qfr73gisu5rz7ljt4ru4sz23cf34rua42qz45zkfjqqm3q",
+      "sha256": "880b158052a984772dbe6f5f2b65af5f99f3f14ade7586139013924b311d269c",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_438_ball_and_chain2.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr 44 sympathy for the devil",
+      "filename": "JonesDr_44_sympathy_for_the_devil.m4a",
+      "ipfsCid": "bafybeifz5qcqzbvdirzbeveghasmhez2tfxjgfkjvctnalvmo2xl3fc7ia",
+      "sha256": "c7101a3fb8bd1dcdb5bae9ae9f42816946ae145127ebed7c81461ff001f8e2e5",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_44_sympathy_for_the_devil.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr 442 Astrovan",
+      "filename": "JonesDr_442_Astrovan.m4a",
+      "ipfsCid": "bafybeih4sieszue4itm7vl3p2zwt4lpuvn7j63xla4mvsi5gtsdjf67v74",
+      "sha256": "bc060ddbe6880f4e1b0b0c403d4c2230d72c3f6f7cb9d5ae82e2377b84e3d6dd",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_442_Astrovan.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr 443 this life",
+      "filename": "JonesDr_443_this_life.m4a",
+      "ipfsCid": "bafybeif4nbgz6sjnhmjijennl5xniew6lodazwvrthl6w2dsii4uuoxfiu",
+      "sha256": "1fa9ed9c12c1c59b4d0236106c4e7e8d2351c84759b1aaebd8050db0e903519e",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_443_this_life.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr 446 little boxes",
+      "filename": "JonesDr_446_little_boxes.m4a",
+      "ipfsCid": "bafybeigb4vzvsat5332ilpq4wbiyva36dl4ngklbm5s6ly2wl46prvmafm",
+      "sha256": "86bc7c59cdb74647cd13f4a977523c36e1084a79ac093962063e0acd86e847c3",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_446_little_boxes.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr 448 goin to Cali",
+      "filename": "JonesDr_448_goin_to_Cali.m4a",
+      "ipfsCid": "bafybeidqzivrkm7wgyaut6gvlonulqlt2fauonon4fpovfryhkjtuzltlq",
+      "sha256": "dc489472d8308de90a81707ec90e0aa688357f67808a9bee90b9a91feccbb756",
+      "albums": [
+        "JonesDriveSessions_AA"
+      ],
+      "sources": [
+        "JonesDriveSessions_AA/JonesDr_448_goin_to_Cali.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "StrongLikeJah",
+      "filename": "StrongLikeJah.mp3",
+      "ipfsCid": "bafybeiao3w4kbrcjrn4d2nt56kw2fl2hfuynhjccrid3puccnijecjjjne",
+      "sha256": "94a3d4754400e898ae56ff795abc7f5aae6bb076f80d6e1d2c5f14d16843f548",
+      "albums": [
+        "JonesDriveSessions_AB"
+      ],
+      "sources": [
+        "JonesDriveSessions_AB/StrongLikeJah.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "BlowinNTheWind",
+      "filename": "BlowinNTheWind.mp3",
+      "ipfsCid": "bafybeidpqlpkoav6625ka4nv3bvmrkl2fq4yhxym53i6rixp37yx4jkbze",
+      "sha256": "f4a3b99504c274b2834b60366b336d4a07be0fd9a083d63f09419c860e6a5ab9",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/BlowinNTheWind.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "brokedownPalace",
+      "filename": "brokedownPalace.mp3",
+      "ipfsCid": "bafybeidqo2vd3avqdyicctcxp4qgyuvuvqeduzirzl4q4x3u4i6nzviuxy",
+      "sha256": "c7bd6c2967ab934561d6ef84ee2775325c41fdf621767ccea52f45e29c72ed37",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/brokedownPalace.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "ChaseTheDevil S.B.1.3",
+      "filename": "ChaseTheDevil_S.B.1.3.mp3",
+      "ipfsCid": "bafybeicvdhgvrx2gxkjwrpkpliblooq43rril52yd5x2cgcgf4mgc2jbqm",
+      "sha256": "788e5bd88db354995dc9fd42da173d90d9f09b29e96222f3c30a4ce9a40e21f0",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/ChaseTheDevil_S.B.1.3.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Coming In",
+      "filename": "Coming_In.m4a",
+      "ipfsCid": "bafybeihid5ycflz5egboqjfn2cglfmby6wocy3vaamwvri7x5soozuoj3q",
+      "sha256": "2d8d8bb8de846b62a5e4eeba2fafdd97a07b5a34f0eccfebd651c2569fdf55f7",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/Coming_In.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Crosby Laughing",
+      "filename": "Crosby_Laughing.mp3",
+      "ipfsCid": "bafybeiavsoov56mb4hh3tpb3dph7elw6a7wprdteo5y6nob2bm7coqye4e",
+      "sha256": "bb78564a163b8ba29008895206fb03540f2f2311d5c4ce688ea0be5e98148e83",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/Crosby_Laughing.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Don'tBogartMe",
+      "filename": "Don'tBogartMe.mp3",
+      "ipfsCid": "bafybeibkenwbh4r7ls3wkephpyqivs35nmziawvtqtdbtsmuj756enlpry",
+      "sha256": "d29ef8237fe132b60b0f0e2411638b818fcc1e1c4a6543f0b8ef9ca9c2e5c4ef",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/Don'tBogartMe.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "HaileSalassie",
+      "filename": "HaileSalassie.mp3",
+      "ipfsCid": "bafybeibk22z3zietlmzwni3ii4ky7icijo4vkik6k7myh5f3skooh4kgvy",
+      "sha256": "63306183ac4ca0dec043764fcb08adf8e0f673dd9006f0bca56c7ad88cb545d5",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/HaileSalassie.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "HorseWithNo Name",
+      "filename": "HorseWithNo Name.m4a",
+      "ipfsCid": "bafybeid5vw2qypfgccqbi4yfbcbzjx6fa3jm6ulooyhaako7giqs7qh7tm",
+      "sha256": "6e5c560c5ecde5415742837aa5ee3eeff1891d99d743a6b8b904810a638dfcf1",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/HorseWithNo Name.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jolly and Alice's Restuarant",
+      "filename": "Jolly_and_Alice's_Restuarant .mp3",
+      "ipfsCid": "bafybeihtzb7dc3r3fkenfktvfplqrfbr7zs4agi25r6sseo7r55fl5eag4",
+      "sha256": "8438ebfb1406819634167bc66c5a76fcc4e9a931535f3da873bdd1d2c937bec1",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/Jolly_and_Alice's_Restuarant .mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Pigs On The Wing Mother",
+      "filename": "Pigs_On_The_Wing_Mother.mp3",
+      "ipfsCid": "bafybeih6bvh4bgb2g5gsqxbsv6fuzbhve7m2zby654jyhrqmii5ftki3l4",
+      "sha256": "0449d9b029c21736cf78a9d9bf69459dbd50c770385f2f6528cee4777cddd742",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/Pigs_On_The_Wing_Mother.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "RockyRacoon",
+      "filename": "RockyRacoon.m4a",
+      "ipfsCid": "bafybeib577bk72sja3c74zo25fnqnqgetpyqrwrx7tqs2owl5n2qpzx22u",
+      "sha256": "f9cf64002ac1f44b3e011908fbdc1b867603ed197718ebb8912ed023f8f0a900",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/RockyRacoon.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "TimesAreChangin",
+      "filename": "TimesAreChangin.mp3",
+      "ipfsCid": "bafybeidcpisncexrjve4fle6uqd2bju77fvohtanjcyxvib42iy2p7lpgq",
+      "sha256": "13fea9e11c383aef4f45c581a7890d2689b8eb72555e0ec878bbe1444d4c6b13",
+      "albums": [
+        "JonesDrSessions_AD"
+      ],
+      "sources": [
+        "JonesDrSessions_AD/TimesAreChangin.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "01 Far Cry",
+      "filename": "01_Far_Cry.m4a",
+      "ipfsCid": "bafybeiam3ddh3mboseimgukpdppfffznkro653hekqxrdm75i36tvlb46y",
+      "sha256": "9d9eaf45374d54bf93a1c4386c5aa3bc43ac1bf201016c868250778f12b056cd",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/01_Far_Cry.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "4 and 20 years",
+      "filename": "4_and_20_years.m4a",
+      "ipfsCid": "bafybeihzdszojt2e2szqn6zp36vt4je4jt7sptng26ntscmen3tqahmy4e",
+      "sha256": "c48461544fc94ccf8af64dddefb810ee20964b327242605fa722df87ac08b0ee",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/4_and_20_years.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "BleedOnMe",
+      "filename": "BleedOnMe.m4a",
+      "ipfsCid": "bafybeigsf4tdkdfhp2hy22zh6bp7cvgwnf7dwhd34u45qivcc5tpwl4csy",
+      "sha256": "5ab74acf09d1e24d99e925ba9e03e1dfeba69154da4aa34af72303743c81abb3",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/BleedOnMe.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Ganja babe",
+      "filename": "Ganja babe.m4a",
+      "ipfsCid": "bafybeia6hqnxy65o6wmt5ncisotpsjtopnure3bv7knh75y5p2oramvuam",
+      "sha256": "c1f558695ee930c244e08e4b9ecb29cfe3c4984b630737336d48c6cc64a1d4ab",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/Ganja babe.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "He's Gone",
+      "filename": "He's_Gone.m4a",
+      "ipfsCid": "bafybeih3bg4vmeabwenyq3653z3w2psyprj5j73prmiiwxue7hx6pihaxu",
+      "sha256": "4d2f17a2f5f352fa87640011e0c809e5c6fffb16105218e11b4e3f37063e4330",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/He's_Gone.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "OurInhibitedExhibit",
+      "filename": "OurInhibitedExhibit.mp3",
+      "ipfsCid": "bafybeibxlbq6n5ur4ls2ikq5fkb5t3udhfej5agaualtaf34x66jp7blgy",
+      "sha256": "db4ba0b13b562f33b6864b43c1accaf10fc567a357140f66fbb16858a5e244c6",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/OurInhibitedExhibit.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "PastLives",
+      "filename": "PastLives.mp3",
+      "ipfsCid": "bafybeideip6dqoew35zhfhpj66zayz7h7yotli5os5qmcuhrgoe2m5sk3m",
+      "sha256": "485d946e34a22e6ec4fd01d8940efc96dd9fb21754ae73fdcfbb5f92add13c05",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/PastLives.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "RainyDayWomen 12&35",
+      "filename": "RainyDayWomen_12&35.mp3",
+      "ipfsCid": "bafybeibhepyhuppzj26cpy34meclvx2cnp2zwf2wn7vp3oukiogxpr7xg4",
+      "sha256": "fed65610d2c3a6bb9480dd21a143c620cefcb9d2cb2c2c6cdee2acd6b650e888",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/RainyDayWomen_12&35.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "RedemptionSong",
+      "filename": "RedemptionSong.mp3",
+      "ipfsCid": "bafybeicqhw6itoxficmrqz4pcaalero24hbjzv7sfftspwbqsrpvyx5hbu",
+      "sha256": "60c3107576276519be9aea640c56d18b0e28677c93ab80264c817aed0c001334",
+      "albums": [
+        "JonesDrSessions_AE",
+        "JonesDrSessions_AF"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/RedemptionSong.mp3",
+        "JonesDrSessions_AF/RedemptionSong.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "TheManComesAround",
+      "filename": "TheManComesAround.mp3",
+      "ipfsCid": "bafybeibv7otpiumepav2gmylv2wlqgnwflwftb3afhljwvphhyxpjx44sq",
+      "sha256": "27ae75cad3f5af00b64c164cb24cddf322fd2f6e19f7692ad5dd119c53a392e3",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/TheManComesAround.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "TheManInMe",
+      "filename": "TheManInMe.mp3",
+      "ipfsCid": "bafybeigu5rzi65scu76om5yp7l77skiuas4ktksxaie2ailcte4etqlf7i",
+      "sha256": "8fc851089458d0b325a1622d6da70cad3fc8d4924e46602b8537744fa0f1761d",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/TheManInMe.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "UpInSmoke",
+      "filename": "UpInSmoke.mp3",
+      "ipfsCid": "bafybeigh5ezntlrhptk626kr2zdxwarpwnx3o5vxx4wtbr3lpqlgbvdzhe",
+      "sha256": "a40cea7fa0fed14f95c14c9e044a1555f66666c183b3181715fd448bbf9d5a83",
+      "albums": [
+        "JonesDrSessions_AE"
+      ],
+      "sources": [
+        "JonesDrSessions_AE/UpInSmoke.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "2 Jones Dr 461 burn one down",
+      "filename": "2 Jones Dr 461 burn one down.m4a",
+      "ipfsCid": "bafybeiginz4qoffsfrtu74d7mihd2ksh4fbxxaizxqiuj62rtbumoberje",
+      "sha256": "6c26804c2a684e5461fb53c7080e8c5769cea931be187bb54bd9719b92f1007c",
+      "albums": [
+        "JonesDrSessions_AF",
+        "JonesDrSessions_AG"
+      ],
+      "sources": [
+        "JonesDrSessions_AF/2 Jones Dr 461 burn one down.m4a",
+        "JonesDrSessions_AG/JonesDr461 burn one down.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "01LittleBoxes",
+      "filename": "01LittleBoxes.mp4",
+      "ipfsCid": "bafybeicxro4xwitlqf2e5s2bk5whmtlatqbcrpwzcswyk4hsmid73n7hzi",
+      "sha256": "fc01bc805b536eb29e3f0dfa24977afb7a7622e43ee05682875715f8eb3532d9",
+      "albums": [
+        "JonesDrSessions_AG"
+      ],
+      "sources": [
+        "JonesDrSessions_AG/01LittleBoxes.mp4"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "461 dragonfly",
+      "filename": "461 dragonfly.m4a",
+      "ipfsCid": "bafybeiey2mxmcxubpspizyusjn54aujidivsbz44mf7lfbywfwh7mdrmzm",
+      "sha256": "92acd26a0df647097ff9eb1e2bb07a6ba2321e778823bd7b10cef49ab0e11c27",
+      "albums": [
+        "JonesDrSessions_AG"
+      ],
+      "sources": [
+        "JonesDrSessions_AG/461 dragonfly.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr HotWinter",
+      "filename": "JonesDr HotWinter.m4a",
+      "ipfsCid": "bafybeiemmxzd2cstevzz4azjfddbvobjcdxeww6j2qztfez4koo2o2fbqe",
+      "sha256": "a51f6ff8a569d87f10b016c6e183876eda31e54378f15ecbb424e6356da09c06",
+      "albums": [
+        "JonesDrSessions_AG"
+      ],
+      "sources": [
+        "JonesDrSessions_AG/JonesDr HotWinter.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr450CaliforniaSway",
+      "filename": "JonesDr450CaliforniaSway.m4a",
+      "ipfsCid": "bafybeihgmxzhp2x2em2tlxcf5ifvhcgbgnlkmpccirrvzv4f6dvefqqg6i",
+      "sha256": "f9c6453ae0a31e2d38f40ffc85c8fbe6bc6de12c9fdf3b69c4652b78c8485758",
+      "albums": [
+        "JonesDrSessions_AG"
+      ],
+      "sources": [
+        "JonesDrSessions_AG/JonesDr450CaliforniaSway.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr451anotherWall",
+      "filename": "JonesDr451anotherWall.m4a",
+      "ipfsCid": "bafybeicwl6iehpdpyo7pn5awblc6uen2s2ag23vgz6ian6aukteksjwele",
+      "sha256": "fe130fab1b12b53abd17c9b63d6b34a15ac800c65da8d9244cdc02e000eedc69",
+      "albums": [
+        "JonesDrSessions_AG"
+      ],
+      "sources": [
+        "JonesDrSessions_AG/JonesDr451anotherWall.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr452 Joll ye need is Love",
+      "filename": "JonesDr452 Joll ye need is Love.m4a",
+      "ipfsCid": "bafybeibsblysnvfrt7372nliygsacfyubc7l55nqxkjw37wf6prs45wkdi",
+      "sha256": "c12724b87fddcf973f0cb709d7df94d1a9818cc4015cd888bb7f81b40ba8eea1",
+      "albums": [
+        "JonesDrSessions_AG"
+      ],
+      "sources": [
+        "JonesDrSessions_AG/JonesDr452 Joll ye need is Love.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr459 god Abraham Xanax",
+      "filename": "JonesDr459 god Abraham Xanax.m4a",
+      "ipfsCid": "bafybeichwywvbktmhu5cs4rkibhsauj3gllxhv2nt46bbla5lsjdi67fs4",
+      "sha256": "01b72941bfe6c48fc4bb23c873217b5ff7d24f661cf98ae7193a2d508caa5060",
+      "albums": [
+        "JonesDrSessions_AG"
+      ],
+      "sources": [
+        "JonesDrSessions_AG/JonesDr459 god Abraham Xanax.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr461 5446",
+      "filename": "JonesDr461 5446.m4a",
+      "ipfsCid": "bafybeifvwspme74sfhltmbkgp5c5mb6czyj7oy3vqfk3pddnhlf4ifhdim",
+      "sha256": "856633c0bdb24094f05b2c4e6b177c4720e1167d742b4f7a31822d557a67d224",
+      "albums": [
+        "JonesDrSessions_AG"
+      ],
+      "sources": [
+        "JonesDrSessions_AG/JonesDr461 5446.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr464 down on the corner",
+      "filename": "JonesDr464 down on the corner.m4a",
+      "ipfsCid": "bafybeibx6wmheks3gofzutzrfgga66pwt4hcyqdx5rzhtbb2ag5j6teura",
+      "sha256": "2523133d07c316642e8b4bf023c03ce374d3e5a30e526429b7257c259199050b",
+      "albums": [
+        "JonesDrSessions_AG"
+      ],
+      "sources": [
+        "JonesDrSessions_AG/JonesDr464 down on the corner.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "WharfRat loRes",
+      "filename": "WharfRat_loRes.mp4",
+      "ipfsCid": "bafybeicfsgcxogeogihkhgf5dcz55cb3fdi74wn7f22272egwa5263qmky",
+      "sha256": "d5a97547597ffbf5e4edc000898b2abe5327e6b174f3e380781245030d201439",
+      "albums": [
+        "JonesDrSessions_AG",
+        "JonesDrSessions_AN"
+      ],
+      "sources": [
+        "JonesDrSessions_AG/WharfRat_loRes.mp4",
+        "JonesDrSessions_AN/WharfRat_loRes.mp4"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "481 bird song",
+      "filename": "481 bird song.m4a",
+      "ipfsCid": "bafybeifz4rua6kkf4afgvvjwvhqa63h7ga3uadyhbziw5f3xxfdacljkxu",
+      "sha256": "30699f967a79a82bf796f79306f31142e08fec69d1d4b76fb83e0e75924b376c",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/481 bird song.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "481 buffalo soldier",
+      "filename": "481 buffalo soldier.m4a",
+      "ipfsCid": "bafybeic6zbudty2nwanz7i2qak5aadd23kf7bbuqvinegv6u5gak3uboii",
+      "sha256": "28c2e86a6d9e76f359f1253ca1bbb6eaf718ed39a4e2bf88c3b435dc060cfe72",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/481 buffalo soldier.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "481 Peter Pan 🧚‍♀️and Tink",
+      "filename": "481 Peter Pan 🧚‍♀️and Tink.m4a",
+      "ipfsCid": "bafybeiabiv6c7p2mwb2wmrd6akicobqnvqdvhvhndttcbj5qydkkhalase",
+      "sha256": "99e18d016962db9f33750d78abf3b6b82481393043a7558de77daec53e52fcdf",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/481 Peter Pan 🧚‍♀️and Tink.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "481 time tough",
+      "filename": "481 time tough.m4a",
+      "ipfsCid": "bafybeiegjamy5zcfdeuxp4rb7q2asd36od7dojvmsh52tdlqdprvcmju6u",
+      "sha256": "b9f786fc2abc9db4c5daf2e2349a87dddd66ea6e2ac4479805e687f3e0cab7cc",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/481 time tough.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "481 watching the wheels",
+      "filename": "481 watching the wheels.m4a",
+      "ipfsCid": "bafybeifmfxbppgz6xuoutmz5cro3ua4cl2qcxetpshr7fzt2djimgggiqy",
+      "sha256": "ea71bda87fb88f31a721dfa8fa26944537229740efbfdd2dd6c540f36a375e77",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/481 watching the wheels.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "481 zombies from the crypt",
+      "filename": "481 zombies from the crypt.m4a",
+      "ipfsCid": "bafybeicnw7t5ipwjmsb5ptzsxhpqf2tzadkqn5hrg7bbme6lk7ohddw4ae",
+      "sha256": "7d200be0d968cb4d58a49e3ba3e98e7fb873006d56c812bf7ac2fa3a2bd380db",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/481 zombies from the crypt.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "483 down by the seaside",
+      "filename": "483 down by the seaside.m4a",
+      "ipfsCid": "bafybeifzi6vif355r7t64kr324zdrvuxn54br3qqxmhynmojfvmwwmdg7e",
+      "sha256": "6c806b86b8e2b7cb6694d0de46888fd4f5bae18b8178963c288e7cd8b8ae465b",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/483 down by the seaside.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "484 dear prudence",
+      "filename": "484 dear prudence.m4a",
+      "ipfsCid": "bafybeihv3mrgzsj6pjzgpkckt6diws6qqty53vl6aexhmgj3ow2yzjy6su",
+      "sha256": "90f972fe9772b83e5b2ac7419049852d093269163ea41f0f669072d2eb49baab",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/484 dear prudence.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "484 on top of the world with friends",
+      "filename": "484 on top of the world with friends.m4a",
+      "ipfsCid": "bafybeicjfqyjy6az5pt6f2v5rbojvgqpqw6aaupqrzzlnxaqgvdrj2srbq",
+      "sha256": "539d41f90a1d84dad771d2897536ab6de0bbc25c95f870ad6998b89b63c289de",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/484 on top of the world with friends.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "485 across the universe",
+      "filename": "485 across the universe.m4a",
+      "ipfsCid": "bafybeigxlyy3kqqhcjhfed64j3wraok4xc3kvzu6lk5jw7uxx2ysrw37c4",
+      "sha256": "14be733a14d19d6ff338c4d7745c465b184685fadbb19148e942b786eb5bf227",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/485 across the universe.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "496 Olympics 🗽",
+      "filename": "496 Olympics 🗽.m4a",
+      "ipfsCid": "bafybeicvamr6dx6l3vs32ebgiazfctttgatuqxctehy4qllmnxeyocybca",
+      "sha256": "0663e19bcd1afc4c5003f92aed4586eae36fa990ba868846846887f9de518f63",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/496 Olympics 🗽.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "498 I saw red",
+      "filename": "498 I saw red.m4a",
+      "ipfsCid": "bafybeibq33br6f4ak7vb24ukekmmnjxcm6o3lowynona5wrlbcsnvacnjy",
+      "sha256": "e65b9f249da8d53fc261f19c69aadc8970499f84a15d5e55d979f0d2e8b07ff9",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/498 I saw red.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "499 zamba de mi esperanza",
+      "filename": "499 zamba de mi esperanza.m4a",
+      "ipfsCid": "bafybeigkscg2yntqrq7v27jtum6luqwc63v76kguccqfqvvank4vx4ubnm",
+      "sha256": "b559e1128645b27b982a6008ebc501707128330d8ca956b43af1834cfa407af5",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/499 zamba de mi esperanza.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 472 ripple",
+      "filename": "Jones Dr 472 ripple.m4a",
+      "ipfsCid": "bafybeic5jkpqitzibycyosfkdwsbbcfxvso3fo7zvdm36flgsgfpnzxdey",
+      "sha256": "3d62c24d197190fb3da514c6dc621394473816f20e2cfcf8ce59988c00d4bc6a",
+      "albums": [
+        "JonesDrSessions_AJ"
+      ],
+      "sources": [
+        "JonesDrSessions_AJ/Jones Dr 472 ripple.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "01 FloridaMan CasinoGod BadThings",
+      "filename": "01_FloridaMan_CasinoGod_BadThings.mp4",
+      "ipfsCid": "bafybeih3fvye6sa5o3wiv2po27lkx7yrtykdtavqccuwlhobsj4mto2gzm",
+      "sha256": "737911b82c20f346bc98bd6230d325299029cdce4ebb6c257a644d458166ecac",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/01_FloridaMan_CasinoGod_BadThings.mp4"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "02 Jones Dr 506 man on fire",
+      "filename": "02_Jones Dr 506 man on fire.m4a",
+      "ipfsCid": "bafybeigbpmdtm7a3ca25h3zuvcmnufb4kz46h5obi7obmsps75pdf74tum",
+      "sha256": "272b6ed265423986fdfa84acfdc01b316ccf32ce16b1eefc07747e8b2a9f807c",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/02_Jones Dr 506 man on fire.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "504 75 and sunny",
+      "filename": "504 75 and sunny.m4a",
+      "ipfsCid": "bafybeiady3rnaelfmp6byoghaxqudwbgyrvllzv2gk3gmfs4i7lwfxmffa",
+      "sha256": "74a9043462d87c9bf4e9f3c05d3bca1739255a32589ea78e789dc7258ae7966a",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/504 75 and sunny.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "504 angel",
+      "filename": "504 angel.m4a",
+      "ipfsCid": "bafybeifwpwmuh3dvu7tye2ufeg7nuppxu4qn3ft4qfweltjuzg4drocyva",
+      "sha256": "a901c22f0cc162624f1ff29b98b213f0c083d33bfc83ac14d10ff165dc9b6bdf",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/504 angel.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 503 baby let me follow you down",
+      "filename": "Jones Dr 503 baby let me follow you down.m4a",
+      "ipfsCid": "bafybeiawo65hhznms2p34hud47hkie7n3dhhu7ob4u6kgsm4brnbcjvbey",
+      "sha256": "27a087cc3da6fbe2a9d8c221aeeabf997c7e32cf5c582c357c4c7cf960100130",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/Jones Dr 503 baby let me follow you down.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 503 heavens door",
+      "filename": "Jones Dr 503 heavens door.m4a",
+      "ipfsCid": "bafybeifkq72sk54qmvugjewv6nxbi45bs72hdivoonss3tzomq7aq6spyq",
+      "sha256": "dd6780621e3807db710e35a98e2048a5a34dd34e4bdf95db8363a883c80ed436",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/Jones Dr 503 heavens door.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 504 creep",
+      "filename": "Jones Dr 504 creep.m4a",
+      "ipfsCid": "bafybeiflp7v4udnlytce5styzhiz57sxm2424uz4ax35es3jrfa3vud5g4",
+      "sha256": "d32104581bd7c422eab63128ca43136bcf01aa625ba5781e08a9a51bd432a62b",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/Jones Dr 504 creep.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 504 janglin",
+      "filename": "Jones Dr 504 janglin.m4a",
+      "ipfsCid": "bafybeif566k43nvtoaxabwyyc4vjr4psmm6feqgi7bnc7wnqsvvwvhenny",
+      "sha256": "57ce55d25e9ab5e16022eac43d1500c7f78823e449f6b45753ab229a8e69410d",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/Jones Dr 504 janglin.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 504 Mrs Robinson",
+      "filename": "Jones Dr 504 Mrs Robinson.m4a",
+      "ipfsCid": "bafybeidoph2ubdcmreczzuwicbivqdmj72vvdhunfmqf42jdmplunh5rfq",
+      "sha256": "5ee202b1eb12499dcb6a3eefc9a2c6f8cb454713efe256e0aa0e762a2ceebf2f",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/Jones Dr 504 Mrs Robinson.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 504 one man band",
+      "filename": "Jones Dr 504 one man band.m4a",
+      "ipfsCid": "bafybeiejwpwkrycznsn7pgkwpxbsr5e5n3vhcbtdl6p2g57xcz2nl37tum",
+      "sha256": "089faa3250d6cd32199ad1464ac755296adc815486f1f170439a883c5231ba0f",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/Jones Dr 504 one man band.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "z 501 rain song ⚸☔️🧞‍♂️",
+      "filename": "z_501 rain song ⚸☔️🧞‍♂️.m4a",
+      "ipfsCid": "bafybeifncyjmqdogjqfodurcdbsj6iwrw65nshqhglj54kfncre74hbrxm",
+      "sha256": "d22103daca75a3d56664a0018247f7837e3aa7c1b18d901c44a6017233e9f5ef",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/z_501 rain song ⚸☔️🧞‍♂️.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "z 502 rain song ⚸☔️🧞‍♂️",
+      "filename": "z_502 rain song ⚸☔️🧞‍♂️.m4a",
+      "ipfsCid": "bafybeicof2obte7hgzr55ecle5kjvvxzxdieggopcewbcask6q57z4ks2e",
+      "sha256": "910717bfafc062c84457b7a9bced9b9f288f43b19f6b84b082fd522e30e010c0",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/z_502 rain song ⚸☔️🧞‍♂️.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "z 503 rain song ⚸☔️🧞‍♂️",
+      "filename": "z_503 rain song ⚸☔️🧞‍♂️.m4a",
+      "ipfsCid": "bafybeicb4u3k2k2w25zbg7l24bxttceeywigelxup5vkct2iakowqrr7ie",
+      "sha256": "3e7fa13b057ca6f51e0f1a1dbbd7d26f87789a4823a1a75161fb69a89d64a7af",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/z_503 rain song ⚸☔️🧞‍♂️.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "z 504 rain song ⚸☔️🧞‍♂️",
+      "filename": "z_504 rain song ⚸☔️🧞‍♂️.m4a",
+      "ipfsCid": "bafybeib7jzxcoqn6sw54qmezzuikyg33oacmja2cali5u66x7zx55plkwm",
+      "sha256": "ba32d5a3103c4b60b7cc5c9f562a0d7e9e6c5a99ec339157fcb3dd93a0346b20",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/z_504 rain song ⚸☔️🧞‍♂️.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "z 505 Rain ⚸☔️🧞‍♂️Song",
+      "filename": "z_505 Rain ⚸☔️🧞‍♂️Song.mp3",
+      "ipfsCid": "bafybeigya6owsn36m4t4betrmatsc4uvmzeq5vgvduhiekrcqbjreygxx4",
+      "sha256": "43a5db7b78a4d7baba5f7b4c0d26fac987870fe09ff1f8022e164f091193ee49",
+      "albums": [
+        "JonesDrSessions_AK"
+      ],
+      "sources": [
+        "JonesDrSessions_AK/z_505 Rain ⚸☔️🧞‍♂️Song.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "BigNutens Prison (MyTapewormTellsMeWhatToDo)",
+      "filename": "BigNutens_Prison_(MyTapewormTellsMeWhatToDo).mp4",
+      "ipfsCid": "bafybeibvw2w2l73p73ivpwyze62m5yn72arpap6kwop42vqu6zk54laepi",
+      "sha256": "3500a97209adb9c3a09315125532fb24590dc2b3b85639e5c766cc1dc5824af9",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/BigNutens_Prison_(MyTapewormTellsMeWhatToDo).mp4"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Everybody’s gotta live",
+      "filename": "Everybody’s gotta live.m4a",
+      "ipfsCid": "bafybeifpjgh6zpqfri47uim2siuhg56abuntnlv4cmnu76asyhqayhl3wu",
+      "sha256": "6b6b514766a06f0a5811d9f5f741aaa3de0c2aa076153c428923db92bc613ff6",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Everybody’s gotta live.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 507 daydream",
+      "filename": "Jones Dr 507 daydream.m4a",
+      "ipfsCid": "bafybeibvru5ra3alblg6ozlp46smvkju5clkzqfamp24tnklpvxh7qua4a",
+      "sha256": "4c672c44beeb9061cfda2fd8d73e62f2115d5248972264141e38f33b1b06c30e",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 507 daydream.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 507 down and out",
+      "filename": "Jones Dr 507 down and out.m4a",
+      "ipfsCid": "bafybeidll374idysy5ayr4muea32jw5bqr26gics6mc65nrtawr5dwurci",
+      "sha256": "03c3d65cd50342335459d37da8470eb0567ceb3be4f76968d7b5073246799a42",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 507 down and out.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 507 down by the seaside",
+      "filename": "Jones Dr 507 down by the seaside.m4a",
+      "ipfsCid": "bafybeiaofwykhp7ljwcpmveeimvx424ipdnkmftrvbqahhbjqckah4dvy4",
+      "sha256": "f756e89e7e75078e901c365060dd8478c140655ef7ea692a5c20098cbb52651f",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 507 down by the seaside.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 507 jolly fleet fox 🦊 meadowlark",
+      "filename": "Jones Dr 507 jolly fleet fox 🦊 meadowlark.m4a",
+      "ipfsCid": "bafybeieqo2alkjf47xpphhktmmdrymqsccuuspsop2pr34rbwlsjfvtb2m",
+      "sha256": "eca60596bb395a10de803b8dcc539d1962b04a9228f21c590becd0afa5a1dd4d",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 507 jolly fleet fox 🦊 meadowlark.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 507 Let it be",
+      "filename": "Jones Dr 507 Let it be.m4a",
+      "ipfsCid": "bafybeihbsro7rgyy2wp6cceshirufgqola67s4q4zwxzj7ot7w5cclaxk4",
+      "sha256": "8277da3909f42a08577422ec2a68f4feaa6ed6425ed6b1e37a586f5d4a8267a7",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 507 Let it be.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 507 the boxer",
+      "filename": "Jones Dr 507 the boxer.m4a",
+      "ipfsCid": "bafybeid3p3gdnnvzo5f6drpq3nuddepahm2sxx7m3tc53xpvcpfmqnt6mu",
+      "sha256": "accf22d68db0d8b45b5f6265ce86ff162c87087c0d99c4340266f710d51fa22b",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 507 the boxer.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 508 down and out",
+      "filename": "Jones Dr 508 down and out.m4a",
+      "ipfsCid": "bafybeihruwtk5jklisdvzvl5piby7dx7x4kfvdi6juviv4hkh5lvw7zyla",
+      "sha256": "e506318bc6b3f0fdeb638975d7da598b6b3d9292ec1f73201ffd08d5f8ae5009",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 508 down and out.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 508 new speedway boogie",
+      "filename": "Jones Dr 508 new speedway boogie.m4a",
+      "ipfsCid": "bafybeib5caufwhxjmh44yxbc37ocft5wxfimlurropz63wwvtytaptneeu",
+      "sha256": "6c53b932a07d25464611c8ad6a78a57bd1f8aa495e67a0e81554836bfe839a4f",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 508 new speedway boogie.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 509 don’t let it bring you down 2",
+      "filename": "Jones Dr 509 don’t let it bring you down 2.m4a",
+      "ipfsCid": "bafybeihk6jdlk3hyydpqssf4wwqpufmklwf2ip5kawkr6yroaso6p42qz4",
+      "sha256": "0270352c7f6a70b478ef78c0e62e9aafd19648a0cc5ece9012cf290adc7700b9",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 509 don’t let it bring you down 2.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 509 don’t let it bring you down",
+      "filename": "Jones Dr 509 don’t let it bring you down.m4a",
+      "ipfsCid": "bafybeibxggkhrgqivskprfyyjydjn6lyzzjciuk5difjnzjrwsdpf2jgtq",
+      "sha256": "59bb0419dd933a846dd9f897a51b3295f6ed326e0ab30486f810ca5e50e9430a",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 509 don’t let it bring you down.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 509 follow the sun 🌙 ⚸🦚🌞with morning birds and mechanical waves of deamons",
+      "filename": "Jones Dr 509 follow the sun 🌙 ⚸🦚🌞with morning birds and mechanical waves of deamons.m4a",
+      "ipfsCid": "bafybeiatdse2bsitneb3im4wplffedxeftxf5ujwe4lcjieqgz3yewsufi",
+      "sha256": "1979f9b998e9cec54ddd1e6868f68c8fa87682a9eee4565ccda7da881191cfc9",
+      "albums": [
+        "JonesDrSessions_AL",
+        "JonesDrSessions_AN"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 509 follow the sun 🌙 ⚸🦚🌞with morning birds and mechanical waves of deamons.m4a",
+        "JonesDrSessions_AN/Jones Dr 509 follow the sun 🌙 ⚸🦚🌞with morning birds and mechanical waves of deamons.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 509 follow the sun 🌙🌞",
+      "filename": "Jones Dr 509 follow the sun 🌙🌞.m4a",
+      "ipfsCid": "bafybeigxu2dwaqesa235qtlpiyz2ka5s4vxxknkd6n7edfd65ianwlumu4",
+      "sha256": "f788a16a101fd573718eef3ffec62702d1eaf4893e1ab671df46907317d5bfd6",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 509 follow the sun 🌙🌞.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 509 heart of gold",
+      "filename": "Jones Dr 509 heart of gold.m4a",
+      "ipfsCid": "bafybeiadytxozqljaxudzndmkdajllhhxm5aop63bsgindktkqp234aolm",
+      "sha256": "1ef0d2d2058a4c513b2205b80018291cc48a5275e7624801819d64fd946b7488",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 509 heart of gold.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 509 helpless",
+      "filename": "Jones Dr 509 helpless.m4a",
+      "ipfsCid": "bafybeicl6352d6cumi6lete5jeg3xmhi24xjxtero4yubsodta3hbgizge",
+      "sha256": "5c0e7a24067609f1c66143f705b687ecaf14384c4b50a0782584654ca1291b07",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 509 helpless.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 509 hey hey my my",
+      "filename": "Jones Dr 509 hey hey my my.m4a",
+      "ipfsCid": "bafybeifyw6nn4tofjusil4dikumutfvxpld6yakq3ugnftdryl6rqzgmzm",
+      "sha256": "20c93add4834ab7d5826041f7e1fce74633c20f4d40711603ca7ce127deae0bd",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 509 hey hey my my.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 509 in hell I’ll be in good company",
+      "filename": "Jones Dr 509 in hell I’ll be in good company.m4a",
+      "ipfsCid": "bafybeifphvdotmoj7kz5mpx3l6qkhn4oxpraj2xiip3yzoipetakhj3mqy",
+      "sha256": "11c4a96a62c362dd563743d7f580fb2d90f66ee7b7fe862c523eeb4d859f81fe",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 509 in hell I’ll be in good company.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 509 teach your children",
+      "filename": "Jones Dr 509 teach your children.m4a",
+      "ipfsCid": "bafybeic5j5rfxors7x4gmvzlxfxaun4qcrj2rg7oatawugtedb5gptba7m",
+      "sha256": "9f0ca54a040ac4906ad55b737a544b6be90518547b36ba56b9236513c39d6150",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 509 teach your children.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 509 the boxer",
+      "filename": "Jones Dr 509 the boxer.m4a",
+      "ipfsCid": "bafybeigfpazyrbj5giiphtfiywgcixejd2pni4wteozgitwpowo7a7gfqy",
+      "sha256": "4bced04ccf8af1e11dc0538b050bbf23699d431824337df0bf043a63582777b5",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 509 the boxer.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 510 eve of destruction",
+      "filename": "Jones Dr 510 eve of destruction.m4a",
+      "ipfsCid": "bafybeidin6grtjj24tya3fp2wecv6uueblfpwvjdl6fcr3xhominqjuhca",
+      "sha256": "ab1da3c45cb79d18f460b40e5824caf265af8f41d6822553a2d5a3532d5abeb4",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 510 eve of destruction.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 510 happy together",
+      "filename": "Jones Dr 510 happy together.m4a",
+      "ipfsCid": "bafybeihi4jnhmgzoccj3xqassrfkuixr2rc7uejri2gvm4zwy34mxnbity",
+      "sha256": "63121632826db3e460408089fb792254a67d0d45ec8aeef6f85752b4bfc1d1fb",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 510 happy together.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 510 hey hey my my",
+      "filename": "Jones Dr 510 hey hey my my.m4a",
+      "ipfsCid": "bafybeignbgzt3uxtq5yht2j2qakh7al6zyl3jbucd2by5ql4t5k2i53oka",
+      "sha256": "276b50cce4a28f8cddf06b782b46f5706a3b7bb179302bd116c50538d312f4e7",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 510 hey hey my my.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 510 ramble on rose 🌹",
+      "filename": "Jones Dr 510 ramble on rose 🌹.m4a",
+      "ipfsCid": "bafybeifk5sl43ygonvqnlm7gwlrdh6lskqmlfa5o5soqeier6fk4nwvgta",
+      "sha256": "0115220f403f1841122ae722a0a4d10ccc4cb7714c4cc329f774deeb0a1b910d",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 510 ramble on rose 🌹.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 510 when I paint my masterpiece",
+      "filename": "Jones Dr 510 when I paint my masterpiece.m4a",
+      "ipfsCid": "bafybeiadqcm5mc63xkccbj7bbkpckscybc3bgy5k4zptl7eqosl5ieiuva",
+      "sha256": "15a28767a82821c9afb7a8ccddc4be30b900be1f831da1f4500db6384c7170f6",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 510 when I paint my masterpiece.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 511 eve of destruction",
+      "filename": "Jones Dr 511 eve of destruction.m4a",
+      "ipfsCid": "bafybeib5zwb5jl4ej3y64tccyjcsx7aaxi7poehllpwfrgtgoxl57ma6ui",
+      "sha256": "4354be8f41e7fff31f2654eef6ee0a19d7f260830f41747c542a93956055ced3",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 511 eve of destruction.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 511 my generation",
+      "filename": "Jones Dr 511 my generation.m4a",
+      "ipfsCid": "bafybeif2uxdtpe7sh7oll6jopjqtij5hcyamg6iaycsmxsfpbepk6nbi3a",
+      "sha256": "fce58f3e6a210294b1c8f9f88e0ca65d87f33c6477731d2499e861473662c62f",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 511 my generation.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 511 strawberry 🍓 fields",
+      "filename": "Jones Dr 511 strawberry 🍓 fields.m4a",
+      "ipfsCid": "bafybeigyeprhvyaudcoognx5kwvirvwhzlmxp5urp33r7ujx4hx3wkbava",
+      "sha256": "c9b5c230c7e0850af1a4f17b838e85680233188e141e40492b22744b291965b1",
+      "albums": [
+        "JonesDrSessions_AL"
+      ],
+      "sources": [
+        "JonesDrSessions_AL/Jones Dr 511 strawberry 🍓 fields.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "4 Plus 20",
+      "filename": "4 Plus 20.mp3",
+      "ipfsCid": "bafybeicckorloevgeq5kmaiuivk7tb5ljde6uk2drtvqcffstahsndspjy",
+      "sha256": "4ccc45379c29911d5e82da5e7d2796b19d9b814cb226544cf543257df2c4dc57",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/4 Plus 20.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Althea",
+      "filename": "Althea.mp3",
+      "ipfsCid": "bafybeibdjnypgm2dn4qhhyun7wv7jbjyc4fv2ckyei5o67bzkea5mtgs7i",
+      "sha256": "099915325c08778b13734379c56de1fe68bb886baad4330656f99a5613381096",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/Althea.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "AnchorAway - 2:25:23, 12.21 PM",
+      "filename": "AnchorAway - 2:25:23, 12.21 PM.mp3",
+      "ipfsCid": "bafybeiarqxbt42osy26expsnikmokimdcp6q3uv2ae3jzeeoyxubjudunu",
+      "sha256": "2aa5871aeb4102022ab137cbb2007488de45f4956011fcaa99e96657df3c2fa8",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/AnchorAway - 2:25:23, 12.21 PM.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "ComeTogether - 3:24:23, 5.42 AM",
+      "filename": "ComeTogether - 3:24:23, 5.42 AM.mp3",
+      "ipfsCid": "bafybeibd4n4fw7ungupbb7b5a3amnvyajmz3ayghsd2r662zc52uhtegfy",
+      "sha256": "625a05257fa26a4785b01f242d6e8171bc174b4b24a352a93d4e33d34dcb5c8e",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/ComeTogether - 3:24:23, 5.42 AM.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "ExquisiteFrequencyProject - 3:2:23, 7.54 AM",
+      "filename": "ExquisiteFrequencyProject - 3:2:23, 7.54 AM.mp3",
+      "ipfsCid": "bafybeia4sototqlwh2rp2jcvrzoku63zgigwqtcxfupkwlsrrtfy2g75hq",
+      "sha256": "99db78b7c855343d7b19437bc2bccdc789d473783528193dd8405d984f3eea4a",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/ExquisiteFrequencyProject - 3:2:23, 7.54 AM.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "GetReady Sublime - 1:25:23, 6.05 AM",
+      "filename": "GetReady_Sublime - 1:25:23, 6.05 AM.mp3",
+      "ipfsCid": "bafybeiaie3dysaxm5ozywhsni4hzu24bkw3dzgjiegapot7dddcadx6qsi",
+      "sha256": "fbb6a0515e66d0bd543c974b911393a47de8e1cf308f3800950d3ba7f852ee0e",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/GetReady_Sublime - 1:25:23, 6.05 AM.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "HaveACigar - 2:14:23, 7.07 AM",
+      "filename": "HaveACigar - 2:14:23, 7.07 AM.mp3",
+      "ipfsCid": "bafybeigpnb5iu2z6zztexcnjs6xei25oy6im6s73weu572pdm66h46criy",
+      "sha256": "a139310a7f3791ee13fa61830aab50171787b22b89ddcbed69b8a68471f08627",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/HaveACigar - 2:14:23, 7.07 AM.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jolly B N Bob D",
+      "filename": "Jolly_B_N_Bob_D.mp3",
+      "ipfsCid": "bafybeib6vnj3j67im6maphrasxtmvvjpa2nzwudxfw424ofv3xxckhh3li",
+      "sha256": "e1c17b3e3c2d94df35891a507972bc917ad479f3b2faf1dd66e5f1e90652ffdf",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/Jolly_B_N_Bob_D.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "Jones Dr 512 a horse with no name",
+      "filename": "Jones Dr 512 a horse with no name.m4a",
+      "ipfsCid": "bafybeiblbcfgnzjdnzfxqjmedwyakfr5a6dq3zljrjoedxcbkt7ffdeo5i",
+      "sha256": "7e12e41c64d076fab7bbcb96f53d9ee90100e47a5272fe9f161ffa698562700d",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/Jones Dr 512 a horse with no name.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "JonesDr GanjaBabe 3:21:23 11.45PM",
+      "filename": "JonesDr_GanjaBabe_3:21:23_11.45PM.mp3",
+      "ipfsCid": "bafybeihnl2gl3l3ekt3xhsayr6zqbgpypaqitmuyzhpdlm6af2bb46uamm",
+      "sha256": "b0379bf1219d0668747de5f6f0f88cf3e36a3eca4590ca2f21cd1ec9de1593e3",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/JonesDr_GanjaBabe_3:21:23_11.45PM.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "LiftMeDown",
+      "filename": "LiftMeDown.mp3",
+      "ipfsCid": "bafybeigraj73oiakvpotrflnbb2jyjubfzczhpheibnuetenmoarsvpkyq",
+      "sha256": "e4ad0c69234f0643d8a119dcad93b84b67ddb9daa8148933085e18f0db98d1fb",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/LiftMeDown.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "ThrillaVanilla",
+      "filename": "ThrillaVanilla.mp3",
+      "ipfsCid": "bafybeidvqwd4p4ksgllfm36nj3jq2hje5h4i4fyqyxd4fvkvruuwewipty",
+      "sha256": "a29196abfe07834a902100dd3bab19cf25a9358bf98e85e325eef29bfbfc8554",
+      "albums": [
+        "JonesDrSessions_AM"
+      ],
+      "sources": [
+        "JonesDrSessions_AM/ThrillaVanilla.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "540 going up the country 2",
+      "filename": "540 going up the country 2.m4a",
+      "ipfsCid": "bafybeicnioznq7kvp5y2qjexoonplnlbkmnywuj7te5spqiz3zizitlhmq",
+      "sha256": "eb34126671a3b09710bab74a11304e7279b930eecd5fb66d35e8dd86c2fc7853",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/540 going up the country 2.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "540 no sugar tonight new Mother Nature",
+      "filename": "540 no sugar tonight new Mother Nature.m4a",
+      "ipfsCid": "bafybeifaqzafbushf533ibrb2a3hblqa6xgrx6wwcraa5r756idhkv246u",
+      "sha256": "5e9730f5e386249fb938ef9f93080cc986101c84566607ce29fe54760861c218",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/540 no sugar tonight new Mother Nature.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "541 man gave names to all the animals",
+      "filename": "541 man gave names to all the animals.m4a",
+      "ipfsCid": "bafybeidkvkuia572ognzslwe4jxbbiadc5ocdyumy53aeziq523enz24cy",
+      "sha256": "87101082da25e122a62b25e6af1d15123d033abf1dea6e12fc9640991267d346",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/541 man gave names to all the animals.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "552 king of the bongo je ne t'aime plus",
+      "filename": "552_king_of_the_bongo_je_ne_t'aime_plus.m4a",
+      "ipfsCid": "bafybeigbkmpcrx42gunrcon7yx6zoysapqpfdqafgg7vtpq2t2j2t4dvn4",
+      "sha256": "167eb232e1719fee9e486507bd7bed30a35a56e217e1ff84c883ead299d5a350",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/552_king_of_the_bongo_je_ne_t'aime_plus.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "560 just visiting the wookie foot🐻🦶",
+      "filename": "560 just visiting the wookie foot🐻🦶.m4a",
+      "ipfsCid": "bafybeihjavz6lzbjydxmuptnjxiwv553k5os7pzftl2tlnurrk7lw5t53u",
+      "sha256": "92bac5e71aeb1ebad11551199fa2d8c0bd95089d6fe0b29b0ec75aac09050c52",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/560 just visiting the wookie foot🐻🦶.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "563 into the mystic",
+      "filename": "563 into the mystic.m4a",
+      "ipfsCid": "bafybeigi7kt25xc5m6lzzbk3ce4grtpmvcvnd4fzeqb232fnazpbv7ozoi",
+      "sha256": "f9896b8dc94c92d8c5c3b94a7bd5433de2f29eb5794176e55184d79acde320c6",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/563 into the mystic.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "567 try try try",
+      "filename": "567 try try try.m4a",
+      "ipfsCid": "bafybeiga5vozm67p6xrfb6x63ycpyk5g6p4ndwimrjha5ydivawv7p6auq",
+      "sha256": "24d4f1c2d48308273a57ec2c736a671bce0c0669defd70bcd35703851adf6188",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/567 try try try.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "568 girl from the north country",
+      "filename": "568 girl from the north country.m4a",
+      "ipfsCid": "bafybeievauwgldrwsml6u63jvmwh4h24frclynpn6z7dkqcoz5qsfr6mry",
+      "sha256": "92ef5483f2a20a20d0fe449e20a2c0f49d1b8f4d34758aae158ff5f06ef07006",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/568 girl from the north country.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "568 in my time of dying",
+      "filename": "568 in my time of dying.m4a",
+      "ipfsCid": "bafybeica2vfhub5h2f6vmmydlshcntpulirqez5z2iiut7e67ay5ho3j34",
+      "sha256": "e9d41e5cd647dadd469a8f9580957105cce65c6b20aaa674bc47cd578d4ba181",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/568 in my time of dying.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "568 let me die in my footsteps",
+      "filename": "568 let me die in my footsteps.m4a",
+      "ipfsCid": "bafybeibwvwbck67o4kf3qyabvfp5o65462ym73pye52dpa42bxpcslt4va",
+      "sha256": "4daf5a20156d335a3caf993abdbb4afc428b6b2e1f2393b838a7ac17c6582b4f",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/568 let me die in my footsteps.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "568 talkin wwIII blues",
+      "filename": "568 talkin wwIII blues.m4a",
+      "ipfsCid": "bafybeic5ezegsdt65k5kqpmcgilb2xxu4cixm5fge2xcmtqg7a2tnupjfu",
+      "sha256": "436780738ba8d73ceed4b752d135c5d5f81993ffc504ca5d82f004627392981a",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/568 talkin wwIII blues.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "569 don’t worry, be happy",
+      "filename": "569 don’t worry, be happy.m4a",
+      "ipfsCid": "bafybeibd4ecbu4n6x7v323qce6en7uh2snq5sshkckarftqk3yiz3vt7ya",
+      "sha256": "9fad8bdc27fcf81f5675f8be8dbd437809b357caa98864918e0c856b293b5b67",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/569 don’t worry, be happy.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "569 here comes the sun ☀️ 2",
+      "filename": "569 here comes the sun ☀️ 2.m4a",
+      "ipfsCid": "bafybeihq4dw33siqymjqcvnfpov56qgpnb3syic2hte3unb52aac2thnkm",
+      "sha256": "d865876ff454694fec33689293a4c1d3febb680ae57920d03c36f1ebf84a4f78",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/569 here comes the sun ☀️ 2.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "569 I shall be released",
+      "filename": "569 I shall be released.m4a",
+      "ipfsCid": "bafybeifc65deasmvnvybtk62tqp55zvcvxnzaw52r6v2d3pf6ayrsixhey",
+      "sha256": "4b8f68ccf0245c961616fac4c7adf323188b168d50df256b847cc6e4907d4413",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/569 I shall be released.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "569 knocking on heavens door",
+      "filename": "569 knocking on heavens door.m4a",
+      "ipfsCid": "bafybeigfvccbpqfrk6f5x76pz7ym47vvan77nvxewiixgwi64rm3rv75ai",
+      "sha256": "f5a2387a3465bffc3846f9d0e7b424e5972c10d093b02de4b2a9ca6f8a397ea4",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/569 knocking on heavens door.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "569 rainy day women 12 & 35",
+      "filename": "569 rainy day women 12 & 35.m4a",
+      "ipfsCid": "bafybeie53ikt4nl32okeytxdbstxwyebaonvinulm6zacufcwecdn3nrxu",
+      "sha256": "eae0d99627403c7135230377b7bb66d62032968705a3f311518390d9a227f938",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/569 rainy day women 12 & 35.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "571 red right hand 🫱🏾",
+      "filename": "571 red right hand 🫱🏾.m4a",
+      "ipfsCid": "bafybeicbs7dupo7wc6zus6pjjc3inwlg6h6natixoz6w6edalux2hvc7dy",
+      "sha256": "e05ca013f7768c99a3edc3d021ce7207792606ac58066c75394ee29ff2722e72",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/571 red right hand 🫱🏾.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "576 Lucy in the sky",
+      "filename": "576 Lucy in the sky.m4a",
+      "ipfsCid": "bafybeigzbjv4xn5sh7jnfcwyjcfrwqahqhlyc633oe7uq5ks2bvyeedmxu",
+      "sha256": "a073d15ff8a4143017d1951d8a7b3b58d992f0582d86916b205691cfaa4061b8",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/576 Lucy in the sky.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "BabyBlue",
+      "filename": "BabyBlue.mp4",
+      "ipfsCid": "bafybeihj7lrh5nlaszyweeatoilxb6tj63dcklx2k3sr634udpy6licsoi",
+      "sha256": "2e9f28e2c5f2dfcd62e6d56538c5a48698d07d7965321a23419f4ccb25158e7f",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/BabyBlue.mp4"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "ManGaveNamesToAllTheAnimals (1)",
+      "filename": "ManGaveNamesToAllTheAnimals (1).mp4",
+      "ipfsCid": "bafybeigswwxa2txt6ijujmjrd22f4dyv6mgpzveowrc37zea5wry5pjcdm",
+      "sha256": "bf8ff826ba60c978d43a9616584d73dc110181bac45c138aa8a118c612a97500",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/ManGaveNamesToAllTheAnimals (1).mp4"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "TomorrowNeverKnows",
+      "filename": "TomorrowNeverKnows.mp3",
+      "ipfsCid": "bafybeia5ebpahvdqi5qpktbgokawj3duii6bi2znhvfpkxdmm4seee4mwu",
+      "sha256": "63a57c887097872e1389aceb774a8f9056b83e4b910e024a3c87520b9b3c5b2e",
+      "albums": [
+        "JonesDrSessions_AQ"
+      ],
+      "sources": [
+        "JonesDrSessions_AQ/TomorrowNeverKnows.mp3"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "🧞‍♂️JollyBlueShadows",
+      "filename": "🧞‍♂️JollyBlueShadows.mp4",
+      "ipfsCid": "bafybeia4dvytratyoubvnathlyy6i3vitrquvyr4s6msn6fycbhon5evim",
+      "sha256": "d482a0089bc171a560122e45ef872e29bea463519f48e8995cb140309390b0be",
+      "albums": [
+        "JonesDrSessions_AR"
+      ],
+      "sources": [
+        "JonesDrSessions_AR/🧞‍♂️JollyBlueShadows.mp4"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "572 mother natures son",
+      "filename": "572 mother natures son.m4a",
+      "ipfsCid": "bafybeigbfnpx22jiaezrzduw4usif3hnx6axhpwjpf7ybr4dt6edrcx36i",
+      "sha256": "ef754a65ef8ad3e7e786f48e39f0a936e141f4ee7eeefec95f3730a3fbb46693",
+      "albums": [
+        "JonesDrSessions_AR"
+      ],
+      "sources": [
+        "JonesDrSessions_AR/572 mother natures son.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "576 badfish",
+      "filename": "576 badfish.m4a",
+      "ipfsCid": "bafybeidfipic2nrhtxih67ij2jml3cdsexukeijj3b4lwiby5lrik36jwy",
+      "sha256": "bea44228466fb0f6e863c7cd225b621453da98f6f0ea0948dcf88b6519057125",
+      "albums": [
+        "JonesDrSessions_AR"
+      ],
+      "sources": [
+        "JonesDrSessions_AR/576 badfish.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "576 Jolly Wonka intro",
+      "filename": "576 Jolly Wonka intro.m4a",
+      "ipfsCid": "bafkreiancc2y6qifht6xpypqwcilhls3ymis3qm6umckohwz4tn6lalbzu",
+      "sha256": "0d10b58f41053cfd77e1f0b090b3ae5bc3112dc19ea304a71ed9e4dbe58161cd",
+      "albums": [
+        "JonesDrSessions_AR"
+      ],
+      "sources": [
+        "JonesDrSessions_AR/576 Jolly Wonka intro.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "576 people are strange",
+      "filename": "576 people are strange.m4a",
+      "ipfsCid": "bafybeihc4akhvx65nzyneseqnc7ofo33in2ouzbe6brghsdrqwp2tst2tu",
+      "sha256": "86a27e08ecdcb205830c419bde0b9088b4f8d7e7ca3d18d31c8c3d49dba77a6a",
+      "albums": [
+        "JonesDrSessions_AR"
+      ],
+      "sources": [
+        "JonesDrSessions_AR/576 people are strange.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "576 us and them",
+      "filename": "576 us and them.m4a",
+      "ipfsCid": "bafybeid2j6yuhdwjb7yavdvwl5v5cut73ul6uy7isehrtytpwr55exwht4",
+      "sha256": "4277a483f6637cf32648f6d1c19686d5ae344f2d49a34b213e123ce5bf3b54b9",
+      "albums": [
+        "JonesDrSessions_AR"
+      ],
+      "sources": [
+        "JonesDrSessions_AR/576 us and them.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "577 blue shadows 🧞‍♂️",
+      "filename": "577 blue shadows 🧞‍♂️.m4a",
+      "ipfsCid": "bafybeied6akhdiqtjndqcjtrwdseakmty6sz7fevylof5edgpbtbeddghe",
+      "sha256": "ba968b6863fdaef39c5b0e560646b3743cc40b5136f6e31f773a6d93438b3edd",
+      "albums": [
+        "JonesDrSessions_AR"
+      ],
+      "sources": [
+        "JonesDrSessions_AR/577 blue shadows 🧞‍♂️.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "577 blue shadows",
+      "filename": "577 blue shadows.m4a",
+      "ipfsCid": "bafybeidzw2xlzjoe5ct7oknbqjtzh7q65qkhqyeq4vkxoiap5uxgj2j6ky",
+      "sha256": "419b10900e2a73fb260462349ec569cc7bdb5f72954ec66b1b17365f56b6be61",
+      "albums": [
+        "JonesDrSessions_AR"
+      ],
+      "sources": [
+        "JonesDrSessions_AR/577 blue shadows.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "578 angel 🧞‍♀️",
+      "filename": "578 angel 🧞‍♀️.m4a",
+      "ipfsCid": "bafybeib5q67ibtilyemhukzzg7jaimch6ujsmmivi6rdtjgs3b6sgnszza",
+      "sha256": "bdc31579a64dfc99ba70379f278c3e981f3f07686a202b777acc0afaf48d90f8",
+      "albums": [
+        "JonesDrSessions_AR"
+      ],
+      "sources": [
+        "JonesDrSessions_AR/578 angel 🧞‍♀️.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "583 mother natures son",
+      "filename": "583 mother natures son.m4a",
+      "ipfsCid": "bafybeia4k333lf3xthabbfdg6hqasdsl365wsvo4oqiqyvhmjmdcipo5pa",
+      "sha256": "5b37c05bc690100504b83a8389e3217087ff68a41cbafbc79245461f00921bc3",
+      "albums": [
+        "JonesDrSessions_AR"
+      ],
+      "sources": [
+        "JonesDrSessions_AR/583 mother natures son.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "586 buried my heart by the riverside - good grief",
+      "filename": "586 buried my heart by the riverside - good grief.m4a",
+      "ipfsCid": "bafybeifinhdgipq3x7abvkvtpotmxce3a5uhruyad3lkjpwxymzihba2pu",
+      "sha256": "868329468c5d0da2d7b999355409bdd80879719e32cff334b37228b7e0d9fc00",
+      "albums": [
+        "JonesDrSessions_AS"
+      ],
+      "sources": [
+        "JonesDrSessions_AS/586 buried my heart by the riverside - good grief.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "586 darlin",
+      "filename": "586 darlin.m4a",
+      "ipfsCid": "bafybeiamhgligokm6kgu5yqyyji5qgyxqcvmcwkjh6ymuhv53gyklcogg4",
+      "sha256": "66fb44c6d5b442d188d7638753c959a3b8dbf9bde16792743f5bdc3c1021da58",
+      "albums": [
+        "JonesDrSessions_AS"
+      ],
+      "sources": [
+        "JonesDrSessions_AS/586 darlin.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "586 son of a preacher man",
+      "filename": "586 son of a preacher man.m4a",
+      "ipfsCid": "bafybeihc3lz2ifs5pg7usl4w7jtdv3rvzrjvaxnqsif6ocq6wxmi6m7ede",
+      "sha256": "6e33858b63c8bfbad4f200170db6b83d636ca773450b37a56c9ec8fd0cf00f26",
+      "albums": [
+        "JonesDrSessions_AS"
+      ],
+      "sources": [
+        "JonesDrSessions_AS/586 son of a preacher man.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "587 a change is gonna come",
+      "filename": "587 a change is gonna come.m4a",
+      "ipfsCid": "bafybeihpveshbjlek3imw7modmzdqrzclo6jpdqrqqgupfcbyrwsbashpq",
+      "sha256": "8610d1c3b9b62e9b2dd0a66e63b9043c0cd25e9225cece7823f0a4fa61ba67e8",
+      "albums": [
+        "JonesDrSessions_AS"
+      ],
+      "sources": [
+        "JonesDrSessions_AS/587 a change is gonna come.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "587 darlin",
+      "filename": "587 darlin.m4a",
+      "ipfsCid": "bafybeif634wfiz2r2mb2qiapow7lxpa4cxggkemobbk7xxfymomkxo33eu",
+      "sha256": "14ee75997e0e91c414710a34ad43b445f21d52920c98587dcf13f57113c9730c",
+      "albums": [
+        "JonesDrSessions_AS"
+      ],
+      "sources": [
+        "JonesDrSessions_AS/587 darlin.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "587 happiness is a warm gun",
+      "filename": "587 happiness is a warm gun.m4a",
+      "ipfsCid": "bafybeieaeftrunapr6aufaqjcfm7whup2oebwdst54lrxpz3xyjcoi2gwm",
+      "sha256": "55edfe50bb6e9b7e20d2d398ae68485e90de338af517331b1b48005f13766b4a",
+      "albums": [
+        "JonesDrSessions_AS"
+      ],
+      "sources": [
+        "JonesDrSessions_AS/587 happiness is a warm gun.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "588 50 ways (to leave your lover)",
+      "filename": "588 50 ways (to leave your lover).m4a",
+      "ipfsCid": "bafybeicdipdzp7ittjbckmzgceddabewsh2aylljzt2fdwtr4b3ze37b2a",
+      "sha256": "3463394cd16f45d8f06322c0c1047a8e5a40fd5d35d0a9d474174b6746dba94c",
+      "albums": [
+        "JonesDrSessions_AT"
+      ],
+      "sources": [
+        "JonesDrSessions_AT/588 50 ways (to leave your lover).m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "589 power of love",
+      "filename": "589 power of love.m4a",
+      "ipfsCid": "bafybeieixsr64vm22m5fy6yin7pq44rmnmbtk6ltjvn25pwbml6m5lxgaa",
+      "sha256": "5fb0722d944a5c70bdda3cc82548ac58f0ff1d730eedd78a1231a27e53299b4f",
+      "albums": [
+        "JonesDrSessions_AT"
+      ],
+      "sources": [
+        "JonesDrSessions_AT/589 power of love.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "590 Peter Pan and tink 🧚‍♀️",
+      "filename": "590 Peter Pan and tink 🧚‍♀️.m4a",
+      "ipfsCid": "bafybeifw5qn3qluj7lubufkaigvg6mqbzm6l4v4qsrhqqjakaxmhi3ndky",
+      "sha256": "ec71a351c1a85b184d98f2ef78b6c7b0a139db4a5ffc89afca34ecf087815102",
+      "albums": [
+        "JonesDrSessions_AT"
+      ],
+      "sources": [
+        "JonesDrSessions_AT/590 Peter Pan and tink 🧚‍♀️.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "591 home 🏡",
+      "filename": "591 home 🏡.m4a",
+      "ipfsCid": "bafybeigs2qlqqt4p3iosivt3c6rw6lt5puu36v5qfuohtsasusmvblfotm",
+      "sha256": "d177126957ebe5c3785d8e88198c54176bb4c0a05db3b7ad944e27ed2b6a2e16",
+      "albums": [
+        "JonesDrSessions_AT"
+      ],
+      "sources": [
+        "JonesDrSessions_AT/591 home 🏡.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "591 janglin",
+      "filename": "591 janglin.m4a",
+      "ipfsCid": "bafybeidf4ah2y535wzopwtrir4fxfcqlwz4jpahnpibyavxsu5upk5syay",
+      "sha256": "3ead470b52e45e7affb2c907190c3621991ab65a5239397693d9d26e31048f02",
+      "albums": [
+        "JonesDrSessions_AT"
+      ],
+      "sources": [
+        "JonesDrSessions_AT/591 janglin.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "591 past lives",
+      "filename": "591 past lives.m4a",
+      "ipfsCid": "bafybeie4mvcwyy2k4hhzie4m7jusea3p2iy5fyerdy7izqnxxqgwj7kpjq",
+      "sha256": "520f75c5c73d7e3ddcd22f9c0296dd773bb4afe74b2585828a46738ee78d0a23",
+      "albums": [
+        "JonesDrSessions_AT"
+      ],
+      "sources": [
+        "JonesDrSessions_AT/591 past lives.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "592 it’s so hard to say goodbye",
+      "filename": "592 it’s so hard to say goodbye.m4a",
+      "ipfsCid": "bafybeigmkmk2oysue6ailcgmfovd57qclc6lxueh7rqwuh5y22mr6mv36q",
+      "sha256": "625cd3c649f90fe5e6c67544646eb55b39e95569b8536c0749fbeadcec86ff89",
+      "albums": [
+        "JonesDrSessions_AT"
+      ],
+      "sources": [
+        "JonesDrSessions_AT/592 it’s so hard to say goodbye.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "593 bad bad love",
+      "filename": "593 bad bad love.m4a",
+      "ipfsCid": "bafybeibswp7kbwo62yixvqa6lisgdwknlbzw5pkqbzzt4z24qekzmpvjp4",
+      "sha256": "b75281500c59e9ff240925029cb769a3d2a1c7c41014e4146e1da2c03800d963",
+      "albums": [
+        "JonesDrSessions_AT"
+      ],
+      "sources": [
+        "JonesDrSessions_AT/593 bad bad love.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "593 glimpses",
+      "filename": "593 glimpses.m4a",
+      "ipfsCid": "bafybeibclwx777nh2mlsmxgob6t4dzhkre3cb5zxlgfav343dunvfozowa",
+      "sha256": "ede0aabb49c15911ff80bd231715ac7d2c0a012ffb79fc9fb411914701035aa9",
+      "albums": [
+        "JonesDrSessions_AT"
+      ],
+      "sources": [
+        "JonesDrSessions_AT/593 glimpses.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "595 back to the earth - send me on my way",
+      "filename": "595 back to the earth - send me on my way.m4a",
+      "ipfsCid": "bafybeifofzl44taab6ie7bdv3novrqel6dipwfly2dk5kmhuexbdzlwzz4",
+      "sha256": "ea1df8bb70a724f1d982758720497ce184f88173589e9345db5beaefc9f8e988",
+      "albums": [
+        "JonesDrSessions_AT"
+      ],
+      "sources": [
+        "JonesDrSessions_AT/595 back to the earth - send me on my way.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "108",
+      "filename": "108.m4a",
+      "ipfsCid": "bafybeiebf6fqdh34esuqzaccav52jtd374ek432lulb4sapbxcrncmuxzu",
+      "sha256": "40ae868fd387605cc45062511e16dedccc2e2c1472f96127f802c5d6fbd2e37e",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/108.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "595 jolly pug hymn 35",
+      "filename": "595 jolly pug hymn 35.m4a",
+      "ipfsCid": "bafybeieolprgrnyatbeeophrxuw3rnicgbu4boyuyyqj5usissgcqfe6uy",
+      "sha256": "71c5e1682d2aa691574a7ac3d9dd549233b1939eefcec55905c5fc42d6260ad8",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/595 jolly pug hymn 35.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "596 👑King Midas 👑",
+      "filename": "596 👑King Midas 👑.m4a",
+      "ipfsCid": "bafybeigmglsgnkbyl3aghc6rcmq5pf6ypqzfxusqhix5eljvkcgx6gbana",
+      "sha256": "1ef1c907c28151bacf2f46d2399ba174073da99e9d6945084dfd99c8e721d614",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/596 👑King Midas 👑.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "596 bouncin round the room",
+      "filename": "596 bouncin round the room.m4a",
+      "ipfsCid": "bafybeifhofys6eotwzxovmfvwficn24ivo5zcwsatuxvk2475lqxg3o2ei",
+      "sha256": "1250c7d6d2dc736ee436fd25030ddb735a834ae517e3cf119b28c1c3def0ff0c",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/596 bouncin round the room.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "596 hymn 101",
+      "filename": "596 hymn 101.m4a",
+      "ipfsCid": "bafybeihetofssvsprfxq4zbydrcgms4zkzk2hnaamiin452mf7wi7ohoum",
+      "sha256": "ab8c67f274ba352cb21d87245c3ae30a6ea90a35c644f4deccc50b34699ed21a",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/596 hymn 101.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "599 Ebin",
+      "filename": "599 Ebin.m4a",
+      "ipfsCid": "bafybeiehvvqk5bzgoh7oocys4oy4tm5f3g2azmd3h7nqzmvdyyejoctksq",
+      "sha256": "8ef29709dbb76703fd547add1c57c5741dd5d0383935e72a90eb43e00f7bd8a3",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/599 Ebin.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "599 sittin on the dock",
+      "filename": "599 sittin on the dock.m4a",
+      "ipfsCid": "bafybeibivmzfnnggnatalz2gvzrd5363z5b6pf6a6z4eczwrystjmmlg5m",
+      "sha256": "7a868aad3dfed9502dae129a1898561199f28eb4fbee0b98f9f2f56c0c9f884c",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/599 sittin on the dock.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "599 take me to your river",
+      "filename": "599 take me to your river.m4a",
+      "ipfsCid": "bafybeictp5fquze24tfaxfypfrzwk6m4jowdhp3clgsruexj75o2pvkl2e",
+      "sha256": "80e89b977ac30fd0ea3cef0aa237ab4e86416d9a343be30705dd6d59679596ec",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/599 take me to your river.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "599 thank you 🙏",
+      "filename": "599 thank you 🙏.m4a",
+      "ipfsCid": "bafybeihtrl64xyxees5lrxittftpi3hud445nbtofivzukzx2c6fkkp3la",
+      "sha256": "ddcf422f548a65635be3b430fc51458567192a6ec7c5098299916fe46513906e",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/599 thank you 🙏.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "599🛕⚸ake me to church",
+      "filename": "599🛕⚸ake me to church.m4a",
+      "ipfsCid": "bafybeifgjr5hnwh46bwdsbchzzlkbs6maftek5wileeux46uzgpxvygknq",
+      "sha256": "793cf9e66fc6ccea46863a162ae4aa98056d5137f3297d21cd9bc16a9fe4274a",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/599🛕⚸ake me to church.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "603 attics of my life",
+      "filename": "603 attics of my life.m4a",
+      "ipfsCid": "bafybeiagw4mdsw3mdzf6bvm277ghih6xede3656jzqsvlzxdmxdxybb2ty",
+      "sha256": "93431c579fcbd78d9ad55e13e533f95a184e2539c828ebc93ae9007df60feff2",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/603 attics of my life.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "603 caress me down",
+      "filename": "603 caress me down.m4a",
+      "ipfsCid": "bafybeidnyoh3tetkwhben7aryxerspmrkkxo5ssmayffanog57epj657me",
+      "sha256": "3aa819ac63fd6a5d938ffdaf25869534d596f83074517c998cd5528d24dcc171",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/603 caress me down.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "6035446",
+      "filename": "6035446.m4a",
+      "ipfsCid": "bafybeie7tquckvlezbpz2lmfyog6txturthegcxlqey3cthkfft6ogbeoa",
+      "sha256": "0bd60f5933096c261caeb5d5e707f468cb6fcb8d014dd9fbfe93d2820d7f9eea",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/6035446.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "604 ball and chain",
+      "filename": "604 ball and chain.m4a",
+      "ipfsCid": "bafybeigwft2tq3shcukv3z7ulzpy54wrby7obgzt3ilat5unleugzv667a",
+      "sha256": "4f64ded3f95b1dbe3504f45c3afc00fd8cf7b2626f04e023951c72759d0eb8c3",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/604 ball and chain.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "605 dead flowers",
+      "filename": "605 dead flowers.m4a",
+      "ipfsCid": "bafybeigvwlpi3juamh2zhldcvayoelf4bqbaggzwqkuamrbldfqu3khr4e",
+      "sha256": "937f5270cb7ef8f347a990a80f077148dd49e6cb303b975edec2e2595fbc9782",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/605 dead flowers.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "605 subterranean homesick blues",
+      "filename": "605 subterranean homesick blues.m4a",
+      "ipfsCid": "bafybeidvnpd2ossyprlglczisp7r2ynrrypkvcvh7keqw5sutw4jdld25i",
+      "sha256": "e955b1b05bfe844948f3fcdccd6c042f79bf8d520c4e227f26080208473aabfc",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/605 subterranean homesick blues.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "605 wash away",
+      "filename": "605 wash away.m4a",
+      "ipfsCid": "bafybeif7dbrdv4e4v3ymnebo26lu6oxiekakwgjzd5kwqvzkdclozlg57i",
+      "sha256": "99ca3c43fec2b582b89635463995c9d8b240e76990bb9d546f58227cafca0b82",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/605 wash away.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "609 yesterday",
+      "filename": "609 yesterday.m4a",
+      "ipfsCid": "bafybeifraowu5eaej2s2vjms5cpypiomw23hg7rddelfwwgmv7hc36wm2m",
+      "sha256": "d8d0bd5aae70460ce24937ecc178729b7de2063aaad79800d4e24d912a6bb586",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/609 yesterday.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "611 bullet and a target ⭕️🥷🚄",
+      "filename": "611 bullet and a target ⭕️🥷🚄.m4a",
+      "ipfsCid": "bafybeichje2jodbtya5j3x53dhrqcvaoccj3kfbnlcohnuzs43ukkuosz4",
+      "sha256": "2a191bdb3e815e582c3d115c9a29de87c8f4c9b1123acffa56bdc917e0f1d41a",
+      "albums": [
+        "JonesDrSessions_AU"
+      ],
+      "sources": [
+        "JonesDrSessions_AU/611 bullet and a target ⭕️🥷🚄.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "2 Jones Dr 618",
+      "filename": "2 Jones Dr 618.m4a",
+      "ipfsCid": "bafybeidyc5xm4zratlygjumnm4yv4w2tgn4p2756yrgb4zjvu5wnucq3ce",
+      "sha256": "6a28f05faac4e0ec9d217ed6b88efec9fb130e179ee6f0332bb06c64a35a26e7",
+      "albums": [
+        "JonesDrSessions_AV"
+      ],
+      "sources": [
+        "JonesDrSessions_AV/2 Jones Dr 618.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "619 imagine",
+      "filename": "619 imagine.m4a",
+      "ipfsCid": "bafybeiejmok7ssglmvbapk2usyodxump43g2r7cempwtbc53cyjbev2cbm",
+      "sha256": "5b2f62bcc0ac80b9a2860cee428746a0035a8f3556ca41da999d7e318d5eec46",
+      "albums": [
+        "JonesDrSessions_AV"
+      ],
+      "sources": [
+        "JonesDrSessions_AV/619 imagine.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "620 come let go",
+      "filename": "620 come let go.m4a",
+      "ipfsCid": "bafybeibhzmtqsw5wdcpspmt77qjkxvpwofytkfukwhz43ccbbat7ccblnm",
+      "sha256": "4e61ce183d7e20b92f77b10225e9bd61441601f88b03b760e331772d63440fcc",
+      "albums": [
+        "JonesDrSessions_AV"
+      ],
+      "sources": [
+        "JonesDrSessions_AV/620 come let go.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "621 107 degrees",
+      "filename": "621_107_degrees.m4a",
+      "ipfsCid": "bafybeiheuyk4pt6zqvrerh77sctakgdx6yliulh3dcsrke2vmsczsfpv4y",
+      "sha256": "78e07f3d6a096e41690da519164bfb26dd2bd5bb2a91292c5764b95e33f2a6da",
+      "albums": [
+        "JonesDrSessions_AV"
+      ],
+      "sources": [
+        "JonesDrSessions_AV/621_107_degrees.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "622 ballad of a thin man 2",
+      "filename": "622 ballad of a thin man 2.m4a",
+      "ipfsCid": "bafybeicdcdmbakasqkytqgbl5wbrwpl7tccgqdndxtue2hryhuqgui3udu",
+      "sha256": "d9c54873aa64ba387ac1fe3bf86e4be5199e0127e137c9962fa712b2830940cc",
+      "albums": [
+        "JonesDrSessions_AV"
+      ],
+      "sources": [
+        "JonesDrSessions_AV/622 ballad of a thin man 2.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "622 visions of Johanna 2",
+      "filename": "622 visions of Johanna 2.m4a",
+      "ipfsCid": "bafybeihyev7wpkr4vyctv4gpel73rdgnvk5tr2ljkoofqcmqg37sq2anwy",
+      "sha256": "44dceef577c37aefeba39600c10627bfbc060deb942e11c94bc686f806acdcda",
+      "albums": [
+        "JonesDrSessions_AV"
+      ],
+      "sources": [
+        "JonesDrSessions_AV/622 visions of Johanna 2.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "624 meadow lark",
+      "filename": "624 meadow lark.m4a",
+      "ipfsCid": "bafybeibbe7xlihzaidnz6ngw7nlbpqev6u3zlmubkt343f5wslujkd4zky",
+      "sha256": "6a71997a002e0f4ead417645d2994934b24f55f25e50b3d264bd40a89034ac72",
+      "albums": [
+        "JonesDrSessions_AV"
+      ],
+      "sources": [
+        "JonesDrSessions_AV/624 meadow lark.m4a"
+      ],
+      "dualPinVerified": true
+    },
+    {
+      "title": "626 walk of life",
+      "filename": "626 walk of life.m4a",
+      "ipfsCid": "bafybeihlcfk37gppr62ttp3abhu37xtkyprouevjna5ciqkl3dji4hyir4",
+      "sha256": "b098e8c124ba439a661c9139c121ce62e5b7d5251bc3f8fb5876c137d2d4c31a",
+      "albums": [
+        "JonesDrSessions_AV"
+      ],
+      "sources": [
+        "JonesDrSessions_AV/626 walk of life.m4a"
+      ],
+      "dualPinVerified": true
+    }
+  ],
+  "requirements": [
+    "recheck-current-playlist-titles-before-apply",
+    "confirm-artist-attribution",
+    "persist-radio-and-album-state-without-changing-existing-history"
+  ]
+}

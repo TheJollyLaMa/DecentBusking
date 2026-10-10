@@ -135,7 +135,7 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
   };
 }
 
-export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true, playId }) {
+export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true, playId, paid = false }) {
   const listenLink = track.ipfsCid && /\/ipfs\//.test(url || '') ? `\n[Open IPFS audio](${url})` : '';
   const votingLine = votingOpen
     ? 'React 👍 to boost it or 👎 to send it lower in the rotation.'
@@ -143,6 +143,7 @@ export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, vo
   return (
     `🎵 Now playing: **${track.title}** by *${track.uploader}* ` +
     `(${queueIndex}/${totalTracks})\n` +
+    (paid ? '💸 **DJuke paid request**\n' : '') +
     `**All-time:** 👍 ${track.likes ?? 0} · 👎 ${track.dislikes ?? 0} · ▶️ ${track.plays ?? 0}\n` +
     `Track ID: ||${track.trackId}||\n` +
     (playId ? `Play ID: ||${playId}||\n` : '') +
@@ -322,12 +323,15 @@ export class JukeLoopSession {
    * @param {import('discord.js').Client}            opts.client        - Discord client (for re-fetching CDN URLs)
     * @param {() => void} [opts.onTerminalDisconnect] - Called after Discord voice recovery fails
    */
-    constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect }) {
+    constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke }) {
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
     this.ipfsGateway  = ipfsGateway;
     this.onTerminalDisconnect = onTerminalDisconnect;
+    this.djuke        = djuke || null;
+    this._currentPaid = null;
+    this._djukeCooldownUntil = 0;
 
     this._destroyed   = false;
     this._ffmpeg      = null;
@@ -476,13 +480,26 @@ export class JukeLoopSession {
     // Collect ratings from the previous track's announcement
     await this._collectReactions();
 
+    // Paid DJuke requests jump ahead without consuming the free rotation slot.
+    let paid = null;
+    if (this.djuke && Date.now() >= this._djukeCooldownUntil) {
+      paid = await this.djuke.nextPaid().catch((err) => {
+        console.warn('[jukeloop] DJuke queue unavailable:', err.message);
+        return null;
+      });
+      if (this._destroyed) {
+        if (paid) await this.djuke.fail(paid.record, new Error('Radio stopped')).catch(() => {});
+        return;
+      }
+    }
+
     // Refill + reshuffle if we've exhausted the current pass
-    if (this._queueIndex >= this._queue.length) {
+    if (!paid && this._queueIndex >= this._queue.length) {
       this._refreshQueue();
     }
 
     // Nothing to play → wait and retry
-    if (this._queue.length === 0) {
+    if (!paid && this._queue.length === 0) {
       await this.textChannel
         .send(
           '📭 The JukeLoop playlist is empty.\n' +
@@ -495,8 +512,9 @@ export class JukeLoopSession {
       return;
     }
 
-    const track = this._queue[this._queueIndex];
-    this._queueIndex++;
+    const track = paid ? paid.track : this._queue[this._queueIndex];
+    if (!paid) this._queueIndex++;
+    this._currentPaid     = paid?.record || null;
     this._currentTrack    = track;
     this._announcementMsg = null;
     this._announcementContext = null;
@@ -508,6 +526,7 @@ export class JukeLoopSession {
       await this.textChannel
         .send(`⚠️ Skipping **${track.title}** — the original upload could not be found.`)
         .catch(() => {});
+      await this._releasePaid('Paid recording could not be fetched');
       this._currentTrack = null;
       await this._playNext();
       return;
@@ -540,6 +559,7 @@ export class JukeLoopSession {
         queueIndex: this._queueIndex,
         totalTracks,
         url,
+        paid: !!this._currentPaid,
       };
       const msg = await this.textChannel
         .send(buildNowPlayingMessage(track, announcementContext))
@@ -558,6 +578,7 @@ export class JukeLoopSession {
       await this.textChannel
         .send(`⚠️ Skipping **${track.title}**: ${err.message}`)
         .catch(() => {});
+      await this._releasePaid(err.message);
       this._currentTrack    = null;
       this._announcementMsg = null;
       this._announcementContext = null;
@@ -573,6 +594,8 @@ export class JukeLoopSession {
     const trackRef = this._currentTrack;
     const completedPlay = this._completedPlay;
     this._completedPlay = null;
+    const paidRecord = this._currentPaid;
+    this._currentPaid = null;
     const msgRef   = this._announcementMsg;
     const announcementContext = this._announcementContext;
 
@@ -586,6 +609,11 @@ export class JukeLoopSession {
       if (recorded.counted) {
         console.log(`[jukeloop] Counted weekly play for "${trackRef.title}" (${recorded.week}, ${Math.round(completedPlay.audibleMs / 1000)}s audible).`);
       }
+    }
+    if (paidRecord && this.djuke) {
+      const play = trackRef && completedPlay?.trackId === trackRef.trackId ? completedPlay : null;
+      await this.djuke.complete(paidRecord, play)
+        .catch((err) => console.warn('[jukeloop] DJuke completion pending:', err.message));
     }
     if (!msgRef || !trackRef) return;
 
@@ -614,10 +642,24 @@ export class JukeLoopSession {
     }
   }
 
+  /** Return an unplayed paid request to the queue and pause paid picks briefly. */
+  async _releasePaid(reason) {
+    const record = this._currentPaid;
+    this._currentPaid = null;
+    if (!record || !this.djuke) return;
+    this._djukeCooldownUntil = Date.now() + 60_000;
+    await this.djuke.fail(record, new Error(reason))
+      .catch((err) => console.warn('[jukeloop] DJuke release failed:', err.message));
+  }
+
   /** Stop all playback and disconnect from the voice channel. */
   destroy() {
     this._destroyed = true;
     this._nowPlaying = null;
+    if (this._currentPaid && this.djuke) {
+      this.djuke.fail(this._currentPaid, new Error('Radio stopped')).catch(() => {});
+      this._currentPaid = null;
+    }
     if (_sessions.get(this.voiceChannel.guild.id) === this) _sessions.delete(this.voiceChannel.guild.id);
     if (this._ffmpeg) {
       try { this._ffmpeg.kill(); } catch {}
