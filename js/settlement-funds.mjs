@@ -3,6 +3,7 @@ export function configuredSettlementFunds(config = {}) {
     { label: 'Playback Payroll', slug: config.radioFunds?.playback },
     { label: 'Top 10 Prize Payouts', slug: config.radioFunds?.topTen },
     { label: 'Repo Dev Bot Payouts', slug: config.fundSlug },
+    { label: 'Community Pinning Rewards', slug: config.pinnerFundSlug },
   ].filter(fund => typeof fund.slug === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fund.slug));
 }
 

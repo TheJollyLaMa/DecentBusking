@@ -109,6 +109,7 @@ export function createWorkerRequestHandler({
   getMintQueue,
   getRadioState,
   getDjukeState,
+  getPinnerManifest,
   checkpointMirror,
   getRadioHistory,
   getWeeklyPayflow,
@@ -194,6 +195,11 @@ export function createWorkerRequestHandler({
           return;
         }
         sendJson(response, 200, await getDjukeState(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/pinners/manifest') {
+        if (!getPinnerManifest) { sendJson(response, 404, { error: 'Pin manifest is not configured' }, '*'); return; }
+        sendJson(response, 200, await getPinnerManifest(), '*');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/ledger') {

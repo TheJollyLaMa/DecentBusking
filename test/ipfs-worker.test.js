@@ -43,6 +43,23 @@ test('checkpoint mirror routes reject unauthenticated requests and do not expose
   });
 });
 
+test('public community pin manifest does not expose credentials and stays unavailable until ready', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const owner = Wallet.createRandom().address;
+  const manifest = { schemaVersion: 1, entryCount: 1, entries: [{ cid: 'bafy' }] };
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: owner, getPinnerManifest: () => manifest });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/pinners/manifest`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.deepEqual(await response.json(), manifest);
+    const unavailable = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: owner });
+    await withServer(unavailable, async nested => {
+      assert.equal((await fetch(`${nested}/api/pinners/manifest`)).status, 404);
+    });
+  });
+});
+
 test('payment ledger is public but reconciliation requires an allowed origin and a valid hash', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const hashes = [];

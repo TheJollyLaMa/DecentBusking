@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261010-listens" />
+  <link rel="stylesheet" href="css/styles.css?v=20261010-community-pin" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -60,6 +60,11 @@
         <p id="djuke-playlist-total">Empty — add songs from any DNFT card</p>
         <button id="djuke-playlist-buy" type="button" disabled>Play My Playlist</button>
       </section>
+      <section class="community-pin" aria-labelledby="community-pin-heading">
+        <h3 id="community-pin-heading">Community mirror</h3>
+        <p>Choose IPFS Desktop or your own Pinata account from the header IPFS control. Shared Pinata remains primary.</p>
+        <p id="community-pin-state" role="status" aria-live="polite">Community pinning is optional. Storage rewards are not active yet.</p>
+      </section>
       <details class="djuke-tiers" open>
         <summary>Price Model</summary>
         <table><thead><tr><th scope="col">Pending requests</th><th scope="col">USDC</th></tr></thead><tbody id="djuke-price-tiers"></tbody></table>
@@ -94,6 +99,24 @@
       <button id="listen-gate-radio" type="button">Back to radio</button>
     </div>
     <p id="listen-gate-status" role="status" aria-live="polite"></p>
+  </dialog>
+
+  <dialog id="community-pin-dialog" aria-labelledby="community-pin-title">
+    <h3 id="community-pin-title">Pin DBusk content</h3>
+    <p id="community-pin-summary">Loading the shared content manifest…</p>
+    <fieldset class="community-pin-providers">
+      <legend>Choose storage</legend>
+      <label><input type="radio" name="community-pin-provider" value="local" checked> IPFS Desktop</label>
+      <label><input type="radio" name="community-pin-provider" value="pinata"> My Pinata account</label>
+    </fieldset>
+    <label id="community-pin-key-label" for="community-pin-key" hidden>Pinata API key (used only in this tab)</label>
+    <input id="community-pin-key" type="password" autocomplete="off" spellcheck="false" placeholder="Pinata API key" hidden>
+    <p id="community-pin-progress" role="status" aria-live="polite"></p>
+    <div class="community-pin-actions">
+      <button id="community-pin-start" type="button" disabled>Pin shared data</button>
+      <button id="community-pin-cancel" type="button">Close</button>
+    </div>
+    <p id="community-pin-rewards-status">Rewards will be weighted by verified availability checks. Pinning alone is not yet reward-eligible.</p>
   </dialog>
 
   <!-- NFT detail panel -->
@@ -540,6 +563,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261010-left-djuke"></script>
   <script type="module" src="js/djuke.mjs?v=20261010-djuke-pay"></script>
   <script type="module" src="js/listens.mjs?v=20261010-listens"></script>
+  <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js?v=20261008-ny-recovery-payflow';
     document.addEventListener('DOMContentLoaded', initPayroll);

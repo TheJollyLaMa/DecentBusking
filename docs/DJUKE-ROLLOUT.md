@@ -1,8 +1,8 @@
 # DJuke and DNft rollout
 
-Status: code complete and rehearsed locally and on a Base fork, 2026-10-10. Nothing has
-been pushed, deployed, broadcast, imported or minted. Every new feature is off by
-default, so shipping the code changes nothing live except the left-tab layout.
+Status: core rollout and listen PRs are merged. The optional community-pin UI and
+the final pinner-fund allocation are local, unpushed changes. No contracts are
+deployed, no album tracks imported or minted, and DJuke payments remain off.
 
 ## Go-live checklist (you enter keys and execute)
 
@@ -12,14 +12,13 @@ the on-chain steps (3, 4, 6), which cost Base gas.
 1. **Ship the code.** Push the reviewed branch; GitHub Pages and Render redeploy.
    Expected: Top 10 and DJuke tabs stacked on the left; DJuke shows "DJuke queue is
    not live yet"; radio unchanged.
-2. **Album import (no wallet).** Generate a secret locally, e.g. `openssl rand -hex 32`.
-   Set it as `CHECKPOINT_MIRROR_SECRET` on Render and in your Mac `discord-bot/.env`.
-   Start IPFS Desktop and run `npm run checkpoint-mirror -- --watch` in `discord-bot`.
-   Set `DBUSK_IMPORT_REVIEWED_ALBUMS=true` on Render, restart, confirm the log line
-   `[album-import] Added 190`, then set it back to `false`.
-3. **Create the repo-dev fund (admin wallet, one transaction).** Done 2026-10-10: the
-   router's `dbusk-repo-dev` fund exists, is active and holds 0 USDC, so the first
-   DJuke deposits are easy to verify.
+2. **Optional community mirror.** The shared Pinata checkpoint is primary and saves
+    never wait for a mirror. Visitors open the pin chooser from the existing header
+    IPFS button and pin shared CIDs to local IPFS Desktop or their own Pinata account.
+    No shared mirror secret is required for playlist saves.
+3. **Create the pinners fund (admin wallet, one transaction).** The router's
+  `dbusk-repo-dev` fund exists. Create and activate `dbusk-pinners` from the Payroll
+  fund selector; deployment preflight requires both funds.
 4. **Deploy contracts (admin key in your shell only).** In DecentMarket:
    `BASE_RPC_URL=… PRIVATE_KEY=… DBUSK_FULFILLER=<new fulfiller address> npm run deploy:dbusk:base`
    (dry run: checks fund, USDC, router, gas). Re-run with `CONFIRM_DEPLOY=yes`.
@@ -34,8 +33,9 @@ the on-chain steps (3, 4, 6), which cost Base gas.
    start, then new Discord uploads and briefcase submissions every two minutes, in
    batches of 25. Watch for `[djuke] Registered` in the logs. The admin-only
    `configure:djuke:base` script remains for changing an existing song's payees.
-7. **Open payments.** Set `DJUKE_PAYMENTS_ENABLED=true` on Render. Make one 0.25 USDC
-   bump yourself and confirm it plays next and the repo fund receives 0.025 USDC.
+7. **Open payments.** Set `DJUKE_PAYMENTS_ENABLED=true` on Render. Each payment
+    splits 90% to artists, 8% to pinners and 2% to repo-dev. A 0.25 USDC bump/listen
+    sends 0.225 / 0.020 / 0.005 USDC. Confirm all three router balances.
 8. **Batch minting (optional, later).** Switch `contractAddress` to the v0.3 address,
    move the old address into `additionalNftContractAddresses`, set
    `DECENT_NFT_CONTRACT_ADDRESS` and `DECENT_NFT_ADDITIONAL_ADDRESSES` on Render, and
@@ -46,11 +46,12 @@ the contract's `pauseRequests` stops new purchases while queued plays still sett
 
 ## Verification so far
 
-- 196 app tests and 72 contract tests pass. Browser checks cover the left-tab layout
+- App and contract test totals are recorded by CI. Browser checks cover the left-tab layout
   (mobile, small and desktop) and payment-button gating.
 - Base fork rehearsal (real USDC and router, nothing broadcast): one-transaction
-  batch mint of three songs, a 0.25 USDC bump, 0.025 USDC into the repo fund, and a
-  70/30 collaborator split withdrawn.
+  batch mint of three songs, a 0.25 USDC bump split 0.225 artist, 0.020 pinners,
+  0.005 repo-dev, and a two-song listen split 0.450 artist, 0.040 pinners,
+  0.010 repo-dev.
 - Paid requests play ahead of free rotation; fulfillment needs 30 audible seconds,
   happens in the background, and is bound to the exact recording revision played.
   A failed paid play waits 60 seconds before retrying; free radio never stalls.
@@ -71,21 +72,18 @@ the contract's `pauseRequests` stops new purchases while queued plays still sett
   `DBUSK_ALBUM_LOCAL_IPFS_API` option has been replaced: Render loopback is not
   the user's Mac. The media requires no additional uploads; Pinata state
   persistence creates a small JSON checkpoint, not another copy of the albums.
-- With `CHECKPOINT_MIRROR_SECRET` configured, the playlist state store serializes
-  each checkpoint once, waits for the Mac to recursively pin those bytes, then
-  publishes the same bytes on Pinata. It verifies the returned CID against the
-  local CID before adoption/pruning. An offline or failed local mirror prevents
-  Pinata publication. A failed remote upload leaves a safe local-only copy.
-  Pinata/local storage are not atomic: an unexpected remote CID mismatch is
-  reported and must be resolved before restart or activation; it does not prove
-  that Pinata's chosen import profile matches the locally tested profile.
+- Pinata publishes checkpoints as the primary copy and never waits for the
+  community mirror. The exact serialized bytes are queued asynchronously for
+  connected mirrors; offline/failed mirrors only log a deferred copy. The local
+  pinner compares its CID to the shared CID before acknowledging. Radio saves
+  continue while all community pinners are offline.
 - The bridge's authenticated claim/ack endpoints use a dedicated shared secret,
   not Pinata credentials or a wallet key. Only the Mac client can retrieve pending
   checkpoint bytes. Kubo stays loopback-only. Acknowledgments trust the configured
   client to verify its recursive pins; they are not remote cryptographic storage
   proofs. Requests are bounded to 2 MiB checkpoints and two queued jobs, with
-  timeouts. The job queue is in memory: restart interrupts pending jobs, and no
-  not-yet-mirrored checkpoint is published. Automatic remote media uploads and
+  timeouts. The job queue is in memory: restart interrupts pending mirror attempts;
+  the shared Pinata checkpoint remains the primary copy. Automatic media uploads and
   other backup namespaces are not covered by this playlist-only bridge.
 - End-to-end local rehearsal through the worker HTTP handler and real Kubo
   mirrored a 471,114-byte, 267-track checkpoint before mock publication. No real
@@ -131,14 +129,18 @@ the contract's `pauseRequests` stops new purchases while queued plays still sett
   directories are unverified; lack of a file-level match does not authorize an
   upload. An upper bound of 7,033,926,637 unmatched bytes is not a new-upload
   estimate: it includes media that may already exist inside the pinned albums.
-- Dual pinning is required for this import and future pinning workflows. The
-  opt-in `createDualPinUploader` reuses known Pinata CIDs and verifies a local
-  recursive pin before returning success. Partial failure reports the existing
-  Pinata CID for retry rather than encouraging duplicate uploads. It is not yet
-  wired into all production upload paths. Render's loopback API is not the user's
-  Mac: hosted/browser uploads need an explicit local-mirror integration before
-  they can claim this guarantee. Existing production pinning is not silently
-  reconfigured. Saving files on the Desktop alone is not a verified IPFS pin.
+- Shared Pinata is the primary copy. The header's existing IPFS button opens a
+  community pin dialog for local IPFS Desktop or the visitor's Pinata account.
+  The visitor's Pinata key is used only in that browser session and never sent to
+  the DBusk worker. Local Kubo pins are confirmed by listing recursive pins.
+  Community copy availability is best effort and never blocks radio saves.
+- `allocatePinnerRewards` calculates weighted shares from successful availability
+  checks, with a minimum 20 checks, 90% availability and a recent check required.
+  Pinner registrations, independent challenge verification and weekly disbursal
+  are not implemented; rewards remain off, and pinning alone earns nothing yet.
+- Detailed local storage audit and mirror journals are temporary files. The
+  complete durable title-review and candidate reports remain under
+  `docs/reports/`. AW's local folder still does not match the original Pinata root.
 - Detailed generated audit and mirror checkpoint are currently at
   `/tmp/dbusk-album-pinata-audit.json` and
   `/tmp/dbusk-local-mirror-journal.json`; these are temporary diagnostic files.
@@ -159,9 +161,9 @@ the contract's `pauseRequests` stops new purchases while queued plays still sett
 - Local DecentMarket now also contains the undeployed
   `contracts/DecentJukeBox_v0.1.sol` candidate and its tests. It escrows USDC,
   enforces FIFO and a user-specified maximum price, snapshots collaborator
-  shares, and routes 10% through `fundToken` on fulfillment. The remaining 90%
-  becomes artist withdrawal credit. This delayed settlement and withdrawal
-  workflow is a candidate design requiring user review, not a deployed feature.
+  shares, and routes 8% to `dbusk-pinners`, 2% to `dbusk-repo-dev`, and 90% to
+  artist withdrawal credits. The 8/2 share applies to both paid queue bumps and
+  on-demand listens. This is an undeployed contract candidate.
 - Song audio references cannot change under an existing DJuke song ID. Split
   edits affect future purchases only. Admin configuration does not prove artist
   consent. The fulfillment role trusts a designated worker; an on-chain playback
@@ -293,14 +295,14 @@ Approved pricing (2026-10-10, supersedes the initial $1 price): the starting
 price is 0.25 USDC and doubles for each eight pending paid requests. Count
 the queue before adding the new request: 0-7 costs 0.25, 8-15 costs 0.50,
 16-23 costs 1.00, 24-31 costs 2.00, and so on. As the pending count falls, so
-does the next request price. Every price allocates 10% to the repo-dev-fund
-and 90% to the song's artist, including approved collaborator splits.
+does the next request price. Every price allocates 8% to the pinners fund,
+2% to repo-dev, and 90% to the song's artist, including approved collaborators.
 Verify the existing fund's on-chain identifier and deposit route before wiring
 this allocation; do not substitute an assumed wallet address.
 
 Native Base USDC is the approved payment asset. At its six decimals, the
-starting price is 250,000 units: 25,000 for the fund and 225,000 for the
-artist/collaborators. Keep fractional-cent splits exact. The payment contract
+starting price is 250,000 units: 20,000 for pinners, 5,000 for repo-dev, and
+225,000 for the artist/collaborators. Keep fractional-cent splits exact. The payment contract
 must compute the authoritative quote at acceptance and reject a price above
 the user's approved maximum; a changed queue must never cause a surprise
 charge. Client-side prices are informational, not transaction authority.

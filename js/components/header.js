@@ -463,7 +463,7 @@ class DecentBuskingHeader extends HTMLElement {
           providerName = 'Pinata via DecentBusking worker';
         }
         dot.classList.add('ready');
-        status.textContent = `${providerName} is online. Uploads are authorized when you mint.`;
+        status.textContent = `${providerName} is online. Opening community pin options…`;
         window.dispatchEvent(new CustomEvent('ipfs-connection-changed', { detail: { connected: true, provider: providerName } }));
       } catch (error) {
         dot.classList.add('error');
@@ -471,6 +471,7 @@ class DecentBuskingHeader extends HTMLElement {
         window.dispatchEvent(new CustomEvent('ipfs-connection-changed', { detail: { connected: false, error: error.message } }));
       } finally {
         button.disabled = false;
+        window.dispatchEvent(new CustomEvent('open-community-pinning'));
       }
     });
   }

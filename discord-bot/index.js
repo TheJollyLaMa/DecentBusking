@@ -45,6 +45,7 @@ import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime,
 import { createPinataStateStore } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
+import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
 import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
 import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
@@ -389,6 +390,7 @@ async function main() {
 
   let client;
   let playlistReady = false;
+  let playlistStateStore = null;
   const getVerifiedMintRequests = createVerifiedMintQueueReader({
     reconcile: async () => {
       if (!playlistReady) throw new Error('Playlist is restoring; please retry shortly');
@@ -572,6 +574,12 @@ async function main() {
   const requestHandler = createWorkerRequestHandler({
     checkpointMirror,
     getDjukeState: readDjukeState,
+    getPinnerManifest: () => {
+      if (!playlistReady) throw new Error('Playlist is restoring');
+      return buildCommunityPinManifest({ checkpointCid: playlistStateStore?.getLatestSnapshotUri()?.slice(7) || '',
+        tracks: getPlaylist().filter(track => track.ipfsCid && track.pinStatus === 'pinned'),
+        albumRoots: payrollAssets.communityAlbumRoots || [] });
+    },
     allowedOrigins: config.allowedOrigins,
     ownerWallet: config.mintOwnerWallet || '0x0000000000000000000000000000000000000000',
     pinataJwt: config.pinataJwt,
@@ -629,6 +637,7 @@ async function main() {
       gateway: config.ipfsGateway,
       beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined,
     });
+    playlistStateStore = stateStore;
     let restoredPlaylist = null;
     // An empty start would checkpoint over the real playlist, so retry transient failures first.
     for (let attempt = 1; attempt <= STATE_RESTORE_ATTEMPTS; attempt++) {
@@ -649,10 +658,7 @@ async function main() {
         const artist = resolveAlbumArtist(restoredPlaylist, { name: 'thejollylama', wallet: config.mintOwnerWallet });
         const imported = await checkpointReviewedAlbumImport({ playlist: restoredPlaylist, plan, artist, save: stateStore.save,
           mirrorBeforePublication: true,
-          verifyMirrorAvailable: async () => {
-            if (!checkpointMirror) throw new Error('CHECKPOINT_MIRROR_SECRET is required before album import');
-            await checkpointMirror.waitAvailable();
-          },
+          verifyMirrorAvailable: async () => {},
         });
         if (imported.added.length) loadPlaylist(imported.playlist);
         console.log(`[album-import] Added ${imported.added.length}; skipped ${imported.skipped.length}. Checkpoint: ${imported.checkpointUri || 'already imported'}`);

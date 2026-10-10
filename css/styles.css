@@ -652,6 +652,21 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 .djuke-split div { display: flex; justify-content: space-between; gap: 6px; margin-top: 5px; }
 .djuke-split dd { margin: 0; }
 .djuke-speaker { flex: 0 0 28px; border: 3px solid #73d8b8; border-top: 0; background: repeating-linear-gradient(90deg, #101918 0 3px, #879592 3px 5px); }
+.community-pin { margin-top: 12px; padding-top: 10px; border-top: 1px solid #425349; }
+.community-pin h3 { margin: 0 0 6px; font-size: .8rem; }
+.community-pin p { margin: 5px 0; color: #b6c6bb; font-size: .7rem; line-height: 1.4; }
+.community-pin-actions { display: flex; gap: 8px; margin-top: 12px; }
+.community-pin-providers { display: grid; gap: 8px; margin: 12px 0; padding: 10px; border: 1px solid #425349; }
+.community-pin-providers label { display: flex; align-items: center; gap: 8px; font-size: .8rem; }
+#community-pin-dialog { max-width: min(390px, calc(100vw - 32px)); margin: auto; padding: 18px; color: #edf4ef; background: #101918; border: 2px solid #73d8b8; border-radius: 10px; }
+#community-pin-dialog::backdrop { background: #0009; }
+#community-pin-dialog h3 { margin: 0 0 8px; color: #b9f49b; }
+#community-pin-dialog p { font-size: .76rem; line-height: 1.45; }
+#community-pin-key { width: 100%; box-sizing: border-box; height: 38px; padding: 8px; color: #edf4ef; background: #1b2924; border: 1px solid #52675a; border-radius: 4px; }
+#community-pin-key-label { display: block; margin: 10px 0 5px; font-size: .75rem; }
+.community-pin-actions button { flex: 1; min-height: 38px; border: 1px solid #69776d; border-radius: 4px; font: inherit; font-size: .76rem; }
+#community-pin-start { color: #15221c; background: #b9f49b; }
+#community-pin-cancel { color: #edf4ef; background: #243634; }
 @media (max-width: 600px) {
   :root { --djuke-width: min(340px, calc(100vw - 44px)); }
   #djuke-panel { bottom: max(160px, calc(var(--radio-footer-height, 150px) + 28px)); }

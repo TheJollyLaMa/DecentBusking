@@ -3,6 +3,26 @@
   "rpcUrl": "https://base-rpc.publicnode.com",
   "routerAddress": "0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5",
   "fundSlug": "dbusk-repo-dev",
+  "pinnerFundSlug": "dbusk-pinners",
+  "communityAlbumRoots": [
+    { "title": "Jones Drive Sessions AA", "cid": "bafybeidxx4rufx7xrn5lmt3npyaej6doupxajyh53ibb4fp43whdvgfm2u" },
+    { "title": "Jones Drive Sessions AB", "cid": "bafybeicsbobnagvxy7tw47kqahluncyv52umlvieplkmr643covtfimnua" },
+    { "title": "Jones Drive Sessions AC", "cid": "bafybeictplsxfqayhrewyrcc2mhouuyydlzyedzweqyhindwgj5o67qsrm" },
+    { "title": "Jones Drive Sessions AD", "cid": "bafybeihs45httneokxvobxm3outngl2w677gssgkjxzklgqxafj32c42pi" },
+    { "title": "Jones Drive Sessions AE", "cid": "bafybeiendvgc6orpxjywzeev4abwiwtcjdpz2644cawuzstbzgdi6iyzri" },
+    { "title": "Jones Drive Sessions AG", "cid": "bafybeiaqsuhdzgu2hnpquwed6jtbgnrf4xcgk4fg5ee3kjyuflaty4qoey" },
+    { "title": "Jones Drive Sessions AJ", "cid": "bafybeibrl3oz5umodfyhblbejmfdj3srzhyq4rfuwv25u66h4bwiz477te" },
+    { "title": "Jones Drive Sessions AK", "cid": "bafybeiavhze22ar4adpanoqchdyvqkilab72wrv3mh752gq2deizo5fz3u" },
+    { "title": "Jones Drive Sessions AL", "cid": "bafybeidv56xm5zob5geoponmbd3sh2yhtnhzgf5d7cbk6idi5bgrvh6lxy" },
+    { "title": "Jones Drive Sessions AM", "cid": "bafybeie5kgrbiczw3bhu6sa5bsyu3pspa54dnkw6gawunbf3pdesumlgqi" },
+    { "title": "Jones Drive Sessions AT", "cid": "bafybeifuqdjue7bkwgt6qaocd2fvcjj5cedbb6e7spbahkescvcets3gza" },
+    { "title": "Jones Drive Sessions AU", "cid": "bafybeihvj257qsqpbajid25lbdssmcr6fglqqzz7uvpeedn7q3adxvvfna" },
+    { "title": "Jones Drive Sessions AV", "cid": "bafybeidmlaaux2aidprviwuwmf2fetmz2pznemwbe4nbksvrkt24eyu6e4" },
+    { "title": "Jones Drive Sessions AW", "cid": "bafybeicubiuslurlpdsdxbjvyxx3m7fmusc3fu7rnv6ngpxgalck5yii44" },
+    { "title": "Jones Drive Sessions AQ", "cid": "bafybeihoiii654hlj2kmneseuze6ulzibsddpwiymmaz2m7vdu5cxfnihi" },
+    { "title": "Jones Drive Sessions AR", "cid": "bafybeicmsjhjjqkptzxqwryvhov5lvhhpxu2xzj6dtx2vqh226lronvkdy" },
+    { "title": "Jones Drive Sessions AS", "cid": "bafybeiftgjgo6ujlju7epbrwr6fripdvr4vc3h24w6eooyg7ik7php3bsm" }
+  ],
   "radioFunds": {
     "playback": "dbusk-playback",
     "topTen": "dbusk-top10"

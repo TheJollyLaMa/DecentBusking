@@ -55,6 +55,7 @@ export function createPinataStateStore({
 } = {}) {
   if (!pinataJwt) throw new Error('PINATA_JWT is required for playlist checkpoints');
   const headers = { authorization: `Bearer ${pinataJwt}` };
+  let latestSnapshotUri = '';
 
   async function listSnapshots(limit = 100) {
     const response = await fetchImpl(buildListUrl(filesApiUrl, limit, name), { headers });
@@ -76,6 +77,7 @@ export function createPinataStateStore({
         continue;
       }
       const snapshot = await response.json();
+      latestSnapshotUri = `ipfs://${latest.cid}`;
       return deserialize(snapshot, `ipfs://${latest.cid}`);
     }
     throw new Error(`IPFS state restore failed (${lastStatus})`);
@@ -84,7 +86,6 @@ export function createPinataStateStore({
   async function save(playlist) {
     const snapshot = serialize(playlist);
     const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
-    const mirroredCid = beforeUpload ? await beforeUpload(bytes) : null;
     const form = new FormData();
     form.append('file', new Blob([bytes], { type: 'application/json' }), name);
     form.append('network', 'public');
@@ -96,7 +97,12 @@ export function createPinataStateStore({
     const result = await response.json();
     const cid = result.data?.cid || result.cid || result.IpfsHash;
     if (!cid) throw new Error('Pinata state upload did not return a CID');
-    if (mirroredCid && cid !== mirroredCid) throw new Error(`Pinata checkpoint ${cid} differs from locally mirrored ${mirroredCid}; do not adopt this state`);
+    latestSnapshotUri = `ipfs://${cid}`;
+    if (beforeUpload) Promise.resolve().then(() => beforeUpload(bytes, cid))
+      .then(mirroredCid => {
+        if (mirroredCid && mirroredCid !== cid) console.warn(`[ipfs-state] Local mirror CID ${mirroredCid} differs from shared Pinata CID ${cid}`);
+      })
+      .catch(error => console.warn(`[ipfs-state] Shared checkpoint ${cid} is saved; local/community mirror deferred: ${error.message}`));
 
     const snapshots = await listSnapshots();
     const normalizedFilesUrl = filesApiUrl.replace(/\/(public|private)?\/?$/, '');
@@ -109,5 +115,5 @@ export function createPinataStateStore({
     return `ipfs://${cid}`;
   }
 
-  return { restore, save };
+  return { restore, save, getLatestSnapshotUri: () => latestSnapshotUri };
 }
