@@ -22,7 +22,7 @@ Open the **Top 10** pull-tab on the upper-left to see this New York week's most-
 
 **New here? Start with one song.** Post audio or MP4 in [#DecentJukebox](https://discord.gg/SCtcBggHPa), or click the guitar case on the site. Discord attachments can be up to 10 MB. The site accepts files up to 50 MB, or an existing IPFS file CID for larger media. You do not need a Pinata account.
 
-After a Discord upload is pinned, click **Request NFT** beneath the bot's reply. For the site guitar case, connect your artist wallet, enter the track details, and submit. In either flow, choose your Base artist wallet. The request goes to the owner; it does not mint automatically.
+After a Discord upload is pinned, the bot replies with a **Request NFT** button. Click it to provide your Base artist wallet and optional artwork; submitting the private form automatically adds the request to the owner mint queue. For the site guitar case, connect your artist wallet, enter the track details, and submit. Neither flow mints automatically; the owner reviews and approves requests.
 
 Artwork is optional. Attach PNG, JPEG, WebP, or GIF up to 10 MB, enter an IPFS image CID for a larger image, or leave it blank to use your Discord profile image. The owner reviews the request and mints approved NFTs directly to the artist wallet.
 
@@ -55,13 +55,13 @@ Contributor payouts are separate from radio playback rewards. See [Contributor P
 
 ## Owner Mint Queue
 
-The contract owner opens **Admin** from the DecentBusking header menu, connects the `DEFAULT_ADMIN_ROLE` wallet on Base, and signs to load pending community requests. The queue shows the artist, destination wallet, track, and submitted artwork. Owners can mint requests one at a time or select several for sequential processing.
+The contract owner opens **Admin** from the DecentBusking header menu, connects the `DEFAULT_ADMIN_ROLE` wallet on Base, and signs to load pending community requests. The queue shows the artist, destination wallet, track, and submitted artwork. Owners can mint requests one at a time or select several for batch processing in groups of up to 20.
 
-The current contract has no atomic batch method, so each track requires two Base confirmations: register the product, then mint one edition directly to the artist. The owner wallet authorizes the transactions and pays gas; it does not keep the artist’s NFT. After confirmation, the bot verifies the Base transaction, updates the durable queue, and announces the minted NFT in Discord.
+New owner-approved mints use DecentNFT v0.3 and require one Base confirmation per batch. The owner wallet pays gas; each NFT is minted directly to its approved artist recipient. Existing v0.2 NFTs remain unchanged and continue to appear in the archive. After confirmation, the bot verifies the collection-qualified Base receipt, updates the durable queue, and announces the minted NFTs in Discord. Reviewed album imports are queued for owner review but never minted automatically.
 
 ## DecentNFT On Base
 
-DecentBusking music NFTs use the DecentNFT v0.2 ERC-1155 contract on Base Mainnet:
+Existing DecentBusking music NFTs use the DecentNFT v0.2 ERC-1155 contract on Base Mainnet:
 
 - Contract: [`0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B`](https://basescan.org/address/0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B)
 - Network: [Base Mainnet](https://basescan.org/)
@@ -69,7 +69,9 @@ DecentBusking music NFTs use the DecentNFT v0.2 ERC-1155 contract on Base Mainne
 - Artwork: optional IPFS image included in the NFT metadata
 - Current royalty: 5% ERC-2981 royalty receiver set to the artist wallet
 
-Minted music appears in the DecentBusking 3D timeline and archive for listening and selection. Marketplace purchase, resale, and richer multi-artist royalty splits are still being developed; a DecentMarket link does not necessarily mean a track is currently listed for sale. Follow the [DecentNFT v0.3 plans](https://github.com/TheJollyLaMa/DecentMarket/issues/47) for restricted creator minting, atomic batch minting, and expanded royalty support.
+New owner-approved mints use the deployed DecentNFT v0.3 batch-capable collection. The v0.2 collection remains in the archive; v0.3 does not migrate or renumber existing v0.2 NFTs.
+
+Minted music appears in the DecentBusking 3D timeline and archive for listening and selection. Marketplace purchase, resale, and richer multi-artist royalty splits are still being developed; a DecentMarket link does not necessarily mean a track is currently listed for sale.
 
 ## How It Works
 
