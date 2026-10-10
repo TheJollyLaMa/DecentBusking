@@ -69,9 +69,10 @@ export async function requestPinataSignedUrl({ pinataJwt, pinataSignUrl, name, s
   return url;
 }
 
-export function createMintTransactionVerifier({ rpcUrl, contractAddress, ownerWallet, provider }) {
+export function createMintTransactionVerifier({ rpcUrl, contractAddress, contractAddresses = [], ownerWallet, provider }) {
   const rpcProvider = provider || new JsonRpcProvider(rpcUrl);
-  const contract = contractAddress.toLowerCase();
+  const contracts = new Set([contractAddress, ...contractAddresses].filter(Boolean).map(address => address.toLowerCase()));
+  if (!contracts.size) throw new Error('At least one DecentNFT contract address is required');
   const owner = ownerWallet.toLowerCase();
   const iface = new Interface(MINT_EVENT_ABI);
 
@@ -83,19 +84,22 @@ export function createMintTransactionVerifier({ rpcUrl, contractAddress, ownerWa
     if (!transaction || !receipt || receipt.status !== 1) throw new Error('Mint transaction is not confirmed');
     // Smart accounts (EIP-7702) route through delegation contracts, so trust DecentNFT's own event, not tx.to/from.
 
+    const matches = [];
     for (const log of receipt.logs) {
-      if (log.address.toLowerCase() !== contract) continue;
+      const emittedBy = log.address?.toLowerCase();
+      if (!contracts.has(emittedBy)) continue;
       try {
         const event = iface.parseLog(log);
         if (event?.name === 'EditionMinted' && event.args.tokenId.toString() === String(tokenId)) {
           if (event.args.minter.toLowerCase() !== owner) throw new Error('Edition was not minted by the configured owner');
-          return { recipient: event.args.to, amount: event.args.amount.toString() };
+          matches.push({ recipient: event.args.to, amount: event.args.amount.toString(), contractAddress: log.address });
         }
       } catch (error) {
         if (error.message.includes('configured owner')) throw error;
       }
     }
-    throw new Error('Mint transaction does not contain the claimed EditionMinted event');
+    if (matches.length !== 1) throw new Error('Mint transaction does not contain exactly one claimed EditionMinted event');
+    return matches[0];
   };
 }
 
@@ -303,7 +307,8 @@ export function createWorkerRequestHandler({
           throw new Error('Invalid mint completion payload');
         }
         const verified = await verifyMintTransaction({ tokenId: String(tokenId), txHash });
-        await onMintComplete({ trackId, tokenId: String(tokenId), txHash, recipient: verified.recipient });
+        await onMintComplete({ trackId, tokenId: String(tokenId), txHash, recipient: verified.recipient,
+          contractAddress: verified.contractAddress });
         sendJson(response, 200, { ok: true }, corsOrigin);
         return;
       }

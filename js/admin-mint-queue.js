@@ -13,6 +13,15 @@ export const PRODUCT_BATCH_ABI = [
   'event EditionMinted(uint256 indexed tokenId,address indexed to,uint256 amount,address indexed minter)',
 ];
 
+export function splitMintBatches(indices, batchSize = 20) {
+  if (!Array.isArray(indices) || !Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 20) {
+    throw new Error('Mint batch size must be between 1 and 20');
+  }
+  const batches = [];
+  for (let start = 0; start < indices.length; start += batchSize) batches.push(indices.slice(start, start + batchSize));
+  return batches;
+}
+
 export async function mintPreparedProductsBatch({ contract, products, owner, maxGas = 8000000n, onBroadcast = () => {} }) {
   if (!Array.isArray(products) || products.length === 0 || products.length > 20) throw new Error('Select 1 to 20 songs per batch');
   const metadataUris = products.map(product => product.tokenURI);

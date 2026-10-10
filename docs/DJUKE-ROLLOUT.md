@@ -3,8 +3,10 @@
 Status (2026-10-10): DecentNFT v0.3 and DecentJukeBox v0.1 are deployed on Base;
 the `dbusk-pinners` fund is active. DJuke payment requests remain disabled until
 the worker environment is configured and radio fulfillment is verified. The
-existing DecentNFT v0.2 remains primary, batch minting is off, and no album
-tracks have been imported or minted.
+existing DecentNFT v0.2 remains in the archive alongside v0.3. New owner-approved
+mint requests target v0.3 in sequential batches of up to 20. The reviewed album
+plan is ready to import and queue after mirror readiness is confirmed; no album
+NFTs have been minted yet.
 
 ## Go-live checklist (you enter keys and execute)
 
@@ -14,11 +16,14 @@ the on-chain steps (3, 4, 6), which cost Base gas.
 1. **Ship the code.** Push the reviewed branch; GitHub Pages and Render redeploy.
   Expected: Top 10 and DJuke tabs stacked on the left; the deployed contract
   address is public, but paid requests remain gated by worker status.
-2. **Album import (no wallet).** Generate a secret locally, e.g. `openssl rand -hex 32`.
-   Set it as `CHECKPOINT_MIRROR_SECRET` on Render and in your Mac `discord-bot/.env`.
-   Start IPFS Desktop and run `npm run checkpoint-mirror -- --watch` in `discord-bot`.
-   Set `DBUSK_IMPORT_REVIEWED_ALBUMS=true` on Render, restart, confirm the log line
-   `[album-import] Added 190`, then set it back to `false`.
+2. **Album import and owner mint queue.** Set `DBUSK_IMPORT_REVIEWED_ALBUMS=true`
+  on Render for the next restart and keep the authenticated Mac mirror available.
+  The 190-track title-reviewed, dual-pinned candidate plan is rechecked against the current restored playlist at worker
+  startup; exact current title/CID duplicates are skipped. The matching uploader
+  identity and previously reviewed owner wallet are required, and conflicting
+  wallet assignments stop the import. New songs enter the owner mint queue; no
+  NFT is minted automatically. Confirm `[album-import] Added …; queued …`, then
+  set the flag to `false` to prevent future retries.
 3. **Create the pinners fund (admin wallet, one transaction).** Done 2026-10-10:
   `dbusk-pinners` is active, with public purpose metadata at
   `https://thejollylama.github.io/DecentBusking/payroll-assets.json#dbusk-pinners`.
@@ -42,19 +47,23 @@ the on-chain steps (3, 4, 6), which cost Base gas.
    start, then new Discord uploads and briefcase submissions every two minutes, in
    batches of 25. Watch for `[djuke] Registered` in the logs. The admin-only
    `configure:djuke:base` script remains for changing an existing song's payees.
-  **Current catalog gate (2026-10-10):** the latest restored Pinata playlist has
+  **Current catalog gate (2026-10-10):** the latest restored Pinata playlist had
   76 IPFS-backed tracks but no `mintRecipient` artist wallets, so the live DJuke
-  reader currently reports zero registered songs. Artists must confirm their
-  Base wallet through the existing **Request NFT** flow; this records attribution
-  and queues owner review, but does not mint automatically. Do not infer a wallet
-  from a Discord username.
+  reader reported zero registered songs. The reviewed album import uses the
+  previously verified `thejollylama` uploader ID and configured owner wallet;
+  conflicting wallet assignments stop the import. New Discord drops receive a
+  **Request NFT** button; the uploader opens the private wallet/artwork form and
+  submission queues owner review but does not mint. Never infer a wallet from an
+  unverified Discord name.
 7. **Open payments (not yet).** Only after the Render worker is configured and a
   full test passes, set `DJUKE_PAYMENTS_ENABLED=true`. Verify one 0.25 USDC bump
   and the 0.225 / 0.020 / 0.005 artist/pinner/repo split in router balances.
-8. **Batch minting (optional, later).** Switch `contractAddress` to the v0.3 address,
-   move the old address into `additionalNftContractAddresses`, set
-   `DECENT_NFT_CONTRACT_ADDRESS` and `DECENT_NFT_ADDITIONAL_ADDRESSES` on Render, and
-   set `nftBatchMintEnabled: true`. Existing v0.2 NFTs stay where they are.
+8. **Batch mint owner requests.** The site targets deployed v0.3 for new mints and
+  retains v0.2 as an additional archive collection; batch minting is enabled.
+  Review the imported songs and artist recipient in Admin, select the approved
+  requests, then confirm sequential transactions of up to 20 songs each. The
+  queue refreshes after each successful batch. Existing v0.2 token IDs and
+  metadata remain unchanged.
 
 Rollback: unset `DJUKE_PAYMENTS_ENABLED` or `djukeContractAddress` to hide payments;
 the contract's `pauseRequests` stops new purchases while queued plays still settle.
@@ -122,9 +131,11 @@ the contract's `pauseRequests` stops new purchases while queued plays still sett
   those same roots are now recursively pinned locally with no Pinata uploads.
   AW did not match any tested profile and remains a directory-review blocker.
 - `docs/reports/album-import-candidates.json` contains 190 unblocked, dual-pinned
-  candidate recordings needing no uploads. It is a plan only, with application
-  disabled. Before applying it, recheck current playlist titles and artist
-  attribution and persist album membership without changing existing history.
+  candidate recordings needing no uploads. On worker startup with
+  `DBUSK_IMPORT_REVIEWED_ALBUMS=true`, the importer rechecks current titles and
+  CIDs, applies album membership without changing existing history, and queues
+  new songs for owner mint review. It does not mint automatically. Set the flag
+  to `false` to pause future import retries.
   The broader Desktop folders remain in the review report, not automatically
   added to the original ENS import scope. No radio entries or NFTs were added.
 

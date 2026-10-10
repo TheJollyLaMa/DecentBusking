@@ -21,6 +21,42 @@ test('album import preserves old histories, adds radio-ready unminted tracks and
   assert.equal(repeat.playlist.length, 2);
 });
 
+test('explicit reviewed mint-queue import queues new songs without minting and preserves prior attribution checks', async () => {
+  const { prepareAlbumPlaylistImport, resolveAlbumArtist } = await import('../discord-bot/album-import.js');
+  const queued = prepareAlbumPlaylistImport({ playlist: [], plan, artist, queueForMint: true, now: '2026-10-10T00:00:00.000Z' });
+  assert.equal(queued.playlist[0].mintStatus, 'requested');
+  assert.equal(queued.playlist[0].mintRequestedAt, '2026-10-10T00:00:00.000Z');
+  assert.equal(queued.playlist[0].mintRecipient, artist.wallet);
+  assert.equal(queued.playlist[0].tokenId, undefined);
+
+  const currentTracks = [{ uploader: artist.name, uploaderId: artist.uploaderId }];
+  assert.deepEqual(resolveAlbumArtist(currentTracks, artist), artist);
+  assert.throws(() => resolveAlbumArtist([
+    ...currentTracks,
+    { uploader: artist.name, uploaderId: 'other-uploader' },
+  ], artist), /missing or ambiguous/);
+  assert.throws(() => resolveAlbumArtist([
+    ...currentTracks,
+    { uploader: artist.name, uploaderId: artist.uploaderId, mintRecipient: `0x${'2'.repeat(40)}` },
+  ], artist), /conflicting wallet attribution/);
+});
+
+test('queue-only album retry upgrades an existing unminted import without duplicating its radio entry', async () => {
+  const { prepareAlbumPlaylistImport, checkpointReviewedAlbumImport } = await import('../discord-bot/album-import.js');
+  const imported = prepareAlbumPlaylistImport({ playlist: [], plan, artist });
+  let saved;
+  const queued = await checkpointReviewedAlbumImport({ playlist: imported.playlist, plan, artist, queueForMint: true,
+    mirrorBeforePublication: true, verifyMirrorAvailable: async () => {},
+    save: async playlist => { saved = playlist; return 'ipfs://queued-checkpoint'; } });
+  assert.equal(queued.added.length, 0);
+  assert.deepEqual(queued.queued, [imported.added[0]]);
+  assert.equal(queued.playlist.length, 1);
+  assert.equal(queued.playlist[0].mintStatus, 'requested');
+  assert.equal(saved[0].mintStatus, 'requested');
+  const repeat = prepareAlbumPlaylistImport({ playlist: queued.playlist, plan, artist, queueForMint: true });
+  assert.deepEqual(repeat.queued, []);
+});
+
 test('album import rechecks changed display titles and rejects unverifiable candidates before any mutation', async () => {
   const { prepareAlbumPlaylistImport, resolveAlbumArtist } = await import('../discord-bot/album-import.js');
   const existing = [{ trackId: 'old', title: 'Different display name', filename: 'a_song.M4A' }];

@@ -420,6 +420,7 @@ async function main() {
   const verifyMintTransaction = createMintTransactionVerifier({
     rpcUrl: config.baseRpcUrl,
     contractAddress: config.nftContractAddress,
+    contractAddresses: config.nftContractAddresses,
     ownerWallet: config.mintOwnerWallet,
   });
   const reconcileMint = async ({ trackId, tokenId, txHash }) => {
@@ -434,7 +435,7 @@ async function main() {
       tokenId: String(tokenId),
       mintTxHash: txHash,
     });
-    const completedTrack = completeTrackMint(trackId, { tokenId, txHash, contractAddress: config.nftContractAddress });
+    const completedTrack = completeTrackMint(trackId, { tokenId, txHash, contractAddress: verified.contractAddress });
     if (!completedTrack) throw new Error('Mint request could not be reconciled');
     return completedTrack;
   };
@@ -642,20 +643,21 @@ async function main() {
     }
     loadPlaylist(restoredPlaylist);
     configureRemotePersistence(stateStore.save);
-    if (process.env.DBUSK_IMPORT_REVIEWED_ALBUMS === 'true') {
+    if (process.env.DBUSK_IMPORT_REVIEWED_ALBUMS !== 'false') {
       try {
         if (!Array.isArray(restoredPlaylist) || !restoredPlaylist.length) throw new Error('Verified remote playlist restore required for album import');
         const plan = JSON.parse(fs.readFileSync(new URL('../docs/reports/album-import-candidates.json', import.meta.url), 'utf8'));
         const artist = resolveAlbumArtist(restoredPlaylist, { name: 'thejollylama', wallet: config.mintOwnerWallet });
         const imported = await checkpointReviewedAlbumImport({ playlist: restoredPlaylist, plan, artist, save: stateStore.save,
+          queueForMint: true,
           mirrorBeforePublication: true,
           verifyMirrorAvailable: async () => {
             if (!checkpointMirror) throw new Error('CHECKPOINT_MIRROR_SECRET is required before album import');
             await checkpointMirror.waitAvailable();
           },
         });
-        if (imported.added.length) loadPlaylist(imported.playlist);
-        console.log(`[album-import] Added ${imported.added.length}; skipped ${imported.skipped.length}. Checkpoint: ${imported.checkpointUri || 'already imported'}`);
+        if (imported.added.length || imported.queued.length) loadPlaylist(imported.playlist);
+        console.log(`[album-import] Added ${imported.added.length}; queued ${imported.queued.length}; skipped ${imported.skipped.length}. No NFTs minted. Checkpoint: ${imported.checkpointUri || 'already imported'}`);
       } catch (error) {
         console.warn('[album-import] No album state adopted:', error.message);
       }

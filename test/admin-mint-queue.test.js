@@ -27,6 +27,14 @@ test('prepared batch uses one transaction and reads actual token IDs from matchi
   await assert.rejects(mintPreparedProductsBatch({ contract, products, owner, maxGas: 1n }), /select fewer/);
   assert.equal(transactions, 2);
 });
+
+test('large batch selections split into sequential contract-sized groups of twenty', async () => {
+  const { splitMintBatches } = await import('../js/admin-mint-queue.js');
+  const batches = splitMintBatches(Array.from({ length: 43 }, (_, index) => index));
+  assert.deepEqual(batches.map(batch => batch.length), [20, 20, 3]);
+  assert.deepEqual(batches.flat(), Array.from({ length: 43 }, (_, index) => index));
+  assert.deepEqual(splitMintBatches([]), []);
+});
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');

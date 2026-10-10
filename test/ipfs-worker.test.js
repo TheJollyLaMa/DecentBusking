@@ -256,7 +256,7 @@ test('worker reconciles only a verified Base mint transaction', async () => {
     verifyMintTransaction: async ({ tokenId, txHash: receivedHash }) => {
       assert.equal(tokenId, '42');
       assert.equal(receivedHash, txHash);
-      return { recipient: '0x2222222222222222222222222222222222222222' };
+      return { recipient: '0x2222222222222222222222222222222222222222', contractAddress: '0x3333333333333333333333333333333333333333' };
     },
     onMintComplete: async (completion) => completions.push(completion),
   });
@@ -273,6 +273,7 @@ test('worker reconciles only a verified Base mint transaction', async () => {
       tokenId: '42',
       txHash,
       recipient: '0x2222222222222222222222222222222222222222',
+      contractAddress: '0x3333333333333333333333333333333333333333',
     }]);
   });
 });
@@ -299,7 +300,26 @@ test('verifies the owner transaction and EditionMinted event on Base', async () 
     },
   });
 
-  assert.deepEqual(await verify({ tokenId: '42', txHash }), { recipient, amount: '1' });
+  assert.deepEqual(await verify({ tokenId: '42', txHash }), { recipient, amount: '1', contractAddress: contract });
+});
+
+test('mint reconciliation accepts owner EditionMinted events from either configured NFT collection', async () => {
+  const { createMintTransactionVerifier } = await import(moduleUrl);
+  const owner = Wallet.createRandom();
+  const recipient = Wallet.createRandom().address;
+  const legacy = Wallet.createRandom().address;
+  const batch = Wallet.createRandom().address;
+  const iface = new Interface(['event EditionMinted(uint256 indexed tokenId,address indexed to,uint256 amount,address indexed minter)']);
+  const provider = {
+    getTransaction: async () => ({ hash: `0x${'1'.repeat(64)}` }),
+    getTransactionReceipt: async () => ({ status: 1, logs: [{
+      address: batch,
+      topics: iface.encodeEventLog(iface.getEvent('EditionMinted'), [12, recipient, 1, owner.address]).topics,
+      data: iface.encodeEventLog(iface.getEvent('EditionMinted'), [12, recipient, 1, owner.address]).data,
+    }] }),
+  };
+  const verify = createMintTransactionVerifier({ rpcUrl: 'unused', contractAddresses: [legacy, batch], ownerWallet: owner.address, provider });
+  assert.deepEqual(await verify({ tokenId: '12', txHash: `0x${'1'.repeat(64)}` }), { recipient, amount: '1', contractAddress: batch });
 });
 
 test('accepts owner mints routed through a smart-account delegation contract', async () => {
@@ -327,9 +347,9 @@ test('accepts owner mints routed through a smart-account delegation contract', a
   };
   const txHash = `0x${'cd'.repeat(32)}`;
 
-  assert.deepEqual(await verifierFor(owner)({ tokenId: '8', txHash }), { recipient, amount: '1' });
+  assert.deepEqual(await verifierFor(owner)({ tokenId: '8', txHash }), { recipient, amount: '1', contractAddress: contract });
   await assert.rejects(verifierFor(recipient)({ tokenId: '8', txHash }), /not minted by the configured owner/);
-  await assert.rejects(verifierFor(owner, delegationManager)({ tokenId: '8', txHash }), /does not contain the claimed EditionMinted/);
+  await assert.rejects(verifierFor(owner, delegationManager)({ tokenId: '8', txHash }), /does not contain exactly one claimed EditionMinted/);
 });
 
 test('returns the pending queue only to the mint owner', async () => {

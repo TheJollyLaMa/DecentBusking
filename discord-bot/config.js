@@ -56,9 +56,10 @@ export function loadConfig() {
     allowedOrigins:         (process.env.IPFS_ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean),
     mintOwnerWallet:        process.env.MINT_OWNER_WALLET || '',
     publicWorkerUrl:        (process.env.PUBLIC_WORKER_URL || '').replace(/\/$/, ''),
-    nftContractAddress:     process.env.DECENT_NFT_CONTRACT_ADDRESS || '0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B',
+    nftContractAddress:     process.env.DECENT_NFT_CONTRACT_ADDRESS || '0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3',
     nftContractAddresses:   [...new Set([
       '0xe63ec9f8228720baac2fd528c0a6d06b3dc5439b',
+      '0x64d5adc50e5513975eff7e9ba366b7ee58586fa3',
       process.env.DECENT_NFT_CONTRACT_ADDRESS,
       ...(process.env.DECENT_NFT_ADDITIONAL_ADDRESSES || '').split(','),
     ].filter(Boolean).map(address => address.trim().toLowerCase()).filter(Boolean))],

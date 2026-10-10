@@ -31,10 +31,10 @@ window.DecentConfig = {
   rpcUrl: "https://mainnet.base.org",
   blockExplorerUrl: "https://basescan.org",
 
-  // Keep DecentNFT v0.2 primary; v0.3 is deployed but batch minting remains off.
-  contractAddress: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B",
-  additionalNftContractAddresses: [],
-  nftBatchMintEnabled: false,
+  // v0.3 receives new batch mints; keep v0.2 in the archive and reconciliation scan.
+  contractAddress: "0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3",
+  additionalNftContractAddresses: ["0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B"],
+  nftBatchMintEnabled: true,
   // Deployed DJuke address. Purchases stay disabled until the worker enables them.
   djukeContractAddress: "0x153ef59a57C9A88cbB7822252B5d9D0B11E48F0E",
   adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",

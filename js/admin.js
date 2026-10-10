@@ -6,7 +6,7 @@
 // The panel is opened by dispatching a custom "open-admin" DOM event (wired up
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
-import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, mintPreparedProductsBatch, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261010-batch';
+import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261010-batch-chunked';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261010-listens';
@@ -290,9 +290,16 @@ function _resetAdminWallet() {
     _mintBusy = true;
     _setMintControlsDisabled(true);
     let completed = false;
+    let completedBatches = 0;
+    let failureMessage = '';
     try {
       if (window.DecentConfig?.nftBatchMintEnabled === true) {
-        await _mintQueuedBatch(indices);
+        const batches = splitMintBatches(indices);
+        for (let index = 0; index < batches.length; index++) {
+          _setMintStatus(`Preparing batch ${index + 1}/${batches.length} (${batches[index].length} songs)…`);
+          await _mintQueuedBatch(batches[index]);
+          completedBatches++;
+        }
       } else for (let position = 0; position < indices.length; position++) {
         const index = indices[position];
         const track = _mintQueue[index];
@@ -302,14 +309,16 @@ function _resetAdminWallet() {
       }
       completed = true;
     } catch (err) {
-      _setMintStatus(`❌ Stopped: ${err.message}`, true);
+      failureMessage = `❌ Stopped after ${completedBatches} confirmed batch(es): ${err.message}`;
+      _setMintStatus(failureMessage, true);
     } finally {
       _mintBusy = false;
       _setMintControlsDisabled(false);
     }
-    if (completed) {
+    if (completed || completedBatches > 0) {
       await _loadMintQueue();
-      _setMintStatus(`✅ Minted and announced ${indices.length} track(s).`);
+      if (completed) _setMintStatus(`✅ Minted and announced ${indices.length} track(s) in ${completedBatches} batch(es).`);
+      else _setMintStatus(failureMessage, true);
     }
   }
 
