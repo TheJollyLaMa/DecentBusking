@@ -5,6 +5,7 @@ const STATE_KEYVALUES = {
   schema: '1',
 };
 const SNAPSHOTS_TO_KEEP = 3;
+const RESTORE_REQUEST_TIMEOUT_MS = 15_000;
 // Bounded so a large backlog is pruned across several saves without tripping Pinata rate limits.
 const MAX_PRUNE_PER_SAVE = 10;
 const FALLBACK_GATEWAY = 'https://gateway.pinata.cloud';
@@ -57,7 +58,10 @@ export function createPinataStateStore({
   const headers = { authorization: `Bearer ${pinataJwt}` };
 
   async function listSnapshots(limit = 100) {
-    const response = await fetchImpl(buildListUrl(filesApiUrl, limit, name), { headers });
+    const response = await fetchImpl(buildListUrl(filesApiUrl, limit, name), {
+      headers,
+      signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
+    });
     if (!response.ok) throw new Error(await responseError(response, 'Pinata state listing failed'));
     return extractFiles(await response.json())
       .filter(file => isStateSnapshot(file, name, tags))
@@ -70,7 +74,9 @@ export function createPinataStateStore({
 
     let lastStatus = 0;
     for (const base of [...new Set([gateway, FALLBACK_GATEWAY])]) {
-      const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${latest.cid}`).catch(() => null);
+      const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${latest.cid}`, {
+        signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
+      }).catch(() => null);
       if (!response?.ok) {
         lastStatus = response?.status || 0;
         continue;

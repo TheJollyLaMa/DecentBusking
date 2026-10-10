@@ -31,6 +31,7 @@ test('restores the newest tagged JukeLoop snapshot from Pinata', async () => {
   assert.equal(listUrl.searchParams.get('order'), 'DESC');
   assert.equal(listUrl.searchParams.get('limit'), '100');
   assert.equal(requests[1].url, 'https://dweb.link/ipfs/bafystate');
+  assert.ok(requests.every(({ options }) => options.signal instanceof AbortSignal));
 });
 
 test('restore falls back to the Pinata gateway when the configured gateway is rate-limited', async () => {
