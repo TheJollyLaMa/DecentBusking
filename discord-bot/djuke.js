@@ -183,7 +183,7 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
     return entries.filter(({ songId, track }) => {
       const song = registrations.get(songId)?.song;
       return song?.enabled && song.audioURI === `ipfs://${track.ipfsCid}`;
-    }).map(({ songId, track }) => ({ songId, trackId: track.trackId, title: track.title }));
+    }).map(({ songId, track }) => ({ songId, trackId: track.trackId, title: track.title, ipfsCid: track.ipfsCid }));
   }
   async function readSnapshot() {
     if (Number((await rpc.getNetwork()).chainId) !== 8453) throw new Error('DJuke is Base-only');

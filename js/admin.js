@@ -9,7 +9,7 @@
 import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, mintPreparedProductsBatch, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261010-batch';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 import { reportMintCompletion } from './mint-reconciliation.js';
-import { addNFTToSpace } from './space.js?v=20261010-collections';
+import { addNFTToSpace } from './space.js?v=20261010-listens';
 import { isAdminWallet } from './admin-access.mjs';
 
 const ROLE_GRANT_ABI = [

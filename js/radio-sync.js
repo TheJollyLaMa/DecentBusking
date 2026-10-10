@@ -26,6 +26,7 @@ function _renderVideo() {
 
 /** @type {'radio'|'takeover'|'archive'} */
 let _mode = 'radio';
+let _archiveSession = null;
 let _radio = null;
 let _radioReachable = true;
 let _loadedPlayId = null;
@@ -193,6 +194,15 @@ async function _castRadioVote(vote) {
   }
 }
 
+/** Active archive listen session id, or null while the radio or a takeover is playing. */
+export function archiveSessionId() {
+  return _mode === 'archive' ? _archiveSession?.id ?? null : null;
+}
+
+export function archiveMedia() {
+  return _mode === 'archive' ? _audio : null;
+}
+
 export function initRadioSync() {
   _audio = document.getElementById('audio-player');
   _audioPlayer = _audio;
@@ -225,8 +235,9 @@ export function initRadioSync() {
 }
 
 /** Play a user-selected archive track; the radio stays muted until returnToRadio(). */
-export function playArchiveTrack({ title, artist, audioUrl, mediaType }) {
+export function playArchiveTrack({ title, artist, audioUrl, mediaType, sessionId = null, onEnded = null }) {
   if (!_audio) return;
+  _archiveSession = { id: sessionId, onEnded };
   if (_takeover) _takeoverQueue.unshift(_takeover.track);
   _clearTakeover();
   _burst = _takeoverQueue.length > 1;
@@ -241,6 +252,7 @@ export function playArchiveTrack({ title, artist, audioUrl, mediaType }) {
 
 export function returnToRadio() {
   if (_mode !== 'archive') return;
+  _archiveSession = null;
   _radioBtn?.classList.add('hidden');
   _mode = 'radio';
   _loadedPlayId = null;
@@ -401,6 +413,9 @@ function _onEnded(event) {
   if (_mode === 'takeover') {
     _startNextTakeover();
   } else if (_mode === 'archive') {
+    const continuation = _archiveSession?.onEnded;
+    _archiveSession = null;
+    if (continuation?.()) return;
     _radioBtn?.classList.add('hidden');
     _mode = 'radio';
     _loadedPlayId = null;

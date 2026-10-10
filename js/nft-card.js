@@ -2,7 +2,7 @@
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js?v=20261010-collections';
+import { fetchNFTMetaById } from './space.js?v=20261010-listens';
 
 // ── Public API ───────────────────────────────────────────────────────────
 export function renderNFTCard(nft) {
@@ -40,10 +40,22 @@ export function renderNFTCard(nft) {
     closeBtn.onclick = () => panel.close();
   }
   content.querySelector('.nft-listen-btn')?.addEventListener('click', async () => {
-    const { setNowPlaying } = await import('./stage.js?v=20261005-mp4');
+    if (!document.dispatchEvent(new CustomEvent('dbusk-listen', { cancelable: true, detail: { nft } }))) {
+      if (nft.videoUrl || nft.mediaType === 'video/mp4') panel.close();
+      return;
+    }
+    const { setNowPlaying } = await import('./stage.js?v=20261010-listens');
     setNowPlaying({ title: nft.name || nft.title, artist: nft.artist || nft.creator,
       audioUrl: nft.videoUrl || nft.audioUrl || nft.animation_url, mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : '') });
     if (nft.videoUrl || nft.mediaType === 'video/mp4') panel.close();
+  });
+
+  content.querySelector('.nft-playlist-btn')?.addEventListener('click', event => {
+    const button = event.currentTarget;
+    const status = text => { button.textContent = text; };
+    if (document.dispatchEvent(new CustomEvent('dbusk-playlist-add', { cancelable: true, detail: { nft, status } }))) {
+      status('Playlists open soon');
+    }
   });
 
   // Wire parent-play button if present
@@ -112,7 +124,7 @@ function _buildCardHTML(nft) {
     ${/^https?:\/\//i.test(imageUrl) ? `<img class="nft-detail-image" src="${_esc(imageUrl)}" alt="Artwork for ${_esc(nft.name || nft.title || 'this NFT')}" />` : ''}
     <h3 id="nft-detail-title">${_esc(nft.name || nft.title || `Track #${nft.tokenId}`)}</h3>
 
-    ${audioUrl ? '<button class="nft-listen-btn nft-buy-btn" type="button">▶ Play Track</button>' : ''}
+    ${audioUrl ? '<button class="nft-listen-btn nft-buy-btn" type="button">▶ Play Track</button><button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>' : ''}
 
     ${parentSection}
 
@@ -143,7 +155,7 @@ function _buildCardHTML(nft) {
 // ── Parent Track Playback ─────────────────────────────────────────────────
 async function _playParent(parentTokenId) {
   if (!parentTokenId) return;
-  const { setNowPlaying } = await import('./stage.js?v=20261005-mp4');
+  const { setNowPlaying } = await import('./stage.js?v=20261010-listens');
   const meta = await fetchNFTMetaById(parentTokenId);
   if (!meta) return;
   const cfg = window.DecentConfig || {};

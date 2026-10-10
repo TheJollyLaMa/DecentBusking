@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261010-left-djuke" />
+  <link rel="stylesheet" href="css/styles.css?v=20261010-listens" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -54,6 +54,12 @@
         <button id="djuke-pay" type="button" disabled title="DJuke payment contract is not deployed">Queue Song</button>
       </div>
       <p id="djuke-payment-state" role="status" aria-live="polite">Payments not live</p>
+      <section class="djuke-playlist" aria-labelledby="djuke-playlist-heading">
+        <h3 id="djuke-playlist-heading">My Playlist</h3>
+        <ol id="djuke-playlist" aria-label="Songs in your personal playlist"></ol>
+        <p id="djuke-playlist-total">Empty — add songs from any DNFT card</p>
+        <button id="djuke-playlist-buy" type="button" disabled>Play My Playlist</button>
+      </section>
       <details class="djuke-tiers" open>
         <summary>Price Model</summary>
         <table><thead><tr><th scope="col">Pending requests</th><th scope="col">USDC</th></tr></thead><tbody id="djuke-price-tiers"></tbody></table>
@@ -77,6 +83,18 @@
     <button id="hat-btn" title="Tip the busker 🎩" aria-label="Tip the busker">🎩</button>
     <button id="guitar-case-btn" title="Mint your busk 💼" aria-label="Mint your busk">💼</button>
   </div>
+
+  <!-- NFT detail panel -->
+  <dialog id="listen-gate" aria-labelledby="listen-gate-title">
+    <h3 id="listen-gate-title">Keep listening?</h3>
+    <p id="listen-gate-text"></p>
+    <div class="listen-gate-actions">
+      <button id="listen-gate-pay" type="button">Pay 0.25 USDC &amp; continue</button>
+      <button id="listen-gate-add" type="button">Add to playlist</button>
+      <button id="listen-gate-radio" type="button">Back to radio</button>
+    </div>
+    <p id="listen-gate-status" role="status" aria-live="polite"></p>
+  </dialog>
 
   <!-- NFT detail panel -->
   <dialog id="nft-panel" class="hidden" aria-labelledby="nft-detail-title">
@@ -512,15 +530,16 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261010-collections"></script>
+  <script type="module" src="js/main.js?v=20261010-listens"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261010-batch"></script>
+  <script type="module" src="js/admin.js?v=20261010-listens"></script>
 
   <script type="module" src="js/payroll.js?v=20261008-ny-recovery-payflow"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261010-left-djuke"></script>
   <script type="module" src="js/djuke.mjs?v=20261010-djuke-pay"></script>
+  <script type="module" src="js/listens.mjs?v=20261010-listens"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js?v=20261008-ny-recovery-payflow';
     document.addEventListener('DOMContentLoaded', initPayroll);

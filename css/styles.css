@@ -616,6 +616,22 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 .djuke-request-details strong { font-size: .77rem; overflow-wrap: anywhere; }
 .djuke-request-details span { color: #a9b9ae; font-size: .68rem; overflow-wrap: anywhere; }
 .djuke-replace { justify-self: start; margin-top: 3px; padding: 4px 8px; color: #15221c; background: #ebefea; border: 1px solid #69776d; border-radius: 4px; font-size: .68rem !important; }
+.djuke-playlist { margin-top: 12px; padding-top: 10px; border-top: 1px solid #425349; }
+.djuke-playlist h3 { margin: 0 0 6px; font-size: .8rem; }
+#djuke-playlist { margin: 0; padding: 0; list-style: none; max-height: 150px; overflow-y: auto; }
+#djuke-playlist li { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid #2d3b33; font-size: .74rem; overflow-wrap: anywhere; }
+#djuke-playlist li button { flex: 0 0 26px; height: 26px; color: #e8eeeb; background: #243634; border: 1px solid #708d81; border-radius: 4px; }
+#djuke-playlist-total { margin: 6px 0; color: #b6c6bb; font-size: .72rem; }
+#djuke-playlist-buy { width: 100%; min-height: 36px; color: #15221c; background: #b9f49b; border: 1px solid #69776d; border-radius: 4px; font-size: .74rem !important; }
+#listen-gate { margin: auto; max-width: min(360px, calc(100vw - 32px)); padding: 18px; color: #edf4ef; background: #101918; border: 2px solid #73d8b8; border-radius: 10px; }
+#listen-gate::backdrop { background: #0009; }
+#listen-gate h3 { margin: 0 0 8px; color: #b9f49b; font-size: 1rem; }
+#listen-gate p { margin: 0 0 12px; font-size: .82rem; line-height: 1.45; }
+.listen-gate-actions { display: grid; gap: 8px; }
+.listen-gate-actions button { min-height: 38px; border: 1px solid #69776d; border-radius: 4px; font: inherit; font-size: .8rem; cursor: pointer; }
+#listen-gate-pay { color: white; background: #ab343b; }
+#listen-gate-add, #listen-gate-radio { color: #15221c; background: #ebefea; }
+#listen-gate-status { min-height: 1em; margin: 10px 0 0 !important; color: #b6c6bb; font-size: .74rem !important; }
 #djuke-queue-state, #djuke-payment-state { margin: 8px 0; color: #b6c6bb; font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
 .djuke-song-label { display: block; margin-top: 12px; margin-bottom: 5px; font-size: .73rem; }
 #djuke-song { width: 100%; box-sizing: border-box; height: 36px; padding: 6px; background: #1b2924; color: #ecf1ed; border: 1px solid #52675a; border-radius: 4px; font: inherit; font-size: .76rem; }
