@@ -688,6 +688,19 @@ async function main() {
     loadPlaylist();
     playlistReady = true;
   }
+  refreshPayflow();
+  syncMintedTracks(config);
+
+  client = new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.GuildVoiceStates,
+      GatewayIntentBits.MessageContent,
+      GatewayIntentBits.GuildMessageReactions,
+    ],
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction],
+  });
 
   client.once(Events.ClientReady, async (readyClient) => {
     console.log(`[jukebox-bot] Logged in as ${readyClient.user.tag}`);
