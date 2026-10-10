@@ -7,6 +7,22 @@ const vm = require('node:vm');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'admin-mint-queue.js')).href;
 
+test('artwork selection keeps profile default, permits a 10 MB replacement, and references larger CID files without uploading', async () => {
+  const { resolveMintArtwork } = await import(moduleUrl);
+  const cid = 'bafybeieupiamdn7e4qmi4hou6zfu4cwluoubn6ppgsqs4rfjydyee7wtnm';
+  let uploads = 0;
+  const upload = async () => { uploads++; return 'ipfs://uploaded-image'; };
+  assert.equal(await resolveMintArtwork({ defaultCid: cid, upload }), `ipfs://${cid}`);
+  const file = { type: 'image/gif', size: 10 * 1024 * 1024 };
+  assert.equal(await resolveMintArtwork({ file, upload }), 'ipfs://uploaded-image');
+  await assert.rejects(resolveMintArtwork({ file: { ...file, size: file.size + 1 }, upload }), /up to 10 MB/);
+  await assert.rejects(resolveMintArtwork({ file, cid, upload }), /one artwork source/);
+  assert.equal(await resolveMintArtwork({ cid, serviceUrl: 'https://worker.example', upload,
+    fetchImpl: async url => { assert.equal(new URL(url).searchParams.get('cid'), cid); return new Response(JSON.stringify({ cid })); } }), `ipfs://${cid}`);
+  assert.equal(uploads, 1);
+  await assert.rejects(resolveMintArtwork({ upload }), /No default artwork/);
+});
+
 test('signs and fetches the owner mint queue', async () => {
   const { buildAdminAuthorizationMessage, fetchMintQueue } = await import(moduleUrl);
   const signed = [];

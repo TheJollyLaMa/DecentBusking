@@ -55,6 +55,21 @@ test('weekly payflow endpoint filters artists and New York history calendar is e
   });
 });
 
+test('artwork CID validation normalizes file CIDs without imposing an attachment-size limit', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const cid = 'bafybeieupiamdn7e4qmi4hou6zfu4cwluoubn6ppgsqs4rfjydyee7wtnm';
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address });
+  await withServer(handler, async base => {
+    for (const value of [cid, `ipfs://${cid}`]) {
+      const response = await fetch(`${base}/api/ipfs/artwork-cid?${new URLSearchParams({ cid: value })}`);
+      assert.equal(response.status, 200); assert.equal((await response.json()).cid, cid);
+    }
+    for (const value of ['bad', `${cid}/image.gif`, `https://example.org/${cid}`]) {
+      assert.equal((await fetch(`${base}/api/ipfs/artwork-cid?${new URLSearchParams({ cid: value })}`)).status, 400);
+    }
+  });
+});
+
 test('worker issues a Pinata URL only for a fresh owner signature', async () => {
   const { buildUploadAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom();

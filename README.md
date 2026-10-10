@@ -24,6 +24,8 @@ After a Discord upload is pinned, click **Request NFT** beneath the bot's reply.
 
 Artwork is optional. Attach PNG, JPEG, WebP, or GIF up to 10 MB, enter an IPFS image CID for a larger image, or leave it blank to use your Discord profile image. The owner reviews the request and mints approved NFTs directly to the artist wallet.
 
+For Discord NFT requests, including `/jukebox submit` with a media CID, the profile image is queued as the default artwork. Admin shows that image in the preview; leave both replacement fields empty to keep it, choose a new image up to 10 MB, or enter an image/GIF file CID for larger artwork. CID mode references the existing file rather than re-uploading it. A valid CID is not a guarantee of availability; review the image preview before minting. Website-only submissions have no Discord profile association.
+
 ## Earn From Radio Plays
 
 Use the same Base wallet for your music NFT and artist payout. A qualifying play is a completed, audible Discord playback of at least 30 seconds. Likes and dislikes influence rotation; they are not paid plays.

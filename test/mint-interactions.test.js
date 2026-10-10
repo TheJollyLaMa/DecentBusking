@@ -1,10 +1,34 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 
 const embedUrl = pathToFileURL(path.join(__dirname, '../discord-bot/embed.js')).href;
 const interactionsUrl = pathToFileURL(path.join(__dirname, '../discord-bot/mint-interactions.js')).href;
+
+test('Discord CID submission queues profile artwork rather than an empty artwork default', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../discord-bot/index.js'), 'utf8');
+  const submission = source.slice(source.indexOf("if (sub === 'submit')"), source.indexOf("if (sub === 'request-mint')"));
+  assert.match(submission, /existing\?\.artworkCid \|\| await pinDiscordAvatar\(interaction.user, config\)/);
+  assert.match(submission, /requestTrackMint\(getTrackId\(track\), interaction.user.id, recipient, artworkCid\)/);
+  assert.match(submission, /if \(!artworkCid\) throw/);
+});
+
+test('pending Discord requests missing artwork recover their profile image without replacing custom artwork', async () => {
+  const { ensureDefaultMintArtwork } = await import(interactionsUrl);
+  const wallet = `0x${'1'.repeat(40)}`;
+  const requests = [{ trackId: 'missing', uploaderId: '735090955560157185', mintRecipient: wallet },
+    { trackId: 'custom', uploaderId: '735090955560157185', artworkCid: 'custom-image' }, { trackId: 'site', uploaderId: 'wallet:artist' }];
+  let pins = 0; let saved = 0;
+  const result = await ensureDefaultMintArtwork({ requests, getUser: async id => ({ id }),
+    getDefaultArtwork: async () => { pins++; return 'profile-image'; },
+    requestTrackMint: (trackId, uploaderId, recipient, artworkCid) => ({ trackId, uploaderId, mintRecipient: recipient, artworkCid }),
+    waitForPersistence: async () => { saved++; } });
+  assert.equal(result[0].artworkCid, 'profile-image');
+  assert.equal(result[1].artworkCid, 'custom-image');
+  assert.equal(pins, 1); assert.equal(saved, 1);
+});
 
 test('upload prompt carries the track identity in a bounded NFT request button', async () => {
   const { buildMintEmbed, buildMintRequestComponents, mintRequestKey } = await import(embedUrl);

@@ -1,4 +1,4 @@
-import { ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, FileUploadBuilder, MessageFlags } from 'discord.js';
+import { ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, FileUploadBuilder, MessageFlags, EmbedBuilder } from 'discord.js';
 import { mintRequestKey } from './embed.js';
 import { normalizeMediaCid } from './media.js';
 
@@ -16,6 +16,21 @@ export function previousArtistWallet(tracks, uploaderId) {
     }
   }
   return wallets.size === 1 ? [...wallets.values()][0] : '';
+}
+
+export async function ensureDefaultMintArtwork({ requests, getUser, getDefaultArtwork, requestTrackMint, waitForPersistence }) {
+  let changed = false;
+  const result = [];
+  for (const track of requests) {
+    if (track.artworkCid || !/^\d{16,22}$/.test(track.uploaderId || '')) { result.push(track); continue; }
+    const user = await getUser(track.uploaderId);
+    const cid = user ? await getDefaultArtwork(user) : null;
+    const updated = cid ? requestTrackMint(track.trackId, track.uploaderId, track.mintRecipient, cid) : null;
+    result.push(updated || track);
+    if (updated) changed = true;
+  }
+  if (changed) await waitForPersistence();
+  return result;
 }
 
 export function createMintRequestInteractionHandler({ getPlaylist, requestTrackMint, waitForPersistence,
@@ -88,6 +103,7 @@ export function createMintRequestInteractionHandler({ getPlaylist, requestTrackM
       await interaction.editReply({ content: `Requested owner approval for **${queued.title}**.\n` +
         `Artist and royalty wallet: \`${wallet}\`\n` +
         `Artwork: ${suppliedArtworkCid ? 'your IPFS image' : artwork ? 'your uploaded image' : track.artworkCid ? 'existing image' : 'your Discord profile image'}.\nNo NFT has been minted yet.`,
+      embeds: [new EmbedBuilder().setTitle('Selected NFT artwork').setImage(`https://gateway.pinata.cloud/ipfs/${artworkCid}`)],
       allowedMentions: { parse: [] } });
     } catch (error) {
       await interaction.editReply({ content: `Could not submit the mint request: ${error.message}`, allowedMentions: { parse: [] } });

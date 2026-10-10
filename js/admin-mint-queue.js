@@ -8,6 +8,27 @@ export function buildAdminAuthorizationMessage({ address, origin, issuedAt }) {
 }
 
 let cachedAuthorization = null;
+const MAX_ARTWORK_BYTES = 10 * 1024 * 1024;
+
+export async function resolveMintArtwork({ file, cid = '', defaultCid = '', serviceUrl, upload, fetchImpl = globalThis.fetch }) {
+  const value = cid.trim();
+  if (file && value) throw new Error('Choose one artwork source: a file up to 10 MB, or an image/GIF CID');
+  if (file) {
+    if (!Number.isSafeInteger(file.size) || file.size < 1 || file.size > MAX_ARTWORK_BYTES || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
+      throw new Error('Artwork must be PNG, JPEG, WebP, or GIF up to 10 MB; use a CID for a larger image');
+    }
+    return upload(file);
+  }
+  if (value) {
+    if (!serviceUrl) throw new Error('Artwork CID validation service is not configured');
+    const response = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/ipfs/artwork-cid?${new URLSearchParams({ cid: value })}`, { signal: AbortSignal.timeout(15000) });
+    const result = await response.json();
+    if (!response.ok || !result.cid) throw new Error(result.error || 'Enter an image file CID or ipfs://CID');
+    return `ipfs://${result.cid}`;
+  }
+  if (!defaultCid) throw new Error('No default artwork is available; choose a file or artwork CID before minting');
+  return `ipfs://${defaultCid}`;
+}
 const AUTHORIZATION_REUSE_MS = 4 * 60 * 1000;
 
 export function clearMintQueueAuthorization() {
