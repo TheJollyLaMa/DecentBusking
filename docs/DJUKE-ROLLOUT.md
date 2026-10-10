@@ -42,6 +42,12 @@ the on-chain steps (3, 4, 6), which cost Base gas.
    start, then new Discord uploads and briefcase submissions every two minutes, in
    batches of 25. Watch for `[djuke] Registered` in the logs. The admin-only
    `configure:djuke:base` script remains for changing an existing song's payees.
+  **Current catalog gate (2026-10-10):** the latest restored Pinata playlist has
+  76 IPFS-backed tracks but no `mintRecipient` artist wallets, so the live DJuke
+  reader currently reports zero registered songs. Artists must confirm their
+  Base wallet through the existing **Request NFT** flow; this records attribution
+  and queues owner review, but does not mint automatically. Do not infer a wallet
+  from a Discord username.
 7. **Open payments (not yet).** Only after the Render worker is configured and a
   full test passes, set `DJUKE_PAYMENTS_ENABLED=true`. Verify one 0.25 USDC bump
   and the 0.225 / 0.020 / 0.005 artist/pinner/repo split in router balances.
