@@ -106,6 +106,71 @@ test('registrar catches up all eligible songs in batches, then picks up only new
   assert.deepEqual(batches, [25, 5, 1]);
 });
 
+test('registrar skips a persistently failing lookup without blocking other song registrations', async () => {
+  const { createDjukeSongRegistrar, DJUKE_ABI } = await import('../discord-bot/djuke.js');
+  const { Interface } = createRequire(path.join(__dirname, '../discord-bot/package.json'))('ethers');
+  const wallet = `0x${'2'.repeat(40)}`;
+  const flakyId = id('flaky-song');
+  const onChain = new Map();
+  let flaky = true;
+  const batches = [];
+  const contract = { interface: new Interface(DJUKE_ABI),
+    getSong: async songId => {
+      if (songId === flakyId && flaky) throw new Error('temporary RPC failure');
+      return { audioURI: onChain.get(songId) || '' };
+    },
+    multicall: async calls => {
+      batches.push(calls.length);
+      for (const call of calls) {
+        const [songId, audioURI] = contract.interface.decodeFunctionData('registerSong', call);
+        onChain.set(songId, audioURI);
+      }
+      return { hash: `0x${batches.length}`, wait: async () => ({ status: 1 }) };
+    } };
+  const playlist = ['flaky-song', 'healthy-song'].map(trackId => ({ trackId, ipfsCid: `${trackId}-cid`, mintRecipient: wallet }));
+  const register = createDjukeSongRegistrar({ contract, getPlaylist: () => playlist, readRetryAttempts: 2,
+    readRetryDelayMs: 0, log: { log() {}, warn() {} } });
+
+  assert.equal(await register(), 1);
+  assert.equal(onChain.has(id('healthy-song')), true);
+  assert.equal(onChain.has(flakyId), false);
+  flaky = false;
+  assert.equal(await register(), 1);
+  assert.equal(onChain.has(flakyId), true);
+  assert.deepEqual(batches, [1, 1]);
+});
+
+test('DJuke catalog retries transient song reads and does not cache failed lookups', async () => {
+  const { createDjukeQueueReader } = await import('../discord-bot/djuke.js');
+  const wallet = `0x${'2'.repeat(40)}`;
+  const track = { trackId: 'retry-song', title: 'Retry Song', ipfsCid: 'retry-cid', mintRecipient: wallet };
+  let shouldFail = true;
+  let lookups = 0;
+  const contract = {
+    headRequestId: async () => 0n,
+    nextRequestId: async () => 0n,
+    getSong: async () => {
+      lookups++;
+      if (shouldFail) throw new Error('temporary RPC failure');
+      return { audioURI: 'ipfs://retry-cid', enabled: true };
+    },
+  };
+  const provider = { getNetwork: async () => ({ chainId: 8453n }), getBlockNumber: async () => 100,
+    getBlock: async () => ({ hash: 'canonical' }) };
+  const read = createDjukeQueueReader({ contractAddress: `0x${'1'.repeat(40)}`, contract, provider,
+    getPlaylist: () => [track], readRetryAttempts: 2, readRetryDelayMs: 0, log: { warn() {} } });
+
+  const incomplete = await read();
+  assert.deepEqual(incomplete.tracks, []);
+  assert.equal(incomplete.catalogReadErrors, 1);
+  assert.equal(lookups, 2);
+  shouldFail = false;
+  const recovered = await read();
+  assert.equal(recovered.catalogReadErrors, 0);
+  assert.deepEqual(recovered.tracks.map(entry => entry.trackId), ['retry-song']);
+  assert.equal(lookups, 3);
+});
+
 function memoryJournal(api) {
   let snapshot = null;
   return api.createDjukePlaybackJournal({ restore: async () => snapshot,
