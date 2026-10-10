@@ -46,6 +46,7 @@ export function initTopTenBoard() {
     panel.classList.add('is-open');
     panel.setAttribute('aria-hidden', 'false');
     document.body.classList.add('top-ten-open');
+    document.dispatchEvent(new CustomEvent('left-drawer-open', { detail: 'top-ten' }));
     refresh();
   };
   const render = (report, nowPlaying) => {
@@ -101,6 +102,7 @@ export function initTopTenBoard() {
   toggle.addEventListener('click', event => { event.stopPropagation(); isOpen() ? close() : open(); });
   document.getElementById('top-ten-panel-close')?.addEventListener('click', () => { close(); toggle.focus(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); } });
+  document.addEventListener('left-drawer-open', event => { if (event.detail !== 'top-ten' && isOpen()) close(); });
   document.addEventListener('click', event => {
     if (isOpen() && !panel.contains(event.target) && event.target !== toggle) close();
   });

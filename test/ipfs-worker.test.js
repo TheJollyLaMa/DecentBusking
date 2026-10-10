@@ -19,6 +19,30 @@ async function withServer(handler, callback) {
   }
 }
 
+test('checkpoint mirror routes reject unauthenticated requests and do not expose jobs publicly', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const { createCheckpointMirror } = await import('../discord-bot/checkpoint-mirror.js');
+  const secret = 'test-only-checkpoint-route-secret-32bytes';
+  const mirror = createCheckpointMirror({ secret });
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+    checkpointMirror: mirror });
+  await withServer(handler, async base => {
+    const rejected = await fetch(`${base}/api/checkpoint-mirror/claim`, { method: 'POST' });
+    assert.equal(rejected.status, 400);
+    assert.equal((await rejected.json()).job, undefined);
+    const accepted = await fetch(`${base}/api/checkpoint-mirror/claim`, { method: 'POST',
+      headers: { authorization: `Bearer ${secret}` } });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.headers.get('access-control-allow-origin'), null);
+    assert.deepEqual(await accepted.json(), { job: null });
+    assert.equal(mirror.status().available, true);
+    const unknown = await fetch(`${base}/api/checkpoint-mirror/ack`, { method: 'POST',
+      headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ jobId: 'expired', cid: 'bad', recursivePinned: true }) });
+    assert.equal(unknown.status, 400);
+  });
+});
+
 test('payment ledger is public but reconciliation requires an allowed origin and a valid hash', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const hashes = [];

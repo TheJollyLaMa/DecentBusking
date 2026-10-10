@@ -32,7 +32,7 @@ import {
 
 import http from 'http'; 
 import fs from 'node:fs';
-import { Contract, JsonRpcProvider, id } from 'ethers';
+import { Contract, JsonRpcProvider, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
 import { createWeeklyPayflow } from './weekly-payflow.js';
 import { payrollPeriodFromKey } from '../js/payroll-week.mjs';
@@ -41,7 +41,10 @@ import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
 import { syncMintedTracksFromChain, createVerifiedMintQueueReader } from './mint-sync.js';
+import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
 import { createPinataStateStore } from './ipfs-state.js';
+import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
+import { createCheckpointMirror } from './checkpoint-mirror.js';
 import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
 import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
@@ -84,6 +87,7 @@ import {
 
 const _jukeLoopRestartTimers = new Map();
 const _jukeLoopRestartAttempts = new Map();
+let _djukeRuntime = null;
 let _mintSyncTask = null;
 const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_RESTORE_ATTEMPTS = 3;
@@ -135,6 +139,7 @@ function syncMintedTracks(config, { required = false } = {}) {
     _mintSyncTask = syncMintedTracksFromChain({
       rpcUrl: config.baseRpcUrl,
       contractAddress: config.nftContractAddress,
+      contractAddresses: config.nftContractAddresses,
     }).finally(() => { _mintSyncTask = null; });
   }
   return required ? _mintSyncTask
@@ -379,6 +384,8 @@ const SLASH_COMMANDS = [
 // ── Main ───────────────────────────────────────────────────────────────────────
 async function main() {
   const config = loadConfig();
+  const checkpointMirror = process.env.CHECKPOINT_MIRROR_SECRET
+    ? createCheckpointMirror({ secret: process.env.CHECKPOINT_MIRROR_SECRET }) : null;
 
   let client;
   let playlistReady = false;
@@ -427,7 +434,7 @@ async function main() {
       tokenId: String(tokenId),
       mintTxHash: txHash,
     });
-    const completedTrack = completeTrackMint(trackId, { tokenId, txHash });
+    const completedTrack = completeTrackMint(trackId, { tokenId, txHash, contractAddress: config.nftContractAddress });
     if (!completedTrack) throw new Error('Mint request could not be reconciled');
     return completedTrack;
   };
@@ -528,7 +535,43 @@ async function main() {
   };
   setInterval(refreshPayflow, 15_000).unref();
 
+  const djukeAddress = process.env.DJUKE_CONTRACT_ADDRESS;
+  const readDjukeState = djukeAddress ? createDjukeQueueReader({
+    rpcUrl: config.baseRpcUrl, contractAddress: djukeAddress,
+    paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
+    getPlaylist: () => {
+      if (!playlistReady) throw new Error('DJuke catalog is restoring');
+      return getPlaylist();
+    },
+  }) : undefined;
+  if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY) {
+    const worker = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, new JsonRpcProvider(config.baseRpcUrl));
+    const registerSongs = createDjukeSongRegistrar({ contract: new Contract(djukeAddress, DJUKE_ABI, worker),
+      getPlaylist: () => (playlistReady ? getPlaylist() : []), onRegistered: songIds => readDjukeState.invalidate(songIds) });
+    const runRegistrar = () => registerSongs().catch(error => console.warn('[djuke] Song registration deferred:', error.shortMessage || error.message));
+    setTimeout(runRegistrar, 30_000).unref();
+    setInterval(runRegistrar, 120_000).unref();
+  }
+  if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY && checkpointMirror && config.pinataJwt) {
+    const fulfiller = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, new JsonRpcProvider(config.baseRpcUrl));
+    const journalStore = createPinataStateStore({ pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+      filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-djuke-journal.json',
+      tags: { app: 'decentbusking', kind: 'djuke-journal', schema: '1' }, serialize: value => value,
+      deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
+    _djukeRuntime = createDjukeRuntime({
+      readState: readDjukeState,
+      journal: createDjukePlaybackJournal(journalStore),
+      fulfill: createDjukeFulfiller(new Contract(djukeAddress, DJUKE_ABI, fulfiller)),
+      getTrack: trackId => getPlaylist().find(track => track.trackId === trackId) || null,
+    });
+    console.log(`[djuke] Paid queue enabled; fulfiller ${fulfiller.address}.`);
+  } else if (readDjukeState) {
+    console.warn('[djuke] Queue is read-only: DJUKE_FULFILLER_PRIVATE_KEY, CHECKPOINT_MIRROR_SECRET and PINATA_JWT are all required for paid playback.');
+  }
+
   const requestHandler = createWorkerRequestHandler({
+    checkpointMirror,
+    getDjukeState: readDjukeState,
     allowedOrigins: config.allowedOrigins,
     ownerWallet: config.mintOwnerWallet || '0x0000000000000000000000000000000000000000',
     pinataJwt: config.pinataJwt,
@@ -584,6 +627,7 @@ async function main() {
       uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl,
       gateway: config.ipfsGateway,
+      beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined,
     });
     let restoredPlaylist = null;
     // An empty start would checkpoint over the real playlist, so retry transient failures first.
@@ -598,6 +642,24 @@ async function main() {
     }
     loadPlaylist(restoredPlaylist);
     configureRemotePersistence(stateStore.save);
+    if (process.env.DBUSK_IMPORT_REVIEWED_ALBUMS === 'true') {
+      try {
+        if (!Array.isArray(restoredPlaylist) || !restoredPlaylist.length) throw new Error('Verified remote playlist restore required for album import');
+        const plan = JSON.parse(fs.readFileSync(new URL('../docs/reports/album-import-candidates.json', import.meta.url), 'utf8'));
+        const artist = resolveAlbumArtist(restoredPlaylist, { name: 'thejollylama', wallet: config.mintOwnerWallet });
+        const imported = await checkpointReviewedAlbumImport({ playlist: restoredPlaylist, plan, artist, save: stateStore.save,
+          mirrorBeforePublication: true,
+          verifyMirrorAvailable: async () => {
+            if (!checkpointMirror) throw new Error('CHECKPOINT_MIRROR_SECRET is required before album import');
+            await checkpointMirror.waitAvailable();
+          },
+        });
+        if (imported.added.length) loadPlaylist(imported.playlist);
+        console.log(`[album-import] Added ${imported.added.length}; skipped ${imported.skipped.length}. Checkpoint: ${imported.checkpointUri || 'already imported'}`);
+      } catch (error) {
+        console.warn('[album-import] No album state adopted:', error.message);
+      }
+    }
     if (!restoredPlaylist && getPlaylist().length > 0) {
       try {
         await stateStore.save(getPlaylist());
@@ -1189,6 +1251,7 @@ async function startJukeLoop(client, config) {
       textChannel,
       client,
       ipfsGateway: config.ipfsGateway,
+      djuke: _djukeRuntime,
       onTerminalDisconnect: () => {
         scheduleJukeLoopRestart(client, config, 'Voice reconnect timed out');
       },

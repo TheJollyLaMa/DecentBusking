@@ -1,0 +1,11 @@
+{
+  "mode": "local-bridge-rehearsal",
+  "tracks": 267,
+  "localRecursivePinVerified": true,
+  "cid": "bafybeidhx7karmxq6n5zgcp4krrnmwhkpy5oaj4vu4nlnz33fxerzp3wke",
+  "checkpointBytes": 471114,
+  "localBeforePublication": true,
+  "mockPublications": 1,
+  "realPinataUploads": 0,
+  "liveRadioChanged": false
+}

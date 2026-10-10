@@ -1,0 +1,20 @@
+{
+  "mode": "rehearsal-only",
+  "liveApplied": false,
+  "checkpointCid": "bafybeifbjf5lqfgvpnet7zeo33zmdz4i5c5c5mlibeafp72wd3pul6ajdu",
+  "checkpointCreatedAt": "2026-10-10T14:43:29.254Z",
+  "existingTracks": 77,
+  "addedCandidates": 190,
+  "skipped": 0,
+  "totalAfterImport": 267,
+  "oldHistoryUnchanged": true,
+  "retryAdds": 0,
+  "artist": {
+    "name": "thejollylama",
+    "wallet": "0x807061DF657A7697c04045dA7d16D941861cAABc",
+    "uploaderId": "735090955560157185"
+  },
+  "newMediaUploads": 0,
+  "newMints": 0,
+  "activation": "Deploy current bot code, then set DBUSK_IMPORT_REVIEWED_ALBUMS=true"
+}

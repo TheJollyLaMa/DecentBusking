@@ -1,5 +1,24 @@
 const CACHE_TTL_MS = 60 * 60 * 1000;
 
+export function configuredNftCollections(config = {}) {
+  const addresses = [config.contractAddress, ...(config.additionalNftContractAddresses || [])];
+  const unique = new Set();
+  return addresses.filter(Boolean).map(address => {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address) || /^0x0{40}$/i.test(address)) throw new Error('Invalid NFT collection address');
+    return address.toLowerCase();
+  }).filter(address => {
+    if (unique.has(address)) return false;
+    unique.add(address);
+    return true;
+  }).map(contractAddress => ({ contractAddress, chainId: config.chainId || 8453 }));
+}
+
+export function nftIdentity({ chainId = 8453, contractAddress, tokenId }) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(contractAddress || '') || !Number.isSafeInteger(tokenId) || tokenId < 0 ||
+    !Number.isSafeInteger(chainId) || chainId <= 0) throw new Error('Invalid NFT identity');
+  return `${chainId}:${contractAddress.toLowerCase()}:${tokenId}`;
+}
+
 export async function readNftContract(call) {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -28,10 +47,13 @@ export function readCachedMintedTokens({ cacheKey, storage } = {}) {
     .sort((first, second) => first.tokenId - second.tokenId);
 }
 
-export async function loadMintedToken({ contract, tokenId, fetchMetadata, cacheKey, storage, now = Date.now() }) {
+export async function loadMintedToken({ contract, tokenId, fetchMetadata, cacheKey, storage, now = Date.now(),
+  contractAddress, chainId = 8453 }) {
   const cache = cacheKey ? readCache(cacheKey, storage) : {};
   const cached = cache[tokenId];
-  if (cached?.nft?.tokenId === tokenId && now - cached.savedAt < CACHE_TTL_MS) return cached.nft;
+  const identity = contractAddress ? { chainId, contractAddress,
+    nftId: nftIdentity({ chainId, contractAddress, tokenId }) } : {};
+  if (cached?.nft?.tokenId === tokenId && now - cached.savedAt < CACHE_TTL_MS) return { ...cached.nft, ...identity };
   const minted = Number(await readNftContract(() => contract.totalMinted(tokenId)));
   if (minted === 0) return null;
 
@@ -47,6 +69,7 @@ export async function loadMintedToken({ contract, tokenId, fetchMetadata, cacheK
     metadataUri: uri,
     mintedSupply: minted,
     creator: creator || meta.creator || meta.artist || '',
+    ...identity,
   };
   if (cacheKey) {
     try {

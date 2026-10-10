@@ -7,6 +7,46 @@ export function buildAdminAuthorizationMessage({ address, origin, issuedAt }) {
   ].join('\n');
 }
 
+export const PRODUCT_BATCH_ABI = [
+  'function registerAndMintProductsBatch((address recipient,uint256 amount,uint256 maxSupply,string tokenURI,address royaltyReceiver,uint96 royaltyFeeBps)[] products) returns (uint256[] tokenIds)',
+  'event TokenRegistered(uint256 indexed tokenId,address indexed creator,uint256 maxSupply,uint8 kind,string uri)',
+  'event EditionMinted(uint256 indexed tokenId,address indexed to,uint256 amount,address indexed minter)',
+];
+
+export async function mintPreparedProductsBatch({ contract, products, owner, maxGas = 8000000n, onBroadcast = () => {} }) {
+  if (!Array.isArray(products) || products.length === 0 || products.length > 20) throw new Error('Select 1 to 20 songs per batch');
+  const metadataUris = products.map(product => product.tokenURI);
+  if (metadataUris.some(uri => typeof uri !== 'string' || !uri.startsWith('ipfs://')) ||
+    new Set(metadataUris).size !== metadataUris.length) throw new Error('Batch metadata URIs must be unique IPFS URIs');
+  const gas = await contract.registerAndMintProductsBatch.estimateGas(products);
+  const gasLimit = gas * 120n / 100n;
+  if (gasLimit > maxGas) throw new Error('Batch gas is too high; select fewer songs');
+  const transaction = await contract.registerAndMintProductsBatch(products, { gasLimit });
+  onBroadcast(transaction.hash);
+  const receipt = await transaction.wait();
+  if (receipt?.status !== 1) throw new Error(`Batch did not confirm: ${transaction.hash}`);
+  const registered = [];
+  const minted = [];
+  for (const log of receipt.logs) {
+    if (log.address?.toLowerCase() !== contract.target.toLowerCase()) continue;
+    let event;
+    try { event = contract.interface.parseLog(log); } catch { continue; }
+    if (event?.name === 'TokenRegistered') registered.push(event.args);
+    if (event?.name === 'EditionMinted') minted.push(event.args);
+  }
+  const tokenIds = products.map(product => {
+    const registrations = registered.filter(event => event.uri === product.tokenURI &&
+      event.creator.toLowerCase() === owner.toLowerCase() && BigInt(event.kind) === 0n);
+    if (registrations.length !== 1) throw new Error(`Confirmed batch ${transaction.hash}: ambiguous registration proof`);
+    const tokenId = registrations[0].tokenId;
+    const editions = minted.filter(event => event.tokenId === tokenId && event.to.toLowerCase() === product.recipient.toLowerCase() &&
+      event.minter.toLowerCase() === owner.toLowerCase() && event.amount === BigInt(product.amount));
+    if (editions.length !== 1) throw new Error(`Confirmed batch ${transaction.hash}: missing mint proof`);
+    return String(tokenId);
+  });
+  return { tokenIds, txHash: receipt.hash || transaction.hash };
+}
+
 let cachedAuthorization = null;
 const MAX_ARTWORK_BYTES = 10 * 1024 * 1024;
 

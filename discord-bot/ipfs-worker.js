@@ -108,6 +108,8 @@ export function createWorkerRequestHandler({
   onMintComplete,
   getMintQueue,
   getRadioState,
+  getDjukeState,
+  checkpointMirror,
   getRadioHistory,
   getWeeklyPayflow,
   getPaymentLedger,
@@ -149,6 +151,16 @@ export function createWorkerRequestHandler({
     const corsOrigin = origins.has(origin) ? origin : '';
 
     try {
+      if (request.method === 'POST' && ['/api/checkpoint-mirror/claim', '/api/checkpoint-mirror/ack'].includes(requestUrl.pathname)) {
+        if (!checkpointMirror) { sendJson(response, 404, { error: 'Checkpoint mirroring is not configured' }); return; }
+        const authorization = String(request.headers.authorization || '');
+        checkpointMirror.authorize(authorization);
+        const result = requestUrl.pathname.endsWith('/claim')
+          ? { job: checkpointMirror.claim(authorization) }
+          : checkpointMirror.acknowledge(authorization, await readJson(request));
+        sendJson(response, 200, result);
+        return;
+      }
       if (request.method === 'OPTIONS') {
         response.writeHead(corsOrigin ? 204 : 403, {
           ...(corsOrigin ? { 'access-control-allow-origin': corsOrigin, vary: 'origin' } : {}),
@@ -174,6 +186,14 @@ export function createWorkerRequestHandler({
           return;
         }
         sendJson(response, 200, await getRadioState(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/djuke') {
+        if (!getDjukeState) {
+          sendJson(response, 404, { error: 'DJuke is not deployed or configured' }, '*');
+          return;
+        }
+        sendJson(response, 200, await getDjukeState(), '*');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/ledger') {
