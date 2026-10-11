@@ -233,7 +233,6 @@ Artists, listeners, testers, designers, and developers can contribute. Paid work
 - [GitHub source and issues](https://github.com/TheJollyLaMa/DecentBusking)
 - [Discord community](https://discord.gg/SCtcBggHPa)
 - [DecentMarket](https://thejollylama.github.io/DecentMarket/) - related marketplace development, not a guarantee that an individual music NFT is listed.
-- [Decent Jukebox on Artizen](https://artizen.fund/index/p/decent-jukebox?season=7) - the support link currently shown in About; external availability and campaign terms should be checked there.
 
 ## 10. Implementation References
 

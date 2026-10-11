@@ -43,12 +43,16 @@ class CleanRightAnkh extends HTMLElement {
           text-align: left;
         }
         .wallet-btn:hover { opacity: 0.8; }
+        .calendar-icon { width: 16px; height: 16px; margin-right: 6px; vertical-align: -3px; filter: invert(1); }
       </style>
       <div class="ankh-wrapper">
         <div class="ankh-container">
           <span class="ankh-coin" role="button" aria-haspopup="true" aria-label="Right menu">☥</span>
           <ul class="dropdown-menu right-ankh-menu"
               style="display:none;">
+            <li class="wallet-item">
+                <button class="wallet-btn" id="radio-schedule-btn"><img class="calendar-icon" src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/calendar-days.svg" alt="" /> Public Schedule</button>
+            </li>
             <li class="wallet-item">
               <button class="wallet-btn" id="radio-history-btn" style="display:none;">My Playbacks</button>
             </li>
@@ -63,7 +67,13 @@ class CleanRightAnkh extends HTMLElement {
 
     const coin = this.shadowRoot.querySelector('.ankh-coin');
     const popup = this.shadowRoot.querySelector('.dropdown-menu.right-ankh-menu');
+    const scheduleBtn = this.shadowRoot.querySelector('#radio-schedule-btn');
     const historyBtn = this.shadowRoot.querySelector('#radio-history-btn');
+    scheduleBtn?.addEventListener('click', event => {
+      event.stopPropagation();
+      if (popup) popup.style.display = 'none';
+      document.dispatchEvent(new CustomEvent('open-radio-schedule', { detail: {} }));
+    });
     historyBtn?.addEventListener('click', (event) => {
       event.stopPropagation();
       if (popup) popup.style.display = 'none';
@@ -97,7 +107,7 @@ class CleanRightAnkh extends HTMLElement {
     this._onDisconnected = _onDisconnected;
 
     coin?.addEventListener('click', e => {
-      if (!popup || !window._wallet?.address) return;
+      if (!popup) return;
       popup.style.display = popup.style.display === 'block' ? 'none' : 'block';
       e.stopPropagation();
     });

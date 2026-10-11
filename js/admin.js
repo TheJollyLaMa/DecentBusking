@@ -11,6 +11,8 @@ import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-si
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261010-listens';
 import { isAdminWallet } from './admin-access.mjs';
+import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261010-public-calendar';
+import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides } from './radio-schedule.mjs';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -28,12 +30,14 @@ const ROLE_GRANT_ABI = [
 let _modal, _connectedAddr, _roleSection,
   _targetAddr, _roleSelect, _statusEl, _grantBtn, _closeBtn,
   _mintSection, _mintQueueEl, _mintRefreshBtn, _mintSelectedBtn,
-  _mintSelectAll, _mintStatusEl;
+  _mintSelectAll, _mintStatusEl, _radioScheduleSection, _radioScheduleForm,
+  _radioScheduleEventsEl, _radioScheduleStatusEl, _radioWeeklyForm;
 let _adminSigner = null;
 let _adminAddress = null;
 let _mintQueue = [];
 let _mintBusy = false;
 let _adminOpen = false;
+let _radioSchedule = null;
 let _walletCheckId = 0;
 const _artworkPreviewUrls = new Map();
 const _artworkPreviewGenerations = new Map();
@@ -55,12 +59,27 @@ document.addEventListener('DOMContentLoaded', () => {
   _mintSelectedBtn = document.getElementById('admin-mint-selected-btn');
   _mintSelectAll = document.getElementById('admin-mint-select-all');
   _mintStatusEl = document.getElementById('admin-mint-status');
+  _radioScheduleSection = document.getElementById('admin-radio-schedule');
+  _radioScheduleForm = document.getElementById('admin-radio-schedule-form');
+  _radioScheduleEventsEl = document.getElementById('admin-radio-schedule-events');
+  _radioScheduleStatusEl = document.getElementById('admin-radio-schedule-status');
+  _radioWeeklyForm = document.getElementById('admin-radio-weekly-form');
 
   if (!_modal) return; // guard: panel HTML not present
 
   _grantBtn?.addEventListener('click', _grantRole);
   _closeBtn?.addEventListener('click', _closeModal);
   _mintRefreshBtn?.addEventListener('click', _loadMintQueue);
+  document.getElementById('admin-radio-schedule-refresh')?.addEventListener('click', _loadRadioSchedule);
+  document.getElementById('admin-radio-event-reset')?.addEventListener('click', _resetRadioScheduleForm);
+  _radioWeeklyForm?.addEventListener('submit', _saveRadioWeeklySchedule);
+  _radioScheduleForm?.addEventListener('submit', _saveRadioScheduleEvent);
+  _radioScheduleEventsEl?.addEventListener('click', event => {
+    const edit = event.target.closest('[data-radio-event-edit]');
+    const cancel = event.target.closest('[data-radio-event-cancel]');
+    if (edit) _editRadioScheduleEvent(edit.dataset.radioEventEdit);
+    if (cancel) _cancelRadioScheduleEvent(cancel.dataset.radioEventCancel);
+  });
   _mintSelectedBtn?.addEventListener('click', _mintSelected);
   _mintSelectAll?.addEventListener('change', () => {
     _mintQueueEl?.querySelectorAll('.admin-mint-check').forEach((checkbox) => {
@@ -176,7 +195,8 @@ async function _connectWallet() {
     _setStatus('✅ Connected wallet has DEFAULT_ADMIN_ROLE.');
     _mintSection?.classList.remove('hidden');
     _roleSection?.classList.remove('hidden');
-    await _loadMintQueue();
+    _radioScheduleSection?.classList.remove('hidden');
+    await Promise.all([_loadMintQueue(), _loadRadioSchedule()]);
   } catch (err) {
     if (checkId === _walletCheckId) _setStatus(`❌ ${err.message || 'Wallet verification failed'}`, true);
   }
@@ -192,6 +212,174 @@ function _resetAdminWallet() {
   _mintQueueEl?.replaceChildren();
   _mintSection?.classList.add('hidden');
   _roleSection?.classList.add('hidden');
+  _radioScheduleSection?.classList.add('hidden');
+  _radioSchedule = null;
+  _radioScheduleEventsEl?.replaceChildren();
+}
+
+async function _loadRadioSchedule() {
+  if (!_adminSigner || !_adminAddress) return;
+  const checkId = _walletCheckId;
+  _setRadioScheduleStatus('Loading the shared live-event calendar…');
+  try {
+    const service = window.DecentConfig?.ipfsUploadServiceUrl;
+    if (!service) throw new Error('The radio service is not configured');
+    const response = await fetch(`${service.replace(/\/$/, '')}/api/radio/schedule`, { cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `Schedule unavailable (${response.status})`);
+    if (checkId !== _walletCheckId) return;
+    _radioSchedule = payload;
+    _populateRadioWeeklyForm(payload.schedule || defaultRadioSchedule(payload.weeklySchedule));
+    _renderRadioScheduleEvents();
+    _setRadioScheduleStatus(payload.ready ? 'Shared calendar loaded. Times below use America/New_York.' : 'Calendar is read-only until durable Pinata storage is available.', !payload.ready);
+    const saveButton = document.getElementById('admin-radio-event-save');
+    if (saveButton) saveButton.disabled = payload.ready !== true;
+    const weeklyButton = document.getElementById('admin-radio-weekly-save');
+    if (weeklyButton) weeklyButton.disabled = payload.ready !== true;
+  } catch (error) {
+    if (checkId === _walletCheckId) _setRadioScheduleStatus(`❌ ${error.message}`, true);
+  }
+}
+
+function _populateRadioWeeklyForm(schedule) {
+  const slots = [
+    ['friday-top10-hype', 'admin-radio-top10-start', 'admin-radio-top10-end'],
+    ['friday-live-performance', 'admin-radio-live-start', 'admin-radio-live-end'],
+  ];
+  for (const [id, startId, endId] of slots) {
+    const show = schedule.find(item => item.id === id);
+    for (const [elementId, selected, last] of [[startId, show?.startHourLocal ?? 20, 23], [endId, show?.endHourLocal ?? 21, 24]]) {
+      const select = document.getElementById(elementId);
+      if (!select) continue;
+      select.replaceChildren();
+      for (let hour = 0; hour <= last; hour++) {
+        const suffix = hour >= 12 ? 'PM' : 'AM';
+        const value = hour % 12 || 12;
+        const option = document.createElement('option');
+        option.value = String(hour);
+        option.textContent = hour === 24 ? '12:00 AM (Saturday)' : `${value}:00 ${suffix}`;
+        select.append(option);
+      }
+      select.value = String(selected);
+    }
+  }
+}
+
+function _renderRadioScheduleEvents() {
+  if (!_radioScheduleEventsEl) return;
+  const now = Date.now();
+  const events = (_radioSchedule?.events || []).filter(event => Date.parse(event.endUtc) > now)
+    .sort((first, second) => Date.parse(first.startUtc) - Date.parse(second.startUtc));
+  if (!events.length) {
+    _radioScheduleEventsEl.innerHTML = '<li class="admin-schedule-empty">No active or upcoming events.</li>';
+    return;
+  }
+  _radioScheduleEventsEl.innerHTML = events.map(event => {
+    const active = Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc);
+    const date = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
+    return `<li class="admin-schedule-event"><div><strong>${_esc(event.title)}</strong><span>${date(event.startUtc)} – ${date(event.endUtc)} ET${active ? ' · LIVE NOW' : ''}</span></div><div class="admin-schedule-actions"><button class="admin-btn admin-btn-secondary" type="button" data-radio-event-edit="${_esc(event.id)}" aria-label="Edit ${_esc(event.title)}">Edit</button><button class="admin-btn admin-btn-secondary" type="button" data-radio-event-cancel="${_esc(event.id)}" aria-label="Cancel ${_esc(event.title)}">Cancel</button></div></li>`;
+  }).join('');
+}
+
+function _editRadioScheduleEvent(eventId) {
+  const event = _radioSchedule?.events?.find(item => item.id === eventId);
+  if (!event || !_radioSchedule?.ready) return;
+  document.getElementById('admin-radio-event-id').value = event.id;
+  document.getElementById('admin-radio-event-title').value = event.title;
+  document.getElementById('admin-radio-event-start').value = utcToNewYorkInput(event.startUtc);
+  document.getElementById('admin-radio-event-end').value = utcToNewYorkInput(event.endUtc);
+  document.getElementById('admin-radio-event-save').textContent = 'Save event';
+  document.getElementById('admin-radio-event-title').focus();
+}
+
+function _resetRadioScheduleForm() {
+  _radioScheduleForm?.reset();
+  const id = document.getElementById('admin-radio-event-id');
+  if (id) id.value = '';
+  const saveButton = document.getElementById('admin-radio-event-save');
+  if (saveButton) saveButton.textContent = 'Schedule event';
+}
+
+async function _saveRadioScheduleEvent(event) {
+  event.preventDefault();
+  if (!_radioSchedule?.ready || !_adminSigner || !_adminAddress) return;
+  try {
+    const eventId = document.getElementById('admin-radio-event-id').value || crypto.randomUUID();
+    const nextEvents = upsertLivePerformanceEvent(_radioSchedule.events || [], {
+      id: eventId,
+      title: document.getElementById('admin-radio-event-title').value.trim(),
+      startUtc: newYorkInputToUtc(document.getElementById('admin-radio-event-start').value),
+      endUtc: newYorkInputToUtc(document.getElementById('admin-radio-event-end').value),
+    });
+    await _saveRadioSchedule(nextEvents, _radioSchedule.weeklySchedule || {});
+    _resetRadioScheduleForm();
+  } catch (error) {
+    _setRadioScheduleStatus(`❌ ${error.message}`, true);
+  }
+}
+
+async function _saveRadioWeeklySchedule(event) {
+  event.preventDefault();
+  if (!_radioSchedule?.ready || !_adminSigner || !_adminAddress) return;
+  try {
+    const weeklySchedule = validateWeeklyScheduleOverrides({
+      'friday-top10-hype': { weekday: 5,
+        startHourLocal: Number(document.getElementById('admin-radio-top10-start').value),
+        endHourLocal: Number(document.getElementById('admin-radio-top10-end').value) },
+      'friday-live-performance': { weekday: 5,
+        startHourLocal: Number(document.getElementById('admin-radio-live-start').value),
+        endHourLocal: Number(document.getElementById('admin-radio-live-end').value) },
+    });
+    await _saveRadioSchedule(_radioSchedule.events || [], weeklySchedule);
+  } catch (error) {
+    _setRadioScheduleStatus(`❌ ${error.message}`, true);
+  }
+}
+
+async function _cancelRadioScheduleEvent(eventId) {
+  if (!_radioSchedule?.ready || !_adminSigner || !_adminAddress) return;
+  try {
+    const nextEvents = (_radioSchedule.events || []).filter(event => event.id !== eventId);
+    if (nextEvents.length === (_radioSchedule.events || []).length) throw new Error('Event is no longer in the shared calendar');
+    await _saveRadioSchedule(nextEvents, _radioSchedule.weeklySchedule || {});
+    _resetRadioScheduleForm();
+  } catch (error) {
+    _setRadioScheduleStatus(`❌ ${error.message}`, true);
+  }
+}
+
+async function _saveRadioSchedule(events, weeklySchedule = _radioSchedule?.weeklySchedule || {}) {
+  const service = window.DecentConfig?.ipfsUploadServiceUrl;
+  if (!service) throw new Error('The radio service is not configured');
+  const signer = _adminSigner;
+  const address = _adminAddress;
+  const checkId = _walletCheckId;
+  const issuedAt = new Date().toISOString();
+  const authorization = { address, origin: window.location.origin, issuedAt, events,
+    weeklySchedule: validateWeeklyScheduleOverrides(weeklySchedule) };
+  _setRadioScheduleStatus('Sign the calendar update with the owner wallet…');
+  const signature = await signer.signMessage(buildRadioScheduleAuthorizationMessage(authorization));
+  if (checkId !== _walletCheckId || signer !== _adminSigner || address !== _adminAddress) throw new Error('Wallet changed before the schedule update completed');
+  _setRadioScheduleStatus('Saving the shared calendar…');
+  const response = await fetch(`${service.replace(/\/$/, '')}/api/radio/schedule`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...authorization, signature }),
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || `Schedule update failed (${response.status})`);
+  if (checkId !== _walletCheckId) return;
+  _radioSchedule = payload;
+  _populateRadioWeeklyForm(payload.schedule || defaultRadioSchedule(payload.weeklySchedule));
+  _renderRadioScheduleEvents();
+  _setRadioScheduleStatus('Calendar saved to the shared schedule.');
+  document.dispatchEvent(new CustomEvent('radio-schedule-updated'));
+}
+
+function _setRadioScheduleStatus(message, isError = false) {
+  if (!_radioScheduleStatusEl) return;
+  _radioScheduleStatusEl.textContent = message;
+  _radioScheduleStatusEl.classList.toggle('error', isError);
 }
 
 // ── NFT Mint Queue ───────────────────────────────────────────────────────────

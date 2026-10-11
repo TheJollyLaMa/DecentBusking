@@ -2,7 +2,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  ARTIZEN_LOGO_URL,
   ENS_ETH_LOGO_URL,
   ARTWORKS,
   artworkIndex,
@@ -33,11 +32,10 @@ test('selects scenes deterministically while covering all 25', () => {
   assert.equal(selected.size, 25);
 });
 
-test('renders 100 cells with actual branded image assets and no dropdown', () => {
+test('renders 100 cells with neutral artwork and ENS/Ethereum imagery, with no dropdown', () => {
   const rendered = renderArtFiComment('Queued 25 ART.', 30, 'merged-payroll');
-  assert.match(rendered, new RegExp(ARTIZEN_LOGO_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(rendered, new RegExp(ENS_ETH_LOGO_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(rendered, /alt="Artizen logo"/);
+  assert.doesNotMatch(rendered, /artizen/i);
   assert.match(rendered, /alt="ENS and Ethereum logo"/);
   assert.doesNotMatch(rendered, /<details>|<summary>|<select/i);
   const table = renderArtworkTable(selectArtwork(30, 'merged-payroll'));
@@ -60,7 +58,7 @@ test('production comment builders preserve ART workflow messages', () => {
   assert.match(comments[0], /20 ART/);
   assert.match(comments[2], /Settled 2 ART payroll entries/);
   for (const comment of comments) {
-    assert.match(comment, /Artizen logo/);
+    assert.doesNotMatch(comment, /artizen/i);
     assert.match(comment, /ENS and Ethereum logo/);
   }
 });

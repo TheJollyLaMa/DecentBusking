@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261010-community-pin" />
+  <link rel="stylesheet" href="css/styles.css?v=20261010-radio-schedule" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -35,7 +35,8 @@
   </aside>
 
   <button id="djuke-tab" type="button" aria-controls="djuke-panel" aria-expanded="false" aria-label="Open DJuke" title="Open DJuke">
-    <span data-djuke-icon="Disc3" aria-hidden="true">♫</span><span>DJuke</span>
+    <span class="djuke-tab-mark" aria-hidden="true"><span class="djuke-note djuke-note-left">🎶</span><span class="djuke-note djuke-note-right">🎶</span><span class="djuke-tab-slot">⚸🎰🧞‍♂️</span><span class="djuke-tab-coin">🪙</span></span>
+    <span>DJuke</span>
   </button>
   <aside id="djuke-panel" aria-label="DJuke jukebox" aria-hidden="true" inert>
     <div class="djuke-heading">
@@ -72,6 +73,23 @@
       <dl class="djuke-split"><div><dt>Repo-dev-fund</dt><dd>10%</dd></div><div><dt>Artist / collaborators</dt><dd>90%</dd></div></dl>
     </div>
     <div class="djuke-speaker" aria-hidden="true"></div>
+  </aside>
+
+  <button id="devert-tab" type="button" aria-controls="devert-panel" aria-expanded="false" aria-label="Open DVert advertising" title="Open DVert advertising">
+    <span data-devert-ticket aria-hidden="true">🎟️</span><span>DVert</span>
+  </button>
+  <aside id="devert-panel" aria-label="DVert advertising" aria-hidden="true" inert>
+    <div class="devert-heading"><div><h2>DVert</h2><p>Advertiser campaigns</p></div><button id="devert-close" type="button" aria-label="Close DVert">✕</button></div>
+    <div class="devert-body">
+      <section class="devert-broadcast-state" aria-labelledby="devert-broadcast-title">
+        <h3 id="devert-broadcast-title">24/7 Ad Broadcast</h3>
+        <p id="devert-broadcast-status" role="status" aria-live="polite">Audio broadcast is not live yet.</p>
+      </section>
+      <div class="devert-campaign-heading"><h3>Active Campaigns</h3><button id="devert-refresh" type="button" aria-label="Refresh DVert campaigns" title="Refresh campaigns">↻</button></div>
+      <ol id="devert-campaigns" aria-label="Active DVert campaigns"></ol>
+      <p id="devert-campaign-status" role="status" aria-live="polite">Campaign contract is not deployed.</p>
+      <p class="devert-checkout-status">Campaign checkout will appear when the verified contract and delivery service are live.</p>
+    </div>
   </aside>
 
   <div id="artist-filter-bar" role="group" aria-label="Filter NFTs by artist">
@@ -340,6 +358,24 @@
     <div id="radio-history-content" aria-live="polite">Loading playback tally…</div>
   </dialog>
 
+  <dialog id="radio-schedule-dialog" aria-labelledby="radio-schedule-title">
+    <header class="radio-history-header">
+      <h2 id="radio-schedule-title">Radio Programming</h2>
+      <button id="radio-schedule-close" type="button" aria-label="Close radio schedule">✕</button>
+    </header>
+    <p class="radio-schedule-note">Weekly shows and upcoming live performances · America/New_York</p>
+    <p id="radio-schedule-status" role="status" aria-live="polite">Loading programming schedule…</p>
+    <button id="radio-schedule-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh schedule</button>
+    <section aria-labelledby="radio-schedule-weekly-title">
+      <h3 id="radio-schedule-weekly-title">Weekly Programming</h3>
+      <ul id="radio-schedule-weekly" class="radio-schedule-list"></ul>
+    </section>
+    <section aria-labelledby="radio-schedule-events-title">
+      <h3 id="radio-schedule-events-title">Live Events</h3>
+      <ul id="radio-schedule-events" class="radio-schedule-list"></ul>
+    </section>
+  </dialog>
+
   <!-- Admin role-grant modal -->
   <div id="admin-modal" class="hidden">
     <div id="admin-modal-inner">
@@ -356,6 +392,28 @@
       </div>
       <div id="admin-status" class="admin-status" role="status"></div>
       <p id="admin-payment-ledger-status" class="admin-status" role="status">Payment proofs not loaded.</p>
+      <section id="admin-radio-schedule" class="hidden" aria-labelledby="admin-radio-schedule-title">
+        <div class="admin-section-header">
+          <div><h3 id="admin-radio-schedule-title">Radio Programming</h3><p>Customize Friday’s weekly show hours and schedule one-off performances.</p></div>
+          <button id="admin-radio-schedule-refresh" class="admin-btn admin-btn-secondary" type="button" aria-label="Refresh radio schedule" title="Refresh schedule">↻</button>
+        </div>
+        <form id="admin-radio-weekly-form" class="admin-schedule-form admin-weekly-form">
+          <label>Friday Top 10 starts (New York time)<select id="admin-radio-top10-start"></select></label>
+          <label>Friday Top 10 ends (New York time)<select id="admin-radio-top10-end"></select></label>
+          <label>Friday Live Performance starts<select id="admin-radio-live-start"></select></label>
+          <label>Friday Live Performance ends<select id="admin-radio-live-end"></select></label>
+          <div class="admin-actions"><button id="admin-radio-weekly-save" class="admin-btn admin-btn-secondary" type="submit">Save weekly hours</button><span class="admin-schedule-fixed">Sunday Top 10 final listen stays fixed to the New York payroll cutoff.</span></div>
+        </form>
+        <form id="admin-radio-schedule-form" class="admin-schedule-form">
+          <input id="admin-radio-event-id" type="hidden" />
+          <label>Performer or show<input id="admin-radio-event-title" type="text" maxlength="100" required /></label>
+          <label>Starts (New York time)<input id="admin-radio-event-start" type="datetime-local" required /></label>
+          <label>Ends (New York time)<input id="admin-radio-event-end" type="datetime-local" required /></label>
+          <div class="admin-actions"><button id="admin-radio-event-save" class="admin-btn admin-btn-primary" type="submit">Schedule event</button><button id="admin-radio-event-reset" class="admin-btn admin-btn-secondary" type="button">Clear form</button></div>
+        </form>
+        <p id="admin-radio-schedule-status" class="admin-status" role="status"></p>
+        <ul id="admin-radio-schedule-events" class="admin-schedule-events"></ul>
+      </section>
       <section id="admin-mint-section" class="hidden">
         <div class="admin-section-header">
           <div>
@@ -422,15 +480,16 @@
         </dl>
         <div class="radio-payroll-controls">
           <label>Fund<select id="router-fund-select"></select></label>
-          <label id="router-custom-fund-label" hidden>New fund slug<input id="router-custom-fund-slug" type="text" minlength="3" maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="dmtv-referrals" autocomplete="off" /><span class="payroll-field-hint">3–64 lowercase letters, numbers, and single hyphens. This name becomes the on-chain accounting ID.</span></label>
+          <label id="router-custom-fund-label" hidden>New fund slug<input id="router-custom-fund-slug" type="text" minlength="3" maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="community-grants" autocomplete="off" /><span class="payroll-field-hint">Choose a short purpose ID: lowercase letters/numbers with single hyphens. Example: <code>community-grants</code>. This becomes the permanent on-chain fund ID.</span></label>
         </div>
         <form id="router-custom-fund-form" hidden>
+          <p class="payroll-fund-guide">Create in two steps: review the suggested public name and purpose, save that metadata to IPFS, then confirm <strong>Create Fund on Base</strong>. Creation makes an empty allocation only; it does not deposit USDC or start payouts.</p>
           <div class="radio-payroll-controls">
-            <label>Fund name<input id="router-fund-name" type="text" maxlength="120" required placeholder="Newcomer &amp; Referral Prizes" /></label>
-            <label>Purpose<textarea id="router-fund-purpose" rows="4" maxlength="2000" required placeholder="Rewards for verified referrals and first-time performers."></textarea></label>
-            <label>Website (optional)<input id="router-fund-website" type="url" maxlength="2048" placeholder="https://..." /></label>
+            <label>Public fund name<input id="router-fund-name" type="text" maxlength="120" required placeholder="Suggested from your fund slug" /><span class="payroll-field-hint">Prefilled from the slug; edit it to make the purpose clear to contributors.</span></label>
+            <label>Purpose and payout scope<textarea id="router-fund-purpose" rows="4" maxlength="2000" required placeholder="Suggested from your fund slug"></textarea><span class="payroll-field-hint">Explain what this allocation supports and who may be paid from it. This text is public metadata.</span></label>
+            <label>Project or policy link (optional)<input id="router-fund-website" type="url" maxlength="2048" placeholder="https://..." /><span class="payroll-field-hint">Optional public reference for this fund.</span></label>
           </div>
-          <button id="router-save-metadata" class="payroll-btn payroll-btn-secondary" type="submit" disabled><img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/cloud-upload.svg" width="18" height="18" alt="" /> Save Metadata to IPFS</button>
+          <button id="router-save-metadata" class="payroll-btn payroll-btn-secondary" type="submit" disabled><img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/cloud-upload.svg" width="18" height="18" alt="" /> Save Public Metadata to IPFS</button>
           <p id="router-metadata-status" class="payroll-status" role="status"></p>
         </form>
         <div class="radio-payroll-controls">
@@ -445,7 +504,7 @@
           <button id="router-fund-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Fund</button>
           <button id="router-create-fund" class="payroll-btn payroll-btn-primary" type="button" disabled>Create Fund on Base</button>
         </div>
-        <p id="router-fund-status" class="payroll-status" role="status">Create a configured fund or choose Create a custom fund for a new purpose. Fund creation does not deposit USDC or enable payouts.</p>
+        <p id="router-fund-status" class="payroll-status" role="status">Choose a project fund, or create a custom fund for a new purpose. Fund creation does not deposit USDC or enable payouts.</p>
         <div class="radio-payroll-controls"><label>USDC deposit amount<input id="router-deposit-amount" type="number" min="0" step="0.01" value="0" /></label></div>
         <button id="router-deposit-usdc" class="payroll-btn payroll-btn-primary" type="button" disabled>Deposit USDC into Selected Fund</button>
         <p id="router-deposit-pending" class="payroll-status"></p>
@@ -540,7 +599,7 @@
   <script type="module" src="js/components/about-override.js?v=20261008-whitepaper"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
-  <script type="module" src="js/components/header-right-ankh-override.js?v=20261007-my-playbacks"></script>
+  <script type="module" src="js/components/header-right-ankh-override.js?v=20261010-public-calendar"></script>
 
   <!-- Load DecentHead components without its legacy IPFS status widget -->
   <script type="module" src="js/components/header.js?v=20261007-my-playbacks"></script>
@@ -556,12 +615,14 @@
   <script type="module" src="js/main.js?v=20261010-listens"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261010-listens"></script>
+  <script type="module" src="js/admin.js?v=20261010-radio-schedule"></script>
 
   <script type="module" src="js/payroll.js?v=20261008-ny-recovery-payflow"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
+  <script type="module" src="js/radio-schedule-ui.mjs?v=20261010-public-calendar"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261010-left-djuke"></script>
   <script type="module" src="js/djuke.mjs?v=20261010-djuke-pay"></script>
+  <script type="module" src="js/devert-tab.mjs?v=20261010-devert-ticket"></script>
   <script type="module" src="js/listens.mjs?v=20261010-listens"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module">

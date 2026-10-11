@@ -1,5 +1,6 @@
 import { Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
+import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const SIGNED_UPLOAD_OVERHEAD_BYTES = 64 * 1024;
@@ -26,6 +27,17 @@ export function buildAdminAuthorizationMessage({ address, origin, issuedAt }) {
     `Wallet: ${address.toLowerCase()}`,
     `Origin: ${origin}`,
     `Issued At: ${issuedAt}`,
+  ].join('\n');
+}
+
+export function buildRadioScheduleAuthorizationMessage({ address, origin, issuedAt, events, weeklySchedule = {} }) {
+  return [
+    'DecentBusking radio schedule update',
+    `Wallet: ${address.toLowerCase()}`,
+    `Origin: ${origin}`,
+    `Issued At: ${issuedAt}`,
+    `Events: ${JSON.stringify(events)}`,
+    `Weekly Schedule: ${JSON.stringify(weeklySchedule)}`,
   ].join('\n');
 }
 
@@ -108,7 +120,10 @@ export function createWorkerRequestHandler({
   onMintComplete,
   getMintQueue,
   getRadioState,
+  getRadioSchedule,
+  saveRadioSchedule,
   getDjukeState,
+  getDevertState,
   getPinnerManifest,
   checkpointMirror,
   getRadioHistory,
@@ -189,12 +204,48 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, await getRadioState(), '*');
         return;
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/radio/schedule') {
+        if (!getRadioSchedule) {
+          sendJson(response, 404, { error: 'Radio schedule is not configured' }, '*');
+          return;
+        }
+        sendJson(response, 200, await getRadioSchedule(), '*');
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/radio/schedule') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!getRadioSchedule || !saveRadioSchedule) throw new Error('Radio schedule editing is not configured');
+        const body = await readJson(request);
+        const issuedAt = Date.parse(body.issuedAt);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') || typeof body.signature !== 'string' ||
+            !Number.isFinite(issuedAt) || Math.abs(now() - issuedAt) > MAX_SIGNATURE_AGE_MS) {
+          throw new Error('Invalid or expired schedule authorization');
+        }
+        if (hasConsumedSignature(body.signature)) throw new Error('Schedule authorization has already been used');
+        const events = validateLivePerformanceSchedule(body.events, { now: now() });
+        const weeklySchedule = validateWeeklyScheduleOverrides(body.weeklySchedule || {});
+        const message = buildRadioScheduleAuthorizationMessage({ address: body.address, origin, issuedAt: body.issuedAt, events, weeklySchedule });
+        const recovered = verifyMessage(message, body.signature).toLowerCase();
+        if (recovered !== body.address.toLowerCase() || recovered !== expectedOwner) throw new Error('Schedule authorization is not from the radio owner');
+        consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
+        await saveRadioSchedule({ events, weeklySchedule });
+        sendJson(response, 200, await getRadioSchedule(), corsOrigin);
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/djuke') {
         if (!getDjukeState) {
           sendJson(response, 404, { error: 'DJuke is not deployed or configured' }, '*');
           return;
         }
         sendJson(response, 200, await getDjukeState(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/devert') {
+        if (!getDevertState) {
+          sendJson(response, 404, { error: 'DeVert is not deployed or configured' }, '*');
+          return;
+        }
+        sendJson(response, 200, await getDevertState(), '*');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/pinners/manifest') {

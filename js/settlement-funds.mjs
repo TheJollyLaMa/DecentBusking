@@ -3,11 +3,26 @@ export function configuredSettlementFunds(config = {}) {
     { label: 'Playback Payroll', slug: config.radioFunds?.playback },
     { label: 'Top 10 Prize Payouts', slug: config.radioFunds?.topTen },
     { label: 'Repo Dev Bot Payouts', slug: config.fundSlug },
-    { label: 'Community Pinning Rewards', slug: config.pinnerFundSlug },
+    { label: 'Community Pinning Rewards (required for DJuke)', slug: config.pinnerFundSlug },
   ].filter(fund => typeof fund.slug === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fund.slug));
 }
 
 export const CUSTOM_FUND_OPTION = '__custom_fund__';
+
+export function defaultSettlementFundMetadata(slug) {
+  const fundSlug = validateSettlementFundSlug(slug);
+  const name = fundSlug.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+  const purposes = {
+    'dbusk-playback': 'USDC allocation for eligible artist payouts from completed, audible DecentBusking radio plays.',
+    'dbusk-top10': 'USDC allocation for owner-reviewed weekly Top 10 artist prizes, ranked by the published New York-week vote rules.',
+    'dbusk-repo-dev': 'DecentBusking contributor and repository-development payouts approved through the project payroll workflow.',
+    'dbusk-pinners': 'USDC allocation for community pinning rewards after the approved availability checks and eligibility rules are implemented.',
+  };
+  return {
+    name,
+    description: purposes[fundSlug] || `Dedicated Base settlement allocation for ${name}. Deposits and payouts use the DecentBusking owner-reviewed settlement workflow.`,
+  };
+}
 
 export function validateSettlementFundSlug(value) {
   const slug = String(value || '').trim().toLowerCase();

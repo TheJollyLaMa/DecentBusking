@@ -1,4 +1,3 @@
-const ARTIZEN_LOGO_URL = 'https://raw.githubusercontent.com/TheJollyLaMa/ArtFi/main/Artizen_LOGO.png';
 const ENS_ETH_LOGO_URL = 'https://raw.githubusercontent.com/TheJollyLaMa/ArtFi/main/Ens_Eth_Breathe.gif';
 
 const SCENES = [
@@ -64,9 +63,6 @@ function selectArtwork(issueNumber, commentType) {
 }
 
 function renderCell(cell) {
-  if (cell === '🟢') {
-    return `<td align="center"><img src="${ARTIZEN_LOGO_URL}" alt="Artizen logo" width="24"></td>`;
-  }
   if (cell === '💠') {
     return `<td align="center"><img src="${ENS_ETH_LOGO_URL}" alt="ENS and Ethereum logo" width="24"></td>`;
   }
@@ -84,7 +80,6 @@ function renderArtFiComment(body, issueNumber, commentType) {
 }
 
 module.exports = {
-  ARTIZEN_LOGO_URL,
   ENS_ETH_LOGO_URL,
   ARTWORKS,
   artworkIndex,

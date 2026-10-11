@@ -35,8 +35,8 @@ window.DecentConfig = {
   contractAddress: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B",
   additionalNftContractAddresses: [],
   nftBatchMintEnabled: false,
-  // Set after deploying DecentJukeBox_v0_1; payments also need the worker's DJUKE_PAYMENTS_ENABLED.
-  djukeContractAddress: "",
+  // DJuke v0.2 on Base; payments also require the worker's DJUKE_PAYMENTS_ENABLED.
+  djukeContractAddress: "0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59",
   adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",
   marketUrl: "https://thejollylama.github.io/DecentMarket/",
 

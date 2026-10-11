@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const payrollAssets = require('../payroll-assets.json');
 const url = pathToFileURL(path.join(__dirname, '../js/settlement-funds.mjs')).href;
 
 function fixture() {
@@ -46,11 +47,25 @@ test('fund selector uses only this app configured radio and repository allocatio
   const { configuredSettlementFunds, validateSettlementFundSlug, resolveSettlementFundSlug } = await import(url);
   assert.deepEqual(configuredSettlementFunds({ radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' }, fundSlug: 'dbusk-repo-dev' })
     .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev']);
+  assert.deepEqual(configuredSettlementFunds({ radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' }, fundSlug: 'dbusk-repo-dev', pinnerFundSlug: 'dbusk-pinners' })
+    .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners']);
+  assert.deepEqual(configuredSettlementFunds(payrollAssets).map(fund => fund.slug),
+    ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners']);
   assert.equal(configuredSettlementFunds({ fundSlug: 'wrong#slug' }).length, 0);
   assert.equal(resolveSettlementFundSlug('__custom_fund__', 'dmtv-referrals', { fundSlug: 'dbusk-repo-dev' }), 'dmtv-referrals');
   assert.equal(resolveSettlementFundSlug('dmtv-referrals', '', {}, ['dmtv-referrals']), 'dmtv-referrals');
   assert.throws(() => validateSettlementFundSlug('DMTV Referrals'), /Fund slug must be/);
   assert.throws(() => resolveSettlementFundSlug('__custom_fund__', 'dbusk-repo-dev', { fundSlug: 'dbusk-repo-dev' }), /configured fund/);
+});
+
+test('fund metadata suggestions prefill names and precise purposes for the project defaults', async () => {
+  const { defaultSettlementFundMetadata } = await import(url);
+  assert.deepEqual(defaultSettlementFundMetadata('dbusk-pinners'), {
+    name: 'Dbusk Pinners',
+    description: 'USDC allocation for community pinning rewards after the approved availability checks and eligibility rules are implemented.',
+  });
+  assert.equal(defaultSettlementFundMetadata('community-grants').name, 'Community Grants');
+  assert.match(defaultSettlementFundMetadata('community-grants').description, /owner-reviewed settlement workflow/);
 });
 
 test('custom fund slugs allow purpose names while rejecting malformed and configured names', async () => {

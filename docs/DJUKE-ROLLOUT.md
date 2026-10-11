@@ -1,18 +1,28 @@
 # DJuke and DNft rollout
 
-Status: core rollout and listen PRs are merged. Community pinning follow-up is in
-PR #110 and the final 8/2/90 contract allocation is in DecentMarket PR #49. No
-contracts are deployed, no album tracks imported or minted, and DJuke payments
-remain off.
+Status: DJuke v0.2 is deployed on Base at
+`0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59`. The live worker reports 253
+registered tracks with no catalog read errors, and payments are enabled for the
+low-stakes prototype; no paid request was submitted during verification. The
+prototype still uses its current worker and Pinata credentials, which must be
+rotated before expanding the audience. Community pinning follow-up is in PR #110
+and the final 8/2/90 contract allocation is in DecentMarket PR #49.
 
-## Go-live checklist (you enter keys and execute)
+Regular radio playback is active. The live-performance calendar and DeVert
+reader/UI changes in the local worktree are not deployed; the live
+`/api/radio/schedule` endpoint currently returns 404. The DeVert contract and
+campaign payments remain undeployed and off.
 
-Never paste keys or secrets into chat. Each step is independent and reversible until
-the on-chain steps (3, 4, 6), which cost Base gas.
+## Remaining public-launch checklist (you enter keys and execute)
 
-1. **Ship the code.** Push the reviewed branch; GitHub Pages and Render redeploy.
-   Expected: Top 10 and DJuke tabs stacked on the left; DJuke shows "DJuke queue is
-   not live yet"; radio unchanged.
+Never paste keys or secrets into chat. Browser and Render settings are reversible;
+fund creation, worker-role changes, and song registration require Base gas.
+
+1. **Ship the remaining sprint code.** The DJuke prototype is already deployed;
+  publish the reviewed local schedule/calendar and DeVert read-only UI changes.
+  Expected: the schedule endpoint returns 200, DJuke shows the live catalog, and
+  DVert clearly identifies that campaigns and the ad-only broadcast are not live;
+  regular radio playback is unchanged.
 2. **Optional community mirror.** The shared Pinata checkpoint is primary and saves
     never wait for a mirror. Visitors open the pin chooser from the existing header
     IPFS button and pin shared CIDs to local IPFS Desktop or their own Pinata account.
@@ -20,23 +30,22 @@ the on-chain steps (3, 4, 6), which cost Base gas.
 3. **Create the pinners fund (admin wallet, one transaction).** The router's
   `dbusk-repo-dev` fund exists. Create and activate `dbusk-pinners` from the Payroll
   fund selector; deployment preflight requires both funds.
-4. **Deploy contracts (admin key in your shell only).** In DecentMarket:
-   `BASE_RPC_URL=… PRIVATE_KEY=… DBUSK_FULFILLER=<new fulfiller address> npm run deploy:dbusk:base`
-   (dry run: checks fund, USDC, router, gas). Re-run with `CONFIRM_DEPLOY=yes`.
-   Addresses are written to `deployments/dbusk-base.json`. Use a brand-new wallet
-   for the worker and fund it with about 0.005 Base ETH; it only fulfills plays and
-   registers new songs (it can never change an existing song's payees).
-5. **Point the app at the contracts (no wallet).** Set `djukeContractAddress` in
-   `decent.config.js`. On Render set `DJUKE_CONTRACT_ADDRESS`,
-   `DJUKE_FULFILLER_PRIVATE_KEY`, and leave `DJUKE_PAYMENTS_ENABLED=false`.
-6. **Songs register automatically.** With the worker key set, the bot registers every
-   radio-eligible song that has an artist wallet: a one-time catch-up shortly after
-   start, then new Discord uploads and briefcase submissions every two minutes, in
-   batches of 25. Watch for `[djuke] Registered` in the logs. The admin-only
-   `configure:djuke:base` script remains for changing an existing song's payees.
-7. **Open payments.** Set `DJUKE_PAYMENTS_ENABLED=true` on Render. Each payment
-  splits 90% to artists, 8% to pinners and 2% to repo-dev. A 0.25 USDC bump/listen
-  sends 0.225 / 0.020 / 0.005 USDC. Confirm all three router balances.
+4. **Rotate the prototype worker before expanding access.** The v0.2 contract is
+  already deployed. Grant the replacement worker the required roles, revoke the
+  old worker, then update `DJUKE_FULFILLER_PRIVATE_KEY` on Render. No contract
+  redeployment is needed for this key switch.
+5. **Keep app configuration aligned.** `decent.config.js` and Render currently
+  point to the deployed v0.2 contract. Preserve `DJUKE_PAYMENTS_ENABLED=true` for
+  the prototype; turn it off before any maintenance that makes the catalog or
+  fulfillment journal unavailable.
+6. **Song registration is complete for the prototype.** The live worker exposes
+  253 registered tracks, verified against their on-chain audio CIDs. New
+  eligible uploads continue to register automatically; watch for `[djuke]
+  Registered` in the logs.
+7. **Verify settlement before widening access.** Prototype payments are enabled
+  with the 90% artist / 8% pinner / 2% repo-dev split. Confirm all three router
+  balances before inviting a broader audience. A 0.25 USDC bump/listen splits
+  0.225 / 0.020 / 0.005 USDC.
 8. **Batch minting (optional, later).** Switch `contractAddress` to the v0.3 address,
    move the old address into `additionalNftContractAddresses`, set
    `DECENT_NFT_CONTRACT_ADDRESS` and `DECENT_NFT_ADDITIONAL_ADDRESSES` on Render, and
@@ -44,6 +53,29 @@ the on-chain steps (3, 4, 6), which cost Base gas.
 
 Rollback: unset `DJUKE_PAYMENTS_ENABLED` or `djukeContractAddress` to hide payments;
 the contract's `pauseRequests` stops new purchases while queued plays still settle.
+
+## DeVert advertising candidate
+
+The separate, undeployed DeVert candidate charges at least 5 USDC for a seven-day
+campaign. Main-radio delivery is limited to one ad slot per ten completed music
+plays. When all current slots are seated, a new offer must clear the cheapest
+seated offer by at least 0.01 USDC. Campaigns that do not make the main-radio cut
+remain in the 24/7 DeVert-only stream for their paid week; there are no refunds.
+
+Campaign payments route 45% to Playback, 45% to Top 10, 8% to Pinners and 2% to
+Repo-dev. The public DVert tab now shows the broadcast/campaign status and can
+display the read-only confirmed campaign snapshot when the worker is deployed
+with `DEVERT_CONTRACT_ADDRESS`. It does not yet play audio or accept campaign
+payments, and the contract has not been deployed.
+
+Before deployment, finish these gates in order: implement advertiser quote and
+purchase controls with exact USDC approval and a user-set maximum; implement the
+24/7 IPFS ad player and the one-per-ten-music-plays main-radio insertion; add a
+dedicated scheduler service with durable, idempotent impression records and
+weekly market updates; verify any DJuke purchase on Base before linking its
+unique ID, so a bump is never charged twice; then rehearse campaign expiry,
+overbids, fee routing, failed playback, restart recovery and role permissions on
+a fork/testnet. Keep DeVert payments disabled until those checks pass.
 
 ## Verification so far
 
@@ -203,6 +235,41 @@ and replacement UI are not integrated yet. The contract currently permits payer
 replacement for any pending request; restricting the UI to unavailable content
 requires verified availability state. No refunds or additional charges occur.
 
+### Live performance calendar
+
+The regular Friday lineup is 8:00–9:00 PM New York time for the Top 10 Hype
+Hour, followed by the Live Performance Block from 9:00–10:00 PM; normal
+rotation resumes at 10:00 PM. Both windows follow New York daylight-saving
+time. Performers use the connected JukeLoop voice channel while the bot's music
+player is stopped.
+
+The weekly Top 10 finale occupies the final New York payroll hour: Sunday 11:00
+PM through Monday 12:00 AM, with the boundary calculated by the payroll calendar
+so daylight-saving transitions do not move payout weeks. It plays the current
+week's net-vote chart, accepts votes through the cutoff, and yields to normal
+rotation exactly at midnight. DJuke paid picks wait until the show ends.
+
+The Discord bot now supports `/jukeloop live-add`, `/jukeloop live-list`, and
+`/jukeloop live-cancel`. Adding or cancelling requires Manage Messages. Supply
+ISO-8601 UTC timestamps ending in `Z`; events must start within 60 days, last no
+more than four hours, and fit within the 100-event calendar limit. The event
+calendar is stored as a separate versioned Pinata snapshot, not inside playlist
+history. If the calendar cannot be restored, normal radio still starts but
+scheduled live blocks remain inactive and calendar edits are disabled rather
+than risking overwrite.
+
+At the scheduled start, JukeLoop stops its own track player and remains connected
+so performers can play in the same voice channel. Paid picks wait during the
+block. At the end or after cancellation, scheduled music resumes. This first
+slice does not record performances, create replays or DNfts, or add the live
+performance payroll category. The DeVert planner and read-only confirmed Base
+campaign reader now exist. Setting `DEVERT_CONTRACT_ADDRESS` exposes its
+confirmed snapshot at `GET /api/devert` (`DEVERT_CONFIRMATIONS` defaults to 2);
+without an address, the endpoint stays unavailable. The reader is read-only and
+not connected to voice playback. Audible ad delivery still needs the contract
+deployed, a scheduler-role signer, and a durable delivery journal before the
+live bot can safely record impressions.
+
 Browser retry of the user-confirmed ipfs.io URL returned a Cloudflare challenge
 (HTTP 403) rather than player content. The user reports that the same gateway
 plays the albums in their browser. This environment's automated-access failures
@@ -214,7 +281,10 @@ implement approved paid-play accounting and payer-consented replacement flow,
 wire browser quote/approval/request actions, make mint completion verification
 explicitly collection-qualified, export ABIs, complete adversarial tests and
 testnet rehearsal, and recover accessible album manifests before duplicate
-review/import. Do not enable payments or batch signing before these gates.
+review/import. DeVert additionally needs the advertiser purchase flow, reliable
+audio delivery, durable impression/market scheduling, verified DJuke-purchase
+linking and its own testnet rehearsal. Do not enable payments or batch signing
+before these gates.
 
 ## Preserve the existing system
 

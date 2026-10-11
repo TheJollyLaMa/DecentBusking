@@ -57,7 +57,6 @@ const _ERC20_ABI = [
 
 const _MSG_NFT_NOT_IN_ESCROW = '⚠ NFT stock not yet loaded into escrow — check back soon.';
 const _DBUSKER_ABOUT_AVATAR = new URL('../../img/D_Busker.jpeg', import.meta.url).href;
-const _ARTIZEN_LOGO = new URL('../../img/Artizen_LOGO.png', import.meta.url).href;
 
 class DecentBuskingAboutModal extends HTMLElement {
   constructor() {
@@ -597,73 +596,6 @@ class DecentBuskingAboutModal extends HTMLElement {
         .about-roadmap ul { margin: 0; padding-left: 1.15rem; color: #c6c8d5; font-size: .81rem; line-height: 1.55; }
         .about-callout { margin: 14px 0; padding: 12px 14px; color: #f2e7dd; background: linear-gradient(100deg,rgba(239,164,120,.12),rgba(137,119,208,.1),rgba(92,200,190,.08)); border-left: 2px solid #f1a576; line-height: 1.5; }
         .about-footer { margin: 22px 0 4px; color: #aaaabd; font-size: .8rem; text-align: center; }
-        .artizen-support {
-          position: relative;
-          isolation: isolate;
-          display: grid;
-          grid-template-columns: 76px minmax(0,1fr);
-          align-items: center;
-          gap: 16px;
-          overflow: hidden;
-          margin: 22px 0 16px;
-          padding: 18px;
-          border: 1px solid rgba(45,222,132,.48);
-          border-radius: 12px;
-          background: linear-gradient(112deg,rgba(8,53,39,.91),rgba(9,32,34,.94) 58%,rgba(18,35,42,.92));
-          box-shadow: 0 0 26px rgba(34,220,130,.13), inset 0 1px rgba(193,255,216,.08);
-        }
-        .artizen-energy {
-          position: absolute;
-          inset: 0;
-          z-index: -1;
-          width: 100%;
-          height: 100%;
-          pointer-events: none;
-          opacity: .72;
-        }
-        .artizen-energy path { fill: none; stroke: rgba(96,244,166,.23); stroke-width: 1; }
-        .artizen-energy .artizen-pulse {
-          stroke: rgba(95,255,169,.96);
-          stroke-width: 1.8;
-          stroke-dasharray: 12 300;
-          stroke-linecap: round;
-          filter: drop-shadow(0 0 5px rgba(59,255,147,.78));
-          animation: about-energy-flow var(--flow-time,7s) linear infinite;
-          animation-delay: var(--flow-delay,0s);
-        }
-        .artizen-logo-wrap {
-          display: grid;
-          place-items: center;
-          width: 70px;
-          height: 70px;
-          border: 1px solid rgba(85,245,159,.48);
-          border-radius: 50%;
-          background: radial-gradient(circle,rgba(30,240,131,.18),rgba(3,23,20,.85) 72%);
-          box-shadow: 0 0 20px rgba(32,229,123,.2);
-          animation: artizen-breathe 4s ease-in-out infinite;
-        }
-        .artizen-logo { width: 48px; height: 48px; object-fit: contain; filter: drop-shadow(0 0 8px rgba(64,255,151,.46)); }
-        .artizen-copy { position: relative; z-index: 1; min-width: 0; }
-        .artizen-kicker { margin: 0 0 5px; color: #81f0b0; font-size: .68rem; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }
-        .artizen-copy h3 { margin: 0 0 6px; color: #ecfff3; font-size: 1.16rem; }
-        .artizen-copy p { margin: 0 0 11px; color: #c5e8d4; font-size: .84rem; line-height: 1.48; }
-        .artizen-cta {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          min-height: 38px;
-          padding: 0 14px;
-          color: #04160d;
-          background: linear-gradient(100deg,#83f4ae,#48d78e);
-          border: 1px solid rgba(207,255,222,.54);
-          border-radius: 6px;
-          font-size: .82rem;
-          font-weight: 750;
-          box-shadow: 0 0 16px rgba(54,232,132,.24);
-        }
-        .artizen-cta img { flex: none; width: 18px; height: 18px; object-fit: contain; }
-        .artizen-cta:hover { text-decoration: none; filter: brightness(1.08); transform: translateY(-1px); }
         .supporter-remint {
           margin: 0 0 20px;
           padding: 15px 17px;
@@ -673,10 +605,9 @@ class DecentBuskingAboutModal extends HTMLElement {
         }
         .supporter-remint h3 { margin: 0 0 6px; color: #e1d5ff; font-size: .98rem; }
         .supporter-remint p { margin: 0; color: #bfc1d0; font-size: .82rem; line-height: 1.5; }
-        @keyframes artizen-breathe { 0%,100% { transform: scale(1); box-shadow: 0 0 16px rgba(32,229,123,.16); } 50% { transform: scale(1.045); box-shadow: 0 0 25px rgba(32,229,123,.34); } }
         @keyframes about-energy-flow { to { stroke-dashoffset: -372; } }
         @keyframes about-orbit { to { transform: rotate(360deg); } }
-        @media (prefers-reduced-motion: reduce) { .about-network .network-pulse, .about-avatar-wrap::before, .about-avatar-wrap::after, .artizen-energy .artizen-pulse, .artizen-logo-wrap { animation: none !important; } }
+        @media (prefers-reduced-motion: reduce) { .about-network .network-pulse, .about-avatar-wrap::before, .about-avatar-wrap::after { animation: none !important; } }
         .close-btn {
           position: absolute;
           top: 15px;
@@ -702,10 +633,6 @@ class DecentBuskingAboutModal extends HTMLElement {
           .about-roadmap { grid-template-columns: 1fr; }
           .buy-options { display: grid; grid-template-columns: minmax(0,1fr); }
           .buy-option-card { min-width: 0; max-width: none; width: 100%; }
-          .artizen-support { grid-template-columns: 54px minmax(0,1fr); gap: 12px; padding: 14px 12px; }
-          .artizen-logo-wrap { width: 52px; height: 52px; }
-          .artizen-logo { width: 36px; height: 36px; }
-          .artizen-copy h3 { font-size: 1rem; }
         }
         .future-note { margin-top: 1em; font-size: 0.85em; color: #aaa; }
         .buy-section {
@@ -863,27 +790,6 @@ class DecentBuskingAboutModal extends HTMLElement {
               <p><strong>Test and welcome people:</strong> listen, vote, try the site on your phone, report a clear bug, invite an artist, or host a listening session. These are welcome contributions, but are not automatically paid.</p>
               <p>Want payment for a specific art, testing, or outreach task? Ask the maintainer to agree on the task and bounty <strong>before starting</strong>. It must be tracked through an eligible GitHub issue and accepted submission; repo payroll does not pay for informal activity.</p>
             </div>
-
-          <section class="artizen-support" aria-labelledby="artizen-support-title">
-            <svg class="artizen-energy" viewBox="0 0 1000 260" preserveAspectRatio="none" aria-hidden="true">
-              <path d="M0 40 C180 220 300 5 500 130 S800 230 1000 28" />
-              <path class="artizen-pulse" style="--flow-time:7s;--flow-delay:-2s" d="M0 40 C180 220 300 5 500 130 S800 230 1000 28" />
-              <path d="M0 220 C210 30 340 245 560 90 S820 35 1000 205" />
-              <path class="artizen-pulse" style="--flow-time:9s;--flow-delay:-5s" d="M0 220 C210 30 340 245 560 90 S820 35 1000 205" />
-              <path d="M80 0 C280 160 650 170 920 0" />
-              <path class="artizen-pulse" style="--flow-time:8s;--flow-delay:-3.6s" d="M80 0 C280 160 650 170 920 0" />
-            </svg>
-            <div class="artizen-logo-wrap"><img class="artizen-logo" src="${_ARTIZEN_LOGO}" alt="Artizen" /></div>
-            <div class="artizen-copy">
-              <p class="artizen-kicker">Primary way to support DecentBusking</p>
-              <h3 id="artizen-support-title">🌱 Back Decent Jukebox on Artizen</h3>
-              <p>Support the community radio, artist tools, and the next stage of the project. The Artizen project is the main support route now, and we’re preparing its connection with DecentJukebox for an upcoming merge.</p>
-              <a class="artizen-cta" href="https://artizen.fund/index/p/decent-jukebox?season=7" target="_blank" rel="noopener noreferrer">
-                <img src="${_ARTIZEN_LOGO}" alt="" aria-hidden="true" />
-                <span>Support Decent Jukebox on Artizen ↗</span>
-              </a>
-            </div>
-          </section>
 
           <section class="supporter-remint" aria-labelledby="supporter-remint-title">
             <h3 id="supporter-remint-title">🎟️ DecentBusking Supporter DNFTs</h3>

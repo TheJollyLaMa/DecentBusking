@@ -60,6 +60,62 @@ test('public community pin manifest does not expose credentials and stays unavai
   });
 });
 
+test('DeVert campaign snapshot is public read-only data and stays unavailable until configured', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const owner = Wallet.createRandom().address;
+  const snapshot = { chainId: 8453, campaigns: [{ campaignId: '7', title: 'Ad' }] };
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: owner, getDevertState: async () => snapshot });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/devert`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.deepEqual(await response.json(), snapshot);
+    const unavailable = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: owner });
+    await withServer(unavailable, async nested => {
+      assert.equal((await fetch(`${nested}/api/devert`)).status, 404);
+    });
+  });
+});
+
+test('public radio schedule is readable and schedule edits require an origin-bound owner signature', async () => {
+  const { buildRadioScheduleAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+  const { buildRadioScheduleAuthorizationMessage: buildBrowserAuthorizationMessage } = await import('../js/radio-schedule-ui.mjs');
+  const owner = Wallet.createRandom();
+  const origin = 'https://busking.example';
+  const now = Date.parse('2026-10-10T12:00:00Z');
+  const issuedAt = new Date(now).toISOString();
+  const events = [{ id: 'web-event', type: 'live_performance', title: 'Live Set',
+    startUtc: new Date(now + 60_000).toISOString(), endUtc: new Date(now + 60 * 60_000).toISOString(), priority: 200 }];
+  const weeklySchedule = {
+    'friday-top10-hype': { weekday: 5, startHourLocal: 19, endHourLocal: 20 },
+    'friday-live-performance': { weekday: 5, startHourLocal: 20, endHourLocal: 22 },
+  };
+  let saved;
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address, now: () => now,
+    getRadioSchedule: () => ({ schedule: [], events, ready: true }),
+    saveRadioSchedule: async next => { saved = next; return { schedule: [], ...next, ready: true }; } });
+  await withServer(handler, async base => {
+    const publicResponse = await fetch(`${base}/api/radio/schedule`);
+    assert.equal(publicResponse.status, 200);
+    assert.deepEqual((await publicResponse.json()).events, events);
+
+    const authorization = { address: owner.address, origin, issuedAt, events, weeklySchedule };
+    assert.equal(buildBrowserAuthorizationMessage(authorization), buildRadioScheduleAuthorizationMessage(authorization));
+    const signature = await owner.signMessage(buildRadioScheduleAuthorizationMessage(authorization));
+    const request = () => fetch(`${base}/api/radio/schedule`, { method: 'POST', headers: { origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...authorization, signature }) });
+    const response = await request();
+    assert.equal(response.status, 200);
+    assert.deepEqual(saved, { events, weeklySchedule });
+    assert.equal((await request()).status, 400);
+
+    const unavailable = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: owner.address });
+    await withServer(unavailable, async nested => {
+      assert.equal((await fetch(`${nested}/api/radio/schedule`)).status, 404);
+    });
+  });
+});
+
 test('payment ledger is public but reconciliation requires an allowed origin and a valid hash', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const hashes = [];

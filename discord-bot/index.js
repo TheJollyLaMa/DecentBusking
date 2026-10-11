@@ -35,13 +35,14 @@ import fs from 'node:fs';
 import { Contract, JsonRpcProvider, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
 import { createWeeklyPayflow } from './weekly-payflow.js';
-import { payrollPeriodFromKey } from '../js/payroll-week.mjs';
+import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
 
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
 import { syncMintedTracksFromChain, createVerifiedMintQueueReader } from './mint-sync.js';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
+import { createDevertCampaignReader } from './devert.js';
 import { createPinataStateStore } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
@@ -77,6 +78,7 @@ import {
   createJukeLoopSession,
   getJukeLoopSession,
   getJukeLoopNowPlaying,
+  updateJukeLoopRadioSchedule,
   submitJukeLoopVote,
   buildRadioState,
   getVoiceRetryDelay,
@@ -85,10 +87,21 @@ import {
   getAttachmentTitle,
   synchronizeDiscordRating,
 } from './jukeloop.js';
+import {
+  upsertLivePerformanceEvent,
+  removeLivePerformanceEvent,
+  serializeLiveSchedule,
+  deserializeLiveSchedule,
+  defaultRadioSchedule,
+} from '../js/radio-schedule.mjs';
 
 const _jukeLoopRestartTimers = new Map();
 const _jukeLoopRestartAttempts = new Map();
 let _djukeRuntime = null;
+let liveScheduleStore = null;
+let livePerformanceEvents = [];
+let liveWeeklySchedule = {};
+let liveScheduleReady = false;
 let _mintSyncTask = null;
 const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_RESTORE_ATTEMPTS = 3;
@@ -368,6 +381,23 @@ const SLASH_COMMANDS = [
     )
     .addSubcommand((sub) =>
       sub
+        .setName('live-add')
+        .setDescription('(Admin) Schedule a live performance block in the JukeLoop voice channel')
+        .addStringOption((opt) => opt.setName('title').setDescription('Performer or show name').setRequired(true))
+        .addStringOption((opt) => opt.setName('start_utc').setDescription('Start time in ISO 8601 UTC, e.g. 2026-10-10T20:00:00Z').setRequired(true))
+        .addStringOption((opt) => opt.setName('end_utc').setDescription('End time in ISO 8601 UTC').setRequired(true)),
+    )
+    .addSubcommand((sub) =>
+      sub.setName('live-list').setDescription('List active and upcoming live performance blocks'),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('live-cancel')
+        .setDescription('(Admin) Cancel a scheduled live performance block')
+        .addStringOption((opt) => opt.setName('event_id').setDescription('Event ID from /jukeloop live-list').setRequired(true)),
+    )
+    .addSubcommand((sub) =>
+      sub
         .setName('mark-minted')
         .setDescription('(Admin) Record a completed owner-wallet mint')
         .addStringOption((opt) =>
@@ -387,6 +417,18 @@ async function main() {
   const config = loadConfig();
   const checkpointMirror = process.env.CHECKPOINT_MIRROR_SECRET
     ? createCheckpointMirror({ secret: process.env.CHECKPOINT_MIRROR_SECRET }) : null;
+  let readDevertState;
+  if (process.env.DEVERT_CONTRACT_ADDRESS) {
+    try {
+      readDevertState = createDevertCampaignReader({
+        rpcUrl: config.baseRpcUrl,
+        contractAddress: process.env.DEVERT_CONTRACT_ADDRESS,
+        confirmations: Number(process.env.DEVERT_CONFIRMATIONS || 2),
+      });
+    } catch (error) {
+      console.warn('[devert] Read-only campaign endpoint disabled:', error.message);
+    }
+  }
 
   let client;
   let playlistReady = false;
@@ -574,6 +616,20 @@ async function main() {
   const requestHandler = createWorkerRequestHandler({
     checkpointMirror,
     getDjukeState: readDjukeState,
+    getRadioSchedule: () => ({
+      timeZone: PAYROLL_TIME_ZONE,
+      schedule: defaultRadioSchedule(liveWeeklySchedule),
+      weeklySchedule: liveWeeklySchedule,
+      events: livePerformanceEvents.filter(event => Date.parse(event.endUtc) > Date.now()),
+      ready: liveScheduleReady,
+    }),
+    saveRadioSchedule: async ({ events, weeklySchedule }) => {
+      if (!liveScheduleReady || !liveScheduleStore) throw new Error('Live calendar is unavailable for durable updates');
+      await liveScheduleStore.save({ events, weeklySchedule });
+      livePerformanceEvents = events;
+      liveWeeklySchedule = weeklySchedule;
+      updateJukeLoopRadioSchedule({ events, schedule: defaultRadioSchedule(weeklySchedule) });
+    },
     getPinnerManifest: () => {
       if (!playlistReady) throw new Error('Playlist is restoring');
       return buildCommunityPinManifest({ checkpointCid: playlistStateStore?.getLatestSnapshotUri()?.slice(7) || '',
@@ -613,6 +669,7 @@ async function main() {
       playlist: getPlaylist(),
     }), paymentLedger: { endpoint: '/api/payroll/ledger', snapshotUri: paymentLedger.getState().snapshotUri,
       lastCheckedAt: paymentLedger.getState().lastCheckedAt, ready: paymentLedgerReady } }),
+    getDevertState: readDevertState,
     getRadioHistory: async ({ weeks, wallet, includeAllTime, calendar }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime, calendar }),
     getWeeklyPayflow: ({ wallet }) => payflow.getState({ wallet }),
     getPaymentLedger: () => ({ ...paymentLedger.getState(), ready: paymentLedgerReady,
@@ -638,6 +695,26 @@ async function main() {
       beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined,
     });
     playlistStateStore = stateStore;
+    liveScheduleStore = createPinataStateStore({
+      pinataJwt: config.pinataJwt,
+      uploadUrl: config.pinataApiUrl,
+      filesApiUrl: config.pinataFilesApiUrl,
+      gateway: config.ipfsGateway,
+      name: 'decentbusking-live-schedule.json',
+      tags: { app: 'decentbusking', kind: 'live-schedule', schema: '1' },
+      serialize: serializeLiveSchedule,
+      deserialize: deserializeLiveSchedule,
+    });
+    try {
+      const restoredSchedule = await liveScheduleStore.restore() || { events: [], weeklySchedule: {} };
+      livePerformanceEvents = restoredSchedule.events || [];
+      liveWeeklySchedule = restoredSchedule.weeklySchedule || {};
+      liveScheduleReady = true;
+      console.log(`[radio-schedule] Restored ${livePerformanceEvents.length} live event(s).`);
+    } catch (error) {
+      liveScheduleReady = false;
+      console.warn('[radio-schedule] Calendar restore failed; admin calendar edits are disabled:', error.message);
+    }
     let restoredPlaylist = null;
     // An empty start would checkpoint over the real playlist, so retry transient failures first.
     for (let attempt = 1; attempt <= STATE_RESTORE_ATTEMPTS; attempt++) {
@@ -675,6 +752,10 @@ async function main() {
       }
     }
   } else {
+    liveScheduleStore = null;
+    livePerformanceEvents = [];
+    liveWeeklySchedule = {};
+    liveScheduleReady = false;
     loadPlaylist();
   }
   playlistReady = true;
@@ -696,10 +777,11 @@ async function main() {
   const handleReaction = change => (reaction, user) => {
     const emoji = reaction.emoji.name?.startsWith('👍') ? '👍' : reaction.emoji.name?.startsWith('👎') ? '👎' : null;
     if (user.bot || !emoji || ![config.jukeLoopTextChannelId, config.jukeboxChannelId].includes(reaction.message.channelId)) return;
+    const receivedAt = Date.now();
     const key = reaction.message.id;
     const pending = (reactionUpdates.get(key) || Promise.resolve()).then(async () => {
       const message = await reaction.message.fetch();
-      synchronizeDiscordRating(message, client.user.id, { change, emoji });
+      synchronizeDiscordRating(message, client.user.id, { change, emoji, now: receivedAt });
     }).catch(error => console.warn('[ratings] Could not synchronize Discord reaction:', error.message));
     reactionUpdates.set(key, pending);
     pending.finally(() => { if (reactionUpdates.get(key) === pending) reactionUpdates.delete(key); });
@@ -1258,6 +1340,8 @@ async function startJukeLoop(client, config) {
       client,
       ipfsGateway: config.ipfsGateway,
       djuke: _djukeRuntime,
+      livePerformanceEvents,
+      schedule: defaultRadioSchedule(liveWeeklySchedule),
       onTerminalDisconnect: () => {
         scheduleJukeLoopRestart(client, config, 'Voice reconnect timed out');
       },
@@ -1289,6 +1373,68 @@ async function startJukeLoop(client, config) {
  */
 async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
   const sub = interaction.options.getSubcommand();
+
+  if (sub === 'live-list') {
+    if (!liveScheduleReady) {
+      await interaction.reply({ content: '⚠️ The live calendar is unavailable because its durable schedule could not be restored.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const upcoming = livePerformanceEvents.filter(event => Date.parse(event.endUtc) > Date.now()).slice(0, 10);
+    const lines = upcoming.map(event => {
+      const start = new Date(event.startUtc).toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+      const end = new Date(event.endUtc).toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+      return `• **${event.title}** · ${start} to ${end} · ID ${event.id}`;
+    });
+    const more = livePerformanceEvents.filter(event => Date.parse(event.endUtc) > Date.now()).length > upcoming.length;
+    await interaction.reply({
+      content: lines.length ? `📅 **Live performance calendar**\n${lines.join('\n')}${more ? '\n…and more' : ''}` : '📅 No active or upcoming live performance blocks.',
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
+    });
+    return;
+  }
+
+  if (sub === 'live-add' || sub === 'live-cancel') {
+    if (!interaction.memberPermissions?.has('ManageMessages')) {
+      await interaction.reply({ content: '🔒 You need **Manage Messages** to change the live calendar.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (!liveScheduleReady || !liveScheduleStore) {
+      await interaction.reply({ content: '⚠️ The live calendar is read-only because durable Pinata scheduling is unavailable.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      let nextEvents;
+      if (sub === 'live-add') {
+        const title = interaction.options.getString('title', true).trim();
+        const startUtc = interaction.options.getString('start_utc', true).trim();
+        const endUtc = interaction.options.getString('end_utc', true).trim();
+        nextEvents = upsertLivePerformanceEvent(livePerformanceEvents, {
+          id: interaction.id,
+          title,
+          startUtc,
+          endUtc,
+        });
+        await liveScheduleStore.save({ events: nextEvents, weeklySchedule: liveWeeklySchedule });
+        livePerformanceEvents = nextEvents;
+        updateJukeLoopRadioSchedule({ events: nextEvents, schedule: defaultRadioSchedule(liveWeeklySchedule) });
+        await interaction.editReply(`✅ Scheduled **${title}** from ${new Date(startUtc).toISOString()} to ${new Date(endUtc).toISOString()} UTC. Event ID: \`${interaction.id}\`.`);
+      } else {
+        const eventId = interaction.options.getString('event_id', true).trim();
+        if (!livePerformanceEvents.some(event => event.id === eventId)) throw new Error('No live event has that ID');
+        nextEvents = removeLivePerformanceEvent(livePerformanceEvents, eventId);
+        await liveScheduleStore.save({ events: nextEvents, weeklySchedule: liveWeeklySchedule });
+        livePerformanceEvents = nextEvents;
+        updateJukeLoopRadioSchedule({ events: nextEvents, schedule: defaultRadioSchedule(liveWeeklySchedule) });
+        await interaction.editReply(`✅ Cancelled live performance event \`${eventId}\`.`);
+      }
+    } catch (error) {
+      await interaction.editReply(`❌ ${error.message}`);
+    }
+    return;
+  }
 
   if (sub === 'restart') {
     if (!interaction.memberPermissions?.has('ManageMessages')) {

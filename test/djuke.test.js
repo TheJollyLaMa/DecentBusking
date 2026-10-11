@@ -82,9 +82,17 @@ test('DJuke payment refuses wrong networks, price increases and low balances bef
 
 test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
-  for (const id of ['djuke-tab', 'djuke-panel', 'djuke-queue', 'djuke-price-tiers', 'djuke-connect']) {
+  for (const id of ['djuke-tab', 'djuke-panel', 'djuke-queue', 'djuke-price-tiers', 'djuke-connect', 'devert-tab', 'devert-panel']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
+  assert.match(html, /class="djuke-tab-mark"/);
+  assert.match(html, /class="djuke-note/);
+  assert.match(html, /class="djuke-tab-coin"/);
+  assert.match(html, /data-devert-ticket/);
+  assert.match(html, /aria-label="DVert advertising"/);
+  assert.match(html, /<span data-devert-ticket[^>]*>🎟️<\/span><span>DVert<\/span>/);
+  assert.doesNotMatch(html, />DeVert</);
   assert.match(html, /id="djuke-pay"[^>]*disabled/);
   assert.match(html, /id="djuke-panel"[^>]*inert/);
+  assert.match(html, /id="devert-panel"[^>]*inert/);
 });

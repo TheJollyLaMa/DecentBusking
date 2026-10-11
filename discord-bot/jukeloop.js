@@ -39,8 +39,15 @@ import {
   reconcileRatings,
   getWeightedShuffledPlaylist,
   getPlaylist,
+  getWeeklyPlayHistory,
   restoreTrackTitles,
 } from './playlist-store.js';
+import {
+  defaultRadioSchedule,
+  resolveActiveShow,
+  rankRotationTracks,
+  rankWeeklyTopTenTracks,
+} from '../js/radio-schedule.mjs';
 import { mediaTypeFor, isDiscordAttachmentWithinLimit } from './media.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -165,7 +172,7 @@ function reactionCount(message, emoji) {
     .reduce((total, reaction) => total + Math.max(0, (reaction.count || 0) - (reaction.me ? 1 : 0)), 0);
 }
 
-export function synchronizeDiscordRating(message, botUserId, { change, emoji, store = { getPlaylist, applyRating } } = {}) {
+export function synchronizeDiscordRating(message, botUserId, { change, emoji, now = Date.now(), store = { getPlaylist, applyRating } } = {}) {
   const playlist = store.getPlaylist();
   const parsed = message.author?.id === botUserId ? parseNowPlayingMessage(message.content || '') : null;
   const uploads = message.author?.bot ? [] : playlist.filter(entry => entry.messageId === message.id && entry.uploaderId === message.author?.id);
@@ -178,7 +185,7 @@ export function synchronizeDiscordRating(message, botUserId, { change, emoji, st
     likes: Math.max(0, likes - (emoji === '👍' ? change : 0)),
     dislikes: Math.max(0, dislikes - (emoji === '👎' ? change : 0)),
   } : undefined;
-  return store.applyRating(track.trackId, likes, dislikes, message.id, { initialCounts });
+  return store.applyRating(track.trackId, likes, dislikes, message.id, { initialCounts, now });
 }
 
 /** Recover announcements that were abandoned by a restart before normal collection. */
@@ -263,6 +270,13 @@ export function getJukeLoopNowPlaying() {
   return null;
 }
 
+export function updateJukeLoopRadioSchedule({ events, schedule }) {
+  for (const session of _sessions.values()) {
+    if (Array.isArray(events)) session.setLivePerformanceEvents(events);
+    if (Array.isArray(schedule)) session.setSchedule(schedule);
+  }
+}
+
 /**
  * Create (or replace) the JukeLoopSession for a guild.
  *
@@ -323,13 +337,19 @@ export class JukeLoopSession {
    * @param {import('discord.js').Client}            opts.client        - Discord client (for re-fetching CDN URLs)
     * @param {() => void} [opts.onTerminalDisconnect] - Called after Discord voice recovery fails
    */
-    constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke }) {
+    constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, schedule, livePerformanceEvents }) {
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
     this.ipfsGateway  = ipfsGateway;
     this.onTerminalDisconnect = onTerminalDisconnect;
     this.djuke        = djuke || null;
+    this.schedule     = Array.isArray(schedule) ? schedule : defaultRadioSchedule();
+    this.livePerformanceEvents = Array.isArray(livePerformanceEvents) ? livePerformanceEvents : [];
+    this._liveEventId = null;
+    this._activeShowKey = null;
+    this._scheduleWatcher = null;
+    this._started = false;
     this._currentPaid = null;
     this._djukeCooldownUntil = 0;
 
@@ -376,7 +396,12 @@ export class JukeLoopSession {
         };
       }
       this._nowPlaying = null;
-      if (!this._destroyed) {
+      const activeShow = resolveActiveShow({
+        now: Date.now(),
+        schedule: this.schedule,
+        livePerformanceEvents: this.livePerformanceEvents,
+      });
+      if (!this._destroyed && activeShow.type !== 'live_performance') {
         setTimeout(() => {
           this._playNext().catch((err) =>
             console.error('[jukeloop] Unhandled error in _playNext:', err),
@@ -430,13 +455,91 @@ export class JukeLoopSession {
   /** Begin the infinite JukeLoop. */
   async start() {
     if (this._destroyed) return;
+    this._started = true;
+    this._syncScheduledShow({ requestPlayback: false });
+    this._scheduleWatcher = setInterval(() => this._syncScheduledShow(), 1_000);
+    this._scheduleWatcher.unref?.();
     this._refreshQueue();
     await this._playNext();
   }
 
-  /** (Re)build the shuffled queue from the current weighted playlist. */
+  setLivePerformanceEvents(events) {
+    this.livePerformanceEvents = Array.isArray(events) ? events : [];
+    this._syncScheduledShow();
+  }
+
+  setSchedule(schedule) {
+    this.schedule = Array.isArray(schedule) ? schedule : defaultRadioSchedule();
+    this._syncScheduledShow();
+  }
+
+  _syncScheduledShow({ requestPlayback = true } = {}) {
+    if (this._destroyed) return;
+    const show = resolveActiveShow({
+      now: Date.now(),
+      schedule: this.schedule,
+      livePerformanceEvents: this.livePerformanceEvents,
+    });
+    const event = show.type === 'live_performance' ? show.event : null;
+    const eventId = event?.id || null;
+    const previousEventId = this._liveEventId;
+    const showKey = `${show.type}:${show.id || ''}`;
+
+    if (eventId !== previousEventId) {
+      this._liveEventId = eventId;
+      if (event) {
+        if (this.player.state.status !== AudioPlayerStatus.Idle) this.player.stop(true);
+        this.textChannel.send(`🔴 **Live performance block: ${event.title}** starts now.`, { allowedMentions: { parse: [] } }).catch(() => {});
+      } else if (previousEventId) {
+        this.textChannel.send('📻 **Live performance block ended.** JukeLoop is resuming.').catch(() => {});
+      }
+    }
+
+    if (showKey !== this._activeShowKey) {
+      const previousShowKey = this._activeShowKey;
+      this._activeShowKey = showKey;
+      if (show.type === 'weekly_top10' && !previousShowKey?.startsWith('weekly_top10:')) {
+        const message = show.window === 'final-payroll-hour'
+          ? `📊 **${show.label}** is live. Vote through the New York payroll cutoff at midnight for this week's chart.`
+          : `📊 **${show.label}** is live. React 👍 or 👎 to vote in this week's chart.`;
+        this.textChannel.send(message, { allowedMentions: { parse: [] } }).catch(() => {});
+      } else if (previousShowKey?.startsWith('weekly_top10:') && show.type === 'normal_rotation') {
+        const finalListenEnded = previousShowKey === 'weekly_top10:weekly-top10-final-listen';
+        const message = finalListenEnded
+          ? '📊 The weekly Top 10 final listen has ended at the payroll cutoff. Normal rotation resumes.'
+          : '📊 The Top 10 hype hour has ended. Normal rotation resumes.';
+        this.textChannel.send(message, { allowedMentions: { parse: [] } }).catch(() => {});
+      }
+      const enteringOrLeavingTopTen = previousShowKey &&
+        (previousShowKey.startsWith('weekly_top10:') || show.type === 'weekly_top10');
+      if (this._started && enteringOrLeavingTopTen && this.player.state.status !== AudioPlayerStatus.Idle) {
+        this.player.stop(true);
+      }
+      if (this._started && show.type !== 'live_performance') this._refreshQueue();
+    }
+
+    if (!event && previousEventId && requestPlayback && this._started) {
+      this._playNext().catch(error => console.error('[jukeloop] Could not resume after live event:', error.message));
+    }
+  }
+
+  /** (Re)build the active queue for the current show slot. */
   _refreshQueue() {
-    this._queue      = getWeightedShuffledPlaylist();
+    const activeShow = resolveActiveShow({
+      now: Date.now(),
+      schedule: this.schedule,
+      livePerformanceEvents: this.livePerformanceEvents,
+    });
+
+    if (activeShow.type === 'weekly_top10') {
+      const weeklyReport = getWeeklyPlayHistory({ weeks: 1, calendar: 'new-york' }).find(report => report.current);
+      const topTenPool = rankWeeklyTopTenTracks(getPlaylist(), weeklyReport);
+      this._queue = topTenPool.length > 0 ? topTenPool : getWeightedShuffledPlaylist();
+    } else if (activeShow.type === 'live_performance') {
+      this._queue = [];
+    } else {
+      this._queue = getWeightedShuffledPlaylist();
+    }
     this._queueIndex = 0;
   }
 
@@ -480,9 +583,16 @@ export class JukeLoopSession {
     // Collect ratings from the previous track's announcement
     await this._collectReactions();
 
+    const activeShow = resolveActiveShow({
+      now: Date.now(),
+      schedule: this.schedule,
+      livePerformanceEvents: this.livePerformanceEvents,
+    });
+    if (activeShow.type === 'live_performance') return;
+
     // Paid DJuke requests jump ahead without consuming the free rotation slot.
     let paid = null;
-    if (this.djuke && Date.now() >= this._djukeCooldownUntil) {
+    if (this.djuke && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
       paid = await this.djuke.nextPaid().catch((err) => {
         console.warn('[jukeloop] DJuke queue unavailable:', err.message);
         return null;
@@ -529,6 +639,18 @@ export class JukeLoopSession {
       await this._releasePaid('Paid recording could not be fetched');
       this._currentTrack = null;
       await this._playNext();
+      return;
+    }
+
+    const showAfterMediaLookup = resolveActiveShow({
+      now: Date.now(),
+      schedule: this.schedule,
+      livePerformanceEvents: this.livePerformanceEvents,
+    });
+    if (showAfterMediaLookup.type === 'live_performance') {
+      this._currentTrack = null;
+      if (paid) await this._releasePaid('Live performance block began before playback');
+      else this._queueIndex = Math.max(0, this._queueIndex - 1);
       return;
     }
 
@@ -655,6 +777,10 @@ export class JukeLoopSession {
   /** Stop all playback and disconnect from the voice channel. */
   destroy() {
     this._destroyed = true;
+    if (this._scheduleWatcher) {
+      clearInterval(this._scheduleWatcher);
+      this._scheduleWatcher = null;
+    }
     this._nowPlaying = null;
     if (this._currentPaid && this.djuke) {
       this.djuke.fail(this._currentPaid, new Error('Radio stopped')).catch(() => {});

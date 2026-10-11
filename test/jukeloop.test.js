@@ -431,3 +431,77 @@ test('anonymous site votes are idempotent per browser and only accepted for the 
   assert.equal(submitJukeLoopVote({ ...ballot, playId: 'track:2000', vote: -1 }, saveVote).duplicate, false);
   assert.deepEqual(calls, [['track', 1], ['track', -1]]);
 });
+
+test('Discord reaction synchronization preserves the event timestamp for payroll-week attribution', async () => {
+  const { synchronizeDiscordRating } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js')).href);
+  const eventAt = Date.parse('2026-10-12T03:59:59Z');
+  let ratingOptions;
+  const store = {
+    getPlaylist: () => [{ trackId: 'weekly-track' }],
+    applyRating: (_trackId, _likes, _dislikes, _messageId, options) => { ratingOptions = options; return {}; },
+  };
+  synchronizeDiscordRating({
+    id: 'announcement',
+    author: { id: 'bot', bot: true },
+    content: '🎵 Now playing: **Song** by *Artist*\nTrack ID: ||weekly-track||',
+    reactions: { cache: new Map([['up', { emoji: { name: '👍' }, count: 2, me: true }]]) },
+  }, 'bot', { change: 1, emoji: '👍', now: eventAt, store });
+  assert.equal(ratingOptions.now, eventAt);
+});
+
+test('scheduled live performance blocks paid picks and resumes the queue when cancelled', async (t) => {
+  const { JukeLoopSession } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js')).href);
+  const notices = [];
+  let paidPicks = 0;
+  const session = new JukeLoopSession({
+    voiceChannel: { guild: { id: 'live-schedule-test' } },
+    textChannel: { send: async message => notices.push(message) },
+    client: {},
+    djuke: { nextPaid: async () => { paidPicks++; return null; } },
+  });
+  t.after(() => session.destroy());
+  session._started = true;
+  const resume = session._playNext;
+  let resumeCalls = 0;
+  session._playNext = async () => { resumeCalls++; };
+  const now = Date.now();
+  session.setLivePerformanceEvents([{
+    id: 'live-test-event', title: 'Live Test Set',
+    startUtc: new Date(now - 1000).toISOString(),
+    endUtc: new Date(now + 60_000).toISOString(),
+  }]);
+  session._playNext = resume;
+  await session._playNext();
+  assert.equal(paidPicks, 0);
+  assert.equal(session._liveEventId, 'live-test-event');
+  session._playNext = async () => { resumeCalls++; };
+  session.setLivePerformanceEvents([]);
+  assert.equal(session._liveEventId, null);
+  assert.equal(resumeCalls, 1);
+  assert.match(notices[0], /Live performance block: Live Test Set/);
+});
+
+test('JukeLoop announces the Top 10 final voting hour and its close', async (t) => {
+  const { JukeLoopSession } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js')).href);
+  const notices = [];
+  const session = new JukeLoopSession({
+    voiceChannel: { guild: { id: 'top-ten-schedule-test' } },
+    textChannel: { send: async message => notices.push(message) },
+    client: {},
+  });
+  t.after(() => session.destroy());
+  const now = new Date();
+  session._started = true;
+  session.schedule = [
+    { id: 'friday-top10-hype', type: 'weekly_top10', label: 'Friday Top 10 Hype Hour',
+      weekday: now.getUTCDay(), startHourUtc: now.getUTCHours(), endHourUtc: now.getUTCHours() + 1 },
+    { id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation' },
+  ];
+  session._activeShowKey = 'normal_rotation:normal-rotation';
+  session._syncScheduledShow();
+  assert.match(notices[0], /Friday Top 10 Hype Hour/);
+  assert.match(notices[0], /React/);
+  session.schedule = [{ id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation' }];
+  session._syncScheduledShow();
+  assert.match(notices[1], /Top 10 hype hour has ended/i);
+});
