@@ -470,6 +470,9 @@ export class JukeLoopSession {
       guildId:        this.voiceChannel.guild.id,
       adapterCreator: this.voiceChannel.guild.voiceAdapterCreator,
     });
+    this.connection.on('error', error => {
+      console.error(`[jukeloop] Voice connection error in ${this.voiceChannel.name} (${this.voiceChannel.id}):`, error.message);
+    });
 
     await entersState(this.connection, VoiceConnectionStatus.Ready, 30_000);
     this.connection.subscribe(this.player);
