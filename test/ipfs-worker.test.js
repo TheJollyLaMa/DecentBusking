@@ -84,9 +84,9 @@ test('ad library requires a fresh wallet signature and binds the read to that wa
   const origin = 'https://busking.example';
   const issuedAt = new Date().toISOString();
   let requestedAddress;
-  const ads = [{ trackId: 'ad-one', state: 'ready' }];
+  const library = { ads: [{ trackId: 'ad-one', state: 'ready' }], metadataUnavailable: 1 };
   const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address,
-    getDevertAds: async ({ address }) => { requestedAddress = address; return ads; } });
+    getDevertAds: async ({ address }) => { requestedAddress = address; return library; } });
   await withServer(handler, async base => {
     const authorization = { address: owner.address, origin, issuedAt };
     const signature = await owner.signMessage(buildDevertAdsAuthorizationMessage(authorization));
@@ -95,7 +95,7 @@ test('ad library requires a fresh wallet signature and binds the read to that wa
     const response = await request({ ...authorization, signature });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('access-control-allow-origin'), origin);
-    assert.deepEqual((await response.json()).ads, ads);
+    assert.deepEqual(await response.json(), library);
     assert.equal(requestedAddress, owner.address);
     assert.equal((await request({ ...authorization, signature }, 'https://untrusted.example')).status, 400);
     assert.equal((await request({ ...authorization, address: Wallet.createRandom().address, signature })).status, 400);

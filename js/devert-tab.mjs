@@ -26,7 +26,7 @@ async function readWalletAds(service, wallet) {
     devertAdsAuthorization = null;
     throw new Error(result.error || `Ad library unavailable (${response.status})`);
   }
-  return Array.isArray(result.ads) ? result.ads : [];
+  return { ads: Array.isArray(result.ads) ? result.ads : [], metadataUnavailable: Number(result.metadataUnavailable || 0) };
 }
 
 function mediaTypeForAdFile(file) {
@@ -455,9 +455,12 @@ export function initDevertTab() {
       campaignList.replaceChildren();
       const walletAddress = window._wallet?.address;
       let ads = [];
+      let metadataUnavailable = 0;
       if (walletAddress) {
-        ads = await readWalletAds(service, window._wallet);
+        const library = await readWalletAds(service, window._wallet);
         if (request !== generation || !isOpen()) return;
+        ads = library.ads;
+        metadataUnavailable = library.metadataUnavailable;
       }
       for (const ad of ads) {
         const item = node('li', undefined, 'devert-campaign');
@@ -482,7 +485,9 @@ export function initDevertTab() {
         campaignList.append(item);
       }
       campaignStatus.textContent = !walletAddress ? 'Connect your wallet to view your ads.'
-        : ads.length ? `${ads.length} ad${ads.length === 1 ? '' : 's'} linked to this wallet.` : 'No ads submitted from this wallet yet.';
+        : metadataUnavailable && !ads.length ? 'IPFS gateways are rate-limiting NFT metadata. Your ad library could not be fully checked; refresh shortly.'
+          : metadataUnavailable ? `${ads.length} ad${ads.length === 1 ? '' : 's'} found; ${metadataUnavailable} NFT metadata item${metadataUnavailable === 1 ? '' : 's'} could not be checked yet.`
+            : ads.length ? `${ads.length} ad${ads.length === 1 ? '' : 's'} linked to this wallet.` : 'No ads submitted from this wallet yet.';
       radioStatus.textContent = 'Main-radio ads follow the ten-song program; AdLoop is a separate 24/7 channel.';
       await checkAdLoopReady();
       syncCheckout();

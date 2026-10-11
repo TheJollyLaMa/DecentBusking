@@ -302,7 +302,8 @@ export function createWorkerRequestHandler({
         if (verifyMessage(buildDevertAdsAuthorizationMessage({ address, origin, issuedAt }), signature).toLowerCase() !== address.toLowerCase()) {
           throw new Error('Ad library signature does not match the connected wallet');
         }
-        sendJson(response, 200, { ads: await getDevertAds({ address }) }, corsOrigin);
+        const library = await getDevertAds({ address });
+        sendJson(response, 200, Array.isArray(library) ? { ads: library } : library, corsOrigin);
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/devert/loop') {

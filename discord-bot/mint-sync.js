@@ -38,6 +38,7 @@ export async function readOwnedDevertAds({ collections, address, fetchImpl = fet
   metadataReader = fetchMintMetadata, log = console } = {}) {
   if (!Array.isArray(collections) || !/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('DeVert ad recovery requires collections and a wallet');
   const ads = new Map();
+  let metadataUnavailable = 0;
   for (const collection of collections) {
     const nextTokenId = Number(await withRetry(() => collection.contract.nextTokenId(), retry));
     if (!Number.isSafeInteger(nextTokenId) || nextTokenId < 0 || nextTokenId > 100_000) throw new Error('Invalid NFT token range');
@@ -63,11 +64,12 @@ export async function readOwnedDevertAds({ collections, address, fetchImpl = fet
           state: 'ready', campaignId: null, expiresAt: null, secondsRemaining: 0,
         });
       } catch (error) {
+        metadataUnavailable++;
         log.warn(`[mint-sync] Ad metadata unavailable for owned token ${tokenId}: ${error.message}`);
       }
     }
   }
-  return [...ads.values()];
+  return { ads: [...ads.values()], metadataUnavailable };
 }
 
 export async function fetchMintMetadata(uri, fetchImpl, { attempts = 3, baseDelayMs = 1_000,

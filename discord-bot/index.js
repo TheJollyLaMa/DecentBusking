@@ -778,8 +778,8 @@ async function main() {
       const normalizedAddress = address.toLowerCase();
       const localAds = getDevertAdsForWallet(address, snapshot?.campaigns || []);
       const cached = _devertAdsOnChainCache.get(normalizedAddress);
-      let chainAds = cached && cached.expiresAt > Date.now() ? cached.ads : null;
-      if (!chainAds) {
+      let chainResult = cached && cached.expiresAt > Date.now() ? cached.result : null;
+      if (!chainResult) {
         const provider = new JsonRpcProvider(config.baseRpcUrl);
         const collections = config.nftContractAddresses.map(contractAddress => ({ contractAddress,
           contract: new Contract(contractAddress, [
@@ -787,12 +787,13 @@ async function main() {
             'function balanceOf(address,uint256) view returns(uint256)',
             'function uri(uint256) view returns(string)',
           ], provider) }));
-        chainAds = await readOwnedDevertAds({ collections, address: normalizedAddress, pauseMs: 90,
+        chainResult = await readOwnedDevertAds({ collections, address: normalizedAddress, pauseMs: 90,
           log: { warn: message => console.warn(message) } });
-        _devertAdsOnChainCache.set(normalizedAddress, { ads: chainAds, expiresAt: Date.now() + 5 * 60_000 });
+        _devertAdsOnChainCache.set(normalizedAddress, { result: chainResult,
+          expiresAt: Date.now() + (chainResult.metadataUnavailable ? 60_000 : 5 * 60_000) });
       }
       const mergedAds = new Map();
-      for (const ad of [...chainAds, ...localAds]) mergedAds.set(ad.ipfsCid, ad);
+      for (const ad of [...chainResult.ads, ...localAds]) mergedAds.set(ad.ipfsCid, ad);
       for (const ad of mergedAds.values()) {
         const campaign = snapshot?.campaigns?.find(item => item.advertiser?.toLowerCase() === normalizedAddress &&
           item.audioURI === `ipfs://${ad.ipfsCid}` && Date.parse(item.startedAt) <= Date.now() && Date.now() < Date.parse(item.expiresAt));
@@ -801,7 +802,8 @@ async function main() {
         ad.expiresAt = campaign?.expiresAt || null;
         ad.secondsRemaining = campaign ? Math.max(0, Math.ceil((Date.parse(campaign.expiresAt) - Date.now()) / 1000)) : 0;
       }
-      return [...mergedAds.values()].sort((first, second) => first.title.localeCompare(second.title));
+      return { ads: [...mergedAds.values()].sort((first, second) => first.title.localeCompare(second.title)),
+        metadataUnavailable: chainResult.metadataUnavailable };
     },
     getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null },
     onDevertLoopVote: payload => _devertLoopWorker ? _devertLoopWorker.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),

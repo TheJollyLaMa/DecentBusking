@@ -40,14 +40,28 @@ test('on-chain ad library recovers wallet-owned DecentAdvert NFTs from legacy me
     balanceOf: async (address, tokenId) => address === owner && tokenId === 1 ? 1n : 0n,
     uri: async tokenId => `ipfs://metadata-${tokenId}`,
   } };
-  const ads = await readOwnedDevertAds({ collections: [collection], address: owner, pauseMs: 0,
+  const result = await readOwnedDevertAds({ collections: [collection], address: owner, pauseMs: 0,
     metadataReader: async () => ({ name: 'DecentAdvert0001', videoUrl: `ipfs://${mediaCid}`, mediaType: 'video/mp4' }),
     log: { warn() {} } });
+  const ads = result.ads;
   assert.equal(ads.length, 1);
+  assert.equal(result.metadataUnavailable, 0);
   assert.equal(ads[0].tokenId, '1');
   assert.equal(ads[0].state, 'ready');
   assert.equal(ads[0].ipfsCid, mediaCid);
   assert.equal(ads[0].mediaType, 'video/mp4');
+});
+
+test('wallet ad recovery reports metadata gaps instead of treating the library as empty', async () => {
+  const { readOwnedDevertAds } = await import(moduleUrl);
+  const owner = `0x${'1'.repeat(40)}`;
+  const collection = { contractAddress: `0x${'2'.repeat(40)}`, contract: {
+    nextTokenId: async () => 1n, balanceOf: async () => 1n, uri: async () => 'ipfs://unavailable',
+  } };
+  const result = await readOwnedDevertAds({ collections: [collection], address: owner, pauseMs: 0,
+    metadataReader: async () => { throw new Error('gateway rate limit'); }, log: { warn() {} } });
+  assert.deepEqual(result.ads, []);
+  assert.equal(result.metadataUnavailable, 1);
 });
 
 test('extracts the audio CID from DecentNFT metadata', async () => {
