@@ -83,7 +83,8 @@ fund creation, worker-role changes, and song registration require Base gas.
 1. **Ship the remaining sprint code.** The DJuke prototype is already deployed;
   publish the reviewed local schedule/calendar and DeVert read-only UI changes.
   Expected: the schedule endpoint returns 200, DJuke shows the live catalog, and
-  DVert clearly identifies that campaigns and the ad-only broadcast are not live;
+  DVert clearly identifies that campaigns are not live; DeVert spots use the
+  same scheduled radio rotation;
   regular radio playback is unchanged.
 2. **Optional community mirror.** The shared Pinata checkpoint is primary and saves
     never wait for a mirror. Visitors open the pin chooser from the existing header
@@ -117,28 +118,44 @@ fund creation, worker-role changes, and song registration require Base gas.
 Rollback: unset `DJUKE_PAYMENTS_ENABLED` or `djukeContractAddress` to hide payments;
 the contract's `pauseRequests` stops new purchases while queued plays still settle.
 
-## DeVert advertising candidate
+## DeVert Advertising
 
-The separate, undeployed DeVert candidate charges at least 5 USDC for a seven-day
-campaign. Main-radio delivery is limited to one ad slot per ten completed music
-plays. When all current slots are seated, a new offer must clear the cheapest
-seated offer by at least 0.01 USDC. Campaigns that do not make the main-radio cut
-remain in the 24/7 DeVert-only stream for their paid week; there are no refunds.
+The undeployed `DeVert_v0_1` candidate in DecentMarket now implements seven-day
+campaign purchases, a 5 USDC minimum, 0.01 USDC minimum overbids for seated
+slots, and 45% Playback / 45% Top 10 / 8% Pinners / 2% Repo-dev settlement. A
+scheduler role reports completed music plays and idempotent campaign impressions.
+The main radio remains the single broadcast: seated campaigns join its rotation
+after each ten completed audible music plays. DJuke priority boosts are linked
+only to an on-chain paid request by the campaign advertiser, with each request
+ID usable once.
 
-Campaign payments route 45% to Playback, 45% to Top 10, 8% to Pinners and 2% to
-Repo-dev. The public DVert tab now shows the broadcast/campaign status and can
-display the read-only confirmed campaign snapshot when the worker is deployed
-with `DEVERT_CONTRACT_ADDRESS`. It does not yet play audio or accept campaign
-payments, and the contract has not been deployed.
+The public DVert tab now has a wallet-gated purchase form. It requires a confirmed
+campaign snapshot from the configured contract, quotes the current on-chain
+minimum, checks a user-set maximum, and approves only the exact USDC offer. The
+checkout remains hidden while `devertContractAddress` is empty or the confirmed
+contract is paused. New deployments start paused. Main JukeLoop can insert a
+seated IPFS ad after each ten completed audible music plays; campaign impressions
+are checkpointed to Pinata before submission and deduplicated on-chain. The main
+radio scheduler reuses the existing DJuke fulfiller wallet by default; its
+private key stays in the existing Render service environment. The same worker
+address receives DeVert's scheduler role, while the project owner remains the
+contract admin. Each campaign purchase adds a Base ETH top-up quoted at 500,000
+scheduler gas units times the current fee cap. The contract validates coverage
+against the included transaction's effective gas price and forwards the attached
+ETH to the worker; any fee-cap surplus remains as worker gas reserve. The top-up
+is separate from the USDC offer/split and from the buyer's transaction gas.
 
-Before deployment, finish these gates in order: implement advertiser quote and
-purchase controls with exact USDC approval and a user-set maximum; implement the
-24/7 IPFS ad player and the one-per-ten-music-plays main-radio insertion; add a
-dedicated scheduler service with durable, idempotent impression records and
-weekly market updates; verify any DJuke purchase on Base before linking its
-unique ID, so a bump is never charged twice; then rehearse campaign expiry,
-overbids, fee routing, failed playback, restart recovery and role permissions on
-a fork/testnet. Keep DeVert payments disabled until those checks pass.
+**Current gate:** the contract has passed local unit tests and a Base-fork
+rehearsal; it is not deployed, and no advertiser purchase or ad playback has
+occurred. The fork rehearsal purchased a campaign against Base USDC/router state,
+checked the exact four-fund split, recorded one main-radio impression, and rejected
+replay; it did not test Discord voice playback or crash/restart recovery. Before
+calling DVert live, run a dedicated testnet/staging rehearsal for purchase,
+expiry, overbids, all four router balances, main-radio playback, duplicate/restart
+recovery and scheduler permissions. Then deploy with `npm run deploy:devert:base`
+(dry-run by default), using the existing DJuke worker address for
+`DEVERT_SCHEDULER_ADDRESS`. Keep campaign checkout disabled until main-radio
+playback and impression recovery are verified.
 
 ## Verification so far
 
@@ -344,11 +361,11 @@ working browser session or another available gateway to complete the audit.
 
 Before widening the prototype audience, rotate the worker key and Pinata token,
 verify all three router balances, confirm journal persistence with the Mac mirror
-client, and complete a controlled paid-play/fulfillment rehearsal. The local
-radio-calendar UI and worker routes still need to be published. DeVert remains
-undeployed and needs advertiser purchase controls, reliable audio delivery,
-durable impression/market scheduling, verified DJuke-purchase linking and its
-own testnet rehearsal. Keep DeVert payments off until those gates pass.
+client, and complete a controlled paid-play/fulfillment rehearsal. The radio
+calendar is published and its live endpoint is verified. DeVert remains
+undeployed; its candidate purchase/playback code is local and needs deployment,
+separate scheduler secrets/roles, voice-service configuration and end-to-end
+rehearsal before campaign payments are enabled.
 
 ## Preserve the existing system
 

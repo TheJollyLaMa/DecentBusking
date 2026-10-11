@@ -6,6 +6,14 @@ const BLOCK_HASH = `0x${'ab'.repeat(32)}`;
 const TIMESTAMP = 1_800_000_000;
 const WEEK_ID = Math.floor(TIMESTAMP / (7 * 24 * 60 * 60));
 
+test('DeVert scheduler reuses the DJuke worker key unless an explicit scheduler key is configured', async () => {
+  const { resolveDevertSchedulerPrivateKey } = await import('../discord-bot/devert.js');
+  assert.equal(resolveDevertSchedulerPrivateKey({ DJUKE_FULFILLER_PRIVATE_KEY: 'worker-key' }), 'worker-key');
+  assert.equal(resolveDevertSchedulerPrivateKey({ DEVERT_SCHEDULER_PRIVATE_KEY: 'devert-key',
+    DJUKE_FULFILLER_PRIVATE_KEY: 'worker-key' }), 'devert-key');
+  assert.equal(resolveDevertSchedulerPrivateKey({}), null);
+});
+
 function fakeProvider({ chainId = 8453, blockHashes = [BLOCK_HASH, BLOCK_HASH] } = {}) {
   let reads = 0;
   return {
@@ -51,8 +59,9 @@ function fakeContract({ record = campaign() } = {}) {
     mainRadioMarket: async (weekId, options) => {
       assert.equal(Number(weekId), WEEK_ID);
       assert.equal(options.blockTag, BLOCK_NUMBER);
-      return { slots: 4n, seated: 2n, lowestSeatedOfferUnits: 6_000_000n };
+      return { slots: 4n, seated: 2n, lowestSeatedOfferUnits: 6_000_000n, mainRadioImpressions: 1n };
     },
+    paused: async () => false,
   };
 }
 
@@ -68,10 +77,24 @@ test('DeVert reader returns a canonical confirmed Base campaign snapshot', async
   assert.equal(snapshot.blockNumber, BLOCK_NUMBER);
   assert.equal(snapshot.blockHash, BLOCK_HASH);
   assert.equal(snapshot.weekId, WEEK_ID);
+  assert.equal(snapshot.paused, false);
   assert.equal(snapshot.campaigns[0].campaignId, '7');
   assert.equal(snapshot.campaigns[0].offerUnits, '5000000');
   assert.equal(snapshot.campaigns[0].startedAt, new Date((TIMESTAMP - 60) * 1000).toISOString());
-  assert.deepEqual(snapshot.market, { slots: 4, seated: 2, lowestSeatedOfferUnits: '6000000' });
+  assert.deepEqual(snapshot.market, { slots: 4, seated: 2, lowestSeatedOfferUnits: '6000000', mainRadioImpressions: 1 });
+});
+
+test('DeVert reader includes a still-active campaign indexed from the previous week', async () => {
+  const { createDevertCampaignReader } = await import('../discord-bot/devert.js');
+  const previousWeekCampaign = fakeContract({ record: campaign({ weekId: BigInt(WEEK_ID - 1) }) });
+  const read = createDevertCampaignReader({
+    contractAddress: `0x${'22'.repeat(20)}`,
+    provider: fakeProvider(),
+    contract: previousWeekCampaign,
+  });
+  const snapshot = await read();
+  assert.equal(snapshot.weekId, WEEK_ID);
+  assert.equal(snapshot.campaigns[0].weekId, WEEK_ID - 1);
 });
 
 test('DeVert reader rejects wrong-chain and reorged snapshots', async () => {

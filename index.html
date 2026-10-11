@@ -85,14 +85,25 @@
   <aside id="devert-panel" aria-label="DVert advertising" aria-hidden="true" inert>
     <div class="devert-heading"><div><h2>DVert</h2><p>Advertiser campaigns</p></div><button id="devert-close" type="button" aria-label="Close DVert">✕</button></div>
     <div class="devert-body">
-      <section class="devert-broadcast-state" aria-labelledby="devert-broadcast-title">
-        <h3 id="devert-broadcast-title">24/7 Ad Broadcast</h3>
-        <p id="devert-broadcast-status" role="status" aria-live="polite">Audio broadcast is not live yet.</p>
+      <section class="devert-radio-state" aria-labelledby="devert-radio-title">
+        <h3 id="devert-radio-title">Main Radio Ads</h3>
+        <p id="devert-radio-status" role="status" aria-live="polite">Campaigns join the main radio rotation.</p>
       </section>
       <div class="devert-campaign-heading"><h3>Active Campaigns</h3><button id="devert-refresh" type="button" aria-label="Refresh DVert campaigns" title="Refresh campaigns">↻</button></div>
       <ol id="devert-campaigns" aria-label="Active DVert campaigns"></ol>
       <p id="devert-campaign-status" role="status" aria-live="polite">Campaign contract is not deployed.</p>
       <p class="devert-checkout-status">Campaign checkout will appear when the verified contract and delivery service are live.</p>
+      <p id="devert-minimum-offer" class="devert-checkout-status">Campaign checkout is unavailable until a contract is configured.</p>
+      <button id="devert-connect-wallet" type="button" hidden>Connect Base wallet</button>
+      <form id="devert-purchase-form" hidden>
+        <label>Campaign title<input id="devert-title" type="text" maxlength="160" required /></label>
+        <label>IPFS audio URI<input id="devert-audio-uri" type="text" inputmode="url" placeholder="ipfs://..." required /></label>
+        <label>Your offer (USDC)<input id="devert-offer" type="number" min="5" step="0.01" value="5.00" required /></label>
+        <label>Maximum you authorize (USDC)<input id="devert-max-payment" type="number" min="5" step="0.01" value="5.00" required /></label>
+        <p class="devert-checkout-status">Each purchase also includes a gas-priced Base ETH top-up for the radio worker. Transaction network gas is separate.</p>
+        <button id="devert-purchase" type="submit" disabled>Purchase 7-day campaign</button>
+      </form>
+      <p id="devert-purchase-status" role="status" aria-live="polite"></p>
     </div>
     <button id="devert-profile" type="button">Creator Profile</button>
   </aside>

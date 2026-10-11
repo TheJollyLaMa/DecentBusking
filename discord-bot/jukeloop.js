@@ -134,6 +134,7 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
           filename: nowPlaying.filename || null,
           mediaType: mediaTypeFor(nowPlaying.filename, nowPlaying.mediaType),
           ipfsCid: nowPlaying.ipfsCid || null,
+          isDevert: nowPlaying.isDevert === true,
           startedAt: nowPlaying.startedAt,
           positionMs: Math.max(0, now - nowPlaying.startedAt),
         }
@@ -248,7 +249,7 @@ export function submitJukeLoopVote({ playId, voterId, vote }, saveVote = applySi
       typeof voterId !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(voterId) ||
       (vote !== 1 && vote !== -1)) throw new Error('Invalid radio vote');
   const session = [..._sessions.values()].find((entry) =>
-    !entry._destroyed && entry._nowPlaying?.audible && entry._nowPlaying.playId === playId);
+    !entry._destroyed && entry._nowPlaying?.audible && !entry._nowPlaying.isDevert && entry._nowPlaying.playId === playId);
   if (!session) throw new Error('This radio play has ended or is not audible yet');
   if (session._siteVotePlayId !== playId) {
     session._siteVotePlayId = playId;
@@ -337,13 +338,16 @@ export class JukeLoopSession {
    * @param {import('discord.js').Client}            opts.client        - Discord client (for re-fetching CDN URLs)
     * @param {() => void} [opts.onTerminalDisconnect] - Called after Discord voice recovery fails
    */
-    constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, schedule, livePerformanceEvents }) {
+    constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback, schedule, livePerformanceEvents }) {
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
     this.ipfsGateway  = ipfsGateway;
     this.onTerminalDisconnect = onTerminalDisconnect;
     this.djuke        = djuke || null;
+    this.devertPlayback = devertPlayback || null;
+    this._currentDevertAd = null;
+    this._failedDevertCampaignIds = new Set();
     this.schedule     = Array.isArray(schedule) ? schedule : defaultRadioSchedule();
     this.livePerformanceEvents = Array.isArray(livePerformanceEvents) ? livePerformanceEvents : [];
     this._liveEventId = null;
@@ -382,7 +386,7 @@ export class JukeLoopSession {
       }
     });
 
-    this.player.on(AudioPlayerStatus.Idle, () => {
+    this.player.on(AudioPlayerStatus.Idle, async () => {
       if (this._nowPlaying?.audible) {
         const endedAt = Date.now();
         this._completedPlay = {
@@ -394,7 +398,22 @@ export class JukeLoopSession {
           firstWeekBonus: this._nowPlaying.firstWeekBonus,
           announcementId: this._announcementMsg?.id,
         };
+        if (this.devertPlayback) {
+          try {
+            if (this._currentDevertAd) {
+              await this.devertPlayback.recordCampaignImpression({ campaignId: this._currentDevertAd.campaignId,
+                radioPlayId: this._nowPlaying.playId, mainRadio: this._currentDevertAd.mainRadio,
+                audibleMs: this._completedPlay.audibleMs });
+            } else {
+              await this.devertPlayback.recordCompletedMusicPlay({ playId: this._nowPlaying.playId,
+                audibleMs: this._completedPlay.audibleMs });
+            }
+          } catch (error) {
+            console.warn('[devert] Durable play record deferred:', error.message);
+          }
+        }
       }
+      this._currentDevertAd = null;
       this._nowPlaying = null;
       const activeShow = resolveActiveShow({
         now: Date.now(),
@@ -412,6 +431,19 @@ export class JukeLoopSession {
 
     this.player.on('error', (err) => {
       console.error('[jukeloop] Audio player error:', err.message);
+      if (this._currentDevertAd) {
+        this._failedDevertCampaignIds.add(this._currentDevertAd.campaignId);
+        this._currentDevertAd = null;
+        this._nowPlaying = null;
+        this._completedPlay = null;
+        this._currentTrack = null;
+        this._announcementMsg = null;
+        this._announcementContext = null;
+      }
+      if (this._ffmpeg) {
+        try { this._ffmpeg.kill(); } catch {}
+        this._ffmpeg = null;
+      }
       if (!this._destroyed) {
         setTimeout(() => {
           this._playNext().catch(() => {});
@@ -603,13 +635,19 @@ export class JukeLoopSession {
       }
     }
 
+    let devertAd = null;
+    if (!paid && this.devertPlayback && activeShow.type !== 'weekly_top10') {
+      devertAd = await this.devertPlayback.nextMainRadioAd({ excludeCampaignIds: [...this._failedDevertCampaignIds] })
+        .catch(error => { console.warn('[devert] Main-radio ad selection deferred:', error.message); return null; });
+    }
+
     // Refill + reshuffle if we've exhausted the current pass
-    if (!paid && this._queueIndex >= this._queue.length) {
+    if (!paid && !devertAd && this._queueIndex >= this._queue.length) {
       this._refreshQueue();
     }
 
     // Nothing to play → wait and retry
-    if (!paid && this._queue.length === 0) {
+    if (!paid && !devertAd && this._queue.length === 0) {
       await this.textChannel
         .send(
           '📭 The JukeLoop playlist is empty.\n' +
@@ -622,9 +660,10 @@ export class JukeLoopSession {
       return;
     }
 
-    const track = paid ? paid.track : this._queue[this._queueIndex];
-    if (!paid) this._queueIndex++;
+    const track = paid ? paid.track : devertAd ? devertAd.track : this._queue[this._queueIndex];
+    if (!paid && !devertAd) this._queueIndex++;
     this._currentPaid     = paid?.record || null;
+    this._currentDevertAd = devertAd;
     this._currentTrack    = track;
     this._announcementMsg = null;
     this._announcementContext = null;
@@ -633,6 +672,7 @@ export class JukeLoopSession {
     const url = await this._getFreshUrl(track);
     if (!url) {
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
+      if (devertAd) this._failedDevertCampaignIds.add(devertAd.campaignId);
       await this.textChannel
         .send(`⚠️ Skipping **${track.title}** — the original upload could not be found.`)
         .catch(() => {});
@@ -649,6 +689,7 @@ export class JukeLoopSession {
     });
     if (showAfterMediaLookup.type === 'live_performance') {
       this._currentTrack = null;
+      this._currentDevertAd = null;
       if (paid) await this._releasePaid('Live performance block began before playback');
       else this._queueIndex = Math.max(0, this._queueIndex - 1);
       return;
@@ -669,6 +710,7 @@ export class JukeLoopSession {
         filename: track.filename || null,
         mediaType: mediaTypeFor(track.filename, track.mediaType),
         ipfsCid: track.ipfsCid || null,
+        isDevert: !!devertAd,
         firstWeekBonus: track.firstWeekBonus === true,
         startedAt: Date.now(),
         audible: false,
@@ -683,11 +725,14 @@ export class JukeLoopSession {
         url,
         paid: !!this._currentPaid,
       };
+      const message = devertAd
+        ? `📢 **Sponsored campaign:** ${track.title} · campaign #${devertAd.campaignId}`
+        : buildNowPlayingMessage(track, announcementContext);
       const msg = await this.textChannel
-        .send(buildNowPlayingMessage(track, announcementContext))
+        .send(message)
         .catch(() => null);
 
-      if (msg) {
+      if (msg && !devertAd) {
         await msg.react('👍').catch(() => {});
         await msg.react('👎').catch(() => {});
         this._announcementMsg = msg;
@@ -697,6 +742,10 @@ export class JukeLoopSession {
       console.log(`[jukeloop] Now playing: "${track.title}" by ${track.uploader}`);
     } catch (err) {
       console.error('[jukeloop] Failed to start track:', err.message);
+      if (devertAd) {
+        this._failedDevertCampaignIds.add(devertAd.campaignId);
+        this._currentDevertAd = null;
+      }
       await this.textChannel
         .send(`⚠️ Skipping **${track.title}**: ${err.message}`)
         .catch(() => {});
@@ -725,6 +774,8 @@ export class JukeLoopSession {
     this._announcementMsg = null;
     this._currentTrack    = null;
     this._announcementContext = null;
+
+    if (completedPlay?.trackId?.startsWith('devert:')) return;
 
     if (trackRef && completedPlay?.trackId === trackRef.trackId) {
       const recorded = recordAudiblePlay(trackRef.trackId, completedPlay);

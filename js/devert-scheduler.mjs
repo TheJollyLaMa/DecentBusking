@@ -58,8 +58,6 @@ export function planDevertQueues({ campaigns, completedSongPlays, now = Date.now
   const ranked = [...active].sort(comparePriority);
   return { at: new Date(now).toISOString(), completedSongPlays, songsPerMainAd, mainRadioSlots,
     mainRadio: ranked.slice(0, mainRadioSlots),
-    devertBroadcast: [...active].sort((first, second) =>
-      (first.devertPlays || 0) - (second.devertPlays || 0) || comparePriority(first, second)),
     mainRadioOverflow: ranked.slice(mainRadioSlots) };
 }
 

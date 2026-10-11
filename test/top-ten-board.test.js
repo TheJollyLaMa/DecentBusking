@@ -39,6 +39,13 @@ test('currently playing song stays highlighted when it is outside the ranked top
   assert.equal(rows.filter(row => row.rank).length, 10);
 });
 
+test('campaign ads are not inserted into the public song leaderboard', async () => {
+  const { topTenDisplayRows } = await import(url);
+  const songs = [{ trackId: 'song-1', title: 'Song', votes: 3, plays: 2 }];
+  const rows = topTenDisplayRows(songs, { trackId: 'devert:7', title: 'Ad', uploader: 'DeVert advertiser', isDevert: true });
+  assert.deepEqual(rows.map(row => row.trackId), ['song-1']);
+});
+
 test('pullout leaderboard exposes public weekly ranking and a distinct current-playing state', () => {
   const html = require('node:fs').readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /id="top-ten-tab"/);

@@ -8,7 +8,7 @@ export function rankTopTenSongs(tracks, nowPlayingId = '') {
 
 export function topTenDisplayRows(tracks, nowPlaying) {
   const ranked = rankTopTenSongs(tracks, nowPlaying?.trackId);
-  if (!nowPlaying?.trackId || ranked.some(track => track.trackId === nowPlaying.trackId)) return ranked;
+  if (!nowPlaying?.trackId || nowPlaying.isDevert || ranked.some(track => track.trackId === nowPlaying.trackId)) return ranked;
   const recorded = tracks.find(track => track.trackId === nowPlaying.trackId);
   return [{ ...(recorded || {}), trackId: nowPlaying.trackId, title: nowPlaying.title || recorded?.title || 'Current song',
     artist: nowPlaying.uploader || recorded?.artist || '', votes: Number.isSafeInteger(recorded?.votes) ? recorded.votes : 0,
@@ -54,7 +54,7 @@ export function initTopTenBoard() {
     header.textContent = `Top 10 Songs · ${report.week}`;
     content.replaceChildren();
     if (!rows.length) {
-      content.append(el('p', 'top-ten-live', 'No song is currently live on JukeLoop.'),
+      content.append(el('p', 'top-ten-live', nowPlaying?.isDevert ? 'A sponsored campaign is playing between songs.' : 'No song is currently live on JukeLoop.'),
         el('p', 'top-ten-empty', 'No weekly song votes recorded yet. Votes appear after listeners rate a song during its play.'));
       return;
     }

@@ -42,7 +42,8 @@ import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
 import { syncMintedTracksFromChain, createVerifiedMintQueueReader } from './mint-sync.js';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
-import { createDevertCampaignReader } from './devert.js';
+import { createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
+import { createDevertPlaybackRuntime } from './devert-playback.js';
 import { createPinataStateStore } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
@@ -100,6 +101,8 @@ import {
 const _jukeLoopRestartTimers = new Map();
 const _jukeLoopRestartAttempts = new Map();
 let _djukeRuntime = null;
+let _devertPlaybackRuntime = null;
+let _devertPlaybackInitialization = null;
 let liveScheduleStore = null;
 let livePerformanceEvents = [];
 let liveWeeklySchedule = {};
@@ -421,6 +424,7 @@ async function main() {
   const config = loadConfig();
   const checkpointMirror = process.env.CHECKPOINT_MIRROR_SECRET
     ? createCheckpointMirror({ secret: process.env.CHECKPOINT_MIRROR_SECRET }) : null;
+  const devertSchedulerPrivateKey = resolveDevertSchedulerPrivateKey();
   let readDevertState;
   if (process.env.DEVERT_CONTRACT_ADDRESS) {
     try {
@@ -432,6 +436,21 @@ async function main() {
     } catch (error) {
       console.warn('[devert] Read-only campaign endpoint disabled:', error.message);
     }
+  }
+  if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt) {
+    const scheduler = new Wallet(devertSchedulerPrivateKey, new JsonRpcProvider(config.baseRpcUrl));
+    const contract = new Contract(process.env.DEVERT_CONTRACT_ADDRESS, DEVERT_ABI, scheduler);
+    const journalStore = createPinataStateStore({ pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+      filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-devert-main-radio.json',
+      tags: { app: 'decentbusking', kind: 'devert-main-radio', schema: '1' }, serialize: value => value,
+      deserialize: value => value, retainSnapshots: Infinity });
+    _devertPlaybackRuntime = createDevertPlaybackRuntime({ contract, provider: scheduler.provider,
+      restore: journalStore.restore, save: journalStore.save, readCampaigns: readDevertState });
+    _devertPlaybackInitialization = _devertPlaybackRuntime.initialize()
+      .then(() => console.log(`[devert] Durable scheduler journal ready; scheduler ${scheduler.address}.`))
+      .catch(error => { _devertPlaybackRuntime = null; console.warn('[devert] Durable scheduler unavailable:', error.message); });
+  } else if (process.env.DEVERT_CONTRACT_ADDRESS) {
+    console.warn('[devert] Campaign reads are configured, but audio scheduling is disabled until a DeVert/DJuke worker key and PINATA_JWT are available.');
   }
   const creatorStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
@@ -1367,6 +1386,7 @@ async function announceCompletedMint(client, config, track) {
  */
 async function startJukeLoop(client, config) {
   clearScheduledJukeLoopRestart(config);
+  if (_devertPlaybackInitialization) await _devertPlaybackInitialization;
   let guildId = null;
   try {
     const voiceChannel = await client.channels.fetch(config.jukeLoopVoiceChannelId).catch(() => null);
@@ -1406,6 +1426,7 @@ async function startJukeLoop(client, config) {
       djuke: _djukeRuntime,
       livePerformanceEvents,
       schedule: defaultRadioSchedule(liveWeeklySchedule),
+      devertPlayback: _devertPlaybackRuntime,
       onTerminalDisconnect: () => {
         scheduleJukeLoopRestart(client, config, 'Voice reconnect timed out');
       },

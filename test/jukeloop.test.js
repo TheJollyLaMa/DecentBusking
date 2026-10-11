@@ -117,6 +117,39 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
   assert.equal(rated.plays, beforeVote.plays);
 });
 
+test('JukeLoop refuses song votes on a DeVert campaign impression', async () => {
+  const { createJukeLoopSession, submitJukeLoopVote } = await import('../discord-bot/jukeloop.js');
+  const session = createJukeLoopSession('devert-vote-test', {
+    voiceChannel: { guild: { id: 'devert-vote-test' } }, textChannel: {}, client: {}, ipfsGateway: 'https://dweb.link',
+  });
+  session._nowPlaying = { playId: 'devert:7:play', trackId: 'devert:7', audible: true, isDevert: true };
+  try {
+    assert.throws(() => submitJukeLoopVote({ playId: 'devert:7:play', voterId: 'anonymous-browser-123', vote: 1 }), /not audible/);
+  } finally { session.destroy(); }
+});
+
+test('JukeLoop player errors discard the active DeVert ad before an Idle event can record an impression', async () => {
+  const { createJukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const impressions = [];
+  const session = createJukeLoopSession('devert-error-test', {
+    voiceChannel: { guild: { id: 'devert-error-test' } }, textChannel: {}, client: {}, ipfsGateway: 'https://dweb.link',
+    devertPlayback: { recordCampaignImpression: async impression => impressions.push(impression) },
+  });
+  session._destroyed = true;
+  session._currentDevertAd = { campaignId: '42', mainRadio: true };
+  session._currentTrack = { trackId: 'devert:42' };
+  session._nowPlaying = { playId: 'devert:42:failed', trackId: 'devert:42', audible: true, startedAt: Date.now() - 60_000 };
+
+  session.player.emit('error', new Error('stream failed'));
+  session.player.emit('idle');
+
+  assert.deepEqual(impressions, []);
+  assert.equal(session._currentDevertAd, null);
+  assert.equal(session._nowPlaying, null);
+  assert.ok(session._failedDevertCampaignIds.has('42'));
+  session.destroy();
+});
+
 test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages', async () => {
   const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'));
   const {
@@ -209,6 +242,7 @@ test('radio state publishes the audible track position and newest uploads', asyn
     filename: 'song.m4a',
     mediaType: 'audio/mp4',
     ipfsCid: 'bafy-song',
+    isDevert: false,
     startedAt: 40_000,
     positionMs: 60_000,
   });

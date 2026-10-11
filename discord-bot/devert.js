@@ -7,11 +7,21 @@ const ZERO_ADDRESS = /^0x0{40}$/i;
 
 export const DEVERT_ABI = [
   'function campaignWeek(uint256 timestamp) pure returns (uint64)',
+  'function paused() view returns (bool)',
   'function getWeekCampaignIds(uint64 weekId) view returns (uint256[])',
   'function getCampaign(uint256 campaignId) view returns ((address advertiser,string title,string audioURI,uint64 startedAt,uint64 expiresAt,uint64 weekId,uint128 offerUnits,uint128 paidUnits,uint32 djukeBoosts,uint32 mainRadioPlays,uint32 devertPlays))',
-  'function mainRadioMarket(uint64 weekId) view returns (uint32 slots,uint32 seated,uint128 lowestSeatedOfferUnits)',
-  'function recordCampaignPlay(uint256 campaignId,bool mainRadio)',
+  'function mainRadioMarket(uint64 weekId) view returns (uint32 slots,uint32 seated,uint128 lowestSeatedOfferUnits,uint32 mainRadioImpressions)',
+  'function recordCampaignPlay(uint256 campaignId,bool mainRadio,bytes32 impressionId)',
+  'function usedImpressionIds(bytes32 impressionId) view returns(bool)',
+  'function reportCompletedMusicPlays(bytes32[] playIds)',
+  'function applyDJukeBoost(uint256 campaignId,uint256 djukeRequestId)',
+  'function createCampaign(string title,string audioURI,uint128 offerUnits,uint128 maxPaymentUnits) returns(uint256)',
+  'function quoteCampaign(uint64 weekId) view returns(uint128 minimumOfferUnits,uint256 bumpedCampaignId)',
 ];
+
+export function resolveDevertSchedulerPrivateKey(env = process.env) {
+  return env.DEVERT_SCHEDULER_PRIVATE_KEY || env.DJUKE_FULFILLER_PRIVATE_KEY || null;
+}
 
 function asSafeNumber(value, label) {
   const number = Number(value);
@@ -28,7 +38,8 @@ function normalizeCampaign(campaignId, raw, weekId) {
   const startedAt = asSafeNumber(raw.startedAt, 'campaign start');
   const expiresAt = asSafeNumber(raw.expiresAt, 'campaign expiry');
   const recordWeek = asSafeNumber(raw.weekId, 'campaign week');
-  if (expiresAt <= startedAt || expiresAt - startedAt > SECONDS_PER_WEEK || recordWeek !== weekId) {
+  if (expiresAt <= startedAt || expiresAt - startedAt > SECONDS_PER_WEEK ||
+    recordWeek > weekId || weekId - recordWeek > 1) {
     throw new Error('Invalid DeVert campaign terms');
   }
   const offerUnits = BigInt(raw.offerUnits);
@@ -55,10 +66,11 @@ function normalizeMarket(raw) {
   const slots = asSafeNumber(raw.slots, 'market slot count');
   const seated = asSafeNumber(raw.seated, 'seated campaign count');
   const lowest = BigInt(raw.lowestSeatedOfferUnits);
-  if (slots > MAX_WEEKLY_CAMPAIGNS || seated > slots || (seated > 0 && lowest < 5_000_000n)) {
+  const mainRadioImpressions = asSafeNumber(raw.mainRadioImpressions ?? 0, 'main-radio impression count');
+  if (seated > slots || mainRadioImpressions > slots || (seated > 0 && lowest < 5_000_000n)) {
     throw new Error('Invalid DeVert market snapshot');
   }
-  return { slots, seated, lowestSeatedOfferUnits: lowest.toString() };
+  return { slots, seated, lowestSeatedOfferUnits: lowest.toString(), mainRadioImpressions };
 }
 
 export function createDevertCampaignReader({ contractAddress, provider, contract, rpcUrl, confirmations = 2 }) {
@@ -77,9 +89,10 @@ export function createDevertCampaignReader({ contractAddress, provider, contract
     const timestamp = asSafeNumber(before.timestamp, 'snapshot timestamp');
     const options = { blockTag: blockNumber };
     const weekId = asSafeNumber(await devert.campaignWeek(timestamp, options), 'week ID');
-    const [ids, marketRaw] = await Promise.all([
+    const [ids, marketRaw, paused] = await Promise.all([
       devert.getWeekCampaignIds(weekId, options),
       devert.mainRadioMarket(weekId, options),
+      devert.paused(options),
     ]);
     if (!Array.isArray(ids) || ids.length > MAX_WEEKLY_CAMPAIGNS) throw new Error('Invalid or oversized DeVert campaign list');
     const uniqueIds = new Set(ids.map(id => BigInt(id).toString()));
@@ -99,6 +112,7 @@ export function createDevertCampaignReader({ contractAddress, provider, contract
       blockHash: before.hash,
       snapshotAt: new Date(timestamp * 1000).toISOString(),
       weekId,
+      paused,
       campaigns,
       market,
     };

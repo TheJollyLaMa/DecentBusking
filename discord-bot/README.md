@@ -57,9 +57,18 @@ cp .env.example .env
 | `FFMPEG_PATH`                | ❌        | Path to `ffmpeg` binary (default: `ffmpeg` from `PATH`) |
 | `JUKE_LOOP_VOICE_CHANNEL_ID` | ❌        | Numeric ID of the `JukeLoop` **voice** channel — enables 24/7 radio |
 | `JUKE_LOOP_TEXT_CHANNEL_ID`  | ❌        | Numeric ID of the `JukeLoop` **text** channel — where "Now Playing" posts go |
+| `DEVERT_CONTRACT_ADDRESS`    | DeVert    | Deployed DeVert campaign contract address; endpoint stays unavailable when unset |
+| `DEVERT_SCHEDULER_PRIVATE_KEY` | DeVert   | Optional override; defaults to the existing `DJUKE_FULFILLER_PRIVATE_KEY` |
+| `DEVERT_CONFIRMATIONS`       | ❌        | Confirmations for public DeVert campaign reads (default: `2`) |
 | `DISABLE_MINT_FLOW`          | ❌        | Set to `true` to skip IPFS pinning and the Mint embed (JukeLoop-only mode). Default: `false` |
 
 > JukeLoop is **opt-in**: omit `JUKE_LOOP_VOICE_CHANNEL_ID` / `JUKE_LOOP_TEXT_CHANNEL_ID` (or leave them blank) to keep the bot running without it.
+
+DeVert campaigns use the existing JukeLoop rotation after each ten completed
+audible music plays. The DJuke fulfiller wallet can also hold DeVert's
+`SCHEDULER_ROLE`; no second bot, voice channel, wallet, or service is required.
+Keep scheduling disabled until the deployed contract is configured and main-radio
+playback plus journal recovery are rehearsed.
 
 ### 4. Configure IPFS uploads
 
