@@ -191,6 +191,7 @@ function runIpfsBackfill(client, config) {
         `📌 Archived **${pinned}** past #DecentJukebox upload${pinned === 1 ? '' : 's'} to IPFS — ` +
         `${pinned === 1 ? 'it' : 'they'} can now stream on DecentBusking.` +
         (remaining ? ` ${remaining} upload${remaining === 1 ? '' : 's'} couldn’t be archived yet; retrying later.` : ''),
+        { flags: MessageFlags.SuppressNotifications },
       ).catch(() => {});
     })
     .catch((err) => console.error('[ipfs-backfill] Run failed:', err.message));
@@ -464,15 +465,11 @@ async function main() {
     if (missingDevertLoopSettings.length) {
       console.warn(`[devert-loop] Not started; missing environment variables: ${missingDevertLoopSettings.join(', ')}`);
     } else {
-      _devertPlaybackInitialization?.then(async () => {
-        try {
-          _devertLoopWorker = await startDevertLoopWorker({ token: process.env.DVERT_LOOP_DISCORD_TOKEN,
-            voiceChannelId: process.env.VERTLOOP_VOICE_CHANNEL_ID, textChannelId: process.env.VERT_LOOP_CHANNEL_ID,
-            playback: _devertPlaybackRuntime });
-        } catch (error) {
-          console.warn('[devert-loop] AdLoop worker unavailable:', error.shortMessage || error.message);
-        }
-      });
+      startDevertLoopWorker({ token: process.env.DVERT_LOOP_DISCORD_TOKEN,
+        voiceChannelId: process.env.VERTLOOP_VOICE_CHANNEL_ID, textChannelId: process.env.VERT_LOOP_CHANNEL_ID,
+        playback: _devertPlaybackRuntime })
+        .then(worker => { _devertLoopWorker = worker; })
+        .catch(error => console.warn('[devert-loop] AdLoop worker unavailable:', error.shortMessage || error.message));
     }
   }
   const creatorStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
@@ -1536,7 +1533,9 @@ async function startJukeLoop(client, config) {
     await session.connect();
     console.log('[jukeloop] Connected to voice channel, starting playback…');
     await textChannel
-      .send('📻 **JukeLoop is live!** The community radio is starting up — tracks from #DecentJukebox are on the way.')
+      .send('📻 **JukeLoop is live!** The community radio is starting up — tracks from #DecentJukebox are on the way.', {
+        flags: MessageFlags.SuppressNotifications,
+      })
       .catch(() => {});
     await session.start();
     _jukeLoopRestartAttempts.delete(config.jukeLoopVoiceChannelId);

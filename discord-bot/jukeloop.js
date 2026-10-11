@@ -21,6 +21,7 @@
 // right before playback to obtain a fresh URL.
 
 import { spawn } from 'child_process';
+import { MessageFlags } from 'discord.js';
 import {
   joinVoiceChannel,
   createAudioPlayer,
@@ -529,9 +530,13 @@ export class JukeLoopSession {
       this._liveEventId = eventId;
       if (event) {
         if (this.player.state.status !== AudioPlayerStatus.Idle) this.player.stop(true);
-        this.textChannel.send(`🔴 **Live performance block: ${event.title}** starts now.`, { allowedMentions: { parse: [] } }).catch(() => {});
+        this.textChannel.send(`🔴 **Live performance block: ${event.title}** starts now.`, {
+          allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications,
+        }).catch(() => {});
       } else if (previousEventId) {
-        this.textChannel.send('📻 **Live performance block ended.** JukeLoop is resuming.').catch(() => {});
+        this.textChannel.send('📻 **Live performance block ended.** JukeLoop is resuming.', {
+          flags: MessageFlags.SuppressNotifications,
+        }).catch(() => {});
       }
     }
 
@@ -542,13 +547,13 @@ export class JukeLoopSession {
         const message = show.window === 'final-payroll-hour'
           ? `📊 **${show.label}** is live. Vote through the New York payroll cutoff at midnight for this week's chart.`
           : `📊 **${show.label}** is live. React 👍 or 👎 to vote in this week's chart.`;
-        this.textChannel.send(message, { allowedMentions: { parse: [] } }).catch(() => {});
+        this.textChannel.send(message, { allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications }).catch(() => {});
       } else if (previousShowKey?.startsWith('weekly_top10:') && show.type === 'normal_rotation') {
         const finalListenEnded = previousShowKey === 'weekly_top10:weekly-top10-final-listen';
         const message = finalListenEnded
           ? '📊 The weekly Top 10 final listen has ended at the payroll cutoff. Normal rotation resumes.'
           : '📊 The Top 10 hype hour has ended. Normal rotation resumes.';
-        this.textChannel.send(message, { allowedMentions: { parse: [] } }).catch(() => {});
+        this.textChannel.send(message, { allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications }).catch(() => {});
       }
       const enteringOrLeavingTopTen = previousShowKey &&
         (previousShowKey.startsWith('weekly_top10:') || show.type === 'weekly_top10');
@@ -660,6 +665,7 @@ export class JukeLoopSession {
         .send(
           '📭 The JukeLoop playlist is empty.\n' +
           'Post audio files (MP3, M4A, etc.) in <#' + this.textChannel.id + '> to add tracks!',
+          { flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } },
         )
         .catch(() => {});
       setTimeout(() => {
@@ -682,7 +688,9 @@ export class JukeLoopSession {
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
       if (devertAd) this._failedDevertCampaignIds.add(devertAd.campaignId);
       await this.textChannel
-        .send(`⚠️ Skipping **${track.title}** — the original upload could not be found.`)
+        .send(`⚠️ Skipping **${track.title}** — the original upload could not be found.`, {
+          flags: MessageFlags.SuppressNotifications,
+        })
         .catch(() => {});
       await this._releasePaid('Paid recording could not be fetched');
       this._currentTrack = null;
@@ -737,7 +745,7 @@ export class JukeLoopSession {
         ? `📢 **Sponsored campaign:** ${track.title} · campaign #${devertAd.campaignId}`
         : buildNowPlayingMessage(track, announcementContext);
       const msg = await this.textChannel
-        .send(message)
+        .send(message, { flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
         .catch(() => null);
 
       if (msg && !devertAd) {
@@ -755,7 +763,7 @@ export class JukeLoopSession {
         this._currentDevertAd = null;
       }
       await this.textChannel
-        .send(`⚠️ Skipping **${track.title}**: ${err.message}`)
+        .send(`⚠️ Skipping **${track.title}**: ${err.message}`, { flags: MessageFlags.SuppressNotifications })
         .catch(() => {});
       await this._releasePaid(err.message);
       this._currentTrack    = null;
