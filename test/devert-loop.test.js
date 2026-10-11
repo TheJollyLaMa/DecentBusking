@@ -3,6 +3,47 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { MessageFlags } = require('discord.js');
 
+test('VertLoop uses a separate voice registry without replacing DBusker connection', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const { joinVoiceChannel, getVoiceConnection, createAudioPlayer } = await import('@discordjs/voice');
+  const guildId = 'voice-isolation-test';
+  const adapterCreator = () => ({ sendPayload: () => true, destroy() {} });
+  const mainConnection = joinVoiceChannel({ channelId: 'jukeloop', guildId, adapterCreator });
+  const voiceChannel = { id: 'vertloop', name: 'VertLoop', isVoiceBased: () => true,
+    guild: { id: guildId, voiceAdapterCreator: adapterCreator } };
+  class MockClient extends EventEmitter {
+    constructor() {
+      super();
+      this.user = { id: 'ad-bot', tag: 'DVertLoop' };
+      this.channels = { fetch: async () => voiceChannel };
+    }
+    async login() { this.emit('ready', this); }
+    destroy() {}
+  }
+  const context = vm.createContext({ Client: MockClient, Events: { ClientReady: 'ready', Error: 'error' },
+    GatewayIntentBits: {}, joinVoiceChannel, entersState: async () => {}, VoiceConnectionStatus: {},
+    createAudioPlayer,
+    createDevertLoopController: () => ({ start: async () => {}, stop() {}, getState: () => ({ ready: true }) }),
+    console });
+  const source = fs.readFileSync(require('node:path').join(__dirname, '../discord-bot/devert-loop.js'), 'utf8');
+  vm.runInContext(source.slice(source.indexOf('export async function startDevertLoopWorker')).replace('export ', ''), context);
+  let worker;
+  try {
+    worker = await context.startDevertLoopWorker({ token: 'test', voiceChannelId: 'vertloop', playback: {} });
+    assert.equal(getVoiceConnection(guildId), mainConnection);
+    assert.equal(mainConnection.joinConfig.channelId, 'jukeloop');
+    assert.equal(getVoiceConnection(guildId, 'devert:ad-bot').joinConfig.channelId, 'vertloop');
+    worker.stop();
+    worker = null;
+    assert.equal(getVoiceConnection(guildId), mainConnection);
+  } finally {
+    worker?.stop();
+    getVoiceConnection(guildId, 'devert:ad-bot')?.destroy();
+    mainConnection.destroy();
+  }
+});
+
 test('AdLoop exposes the live play and records only completed audible non-main impressions', async () => {
   const { createDevertLoopController } = await import('../discord-bot/devert-loop.js');
   const player = new EventEmitter();

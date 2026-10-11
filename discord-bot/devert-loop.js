@@ -133,7 +133,7 @@ export async function startDevertLoopWorker({ token, voiceChannelId, textChannel
       const textChannel = textChannelId ? await readyClient.channels.fetch(textChannelId).catch(() => null) : null;
       if (!voiceChannel?.isVoiceBased()) throw new Error('VERTLOOP_VOICE_CHANNEL_ID must refer to a voice channel');
       connection = joinVoiceChannel({ channelId: voiceChannel.id, guildId: voiceChannel.guild.id,
-        adapterCreator: voiceChannel.guild.voiceAdapterCreator });
+        adapterCreator: voiceChannel.guild.voiceAdapterCreator, group: `devert:${readyClient.user.id}` });
       connection.on('error', error => log.warn(`[devert-loop] Voice connection error in ${voiceChannel.name} (${voiceChannel.id}):`, error.message));
       await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
       const player = createAudioPlayer();
