@@ -27,11 +27,24 @@ export function readDjukeQueue(snapshot) {
   return snapshot.requests;
 }
 
+export function filterDjukeSongs(tracks, query = '') {
+  const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  return (Array.isArray(tracks) ? tracks : []).filter(track => {
+    if (!track || typeof track.trackId !== 'string' || typeof track.title !== 'string') return false;
+    const text = [track.title, track.artist, track.creator, track.uploader].filter(value => typeof value === 'string').join(' ').toLowerCase();
+    return terms.every(term => text.includes(term));
+  });
+}
+
 export const BASE_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export const DJUKE_BROWSER_ABI = [
   'function quote() view returns (uint256)',
   'function requestPlay(bytes32 songId, uint256 maxPrice) returns (uint256)',
   'function replaceRequest(uint256 requestId, bytes32 songId)',
+  'function gasWorker() view returns(address)',
+  'function maxGasContributionWei() view returns(uint256)',
+  'function gasQuoteNonces(address) view returns(uint256)',
+  'function requestPlayWithGas(bytes32,uint256,uint256,uint256,bytes) payable returns(uint256)',
 ];
 export const USDC_BROWSER_ABI = [
   'function decimals() view returns (uint8)',
@@ -40,7 +53,7 @@ export const USDC_BROWSER_ABI = [
   'function approve(address, uint256) returns (bool)',
 ];
 
-export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUnits, onStep = () => {} }) {
+export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUnits, gasQuote = null, onStep = () => {} }) {
   if (Number((await signer.provider.getNetwork()).chainId) !== 8453) throw new Error('Switch your wallet to Base');
   if (usdc.target.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase() || Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');
   if (!/^0x[0-9a-fA-F]{64}$/.test(songId || '')) throw new Error('Select a song');
@@ -48,13 +61,30 @@ export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUni
   const price = await djuke.quote();
   if (price > maxPriceUnits) throw new Error(`Price rose to ${formatDjukeUsdc(price)} USDC; refresh and try again`);
   if (await usdc.balanceOf(address) < price) throw new Error(`You need ${formatDjukeUsdc(price)} USDC on Base`);
+  if (gasQuote) {
+    if (gasQuote.listener.toLowerCase() !== address.toLowerCase() || gasQuote.songId !== songId ||
+        gasQuote.contractAddress.toLowerCase() !== djuke.target.toLowerCase() || gasQuote.chainId !== 8453 ||
+        Number(gasQuote.deadline) <= Math.floor(Date.now() / 1000) || BigInt(gasQuote.maxPrice) !== maxPriceUnits) throw new Error('Refresh the worker gas quote');
+    const [worker, cap, nonce] = await Promise.all([djuke.gasWorker(), djuke.maxGasContributionWei(), djuke.gasQuoteNonces(address)]);
+    const contribution = BigInt(gasQuote.contributionWei);
+    if (contribution <= 0n || contribution !== BigInt(gasQuote.fulfillmentCostWei) * 2n || contribution > cap ||
+        String(nonce) !== String(gasQuote.nonce)) throw new Error('Invalid worker gas quote');
+    const types = { GasQuote: [{ name: 'listener', type: 'address' }, { name: 'songId', type: 'bytes32' },
+      { name: 'maxPrice', type: 'uint256' }, { name: 'fulfillmentCostWei', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }] };
+    const recovered = ethers.verifyTypedData({ name: 'DecentJukeBox', version: '0.2', chainId: 8453, verifyingContract: djuke.target }, types, gasQuote, gasQuote.signature);
+    if (recovered.toLowerCase() !== worker.toLowerCase()) throw new Error('Invalid worker gas signature');
+    if (await signer.provider.getBalance(address) < contribution) throw new Error('Insufficient Base ETH for worker gas contribution');
+  }
   if (await usdc.allowance(address, djuke.target) < price) {
     onStep(`Approve exactly ${formatDjukeUsdc(price)} USDC`);
     if ((await (await usdc.approve(djuke.target, price)).wait())?.status !== 1) throw new Error('USDC approval did not confirm');
   }
-  await djuke.requestPlay.staticCall(songId, maxPriceUnits);
+  const args = gasQuote ? [songId, maxPriceUnits, BigInt(gasQuote.fulfillmentCostWei), gasQuote.deadline, gasQuote.signature,
+    { value: BigInt(gasQuote.contributionWei) }] : [songId, maxPriceUnits];
+  const request = gasQuote ? djuke.requestPlayWithGas : djuke.requestPlay;
+  await request.staticCall(...args);
   onStep('Confirm your DJuke request');
-  const transaction = await djuke.requestPlay(songId, maxPriceUnits);
+  const transaction = await request(...args);
   onStep('Waiting for Base confirmation…');
   if ((await transaction.wait())?.status !== 1) throw new Error('DJuke request did not confirm');
   return { txHash: transaction.hash, priceUnits: price };
@@ -77,10 +107,14 @@ export function initDjuke() {
   const price = document.getElementById('djuke-price');
   const count = document.getElementById('djuke-count');
   const select = document.getElementById('djuke-song');
+  const search = document.getElementById('djuke-search');
   const connect = document.getElementById('djuke-connect');
   const paymentStatus = document.getElementById('djuke-payment-state');
   const tiers = document.getElementById('djuke-price-tiers');
   const pay = document.getElementById('djuke-pay');
+  const gasStatus = document.getElementById('djuke-gas-status');
+  let gasQuote = null;
+  let gasGeneration = 0;
   let timer;
   let generation = 0;
   let live = null;
@@ -96,15 +130,47 @@ export function initDjuke() {
       usdc: new ethers.Contract(BASE_USDC_ADDRESS, USDC_BROWSER_ABI, signer) };
   };
   const syncPayButton = () => {
-    const ready = paymentsLive() && !!window._wallet?.address && window._wallet?.chainId === 8453 && !!selectedSongId() && !busy;
+    const ready = paymentsLive() && !!window._wallet?.address && window._wallet?.chainId === 8453 && !!selectedSongId() && !busy &&
+      (window.DecentConfig?.djukeContractVersion !== '0.2' || !!gasQuote && gasQuote.deadline > Date.now() / 1000);
     pay.disabled = !ready;
     pay.title = paymentsLive() ? 'Pay to queue the selected song' : 'DJuke payments are not live yet';
+  };
+  const refreshGasQuote = async () => {
+    gasQuote = null;
+    const check = ++gasGeneration;
+    if (gasStatus) gasStatus.textContent = '';
+    syncPayButton();
+    const songId = selectedSongId();
+    if (window.DecentConfig?.djukeContractVersion !== '0.2' || !songId || !window._wallet?.address) return;
+    if (gasStatus) gasStatus.textContent = 'Estimating worker gas';
+    try {
+      const response = await fetch(`${window.DecentConfig.ipfsUploadServiceUrl}/api/djuke/gas-quote?${new URLSearchParams({ listener: window._wallet.address, songId })}`, { signal: AbortSignal.timeout(15000) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Gas quote unavailable');
+      if (check !== gasGeneration) return;
+      gasQuote = result;
+      if (gasStatus) gasStatus.textContent = `Worker gas: ${ethers.formatEther(result.contributionWei)} ETH on Base (2x estimate), plus your transaction gas`;
+    } catch (error) { if (check === gasGeneration && gasStatus) gasStatus.textContent = error.message; }
+    syncPayButton();
   };
   const node = (tag, text, className) => {
     const element = document.createElement(tag);
     if (text !== undefined) element.textContent = text;
     if (className) element.className = className;
     return element;
+  };
+  const renderSongs = () => {
+    const previous = select.value;
+    const tracks = filterDjukeSongs(live?.tracks, search?.value || '');
+    select.replaceChildren(node('option', tracks.length ? 'Select one song' : 'No matching songs'));
+    for (const track of tracks) {
+      const option = node('option', track.artist ? `${track.title} - ${track.artist}` : track.title);
+      option.value = track.trackId;
+      select.append(option);
+    }
+    select.value = tracks.some(track => track.trackId === previous) ? previous : '';
+    select.disabled = !tracks.length;
+    syncPayButton();
   };
   const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
   const renderTiers = pending => {
@@ -136,7 +202,8 @@ export function initDjuke() {
   const updateWallet = () => {
     const address = window._wallet?.address;
     connect.disabled = !!address;
-    connect.querySelector('span:last-child').textContent = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : 'Connect Wallet';
+    connect.hidden = !!address;
+    connect.querySelector('span:last-child').textContent = 'Connect Wallet';
     if (!busy) {
       paymentStatus.textContent = !paymentsLive() ? 'Payments not live'
         : !address ? 'Connect a Base wallet to queue a song'
@@ -179,18 +246,9 @@ export function initDjuke() {
       count.textContent = String(requests.length);
       renderTiers(requests.length);
       status.textContent = requests.length ? 'First paid · first played' : 'No paid requests';
-      const previous = select.value;
-      select.replaceChildren(node('option', 'Select a song'));
-      const tracks = Array.isArray(snapshot.tracks) ? snapshot.tracks.filter(track =>
-        track && typeof track.trackId === 'string' && track.trackId && typeof track.title === 'string') : [];
-      for (const track of tracks) {
-        const option = node('option', track.title);
-        option.value = track.trackId;
-        select.append(option);
-      }
-      select.value = tracks.some(track => track.trackId === previous) ? previous : '';
-      select.disabled = !tracks.length;
+      renderSongs();
       updateWallet();
+      refreshGasQuote();
     } catch (error) {
       if (requestGeneration !== generation || !isOpen()) return;
       unavailable(error.message);
@@ -221,11 +279,16 @@ export function initDjuke() {
   pay.addEventListener('click', () => {
     const songId = selectedSongId();
     if (!paymentsLive() || !songId || !live?.priceUnits) return;
-    runPayment(() => payForDjukeSong({ ...contracts(), songId, maxPriceUnits: BigInt(live.priceUnits),
+    if (window.DecentConfig?.djukeContractVersion === '0.2' && (!gasQuote || gasQuote.deadline <= Date.now() / 1000)) {
+      refreshGasQuote();
+      return;
+    }
+    runPayment(() => payForDjukeSong({ ...contracts(), songId, maxPriceUnits: BigInt(live.priceUnits), gasQuote,
       onStep: message => { paymentStatus.textContent = message; } }),
     'Queued! Your song plays after the paid requests ahead of it.');
   });
-  select.addEventListener('change', syncPayButton);
+  select.addEventListener('change', refreshGasQuote);
+  search?.addEventListener('input', () => { renderSongs(); refreshGasQuote(); });
   const close = () => {
     clearTimeout(timer);
     generation++;
@@ -269,6 +332,8 @@ export function initDjuke() {
   });
   document.addEventListener('wallet-connected', updateWallet);
   document.addEventListener('wallet-disconnected', updateWallet);
+  document.addEventListener('wallet-connected', refreshGasQuote);
+  document.addEventListener('wallet-disconnected', refreshGasQuote);
   renderTiers(null);
   import('https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm').then(icons => {
     for (const element of document.querySelectorAll('[data-djuke-icon]')) {

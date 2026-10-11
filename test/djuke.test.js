@@ -82,6 +82,7 @@ test('DJuke payment refuses wrong networks, price increases and low balances bef
 
 test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
+  const config = require('node:fs').readFileSync(require('node:path').join(__dirname, '../decent.config.js'), 'utf8');
   for (const id of ['djuke-tab', 'djuke-panel', 'djuke-queue', 'djuke-price-tiers', 'djuke-connect', 'devert-tab', 'devert-panel']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
@@ -95,4 +96,65 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   assert.match(html, /id="djuke-pay"[^>]*disabled/);
   assert.match(html, /id="djuke-panel"[^>]*inert/);
   assert.match(html, /id="devert-panel"[^>]*inert/);
+  assert.match(config, /contractAddress: "0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3"/);
+  assert.match(config, /additionalNftContractAddresses: \["0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B"\]/);
+  assert.match(config, /djukeContractAddress: "0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59"/);
+  assert.match(config, /djukeContractVersion: "0.2"/);
+  assert.match(config, /nftBatchMintEnabled: true/);
+  for (const tab of ['top-ten', 'djuke', 'devert']) assert.match(html, new RegExp(`id="${tab}-tab"[^>]*aria-controls="${tab}-panel"`));
+  assert.match(html, /class="djuke-tab-slot">⚸🎰🧞‍♂️/);
+  assert.match(html, /class="djuke-tab-coin">🪙/);
+});
+
+test('worker gas reminders precede import, mint and paid queue controls', () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
+  for (const [startId, controlId] of [['djuke-body', 'djuke-pay'],
+    ['admin-reviewed-album-import', 'admin-reviewed-album-import-btn'], ['admin-mint-section', 'admin-mint-queue']]) {
+    const start = startId === 'djuke-body' ? html.indexOf('class="djuke-body"') : html.indexOf(`id="${startId}"`);
+    const control = html.indexOf(`id="${controlId}"`, start);
+    const notice = html.slice(start, control);
+    assert.match(notice, /class="worker-gas-notice"/);
+    assert.match(notice, /ETH on Base/);
+    assert.match(notice, /0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F/);
+    assert.match(notice, /Balance is not checked here/);
+  }
+  assert.match(html, /NFT mint gas is paid by your connected wallet/);
+});
+
+test('DJuke search matches song titles and creators without selecting a song implicitly', async () => {
+  const { filterDjukeSongs } = await import('../js/djuke.mjs');
+  const tracks = [{ trackId: 'a', title: 'Heart of Gold', artist: 'thejollylama', creator: '0xabc' },
+    { trackId: 'b', title: 'Other', artist: 'Someone' }];
+  assert.deepEqual(filterDjukeSongs(tracks, 'heart jolly').map(track => track.trackId), ['a']);
+  assert.deepEqual(filterDjukeSongs(tracks, '0xabc').map(track => track.trackId), ['a']);
+  assert.deepEqual(filterDjukeSongs(tracks, 'missing'), []);
+});
+
+test('v0.2 payment verifies a worker quote and sends exactly the doubled ETH contribution', async () => {
+  const { payForDjukeSong } = await import('../js/djuke.mjs');
+  const { createRequire } = require('node:module');
+  const library = createRequire(require('node:path').join(__dirname, '../discord-bot/package.json'))('ethers');
+  const { GAS_QUOTE_TYPES } = await import('../discord-bot/djuke-gas.js');
+  const previous = global.ethers;
+  global.ethers = library;
+  try {
+    const worker = library.Wallet.createRandom();
+    const fixture = paymentFixture({ allowance: 250000n });
+    fixture.signer.provider.getBalance = async () => 100000n;
+    const listener = await fixture.signer.getAddress();
+    const quote = { listener, songId: fixture.songId, maxPrice: '250000', fulfillmentCostWei: '1000', nonce: '0',
+      deadline: Math.floor(Date.now() / 1000) + 120, contributionWei: '2000', contractAddress: fixture.djuke.target, chainId: 8453 };
+    quote.signature = await worker.signTypedData({ name: 'DecentJukeBox', version: '0.2', chainId: 8453, verifyingContract: fixture.djuke.target }, GAS_QUOTE_TYPES, quote);
+    fixture.djuke.gasWorker = async () => worker.address;
+    fixture.djuke.maxGasContributionWei = async () => 10000n;
+    fixture.djuke.gasQuoteNonces = async () => 0n;
+    fixture.djuke.requestPlayWithGas = async (...args) => {
+      fixture.calls.push(['gas-request', args.at(-1).value]);
+      return { hash: '0xgas', wait: async () => ({ status: 1 }) };
+    };
+    fixture.djuke.requestPlayWithGas.staticCall = async () => {};
+    await payForDjukeSong({ ...fixture, gasQuote: quote });
+    assert.deepEqual(fixture.calls, [['gas-request', 2000n]]);
+    await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: { ...quote, contributionWei: '4000' } }), /Invalid worker gas quote/);
+  } finally { global.ethers = previous; }
 });

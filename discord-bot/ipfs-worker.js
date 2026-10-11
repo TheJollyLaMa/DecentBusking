@@ -41,6 +41,15 @@ export function buildRadioScheduleAuthorizationMessage({ address, origin, issued
   ].join('\n');
 }
 
+export function buildReviewedAlbumImportAuthorizationMessage({ address, origin, issuedAt }) {
+  return [
+    'DecentBusking reviewed album import and owner mint queue',
+    `Wallet: ${address.toLowerCase()}`,
+    `Origin: ${origin}`,
+    `Issued At: ${issuedAt}`,
+  ].join('\n');
+}
+
 async function readJson(request) {
   const chunks = [];
   let size = 0;
@@ -81,9 +90,10 @@ export async function requestPinataSignedUrl({ pinataJwt, pinataSignUrl, name, s
   return url;
 }
 
-export function createMintTransactionVerifier({ rpcUrl, contractAddress, ownerWallet, provider }) {
+export function createMintTransactionVerifier({ rpcUrl, contractAddress, contractAddresses = [], ownerWallet, provider }) {
   const rpcProvider = provider || new JsonRpcProvider(rpcUrl);
-  const contract = contractAddress.toLowerCase();
+  const contracts = new Set([contractAddress, ...contractAddresses].filter(Boolean).map(address => address.toLowerCase()));
+  if (!contracts.size) throw new Error('At least one DecentNFT contract address is required');
   const owner = ownerWallet.toLowerCase();
   const iface = new Interface(MINT_EVENT_ABI);
 
@@ -95,19 +105,22 @@ export function createMintTransactionVerifier({ rpcUrl, contractAddress, ownerWa
     if (!transaction || !receipt || receipt.status !== 1) throw new Error('Mint transaction is not confirmed');
     // Smart accounts (EIP-7702) route through delegation contracts, so trust DecentNFT's own event, not tx.to/from.
 
+    const matches = [];
     for (const log of receipt.logs) {
-      if (log.address.toLowerCase() !== contract) continue;
+      const emittedBy = log.address?.toLowerCase();
+      if (!contracts.has(emittedBy)) continue;
       try {
         const event = iface.parseLog(log);
         if (event?.name === 'EditionMinted' && event.args.tokenId.toString() === String(tokenId)) {
           if (event.args.minter.toLowerCase() !== owner) throw new Error('Edition was not minted by the configured owner');
-          return { recipient: event.args.to, amount: event.args.amount.toString() };
+          matches.push({ recipient: event.args.to, amount: event.args.amount.toString(), contractAddress: log.address });
         }
       } catch (error) {
         if (error.message.includes('configured owner')) throw error;
       }
     }
-    throw new Error('Mint transaction does not contain the claimed EditionMinted event');
+    if (matches.length !== 1) throw new Error('Mint transaction does not contain exactly one claimed EditionMinted event');
+    return matches[0];
   };
 }
 
@@ -119,10 +132,13 @@ export function createWorkerRequestHandler({
   verifyMintTransaction,
   onMintComplete,
   getMintQueue,
+  onReviewedAlbumImport,
+  creatorProfiles,
   getRadioState,
   getRadioSchedule,
   saveRadioSchedule,
   getDjukeState,
+  getDjukeGasQuote,
   getDevertState,
   getPinnerManifest,
   checkpointMirror,
@@ -190,6 +206,20 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured' }, '*');
         return;
       }
+      if (requestUrl.pathname === '/api/creator/profile' && request.method === 'GET') {
+        if (!creatorProfiles) throw new Error('Creator profiles are not configured');
+        sendJson(response, 200, creatorProfiles.get(requestUrl.searchParams.get('address')), '*');
+        return;
+      }
+      if (request.method === 'POST' && ['/api/creator/profile', '/api/creator/link-discord'].includes(requestUrl.pathname)) {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!creatorProfiles) throw new Error('Creator profiles are not configured');
+        const body = await readJson(request);
+        const result = requestUrl.pathname.endsWith('link-discord')
+          ? creatorProfiles.startLink(body, origin) : await creatorProfiles.update(body, origin);
+        sendJson(response, 200, result, corsOrigin);
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/ipfs/artwork-cid') {
         const value = requestUrl.searchParams.get('cid') || '';
         if (!value || value.length > 160) throw new Error('Enter a valid image file CID');
@@ -253,6 +283,11 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, await getPinnerManifest(), '*');
         return;
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/djuke/gas-quote') {
+        if (!getDjukeGasQuote) throw new Error('DJuke v0.2 gas funding is not configured');
+        sendJson(response, 200, await getDjukeGasQuote({ listener: requestUrl.searchParams.get('listener'), songId: requestUrl.searchParams.get('songId') }), '*');
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/ledger') {
         if (!getPaymentLedger) throw new Error('Payment ledger is not configured');
         sendJson(response, 200, await getPaymentLedger(), '*');
@@ -314,6 +349,23 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, { requests: await getMintQueue() }, corsOrigin);
         return;
       }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/admin/reviewed-album-import') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!onReviewedAlbumImport) throw new Error('Reviewed album import is not configured');
+        const body = await readJson(request);
+        const issuedAt = Date.parse(body.issuedAt);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') || typeof body.signature !== 'string' ||
+            !Number.isFinite(issuedAt) || Math.abs(now() - issuedAt) > MAX_SIGNATURE_AGE_MS) {
+          throw new Error('Invalid or expired album-import authorization');
+        }
+        if (hasConsumedSignature(body.signature)) throw new Error('Album-import authorization has already been used');
+        const message = buildReviewedAlbumImportAuthorizationMessage({ address: body.address, origin, issuedAt: body.issuedAt });
+        const recovered = verifyMessage(message, body.signature).toLowerCase();
+        if (recovered !== body.address.toLowerCase() || recovered !== expectedOwner) throw new Error('Album-import authorization is not from the configured owner');
+        consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
+        sendJson(response, 200, await onReviewedAlbumImport(), corsOrigin);
+        return;
+      }
       if (request.method === 'POST' && requestUrl.pathname === '/api/media/submit') {
         if (!corsOrigin) throw new Error('Origin is not allowed');
         if (!onMediaSubmission) throw new Error('Media submissions are not configured');
@@ -360,7 +412,8 @@ export function createWorkerRequestHandler({
           throw new Error('Invalid mint completion payload');
         }
         const verified = await verifyMintTransaction({ tokenId: String(tokenId), txHash });
-        await onMintComplete({ trackId, tokenId: String(tokenId), txHash, recipient: verified.recipient });
+        await onMintComplete({ trackId, tokenId: String(tokenId), txHash, recipient: verified.recipient,
+          contractAddress: verified.contractAddress });
         sendJson(response, 200, { ok: true }, corsOrigin);
         return;
       }

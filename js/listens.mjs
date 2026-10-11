@@ -7,7 +7,8 @@ export const LISTEN_PRICE_UNITS = 250000n;
 export const PREVIEW_SECONDS = 30;
 export const MAX_PLAYLIST = 50;
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const LISTEN_ABI = ['function purchaseListens(bytes32[] songIds, uint256 maxTotal) returns (uint256)'];
+const LISTEN_ABI = ['function purchaseListens(bytes32[] songIds, uint256 maxTotal) returns (uint256)',
+  'function quoteListens(bytes32[] songIds) view returns(uint256)'];
 const USDC_ABI = [
   'function decimals() view returns (uint8)',
   'function balanceOf(address) view returns (uint256)',
@@ -24,13 +25,15 @@ export function audioCid(value) {
   return String(value || '').match(/^ipfs:\/\/(?:ipfs\/)?([^/?#]+)/)?.[1] || String(value || '').match(/\/ipfs\/([^/?#]+)/)?.[1] || '';
 }
 
-export async function purchaseListens({ signer, djuke, usdc, songIds, onStep = () => {} }) {
+export async function purchaseListens({ signer, djuke, usdc, songIds, contractVersion = '0.1', onStep = () => {} }) {
   if (Number((await signer.provider.getNetwork()).chainId) !== 8453) throw new Error('Switch your wallet to Base');
   if (usdc.target.toLowerCase() !== BASE_USDC.toLowerCase() || Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');
   if (!Array.isArray(songIds) || !songIds.length || songIds.length > MAX_PLAYLIST || songIds.some(id => !/^0x[0-9a-fA-F]{64}$/.test(id))) {
     throw new Error(`Choose 1 to ${MAX_PLAYLIST} songs`);
   }
-  const total = LISTEN_PRICE_UNITS * BigInt(songIds.length);
+  const total = contractVersion === '0.2' ? await djuke.quoteListens(songIds) : LISTEN_PRICE_UNITS * BigInt(songIds.length);
+  if (total <= 0n) throw new Error('Invalid personal listen quote');
+  onStep(`Personal listen price: ${formatUsdc(total)} USDC`);
   const address = await signer.getAddress();
   if (await usdc.balanceOf(address) < total) throw new Error(`You need ${formatUsdc(total)} USDC on Base`);
   if (await usdc.allowance(address, djuke.target) < total) {
@@ -139,7 +142,8 @@ export function initListens() {
   const contracts = () => {
     const signer = window._wallet?.signer;
     if (!signer) throw new Error('Connect your wallet first');
-    return { signer, djuke: new ethers.Contract(window.DecentConfig.djukeContractAddress, LISTEN_ABI, signer),
+    return { signer, contractVersion: window.DecentConfig.djukeContractVersion || '0.1',
+      djuke: new ethers.Contract(window.DecentConfig.djukeContractAddress, LISTEN_ABI, signer),
       usdc: new ethers.Contract(BASE_USDC, USDC_ABI, signer) };
   };
   const ensureWallet = async () => { if (!window._wallet?.signer) await window._wallet?.connect?.(); return contracts(); };
@@ -153,7 +157,9 @@ export function initListens() {
     getMedia: archiveMedia,
     onPreviewEnded: ({ song, resume }) => {
       pendingGate = { song, resume };
-      gateText.textContent = `That was your 30-second preview of \u201c${song.title}\u201d. Keep listening for ${formatUsdc(LISTEN_PRICE_UNITS)} USDC \u2014 90% goes to the artist.`;
+      gateText.textContent = cfg.djukeContractVersion === '0.2'
+        ? `Personal listen for ${song.title}. The current creator price will be quoted before payment.`
+        : `That was your 30-second preview of \u201c${song.title}\u201d. Keep listening for ${formatUsdc(LISTEN_PRICE_UNITS)} USDC \u2014 90% goes to the artist.`;
       gateStatus.textContent = '';
       if (!gate.open) gate.showModal();
     },
@@ -174,7 +180,9 @@ export function initListens() {
       row.append(title, remove);
       playlistEl.append(row);
     }
-    playlistTotal.textContent = items.length ? `${items.length} song${items.length === 1 ? '' : 's'} \u00b7 ${formatUsdc(LISTEN_PRICE_UNITS * BigInt(items.length))} USDC` : 'Empty \u2014 add songs from any DNFT card';
+    playlistTotal.textContent = items.length ? cfg.djukeContractVersion === '0.2'
+      ? `${items.length} songs - creator prices quoted before payment`
+      : `${items.length} song${items.length === 1 ? '' : 's'} \u00b7 ${formatUsdc(LISTEN_PRICE_UNITS * BigInt(items.length))} USDC` : 'Empty \u2014 add songs from any DNFT card';
     playlistBuy.disabled = !items.length || busy;
   }
   async function addToPlaylist(song, status) {

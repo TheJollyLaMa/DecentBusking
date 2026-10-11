@@ -50,7 +50,6 @@ export function initDevertTab() {
     panel.inert = true;
     document.body.classList.remove('devert-open');
   };
-
   async function refresh() {
     clearTimeout(timer);
     if (!isOpen()) return;
@@ -90,7 +89,6 @@ export function initDevertTab() {
     }
     if (isOpen()) timer = setTimeout(refresh, 30000);
   }
-
   toggle.addEventListener('click', event => {
     event.stopPropagation();
     if (isOpen()) { close(); return; }
@@ -105,6 +103,9 @@ export function initDevertTab() {
   });
   closeButton?.addEventListener('click', () => { close(); toggle.focus(); });
   refreshButton?.addEventListener('click', refresh);
+  document.getElementById('devert-profile')?.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('open-creator-profile'));
+  });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); }
   });
@@ -114,4 +115,6 @@ export function initDevertTab() {
   });
 }
 
-if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', initDevertTab, { once: true });
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDevertTab); else initDevertTab();
+}

@@ -913,8 +913,11 @@ function _setDefaultFundMetadata() {
         const purpose = document.getElementById('router-fund-purpose');
         if (name && (!name.value || name.value === name.dataset.autoValue)) name.value = defaults.name;
         if (purpose && (!purpose.value || purpose.value === purpose.dataset.autoValue)) purpose.value = defaults.description;
+  const website = document.getElementById('router-fund-website');
+  if (website && (!website.value || website.value === website.dataset.autoValue)) website.value = 'https://thejollylama.github.io/DecentBusking/';
         if (name) name.dataset.autoValue = defaults.name;
         if (purpose) purpose.dataset.autoValue = defaults.description;
+        if (website) website.dataset.autoValue = 'https://thejollylama.github.io/DecentBusking/';
       } catch {}
     }
     const priorDefault = input.dataset.autoValue;

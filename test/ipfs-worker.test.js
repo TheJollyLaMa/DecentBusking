@@ -228,6 +228,29 @@ test('worker rejects a valid signature from a non-owner wallet', async () => {
     issuedAt,
   };
   const signature = await stranger.signMessage(buildUploadAuthorizationMessage(authorization));
+  test('reviewed album import requires a fresh owner signature and returns queued counts without minting', async () => {
+    const { buildReviewedAlbumImportAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+    const owner = Wallet.createRandom();
+    const origin = 'https://busking.example';
+    const issuedAt = new Date().toISOString();
+    let calls = 0;
+    const result = { added: 190, queued: 190, skipped: 0, checkpointUri: 'ipfs://playlist-checkpoint', minted: 0 };
+    const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address,
+      onReviewedAlbumImport: async () => { calls++; return result; } });
+    const authorization = { address: owner.address, origin, issuedAt };
+    const signature = await owner.signMessage(buildReviewedAlbumImportAuthorizationMessage(authorization));
+    await withServer(handler, async base => {
+      const request = () => fetch(`${base}/api/admin/reviewed-album-import`, { method: 'POST',
+        headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ ...authorization, signature }) });
+      const response = await request();
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), result);
+      assert.equal(calls, 1);
+      assert.equal((await request()).status, 400);
+      assert.equal(calls, 1);
+    });
+  });
+
   const handler = createWorkerRequestHandler({
     allowedOrigins: [authorization.origin],
     ownerWallet: owner.address,
@@ -329,7 +352,7 @@ test('worker reconciles only a verified Base mint transaction', async () => {
     verifyMintTransaction: async ({ tokenId, txHash: receivedHash }) => {
       assert.equal(tokenId, '42');
       assert.equal(receivedHash, txHash);
-      return { recipient: '0x2222222222222222222222222222222222222222' };
+      return { recipient: '0x2222222222222222222222222222222222222222', contractAddress: '0x3333333333333333333333333333333333333333' };
     },
     onMintComplete: async (completion) => completions.push(completion),
   });
@@ -346,6 +369,7 @@ test('worker reconciles only a verified Base mint transaction', async () => {
       tokenId: '42',
       txHash,
       recipient: '0x2222222222222222222222222222222222222222',
+      contractAddress: '0x3333333333333333333333333333333333333333',
     }]);
   });
 });
@@ -372,7 +396,26 @@ test('verifies the owner transaction and EditionMinted event on Base', async () 
     },
   });
 
-  assert.deepEqual(await verify({ tokenId: '42', txHash }), { recipient, amount: '1' });
+  assert.deepEqual(await verify({ tokenId: '42', txHash }), { recipient, amount: '1', contractAddress: contract });
+});
+
+test('mint reconciliation accepts owner EditionMinted events from either configured NFT collection', async () => {
+  const { createMintTransactionVerifier } = await import(moduleUrl);
+  const owner = Wallet.createRandom();
+  const recipient = Wallet.createRandom().address;
+  const legacy = Wallet.createRandom().address;
+  const batch = Wallet.createRandom().address;
+  const iface = new Interface(['event EditionMinted(uint256 indexed tokenId,address indexed to,uint256 amount,address indexed minter)']);
+  const provider = {
+    getTransaction: async () => ({ hash: `0x${'1'.repeat(64)}` }),
+    getTransactionReceipt: async () => ({ status: 1, logs: [{
+      address: batch,
+      topics: iface.encodeEventLog(iface.getEvent('EditionMinted'), [12, recipient, 1, owner.address]).topics,
+      data: iface.encodeEventLog(iface.getEvent('EditionMinted'), [12, recipient, 1, owner.address]).data,
+    }] }),
+  };
+  const verify = createMintTransactionVerifier({ rpcUrl: 'unused', contractAddresses: [legacy, batch], ownerWallet: owner.address, provider });
+  assert.deepEqual(await verify({ tokenId: '12', txHash: `0x${'1'.repeat(64)}` }), { recipient, amount: '1', contractAddress: batch });
 });
 
 test('accepts owner mints routed through a smart-account delegation contract', async () => {
@@ -400,9 +443,9 @@ test('accepts owner mints routed through a smart-account delegation contract', a
   };
   const txHash = `0x${'cd'.repeat(32)}`;
 
-  assert.deepEqual(await verifierFor(owner)({ tokenId: '8', txHash }), { recipient, amount: '1' });
+  assert.deepEqual(await verifierFor(owner)({ tokenId: '8', txHash }), { recipient, amount: '1', contractAddress: contract });
   await assert.rejects(verifierFor(recipient)({ tokenId: '8', txHash }), /not minted by the configured owner/);
-  await assert.rejects(verifierFor(owner, delegationManager)({ tokenId: '8', txHash }), /does not contain the claimed EditionMinted/);
+  await assert.rejects(verifierFor(owner, delegationManager)({ tokenId: '8', txHash }), /does not contain exactly one claimed EditionMinted/);
 });
 
 test('returns the pending queue only to the mint owner', async () => {
@@ -431,6 +474,28 @@ test('returns the pending queue only to the mint owner', async () => {
     });
     assert.equal(response.status, 200);
     assert.deepEqual((await response.json()).requests, [{ trackId: 'track-1', title: 'Track One' }]);
+  });
+});
+
+test('reviewed album import requires fresh owner authorization and rejects replay', async () => {
+  const { buildReviewedAlbumImportAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+  const owner = Wallet.createRandom();
+  const origin = 'https://busking.example';
+  const issuedAt = new Date().toISOString();
+  let imports = 0;
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address,
+    onReviewedAlbumImport: async () => { imports++; return { added: 190, queued: 190, skipped: 0, minted: 0 }; } });
+  const authorization = { address: owner.address, origin, issuedAt };
+  const signature = await owner.signMessage(buildReviewedAlbumImportAuthorizationMessage(authorization));
+  await withServer(handler, async baseUrl => {
+    const send = () => fetch(`${baseUrl}/api/admin/reviewed-album-import`, { method: 'POST',
+      headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ ...authorization, signature }) });
+    const response = await send();
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { added: 190, queued: 190, skipped: 0, minted: 0 });
+    assert.equal(imports, 1);
+    assert.equal((await send()).status, 400);
+    assert.equal(imports, 1);
   });
 });
 

@@ -31,12 +31,14 @@ window.DecentConfig = {
   rpcUrl: "https://mainnet.base.org",
   blockExplorerUrl: "https://basescan.org",
 
-  // DecentNFT v0.2 deployed on Base via DecentMarket
-  contractAddress: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B",
-  additionalNftContractAddresses: [],
-  nftBatchMintEnabled: false,
-  // DJuke v0.2 on Base; payments also require the worker's DJUKE_PAYMENTS_ENABLED.
+  // v0.3 receives new batch mints; keep v0.2 in the archive and reconciliation scan.
+  contractAddress: "0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3",
+  additionalNftContractAddresses: ["0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B"],
+  nftBatchMintEnabled: true,
+  // Deployed DJuke v0.2 address.
   djukeContractAddress: "0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59",
+  djukeContractVersion: "0.2",
+  ensRpcUrl: "https://ethereum-rpc.publicnode.com",
   adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",
   marketUrl: "https://thejollylama.github.io/DecentMarket/",
 

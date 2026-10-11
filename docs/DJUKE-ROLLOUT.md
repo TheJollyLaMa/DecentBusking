@@ -7,6 +7,68 @@ low-stakes prototype; no paid request was submitted during verification. The
 prototype still uses its current worker and Pinata credentials, which must be
 rotated before expanding the audience. Community pinning follow-up is in PR #110
 and the final 8/2/90 contract allocation is in DecentMarket PR #49.
+## Creator profiles and DJuke v0.2
+
+The Base-fork rehearsal passed after mining one local block before historical
+contract reads. DJuke v0.2 is deployed at
+`0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59`, transaction
+`0x27973e8bff75d4cf0a29356641dba04b8a787cfdd76ae27dd3893ef0c966658a`.
+All 253 songs were migrated and verified with identical IDs, audio and payee
+splits. Worker roles are granted. The live API reports 253 registered tracks
+with no catalog read errors, and payments are enabled for the low-stakes
+prototype. No paid request was submitted during verification. Receipts are in
+DecentMarket `deployments/djuke-v02-base.json`. Migration RPC calls are serialized
+to avoid public provider rate limits. Album grouping is curated separately,
+not inferred from artist names.
+
+The Top 10, DJuke emoji mark, and DVert pullout tabs are restored in the UI.
+DVert is currently a profile entry point and an explicit undeployed status, not
+a live advertisement checkout or broadcast.
+
+The creator profile opens from DJuke or an NFT detail panel. Public profiles are
+readable without connecting; editing requires the same wallet's fresh signature.
+Linking Discord requires both a wallet-signed link request and the authenticated
+`/creator-link code:...` Discord interaction. Codes expire in five minutes and
+cannot silently replace an existing wallet/Discord association. Profile snapshots
+use their own Pinata namespace; they are not part of the playlist-only Mac mirror.
+
+Uploaded IPFS avatar/banner overrides take precedence over forward-verified ENS
+records, then verified Discord images. ENS is resolved on Ethereum mainnet, not
+Base. Banners use `banner` or `header` text records; neither record is guaranteed.
+Images may be PNG, JPEG, WebP or GIF up to 10 MB. Profile updates never rewrite
+immutable DNFT metadata, transfer NFTs, or grant song/advert contract permissions.
+
+DecentMarket's v0.2 source compiles separately with IR. It preserves FIFO queue
+pricing (0.25 USDC, doubling every eight pending requests), and the 90/8/2 split.
+Albums have a manager, collaborator percentages and position titles. Every current
+recipient must sign the same revision before a manager changes recipients/shares;
+song splits can then be synced in a separate retryable transaction. Existing paid
+requests retain their original recipients. Album manifest edits do not change
+individual song audio. Personal listen/album prices are separate from queue prices.
+
+Queued plays use `requestPlayWithGas` with a worker-signed EIP-712 quote bound to
+listener, song, USDC price cap, nonce and expiry. The ETH contribution is twice the
+quoted fulfillment budget and is forwarded atomically to the fixed worker. The
+worker budget defaults to 1,000,000 gas plus the Base gas oracle's L1 data fee;
+it is a conservative budget, not a guarantee of future fee levels. Quotes fail
+closed above the deployed contract cap. Prototype payments are enabled; verify
+the budget and settlement against the production router before widening access.
+
+Browser and worker configuration must use the new address with
+`DJUKE_CONTRACT_VERSION=0.2` on Render and `djukeContractVersion: "0.2"`
+in browser config. `DJUKE_FULFILLMENT_GAS_UNITS` may
+override the bounded budget (100,000 to 2,000,000). Existing v0.1 registrations do
+not automatically appear in a new contract. Album management remains disabled
+until v0.2 is selected. Advert-specific editing still requires the advert contract's
+own permissions and a reviewed integration; linking Discord alone is insufficient.
+
+Status: DecentNFT v0.3 and DecentJukeBox v0.2 are deployed on Base; the
+`dbusk-pinners` fund is active. DJuke payments are enabled for the low-stakes
+prototype after the worker, catalog and mirror were verified. The
+existing DecentNFT v0.2 remains in the archive alongside v0.3. New owner-approved
+mint requests target v0.3 in sequential batches of up to 20. The reviewed album
+plan is ready to import and queue after mirror readiness is confirmed; no album
+NFTs have been minted yet.
 
 Regular radio playback is active. The live-performance calendar and DeVert
 reader/UI changes in the local worktree are not deployed; the live
@@ -27,9 +89,9 @@ fund creation, worker-role changes, and song registration require Base gas.
     never wait for a mirror. Visitors open the pin chooser from the existing header
     IPFS button and pin shared CIDs to local IPFS Desktop or their own Pinata account.
     No shared mirror secret is required for playlist saves.
-3. **Create the pinners fund (admin wallet, one transaction).** The router's
-  `dbusk-repo-dev` fund exists. Create and activate `dbusk-pinners` from the Payroll
-  fund selector; deployment preflight requires both funds.
+3. **Pinner fund status.** `dbusk-pinners` is active and empty until revenue is
+  routed to it. Confirm the pinner, artist and repo-dev balances before widening
+  the audience.
 4. **Rotate the prototype worker before expanding access.** The v0.2 contract is
   already deployed. Grant the replacement worker the required roles, revoke the
   old worker, then update `DJUKE_FULFILLER_PRIVATE_KEY` on Render. No contract
@@ -41,16 +103,17 @@ fund creation, worker-role changes, and song registration require Base gas.
 6. **Song registration is complete for the prototype.** The live worker exposes
   253 registered tracks, verified against their on-chain audio CIDs. New
   eligible uploads continue to register automatically; watch for `[djuke]
-  Registered` in the logs.
+  Registered` in the logs. The reviewed-album action rechecks the 190-song
+  dual-pinned plan against the current playlist and queues eligible songs for
+  owner review; it does not mint. Review the artist wallet before approving.
 7. **Verify settlement before widening access.** Prototype payments are enabled
   with the 90% artist / 8% pinner / 2% repo-dev split. Confirm all three router
   balances before inviting a broader audience. A 0.25 USDC bump/listen splits
   0.225 / 0.020 / 0.005 USDC.
-8. **Batch minting (optional, later).** Switch `contractAddress` to the v0.3 address,
-   move the old address into `additionalNftContractAddresses`, set
-   `DECENT_NFT_CONTRACT_ADDRESS` and `DECENT_NFT_ADDITIONAL_ADDRESSES` on Render, and
-   set `nftBatchMintEnabled: true`. Existing v0.2 NFTs stay where they are.
-
+8. **Batch minting.** New owner-approved mints target DecentNFT v0.3; v0.2 stays
+  in the archive and reconciliation scan. Batch minting is enabled. Review the
+  imported song and artist recipient in Admin, then confirm sequential batches
+  of up to 20. Existing v0.2 token IDs and metadata remain unchanged.
 Rollback: unset `DJUKE_PAYMENTS_ENABLED` or `djukeContractAddress` to hide payments;
 the contract's `pauseRequests` stops new purchases while queued plays still settle.
 
@@ -95,13 +158,14 @@ a fork/testnet. Keep DeVert payments disabled until those checks pass.
   current title/filename and audio identity, preserves every existing entry,
   assigns stable album IDs and album membership, and creates zero-stat unminted
   radio tracks. It neither registers NFTs nor requests mints automatically.
-- The newest readable checkpoint (77 tracks, 2026-10-10T14:43:29.254Z) passed a
-  local rehearsal: 190 additions, 267 resulting tracks, old history unchanged,
-  zero additions on rerun, verified existing Jolly uploader/wallet attribution.
-  See `docs/reports/album-import-rehearsal.json`. This was not a live import.
+- The current recovered Pinata checkpoint contains 266 tracks, including 253
+  DJuke-eligible songs. All 253 eligible song IDs are enabled on-chain and match
+  their exact audio CIDs. The older 77-track checkpoint is superseded.
 - Opt-in startup application requires deployed code and
   `DBUSK_IMPORT_REVIEWED_ALBUMS=true`, a successful nonempty remote restore, and
-  the authenticated outbound checkpoint mirror described below. The previous
+  the authenticated outbound checkpoint mirror described below. The live
+  instance restored the full checkpoint; its latest reviewed-plan run added 0,
+  queued 0, skipped 190, and minted no NFTs. The previous
   `DBUSK_ALBUM_LOCAL_IPFS_API` option has been replaced: Render loopback is not
   the user's Mac. The media requires no additional uploads; Pinata state
   persistence creates a small JSON checkpoint, not another copy of the albums.
@@ -137,12 +201,15 @@ a fork/testnet. Keep DeVert payments disabled until those checks pass.
   roots matched offline using raw leaves and their existing Finder metadata;
   those same roots are now recursively pinned locally with no Pinata uploads.
   AW did not match any tested profile and remains a directory-review blocker.
-- `docs/reports/album-import-candidates.json` contains 190 unblocked, dual-pinned
-  candidate recordings needing no uploads. It is a plan only, with application
-  disabled. Before applying it, recheck current playlist titles and artist
-  attribution and persist album membership without changing existing history.
+  `docs/reports/album-import-candidates.json` contains 190 unblocked, dual-pinned
+  candidate recordings needing no uploads. Startup rechecks current titles and
+  CIDs, applies album membership without changing existing history, and queues
+  new songs for owner mint review. The separate Admin action also rechecks the
+  plan and queues without minting. Set the startup flag to `false` to pause
+  automatic retries.
   The broader Desktop folders remain in the review report, not automatically
-  added to the original ENS import scope. No radio entries or NFTs were added.
+  added to the original ENS import scope. No NFTs were minted by the latest
+  reviewed-plan run.
 
 - Album storage update: use `/Users/j/Desktop/DecentJukeboxAlbums` as the local
   source, leaving originals unchanged. Inventory found 343 media files in 27
@@ -181,22 +248,21 @@ a fork/testnet. Keep DeVert payments disabled until those checks pass.
   review of recordings with alternate encodings and expanded album scope.
 
 - Archive caches, selection, detail links and coin placement distinguish
-  chain/contract/token identities. `additionalNftContractAddresses` is empty;
-  v0.2 remains the configured collection. Both archive and CLI/worker scans
+  chain/contract/token identities. DecentNFT v0.3 is the configured mint
+  collection and v0.2 remains in `additionalNftContractAddresses`. Both archive and CLI/worker scans
   support additional collections. Worker scans retain v0.2 and accept optional
   `DECENT_NFT_ADDITIONAL_ADDRESSES` (comma-separated); every scan must succeed
   before playlist reconciliation. Existing playlist token IDs and statistics
   remain intact; `nftReferences` carries verified collection-qualified refs.
-- Admin selected-song minting supports v0.3 behind `nftBatchMintEnabled: false`.
+- Admin selected-song minting supports v0.3 with `nftBatchMintEnabled: true`.
   It prepares metadata, estimates gas, limits batches to 20 songs, uses one
   transaction and matches receipt events to metadata/recipients. It does not
   automatically rebroadcast after Discord reconciliation fails.
-- Local DecentMarket now also contains the undeployed
-  `contracts/DecentJukeBox_v0.1.sol` candidate and its tests. It escrows USDC,
-  enforces FIFO and a user-specified maximum price, snapshots collaborator
-  shares, and routes 8% to `dbusk-pinners`, 2% to `dbusk-repo-dev`, and 90% to
-  artist withdrawal credits. The 8/2 share applies to both paid queue bumps and
-  on-demand listens. This is an undeployed contract candidate.
+- DecentJukeBox v0.2 is deployed and its worker-signed EIP-712 gas quote is wired
+  into the browser request path. The live prototype uses FIFO queue pricing,
+  exact 90/8/2 routing and a bounded worker gas contribution. Keep the existing
+  Fulfiller credentials prototype-only; rotate them and regrant roles before
+  widening access.
 - Song audio references cannot change under an existing DJuke song ID. Split
   edits affect future purchases only. Admin configuration does not prove artist
   consent. The fulfillment role trusts a designated worker; an on-chain playback
@@ -207,11 +273,11 @@ a fork/testnet. Keep DeVert payments disabled until those checks pass.
   The current reader refuses queues exceeding 128 pending requests rather than
   presenting an incomplete price. Pagination must be implemented before activation
   so this operational bound does not undermine paid fulfillment.
-- The durable playback journal is tested but not attached to the live radio or
-  Pinata store. It checkpoints before acquisition, retries failures after restart
-  and preserves completed playback awaiting fulfillment. Its synchronization
-  input must come from verified contract state; chain-order reconciliation and
-  external fulfillments still need integration testing.
+- The durable playback journal is attached to the live radio and Pinata store.
+  Its local Kubo mirror client must remain online for checkpoint acknowledgements;
+  when the client is unavailable, journal writes can fail. The journal checkpoints
+  before acquisition, retries after restart and synchronizes from confirmed
+  contract state. No paid request was submitted during prototype verification.
 - Read-only `discord-bot/album-audit.js` parses HTML and literal track manifests
   without executing player scripts, retains CID/path identities, links exact
   existing references and flags title-only matches for review. It is not a
@@ -276,15 +342,13 @@ plays the albums in their browser. This environment's automated-access failures
 are not evidence of dead CIDs; use accessible player HTML/manifests from the
 working browser session or another available gateway to complete the audit.
 
-Next activation gates: finish paid-play scheduler and worker signer integration,
-implement approved paid-play accounting and payer-consented replacement flow,
-wire browser quote/approval/request actions, make mint completion verification
-explicitly collection-qualified, export ABIs, complete adversarial tests and
-testnet rehearsal, and recover accessible album manifests before duplicate
-review/import. DeVert additionally needs the advertiser purchase flow, reliable
-audio delivery, durable impression/market scheduling, verified DJuke-purchase
-linking and its own testnet rehearsal. Do not enable payments or batch signing
-before these gates.
+Before widening the prototype audience, rotate the worker key and Pinata token,
+verify all three router balances, confirm journal persistence with the Mac mirror
+client, and complete a controlled paid-play/fulfillment rehearsal. The local
+radio-calendar UI and worker routes still need to be published. DeVert remains
+undeployed and needs advertiser purchase controls, reliable audio delivery,
+durable impression/market scheduling, verified DJuke-purchase linking and its
+own testnet rehearsal. Keep DeVert payments off until those gates pass.
 
 ## Preserve the existing system
 

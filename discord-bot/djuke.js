@@ -18,6 +18,21 @@ export function djukeCatalog(playlist) {
     .map(track => ({ songId: id(track.trackId), track }));
 }
 
+async function readSongWithRetry(contract, songId, options, attempts, retryDelayMs) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await contract.getSong(...(options === undefined ? [songId] : [songId, options]));
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts && retryDelayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export function createDjukeFulfiller(contract) {
   return async ({ chainRequestId, songId, revision, playId }) => {
     const transaction = await contract.fulfill(BigInt(chainRequestId), songId, BigInt(revision), id(playId));
@@ -27,20 +42,27 @@ export function createDjukeFulfiller(contract) {
   };
 }
 
-export function createDjukeSongRegistrar({ contract, getPlaylist, batchSize = 25, concurrency = 20, onRegistered = () => {}, log = console }) {
+export function createDjukeSongRegistrar({ contract, getPlaylist, batchSize = 25, concurrency = 5,
+  readRetryAttempts = 3, readRetryDelayMs = 200, onRegistered = () => {}, log = console }) {
   const known = new Set();
   let running = null;
   async function sync() {
     const missing = [];
     const entries = djukeCatalog(getPlaylist()).filter(({ songId }) => !known.has(songId));
+    let lookupErrors = 0;
     for (let start = 0; start < entries.length; start += concurrency) {
       await Promise.all(entries.slice(start, start + concurrency).map(async entry => {
-        const song = await contract.getSong(entry.songId);
-        if (!song.audioURI) missing.push(entry);
-        else if (song.audioURI === `ipfs://${entry.track.ipfsCid}`) known.add(entry.songId);
-        else { known.add(entry.songId); log.warn(`[djuke] ${entry.track.trackId} is registered with different audio; admin review needed`); }
+        try {
+          const song = await readSongWithRetry(contract, entry.songId, undefined, readRetryAttempts, readRetryDelayMs);
+          if (!song.audioURI) missing.push(entry);
+          else if (song.audioURI === `ipfs://${entry.track.ipfsCid}`) known.add(entry.songId);
+          else { known.add(entry.songId); log.warn(`[djuke] ${entry.track.trackId} is registered with different audio; admin review needed`); }
+        } catch {
+          lookupErrors++;
+        }
       }));
     }
+    if (lookupErrors) log.warn(`[djuke] Could not verify ${lookupErrors} song registration(s); retrying on the next scan.`);
     let registered = 0;
     for (let start = 0; start < missing.length; start += batchSize) {
       const batch = missing.slice(start, start + batchSize);
@@ -166,24 +188,34 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
 }
 
 export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, provider, contract, confirmations = 2,
-  paymentsEnabled = false, songCacheMs = 300000, now = () => Date.now() }) {
+  paymentsEnabled = false, songCacheMs = 300000, concurrency = 5, readRetryAttempts = 3,
+  readRetryDelayMs = 200, now = () => Date.now(), log = console }) {
   if (!isAddress(contractAddress) || /^0x0{40}$/i.test(contractAddress)) throw new Error('Invalid DJuke contract address');
   if (!Number.isSafeInteger(confirmations) || confirmations < 2) throw new Error('DJuke needs at least two confirmations');
   const rpc = provider || new JsonRpcProvider(rpcUrl);
   const jukebox = contract || new Contract(contractAddress, DJUKE_ABI, rpc);
   const registrations = new Map();
   let task = null;
-  async function registeredSongs(entries) {
+  async function registeredSongs(entries, options) {
     const stale = entries.filter(({ songId }) => !(now() - (registrations.get(songId)?.at ?? -Infinity) < songCacheMs));
-    for (let start = 0; start < stale.length; start += 20) {
-      await Promise.all(stale.slice(start, start + 20).map(async ({ songId }) => {
-        registrations.set(songId, { at: now(), song: await jukebox.getSong(songId) });
+    let lookupErrors = 0;
+    for (let start = 0; start < stale.length; start += concurrency) {
+      await Promise.all(stale.slice(start, start + concurrency).map(async ({ songId }) => {
+        try {
+          const song = await readSongWithRetry(jukebox, songId, options, readRetryAttempts, readRetryDelayMs);
+          registrations.set(songId, { at: now(), song });
+        } catch {
+          lookupErrors++;
+        }
       }));
     }
-    return entries.filter(({ songId, track }) => {
+    if (lookupErrors) log.warn(`[djuke] Could not verify ${lookupErrors} song registration(s); omitting them from this snapshot.`);
+    const tracks = entries.filter(({ songId, track }) => {
       const song = registrations.get(songId)?.song;
       return song?.enabled && song.audioURI === `ipfs://${track.ipfsCid}`;
-    }).map(({ songId, track }) => ({ songId, trackId: track.trackId, title: track.title, ipfsCid: track.ipfsCid }));
+    }).map(({ songId, track }) => ({ songId, trackId: track.trackId, title: track.title, ipfsCid: track.ipfsCid,
+      artist: track.uploader || track.mintRecipient, creator: track.mintRecipient }));
+    return { tracks, lookupErrors };
   }
   async function readSnapshot() {
     if (Number((await rpc.getNetwork()).chainId) !== 8453) throw new Error('DJuke is Base-only');
@@ -203,7 +235,7 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
     const catalog = new Map(entries.map(({ songId, track }) => [songId, track]));
     const songs = new Map();
     const getSong = async songId => {
-      if (!songs.has(songId)) songs.set(songId, await jukebox.getSong(songId, options));
+      if (!songs.has(songId)) songs.set(songId, await readSongWithRetry(jukebox, songId, options, readRetryAttempts, readRetryDelayMs));
       return songs.get(songId);
     };
     const requests = [];
@@ -221,11 +253,11 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
         artist: mapped ? track.uploader || track.mintRecipient : '',
         payer: request.payer, amountUnits: request.amount.toString(), playable: !!mapped });
     }
-    const tracks = await registeredSongs(entries);
+    const { tracks, lookupErrors: catalogReadErrors } = await registeredSongs(entries, options);
     if ((await rpc.getBlock(blockNumber))?.hash !== before.hash) throw new Error('DJuke snapshot changed during verification');
     const quote = quoteDjuke(requests.length);
     return { chainId: 8453, contractAddress, usdcAddress: BASE_USDC, blockNumber, blockHash: before.hash,
-      requests, tracks, priceUnits: quote.priceUnits.toString(), paymentsEnabled };
+      requests, tracks, catalogReadErrors, priceUnits: quote.priceUnits.toString(), paymentsEnabled };
   }
   const read = () => {
     if (!task) task = readSnapshot().finally(() => { task = null; });

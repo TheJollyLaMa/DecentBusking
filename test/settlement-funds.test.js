@@ -58,7 +58,7 @@ test('fund selector uses only this app configured radio and repository allocatio
   assert.throws(() => resolveSettlementFundSlug('__custom_fund__', 'dbusk-repo-dev', { fundSlug: 'dbusk-repo-dev' }), /configured fund/);
 });
 
-test('fund metadata suggestions prefill names and precise purposes for the project defaults', async () => {
+test('fund metadata suggestions prefill names and purpose for the project defaults', async () => {
   const { defaultSettlementFundMetadata } = await import(url);
   assert.deepEqual(defaultSettlementFundMetadata('dbusk-pinners'), {
     name: 'Dbusk Pinners',
