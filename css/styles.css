@@ -25,6 +25,8 @@
 #devert-panel [role=status]:empty, .devert-secondary-status:empty { display: none; }
 #devert-panel button:disabled { opacity: .45; cursor: default; }
 #devert-ad-queue, #devert-purchase { width: 100%; }
+.devert-ad-library-state { color: #f5cf66; }
+#devert-panel .devert-use-ad { min-height: 30px; padding: 4px 7px; font-size: .68rem; white-space: nowrap; }
 #devert-tab .devert-tab-art { position: relative; display: block; width: 40px; height: 50px; }
 .devert-tab-art > span { position: absolute; line-height: 1; pointer-events: none; }
 .devert-tab-art .devert-cash { top: 0; font-size: 12px; }

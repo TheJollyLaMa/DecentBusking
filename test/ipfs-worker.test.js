@@ -77,6 +77,22 @@ test('DeVert campaign snapshot is public read-only data and stays unavailable un
   });
 });
 
+test('ad library requires an address and returns only the request for that wallet', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const owner = Wallet.createRandom().address;
+  let requestedAddress;
+  const ads = [{ trackId: 'ad-one', state: 'ready' }];
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: owner,
+    getDevertAds: async ({ address }) => { requestedAddress = address; return ads; } });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/devert/ads?address=${owner}`);
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).ads, ads);
+    assert.equal(requestedAddress, owner);
+    assert.equal((await fetch(`${base}/api/devert/ads?address=bad`)).status, 400);
+  });
+});
+
 test('AdLoop state endpoint exposes live now-playing state without requiring a main-radio campaign reader', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom().address;

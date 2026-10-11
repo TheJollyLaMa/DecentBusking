@@ -537,6 +537,30 @@ export function getMintRequests() {
     .sort((first, second) => Date.parse(first.mintRequestedAt) - Date.parse(second.mintRequestedAt));
 }
 
+export function getDevertAdsForWallet(address, campaigns = [], now = Date.now()) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('Invalid advertiser wallet');
+  const owner = address.toLowerCase();
+  return _playlist.filter(track => track.isDevertAd === true && track.mintRecipient?.toLowerCase() === owner)
+    .map(track => {
+      const campaign = campaigns.find(item => item.advertiser?.toLowerCase() === owner &&
+        item.audioURI === `ipfs://${track.ipfsCid}` && Date.parse(item.startedAt) <= now && now < Date.parse(item.expiresAt));
+      const minted = track.mintStatus === 'minted' && track.tokenId != null;
+      return {
+        trackId: track.trackId,
+        title: track.title,
+        ipfsCid: track.ipfsCid,
+        mediaType: track.mediaType || 'audio/mpeg',
+        filename: track.filename || '',
+        mintStatus: minted ? 'minted' : 'pending',
+        tokenId: minted ? String(track.tokenId) : null,
+        state: campaign ? 'active' : minted ? 'ready' : 'pending',
+        campaignId: campaign?.campaignId || null,
+        expiresAt: campaign?.expiresAt || null,
+        secondsRemaining: campaign ? Math.max(0, Math.ceil((Date.parse(campaign.expiresAt) - now) / 1000)) : 0,
+      };
+    }).sort((first, second) => first.title.localeCompare(second.title));
+}
+
 /**
  * Compute the playback weight for a track.
  * Formula: max(0.1, 1 + likes − dislikes × 0.5)

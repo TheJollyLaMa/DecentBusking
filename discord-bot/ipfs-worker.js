@@ -150,6 +150,7 @@ export function createWorkerRequestHandler({
   getDjukeState,
   getDjukeGasQuote,
   getDevertState,
+  getDevertAds,
   getDevertLoopState,
   onDevertLoopVote,
   getPinnerManifest,
@@ -288,6 +289,13 @@ export function createWorkerRequestHandler({
           return;
         }
         sendJson(response, 200, await getDevertState(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/devert/ads') {
+        if (!getDevertAds) { sendJson(response, 404, { error: 'Advert library is not configured' }, '*'); return; }
+        const address = requestUrl.searchParams.get('address') || '';
+        if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error('Valid advertiser wallet required');
+        sendJson(response, 200, { ads: await getDevertAds({ address }) }, '*');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/devert/loop') {

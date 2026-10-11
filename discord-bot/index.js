@@ -66,6 +66,7 @@ import {
   getPlaylist,
   getMintBacklog,
   getMintRequests,
+  getDevertAdsForWallet,
   queueUploaderMints,
   getTopTracks,
   removeTrack,
@@ -769,6 +770,11 @@ async function main() {
     }), paymentLedger: { endpoint: '/api/payroll/ledger', snapshotUri: paymentLedger.getState().snapshotUri,
       lastCheckedAt: paymentLedger.getState().lastCheckedAt, ready: paymentLedgerReady } }),
     getDevertState: readDevertState,
+    getDevertAds: async ({ address }) => {
+      if (!playlistReady) throw new Error('Advert library is restoring; retry shortly');
+      const snapshot = await readDevertState?.();
+      return getDevertAdsForWallet(address, snapshot?.campaigns || []);
+    },
     getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null },
     onDevertLoopVote: payload => _devertLoopWorker ? _devertLoopWorker.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),
     getRadioHistory: async ({ weeks, wallet, includeAllTime, calendar }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime, calendar }),

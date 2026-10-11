@@ -37,17 +37,6 @@ function formatEth(units) {
   return `${whole}${fraction ? `.${fraction}` : ''} ETH`;
 }
 
-function activeCampaigns(snapshot, now = Date.now()) {
-  if (!snapshot || snapshot.chainId !== 8453 || !Array.isArray(snapshot.campaigns)) return [];
-  return snapshot.campaigns.filter(campaign => {
-    const start = Date.parse(campaign.startedAt);
-    const end = Date.parse(campaign.expiresAt);
-    return Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end;
-  }).sort((first, second) => Number(second.djukeBoosts || 0) - Number(first.djukeBoosts || 0) ||
-    Number(first.mainRadioPlays || 0) - Number(second.mainRadioPlays || 0) ||
-    (BigInt(second.offerUnits) > BigInt(first.offerUnits) ? 1 : BigInt(second.offerUnits) < BigInt(first.offerUnits) ? -1 : 0));
-}
-
 export function normalizeAdLoopNowPlaying(state) {
   const item = state?.nowPlaying;
   if (state?.ready !== true || !item?.audible || typeof item.radioPlayId !== 'string' ||
@@ -439,19 +428,39 @@ export function initDevertTab() {
       if (!response.ok) throw new Error(result.error || `Campaigns unavailable (${response.status})`);
       snapshot = result;
       campaignList.replaceChildren();
-      const campaigns = activeCampaigns(snapshot);
-      for (const campaign of campaigns) {
+      const walletAddress = window._wallet?.address;
+      let ads = [];
+      if (walletAddress) {
+        const libraryResponse = await fetch(`${service}/api/devert/ads?address=${encodeURIComponent(walletAddress)}`,
+          { cache: 'no-store', signal: AbortSignal.timeout(12_000) });
+        const libraryResult = await libraryResponse.json();
+        if (!libraryResponse.ok) throw new Error(libraryResult.error || `Ad library unavailable (${libraryResponse.status})`);
+        ads = Array.isArray(libraryResult.ads) ? libraryResult.ads : [];
+      }
+      for (const ad of ads) {
         const item = node('li', undefined, 'devert-campaign');
         const details = node('span', undefined, 'devert-campaign-details');
-        const boosts = Number(campaign.djukeBoosts || 0);
-        details.append(node('strong', campaign.title), node('span',
-          `${formatUsdc(campaign.offerUnits)}${boosts ? ` · DJuke boosts ${boosts}` : ''} · expires ${new Intl.DateTimeFormat('en-US', {
-            timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
-          }).format(new Date(campaign.expiresAt))}`));
+        const state = ad.state === 'active' ? 'Active campaign' : ad.state === 'ready' ? 'NFT minted · ready for campaign' : 'Waiting for admin mint';
+        const remaining = ad.secondsRemaining > 0 ? ` · ${Math.floor(ad.secondsRemaining / 86400)}d ${Math.floor(ad.secondsRemaining % 86400 / 3600)}h left` : '';
+        details.append(node('strong', ad.title), node('span', `${state}${remaining}`));
         item.append(details);
+        if (ad.state === 'ready') {
+          const select = node('button', 'Run Campaign', 'devert-use-ad');
+          select.type = 'button';
+          select.setAttribute('aria-label', `Use ${ad.title} in a campaign`);
+          select.addEventListener('click', () => {
+            document.getElementById('devert-title').value = ad.title;
+            document.getElementById('devert-audio-uri').value = `ipfs://${ad.ipfsCid}`;
+            const campaignDetails = document.querySelector('.devert-run-campaign');
+            campaignDetails.open = true;
+            document.getElementById('devert-offer').focus();
+          });
+          item.append(select);
+        }
         campaignList.append(item);
       }
-      campaignStatus.textContent = campaigns.length ? `${campaigns.length} active campaign${campaigns.length === 1 ? '' : 's'} · confirmed Base snapshot #${snapshot.blockNumber}` : 'No active campaigns right now.';
+      campaignStatus.textContent = !walletAddress ? 'Connect your wallet to view your ads.'
+        : ads.length ? `${ads.length} ad${ads.length === 1 ? '' : 's'} linked to this wallet.` : 'No ads submitted from this wallet yet.';
       radioStatus.textContent = 'Main-radio ads follow the ten-song program; AdLoop is a separate 24/7 channel.';
       await checkAdLoopReady();
       syncCheckout();
@@ -502,7 +511,8 @@ export function initDevertTab() {
   adMediaQueueButton?.addEventListener('click', queueAdMedia);
   walletButton?.addEventListener('click', () => window._wallet?.connect?.());
   document.addEventListener('wallet-connected', syncCheckout);
-  document.addEventListener('wallet-disconnected', syncCheckout);
+  document.addEventListener('wallet-connected', refresh);
+  document.addEventListener('wallet-disconnected', () => { syncCheckout(); campaignList.replaceChildren(); campaignStatus.textContent = 'Connect your wallet to view your ads.'; });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); } });
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
   document.addEventListener('click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target)) close(); });

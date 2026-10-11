@@ -117,6 +117,32 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
   assert.equal(rated.plays, beforeVote.plays);
 });
 
+test('DeVert ad library is scoped to wallet and reports mint/campaign state', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-devert-library-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(tempDir, { recursive: true, force: true }); });
+  const moduleUrl = pathToFileURL(path.join(__dirname, '../discord-bot/playlist-store.js'));
+  moduleUrl.searchParams.set('ad-library', String(Date.now()));
+  const store = await import(moduleUrl.href);
+  const owner = '0x1111111111111111111111111111111111111111';
+  const other = '0x2222222222222222222222222222222222222222';
+  store.loadPlaylist([
+    { trackId: 'pending', title: 'Pending Ad', ipfsCid: 'cid-pending', isDevertAd: true, mintRecipient: owner, mintStatus: 'requested' },
+    { trackId: 'ready', title: 'Ready Ad', ipfsCid: 'cid-ready', isDevertAd: true, mintRecipient: owner, mintStatus: 'minted', tokenId: '41' },
+    { trackId: 'active', title: 'Active Ad', ipfsCid: 'cid-active', isDevertAd: true, mintRecipient: owner, mintStatus: 'minted', tokenId: '42' },
+    { trackId: 'other', title: 'Other Wallet Ad', ipfsCid: 'cid-other', isDevertAd: true, mintRecipient: other, mintStatus: 'requested' },
+    { trackId: 'song', title: 'Song', ipfsCid: 'cid-song', mintRecipient: owner, mintStatus: 'requested' },
+  ]);
+  const now = Date.parse('2026-10-11T12:00:00Z');
+  const ads = store.getDevertAdsForWallet(owner, [{ campaignId: '9', advertiser: owner,
+    audioURI: 'ipfs://cid-active', startedAt: new Date(now - 60_000).toISOString(),
+    expiresAt: new Date(now + 3_600_000).toISOString() }], now);
+  assert.deepEqual(ads.map(ad => [ad.trackId, ad.state]), [['active', 'active'], ['pending', 'pending'], ['ready', 'ready']]);
+  assert.equal(ads[0].campaignId, '9');
+  assert.equal(ads[0].secondsRemaining, 3600);
+  assert.equal(ads[2].tokenId, '41');
+});
+
 test('JukeLoop sends DeVert main-radio votes to the campaign vote journal', async () => {
   const { createJukeLoopSession, submitJukeLoopVote } = await import('../discord-bot/jukeloop.js');
   const adVotes = [];
