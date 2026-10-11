@@ -93,3 +93,18 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   assert.match(config, /djukeContractAddress: "0x153ef59a57C9A88cbB7822252B5d9D0B11E48F0E"/);
   assert.match(config, /nftBatchMintEnabled: true/);
 });
+
+test('worker gas reminders precede import, mint and paid queue controls', () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
+  for (const [startId, controlId] of [['djuke-body', 'djuke-pay'],
+    ['admin-reviewed-album-import', 'admin-reviewed-album-import-btn'], ['admin-mint-section', 'admin-mint-queue']]) {
+    const start = startId === 'djuke-body' ? html.indexOf('class="djuke-body"') : html.indexOf(`id="${startId}"`);
+    const control = html.indexOf(`id="${controlId}"`, start);
+    const notice = html.slice(start, control);
+    assert.match(notice, /class="worker-gas-notice"/);
+    assert.match(notice, /ETH on Base/);
+    assert.match(notice, /0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F/);
+    assert.match(notice, /Balance is not checked here/);
+  }
+  assert.match(html, /NFT mint gas is paid by your connected wallet/);
+});
