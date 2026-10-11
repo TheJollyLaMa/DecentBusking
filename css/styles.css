@@ -1673,6 +1673,27 @@ decent-foot {
 .admin-reviewed-album-import .admin-status { margin-top: .25rem; }
 .worker-gas-notice { margin: .75rem 0; padding: .5rem 0 .5rem .65rem; border-left: 3px solid #dbbd57; color: var(--text-dim); font-size: .76rem; line-height: 1.5; }
 .worker-gas-notice code { overflow-wrap: anywhere; }
+#creator-profile { margin: auto; width: min(620px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; box-sizing: border-box; padding: 18px; color: var(--text); background: var(--bg, #111); border: 1px solid #69776d; border-radius: 6px; }
+#creator-profile::backdrop { background: #000b; }
+.creator-profile-toolbar, .creator-profile-identity, .creator-profile-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.creator-profile-toolbar h2 { flex: 1; font-size: 1rem; margin: 0; }
+.creator-profile-banner { width: 100%; height: 150px; object-fit: cover; margin-top: 14px; }
+.creator-profile-avatar { width: 80px; height: 80px; flex: 0 0 80px; object-fit: cover; border-radius: 50%; }
+.creator-profile-identity { padding: 16px 0; }
+.creator-profile-identity h3 { font-size: 1rem; margin: 0; }
+.creator-profile-identity p { margin: 4px 0; font-size: .8rem; }
+#creator-profile form { display: grid; gap: 12px; padding: 12px 0; }
+#creator-profile label { display: grid; gap: 5px; font-size: .8rem; min-width: 0; }
+#creator-profile input, #creator-profile textarea, #djuke-search { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px; background: #1b2924; color: #ecf1ed; border: 1px solid #52675a; border-radius: 4px; font: inherit; font-size: .8rem; }
+#creator-profile button, #djuke-profile { min-height: 36px; padding: 8px 12px; border: 1px solid #69776d; border-radius: 4px; color: #15221c; background: #ebefea; font: inherit; font-size: .8rem; cursor: pointer; }
+#creator-profile button:disabled { opacity: .5; cursor: not-allowed; }
+.creator-profile-toolbar button { display: grid; place-items: center; width: 36px; height: 36px; padding: 6px; }
+.creator-profile-toolbar svg { width: 18px; height: 18px; }
+#creator-profile output, #creator-profile code, #creator-profile p { overflow-wrap: anywhere; }
+.creator-profile-image-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.creator-profile-discord { display: grid; gap: 8px; padding: 12px 0; }
+#djuke-search { margin: 0 0 8px; }
+@media (max-width: 480px) { .creator-profile-image-fields { grid-template-columns: minmax(0, 1fr); } }
 
 .admin-section-header,
 .admin-mint-toolbar {

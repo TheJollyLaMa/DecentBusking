@@ -45,6 +45,8 @@ import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime,
 import { createPinataStateStore } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
+import { createCreatorProfiles } from './creator-profiles.js';
+import { createDjukeGasQuoteReader, DJUKE_GAS_ABI } from './djuke-gas.js';
 import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
 import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
@@ -263,6 +265,8 @@ const NO_TRACKS_MSG =
   '❌ No audio tracks found in that IPFS directory. Make sure the CID points to a directory containing `.mp3`, `.m4a`, `.wav`, `.ogg`, `.flac`, `.aac`, or `.opus` files.';
 
 const SLASH_COMMANDS = [
+  new SlashCommandBuilder().setName('creator-link').setDescription('Link your Discord identity to a wallet-signed creator profile')
+    .addStringOption(option => option.setName('code').setDescription('Private link code from your creator profile').setRequired(true)),
   new SlashCommandBuilder()
     .setName('radio')
     .setDescription('Community radio — stream an IPFS album to a Discord voice channel')
@@ -386,6 +390,14 @@ async function main() {
   const config = loadConfig();
   const checkpointMirror = process.env.CHECKPOINT_MIRROR_SECRET
     ? createCheckpointMirror({ secret: process.env.CHECKPOINT_MIRROR_SECRET }) : null;
+  const creatorStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+    uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+    name: 'decentbusking-creator-profiles.json', tags: { app: 'decentbusking', kind: 'creator-profiles', schema: '1' },
+    serialize: value => value, deserialize: value => value }) : null;
+  const creatorProfiles = creatorStore ? createCreatorProfiles({ restore: creatorStore.restore, save: creatorStore.save }) : null;
+  const initializeCreators = () => creatorProfiles?.initialize().catch(error => console.warn('[creator-profiles]', error.message));
+  initializeCreators();
+  setInterval(initializeCreators, 30000).unref();
 
   let client;
   let playlistReady = false;
@@ -539,6 +551,11 @@ async function main() {
   setInterval(refreshPayflow, 15_000).unref();
 
   const djukeAddress = process.env.DJUKE_CONTRACT_ADDRESS;
+  const quoteSigner = process.env.DJUKE_CONTRACT_VERSION === '0.2' && process.env.DJUKE_FULFILLER_PRIVATE_KEY
+    ? new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, new JsonRpcProvider(config.baseRpcUrl)) : null;
+  const getDjukeGasQuote = quoteSigner ? createDjukeGasQuoteReader({ provider: quoteSigner.provider, signer: quoteSigner,
+    contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, 'function quote() view returns(uint256)'], quoteSigner),
+    fulfillmentGasUnits: BigInt(process.env.DJUKE_FULFILLMENT_GAS_UNITS || '1000000') }) : null;
   const readDjukeState = djukeAddress ? createDjukeQueueReader({
     rpcUrl: config.baseRpcUrl, contractAddress: djukeAddress,
     paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
@@ -574,7 +591,9 @@ async function main() {
 
   const requestHandler = createWorkerRequestHandler({
     checkpointMirror,
+    creatorProfiles,
     getDjukeState: readDjukeState,
+    getDjukeGasQuote,
     onReviewedAlbumImport: async () => {
       if (!playlistReady) throw new Error('Playlist is restoring; retry shortly');
       if (!queueReviewedAlbumImport) throw new Error('Reviewed album import is not configured');
@@ -779,6 +798,17 @@ async function main() {
       return;
     }
     if (!interaction.isChatInputCommand()) return;
+
+    if (interaction.commandName === 'creator-link') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        if (!creatorProfiles) throw new Error('Creator profiles are not configured');
+        const user = await interaction.user.fetch();
+        await creatorProfiles.confirmDiscord(interaction.options.getString('code', true), user);
+        await interaction.editReply('Discord identity verified. Refresh your creator profile to see the link.');
+      } catch (error) { await interaction.editReply(error.message); }
+      return;
+    }
 
     if (interaction.commandName === 'radio') {
       await handleRadioCommand(interaction, config);

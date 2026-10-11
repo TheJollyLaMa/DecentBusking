@@ -125,6 +125,7 @@ function _buildCardHTML(nft) {
     <h3 id="nft-detail-title">${_esc(nft.name || nft.title || `Track #${nft.tokenId}`)}</h3>
 
     ${audioUrl ? '<button class="nft-listen-btn nft-buy-btn" type="button">▶ Play Track</button><button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>' : ''}
+    ${/^0x[0-9a-fA-F]{40}$/.test(nft.artist || nft.creator || '') ? `<button class="nft-creator-profile nft-buy-btn" type="button" data-creator="${_esc(nft.artist || nft.creator)}" data-album="${_esc(nft.djukeAlbumId || '')}">Creator Profile / Collaborators</button>` : ''}
 
     ${parentSection}
 

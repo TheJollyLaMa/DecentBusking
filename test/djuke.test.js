@@ -108,3 +108,41 @@ test('worker gas reminders precede import, mint and paid queue controls', () => 
   }
   assert.match(html, /NFT mint gas is paid by your connected wallet/);
 });
+
+test('DJuke search matches song titles and creators without selecting a song implicitly', async () => {
+  const { filterDjukeSongs } = await import('../js/djuke.mjs');
+  const tracks = [{ trackId: 'a', title: 'Heart of Gold', artist: 'thejollylama', creator: '0xabc' },
+    { trackId: 'b', title: 'Other', artist: 'Someone' }];
+  assert.deepEqual(filterDjukeSongs(tracks, 'heart jolly').map(track => track.trackId), ['a']);
+  assert.deepEqual(filterDjukeSongs(tracks, '0xabc').map(track => track.trackId), ['a']);
+  assert.deepEqual(filterDjukeSongs(tracks, 'missing'), []);
+});
+
+test('v0.2 payment verifies a worker quote and sends exactly the doubled ETH contribution', async () => {
+  const { payForDjukeSong } = await import('../js/djuke.mjs');
+  const { createRequire } = require('node:module');
+  const library = createRequire(require('node:path').join(__dirname, '../discord-bot/package.json'))('ethers');
+  const { GAS_QUOTE_TYPES } = await import('../discord-bot/djuke-gas.js');
+  const previous = global.ethers;
+  global.ethers = library;
+  try {
+    const worker = library.Wallet.createRandom();
+    const fixture = paymentFixture({ allowance: 250000n });
+    fixture.signer.provider.getBalance = async () => 100000n;
+    const listener = await fixture.signer.getAddress();
+    const quote = { listener, songId: fixture.songId, maxPrice: '250000', fulfillmentCostWei: '1000', nonce: '0',
+      deadline: Math.floor(Date.now() / 1000) + 120, contributionWei: '2000', contractAddress: fixture.djuke.target, chainId: 8453 };
+    quote.signature = await worker.signTypedData({ name: 'DecentJukeBox', version: '0.2', chainId: 8453, verifyingContract: fixture.djuke.target }, GAS_QUOTE_TYPES, quote);
+    fixture.djuke.gasWorker = async () => worker.address;
+    fixture.djuke.maxGasContributionWei = async () => 10000n;
+    fixture.djuke.gasQuoteNonces = async () => 0n;
+    fixture.djuke.requestPlayWithGas = async (...args) => {
+      fixture.calls.push(['gas-request', args.at(-1).value]);
+      return { hash: '0xgas', wait: async () => ({ status: 1 }) };
+    };
+    fixture.djuke.requestPlayWithGas.staticCall = async () => {};
+    await payForDjukeSong({ ...fixture, gasQuote: quote });
+    assert.deepEqual(fixture.calls, [['gas-request', 2000n]]);
+    await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: { ...quote, contributionWei: '4000' } }), /Invalid worker gas quote/);
+  } finally { global.ethers = previous; }
+});

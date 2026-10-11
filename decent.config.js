@@ -37,6 +37,8 @@ window.DecentConfig = {
   nftBatchMintEnabled: true,
   // Deployed DJuke address. Purchases stay disabled until the worker enables them.
   djukeContractAddress: "0x153ef59a57C9A88cbB7822252B5d9D0B11E48F0E",
+  djukeContractVersion: "0.1",
+  ensRpcUrl: "https://ethereum-rpc.publicnode.com",
   adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",
   marketUrl: "https://thejollylama.github.io/DecentMarket/",
 

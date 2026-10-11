@@ -1,5 +1,45 @@
 # DJuke and DNft rollout
 
+## Creator profiles and DJuke v0.2 (not deployed)
+
+The creator profile opens from DJuke or an NFT detail panel. Public profiles are
+readable without connecting; editing requires the same wallet's fresh signature.
+Linking Discord requires both a wallet-signed link request and the authenticated
+`/creator-link code:...` Discord interaction. Codes expire in five minutes and
+cannot silently replace an existing wallet/Discord association. Profile snapshots
+use their own Pinata namespace; they are not part of the playlist-only Mac mirror.
+
+Uploaded IPFS avatar/banner overrides take precedence over forward-verified ENS
+records, then verified Discord images. ENS is resolved on Ethereum mainnet, not
+Base. Banners use `banner` or `header` text records; neither record is guaranteed.
+Images may be PNG, JPEG, WebP or GIF up to 10 MB. Profile updates never rewrite
+immutable DNFT metadata, transfer NFTs, or grant song/advert contract permissions.
+
+DecentMarket's v0.2 source compiles separately with IR. It preserves FIFO queue
+pricing (0.25 USDC, doubling every eight pending requests), and the 90/8/2 split.
+Albums have a manager, collaborator percentages and position titles. Every current
+recipient must sign the same revision before a manager changes recipients/shares;
+song splits can then be synced in a separate retryable transaction. Existing paid
+requests retain their original recipients. Album manifest edits do not change
+individual song audio. Personal listen/album prices are separate from queue prices.
+
+Queued plays use `requestPlayWithGas` with a worker-signed EIP-712 quote bound to
+listener, song, USDC price cap, nonce and expiry. The ETH contribution is twice the
+quoted fulfillment budget and is forwarded atomically to the fixed worker. The
+worker budget defaults to 1,000,000 gas plus the Base gas oracle's L1 data fee;
+it is a conservative budget, not a guarantee of future fee levels. Quotes fail
+closed above the deployed contract cap. Keep payments disabled until a fork/full
+playback test verifies the budget and settlement against the production router.
+
+Activation requires a separately reviewed v0.2 deployment, song/album migration,
+worker role grants, `DJUKE_CONTRACT_VERSION=0.2` on Render and
+`djukeContractVersion: "0.2"` with the same new address in browser config. The
+current v0.1 address is intentionally unchanged. `DJUKE_FULFILLMENT_GAS_UNITS` may
+override the bounded budget (100,000 to 2,000,000). Existing v0.1 registrations do
+not automatically appear in a new contract. Album management remains disabled
+until v0.2 is selected. Advert-specific editing still requires the advert contract's
+own permissions and a reviewed integration; linking Discord alone is insufficient.
+
 Status (2026-10-10): DecentNFT v0.3 and DecentJukeBox v0.1 are deployed on Base;
 the `dbusk-pinners` fund is active. DJuke payment requests remain disabled until
 the worker environment is configured and radio fulfillment is verified. The

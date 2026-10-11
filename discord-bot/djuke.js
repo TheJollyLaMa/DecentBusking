@@ -213,7 +213,8 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
     const tracks = entries.filter(({ songId, track }) => {
       const song = registrations.get(songId)?.song;
       return song?.enabled && song.audioURI === `ipfs://${track.ipfsCid}`;
-    }).map(({ songId, track }) => ({ songId, trackId: track.trackId, title: track.title, ipfsCid: track.ipfsCid }));
+    }).map(({ songId, track }) => ({ songId, trackId: track.trackId, title: track.title, ipfsCid: track.ipfsCid,
+      artist: track.uploader || track.mintRecipient, creator: track.mintRecipient }));
     return { tracks, lookupErrors };
   }
   async function readSnapshot() {

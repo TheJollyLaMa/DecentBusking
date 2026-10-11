@@ -121,8 +121,10 @@ export function createWorkerRequestHandler({
   onMintComplete,
   getMintQueue,
   onReviewedAlbumImport,
+  creatorProfiles,
   getRadioState,
   getDjukeState,
+  getDjukeGasQuote,
   checkpointMirror,
   getRadioHistory,
   getWeeklyPayflow,
@@ -188,6 +190,20 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured' }, '*');
         return;
       }
+      if (requestUrl.pathname === '/api/creator/profile' && request.method === 'GET') {
+        if (!creatorProfiles) throw new Error('Creator profiles are not configured');
+        sendJson(response, 200, creatorProfiles.get(requestUrl.searchParams.get('address')), '*');
+        return;
+      }
+      if (request.method === 'POST' && ['/api/creator/profile', '/api/creator/link-discord'].includes(requestUrl.pathname)) {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!creatorProfiles) throw new Error('Creator profiles are not configured');
+        const body = await readJson(request);
+        const result = requestUrl.pathname.endsWith('link-discord')
+          ? creatorProfiles.startLink(body, origin) : await creatorProfiles.update(body, origin);
+        sendJson(response, 200, result, corsOrigin);
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/ipfs/artwork-cid') {
         const value = requestUrl.searchParams.get('cid') || '';
         if (!value || value.length > 160) throw new Error('Enter a valid image file CID');
@@ -208,6 +224,11 @@ export function createWorkerRequestHandler({
           return;
         }
         sendJson(response, 200, await getDjukeState(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/djuke/gas-quote') {
+        if (!getDjukeGasQuote) throw new Error('DJuke v0.2 gas funding is not configured');
+        sendJson(response, 200, await getDjukeGasQuote({ listener: requestUrl.searchParams.get('listener'), songId: requestUrl.searchParams.get('songId') }), '*');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/ledger') {

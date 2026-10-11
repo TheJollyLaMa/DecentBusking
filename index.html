@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261010-listens-pinner-fund-form" />
+  <link rel="stylesheet" href="css/styles.css?v=20261010-creator-profile" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -48,6 +48,7 @@
       <ol id="djuke-queue" aria-label="Pending paid requests"></ol>
       <p id="djuke-queue-state" role="status" aria-live="polite">Queue unavailable</p>
       <label class="djuke-song-label" for="djuke-song">Song</label>
+      <input id="djuke-search" type="search" aria-label="Search songs and creators" placeholder="Search songs or creators" />
       <select id="djuke-song" disabled><option value="">Song catalog unavailable</option></select>
       <p class="worker-gas-notice">Operator reminder: top up the worker with ETH on Base for playback fulfillment before accepting paid requests. Worker: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Balance is not checked here.</p>
       <div class="djuke-wallet-actions">
@@ -55,6 +56,8 @@
         <button id="djuke-pay" type="button" disabled title="DJuke payment contract is not deployed">Queue Song</button>
       </div>
       <p id="djuke-payment-state" role="status" aria-live="polite">Payments not live</p>
+      <p id="djuke-gas-status" role="status" aria-live="polite"></p>
+      <button id="djuke-profile" type="button">Creator Profile</button>
       <section class="djuke-playlist" aria-labelledby="djuke-playlist-heading">
         <h3 id="djuke-playlist-heading">My Playlist</h3>
         <ol id="djuke-playlist" aria-label="Songs in your personal playlist"></ol>
@@ -547,12 +550,36 @@
   <script type="module" src="js/payroll.js?v=20261010-pinner-fund-form"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261010-left-djuke"></script>
-  <script type="module" src="js/djuke.mjs?v=20261010-djuke-pay"></script>
+  <script type="module" src="js/djuke.mjs?v=20261010-creator-profile"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261010-creator-profile"></script>
   <script type="module" src="js/listens.mjs?v=20261010-listens"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js?v=20261010-pinner-fund-form';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 
+  <dialog id="creator-profile" aria-labelledby="creator-profile-title">
+    <div class="creator-profile-toolbar"><h2 id="creator-profile-title">Creator Profile</h2><button type="button" data-profile-refresh title="Refresh profile" aria-label="Refresh profile"><span data-profile-icon="RefreshCw" aria-hidden="true">↻</span></button><button type="button" data-profile-close title="Close profile" aria-label="Close profile"><span data-profile-icon="X" aria-hidden="true">×</span></button></div>
+    <img data-profile-banner class="creator-profile-banner" alt="Creator banner" hidden />
+    <div class="creator-profile-identity"><img data-profile-avatar class="creator-profile-avatar" alt="Creator avatar" hidden /><div><h3 data-profile-name>Creator</h3><p data-profile-ens></p><p data-profile-discord>Discord not linked</p></div></div>
+    <form data-profile-form>
+      <label>Display Name<input name="displayName" maxlength="80" /></label>
+      <label>Bio<textarea name="bio" maxlength="1000" rows="3"></textarea></label>
+      <div class="creator-profile-image-fields"><label>Avatar<input name="avatar" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label><label>Banner<input name="banner" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label></div>
+      <button type="submit">Sign and Save Profile</button>
+    </form>
+    <div class="creator-profile-discord"><button type="button" data-discord-link>Link Discord</button><code data-discord-code hidden></code></div>
+    <details><summary>Albums and Collaborators</summary>
+      <form data-album-form>
+        <label>Album ID or Slug<input name="albumId" required maxlength="100" /></label><button type="button" data-album-load>Load Album</button>
+        <label>Title<input name="title" required maxlength="120" /></label><label>Manifest URI<input name="manifest" required /></label>
+        <div class="creator-profile-image-fields"><label>Personal Listen Price (USDC)<input name="listenPrice" type="number" min="0.000001" step="0.000001" value="0.25" required /></label><label>Whole Album Price (USDC)<input name="albumPrice" type="number" min="0.000001" step="0.000001" value="1" required /></label></div>
+        <label>Collaborators<textarea name="splits" rows="4" placeholder="0xWallet, 70, Performer&#10;0xWallet, 30, Producer" required></textarea></label>
+        <div class="creator-profile-actions"><button type="submit">Create Album</button><button type="button" data-album-sign>Sign Split Approval</button><button type="button" data-album-metadata>Save Manifest and Prices</button></div>
+        <output data-album-signature></output><label>Current Owner Approvals (JSON)<textarea name="approvals" rows="3" placeholder="[]"></textarea></label><button type="button" data-album-update>Apply Approved Split and Sync Songs</button><button type="button" data-album-sync>Sync Saved Split to Songs</button>
+      </form>
+    </details>
+    <p data-profile-status role="status" aria-live="polite"></p>
+  </dialog>
 </body>
 </html>
