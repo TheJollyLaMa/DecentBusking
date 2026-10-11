@@ -25,6 +25,8 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.equal((html.match(/id="devert-max-payment"/g) || []).length, 1);
   const panel = fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8');
   assert.match(panel, /from '\.\/radio-sync\.js\?v=20261010-listens'/);
+  assert.match(panel, /document\.addEventListener\('wallet-connected', refresh\)/);
+  assert.match(panel, /adMediaStatus\.textContent = 'Submitted for review\.';\s*await refresh\(\)/);
 });
 
 function fixture({ nativeBalance = 1_000_000_000_000_000_000n, allowance = 0n } = {}) {

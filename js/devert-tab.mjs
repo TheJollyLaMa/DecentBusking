@@ -371,12 +371,13 @@ export function initDevertTab() {
       if (!/^ipfs:\/\/[^/\s]+$/.test(ipfsUri)) throw new Error('Ad upload did not return a file CID');
       document.getElementById('devert-audio-uri').value = ipfsUri;
       adMediaStatus.textContent = 'Confirm submission in your wallet…';
-      const result = await submitMediaForApproval({ serviceUrl: config.ipfsUploadServiceUrl,
+      await submitMediaForApproval({ serviceUrl: config.ipfsUploadServiceUrl,
         signer: wallet.signer, address: wallet.address, origin: window.location.origin,
         media: { title, artist: adMediaArtist.value.trim() || wallet.address, ipfsCid: ipfsUri,
           mediaType, filename: file.name, recipient: wallet.address, isDevertAd: true } });
       document.getElementById('devert-audio-uri').value = ipfsUri;
-      adMediaStatus.textContent = 'Submitted for review. If approved, your NFT will be minted to your wallet.';
+      adMediaStatus.textContent = 'Submitted for review.';
+      await refresh();
     } catch (error) {
       adMediaStatus.textContent = error.shortMessage || error.reason || error.message;
     } finally {
