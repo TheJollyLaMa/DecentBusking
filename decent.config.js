@@ -38,7 +38,7 @@ window.DecentConfig = {
   // Deployed DJuke v0.2 address.
   djukeContractAddress: "0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59",
   djukeContractVersion: "0.2",
-  devertContractAddress: "",
+  devertContractAddress: "0x135Cbc573F87637158eb3186C87c584fb0B34CD9",
   ensRpcUrl: "https://ethereum-rpc.publicnode.com",
   adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",
   marketUrl: "https://thejollylama.github.io/DecentMarket/",
