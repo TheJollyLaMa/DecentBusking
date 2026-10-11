@@ -2,6 +2,20 @@
 
 ## Creator profiles and DJuke v0.2 (not deployed)
 
+Deployment sprint checkpoint: the read-only Base migration preflight verified
+253 songs with no pending paid requests and sufficient deployer ETH. The live
+broadcast is held because the Hardhat Base-fork rehearsal is blocked by EDR's
+historical hardfork execution error before USDC/router assertions execute.
+No new contract address has been activated. DecentMarket's
+`scripts/deploy_djuke_v02.js` is dry-run by default and records deployment and
+batch receipts for recovery; do not bypass the failed rehearsal or retry a
+recorded deployment blindly. Migration preserves existing song IDs and splits;
+album grouping is curated separately, not inferred from artist names.
+
+The Top 10, DJuke emoji mark, and DVert pullout tabs are restored in the UI.
+DVert is currently a profile entry point and an explicit undeployed status, not
+a live advertisement checkout or broadcast.
+
 The creator profile opens from DJuke or an NFT detail panel. Public profiles are
 readable without connecting; editing requires the same wallet's fresh signature.
 Linking Discord requires both a wallet-signed link request and the authenticated

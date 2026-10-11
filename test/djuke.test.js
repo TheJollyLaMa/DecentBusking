@@ -92,6 +92,9 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   assert.match(config, /additionalNftContractAddresses: \["0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B"\]/);
   assert.match(config, /djukeContractAddress: "0x153ef59a57C9A88cbB7822252B5d9D0B11E48F0E"/);
   assert.match(config, /nftBatchMintEnabled: true/);
+  for (const tab of ['top-ten', 'djuke', 'devert']) assert.match(html, new RegExp(`id="${tab}-tab"[^>]*aria-controls="${tab}-panel"`));
+  assert.match(html, /class="djuke-tab-slot">⚸🎰🧞‍♂️/);
+  assert.match(html, /class="djuke-tab-coin">🪙/);
 });
 
 test('worker gas reminders precede import, mint and paid queue controls', () => {

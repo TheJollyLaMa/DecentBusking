@@ -508,8 +508,9 @@ decent-header {
 #top-ten-tab > span:last-child { font-size: .67rem; font-weight: 700; white-space: nowrap; }
 #top-ten-tab:hover { background: #151923; }
 #top-ten-tab:focus-visible, #top-ten-panel button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-body.top-ten-open #top-ten-tab, body.top-ten-open #djuke-tab { left: var(--top-ten-drawer-width); }
-body.djuke-open #top-ten-tab { left: var(--djuke-width); }
+body.top-ten-open #top-ten-tab, body.top-ten-open #djuke-tab, body.top-ten-open #devert-tab { left: var(--top-ten-drawer-width); }
+body.djuke-open #top-ten-tab, body.djuke-open #devert-tab { left: var(--djuke-width); }
+body.devert-open #top-ten-tab, body.devert-open #djuke-tab, body.devert-open #devert-tab { left: var(--devert-width); }
 #top-ten-panel {
   position: fixed;
   top: var(--left-tab-top);
@@ -568,12 +569,32 @@ body.djuke-open #top-ten-tab { left: var(--djuke-width); }
 #djuke-tab {
   position: fixed; left: 0; top: calc(var(--left-tab-top) + 82px); z-index: 111;
   display: grid; justify-items: center; align-content: center; gap: 4px;
-  width: 44px; height: 74px; padding: 6px 3px; border: 1px solid #929c9c;
+  width: 44px; height: 96px; padding: 6px 3px; border: 1px solid #929c9c;
   border-left: 0; border-radius: 0 6px 6px 0;
   background: #192524; color: #f1f6f4; cursor: pointer;
   transition: left var(--transition);
 }
 #djuke-tab > span:last-child { font-size: .66rem; font-weight: 700; }
+.djuke-tab-mark { position: relative; display: block; width: 40px; height: 50px; }
+.djuke-note { position: absolute; top: 0; font-size: 11px; line-height: 1; }
+.djuke-note-left { left: 2px; transform: rotate(-16deg) translateY(3px); }
+.djuke-note-right { right: 2px; transform: rotate(14deg) translateY(-2px); }
+.djuke-tab-slot { position: absolute; top: 17px; left: 50%; transform: translateX(-50%); font-size: 13px; line-height: 1; white-space: nowrap; }
+.djuke-tab-coin { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); font-size: 9px; line-height: 1; }
+:root { --devert-width: min(350px, calc(100vw - 44px)); }
+#devert-tab { position: fixed; left: 0; top: calc(var(--left-tab-top) + 186px); z-index: 111; display: grid; justify-items: center; align-content: center; gap: 4px; width: 44px; height: 74px; padding: 6px 3px; border: 1px solid #c49a45; border-left: 0; border-radius: 0 6px 6px 0; color: #fff1c2; background: #392b13; cursor: pointer; transition: left var(--transition); }
+#devert-tab > span:first-child { font-size: 19px; }
+#devert-tab > span:last-child { font-size: .66rem; }
+#devert-panel { position: fixed; left: 0; top: var(--left-tab-top); bottom: max(120px, calc(var(--radio-footer-height, 96px) + 20px)); z-index: 110; width: var(--devert-width); box-sizing: border-box; padding: 14px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; color: #f6efdd; background: #17140d; border: 1px solid #c49a45; border-left: 0; border-radius: 0 8px 8px 0; transform: translateX(calc(-100% - 2px)); visibility: hidden; pointer-events: none; transition: transform var(--transition), visibility var(--transition); }
+#devert-panel.is-open { transform: translateX(0); visibility: visible; pointer-events: auto; }
+.devert-heading { display: flex; justify-content: space-between; align-items: center; }
+#devert-panel h2 { font-family: var(--font-display); color: #f5cf66; font-size: 1.1rem; margin: 0; }
+#devert-panel h3 { font-size: .9rem; margin: 0; }
+#devert-panel p { font-size: .8rem; line-height: 1.5; margin: 0; }
+#devert-panel button { min-height: 36px; padding: 6px 10px; font: inherit; font-size: .8rem; border: 1px solid #806532; border-radius: 4px; background: #302714; color: #f6efdd; cursor: pointer; }
+#devert-tab:focus-visible, #devert-panel button:focus-visible { outline: 2px solid #f5cf66; outline-offset: 3px; }
+@media (max-width: 600px) { #devert-panel { bottom: max(160px, calc(var(--radio-footer-height, 150px) + 28px)); } }
+@media (prefers-reduced-motion: reduce) { #devert-tab, #devert-panel { transition: none; } }
 #djuke-tab svg, #djuke-panel svg { width: 19px; height: 19px; }
 body.djuke-open #djuke-tab { left: var(--djuke-width); }
 #djuke-panel {

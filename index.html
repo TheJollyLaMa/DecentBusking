@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261010-creator-profile" />
+  <link rel="stylesheet" href="css/styles.css?v=20261010-three-tabs" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -35,7 +35,7 @@
   </aside>
 
   <button id="djuke-tab" type="button" aria-controls="djuke-panel" aria-expanded="false" aria-label="Open DJuke" title="Open DJuke">
-    <span data-djuke-icon="Disc3" aria-hidden="true">♫</span><span>DJuke</span>
+    <span class="djuke-tab-mark" aria-hidden="true"><span class="djuke-note djuke-note-left">🎶</span><span class="djuke-note djuke-note-right">🎶</span><span class="djuke-tab-slot">⚸🎰🧞‍♂️</span><span class="djuke-tab-coin">🪙</span></span><span>DJuke</span>
   </button>
   <aside id="djuke-panel" aria-label="DJuke jukebox" aria-hidden="true" inert>
     <div class="djuke-heading">
@@ -71,6 +71,15 @@
       <dl class="djuke-split"><div><dt>Repo-dev-fund</dt><dd>10%</dd></div><div><dt>Artist / collaborators</dt><dd>90%</dd></div></dl>
     </div>
     <div class="djuke-speaker" aria-hidden="true"></div>
+  </aside>
+
+  <button id="devert-tab" type="button" aria-controls="devert-panel" aria-expanded="false" aria-label="Open DVert advertising" title="Open DVert advertising"><span aria-hidden="true">🎟️</span><span>DVert</span></button>
+  <aside id="devert-panel" aria-label="DVert advertising" aria-hidden="true" inert>
+    <div class="devert-heading"><h2>DVert</h2><button id="devert-close" type="button" aria-label="Close DVert" title="Close DVert">×</button></div>
+    <h3>Advertiser Campaigns</h3>
+    <p role="status">Campaign contract and checkout are not deployed.</p>
+    <p>24/7 ad broadcast is not live yet.</p>
+    <button id="devert-profile" type="button">Creator Profile</button>
   </aside>
 
   <div id="artist-filter-bar" role="group" aria-label="Filter NFTs by artist">
@@ -551,6 +560,7 @@
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261010-left-djuke"></script>
   <script type="module" src="js/djuke.mjs?v=20261010-creator-profile"></script>
+  <script type="module" src="js/devert-tab.mjs?v=20261010-three-tabs"></script>
   <script type="module" src="js/creator-profile.mjs?v=20261010-creator-profile"></script>
   <script type="module" src="js/listens.mjs?v=20261010-listens"></script>
   <script type="module">
