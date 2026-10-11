@@ -1531,7 +1531,7 @@ async function startJukeLoop(client, config) {
     });
 
     await session.connect();
-    console.log('[jukeloop] Connected to voice channel, starting playback…');
+    console.log(`[jukeloop] Connected to voice channel ${voiceChannel.name} (${voiceChannel.id}), starting playback…`);
     await textChannel
       .send('📻 **JukeLoop is live!** The community radio is starting up — tracks from #DecentJukebox are on the way.', {
         flags: MessageFlags.SuppressNotifications,
