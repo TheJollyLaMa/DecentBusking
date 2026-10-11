@@ -458,13 +458,13 @@ async function main() {
   } else if (process.env.DEVERT_CONTRACT_ADDRESS) {
     console.warn('[devert] Campaign reads are configured, but audio scheduling is disabled until a DeVert/DJuke worker key and PINATA_JWT are available.');
   }
-  if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt && process.env.DVERT_LOOP_DISCORD_TOKEN &&
-      process.env.DVERT_LOOP_CHANNEL_ID && process.env.ADLOOP_VOICE_CHANNEL_ID) {
+    if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt && process.env.DVERT_LOOP_DISCORD_TOKEN &&
+      process.env.VERT_LOOP_CHANNEL_ID && process.env.VERTLOOP_VOICE_CHANNEL_ID) {
     _devertPlaybackInitialization?.then(async () => {
       if (!_devertPlaybackRuntime) return;
       try {
         _devertLoopWorker = await startDevertLoopWorker({ token: process.env.DVERT_LOOP_DISCORD_TOKEN,
-          voiceChannelId: process.env.ADLOOP_VOICE_CHANNEL_ID, textChannelId: process.env.DVERT_LOOP_CHANNEL_ID,
+          voiceChannelId: process.env.VERTLOOP_VOICE_CHANNEL_ID, textChannelId: process.env.VERT_LOOP_CHANNEL_ID,
           playback: _devertPlaybackRuntime });
       } catch (error) {
         console.warn('[devert-loop] AdLoop worker unavailable:', error.shortMessage || error.message);
@@ -928,7 +928,7 @@ async function main() {
   client.on(Events.MessageCreate, async (message) => {
     // Ignore bots and messages outside the configured channel
     if (message.author.bot) return;
-    if (process.env.DVERT_LOOP_CHANNEL_ID && message.channelId === process.env.DVERT_LOOP_CHANNEL_ID) {
+    if (process.env.VERT_LOOP_CHANNEL_ID && message.channelId === process.env.VERT_LOOP_CHANNEL_ID) {
       await handleDevertLoopSubmission(message, config, creatorProfiles);
       return;
     }
