@@ -169,8 +169,8 @@ export function initDevertTab() {
     adsModeButton.disabled = !canSwitch || adLoopState?.ready !== true;
     muteAdsInput.checked = getDevertAdsMuted();
     muteAdsInput.disabled = adsOnly;
-    previewPlayer.hidden = !adsOnly;
     const playId = normalizeAdLoopNowPlaying(adLoopState)?.playId;
+    previewPlayer.hidden = !adsOnly || !playId;
     for (const button of adVoteButtons) {
       if (button) button.disabled = !adsOnly || !playId || adVoteBusy || votedAdPlays.has(playId);
     }
@@ -218,8 +218,8 @@ export function initDevertTab() {
     if (previewPlayer.dataset.listenMode !== 'ads-only') return;
     const item = normalizeAdLoopNowPlaying(state);
     if (!item) {
-      if (adLoopPlayId) stopAdLoopMirror('AdLoop is between ads; waiting for the next spot.');
-      else listenStatus.textContent = state?.ready ? 'AdLoop is waiting for an eligible campaign.' : 'AdLoop is not configured yet.';
+      if (adLoopPlayId) stopAdLoopMirror('Between ads');
+      else listenStatus.textContent = state?.ready ? 'No ads playing' : 'VertLoop offline';
       return;
     }
     adLoopPositionReceivedAt = performance.now();
@@ -237,11 +237,11 @@ export function initDevertTab() {
           try { previewPlayer.currentTime = expectedPosition(); } catch {}
         }
         previewPlayer.play().catch(() => {
-          listenStatus.textContent = `Tap play to mirror AdLoop: ${item.title}. This does not count as a paid impression.`;
+          listenStatus.textContent = `Ready to play: ${item.title}`;
         });
       };
       previewPlayer.addEventListener('loadedmetadata', syncAndPlay, { once: true });
-      listenStatus.textContent = `Mirroring live AdLoop: ${item.title}. This does not count as a paid impression.`;
+      listenStatus.textContent = item.title;
       return;
     }
     if (previewPlayer.readyState >= 2 && !previewPlayer.seeking && Number.isFinite(previewPlayer.duration) &&
@@ -294,12 +294,12 @@ export function initDevertTab() {
     walletButton.hidden = !verifiedContract || !!wallet?.address;
     purchaseButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || purchaseBusy;
     adMediaQueueButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || adMediaBusy || !adMediaFile.files?.[0];
-    if (!address) minimumOffer.textContent = 'Campaign checkout is unavailable until a DeVert contract is deployed and configured.';
-    else if (confirmedContract && snapshot.paused) minimumOffer.textContent = 'Campaign checkout is paused until the owner activates DeVert after service rehearsal.';
-    else if (!verifiedContract) minimumOffer.textContent = 'Waiting for a confirmed campaign snapshot from the configured contract.';
-    else if (!wallet?.address) minimumOffer.textContent = 'Connect a Base wallet to purchase a campaign.';
-    else if (wallet.chainId !== 8453) minimumOffer.textContent = 'Switch your wallet to Base to purchase a campaign.';
-    else minimumOffer.textContent = 'Campaigns require the USDC offer plus a gas-priced Base ETH scheduler top-up; transaction gas is separate.';
+    if (!address) minimumOffer.textContent = 'Campaigns unavailable';
+    else if (confirmedContract && snapshot.paused) minimumOffer.textContent = 'Campaign purchases paused';
+    else if (!verifiedContract) minimumOffer.textContent = 'Connecting…';
+    else if (!wallet?.address) minimumOffer.textContent = 'Connect your wallet to submit an ad';
+    else if (wallet.chainId !== 8453) minimumOffer.textContent = 'Switch to Base';
+    else minimumOffer.textContent = '';
   }
 
   async function submitCampaign(event) {
@@ -355,13 +355,14 @@ export function initDevertTab() {
       adMediaStatus.textContent = `Uploading ${file.name} to IPFS…`;
       const ipfsUri = await upload(file);
       if (!/^ipfs:\/\/[^/\s]+$/.test(ipfsUri)) throw new Error('Ad upload did not return a file CID');
-      adMediaStatus.textContent = 'Requesting owner mint review…';
+      document.getElementById('devert-audio-uri').value = ipfsUri;
+      adMediaStatus.textContent = 'Confirm submission in your wallet…';
       const result = await submitMediaForApproval({ serviceUrl: config.ipfsUploadServiceUrl,
         signer: wallet.signer, address: wallet.address, origin: window.location.origin,
         media: { title, artist: adMediaArtist.value.trim() || wallet.address, ipfsCid: ipfsUri,
           mediaType, filename: file.name, recipient: wallet.address, isDevertAd: true } });
       document.getElementById('devert-audio-uri').value = ipfsUri;
-      adMediaStatus.textContent = `IPFS media queued for owner NFT review (${result.trackId}). Campaign purchase is separate.`;
+      adMediaStatus.textContent = 'Submitted for review. If approved, your NFT will be minted to your wallet.';
     } catch (error) {
       adMediaStatus.textContent = error.shortMessage || error.reason || error.message;
     } finally {
@@ -391,7 +392,7 @@ export function initDevertTab() {
     if (!setDevertListenMode('radio')) { listenStatus.textContent = 'Finish archive playback or the current new-song preview first.'; return; }
     stopAdLoopPlayback();
     previewPlayer.dataset.listenMode = 'radio';
-    listenStatus.textContent = 'Following the main radio. You can mute sponsored ads on this device.';
+    listenStatus.textContent = 'Main radio';
     syncListenControls();
   });
   adsModeButton.addEventListener('click', () => {
@@ -502,7 +503,6 @@ export function initDevertTab() {
   walletButton?.addEventListener('click', () => window._wallet?.connect?.());
   document.addEventListener('wallet-connected', syncCheckout);
   document.addEventListener('wallet-disconnected', syncCheckout);
-  document.getElementById('devert-profile')?.addEventListener('click', () => document.dispatchEvent(new CustomEvent('open-creator-profile')));
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); } });
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
   document.addEventListener('click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target)) close(); });

@@ -180,7 +180,7 @@ test('both tally modes show all-time song votes and recompute filtered artist to
 });
 
 test('Right Ankh keeps the public schedule visible and hides My Playbacks on disconnect', () => {
-  const nodes = new Map(['.ankh-coin', '.dropdown-menu.right-ankh-menu', '#radio-schedule-btn', '#radio-history-btn'].map(selector => [selector, new Node()]));
+  const nodes = new Map(['.ankh-coin', '.dropdown-menu.right-ankh-menu', '#radio-schedule-btn', '#radio-history-btn', '#creator-profile-btn'].map(selector => [selector, new Node()]));
   const root = { innerHTML: '', querySelector: selector => nodes.get(selector) };
   const events = new Map();
   const window = { _wallet: { address: walletA } };
@@ -191,7 +191,9 @@ test('Right Ankh keeps the public schedule visible and hides My Playbacks on dis
     document: { addEventListener: (name, callback) => events.set(name, callback), dispatchEvent: event => { dispatched = event; } } });
   const source = fs.readFileSync(path.join(__dirname, '../js/components/header-right-ankh-override.js'), 'utf8');
   vm.runInContext(`${source}\nnew CleanRightAnkh().connectedCallback();`, context);
-  assert.equal((root.innerHTML.match(/<li /g) || []).length, 2);
+  assert.equal((root.innerHTML.match(/<li /g) || []).length, 3);
+  nodes.get('#creator-profile-btn').listeners.get('click')({ stopPropagation() {} });
+  assert.equal(dispatched.type, 'open-creator-profile');
   assert.match(root.innerHTML, /Public Schedule/);
   assert.match(root.innerHTML, /My Playbacks/);
   assert.doesNotMatch(root.innerHTML, /wallet-connect-btn|wallet-addr-display/);
@@ -217,6 +219,6 @@ test('header registers the local Right Ankh before CDN imports without loading t
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/components/header-right-ankh-override.js'), 'utf8'), context);
   assert.equal(registered.get('right-ankh').name, 'CleanRightAnkh');
   const header = fs.readFileSync(path.join(__dirname, '../js/components/header.js'), 'utf8');
-  assert.match(header, /^import '\.\/header-right-ankh-override\.js\?v=20261010-public-calendar';/);
+  assert.match(header, /^import '\.\/header-right-ankh-override\.js\?v=20261011-creator-menu';/);
   assert.doesNotMatch(header, /import\([^\n]*RightAnkhDropdown/);
 });

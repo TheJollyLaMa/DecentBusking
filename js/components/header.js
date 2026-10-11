@@ -1,4 +1,4 @@
-import './header-right-ankh-override.js?v=20261010-public-calendar';
+import './header-right-ankh-override.js?v=20261011-creator-menu';
 
 const DECENT_HEAD_BASE = 'https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@main/';
 const DBUSKER_AVATAR_URL = new URL('../../img/D_Busker.jpeg', import.meta.url).href;

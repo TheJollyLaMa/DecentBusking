@@ -13,7 +13,9 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   for (const id of ['devert-listen-radio', 'devert-listen-ads', 'devert-mute-ads', 'devert-ad-preview', 'devert-listen-status']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, `${id} should appear once`);
   }
-  assert.match(html, /Ads Only previews do not count as paid impressions/);
+  assert.match(html, /Approved NFT sent to your wallet/);
+  assert.match(html, /Submit for Review/);
+  assert.doesNotMatch(html, /id="devert-profile"/);
   assert.match(html, /Mute ads on this device/);
   assert.equal((html.match(/id="devert-max-payment"/g) || []).length, 1);
   const panel = fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8');
@@ -101,5 +103,5 @@ test('Ads Only mirrors only an audible live AdLoop state and its radio play posi
   assert.equal(normalizeAdLoopNowPlaying({ ...state, ready: false }), null);
   assert.equal(normalizeAdLoopNowPlaying({ ...state, nowPlaying: { ...state.nowPlaying, audible: false } }), null);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /Ads Only previews do not count as paid impressions/);
+  assert.match(html, /Vote on current VertLoop ad/);
 });

@@ -34,17 +34,31 @@ export function audioCidFromMetadata(metadata = {}) {
   return [normalized, ...segments].join('/');
 }
 
-async function fetchMetadata(uri, fetchImpl) {
-  const cidPath = uri.replace(/^ipfs:\/\/(ipfs\/)?/, '');
-  const urls = /^https?:\/\//.test(uri) ? [uri] : METADATA_GATEWAYS.map((gateway) => `${gateway}${cidPath}`);
-  for (const url of urls) {
-    const response = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-    if (response?.ok) {
-      const metadata = await response.json().catch(() => null);
-      if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) return metadata;
+export async function fetchMintMetadata(uri, fetchImpl, { wait = delay => new Promise(resolve => setTimeout(resolve, delay)) } = {}) {
+  const cidPath = uri.startsWith('ipfs://') ? uri.replace(/^ipfs:\/\/(ipfs\/)?/, '')
+    : /^https?:\/\//.test(uri) ? new URL(uri).pathname.split('/ipfs/')[1] : null;
+  const urls = [...new Set([
+    ...(/^https?:\/\//.test(uri) ? [uri] : []),
+    ...(cidPath ? METADATA_GATEWAYS.map(gateway => `${gateway}${cidPath}`) : []),
+  ])];
+  const failures = new Map();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let transient = false;
+    for (const url of urls) {
+      const response = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
+      if (response?.ok) {
+        const metadata = await response.json().catch(() => null);
+        if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) return metadata;
+        failures.set(url, 'invalid JSON metadata');
+      } else {
+        failures.set(url, response?.status || 'timeout/network error');
+        if (!response || response.status === 429 || response.status >= 500) transient = true;
+      }
     }
+    if (!transient || attempt === 2) break;
+    await wait(1_000 * 2 ** attempt);
   }
-  throw new Error('NFT metadata could not be verified through any IPFS gateway');
+  throw new Error(`NFT metadata could not be verified through any IPFS gateway: ${uri}. ${[...failures].map(([url, status]) => `${new URL(url).hostname}: ${status}`).join('; ')}. Mint queue remains locked to prevent duplicate mints; retry after gateway recovery.`);
 }
 
 /** Map audio CID → lowest minted token ID for every minted DecentNFT token. */
@@ -55,7 +69,7 @@ export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry =
     if (pauseMs) await new Promise((resolve) => setTimeout(resolve, pauseMs));
     if (Number(await withRetry(() => contract.totalMinted(tokenId), retry)) === 0) continue;
     const uri = await withRetry(() => contract.uri(tokenId), retry);
-    const metadata = await fetchMetadata(uri, fetchImpl);
+    const metadata = await fetchMintMetadata(uri, fetchImpl);
     const cid = audioCidFromMetadata(metadata || {});
     if (cid && !tokenIdByAudioCid.has(cid)) {
       tokenIdByAudioCid.set(cid, String(tokenId));

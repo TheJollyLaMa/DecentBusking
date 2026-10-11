@@ -6,7 +6,7 @@
 // The panel is opened by dispatching a custom "open-admin" DOM event (wired up
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
-import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolveBatchMintArtwork, importReviewedAlbums, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261011-batch-artwork-default';
+import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolveBatchMintArtwork, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261011-batch-artwork-default';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261011-batch-upload-signature';
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261010-listens';
@@ -31,8 +31,7 @@ let _modal, _connectedAddr, _roleSection,
   _targetAddr, _roleSelect, _statusEl, _grantBtn, _closeBtn,
   _mintSection, _mintQueueEl, _mintRefreshBtn, _mintSelectedBtn,
   _mintSelectAll, _mintStatusEl, _radioScheduleSection, _radioScheduleForm,
-  _radioScheduleEventsEl, _radioScheduleStatusEl, _radioWeeklyForm,
-  _albumImportSection, _albumImportButton, _albumImportStatus;
+  _radioScheduleEventsEl, _radioScheduleStatusEl, _radioWeeklyForm;
 let _adminSigner = null;
 let _adminAddress = null;
 let _mintQueue = [];
@@ -43,8 +42,6 @@ let _walletCheckId = 0;
 const _artworkPreviewUrls = new Map();
 const _artworkPreviewGenerations = new Map();
 let _artworkPreviewId = 0;
-  _albumImportSection?.classList.add('hidden');
-  if (_albumImportStatus) _albumImportStatus.textContent = '';
 document.addEventListener('DOMContentLoaded', () => {
   _modal        = document.getElementById('admin-modal');
   _connectedAddr = document.getElementById('admin-connected-addr');
@@ -65,15 +62,11 @@ document.addEventListener('DOMContentLoaded', () => {
   _radioScheduleEventsEl = document.getElementById('admin-radio-schedule-events');
   _radioScheduleStatusEl = document.getElementById('admin-radio-schedule-status');
   _radioWeeklyForm = document.getElementById('admin-radio-weekly-form');
-  _albumImportSection = document.getElementById('admin-reviewed-album-import');
-  _albumImportButton = document.getElementById('admin-reviewed-album-import-btn');
-  _albumImportStatus = document.getElementById('admin-reviewed-album-status');
 
   if (!_modal) return; // guard: panel HTML not present
 
   _grantBtn?.addEventListener('click', _grantRole);
   _closeBtn?.addEventListener('click', _closeModal);
-  _albumImportButton?.addEventListener('click', _importReviewedAlbums);
   _mintRefreshBtn?.addEventListener('click', _loadMintQueue);
   document.getElementById('admin-radio-schedule-refresh')?.addEventListener('click', _loadRadioSchedule);
   document.getElementById('admin-radio-event-reset')?.addEventListener('click', _resetRadioScheduleForm);
@@ -201,7 +194,6 @@ async function _connectWallet() {
     _mintSection?.classList.remove('hidden');
     _roleSection?.classList.remove('hidden');
     _radioScheduleSection?.classList.remove('hidden');
-    _albumImportSection?.classList.remove('hidden');
     await Promise.all([_loadMintQueue(), _loadRadioSchedule()]);
   } catch (err) {
     if (checkId === _walletCheckId) _setStatus(`❌ ${err.message || 'Wallet verification failed'}`, true);
@@ -221,8 +213,6 @@ function _resetAdminWallet() {
   _radioScheduleSection?.classList.add('hidden');
   _radioSchedule = null;
   _radioScheduleEventsEl?.replaceChildren();
-  _albumImportSection?.classList.add('hidden');
-  if (_albumImportStatus) _albumImportStatus.textContent = '';
 }
 
 async function _loadRadioSchedule() {
@@ -388,30 +378,6 @@ function _setRadioScheduleStatus(message, isError = false) {
   if (!_radioScheduleStatusEl) return;
   _radioScheduleStatusEl.textContent = message;
   _radioScheduleStatusEl.classList.toggle('error', isError);
-}
-
-async function _importReviewedAlbums() {
-  if (!_adminSigner || !_adminAddress || _mintBusy || !_albumImportButton) return;
-  const signer = _adminSigner;
-  const address = _adminAddress;
-  const walletCheck = _walletCheckId;
-  _albumImportButton.disabled = true;
-  if (_albumImportStatus) _albumImportStatus.textContent = 'Sign to recheck the reviewed album plan and queue eligible songs. This action does not mint NFTs.';
-  try {
-    const result = await importReviewedAlbums({
-      serviceUrl: window.DecentConfig?.ipfsUploadServiceUrl,
-      signer,
-      address,
-      origin: window.location.origin,
-    });
-    if (walletCheck !== _walletCheckId || signer !== _adminSigner || address !== _adminAddress) return;
-    await _loadMintQueue();
-    if (_albumImportStatus) _albumImportStatus.textContent = `${result.added} added, ${result.queued} queued, ${result.skipped} held as duplicates. ${result.minted} minted; owner confirmation is still required.`;
-  } catch (error) {
-    if (walletCheck === _walletCheckId && _albumImportStatus) _albumImportStatus.textContent = error.message;
-  } finally {
-    if (walletCheck === _walletCheckId && _adminSigner && _albumImportButton) _albumImportButton.disabled = false;
-  }
 }
 
 // ── NFT Mint Queue ───────────────────────────────────────────────────────────

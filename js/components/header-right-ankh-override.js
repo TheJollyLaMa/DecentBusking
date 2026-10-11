@@ -50,6 +50,7 @@ class CleanRightAnkh extends HTMLElement {
           <span class="ankh-coin" role="button" aria-haspopup="true" aria-label="Right menu">☥</span>
           <ul class="dropdown-menu right-ankh-menu"
               style="display:none;">
+            <li class="wallet-item"><button class="wallet-btn" id="creator-profile-btn">Creator Profile</button></li>
             <li class="wallet-item">
                 <button class="wallet-btn" id="radio-schedule-btn"><img class="calendar-icon" src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/calendar-days.svg" alt="" /> Public Schedule</button>
             </li>
@@ -69,6 +70,11 @@ class CleanRightAnkh extends HTMLElement {
     const popup = this.shadowRoot.querySelector('.dropdown-menu.right-ankh-menu');
     const scheduleBtn = this.shadowRoot.querySelector('#radio-schedule-btn');
     const historyBtn = this.shadowRoot.querySelector('#radio-history-btn');
+    this.shadowRoot.querySelector('#creator-profile-btn')?.addEventListener('click', event => {
+      event.stopPropagation();
+      popup.style.display = 'none';
+      document.dispatchEvent(new CustomEvent('open-creator-profile', { detail: {} }));
+    });
     scheduleBtn?.addEventListener('click', event => {
       event.stopPropagation();
       if (popup) popup.style.display = 'none';

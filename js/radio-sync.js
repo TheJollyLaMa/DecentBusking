@@ -258,7 +258,7 @@ export function setDevertListenMode(mode) {
     _setLabel('🎟️ DVert Ads Only');
     _stopAudio();
     _setTrack('Ads Only', '');
-    _setActivity('🎧 Ads-only preview is playing in the DVert panel');
+    _setActivity('Listening to VertLoop');
   } else if (_takeoverQueue.length) {
     _startNextTakeover();
   } else {

@@ -91,7 +91,9 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   assert.match(html, /class="djuke-tab-coin"/);
   assert.match(html, /data-devert-ticket/);
   assert.match(html, /aria-label="DVert advertising"/);
-  assert.match(html, /<span data-devert-ticket[^>]*>🎟️<\/span><span>DVert<\/span>/);
+  assert.match(html, /class="devert-tab-art" data-devert-ticket/);
+  assert.match(html, /class="devert-cash first">💸/);
+  assert.match(html, /class="devert-speaker second">🔊/);
   assert.doesNotMatch(html, />DeVert</);
   assert.match(html, /id="djuke-pay"[^>]*disabled/);
   assert.match(html, /id="djuke-panel"[^>]*inert/);
@@ -106,19 +108,21 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   assert.match(html, /class="djuke-tab-coin">🪙/);
 });
 
-test('worker gas reminders precede import, mint and paid queue controls', () => {
+test('worker funding remains available beside mint and paid queue controls', () => {
   const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
-  for (const [startId, controlId] of [['djuke-body', 'djuke-pay'],
-    ['admin-reviewed-album-import', 'admin-reviewed-album-import-btn'], ['admin-mint-section', 'admin-mint-queue']]) {
+  for (const [startId, controlId] of [['djuke-body', 'djuke-pay'], ['admin-mint-section', 'admin-mint-queue']]) {
     const start = startId === 'djuke-body' ? html.indexOf('class="djuke-body"') : html.indexOf(`id="${startId}"`);
     const control = html.indexOf(`id="${controlId}"`, start);
     const notice = html.slice(start, control);
     assert.match(notice, /class="worker-gas-notice"/);
-    assert.match(notice, /ETH on Base/);
+    assert.match(notice, /ETH/);
     assert.match(notice, /0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F/);
-    assert.match(notice, /Balance is not checked here/);
+    assert.match(notice, /[Bb]alance is not checked here/);
   }
-  assert.match(html, /NFT mint gas is paid by your connected wallet/);
+  assert.match(html, /Mint gas comes from your wallet/);
+  assert.doesNotMatch(html, /id="admin-reviewed-album-import"/);
+  assert.match(html, /<details id="admin-radio-schedule"/);
+  assert.match(html, /<details id="admin-role-section"/);
 });
 
 test('DJuke search matches song titles and creators without selecting a song implicitly', async () => {

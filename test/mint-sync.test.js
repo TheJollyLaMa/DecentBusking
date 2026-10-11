@@ -7,6 +7,26 @@ const { pathToFileURL } = require('node:url');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'mint-sync.js')).href;
 
+test('metadata retries transient gateway failures and falls back for HTTP IPFS URLs', async () => {
+  const { fetchMintMetadata } = await import(moduleUrl);
+  let requests = 0;
+  const delays = [];
+  const metadata = await fetchMintMetadata('ipfs://retry-metadata', async () => {
+    requests++;
+    return requests <= 2 ? new Response('', { status: 429 }) : new Response(JSON.stringify({ audioUrl: 'ipfs://song' }));
+  }, { wait: async delay => delays.push(delay) });
+  assert.equal(metadata.audioUrl, 'ipfs://song');
+  assert.deepEqual(delays, [1000]);
+  const urls = [];
+  assert.deepEqual(await fetchMintMetadata('https://unavailable.example/ipfs/metadata', async url => {
+    urls.push(url);
+    return url.includes('unavailable.example') ? new Response('', { status: 503 }) : new Response(JSON.stringify({ name: 'Recovered' }));
+  }), { name: 'Recovered' });
+  assert.equal(urls[1], 'https://gateway.pinata.cloud/ipfs/metadata');
+  await assert.rejects(fetchMintMetadata('ipfs://missing', async () => new Response('', { status: 404 })),
+    /ipfs:\/\/missing.*404.*duplicate mints/);
+});
+
 test('extracts the audio CID from DecentNFT metadata', async () => {
   const { audioCidFromMetadata } = await import(moduleUrl);
   assert.equal(audioCidFromMetadata({ animation_url: 'ipfs://bafy-audio' }), 'bafy-audio');
