@@ -40,6 +40,17 @@ const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+test('Admin clearly exposes multi-select mint batches of up to 20 while marking row actions as single-item', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const admin = fs.readFileSync(path.join(__dirname, '../js/admin.js'), 'utf8');
+  const config = fs.readFileSync(path.join(__dirname, '../decent.config.js'), 'utf8');
+  assert.match(html, /id="admin-mint-select-all"[^>]*> Select all/);
+  assert.match(html, />Mint selected in batches</);
+  assert.match(html, /up to 20 in one Base transaction/);
+  assert.match(admin, />Mint one<\/button>/);
+  assert.match(config, /nftBatchMintEnabled:\s*true/);
+});
+
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'admin-mint-queue.js')).href;
 
 test('artwork selection keeps profile default, permits a 10 MB replacement, and references larger CID files without uploading', async () => {

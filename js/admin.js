@@ -464,7 +464,7 @@ async function _importReviewedAlbums() {
           </label>
           <span class="admin-artwork-status" data-index="${index}" role="status">${track.artworkCid ? 'Queued artwork is selected by default. Leave both fields empty to keep it.' : 'No default image available; select artwork before minting.'}</span>
         </div>
-        <button class="admin-btn admin-btn-secondary admin-mint-one" type="button" data-index="${index}">Mint</button>
+        <button class="admin-btn admin-btn-secondary admin-mint-one" type="button" data-index="${index}">Mint one</button>
       </div>
     `).join('');
     if (_mintSelectedBtn) _mintSelectedBtn.disabled = false;
