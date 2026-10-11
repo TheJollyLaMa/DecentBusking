@@ -6,6 +6,15 @@ export const DEVERT_SONGS_PER_MAIN_AD = 10;
 export const DEVERT_MAX_AD_SECONDS = 150;
 export const DEVERT_MAX_WEEKLY_CAMPAIGNS = 1000;
 
+export function buildDevertAdsAuthorizationMessage({ address, origin, issuedAt }) {
+  return [
+    'DecentBusking private DeVert ad library',
+    `Wallet: ${address.toLowerCase()}`,
+    `Origin: ${origin}`,
+    `Issued At: ${issuedAt}`,
+  ].join('\n');
+}
+
 function validateCampaign(campaign) {
   if (!campaign || typeof campaign.campaignId !== 'string' || !campaign.campaignId ||
     typeof campaign.audioURI !== 'string' || !campaign.audioURI.startsWith('ipfs://') ||

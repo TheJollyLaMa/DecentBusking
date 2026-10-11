@@ -34,7 +34,44 @@ export function audioCidFromMetadata(metadata = {}) {
   return [normalized, ...segments].join('/');
 }
 
-export async function fetchMintMetadata(uri, fetchImpl, { wait = delay => new Promise(resolve => setTimeout(resolve, delay)) } = {}) {
+export async function readOwnedDevertAds({ collections, address, fetchImpl = fetch, retry = {}, pauseMs = 40,
+  metadataReader = fetchMintMetadata, log = console } = {}) {
+  if (!Array.isArray(collections) || !/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('DeVert ad recovery requires collections and a wallet');
+  const ads = new Map();
+  for (const collection of collections) {
+    const nextTokenId = Number(await withRetry(() => collection.contract.nextTokenId(), retry));
+    if (!Number.isSafeInteger(nextTokenId) || nextTokenId < 0 || nextTokenId > 100_000) throw new Error('Invalid NFT token range');
+    for (let tokenId = 0; tokenId < nextTokenId; tokenId++) {
+      if (pauseMs) await new Promise(resolve => setTimeout(resolve, pauseMs));
+      let balance;
+      try { balance = await withRetry(() => collection.contract.balanceOf(address, tokenId), retry); }
+      catch (error) { log.warn(`[mint-sync] Ad library ownership check deferred for token ${tokenId}: ${error.message}`); continue; }
+      if (BigInt(balance) === 0n) continue;
+      try {
+        const uri = await withRetry(() => collection.contract.uri(tokenId), retry);
+        const metadata = await metadataReader(uri, fetchImpl, { attempts: 1 });
+        const isAd = metadata.isDevertAd === true || /^DecentAdvert(?:isement)?(?:\b|[0-9_-])/i.test(String(metadata.name || ''));
+        if (!isAd) continue;
+        const mediaUri = metadata.videoUrl || metadata.audioUrl || metadata.animation_url || '';
+        const ipfsCid = audioCidFromMetadata({ ...metadata, audioUrl: mediaUri });
+        if (!ipfsCid) continue;
+        ads.set(`${collection.contractAddress.toLowerCase()}:${tokenId}`, {
+          trackId: `nft:${collection.contractAddress.toLowerCase()}:${tokenId}`,
+          title: String(metadata.name || `DeVert ad #${tokenId}`), ipfsCid,
+          mediaType: metadata.mediaType || (metadata.videoUrl ? 'video/mp4' : 'audio/mpeg'),
+          filename: String(metadata.filename || ''), mintStatus: 'minted', tokenId: String(tokenId),
+          state: 'ready', campaignId: null, expiresAt: null, secondsRemaining: 0,
+        });
+      } catch (error) {
+        log.warn(`[mint-sync] Ad metadata unavailable for owned token ${tokenId}: ${error.message}`);
+      }
+    }
+  }
+  return [...ads.values()];
+}
+
+export async function fetchMintMetadata(uri, fetchImpl, { attempts = 3, baseDelayMs = 1_000,
+  wait = delay => new Promise(resolve => setTimeout(resolve, delay)) } = {}) {
   const cidPath = uri.startsWith('ipfs://') ? uri.replace(/^ipfs:\/\/(ipfs\/)?/, '')
     : /^https?:\/\//.test(uri) ? new URL(uri).pathname.split('/ipfs/')[1] : null;
   const urls = [...new Set([
@@ -42,7 +79,7 @@ export async function fetchMintMetadata(uri, fetchImpl, { wait = delay => new Pr
     ...(cidPath ? METADATA_GATEWAYS.map(gateway => `${gateway}${cidPath}`) : []),
   ])];
   const failures = new Map();
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     let transient = false;
     for (const url of urls) {
       const response = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
@@ -55,8 +92,8 @@ export async function fetchMintMetadata(uri, fetchImpl, { wait = delay => new Pr
         if (!response || response.status === 429 || response.status >= 500) transient = true;
       }
     }
-    if (!transient || attempt === 2) break;
-    await wait(1_000 * 2 ** attempt);
+      if (!transient || attempt === attempts - 1) break;
+      await wait(baseDelayMs * 2 ** attempt);
   }
   throw new Error(`NFT metadata could not be verified through any IPFS gateway: ${uri}. ${[...failures].map(([url, status]) => `${new URL(url).hostname}: ${status}`).join('; ')}. Mint queue remains locked to prevent duplicate mints; retry after gateway recovery.`);
 }

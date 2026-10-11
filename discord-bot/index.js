@@ -40,7 +40,7 @@ import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs'
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
-import { syncMintedTracksFromChain, createVerifiedMintQueueReader } from './mint-sync.js';
+import { syncMintedTracksFromChain, createVerifiedMintQueueReader, readOwnedDevertAds } from './mint-sync.js';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
@@ -109,6 +109,7 @@ let _devertLoopWorker = null;
 let _devertSchedulerContract = null;
 let _devertBoostTask = null;
 const _devertBoostsInFlight = new Set();
+const _devertAdsOnChainCache = new Map();
 let liveScheduleStore = null;
 let livePerformanceEvents = [];
 let liveWeeklySchedule = {};
@@ -762,6 +763,7 @@ async function main() {
       mediaType: mediaTypeFor(track.filename, track.mediaType),
       tipWallet: track.tipWallet || track.mintRecipient,
       parentTokenId: track.parentTokenId || 0,
+      isDevertAd: track.isDevertAd === true,
       requestedAt: track.mintRequestedAt,
     })),
     getRadioState: async () => ({ ...buildRadioState({
@@ -773,7 +775,33 @@ async function main() {
     getDevertAds: async ({ address }) => {
       if (!playlistReady) throw new Error('Advert library is restoring; retry shortly');
       const snapshot = await readDevertState?.();
-      return getDevertAdsForWallet(address, snapshot?.campaigns || []);
+      const normalizedAddress = address.toLowerCase();
+      const localAds = getDevertAdsForWallet(address, snapshot?.campaigns || []);
+      const cached = _devertAdsOnChainCache.get(normalizedAddress);
+      let chainAds = cached && cached.expiresAt > Date.now() ? cached.ads : null;
+      if (!chainAds) {
+        const provider = new JsonRpcProvider(config.baseRpcUrl);
+        const collections = config.nftContractAddresses.map(contractAddress => ({ contractAddress,
+          contract: new Contract(contractAddress, [
+            'function nextTokenId() view returns(uint256)',
+            'function balanceOf(address,uint256) view returns(uint256)',
+            'function uri(uint256) view returns(string)',
+          ], provider) }));
+        chainAds = await readOwnedDevertAds({ collections, address: normalizedAddress, pauseMs: 90,
+          log: { warn: message => console.warn(message) } });
+        _devertAdsOnChainCache.set(normalizedAddress, { ads: chainAds, expiresAt: Date.now() + 5 * 60_000 });
+      }
+      const mergedAds = new Map();
+      for (const ad of [...chainAds, ...localAds]) mergedAds.set(ad.ipfsCid, ad);
+      for (const ad of mergedAds.values()) {
+        const campaign = snapshot?.campaigns?.find(item => item.advertiser?.toLowerCase() === normalizedAddress &&
+          item.audioURI === `ipfs://${ad.ipfsCid}` && Date.parse(item.startedAt) <= Date.now() && Date.now() < Date.parse(item.expiresAt));
+        ad.state = campaign ? 'active' : ad.mintStatus === 'minted' ? 'ready' : 'pending';
+        ad.campaignId = campaign?.campaignId || null;
+        ad.expiresAt = campaign?.expiresAt || null;
+        ad.secondsRemaining = campaign ? Math.max(0, Math.ceil((Date.parse(campaign.expiresAt) - Date.now()) / 1000)) : 0;
+      }
+      return [...mergedAds.values()].sort((first, second) => first.title.localeCompare(second.title));
     },
     getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null },
     onDevertLoopVote: payload => _devertLoopWorker ? _devertLoopWorker.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),

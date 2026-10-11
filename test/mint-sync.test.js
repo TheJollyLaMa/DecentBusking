@@ -25,6 +25,29 @@ test('metadata retries transient gateway failures and falls back for HTTP IPFS U
   assert.equal(urls[1], 'https://gateway.pinata.cloud/ipfs/metadata');
   await assert.rejects(fetchMintMetadata('ipfs://missing', async () => new Response('', { status: 404 })),
     /ipfs:\/\/missing.*404.*duplicate mints/);
+  let bestEffortCalls = 0;
+  await assert.rejects(fetchMintMetadata('ipfs://best-effort', async () => { bestEffortCalls++; return new Response('', { status: 503 }); },
+    { attempts: 1 }), /ipfs:\/\/best-effort/);
+  assert.equal(bestEffortCalls, 2);
+});
+
+test('on-chain ad library recovers wallet-owned DecentAdvert NFTs from legacy metadata', async () => {
+  const { readOwnedDevertAds } = await import(moduleUrl);
+  const owner = `0x${'1'.repeat(40)}`;
+  const mediaCid = 'bafybeidbdge6db6zq2pulyi34tk4pra6zl7hiccwfts4zie5mg7rcqczxq';
+  const collection = { contractAddress: `0x${'2'.repeat(40)}`, contract: {
+    nextTokenId: async () => 3n,
+    balanceOf: async (address, tokenId) => address === owner && tokenId === 1 ? 1n : 0n,
+    uri: async tokenId => `ipfs://metadata-${tokenId}`,
+  } };
+  const ads = await readOwnedDevertAds({ collections: [collection], address: owner, pauseMs: 0,
+    metadataReader: async () => ({ name: 'DecentAdvert0001', videoUrl: `ipfs://${mediaCid}`, mediaType: 'video/mp4' }),
+    log: { warn() {} } });
+  assert.equal(ads.length, 1);
+  assert.equal(ads[0].tokenId, '1');
+  assert.equal(ads[0].state, 'ready');
+  assert.equal(ads[0].ipfsCid, mediaCid);
+  assert.equal(ads[0].mediaType, 'video/mp4');
 });
 
 test('extracts the audio CID from DecentNFT metadata', async () => {

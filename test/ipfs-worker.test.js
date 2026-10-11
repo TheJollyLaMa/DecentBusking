@@ -77,19 +77,28 @@ test('DeVert campaign snapshot is public read-only data and stays unavailable un
   });
 });
 
-test('ad library requires an address and returns only the request for that wallet', async () => {
+test('ad library requires a fresh wallet signature and binds the read to that wallet and origin', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
-  const owner = Wallet.createRandom().address;
+  const { buildDevertAdsAuthorizationMessage } = await import('../js/devert-scheduler.mjs');
+  const owner = Wallet.createRandom();
+  const origin = 'https://busking.example';
+  const issuedAt = new Date().toISOString();
   let requestedAddress;
   const ads = [{ trackId: 'ad-one', state: 'ready' }];
-  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: owner,
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address,
     getDevertAds: async ({ address }) => { requestedAddress = address; return ads; } });
   await withServer(handler, async base => {
-    const response = await fetch(`${base}/api/devert/ads?address=${owner}`);
+    const authorization = { address: owner.address, origin, issuedAt };
+    const signature = await owner.signMessage(buildDevertAdsAuthorizationMessage(authorization));
+    const request = (body, requestOrigin = origin) => fetch(`${base}/api/devert/ads`, { method: 'POST',
+      headers: { origin: requestOrigin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const response = await request({ ...authorization, signature });
     assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), origin);
     assert.deepEqual((await response.json()).ads, ads);
-    assert.equal(requestedAddress, owner);
-    assert.equal((await fetch(`${base}/api/devert/ads?address=bad`)).status, 400);
+    assert.equal(requestedAddress, owner.address);
+    assert.equal((await request({ ...authorization, signature }, 'https://untrusted.example')).status, 400);
+    assert.equal((await request({ ...authorization, address: Wallet.createRandom().address, signature })).status, 400);
   });
 });
 

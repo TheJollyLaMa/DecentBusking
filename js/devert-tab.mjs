@@ -1,8 +1,33 @@
 import { canSetDevertListenMode, getDevertAdsMuted, setDevertAdsMuted, setDevertListenMode } from './radio-sync.js?v=20261010-listens';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { submitMediaForApproval } from './mint-submission.js';
+import { buildDevertAdsAuthorizationMessage } from './devert-scheduler.mjs';
 
 const MAX_DEVERT_MEDIA_BYTES = 250 * 1024 * 1024;
+let devertAdsAuthorization = null;
+
+async function readWalletAds(service, wallet) {
+  if (!wallet?.address || !wallet?.signer) throw new Error('Connect your wallet to view your ads.');
+  const key = `${service}:${wallet.address.toLowerCase()}:${window.location.origin}`;
+  if (!devertAdsAuthorization || devertAdsAuthorization.key !== key ||
+      devertAdsAuthorization.signer !== wallet.signer || devertAdsAuthorization.expiresAt <= Date.now()) {
+    const issuedAt = new Date().toISOString();
+    const authorization = { address: wallet.address, origin: window.location.origin, issuedAt };
+    const signature = await wallet.signer.signMessage(buildDevertAdsAuthorizationMessage(authorization));
+    devertAdsAuthorization = { key, signer: wallet.signer, authorization, signature,
+      expiresAt: Date.now() + 4 * 60_000 };
+  }
+  const response = await fetch(`${service}/api/devert/ads`, { method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...devertAdsAuthorization.authorization, signature: devertAdsAuthorization.signature }),
+    cache: 'no-store', signal: AbortSignal.timeout(12_000) });
+  const result = await response.json();
+  if (!response.ok) {
+    devertAdsAuthorization = null;
+    throw new Error(result.error || `Ad library unavailable (${response.status})`);
+  }
+  return Array.isArray(result.ads) ? result.ads : [];
+}
 
 function mediaTypeForAdFile(file) {
   const declared = String(file.type || '').toLowerCase();
@@ -431,11 +456,8 @@ export function initDevertTab() {
       const walletAddress = window._wallet?.address;
       let ads = [];
       if (walletAddress) {
-        const libraryResponse = await fetch(`${service}/api/devert/ads?address=${encodeURIComponent(walletAddress)}`,
-          { cache: 'no-store', signal: AbortSignal.timeout(12_000) });
-        const libraryResult = await libraryResponse.json();
-        if (!libraryResponse.ok) throw new Error(libraryResult.error || `Ad library unavailable (${libraryResponse.status})`);
-        ads = Array.isArray(libraryResult.ads) ? libraryResult.ads : [];
+        ads = await readWalletAds(service, window._wallet);
+        if (request !== generation || !isOpen()) return;
       }
       for (const ad of ads) {
         const item = node('li', undefined, 'devert-campaign');
@@ -512,7 +534,7 @@ export function initDevertTab() {
   walletButton?.addEventListener('click', () => window._wallet?.connect?.());
   document.addEventListener('wallet-connected', syncCheckout);
   document.addEventListener('wallet-connected', refresh);
-  document.addEventListener('wallet-disconnected', () => { syncCheckout(); campaignList.replaceChildren(); campaignStatus.textContent = 'Connect your wallet to view your ads.'; });
+  document.addEventListener('wallet-disconnected', () => { devertAdsAuthorization = null; syncCheckout(); campaignList.replaceChildren(); campaignStatus.textContent = 'Connect your wallet to view your ads.'; });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); } });
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
   document.addEventListener('click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target)) close(); });

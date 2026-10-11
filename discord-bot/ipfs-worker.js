@@ -1,6 +1,7 @@
 import { Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
+import { buildDevertAdsAuthorizationMessage } from '../js/devert-scheduler.mjs';
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 const SIGNED_UPLOAD_OVERHEAD_BYTES = 64 * 1024;
@@ -291,11 +292,17 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, await getDevertState(), '*');
         return;
       }
-      if (request.method === 'GET' && requestUrl.pathname === '/api/devert/ads') {
+      if (request.method === 'POST' && requestUrl.pathname === '/api/devert/ads') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
         if (!getDevertAds) { sendJson(response, 404, { error: 'Advert library is not configured' }, '*'); return; }
-        const address = requestUrl.searchParams.get('address') || '';
-        if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error('Valid advertiser wallet required');
-        sendJson(response, 200, { ads: await getDevertAds({ address }) }, '*');
+        const { address, issuedAt, signature } = await readJson(request);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(address || '') || typeof signature !== 'string') throw new Error('Invalid ad library authorization');
+        const issuedAtMs = Date.parse(issuedAt);
+        if (!Number.isFinite(issuedAtMs) || Math.abs(now() - issuedAtMs) > MAX_SIGNATURE_AGE_MS) throw new Error('Ad library authorization expired; refresh and retry');
+        if (verifyMessage(buildDevertAdsAuthorizationMessage({ address, origin, issuedAt }), signature).toLowerCase() !== address.toLowerCase()) {
+          throw new Error('Ad library signature does not match the connected wallet');
+        }
+        sendJson(response, 200, { ads: await getDevertAds({ address }) }, corsOrigin);
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/devert/loop') {

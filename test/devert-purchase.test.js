@@ -17,7 +17,8 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(html, /Submit for Review/);
   assert.match(html, /My Ads/);
   assert.match(html, /id="devert-campaigns" aria-label="My DeVert advertisements"/);
-  assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /api\/devert\/ads\?address=/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /api\/devert\/ads/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /buildDevertAdsAuthorizationMessage/);
   assert.match(fs.readFileSync(path.join(__dirname, '../discord-bot/index.js'), 'utf8'), /getDevertAdsForWallet\(address/);
   assert.doesNotMatch(html, /id="devert-profile"/);
   assert.match(html, /Mute ads on this device/);
