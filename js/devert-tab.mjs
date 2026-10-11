@@ -142,6 +142,10 @@ export function initDevertTab() {
   const adsModeButton = document.getElementById('devert-listen-ads');
   const muteAdsInput = document.getElementById('devert-mute-ads');
   const previewPlayer = document.getElementById('devert-ad-preview');
+  const adVoteButtons = [document.getElementById('devert-vote-up'), document.getElementById('devert-vote-down')];
+  const adVoteStatus = document.getElementById('devert-vote-status');
+  let adVoteBusy = false;
+  const votedAdPlays = new Set();
   const listenStatus = document.getElementById('devert-listen-status');
   let generation = 0;
   let refreshTimer;
@@ -166,6 +170,10 @@ export function initDevertTab() {
     muteAdsInput.checked = getDevertAdsMuted();
     muteAdsInput.disabled = adsOnly;
     previewPlayer.hidden = !adsOnly;
+    const playId = normalizeAdLoopNowPlaying(adLoopState)?.playId;
+    for (const button of adVoteButtons) {
+      if (button) button.disabled = !adsOnly || !playId || adVoteBusy || votedAdPlays.has(playId);
+    }
   }
 
   function stopAdLoopMirror(message = '') {
@@ -175,6 +183,35 @@ export function initDevertTab() {
     previewPlayer.load();
     adLoopPlayId = null;
     if (message) listenStatus.textContent = message;
+  }
+
+  async function voteOnAd(vote) {
+    const item = normalizeAdLoopNowPlaying(adLoopState);
+    if (!item || adVoteBusy || previewPlayer.dataset.listenMode !== 'ads-only') return;
+    adVoteBusy = true;
+    syncListenControls();
+    try {
+      const storageKey = 'decentbusking:listener:v1';
+      let voterId = localStorage.getItem(storageKey);
+      if (!/^[a-zA-Z0-9_-]{16,128}$/.test(voterId || '')) {
+        voterId = crypto.randomUUID();
+        localStorage.setItem(storageKey, voterId);
+      }
+      const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+      const response = await fetch(`${service}/api/devert/loop/vote`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ playId: item.playId, voterId, vote }), signal: AbortSignal.timeout(10_000),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Ad vote failed');
+      votedAdPlays.add(item.playId);
+      adVoteStatus.textContent = 'Vote recorded';
+    } catch (error) {
+      adVoteStatus.textContent = error.message;
+    } finally {
+      adVoteBusy = false;
+      syncListenControls();
+    }
   }
 
   function syncAdLoopAudio(state) {
@@ -448,11 +485,18 @@ export function initDevertTab() {
     panel.inert = false;
     document.body.classList.add('devert-open');
     document.dispatchEvent(new CustomEvent('left-drawer-open', { detail: 'devert' }));
+    if (setDevertListenMode('ads-only')) {
+      previewPlayer.dataset.listenMode = 'ads-only';
+      startAdLoopMirror();
+      syncListenControls();
+    }
     refresh();
   });
   closeButton?.addEventListener('click', () => { close(); toggle.focus(); });
   refreshButton?.addEventListener('click', refresh);
   purchaseForm?.addEventListener('submit', submitCampaign);
+  adVoteButtons[0]?.addEventListener('click', () => voteOnAd(1));
+  adVoteButtons[1]?.addEventListener('click', () => voteOnAd(-1));
   adMediaFile?.addEventListener('change', syncCheckout);
   adMediaQueueButton?.addEventListener('click', queueAdMedia);
   walletButton?.addEventListener('click', () => window._wallet?.connect?.());

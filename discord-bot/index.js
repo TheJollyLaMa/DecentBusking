@@ -187,12 +187,12 @@ function runIpfsBackfill(client, config) {
       await syncMintedTracks(config);
       if (!pinned || !config.jukeLoopTextChannelId) return;
       const channel = await client.channels.fetch(config.jukeLoopTextChannelId).catch(() => null);
-      await channel?.send(
-        `📌 Archived **${pinned}** past #DecentJukebox upload${pinned === 1 ? '' : 's'} to IPFS — ` +
+      await channel?.send({
+        content: `📌 Archived **${pinned}** past #DecentJukebox upload${pinned === 1 ? '' : 's'} to IPFS — ` +
         `${pinned === 1 ? 'it' : 'they'} can now stream on DecentBusking.` +
         (remaining ? ` ${remaining} upload${remaining === 1 ? '' : 's'} couldn’t be archived yet; retrying later.` : ''),
-        { flags: MessageFlags.SuppressNotifications },
-      ).catch(() => {});
+        flags: MessageFlags.SuppressNotifications,
+      }).catch(() => {});
     })
     .catch((err) => console.error('[ipfs-backfill] Run failed:', err.message));
 }
@@ -452,7 +452,9 @@ async function main() {
       tags: { app: 'decentbusking', kind: 'devert-main-radio', schema: '1' }, serialize: value => value,
       deserialize: value => value, retainSnapshots: Infinity });
     _devertPlaybackRuntime = createDevertPlaybackRuntime({ contract, provider: scheduler.provider,
-      restore: journalStore.restore, save: journalStore.save, readCampaigns: readDevertState });
+      restore: journalStore.restore, save: journalStore.save, readCampaigns: readDevertState,
+      resolveCampaignMedia: (campaign, cid) => getPlaylist().find(track => track.isDevertAd && track.ipfsCid === cid &&
+        track.mintRecipient?.toLowerCase() === campaign.advertiser.toLowerCase()) });
     _devertPlaybackInitialization = initializeDevertPlaybackWithRetry({
       initialize: () => _devertPlaybackRuntime.initialize(),
     }).then(() => console.log(`[devert] Durable scheduler journal ready; scheduler ${scheduler.address}.`));
@@ -467,7 +469,12 @@ async function main() {
     } else {
       startDevertLoopWorker({ token: process.env.DVERT_LOOP_DISCORD_TOKEN,
         voiceChannelId: process.env.VERTLOOP_VOICE_CHANNEL_ID, textChannelId: process.env.VERT_LOOP_CHANNEL_ID,
-        playback: _devertPlaybackRuntime })
+        playback: _devertPlaybackRuntime,
+        onAdMessage: process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true' ? async message => {
+          if (message.channelId === config.jukeboxChannelId && /^!devert-ad\b/i.test(message.content)) {
+            await handleDevertLoopSubmission(message, config, creatorProfiles);
+          }
+        } : undefined })
         .then(worker => { _devertLoopWorker = worker; })
         .catch(error => console.warn('[devert-loop] AdLoop worker unavailable:', error.shortMessage || error.message));
     }
@@ -755,6 +762,7 @@ async function main() {
       lastCheckedAt: paymentLedger.getState().lastCheckedAt, ready: paymentLedgerReady } }),
     getDevertState: readDevertState,
     getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null },
+    onDevertLoopVote: payload => _devertLoopWorker ? _devertLoopWorker.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),
     getRadioHistory: async ({ weeks, wallet, includeAllTime, calendar }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime, calendar }),
     getWeeklyPayflow: ({ wallet }) => payflow.getState({ wallet }),
     getPaymentLedger: () => ({ ...paymentLedger.getState(), ready: paymentLedgerReady,
@@ -929,6 +937,7 @@ async function main() {
   client.on(Events.MessageCreate, async (message) => {
     // Ignore bots and messages outside the configured channel
     if (message.author.bot) return;
+    if (message.channelId === config.jukeboxChannelId && /^!devert-ad\b/i.test(message.content)) return;
     if (process.env.VERT_LOOP_CHANNEL_ID && message.channelId === process.env.VERT_LOOP_CHANNEL_ID) {
       await handleDevertLoopSubmission(message, config, creatorProfiles);
       return;
@@ -1533,7 +1542,7 @@ async function startJukeLoop(client, config) {
     await session.connect();
     console.log(`[jukeloop] Connected to voice channel ${voiceChannel.name} (${voiceChannel.id}), starting playback…`);
     await textChannel
-      .send('📻 **JukeLoop is live!** The community radio is starting up — tracks from #DecentJukebox are on the way.', {
+      .send({ content: '📻 **JukeLoop is live!** The community radio is starting up — tracks from #DecentJukebox are on the way.',
         flags: MessageFlags.SuppressNotifications,
       })
       .catch(() => {});

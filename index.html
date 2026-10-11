@@ -96,7 +96,12 @@
           <button id="devert-listen-ads" type="button" aria-pressed="false">Ads Only</button>
         </div>
         <label id="devert-mute-ads-label" class="devert-mute-ads"><input id="devert-mute-ads" type="checkbox" /> Mute ads on this device</label>
-        <audio id="devert-ad-preview" controls preload="none" hidden aria-label="DeVert ad preview"></audio>
+        <video id="devert-ad-preview" controls playsinline preload="none" hidden aria-label="DeVert live ad"></video>
+        <div role="group" aria-label="Vote on current VertLoop ad">
+          <button id="devert-vote-up" type="button" disabled aria-label="Like current ad">👍</button>
+          <button id="devert-vote-down" type="button" disabled aria-label="Dislike current ad">👎</button>
+          <span id="devert-vote-status" role="status"></span>
+        </div>
         <p id="devert-listen-status" role="status" aria-live="polite">Ads Only previews do not count as paid impressions.</p>
       </fieldset>
       <div class="devert-campaign-heading"><h3>Active Campaigns</h3><button id="devert-refresh" type="button" aria-label="Refresh DVert campaigns" title="Refresh campaigns">↻</button></div>

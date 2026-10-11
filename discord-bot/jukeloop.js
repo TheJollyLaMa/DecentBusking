@@ -22,6 +22,7 @@
 
 import { spawn } from 'child_process';
 import { MessageFlags } from 'discord.js';
+import { DEVERT_MAX_AD_SECONDS, DEVERT_SONGS_PER_MAIN_AD } from '../js/devert-scheduler.mjs';
 import {
   joinVoiceChannel,
   createAudioPlayer,
@@ -314,12 +315,13 @@ export function createJukeLoopSession(guildId, opts) {
  * @param {string} url
  * @returns {{ stream: import('stream').Readable, ffmpegProcess: import('child_process').ChildProcess }}
  */
-function createFFmpegStream(url) {
+function createFFmpegStream(url, { ad = false } = {}) {
   const args = [
     '-reconnect',           '1',
     '-reconnect_streamed',  '1',
     '-reconnect_delay_max', '5',
     '-i',                   url,
+    ...(ad ? ['-t', String(DEVERT_MAX_AD_SECONDS)] : []),
     '-analyzeduration',     '0',
     '-loglevel',            '0',
     '-vn',
@@ -355,6 +357,7 @@ export class JukeLoopSession {
     this.onTerminalDisconnect = onTerminalDisconnect;
     this.djuke        = djuke || null;
     this.devertPlayback = devertPlayback || null;
+    this._musicSinceAd = 0;
     this._currentDevertAd = null;
     this._failedDevertCampaignIds = new Set();
     this.schedule     = Array.isArray(schedule) ? schedule : defaultRadioSchedule();
@@ -407,6 +410,8 @@ export class JukeLoopSession {
           firstWeekBonus: this._nowPlaying.firstWeekBonus,
           announcementId: this._announcementMsg?.id,
         };
+        if (this._currentDevertAd) this._musicSinceAd = 0;
+        else if (this._completedPlay.audibleMs >= 30_000) this._musicSinceAd++;
         if (this.devertPlayback) {
           try {
             if (this._currentDevertAd) {
@@ -533,11 +538,11 @@ export class JukeLoopSession {
       this._liveEventId = eventId;
       if (event) {
         if (this.player.state.status !== AudioPlayerStatus.Idle) this.player.stop(true);
-        this.textChannel.send(`🔴 **Live performance block: ${event.title}** starts now.`, {
+        this.textChannel.send({ content: `🔴 **Live performance block: ${event.title}** starts now.`,
           allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications,
         }).catch(() => {});
       } else if (previousEventId) {
-        this.textChannel.send('📻 **Live performance block ended.** JukeLoop is resuming.', {
+        this.textChannel.send({ content: '📻 **Live performance block ended.** JukeLoop is resuming.',
           flags: MessageFlags.SuppressNotifications,
         }).catch(() => {});
       }
@@ -550,13 +555,13 @@ export class JukeLoopSession {
         const message = show.window === 'final-payroll-hour'
           ? `📊 **${show.label}** is live. Vote through the New York payroll cutoff at midnight for this week's chart.`
           : `📊 **${show.label}** is live. React 👍 or 👎 to vote in this week's chart.`;
-        this.textChannel.send(message, { allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications }).catch(() => {});
+        this.textChannel.send({ content: message, allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications }).catch(() => {});
       } else if (previousShowKey?.startsWith('weekly_top10:') && show.type === 'normal_rotation') {
         const finalListenEnded = previousShowKey === 'weekly_top10:weekly-top10-final-listen';
         const message = finalListenEnded
           ? '📊 The weekly Top 10 final listen has ended at the payroll cutoff. Normal rotation resumes.'
           : '📊 The Top 10 hype hour has ended. Normal rotation resumes.';
-        this.textChannel.send(message, { allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications }).catch(() => {});
+        this.textChannel.send({ content: message, allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications }).catch(() => {});
       }
       const enteringOrLeavingTopTen = previousShowKey &&
         (previousShowKey.startsWith('weekly_top10:') || show.type === 'weekly_top10');
@@ -652,7 +657,7 @@ export class JukeLoopSession {
     }
 
     let devertAd = null;
-    if (!paid && this.devertPlayback && activeShow.type !== 'weekly_top10') {
+    if (!paid && this.devertPlayback && this._musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD && activeShow.type !== 'weekly_top10') {
       devertAd = await this.devertPlayback.nextMainRadioAd({ excludeCampaignIds: [...this._failedDevertCampaignIds] })
         .catch(error => { console.warn('[devert] Main-radio ad selection deferred:', error.message); return null; });
     }
@@ -665,11 +670,11 @@ export class JukeLoopSession {
     // Nothing to play → wait and retry
     if (!paid && !devertAd && this._queue.length === 0) {
       await this.textChannel
-        .send(
-          '📭 The JukeLoop playlist is empty.\n' +
+        .send({
+          content: '📭 The JukeLoop playlist is empty.\n' +
           'Post audio files (MP3, M4A, etc.) in <#' + this.textChannel.id + '> to add tracks!',
-          { flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } },
-        )
+          flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] },
+        })
         .catch(() => {});
       setTimeout(() => {
         if (!this._destroyed) this._playNext().catch(() => {});
@@ -691,7 +696,7 @@ export class JukeLoopSession {
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
       if (devertAd) this._failedDevertCampaignIds.add(devertAd.campaignId);
       await this.textChannel
-        .send(`⚠️ Skipping **${track.title}** — the original upload could not be found.`, {
+        .send({ content: `⚠️ Skipping **${track.title}** — the original upload could not be found.`,
           flags: MessageFlags.SuppressNotifications,
         })
         .catch(() => {});
@@ -715,7 +720,7 @@ export class JukeLoopSession {
     }
 
     try {
-      const { stream, ffmpegProcess } = createFFmpegStream(url);
+      const { stream, ffmpegProcess } = createFFmpegStream(url, { ad: !!devertAd });
       this._ffmpeg = ffmpegProcess;
 
       const resource = createAudioResource(stream, { inputType: StreamType.Raw });
@@ -748,7 +753,7 @@ export class JukeLoopSession {
         ? `📢 **Sponsored campaign:** ${track.title} · campaign #${devertAd.campaignId}`
         : buildNowPlayingMessage(track, announcementContext);
       const msg = await this.textChannel
-        .send(message, { flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
+        .send({ content: message, flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
         .catch(() => null);
 
       if (msg && !devertAd) {
@@ -766,7 +771,7 @@ export class JukeLoopSession {
         this._currentDevertAd = null;
       }
       await this.textChannel
-        .send(`⚠️ Skipping **${track.title}**: ${err.message}`, { flags: MessageFlags.SuppressNotifications })
+        .send({ content: `⚠️ Skipping **${track.title}**: ${err.message}`, flags: MessageFlags.SuppressNotifications })
         .catch(() => {});
       await this._releasePaid(err.message);
       this._currentTrack    = null;

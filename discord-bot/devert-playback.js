@@ -60,7 +60,7 @@ function validateJournal(value) {
 }
 
 export function createDevertPlaybackRuntime({ contract, provider = contract?.runner?.provider, restore, save,
-  readCampaigns, now = () => Date.now(), minimumAudibleMs = MIN_AUDIBLE_MS, log = console }) {
+  readCampaigns, resolveCampaignMedia = () => null, now = () => Date.now(), minimumAudibleMs = MIN_AUDIBLE_MS, log = console }) {
   if (!contract || typeof restore !== 'function' || typeof save !== 'function' || typeof readCampaigns !== 'function') {
     throw new Error('DeVert playback requires a contract and durable journal store');
   }
@@ -120,9 +120,10 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
 
   function campaignTrack(campaign, kind) {
     const ipfsCid = campaign.audioURI.slice('ipfs://'.length);
+    const media = resolveCampaignMedia(campaign, ipfsCid);
     return { campaignId: campaign.campaignId, source: 'devert', kind, trackId: `devert:${campaign.campaignId}`,
-      title: campaign.title, uploader: 'DeVert advertiser', filename: `devert-${campaign.campaignId}.mp3`,
-      mediaType: 'audio/mpeg', ipfsCid, pinStatus: 'untracked' };
+      title: campaign.title, uploader: 'DeVert advertiser', filename: media?.filename || `devert-${campaign.campaignId}.mp3`,
+      mediaType: media?.mediaType || 'audio/mpeg', ipfsCid, pinStatus: 'untracked' };
   }
 
   return {
@@ -170,7 +171,8 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
         voteScores.set(entry.campaignId, (voteScores.get(entry.campaignId) || 0) + entry.vote);
       }
       const campaign = plan.mainRadio.filter(item => !excluded.has(item.campaignId))
-        .sort((first, second) => (voteScores.get(second.campaignId) || 0) - (voteScores.get(first.campaignId) || 0))[0];
+        .sort((first, second) => (voteScores.get(second.campaignId) || 0) - (voteScores.get(first.campaignId) || 0))
+        .slice(0, 10)[0];
       return campaign ? { campaignId: campaign.campaignId, mainRadio: true, track: campaignTrack(campaign, 'main-radio') } : null;
     },
     recordMainRadioAdVote: ({ campaignId, radioPlayId, voterId, vote }) => run(async () => {

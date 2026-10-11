@@ -51,6 +51,7 @@ test('AdLoop exposes the live play and records only completed audible non-main i
   const timers = [];
   const ad = { campaignId: '17', track: { title: 'Advert', ipfsCid: 'bafy-ad', mediaType: 'video/mp4' } };
   const announcements = [];
+  const votes = [];
   let now = 10_000;
   player.play = () => {};
   const controller = createDevertLoopController({
@@ -58,6 +59,7 @@ test('AdLoop exposes the live play and records only completed audible non-main i
     playback: {
       nextDevertLoopAd: async () => ad,
       recordCampaignImpression: async impression => impressions.push(impression),
+      recordMainRadioAdVote: async vote => { votes.push(vote); return { ...vote, duplicate: false }; },
     },
     voiceChannel: { name: 'AdLoop' },
     textChannel: { send: message => { announcements.push(message); return Promise.resolve(); } },
@@ -71,11 +73,16 @@ test('AdLoop exposes the live play and records only completed audible non-main i
   });
 
   await controller.start();
-  assert.deepEqual(announcements, [{ content: '📢 **AdLoop:** Advert', flags: MessageFlags.SuppressNotifications }]);
+  assert.deepEqual(announcements, [{ content: '📢 **AdLoop:** Advert', flags: MessageFlags.SuppressNotifications,
+    allowedMentions: { parse: [] } }]);
   assert.equal(controller.getState().ready, true);
   assert.equal(controller.getState().nowPlaying.audible, false);
+  await assert.rejects(controller.submitVote({ playId: 'devert-loop:17:10000', voterId: 'listener-browser-0001', vote: 1 }), /audible/);
   assert.deepEqual(impressions, []);
   player.emit('stateChange', { status: 'buffering' }, { status: 'playing' });
+  await assert.rejects(controller.submitVote({ playId: 'old-play', voterId: 'listener-browser-0001', vote: 1 }), /current/);
+  await controller.submitVote({ playId: 'devert-loop:17:10000', voterId: 'listener-browser-0001', vote: 1 });
+  assert.equal(votes[0].campaignId, '17');
   now += 35_000;
   assert.equal(controller.getState().nowPlaying.positionMs, 35_000);
   player.emit('idle');
@@ -86,6 +93,18 @@ test('AdLoop exposes the live play and records only completed audible non-main i
   assert.equal(controller.getState().nowPlaying, null);
   assert.equal(timers[0].delay, 1_500);
   controller.stop();
+});
+
+test('VertLoop FFmpeg caps an ad output at 150 seconds', () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require('node:path').join(__dirname, '../discord-bot/devert-loop.js'), 'utf8');
+  let argumentsUsed;
+  const context = vm.createContext({ FFMPEG_BIN: 'ffmpeg', DEVERT_MAX_AD_SECONDS: 150,
+    spawn: (_binary, args) => { argumentsUsed = args; return { on() {} }; } });
+  vm.runInContext(source.slice(source.indexOf('function createStream('), source.indexOf('export function createDevertLoopController')), context);
+  context.createStream('https://media.example/ad.mp4');
+  assert.equal(argumentsUsed[argumentsUsed.indexOf('-t') + 1], '150');
 });
 
 test('AdLoop retries unstreamable campaigns without reporting an impression', async () => {

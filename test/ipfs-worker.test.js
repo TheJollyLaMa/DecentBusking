@@ -180,6 +180,23 @@ test('artwork CID validation normalizes file CIDs without imposing an attachment
   });
 });
 
+test('VertLoop votes require an allowed origin and a valid live-play payload', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const origin = 'https://busking.example';
+  const votes = [];
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: Wallet.createRandom().address,
+    onDevertLoopVote: async payload => { votes.push(payload); return { ...payload, duplicate: false }; } });
+  await withServer(handler, async base => {
+    const payload = { playId: 'devert-loop:17:10000', voterId: 'listener-browser-0001', vote: 1 };
+    const post = (body, requestOrigin = origin) => fetch(`${base}/api/devert/loop/vote`, { method: 'POST',
+      headers: { origin: requestOrigin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await post(payload, 'https://untrusted.example')).status, 400);
+    assert.equal((await post({ ...payload, vote: 2 })).status, 400);
+    assert.equal((await post(payload)).status, 200);
+    assert.deepEqual(votes, [payload]);
+  });
+});
+
 test('worker issues a Pinata URL only for a fresh owner signature', async () => {
   const { buildUploadAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom();

@@ -542,7 +542,28 @@ test('scheduled live performance blocks paid picks and resumes the queue when ca
   session.setLivePerformanceEvents([]);
   assert.equal(session._liveEventId, null);
   assert.equal(resumeCalls, 1);
-  assert.match(notices[0], /Live performance block: Live Test Set/);
+  assert.match(notices[0].content, /Live performance block: Live Test Set/);
+  assert.equal(notices[0].flags, 4096);
+});
+
+test('JukeLoop counts qualified music toward the next ad and resets after an audible ad', async (t) => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const session = new JukeLoopSession({ voiceChannel: { guild: { id: 'ad-cadence-test' } },
+    textChannel: {}, client: {} });
+  t.after(() => session.destroy());
+  session._destroyed = true;
+  session._nowPlaying = { audible: true, playId: 'short', startedAt: Date.now() - 1000 };
+  session.player.emit('idle');
+  assert.equal(session._musicSinceAd, 0);
+  for (let index = 0; index < 10; index++) {
+    session._nowPlaying = { audible: true, playId: `music-${index}`, startedAt: Date.now() - 35_000 };
+    session.player.emit('idle');
+  }
+  assert.equal(session._musicSinceAd, 10);
+  session._currentDevertAd = { campaignId: '17' };
+  session._nowPlaying = { audible: true, playId: 'ad-17', startedAt: Date.now() - 35_000 };
+  session.player.emit('idle');
+  assert.equal(session._musicSinceAd, 0);
 });
 
 test('JukeLoop announces the Top 10 final voting hour and its close', async (t) => {
@@ -563,9 +584,10 @@ test('JukeLoop announces the Top 10 final voting hour and its close', async (t) 
   ];
   session._activeShowKey = 'normal_rotation:normal-rotation';
   session._syncScheduledShow();
-  assert.match(notices[0], /Friday Top 10 Hype Hour/);
-  assert.match(notices[0], /React/);
+  assert.match(notices[0].content, /Friday Top 10 Hype Hour/);
+  assert.match(notices[0].content, /React/);
+  assert.equal(notices[0].flags, 4096);
   session.schedule = [{ id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation' }];
   session._syncScheduledShow();
-  assert.match(notices[1], /Top 10 hype hour has ended/i);
+  assert.match(notices[1].content, /Top 10 hype hour has ended/i);
 });

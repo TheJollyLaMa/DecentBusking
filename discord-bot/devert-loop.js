@@ -3,6 +3,7 @@ import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
 import { AudioPlayerStatus, createAudioPlayer, createAudioResource, entersState,
   joinVoiceChannel, StreamType, VoiceConnectionStatus } from '@discordjs/voice';
 import { resolveStreamableIpfsUrl } from './jukeloop.js';
+import { DEVERT_MAX_AD_SECONDS } from '../js/devert-scheduler.mjs';
 
 const MIN_AUDIBLE_MS = 30_000;
 const RETRY_MS = 30_000;
@@ -11,7 +12,7 @@ const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
 
 function createStream(url) {
   const child = spawn(FFMPEG_BIN, ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
-    '-i', url, '-analyzeduration', '0', '-loglevel', '0', '-vn',
+    '-i', url, '-t', String(DEVERT_MAX_AD_SECONDS), '-analyzeduration', '0', '-loglevel', '0', '-vn',
     '-af', 'afade=t=in:st=0:d=0.6:curve=qsin', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'],
   { stdio: ['ignore', 'pipe', 'ignore'] });
   child.on('error', error => console.error('[devert-loop] FFmpeg:', error.message));
@@ -28,6 +29,7 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
   let stopped = false;
   let retryTimer = null;
   let errorIdlePending = false;
+  let announcement = null;
   const failedCampaigns = new Map();
 
   const stopChild = () => {
@@ -92,6 +94,7 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
       return;
     }
     const radioPlayId = `devert-loop:${ad.campaignId}:${timestamp}`;
+    announcement = null;
     child = streamFactory(url);
     current = { campaignId: ad.campaignId, radioPlayId, title: ad.track.title,
       ipfsCid: ad.track.ipfsCid, mediaType: ad.track.mediaType || 'audio/mpeg',
@@ -105,12 +108,23 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
       scheduleNext(retryMs);
       return;
     }
-    textChannel?.send({ content: `📢 **AdLoop:** ${ad.track.title}`, flags: MessageFlags.SuppressNotifications }).catch(() => {});
+    announcement = await textChannel?.send({ content: `📢 **AdLoop:** ${ad.track.title}`, flags: MessageFlags.SuppressNotifications,
+      allowedMentions: { parse: [] } }).catch(() => null);
+    if (announcement?.react) {
+      await announcement.react('👍').catch(() => {});
+      await announcement.react('👎').catch(() => {});
+    }
     log.log(`[devert-loop] Playing campaign ${ad.campaignId} in ${voiceChannel.name}.`);
   }
 
   return {
     start: runNext,
+    async submitVote({ playId, voterId, vote, messageId }) {
+      if (!current?.audible || playId && playId !== current.radioPlayId ||
+          messageId && messageId !== announcement?.id) throw new Error('Vote only on the current audible VertLoop ad');
+      return playback.recordMainRadioAdVote({ campaignId: current.campaignId,
+        radioPlayId: current.radioPlayId, voterId, vote });
+    },
     stop() { stopped = true; clearTimer(retryTimer); stopChild(); current = null; },
     getState() {
       return { ready: !stopped, nowPlaying: current ? { ...current, positionMs: current.audible ? Math.max(0, now() - current.startedAt) : 0 } : null };
@@ -118,9 +132,11 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
   };
 }
 
-export async function startDevertLoopWorker({ token, voiceChannelId, textChannelId, playback, log = console }) {
+export async function startDevertLoopWorker({ token, voiceChannelId, textChannelId, playback, onAdMessage, log = console }) {
   if (!token || !voiceChannelId || !playback) throw new Error('AdLoop requires a separate Discord token, voice channel, and DeVert scheduler');
-  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
+  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions,
+    ...(onAdMessage ? [GatewayIntentBits.MessageContent] : [])] });
   let controller = null;
   let connection = null;
   let readyError;
@@ -149,10 +165,21 @@ export async function startDevertLoopWorker({ token, voiceChannelId, textChannel
     }
   });
   client.on(Events.Error, error => log.error('[devert-loop] Discord client:', error.message));
+  client.on(Events.MessageCreate, message => {
+    if (!message.author.bot && onAdMessage) Promise.resolve(onAdMessage(message))
+      .catch(error => log.warn('[devert-loop] Ad intake failed:', error.message));
+  });
+  client.on(Events.MessageReactionAdd, (reaction, user) => {
+    const vote = reaction.emoji.name === '👍' ? 1 : reaction.emoji.name === '👎' ? -1 : 0;
+    if (!vote || user.bot || !controller || reaction.message.channelId !== textChannelId) return;
+    controller.submitVote({ messageId: reaction.message.id, voterId: `discord:${user.id}`.replace(':', '_'), vote })
+      .catch(error => log.warn('[devert-loop] Vote rejected:', error.message));
+  });
   try { await client.login(token); await ready; }
   catch (error) { controller?.stop(); connection?.destroy(); client.destroy(); throw readyError || error; }
   return {
     getState: () => controller?.getState() || { ready: false, nowPlaying: null },
+    submitVote: payload => controller ? controller.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),
     stop() { controller?.stop(); connection?.destroy(); client.destroy(); },
   };
 }

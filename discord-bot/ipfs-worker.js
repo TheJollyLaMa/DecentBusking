@@ -151,6 +151,7 @@ export function createWorkerRequestHandler({
   getDjukeGasQuote,
   getDevertState,
   getDevertLoopState,
+  onDevertLoopVote,
   getPinnerManifest,
   checkpointMirror,
   getRadioHistory,
@@ -292,6 +293,15 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/api/devert/loop') {
         if (!getDevertLoopState) { sendJson(response, 200, { ready: false, nowPlaying: null }, '*'); return; }
         sendJson(response, 200, await getDevertLoopState(), '*');
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/devert/loop/vote') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!onDevertLoopVote) throw new Error('VertLoop voting is not configured');
+        const { playId, voterId, vote } = await readJson(request);
+        if (typeof playId !== 'string' || !playId || typeof voterId !== 'string' ||
+            !/^[a-zA-Z0-9_-]{16,128}$/.test(voterId) || vote !== 1 && vote !== -1) throw new Error('Invalid VertLoop vote');
+        sendJson(response, 200, await onDevertLoopVote({ playId, voterId, vote }), corsOrigin);
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/pinners/manifest') {

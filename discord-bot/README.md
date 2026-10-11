@@ -63,6 +63,7 @@ cp .env.example .env
 | `DVERT_LOOP_DISCORD_TOKEN`   | AdLoop   | Separate bot token for the dedicated ad-only voice channel |
 | `VERT_LOOP_CHANNEL_ID`       | AdLoop   | ID of the `#vertloop` text channel for announcements/submissions |
 | `VERTLOOP_VOICE_CHANNEL_ID`  | AdLoop   | ID of the `VertLoop` voice channel for the dedicated ad rotation |
+| `DVERT_LOOP_AD_INTAKE_ENABLED` | AdLoop | Enable DVertLoop intake in DecentJukebox after enabling Message Content intent for that bot |
 | `DISABLE_MINT_FLOW`          | ❌        | Set to `true` to skip IPFS pinning and the Mint embed (JukeLoop-only mode). Default: `false` |
 
 > JukeLoop is **opt-in**: omit `JUKE_LOOP_VOICE_CHANNEL_ID` / `JUKE_LOOP_TEXT_CHANNEL_ID` (or leave them blank) to keep the bot running without it.
@@ -79,6 +80,30 @@ ambiguous requests are skipped rather than assigned arbitrarily.
 Create the AdLoop voice channel as `VertLoop` and its announcement/submission text
 channel as `#vertloop`. Channel names are for people; the worker connects using
 their numeric channel IDs configured above.
+
+The second bot uses its own voice connection group, so it cannot reuse DBusker's
+connection or redirect the music player into VertLoop. Both text channels retain
+playback logs without push notification pings.
+
+VertLoop ads have a 150-second playback ceiling, including the soundtrack of MP4
+ads. Main-radio ads have the same ceiling; ordinary songs are not truncated.
+DBusker waits for ten qualifying audible music plays between ad selections,
+subject to the current show and on-chain campaign-slot eligibility. VertLoop's
+live ad accepts one durable vote per listener per play through Discord reactions
+or the DVert panel. Main-radio selection ranks the top ten eligible campaigns
+using those votes. Opening Ads Only hushes the main-radio browser player and
+mirrors VertLoop; a browser mirror never creates a second paid impression.
+
+To enable DVertLoop ad intake, enable Message Content intent for the DVertLoop
+application and set `DVERT_LOOP_AD_INTAKE_ENABLED=true`. Give the bot View Channel,
+Read Message History, and Send Messages in DecentJukebox, plus Add Reactions in
+the vertloop text channel. After linking your advertiser wallet and Discord
+account, post `!devert-ad Title | ipfs://CID | video/mp4` in DecentJukebox, or post
+`!devert-ad` with an audio/MP4 attachment (up to 10 MB). Larger media uploads use
+the DVert panel. Explicitly marked ads are not ingested as songs by DBusker.
+Ad submissions queue owner NFT review separately from campaign purchase.
+Existing DJuke v0.2 requests still boost only a payer's sole active campaign;
+multi-campaign targeting and a dedicated ad purchase UI are not implemented.
 
 ### 4. Configure IPFS uploads
 

@@ -1,3 +1,9 @@
+#devert-ad-preview {
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+}
 /* css/styles.css — DecentBusking */
 /* Dark space theme with warm stage lighting for the busker zone */
 
