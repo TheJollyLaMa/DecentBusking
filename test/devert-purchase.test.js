@@ -15,6 +15,9 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   }
   assert.match(html, /Ads Only previews do not count as paid impressions/);
   assert.match(html, /Mute ads on this device/);
+  assert.equal((html.match(/id="devert-max-payment"/g) || []).length, 1);
+  const panel = fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8');
+  assert.match(panel, /from '\.\/radio-sync\.js\?v=20261010-listens'/);
 });
 
 function fixture({ nativeBalance = 1_000_000_000_000_000_000n, allowance = 0n } = {}) {

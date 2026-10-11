@@ -1,4 +1,4 @@
-import { canSetDevertListenMode, getDevertAdsMuted, setDevertAdsMuted, setDevertListenMode } from './radio-sync.js';
+import { canSetDevertListenMode, getDevertAdsMuted, setDevertAdsMuted, setDevertListenMode } from './radio-sync.js?v=20261010-listens';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { submitMediaForApproval } from './mint-submission.js';
 
