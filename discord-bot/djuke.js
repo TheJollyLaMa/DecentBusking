@@ -267,7 +267,7 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
   return read;
 }
 
-export function createDjukeRuntime({ readState, journal, fulfill, getTrack, minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
+export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVerifiedRequests, minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
   let initialized = null;
   let settling = Promise.resolve();
   const ready = () => { initialized ||= journal.initialize().catch(error => { initialized = null; throw error; }); return initialized; };
@@ -288,6 +288,8 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, minA
   async function claim() {
     await ready();
     const state = await readState();
+    if (onVerifiedRequests) Promise.resolve().then(() => onVerifiedRequests(state))
+      .catch(error => log.warn(`[djuke] Confirmed-request hook deferred: ${error.message}`));
     await journal.synchronize(state.requests);
     await settleSerial(state);
     const head = journal.peek();

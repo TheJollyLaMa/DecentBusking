@@ -131,10 +131,14 @@ campaign purchases, a 5 USDC minimum, 0.01 USDC minimum overbids for seated
 slots, and 45% Playback / 45% Top 10 / 8% Pinners / 2% Repo-dev settlement. A
 scheduler role reports completed music plays and idempotent campaign impressions.
 The main radio remains the single broadcast: seated campaigns join its rotation
-after each ten completed audible music plays. The contract supports boosts linked
-to a paid DJuke request by the same advertiser, but the worker bridge that applies
-those boosts is not yet implemented; don't advertise DJuke-driven priority until
-that integration is tested.
+after each ten completed audible music plays. The worker now links confirmed
+paid DJuke requests to the advertiser's DeVert campaign when exactly one active
+campaign belongs to that payer. The DVert panel also has local `Main Radio` and
+`Ads Only` listening modes: Ads Only loops previews of active seated campaigns in
+the browser without recording paid impressions, and a local checkbox can mute
+sponsored spots while following the main radio. A DJuke request bumps the
+advertiser's campaign only when exactly one active campaign belongs to that payer;
+ambiguous requests are left unboosted.
 
 The public DVert tab now has a wallet-gated purchase form. It requires a confirmed
 campaign snapshot from the configured contract, quotes the current on-chain

@@ -42,7 +42,7 @@ import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
 import { syncMintedTracksFromChain, createVerifiedMintQueueReader } from './mint-sync.js';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
-import { createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
+import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime } from './devert-playback.js';
 import { createPinataStateStore } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
@@ -103,6 +103,9 @@ const _jukeLoopRestartAttempts = new Map();
 let _djukeRuntime = null;
 let _devertPlaybackRuntime = null;
 let _devertPlaybackInitialization = null;
+let _devertSchedulerContract = null;
+let _devertBoostTask = null;
+const _devertBoostsInFlight = new Set();
 let liveScheduleStore = null;
 let livePerformanceEvents = [];
 let liveWeeklySchedule = {};
@@ -440,6 +443,7 @@ async function main() {
   if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt) {
     const scheduler = new Wallet(devertSchedulerPrivateKey, new JsonRpcProvider(config.baseRpcUrl));
     const contract = new Contract(process.env.DEVERT_CONTRACT_ADDRESS, DEVERT_ABI, scheduler);
+    _devertSchedulerContract = contract;
     const journalStore = createPinataStateStore({ pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-devert-main-radio.json',
       tags: { app: 'decentbusking', kind: 'devert-main-radio', schema: '1' }, serialize: value => value,
@@ -627,6 +631,18 @@ async function main() {
       return getPlaylist();
     },
   }) : undefined;
+  const syncDevertDjukeBoosts = () => {
+    if (!readDevertState || !readDjukeState || !_devertSchedulerContract || _devertBoostTask) return _devertBoostTask;
+    _devertBoostTask = applyDevertDjukeBoosts({ contract: _devertSchedulerContract,
+      readCampaigns: readDevertState, readDjukeState, inFlightRequests: _devertBoostsInFlight })
+      .catch(error => console.warn('[devert] DJuke campaign boost deferred:', error.shortMessage || error.message))
+      .finally(() => { _devertBoostTask = null; });
+    return _devertBoostTask;
+  };
+  if (readDevertState && readDjukeState && _devertSchedulerContract) {
+    setTimeout(syncDevertDjukeBoosts, 30_000).unref();
+    setInterval(syncDevertDjukeBoosts, 60_000).unref();
+  }
   if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY) {
     const worker = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, new JsonRpcProvider(config.baseRpcUrl));
     const registerSongs = createDjukeSongRegistrar({ contract: new Contract(djukeAddress, DJUKE_ABI, worker),
@@ -645,6 +661,11 @@ async function main() {
       readState: readDjukeState,
       journal: createDjukePlaybackJournal(journalStore),
       fulfill: createDjukeFulfiller(new Contract(djukeAddress, DJUKE_ABI, fulfiller)),
+      onVerifiedRequests: async state => {
+        if (!_devertSchedulerContract || !readDevertState) return;
+        await applyDevertDjukeBoosts({ contract: _devertSchedulerContract, readCampaigns: readDevertState,
+          djukeState: state, inFlightRequests: _devertBoostsInFlight });
+      },
       getTrack: trackId => getPlaylist().find(track => track.trackId === trackId) || null,
     });
     console.log(`[djuke] Paid queue enabled; fulfiller ${fulfiller.address}.`);

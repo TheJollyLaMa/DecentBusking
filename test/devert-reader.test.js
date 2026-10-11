@@ -14,6 +14,47 @@ test('DeVert scheduler reuses the DJuke worker key unless an explicit scheduler 
   assert.equal(resolveDevertSchedulerPrivateKey({}), null);
 });
 
+test('DeVert applies one confirmed DJuke request to its advertiser’s sole active campaign once', async () => {
+  const { applyDevertDjukeBoosts } = await import('../discord-bot/devert.js');
+  const advertiser = `0x${'11'.repeat(20)}`;
+  const used = new Set();
+  const calls = [];
+  const contract = {
+    usedDjukeRequests: async requestId => used.has(String(requestId)),
+    applyDJukeBoost: async (campaignId, requestId) => {
+      calls.push([campaignId, requestId]);
+      used.add(String(requestId));
+      return { wait: async () => ({ status: 1 }) };
+    },
+  };
+  contract.applyDJukeBoost.staticCall = async () => {};
+  const readCampaigns = async () => ({ chainId: 8453, paused: false, campaigns: [{ campaignId: '7', advertiser,
+    startedAt: new Date(TIMESTAMP - 60_000).toISOString(), expiresAt: new Date(TIMESTAMP + 60_000).toISOString() }] });
+  const readDjukeState = async () => ({ requests: [{ chainRequestId: '33', payer: advertiser, amountUnits: '250000' }] });
+  const options = { contract, readCampaigns, readDjukeState, now: () => TIMESTAMP };
+  assert.equal(await applyDevertDjukeBoosts(options), 1);
+  assert.deepEqual(calls, [[7n, 33n]]);
+  assert.equal(await applyDevertDjukeBoosts(options), 0);
+  assert.deepEqual(calls, [[7n, 33n]]);
+});
+
+test('DeVert leaves DJuke boosts unapplied when the payer has multiple active campaigns', async () => {
+  const { applyDevertDjukeBoosts } = await import('../discord-bot/devert.js');
+  const advertiser = `0x${'11'.repeat(20)}`;
+  let calls = 0;
+  const contract = { usedDjukeRequests: async () => false, applyDJukeBoost: async () => { calls++; } };
+  contract.applyDJukeBoost.staticCall = async () => {};
+  const warnings = [];
+  const campaigns = ['7', '8'].map(campaignId => ({ campaignId, advertiser,
+    startedAt: new Date(TIMESTAMP - 60_000).toISOString(), expiresAt: new Date(TIMESTAMP + 60_000).toISOString() }));
+  const result = await applyDevertDjukeBoosts({ contract, readCampaigns: async () => ({ chainId: 8453, paused: false, campaigns }),
+    readDjukeState: async () => ({ requests: [{ chainRequestId: '33', payer: advertiser, amountUnits: '250000' }] }),
+    now: () => TIMESTAMP, log: { warn: message => warnings.push(message), log() {} } });
+  assert.equal(result, 0);
+  assert.equal(calls, 0);
+  assert.match(warnings[0], /multiple active campaigns/);
+});
+
 function fakeProvider({ chainId = 8453, blockHashes = [BLOCK_HASH, BLOCK_HASH] } = {}) {
   let reads = 0;
   return {

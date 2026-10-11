@@ -215,6 +215,21 @@ test('runtime follows payer replacements and replays when a stale fulfillment is
   assert.equal((await runtime.nextPaid()).track.trackId, 'b');
 });
 
+test('runtime does not wait for the optional DeVert boost hook before returning a paid request', async () => {
+  const api = await import('../discord-bot/djuke.js');
+  let releaseBoost;
+  let boostStarted = false;
+  const request = { requestId: 'r0', chainRequestId: '0', songId: id('song'), revision: '0', trackId: 'song', playable: true };
+  const runtime = api.createDjukeRuntime({ readState: async () => ({ requests: [request] }), journal: memoryJournal(api),
+    onVerifiedRequests: async () => { boostStarted = true; await new Promise(resolve => { releaseBoost = resolve; }); },
+    fulfill: async () => {}, getTrack: trackId => ({ trackId }), log: { warn() {} } });
+  const paid = await runtime.nextPaid();
+  assert.equal(paid.track.trackId, 'song');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(boostStarted, true);
+  releaseBoost();
+});
+
 test('runtime gives radio a timely answer when the queue is slow or unplayable', async () => {
   const api = await import('../discord-bot/djuke.js');
   const slow = api.createDjukeRuntime({ readState: () => new Promise(() => {}), journal: memoryJournal(api),

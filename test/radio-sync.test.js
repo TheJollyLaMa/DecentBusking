@@ -180,7 +180,8 @@ test('radio volume survives fades and mute does not affect archive playback', as
   await context.fade();
   assert.equal(audio.muted, true);
   assert.equal(audio.volume, 0.3);
-  assert.deepEqual(JSON.parse(saved.get('decentbusking:radio-audio:v1')), { volume: 0.3, muted: true });
+  assert.deepEqual(JSON.parse(saved.get('decentbusking:radio-audio:v1')),
+    { volume: 0.3, muted: true, devertAdsMuted: false });
   vm.runInContext("_mode = 'archive';", context);
   await context.fade();
   assert.equal(audio.muted, false);
@@ -192,6 +193,37 @@ test('radio volume survives fades and mute does not affect archive playback', as
   vm.runInContext('_setRadioVolume(0.65);', context);
   assert.equal(audio.muted, false);
   assert.equal(audio.volume, 0.65);
+});
+
+test('DVert Ads Only pauses the main radio and radio mode resumes it without hijacking archive playback', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const audio = { paused: false, pause() { this.paused = true; } };
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console, audio });
+  vm.runInContext(`${source}\n_audio = audio; _mode = 'radio'; globalThis.setListenMode = setDevertListenMode;\n` +
+    `globalThis.canSwitchListenMode = canSetDevertListenMode;`, context);
+  assert.equal(context.canSwitchListenMode(), true);
+  assert.equal(context.setListenMode('ads-only'), true);
+  assert.equal(audio.paused, true);
+  assert.equal(vm.runInContext('_devertListenMode', context), 'ads-only');
+  vm.runInContext("_mode = 'archive';", context);
+  assert.equal(context.setListenMode('ads-only'), false);
+  assert.equal(context.setListenMode('radio'), true);
+  assert.equal(vm.runInContext('_devertListenMode', context), 'radio');
+});
+
+test('sponsored-ad mute persists per device and skips only DeVert main-radio playback', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const audio = { paused: false, volume: 0, muted: false, pause() { this.paused = true; } };
+  const saved = new Map();
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console, audio,
+    localStorage: { setItem: (key, value) => saved.set(key, value) } });
+  vm.runInContext(`${source}\n_audio = audio; _radio = { playId: 'ad-play', title: 'Campaign', uploader: 'Advertiser', isDevert: true };\n` +
+    `globalThis.setMuteAds = setDevertAdsMuted; globalThis.getMuteAds = getDevertAdsMuted;`, context);
+  context.setMuteAds(true);
+  vm.runInContext('_syncRadio()', context);
+  assert.equal(context.getMuteAds(), true);
+  assert.equal(audio.paused, true);
+  assert.equal(JSON.parse(saved.get('decentbusking:radio-audio:v1')).devertAdsMuted, true);
 });
 
 test('recorded browser votes survive reload and reset only for another radio play', () => {

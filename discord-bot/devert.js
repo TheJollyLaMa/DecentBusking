@@ -15,12 +15,49 @@ export const DEVERT_ABI = [
   'function usedImpressionIds(bytes32 impressionId) view returns(bool)',
   'function reportCompletedMusicPlays(bytes32[] playIds)',
   'function applyDJukeBoost(uint256 campaignId,uint256 djukeRequestId)',
+  'function usedDjukeRequests(uint256 djukeRequestId) view returns(bool)',
   'function createCampaign(string title,string audioURI,uint128 offerUnits,uint128 maxPaymentUnits) returns(uint256)',
   'function quoteCampaign(uint64 weekId) view returns(uint128 minimumOfferUnits,uint256 bumpedCampaignId)',
 ];
 
 export function resolveDevertSchedulerPrivateKey(env = process.env) {
   return env.DEVERT_SCHEDULER_PRIVATE_KEY || env.DJUKE_FULFILLER_PRIVATE_KEY || null;
+}
+
+export async function applyDevertDjukeBoosts({ contract, readCampaigns, readDjukeState, djukeState,
+  inFlightRequests = new Set(), now = () => Date.now(), log = console }) {
+  if (!contract || typeof readCampaigns !== 'function' || (typeof readDjukeState !== 'function' && !djukeState)) {
+    throw new Error('DeVert DJuke boosts require campaign and paid-request readers');
+  }
+  const [snapshot, djuke] = await Promise.all([readCampaigns(), djukeState || readDjukeState()]);
+  if (snapshot.chainId !== 8453 || snapshot.paused || !Array.isArray(snapshot.campaigns) || !Array.isArray(djuke.requests)) return 0;
+  const time = now();
+  let applied = 0;
+  for (const request of djuke.requests) {
+    if (!isAddress(request.payer) || BigInt(request.amountUnits || 0) <= 0n || !/^\d+$/.test(String(request.chainRequestId))) continue;
+    const campaigns = snapshot.campaigns.filter(campaign => campaign.advertiser.toLowerCase() === request.payer.toLowerCase() &&
+      Date.parse(campaign.startedAt) <= time && time < Date.parse(campaign.expiresAt));
+    if (campaigns.length !== 1) {
+      if (campaigns.length > 1) log.warn(`[devert] DJuke request ${request.chainRequestId} has multiple active campaigns for its payer; choose a campaign before boosting.`);
+      continue;
+    }
+    const campaignId = BigInt(campaigns[0].campaignId);
+    const requestId = BigInt(request.chainRequestId);
+    const requestKey = requestId.toString();
+    if (inFlightRequests.has(requestKey)) continue;
+    inFlightRequests.add(requestKey);
+    try {
+      if (await contract.usedDjukeRequests(requestId)) continue;
+      await contract.applyDJukeBoost.staticCall(campaignId, requestId);
+      const transaction = await contract.applyDJukeBoost(campaignId, requestId);
+      if ((await transaction.wait(2))?.status !== 1) throw new Error(`DeVert DJuke boost failed: ${transaction.hash}`);
+      applied++;
+      log.log(`[devert] Applied DJuke request ${request.chainRequestId} as a priority boost for campaign ${campaigns[0].campaignId}.`);
+    } finally {
+      inFlightRequests.delete(requestKey);
+    }
+  }
+  return applied;
 }
 
 function asSafeNumber(value, label) {

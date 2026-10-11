@@ -713,6 +713,16 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 .devert-radio-state h3, .devert-campaign-heading h3 { margin: 0; color: #f5cf66; font-size: .82rem; }
 .devert-radio-state p, #devert-campaign-status, .devert-checkout-status { color: #c7b98f; font-size: .72rem; line-height: 1.45; }
 .devert-radio-state p { margin: 6px 0 0; }
+.devert-listen-controls { display: grid; gap: 8px; margin: 12px 0; padding: 9px; border: 1px solid #554522; min-width: 0; }
+.devert-listen-controls legend { padding: 0 4px; color: #dfd3b3; font-size: .72rem; }
+.devert-listen-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.devert-listen-modes button { min-height: 34px; border: 1px solid #806532; border-radius: 4px; color: #dfd3b3; background: #201a0f; font: inherit; font-size: .72rem; cursor: pointer; }
+.devert-listen-modes button[aria-pressed="true"] { color: #201a0f; background: #f5cf66; }
+.devert-listen-modes button:disabled { opacity: .5; cursor: not-allowed; }
+.devert-mute-ads { display: flex; align-items: center; gap: 7px; color: #dfd3b3; font-size: .72rem; }
+.devert-mute-ads input { accent-color: #f5cf66; }
+#devert-ad-preview { width: 100%; min-width: 0; min-height: 36px; }
+#devert-listen-status { margin: 0; color: #c7b98f; font-size: .68rem; line-height: 1.4; overflow-wrap: anywhere; }
 .devert-campaign-heading { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
 #devert-campaigns { display: grid; gap: 5px; margin: 8px 0; padding: 0; list-style: none; }
 .devert-campaign { padding: 8px; border: 1px solid #554522; background: #201a0f; }

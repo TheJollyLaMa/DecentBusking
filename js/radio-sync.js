@@ -13,6 +13,10 @@ let _audio, _labelEl, _titleEl, _artistEl, _activityEl, _playBtn, _radioBtn;
 let _audioPlayer, _videoPlayer, _videoStage, _videoToggle;
 let _videoHidden = false;
 
+function _notifyRadioSourceMode() {
+  if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('radio-source-mode-change', { detail: _mode }));
+}
+
 function _renderVideo() {
   const videoActive = _videoPlayer && _audio === _videoPlayer;
   if (_videoStage) _videoStage.hidden = !videoActive || _videoHidden;
@@ -46,6 +50,8 @@ let _votingPlayId = null;
 const _votedPlays = new Map();
 let _radioVolume = 1;
 let _radioMuted = false;
+let _devertAdsMuted = false;
+let _devertListenMode = 'radio';
 let _fadeLevel = 0;
 let _muteBtn, _volumeInput, _volumeDial;
 
@@ -76,7 +82,9 @@ function _renderAudioControls() {
 
 function _saveAudioPreferences() {
   try {
-    localStorage.setItem('decentbusking:radio-audio:v1', JSON.stringify({ volume: _radioVolume, muted: _radioMuted }));
+    localStorage.setItem('decentbusking:radio-audio:v1', JSON.stringify({
+      volume: _radioVolume, muted: _radioMuted, devertAdsMuted: _devertAdsMuted,
+    }));
   } catch {}
   _applyRadioVolume();
   _renderAudioControls();
@@ -94,6 +102,7 @@ function _initAudioControls() {
     const saved = JSON.parse(localStorage.getItem('decentbusking:radio-audio:v1') || 'null');
     if (saved && Number.isFinite(saved.volume)) _radioVolume = Math.max(0, Math.min(1, saved.volume));
     _radioMuted = saved?.muted === true;
+    _devertAdsMuted = saved?.devertAdsMuted === true;
   } catch {}
   _muteBtn = document.getElementById('radio-mute');
   _volumeInput = document.getElementById('radio-volume');
@@ -162,7 +171,8 @@ function _restoreVotes() {
 function _renderVoting() {
   if (!_voteButtons.length) return;
   const playId = _radio?.playId || null;
-  const active = _mode === 'radio' && _radioReachable && playId && _radio?.ipfsCid && !_radio?.isDevert;
+  const active = _mode === 'radio' && _devertListenMode === 'radio' && _radioReachable &&
+    playId && _radio?.ipfsCid && !_radio?.isDevert;
   const choice = _votedPlays.get(playId);
   if (_votingPlayId !== playId) {
     _votingPlayId = playId;
@@ -234,6 +244,44 @@ export function initRadioSync() {
   _poll();
 }
 
+export function canSetDevertListenMode() {
+  return _mode === 'radio';
+}
+
+export function setDevertListenMode(mode) {
+  if (!['radio', 'ads-only'].includes(mode)) return false;
+  if (mode === 'ads-only' && _mode !== 'radio') return false;
+  if (_devertListenMode === mode) return true;
+  _devertListenMode = mode;
+  if (_mode !== 'radio') return mode === 'radio';
+  _loadedPlayId = null;
+  if (mode === 'ads-only') {
+    _setLabel('🎟️ DVert Ads Only');
+    _stopAudio();
+    _setTrack('Ads Only', '');
+    _setActivity('🎧 Ads-only preview is playing in the DVert panel');
+  } else if (_takeoverQueue.length) {
+    _startNextTakeover();
+  } else {
+    _syncRadio('📻 Back in sync with the Discord JukeLoop');
+  }
+  _renderVoting();
+  return true;
+}
+
+export function setDevertAdsMuted(muted) {
+  _devertAdsMuted = muted === true;
+  _saveAudioPreferences();
+  if (_mode === 'radio' && _devertListenMode === 'radio' && _radio?.isDevert) {
+    _loadedPlayId = null;
+    _syncRadio();
+  }
+}
+
+export function getDevertAdsMuted() {
+  return _devertAdsMuted;
+}
+
 /** Play a user-selected archive track; the radio stays muted until returnToRadio(). */
 export function playArchiveTrack({ title, artist, audioUrl, mediaType, sessionId = null, onEnded = null }) {
   if (!_audio) return;
@@ -242,6 +290,7 @@ export function playArchiveTrack({ title, artist, audioUrl, mediaType, sessionId
   _clearTakeover();
   _burst = _takeoverQueue.length > 1;
   _mode = 'archive';
+  _notifyRadioSourceMode();
   _renderVoting();
   _loadedPlayId = null;
   _setLabel('🎧 From the Archive');
@@ -255,6 +304,7 @@ export function returnToRadio() {
   _archiveSession = null;
   _radioBtn?.classList.add('hidden');
   _mode = 'radio';
+  _notifyRadioSourceMode();
   _loadedPlayId = null;
   if (_takeoverQueue.length) _startNextTakeover();
   else _syncRadio('📻 Back in sync with the Discord JukeLoop');
@@ -312,9 +362,11 @@ function _detectNewUploads(recent, serverTime) {
 
   if (_mode === 'takeover') {
     _capTakeoverToPreview();
-  } else if (_mode === 'archive') {
-    const count = _takeoverQueue.length;
-    _setActivity(`✨ ${count} new song${count === 1 ? '' : 's'} posted in Discord — return to the radio to hear ${count === 1 ? 'it' : 'them'}`);
+  } else if (_mode === 'archive' || _devertListenMode === 'ads-only') {
+    if (_mode === 'archive') {
+      const count = _takeoverQueue.length;
+      _setActivity(`✨ ${count} new song${count === 1 ? '' : 's'} posted in Discord — return to the radio to hear ${count === 1 ? 'it' : 'them'}`);
+    }
   } else {
     _startNextTakeover();
   }
@@ -329,11 +381,22 @@ function _radioPositionS() {
 function _syncRadio(message) {
   _setLabel('📻 Live on JukeLoop');
   _renderVoting();
+  if (_devertListenMode === 'ads-only') return;
   if (!_radio) {
     if (_loadedPlayId || !_audio.paused) _stopAudio();
     _loadedPlayId = null;
     _setTrack('—', '');
     _setActivity(message || '🌙 The JukeLoop is between tracks — waiting for the next song');
+    return;
+  }
+
+  if (_radio.isDevert && _devertAdsMuted) {
+    if (_loadedPlayId !== _radio.playId) {
+      _loadedPlayId = _radio.playId;
+      _stopAudio();
+    }
+    _setTrack(_radio.title, _radio.uploader);
+    _setActivity('🔇 Sponsored ad muted on this device');
     return;
   }
 
@@ -368,12 +431,14 @@ function _startNextTakeover() {
   if (!track) {
     _burst = false;
     _mode = 'radio';
+    _notifyRadioSourceMode();
     _loadedPlayId = null;
     _syncRadio('📻 Back to mirroring the Discord JukeLoop');
     return;
   }
 
   _mode = 'takeover';
+  _notifyRadioSourceMode();
   _renderVoting();
   if (_takeoverQueue.length > 0) _burst = true;
   const preview = _burst;
@@ -418,6 +483,7 @@ function _onEnded(event) {
     if (continuation?.()) return;
     _radioBtn?.classList.add('hidden');
     _mode = 'radio';
+    _notifyRadioSourceMode();
     _loadedPlayId = null;
     if (_takeoverQueue.length) _startNextTakeover();
     else _syncRadio('🎧 Archive track finished — back to the JukeLoop');

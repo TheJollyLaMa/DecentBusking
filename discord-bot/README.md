@@ -67,8 +67,12 @@ cp .env.example .env
 DeVert campaigns use the existing JukeLoop rotation after each ten completed
 audible music plays. The DJuke fulfiller wallet can also hold DeVert's
 `SCHEDULER_ROLE`; no second bot, voice channel, wallet, or service is required.
-Keep scheduling disabled until the deployed contract is configured and main-radio
-playback plus journal recovery are rehearsed.
+The DVert panel offers local `Main Radio` and `Ads Only` listening modes. Ads Only
+loops previews of active seated campaigns in the visitor's browser and never
+records paid impressions; the optional ad-mute preference affects only that
+visitor's main-radio audio. A confirmed DJuke request boosts a campaign only when
+the payer has exactly one active campaign. If multiple campaigns match, the
+worker skips the boost instead of choosing one arbitrarily.
 
 ### 4. Configure IPFS uploads
 

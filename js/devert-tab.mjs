@@ -1,3 +1,5 @@
+import { canSetDevertListenMode, getDevertAdsMuted, setDevertAdsMuted, setDevertListenMode } from './radio-sync.js';
+
 function node(tag, text, className) {
   const element = document.createElement(tag);
   if (text !== undefined) element.textContent = text;
@@ -50,6 +52,14 @@ function activeCampaigns(snapshot, now = Date.now()) {
   }).sort((first, second) => Number(second.djukeBoosts || 0) - Number(first.djukeBoosts || 0) ||
     Number(first.mainRadioPlays || 0) - Number(second.mainRadioPlays || 0) ||
     (BigInt(second.offerUnits) > BigInt(first.offerUnits) ? 1 : BigInt(second.offerUnits) < BigInt(first.offerUnits) ? -1 : 0));
+}
+
+export function seatedDevertPreviewCampaigns(snapshot, now = Date.now()) {
+  if (!snapshot || snapshot.paused !== false || !snapshot.market) return [];
+  const slots = Number(snapshot.market.slots);
+  const seated = Number(snapshot.market.seated);
+  if (!Number.isSafeInteger(slots) || !Number.isSafeInteger(seated) || slots <= 0 || seated <= 0) return [];
+  return activeCampaigns(snapshot, now).slice(0, seated);
 }
 
 export const DEVERT_BROWSER_ABI = [
@@ -114,10 +124,70 @@ export function initDevertTab() {
   const purchaseStatus = document.getElementById('devert-purchase-status');
   const minimumOffer = document.getElementById('devert-minimum-offer');
   const walletButton = document.getElementById('devert-connect-wallet');
+  const radioModeButton = document.getElementById('devert-listen-radio');
+  const adsModeButton = document.getElementById('devert-listen-ads');
+  const muteAdsInput = document.getElementById('devert-mute-ads');
+  const previewPlayer = document.getElementById('devert-ad-preview');
+  const listenStatus = document.getElementById('devert-listen-status');
   let generation = 0;
   let timer;
   let snapshot = null;
   let purchaseBusy = false;
+  let previewCampaigns = [];
+  let previewIndex = 0;
+  let previewCampaignKey = '';
+  let previewLoopToken = 0;
+  const failedPreviewIds = new Set();
+
+  function syncListenControls() {
+    const adsOnly = previewPlayer.dataset.listenMode === 'ads-only';
+    radioModeButton.setAttribute('aria-pressed', String(!adsOnly));
+    adsModeButton.setAttribute('aria-pressed', String(adsOnly));
+    const canSwitch = canSetDevertListenMode();
+    radioModeButton.disabled = !canSwitch;
+    adsModeButton.disabled = !canSwitch || previewCampaigns.length === 0;
+    muteAdsInput.checked = getDevertAdsMuted();
+    muteAdsInput.disabled = adsOnly;
+    previewPlayer.hidden = !adsOnly;
+  }
+
+  function playNextAdPreview() {
+    const token = ++previewLoopToken;
+    const candidates = previewCampaigns.filter(campaign => !failedPreviewIds.has(campaign.campaignId));
+    if (previewPlayer.dataset.listenMode !== 'ads-only') return;
+    if (!candidates.length) {
+      previewPlayer.pause();
+      previewPlayer.removeAttribute('src');
+      previewPlayer.load();
+      listenStatus.textContent = 'No playable seated ads are available to preview right now.';
+      return;
+    }
+    const campaign = candidates[previewIndex++ % candidates.length];
+    const cid = campaign.audioURI.slice('ipfs://'.length);
+    const gateway = (window.DecentConfig?.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/').replace(/\/?$/, '/');
+    previewPlayer.dataset.campaignId = campaign.campaignId;
+    previewPlayer.src = `${gateway}${cid}`;
+    listenStatus.textContent = `Ads-only preview: ${campaign.title}. This does not count as a paid impression.`;
+    previewPlayer.play().catch(() => {
+      if (token !== previewLoopToken) return;
+      listenStatus.textContent = `Tap play to preview ${campaign.title}. Previews do not count as paid impressions.`;
+    });
+  }
+
+  function updateAdPreviewQueue(nextCampaigns) {
+    const nextKey = nextCampaigns.map(campaign => campaign.campaignId).join(',');
+    if (nextKey === previewCampaignKey) return;
+    const currentId = previewPlayer.dataset.campaignId;
+    previewCampaignKey = nextKey;
+    previewCampaigns = nextCampaigns;
+    for (const campaignId of failedPreviewIds) {
+      if (!previewCampaigns.some(campaign => campaign.campaignId === campaignId)) failedPreviewIds.delete(campaignId);
+    }
+    const currentIndex = previewCampaigns.findIndex(campaign => campaign.campaignId === currentId);
+    previewIndex = currentIndex >= 0 ? currentIndex : 0;
+    if (previewPlayer.dataset.listenMode === 'ads-only') playNextAdPreview();
+    syncListenControls();
+  }
 
   function syncCheckout() {
     const address = window.DecentConfig?.devertContractAddress || '';
@@ -168,6 +238,12 @@ export function initDevertTab() {
   const close = () => {
     clearTimeout(timer);
     generation++;
+    if (previewPlayer.dataset.listenMode === 'ads-only') {
+      previewPlayer.pause();
+      previewPlayer.dataset.listenMode = 'radio';
+      setDevertListenMode('radio');
+    }
+    ++previewLoopToken;
     toggle.setAttribute('aria-expanded', 'false');
     toggle.setAttribute('aria-label', 'Open DVert advertising');
     panel.classList.remove('is-open');
@@ -175,6 +251,49 @@ export function initDevertTab() {
     panel.inert = true;
     document.body.classList.remove('devert-open');
   };
+  radioModeButton.addEventListener('click', () => {
+    if (!setDevertListenMode('radio')) {
+      listenStatus.textContent = 'Finish archive playback or the current new-song preview before switching listening modes.';
+      return;
+    }
+    previewPlayer.pause();
+    previewPlayer.dataset.listenMode = 'radio';
+    listenStatus.textContent = 'Following the main radio. You can mute sponsored ads on this device.';
+    syncListenControls();
+  });
+  adsModeButton.addEventListener('click', () => {
+    if (!previewCampaigns.length) return;
+    if (!setDevertListenMode('ads-only')) {
+      listenStatus.textContent = 'Finish archive playback or the current new-song preview before switching to Ads Only.';
+      return;
+    }
+    previewPlayer.dataset.listenMode = 'ads-only';
+    syncListenControls();
+    playNextAdPreview();
+  });
+  muteAdsInput.addEventListener('change', () => {
+    setDevertAdsMuted(muteAdsInput.checked);
+    listenStatus.textContent = muteAdsInput.checked
+      ? 'Sponsored ads are muted on this device; other listeners are unaffected.'
+      : 'Sponsored ads are audible on this device.';
+  });
+  previewPlayer.addEventListener('ended', () => {
+    if (previewPlayer.dataset.listenMode === 'ads-only') playNextAdPreview();
+  });
+  previewPlayer.addEventListener('error', () => {
+    const campaignId = previewPlayer.dataset.campaignId;
+    if (campaignId) failedPreviewIds.add(campaignId);
+    if (previewPlayer.dataset.listenMode === 'ads-only') playNextAdPreview();
+  });
+  document.addEventListener('radio-source-mode-change', () => {
+    if (previewPlayer.dataset.listenMode === 'ads-only') {
+      previewPlayer.pause();
+      previewPlayer.dataset.listenMode = 'radio';
+      setDevertListenMode('radio');
+    }
+    syncListenControls();
+  });
+  syncListenControls();
   async function refresh() {
     clearTimeout(timer);
     if (!isOpen()) return;
@@ -195,13 +314,15 @@ export function initDevertTab() {
       if (response.status === 404) throw new Error('Campaign contract is not deployed');
       if (!response.ok) throw new Error(result.error || `Campaigns unavailable (${response.status})`);
       snapshot = result;
+      updateAdPreviewQueue(seatedDevertPreviewCampaigns(snapshot));
       campaignList.replaceChildren();
       const campaigns = activeCampaigns(snapshot);
       for (const campaign of campaigns) {
         const item = node('li', undefined, 'devert-campaign');
         const details = node('span', undefined, 'devert-campaign-details');
+        const priority = Number(campaign.djukeBoosts || 0);
         details.append(node('strong', campaign.title),
-          node('span', `${formatUsdc(campaign.offerUnits)} · expires ${new Intl.DateTimeFormat('en-US', {
+          node('span', `${formatUsdc(campaign.offerUnits)}${priority ? ` · DJuke boosts ${priority}` : ''} · expires ${new Intl.DateTimeFormat('en-US', {
             timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
           }).format(new Date(campaign.expiresAt))}`));
         item.append(details);
