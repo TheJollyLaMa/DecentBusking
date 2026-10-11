@@ -126,8 +126,8 @@ the contract's `pauseRequests` stops new purchases while queued plays still sett
 
 ## DeVert Advertising
 
-The undeployed `DeVert_v0_1` candidate in DecentMarket now implements seven-day
-campaign purchases, a 5 USDC minimum, 0.01 USDC minimum overbids for seated
+The deployed and unpaused `DeVert_v0_1` contract implements seven-day campaign
+purchases, a 5 USDC minimum, 0.01 USDC minimum overbids for seated
 slots, and 45% Playback / 45% Top 10 / 8% Pinners / 2% Repo-dev settlement. A
 scheduler role reports completed music plays and idempotent campaign impressions.
 The main radio remains the single broadcast: seated campaigns join its rotation
