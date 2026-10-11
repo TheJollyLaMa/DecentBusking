@@ -1,4 +1,16 @@
 import { canSetDevertListenMode, getDevertAdsMuted, setDevertAdsMuted, setDevertListenMode } from './radio-sync.js';
+import { createBrowserIpfsUploader } from './ipfs-upload.js';
+import { submitMediaForApproval } from './mint-submission.js';
+
+const MAX_DEVERT_MEDIA_BYTES = 250 * 1024 * 1024;
+
+function mediaTypeForAdFile(file) {
+  const declared = String(file.type || '').toLowerCase();
+  if (declared === 'video/mp4' || declared.startsWith('audio/')) return declared;
+  const extension = file.name.split('.').pop().toLowerCase();
+  return ({ mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac',
+    aac: 'audio/aac', opus: 'audio/ogg', weba: 'audio/webm', mp4: 'video/mp4' })[extension] || '';
+}
 
 function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -25,6 +37,25 @@ function formatEth(units) {
   return `${whole}${fraction ? `.${fraction}` : ''} ETH`;
 }
 
+function activeCampaigns(snapshot, now = Date.now()) {
+  if (!snapshot || snapshot.chainId !== 8453 || !Array.isArray(snapshot.campaigns)) return [];
+  return snapshot.campaigns.filter(campaign => {
+    const start = Date.parse(campaign.startedAt);
+    const end = Date.parse(campaign.expiresAt);
+    return Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end;
+  }).sort((first, second) => Number(second.djukeBoosts || 0) - Number(first.djukeBoosts || 0) ||
+    Number(first.mainRadioPlays || 0) - Number(second.mainRadioPlays || 0) ||
+    (BigInt(second.offerUnits) > BigInt(first.offerUnits) ? 1 : BigInt(second.offerUnits) < BigInt(first.offerUnits) ? -1 : 0));
+}
+
+export function normalizeAdLoopNowPlaying(state) {
+  const item = state?.nowPlaying;
+  if (state?.ready !== true || !item?.audible || typeof item.radioPlayId !== 'string' ||
+      typeof item.ipfsCid !== 'string' || !item.ipfsCid || !Number.isFinite(Number(item.positionMs))) return null;
+  return { playId: item.radioPlayId, title: item.title || 'DeVert ad', ipfsCid: item.ipfsCid,
+    mediaType: item.mediaType || 'audio/mpeg', positionMs: Math.max(0, Number(item.positionMs)) };
+}
+
 async function getSchedulerTopUpQuote(signer, contract, advertiser) {
   const feeData = await signer.provider.getFeeData();
   const maxFeePerGas = feeData.maxFeePerGas ?? feeData.gasPrice;
@@ -37,29 +68,8 @@ async function getSchedulerTopUpQuote(signer, contract, advertiser) {
   if (feeData.maxFeePerGas != null) {
     overrides.maxFeePerGas = feeData.maxFeePerGas;
     if (feeData.maxPriorityFeePerGas != null) overrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
-  } else {
-    overrides.gasPrice = feeData.gasPrice;
-  }
+  } else overrides.gasPrice = feeData.gasPrice;
   return { amount, overrides };
-}
-
-function activeCampaigns(snapshot, now = Date.now()) {
-  if (!snapshot || snapshot.chainId !== 8453 || !Array.isArray(snapshot.campaigns)) return [];
-  return snapshot.campaigns.filter(campaign => {
-    const start = Date.parse(campaign.startedAt);
-    const end = Date.parse(campaign.expiresAt);
-    return Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end;
-  }).sort((first, second) => Number(second.djukeBoosts || 0) - Number(first.djukeBoosts || 0) ||
-    Number(first.mainRadioPlays || 0) - Number(second.mainRadioPlays || 0) ||
-    (BigInt(second.offerUnits) > BigInt(first.offerUnits) ? 1 : BigInt(second.offerUnits) < BigInt(first.offerUnits) ? -1 : 0));
-}
-
-export function seatedDevertPreviewCampaigns(snapshot, now = Date.now()) {
-  if (!snapshot || snapshot.paused !== false || !snapshot.market) return [];
-  const slots = Number(snapshot.market.slots);
-  const seated = Number(snapshot.market.seated);
-  if (!Number.isSafeInteger(slots) || !Number.isSafeInteger(seated) || slots <= 0 || seated <= 0) return [];
-  return activeCampaigns(snapshot, now).slice(0, seated);
 }
 
 export const DEVERT_BROWSER_ABI = [
@@ -87,7 +97,7 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   const campaignTitle = String(title || '').trim();
   const mediaUri = String(audioURI || '').trim();
   if (!campaignTitle || campaignTitle.length > 160 || !mediaUri.startsWith('ipfs://') || mediaUri.length > 256) {
-    throw new Error('Enter a campaign title and valid IPFS audio URI');
+    throw new Error('Enter a campaign title and valid IPFS media URI');
   }
   const block = await signer.provider.getBlock('latest');
   const weekId = await contract.campaignWeek(block.timestamp);
@@ -122,6 +132,10 @@ export function initDevertTab() {
   const purchaseForm = document.getElementById('devert-purchase-form');
   const purchaseButton = document.getElementById('devert-purchase');
   const purchaseStatus = document.getElementById('devert-purchase-status');
+  const adMediaFile = document.getElementById('devert-ad-file');
+  const adMediaArtist = document.getElementById('devert-ad-artist');
+  const adMediaQueueButton = document.getElementById('devert-ad-queue');
+  const adMediaStatus = document.getElementById('devert-ad-queue-status');
   const minimumOffer = document.getElementById('devert-minimum-offer');
   const walletButton = document.getElementById('devert-connect-wallet');
   const radioModeButton = document.getElementById('devert-listen-radio');
@@ -130,63 +144,108 @@ export function initDevertTab() {
   const previewPlayer = document.getElementById('devert-ad-preview');
   const listenStatus = document.getElementById('devert-listen-status');
   let generation = 0;
-  let timer;
+  let refreshTimer;
+  let adLoopTimer;
+  let adLoopState = null;
+  let adLoopPlayId = null;
+  let adLoopPositionReceivedAt = 0;
+  let previewToken = 0;
   let snapshot = null;
   let purchaseBusy = false;
-  let previewCampaigns = [];
-  let previewIndex = 0;
-  let previewCampaignKey = '';
-  let previewLoopToken = 0;
-  const failedPreviewIds = new Set();
+  let adMediaBusy = false;
+
+  const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
 
   function syncListenControls() {
     const adsOnly = previewPlayer.dataset.listenMode === 'ads-only';
+    const canSwitch = canSetDevertListenMode();
     radioModeButton.setAttribute('aria-pressed', String(!adsOnly));
     adsModeButton.setAttribute('aria-pressed', String(adsOnly));
-    const canSwitch = canSetDevertListenMode();
     radioModeButton.disabled = !canSwitch;
-    adsModeButton.disabled = !canSwitch || previewCampaigns.length === 0;
+    adsModeButton.disabled = !canSwitch || adLoopState?.ready !== true;
     muteAdsInput.checked = getDevertAdsMuted();
     muteAdsInput.disabled = adsOnly;
     previewPlayer.hidden = !adsOnly;
   }
 
-  function playNextAdPreview() {
-    const token = ++previewLoopToken;
-    const candidates = previewCampaigns.filter(campaign => !failedPreviewIds.has(campaign.campaignId));
-    if (previewPlayer.dataset.listenMode !== 'ads-only') return;
-    if (!candidates.length) {
-      previewPlayer.pause();
-      previewPlayer.removeAttribute('src');
-      previewPlayer.load();
-      listenStatus.textContent = 'No playable seated ads are available to preview right now.';
-      return;
-    }
-    const campaign = candidates[previewIndex++ % candidates.length];
-    const cid = campaign.audioURI.slice('ipfs://'.length);
-    const gateway = (window.DecentConfig?.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/').replace(/\/?$/, '/');
-    previewPlayer.dataset.campaignId = campaign.campaignId;
-    previewPlayer.src = `${gateway}${cid}`;
-    listenStatus.textContent = `Ads-only preview: ${campaign.title}. This does not count as a paid impression.`;
-    previewPlayer.play().catch(() => {
-      if (token !== previewLoopToken) return;
-      listenStatus.textContent = `Tap play to preview ${campaign.title}. Previews do not count as paid impressions.`;
-    });
+  function stopAdLoopMirror(message = '') {
+    ++previewToken;
+    previewPlayer.pause();
+    previewPlayer.removeAttribute('src');
+    previewPlayer.load();
+    adLoopPlayId = null;
+    if (message) listenStatus.textContent = message;
   }
 
-  function updateAdPreviewQueue(nextCampaigns) {
-    const nextKey = nextCampaigns.map(campaign => campaign.campaignId).join(',');
-    if (nextKey === previewCampaignKey) return;
-    const currentId = previewPlayer.dataset.campaignId;
-    previewCampaignKey = nextKey;
-    previewCampaigns = nextCampaigns;
-    for (const campaignId of failedPreviewIds) {
-      if (!previewCampaigns.some(campaign => campaign.campaignId === campaignId)) failedPreviewIds.delete(campaignId);
+  function syncAdLoopAudio(state) {
+    if (previewPlayer.dataset.listenMode !== 'ads-only') return;
+    const item = normalizeAdLoopNowPlaying(state);
+    if (!item) {
+      if (adLoopPlayId) stopAdLoopMirror('AdLoop is between ads; waiting for the next spot.');
+      else listenStatus.textContent = state?.ready ? 'AdLoop is waiting for an eligible campaign.' : 'AdLoop is not configured yet.';
+      return;
     }
-    const currentIndex = previewCampaigns.findIndex(campaign => campaign.campaignId === currentId);
-    previewIndex = currentIndex >= 0 ? currentIndex : 0;
-    if (previewPlayer.dataset.listenMode === 'ads-only') playNextAdPreview();
-    syncListenControls();
+    adLoopPositionReceivedAt = performance.now();
+    const expectedPosition = () => (item.positionMs + performance.now() - adLoopPositionReceivedAt) / 1000;
+    const gateway = (window.DecentConfig?.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/').replace(/\/?$/, '/');
+    if (adLoopPlayId !== item.playId) {
+      const token = ++previewToken;
+      adLoopPlayId = item.playId;
+      previewPlayer.pause();
+      previewPlayer.src = `${gateway}${item.ipfsCid}`;
+      previewPlayer.load();
+      const syncAndPlay = () => {
+        if (token !== previewToken || previewPlayer.dataset.listenMode !== 'ads-only') return;
+        if (Number.isFinite(previewPlayer.duration) && expectedPosition() < previewPlayer.duration - 1) {
+          try { previewPlayer.currentTime = expectedPosition(); } catch {}
+        }
+        previewPlayer.play().catch(() => {
+          listenStatus.textContent = `Tap play to mirror AdLoop: ${item.title}. This does not count as a paid impression.`;
+        });
+      };
+      previewPlayer.addEventListener('loadedmetadata', syncAndPlay, { once: true });
+      listenStatus.textContent = `Mirroring live AdLoop: ${item.title}. This does not count as a paid impression.`;
+      return;
+    }
+    if (previewPlayer.readyState >= 2 && !previewPlayer.seeking && Number.isFinite(previewPlayer.duration) &&
+        Math.abs(previewPlayer.currentTime - expectedPosition()) > 8 && expectedPosition() < previewPlayer.duration - 1) {
+      try { previewPlayer.currentTime = expectedPosition(); } catch {}
+    }
+    if (previewPlayer.paused) previewPlayer.play().catch(() => {});
+  }
+
+  async function readAdLoopState() {
+    const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+    if (!service) return { ready: false, nowPlaying: null };
+    const response = await fetch(`${service}/api/devert/loop`, { cache: 'no-store', signal: AbortSignal.timeout(12_000) });
+    if (!response.ok) throw new Error(`AdLoop state unavailable (${response.status})`);
+    return response.json();
+  }
+
+  async function refreshAdLoop() {
+    if (!isOpen()) return;
+    try {
+      adLoopState = await readAdLoopState();
+      syncAdLoopAudio(adLoopState);
+      syncListenControls();
+    } catch (error) {
+      adLoopState = { ready: false, nowPlaying: null };
+      if (previewPlayer.dataset.listenMode === 'ads-only') stopAdLoopMirror(`${error.message}; retrying.`);
+      syncListenControls();
+    }
+  }
+
+  function startAdLoopMirror() {
+    clearInterval(adLoopTimer);
+    refreshAdLoop();
+    adLoopTimer = setInterval(refreshAdLoop, 5_000);
+    adLoopTimer.unref?.();
+  }
+
+  function stopAdLoopPlayback() {
+    clearInterval(adLoopTimer);
+    adLoopTimer = null;
+    stopAdLoopMirror();
   }
 
   function syncCheckout() {
@@ -197,6 +256,7 @@ export function initDevertTab() {
     purchaseForm.hidden = !verifiedContract;
     walletButton.hidden = !verifiedContract || !!wallet?.address;
     purchaseButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || purchaseBusy;
+    adMediaQueueButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || adMediaBusy || !adMediaFile.files?.[0];
     if (!address) minimumOffer.textContent = 'Campaign checkout is unavailable until a DeVert contract is deployed and configured.';
     else if (confirmedContract && snapshot.paused) minimumOffer.textContent = 'Campaign checkout is paused until the owner activates DeVert after service rehearsal.';
     else if (!verifiedContract) minimumOffer.textContent = 'Waiting for a confirmed campaign snapshot from the configured contract.';
@@ -221,9 +281,7 @@ export function initDevertTab() {
       const hash = await purchaseDevertCampaign({ signer, contract, usdc,
         title: document.getElementById('devert-title').value,
         audioURI: document.getElementById('devert-audio-uri').value,
-        offerUnits, maxPaymentUnits,
-        onStep: message => { purchaseStatus.textContent = message; },
-      });
+        offerUnits, maxPaymentUnits, onStep: message => { purchaseStatus.textContent = message; } });
       purchaseStatus.textContent = `Campaign confirmed: ${hash}`;
       await refresh();
     } catch (error) {
@@ -234,68 +292,96 @@ export function initDevertTab() {
     }
   }
 
-  const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
-  const close = () => {
-    clearTimeout(timer);
+  async function queueAdMedia() {
+    if (adMediaBusy) return;
+    const file = adMediaFile.files?.[0];
+    const wallet = window._wallet;
+    if (!file || !wallet?.signer || wallet.chainId !== 8453) {
+      adMediaStatus.textContent = 'Choose ad media and connect a Base wallet first.';
+      return;
+    }
+    if (file.size < 1 || file.size > MAX_DEVERT_MEDIA_BYTES) {
+      adMediaStatus.textContent = 'Ad media must be no larger than 250 MB.';
+      return;
+    }
+    const mediaType = mediaTypeForAdFile(file);
+    if (!mediaType) { adMediaStatus.textContent = 'Choose a supported audio file or MP4 video.'; return; }
+    const title = document.getElementById('devert-title').value.trim();
+    if (!title || title.length > 120) { adMediaStatus.textContent = 'Enter the campaign title before queuing ad media.'; return; }
+    adMediaBusy = true;
+    syncCheckout();
+    try {
+      const config = window.DecentConfig || {};
+      const upload = createBrowserIpfsUploader({ provider: config.ipfsUploadProvider || 'pinata',
+        serviceUrl: config.ipfsUploadServiceUrl, ipfsApiUrl: config.ipfsApiUrl, signer: wallet.signer,
+        address: wallet.address, origin: window.location.origin, purpose: 'submission' });
+      adMediaStatus.textContent = `Uploading ${file.name} to IPFS…`;
+      const ipfsUri = await upload(file);
+      if (!/^ipfs:\/\/[^/\s]+$/.test(ipfsUri)) throw new Error('Ad upload did not return a file CID');
+      adMediaStatus.textContent = 'Requesting owner mint review…';
+      const result = await submitMediaForApproval({ serviceUrl: config.ipfsUploadServiceUrl,
+        signer: wallet.signer, address: wallet.address, origin: window.location.origin,
+        media: { title, artist: adMediaArtist.value.trim() || wallet.address, ipfsCid: ipfsUri,
+          mediaType, filename: file.name, recipient: wallet.address, isDevertAd: true } });
+      document.getElementById('devert-audio-uri').value = ipfsUri;
+      adMediaStatus.textContent = `IPFS media queued for owner NFT review (${result.trackId}). Campaign purchase is separate.`;
+    } catch (error) {
+      adMediaStatus.textContent = error.shortMessage || error.reason || error.message;
+    } finally {
+      adMediaBusy = false;
+      syncCheckout();
+    }
+  }
+
+  function close() {
+    clearTimeout(refreshTimer);
     generation++;
+    stopAdLoopPlayback();
     if (previewPlayer.dataset.listenMode === 'ads-only') {
-      previewPlayer.pause();
       previewPlayer.dataset.listenMode = 'radio';
       setDevertListenMode('radio');
     }
-    ++previewLoopToken;
     toggle.setAttribute('aria-expanded', 'false');
     toggle.setAttribute('aria-label', 'Open DVert advertising');
     panel.classList.remove('is-open');
     panel.setAttribute('aria-hidden', 'true');
     panel.inert = true;
     document.body.classList.remove('devert-open');
-  };
+    syncListenControls();
+  }
+
   radioModeButton.addEventListener('click', () => {
-    if (!setDevertListenMode('radio')) {
-      listenStatus.textContent = 'Finish archive playback or the current new-song preview before switching listening modes.';
-      return;
-    }
-    previewPlayer.pause();
+    if (!setDevertListenMode('radio')) { listenStatus.textContent = 'Finish archive playback or the current new-song preview first.'; return; }
+    stopAdLoopPlayback();
     previewPlayer.dataset.listenMode = 'radio';
     listenStatus.textContent = 'Following the main radio. You can mute sponsored ads on this device.';
     syncListenControls();
   });
   adsModeButton.addEventListener('click', () => {
-    if (!previewCampaigns.length) return;
-    if (!setDevertListenMode('ads-only')) {
-      listenStatus.textContent = 'Finish archive playback or the current new-song preview before switching to Ads Only.';
-      return;
-    }
+    if (adLoopState?.ready !== true) return;
+    if (!setDevertListenMode('ads-only')) { listenStatus.textContent = 'Finish archive playback or the current new-song preview first.'; return; }
     previewPlayer.dataset.listenMode = 'ads-only';
     syncListenControls();
-    playNextAdPreview();
+    startAdLoopMirror();
   });
   muteAdsInput.addEventListener('change', () => {
     setDevertAdsMuted(muteAdsInput.checked);
-    listenStatus.textContent = muteAdsInput.checked
-      ? 'Sponsored ads are muted on this device; other listeners are unaffected.'
+    listenStatus.textContent = muteAdsInput.checked ? 'Sponsored ads are muted on this device; other listeners are unaffected.'
       : 'Sponsored ads are audible on this device.';
   });
-  previewPlayer.addEventListener('ended', () => {
-    if (previewPlayer.dataset.listenMode === 'ads-only') playNextAdPreview();
-  });
-  previewPlayer.addEventListener('error', () => {
-    const campaignId = previewPlayer.dataset.campaignId;
-    if (campaignId) failedPreviewIds.add(campaignId);
-    if (previewPlayer.dataset.listenMode === 'ads-only') playNextAdPreview();
-  });
   document.addEventListener('radio-source-mode-change', () => {
-    if (previewPlayer.dataset.listenMode === 'ads-only') {
-      previewPlayer.pause();
+    if (previewPlayer.dataset.listenMode === 'ads-only' && !canSetDevertListenMode()) {
+      stopAdLoopPlayback();
       previewPlayer.dataset.listenMode = 'radio';
       setDevertListenMode('radio');
     }
     syncListenControls();
   });
+  previewPlayer.addEventListener('error', () => listenStatus.textContent = 'Could not mirror the current AdLoop stream. Retrying shortly.');
   syncListenControls();
+
   async function refresh() {
-    clearTimeout(timer);
+    clearTimeout(refreshTimer);
     if (!isOpen()) return;
     const request = ++generation;
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
@@ -308,39 +394,50 @@ export function initDevertTab() {
     }
     campaignStatus.textContent = 'Loading confirmed campaigns…';
     try {
-      const response = await fetch(`${service}/api/devert`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+      const response = await fetch(`${service}/api/devert`, { cache: 'no-store', signal: AbortSignal.timeout(12_000) });
       const result = await response.json();
       if (request !== generation || !isOpen()) return;
       if (response.status === 404) throw new Error('Campaign contract is not deployed');
       if (!response.ok) throw new Error(result.error || `Campaigns unavailable (${response.status})`);
       snapshot = result;
-      updateAdPreviewQueue(seatedDevertPreviewCampaigns(snapshot));
       campaignList.replaceChildren();
       const campaigns = activeCampaigns(snapshot);
       for (const campaign of campaigns) {
         const item = node('li', undefined, 'devert-campaign');
         const details = node('span', undefined, 'devert-campaign-details');
-        const priority = Number(campaign.djukeBoosts || 0);
-        details.append(node('strong', campaign.title),
-          node('span', `${formatUsdc(campaign.offerUnits)}${priority ? ` · DJuke boosts ${priority}` : ''} · expires ${new Intl.DateTimeFormat('en-US', {
+        const boosts = Number(campaign.djukeBoosts || 0);
+        details.append(node('strong', campaign.title), node('span',
+          `${formatUsdc(campaign.offerUnits)}${boosts ? ` · DJuke boosts ${boosts}` : ''} · expires ${new Intl.DateTimeFormat('en-US', {
             timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
           }).format(new Date(campaign.expiresAt))}`));
         item.append(details);
         campaignList.append(item);
       }
       campaignStatus.textContent = campaigns.length ? `${campaigns.length} active campaign${campaigns.length === 1 ? '' : 's'} · confirmed Base snapshot #${snapshot.blockNumber}` : 'No active campaigns right now.';
-      radioStatus.textContent = 'Campaigns are scheduled into the main radio rotation.';
+      radioStatus.textContent = 'Main-radio ads follow the ten-song program; AdLoop is a separate 24/7 channel.';
+      await checkAdLoopReady();
       syncCheckout();
     } catch (error) {
       if (request !== generation || !isOpen()) return;
       snapshot = null;
       campaignList.replaceChildren();
       campaignStatus.textContent = error.message;
-      radioStatus.textContent = 'Main radio ad scheduling is not live yet.';
+      radioStatus.textContent = 'Main-radio ad scheduling is not live yet.';
       syncCheckout();
     }
-    if (isOpen()) timer = setTimeout(refresh, 30000);
+    if (isOpen()) refreshTimer = setTimeout(refresh, 30_000);
   }
+
+  async function checkAdLoopReady() {
+    const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+    if (!service) { adLoopState = { ready: false }; syncListenControls(); return; }
+    try {
+      const response = await fetch(`${service}/api/devert/loop`, { cache: 'no-store', signal: AbortSignal.timeout(10_000) });
+      adLoopState = response.ok ? await response.json() : { ready: false };
+    } catch { adLoopState = { ready: false }; }
+    syncListenControls();
+  }
+
   toggle.addEventListener('click', event => {
     event.stopPropagation();
     if (isOpen()) { close(); return; }
@@ -356,21 +453,18 @@ export function initDevertTab() {
   closeButton?.addEventListener('click', () => { close(); toggle.focus(); });
   refreshButton?.addEventListener('click', refresh);
   purchaseForm?.addEventListener('submit', submitCampaign);
+  adMediaFile?.addEventListener('change', syncCheckout);
+  adMediaQueueButton?.addEventListener('click', queueAdMedia);
   walletButton?.addEventListener('click', () => window._wallet?.connect?.());
   document.addEventListener('wallet-connected', syncCheckout);
   document.addEventListener('wallet-disconnected', syncCheckout);
-  document.getElementById('devert-profile')?.addEventListener('click', () => {
-    document.dispatchEvent(new CustomEvent('open-creator-profile'));
-  });
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); }
-  });
+  document.getElementById('devert-profile')?.addEventListener('click', () => document.dispatchEvent(new CustomEvent('open-creator-profile')));
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); } });
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
-  document.addEventListener('click', event => {
-    if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target)) close();
-  });
+  document.addEventListener('click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target)) close(); });
 }
 
 if (typeof document !== 'undefined') {
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDevertTab); else initDevertTab();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDevertTab);
+  else initDevertTab();
 }

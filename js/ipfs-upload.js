@@ -10,6 +10,16 @@ export function buildUploadAuthorizationMessage({ address, origin, name, size, t
   ].join('\n');
 }
 
+export function buildUploadBatchAuthorizationMessage({ address, origin, issuedAt, files }) {
+  return [
+    'DecentBusking IPFS metadata batch upload authorization',
+    `Wallet: ${address.toLowerCase()}`,
+    `Origin: ${origin}`,
+    `Issued At: ${issuedAt}`,
+    `Files: ${JSON.stringify(files)}`,
+  ].join('\n');
+}
+
 function extractCid(result) {
   return result.data?.cid || result.cid || result.IpfsHash || result.Hash;
 }
@@ -40,7 +50,7 @@ export function createBrowserIpfsUploader({
   purpose,
   fetchImpl = globalThis.fetch,
 }) {
-  return async function upload(file) {
+  const upload = async function upload(file) {
     if (provider === 'local') {
       const endpoint = `${ipfsApiUrl.replace(/\/$/, '')}/api/v0/add?cid-version=1&pin=true`;
       return uploadForm(endpoint, file, fetchImpl);
@@ -74,6 +84,38 @@ export function createBrowserIpfsUploader({
     if (!url) throw new Error('Pinata signing response did not include a URL');
     return uploadForm(url, file, fetchImpl, true);
   };
+
+  upload.batch = async files => {
+    if (!Array.isArray(files) || files.length < 1 || files.length > 20) {
+      throw new Error('Metadata upload batches must contain 1 to 20 files');
+    }
+    if (provider === 'local') return Promise.all(files.map(file => uploadForm(
+      `${ipfsApiUrl.replace(/\/$/, '')}/api/v0/add?cid-version=1&pin=true`, file, fetchImpl)));
+    if (provider !== 'pinata') throw new Error(`Unsupported IPFS upload provider: ${provider}`);
+    if (!serviceUrl) throw new Error('The Render IPFS worker URL is not configured');
+    if (!signer || !address) throw new Error('Connect your wallet before uploading');
+    const issuedAt = new Date().toISOString();
+    const descriptors = files.map(file => ({ name: file.name, size: file.size,
+      type: file.type || 'application/octet-stream' }));
+    const authorization = { address, origin, issuedAt, files: descriptors };
+    const signature = await signer.signMessage(buildUploadBatchAuthorizationMessage(authorization));
+    const response = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/ipfs/upload-batch-urls`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...authorization, signature }),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || `Pinata batch signing failed (${response.status})`);
+    }
+    const result = await response.json();
+    if (!Array.isArray(result.urls) || result.urls.length !== files.length || result.urls.some(url => typeof url !== 'string' || !url)) {
+      throw new Error('Pinata batch signing response did not include one URL per metadata file');
+    }
+    return Promise.all(files.map((file, index) => uploadForm(result.urls[index], file, fetchImpl, true)));
+  };
+
+  return upload;
 }
 
 export function uploadFileToIPFS(file) {

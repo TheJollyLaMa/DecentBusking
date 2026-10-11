@@ -13,7 +13,7 @@ export const DJUKE_ABI = [
 export const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
 export function djukeCatalog(playlist) {
-  return playlist.filter(track => track.ipfsCid && /^0x[0-9a-fA-F]{40}$/.test(track.mintRecipient || '') &&
+  return playlist.filter(track => !track.isDevertAd && track.ipfsCid && /^0x[0-9a-fA-F]{40}$/.test(track.mintRecipient || '') &&
     (track.source !== 'site' || track.mintStatus === 'minted'))
     .map(track => ({ songId: id(track.trackId), track }));
 }

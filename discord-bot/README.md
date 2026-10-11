@@ -60,19 +60,25 @@ cp .env.example .env
 | `DEVERT_CONTRACT_ADDRESS`    | DeVert    | Deployed DeVert campaign contract address; endpoint stays unavailable when unset |
 | `DEVERT_SCHEDULER_PRIVATE_KEY` | DeVert   | Optional override; defaults to the existing `DJUKE_FULFILLER_PRIVATE_KEY` |
 | `DEVERT_CONFIRMATIONS`       | ❌        | Confirmations for public DeVert campaign reads (default: `2`) |
+| `DVERT_LOOP_DISCORD_TOKEN`   | AdLoop   | Separate bot token for the dedicated ad-only voice channel |
+| `DVERT_LOOP_CHANNEL_ID`      | AdLoop   | ID of the `#vertloop` text channel for announcements/submissions |
+| `ADLOOP_VOICE_CHANNEL_ID`    | AdLoop   | ID of the `VertLoop` voice channel for the dedicated ad rotation |
 | `DISABLE_MINT_FLOW`          | ❌        | Set to `true` to skip IPFS pinning and the Mint embed (JukeLoop-only mode). Default: `false` |
 
 > JukeLoop is **opt-in**: omit `JUKE_LOOP_VOICE_CHANNEL_ID` / `JUKE_LOOP_TEXT_CHANNEL_ID` (or leave them blank) to keep the bot running without it.
 
 DeVert campaigns use the existing JukeLoop rotation after each ten completed
-audible music plays. The DJuke fulfiller wallet can also hold DeVert's
-`SCHEDULER_ROLE`; no second bot, voice channel, wallet, or service is required.
-The DVert panel offers local `Main Radio` and `Ads Only` listening modes. Ads Only
-loops previews of active seated campaigns in the visitor's browser and never
-records paid impressions; the optional ad-mute preference affects only that
-visitor's main-radio audio. A confirmed DJuke request boosts a campaign only when
-the payer has exactly one active campaign. If multiple campaigns match, the
-worker skips the boost instead of choosing one arbitrarily.
+audible music plays. The DJuke fulfiller wallet also holds DeVert's
+`SCHEDULER_ROLE`. A second Discord bot is required for AdLoop because a bot cannot
+join two voice channels in the same guild. The DVert panel's Ads Only mode mirrors
+that live loop; browser playback never creates paid impressions. The optional
+ad-mute preference affects only the visitor's main-radio audio. A confirmed DJuke
+request boosts a campaign only when the payer has exactly one active campaign;
+ambiguous requests are skipped rather than assigned arbitrarily.
+
+Create the AdLoop voice channel as `VertLoop` and its announcement/submission text
+channel as `#vertloop`. Channel names are for people; the worker connects using
+their numeric channel IDs configured above.
 
 ### 4. Configure IPFS uploads
 

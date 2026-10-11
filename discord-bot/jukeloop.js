@@ -111,7 +111,7 @@ export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch) 
 
 /** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
 export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recentLimit = 10 }) {
-  const recent = playlist.filter(track => track.source !== 'site' || track.mintStatus === 'minted')
+  const recent = playlist.filter(track => !track.isDevertAd && (track.source !== 'site' || track.mintStatus === 'minted'))
     .sort((first, second) => Date.parse(second.addedAt) - Date.parse(first.addedAt))
     .slice(0, recentLimit)
     .map((track) => ({
@@ -244,12 +244,12 @@ export function getJukeLoopSession(guildId) {
   return _sessions.get(guildId) ?? null;
 }
 
-export function submitJukeLoopVote({ playId, voterId, vote }, saveVote = applySiteVote) {
+export async function submitJukeLoopVote({ playId, voterId, vote }, saveVote = applySiteVote) {
   if (typeof playId !== 'string' || playId.length > 160 ||
       typeof voterId !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(voterId) ||
       (vote !== 1 && vote !== -1)) throw new Error('Invalid radio vote');
   const session = [..._sessions.values()].find((entry) =>
-    !entry._destroyed && entry._nowPlaying?.audible && !entry._nowPlaying.isDevert && entry._nowPlaying.playId === playId);
+    !entry._destroyed && entry._nowPlaying?.audible && entry._nowPlaying.playId === playId);
   if (!session) throw new Error('This radio play has ended or is not audible yet');
   if (session._siteVotePlayId !== playId) {
     session._siteVotePlayId = playId;
@@ -258,9 +258,17 @@ export function submitJukeLoopVote({ playId, voterId, vote }, saveVote = applySi
   const previous = session._siteVoters.get(voterId);
   if (previous !== undefined) return { playId, vote: previous, duplicate: true };
   if (session._siteVoters.size >= 5000) throw new Error('Voting capacity reached for this play');
-  saveVote(session._nowPlaying.trackId, vote);
-  session._siteVoters.set(voterId, vote);
-  return { playId, vote, duplicate: false };
+  let acceptedVote = vote;
+  let duplicate = false;
+  if (session._nowPlaying.isDevert) {
+    if (!session.devertPlayback?.recordMainRadioAdVote || !session._currentDevertAd) throw new Error('DeVert ad voting is not configured');
+    const result = await session.devertPlayback.recordMainRadioAdVote({ campaignId: session._currentDevertAd.campaignId,
+      radioPlayId: playId, voterId, vote });
+    duplicate = result?.duplicate === true;
+    if (duplicate) acceptedVote = result.vote;
+  } else saveVote(session._nowPlaying.trackId, vote);
+  session._siteVoters.set(voterId, acceptedVote);
+  return { playId, vote: acceptedVote, duplicate };
 }
 
 /** The track currently audible in any JukeLoop voice session, or null. */

@@ -117,15 +117,45 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
   assert.equal(rated.plays, beforeVote.plays);
 });
 
-test('JukeLoop refuses song votes on a DeVert campaign impression', async () => {
+test('JukeLoop sends DeVert main-radio votes to the campaign vote journal', async () => {
   const { createJukeLoopSession, submitJukeLoopVote } = await import('../discord-bot/jukeloop.js');
+  const adVotes = [];
   const session = createJukeLoopSession('devert-vote-test', {
     voiceChannel: { guild: { id: 'devert-vote-test' } }, textChannel: {}, client: {}, ipfsGateway: 'https://dweb.link',
+    devertPlayback: { recordMainRadioAdVote: async vote => { adVotes.push(vote); return { duplicate: false }; } },
   });
   session._nowPlaying = { playId: 'devert:7:play', trackId: 'devert:7', audible: true, isDevert: true };
+  session._currentDevertAd = { campaignId: '7', mainRadio: true };
   try {
-    assert.throws(() => submitJukeLoopVote({ playId: 'devert:7:play', voterId: 'anonymous-browser-123', vote: 1 }), /not audible/);
+    assert.deepEqual(await submitJukeLoopVote({ playId: 'devert:7:play', voterId: 'anonymous-browser-123', vote: 1 }),
+      { playId: 'devert:7:play', vote: 1, duplicate: false });
+    assert.deepEqual(adVotes, [{ campaignId: '7', radioPlayId: 'devert:7:play', voterId: 'anonymous-browser-123', vote: 1 }]);
   } finally { session.destroy(); }
+});
+
+test('JukeLoop reports the durable prior ad vote after a session restart', async () => {
+  const { createJukeLoopSession, submitJukeLoopVote } = await import('../discord-bot/jukeloop.js');
+  let persistedVote;
+  const devertPlayback = { recordMainRadioAdVote: async ({ vote }) => {
+    if (persistedVote !== undefined) return { vote: persistedVote, duplicate: true };
+    persistedVote = vote;
+    return { vote, duplicate: false };
+  } };
+  const options = { voiceChannel: { guild: { id: 'devert-vote-restart' } }, textChannel: {}, client: {}, devertPlayback };
+  const first = createJukeLoopSession('devert-vote-restart', options);
+  first._nowPlaying = { playId: 'devert:8:play', trackId: 'devert:8', audible: true, isDevert: true };
+  first._currentDevertAd = { campaignId: '8', mainRadio: true };
+  assert.deepEqual(await submitJukeLoopVote({ playId: 'devert:8:play', voterId: 'anonymous-browser-7654321', vote: 1 }),
+    { playId: 'devert:8:play', vote: 1, duplicate: false });
+  first.destroy();
+
+  const restarted = createJukeLoopSession('devert-vote-restart', options);
+  restarted._nowPlaying = { playId: 'devert:8:play', trackId: 'devert:8', audible: true, isDevert: true };
+  restarted._currentDevertAd = { campaignId: '8', mainRadio: true };
+  try {
+    assert.deepEqual(await submitJukeLoopVote({ playId: 'devert:8:play', voterId: 'anonymous-browser-7654321', vote: -1 }),
+      { playId: 'devert:8:play', vote: 1, duplicate: true });
+  } finally { restarted.destroy(); }
 });
 
 test('JukeLoop player errors discard the active DeVert ad before an Idle event can record an impression', async () => {
@@ -456,13 +486,13 @@ test('anonymous site votes are idempotent per browser and only accepted for the 
   const calls = [];
   const saveVote = (...args) => calls.push(args);
   const ballot = { playId: 'track:1000', voterId: 'anonymous-browser-123', vote: 1 };
-  assert.equal(submitJukeLoopVote(ballot, saveVote).duplicate, false);
-  assert.deepEqual(submitJukeLoopVote({ ...ballot, vote: -1 }, saveVote), { playId: 'track:1000', vote: 1, duplicate: true });
+  assert.equal((await submitJukeLoopVote(ballot, saveVote)).duplicate, false);
+  assert.deepEqual(await submitJukeLoopVote({ ...ballot, vote: -1 }, saveVote), { playId: 'track:1000', vote: 1, duplicate: true });
   assert.equal(calls.length, 1);
-  assert.throws(() => submitJukeLoopVote({ ...ballot, playId: 'old-play' }, saveVote), /ended/);
-  assert.throws(() => submitJukeLoopVote({ ...ballot, vote: 0 }, saveVote), /Invalid/);
+  await assert.rejects(submitJukeLoopVote({ ...ballot, playId: 'old-play' }, saveVote), /ended/);
+  await assert.rejects(submitJukeLoopVote({ ...ballot, vote: 0 }, saveVote), /Invalid/);
   session._nowPlaying = { playId: 'track:2000', trackId: 'track', audible: true };
-  assert.equal(submitJukeLoopVote({ ...ballot, playId: 'track:2000', vote: -1 }, saveVote).duplicate, false);
+  assert.equal((await submitJukeLoopVote({ ...ballot, playId: 'track:2000', vote: -1 }, saveVote)).duplicate, false);
   assert.deepEqual(calls, [['track', 1], ['track', -1]]);
 });
 

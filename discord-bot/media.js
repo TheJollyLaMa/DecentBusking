@@ -26,12 +26,12 @@ export function normalizeMediaCid(value) {
 
 export function buildSubmissionAuthorizationMessage(payload) {
   const { address, origin, issuedAt, title, artist, ipfsCid, mediaType, filename,
-    recipient, artworkCid = '', tipWallet = '', parentTokenId = 0 } = payload;
+    recipient, artworkCid = '', tipWallet = '', parentTokenId = 0, isDevertAd = false } = payload;
   return [
     'DecentBusking media submission for owner approval',
     `Wallet: ${address.toLowerCase()}`,
     `Origin: ${origin}`,
     `Issued At: ${issuedAt}`,
-    JSON.stringify({ title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId }),
+    JSON.stringify({ title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId, isDevertAd }),
   ].join('\n');
 }

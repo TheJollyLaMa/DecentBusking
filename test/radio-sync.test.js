@@ -124,13 +124,15 @@ test('site votes post only the current play and anonymous browser ID, with no wa
     fetchImpl: async () => new Response(JSON.stringify({ error: 'This play has ended' }), { status: 400 }) }), /ended/);
 });
 
-test('DeVert campaign audio disables website song voting', () => {
+test('DeVert main-radio ads allow live-program votes while non-radio previews remain disabled', () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
   const button = { dataset: { radioVote: '1' }, disabled: false, setAttribute() {} };
   const context = vm.createContext({ performance, setTimeout, clearTimeout, console, button });
   vm.runInContext(`${source}\n_voteButtons = [button]; _mode = 'radio'; _radioReachable = true;\n` +
     `_radio = { playId: 'devert:1:play', ipfsCid: 'bafy-ad', isDevert: true }; _renderVoting();`,
     context);
+  assert.equal(button.disabled, false);
+  vm.runInContext("_devertListenMode = 'ads-only'; _renderVoting();", context);
   assert.equal(button.disabled, true);
 });
 

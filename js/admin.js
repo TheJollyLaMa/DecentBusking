@@ -6,8 +6,8 @@
 // The panel is opened by dispatching a custom "open-admin" DOM event (wired up
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
-import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, importReviewedAlbums, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261010-album-batch-queue';
-import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
+import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolveBatchMintArtwork, importReviewedAlbums, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261011-batch-artwork-default';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261011-batch-upload-signature';
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261010-listens';
 import { isAdminWallet } from './admin-access.mjs';
@@ -437,6 +437,7 @@ async function _importReviewedAlbums() {
   }
 
   function _renderMintQueue() {
+    const batchMintEnabled = window.DecentConfig?.nftBatchMintEnabled === true;
     ++_artworkPreviewId;
     _artworkPreviewGenerations.clear();
     for (const url of _artworkPreviewUrls.values()) URL.revokeObjectURL(url);
@@ -456,15 +457,17 @@ async function _importReviewedAlbums() {
           <span>by ${_esc(track.uploader)} · ${_esc(track.requestedAt ? new Date(track.requestedAt).toLocaleString() : '')}</span>
           <span>${_esc(track.recipient)}</span>
           <a href="${_esc(_gatewayUrl(track.ipfsCid))}" target="_blank" rel="noopener noreferrer">Open ${track.mediaType === 'video/mp4' ? 'video' : 'audio'}</a>
-          <label class="admin-artwork-label">${track.artworkCid ? 'Replace default artwork (up to 10 MB)' : 'Choose artwork (up to 10 MB)'}
-            <input class="admin-artwork" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-index="${index}" />
-          </label>
-          <label class="admin-artwork-label">Image / GIF file CID (optional, including files over 10 MB)
-            <input class="admin-artwork-cid" type="text" maxlength="160" placeholder="bafy... or ipfs://..." data-index="${index}" />
-          </label>
-          <span class="admin-artwork-status" data-index="${index}" role="status">${track.artworkCid ? 'Queued artwork is selected by default. Leave both fields empty to keep it.' : 'No default image available; select artwork before minting.'}</span>
+          ${batchMintEnabled ? '<span class="admin-artwork-status" role="status">Queued artwork will be used; requests without artwork will mint without an image.</span>' : `
+            <label class="admin-artwork-label">${track.artworkCid ? 'Replace default artwork (up to 10 MB)' : 'Choose artwork (up to 10 MB)'}
+              <input class="admin-artwork" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-index="${index}" />
+            </label>
+            <label class="admin-artwork-label">Image / GIF file CID (optional, including files over 10 MB)
+              <input class="admin-artwork-cid" type="text" maxlength="160" placeholder="bafy... or ipfs://..." data-index="${index}" />
+            </label>
+            <span class="admin-artwork-status" data-index="${index}" role="status">${track.artworkCid ? 'Queued artwork is selected by default. Leave both fields empty to keep it.' : 'No default image available; select artwork before minting.'}</span>
+          `}
         </div>
-        <button class="admin-btn admin-btn-secondary admin-mint-one" type="button" data-index="${index}">Mint one</button>
+        <button class="admin-btn admin-btn-secondary admin-mint-one" type="button" data-index="${index}">Mint</button>
       </div>
     `).join('');
     if (_mintSelectedBtn) _mintSelectedBtn.disabled = false;
@@ -542,7 +545,7 @@ async function _importReviewedAlbums() {
     }
   }
 
-  async function _prepareQueuedTrack(track, index) {
+  async function _prepareQueuedTrack(track, index, { batch = false } = {}) {
     const cfg = window.DecentConfig || {};
     const artwork = _mintQueueEl?.querySelector(`.admin-artwork[data-index="${index}"]`)?.files?.[0];
     const upload = createBrowserIpfsUploader({
@@ -554,12 +557,16 @@ async function _importReviewedAlbums() {
       origin: window.location.origin,
     });
 
-    const artworkCid = _mintQueueEl?.querySelector(`.admin-artwork-cid[data-index="${index}"]`)?.value || '';
-    const image = await resolveMintArtwork({ file: artwork, cid: artworkCid, defaultCid: track.artworkCid,
-      serviceUrl: cfg.ipfsUploadServiceUrl, upload: async file => {
-        _setMintStatus(`Uploading artwork for ${track.title}…`);
-        return upload(file);
-      } });
+    let image;
+    if (batch) image = resolveBatchMintArtwork(track.artworkCid);
+    else {
+      const artworkCid = _mintQueueEl?.querySelector(`.admin-artwork-cid[data-index="${index}"]`)?.value || '';
+      image = await resolveMintArtwork({ file: artwork, cid: artworkCid, defaultCid: track.artworkCid,
+        serviceUrl: cfg.ipfsUploadServiceUrl, upload: async file => {
+          _setMintStatus(`Uploading artwork for ${track.title}…`);
+          return upload(file);
+        } });
+    }
     const metadata = {
       name: track.title,
       description: `Shared through DecentJukebox by ${track.uploader}`,
@@ -580,6 +587,7 @@ async function _importReviewedAlbums() {
       `${_slugify(track.title)}.json`,
       { type: 'application/json' },
     );
+    if (batch) return { metadata, metadataFile };
     _setMintStatus(`Uploading metadata for ${track.title}…`);
     const metadataUrl = await upload(metadataFile);
     return { metadata, metadataUrl };
@@ -635,13 +643,20 @@ async function _importReviewedAlbums() {
     for (const index of indices) {
       const track = _mintQueue[index];
       if (!track) throw new Error('Mint queue changed; reload before minting');
-      prepared.push({ track, ...await _prepareQueuedTrack(track, index) });
+      prepared.push({ track, ...await _prepareQueuedTrack(track, index, { batch: true }) });
       if (walletCheck !== _walletCheckId) throw new Error('Wallet changed during batch preparation');
     }
     if (Number((await signer.provider.getNetwork()).chainId) !== 8453) throw new Error('Batch minting is Base-only');
     if (walletCheck !== _walletCheckId || signer !== _adminSigner || cfg.contractAddress !== window.DecentConfig?.contractAddress) {
       throw new Error('Wallet or contract changed; reload before minting');
     }
+    const batchUploader = createBrowserIpfsUploader({ provider: cfg.ipfsUploadProvider || 'pinata',
+      serviceUrl: cfg.ipfsUploadServiceUrl, ipfsApiUrl: cfg.ipfsApiUrl, signer,
+      address: owner, origin: window.location.origin });
+    _setMintStatus(`Authorize and upload metadata for ${prepared.length} songs…`);
+    const metadataUris = await batchUploader.batch(prepared.map(item => item.metadataFile));
+    prepared.forEach((item, index) => { item.metadataUrl = metadataUris[index]; });
+    if (walletCheck !== _walletCheckId || signer !== _adminSigner) throw new Error('Wallet changed during batch upload');
     const contract = new ethers.Contract(cfg.contractAddress, ROLE_GRANT_ABI, signer);
     const products = prepared.map(({ track, metadataUrl }) => ({ recipient: track.recipient,
       amount: 1, maxSupply: 0, tokenURI: metadataUrl, royaltyReceiver: track.recipient, royaltyFeeBps: 500 }));

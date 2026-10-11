@@ -107,9 +107,12 @@
       <button id="devert-connect-wallet" type="button" hidden>Connect Base wallet</button>
       <form id="devert-purchase-form" hidden>
         <label>Campaign title<input id="devert-title" type="text" maxlength="160" required /></label>
-        <label>IPFS audio URI<input id="devert-audio-uri" type="text" inputmode="url" placeholder="ipfs://..." required /></label>
+        <label>IPFS media URI<input id="devert-audio-uri" type="text" inputmode="url" placeholder="ipfs://..." required /></label>
+        <label>Ad media file (audio or MP4, up to 250 MB)<input id="devert-ad-file" type="file" accept="audio/*,video/mp4" /></label>
+        <label>Artist name for mint review<input id="devert-ad-artist" type="text" maxlength="80" /></label>
+        <button id="devert-ad-queue" type="button" disabled>Upload to IPFS and queue NFT review</button>
+        <p id="devert-ad-queue-status" class="devert-checkout-status" role="status" aria-live="polite"></p>
         <label>Your offer (USDC)<input id="devert-offer" type="number" min="5" step="0.01" value="5.00" required /></label>
-        <label>Maximum you authorize (USDC)<input id="devert-max-payment" type="number" min="5" step="0.01" value="5.00" required /></label>
         <p class="devert-checkout-status">Each purchase also includes a gas-priced Base ETH top-up for the radio worker. Transaction network gas is separate.</p>
         <button id="devert-purchase" type="submit" disabled>Purchase 7-day campaign</button>
       </form>
@@ -450,7 +453,7 @@
         <div class="admin-section-header">
           <div>
             <h3>Pending NFT Requests</h3>
-            <p>Select multiple tracks, review their artwork, then mint up to 20 in one Base transaction. Larger selections use one confirmation per batch.</p>
+            <p>Select requests and mint up to 20 in one Base transaction. Queued artwork is reused; missing artwork will not block minting. Larger selections use one confirmation per batch.</p>
           </div>
           <button id="admin-mint-refresh-btn" class="admin-btn admin-btn-secondary" type="button">Refresh</button>
         </div>

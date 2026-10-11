@@ -88,17 +88,15 @@ test('DeVert purchase uses the legacy gasPrice quote when maxFeePerGas is unavai
   assert.equal(state.calls.purchases[0][4].gasPrice, 1_000_000_000n);
 });
 
-test('Ads Only preview loops active seated campaigns even after paid slots are consumed', async () => {
-  const { seatedDevertPreviewCampaigns } = await import('../js/devert-tab.mjs');
-  const now = 1_800_000_000_000;
-  const campaign = (campaignId, djukeBoosts = 0) => ({
-    campaignId, advertiser: ADVERTISER, title: `Campaign ${campaignId}`, audioURI: `ipfs://bafy-${campaignId}`,
-    startedAt: new Date(now - 60_000).toISOString(), expiresAt: new Date(now + 60_000).toISOString(),
-    offerUnits: '5000000', djukeBoosts, mainRadioPlays: 0,
+test('Ads Only mirrors only an audible live AdLoop state and its radio play position', async () => {
+  const { normalizeAdLoopNowPlaying } = await import('../js/devert-tab.mjs');
+  const state = { ready: true, nowPlaying: { campaignId: '9', radioPlayId: 'adloop:9:1',
+    title: 'Campaign 9', ipfsCid: 'bafy-nine', mediaType: 'audio/mp4', audible: true, positionMs: 42_000 } };
+  assert.deepEqual(normalizeAdLoopNowPlaying(state), {
+    playId: 'adloop:9:1', title: 'Campaign 9', ipfsCid: 'bafy-nine', mediaType: 'audio/mp4', positionMs: 42_000,
   });
-  const snapshot = { chainId: 8453, paused: false, campaigns: [campaign('1'), campaign('2', 1), campaign('3')],
-    market: { slots: 3, seated: 2, mainRadioImpressions: 3 } };
-  assert.deepEqual(seatedDevertPreviewCampaigns(snapshot, now).map(entry => entry.campaignId), ['2', '1']);
-  assert.deepEqual(seatedDevertPreviewCampaigns({ ...snapshot, paused: true }, now), []);
-  assert.deepEqual(seatedDevertPreviewCampaigns({ ...snapshot, market: { ...snapshot.market, slots: 0, seated: 0 } }, now), []);
+  assert.equal(normalizeAdLoopNowPlaying({ ...state, ready: false }), null);
+  assert.equal(normalizeAdLoopNowPlaying({ ...state, nowPlaying: { ...state.nowPlaying, audible: false } }), null);
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /Ads Only previews do not count as paid impressions/);
 });

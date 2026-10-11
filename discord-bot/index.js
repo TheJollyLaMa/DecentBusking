@@ -44,6 +44,7 @@ import { syncMintedTracksFromChain, createVerifiedMintQueueReader } from './mint
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime } from './devert-playback.js';
+import { startDevertLoopWorker } from './devert-loop.js';
 import { createPinataStateStore } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
@@ -103,6 +104,7 @@ const _jukeLoopRestartAttempts = new Map();
 let _djukeRuntime = null;
 let _devertPlaybackRuntime = null;
 let _devertPlaybackInitialization = null;
+let _devertLoopWorker = null;
 let _devertSchedulerContract = null;
 let _devertBoostTask = null;
 const _devertBoostsInFlight = new Set();
@@ -456,6 +458,19 @@ async function main() {
   } else if (process.env.DEVERT_CONTRACT_ADDRESS) {
     console.warn('[devert] Campaign reads are configured, but audio scheduling is disabled until a DeVert/DJuke worker key and PINATA_JWT are available.');
   }
+  if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt && process.env.DVERT_LOOP_DISCORD_TOKEN &&
+      process.env.DVERT_LOOP_CHANNEL_ID && process.env.ADLOOP_VOICE_CHANNEL_ID) {
+    _devertPlaybackInitialization?.then(async () => {
+      if (!_devertPlaybackRuntime) return;
+      try {
+        _devertLoopWorker = await startDevertLoopWorker({ token: process.env.DVERT_LOOP_DISCORD_TOKEN,
+          voiceChannelId: process.env.ADLOOP_VOICE_CHANNEL_ID, textChannelId: process.env.DVERT_LOOP_CHANNEL_ID,
+          playback: _devertPlaybackRuntime });
+      } catch (error) {
+        console.warn('[devert-loop] AdLoop worker unavailable:', error.shortMessage || error.message);
+      }
+    }).catch(error => console.warn('[devert-loop] Scheduler journal unavailable:', error.message));
+  }
   const creatorStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-creator-profiles.json', tags: { app: 'decentbusking', kind: 'creator-profiles', schema: '1' },
@@ -738,6 +753,7 @@ async function main() {
     }), paymentLedger: { endpoint: '/api/payroll/ledger', snapshotUri: paymentLedger.getState().snapshotUri,
       lastCheckedAt: paymentLedger.getState().lastCheckedAt, ready: paymentLedgerReady } }),
     getDevertState: readDevertState,
+    getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null },
     getRadioHistory: async ({ weeks, wallet, includeAllTime, calendar }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime, calendar }),
     getWeeklyPayflow: ({ wallet }) => payflow.getState({ wallet }),
     getPaymentLedger: () => ({ ...paymentLedger.getState(), ready: paymentLedgerReady,
@@ -912,6 +928,10 @@ async function main() {
   client.on(Events.MessageCreate, async (message) => {
     // Ignore bots and messages outside the configured channel
     if (message.author.bot) return;
+    if (process.env.DVERT_LOOP_CHANNEL_ID && message.channelId === process.env.DVERT_LOOP_CHANNEL_ID) {
+      await handleDevertLoopSubmission(message, config, creatorProfiles);
+      return;
+    }
     if (message.channelId !== config.jukeboxChannelId) return;
 
     const audioAttachments = [...message.attachments.values()].filter(isAudioAttachment);
@@ -1273,6 +1293,63 @@ async function handleJukeboxCommand(interaction, config) {
 }
 
 // ── Per-attachment handler ────────────────────────────────────────────────────
+
+async function handleDevertLoopSubmission(message, config, profiles) {
+  const linked = profiles?.getByDiscordId(message.author.id);
+  if (!linked) {
+    await message.reply('Link this Discord account to your creator wallet in the DVert panel before submitting an ad.').catch(() => {});
+    return;
+  }
+
+  let title = '';
+  let ipfsCid = '';
+  let mediaType = '';
+  let filename = '';
+  const attachment = [...message.attachments.values()].find(isAudioAttachment);
+  if (attachment) {
+    title = getAttachmentTitle(attachment);
+    filename = attachment.name || 'ad.mp4';
+    mediaType = mediaTypeFor(filename, attachment.contentType);
+    if (!isDiscordAttachmentWithinLimit(attachment)) {
+      await message.reply(`This attachment is ${(attachment.size / 1024 / 1024).toFixed(1)} MB. Upload it in the DVert panel, then post !devert-ad ${title} | ipfs://CID | ${mediaType}.`).catch(() => {});
+      return;
+    }
+    try {
+      const response = await fetch(attachment.url, { signal: AbortSignal.timeout(30_000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status} downloading attachment`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      const uri = await uploadToIPFS(bytes, filename, mediaType || 'audio/mpeg', {
+        provider: config.ipfsUploadProvider, pinataJwt: config.pinataJwt, pinataApiUrl: config.pinataApiUrl,
+        ipfsApiUrl: config.ipfsApiUrl,
+      });
+      ipfsCid = normalizeMediaCid(uri);
+    } catch (error) {
+      await message.reply(`Ad upload failed: ${error.message}`).catch(() => {});
+      return;
+    }
+  } else {
+    const match = message.content.match(/^!devert-ad\s+([^|]{1,120})\s*\|\s*(ipfs:\/\/\S+)\s*\|\s*(audio\/[a-z0-9.+-]+|video\/mp4)\s*$/i);
+    if (!match) {
+      await message.reply('Submit `!devert-ad Title | ipfs://CID | video/mp4` after uploading large media through the DVert panel.').catch(() => {});
+      return;
+    }
+    title = match[1].trim();
+    mediaType = match[3].toLowerCase();
+    if (!Object.values(MEDIA_TYPES).includes(mediaType)) {
+      await message.reply('Use a supported audio media type or `video/mp4`.').catch(() => {});
+      return;
+    }
+    filename = `${title.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 80) || 'devert-ad'}.${mediaType === 'video/mp4' ? 'mp4' : 'audio'}`;
+    try { ipfsCid = normalizeMediaCid(match[2]); }
+    catch (error) { await message.reply(error.message).catch(() => {}); return; }
+  }
+
+  const address = linked.address;
+  const track = submitMediaTrack({ address, title, artist: linked.displayName || message.author.globalName || message.author.username,
+    ipfsCid, mediaType, filename, recipient: address, isDevertAd: true });
+  await waitForRemotePersistence();
+  await message.reply(`Ad media added to the owner NFT mint queue: **${track.title}** · ${track.trackId} · ipfs://${track.ipfsCid}`).catch(() => {});
+}
 
 /**
  * Download an audio attachment, pin it to IPFS, and reply with the mint embed.

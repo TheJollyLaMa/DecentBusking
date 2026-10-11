@@ -49,6 +49,18 @@ export function createCreatorProfiles({ restore, save, now = () => Date.now() })
       if (!/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('Invalid creator wallet');
       return structuredClone({ address: address.toLowerCase(), ...profiles[address.toLowerCase()] });
     },
+    getByDiscordId(discordId) {
+      requireReady();
+      if (!/^\d{16,22}$/.test(discordId || '')) return null;
+      const match = Object.entries(profiles).find(([, profile]) => profile.discord?.id === discordId);
+      return match ? structuredClone({ address: match[0], ...match[1] }) : null;
+    },
+    getByDiscordId(discordId) {
+      requireReady();
+      if (!/^\d{16,22}$/.test(discordId || '')) return null;
+      const match = Object.entries(profiles).find(([, profile]) => profile.discord?.id === discordId);
+      return match ? structuredClone({ address: match[0], ...match[1] }) : null;
+    },
     update: (body, origin) => serialize(async () => {
       const { address, profile } = authorize(body, origin, 'save');
       await persist({ ...profiles, [address]: { ...profiles[address], ...profile, updatedAt: new Date(now()).toISOString() } });

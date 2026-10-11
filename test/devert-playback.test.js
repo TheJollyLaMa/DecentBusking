@@ -115,3 +115,31 @@ test('DeVert uses only the main-radio queue and advances by confirmed impression
   const next = await makeRuntime(afterOne);
   assert.equal((await next.nextMainRadioAd()).track.trackId, 'devert:low');
 });
+
+test('main-radio listener votes are durable and reorder only seated campaigns', async () => {
+  const campaigns = [campaign('1', { offerUnits: '8000000' }), campaign('2', { offerUnits: '7000000' }),
+    campaign('3', { offerUnits: '5000000' })];
+  const fixture = harness({ campaigns, slots: 2 });
+  const runtime = await makeRuntime(fixture);
+  const voteA = { campaignId: '1', radioPlayId: 'devert:1:play-1', voterId: 'listener-browser-0001', vote: -1 };
+  const voteB = { campaignId: '2', radioPlayId: 'devert:2:play-1', voterId: 'listener-browser-0002', vote: 1 };
+  assert.equal((await runtime.recordMainRadioAdVote(voteA)).duplicate, false);
+  assert.equal((await runtime.recordMainRadioAdVote(voteB)).duplicate, false);
+  assert.equal((await runtime.recordMainRadioAdVote(voteB)).duplicate, true);
+  assert.equal(fixture.state.adVotes.length, 2);
+  assert.equal((await runtime.nextMainRadioAd()).track.trackId, 'devert:2');
+  assert.ok(fixture.state.adVotes.every(entry => entry.campaignId !== '3'));
+});
+
+test('AdLoop queue includes active unseated campaigns and ranks DJuke boosts before prior loop plays', async () => {
+  const campaigns = [campaign('low', { offerUnits: '5000000', devertPlays: 0 }),
+    campaign('boosted', { offerUnits: '5000000', djukeBoosts: 1, devertPlays: 4 }),
+    campaign('expired', { expiresAt: new Date(NOW - 1).toISOString() })];
+  const fixture = harness({ campaigns, slots: 0, impressions: 0 });
+  const runtime = await makeRuntime(fixture);
+  const first = await runtime.nextDevertLoopAd();
+  assert.equal(first.track.trackId, 'devert:boosted');
+  assert.equal(first.mainRadio, false);
+  const second = await runtime.nextDevertLoopAd({ excludeCampaignIds: ['boosted'] });
+  assert.equal(second.track.trackId, 'devert:low');
+});

@@ -34,6 +34,34 @@ test('browser uploader signs a request then uploads through the returned Pinata 
   assert.equal(calls[1].options.body.get('network'), 'public');
 });
 
+test('browser batch uploader requests all metadata URLs with one owner signature', async () => {
+  const { createBrowserIpfsUploader, buildUploadBatchAuthorizationMessage } = await import(moduleUrl);
+  const calls = [];
+  const signed = [];
+  const upload = createBrowserIpfsUploader({ provider: 'pinata', serviceUrl: 'https://worker.example',
+    signer: { signMessage: async message => { signed.push(message); return '0xbatch-signed'; } },
+    address: '0x1111111111111111111111111111111111111111', origin: 'https://busking.example',
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      if (url.endsWith('/api/ipfs/upload-batch-urls')) return new Response(JSON.stringify({ urls: [
+        'https://uploads.pinata.example/first', 'https://uploads.pinata.example/second',
+      ] }));
+      return new Response(JSON.stringify({ data: { cid: new URL(url).pathname.endsWith('first') ? 'bafyfirst' : 'bafysecond' } }));
+    } });
+  const files = [new File(['{}'], 'first.json', { type: 'application/json' }),
+    new File(['{}'], 'second.json', { type: 'application/json' })];
+
+  assert.deepEqual(await upload.batch(files), ['ipfs://bafyfirst', 'ipfs://bafysecond']);
+  assert.equal(signed.length, 1);
+  const authorization = JSON.parse(calls[0].options.body);
+  assert.equal(calls[0].url, 'https://worker.example/api/ipfs/upload-batch-urls');
+  assert.equal(authorization.signature, '0xbatch-signed');
+  assert.deepEqual(authorization.files.map(({ name, size, type }) => ({ name, size, type })),
+    files.map(file => ({ name: file.name, size: file.size, type: file.type })));
+  assert.equal(signed[0], buildUploadBatchAuthorizationMessage(authorization));
+  assert.equal(calls.length, 3);
+});
+
 test('browser uploader supports local Kubo without a wallet signer', async () => {
   const { createBrowserIpfsUploader } = await import(moduleUrl);
   let endpoint;

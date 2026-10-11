@@ -77,6 +77,19 @@ test('DeVert campaign snapshot is public read-only data and stays unavailable un
   });
 });
 
+test('AdLoop state endpoint exposes live now-playing state without requiring a main-radio campaign reader', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const owner = Wallet.createRandom().address;
+  const state = { ready: true, nowPlaying: { radioPlayId: 'devert-loop:7:1', campaignId: '7', audible: true } };
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: owner, getDevertLoopState: () => state });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/devert/loop`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.deepEqual(await response.json(), state);
+  });
+});
+
 test('public radio schedule is readable and schedule edits require an origin-bound owner signature', async () => {
   const { buildRadioScheduleAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const { buildRadioScheduleAuthorizationMessage: buildBrowserAuthorizationMessage } = await import('../js/radio-schedule-ui.mjs');
@@ -214,6 +227,42 @@ test('worker issues a Pinata URL only for a fresh owner signature', async () => 
   });
 });
 
+test('worker grants one owner signature a one-use set of metadata upload URLs', async () => {
+  const { buildUploadBatchAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+  const owner = Wallet.createRandom();
+  const origin = 'https://busking.example';
+  const issuedAt = '2026-10-01T12:00:00.000Z';
+  const files = [
+    { name: 'first.json', size: 12, type: 'application/json' },
+    { name: 'second.json', size: 18, type: 'application/json' },
+  ];
+  const authorization = { address: owner.address, origin, issuedAt, files };
+  const signature = await owner.signMessage(buildUploadBatchAuthorizationMessage(authorization));
+  const pinataFiles = [];
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address,
+    pinataJwt: 'server-secret', now: () => Date.parse(issuedAt),
+    fetchImpl: async (_url, options) => {
+      pinataFiles.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ data: `https://uploads.pinata.example/${pinataFiles.length}` }));
+    } });
+
+  await withServer(handler, async baseUrl => {
+    const request = body => fetch(`${baseUrl}/api/ipfs/upload-batch-urls`, { method: 'POST',
+      headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const response = await request({ ...authorization, signature });
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).urls, [
+      'https://uploads.pinata.example/1', 'https://uploads.pinata.example/2',
+    ]);
+    assert.equal(pinataFiles.length, 2);
+    assert.deepEqual(pinataFiles.map(file => file.filename), ['first.json', 'second.json']);
+    assert.equal(pinataFiles.every(file => file.allow_mime_types[0] === 'application/json'), true);
+    assert.equal((await request({ ...authorization, signature })).status, 400);
+    const changed = { ...authorization, files: [{ ...files[0], size: 13 }, files[1]], signature };
+    assert.equal((await request(changed)).status, 400);
+  });
+});
+
 test('worker rejects a valid signature from a non-owner wallet', async () => {
   const { buildUploadAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom();
@@ -275,12 +324,17 @@ test('artist MP4 uploads use separate authorization and cannot access owner uplo
   const artist = Wallet.createRandom();
   const issuedAt = '2026-10-05T12:00:00Z';
   const origin = 'https://busking.example';
-  const payload = { address: artist.address, origin, issuedAt, name: 'performance.mp4',
-    type: 'video/mp4', size: 12 * 1024 * 1024, purpose: 'submission' };
+  const payload = { address: artist.address, origin, issuedAt, name: 'DecentAdvert_01.mp4',
+    type: 'video/mp4', size: 111_027_138, purpose: 'submission' };
   const signature = await artist.signMessage(buildUploadAuthorizationMessage(payload));
+  const oversized = { ...payload, size: 251 * 1024 * 1024 };
+  const oversizedSignature = await artist.signMessage(buildUploadAuthorizationMessage(oversized));
+  let pinataCalls = 0;
   const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: Wallet.createRandom().address,
     now: () => Date.parse(issuedAt), pinataJwt: 'secret',
     fetchImpl: async (_url, options) => {
+      pinataCalls++;
+      assert.equal(JSON.parse(options.body).max_file_size, payload.size + 64 * 1024);
       assert.deepEqual(JSON.parse(options.body).allow_mime_types, ['video/mp4']);
       return new Response(JSON.stringify({ data: 'https://uploads.example/signed' }));
     } });
@@ -291,7 +345,8 @@ test('artist MP4 uploads use separate authorization and cannot access owner uplo
     assert.equal((await post('upload-url', { ...payload, signature })).status, 400);
     assert.equal((await post('submission-upload-url', { ...payload, signature })).status, 200);
     assert.equal((await post('submission-upload-url', { ...payload, signature })).status, 400);
-    assert.equal((await post('submission-upload-url', { ...payload, signature, size: 51 * 1024 * 1024 })).status, 400);
+    assert.equal((await post('submission-upload-url', { ...oversized, signature: oversizedSignature })).status, 400);
+    assert.equal(pinataCalls, 1);
   });
 });
 
@@ -308,7 +363,7 @@ test('signed CID submissions validate the artist, media, expiry, origin, and rep
   const payload = { address: artist.address, origin, issuedAt, title: 'Performance', artist: 'Artist',
     ipfsCid: 'bafybeifynaihnl2t37s3nfez3k5vbwwziaqyvayadqwt4bou3yv6jstxye',
     mediaType: 'video/mp4', filename: 'performance.mp4', recipient: artist.address,
-    artworkCid: '', tipWallet: artist.address, parentTokenId: 7 };
+    artworkCid: '', tipWallet: artist.address, parentTokenId: 7, isDevertAd: true };
   assert.equal(browser.buildSubmissionAuthorizationMessage(payload), buildSubmissionAuthorizationMessage(payload));
   const submissions = [];
   const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: other.address,
@@ -326,6 +381,7 @@ test('signed CID submissions validate the artist, media, expiry, origin, and rep
     assert.deepEqual(await accepted.json(), { trackId: 'queued-video', status: 'requested' });
     assert.equal(submissions[0].mediaType, 'video/mp4');
     assert.equal(submissions[0].parentTokenId, 7);
+    assert.equal(submissions[0].isDevertAd, true);
     assert.equal((await post(payload)).status, 400);
     for (const invalid of [
       { ...payload, recipient: Wallet.createRandom().address },

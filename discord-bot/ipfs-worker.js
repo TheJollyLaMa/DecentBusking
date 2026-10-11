@@ -2,7 +2,7 @@ import { Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
 
-const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 const SIGNED_UPLOAD_OVERHEAD_BYTES = 64 * 1024;
 const MAX_SIGNATURE_AGE_MS = 5 * 60 * 1000;
 const MINT_EVENT_ABI = [
@@ -18,6 +18,16 @@ export function buildUploadAuthorizationMessage({ address, origin, name, size, t
     `Size: ${size}`,
     `Type: ${type}`,
     `Issued At: ${issuedAt}`,
+  ].join('\n');
+}
+
+export function buildUploadBatchAuthorizationMessage({ address, origin, issuedAt, files }) {
+  return [
+    'DecentBusking IPFS metadata batch upload authorization',
+    `Wallet: ${address.toLowerCase()}`,
+    `Origin: ${origin}`,
+    `Issued At: ${issuedAt}`,
+    `Files: ${JSON.stringify(files)}`,
   ].join('\n');
 }
 
@@ -140,6 +150,7 @@ export function createWorkerRequestHandler({
   getDjukeState,
   getDjukeGasQuote,
   getDevertState,
+  getDevertLoopState,
   getPinnerManifest,
   checkpointMirror,
   getRadioHistory,
@@ -278,6 +289,11 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, await getDevertState(), '*');
         return;
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/devert/loop') {
+        if (!getDevertLoopState) { sendJson(response, 200, { ready: false, nowPlaying: null }, '*'); return; }
+        sendJson(response, 200, await getDevertLoopState(), '*');
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/pinners/manifest') {
         if (!getPinnerManifest) { sendJson(response, 404, { error: 'Pin manifest is not configured' }, '*'); return; }
         sendJson(response, 200, await getPinnerManifest(), '*');
@@ -371,7 +387,7 @@ export function createWorkerRequestHandler({
         if (!onMediaSubmission) throw new Error('Media submissions are not configured');
         const body = await readJson(request);
         const { address, signature, issuedAt, title, artist, mediaType, filename, recipient,
-          artworkCid = '', tipWallet = '', parentTokenId = 0 } = body;
+          artworkCid = '', tipWallet = '', parentTokenId = 0, isDevertAd = false } = body;
         if (!/^0x[0-9a-fA-F]{40}$/.test(address || '') || !signature ||
             !Number.isFinite(Date.parse(issuedAt)) || Math.abs(now() - Date.parse(issuedAt)) > MAX_SIGNATURE_AGE_MS) {
           throw new Error('Invalid or expired submission authorization');
@@ -385,7 +401,7 @@ export function createWorkerRequestHandler({
           throw new Error('Artists must submit to their own connected wallet');
         }
         if ((tipWallet && !/^0x[0-9a-fA-F]{40}$/.test(tipWallet)) ||
-            !Number.isSafeInteger(parentTokenId) || parentTokenId < 0) throw new Error('Invalid tip wallet or parent token');
+          !Number.isSafeInteger(parentTokenId) || parentTokenId < 0 || typeof isDevertAd !== 'boolean') throw new Error('Invalid tip wallet or parent token');
         const ipfsCid = normalizeMediaCid(body.ipfsCid);
         if (artworkCid) normalizeMediaCid(artworkCid);
         const recovered = verifyMessage(buildSubmissionAuthorizationMessage({ ...body, origin }), signature).toLowerCase();
@@ -395,7 +411,7 @@ export function createWorkerRequestHandler({
         consumedSignatures.set(signature, now() + MAX_SIGNATURE_AGE_MS);
         try {
           const track = await onMediaSubmission({ address, title: title.trim(), artist: artist.trim(), ipfsCid,
-            mediaType, filename, recipient, artworkCid: artworkCid ? normalizeMediaCid(artworkCid) : '', tipWallet, parentTokenId });
+            mediaType, filename, recipient, artworkCid: artworkCid ? normalizeMediaCid(artworkCid) : '', tipWallet, parentTokenId, isDevertAd });
           sendJson(response, 200, { trackId: track.trackId, status: track.mintStatus }, corsOrigin);
         } catch (error) {
           consumedSignatures.delete(signature);
@@ -418,13 +434,38 @@ export function createWorkerRequestHandler({
         return;
       }
       const artistUpload = requestUrl.pathname === '/api/ipfs/submission-upload-url';
-      if (request.method !== 'POST' || (!artistUpload && requestUrl.pathname !== '/api/ipfs/upload-url')) {
+      const batchUpload = requestUrl.pathname === '/api/ipfs/upload-batch-urls';
+      if (request.method !== 'POST' || (!artistUpload && !batchUpload && requestUrl.pathname !== '/api/ipfs/upload-url')) {
         sendJson(response, 404, { error: 'Not found' }, corsOrigin);
         return;
       }
       if (!corsOrigin) throw new Error('Origin is not allowed');
 
       const body = await readJson(request);
+      if (batchUpload) {
+        const { address, signature, origin: signedOrigin, issuedAt, files } = body;
+        if (!/^0x[0-9a-fA-F]{40}$/.test(address || '') || !signature || signedOrigin !== origin ||
+            !Array.isArray(files) || files.length < 1 || files.length > 20) {
+          throw new Error('Incomplete metadata batch authorization');
+        }
+        if (files.some(file => !file || typeof file.name !== 'string' || !file.name || file.name.length > 160 ||
+            !Number.isInteger(file.size) || file.size < 1 || file.size > MAX_UPLOAD_BYTES || file.type !== 'application/json')) {
+          throw new Error('Metadata batch must contain valid JSON files no larger than 250 MB');
+        }
+        const issuedAtMs = Date.parse(issuedAt);
+        if (!Number.isFinite(issuedAtMs) || Math.abs(now() - issuedAtMs) > MAX_SIGNATURE_AGE_MS) {
+          throw new Error('Upload authorization has expired');
+        }
+        const recovered = verifyMessage(buildUploadBatchAuthorizationMessage({ address, origin: signedOrigin, issuedAt, files }), signature).toLowerCase();
+        if (recovered !== expectedOwner) throw new Error('Upload authorization is not from the mint owner');
+        if (hasConsumedSignature(signature)) throw new Error('Upload authorization has already been used');
+        consumedSignatures.set(signature, now() + MAX_SIGNATURE_AGE_MS);
+        const urls = await Promise.all(files.map(file => requestPinataSignedUrl({
+          pinataJwt, pinataSignUrl, ...file, fetchImpl,
+        })));
+        sendJson(response, 200, { urls }, corsOrigin);
+        return;
+      }
       const { address, signature, name, size, type, issuedAt } = body;
       if (!/^0x[0-9a-fA-F]{40}$/.test(address || '') || !signature || typeof name !== 'string' || !name || name.length > 160 || typeof type !== 'string' || !issuedAt) throw new Error('Incomplete upload authorization');
       if (!Number.isInteger(size) || size < 1 || size > MAX_UPLOAD_BYTES) throw new Error('Invalid upload size');

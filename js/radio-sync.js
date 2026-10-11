@@ -171,8 +171,7 @@ function _restoreVotes() {
 function _renderVoting() {
   if (!_voteButtons.length) return;
   const playId = _radio?.playId || null;
-  const active = _mode === 'radio' && _devertListenMode === 'radio' && _radioReachable &&
-    playId && _radio?.ipfsCid && !_radio?.isDevert;
+  const active = _mode === 'radio' && _devertListenMode === 'radio' && _radioReachable && playId && _radio?.ipfsCid;
   const choice = _votedPlays.get(playId);
   if (_votingPlayId !== playId) {
     _votingPlayId = playId;

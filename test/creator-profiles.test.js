@@ -23,6 +23,10 @@ test('creator profiles require wallet signatures and verified Discord confirmati
   assert.equal(store.get(wallet.address).discord, undefined);
   await store.confirmDiscord(link.code, { id: '735090955560157185', username: 'creator', displayAvatarURL: () => 'https://cdn.discordapp.com/avatar.png' });
   assert.equal(store.get(wallet.address).discord.id, '735090955560157185');
+  assert.equal(store.getByDiscordId('735090955560157185').address, wallet.address.toLowerCase());
+  assert.equal(store.getByDiscordId('123'), null);
+  assert.equal(store.getByDiscordId('735090955560157185').address, wallet.address.toLowerCase());
+  assert.equal(store.getByDiscordId('123'), null);
   await assert.rejects(store.confirmDiscord(link.code, {}), /expired or invalid/);
   const reloaded = createCreatorProfiles({ restore: async () => snapshot, save: async () => 'ipfs://profile' });
   await reloaded.initialize();

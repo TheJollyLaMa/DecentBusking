@@ -47,7 +47,8 @@ test('Admin clearly exposes multi-select mint batches of up to 20 while marking 
   assert.match(html, /id="admin-mint-select-all"[^>]*> Select all/);
   assert.match(html, />Mint selected in batches</);
   assert.match(html, /up to 20 in one Base transaction/);
-  assert.match(admin, />Mint one<\/button>/);
+  assert.match(admin, />Mint<\/button>/);
+  assert.match(admin, /Queued artwork will be used; requests without artwork will mint without an image/);
   assert.match(config, /nftBatchMintEnabled:\s*true/);
 });
 
@@ -67,6 +68,13 @@ test('artwork selection keeps profile default, permits a 10 MB replacement, and 
     fetchImpl: async url => { assert.equal(new URL(url).searchParams.get('cid'), cid); return new Response(JSON.stringify({ cid })); } }), `ipfs://${cid}`);
   assert.equal(uploads, 1);
   await assert.rejects(resolveMintArtwork({ upload }), /No default artwork/);
+});
+
+test('batch minting reuses queued artwork and does not require artwork when none is queued', async () => {
+  const { resolveBatchMintArtwork } = await import(moduleUrl);
+  assert.equal(resolveBatchMintArtwork('bafy-image'), 'ipfs://bafy-image');
+  assert.equal(resolveBatchMintArtwork('ipfs://bafy-image'), 'ipfs://bafy-image');
+  assert.equal(resolveBatchMintArtwork(), null);
 });
 
 test('signs and fetches the owner mint queue', async () => {

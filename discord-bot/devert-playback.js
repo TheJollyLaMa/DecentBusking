@@ -8,13 +8,14 @@ const MAX_SAVED_IDS = 2000;
 const MIN_AUDIBLE_MS = 30_000;
 
 function emptyJournal() {
-  return { schemaVersion: SCHEMA_VERSION, musicWeekId: null, pendingMusicPlayIds: [], seenMusicPlayIds: [], impressions: [] };
+  return { schemaVersion: SCHEMA_VERSION, musicWeekId: null, pendingMusicPlayIds: [], seenMusicPlayIds: [], impressions: [], adVotes: [] };
 }
 
 function validateJournal(value) {
   if (!value || value.schemaVersion !== SCHEMA_VERSION ||
     value.musicWeekId !== null && (!Number.isSafeInteger(value.musicWeekId) || value.musicWeekId < 0) ||
-    !Array.isArray(value.pendingMusicPlayIds) || !Array.isArray(value.seenMusicPlayIds) || !Array.isArray(value.impressions)) {
+    !Array.isArray(value.pendingMusicPlayIds) || !Array.isArray(value.seenMusicPlayIds) || !Array.isArray(value.impressions) ||
+    value.adVotes !== undefined && !Array.isArray(value.adVotes)) {
     throw new Error('Invalid DeVert playback journal');
   }
   const impressionIds = new Set();
@@ -29,7 +30,17 @@ function validateJournal(value) {
     value.seenMusicPlayIds.some(playId => typeof playId !== 'string' || !/^0x[0-9a-f]{64}$/i.test(playId))) {
     throw new Error('Invalid DeVert music-play journal entry');
   }
-  return structuredClone(value);
+  const adVotes = value.adVotes || [];
+  const voteKeys = new Set();
+  for (const entry of adVotes) {
+    if (!entry || !/^\d+$/.test(String(entry.campaignId)) || typeof entry.radioPlayId !== 'string' || !entry.radioPlayId ||
+      typeof entry.voterId !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(entry.voterId) ||
+      entry.vote !== 1 && entry.vote !== -1) throw new Error('Invalid DeVert radio ad vote');
+    const key = `${entry.radioPlayId}:${entry.voterId}`;
+    if (voteKeys.has(key)) throw new Error('Duplicate DeVert radio ad vote');
+    voteKeys.add(key);
+  }
+  return structuredClone({ ...value, adVotes });
 }
 
 export function createDevertPlaybackRuntime({ contract, provider = contract?.runner?.provider, restore, save,
@@ -138,8 +149,43 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       const plan = planDevertQueues({ campaigns: snapshot.campaigns,
         completedSongPlays: snapshot.market.slots * MUSIC_PLAYS_PER_MAIN_AD, now: at });
       const excluded = new Set(excludeCampaignIds.map(String));
-      const campaign = plan.mainRadio.find(item => !excluded.has(item.campaignId));
+      const voteScores = new Map();
+      for (const entry of journal.adVotes) {
+        voteScores.set(entry.campaignId, (voteScores.get(entry.campaignId) || 0) + entry.vote);
+      }
+      const campaign = plan.mainRadio.filter(item => !excluded.has(item.campaignId))
+        .sort((first, second) => (voteScores.get(second.campaignId) || 0) - (voteScores.get(first.campaignId) || 0))[0];
       return campaign ? { campaignId: campaign.campaignId, mainRadio: true, track: campaignTrack(campaign, 'main-radio') } : null;
+    },
+    recordMainRadioAdVote: ({ campaignId, radioPlayId, voterId, vote }) => run(async () => {
+      requireReady();
+      if (!/^\d+$/.test(String(campaignId)) || typeof radioPlayId !== 'string' || !radioPlayId ||
+          typeof voterId !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(voterId) || (vote !== 1 && vote !== -1)) {
+        throw new Error('Invalid DeVert radio ad vote');
+      }
+      const existing = journal.adVotes.find(entry => entry.radioPlayId === radioPlayId && entry.voterId === voterId);
+      if (existing) return { campaignId: existing.campaignId, radioPlayId, vote: existing.vote, duplicate: true };
+      const entry = { campaignId: String(campaignId), radioPlayId, voterId, vote, recordedAt: new Date(now()).toISOString() };
+      await commit({ ...journal, adVotes: [...journal.adVotes, entry].slice(-MAX_SAVED_IDS) });
+      return { campaignId: entry.campaignId, radioPlayId, vote, duplicate: false };
+    }),
+    async nextDevertLoopAd({ excludeCampaignIds = [] } = {}) {
+      requireReady();
+      await retryPendingImpressions();
+      const snapshot = await readCampaigns();
+      if (snapshot.chainId !== 8453 || snapshot.paused || !Array.isArray(snapshot.campaigns)) return null;
+      const nowMs = Date.parse(snapshot.snapshotAt);
+      const excluded = new Set(excludeCampaignIds.map(String));
+      const campaign = snapshot.campaigns.filter(item => {
+        const start = Date.parse(item.startedAt);
+        const end = Date.parse(item.expiresAt);
+        return start <= nowMs && nowMs < end && !excluded.has(String(item.campaignId));
+      }).sort((first, second) => Number(second.djukeBoosts || 0) - Number(first.djukeBoosts || 0) ||
+        Number(first.devertPlays || 0) - Number(second.devertPlays || 0) ||
+        (BigInt(second.offerUnits) > BigInt(first.offerUnits) ? 1 : BigInt(second.offerUnits) < BigInt(first.offerUnits) ? -1 :
+          String(first.campaignId).localeCompare(String(second.campaignId))));
+      return campaign[0] ? { campaignId: String(campaign[0].campaignId), mainRadio: false,
+        track: campaignTrack(campaign[0], 'devert-loop') } : null;
     },
     recordCampaignImpression: ({ campaignId, radioPlayId, mainRadio, audibleMs }) => run(async () => {
       requireReady();

@@ -105,6 +105,11 @@ export async function resolveMintArtwork({ file, cid = '', defaultCid = '', serv
   if (!defaultCid) throw new Error('No default artwork is available; choose a file or artwork CID before minting');
   return `ipfs://${defaultCid}`;
 }
+
+export function resolveBatchMintArtwork(defaultCid = '') {
+  if (!defaultCid) return null;
+  return defaultCid.startsWith('ipfs://') ? defaultCid : `ipfs://${defaultCid}`;
+}
 const AUTHORIZATION_REUSE_MS = 4 * 60 * 1000;
 
 export function clearMintQueueAuthorization() {

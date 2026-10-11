@@ -159,13 +159,13 @@ export function addTrack(track) {
   return true;
 }
 
-export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId }) {
+export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId, isDevertAd = false }) {
   const trackId = `site:${address.toLowerCase()}:${ipfsCid}`;
   const existing = _playlist.find(track => track.trackId === trackId);
   if (existing) return existing;
   addTrack({ attachmentId: trackId, source: 'site', uploaderId: `wallet:${address.toLowerCase()}`,
     uploader: artist, title, ipfsCid, mediaType, filename, pinStatus: 'pinned', artworkCid,
-    tipWallet: tipWallet || recipient, parentTokenId,
+    tipWallet: tipWallet || recipient, parentTokenId, isDevertAd,
     mintStatus: 'requested', mintRecipient: recipient, mintRequestedAt: new Date().toISOString() });
   return _playlist.find(track => track.trackId === trackId);
 }
@@ -561,7 +561,7 @@ export function getWeight(track) {
  * @returns {TrackEntry[]}
  */
 export function getWeightedShuffledPlaylist(now = Date.now()) {
-  const eligible = _playlist.filter(track => track.source !== 'site' || track.mintStatus === 'minted');
+  const eligible = _playlist.filter(track => !track.isDevertAd && (track.source !== 'site' || track.mintStatus === 'minted'));
   if (eligible.length === 0) return [];
 
   // Build mutable candidate array with weights
@@ -600,6 +600,7 @@ export function getWeightedShuffledPlaylist(now = Date.now()) {
  */
 export function getTopTracks(n = 10) {
   return [..._playlist]
+    .filter(track => !track.isDevertAd)
     .sort((a, b) => getWeight(b) - getWeight(a))
     .slice(0, n);
 }
