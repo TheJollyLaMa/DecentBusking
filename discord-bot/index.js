@@ -43,7 +43,7 @@ import { backfillIpfsPins } from './ipfs-backfill.js';
 import { syncMintedTracksFromChain, createVerifiedMintQueueReader } from './mint-sync.js';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
-import { createDevertPlaybackRuntime } from './devert-playback.js';
+import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
 import { startDevertLoopWorker } from './devert-loop.js';
 import { createPinataStateStore } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
@@ -452,24 +452,28 @@ async function main() {
       deserialize: value => value, retainSnapshots: Infinity });
     _devertPlaybackRuntime = createDevertPlaybackRuntime({ contract, provider: scheduler.provider,
       restore: journalStore.restore, save: journalStore.save, readCampaigns: readDevertState });
-    _devertPlaybackInitialization = _devertPlaybackRuntime.initialize()
-      .then(() => console.log(`[devert] Durable scheduler journal ready; scheduler ${scheduler.address}.`))
-      .catch(error => { _devertPlaybackRuntime = null; console.warn('[devert] Durable scheduler unavailable:', error.message); });
+    _devertPlaybackInitialization = initializeDevertPlaybackWithRetry({
+      initialize: () => _devertPlaybackRuntime.initialize(),
+    }).then(() => console.log(`[devert] Durable scheduler journal ready; scheduler ${scheduler.address}.`));
   } else if (process.env.DEVERT_CONTRACT_ADDRESS) {
     console.warn('[devert] Campaign reads are configured, but audio scheduling is disabled until a DeVert/DJuke worker key and PINATA_JWT are available.');
   }
-    if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt && process.env.DVERT_LOOP_DISCORD_TOKEN &&
-      process.env.VERT_LOOP_CHANNEL_ID && process.env.VERTLOOP_VOICE_CHANNEL_ID) {
-    _devertPlaybackInitialization?.then(async () => {
-      if (!_devertPlaybackRuntime) return;
-      try {
-        _devertLoopWorker = await startDevertLoopWorker({ token: process.env.DVERT_LOOP_DISCORD_TOKEN,
-          voiceChannelId: process.env.VERTLOOP_VOICE_CHANNEL_ID, textChannelId: process.env.VERT_LOOP_CHANNEL_ID,
-          playback: _devertPlaybackRuntime });
-      } catch (error) {
-        console.warn('[devert-loop] AdLoop worker unavailable:', error.shortMessage || error.message);
-      }
-    }).catch(error => console.warn('[devert-loop] Scheduler journal unavailable:', error.message));
+  if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt) {
+    const missingDevertLoopSettings = ['DVERT_LOOP_DISCORD_TOKEN', 'VERT_LOOP_CHANNEL_ID', 'VERTLOOP_VOICE_CHANNEL_ID']
+      .filter(name => !process.env[name]);
+    if (missingDevertLoopSettings.length) {
+      console.warn(`[devert-loop] Not started; missing environment variables: ${missingDevertLoopSettings.join(', ')}`);
+    } else {
+      _devertPlaybackInitialization?.then(async () => {
+        try {
+          _devertLoopWorker = await startDevertLoopWorker({ token: process.env.DVERT_LOOP_DISCORD_TOKEN,
+            voiceChannelId: process.env.VERTLOOP_VOICE_CHANNEL_ID, textChannelId: process.env.VERT_LOOP_CHANNEL_ID,
+            playback: _devertPlaybackRuntime });
+        } catch (error) {
+          console.warn('[devert-loop] AdLoop worker unavailable:', error.shortMessage || error.message);
+        }
+      });
+    }
   }
   const creatorStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,

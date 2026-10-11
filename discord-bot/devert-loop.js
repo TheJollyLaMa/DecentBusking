@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { Client, Events, GatewayIntentBits } from 'discord.js';
+import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
 import { AudioPlayerStatus, createAudioPlayer, createAudioResource, entersState,
   joinVoiceChannel, StreamType, VoiceConnectionStatus } from '@discordjs/voice';
 import { resolveStreamableIpfsUrl } from './jukeloop.js';
@@ -105,7 +105,7 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
       scheduleNext(retryMs);
       return;
     }
-    textChannel?.send(`📢 **AdLoop:** ${ad.track.title}`).catch(() => {});
+    textChannel?.send({ content: `📢 **AdLoop:** ${ad.track.title}`, flags: MessageFlags.SuppressNotifications }).catch(() => {});
     log.log(`[devert-loop] Playing campaign ${ad.campaignId} in ${voiceChannel.name}.`);
   }
 

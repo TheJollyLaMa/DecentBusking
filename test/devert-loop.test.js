@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const { MessageFlags } = require('discord.js');
 
 test('AdLoop exposes the live play and records only completed audible non-main impressions', async () => {
   const { createDevertLoopController } = await import('../discord-bot/devert-loop.js');
@@ -8,6 +9,7 @@ test('AdLoop exposes the live play and records only completed audible non-main i
   const impressions = [];
   const timers = [];
   const ad = { campaignId: '17', track: { title: 'Advert', ipfsCid: 'bafy-ad', mediaType: 'video/mp4' } };
+  const announcements = [];
   let now = 10_000;
   player.play = () => {};
   const controller = createDevertLoopController({
@@ -17,6 +19,7 @@ test('AdLoop exposes the live play and records only completed audible non-main i
       recordCampaignImpression: async impression => impressions.push(impression),
     },
     voiceChannel: { name: 'AdLoop' },
+    textChannel: { send: message => { announcements.push(message); return Promise.resolve(); } },
     resolveAdUrl: async cid => `https://gateway.example/ipfs/${cid}`,
     createStream: () => ({ stdout: {}, kill() {} }),
     createResource: stream => stream,
@@ -27,6 +30,7 @@ test('AdLoop exposes the live play and records only completed audible non-main i
   });
 
   await controller.start();
+  assert.deepEqual(announcements, [{ content: '📢 **AdLoop:** Advert', flags: MessageFlags.SuppressNotifications }]);
   assert.equal(controller.getState().ready, true);
   assert.equal(controller.getState().nowPlaying.audible, false);
   assert.deepEqual(impressions, []);

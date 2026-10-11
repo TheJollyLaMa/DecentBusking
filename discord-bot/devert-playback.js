@@ -6,6 +6,22 @@ const MUSIC_PLAYS_PER_MAIN_AD = 10;
 const MUSIC_BATCH_SIZE = 10;
 const MAX_SAVED_IDS = 2000;
 const MIN_AUDIBLE_MS = 30_000;
+const INITIAL_RESTORE_RETRY_MS = 5_000;
+const MAX_RESTORE_RETRY_MS = 5 * 60_000;
+
+export async function initializeDevertPlaybackWithRetry({ initialize, wait = delay => new Promise(resolve => setTimeout(resolve, delay)), log = console }) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await initialize();
+    } catch (error) {
+      attempt++;
+      const delay = Math.min(MAX_RESTORE_RETRY_MS, INITIAL_RESTORE_RETRY_MS * 2 ** Math.min(attempt - 1, 16));
+      log.warn(`[devert] Durable scheduler restore attempt ${attempt} failed; retrying in ${Math.ceil(delay / 1000)}s: ${error.message}`);
+      await wait(delay);
+    }
+  }
+}
 
 function emptyJournal() {
   return { schemaVersion: SCHEMA_VERSION, musicWeekId: null, pendingMusicPlayIds: [], seenMusicPlayIds: [], impressions: [], adVotes: [] };

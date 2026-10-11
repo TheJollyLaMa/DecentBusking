@@ -12,6 +12,24 @@ function campaign(campaignId, overrides = {}) {
     weekId: WEEK_ID, offerUnits: '5000000', paidUnits: '5000000', djukeBoosts: 0, mainRadioPlays: 0, devertPlays: 0, ...overrides };
 }
 
+test('DeVert scheduler restore retries transient failures with capped exponential backoff', async () => {
+  const { initializeDevertPlaybackWithRetry } = await import('../discord-bot/devert-playback.js');
+  const delays = [];
+  let attempts = 0;
+  const result = await initializeDevertPlaybackWithRetry({
+    initialize: async () => {
+      attempts++;
+      if (attempts < 4) throw new Error('Pinata 429');
+      return 'ready';
+    },
+    wait: async delay => delays.push(delay),
+    log: { warn() {} },
+  });
+  assert.equal(result, 'ready');
+  assert.equal(attempts, 4);
+  assert.deepEqual(delays, [5_000, 10_000, 20_000]);
+});
+
 function harness({ campaigns = [], slots = 0, impressions = 0, failImpression = false, failMusic = false, save = async () => 'ipfs://journal' } = {}) {
   const recorded = new Set();
   const musicBatches = [];
