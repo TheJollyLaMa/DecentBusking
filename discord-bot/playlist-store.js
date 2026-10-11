@@ -289,7 +289,9 @@ export function queueUploaderMints(uploaderId, recipient, { artworkCid, now = Da
 /** Record a manually approved owner-wallet mint. */
 export function completeTrackMint(trackId, { tokenId, txHash, contractAddress }) {
   const track = _playlist.find((entry) => entry.trackId === trackId);
-  if (!track || track.mintStatus !== 'requested') return null;
+  if (!track) return null;
+  if (track.mintStatus === 'minted') return String(track.tokenId) === String(tokenId) ? track : null;
+  if (track.mintStatus !== 'requested') return null;
 
   track.mintStatus = 'minted';
   track.tokenId = String(tokenId);

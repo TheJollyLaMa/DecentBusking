@@ -39,6 +39,20 @@ test('extracts the audio CID from DecentNFT metadata', async () => {
     audioCidFromMetadata({ audioUrl: `ipfs://${root}/two.mp3` }));
 });
 
+test('mint completion is idempotent for the same reconciled token and rejects a conflicting token', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-mint-idempotent-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(tempDir, { recursive: true, force: true }); });
+  const url = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'playlist-store.js'));
+  url.searchParams.set('mint-idempotent', String(Date.now()));
+  const store = await import(url.href);
+  store.loadPlaylist([{ trackId: 'ad-track', mintStatus: 'requested', ipfsCid: 'bafy-ad', mintRecipient: '0x1111111111111111111111111111111111111111' }]);
+  const first = store.completeTrackMint('ad-track', { tokenId: '41', txHash: '0xfirst', contractAddress: '0x2222222222222222222222222222222222222222' });
+  assert.equal(first.tokenId, '41');
+  assert.equal(store.completeTrackMint('ad-track', { tokenId: '41', txHash: '0xfirst', contractAddress: '0x2222222222222222222222222222222222222222' }), first);
+  assert.equal(store.completeTrackMint('ad-track', { tokenId: '42', txHash: '0xother', contractAddress: '0x2222222222222222222222222222222222222222' }), null);
+});
+
 test('multi-collection reconciliation preserves contract identity and waits for every scan', async () => {
   const { readMintedCollections, syncMintedTracksFromChain } = await import(moduleUrl);
   const oldAddress = `0x${'1'.repeat(40)}`;

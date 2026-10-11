@@ -528,14 +528,22 @@ async function main() {
     ownerWallet: config.mintOwnerWallet,
   });
   const reconcileMint = async ({ trackId, tokenId, txHash }) => {
-    const pendingTrack = getPlaylist().find((track) => track.trackId === trackId && track.mintStatus === 'requested');
-    if (!pendingTrack) throw new Error('No pending mint request has that track ID');
+    const queuedTrack = getPlaylist().find((track) => track.trackId === trackId);
+    if (!queuedTrack) throw new Error('No mint queue track has that track ID');
     const verified = await verifyMintTransaction({ tokenId, txHash });
-    if (verified.recipient.toLowerCase() !== pendingTrack.mintRecipient.toLowerCase()) {
+    const requestedRecipient = queuedTrack.mintRecipient || config.mintOwnerWallet;
+    if (verified.recipient.toLowerCase() !== requestedRecipient.toLowerCase()) {
       throw new Error('Mint recipient does not match the requested artist wallet');
     }
+    if (queuedTrack.mintStatus === 'minted') {
+      const completedTrack = completeTrackMint(trackId, { tokenId, txHash, contractAddress: verified.contractAddress });
+      if (!completedTrack) throw new Error(`Track is already reconciled to token ${queuedTrack.tokenId}`);
+      console.log(`[mint-sync] Mint completion already reconciled for ${trackId} as token ${tokenId}.`);
+      return completedTrack;
+    }
+    if (queuedTrack.mintStatus !== 'requested') throw new Error(`Track is not pending mint approval (status: ${queuedTrack.mintStatus})`);
     await announceCompletedMint(client, config, {
-      ...pendingTrack,
+      ...queuedTrack,
       tokenId: String(tokenId),
       mintTxHash: txHash,
     });
