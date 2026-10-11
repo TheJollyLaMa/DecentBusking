@@ -540,6 +540,7 @@ function _setRadioScheduleStatus(message, isError = false) {
       audioUrl: `ipfs://${track.ipfsCid}`,
       ...(track.mediaType ? { mediaType: track.mediaType } : {}),
       ...(track.mediaType === 'video/mp4' ? { videoUrl: `ipfs://${track.ipfsCid}` } : {}),
+      ...(track.isDevertAd === true ? { isDevertAd: true } : {}),
       ...(image ? { image } : {}),
       artist: track.recipient,
       creator: track.recipient,
