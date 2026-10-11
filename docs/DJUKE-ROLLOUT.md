@@ -22,8 +22,9 @@ to avoid public provider rate limits. Album grouping is curated separately,
 not inferred from artist names.
 
 The Top 10, DJuke emoji mark, and DVert pullout tabs are restored in the UI.
-DVert is currently a profile entry point and an explicit undeployed status, not
-a live advertisement checkout or broadcast.
+DeVert is deployed and unpaused with campaign checkout configured on the public
+site. It schedules eligible campaigns into the existing JukeLoop rotation; there
+is no separate ad-only Discord station.
 
 The creator profile opens from DJuke or an NFT detail panel. Public profiles are
 readable without connecting; editing requires the same wallet's fresh signature.
@@ -70,22 +71,21 @@ mint requests target v0.3 in sequential batches of up to 20. The reviewed album
 plan is ready to import and queue after mirror readiness is confirmed; no album
 NFTs have been minted yet.
 
-Regular radio playback is active. The live-performance calendar and DeVert
-reader/UI changes in the local worktree are not deployed; the live
-`/api/radio/schedule` endpoint currently returns 404. The DeVert contract and
-campaign payments remain undeployed and off.
+Regular radio playback and the live-performance calendar are deployed. The
+`/api/radio/schedule` endpoint is live. DeVert is deployed on Base, unpaused, and
+configured in the public site and Render worker; campaign checkout is available.
+No DeVert campaign purchase, paid ad playback, or crash/restart rehearsal has
+occurred yet.
 
 ## Remaining public-launch checklist (you enter keys and execute)
 
 Never paste keys or secrets into chat. Browser and Render settings are reversible;
 fund creation, worker-role changes, and song registration require Base gas.
 
-1. **Ship the remaining sprint code.** The DJuke prototype is already deployed;
-  publish the reviewed local schedule/calendar and DeVert read-only UI changes.
-  Expected: the schedule endpoint returns 200, DJuke shows the live catalog, and
-  DVert clearly identifies that campaigns are not live; DeVert spots use the
-  same scheduled radio rotation;
-  regular radio playback is unchanged.
+1. **Rehearse the first DeVert campaign.** Confirm the published checkout quotes
+  the USDC offer and ETH gas top-up, then run an agreed low-stakes campaign and
+  verify its first eligible main-radio impression and durable recovery after a
+  worker restart. DeVert ads use the existing radio rotation.
 2. **Optional community mirror.** The shared Pinata checkpoint is primary and saves
     never wait for a mirror. Visitors open the pin chooser from the existing header
     IPFS button and pin shared CIDs to local IPFS Desktop or their own Pinata account.
@@ -115,6 +115,12 @@ fund creation, worker-role changes, and song registration require Base gas.
   in the archive and reconciliation scan. Batch minting is enabled. Review the
   imported song and artist recipient in Admin, then confirm sequential batches
   of up to 20. Existing v0.2 token IDs and metadata remain unchanged.
+9. **Design a Live Performance pay slot.** Specify an escrowed live-show budget
+  (for example, $100 USDC reserved in the contract), completion evidence and
+  cancellation rules. On verified completion, define how the performance
+  recording is uploaded to IPFS, minted as an NFT, and its approved edits are
+  scheduled into radio over the following hours, days, or week. This is a
+  separate feature; no live-show escrow or automatic release currently exists.
 Rollback: unset `DJUKE_PAYMENTS_ENABLED` or `djukeContractAddress` to hide payments;
 the contract's `pauseRequests` stops new purchases while queued plays still settle.
 
@@ -125,9 +131,10 @@ campaign purchases, a 5 USDC minimum, 0.01 USDC minimum overbids for seated
 slots, and 45% Playback / 45% Top 10 / 8% Pinners / 2% Repo-dev settlement. A
 scheduler role reports completed music plays and idempotent campaign impressions.
 The main radio remains the single broadcast: seated campaigns join its rotation
-after each ten completed audible music plays. DJuke priority boosts are linked
-only to an on-chain paid request by the campaign advertiser, with each request
-ID usable once.
+after each ten completed audible music plays. The contract supports boosts linked
+to a paid DJuke request by the same advertiser, but the worker bridge that applies
+those boosts is not yet implemented; don't advertise DJuke-driven priority until
+that integration is tested.
 
 The public DVert tab now has a wallet-gated purchase form. It requires a confirmed
 campaign snapshot from the configured contract, quotes the current on-chain
@@ -145,17 +152,11 @@ against the included transaction's effective gas price and forwards the attached
 ETH to the worker; any fee-cap surplus remains as worker gas reserve. The top-up
 is separate from the USDC offer/split and from the buyer's transaction gas.
 
-**Current gate:** the contract has passed local unit tests and a Base-fork
-rehearsal; it is not deployed, and no advertiser purchase or ad playback has
-occurred. The fork rehearsal purchased a campaign against Base USDC/router state,
-checked the exact four-fund split, recorded one main-radio impression, and rejected
-replay; it did not test Discord voice playback or crash/restart recovery. Before
-calling DVert live, run a dedicated testnet/staging rehearsal for purchase,
-expiry, overbids, all four router balances, main-radio playback, duplicate/restart
-recovery and scheduler permissions. Then deploy with `npm run deploy:devert:base`
-(dry-run by default), using the existing DJuke worker address for
-`DEVERT_SCHEDULER_ADDRESS`. Keep campaign checkout disabled until main-radio
-playback and impression recovery are verified.
+**Current status:** the contract is deployed and unpaused, and the public campaign
+checkout is configured. The Base-fork rehearsal checked the USDC split, main-radio
+impression, and replay rejection. No paid campaign or production ad impression has
+been run; verify a real ad in the main radio and durable journal recovery through a
+worker restart before promoting DeVert beyond its initial low-stakes run.
 
 ## Verification so far
 
