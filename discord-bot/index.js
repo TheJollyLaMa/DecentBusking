@@ -1488,7 +1488,6 @@ async function announceCompletedMint(client, config, track) {
  */
 async function startJukeLoop(client, config) {
   clearScheduledJukeLoopRestart(config);
-  if (_devertPlaybackInitialization) await _devertPlaybackInitialization;
   let guildId = null;
   try {
     const voiceChannel = await client.channels.fetch(config.jukeLoopVoiceChannelId).catch(() => null);
