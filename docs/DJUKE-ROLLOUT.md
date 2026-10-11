@@ -1,16 +1,17 @@
 # DJuke and DNft rollout
 
-## Creator profiles and DJuke v0.2 (not deployed)
+## Creator profiles and DJuke v0.2 (deployed, purchases paused)
 
-Deployment sprint checkpoint: the read-only Base migration preflight verified
-253 songs with no pending paid requests and sufficient deployer ETH. The live
-broadcast is held because the Hardhat Base-fork rehearsal is blocked by EDR's
-historical hardfork execution error before USDC/router assertions execute.
-No new contract address has been activated. DecentMarket's
-`scripts/deploy_djuke_v02.js` is dry-run by default and records deployment and
-batch receipts for recovery; do not bypass the failed rehearsal or retry a
-recorded deployment blindly. Migration preserves existing song IDs and splits;
-album grouping is curated separately, not inferred from artist names.
+The Base-fork rehearsal passed after mining one local block before historical
+contract reads. DJuke v0.2 is deployed at
+`0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59`, transaction
+`0x27973e8bff75d4cf0a29356641dba04b8a787cfdd76ae27dd3893ef0c966658a`.
+All 253 songs were migrated and verified with identical IDs, audio and payee
+splits. Worker roles are granted. Both old and new purchase gates remain paused;
+public payments remain disabled pending live integration checks. Receipts are in
+DecentMarket `deployments/djuke-v02-base.json`. Migration RPC calls are serialized
+to avoid public provider rate limits. Album grouping is curated separately,
+not inferred from artist names.
 
 The Top 10, DJuke emoji mark, and DVert pullout tabs are restored in the UI.
 DVert is currently a profile entry point and an explicit undeployed status, not
@@ -45,10 +46,9 @@ it is a conservative budget, not a guarantee of future fee levels. Quotes fail
 closed above the deployed contract cap. Keep payments disabled until a fork/full
 playback test verifies the budget and settlement against the production router.
 
-Activation requires a separately reviewed v0.2 deployment, song/album migration,
-worker role grants, `DJUKE_CONTRACT_VERSION=0.2` on Render and
-`djukeContractVersion: "0.2"` with the same new address in browser config. The
-current v0.1 address is intentionally unchanged. `DJUKE_FULFILLMENT_GAS_UNITS` may
+Browser and worker configuration must use the new address with
+`DJUKE_CONTRACT_VERSION=0.2` on Render and `djukeContractVersion: "0.2"`
+in browser config. `DJUKE_FULFILLMENT_GAS_UNITS` may
 override the bounded budget (100,000 to 2,000,000). Existing v0.1 registrations do
 not automatically appear in a new contract. Album management remains disabled
 until v0.2 is selected. Advert-specific editing still requires the advert contract's
