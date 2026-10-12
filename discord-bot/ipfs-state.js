@@ -44,6 +44,7 @@ export function createPinataStateStore({
   uploadUrl = 'https://uploads.pinata.cloud/v3/files',
   filesApiUrl = 'https://api.pinata.cloud/v3/files',
   gateway = 'https://dweb.link',
+  gatewayAccessToken = process.env.PINATA_GATEWAY_TOKEN || '',
   fetchImpl = globalThis.fetch,
   name = STATE_FILE_NAME,
   tags = STATE_KEYVALUES,
@@ -75,7 +76,7 @@ export function createPinataStateStore({
 
   async function restoreGateways() {
     if (!restoreGatewaysPromise) restoreGatewaysPromise = (async () => {
-      const domains = [];
+      const candidates = [];
       try {
         const response = await fetchImpl('https://api.pinata.cloud/v3/gateways?pageSize=100&page=1', {
           headers, signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
@@ -86,12 +87,21 @@ export function createPinataStateStore({
             for (const value of [gateway.domain, ...(gateway.custom_domains || []).map(item => item.domain)]) {
               const raw = String(value || '').replace(/^https?:\/\//i, '').split('/')[0];
               if (!raw || !/^[a-z0-9.-]+$/i.test(raw)) continue;
-              domains.push(`https://${raw.includes('.') ? raw : `${raw}.mypinata.cloud`}`);
+              const base = `https://${raw.includes('.') ? raw : `${raw}.mypinata.cloud`}`;
+              candidates.push({ base, accessToken: '' });
+              for (const key of gateway.settings?.restriction_policies?.accessTokens || []) {
+                if (typeof key.value === 'string' && key.value) candidates.push({ base, accessToken: key.value });
+              }
             }
           }
         }
       } catch {}
-      return [...new Set([...domains, gateway, FALLBACK_GATEWAY])];
+      const explicitToken = typeof gatewayAccessToken === 'string' ? gatewayAccessToken.trim() : '';
+      const bases = [gateway, FALLBACK_GATEWAY].map(base => ({ base, accessToken: '' }));
+      if (explicitToken) bases.push(...[gateway, FALLBACK_GATEWAY].map(base => ({ base, accessToken: explicitToken })));
+      const unique = new Map();
+      for (const candidate of [...candidates, ...bases]) unique.set(`${candidate.base}\u0000${candidate.accessToken}`, candidate);
+      return [...unique.values()];
     })();
     return restoreGatewaysPromise;
   }
@@ -138,8 +148,10 @@ export function createPinataStateStore({
     for (let attempt = 0; attempt < attempts; attempt++) {
       failures = [];
       let transientFailure = false;
-      for (const base of gateways) {
-        const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${cid}`, {
+      for (const { base, accessToken } of gateways) {
+        const url = new URL(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${cid}`);
+        if (accessToken) url.searchParams.set('pinataGatewayToken', accessToken);
+        const response = await fetchImpl(url.toString(), {
           signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
         }).catch(() => null);
         if (!response?.ok) {
