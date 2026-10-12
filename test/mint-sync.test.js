@@ -66,6 +66,55 @@ test('wallet ad recovery checks newest owned tokens first', async () => {
   assert.deepEqual(checked, [2, 1, 0]);
 });
 
+test('wallet ad recovery checks ownership concurrently and reports failed checks', async () => {
+  const { readOwnedDevertAds } = await import(moduleUrl);
+  const owner = `0x${'1'.repeat(40)}`;
+  let activeChecks = 0;
+  let peakChecks = 0;
+  const collection = { contractAddress: `0x${'2'.repeat(40)}`, contract: {
+    nextTokenId: async () => 8n,
+    balanceOf: async (_address, tokenId) => {
+      activeChecks++;
+      peakChecks = Math.max(peakChecks, activeChecks);
+      await new Promise(resolve => setTimeout(resolve, 2));
+      activeChecks--;
+      if (tokenId === 3) throw new Error('temporary RPC failure');
+      return 0n;
+    },
+  } };
+  const result = await readOwnedDevertAds({ collections: [collection], address: owner, pauseMs: 0,
+    ownershipConcurrency: 4, retry: { attempts: 1 }, log: { warn() {} } });
+  assert.ok(peakChecks > 1);
+  assert.equal(result.ownershipUnavailable, 1);
+  assert.equal(result.metadataUnavailable, 0);
+});
+
+test('wallet ad recovery uses a batched ownership reader', async () => {
+  const { readOwnedDevertAds } = await import(moduleUrl);
+  const owner = `0x${'1'.repeat(40)}`;
+  const batches = [];
+  const progress = [];
+  const collection = { contractAddress: `0x${'2'.repeat(40)}`, contract: {
+    nextTokenId: async () => 3n,
+    uri: async tokenId => `ipfs://metadata-${tokenId}`,
+  } };
+  const result = await readOwnedDevertAds({ collections: [collection], address: owner, pauseMs: 0,
+    ownershipConcurrency: 2,
+    ownershipReader: async (_collection, address, tokenIds) => {
+      assert.equal(address, owner);
+      batches.push(tokenIds);
+      return tokenIds.map(tokenId => ({ balance: tokenId === 2 ? 1n : 0n }));
+    },
+    metadataReader: async () => ({ name: 'DecentAdvert', audioUrl: 'ipfs://devert-ad-cid' }),
+    onProgress: result => progress.push(result.ads.map(ad => ad.tokenId)),
+    log: { warn() {} },
+  });
+  assert.deepEqual(batches, [[2, 1], [0]]);
+  assert.deepEqual(progress, [['2'], ['2']]);
+  assert.equal(result.ads[0].tokenId, '2');
+  assert.equal(result.ownershipUnavailable, 0);
+});
+
 test('wallet ad recovery reports metadata gaps instead of treating the library as empty', async () => {
   const { readOwnedDevertAds } = await import(moduleUrl);
   const owner = `0x${'1'.repeat(40)}`;

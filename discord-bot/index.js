@@ -32,7 +32,7 @@ import {
 
 import http from 'http'; 
 import fs from 'node:fs';
-import { Contract, JsonRpcProvider, Wallet, id } from 'ethers';
+import { Contract, Interface, JsonRpcProvider, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
 import { createWeeklyPayflow } from './weekly-payflow.js';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
@@ -111,6 +111,7 @@ let _devertSchedulerContract = null;
 let _devertBoostTask = null;
 const _devertBoostsInFlight = new Set();
 const _devertAdsOnChainCache = new Map();
+const _devertAdsOnChainScans = new Map();
 let liveScheduleStore = null;
 let livePerformanceEvents = [];
 let liveWeeklySchedule = {};
@@ -230,6 +231,10 @@ const IMAGE_EXTENSIONS_RE  = /\.(png|jpe?g|webp|gif)$/i;
 
 const MAX_FILE_BYTES = DISCORD_UPLOAD_MAX_BYTES;
 const MAX_ARTWORK_BYTES = 10 * 1024 * 1024; // 10 MB
+const BASE_MULTICALL3_ADDRESS = '0xca11bde05977b3631167028862be2a173976ca11';
+const MULTICALL3_ABI = ['function aggregate3((address target,bool allowFailure,bytes callData)[] calls) view returns ((bool success,bytes returnData)[] returnData)'];
+const NFT_BALANCE_ABI = ['function balanceOf(address,uint256) view returns(uint256)'];
+const DEVERT_OWNERSHIP_BATCH_SIZE = 32;
 
 // Keyed by avatar hash so a changed Discord avatar is pinned again.
 const _avatarCids = new Map();
@@ -779,22 +784,51 @@ async function main() {
       const normalizedAddress = address.toLowerCase();
       const localAds = getDevertAdsForWallet(address, snapshot?.campaigns || []);
       const cached = _devertAdsOnChainCache.get(normalizedAddress);
-      let chainResult = cached && cached.expiresAt > Date.now() ? cached.result : null;
+      let scanPending = _devertAdsOnChainScans.has(normalizedAddress);
+      let chainResult = cached && (cached.expiresAt > Date.now() || scanPending) ? cached.result : null;
       if (!chainResult) {
-        const provider = new JsonRpcProvider(config.baseRpcUrl);
-        const currentCollection = config.nftContractAddress.toLowerCase();
-        const orderedAddresses = [...config.nftContractAddresses].sort((first, second) =>
-          Number(second.toLowerCase() === currentCollection) - Number(first.toLowerCase() === currentCollection));
-        const collections = orderedAddresses.map(contractAddress => ({ contractAddress,
-          contract: new Contract(contractAddress, [
-            'function nextTokenId() view returns(uint256)',
-            'function balanceOf(address,uint256) view returns(uint256)',
-            'function uri(uint256) view returns(string)',
-          ], provider) }));
-        chainResult = await readOwnedDevertAds({ collections, address: normalizedAddress, pauseMs: 90,
-          log: { warn: message => console.warn(message) } });
-        _devertAdsOnChainCache.set(normalizedAddress, { result: chainResult,
-          expiresAt: Date.now() + (chainResult.metadataUnavailable ? 60_000 : 5 * 60_000) });
+        scanPending = true;
+        if (!_devertAdsOnChainScans.has(normalizedAddress)) {
+          const scan = (async () => {
+            try {
+              const provider = new JsonRpcProvider(config.baseRpcUrl);
+              const multicall = new Contract(BASE_MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
+              const balanceInterface = new Interface(NFT_BALANCE_ABI);
+              const currentCollection = config.nftContractAddress.toLowerCase();
+              const orderedAddresses = [...config.nftContractAddresses].sort((first, second) =>
+                Number(second.toLowerCase() === currentCollection) - Number(first.toLowerCase() === currentCollection));
+              const collections = orderedAddresses.map(contractAddress => ({ contractAddress,
+                contract: new Contract(contractAddress, [
+                  'function nextTokenId() view returns(uint256)',
+                  'function uri(uint256) view returns(string)',
+                ], provider) }));
+              const ownershipReader = async (collection, owner, tokenIds) => {
+                const calls = tokenIds.map(tokenId => ({ target: collection.contractAddress, allowFailure: true,
+                  callData: balanceInterface.encodeFunctionData('balanceOf', [owner, tokenId]) }));
+                const results = await multicall.aggregate3(calls);
+                return results.map(({ success, returnData }) => success
+                  ? { balance: balanceInterface.decodeFunctionResult('balanceOf', returnData)[0] }
+                  : { error: new Error('Multicall ownership check failed') });
+              };
+              const result = await readOwnedDevertAds({ collections, address: normalizedAddress,
+                ownershipConcurrency: DEVERT_OWNERSHIP_BATCH_SIZE, ownershipReader,
+                onProgress: progress => _devertAdsOnChainCache.set(normalizedAddress, {
+                  result: progress, expiresAt: Date.now() + 60_000,
+                }),
+                log: { warn: message => console.warn(message) } });
+              _devertAdsOnChainCache.set(normalizedAddress, { result,
+                expiresAt: Date.now() + (result.metadataUnavailable || result.ownershipUnavailable ? 60_000 : 5 * 60_000) });
+            } catch (error) {
+              console.warn(`[devert] Wallet ad scan failed for ${normalizedAddress}: ${error.message}`);
+              _devertAdsOnChainCache.set(normalizedAddress, { result: { ads: [], metadataUnavailable: 1, ownershipUnavailable: 0 },
+                expiresAt: Date.now() + 60_000 });
+            } finally {
+              _devertAdsOnChainScans.delete(normalizedAddress);
+            }
+          })();
+          _devertAdsOnChainScans.set(normalizedAddress, scan);
+        }
+        chainResult = { ads: [], metadataUnavailable: 0, ownershipUnavailable: 0 };
       }
       const mergedAds = mergeDevertAdsForWallet(localAds, chainResult.ads);
       for (const ad of mergedAds) {
@@ -806,7 +840,9 @@ async function main() {
         ad.secondsRemaining = campaign ? Math.max(0, Math.ceil((Date.parse(campaign.expiresAt) - Date.now()) / 1000)) : 0;
       }
       return { ads: mergedAds,
-        metadataUnavailable: chainResult.metadataUnavailable };
+        metadataUnavailable: chainResult.metadataUnavailable,
+        ownershipUnavailable: chainResult.ownershipUnavailable,
+        scanPending };
     },
     getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null },
     onDevertLoopVote: payload => _devertLoopWorker ? _devertLoopWorker.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),

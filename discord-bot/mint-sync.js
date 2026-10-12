@@ -34,42 +34,72 @@ export function audioCidFromMetadata(metadata = {}) {
   return [normalized, ...segments].join('/');
 }
 
-export async function readOwnedDevertAds({ collections, address, fetchImpl = fetch, retry = {}, pauseMs = 40,
-  metadataReader = fetchMintMetadata, log = console } = {}) {
+export async function readOwnedDevertAds({ collections, address, fetchImpl = fetch, retry = {}, pauseMs = 0,
+  ownershipConcurrency = 32, metadataConcurrency = 8, ownershipReader, metadataReader = fetchMintMetadata,
+  onProgress, log = console } = {}) {
   if (!Array.isArray(collections) || !/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('DeVert ad recovery requires collections and a wallet');
+  if (!Number.isSafeInteger(ownershipConcurrency) || ownershipConcurrency < 1 ||
+      !Number.isSafeInteger(metadataConcurrency) || metadataConcurrency < 1) throw new Error('Invalid ownership scan concurrency');
   const ads = new Map();
   let metadataUnavailable = 0;
+  let ownershipUnavailable = 0;
   for (const collection of collections) {
     const nextTokenId = Number(await withRetry(() => collection.contract.nextTokenId(), retry));
     if (!Number.isSafeInteger(nextTokenId) || nextTokenId < 0 || nextTokenId > 100_000) throw new Error('Invalid NFT token range');
-    for (let tokenId = nextTokenId - 1; tokenId >= 0; tokenId--) {
-      if (pauseMs) await new Promise(resolve => setTimeout(resolve, pauseMs));
-      let balance;
-      try { balance = await withRetry(() => collection.contract.balanceOf(address, tokenId), retry); }
-      catch (error) { log.warn(`[mint-sync] Ad library ownership check deferred for token ${tokenId}: ${error.message}`); continue; }
-      if (BigInt(balance) === 0n) continue;
+    for (let endTokenId = nextTokenId - 1; endTokenId >= 0; endTokenId -= ownershipConcurrency) {
+      if (pauseMs && endTokenId < nextTokenId - 1) await new Promise(resolve => setTimeout(resolve, pauseMs));
+      const tokenIds = Array.from({ length: Math.min(ownershipConcurrency, endTokenId + 1) }, (_, offset) => endTokenId - offset);
+      let balances;
       try {
-        const uri = await withRetry(() => collection.contract.uri(tokenId), retry);
-        const metadata = await metadataReader(uri, fetchImpl, { attempts: 1 });
-        const isAd = metadata.isDevertAd === true || /^DecentAdvert(?:isement)?(?:\b|[0-9_-])/i.test(String(metadata.name || ''));
-        if (!isAd) continue;
-        const mediaUri = metadata.videoUrl || metadata.audioUrl || metadata.animation_url || '';
-        const ipfsCid = audioCidFromMetadata({ ...metadata, audioUrl: mediaUri });
-        if (!ipfsCid) continue;
-        ads.set(`${collection.contractAddress.toLowerCase()}:${tokenId}`, {
-          trackId: `nft:${collection.contractAddress.toLowerCase()}:${tokenId}`,
-          title: String(metadata.name || `DeVert ad #${tokenId}`), ipfsCid,
-          mediaType: metadata.mediaType || (metadata.videoUrl ? 'video/mp4' : 'audio/mpeg'),
-          filename: String(metadata.filename || ''), mintStatus: 'minted', tokenId: String(tokenId),
-          state: 'ready', campaignId: null, expiresAt: null, secondsRemaining: 0,
-        });
+        balances = ownershipReader
+          ? await ownershipReader(collection, address, tokenIds)
+          : await Promise.all(tokenIds.map(async tokenId => {
+            try { return { balance: await withRetry(() => collection.contract.balanceOf(address, tokenId), retry) }; }
+            catch (error) { return { error }; }
+          }));
+        if (!Array.isArray(balances) || balances.length !== tokenIds.length) throw new Error('Invalid ownership batch response');
       } catch (error) {
-        metadataUnavailable++;
-        log.warn(`[mint-sync] Ad metadata unavailable for owned token ${tokenId}: ${error.message}`);
+        balances = tokenIds.map(() => ({ error }));
       }
+      const ownedTokenIds = [];
+      for (let index = 0; index < tokenIds.length; index++) {
+        const tokenId = tokenIds[index];
+        const ownership = balances[index];
+        if (ownership.error) {
+          ownershipUnavailable++;
+          continue;
+        }
+        if (BigInt(ownership.balance) === 0n) continue;
+        ownedTokenIds.push(tokenId);
+      }
+      for (let index = 0; index < ownedTokenIds.length; index += metadataConcurrency) {
+        await Promise.all(ownedTokenIds.slice(index, index + metadataConcurrency).map(async tokenId => {
+          try {
+            const uri = await withRetry(() => collection.contract.uri(tokenId), retry);
+            const metadata = await metadataReader(uri, fetchImpl, { attempts: 1 });
+            const isAd = metadata.isDevertAd === true || /^DecentAdvert(?:isement)?(?:\b|[0-9_-])/i.test(String(metadata.name || ''));
+            if (!isAd) return;
+            const mediaUri = metadata.videoUrl || metadata.audioUrl || metadata.animation_url || '';
+            const ipfsCid = audioCidFromMetadata({ ...metadata, audioUrl: mediaUri });
+            if (!ipfsCid) return;
+            ads.set(`${collection.contractAddress.toLowerCase()}:${tokenId}`, {
+              trackId: `nft:${collection.contractAddress.toLowerCase()}:${tokenId}`,
+              title: String(metadata.name || `DeVert ad #${tokenId}`), ipfsCid,
+              mediaType: metadata.mediaType || (metadata.videoUrl ? 'video/mp4' : 'audio/mpeg'),
+              filename: String(metadata.filename || ''), mintStatus: 'minted', tokenId: String(tokenId),
+              state: 'ready', campaignId: null, expiresAt: null, secondsRemaining: 0,
+            });
+          } catch (error) {
+            metadataUnavailable++;
+            log.warn(`[mint-sync] Ad metadata unavailable for owned token ${tokenId}: ${error.message}`);
+          }
+        }));
+      }
+      onProgress?.({ ads: [...ads.values()], metadataUnavailable, ownershipUnavailable });
     }
+    if (ownershipUnavailable) log.warn(`[mint-sync] ${ownershipUnavailable} ad library ownership check(s) failed; results may be incomplete.`);
   }
-  return { ads: [...ads.values()], metadataUnavailable };
+  return { ads: [...ads.values()], metadataUnavailable, ownershipUnavailable };
 }
 
 export async function fetchMintMetadata(uri, fetchImpl, { attempts = 3, baseDelayMs = 1_000,
