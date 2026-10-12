@@ -37,7 +37,7 @@ export async function findBlockAtOrBefore(provider, timestamp, { requestDelayMs 
   return low;
 }
 
-export function createWeeklyPayflow({ router, config, getReports, upload, restore = async () => null, save, getClosingBalance, now = () => Date.now() }) {
+export function createWeeklyPayflow({ router, config, getReports, upload, restore = async () => null, save, getClosingBalance, log = console, now = () => Date.now() }) {
   const minimumUnits = BigInt(config.radioPayflow?.minimumPayoutUnits || '10000');
   const significantUnits = BigInt(config.radioPayflow?.significantShareUnits || '1000000');
   const shareBps = config.radioPayflow?.fundShareBps ?? 10000;
@@ -56,7 +56,15 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
   let latestReports = [];
   const receiptConfig = { routerAddress: config.routerAddress, assetAddress: asset, funds: config.radioFunds };
   async function initialize() {
-    const saved = await restore();
+    let saved;
+    try {
+      saved = await restore();
+    } catch (error) {
+      if (!ignoredWeeks.size || config.radioPayflow?.resetUnavailableCheckpoint !== true) throw error;
+      log.warn(`[weekly-payflow] Starting a clean receipt schedule because the saved checkpoint is unavailable and weeks are explicitly excluded: ${[...ignoredWeeks].join(', ')}. No funds were moved.`);
+      saved = { schemaVersion: 1, routerAddress: config.routerAddress, allocations: [] };
+      backupPending = true;
+    }
     if (saved) {
       if (saved.schemaVersion !== 1 || saved.routerAddress?.toLowerCase() !== config.routerAddress.toLowerCase() || !Array.isArray(saved.allocations)) throw new Error('Invalid weekly payflow checkpoint');
       const retainedAllocations = saved.allocations.filter(record => !ignoredWeeks.has(record.allocation?.week));

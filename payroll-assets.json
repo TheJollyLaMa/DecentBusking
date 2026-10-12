@@ -32,7 +32,8 @@
     "fundShareBps": 10000,
     "minimumPayoutUnits": "10000",
     "significantShareUnits": "1000000",
-    "ignoredWeeks": ["NY-2026-10-05"]
+    "ignoredWeeks": ["NY-2026-10-05"],
+    "resetUnavailableCheckpoint": true
   },
   "assets": {
     "ART": {

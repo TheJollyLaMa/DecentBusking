@@ -162,22 +162,25 @@ test('weekly payflow defers empty or insufficient funds and hides receipts until
   assert.equal(scheduler.getState().allocations.length, 2);
 });
 
-test('ignored partial week removes its stale receipt reservation and keeps its USDC available', async () => {
+test('an ignored week allows a clean schedule when its old checkpoint cannot be restored', async () => {
   const { createWeeklyPayflow } = await import(url);
   const value = await fixture();
   await value.scheduler.initialize();
   const saved = value.snapshots.at(-1);
   const ignoredWeek = saved.allocations[0].allocation.week;
-  const config = { ...value.options.config, radioPayflow: { ignoredWeeks: [ignoredWeek] } };
+  const config = { ...value.options.config, radioPayflow: { ignoredWeeks: [ignoredWeek], resetUnavailableCheckpoint: true } };
   const persisted = [];
-  const scheduler = createWeeklyPayflow({ ...value.options, config, restore: async () => saved,
-    save: async checkpoint => { persisted.push(structuredClone(checkpoint)); return 'ipfs://filtered-schedule'; } });
+  const scheduler = createWeeklyPayflow({ ...value.options, config,
+    restore: async () => { throw new Error('Pinata gateway unavailable'); },
+    save: async checkpoint => { persisted.push(structuredClone(checkpoint)); return 'ipfs://fresh-schedule'; },
+    log: { warn() {} },
+  });
   await scheduler.initialize();
   const state = scheduler.getState();
+  assert.equal(state.ready, true);
   assert.equal(state.allocations.some(record => record.allocation.week === ignoredWeek), false);
-  assert.deepEqual(state.ignoredWeeks, [ignoredWeek]);
   assert.equal(state.funds.playback.reservedUnits, '0');
   assert.equal(state.funds.playback.availableUnits, '10000000');
-  assert.equal(persisted.at(-1).allocations.some(record => record.allocation.week === ignoredWeek), false);
+  assert.deepEqual(persisted.at(-1).allocations, []);
   assert.equal(value.uploads(), 2, 'ignoring the closed week must not prepare a replacement receipt');
 });

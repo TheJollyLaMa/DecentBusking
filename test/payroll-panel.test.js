@@ -28,6 +28,12 @@ test('weekly payroll surfaces counted plays and copyable work references without
   assert.doesNotMatch(html, /id="radio-payroll-preview"/);
 });
 
+test('the rollout week is explicitly excluded from automatic payout preparation', () => {
+  const assets = JSON.parse(fs.readFileSync(path.join(__dirname, '../payroll-assets.json'), 'utf8'));
+  assert.deepEqual(assets.radioPayflow.ignoredWeeks, ['NY-2026-10-05']);
+  assert.equal(assets.radioPayflow.resetUnavailableCheckpoint, true);
+});
+
 test('partial rollout week is configured as excluded while report history remains available', () => {
   const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../payroll-assets.json'), 'utf8'));
   const source = fs.readFileSync(path.join(__dirname, '../js/payroll.js'), 'utf8');
