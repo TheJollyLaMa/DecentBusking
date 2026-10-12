@@ -3,6 +3,32 @@ import { currentPayrollPeriod, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs'
 import { finalizeRadioAllocation, previewPlaybackPayroll, previewTopTenPayroll, validateRadioReceipt } from '../js/radio-payroll.mjs';
 import { BASE_USDC_ADDRESS } from '../js/settlement-funds.mjs';
 
+export async function findBlockAtOrBefore(provider, timestamp) {
+  if (!Number.isSafeInteger(timestamp) || timestamp <= 0) throw new Error('Invalid payroll close timestamp');
+  let low = 0;
+  let high = await provider.getBlockNumber();
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    let block;
+    try {
+      block = await provider.getBlock(middle);
+    } catch (error) {
+      const earliest = Number(String(error.message).match(/earliest available (\d+)/i)?.[1]);
+      if (!Number.isSafeInteger(earliest) || earliest <= low || earliest > high) throw error;
+      const firstAvailable = await provider.getBlock(earliest);
+      if (!firstAvailable || Number(firstAvailable.timestamp) >= timestamp) {
+        throw new Error('Archive endpoint does not retain the payroll closing block');
+      }
+      low = earliest;
+      continue;
+    }
+    if (!block) throw new Error('Payroll closing block could not be verified');
+    if (Number(block.timestamp) < timestamp) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+
 export function createWeeklyPayflow({ router, config, getReports, upload, restore = async () => null, save, getClosingBalance, now = () => Date.now() }) {
   const minimumUnits = BigInt(config.radioPayflow?.minimumPayoutUnits || '10000');
   const significantUnits = BigInt(config.radioPayflow?.significantShareUnits || '1000000');

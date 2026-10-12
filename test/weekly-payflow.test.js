@@ -62,6 +62,34 @@ test('historical close balance reads use the supplied archive router and subtrac
   assert.ok(calls.every(call => call.at(-1) === 123));
 });
 
+test('closing block search skips a provider-pruned range and finds the exact close boundary', async () => {
+  const { findBlockAtOrBefore } = await import(url);
+  const requested = [];
+  const provider = {
+    getBlockNumber: async () => 100,
+    getBlock: async blockNumber => {
+      requested.push(blockNumber);
+      if (blockNumber < 80) throw new Error(`pruned history unavailable: requested ${blockNumber}, earliest available 80`);
+      return { number: blockNumber, timestamp: blockNumber };
+    },
+  };
+  assert.equal(await findBlockAtOrBefore(provider, 90), 89);
+  assert.ok(requested[0] < 80);
+  assert.ok(requested.slice(1).every(blockNumber => blockNumber >= 80));
+});
+
+test('closing block search rejects weeks older than the archive provider retention floor', async () => {
+  const { findBlockAtOrBefore } = await import(url);
+  const provider = {
+    getBlockNumber: async () => 100,
+    getBlock: async blockNumber => {
+      if (blockNumber < 80) throw new Error(`pruned history unavailable: earliest available 80`);
+      return { number: blockNumber, timestamp: blockNumber };
+    },
+  };
+  await assert.rejects(findBlockAtOrBefore(provider, 70), /does not retain the payroll closing block/);
+});
+
 test('historical close balance is zero when the router was not deployed at close', async () => {
   const { readClosingFundBalance } = await import(url);
   const router = { target: `0x${'1'.repeat(40)}`, runner: { getCode: async () => '0x' },

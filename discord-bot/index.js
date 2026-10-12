@@ -34,7 +34,7 @@ import http from 'http';
 import fs from 'node:fs';
 import { Contract, Interface, JsonRpcProvider, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
-import { createWeeklyPayflow, readClosingFundBalance } from './weekly-payflow.js';
+import { createWeeklyPayflow, findBlockAtOrBefore, readClosingFundBalance } from './weekly-payflow.js';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
 
 import { loadConfig }    from './config.js';
@@ -631,14 +631,7 @@ async function main() {
   const getClosingBalance = async ({ report, fundSlug, allocations }) => {
     if (!closingBlocks.has(report.week)) {
       const end = Date.parse(payrollPeriodFromKey(report.week).endAt) / 1000;
-      let low = 0; let high = await paymentProvider.getBlockNumber();
-      while (low < high) {
-        const middle = Math.ceil((low + high) / 2);
-        const block = await paymentProvider.getBlock(middle);
-        if (!block) throw new Error('Closing block could not be verified');
-        if (Number(block.timestamp) < end) low = middle; else high = middle - 1;
-      }
-      closingBlocks.set(report.week, low);
+      closingBlocks.set(report.week, await findBlockAtOrBefore(archiveProvider, end));
     }
     const blockTag = closingBlocks.get(report.week);
     return readClosingFundBalance({ router: archivePayflowRouter, fundSlug,
