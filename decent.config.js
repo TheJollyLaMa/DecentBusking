@@ -35,9 +35,9 @@ window.DecentConfig = {
   contractAddress: "0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3",
   additionalNftContractAddresses: ["0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B"],
   nftBatchMintEnabled: true,
-  // Deployed DJuke v0.2 address.
-  djukeContractAddress: "0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59",
-  djukeContractVersion: "0.2",
+  // Deployed DJuke v0.3 address with direct artist settlement.
+  djukeContractAddress: "0x5d07489163feBCdB39C9F579CCC36dff5A067FF9",
+  djukeContractVersion: "0.3",
   devertContractAddress: "0x135Cbc573F87637158eb3186C87c584fb0B34CD9",
   ensRpcUrl: "https://ethereum-rpc.publicnode.com",
   adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",

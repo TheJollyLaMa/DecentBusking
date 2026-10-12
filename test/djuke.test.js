@@ -100,8 +100,8 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   assert.match(html, /id="devert-panel"[^>]*inert/);
   assert.match(config, /contractAddress: "0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3"/);
   assert.match(config, /additionalNftContractAddresses: \["0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B"\]/);
-  assert.match(config, /djukeContractAddress: "0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59"/);
-  assert.match(config, /djukeContractVersion: "0.2"/);
+  assert.match(config, /djukeContractAddress: "0x5d07489163feBCdB39C9F579CCC36dff5A067FF9"/);
+  assert.match(config, /djukeContractVersion: "0.3"/);
   assert.match(config, /nftBatchMintEnabled: true/);
   for (const tab of ['top-ten', 'djuke', 'devert']) assert.match(html, new RegExp(`id="${tab}-tab"[^>]*aria-controls="${tab}-panel"`));
   assert.match(html, /class="djuke-tab-slot">⚸🎰🧞‍♂️/);

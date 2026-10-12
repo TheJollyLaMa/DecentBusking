@@ -125,10 +125,10 @@ no unattended automatic transfer. Recheck fund balances, owner Base gas, router
 roles/asset readiness and receipt status before settlement. On-demand DJuke
 artist payments and funded weekly radio rewards remain separate accounting.
 
-Status: DJuke v0.2 is deployed on Base at
-`0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59`. The live worker reports 253
-registered tracks with no catalog read errors, and payments are enabled for the
-low-stakes prototype; no paid request was submitted during verification. The
+Status: DJuke v0.3 with direct artist settlement is deployed on Base at
+`0x5d07489163feBCdB39C9F579CCC36dff5A067FF9` (unpaused and configured with all 253 tracks).
+The previous v0.2 contract at `0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59` is paused.
+The live worker reports 253 registered tracks with no catalog read errors. The
 prototype still uses its current worker and Pinata credentials, which must be
 rotated before expanding the audience. Community pinning follow-up is in PR #110
 and the final 8/2/90 contract allocation is in DecentMarket PR #49.
