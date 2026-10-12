@@ -106,6 +106,27 @@ test('restoreCid retries a transient gateway 429 and restores the archived check
   assert.equal(store.getLatestSnapshotSavedAt(), '2026-10-12T15:37:06.715Z');
 });
 
+test('restoreCid discovers the account Pinata gateway before public gateways', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  const cid = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
+  const requested = [];
+  const store = createPinataStateStore({ pinataJwt: 'test-jwt', fetchImpl: async url => {
+    requested.push(url);
+    if (url.startsWith('https://api.pinata.cloud/v3/gateways')) {
+      return new Response(JSON.stringify({ data: { rows: [{ domain: 'studio', custom_domains: [] }] } }));
+    }
+    if (url === `https://studio.mypinata.cloud/ipfs/${cid}`) {
+      return new Response(JSON.stringify({ schemaVersion: 1, playlist: [{ trackId: 'recovered' }] }));
+    }
+    return new Response('', { status: 429 });
+  } });
+  assert.deepEqual(await store.restoreCid(cid), [{ trackId: 'recovered' }]);
+  assert.deepEqual(requested.slice(0, 2), [
+    'https://api.pinata.cloud/v3/gateways?pageSize=100&page=1',
+    `https://studio.mypinata.cloud/ipfs/${cid}`,
+  ]);
+});
+
 test('payment snapshot namespace is separate and immutable payment backups are retained', async () => {
   const { createPinataStateStore } = await import(moduleUrl);
   const requests = [];

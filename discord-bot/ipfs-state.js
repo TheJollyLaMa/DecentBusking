@@ -60,6 +60,7 @@ export function createPinataStateStore({
   const headers = { authorization: `Bearer ${pinataJwt}` };
   let latestSnapshotUri = '';
   let latestSnapshotSavedAt = '';
+  let restoreGatewaysPromise = null;
 
   async function listSnapshots(limit = 100) {
     const response = await fetchImpl(buildListUrl(filesApiUrl, limit, name), {
@@ -70,6 +71,29 @@ export function createPinataStateStore({
     return extractFiles(await response.json())
       .filter(file => isStateSnapshot(file, name, tags))
       .sort((first, second) => Date.parse(second.created_at || 0) - Date.parse(first.created_at || 0));
+  }
+
+  async function restoreGateways() {
+    if (!restoreGatewaysPromise) restoreGatewaysPromise = (async () => {
+      const domains = [];
+      try {
+        const response = await fetchImpl('https://api.pinata.cloud/v3/gateways?pageSize=100&page=1', {
+          headers, signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          for (const gateway of data.data?.rows || []) {
+            for (const value of [gateway.domain, ...(gateway.custom_domains || []).map(item => item.domain)]) {
+              const raw = String(value || '').replace(/^https?:\/\//i, '').split('/')[0];
+              if (!raw || !/^[a-z0-9.-]+$/i.test(raw)) continue;
+              domains.push(`https://${raw.includes('.') ? raw : `${raw}.mypinata.cloud`}`);
+            }
+          }
+        }
+      } catch {}
+      return [...new Set([...domains, gateway, FALLBACK_GATEWAY])];
+    })();
+    return restoreGatewaysPromise;
   }
 
   async function restore() {
@@ -110,10 +134,11 @@ export function createPinataStateStore({
       throw new Error('Invalid IPFS restore retry policy');
     }
     let failures = [];
+    const gateways = await restoreGateways();
     for (let attempt = 0; attempt < attempts; attempt++) {
       failures = [];
       let transientFailure = false;
-      for (const base of [...new Set([gateway, FALLBACK_GATEWAY])]) {
+      for (const base of gateways) {
         const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${cid}`, {
           signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
         }).catch(() => null);
