@@ -73,6 +73,31 @@ export function radioWorkReferenceText({ week, category, wallet }) {
   return `decentbusking:radio:${ny ? 'v3' : 'v1'}:8453:${week}:${category}:${wallet.toLowerCase()}`;
 }
 
+export function radioAllocationMatchesReport(report, allocation) {
+  try {
+    if (!report || !allocation || report.current || report.week !== allocation.week || !Array.isArray(report.tracks)) return false;
+    const budgetUnits = BigInt(allocation.budgetUnits);
+    const minimumUnits = BigInt(allocation.minimumUnits);
+    const ranking = allocation.schemaVersion === 1 ? 'plays' : allocation.ranking;
+    const plan = allocation.category === 'playback'
+      ? previewPlaybackPayroll({ tracks: report.tracks, budgetUnits, minimumUnits })
+      : previewTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking });
+    const expectedEntries = plan.entries.filter(entry => entry.payable);
+    if (BigInt(allocation.allocatedUnits) !== plan.allocatedUnits || BigInt(allocation.remainderUnits) !== plan.remainderUnits ||
+        expectedEntries.length !== allocation.entries?.length) return false;
+    return expectedEntries.every((expected, index) => {
+      const actual = allocation.entries[index];
+      return actual.wallet?.toLowerCase() === expected.wallet.toLowerCase() && actual.plays === expected.plays &&
+        (expected.votes === undefined || actual.votes === expected.votes) &&
+        (expected.rank === undefined || actual.rank === expected.rank) &&
+        BigInt(actual.amountUnits) === expected.amountUnits &&
+        actual.workReferenceText === radioWorkReferenceText({ week: report.week, category: allocation.category, wallet: expected.wallet });
+    });
+  } catch {
+    return false;
+  }
+}
+
 export function finalizeRadioAllocation({ report, category, budgetUnits, minimumUnits, fundSlug, routerAddress, assetAddress, ranking = 'votes', now = Date.now() }) {
   if (!report || report.current || report.week === 'all-time') throw new Error('Only a completed week can be finalized');
   radioWorkReferenceText({ week: report.week, category, wallet: `0x${'1'.repeat(40)}` });

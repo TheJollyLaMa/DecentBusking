@@ -52,6 +52,18 @@ test('finalization excludes live/all-time weeks and freezes stable identities in
   assert.notEqual(radioWorkReferenceText({ week: receipt.week, category: 'top10', wallet: track(1, 1).wallet }), receipt.entries[0].workReferenceText);
 });
 
+test('frozen receipts must match the recovered weekly report before settlement', async () => {
+  const { finalizeRadioAllocation, radioAllocationMatchesReport } = await import(url);
+  const report = { week: 'NY-2026-10-05', current: false,
+    tracks: [{ wallet: track(1, 125).wallet, artist: 'Artist 1', plays: 125, votes: 0 }] };
+  const allocation = finalizeRadioAllocation({ report, category: 'playback', budgetUnits: 10000000n, minimumUnits: 10000n,
+    fundSlug: 'dbusk-playback', routerAddress: track(2, 1).wallet,
+    assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-13T12:00:00Z') });
+  assert.equal(radioAllocationMatchesReport(report, allocation), true);
+  assert.equal(radioAllocationMatchesReport(report, { ...allocation, entries: [{ ...allocation.entries[0], plays: 126 }] }), false);
+  assert.equal(radioAllocationMatchesReport(report, { ...allocation, entries: [{ ...allocation.entries[0], amountUnits: '9999999' }] }), false);
+});
+
 test('radio settlement skips paid references and retry does not pay confirmed entries twice', async () => {
   const { finalizeRadioAllocation, settleRadioAllocation } = await import(url);
   const owner = track(9, 1).wallet;

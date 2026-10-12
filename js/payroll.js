@@ -21,7 +21,7 @@
  */
 
 import { isAdminWallet } from './admin-access.mjs';
-import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText } from './radio-payroll.mjs';
+import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs';
 import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 
@@ -1198,8 +1198,9 @@ function _renderRadioReviews() {
   for (const category of ['playback', 'top10']) {
     const button = document.getElementById(`radio-settle-${category}`);
     const saved = _radioReviews[category];
+    const receiptMatches = saved && report ? radioAllocationMatchesReport(report, saved.allocation) : false;
     const unpaid = saved?.allocation.entries.filter(entry => !_radioRecipientStates.get(entry.workReferenceText)?.paid) || [];
-    const ready = saved && unpaid.length > 0 && unpaid.every(entry => _radioRecipientStates.get(entry.workReferenceText)?.approved);
+    const ready = saved && receiptMatches && unpaid.length > 0 && unpaid.every(entry => _radioRecipientStates.get(entry.workReferenceText)?.approved);
     if (button) { button.disabled = !ready || _settling; button.textContent = `${category === 'playback' ? 'Playback' : 'Top 10'}: Pay ${unpaid.length} / Resume Batch`; }
     if (button && report?.week.startsWith('NY-')) { button.hidden = !saved; if (!_weeklyPayflow?.ready || _weeklyPayflow.lastError) button.disabled = true; }
     else if (button) button.hidden = false;
@@ -1222,6 +1223,11 @@ function _renderRadioReviews() {
     const summary = document.createElement('p'); summary.className = 'payroll-status';
     summary.textContent = `${saved.allocation.entries.length - unpaid.length} paid · ${unpaid.length} unpaid · ${saved.allocation.ranking || 'legacy play-ranked receipt'}`;
     target.append(summary);
+    if (!receiptMatches) {
+      const warning = document.createElement('p'); warning.className = 'payroll-funding-warning';
+      warning.textContent = 'Frozen receipt does not match the recovered weekly report. Do not pay; manual reconciliation is required.';
+      target.append(warning);
+    }
     for (const entry of saved.allocation.entries) {
       const row = document.createElement('div'); row.className = 'radio-payroll-artist';
       const label = document.createElement('span'); label.textContent = `${entry.artist} · ${_shortAddr(entry.wallet)} · ${ethers.formatUnits(entry.amountUnits, 6)} USDC`;
@@ -1313,6 +1319,8 @@ async function _settleRadioPayroll(category) {
     if (!saved || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash) throw new Error('The frozen receipt is missing or changed; do not pay');
     validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress,
       assetAddress: _getAssetConfig('USDC').address, funds: _payrollAssetConfig.radioFunds });
+    const report = _radioReports.find(value => value.week === saved.allocation.week);
+    if (!report || !radioAllocationMatchesReport(report, saved.allocation)) throw new Error('Frozen receipt does not match the recovered weekly report; manual reconciliation is required');
     if (!confirm(`Settle reviewed ${category} for ${saved.allocation.week}? Each unpaid recipient requires a Base transaction. Already-paid references are skipped.`)) return;
     _settling = true;
     const signer = await _getSigner(BASE_CHAIN_ID);
