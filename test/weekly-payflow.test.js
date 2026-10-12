@@ -39,6 +39,26 @@ test('weekly payflow freezes funded closed-week shares, reserves unpaid receipts
   assert.equal(value.uploads(), 2);
 });
 
+test('ignored partial week removes its stale reservation and keeps its USDC available', async () => {
+  const { createWeeklyPayflow } = await import(url);
+  const value = await fixture();
+  await value.scheduler.initialize();
+  const saved = value.snapshots.at(-1);
+  const ignoredWeek = saved.allocations[0].allocation.week;
+  const config = { ...value.options.config, radioPayflow: { ignoredWeeks: [ignoredWeek] } };
+  const persisted = [];
+  const scheduler = createWeeklyPayflow({ ...value.options, config, restore: async () => saved,
+    save: async checkpoint => { persisted.push(structuredClone(checkpoint)); return 'ipfs://filtered-schedule'; } });
+  await scheduler.initialize();
+  const state = scheduler.getState();
+  assert.equal(state.allocations.some(record => record.allocation.week === ignoredWeek), false);
+  assert.equal(state.funds.playback.reservedUnits, '0');
+  assert.equal(state.funds.playback.availableUnits, '10000000');
+  assert.deepEqual(state.ignoredWeeks, [ignoredWeek]);
+  assert.equal(persisted.at(-1).allocations.some(record => record.allocation.week === ignoredWeek), false);
+  assert.equal(value.uploads(), 2, 'ignoring the closed week must not prepare a replacement receipt');
+});
+
 test('historical close balance reads use the supplied archive router and subtract unpaid reservations', async () => {
   const { readClosingFundBalance } = await import(url);
   const calls = [];
@@ -65,6 +85,7 @@ test('historical close balance reads use the supplied archive router and subtrac
 test('closing block search skips a provider-pruned range and finds the exact close boundary', async () => {
   const { findBlockAtOrBefore } = await import(url);
   const requested = [];
+  const delays = [];
   const provider = {
     getBlockNumber: async () => 100,
     getBlock: async blockNumber => {
@@ -73,9 +94,11 @@ test('closing block search skips a provider-pruned range and finds the exact clo
       return { number: blockNumber, timestamp: blockNumber };
     },
   };
-  assert.equal(await findBlockAtOrBefore(provider, 90), 89);
+  assert.equal(await findBlockAtOrBefore(provider, 90, { requestDelayMs: 75, wait: async delay => delays.push(delay) }), 89);
   assert.ok(requested[0] < 80);
   assert.ok(requested.slice(1).every(blockNumber => blockNumber >= 80));
+  assert.equal(delays.length, requested.length - 1);
+  assert.ok(delays.every(delay => delay === 75));
 });
 
 test('closing block search rejects weeks older than the archive provider retention floor', async () => {
@@ -137,4 +160,24 @@ test('weekly payflow defers empty or insufficient funds and hides receipts until
   offline = false;
   await scheduler.tick();
   assert.equal(scheduler.getState().allocations.length, 2);
+});
+
+test('ignored partial week removes its stale receipt reservation and keeps its USDC available', async () => {
+  const { createWeeklyPayflow } = await import(url);
+  const value = await fixture();
+  await value.scheduler.initialize();
+  const saved = value.snapshots.at(-1);
+  const ignoredWeek = saved.allocations[0].allocation.week;
+  const config = { ...value.options.config, radioPayflow: { ignoredWeeks: [ignoredWeek] } };
+  const persisted = [];
+  const scheduler = createWeeklyPayflow({ ...value.options, config, restore: async () => saved,
+    save: async checkpoint => { persisted.push(structuredClone(checkpoint)); return 'ipfs://filtered-schedule'; } });
+  await scheduler.initialize();
+  const state = scheduler.getState();
+  assert.equal(state.allocations.some(record => record.allocation.week === ignoredWeek), false);
+  assert.deepEqual(state.ignoredWeeks, [ignoredWeek]);
+  assert.equal(state.funds.playback.reservedUnits, '0');
+  assert.equal(state.funds.playback.availableUnits, '10000000');
+  assert.equal(persisted.at(-1).allocations.some(record => record.allocation.week === ignoredWeek), false);
+  assert.equal(value.uploads(), 2, 'ignoring the closed week must not prepare a replacement receipt');
 });

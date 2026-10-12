@@ -3,19 +3,27 @@ import { currentPayrollPeriod, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs'
 import { finalizeRadioAllocation, previewPlaybackPayroll, previewTopTenPayroll, validateRadioReceipt } from '../js/radio-payroll.mjs';
 import { BASE_USDC_ADDRESS } from '../js/settlement-funds.mjs';
 
-export async function findBlockAtOrBefore(provider, timestamp) {
+export async function findBlockAtOrBefore(provider, timestamp, { requestDelayMs = 100,
+  wait = delay => new Promise(resolve => setTimeout(resolve, delay)) } = {}) {
   if (!Number.isSafeInteger(timestamp) || timestamp <= 0) throw new Error('Invalid payroll close timestamp');
+  if (!Number.isFinite(requestDelayMs) || requestDelayMs < 0) throw new Error('Invalid block lookup delay');
   let low = 0;
   let high = await provider.getBlockNumber();
+  let requestedBlock = false;
+  const readBlock = async blockNumber => {
+    if (requestedBlock && requestDelayMs) await wait(requestDelayMs);
+    requestedBlock = true;
+    return provider.getBlock(blockNumber);
+  };
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
     let block;
     try {
-      block = await provider.getBlock(middle);
+      block = await readBlock(middle);
     } catch (error) {
       const earliest = Number(String(error.message).match(/earliest available (\d+)/i)?.[1]);
       if (!Number.isSafeInteger(earliest) || earliest <= low || earliest > high) throw error;
-      const firstAvailable = await provider.getBlock(earliest);
+      const firstAvailable = await readBlock(earliest);
       if (!firstAvailable || Number(firstAvailable.timestamp) >= timestamp) {
         throw new Error('Archive endpoint does not retain the payroll closing block');
       }
@@ -33,6 +41,7 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
   const minimumUnits = BigInt(config.radioPayflow?.minimumPayoutUnits || '10000');
   const significantUnits = BigInt(config.radioPayflow?.significantShareUnits || '1000000');
   const shareBps = config.radioPayflow?.fundShareBps ?? 10000;
+  const ignoredWeeks = new Set((config.radioPayflow?.ignoredWeeks || []).filter(week => /^NY-\d{4}-\d{2}-\d{2}$/.test(week)));
   if (config.radioPayflow?.timeZone && config.radioPayflow.timeZone !== PAYROLL_TIME_ZONE) throw new Error('Weekly payflow timezone must be America/New_York');
   if (!Number.isInteger(shareBps) || shareBps < 1 || shareBps > 10000 || minimumUnits < 1n || significantUnits < minimumUnits) throw new Error('Invalid weekly payflow policy');
   const asset = config.assets.USDC.address;
@@ -50,15 +59,17 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
     const saved = await restore();
     if (saved) {
       if (saved.schemaVersion !== 1 || saved.routerAddress?.toLowerCase() !== config.routerAddress.toLowerCase() || !Array.isArray(saved.allocations)) throw new Error('Invalid weekly payflow checkpoint');
+      const retainedAllocations = saved.allocations.filter(record => !ignoredWeeks.has(record.allocation?.week));
+      if (retainedAllocations.length !== saved.allocations.length) backupPending = true;
       const keys = new Set();
-      for (const record of saved.allocations) {
+      for (const record of retainedAllocations) {
         validateRadioReceipt(record.allocation, receiptConfig);
         if (record.allocation.schemaVersion !== 3 || id(JSON.stringify(record.allocation)) !== record.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(record.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
         const key = `${record.allocation.week}:${record.allocation.category}`;
         if (keys.has(key)) throw new Error('Duplicate scheduled allocation');
         keys.add(key);
       }
-      allocations = saved.allocations.map(record => ({ ...record, published: true }));
+      allocations = retainedAllocations.map(record => ({ ...record, published: true }));
     }
     ready = true;
     return tick();
@@ -97,7 +108,7 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
       let available = balance > reserved ? balance - reserved : 0n;
       for (const report of latestReports.filter(value => !value.current && value.week.startsWith('NY-') && value.tracks.length)
         .sort((first, second) => first.startAt.localeCompare(second.startAt))) {
-        if (!approved || !(fund.active ?? fund[1]) || allocations.some(record => record.allocation.category === category && record.allocation.week === report.week)) continue;
+        if (ignoredWeeks.has(report.week) || !approved || !(fund.active ?? fund[1]) || allocations.some(record => record.allocation.category === category && record.allocation.week === report.week)) continue;
         const closing = getClosingBalance ? await getClosingBalance({ report, fundSlug: slug, allocations: allocations.filter(record => record.allocation.category === category) }) : available;
         const cap = closing < available ? closing : available;
         const budget = cap * BigInt(shareBps) / 10000n;
@@ -141,6 +152,7 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
     const period = currentPayrollPeriod(now());
     const result = { schemaVersion: 1, chainId: 8453, routerAddress: config.routerAddress, ready: ready && Boolean(lastCheckedAt), timeZone: PAYROLL_TIME_ZONE, currentPeriod: period, nextCloseAt: period.endAt,
       minimumPayoutUnits: minimumUnits.toString(), significantShareUnits: significantUnits.toString(), fundShareBps: shareBps,
+      ignoredWeeks: [...ignoredWeeks],
       lastCheckedAt, lastError, backupPending, funds,
       accountingStartedAt: latestReports.find(report => report.current)?.accountingStartedAt || null,
       partial: Boolean(latestReports.find(report => report.current)?.partial),

@@ -837,6 +837,10 @@ async function _refreshWeeklyPayflow() {
       if (state.chainId !== BASE_CHAIN_ID || state.routerAddress?.toLowerCase() !== _payrollAssetConfig?.routerAddress.toLowerCase() || state.timeZone !== 'America/New_York') throw new Error('Weekly payflow does not match this Base router and New York schedule');
       _weeklyPayflow = state;
       const records = _reviewRecords();
+      const ignoredWeeks = new Set(state.ignoredWeeks || []);
+      for (const [key, saved] of Object.entries(records)) {
+        if (ignoredWeeks.has(saved?.allocation?.week)) delete records[key];
+      }
       for (const saved of state.allocations || []) {
         validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress, assetAddress: _getAssetConfig('USDC').address, funds: _payrollAssetConfig.radioFunds });
         if (saved.allocation.schemaVersion !== 3 || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(saved.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
@@ -845,9 +849,14 @@ async function _refreshWeeklyPayflow() {
         records[key] = saved;
       }
       localStorage.setItem('decentbusking:radio-payroll-reviews:v1', JSON.stringify(records));
+      const weekSelect = document.getElementById('radio-payroll-week');
+      for (const option of weekSelect?.options || []) {
+        if (ignoredWeeks.has(option.value)) option.textContent = `${option.value} · excluded from payout`;
+      }
       const close = new Date(state.nextCloseAt).toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
+      const ignoredStatus = ignoredWeeks.size ? ` · excluded from payout (history kept): ${[...ignoredWeeks].join(', ')}` : '';
       _setStatus(status, !state.ready ? 'Weekly schedule restoring; no automatic payments.' :
-        `Next close: ${close} · ${(state.fundShareBps / 100).toFixed(0)}% of unreserved closing funds · ${state.partial ? 'tracking began after this week started; earlier activity may be missing' : 'New York weeks'}${state.backupPending ? ' · receipt backup pending' : ''}${state.lastError ? ` · ${state.lastError}` : ''}`, Boolean(state.lastError));
+        `Next close: ${close} · ${(state.fundShareBps / 100).toFixed(0)}% of unreserved closing funds · ${state.partial ? 'tracking began after this week started; earlier activity may be missing' : 'New York weeks'}${ignoredStatus}${state.backupPending ? ' · receipt backup pending' : ''}${state.lastError ? ` · ${state.lastError}` : ''}`, Boolean(state.lastError));
       const target = document.getElementById('radio-funding-dashboard');
       target?.replaceChildren();
       for (const [category, fund] of Object.entries(state.funds || {})) {

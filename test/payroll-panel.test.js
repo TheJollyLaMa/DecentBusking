@@ -28,6 +28,14 @@ test('weekly payroll surfaces counted plays and copyable work references without
   assert.doesNotMatch(html, /id="radio-payroll-preview"/);
 });
 
+test('partial rollout week is configured as excluded while report history remains available', () => {
+  const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../payroll-assets.json'), 'utf8'));
+  const source = fs.readFileSync(path.join(__dirname, '../js/payroll.js'), 'utf8');
+  assert.deepEqual(config.radioPayflow.ignoredWeeks, ['NY-2026-10-05']);
+  assert.match(source, /ignoredWeeks\.has\(saved\?\.allocation\?\.week\)/);
+  assert.match(source, /excluded from payout \(history kept\)/);
+});
+
 test('Base payroll excludes retired legacy entries without sending or verifying payments', async () => {
   const { createLegacyReceiptStore, verifyLegacyPayment } = await import(pathToFileURL(path.join(__dirname, '../js/legacy-payroll.mjs')).href);
   const owner = '0x807061DF657A7697c04045dA7d16D941861cAABc';

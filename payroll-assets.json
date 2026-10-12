@@ -31,7 +31,8 @@
     "timeZone": "America/New_York",
     "fundShareBps": 10000,
     "minimumPayoutUnits": "10000",
-    "significantShareUnits": "1000000"
+    "significantShareUnits": "1000000",
+    "ignoredWeeks": ["NY-2026-10-05"]
   },
   "assets": {
     "ART": {

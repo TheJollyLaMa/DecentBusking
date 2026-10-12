@@ -37,6 +37,8 @@ If a receipt is uncertain, recovery/deposit controls for that fund stay locked. 
 
 New York receipt schema 3 includes exact timezone/start/end boundaries and distinct references. A paid UTC receipt overlapping a new period causes a manual-reconciliation error instead of a second payment. Legacy receipts remain accessible. Automatic New York budgets are read-only in the dashboard; changing `payroll-assets.json` affects future preparation, not already-published receipts. A proposal is not proof of payment.
 
+`radioPayflow.ignoredWeeks` explicitly excludes `NY-2026-10-05`, the partial rollout week, from preparing or reserving payouts. Its play/vote history remains visible for audit; its stale unpaid receipt is removed from the durable schedule, leaving the Playback funds available for later weeks. This exclusion does not send or recover funds.
+
 When a Pinata playlist restore fails, the worker can merge explicitly identified older playlist snapshots' per-week payroll counters into matching current tracks in snapshot-time order without replacing newer track data. Each CID and the latest merged snapshot time are recorded in the playlist so counters are not applied twice. This restores reporting inputs only; it does not create a payout transaction or bypass owner review.
 
 Funding meters show balances, pending commitments and unreserved budgets. My Playbacks shows the connected wallet's current New York-week estimated artist share and indicative song contribution, separate from its All Time table. These are not claimable balances, accrued debt, or guarantees. Anonymous votes still need owner scrutiny. No claims, automatic payouts, or signing key on the worker are introduced.
