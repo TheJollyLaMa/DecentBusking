@@ -98,9 +98,10 @@ export function createPinataStateStore({
       } catch {}
       const explicitToken = typeof gatewayAccessToken === 'string' ? gatewayAccessToken.trim() : '';
       const bases = [gateway, FALLBACK_GATEWAY].map(base => ({ base, accessToken: '' }));
-      if (explicitToken) bases.push(...[gateway, FALLBACK_GATEWAY].map(base => ({ base, accessToken: explicitToken })));
+      const allCandidates = [...candidates, ...bases];
+      if (explicitToken) allCandidates.push(...allCandidates.map(({ base }) => ({ base, accessToken: explicitToken })));
       const unique = new Map();
-      for (const candidate of [...candidates, ...bases]) unique.set(`${candidate.base}\u0000${candidate.accessToken}`, candidate);
+      for (const candidate of allCandidates) unique.set(`${candidate.base}\u0000${candidate.accessToken}`, candidate);
       return [...unique.values()];
     })();
     return restoreGatewaysPromise;

@@ -147,6 +147,28 @@ test('restoreCid uses a gateway access token from the authenticated Pinata gatew
   assert.equal(gatewayRequest.searchParams.get('pinataGatewayToken'), 'gateway-secret');
 });
 
+test('restoreCid applies the explicit server gateway token to a discovered dedicated gateway', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  const cid = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
+  let dedicatedRequest;
+  const store = createPinataStateStore({ pinataJwt: 'test-jwt', gatewayAccessToken: 'render-gateway-key',
+    fetchImpl: async url => {
+      if (url.startsWith('https://api.pinata.cloud/v3/gateways')) {
+        return new Response(JSON.stringify({ data: { rows: [{ domain: 'peach-fast-pike-16' }] } }));
+      }
+      if (url.includes('peach-fast-pike-16.mypinata.cloud')) {
+        dedicatedRequest = new URL(url);
+        return dedicatedRequest.searchParams.get('pinataGatewayToken') === 'render-gateway-key'
+          ? new Response(JSON.stringify({ schemaVersion: 1, playlist: [{ trackId: 'recovered' }] }))
+          : new Response('', { status: 401 });
+      }
+      return new Response('', { status: 429 });
+    },
+  });
+  assert.deepEqual(await store.restoreCid(cid), [{ trackId: 'recovered' }]);
+  assert.equal(dedicatedRequest.searchParams.get('pinataGatewayToken'), 'render-gateway-key');
+});
+
 test('payment snapshot namespace is separate and immutable payment backups are retained', async () => {
   const { createPinataStateStore } = await import(moduleUrl);
   const requests = [];
