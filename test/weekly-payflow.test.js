@@ -39,6 +39,37 @@ test('weekly payflow freezes funded closed-week shares, reserves unpaid receipts
   assert.equal(value.uploads(), 2);
 });
 
+test('historical close balance reads use the supplied archive router and subtract unpaid reservations', async () => {
+  const { readClosingFundBalance } = await import(url);
+  const calls = [];
+  const router = {
+    target: `0x${'1'.repeat(40)}`,
+    runner: { getCode: async (_target, blockTag) => { calls.push(['getCode', blockTag]); return '0x6000'; } },
+    fundBalances: async (fundId, asset, overrides) => {
+      calls.push(['fundBalances', fundId, asset, overrides.blockTag]);
+      return 12_000_000n;
+    },
+    completedWorkReferences: async (reference, overrides) => {
+      calls.push(['completedWorkReferences', reference, overrides.blockTag]);
+      return false;
+    },
+  };
+  const balance = await readClosingFundBalance({ router, fundSlug: 'dbusk-playback',
+    assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', blockTag: 123,
+    allocations: [{ allocation: { entries: [{ workReferenceText: 'weekly payout', amountUnits: '2000000' }] } }] });
+  assert.equal(balance, 10_000_000n);
+  assert.deepEqual(calls.map(call => call[0]), ['getCode', 'fundBalances', 'completedWorkReferences']);
+  assert.ok(calls.every(call => call.at(-1) === 123));
+});
+
+test('historical close balance is zero when the router was not deployed at close', async () => {
+  const { readClosingFundBalance } = await import(url);
+  const router = { target: `0x${'1'.repeat(40)}`, runner: { getCode: async () => '0x' },
+    fundBalances: async () => { throw new Error('must not read balance'); } };
+  assert.equal(await readClosingFundBalance({ router, fundSlug: 'dbusk-playback',
+    assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', blockTag: 123 }), 0n);
+});
+
 test('new deposits cannot enlarge an old week beyond its verified closing balance', async () => {
   const { createWeeklyPayflow } = await import(url);
   const value = await fixture();

@@ -51,6 +51,8 @@ Set server-only `PAYROLL_GITHUB_TOKEN` to an owner credential with repository Ac
 
 Set `PAYROLL_START_BLOCK` for an explicit historical scan boundary. Without a restored snapshot or configured start block, discovery begins 2,000 blocks behind startup head, then scans forward in bounded chunks; the UI reports coverage. Older unknown transactions are not silently claimed as reconciled. Supply their hashes to `/api/payroll/reconcile` or choose the correct historical start block. Newly confirmed browser payments bypass scan catch-up. API/backup convergence is seconds-scale when services are available, not guaranteed instant finality.
 
+Weekly close-balance checks require historical Base state. They use `PAYROLL_ARCHIVE_RPC_URL` when set, otherwise `https://mainnet.base.org`; configure an archive-capable Base provider if that endpoint is unavailable or rate-limited. This read-only provider is separate from the worker's normal `BASE_RPC_URL`.
+
 For a $10 start, a conservative example is $3 for a playback pilot and $7 retained for gas/operations, with no cash Top 10 budget yet. Preserve free radio; seek supporter tips, small fixed-price sponsor slots, or optional paid requests before committing recurring cash rewards. Paid queues and sponsorship fulfillment need reviewed contracts and clear refund/service rules; neither is implemented by this payroll preview.
 
 DecentBusking follows the ArtFi contribution-payroll model. GitHub Actions records bounty credits in the repository ledger; the repo owner sends configured ERC-20 rewards through the existing ArtFi Settlement Router on Base. DecentBusking uses its own `dbusk-repo-dev` fund on that shared router and does not deploy a second router.

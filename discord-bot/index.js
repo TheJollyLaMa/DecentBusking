@@ -34,7 +34,7 @@ import http from 'http';
 import fs from 'node:fs';
 import { Contract, Interface, JsonRpcProvider, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
-import { createWeeklyPayflow } from './weekly-payflow.js';
+import { createWeeklyPayflow, readClosingFundBalance } from './weekly-payflow.js';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
 
 import { loadConfig }    from './config.js';
@@ -616,6 +616,11 @@ async function main() {
     'function approvedAssets(address) view returns(bool)',
     'function completedWorkReferences(bytes32) view returns(bool)',
   ], paymentProvider);
+  const archiveProvider = new JsonRpcProvider(process.env.PAYROLL_ARCHIVE_RPC_URL || 'https://mainnet.base.org');
+  const archivePayflowRouter = new Contract(payrollAssets.routerAddress, [
+    'function fundBalances(bytes32,address) view returns(uint256)',
+    'function completedWorkReferences(bytes32) view returns(bool)',
+  ], archiveProvider);
   const closingBlocks = new Map();
   const getClosingBalance = async ({ report, fundSlug, allocations }) => {
     if (!closingBlocks.has(report.week)) {
@@ -630,13 +635,8 @@ async function main() {
       closingBlocks.set(report.week, low);
     }
     const blockTag = closingBlocks.get(report.week);
-    if (await paymentProvider.getCode(payrollAssets.routerAddress, blockTag) === '0x') return 0n;
-    const balance = await payflowRouter.fundBalances(id(fundSlug), payrollAssets.assets.USDC.address, { blockTag });
-    let reserved = 0n;
-    for (const record of allocations) for (const entry of record.allocation.entries) {
-      if (!await payflowRouter.completedWorkReferences(id(entry.workReferenceText), { blockTag })) reserved += BigInt(entry.amountUnits);
-    }
-    return balance > reserved ? balance - reserved : 0n;
+    return readClosingFundBalance({ router: archivePayflowRouter, fundSlug,
+      assetAddress: payrollAssets.assets.USDC.address, blockTag, allocations });
   };
   const payflow = createWeeklyPayflow({ router: payflowRouter, config: payrollAssets,
     getReports: () => getWeeklyPlayHistory({ weeks: 12, calendar: 'new-york' }),

@@ -130,3 +130,16 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
   }
   return { initialize, tick, getState };
 }
+
+export async function readClosingFundBalance({ router, fundSlug, assetAddress, blockTag, allocations = [] }) {
+  if (await router.runner.getCode(router.target, blockTag) === '0x') return 0n;
+  const fundId = id(fundSlug);
+  const balance = await router.fundBalances(fundId, assetAddress, { blockTag });
+  let reserved = 0n;
+  for (const record of allocations) {
+    for (const entry of record.allocation.entries) {
+      if (!await router.completedWorkReferences(id(entry.workReferenceText), { blockTag })) reserved += BigInt(entry.amountUnits);
+    }
+  }
+  return balance > reserved ? balance - reserved : 0n;
+}
