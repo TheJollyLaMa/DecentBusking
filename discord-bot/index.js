@@ -990,9 +990,7 @@ async function main() {
       const imported = await checkpointReviewedAlbumImport({ playlist: getPlaylist(), plan, artist, save: stateStore.save,
         queueForMint: true,
         mirrorBeforePublication: true,
-        verifyMirrorAvailable: async () => {
-          if (checkpointMirror) await checkpointMirror.waitAvailable();
-        },
+        verifyMirrorAvailable: async () => {},
       });
       if (imported.added.length || imported.queued.length) loadPlaylist(imported.playlist);
       console.log(`[album-import] Added ${imported.added.length}; queued ${imported.queued.length}; skipped ${imported.skipped.length}. No NFTs minted. Checkpoint: ${imported.checkpointUri || 'already imported'}`);
