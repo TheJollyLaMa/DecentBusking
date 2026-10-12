@@ -1,7 +1,8 @@
 // On-demand personal listens: 30-second preview, then 0.25 USDC per song via DJuke.
 // Fails open to free playback whenever payments are not live, matching today's behavior.
 import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261010-listens';
-import { setNowPlaying } from './stage.js?v=20261010-listens';
+import { setNowPlaying } from './stage.js?v=20261012-paging';
+import { supportsDjukeAlbumsAndGas } from './djuke-version.mjs';
 
 export const LISTEN_PRICE_UNITS = 250000n;
 export const PREVIEW_SECONDS = 30;
@@ -31,7 +32,7 @@ export async function purchaseListens({ signer, djuke, usdc, songIds, contractVe
   if (!Array.isArray(songIds) || !songIds.length || songIds.length > MAX_PLAYLIST || songIds.some(id => !/^0x[0-9a-fA-F]{64}$/.test(id))) {
     throw new Error(`Choose 1 to ${MAX_PLAYLIST} songs`);
   }
-  const total = contractVersion === '0.2' ? await djuke.quoteListens(songIds) : LISTEN_PRICE_UNITS * BigInt(songIds.length);
+  const total = supportsDjukeAlbumsAndGas(contractVersion) ? await djuke.quoteListens(songIds) : LISTEN_PRICE_UNITS * BigInt(songIds.length);
   if (total <= 0n) throw new Error('Invalid personal listen quote');
   onStep(`Personal listen price: ${formatUsdc(total)} USDC`);
   const address = await signer.getAddress();
@@ -157,7 +158,7 @@ export function initListens() {
     getMedia: archiveMedia,
     onPreviewEnded: ({ song, resume }) => {
       pendingGate = { song, resume };
-      gateText.textContent = cfg.djukeContractVersion === '0.2'
+      gateText.textContent = supportsDjukeAlbumsAndGas(cfg.djukeContractVersion)
         ? `Personal listen for ${song.title}. The current creator price will be quoted before payment.`
         : `That was your 30-second preview of \u201c${song.title}\u201d. Keep listening for ${formatUsdc(LISTEN_PRICE_UNITS)} USDC \u2014 90% goes to the artist.`;
       gateStatus.textContent = '';
@@ -180,7 +181,7 @@ export function initListens() {
       row.append(title, remove);
       playlistEl.append(row);
     }
-    playlistTotal.textContent = items.length ? cfg.djukeContractVersion === '0.2'
+    playlistTotal.textContent = items.length ? supportsDjukeAlbumsAndGas(cfg.djukeContractVersion)
       ? `${items.length} songs - creator prices quoted before payment`
       : `${items.length} song${items.length === 1 ? '' : 's'} \u00b7 ${formatUsdc(LISTEN_PRICE_UNITS * BigInt(items.length))} USDC` : 'Empty \u2014 add songs from any DNFT card';
     playlistBuy.disabled = !items.length || busy;

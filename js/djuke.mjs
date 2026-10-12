@@ -1,3 +1,5 @@
+import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
+
 export function quoteDjuke(pendingCount) {
   if (!Number.isSafeInteger(pendingCount) || pendingCount < 0) throw new RangeError('Invalid pending queue count');
   const tier = Math.floor(pendingCount / 8);
@@ -71,7 +73,7 @@ export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUni
         String(nonce) !== String(gasQuote.nonce)) throw new Error('Invalid worker gas quote');
     const types = { GasQuote: [{ name: 'listener', type: 'address' }, { name: 'songId', type: 'bytes32' },
       { name: 'maxPrice', type: 'uint256' }, { name: 'fulfillmentCostWei', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }] };
-    const recovered = ethers.verifyTypedData({ name: 'DecentJukeBox', version: '0.2', chainId: 8453, verifyingContract: djuke.target }, types, gasQuote, gasQuote.signature);
+    const recovered = ethers.verifyTypedData({ name: 'DecentJukeBox', version: DJUKE_SIGNING_DOMAIN_VERSION, chainId: 8453, verifyingContract: djuke.target }, types, gasQuote, gasQuote.signature);
     if (recovered.toLowerCase() !== worker.toLowerCase()) throw new Error('Invalid worker gas signature');
     if (await signer.provider.getBalance(address) < contribution) throw new Error('Insufficient Base ETH for worker gas contribution');
   }
@@ -108,6 +110,10 @@ export function initDjuke() {
   const count = document.getElementById('djuke-count');
   const select = document.getElementById('djuke-song');
   const search = document.getElementById('djuke-search');
+  const searchResults = document.getElementById('djuke-search-results');
+  const searchState = document.getElementById('djuke-search-state');
+  const searchMore = document.getElementById('djuke-search-more');
+  let shownSongs = 20;
   const connect = document.getElementById('djuke-connect');
   const paymentStatus = document.getElementById('djuke-payment-state');
   const tiers = document.getElementById('djuke-price-tiers');
@@ -131,7 +137,7 @@ export function initDjuke() {
   };
   const syncPayButton = () => {
     const ready = paymentsLive() && !!window._wallet?.address && window._wallet?.chainId === 8453 && !!selectedSongId() && !busy &&
-      (window.DecentConfig?.djukeContractVersion !== '0.2' || !!gasQuote && gasQuote.deadline > Date.now() / 1000);
+      (!supportsDjukeAlbumsAndGas(window.DecentConfig?.djukeContractVersion) || !!gasQuote && gasQuote.deadline > Date.now() / 1000);
     pay.disabled = !ready;
     pay.title = paymentsLive() ? 'Pay to queue the selected song' : 'DJuke payments are not live yet';
   };
@@ -141,7 +147,7 @@ export function initDjuke() {
     if (gasStatus) gasStatus.textContent = '';
     syncPayButton();
     const songId = selectedSongId();
-    if (window.DecentConfig?.djukeContractVersion !== '0.2' || !songId || !window._wallet?.address) return;
+    if (!supportsDjukeAlbumsAndGas(window.DecentConfig?.djukeContractVersion) || !songId || !window._wallet?.address) return;
     if (gasStatus) gasStatus.textContent = 'Estimating worker gas';
     try {
       const response = await fetch(`${window.DecentConfig.ipfsUploadServiceUrl}/api/djuke/gas-quote?${new URLSearchParams({ listener: window._wallet.address, songId })}`, { signal: AbortSignal.timeout(15000) });
@@ -162,12 +168,33 @@ export function initDjuke() {
   const renderSongs = () => {
     const previous = select.value;
     const tracks = filterDjukeSongs(live?.tracks, search?.value || '');
-    select.replaceChildren(node('option', tracks.length ? 'Select one song' : 'No matching songs'));
-    for (const track of tracks) {
+    const placeholder = node('option', tracks.length ? 'Select one song' : 'No matching songs');
+    placeholder.value = '';
+    select.replaceChildren(placeholder);
+    searchResults?.replaceChildren();
+    const visible = tracks.slice(0, shownSongs);
+    const previousTrack = tracks.find(track => track.trackId === previous);
+    const options = previousTrack && !visible.includes(previousTrack) ? [...visible, previousTrack] : visible;
+    for (const track of options) {
       const option = node('option', track.artist ? `${track.title} - ${track.artist}` : track.title);
       option.value = track.trackId;
       select.append(option);
     }
+    for (const track of visible) {
+      const item = node('li');
+      const button = node('button', track.artist ? `${track.title} - ${track.artist}` : track.title);
+      button.type = 'button';
+      button.setAttribute('aria-pressed', String(track.trackId === previous));
+      button.addEventListener('click', () => {
+        select.value = track.trackId;
+        renderSongs();
+        refreshGasQuote();
+      });
+      item.append(button);
+      searchResults?.append(item);
+    }
+    if (searchState) searchState.textContent = `${visible.length} of ${tracks.length} matching songs`;
+    if (searchMore) searchMore.hidden = visible.length >= tracks.length;
     select.value = tracks.some(track => track.trackId === previous) ? previous : '';
     select.disabled = !tracks.length;
     syncPayButton();
@@ -195,6 +222,9 @@ export function initDjuke() {
     count.textContent = '—';
     select.replaceChildren(node('option', 'Song catalog unavailable'));
     select.disabled = true;
+    searchResults?.replaceChildren();
+    if (searchState) searchState.textContent = 'Song catalog unavailable; refresh to retry.';
+    if (searchMore) searchMore.hidden = true;
     renderTiers(null);
     status.textContent = message;
     syncPayButton();
@@ -279,7 +309,7 @@ export function initDjuke() {
   pay.addEventListener('click', () => {
     const songId = selectedSongId();
     if (!paymentsLive() || !songId || !live?.priceUnits) return;
-    if (window.DecentConfig?.djukeContractVersion === '0.2' && (!gasQuote || gasQuote.deadline <= Date.now() / 1000)) {
+    if (supportsDjukeAlbumsAndGas(window.DecentConfig?.djukeContractVersion) && (!gasQuote || gasQuote.deadline <= Date.now() / 1000)) {
       refreshGasQuote();
       return;
     }
@@ -287,8 +317,9 @@ export function initDjuke() {
       onStep: message => { paymentStatus.textContent = message; } }),
     'Queued! Your song plays after the paid requests ahead of it.');
   });
-  select.addEventListener('change', refreshGasQuote);
-  search?.addEventListener('input', () => { renderSongs(); refreshGasQuote(); });
+  select.addEventListener('change', () => { renderSongs(); refreshGasQuote(); });
+  search?.addEventListener('input', () => { shownSongs = 20; renderSongs(); refreshGasQuote(); });
+  searchMore?.addEventListener('click', () => { shownSongs += 20; renderSongs(); });
   const close = () => {
     clearTimeout(timer);
     generation++;
@@ -319,7 +350,8 @@ export function initDjuke() {
   });
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'djuke' && isOpen()) close(); });
   document.addEventListener('click', event => {
-    if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target)) close();
+    const path = event.composedPath();
+    if (isOpen() && !path.includes(panel) && !path.includes(toggle)) close();
   });
   connect.addEventListener('click', async () => {
     if (!window._wallet?.connect || !window.ethereum) {

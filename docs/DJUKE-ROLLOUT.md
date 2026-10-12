@@ -1,5 +1,130 @@
 # DJuke and DNft rollout
 
+## October 12 fixes and live readiness check
+
+These browser/worker changes and the DecentMarket v0.3 contract candidate are
+local, tested changes, **not a live deployment or fund movement**.
+
+### Artist payment correction
+
+Live v0.2 personal listens and fulfilled queue requests accrue
+`artistCredits` in DJuke; funding the router does not transfer that credit to
+the artist wallet. A read-only check found 225,000 USDC base units (0.225 USDC)
+credited to the configured admin/artist wallet. Those funds remain
+withdrawable by that artist using the old contract's `withdrawArtistCredit`.
+Do not sweep old credits or describe them as already paid.
+
+The DecentMarket v0.3 candidate transfers the artist/collaborator share
+atomically when a personal listen or album is purchased, and only after
+successful fulfillment for queued requests. Replacement requests still pay
+only the final, snapshotted recipients. Pinners retain 8%, repo-dev 2%, and
+artists 90%, with the existing integer-rounding rules. The new
+`artistLedger(address)` cumulative paid totals and `ArtistPaid` events are
+accounting records, not withdrawable credits.
+
+v0.2 is not upgradeable. Before separately authorized deployment: pause new
+purchases, genuinely fulfill/drain the old paid queue, snapshot registrations
+and albums, independently check each NFT-associated artist wallet and
+collaborator split, retain the old credit-withdrawal path, and rehearse migration.
+Do not copy pending payments or replay old signatures. The offline preparation
+tool and full checklist are in DecentMarket's `docs/DJUKE_V03.md`.
+
+Browser and worker now recognize `0.3` for album pricing and gas-quoted requests,
+but live config still uses `0.2` and the existing address. Both versions use the
+EIP-712 signing-domain version **`0.2`**, bound to the actual verifying contract
+and Base chain ID 8453. Do not change the signing-domain version to `0.3`.
+
+### MetaMask trust warning
+
+Reported warning: **High-risk approval**, an address flagged by security
+partners, with deployed DJuke identified as untrusted. This is not merely a
+generic source-verification warning. The October 12 BaseScan page also displayed
+“Are you the contract creator? Verify and Publish your contract source code”.
+
+Do not bypass or disable security alerts, conceal this warning, or redeploy
+solely to evade a flag. Publishing source is useful but does **not** guarantee
+that a security-provider flag disappears or establish that the contract is safe.
+Paid checkout was deliberately left unchanged at the operator's request; no
+approval or payment was signed during this work.
+
+1. Retain the exact warning, network, contract and spender addresses, originating
+   site URL, public transaction/approval details, and the security-provider name
+   shown under “Powered by” / “See details”. Never send seed phrases or keys.
+2. Publish the exact deployed v0.2 source, dependency/compiler versions, optimizer
+   and IR settings, constructor arguments and matching deployment artifacts on
+   BaseScan. Use the deployment's recorded build, not the new v0.3 build.
+3. Independently review the deployed bytecode, privileged roles, payment-token
+   spender, actual transfers, approvals and payout behavior. Do not call the
+   flag a false positive before this review.
+4. Contact the named security provider through its official support channel for
+   an address-classification review, or start at
+   [official MetaMask support](https://support.metamask.io/) if the provider is
+   unclear. Source verification is evidence for the review, not a substitute.
+5. Publish accurate contract/network links and fee breakdowns. The browser now
+   correctly displays 8% pinners / 2% repo-dev / 90% artists and retains
+   exact-price USDC approvals rather than requesting unlimited allowances.
+
+### Bounded loading and worker notice
+
+- `GET /api/nfts` returns at most 25 verified music NFTs, newest first by metadata
+  mint date (token ID provides a deterministic tie-break). Parameters: `offset`,
+  `limit` (1–25), `query`, `artist`, and optional ISO `after`/`before` dates.
+  Search and artist filtering operate over the entire verified index, not merely
+  the displayed page. Both configured NFT collections are indexed.
+- The browser fetches only the first 25. Explicit paging, debounced archive
+  searches, artist changes and timeline navigation fetch additional matching
+  pages; superseded requests are aborted. Old scene objects are disposed when
+  replacing a result set. Historical cached browser NFTs no longer trigger an
+  eager full scene rebuild.
+- The worker reuses verified token metadata between chain scans. URI changes,
+  global base-URI changes, transfer/mint events and checkpoint reorgs invalidate
+  affected cache entries. Failed scans do not publish a partial catalog.
+  The first cold-start scan is still required; restoring/error states are
+  explicit rather than success-shaped empty results.
+  Uncached reads are bounded to three in flight, and catalog refresh failures
+  show an explicit last-verified-index warning rather than hiding stale data.
+- Signed owner mint-queue requests can specify `offset` and `limit` (1–20).
+  Responses contain `requests`, `total` and `nextOffset`; legacy CLI requests
+  without paging retain their existing full-list response. Browser navigation
+  reuses the short-lived owner authorization and clears selection on page changes.
+  Verified queue reads share in-flight reconciliation and reuse it for one
+  minute. Default-artwork backfill runs in the background, not on every list read;
+  previews use native image lazy loading.
+- DJuke search now shows selectable song results directly beneath its input,
+  20 at a time, with a matching count. The native song selector remains available.
+  The October 12 live API and browser successfully found title/artist matches;
+  the original results were only visible inside that selector.
+- All worker top-up reminders start hidden. A read-only Base balance check uses
+  the deployed contract's actual `gasWorker`, shows the reminder only for exactly
+  zero wei, and rechecks at most once per minute. RPC failures show a separate
+  “balance unavailable” status, never an assumed empty wallet. A positive balance
+  does not guarantee sufficient gas for future batches. The observed worker
+  balance was 0.000102336629037513 ETH.
+
+Ship the worker first; verify `/api/nfts` pages and authenticated 20-request
+mint pages, then publish the browser. None of these changes requires switching
+DJuke contracts.
+
+### This week's shows and payroll
+
+Read-only live `/api/radio/schedule` and `/api/payroll/weekly` checks were ready:
+
+- Friday **October 16, 8–9 p.m. America/New_York**: Top 10 hype hour.
+- Friday **9–10 p.m.**: live-performance block.
+- Sunday **October 18, 11 p.m.–midnight**: Top 10 final listen.
+- The `NY-2026-10-12` period closes Monday October 19 at midnight New York
+  (`2026-10-19T04:00:00Z`). New-week funds cannot inflate the old closing balance.
+- Both `dbusk-playback` and `dbusk-top10` were active with **10 USDC each**,
+  zero reserved balances, no weekly-worker error, and no pending backup. These
+  observations are not promises about balances at cutoff or recipient shares.
+
+Friday is a hype show, not an early final payout. After the Sunday cutoff, the
+worker produces durable allocations for eligible completed-week activity.
+The owner must still review and authorize Base settlement in Payroll; there is
+no unattended automatic transfer. Recheck fund balances, owner Base gas, router
+roles/asset readiness and receipt status before settlement. On-demand DJuke
+artist payments and funded weekly radio rewards remain separate accounting.
+
 Status: DJuke v0.2 is deployed on Base at
 `0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59`. The live worker reports 253
 registered tracks with no catalog read errors, and payments are enabled for the

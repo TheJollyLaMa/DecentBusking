@@ -575,6 +575,57 @@ test('returns the pending queue only to the mint owner', async () => {
   });
 });
 
+  test('owner queue pagination returns twenty requests and rejects oversized or unauthorized pages', async () => {
+    const { buildAdminAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+    const owner = Wallet.createRandom();
+    const origin = 'https://busking.example';
+    const issuedAt = new Date().toISOString();
+    const authorization = { address: owner.address, origin, issuedAt };
+    const signature = await owner.signMessage(buildAdminAuthorizationMessage(authorization));
+    const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address,
+      getMintQueue: async () => Array.from({ length: 43 }, (_, i) => ({ trackId: String(i) })) });
+    await withServer(handler, async base => {
+      const request = (offset, limit, sig = signature) => fetch(`${base}/api/mint-queue`, {
+        method: 'POST', headers: { origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ ...authorization, signature: sig, offset, limit }),
+      });
+      const first = await (await request(0, 20)).json();
+      assert.equal(first.requests.length, 20);
+      assert.equal(first.total, 43);
+      assert.equal(first.nextOffset, 20);
+      const last = await (await request(40, 20)).json();
+      assert.equal(last.requests.length, 3);
+      assert.equal(last.nextOffset, null);
+      assert.equal((await request(0, 21)).status, 400);
+      assert.equal((await request(-1, 20)).status, 400);
+      assert.equal((await request(0, 20, await Wallet.createRandom().signMessage(buildAdminAuthorizationMessage(authorization)))).status, 400);
+    });
+  });
+
+  test('public NFT archive endpoint applies search, artist and timeline bounds to bounded pages', async () => {
+    const { createWorkerRequestHandler } = await import(moduleUrl);
+    const { nftCatalogPage } = await import('../js/nft-loader.js');
+    const address = `0x${'1'.repeat(40)}`;
+    const nfts = Array.from({ length: 55 }, (_, tokenId) => ({ tokenId, chainId: 8453, contractAddress: address,
+      name: tokenId === 0 ? 'Forgotten Song' : `Track ${tokenId}`, audioUrl: 'ipfs://audio', artistName: 'Alice', artist: address,
+      mintedAt: new Date(Date.UTC(2026, 9, tokenId + 1)).toISOString() }));
+    const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: address,
+      getNftCatalog: options => nftCatalogPage(nfts, options) });
+    await withServer(handler, async base => {
+      const response = await fetch(`${base}/api/nfts`);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('access-control-allow-origin'), '*');
+      const first = await response.json();
+      assert.equal(first.nfts.length, 25);
+      assert.equal(first.nfts[0].tokenId, 54);
+      assert.equal(first.nextOffset, 25);
+      const search = await (await fetch(`${base}/api/nfts?query=forgotten%20alice`)).json();
+      assert.equal(search.nfts.length, 1);
+      assert.equal(search.nfts[0].tokenId, 0);
+      assert.equal((await fetch(`${base}/api/nfts?limit=26`)).status, 400);
+    });
+  });
+
 test('reviewed album import requires fresh owner authorization and rejects replay', async () => {
   const { buildReviewedAlbumImportAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom();

@@ -2,7 +2,7 @@
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js?v=20261010-listens';
+import { fetchNFTMetaById } from './space.js?v=20261012-paging';
 
 // ── Public API ───────────────────────────────────────────────────────────
 export function renderNFTCard(nft) {
@@ -44,7 +44,7 @@ export function renderNFTCard(nft) {
       if (nft.videoUrl || nft.mediaType === 'video/mp4') panel.close();
       return;
     }
-    const { setNowPlaying } = await import('./stage.js?v=20261010-listens');
+    const { setNowPlaying } = await import('./stage.js?v=20261012-paging');
     setNowPlaying({ title: nft.name || nft.title, artist: nft.artist || nft.creator,
       audioUrl: nft.videoUrl || nft.audioUrl || nft.animation_url, mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : '') });
     if (nft.videoUrl || nft.mediaType === 'video/mp4') panel.close();
@@ -156,7 +156,7 @@ function _buildCardHTML(nft) {
 // ── Parent Track Playback ─────────────────────────────────────────────────
 async function _playParent(parentTokenId) {
   if (!parentTokenId) return;
-  const { setNowPlaying } = await import('./stage.js?v=20261010-listens');
+  const { setNowPlaying } = await import('./stage.js?v=20261012-paging');
   const meta = await fetchNFTMetaById(parentTokenId);
   if (!meta) return;
   const cfg = window.DecentConfig || {};

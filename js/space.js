@@ -12,9 +12,8 @@
 //    to show that NFT.
 //  • Only music NFTs (those with audioUrl, audio-extension animation_url, or a
 //    bare ipfs:// animation_url) are shown — non-audio tokens are silently
-//    skipped.  See _isMusicNFT().
-//  • NFTs load lazily: the 4 newest load immediately, then 4 more every 30 s.
-//    The "Show All Now" button forces an immediate full load.
+//    skipped by the indexed catalog.
+//  • The indexed archive loads 25 newest tracks, then pages only on demand.
 //  • WASD / Arrow keys always fly the camera (no toggle required).  Tab
 //    additionally disables mouse-orbit (pure ship mode).  Q/E move vertically.
 //  • Mouse orbit is always available; full vertical range (0–180°) is allowed.
@@ -23,10 +22,10 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261010-listens';
-import { setNowPlaying } from './stage.js?v=20261010-listens';
+import { renderNFTCard } from './nft-card.js?v=20261012-paging';
+import { setNowPlaying } from './stage.js?v=20261012-paging';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
-import { loadMintedToken, readCachedMintedTokens, readNftContract, configuredNftCollections } from './nft-loader.js?v=20261010-collections';
+import { loadMintedToken, nftArtistKey, fetchNftCatalogPage } from './nft-loader.js?v=20261012-paging';
 
 // ── Timeline constants ────────────────────────────────────────────────────
 const UNITS_PER_DAY   = 5;          // 3-D units per day on the Z-axis
@@ -37,21 +36,6 @@ const MAX_NAV_DAYS    = 365;        // how far back the slider can go
 
 // Camera home position (z offset ahead of the timeline centre)
 const CAM_Z_OFFSET = 28;
-
-// ── NFT lazy-loading constants ────────────────────────────────────────────
-// Adjust these values to tune how many NFTs load at startup and how quickly
-// subsequent pages are fetched.
-const INITIAL_BATCH    = 4;         // NFTs to load immediately on startup
-const PAGE_BATCH       = 4;         // NFTs fetched per subsequent auto-page
-const PAGE_INTERVAL_MS = 500;
-
-// Yield time (ms) between rapid batch loads triggered by "Show All Now".
-// Keeps the browser event loop responsive during fast loading.
-const BATCH_YIELD_MS   = 200;
-
-// Music-filter: an animation_url with one of these extensions is an audio NFT.
-// ipfs:// links without an extension are also accepted (this dapp's native format).
-const AUDIO_EXT_RE = /\.(mp3|mp4|wav|flac|m4a|ogg|opus|aac|weba)(\?|#|$)/i;
 
 // ── Global state ──────────────────────────────────────────────────────────
 let _renderer, _scene, _camera, _controls;
@@ -75,15 +59,12 @@ let _activeId  = null;         // currently selected tokenId
 const _ship = { speed: 0.3 };
 
 // ── NFT paging state ──────────────────────────────────────────────────────
-// Shared contract instance reused across lazy-load pages.
-let _collections = [];
-// Next tokenId to attempt loading (counts DOWN from nextTokenId-1 → 0).
-let _nextTokenToLoad = -1;
-// Timer for the auto-page interval.
-let _pageTimerId     = null;
-// Set to true once all tokens have been iterated.
-let _allLoaded       = false;
-let _batchInFlight = null;
+let _archiveNext = 0;
+let _archiveGeneration = 0;
+let _archiveRequest = null;
+let _archiveTimer = null;
+let _catalogArtists = [];
+let _archiveQuery = '';
 let _pointerStart = null;
 let _activeArtist = '';
 
@@ -138,6 +119,8 @@ export function setTimelineOffset(days) {
   _updateVisibility();
   _moveCameraToOffset();
   _updateNavUI();
+  clearTimeout(_archiveTimer);
+  _archiveTimer = setTimeout(() => _loadNFTs(true), 250);
 }
 
 // ── Scene Bootstrap ────────────────────────────────────────────────────────
@@ -233,176 +216,67 @@ function _addTimelineLine() {
 
 // ── NFT Loading ────────────────────────────────────────────────────────────
 //
-// Loading strategy (tunable via INITIAL_BATCH / PAGE_BATCH / PAGE_INTERVAL_MS):
-//   1. Fetch nextTokenId from the contract to know the total token count.
-//   2. Show a spinner in the DNFT list while loading.
-//   3. Iterate from the newest token (nextTokenId-1) downward, loading only
-//      music NFTs (see _isMusicNFT).  Stop after INITIAL_BATCH matches.
-//   4. After PAGE_INTERVAL_MS auto-load PAGE_BATCH more, repeating
-//      until the full list is loaded.
-//   5. The "Show All Now" button short-circuits the timer and loads the rest
-//      in rapid bursts.
-async function _loadNFTs() {
+async function _loadNFTs(reset = true) {
+  if (reset) { clearTimeout(_archiveTimer); _archiveTimer = null; }
   const cfg = window.DecentConfig || {};
-  const contractAddress = cfg.contractAddress;
-  if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') {
-    console.info('[space] No contract address configured — skipping NFT load.');
-    _markListEmpty('No contract configured.');
-    return;
-  }
-
+  if (!reset && (_archiveRequest || _archiveNext === null)) return;
+  _archiveRequest?.abort();
+  const controller = new AbortController();
+  _archiveRequest = controller;
+  const generation = ++_archiveGeneration;
+  const button = document.getElementById('dnft-show-all-btn');
+  if (button) button.disabled = true;
   _showSpinner(true);
-
   try {
-    const rpcUrl = cfg.rpcUrl || 'https://mainnet.base.org';
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const abi = [
-      'function nextTokenId() view returns (uint256)',
-      'function uri(uint256 tokenId) view returns (string)',
-      'function creatorOf(uint256 tokenId) view returns (address)',
-      'function totalMinted(uint256 tokenId) view returns (uint256)',
-    ];
-    _collections = [];
-    for (const collection of configuredNftCollections(cfg)) {
-      const cacheKey = `${collection.chainId}:${collection.contractAddress}`;
-      for (const cached of readCachedMintedTokens({ cacheKey })) {
-        const nft = { ...cached, ...collection };
-        if (_isMusicNFT(nft) && !_allNFTs.some(entry => _nftKey(entry.nft) === _nftKey(nft))) _spawnMesh(nft, false);
+    const options = { offset: reset ? 0 : _archiveNext, query: _archiveQuery, artist: _activeArtist };
+    if (_timelineOffsetDays > 0 && !_activeArtist && !_archiveQuery) {
+      const now = Date.now();
+      options.before = new Date(now - _timelineOffsetDays * 86400000).toISOString();
+      options.after = new Date(now - (_timelineOffsetDays + WINDOW_DAYS) * 86400000).toISOString();
+    }
+    const page = await fetchNftCatalogPage({ config: cfg, ...options, signal: controller.signal });
+    if (generation !== _archiveGeneration) return;
+    if (reset) {
+      for (const mesh of _nftMeshes) {
+        _scene.remove(mesh);
+        mesh.geometry.dispose();
+        mesh.material.map?.dispose();
+        mesh.material.dispose();
       }
-      const contract = new ethers.Contract(collection.contractAddress, abi, provider);
-      const nextId = Number(await readNftContract(() => contract.nextTokenId()));
-      if (!Number.isSafeInteger(nextId) || nextId < 0) throw new Error('Invalid NFT token count');
-      _collections.push({ ...collection, contract, cacheKey, nextTokenId: nextId - 1 });
+      _nftMeshes = [];
+      _allNFTs = [];
+      document.getElementById('dnft-list-items').replaceChildren();
     }
-    const nextId = _collections.reduce((total, collection) => total + collection.nextTokenId + 1, 0);
-
-    if (nextId === 0) {
-      _showSpinner(false);
-      _markListEmpty('No tracks minted yet.');
-      return;
+    _catalogArtists = page.artists;
+    for (const nft of page.nfts) {
+      if (!_allNFTs.some(entry => _nftKey(entry.nft) === _nftKey(nft))) _spawnMesh(nft, false);
     }
-
-    // Start from the newest token and work backwards (highest tokenId first).
-    _nextTokenToLoad = nextId - 1;
-    _allLoaded = false;
-
-    // Load the initial batch so the UI is populated quickly.
-    await _loadBatch(INITIAL_BATCH);
-    _showSpinner(false);
-
-    if (_allNFTs.length === 0 && _allLoaded) {
-      _markListEmpty('No music tracks found yet.');
-      return;
-    }
-
-    // Schedule subsequent pages if tokens still remain.
-    if (!_allLoaded) {
-      _scheduleNextPage();
+    _archiveNext = page.nextOffset;
+    _refreshArtistFilters();
+    _updateVisibility();
+    if (!_allNFTs.length) _markListEmpty('No matching music NFTs.');
+    const status = document.getElementById('archive-search-status');
+    if (status) status.textContent = `${_allNFTs.length} of ${page.total} matching tracks loaded` +
+      (page.refreshError ? `; showing the last verified index: ${page.refreshError}` : '');
+    if (button) {
+      button.classList.toggle('hidden', page.nextOffset === null);
+      button.textContent = 'Load 25 more';
     }
   } catch (err) {
-    _showSpinner(false);
+    if (generation !== _archiveGeneration || controller.signal.aborted) return;
     console.warn('[space] NFT load failed:', err.message);
-    if (_allNFTs.length === 0) _markListEmpty('Could not load tracks.');
-  }
-}
-
-// Load up to `count` music NFTs, working down from _nextTokenToLoad.
-async function _loadBatch(count) {
-  if (_batchInFlight) return _batchInFlight;
-  _batchInFlight = _loadBatchEntries(count).finally(() => { _batchInFlight = null; });
-  return _batchInFlight;
-}
-
-async function _loadBatchEntries(count) {
-  let loaded = 0;
-  while (_nextTokenToLoad >= 0 && loaded < count) {
-    const entries = [];
-    while (_nextTokenToLoad >= 0 && entries.length < Math.min(2, count - loaded)) {
-      const collection = _collections.find(entry => entry.nextTokenId >= 0);
-      if (!collection) { _nextTokenToLoad = -1; break; }
-      entries.push({ collection, tokenId: collection.nextTokenId-- });
-      _nextTokenToLoad--;
-    }
-    const results = await Promise.all(entries.map(_tryLoadToken));
-    loaded += results.filter(Boolean).length;
-  }
-  if (_nextTokenToLoad < 0) _allLoaded = true;
-  return loaded;
-}
-
-// Try to load a single token. Returns true if the token was a music NFT and
-// was successfully spawned, false otherwise.
-async function _tryLoadToken({ collection, tokenId }) {
-  try {
-    const nft = await loadMintedToken({
-      contract: collection.contract,
-      tokenId,
-      fetchMetadata: _fetchMetadata,
-      cacheKey: collection.cacheKey,
-      contractAddress: collection.contractAddress,
-      chainId: collection.chainId,
-    });
-
-    // Skip non-music tokens (images, text NFTs, etc.)
-    if (!nft || !_isMusicNFT(nft)) return false;
-
-    if (_allNFTs.some((entry) => _nftKey(entry.nft) === _nftKey(nft))) return true;
-    _spawnMesh(nft, false);
-    return true;
-  } catch (error) {
-    console.warn(`[space] Could not load token #${tokenId}:`, error.message);
-    return false; // Non-fatal per-token failure
-  }
-}
-
-// Schedule the next auto-page load after PAGE_INTERVAL_MS milliseconds.
-function _scheduleNextPage() {
-  if (_allLoaded || _nextTokenToLoad < 0) return;
-  _pageTimerId = setTimeout(async () => {
-    await _loadBatch(PAGE_BATCH);
-    if (!_allLoaded) _scheduleNextPage();
-  }, PAGE_INTERVAL_MS);
-}
-
-// Called by the "Show All Now" button — cancels the timer and loads the rest
-// of the tokens in rapid PAGE_BATCH bursts (with a small yield between each).
-async function _loadAllNow() {
-  if (_allLoaded || _nextTokenToLoad < 0) return;
-  if (_pageTimerId !== null) {
-    clearTimeout(_pageTimerId);
-    _pageTimerId = null;
-  }
-  _showSpinner(true);
-  const runNext = async () => {
-    if (_nextTokenToLoad < 0 || _allLoaded) {
+    const status = document.getElementById('archive-search-status');
+    if (status) status.textContent = err.message;
+    if (reset) _archiveNext = 0;
+    if (!_allNFTs.length) _markListEmpty(err.message);
+    if (button) { button.classList.remove('hidden'); button.textContent = 'Retry loading'; }
+  } finally {
+    if (generation === _archiveGeneration) {
+      _archiveRequest = null;
       _showSpinner(false);
-      return;
+      if (button) button.disabled = false;
     }
-    await _loadBatch(PAGE_BATCH);
-    // Yield to the browser between bursts so the UI stays responsive.
-    setTimeout(runNext, BATCH_YIELD_MS);
-  };
-  await runNext();
-}
-
-// ── Music NFT filter ───────────────────────────────────────────────────────
-// Returns true for tokens that contain playable audio.
-// Logic:
-//  • meta.audioUrl present → always music
-//  • meta.animation_url ends with a known audio extension → music
-//  • meta.animation_url starts with ipfs:// without an extension → assumed
-//    audio (this dapp's native format; non-audio IPFS links would include an
-//    explicit extension like .png or .json)
-function _isMusicNFT(meta) {
-  if (!meta) return false;
-  if (meta.audioUrl || meta.videoUrl || meta.mediaType === 'video/mp4') return true;
-  const anim = (meta.animation_url || '').toLowerCase();
-  if (!anim) return false;
-  if (AUDIO_EXT_RE.test(anim)) return true;
-  // ipfs:// links without a recognised extension → treat as audio
-  // ({2,5} covers extensions like js, mp3, json, flac, etc.)
-  if (anim.startsWith('ipfs://') && !/\.[a-z]{2,5}(\?|#|$)/.test(anim)) return true;
-  return false;
+  }
 }
 
 async function _fetchMetadata(uri) {
@@ -457,8 +331,9 @@ function _spawnMesh(nft, isNew) {
   _nftMeshes.push(mesh);
 
   // Track for list panel (newest first — prepend)
-  _allNFTs.unshift({ nft, mesh });
-  _addListItem(nft, mesh);
+  if (isNew) _allNFTs.unshift({ nft, mesh });
+  else _allNFTs.push({ nft, mesh });
+  _addListItem(nft, mesh, isNew);
   _refreshArtistFilters();
   _updateVisibility();
 
@@ -588,7 +463,7 @@ function _updateVisibility() {
 }
 
 function _artistKey(nft) {
-  return String(nft.artist || nft.creator || nft.uploader || 'Unknown artist').trim().toLowerCase();
+  return nftArtistKey(nft);
 }
 
 function _artistLabel(nft) {
@@ -602,7 +477,8 @@ function _matchesArtist(nft) {
 }
 
 function _refreshArtistFilters() {
-  const artists = new Map(_allNFTs.map(({ nft }) => [_artistKey(nft), _artistLabel(nft)]));
+  const artists = new Map(_catalogArtists.map(artist => [artist.value, artist.label]));
+  for (const { nft } of _allNFTs) artists.set(_artistKey(nft), _artistLabel(nft));
   const entries = [...artists].sort((first, second) => first[1].localeCompare(second[1]));
   for (const id of ['scene-artist-filter', 'archive-artist-filter']) {
     const select = document.getElementById(id);
@@ -618,8 +494,15 @@ function _bindArtistFilters() {
       _activeArtist = event.target.value;
       _refreshArtistFilters();
       _updateVisibility();
+      _loadNFTs(true);
     });
   }
+  document.getElementById('archive-search')?.addEventListener('input', event => {
+    _archiveQuery = event.target.value;
+    clearTimeout(_archiveTimer);
+    _archiveRequest?.abort();
+    _archiveTimer = setTimeout(() => _loadNFTs(true), 250);
+  });
   const header = document.querySelector('decent-header');
   if (header && typeof ResizeObserver !== 'undefined') {
     customElements.whenDefined('decent-header').then(() => {
@@ -734,7 +617,7 @@ function _setArchiveOpen(open) {
 }
 
 // ── Right-side List Panel ──────────────────────────────────────────────────
-function _addListItem(nft, mesh) {
+function _addListItem(nft, mesh, isNew = false) {
   const list = document.getElementById('dnft-list-items');
   if (!list) return;
 
@@ -748,7 +631,7 @@ function _addListItem(nft, mesh) {
   li.dataset.nftId = _nftKey(nft);
 
   const title    = nft.name || nft.title || `Track #${nft.tokenId}`;
-  const artist   = nft.artist || _shortAddr(nft.creator || '');
+  const artist   = _artistLabel(nft);
   const dateStr  = nft.mintedAt
     ? new Date(nft.mintedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' })
     : '';
@@ -764,7 +647,8 @@ function _addListItem(nft, mesh) {
   });
 
   // Prepend so newest is at the top (items are pushed via unshift in _spawnMesh)
-  list.prepend(li);
+  if (isNew) list.prepend(li);
+  else list.append(li);
 
   // Update count badge
   const countEl = document.getElementById('dnft-list-count');
@@ -788,16 +672,12 @@ function _showSpinner(show) {
   spinner.classList.toggle('hidden', !show);
 }
 
-// Wire the "Show All Now" button.  The button is hidden once all tokens are loaded.
+// The archive fetches another bounded page only when requested.
 function _bindShowAllBtn() {
   const btn = document.getElementById('dnft-show-all-btn');
   if (!btn) return;
   btn.addEventListener('click', () => {
-    btn.disabled = true;
-    btn.textContent = '⏳ Loading…';
-    _loadAllNow().then(() => {
-      btn.classList.add('hidden');
-    });
+    _loadNFTs(_archiveNext === 0 || _archiveNext === null);
   });
 }
 
@@ -822,7 +702,10 @@ function _selectNFT(nft, mesh, listItem, showCard = true) {
   // If NFT is outside the current window, pan to show it
   const { ageDays } = mesh.userData;
   if (!_isInWindow(ageDays)) {
-    setTimelineOffset(Math.max(0, ageDays - WINDOW_DAYS / 2));
+    _timelineOffsetDays = Math.max(0, Math.min(ageDays - WINDOW_DAYS / 2, MAX_NAV_DAYS - WINDOW_DAYS));
+    _updateVisibility();
+    _moveCameraToOffset();
+    _updateNavUI();
   }
 
   _playNFT(nft);

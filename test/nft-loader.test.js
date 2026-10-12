@@ -147,7 +147,8 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   assert.equal(classes.has('hidden'), true);
 });
 
-test('artist filtering hides other artists in both the 3D scene and archive', () => {
+test('artist filtering hides other artists in both the 3D scene and archive', async () => {
+  const { nftArtistKey } = await import(loaderUrl);
   const source = fs.readFileSync(path.join(__dirname, '../js/space.js'), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/export /g, '');
   const first = { tokenId: 1, artist: '0xArtistA', description: 'Shared through DecentJukebox by Alice' };
@@ -157,10 +158,52 @@ test('artist filtering hides other artists in both the 3D scene and archive', ()
   const entries = [first, second].map((nft) => ({ nft, mesh: { userData: { nft, ageDays: 0 } } }));
   const context = vm.createContext({
     entries,
+    nftArtistKey,
     document: {
       querySelector: (selector) => rows[selector.match(/data-token-id="(\d+)"/)?.[1]],
       getElementById: (id) => id === 'artist-filter-count' ? summary : null,
     },
+  });
+
+  test('indexed archive returns latest 25 only, searches older titles and artists, and pages artist collections', async () => {
+    const { nftCatalogPage } = await import(loaderUrl);
+    const address = `0x${'1'.repeat(40)}`;
+    const nfts = Array.from({ length: 60 }, (_, tokenId) => ({ tokenId, contractAddress: address, chainId: 8453,
+      name: tokenId === 0 ? 'Forgotten Song' : `Song ${tokenId}`, artist: tokenId < 30 ? 'Alice' : 'Bob',
+      mintedAt: new Date(Date.UTC(2026, 9, 1, 0, tokenId)).toISOString(), audioUrl: `ipfs://audio-${tokenId}` }));
+    const first = nftCatalogPage(nfts);
+    assert.equal(first.nfts.length, 25);
+    assert.equal(first.nfts[0].tokenId, 59);
+    assert.equal(first.nfts[24].tokenId, 35);
+    assert.equal(first.nextOffset, 25);
+    assert.equal(first.total, 60);
+    assert.deepEqual(nftCatalogPage(nfts, { query: 'forgotten alice' }).nfts.map(nft => nft.tokenId), [0]);
+    const artist = nftCatalogPage(nfts, { artist: 'alice' });
+    assert.equal(artist.total, 30);
+    assert.equal(artist.nfts.length, 25);
+    assert.equal(nftCatalogPage(nfts, { artist: 'alice', offset: artist.nextOffset }).nfts.length, 5);
+    assert.equal(nftCatalogPage(nfts, { artist: 'alice', offset: 25 }).nextOffset, null);
+    assert.equal(nftCatalogPage(nfts, { after: nfts[10].mintedAt, before: nfts[15].mintedAt }).total, 5);
+    for (const page of [{ limit: 26 }, { limit: 0 }, { offset: -1 }, { offset: 0.5 }, { after: 'invalid' }]) {
+      assert.throws(() => nftCatalogPage(nfts, page));
+    }
+  });
+
+  test('browser archive validates collection identity, page bounds and service errors', async () => {
+    const { nftCatalogPage, fetchNftCatalogPage } = await import(loaderUrl);
+    const address = `0x${'2'.repeat(40)}`;
+    const config = { contractAddress: address, chainId: 8453, ipfsUploadServiceUrl: 'https://worker.example' };
+    const page = nftCatalogPage([{ tokenId: 1, contractAddress: address, chainId: 8453, name: 'Song', audioUrl: 'ipfs://audio' }]);
+    const options = { config, fetchImpl: async url => {
+      assert.equal(new URL(url).searchParams.get('limit'), '25');
+      return new Response(JSON.stringify(page));
+    } };
+    assert.equal((await fetchNftCatalogPage(options)).nfts.length, 1);
+    await assert.rejects(fetchNftCatalogPage({ ...options, fetchImpl: async () =>
+      new Response(JSON.stringify({ error: 'Catalog restoring' }), { status: 503 }) }), /Catalog restoring/);
+    await assert.rejects(fetchNftCatalogPage({ ...options, fetchImpl: async () =>
+      new Response(JSON.stringify({ ...page, nfts: Array(26).fill(page.nfts[0]) })) }), /Invalid NFT catalog page/);
+    await assert.rejects(fetchNftCatalogPage({ ...options, config: { ...config, contractAddress: `0x${'3'.repeat(40)}` } }), /Invalid catalog NFT/);
   });
   vm.runInContext(`${source}\n_allNFTs = entries; _activeArtist = '0xartista'; _updateVisibility();`, context);
   assert.equal(entries[0].mesh.visible, true);

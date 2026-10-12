@@ -75,6 +75,14 @@ New owner-approved mints use the deployed DecentNFT v0.3 batch-capable collectio
 
 Minted music appears in the DecentBusking 3D timeline and archive for listening and selection. Marketplace purchase, resale, and richer multi-artist royalty splits are still being developed; a DecentMarket link does not necessarily mean a track is currently listed for sale.
 
+The archive initially loads the latest 25 music NFTs. Search the full indexed
+archive by artist or song title, select an artist to browse their collection,
+or use **Load 25 more** and the timeline to explore older mints. There is no
+automatic full-collection download. Admin reviews mint requests in pages of 20.
+Deploy the worker's `/api/nfts` and paginated mint-queue API before publishing
+the updated browser. A worker cold start may show an explicit catalog-restoring
+message until its first verified Base scan finishes.
+
 ## How It Works
 
 - **JukeLoop:** Discord voice radio plays community tracks and applies vote-weighted rotation.

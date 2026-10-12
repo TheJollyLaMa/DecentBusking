@@ -6,10 +6,11 @@ const vm = require('node:vm');
 
 const songId = `0x${'a'.repeat(64)}`;
 async function load() {
+  const { supportsDjukeAlbumsAndGas } = await import('../js/djuke-version.mjs');
   const source = fs.readFileSync(path.join(__dirname, '../js/listens.mjs'), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/^if \(typeof document[^\n]*$/m, '');
-  const context = vm.createContext({ crypto, setInterval, clearInterval, setTimeout, Promise, BigInt, JSON, AbortSignal });
+  const context = vm.createContext({ crypto, setInterval, clearInterval, setTimeout, Promise, BigInt, JSON, AbortSignal, supportsDjukeAlbumsAndGas });
   vm.runInContext(`${source}\nglobalThis.api = { createListenController, createListenPlaylist, purchaseListens, audioCid, formatUsdc };`, context);
   return context.api;
 }
@@ -41,6 +42,17 @@ test('listen gate plays free while payments are off and previews 30 seconds once
   assert.equal(media.paused, false);
   assert.equal(await controller.playSong({ title: 'Unregistered', audioUrl: 'ipfs://other' }), 'free');
   assert.deepEqual(played, ['free:Song', 'Song', 'free:Unregistered']);
+});
+
+test('v02 and v03 personal listen purchases use the actual creator quote, not the legacy fixed price', async () => {
+  const api = await load();
+  for (const contractVersion of ['0.2', '0.3']) {
+    const fixture = purchaseFixture();
+    fixture.djuke.quoteListens = async () => 900000n;
+    const result = await api.purchaseListens({ ...fixture, songIds: [songId], contractVersion });
+    assert.equal(result.totalUnits, 900000n);
+    assert.deepEqual(fixture.calls, [['approve', 900000n], ['purchase', 1, 900000n]]);
+  }
 });
 
 test('switching songs during a preview cancels the old gate', async () => {

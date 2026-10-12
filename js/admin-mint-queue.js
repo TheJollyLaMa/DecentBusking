@@ -116,7 +116,7 @@ export function clearMintQueueAuthorization() {
   cachedAuthorization = null;
 }
 
-export async function fetchMintQueue({ serviceUrl, signer, address, origin, fetchImpl = globalThis.fetch, now = Date.now }) {
+export async function fetchMintQueue({ serviceUrl, signer, address, origin, offset, limit, fetchImpl = globalThis.fetch, now = Date.now }) {
   if (!serviceUrl) throw new Error('The Render worker URL is not configured');
   if (!signer || !address) throw new Error('Connect your wallet before loading the mint queue');
   const endpoint = `${serviceUrl.replace(/\/$/, '')}/api/mint-queue`;
@@ -138,7 +138,8 @@ export async function fetchMintQueue({ serviceUrl, signer, address, origin, fetc
   const response = await fetchImpl(endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ...session.authorization, signature }),
+    body: JSON.stringify({ ...session.authorization, signature, offset, limit }),
+    signal: AbortSignal.timeout(30000),
   });
   if (!response.ok) {
     if (cachedAuthorization === session) clearMintQueueAuthorization();
@@ -146,5 +147,11 @@ export async function fetchMintQueue({ serviceUrl, signer, address, origin, fetc
     throw new Error(result.error || `Mint queue request failed (${response.status})`);
   }
   const result = await response.json();
-  return Array.isArray(result.requests) ? result.requests : [];
+  if (!Array.isArray(result.requests)) throw new Error('Invalid mint queue response');
+  if (limit === undefined && offset === undefined) return result.requests;
+  if (!Number.isSafeInteger(result.total) || result.total < result.requests.length || result.requests.length > limit ||
+    (result.nextOffset !== null && (!Number.isSafeInteger(result.nextOffset) || result.nextOffset <= offset))) {
+    throw new Error('Invalid mint queue page; update the worker before using pagination');
+  }
+  return result;
 }

@@ -41,6 +41,8 @@ import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
 import { syncMintedTracksFromChain, createVerifiedMintQueueReader, readOwnedDevertAds } from './mint-sync.js';
+import { nftCatalogPage } from '../js/nft-loader.js';
+import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
@@ -120,6 +122,10 @@ let livePerformanceEvents = [];
 let liveWeeklySchedule = {};
 let liveScheduleReady = false;
 let _mintSyncTask = null;
+const _mintTokenCaches = new Map();
+let _nftCatalog = null;
+let _nftCatalogCheckedAt = 0;
+let _nftCatalogError = '';
 const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_RESTORE_ATTEMPTS = 3;
 const WEEKLY_REPORT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -175,7 +181,11 @@ function syncMintedTracks(config, { required = false } = {}) {
       rpcUrl: config.baseRpcUrl,
       contractAddress: config.nftContractAddress,
       contractAddresses: config.nftContractAddresses,
-    }).finally(() => { _mintSyncTask = null; });
+      tokenCaches: _mintTokenCaches,
+      onCatalog: nfts => { _nftCatalog = nfts; _nftCatalogCheckedAt = Date.now(); },
+    }).then(result => { _nftCatalogError = ''; return result; })
+      .catch(error => { _nftCatalogError = error.message; throw error; })
+      .finally(() => { _mintSyncTask = null; });
   }
   return required ? _mintSyncTask
     : _mintSyncTask.catch((err) => console.warn('[mint-sync] Could not read DecentNFT mints:', err.message));
@@ -657,7 +667,7 @@ async function main() {
   setInterval(refreshPayflow, 15_000).unref();
 
   const djukeAddress = process.env.DJUKE_CONTRACT_ADDRESS;
-  const quoteSigner = process.env.DJUKE_CONTRACT_VERSION === '0.2' && process.env.DJUKE_FULFILLER_PRIVATE_KEY
+  const quoteSigner = supportsDjukeAlbumsAndGas(process.env.DJUKE_CONTRACT_VERSION) && process.env.DJUKE_FULFILLER_PRIVATE_KEY
     ? new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, new JsonRpcProvider(config.baseRpcUrl)) : null;
   const getDjukeGasQuote = quoteSigner ? createDjukeGasQuoteReader({ provider: quoteSigner.provider, signer: quoteSigner,
     contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, 'function quote() view returns(uint256)'], quoteSigner),
@@ -716,6 +726,13 @@ async function main() {
     checkpointMirror,
     creatorProfiles,
     getDjukeState: readDjukeState,
+    getNftCatalog: async options => {
+      if (!playlistReady) throw new Error('Playlist is restoring; retry shortly');
+      if (Date.now() - _nftCatalogCheckedAt >= 60000) syncMintedTracks(config);
+      if (!_nftCatalog) throw new Error(_nftCatalogError ? `NFT catalog unavailable: ${_nftCatalogError}` : 'NFT catalog is restoring; retry shortly');
+      return { ...nftCatalogPage(_nftCatalog, options), lastCheckedAt: new Date(_nftCatalogCheckedAt).toISOString(),
+        refreshError: _nftCatalogError };
+    },
     getRadioSchedule: () => ({
       timeZone: PAYROLL_TIME_ZONE,
       schedule: defaultRadioSchedule(liveWeeklySchedule),
@@ -755,9 +772,7 @@ async function main() {
       await waitForRemotePersistence();
       return track;
     },
-    getMintQueue: async () => (await ensureDefaultMintArtwork({ requests: await getVerifiedMintRequests(),
-      getUser: userId => client?.users.fetch(userId).catch(() => null), getDefaultArtwork: user => pinDiscordAvatar(user, config),
-      requestTrackMint, waitForPersistence: waitForRemotePersistence })).map((track) => ({
+    getMintQueue: async () => (await getVerifiedMintRequests()).map((track) => ({
       trackId: track.trackId,
       title: track.title,
       uploader: track.uploader,

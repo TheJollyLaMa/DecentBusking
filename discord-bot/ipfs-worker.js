@@ -1,6 +1,7 @@
 import { Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
+import { catalogPage } from '../js/nft-loader.js';
 import { buildDevertAdsAuthorizationMessage } from '../js/devert-scheduler.mjs';
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
@@ -143,6 +144,7 @@ export function createWorkerRequestHandler({
   verifyMintTransaction,
   onMintComplete,
   getMintQueue,
+  getNftCatalog,
   onReviewedAlbumImport,
   creatorProfiles,
   getRadioState,
@@ -284,6 +286,19 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, await getDjukeState(), '*');
         return;
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/nfts') {
+        if (!getNftCatalog) { sendJson(response, 404, { error: 'NFT catalog is not configured' }, '*'); return; }
+        const params = requestUrl.searchParams;
+        sendJson(response, 200, await getNftCatalog({
+          offset: Number(params.get('offset') || 0),
+          limit: Number(params.get('limit') || 25),
+          query: params.get('query') || '',
+          artist: params.get('artist') || '',
+          before: params.get('before') || '',
+          after: params.get('after') || '',
+        }), '*');
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/devert') {
         if (!getDevertState) {
           sendJson(response, 404, { error: 'DeVert is not deployed or configured' }, '*');
@@ -388,7 +403,16 @@ export function createWorkerRequestHandler({
         if (recovered !== address.toLowerCase() || recovered !== expectedOwner) {
           throw new Error('Admin authorization is not from the mint owner');
         }
-        sendJson(response, 200, { requests: await getMintQueue() }, corsOrigin);
+        if (body.limit !== undefined || body.offset !== undefined) {
+          catalogPage([], { offset: body.offset ?? 0, limit: body.limit ?? 20 }, 20);
+        }
+        const requests = await getMintQueue();
+        if (body.limit === undefined && body.offset === undefined) {
+          sendJson(response, 200, { requests }, corsOrigin);
+        } else {
+          const page = catalogPage(requests, { offset: body.offset ?? 0, limit: body.limit ?? 20 }, 20);
+          sendJson(response, 200, { requests: page.items, total: page.total, nextOffset: page.nextOffset }, corsOrigin);
+        }
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/admin/reviewed-album-import') {

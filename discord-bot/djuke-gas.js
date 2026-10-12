@@ -1,4 +1,5 @@
 import { Contract, Transaction } from 'ethers';
+import { DJUKE_SIGNING_DOMAIN_VERSION } from '../js/djuke-version.mjs';
 
 export const GAS_QUOTE_TYPES = { GasQuote: [
   { name: 'listener', type: 'address' }, { name: 'songId', type: 'bytes32' }, { name: 'maxPrice', type: 'uint256' },
@@ -37,7 +38,7 @@ export function createDjukeGasQuoteReader({ provider, contract, signer, fulfillm
     const deadline = Math.floor(now() / 1000) + 120;
     const quote = { listener, songId, maxPrice: maxPrice.toString(), fulfillmentCostWei: fulfillmentCostWei.toString(),
       nonce: nonce.toString(), deadline };
-    const domain = { name: 'DecentJukeBox', version: '0.2', chainId: 8453, verifyingContract: contract.target };
+    const domain = { name: 'DecentJukeBox', version: DJUKE_SIGNING_DOMAIN_VERSION, chainId: 8453, verifyingContract: contract.target };
     const signature = await signer.signTypedData(domain, GAS_QUOTE_TYPES, quote);
     return { ...quote, signature, contractAddress: contract.target, worker, contributionWei: (fulfillmentCostWei * 2n).toString(),
       executionGasBudget: gasLimit.toString(), estimatedL1FeeWei: l1Fee.toString(), chainId: 8453 };

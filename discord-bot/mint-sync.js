@@ -1,7 +1,7 @@
 // Recovers which playlist tracks are already DecentNFT editions by reading Base,
 // the source of truth when bot state is lost (e.g. a Render restart).
 
-import { Contract, JsonRpcProvider, isAddress } from 'ethers';
+import { Contract, JsonRpcProvider, Interface, isAddress, id } from 'ethers';
 import { CID } from 'multiformats/cid';
 import * as playlistStore from './playlist-store.js';
 
@@ -11,6 +11,34 @@ const NFT_ABI = [
   'function uri(uint256 tokenId) view returns (string)',
 ];
 const METADATA_GATEWAYS = ['https://gateway.pinata.cloud/ipfs/', 'https://ipfs.io/ipfs/'];
+const cacheEvents = new Interface([
+  'event URI(string value,uint256 indexed id)',
+  'event TransferSingle(address indexed operator,address indexed from,address indexed to,uint256 id,uint256 value)',
+  'event TransferBatch(address indexed operator,address indexed from,address indexed to,uint256[] ids,uint256[] values)',
+]);
+
+export async function invalidateMintCache({ cache, provider, contractAddress }) {
+  const blockNumber = await provider.getBlockNumber() - 1;
+  const block = await provider.getBlock(blockNumber);
+  if (!block?.hash) throw new Error('NFT cache confirmation block unavailable');
+  if (cache.blockNumber === undefined || blockNumber < cache.blockNumber ||
+      (await provider.getBlock(cache.blockNumber))?.hash !== cache.blockHash) {
+    cache.tokens.clear();
+  } else {
+    for (let fromBlock = cache.blockNumber + 1; fromBlock <= blockNumber; fromBlock += 1000) {
+      const logs = await provider.getLogs({ address: contractAddress, fromBlock,
+        toBlock: Math.min(fromBlock + 999, blockNumber),
+        topics: [[id('URI(string,uint256)'), id('TransferSingle(address,address,address,uint256,uint256)'),
+          id('TransferBatch(address,address,address,uint256[],uint256[])')]] });
+      for (const log of logs) {
+        const event = cacheEvents.parseLog(log);
+        if (event.name === 'URI' && event.args.id === (2n ** 256n - 1n)) cache.tokens.clear();
+        else for (const tokenId of event.name === 'TransferBatch' ? event.args.ids : [event.args.id]) cache.tokens.delete(Number(tokenId));
+      }
+    }
+  }
+  return { blockNumber, blockHash: block.hash };
+}
 
 // The public Base RPC answers bursts with "over rate limit", so retry with backoff.
 export async function withRetry(call, { attempts = 5, baseDelayMs = 1_000 } = {}) {
@@ -131,25 +159,45 @@ export async function fetchMintMetadata(uri, fetchImpl, { attempts = 3, baseDela
 }
 
 /** Map audio CID → lowest minted token ID for every minted DecentNFT token. */
-export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry = {}, pauseMs = 250, artistWalletByAudioCid }) {
+export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry = {}, pauseMs = 250, artistWalletByAudioCid,
+  tokenCache = new Map(), nfts = [] }) {
   const tokenIdByAudioCid = new Map();
   const nextTokenId = Number(await withRetry(() => contract.nextTokenId(), retry));
-  for (let tokenId = 0; tokenId < nextTokenId; tokenId++) {
-    if (pauseMs) await new Promise((resolve) => setTimeout(resolve, pauseMs));
-    if (Number(await withRetry(() => contract.totalMinted(tokenId), retry)) === 0) continue;
-    const uri = await withRetry(() => contract.uri(tokenId), retry);
-    const metadata = await fetchMintMetadata(uri, fetchImpl);
-    const cid = audioCidFromMetadata(metadata || {});
-    if (cid && !tokenIdByAudioCid.has(cid)) {
-      tokenIdByAudioCid.set(cid, String(tokenId));
-      if (typeof metadata.artist === 'string' && isAddress(metadata.artist)) artistWalletByAudioCid?.set(cid, metadata.artist);
+  if (!Number.isSafeInteger(nextTokenId) || nextTokenId < 0) throw new Error('Invalid NFT token count');
+  const load = async tokenId => {
+    let cached = tokenCache.get(tokenId);
+    if (!cached) {
+      const mintedSupply = Number(await withRetry(() => contract.totalMinted(tokenId), retry));
+      if (mintedSupply === 0) return null;
+      const uri = await withRetry(() => contract.uri(tokenId), retry);
+      const metadata = await fetchMintMetadata(uri, fetchImpl);
+      cached = { ...metadata, tokenId, metadataUri: uri, mintedSupply };
+      tokenCache.set(tokenId, cached);
+    }
+    return cached;
+  };
+  for (let start = 0; start < nextTokenId; start += 3) {
+    const ids = Array.from({ length: Math.min(3, nextTokenId - start) }, (_, index) => start + index);
+    if (pauseMs && ids.some(tokenId => !tokenCache.has(tokenId))) await new Promise(resolve => setTimeout(resolve, pauseMs));
+    const results = await Promise.allSettled(ids.map(load));
+    const failed = results.find(result => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    for (const result of results) {
+      const metadata = result.value;
+      if (!metadata) continue;
+      nfts.push(metadata);
+      const cid = audioCidFromMetadata(metadata);
+      if (cid && !tokenIdByAudioCid.has(cid)) {
+        tokenIdByAudioCid.set(cid, String(metadata.tokenId));
+        if (typeof metadata.artist === 'string' && isAddress(metadata.artist)) artistWalletByAudioCid?.set(cid, metadata.artist);
+      }
     }
   }
   return tokenIdByAudioCid;
 }
 
 /** Mark playlist tracks whose audio is already minted on Base. */
-export async function readMintedCollections({ collections, fetchImpl = fetch, pauseMs, retry }) {
+export async function readMintedCollections({ collections, fetchImpl = fetch, pauseMs, retry, tokenCaches = new Map(), nfts = [] }) {
   if (!Array.isArray(collections) || !collections.length) throw new Error('NFT collections are required');
   const minted = new Map();
   const artistWalletByAudioCid = new Map();
@@ -161,7 +209,7 @@ export async function readMintedCollections({ collections, fetchImpl = fetch, pa
     seen.add(address.toLowerCase());
     const artists = new Map();
     const tokens = await readMintedAudioCids({ contract: collection.contract, fetchImpl, pauseMs, retry,
-      artistWalletByAudioCid: artists });
+      artistWalletByAudioCid: artists, tokenCache: tokenCaches.get(address.toLowerCase()) || new Map(), nfts });
     for (const [cid, tokenId] of tokens) {
       if (!minted.has(cid)) minted.set(cid, tokenId);
       if (!artistWalletByAudioCid.has(cid) && artists.has(cid)) artistWalletByAudioCid.set(cid, artists.get(cid));
@@ -170,7 +218,7 @@ export async function readMintedCollections({ collections, fetchImpl = fetch, pa
       tokenReferencesByAudioCid.set(cid, references);
     }
   }
-  return { minted, artistWalletByAudioCid, tokenReferencesByAudioCid };
+  return { minted, artistWalletByAudioCid, tokenReferencesByAudioCid, nfts };
 }
 
 export async function syncMintedTracksFromChain({
@@ -183,21 +231,24 @@ export async function syncMintedTracksFromChain({
   store = playlistStore,
   log = console,
   pauseMs,
+  tokenCaches = new Map(),
+  onCatalog,
 }) {
   let result;
   if (collections || contractAddresses?.length) {
     const provider = collections ? null : new JsonRpcProvider(rpcUrl);
     result = await readMintedCollections({ collections: collections || contractAddresses.map(address => ({
       contractAddress: address, contract: new Contract(address, NFT_ABI, provider),
-    })), fetchImpl, pauseMs });
+    })), fetchImpl, pauseMs, tokenCaches });
   } else {
     const artistWalletByAudioCid = new Map();
     const minted = await readMintedAudioCids({
       contract: contract || new Contract(contractAddress, NFT_ABI, new JsonRpcProvider(rpcUrl)),
       fetchImpl, pauseMs, artistWalletByAudioCid,
     });
-    result = { minted, artistWalletByAudioCid };
+    result = { minted, artistWalletByAudioCid, nfts: [] };
   }
+  onCatalog?.(result.nfts || []);
   const changed = store.applyOnChainMints(result.minted, result);
   if (changed) log.log(`[mint-sync] Marked ${changed} track(s) minted from DecentNFT on Base.`);
   return changed;

@@ -1,5 +1,6 @@
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
+import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 
 export const CREATOR_ALBUM_ABI = [
   'function getAlbum(bytes32) view returns ((address mainOwner,string title,string manifestURI,uint256 revision,uint256 listenPrice,uint256 albumPrice,address[] recipients,uint16[] sharesBps,string[] positions,bytes32[] songIds))',
@@ -48,7 +49,7 @@ export function initCreatorProfile() {
     return window._wallet.signer;
   };
   const albumContract = () => {
-    if (config().djukeContractVersion !== '0.2') throw new Error('Album management requires the tested DJuke v0.2 deployment');
+    if (!supportsDjukeAlbumsAndGas(config().djukeContractVersion)) throw new Error('Album management requires DJuke v0.2 or v0.3');
     return new ethers.Contract(config().djukeContractAddress, CREATOR_ALBUM_ABI, signer());
   };
   const requireBase = async () => {
@@ -58,7 +59,7 @@ export function initCreatorProfile() {
     form.querySelectorAll('input, textarea, button').forEach(element => { element.disabled = busy || !editable(); });
     dialog.querySelector('[data-discord-link]').disabled = busy || !editable();
     albumForm.querySelectorAll('input, textarea, button').forEach(element => {
-      element.disabled = busy || !editable() || config().djukeContractVersion !== '0.2';
+      element.disabled = busy || !editable() || !supportsDjukeAlbumsAndGas(config().djukeContractVersion);
     });
   };
   const display = () => {
@@ -189,7 +190,7 @@ export function initCreatorProfile() {
     const current = await contract.getAlbum(albumId);
     const split = parseCreatorSplits(albumValue('splits'));
     const coder = ethers.AbiCoder.defaultAbiCoder();
-    const domain = { name: 'DecentJukeBox', version: '0.2', chainId: 8453, verifyingContract: contract.target };
+    const domain = { name: 'DecentJukeBox', version: DJUKE_SIGNING_DOMAIN_VERSION, chainId: 8453, verifyingContract: contract.target };
     const types = { AlbumSplit: [{ name: 'albumId', type: 'bytes32' }, { name: 'revision', type: 'uint256' },
       { name: 'recipientsHash', type: 'bytes32' }, { name: 'sharesHash', type: 'bytes32' }, { name: 'positionsHash', type: 'bytes32' }] };
     const data = { albumId, revision: current.revision, recipientsHash: ethers.keccak256(coder.encode(['address[]'], [split.recipients])),

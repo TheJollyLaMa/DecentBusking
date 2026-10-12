@@ -1,5 +1,77 @@
 const CACHE_TTL_MS = 60 * 60 * 1000;
 
+export function isMusicNft(nft) {
+  const animation = String(nft?.animation_url || '').toLowerCase();
+  return !!(nft && (nft.audioUrl || nft.videoUrl || nft.mediaType === 'video/mp4' ||
+    /\.(mp3|mp4|wav|flac|m4a|ogg|opus|aac|weba)(\?|#|$)/i.test(animation) ||
+    (animation.startsWith('ipfs://') && !/\.[a-z]{2,5}(\?|#|$)/.test(animation))));
+}
+
+export function nftArtistKey(nft) {
+  return String(nft.artist || nft.creator || nft.uploader || 'Unknown artist').trim().toLowerCase();
+}
+
+export function nftArtistLabel(nft) {
+  return nft.artistName || nft.uploader || nft.description?.match(/^Shared through DecentJukebox by (.+)$/)?.[1] ||
+    nft.artist || nft.creator || 'Unknown artist';
+}
+
+export function catalogPage(items, { offset = 0, limit = 25 } = {}, maxLimit = 25) {
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > maxLimit) {
+    throw new Error(`Invalid page: offset must be nonnegative and limit must be 1 to ${maxLimit}`);
+  }
+  return { items: items.slice(offset, offset + limit), total: items.length,
+    nextOffset: offset + limit < items.length ? offset + limit : null };
+}
+
+export function nftCatalogPage(nfts, { query = '', artist = '', before = '', after = '', ...paging } = {}) {
+  const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const lower = after ? Date.parse(after) : null;
+  const upper = before ? Date.parse(before) : null;
+  if ((after && !Number.isFinite(lower)) || (before && !Number.isFinite(upper))) throw new Error('Invalid timeline dates');
+  const music = nfts.filter(isMusicNft);
+  const artists = [...new Map(music.map(nft => [nftArtistKey(nft), nftArtistLabel(nft)])).entries()]
+    .map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  const matching = music.filter(nft => {
+    const text = [nft.name, nft.title, nftArtistLabel(nft), nft.artist, nft.creator].filter(Boolean).join(' ').toLowerCase();
+    const date = Date.parse(nft.mintedAt);
+    return (!artist || nftArtistKey(nft) === artist.toLowerCase()) && terms.every(term => text.includes(term)) &&
+      (lower === null || date >= lower) && (upper === null || date < upper);
+  }).sort((a, b) => (Date.parse(b.mintedAt) || 0) - (Date.parse(a.mintedAt) || 0) || b.tokenId - a.tokenId ||
+    a.contractAddress.localeCompare(b.contractAddress));
+  const page = catalogPage(matching, paging);
+  return { nfts: page.items.map(nft => ({ ...nft, nftId: nftIdentity(nft) })),
+    total: page.total, nextOffset: page.nextOffset, artists };
+}
+
+export async function fetchNftCatalogPage({ config, offset = 0, query = '', artist = '', before = '', after = '',
+  signal, fetchImpl = globalThis.fetch }) {
+  const service = (config.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+  if (!service) throw new Error('NFT catalog service is not configured');
+  const params = new URLSearchParams({ offset, limit: 25, query, artist, before, after });
+  const response = await fetchImpl(`${service}/api/nfts?${params}`, {
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+  });
+  const page = await response.json();
+  if (!response.ok) throw new Error(page.error || `NFT catalog unavailable (${response.status})`);
+  if (!Array.isArray(page.nfts) || page.nfts.length > 25 || !Array.isArray(page.artists) ||
+    !Number.isSafeInteger(page.total) || page.total < page.nfts.length ||
+    (page.nextOffset !== null && (!Number.isSafeInteger(page.nextOffset) || page.nextOffset <= offset))) {
+    throw new Error('Invalid NFT catalog page');
+  }
+  const collections = new Set(configuredNftCollections(config).map(entry => entry.contractAddress));
+  const seen = new Set();
+  for (const nft of page.nfts) {
+    if (nft.chainId !== (config.chainId || 8453) || !collections.has(String(nft.contractAddress).toLowerCase()) ||
+      nft.nftId !== nftIdentity(nft) || seen.has(nft.nftId) || !isMusicNft(nft)) throw new Error('Invalid catalog NFT');
+    seen.add(nft.nftId);
+  }
+  if (page.artists.some(artist => typeof artist?.value !== 'string' || typeof artist?.label !== 'string')) {
+    throw new Error('Invalid catalog artists');
+  }
+  return page;
+}
+
 export function configuredNftCollections(config = {}) {
   const addresses = [config.contractAddress, ...(config.additionalNftContractAddresses || [])];
   const unique = new Set();

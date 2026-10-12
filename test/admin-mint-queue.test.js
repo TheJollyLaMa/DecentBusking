@@ -95,6 +95,26 @@ test('signs and fetches the owner mint queue', async () => {
     },
   });
 
+  test('mint queue pages are bounded to twenty and reuse authorization across navigation', async () => {
+    const { fetchMintQueue, clearMintQueueAuthorization } = await import(moduleUrl);
+    clearMintQueueAuthorization();
+    let signed = 0;
+    const options = { serviceUrl: 'https://worker.example', signer: { signMessage: async () => { signed++; return 'signature'; } },
+      address: `0x${'1'.repeat(40)}`, origin: 'https://site.example', offset: 0, limit: 20,
+      fetchImpl: async (_url, request) => {
+        const { offset, limit } = JSON.parse(request.body);
+        assert.equal(limit, 20);
+        return new Response(JSON.stringify({ requests: Array.from({ length: offset ? 3 : 20 }, (_, i) => ({ trackId: String(i + offset) })),
+          total: 23, nextOffset: offset ? null : 20 }));
+      } };
+    const first = await fetchMintQueue(options);
+    assert.equal(first.requests.length, 20);
+    assert.equal(first.nextOffset, 20);
+    assert.equal((await fetchMintQueue({ ...options, offset: 20 })).requests.length, 3);
+    assert.equal(signed, 1);
+    await assert.rejects(fetchMintQueue({ ...options, fetchImpl: async () => new Response(JSON.stringify({ requests: [] })) }), /Invalid mint queue page/);
+  });
+
   assert.deepEqual(queue, [{ trackId: 'track-1' }]);
   assert.equal(request.url, 'https://worker.example/api/mint-queue');
   const authorization = JSON.parse(request.options.body);

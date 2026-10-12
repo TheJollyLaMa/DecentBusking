@@ -2,8 +2,8 @@
 // Initialises the header, footer, stage interactions, and the 3-D space field.
 
 import { initWallet } from './wallet.js';
-import { initStage } from './stage.js?v=20261010-listens';
-import { initSpace } from './space.js?v=20261010-listens';
+import { initStage } from './stage.js?v=20261012-paging';
+import { initSpace } from './space.js?v=20261012-paging';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.
 
