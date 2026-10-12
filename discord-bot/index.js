@@ -40,7 +40,7 @@ import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs'
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
-import { syncMintedTracksFromChain, createVerifiedMintQueueReader, readOwnedDevertAds } from './mint-sync.js';
+import { syncMintedTracksFromChain, createVerifiedMintQueueReader, discoverPinataMetadataGateway, readOwnedDevertAds } from './mint-sync.js';
 import { nftCatalogPage } from '../js/nft-loader.js';
 import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
@@ -126,6 +126,7 @@ const _mintTokenCaches = new Map();
 let _nftCatalog = null;
 let _nftCatalogCheckedAt = 0;
 let _nftCatalogError = '';
+let _nftMetadataGateways = null;
 const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_RESTORE_ATTEMPTS = 3;
 const WEEKLY_REPORT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -177,12 +178,19 @@ async function runWeeklyPlayReport(client, config) {
 
 function syncMintedTracks(config, { required = false } = {}) {
   if (!_mintSyncTask) {
-    _mintSyncTask = syncMintedTracksFromChain({
-      rpcUrl: config.baseRpcUrl,
-      contractAddress: config.nftContractAddress,
-      contractAddresses: config.nftContractAddresses,
-      tokenCaches: _mintTokenCaches,
-      onCatalog: nfts => { _nftCatalog = nfts; _nftCatalogCheckedAt = Date.now(); },
+    _mintSyncTask = Promise.resolve().then(async () => {
+      if (!_nftMetadataGateways) {
+        const dedicated = await discoverPinataMetadataGateway({ pinataJwt: config.pinataJwt });
+        _nftMetadataGateways = [dedicated];
+      }
+      return syncMintedTracksFromChain({
+        rpcUrl: config.baseRpcUrl,
+        contractAddress: config.nftContractAddress,
+        contractAddresses: config.nftContractAddresses,
+        tokenCaches: _mintTokenCaches,
+        metadataGateways: _nftMetadataGateways,
+        onCatalog: nfts => { _nftCatalog = nfts; _nftCatalogCheckedAt = Date.now(); },
+      });
     }).then(result => { _nftCatalogError = ''; return result; })
       .catch(error => { _nftCatalogError = error.message; throw error; })
       .finally(() => { _mintSyncTask = null; });

@@ -130,13 +130,30 @@ export async function readOwnedDevertAds({ collections, address, fetchImpl = fet
   return { ads: [...ads.values()], metadataUnavailable, ownershipUnavailable };
 }
 
+export async function discoverPinataMetadataGateway({ pinataJwt, fetchImpl = fetch,
+  apiUrl = 'https://api.pinata.cloud/v3/gateways' } = {}) {
+  if (!pinataJwt) throw new Error('PINATA_JWT is required to discover the dedicated metadata gateway');
+  const response = await fetchImpl(`${apiUrl}?pageSize=1`, {
+    headers: { Authorization: `Bearer ${pinataJwt}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`Pinata gateway discovery failed (${response.status})`);
+  const body = await response.json();
+  let domain = body?.data?.rows?.[0]?.domain;
+  if (typeof domain !== 'string' || !/^[a-z0-9.-]+$/i.test(domain)) {
+    throw new Error('Pinata gateway discovery returned no valid domain');
+  }
+  if (!domain.includes('.')) domain = `${domain}.mypinata.cloud`;
+  return `https://${domain}/ipfs/`;
+}
+
 export async function fetchMintMetadata(uri, fetchImpl, { attempts = 3, baseDelayMs = 1_000,
-  wait = delay => new Promise(resolve => setTimeout(resolve, delay)) } = {}) {
+  gateways = METADATA_GATEWAYS, wait = delay => new Promise(resolve => setTimeout(resolve, delay)) } = {}) {
   const cidPath = uri.startsWith('ipfs://') ? uri.replace(/^ipfs:\/\/(ipfs\/)?/, '')
     : /^https?:\/\//.test(uri) ? new URL(uri).pathname.split('/ipfs/')[1] : null;
   const urls = [...new Set([
     ...(/^https?:\/\//.test(uri) ? [uri] : []),
-    ...(cidPath ? METADATA_GATEWAYS.map(gateway => `${gateway}${cidPath}`) : []),
+    ...(cidPath ? gateways.map(gateway => `${gateway.replace(/\/?$/, '/')}${cidPath}`) : []),
   ])];
   const failures = new Map();
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -160,7 +177,7 @@ export async function fetchMintMetadata(uri, fetchImpl, { attempts = 3, baseDela
 
 /** Map audio CID → lowest minted token ID for every minted DecentNFT token. */
 export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry = {}, pauseMs = 250, artistWalletByAudioCid,
-  tokenCache = new Map(), nfts = [] }) {
+  tokenCache = new Map(), nfts = [], metadataGateways }) {
   const tokenIdByAudioCid = new Map();
   const nextTokenId = Number(await withRetry(() => contract.nextTokenId(), retry));
   if (!Number.isSafeInteger(nextTokenId) || nextTokenId < 0) throw new Error('Invalid NFT token count');
@@ -170,7 +187,8 @@ export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry =
       const mintedSupply = Number(await withRetry(() => contract.totalMinted(tokenId), retry));
       if (mintedSupply === 0) return null;
       const uri = await withRetry(() => contract.uri(tokenId), retry);
-      const metadata = await fetchMintMetadata(uri, fetchImpl);
+      const metadata = await fetchMintMetadata(uri, fetchImpl,
+        metadataGateways?.length ? { gateways: metadataGateways } : undefined);
       cached = { ...metadata, tokenId, metadataUri: uri, mintedSupply };
       tokenCache.set(tokenId, cached);
     }
@@ -197,7 +215,8 @@ export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry =
 }
 
 /** Mark playlist tracks whose audio is already minted on Base. */
-export async function readMintedCollections({ collections, fetchImpl = fetch, pauseMs, retry, tokenCaches = new Map(), nfts = [] }) {
+export async function readMintedCollections({ collections, fetchImpl = fetch, pauseMs, retry,
+  tokenCaches = new Map(), nfts = [], metadataGateways }) {
   if (!Array.isArray(collections) || !collections.length) throw new Error('NFT collections are required');
   const minted = new Map();
   const artistWalletByAudioCid = new Map();
@@ -206,10 +225,16 @@ export async function readMintedCollections({ collections, fetchImpl = fetch, pa
   for (const collection of collections) {
     const address = collection.contractAddress;
     if (!isAddress(address) || seen.has(address.toLowerCase())) throw new Error('Invalid or duplicate NFT collection');
-    seen.add(address.toLowerCase());
+    const cacheKey = address.toLowerCase();
+    seen.add(cacheKey);
+    let tokenCache = tokenCaches.get(cacheKey);
+    if (!tokenCache) {
+      tokenCache = new Map();
+      tokenCaches.set(cacheKey, tokenCache);
+    }
     const artists = new Map();
     const tokens = await readMintedAudioCids({ contract: collection.contract, fetchImpl, pauseMs, retry,
-      artistWalletByAudioCid: artists, tokenCache: tokenCaches.get(address.toLowerCase()) || new Map(), nfts });
+      artistWalletByAudioCid: artists, tokenCache, nfts, metadataGateways });
     for (const [cid, tokenId] of tokens) {
       if (!minted.has(cid)) minted.set(cid, tokenId);
       if (!artistWalletByAudioCid.has(cid) && artists.has(cid)) artistWalletByAudioCid.set(cid, artists.get(cid));
@@ -232,6 +257,7 @@ export async function syncMintedTracksFromChain({
   log = console,
   pauseMs,
   tokenCaches = new Map(),
+  metadataGateways,
   onCatalog,
 }) {
   let result;
@@ -239,12 +265,12 @@ export async function syncMintedTracksFromChain({
     const provider = collections ? null : new JsonRpcProvider(rpcUrl);
     result = await readMintedCollections({ collections: collections || contractAddresses.map(address => ({
       contractAddress: address, contract: new Contract(address, NFT_ABI, provider),
-    })), fetchImpl, pauseMs, tokenCaches });
+    })), fetchImpl, pauseMs, tokenCaches, metadataGateways });
   } else {
     const artistWalletByAudioCid = new Map();
     const minted = await readMintedAudioCids({
       contract: contract || new Contract(contractAddress, NFT_ABI, new JsonRpcProvider(rpcUrl)),
-      fetchImpl, pauseMs, artistWalletByAudioCid,
+      fetchImpl, pauseMs, artistWalletByAudioCid, metadataGateways,
     });
     result = { minted, artistWalletByAudioCid, nfts: [] };
   }

@@ -31,6 +31,20 @@ test('metadata retries transient gateway failures and falls back for HTTP IPFS U
   assert.equal(bestEffortCalls, 2);
 });
 
+test('discovers the account dedicated Pinata gateway without exposing the JWT to content requests', async () => {
+  const { discoverPinataMetadataGateway } = await import(moduleUrl);
+  let request;
+  const gateway = await discoverPinataMetadataGateway({ pinataJwt: 'secret-jwt', fetchImpl: async (url, options) => {
+    request = { url, options };
+    return new Response(JSON.stringify({ data: { rows: [{ domain: 'account-gateway' }] } }));
+  } });
+  assert.equal(gateway, 'https://account-gateway.mypinata.cloud/ipfs/');
+  assert.equal(request.url, 'https://api.pinata.cloud/v3/gateways?pageSize=1');
+  assert.equal(request.options.headers.Authorization, 'Bearer secret-jwt');
+  await assert.rejects(discoverPinataMetadataGateway({ pinataJwt: 'secret-jwt',
+    fetchImpl: async () => new Response('{}') }), /no valid domain/);
+});
+
 test('on-chain ad library recovers wallet-owned DecentAdvert NFTs from legacy metadata', async () => {
   const { readOwnedDevertAds } = await import(moduleUrl);
   const owner = `0x${'1'.repeat(40)}`;
@@ -178,6 +192,33 @@ test('multi-collection reconciliation preserves contract identity and waits for 
   assert.equal(applied, false);
   await assert.rejects(readMintedCollections({ collections: [collections[0], collections[0]], pauseMs: 0, fetchImpl }),
     /duplicate NFT collection/);
+});
+
+test('collection cache retains verified tokens when a later cold batch fails', async () => {
+  const { readMintedCollections } = await import(moduleUrl);
+  const address = `0x${'2'.repeat(40)}`;
+  const tokenCaches = new Map();
+  const metadataReads = new Map();
+  let failLast = true;
+  const collection = { contractAddress: address, contract: {
+    nextTokenId: async () => 4n,
+    totalMinted: async () => 1n,
+    uri: async tokenId => `ipfs://metadata-${tokenId}`,
+  } };
+  const fetchImpl = async url => {
+    const tokenId = Number(url.split('-').pop());
+    metadataReads.set(tokenId, (metadataReads.get(tokenId) || 0) + 1);
+    if (tokenId === 3 && failLast) return new Response('', { status: 404 });
+    return new Response(JSON.stringify({ audioUrl: `ipfs://audio-${tokenId}` }));
+  };
+  await assert.rejects(readMintedCollections({ collections: [collection], tokenCaches, fetchImpl,
+    pauseMs: 0, metadataGateways: ['https://metadata.example/ipfs/'] }), /metadata-3/);
+  assert.equal(tokenCaches.get(address).size, 3);
+  failLast = false;
+  const result = await readMintedCollections({ collections: [collection], tokenCaches, fetchImpl,
+    pauseMs: 0, metadataGateways: ['https://metadata.example/ipfs/'] });
+  assert.equal(result.nfts.length, 4);
+  assert.deepEqual([...metadataReads.entries()], [[0, 1], [1, 1], [2, 1], [3, 2]]);
 });
 
 test('marks tracks minted from Base so lost state cannot re-queue an existing NFT', async (t) => {
