@@ -146,6 +146,26 @@ test('archived payroll recovery merges week counters once without replacing curr
   assert.equal(JSON.parse(fs.readFileSync(storePath, 'utf8'))[0].payrollPlays['NY-2026-10-12'], 5);
 });
 
+test('archived payroll checkpoint seeds an empty playlist and marks its CID as consumed', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-payroll-seed-'));
+  const storePath = path.join(tempDir, 'playlist.json');
+  process.env.JUKELOOP_PLAYLIST_PATH = storePath;
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(tempDir, { recursive: true, force: true }); });
+  const storeUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'playlist-store.js'));
+  storeUrl.searchParams.set('payroll-seed', String(Date.now()));
+  const store = await import(storeUrl.href);
+  store.loadPlaylist();
+  const cid = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
+  const tracks = store.seedPlaylistFromPayrollSnapshot([{ trackId: 'recovered', title: 'Recovered song',
+    payrollPlays: { 'NY-2026-10-05': 125 }, payrollTrackingStartedAt: '2026-10-11T19:14:41.819Z' }],
+  cid, '2026-10-12T15:37:06.715Z');
+  assert.equal(tracks, 1);
+  assert.equal(store.getPlaylist()[0].payrollPlays['NY-2026-10-05'], 125);
+  assert.equal(store.hasPayrollHistoryRecovery(cid), true);
+  assert.ok(store.getPlaylist()[0].payrollLiveTrackingStartedAt);
+  assert.equal(JSON.parse(fs.readFileSync(storePath, 'utf8'))[0].payrollPlays['NY-2026-10-05'], 125);
+});
+
 test('archived payroll recovery does not double-count history already in the current playlist', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-payroll-recovery-existing-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');

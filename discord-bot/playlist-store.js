@@ -198,6 +198,24 @@ export function hasPayrollHistoryRecovery(snapshotCid) {
   return _playlist.some(track => track.payrollRecoveryCids?.includes(`v2:${snapshotCid}`));
 }
 
+export function seedPlaylistFromPayrollSnapshot(archivedPlaylist, snapshotCid, snapshotSavedAt) {
+  if (_playlist.length) throw new Error('Payroll recovery can seed only an empty playlist');
+  if (!Array.isArray(archivedPlaylist) || !/^[a-zA-Z0-9]{20,120}$/.test(snapshotCid || '')) {
+    throw new Error('A valid archived playlist and snapshot CID are required');
+  }
+  const savedAt = Date.parse(snapshotSavedAt || '');
+  if (!Number.isFinite(savedAt)) throw new Error('Archived playlist snapshot timestamp is required');
+  _playlist = _normalizePlaylist(archivedPlaylist);
+  const recoveredAt = new Date().toISOString();
+  for (const track of _playlist) {
+    track.payrollLiveTrackingStartedAt = recoveredAt;
+    track.payrollRecoverySnapshotAt = new Date(savedAt).toISOString();
+    track.payrollRecoveryCids = [...new Set([...(track.payrollRecoveryCids || []), snapshotCid, `v2:${snapshotCid}`])].slice(-32);
+  }
+  _save();
+  return _playlist.length;
+}
+
 export function mergePayrollHistorySnapshot(archivedPlaylist, snapshotCid, { snapshotSavedAt } = {}) {
   if (!Array.isArray(archivedPlaylist) || !/^[a-zA-Z0-9]{20,120}$/.test(snapshotCid || '')) {
     throw new Error('A valid archived playlist and snapshot CID are required');

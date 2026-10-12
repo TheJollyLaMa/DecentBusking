@@ -76,6 +76,7 @@ import {
   updateTrackPin,
   hasPayrollHistoryRecovery,
   mergePayrollHistorySnapshot,
+  seedPlaylistFromPayrollSnapshot,
   getWeeklyPlayHistory,
   getWeeklyPlayReport,
   getWeeklyPlayWeeks,
@@ -905,7 +906,20 @@ async function main() {
     configureRemotePersistence(stateStore.save);
     const payrollRecoveryCids = (process.env.JUKELOOP_PAYROLL_RECOVERY_CID || PAYROLL_RECOVERY_CIDS.join(','))
       .split(',').map(cid => cid.trim()).filter(Boolean);
-    for (const payrollRecoveryCid of payrollRecoveryCids) {
+    let recoveryCids = payrollRecoveryCids;
+    if (!getPlaylist().length && recoveryCids.length) {
+      const baselineCid = recoveryCids[0];
+      try {
+        const baseline = await stateStore.restoreCid(baselineCid, { attempts: 4, baseDelayMs: 15_000 });
+        const tracks = seedPlaylistFromPayrollSnapshot(baseline, baselineCid, stateStore.getLatestSnapshotSavedAt());
+        await waitForRemotePersistence();
+        console.log(`[payroll-recovery] Seeded ${tracks} tracks from ${baselineCid}; saved weekly history restored.`);
+        recoveryCids = recoveryCids.slice(1);
+      } catch (error) {
+        console.warn('[payroll-recovery] Archived playlist could not seed the empty store:', error.message);
+      }
+    }
+    for (const payrollRecoveryCid of recoveryCids) {
       if (hasPayrollHistoryRecovery(payrollRecoveryCid)) continue;
       try {
         const archivedPlaylist = await stateStore.restoreCid(payrollRecoveryCid, { attempts: 4, baseDelayMs: 15_000 });
