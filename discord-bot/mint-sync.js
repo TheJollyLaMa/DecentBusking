@@ -226,7 +226,8 @@ export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry =
       const uri = await withRetry(() => contract.uri(tokenId), retry);
       const metadata = await fetchMintMetadata(uri, fetchImpl,
         metadataGateways?.length ? { gateways: metadataGateways } : undefined);
-      cached = { ...metadata, tokenId, metadataUri: uri, mintedSupply };
+      cached = { ...metadata, tokenId, contractAddress: contract.target || contract.address || '',
+        chainId: 8453, metadataUri: uri, mintedSupply };
       tokenCache.set(tokenId, cached);
     }
     return cached;
@@ -240,7 +241,8 @@ export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry =
     for (const result of results) {
       const metadata = result.value;
       if (!metadata) continue;
-      nfts.push(metadata);
+      const contractAddress = contract.target || contract.address || '';
+      nfts.push({ ...metadata, contractAddress: metadata.contractAddress || contractAddress, chainId: metadata.chainId || 8453 });
       const cid = audioCidFromMetadata(metadata);
       if (cid && !tokenIdByAudioCid.has(cid)) {
         tokenIdByAudioCid.set(cid, String(metadata.tokenId));
