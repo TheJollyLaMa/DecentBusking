@@ -180,8 +180,18 @@ function syncMintedTracks(config, { required = false } = {}) {
   if (!_mintSyncTask) {
     _mintSyncTask = Promise.resolve().then(async () => {
       if (!_nftMetadataGateways) {
-        const dedicated = await discoverPinataMetadataGateway({ pinataJwt: config.pinataJwt });
-        _nftMetadataGateways = ['https://ipfs.orbitor.dev/ipfs/', dedicated];
+        let dedicated = null;
+        try {
+          dedicated = await discoverPinataMetadataGateway({ pinataJwt: config.pinataJwt });
+        } catch (err) {
+          console.warn('[mint-sync] Dedicated Pinata gateway discovery failed, using fallback gateways:', err.message);
+        }
+        _nftMetadataGateways = [
+          'https://gateway.pinata.cloud/ipfs/',
+          'https://ipfs.orbitor.dev/ipfs/',
+          ...(dedicated ? [dedicated] : []),
+          'https://ipfs.io/ipfs/',
+        ];
       }
       return syncMintedTracksFromChain({
         rpcUrl: config.baseRpcUrl,
