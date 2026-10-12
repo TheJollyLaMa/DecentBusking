@@ -135,14 +135,14 @@ test('archived payroll recovery merges week counters once without replacing curr
     payrollVotes: { 'NY-2026-10-05': 0, 'NY-2026-10-12': 2 }, payrollTrackingStartedAt: '2026-10-11T19:14:41.819Z' },
   { trackId: 'removed-track', payrollPlays: { 'NY-2026-10-05': 2 } }];
   const merged = store.mergePayrollHistorySnapshot(archived, cid, { snapshotSavedAt: '2026-10-12T15:37:06.715Z' });
-  assert.deepEqual(merged, { mergedTracks: 1, addedPlays: 126, addedVotes: 2 });
+  assert.deepEqual(merged, { mergedTracks: 1, addedPlays: 126, addedVotes: 2, correctedPlays: 0, correctedVotes: 0 });
   const [track] = store.getPlaylist();
   assert.equal(track.title, 'Current title');
   assert.deepEqual(track.payrollPlays, { 'NY-2026-10-05': 125, 'NY-2026-10-12': 5 });
   assert.deepEqual(track.payrollVotes, { 'NY-2026-10-05': 0, 'NY-2026-10-12': 3 });
   assert.equal(track.payrollTrackingStartedAt, '2026-10-11T19:14:41.819Z');
   assert.equal(store.hasPayrollHistoryRecovery(cid), true);
-  assert.deepEqual(store.mergePayrollHistorySnapshot(archived, cid), { mergedTracks: 0, addedPlays: 0, addedVotes: 0 });
+  assert.deepEqual(store.mergePayrollHistorySnapshot(archived, cid), { mergedTracks: 0, addedPlays: 0, addedVotes: 0, correctedPlays: 0, correctedVotes: 0 });
   assert.equal(JSON.parse(fs.readFileSync(storePath, 'utf8'))[0].payrollPlays['NY-2026-10-12'], 5);
 });
 
@@ -159,7 +159,30 @@ test('archived payroll recovery does not double-count history already in the cur
   const archived = [{ trackId: 'track-1', payrollPlays: { 'NY-2026-10-05': 125 }, payrollTrackingStartedAt: '2026-10-11T19:14:41.819Z' }];
   const result = store.mergePayrollHistorySnapshot(archived, cid, { snapshotSavedAt: '2026-10-12T15:37:06.715Z' });
   assert.equal(result.addedPlays, 0);
+  assert.equal(result.correctedPlays, 0);
   assert.equal(store.getPlaylist()[0].payrollPlays['NY-2026-10-05'], 125);
+});
+
+test('versioned recovery corrects a stale closed-week counter from an earlier merge', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-payroll-recovery-v2-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(tempDir, { recursive: true, force: true }); });
+  const storeUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'playlist-store.js'));
+  storeUrl.searchParams.set('payroll-recovery-v2', String(Date.now()));
+  const store = await import(storeUrl.href);
+  const cid = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
+  store.loadPlaylist([{ trackId: 'track-1', payrollPlays: { 'NY-2026-10-05': 2, 'NY-2026-10-12': 115 },
+    payrollTrackingStartedAt: '2026-10-11T19:14:41.819Z',
+    payrollRecoverySnapshotAt: '2026-10-12T16:19:48.703Z', payrollRecoveryCids: [cid, `v1:${cid}`] }]);
+  const archived = [{ trackId: 'track-1', payrollPlays: { 'NY-2026-10-05': 1, 'NY-2026-10-12': 111 },
+    payrollTrackingStartedAt: '2026-10-11T19:14:41.819Z' }];
+  const result = store.mergePayrollHistorySnapshot(archived, cid, { snapshotSavedAt: '2026-10-12T15:37:06.715Z' });
+  const track = store.getPlaylist()[0];
+  assert.equal(track.payrollPlays['NY-2026-10-05'], 1);
+  assert.equal(track.payrollPlays['NY-2026-10-12'], 115);
+  assert.equal(result.correctedPlays, 1);
+  assert.equal(result.addedPlays, 0);
+  assert.equal(store.hasPayrollHistoryRecovery(cid), true);
 });
 
 test('later disjoint recovery snapshots add current-week plays after the older closed-week baseline', async (t) => {

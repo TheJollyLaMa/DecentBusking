@@ -913,7 +913,7 @@ async function main() {
           { snapshotSavedAt: stateStore.getLatestSnapshotSavedAt() });
         if (merged.mergedTracks) {
           await waitForRemotePersistence();
-          console.log(`[payroll-recovery] Merged ${merged.addedPlays} plays and ${merged.addedVotes} votes from ${payrollRecoveryCid} across ${merged.mergedTracks} tracks.`);
+          console.log(`[payroll-recovery] Added ${merged.addedPlays} plays/${merged.addedVotes} votes and corrected ${merged.correctedPlays} plays/${merged.correctedVotes} votes from ${payrollRecoveryCid} across ${merged.mergedTracks} tracks.`);
         }
       } catch (error) {
         console.warn('[payroll-recovery] Archived playback counters were not merged:', error.message);

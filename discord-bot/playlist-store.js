@@ -195,7 +195,7 @@ export function savePlaylist() {
 }
 
 export function hasPayrollHistoryRecovery(snapshotCid) {
-  return _playlist.some(track => track.payrollRecoveryCids?.includes(snapshotCid));
+  return _playlist.some(track => track.payrollRecoveryCids?.includes(`v2:${snapshotCid}`));
 }
 
 export function mergePayrollHistorySnapshot(archivedPlaylist, snapshotCid, { snapshotSavedAt } = {}) {
@@ -207,10 +207,14 @@ export function mergePayrollHistorySnapshot(archivedPlaylist, snapshotCid, { sna
   let mergedTracks = 0;
   let addedPlays = 0;
   let addedVotes = 0;
+  let correctedPlays = 0;
+  let correctedVotes = 0;
   for (const archived of archivedPlaylist) {
     const current = currentById.get(archived.trackId);
-    if (!current || current.payrollRecoveryCids?.includes(snapshotCid)) continue;
-    current.payrollLiveTrackingStartedAt ||= current.payrollTrackingStartedAt || new Date().toISOString();
+    const recoveryKey = `v2:${snapshotCid}`;
+    if (!current || current.payrollRecoveryCids?.includes(recoveryKey)) continue;
+    const alreadyMergedByEarlierCode = current.payrollRecoveryCids?.includes(snapshotCid) === true;
+    current.payrollLiveTrackingStartedAt ||= current.payrollRecoverySnapshotAt || current.payrollTrackingStartedAt || new Date().toISOString();
     const liveTrackingStartedAt = Date.parse(current.payrollLiveTrackingStartedAt);
     const previousRecoveryAt = Date.parse(current.payrollRecoverySnapshotAt || '');
     const isNewerRecoverySnapshot = Number.isFinite(archivedAt) &&
@@ -227,12 +231,17 @@ export function mergePayrollHistorySnapshot(archivedPlaylist, snapshotCid, { sna
         if (!Number.isSafeInteger(existing) || existing < 0) throw new Error(`Invalid current ${field} value`);
         const periodClosedAtLiveStart = /^NY-\d{4}-\d{2}-\d{2}$/.test(week) &&
           Date.parse(payrollPeriodFromKey(week).endAt) <= liveTrackingStartedAt;
-        const shouldAdd = currentStartedAfterSnapshot && !periodClosedAtLiveStart;
-        const merged = shouldAdd ? existing + value : Math.max(existing, value);
+        const shouldAdd = !alreadyMergedByEarlierCode && currentStartedAfterSnapshot && !periodClosedAtLiveStart;
+        const merged = alreadyMergedByEarlierCode && periodClosedAtLiveStart ? value
+          : shouldAdd ? existing + value : Math.max(existing, value);
         if (!Number.isSafeInteger(merged)) throw new Error(`Merged ${field} exceeds safe accounting precision`);
         current[field][week] = merged;
-        if (field === 'payrollPlays') addedPlays += merged - existing;
-        else addedVotes += merged - existing;
+        const delta = merged - existing;
+        if (field === 'payrollPlays') {
+          if (delta >= 0) addedPlays += delta;
+          else correctedPlays -= delta;
+        } else if (delta >= 0) addedVotes += delta;
+        else correctedVotes -= delta;
       }
     }
     if (Number.isFinite(archivedAt)) current.payrollRecoverySnapshotAt = new Date(Math.max(
@@ -242,11 +251,11 @@ export function mergePayrollHistorySnapshot(archivedPlaylist, snapshotCid, { sna
         Date.parse(archived.payrollTrackingStartedAt) < Date.parse(current.payrollTrackingStartedAt))) {
       current.payrollTrackingStartedAt = archived.payrollTrackingStartedAt;
     }
-    current.payrollRecoveryCids = [...new Set([...(current.payrollRecoveryCids || []), snapshotCid])].slice(-16);
+    current.payrollRecoveryCids = [...new Set([...(current.payrollRecoveryCids || []), snapshotCid, recoveryKey])].slice(-32);
     mergedTracks++;
   }
   if (mergedTracks) _save();
-  return { mergedTracks, addedPlays, addedVotes };
+  return { mergedTracks, addedPlays, addedVotes, correctedPlays, correctedVotes };
 }
 
 /**
