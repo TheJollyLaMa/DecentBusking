@@ -117,6 +117,51 @@ test('playlist tracks each attachment and persists its IPFS pin state', async (t
   assert.equal(rated.plays, beforeVote.plays);
 });
 
+test('archived payroll recovery merges week counters once without replacing current playlist data', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-payroll-recovery-'));
+  const storePath = path.join(tempDir, 'playlist.json');
+  process.env.JUKELOOP_PLAYLIST_PATH = storePath;
+  t.after(() => {
+    delete process.env.JUKELOOP_PLAYLIST_PATH;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+  const storeUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'playlist-store.js'));
+  storeUrl.searchParams.set('payroll-recovery', String(Date.now()));
+  const store = await import(storeUrl.href);
+  store.loadPlaylist([{ trackId: 'track-1', title: 'Current title', payrollPlays: { 'NY-2026-10-12': 4 },
+    payrollVotes: { 'NY-2026-10-12': 1 }, payrollTrackingStartedAt: '2026-10-12T15:40:00.000Z' }]);
+  const cid = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
+  const archived = [{ trackId: 'track-1', title: 'Old title', payrollPlays: { 'NY-2026-10-05': 125, 'NY-2026-10-12': 1 },
+    payrollVotes: { 'NY-2026-10-05': 0, 'NY-2026-10-12': 2 }, payrollTrackingStartedAt: '2026-10-11T19:14:41.819Z' },
+  { trackId: 'removed-track', payrollPlays: { 'NY-2026-10-05': 2 } }];
+  const merged = store.mergePayrollHistorySnapshot(archived, cid, { snapshotSavedAt: '2026-10-12T15:37:06.715Z' });
+  assert.deepEqual(merged, { mergedTracks: 1, addedPlays: 126, addedVotes: 2 });
+  const [track] = store.getPlaylist();
+  assert.equal(track.title, 'Current title');
+  assert.deepEqual(track.payrollPlays, { 'NY-2026-10-05': 125, 'NY-2026-10-12': 5 });
+  assert.deepEqual(track.payrollVotes, { 'NY-2026-10-05': 0, 'NY-2026-10-12': 3 });
+  assert.equal(track.payrollTrackingStartedAt, '2026-10-11T19:14:41.819Z');
+  assert.equal(store.hasPayrollHistoryRecovery(cid), true);
+  assert.deepEqual(store.mergePayrollHistorySnapshot(archived, cid), { mergedTracks: 0, addedPlays: 0, addedVotes: 0 });
+  assert.equal(JSON.parse(fs.readFileSync(storePath, 'utf8'))[0].payrollPlays['NY-2026-10-12'], 5);
+});
+
+test('archived payroll recovery does not double-count history already in the current playlist', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-payroll-recovery-existing-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(tempDir, { recursive: true, force: true }); });
+  const storeUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'playlist-store.js'));
+  storeUrl.searchParams.set('payroll-recovery-existing', String(Date.now()));
+  const store = await import(storeUrl.href);
+  store.loadPlaylist([{ trackId: 'track-1', payrollPlays: { 'NY-2026-10-05': 125 },
+    payrollTrackingStartedAt: '2026-10-11T19:14:41.819Z' }]);
+  const cid = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
+  const archived = [{ trackId: 'track-1', payrollPlays: { 'NY-2026-10-05': 125 }, payrollTrackingStartedAt: '2026-10-11T19:14:41.819Z' }];
+  const result = store.mergePayrollHistorySnapshot(archived, cid, { snapshotSavedAt: '2026-10-12T15:37:06.715Z' });
+  assert.equal(result.addedPlays, 0);
+  assert.equal(store.getPlaylist()[0].payrollPlays['NY-2026-10-05'], 125);
+});
+
 test('DeVert ad library is scoped to wallet and reports mint/campaign state', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-devert-library-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');

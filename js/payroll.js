@@ -21,7 +21,7 @@
  */
 
 import { isAdminWallet } from './admin-access.mjs';
-import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt } from './radio-payroll.mjs';
+import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText } from './radio-payroll.mjs';
 import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
 
@@ -772,7 +772,7 @@ async function _refreshRadioPayroll() {
     select.replaceChildren(..._radioReports.slice().reverse().map(report => {
       const option = document.createElement('option');
       option.value = report.week;
-      option.textContent = `${report.week}${report.current ? ' · current estimate' : ' · completed'}${report.partial ? ' · partial migration week' : ''}${report.legacy ? ' · legacy receipt' : ''}`;
+      option.textContent = `${report.week}${report.current ? ' · in progress' : ' · completed'}${report.partial ? ' · tracking began late' : ''}${report.legacy ? ' · legacy receipt' : ''}`;
       return option;
     }));
     select.value = _radioReports.some(report => report.week === selectedWeek) ? selectedWeek
@@ -847,7 +847,7 @@ async function _refreshWeeklyPayflow() {
       localStorage.setItem('decentbusking:radio-payroll-reviews:v1', JSON.stringify(records));
       const close = new Date(state.nextCloseAt).toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
       _setStatus(status, !state.ready ? 'Weekly schedule restoring; no automatic payments.' :
-        `Next close: ${close} · ${(state.fundShareBps / 100).toFixed(0)}% of unreserved closing funds · ${state.partial ? 'partial first week; old totals retained' : 'New York weeks'}${state.backupPending ? ' · receipt backup pending' : ''}${state.lastError ? ` · ${state.lastError}` : ''}`, Boolean(state.lastError));
+        `Next close: ${close} · ${(state.fundShareBps / 100).toFixed(0)}% of unreserved closing funds · ${state.partial ? 'tracking began after this week started; earlier activity may be missing' : 'New York weeks'}${state.backupPending ? ' · receipt backup pending' : ''}${state.lastError ? ` · ${state.lastError}` : ''}`, Boolean(state.lastError));
       const target = document.getElementById('radio-funding-dashboard');
       target?.replaceChildren();
       for (const [category, fund] of Object.entries(state.funds || {})) {
@@ -1161,6 +1161,28 @@ function _loadRadioReviews() {
   _checkRadioRecipients();
 }
 
+function _appendRadioWorkReference(target, reference, category, preview = false) {
+  const row = document.createElement('div'); row.className = 'payroll-work-reference';
+  const label = document.createElement('span');
+  label.textContent = `${category === 'playback' ? 'Playback' : 'Top 10'} work reference${preview ? ' · preview' : ''}`;
+  const value = document.createElement('input'); value.type = 'text'; value.readOnly = true; value.value = reference;
+  value.setAttribute('aria-label', `${category} work reference`);
+  const copy = document.createElement('button'); copy.type = 'button';
+  copy.className = 'payroll-btn payroll-btn-secondary payroll-copy-reference';
+  copy.textContent = 'Copy'; copy.setAttribute('aria-label', `Copy ${category} work reference`);
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(reference);
+      copy.textContent = 'Copied';
+    } catch {
+      value.focus(); value.select();
+      copy.textContent = 'Selected';
+    }
+  });
+  row.append(label, value, copy);
+  target.append(row);
+}
+
 function _renderRadioReviews() {
   const target = document.getElementById('radio-reviewed-receipts');
   if (!target) return;
@@ -1169,8 +1191,10 @@ function _renderRadioReviews() {
   const finalize = document.getElementById('radio-payroll-finalize');
   const positiveBudget = ['radio-playback-budget', 'radio-prize-budget'].some(id => Number(document.getElementById(id)?.value) > 0);
   if (finalize) finalize.disabled = !report || report.current || !positiveBudget || _settling;
-  if (finalize && report?.week.startsWith('NY-')) { finalize.disabled = true; finalize.textContent = 'Weekly allocations prepared automatically'; }
-  else if (finalize) finalize.textContent = 'Save Allocation & Review Recipients';
+  if (finalize) {
+    finalize.hidden = Boolean(report?.week.startsWith('NY-'));
+    if (!finalize.hidden) finalize.textContent = 'Save Allocation & Review Recipients';
+  }
   for (const category of ['playback', 'top10']) {
     const button = document.getElementById(`radio-settle-${category}`);
     const saved = _radioReviews[category];
@@ -1204,12 +1228,15 @@ function _renderRadioReviews() {
       const state = _radioRecipientStates.get(entry.workReferenceText);
       label.textContent += state?.paid ? ' · Paid on Base' : state?.approved ? ' · Approved / unpaid' : state ? ' · Approval required' : ' · Checking Base';
       row.append(label);
-      if (!state || state.paid || state.approved) { target.append(row); continue; }
-      const identity = document.createElement('input'); identity.type = 'text'; identity.placeholder = 'Verified contributor identity';
-      identity.setAttribute('aria-label', `Contributor identity for ${entry.wallet}`);
-      const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'payroll-btn payroll-btn-secondary'; approve.textContent = 'Approve Recipient';
-      approve.addEventListener('click', () => _approveRadioRecipient(entry.wallet, identity.value));
-      row.append(identity, approve); target.append(row);
+      if (state && !state.paid && !state.approved) {
+        const identity = document.createElement('input'); identity.type = 'text'; identity.placeholder = 'Verified contributor identity';
+        identity.setAttribute('aria-label', `Contributor identity for ${entry.wallet}`);
+        const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'payroll-btn payroll-btn-secondary'; approve.textContent = 'Approve Recipient';
+        approve.addEventListener('click', () => _approveRadioRecipient(entry.wallet, identity.value));
+        row.append(identity, approve);
+      }
+      target.append(row);
+      _appendRadioWorkReference(target, entry.workReferenceText, category);
     }
   }
 }
@@ -1380,6 +1407,8 @@ function _previewRadioPayroll() {
         amount.textContent = `${ethers.formatUnits(entry.amountUnits, 6)} USDC${entry.payable ? '' : entry.amountUnits === 0n ? ' · no payout' : ' · held below minimum'}`;
         row.append(name, amount);
         target.append(row);
+        const category = id === 'radio-playback-preview' ? 'playback' : 'top10';
+        _appendRadioWorkReference(target, radioWorkReferenceText({ week: report.week, category, wallet: entry.wallet }), category, true);
       }
     };
     render('radio-playback-preview', playback);
@@ -1388,7 +1417,10 @@ function _previewRadioPayroll() {
       (playbackBudget === 0n || (_radioBalances.playback.active && _radioBalances.playback.available >= playbackBudget)) &&
       (prizeBudget === 0n || (_radioBalances.prizes.active && _radioBalances.prizes.available >= prizeBudget));
     const excluded = report.tracks.filter(track => !isValidEthAddress(track.wallet)).length;
-    _setStatus(status, `Draft ${report.week}${report.current ? ' (week still in progress)' : ''}. ` +
+    const trackingStartedAt = report.accountingStartedAt
+      ? new Date(report.accountingStartedAt).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' }) : '';
+    const trackingNote = report.partial && trackingStartedAt ? ` Tracking began ${trackingStartedAt}; earlier activity may be missing.` : '';
+    _setStatus(status, `${report.current ? `Current week ${report.week}: ${report.totalPlays} qualified plays across ${report.trackCount} tracks so far.` : `Closed week ${report.week}: ${report.totalPlays} qualified plays across ${report.trackCount} tracks.`}${trackingNote} ` +
       `${funded ? 'Budgets within available funds' : 'Budgets are not confirmed funded'}. ` +
       `${excluded ? `${excluded} tracks excluded for missing verified wallets. ` : ''}Preview only; settlement uses the frozen reviewed receipt.`);
     _renderRadioReviews();
@@ -1444,7 +1476,6 @@ export function initPayroll() {
     });
   }
   document.getElementById('radio-payroll-refresh')?.addEventListener('click', _refreshRadioPayroll);
-  document.getElementById('radio-payroll-preview')?.addEventListener('click', _previewRadioPayroll);
   document.getElementById('radio-payroll-week')?.addEventListener('change', () => {
     document.getElementById('radio-playback-preview')?.replaceChildren();
     document.getElementById('radio-prize-preview')?.replaceChildren();

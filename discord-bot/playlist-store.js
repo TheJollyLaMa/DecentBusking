@@ -194,6 +194,51 @@ export function savePlaylist() {
   _save();
 }
 
+export function hasPayrollHistoryRecovery(snapshotCid) {
+  return _playlist.some(track => track.payrollRecoveryCids?.includes(snapshotCid));
+}
+
+export function mergePayrollHistorySnapshot(archivedPlaylist, snapshotCid, { snapshotSavedAt } = {}) {
+  if (!Array.isArray(archivedPlaylist) || !/^[a-zA-Z0-9]{20,120}$/.test(snapshotCid || '')) {
+    throw new Error('A valid archived playlist and snapshot CID are required');
+  }
+  const archivedAt = Date.parse(snapshotSavedAt || '');
+  const currentById = new Map(_playlist.map(track => [track.trackId, track]));
+  let mergedTracks = 0;
+  let addedPlays = 0;
+  let addedVotes = 0;
+  for (const archived of archivedPlaylist) {
+    const current = currentById.get(archived.trackId);
+    if (!current || current.payrollRecoveryCids?.includes(snapshotCid)) continue;
+    for (const field of ['payrollPlays', 'payrollVotes']) {
+      const source = archived[field];
+      if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
+      current[field] ||= {};
+      for (const [week, rawValue] of Object.entries(source)) {
+        const value = Number(rawValue);
+        if (!Number.isSafeInteger(value) || value < 0) throw new Error(`Invalid ${field} value in archived playlist`);
+        const existing = Number(current[field][week] || 0);
+        if (!Number.isSafeInteger(existing) || existing < 0) throw new Error(`Invalid current ${field} value`);
+        const currentStartedAt = Date.parse(current.payrollTrackingStartedAt || '');
+        const currentStartedAfterSnapshot = Number.isFinite(archivedAt) && Number.isFinite(currentStartedAt) && currentStartedAt > archivedAt;
+        const merged = currentStartedAfterSnapshot ? existing + value : Math.max(existing, value);
+        if (!Number.isSafeInteger(merged)) throw new Error(`Merged ${field} exceeds safe accounting precision`);
+        current[field][week] = merged;
+        if (field === 'payrollPlays') addedPlays += merged - existing;
+        else addedVotes += merged - existing;
+      }
+    }
+    if (archived.payrollTrackingStartedAt && (!current.payrollTrackingStartedAt ||
+        Date.parse(archived.payrollTrackingStartedAt) < Date.parse(current.payrollTrackingStartedAt))) {
+      current.payrollTrackingStartedAt = archived.payrollTrackingStartedAt;
+    }
+    current.payrollRecoveryCids = [...new Set([...(current.payrollRecoveryCids || []), snapshotCid])].slice(-16);
+    mergedTracks++;
+  }
+  if (mergedTracks) _save();
+  return { mergedTracks, addedPlays, addedVotes };
+}
+
 /**
  * Mark tracks minted from on-chain DecentNFT records (audio CID → token ID),
  * so lost local state can never re-queue an existing NFT. Checkpoints once.

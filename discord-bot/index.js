@@ -74,6 +74,8 @@ import {
   requestTrackMint,
   completeTrackMint,
   updateTrackPin,
+  hasPayrollHistoryRecovery,
+  mergePayrollHistorySnapshot,
   getWeeklyPlayHistory,
   getWeeklyPlayReport,
   getWeeklyPlayWeeks,
@@ -120,6 +122,7 @@ let _mintSyncTask = null;
 const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_RESTORE_ATTEMPTS = 3;
 const WEEKLY_REPORT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const PAYROLL_RECOVERY_CID = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
 
 async function runWeeklyPlayReport(client, config) {
   const channelId = config.jukeLoopTextChannelId;
@@ -904,6 +907,20 @@ async function main() {
     }
     loadPlaylist(restoredPlaylist);
     configureRemotePersistence(stateStore.save);
+    const payrollRecoveryCid = process.env.JUKELOOP_PAYROLL_RECOVERY_CID || PAYROLL_RECOVERY_CID;
+    if (payrollRecoveryCid && !hasPayrollHistoryRecovery(payrollRecoveryCid)) {
+      try {
+        const archivedPlaylist = await stateStore.restoreCid(payrollRecoveryCid);
+        const merged = mergePayrollHistorySnapshot(archivedPlaylist, payrollRecoveryCid,
+          { snapshotSavedAt: stateStore.getLatestSnapshotSavedAt() });
+        if (merged.mergedTracks) {
+          await waitForRemotePersistence();
+          console.log(`[payroll-recovery] Merged ${merged.addedPlays} plays and ${merged.addedVotes} votes from ${payrollRecoveryCid} across ${merged.mergedTracks} tracks.`);
+        }
+      } catch (error) {
+        console.warn('[payroll-recovery] Archived playback counters were not merged:', error.message);
+      }
+    }
     if (process.env.DBUSK_IMPORT_REVIEWED_ALBUMS === 'true') {
       try {
         if (!Array.isArray(restoredPlaylist) || !restoredPlaylist.length) throw new Error('Verified remote playlist restore required for album import');

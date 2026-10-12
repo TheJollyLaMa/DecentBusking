@@ -1599,6 +1599,12 @@ decent-foot {
 .settlement-router-section .payroll-status { overflow-wrap: anywhere; }
 .radio-payroll-artist { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--panel-border); font-size: .8rem; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .radio-payroll-artist { grid-template-columns: minmax(0, 1fr); } }
+.payroll-secondary-flow { margin: 12px 0; border-block: 1px solid var(--panel-border); }
+.payroll-secondary-flow > summary { padding: 10px 0; cursor: pointer; font-weight: 600; }
+.payroll-work-reference { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; padding: 8px 0 12px; }
+.payroll-work-reference > span { color: var(--text-dim); font-size: .75rem; }
+.payroll-work-reference > input { grid-column: 1; width: 100%; min-width: 0; font-size: .72rem; font-family: monospace; }
+.payroll-copy-reference { grid-column: 2; grid-row: 1 / span 2; }
 .payroll-legacy-warning { color: var(--gold); font-size: .85rem; }
 .payroll-legacy-review { display: grid; min-width: 220px; gap: 8px; margin-top: 8px; }
 .payroll-legacy-review input[type="text"], .payroll-tx-hash { min-width: 0; width: 100%; padding: 8px; border: 1px solid var(--panel-border); border-radius: 4px; background: #10121a; color: var(--text-primary); font: inherit; }

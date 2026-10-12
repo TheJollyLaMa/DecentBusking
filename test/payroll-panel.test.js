@@ -15,6 +15,19 @@ test('active payroll is Base-only and radio drafts cannot send transactions', as
   assert.match(preview, /Preview only; settlement uses the frozen reviewed receipt/);
 });
 
+test('weekly payroll surfaces counted plays and copyable work references without a redundant preview action', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/payroll.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(source, /_appendRadioWorkReference\(target, entry\.workReferenceText, category\)/);
+  assert.match(source, /radioWorkReferenceText\(\{ week: report\.week, category, wallet: entry\.wallet \}\)/);
+  assert.match(source, /navigator\.clipboard\.writeText\(reference\)/);
+  assert.match(source, /Current week \$\{report\.week\}: \$\{report\.totalPlays\} qualified plays/);
+  assert.match(source, /Tracking began \$\{trackingStartedAt\}; earlier activity may be missing/);
+  assert.match(html, /Reviewed Receipts &amp; Work References/);
+  assert.match(html, /<details class="payroll-secondary-flow">/);
+  assert.doesNotMatch(html, /id="radio-payroll-preview"/);
+});
+
 test('Base payroll excludes retired legacy entries without sending or verifying payments', async () => {
   const { createLegacyReceiptStore, verifyLegacyPayment } = await import(pathToFileURL(path.join(__dirname, '../js/legacy-payroll.mjs')).href);
   const owner = '0x807061DF657A7697c04045dA7d16D941861cAABc';

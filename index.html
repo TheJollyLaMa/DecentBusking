@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261011-ad-studio" />
+  <link rel="stylesheet" href="css/styles.css?v=20261012-payroll-work-references" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -568,17 +568,18 @@
         </div>
         <div class="radio-payroll-actions">
           <button id="radio-payroll-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Treasury &amp; Plays</button>
-          <button id="radio-payroll-preview" class="payroll-btn payroll-btn-primary" type="button">Preview Allocation</button>
         </div>
         <p id="radio-payroll-status" class="payroll-status" role="status">Current shares are estimates. Published closed-week receipts require owner-authorized payments.</p>
         <dl class="payroll-allocation"><dt>Base gas balance</dt><dd id="radio-gas-balance">Not loaded</dd><dt>Playback fund USDC</dt><dd id="radio-playback-balance">Not loaded</dd></dl>
         <div id="radio-playback-preview" class="radio-payroll-preview"></div>
-        <h4 id="top-ten-payroll-title">Top 10 Vote Prizes</h4>
-        <div class="radio-payroll-controls"><label>Prize budget (USDC)<input id="radio-prize-budget" type="number" min="0" step="0.01" value="0" /></label></div>
-        <p id="radio-vote-policy" class="payroll-description">Weekly net votes (upvotes minus downvotes). Equal prize shares; one place per artist wallet.</p>
-        <dl class="payroll-allocation"><dt>Prize fund USDC</dt><dd id="radio-prize-balance">Not loaded</dd></dl>
-        <div id="radio-prize-preview" class="radio-payroll-preview"></div>
-        <h4 id="radio-review-title">Review &amp; Pay</h4>
+        <details class="payroll-secondary-flow">
+          <summary id="top-ten-payroll-title">Top 10 Vote Prizes</summary>
+          <div class="radio-payroll-controls"><label>Prize budget (USDC)<input id="radio-prize-budget" type="number" min="0" step="0.01" value="0" /></label></div>
+          <p id="radio-vote-policy" class="payroll-description">Weekly net votes (upvotes minus downvotes). Equal prize shares; one place per artist wallet.</p>
+          <dl class="payroll-allocation"><dt>Prize fund USDC</dt><dd id="radio-prize-balance">Not loaded</dd></dl>
+          <div id="radio-prize-preview" class="radio-payroll-preview"></div>
+        </details>
+        <h4 id="radio-review-title">Reviewed Receipts &amp; Work References</h4>
         <button id="radio-payroll-finalize" class="payroll-btn payroll-btn-secondary" type="button" disabled>Save Allocation &amp; Review Recipients</button>
         <div id="radio-reviewed-receipts"></div>
         <div class="radio-payroll-actions">
@@ -651,7 +652,7 @@
   <!-- Admin role-grant panel -->
   <script type="module" src="js/admin.js?v=20261011-clean-admin"></script>
 
-  <script type="module" src="js/payroll.js?v=20261010-pinner-fund-form"></script>
+  <script type="module" src="js/payroll.js?v=20261012-payroll-work-references"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261010-public-calendar"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261010-left-djuke"></script>
@@ -661,7 +662,7 @@
   <script type="module" src="js/listens.mjs?v=20261010-listens"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261010-pinner-fund-form';
+    import { initPayroll } from './js/payroll.js?v=20261012-payroll-work-references';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

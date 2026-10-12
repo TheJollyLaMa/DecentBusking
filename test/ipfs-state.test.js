@@ -55,6 +55,39 @@ test('restore falls back to the Pinata gateway when the configured gateway is ra
   assert.deepEqual(fetched.slice(1), ['https://dweb.link/ipfs/bafystate', 'https://gateway.pinata.cloud/ipfs/bafystate']);
 });
 
+test('restore falls back to a retained older checkpoint when the newest CID is unavailable', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  const fetched = [];
+  const warnings = [];
+  const store = createPinataStateStore({ pinataJwt: 'test-jwt', log: { warn: message => warnings.push(message) },
+    fetchImpl: async url => {
+      fetched.push(url);
+      if (url.startsWith('https://api.pinata.cloud/')) return new Response(JSON.stringify({ data: { files: [
+        { cid: 'latest', name: 'decentbusking-jukeloop-state.json', created_at: '2026-10-02T12:00:00Z' },
+        { cid: 'previous', name: 'decentbusking-jukeloop-state.json', created_at: '2026-10-01T12:00:00Z' },
+      ] } }));
+      if (url.endsWith('/ipfs/latest')) return new Response('', { status: 429 });
+      return new Response(JSON.stringify({ schemaVersion: 1, playlist: [{ trackId: 'recovered' }] }));
+    } });
+  assert.deepEqual(await store.restore(), [{ trackId: 'recovered' }]);
+  assert.equal(store.getLatestSnapshotUri(), 'ipfs://previous');
+  assert.ok(fetched.includes('https://dweb.link/ipfs/previous'));
+  assert.match(warnings[0], /Restored older checkpoint previous/);
+});
+
+test('restoreCid fetches an explicit checkpoint without requiring it to remain in Pinata file listings', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  const cid = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
+  const store = createPinataStateStore({ pinataJwt: 'test-jwt', fetchImpl: async url => {
+    if (url.endsWith(`/ipfs/${cid}`)) {
+      return new Response(JSON.stringify({ schemaVersion: 1, playlist: [{ trackId: 'recovered' }] }));
+    }
+    return new Response('', { status: 404 });
+  } });
+  assert.deepEqual(await store.restoreCid(cid), [{ trackId: 'recovered' }]);
+  assert.equal(store.getLatestSnapshotUri(), `ipfs://${cid}`);
+});
+
 test('payment snapshot namespace is separate and immutable payment backups are retained', async () => {
   const { createPinataStateStore } = await import(moduleUrl);
   const requests = [];

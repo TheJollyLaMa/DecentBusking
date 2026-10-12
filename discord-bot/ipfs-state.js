@@ -5,6 +5,7 @@ const STATE_KEYVALUES = {
   schema: '1',
 };
 const SNAPSHOTS_TO_KEEP = 3;
+const MAX_RESTORE_CANDIDATES = 3;
 const RESTORE_REQUEST_TIMEOUT_MS = 15_000;
 // Bounded so a large backlog is pruned across several saves without tripping Pinata rate limits.
 const MAX_PRUNE_PER_SAVE = 10;
@@ -48,6 +49,7 @@ export function createPinataStateStore({
   tags = STATE_KEYVALUES,
   retainSnapshots = SNAPSHOTS_TO_KEEP,
   beforeUpload,
+  log = console,
   serialize = playlist => ({ schemaVersion: 1, savedAt: new Date().toISOString(), playlist }),
   deserialize = snapshot => {
     if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.playlist)) throw new Error('IPFS state snapshot has an unsupported format');
@@ -57,6 +59,7 @@ export function createPinataStateStore({
   if (!pinataJwt) throw new Error('PINATA_JWT is required for playlist checkpoints');
   const headers = { authorization: `Bearer ${pinataJwt}` };
   let latestSnapshotUri = '';
+  let latestSnapshotSavedAt = '';
 
   async function listSnapshots(limit = 100) {
     const response = await fetchImpl(buildListUrl(filesApiUrl, limit, name), {
@@ -70,23 +73,58 @@ export function createPinataStateStore({
   }
 
   async function restore() {
-    const [latest] = await listSnapshots();
-    if (!latest?.cid) return null;
+    const snapshots = await listSnapshots();
+    if (!snapshots.length) return null;
 
-    let lastStatus = 0;
+    const failures = [];
+    const candidates = snapshots.slice(0, MAX_RESTORE_CANDIDATES);
+    for (const [index, candidate] of candidates.entries()) {
+      if (!candidate.cid) continue;
+      for (const base of [...new Set([gateway, FALLBACK_GATEWAY])]) {
+        const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${candidate.cid}`, {
+          signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
+        }).catch(() => null);
+        if (!response?.ok) {
+          failures.push(`${candidate.cid}: HTTP ${response?.status || 'network error'}`);
+          continue;
+        }
+        try {
+          const snapshot = await response.json();
+          const restored = deserialize(snapshot, `ipfs://${candidate.cid}`);
+          latestSnapshotUri = `ipfs://${candidate.cid}`;
+          latestSnapshotSavedAt = snapshot.savedAt || candidate.created_at || '';
+          if (index > 0) log.warn(`[ipfs-state] Restored older checkpoint ${candidate.cid}; newer snapshot gateways were unavailable.`);
+          return restored;
+        } catch (error) {
+          failures.push(`${candidate.cid}: ${error.message}`);
+        }
+      }
+    }
+    throw new Error(`IPFS state restore failed; tried ${candidates.length} checkpoint(s): ${failures.join('; ')}`);
+  }
+
+  async function restoreCid(cid) {
+    if (!/^[a-zA-Z0-9]{20,120}$/.test(cid || '')) throw new Error('Invalid IPFS state snapshot CID');
+    const failures = [];
     for (const base of [...new Set([gateway, FALLBACK_GATEWAY])]) {
-      const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${latest.cid}`, {
+      const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${cid}`, {
         signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
       }).catch(() => null);
       if (!response?.ok) {
-        lastStatus = response?.status || 0;
+        failures.push(`${base}: HTTP ${response?.status || 'network error'}`);
         continue;
       }
-      const snapshot = await response.json();
-      latestSnapshotUri = `ipfs://${latest.cid}`;
-      return deserialize(snapshot, `ipfs://${latest.cid}`);
+      try {
+        const snapshot = await response.json();
+        const restored = deserialize(snapshot, `ipfs://${cid}`);
+        latestSnapshotUri = `ipfs://${cid}`;
+        latestSnapshotSavedAt = snapshot.savedAt || '';
+        return restored;
+      } catch (error) {
+        failures.push(`${base}: ${error.message}`);
+      }
     }
-    throw new Error(`IPFS state restore failed (${lastStatus})`);
+    throw new Error(`IPFS state restore failed for ${cid}: ${failures.join('; ')}`);
   }
 
   async function save(playlist) {
@@ -121,5 +159,6 @@ export function createPinataStateStore({
     return `ipfs://${cid}`;
   }
 
-  return { restore, save, getLatestSnapshotUri: () => latestSnapshotUri };
+  return { restore, restoreCid, save, getLatestSnapshotUri: () => latestSnapshotUri,
+    getLatestSnapshotSavedAt: () => latestSnapshotSavedAt };
 }
