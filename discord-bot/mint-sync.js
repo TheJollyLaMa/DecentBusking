@@ -143,12 +143,45 @@ export async function discoverPinataMetadataGateway({ pinataJwt, fetchImpl = fet
   });
   if (!response.ok) throw new Error(`Pinata gateway discovery failed (${response.status})`);
   const body = await response.json();
-  let domain = body?.data?.rows?.[0]?.domain;
+  const row = body?.data?.rows?.[0];
+  let domain = row?.domain;
   if (typeof domain !== 'string' || !/^[a-z0-9.-]+$/i.test(domain)) {
     throw new Error('Pinata gateway discovery returned no valid domain');
   }
   if (!domain.includes('.')) domain = `${domain}.mypinata.cloud`;
-  return `https://${domain}/ipfs/`;
+
+  let tokenParam = '';
+  if (row?.id) {
+    try {
+      const detailsUrl = `${apiUrl.replace(/\/?$/, '')}/${row.id}`;
+      const detailsResp = await fetchImpl(detailsUrl, {
+        headers: { Authorization: `Bearer ${pinataJwt}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (detailsResp.ok) {
+        const detailsBody = await detailsResp.json();
+        const accessTokens = detailsBody?.data?.settings?.restriction_policies?.accessTokens;
+        if (Array.isArray(accessTokens) && accessTokens[0]?.value) {
+          tokenParam = `?pinataGatewayToken=${encodeURIComponent(accessTokens[0].value)}`;
+        }
+      }
+    } catch {
+      // Best-effort gateway token discovery
+    }
+  }
+
+  return `https://${domain}/ipfs/${tokenParam}`;
+}
+
+export function buildGatewayUrl(gateway, cidPath) {
+  try {
+    const url = new URL(gateway);
+    const cleanPath = url.pathname.replace(/\/?$/, '/') + cidPath.replace(/^\/?/, '');
+    url.pathname = cleanPath;
+    return url.toString();
+  } catch {
+    return `${gateway.replace(/\/?$/, '/')}${cidPath.replace(/^\/?/, '')}`;
+  }
 }
 
 export async function fetchMintMetadata(uri, fetchImpl, { attempts = 3, baseDelayMs = 1_000,
@@ -157,7 +190,7 @@ export async function fetchMintMetadata(uri, fetchImpl, { attempts = 3, baseDela
     : /^https?:\/\//.test(uri) ? new URL(uri).pathname.split('/ipfs/')[1] : null;
   const urls = [...new Set([
     ...(/^https?:\/\//.test(uri) ? [uri] : []),
-    ...(cidPath ? gateways.map(gateway => `${gateway.replace(/\/?$/, '/')}${cidPath}`) : []),
+    ...(cidPath ? gateways.map(gateway => buildGatewayUrl(gateway, cidPath)) : []),
   ])];
   const failures = new Map();
   for (let attempt = 0; attempt < attempts; attempt++) {

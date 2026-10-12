@@ -187,9 +187,9 @@ function syncMintedTracks(config, { required = false } = {}) {
           console.warn('[mint-sync] Dedicated Pinata gateway discovery failed, using fallback gateways:', err.message);
         }
         _nftMetadataGateways = [
+          ...(dedicated ? [dedicated] : []),
           'https://gateway.pinata.cloud/ipfs/',
           'https://ipfs.orbitor.dev/ipfs/',
-          ...(dedicated ? [dedicated] : []),
           'https://ipfs.io/ipfs/',
         ];
       }

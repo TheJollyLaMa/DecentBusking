@@ -41,6 +41,15 @@ test('discovers the account dedicated Pinata gateway without exposing the JWT to
   assert.equal(gateway, 'https://account-gateway.mypinata.cloud/ipfs/');
   assert.equal(request.url, 'https://api.pinata.cloud/v3/gateways?pageSize=1');
   assert.equal(request.options.headers.Authorization, 'Bearer secret-jwt');
+
+  const gatedGateway = await discoverPinataMetadataGateway({ pinataJwt: 'secret-jwt', fetchImpl: async (url, options) => {
+    if (url.endsWith('pageSize=1')) {
+      return new Response(JSON.stringify({ data: { rows: [{ id: 'gate-id', domain: 'account-gateway' }] } }));
+    }
+    return new Response(JSON.stringify({ data: { settings: { restriction_policies: { accessTokens: [{ value: 'test-token' }] } } } }));
+  } });
+  assert.equal(gatedGateway, 'https://account-gateway.mypinata.cloud/ipfs/?pinataGatewayToken=test-token');
+
   await assert.rejects(discoverPinataMetadataGateway({ pinataJwt: 'secret-jwt',
     fetchImpl: async () => new Response('{}') }), /no valid domain/);
 });
