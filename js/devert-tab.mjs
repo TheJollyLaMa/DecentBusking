@@ -1,4 +1,4 @@
-import { canSetDevertListenMode, getDevertAdsMuted, setDevertAdsMuted, setDevertListenMode } from './radio-sync.js?v=20261010-listens';
+import { canSetDevertListenMode, setDevertListenMode } from './radio-sync.js?v=20261010-listens';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { submitMediaForApproval } from './mint-submission.js';
 import { buildDevertAdsAuthorizationMessage } from './devert-scheduler.mjs';
@@ -152,9 +152,7 @@ export function initDevertTab() {
   const adMediaStatus = document.getElementById('devert-ad-queue-status');
   const minimumOffer = document.getElementById('devert-minimum-offer');
   const walletButton = document.getElementById('devert-connect-wallet');
-  const radioModeButton = document.getElementById('devert-listen-radio');
-  const adsModeButton = document.getElementById('devert-listen-ads');
-  const muteAdsInput = document.getElementById('devert-mute-ads');
+  const audioModeButton = document.getElementById('devert-audio-mode');
   const previewPlayer = document.getElementById('devert-ad-preview');
   const adVoteButtons = [document.getElementById('devert-vote-up'), document.getElementById('devert-vote-down')];
   const adVoteStatus = document.getElementById('devert-vote-status');
@@ -168,21 +166,20 @@ export function initDevertTab() {
   let adLoopPlayId = null;
   let adLoopPositionReceivedAt = 0;
   let previewToken = 0;
+  let audioModeBusy = false;
   let snapshot = null;
   let purchaseBusy = false;
   let adMediaBusy = false;
 
   const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
+  previewPlayer.dataset.listenMode ||= 'radio';
 
   function syncListenControls() {
     const adsOnly = previewPlayer.dataset.listenMode === 'ads-only';
     const canSwitch = canSetDevertListenMode();
-    radioModeButton.setAttribute('aria-pressed', String(!adsOnly));
-    adsModeButton.setAttribute('aria-pressed', String(adsOnly));
-    radioModeButton.disabled = !canSwitch;
-    adsModeButton.disabled = !canSwitch || adLoopState?.ready !== true;
-    muteAdsInput.checked = getDevertAdsMuted();
-    muteAdsInput.disabled = adsOnly;
+    audioModeButton.setAttribute('aria-pressed', String(adsOnly));
+    audioModeButton.textContent = adsOnly ? 'Return to Main Radio' : 'Listen to VertLoop';
+    audioModeButton.disabled = !canSwitch || audioModeBusy || (!adsOnly && adLoopState?.ready !== true);
     const playId = normalizeAdLoopNowPlaying(adLoopState)?.playId;
     previewPlayer.hidden = !adsOnly || !playId;
     for (const button of adVoteButtons) {
@@ -299,6 +296,18 @@ export function initDevertTab() {
     stopAdLoopMirror();
   }
 
+  async function fadeOutAdAudio(durationMs = 350) {
+    if (previewPlayer.paused) return;
+    const initialVolume = previewPlayer.volume;
+    const startedAt = performance.now();
+    while (performance.now() - startedAt < durationMs) {
+      previewPlayer.volume = initialVolume * Math.max(0, 1 - (performance.now() - startedAt) / durationMs);
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    previewPlayer.pause();
+    previewPlayer.volume = initialVolume;
+  }
+
   function syncCheckout() {
     const address = window.DecentConfig?.devertContractAddress || '';
     const wallet = window._wallet;
@@ -386,14 +395,19 @@ export function initDevertTab() {
     }
   }
 
-  function close() {
+  async function close() {
     clearTimeout(refreshTimer);
     generation++;
-    stopAdLoopPlayback();
     if (previewPlayer.dataset.listenMode === 'ads-only') {
+      clearInterval(adLoopTimer);
+      audioModeBusy = true;
+      syncListenControls();
+      await fadeOutAdAudio();
+      stopAdLoopPlayback();
       previewPlayer.dataset.listenMode = 'radio';
       setDevertListenMode('radio');
-    }
+      audioModeBusy = false;
+    } else stopAdLoopPlayback();
     toggle.setAttribute('aria-expanded', 'false');
     toggle.setAttribute('aria-label', 'Open DVert advertising');
     panel.classList.remove('is-open');
@@ -403,24 +417,28 @@ export function initDevertTab() {
     syncListenControls();
   }
 
-  radioModeButton.addEventListener('click', () => {
-    if (!setDevertListenMode('radio')) { listenStatus.textContent = 'Finish archive playback or the current new-song preview first.'; return; }
-    stopAdLoopPlayback();
-    previewPlayer.dataset.listenMode = 'radio';
-    listenStatus.textContent = 'Main radio';
+  audioModeButton.addEventListener('click', async () => {
+    if (audioModeBusy) return;
+    audioModeBusy = true;
     syncListenControls();
-  });
-  adsModeButton.addEventListener('click', () => {
-    if (adLoopState?.ready !== true) return;
-    if (!setDevertListenMode('ads-only')) { listenStatus.textContent = 'Finish archive playback or the current new-song preview first.'; return; }
-    previewPlayer.dataset.listenMode = 'ads-only';
-    syncListenControls();
-    startAdLoopMirror();
-  });
-  muteAdsInput.addEventListener('change', () => {
-    setDevertAdsMuted(muteAdsInput.checked);
-    listenStatus.textContent = muteAdsInput.checked ? 'Sponsored ads are muted on this device; other listeners are unaffected.'
-      : 'Sponsored ads are audible on this device.';
+    try {
+      if (previewPlayer.dataset.listenMode === 'ads-only') {
+        clearInterval(adLoopTimer);
+        await fadeOutAdAudio();
+        stopAdLoopPlayback();
+        previewPlayer.dataset.listenMode = 'radio';
+        setDevertListenMode('radio');
+        listenStatus.textContent = 'Main radio';
+      } else {
+        if (adLoopState?.ready !== true) return;
+        if (!setDevertListenMode('ads-only')) { listenStatus.textContent = 'Finish archive playback or the current new-song preview first.'; return; }
+        previewPlayer.dataset.listenMode = 'ads-only';
+        startAdLoopMirror();
+      }
+    } finally {
+      audioModeBusy = false;
+      syncListenControls();
+    }
   });
   document.addEventListener('radio-source-mode-change', () => {
     if (previewPlayer.dataset.listenMode === 'ads-only' && !canSetDevertListenMode()) {
@@ -523,14 +541,9 @@ export function initDevertTab() {
     panel.inert = false;
     document.body.classList.add('devert-open');
     document.dispatchEvent(new CustomEvent('left-drawer-open', { detail: 'devert' }));
-    if (setDevertListenMode('ads-only')) {
-      previewPlayer.dataset.listenMode = 'ads-only';
-      startAdLoopMirror();
-      syncListenControls();
-    }
     refresh();
   });
-  closeButton?.addEventListener('click', () => { close(); toggle.focus(); });
+  closeButton?.addEventListener('click', async () => { await close(); toggle.focus(); });
   refreshButton?.addEventListener('click', refresh);
   purchaseForm?.addEventListener('submit', submitCampaign);
   adVoteButtons[0]?.addEventListener('click', () => voteOnAd(1));
@@ -541,7 +554,7 @@ export function initDevertTab() {
   document.addEventListener('wallet-connected', syncCheckout);
   document.addEventListener('wallet-connected', refresh);
   document.addEventListener('wallet-disconnected', () => { devertAdsAuthorization = null; syncCheckout(); campaignList.replaceChildren(); campaignStatus.textContent = 'Connect your wallet to view your ads.'; });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); } });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close().then(() => toggle.focus()); } });
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
   document.addEventListener('click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target)) close(); });
 }

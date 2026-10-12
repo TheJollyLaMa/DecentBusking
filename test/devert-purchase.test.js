@@ -10,7 +10,7 @@ const CONTRACT_ADDRESS = '0x2222222222222222222222222222222222222222';
 
 test('DVert panel exposes local Main Radio and Ads Only controls with no paid preview implication', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  for (const id of ['devert-listen-radio', 'devert-listen-ads', 'devert-mute-ads', 'devert-ad-preview', 'devert-listen-status']) {
+  for (const id of ['devert-audio-mode', 'devert-ad-preview', 'devert-listen-status', 'devert-vote-up', 'devert-vote-down']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, `${id} should appear once`);
   }
   assert.match(html, /Approved NFT sent to your wallet/);
@@ -21,7 +21,7 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /buildDevertAdsAuthorizationMessage/);
   assert.match(fs.readFileSync(path.join(__dirname, '../discord-bot/index.js'), 'utf8'), /getDevertAdsForWallet\(address/);
   assert.doesNotMatch(html, /id="devert-profile"/);
-  assert.match(html, /Mute ads on this device/);
+  assert.doesNotMatch(html, /id="devert-mute-ads"|id="devert-listen-radio"|id="devert-listen-ads"/);
   assert.equal((html.match(/id="devert-max-payment"/g) || []).length, 1);
   const panel = fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8');
   assert.match(panel, /from '\.\/radio-sync\.js\?v=20261010-listens'/);

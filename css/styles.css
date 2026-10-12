@@ -776,6 +776,10 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 .devert-radio-state p { margin: 6px 0 0; }
 .devert-listen-controls { display: grid; gap: 8px; margin: 12px 0; padding: 9px; border: 1px solid #554522; min-width: 0; }
 .devert-listen-controls legend { padding: 0 4px; color: #dfd3b3; font-size: .72rem; }
+.devert-listen-controls > p { margin: 0; color: #c7b98f; font-size: .7rem; line-height: 1.35; }
+.devert-listen-controls > #devert-audio-mode { width: 100%; min-height: 38px; color: #201a0f; background: #f5cf66; border-color: #c49a45; font-weight: 700; }
+.devert-listen-controls > #devert-audio-mode[aria-pressed="true"] { color: #f6efdd; background: #302714; }
+.devert-listen-controls > #devert-audio-mode:disabled { opacity: .55; }
 .devert-listen-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .devert-listen-modes button { min-height: 34px; border: 1px solid #806532; border-radius: 4px; color: #dfd3b3; background: #201a0f; font: inherit; font-size: .72rem; cursor: pointer; }
 .devert-listen-modes button[aria-pressed="true"] { color: #201a0f; background: #f5cf66; }

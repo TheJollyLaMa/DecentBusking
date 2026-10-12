@@ -89,11 +89,8 @@
       <p id="devert-radio-status" class="devert-secondary-status" role="status" aria-live="polite"></p>
       <fieldset class="devert-listen-controls">
         <legend>VertLoop Live</legend>
-        <div class="devert-listen-modes" role="group" aria-label="DeVert listening mode">
-          <button id="devert-listen-radio" type="button" aria-pressed="true">Main Radio</button>
-          <button id="devert-listen-ads" type="button" aria-pressed="false">Ads Only</button>
-        </div>
-        <label id="devert-mute-ads-label" class="devert-mute-ads"><input id="devert-mute-ads" type="checkbox" /> Mute ads on this device</label>
+        <p>Browse ads while the main radio continues, or switch listening to VertLoop.</p>
+        <button id="devert-audio-mode" type="button" aria-pressed="false" disabled>Listen to VertLoop</button>
         <video id="devert-ad-preview" controls playsinline preload="none" hidden aria-label="DeVert live ad"></video>
         <div role="group" aria-label="Vote on current VertLoop ad">
           <button id="devert-vote-up" type="button" disabled aria-label="Like current ad">👍</button>

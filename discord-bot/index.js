@@ -67,6 +67,7 @@ import {
   getMintBacklog,
   getMintRequests,
   getDevertAdsForWallet,
+  mergeDevertAdsForWallet,
   queueUploaderMints,
   getTopTracks,
   removeTrack,
@@ -781,7 +782,10 @@ async function main() {
       let chainResult = cached && cached.expiresAt > Date.now() ? cached.result : null;
       if (!chainResult) {
         const provider = new JsonRpcProvider(config.baseRpcUrl);
-        const collections = config.nftContractAddresses.map(contractAddress => ({ contractAddress,
+        const currentCollection = config.nftContractAddress.toLowerCase();
+        const orderedAddresses = [...config.nftContractAddresses].sort((first, second) =>
+          Number(second.toLowerCase() === currentCollection) - Number(first.toLowerCase() === currentCollection));
+        const collections = orderedAddresses.map(contractAddress => ({ contractAddress,
           contract: new Contract(contractAddress, [
             'function nextTokenId() view returns(uint256)',
             'function balanceOf(address,uint256) view returns(uint256)',
@@ -792,9 +796,8 @@ async function main() {
         _devertAdsOnChainCache.set(normalizedAddress, { result: chainResult,
           expiresAt: Date.now() + (chainResult.metadataUnavailable ? 60_000 : 5 * 60_000) });
       }
-      const mergedAds = new Map();
-      for (const ad of [...chainResult.ads, ...localAds]) mergedAds.set(ad.ipfsCid, ad);
-      for (const ad of mergedAds.values()) {
+      const mergedAds = mergeDevertAdsForWallet(localAds, chainResult.ads);
+      for (const ad of mergedAds) {
         const campaign = snapshot?.campaigns?.find(item => item.advertiser?.toLowerCase() === normalizedAddress &&
           item.audioURI === `ipfs://${ad.ipfsCid}` && Date.parse(item.startedAt) <= Date.now() && Date.now() < Date.parse(item.expiresAt));
         ad.state = campaign ? 'active' : ad.mintStatus === 'minted' ? 'ready' : 'pending';
@@ -802,7 +805,7 @@ async function main() {
         ad.expiresAt = campaign?.expiresAt || null;
         ad.secondsRemaining = campaign ? Math.max(0, Math.ceil((Date.parse(campaign.expiresAt) - Date.now()) / 1000)) : 0;
       }
-      return { ads: [...mergedAds.values()].sort((first, second) => first.title.localeCompare(second.title)),
+      return { ads: mergedAds,
         metadataUnavailable: chainResult.metadataUnavailable };
     },
     getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null },

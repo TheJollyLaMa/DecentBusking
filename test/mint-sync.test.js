@@ -52,6 +52,20 @@ test('on-chain ad library recovers wallet-owned DecentAdvert NFTs from legacy me
   assert.equal(ads[0].mediaType, 'video/mp4');
 });
 
+test('wallet ad recovery checks newest owned tokens first', async () => {
+  const { readOwnedDevertAds } = await import(moduleUrl);
+  const owner = `0x${'1'.repeat(40)}`;
+  const checked = [];
+  const collection = { contractAddress: `0x${'2'.repeat(40)}`, contract: {
+    nextTokenId: async () => 3n,
+    balanceOf: async () => 1n,
+    uri: async tokenId => { checked.push(Number(tokenId)); return `ipfs://metadata-${tokenId}`; },
+  } };
+  await readOwnedDevertAds({ collections: [collection], address: owner, pauseMs: 0,
+    metadataReader: async () => ({ name: 'Song', audioUrl: 'ipfs://song' }), log: { warn() {} } });
+  assert.deepEqual(checked, [2, 1, 0]);
+});
+
 test('wallet ad recovery reports metadata gaps instead of treating the library as empty', async () => {
   const { readOwnedDevertAds } = await import(moduleUrl);
   const owner = `0x${'1'.repeat(40)}`;

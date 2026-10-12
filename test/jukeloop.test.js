@@ -143,6 +143,22 @@ test('DeVert ad library is scoped to wallet and reports mint/campaign state', as
   assert.equal(ads[2].tokenId, '41');
 });
 
+test('DeVert library prefers owned minted NFTs over stale pending rows for duplicate media and keeps the highest token', async () => {
+  const storeUrl = pathToFileURL(path.join(__dirname, '../discord-bot/playlist-store.js'));
+  storeUrl.searchParams.set('ad-library-merge', String(Date.now()));
+  const { mergeDevertAdsForWallet } = await import(storeUrl.href);
+  const cid = 'bafy-ad-media';
+  const merged = mergeDevertAdsForWallet([
+    { trackId: 'site:owner:media', title: 'DecentAdvert0001', ipfsCid: cid, mintStatus: 'requested', state: 'pending' },
+  ], [
+    { trackId: 'nft:collection:40', title: 'DecentAdvert0001', ipfsCid: cid, mintStatus: 'minted', tokenId: '40', state: 'ready' },
+    { trackId: 'nft:collection:41', title: 'DecentAdvert0001', ipfsCid: cid, mintStatus: 'minted', tokenId: '41', state: 'ready' },
+  ]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].tokenId, '41');
+  assert.equal(merged[0].state, 'ready');
+});
+
 test('JukeLoop sends DeVert main-radio votes to the campaign vote journal', async () => {
   const { createJukeLoopSession, submitJukeLoopVote } = await import('../discord-bot/jukeloop.js');
   const adVotes = [];

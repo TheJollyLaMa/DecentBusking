@@ -72,7 +72,7 @@ test('radio rejects a finished seek that landed at zero and waits for buffered s
   assert.equal(audio.volume, 0);
 });
 
-test('radio corrects a play-time position reset while still silent, before fading in', async () => {
+test('radio corrects a play-time position reset while silent, then starts immediately in sync', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
     .replace(/export /g, '').replace('const FADE_IN_MS = 1_500;', 'const FADE_IN_MS = 1;');
   const audiblePositions = [];
@@ -183,7 +183,7 @@ test('radio volume survives fades and mute does not affect archive playback', as
   assert.equal(audio.muted, true);
   assert.equal(audio.volume, 0.3);
   assert.deepEqual(JSON.parse(saved.get('decentbusking:radio-audio:v1')),
-    { volume: 0.3, muted: true, devertAdsMuted: false });
+    { volume: 0.3, muted: true });
   vm.runInContext("_mode = 'archive';", context);
   await context.fade();
   assert.equal(audio.muted, false);
@@ -197,7 +197,7 @@ test('radio volume survives fades and mute does not affect archive playback', as
   assert.equal(audio.volume, 0.65);
 });
 
-test('DVert Ads Only pauses the main radio and radio mode resumes it without hijacking archive playback', () => {
+test('DVert audio toggle fades out main radio and can return without hijacking archive playback', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
   const audio = { paused: false, pause() { this.paused = true; } };
   const context = vm.createContext({ performance, setTimeout, clearTimeout, console, audio });
@@ -205,27 +205,26 @@ test('DVert Ads Only pauses the main radio and radio mode resumes it without hij
     `globalThis.canSwitchListenMode = canSetDevertListenMode;`, context);
   assert.equal(context.canSwitchListenMode(), true);
   assert.equal(context.setListenMode('ads-only'), true);
-  assert.equal(audio.paused, true);
+  assert.equal(audio.paused, false);
   assert.equal(vm.runInContext('_devertListenMode', context), 'ads-only');
+  await new Promise(resolve => setTimeout(resolve, 650));
+  assert.equal(audio.paused, true);
   vm.runInContext("_mode = 'archive';", context);
   assert.equal(context.setListenMode('ads-only'), false);
   assert.equal(context.setListenMode('radio'), true);
   assert.equal(vm.runInContext('_devertListenMode', context), 'radio');
 });
 
-test('sponsored-ad mute persists per device and skips only DeVert main-radio playback', () => {
+test('legacy sponsored-ad mute preference does not skip a main-radio ad', () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
-  const audio = { paused: false, volume: 0, muted: false, pause() { this.paused = true; } };
-  const saved = new Map();
-  const context = vm.createContext({ performance, setTimeout, clearTimeout, console, audio,
-    localStorage: { setItem: (key, value) => saved.set(key, value) } });
-  vm.runInContext(`${source}\n_audio = audio; _radio = { playId: 'ad-play', title: 'Campaign', uploader: 'Advertiser', isDevert: true };\n` +
-    `globalThis.setMuteAds = setDevertAdsMuted; globalThis.getMuteAds = getDevertAdsMuted;`, context);
-  context.setMuteAds(true);
-  vm.runInContext('_syncRadio()', context);
-  assert.equal(context.getMuteAds(), true);
-  assert.equal(audio.paused, true);
-  assert.equal(JSON.parse(saved.get('decentbusking:radio-audio:v1')).devertAdsMuted, true);
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } } });
+  vm.runInContext(`${source}\n_radio = { playId: 'ad-play', title: 'Campaign', uploader: 'Advertiser',
+    ipfsCid: 'bafy-ad', isDevert: true, receivedAt: performance.now(), positionMs: 0 };\n` +
+    `globalThis.started = []; _switchTo = options => started.push(options); _syncRadio();`, context);
+  assert.equal(vm.runInContext('started.length', context), 1);
+  assert.equal(vm.runInContext('started[0].title', context), 'Campaign');
+  assert.equal(vm.runInContext("typeof _devertAdsMuted", context), 'undefined');
 });
 
 test('recorded browser votes survive reload and reset only for another radio play', () => {

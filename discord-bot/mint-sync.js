@@ -42,7 +42,7 @@ export async function readOwnedDevertAds({ collections, address, fetchImpl = fet
   for (const collection of collections) {
     const nextTokenId = Number(await withRetry(() => collection.contract.nextTokenId(), retry));
     if (!Number.isSafeInteger(nextTokenId) || nextTokenId < 0 || nextTokenId > 100_000) throw new Error('Invalid NFT token range');
-    for (let tokenId = 0; tokenId < nextTokenId; tokenId++) {
+    for (let tokenId = nextTokenId - 1; tokenId >= 0; tokenId--) {
       if (pauseMs) await new Promise(resolve => setTimeout(resolve, pauseMs));
       let balance;
       try { balance = await withRetry(() => collection.contract.balanceOf(address, tokenId), retry); }

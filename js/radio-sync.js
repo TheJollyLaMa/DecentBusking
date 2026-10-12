@@ -50,9 +50,9 @@ let _votingPlayId = null;
 const _votedPlays = new Map();
 let _radioVolume = 1;
 let _radioMuted = false;
-let _devertAdsMuted = false;
 let _devertListenMode = 'radio';
 let _fadeLevel = 0;
+let _fadeNextRadioSwitch = false;
 let _muteBtn, _volumeInput, _volumeDial;
 
 function _applyRadioVolume() {
@@ -83,7 +83,7 @@ function _renderAudioControls() {
 function _saveAudioPreferences() {
   try {
     localStorage.setItem('decentbusking:radio-audio:v1', JSON.stringify({
-      volume: _radioVolume, muted: _radioMuted, devertAdsMuted: _devertAdsMuted,
+      volume: _radioVolume, muted: _radioMuted,
     }));
   } catch {}
   _applyRadioVolume();
@@ -102,7 +102,6 @@ function _initAudioControls() {
     const saved = JSON.parse(localStorage.getItem('decentbusking:radio-audio:v1') || 'null');
     if (saved && Number.isFinite(saved.volume)) _radioVolume = Math.max(0, Math.min(1, saved.volume));
     _radioMuted = saved?.muted === true;
-    _devertAdsMuted = saved?.devertAdsMuted === true;
   } catch {}
   _muteBtn = document.getElementById('radio-mute');
   _volumeInput = document.getElementById('radio-volume');
@@ -251,34 +250,24 @@ export function setDevertListenMode(mode) {
   if (!['radio', 'ads-only'].includes(mode)) return false;
   if (mode === 'ads-only' && _mode !== 'radio') return false;
   if (_devertListenMode === mode) return true;
+  const returningToRadio = mode === 'radio' && _devertListenMode === 'ads-only';
   _devertListenMode = mode;
   if (_mode !== 'radio') return mode === 'radio';
   _loadedPlayId = null;
   if (mode === 'ads-only') {
     _setLabel('🎟️ DVert Ads Only');
-    _stopAudio();
+    _fadeMainRadioOut();
     _setTrack('Ads Only', '');
     _setActivity('Listening to VertLoop');
   } else if (_takeoverQueue.length) {
+    _fadeNextRadioSwitch = returningToRadio;
     _startNextTakeover();
   } else {
+    _fadeNextRadioSwitch = returningToRadio;
     _syncRadio('📻 Back in sync with the Discord JukeLoop');
   }
   _renderVoting();
   return true;
-}
-
-export function setDevertAdsMuted(muted) {
-  _devertAdsMuted = muted === true;
-  _saveAudioPreferences();
-  if (_mode === 'radio' && _devertListenMode === 'radio' && _radio?.isDevert) {
-    _loadedPlayId = null;
-    _syncRadio();
-  }
-}
-
-export function getDevertAdsMuted() {
-  return _devertAdsMuted;
 }
 
 /** Play a user-selected archive track; the radio stays muted until returnToRadio(). */
@@ -386,16 +375,6 @@ function _syncRadio(message) {
     _loadedPlayId = null;
     _setTrack('—', '');
     _setActivity(message || '🌙 The JukeLoop is between tracks — waiting for the next song');
-    return;
-  }
-
-  if (_radio.isDevert && _devertAdsMuted) {
-    if (_loadedPlayId !== _radio.playId) {
-      _loadedPlayId = _radio.playId;
-      _stopAudio();
-    }
-    _setTrack(_radio.title, _radio.uploader);
-    _setActivity('🔇 Sponsored ad muted on this device');
     return;
   }
 
@@ -552,7 +531,13 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     if (token === _switchToken) _audio.pause();
     return;
   }
-  await _fadeIn(token);
+  if (_fadeNextRadioSwitch) {
+    _fadeNextRadioSwitch = false;
+    await _fadeIn(token);
+  } else {
+    _fadeLevel = 1;
+    _applyRadioVolume();
+  }
 }
 
 async function _prepareRadioSeek(offset, token) {
@@ -626,6 +611,21 @@ function _fadeIn(token = _switchToken, ms = FADE_IN_MS) {
   });
 }
 
+function _fadeMainRadioOut(ms = FADE_IN_MS) {
+  const token = ++_switchToken;
+  const initial = _fadeLevel;
+  const startedAt = performance.now();
+  const step = () => {
+    if (token !== _switchToken || _devertListenMode !== 'ads-only') return;
+    const progress = Math.min(1, (performance.now() - startedAt) / ms);
+    _fadeLevel = initial * (1 - progress) ** 2;
+    _applyRadioVolume();
+    if (progress < 1) setTimeout(step, 30);
+    else _audio?.pause();
+  };
+  step();
+}
+
 function _stopAudio() {
   ++_switchToken;
   _audio.pause();
@@ -634,7 +634,7 @@ function _stopAudio() {
 }
 
 async function _unlock() {
-  _fadeLevel = 0;
+  _fadeLevel = 1;
   _applyRadioVolume();
   if (_mode === 'radio' && _radio && !await _prepareRadioSeek(_radioPositionS, _switchToken)) return;
   try {
@@ -649,7 +649,6 @@ async function _unlock() {
     _audio.pause();
     return;
   }
-  await _fadeIn();
 }
 
 // ── Banner text ───────────────────────────────────────────────────────────

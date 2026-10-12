@@ -561,6 +561,19 @@ export function getDevertAdsForWallet(address, campaigns = [], now = Date.now())
     }).sort((first, second) => first.title.localeCompare(second.title));
 }
 
+export function mergeDevertAdsForWallet(submittedAds = [], ownedAds = []) {
+  const byCid = new Map();
+  for (const ad of submittedAds) if (ad.ipfsCid) byCid.set(ad.ipfsCid, ad);
+  for (const ad of ownedAds) {
+    if (!ad.ipfsCid) continue;
+    const previous = byCid.get(ad.ipfsCid);
+    const previousId = /^\d+$/.test(String(previous?.tokenId || '')) ? BigInt(previous.tokenId) : -1n;
+    const ownedId = /^\d+$/.test(String(ad.tokenId || '')) ? BigInt(ad.tokenId) : -1n;
+    if (!previous || previous.mintStatus !== 'minted' || ownedId > previousId) byCid.set(ad.ipfsCid, ad);
+  }
+  return [...byCid.values()].sort((first, second) => first.title.localeCompare(second.title));
+}
+
 /**
  * Compute the playback weight for a track.
  * Formula: max(0.1, 1 + likes − dislikes × 0.5)
