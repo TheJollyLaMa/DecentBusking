@@ -122,7 +122,10 @@ let _mintSyncTask = null;
 const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_RESTORE_ATTEMPTS = 3;
 const WEEKLY_REPORT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const PAYROLL_RECOVERY_CID = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
+const PAYROLL_RECOVERY_CIDS = [
+  'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply',
+  'bafkreigl2kr22jpet5emu4umwuoznzyzth7gsm7vzld74seammdbqoakjm',
+];
 
 async function runWeeklyPlayReport(client, config) {
   const channelId = config.jukeLoopTextChannelId;
@@ -907,8 +910,10 @@ async function main() {
     }
     loadPlaylist(restoredPlaylist);
     configureRemotePersistence(stateStore.save);
-    const payrollRecoveryCid = process.env.JUKELOOP_PAYROLL_RECOVERY_CID || PAYROLL_RECOVERY_CID;
-    if (payrollRecoveryCid && !hasPayrollHistoryRecovery(payrollRecoveryCid)) {
+    const payrollRecoveryCids = (process.env.JUKELOOP_PAYROLL_RECOVERY_CID || PAYROLL_RECOVERY_CIDS.join(','))
+      .split(',').map(cid => cid.trim()).filter(Boolean);
+    for (const payrollRecoveryCid of payrollRecoveryCids) {
+      if (hasPayrollHistoryRecovery(payrollRecoveryCid)) continue;
       try {
         const archivedPlaylist = await stateStore.restoreCid(payrollRecoveryCid, { attempts: 4, baseDelayMs: 15_000 });
         const merged = mergePayrollHistorySnapshot(archivedPlaylist, payrollRecoveryCid,

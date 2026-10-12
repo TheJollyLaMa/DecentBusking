@@ -210,6 +210,12 @@ export function mergePayrollHistorySnapshot(archivedPlaylist, snapshotCid, { sna
   for (const archived of archivedPlaylist) {
     const current = currentById.get(archived.trackId);
     if (!current || current.payrollRecoveryCids?.includes(snapshotCid)) continue;
+    current.payrollLiveTrackingStartedAt ||= current.payrollTrackingStartedAt || new Date().toISOString();
+    const liveTrackingStartedAt = Date.parse(current.payrollLiveTrackingStartedAt);
+    const previousRecoveryAt = Date.parse(current.payrollRecoverySnapshotAt || '');
+    const isNewerRecoverySnapshot = Number.isFinite(archivedAt) &&
+      (!Number.isFinite(previousRecoveryAt) || archivedAt > previousRecoveryAt);
+    const currentStartedAfterSnapshot = isNewerRecoverySnapshot && Number.isFinite(liveTrackingStartedAt) && liveTrackingStartedAt > archivedAt;
     for (const field of ['payrollPlays', 'payrollVotes']) {
       const source = archived[field];
       if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
@@ -219,8 +225,6 @@ export function mergePayrollHistorySnapshot(archivedPlaylist, snapshotCid, { sna
         if (!Number.isSafeInteger(value) || value < 0) throw new Error(`Invalid ${field} value in archived playlist`);
         const existing = Number(current[field][week] || 0);
         if (!Number.isSafeInteger(existing) || existing < 0) throw new Error(`Invalid current ${field} value`);
-        const currentStartedAt = Date.parse(current.payrollTrackingStartedAt || '');
-        const currentStartedAfterSnapshot = Number.isFinite(archivedAt) && Number.isFinite(currentStartedAt) && currentStartedAt > archivedAt;
         const merged = currentStartedAfterSnapshot ? existing + value : Math.max(existing, value);
         if (!Number.isSafeInteger(merged)) throw new Error(`Merged ${field} exceeds safe accounting precision`);
         current[field][week] = merged;
@@ -228,6 +232,9 @@ export function mergePayrollHistorySnapshot(archivedPlaylist, snapshotCid, { sna
         else addedVotes += merged - existing;
       }
     }
+    if (Number.isFinite(archivedAt)) current.payrollRecoverySnapshotAt = new Date(Math.max(
+      Number.isFinite(previousRecoveryAt) ? previousRecoveryAt : 0, archivedAt,
+    )).toISOString();
     if (archived.payrollTrackingStartedAt && (!current.payrollTrackingStartedAt ||
         Date.parse(archived.payrollTrackingStartedAt) < Date.parse(current.payrollTrackingStartedAt))) {
       current.payrollTrackingStartedAt = archived.payrollTrackingStartedAt;

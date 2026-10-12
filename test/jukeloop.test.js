@@ -162,6 +162,30 @@ test('archived payroll recovery does not double-count history already in the cur
   assert.equal(store.getPlaylist()[0].payrollPlays['NY-2026-10-05'], 125);
 });
 
+test('later disjoint recovery snapshots add current-week plays after the older closed-week baseline', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-payroll-recovery-sequence-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(tempDir, { recursive: true, force: true }); });
+  const storeUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'playlist-store.js'));
+  storeUrl.searchParams.set('payroll-recovery-sequence', String(Date.now()));
+  const store = await import(storeUrl.href);
+  store.loadPlaylist([
+    { trackId: 'old-week-track', payrollPlays: {}, payrollTrackingStartedAt: '2026-10-12T16:27:00.000Z' },
+    { trackId: 'new-week-track', payrollPlays: {}, payrollTrackingStartedAt: '2026-10-12T16:27:00.000Z' },
+  ]);
+  const earlierCid = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
+  const laterCid = 'bafkreigl2kr22jpet5emu4umwuoznzyzth7gsm7vzld74seammdbqoakjm';
+  store.mergePayrollHistorySnapshot([{ trackId: 'old-week-track', payrollPlays: { 'NY-2026-10-05': 125 },
+    payrollTrackingStartedAt: '2026-10-11T19:14:41.819Z' }], earlierCid, { snapshotSavedAt: '2026-10-12T15:37:06.715Z' });
+  store.mergePayrollHistorySnapshot([{ trackId: 'new-week-track', payrollPlays: { 'NY-2026-10-12': 11 },
+    payrollTrackingStartedAt: '2026-10-12T15:40:00.000Z' }], laterCid, { snapshotSavedAt: '2026-10-12T16:19:48.703Z' });
+  const tracks = store.getPlaylist();
+  assert.equal(tracks[0].payrollPlays['NY-2026-10-05'], 125);
+  assert.equal(tracks[1].payrollPlays['NY-2026-10-12'], 11);
+  assert.equal(tracks[1].payrollTrackingStartedAt, '2026-10-12T15:40:00.000Z');
+  assert.equal(tracks[1].payrollLiveTrackingStartedAt, '2026-10-12T16:27:00.000Z');
+});
+
 test('DeVert ad library is scoped to wallet and reports mint/campaign state', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-devert-library-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
