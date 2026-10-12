@@ -14,7 +14,7 @@ import { Contract, JsonRpcProvider, Wallet } from 'ethers';
 import { loadConfig } from './config.js';
 import { uploadToIPFS } from './ipfs.js';
 import { buildAdminAuthorizationMessage } from './ipfs-worker.js';
-import { readMintedCollections, audioCidFromMetadata, withRetry } from './mint-sync.js';
+import { readMintedCollections, audioCidFromMetadata, discoverPinataMetadataGateway, withRetry } from './mint-sync.js';
 import { mediaTypeFor } from './media.js';
 
 const NFT_ABI = [
@@ -127,9 +127,12 @@ async function main() {
   const { requests = [] } = await postJson(`${serviceUrl}/api/mint-queue`, { address: wallet.address, signature, issuedAt }, origin);
 
   console.log('Checking Base for audio that is already minted…');
+  const dedicatedGateway = config.pinataJwt ? await discoverPinataMetadataGateway({ pinataJwt: config.pinataJwt }).catch(() => null) : null;
+  const metadataGateways = dedicatedGateway ? [dedicatedGateway] : undefined;
   const { minted: alreadyMinted } = await readMintedCollections({
     collections: config.nftContractAddresses.map(contractAddress => ({ contractAddress,
       contract: new Contract(contractAddress, NFT_ABI, provider) })),
+    metadataGateways,
   });
   const duplicates = requests.filter((track) => alreadyMinted.has(track.ipfsCid));
   const pending = requests.filter((track) => !alreadyMinted.has(track.ipfsCid)).slice(0, limit);
