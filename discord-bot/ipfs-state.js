@@ -103,26 +103,40 @@ export function createPinataStateStore({
     throw new Error(`IPFS state restore failed; tried ${candidates.length} checkpoint(s): ${failures.join('; ')}`);
   }
 
-  async function restoreCid(cid) {
+  async function restoreCid(cid, { attempts = 1, baseDelayMs = 15_000,
+    wait = delay => new Promise(resolve => setTimeout(resolve, delay)) } = {}) {
     if (!/^[a-zA-Z0-9]{20,120}$/.test(cid || '')) throw new Error('Invalid IPFS state snapshot CID');
-    const failures = [];
-    for (const base of [...new Set([gateway, FALLBACK_GATEWAY])]) {
-      const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${cid}`, {
-        signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
-      }).catch(() => null);
-      if (!response?.ok) {
-        failures.push(`${base}: HTTP ${response?.status || 'network error'}`);
-        continue;
+    if (!Number.isSafeInteger(attempts) || attempts < 1 || !Number.isFinite(baseDelayMs) || baseDelayMs < 0) {
+      throw new Error('Invalid IPFS restore retry policy');
+    }
+    let failures = [];
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      failures = [];
+      let transientFailure = false;
+      for (const base of [...new Set([gateway, FALLBACK_GATEWAY])]) {
+        const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${cid}`, {
+          signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
+        }).catch(() => null);
+        if (!response?.ok) {
+          const status = response?.status || 0;
+          failures.push(`${base}: HTTP ${status || 'network error'}`);
+          transientFailure ||= !status || status === 429 || status >= 500;
+          continue;
+        }
+        try {
+          const snapshot = await response.json();
+          const restored = deserialize(snapshot, `ipfs://${cid}`);
+          latestSnapshotUri = `ipfs://${cid}`;
+          latestSnapshotSavedAt = snapshot.savedAt || '';
+          return restored;
+        } catch (error) {
+          failures.push(`${base}: ${error.message}`);
+        }
       }
-      try {
-        const snapshot = await response.json();
-        const restored = deserialize(snapshot, `ipfs://${cid}`);
-        latestSnapshotUri = `ipfs://${cid}`;
-        latestSnapshotSavedAt = snapshot.savedAt || '';
-        return restored;
-      } catch (error) {
-        failures.push(`${base}: ${error.message}`);
-      }
+      if (!transientFailure || attempt === attempts - 1) break;
+      const delay = baseDelayMs * 2 ** attempt;
+      log.warn(`[ipfs-state] Checkpoint ${cid} unavailable; retrying in ${Math.ceil(delay / 1000)}s.`);
+      await wait(delay);
     }
     throw new Error(`IPFS state restore failed for ${cid}: ${failures.join('; ')}`);
   }

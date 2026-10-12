@@ -88,6 +88,24 @@ test('restoreCid fetches an explicit checkpoint without requiring it to remain i
   assert.equal(store.getLatestSnapshotUri(), `ipfs://${cid}`);
 });
 
+test('restoreCid retries a transient gateway 429 and restores the archived checkpoint', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  const cid = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';
+  let gatewayRequests = 0;
+  const delays = [];
+  const store = createPinataStateStore({ pinataJwt: 'test-jwt', fetchImpl: async url => {
+    if (!url.endsWith(`/ipfs/${cid}`)) return new Response('', { status: 404 });
+    gatewayRequests++;
+    return gatewayRequests <= 2 ? new Response('', { status: 429 })
+      : new Response(JSON.stringify({ schemaVersion: 1, playlist: [{ trackId: 'recovered' }], savedAt: '2026-10-12T15:37:06.715Z' }));
+  } });
+  assert.deepEqual(await store.restoreCid(cid, { attempts: 2, baseDelayMs: 50, wait: async delay => delays.push(delay) }),
+    [{ trackId: 'recovered' }]);
+  assert.equal(gatewayRequests, 3);
+  assert.deepEqual(delays, [50]);
+  assert.equal(store.getLatestSnapshotSavedAt(), '2026-10-12T15:37:06.715Z');
+});
+
 test('payment snapshot namespace is separate and immutable payment backups are retained', async () => {
   const { createPinataStateStore } = await import(moduleUrl);
   const requests = [];

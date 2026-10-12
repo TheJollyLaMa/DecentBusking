@@ -910,7 +910,7 @@ async function main() {
     const payrollRecoveryCid = process.env.JUKELOOP_PAYROLL_RECOVERY_CID || PAYROLL_RECOVERY_CID;
     if (payrollRecoveryCid && !hasPayrollHistoryRecovery(payrollRecoveryCid)) {
       try {
-        const archivedPlaylist = await stateStore.restoreCid(payrollRecoveryCid);
+        const archivedPlaylist = await stateStore.restoreCid(payrollRecoveryCid, { attempts: 4, baseDelayMs: 15_000 });
         const merged = mergePayrollHistorySnapshot(archivedPlaylist, payrollRecoveryCid,
           { snapshotSavedAt: stateStore.getLatestSnapshotSavedAt() });
         if (merged.mergedTracks) {
