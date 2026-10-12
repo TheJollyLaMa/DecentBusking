@@ -27,7 +27,7 @@ export function prepareAlbumPlaylistImport({ playlist, plan, artist, now = new D
           normalizeAlbumSongTitle(existingTrack.title) === titleKey && existingTrack.mintRecipient?.toLowerCase() === artist.wallet.toLowerCase() &&
           existingTrack.mintStatus === 'unminted') {
         existingTrack.mintStatus = 'requested';
-        existingTrack.mintRequestedAt = now;
+        existingTrack.mintRequestedAt = new Date(Date.parse(now) + queued.length * 1000).toISOString();
         queued.push(trackId);
       }
       skipped.push({ title: candidate.title, reason: 'already-present-title-or-audio' });
@@ -45,7 +45,7 @@ export function prepareAlbumPlaylistImport({ playlist, plan, artist, now = new D
       albums: [...new Set(candidate.albums)], contentSha256: candidate.sha256,
       uploader: artist.name, uploaderId: artist.uploaderId, mintRecipient: artist.wallet, tipWallet: artist.wallet,
       mintStatus: queueForMint ? 'requested' : 'unminted',
-      ...(queueForMint ? { mintRequestedAt: now } : {}),
+      ...(queueForMint ? { mintRequestedAt: new Date(Date.parse(now) + queued.length * 1000).toISOString() } : {}),
       likes: 0, dislikes: 0, plays: 0, addedAt: now, payrollTrackingStartedAt: now };
     next.push(track);
     added.push(trackId);

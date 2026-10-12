@@ -113,14 +113,17 @@ export function createPinataStateStore({
 
     const failures = [];
     const candidates = snapshots.slice(0, MAX_RESTORE_CANDIDATES);
+    const gateways = await restoreGateways();
     for (const [index, candidate] of candidates.entries()) {
       if (!candidate.cid) continue;
-      for (const base of [...new Set([gateway, FALLBACK_GATEWAY])]) {
-        const response = await fetchImpl(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${candidate.cid}`, {
+      for (const { base, accessToken } of gateways) {
+        const url = new URL(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${candidate.cid}`);
+        if (accessToken) url.searchParams.set('pinataGatewayToken', accessToken);
+        const response = await fetchImpl(url.toString(), {
           signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
         }).catch(() => null);
         if (!response?.ok) {
-          failures.push(`${candidate.cid}: HTTP ${response?.status || 'network error'}`);
+          failures.push(`${candidate.cid} (${base}): HTTP ${response?.status || 'network error'}`);
           continue;
         }
         try {
@@ -131,7 +134,7 @@ export function createPinataStateStore({
           if (index > 0) log.warn(`[ipfs-state] Restored older checkpoint ${candidate.cid}; newer snapshot gateways were unavailable.`);
           return restored;
         } catch (error) {
-          failures.push(`${candidate.cid}: ${error.message}`);
+          failures.push(`${candidate.cid} (${base}): ${error.message}`);
         }
       }
     }

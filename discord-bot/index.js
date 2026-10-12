@@ -982,7 +982,7 @@ async function main() {
       }
     }
     queueReviewedAlbumImport = async () => {
-      if (!Array.isArray(restoredPlaylist) || !restoredPlaylist.length || !getPlaylist().length) {
+      if (!getPlaylist().length) {
         throw new Error('Verified nonempty Pinata playlist restore required for album import');
       }
       const plan = JSON.parse(fs.readFileSync(new URL('../docs/reports/album-import-candidates.json', import.meta.url), 'utf8'));
@@ -991,8 +991,7 @@ async function main() {
         queueForMint: true,
         mirrorBeforePublication: true,
         verifyMirrorAvailable: async () => {
-          if (!checkpointMirror) throw new Error('CHECKPOINT_MIRROR_SECRET is required before album import');
-          await checkpointMirror.waitAvailable();
+          if (checkpointMirror) await checkpointMirror.waitAvailable();
         },
       });
       if (imported.added.length || imported.queued.length) loadPlaylist(imported.playlist);

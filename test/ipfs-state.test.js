@@ -30,7 +30,8 @@ test('restores the newest tagged JukeLoop snapshot from Pinata', async () => {
   assert.equal(listUrl.searchParams.get('network'), null);
   assert.equal(listUrl.searchParams.get('order'), 'DESC');
   assert.equal(listUrl.searchParams.get('limit'), '100');
-  assert.equal(requests[1].url, 'https://dweb.link/ipfs/bafystate');
+  assert.equal(requests[1].url, 'https://api.pinata.cloud/v3/gateways?pageSize=100&page=1');
+  assert.equal(requests[2].url, 'https://dweb.link/ipfs/bafystate');
   assert.ok(requests.every(({ options }) => options.signal instanceof AbortSignal));
 });
 
@@ -52,7 +53,11 @@ test('restore falls back to the Pinata gateway when the configured gateway is ra
 
   assert.deepEqual(await store.restore(), [{ trackId: 'kept' }]);
   assert.equal(new URL(fetched[0]).pathname, '/v3/files/public');
-  assert.deepEqual(fetched.slice(1), ['https://dweb.link/ipfs/bafystate', 'https://gateway.pinata.cloud/ipfs/bafystate']);
+  assert.deepEqual(fetched.slice(1), [
+    'https://api.pinata.cloud/v3/gateways?pageSize=100&page=1',
+    'https://dweb.link/ipfs/bafystate',
+    'https://gateway.pinata.cloud/ipfs/bafystate',
+  ]);
 });
 
 test('restore falls back to a retained older checkpoint when the newest CID is unavailable', async () => {
