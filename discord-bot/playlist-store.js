@@ -12,7 +12,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { currentPayrollPeriod, payrollPeriods } from '../js/payroll-week.mjs';
+import { currentPayrollPeriod, payrollPeriodFromKey, payrollPeriods } from '../js/payroll-week.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STORE_PATH = process.env.JUKELOOP_PLAYLIST_PATH || join(__dirname, 'jukeloop-playlist.json');
@@ -225,7 +225,10 @@ export function mergePayrollHistorySnapshot(archivedPlaylist, snapshotCid, { sna
         if (!Number.isSafeInteger(value) || value < 0) throw new Error(`Invalid ${field} value in archived playlist`);
         const existing = Number(current[field][week] || 0);
         if (!Number.isSafeInteger(existing) || existing < 0) throw new Error(`Invalid current ${field} value`);
-        const merged = currentStartedAfterSnapshot ? existing + value : Math.max(existing, value);
+        const periodClosedAtLiveStart = /^NY-\d{4}-\d{2}-\d{2}$/.test(week) &&
+          Date.parse(payrollPeriodFromKey(week).endAt) <= liveTrackingStartedAt;
+        const shouldAdd = currentStartedAfterSnapshot && !periodClosedAtLiveStart;
+        const merged = shouldAdd ? existing + value : Math.max(existing, value);
         if (!Number.isSafeInteger(merged)) throw new Error(`Merged ${field} exceeds safe accounting precision`);
         current[field][week] = merged;
         if (field === 'payrollPlays') addedPlays += merged - existing;
