@@ -10,7 +10,11 @@ const NFT_ABI = [
   'function totalMinted(uint256 tokenId) view returns (uint256)',
   'function uri(uint256 tokenId) view returns (string)',
 ];
-const METADATA_GATEWAYS = ['https://gateway.pinata.cloud/ipfs/', 'https://ipfs.io/ipfs/'];
+const METADATA_GATEWAYS = [
+  'https://ipfs.orbitor.dev/ipfs/',
+  'https://gateway.pinata.cloud/ipfs/',
+  'https://ipfs.io/ipfs/',
+];
 const cacheEvents = new Interface([
   'event URI(string value,uint256 indexed id)',
   'event TransferSingle(address indexed operator,address indexed from,address indexed to,uint256 id,uint256 value)',

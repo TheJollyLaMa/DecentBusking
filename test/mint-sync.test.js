@@ -13,7 +13,7 @@ test('metadata retries transient gateway failures and falls back for HTTP IPFS U
   const delays = [];
   const metadata = await fetchMintMetadata('ipfs://retry-metadata', async () => {
     requests++;
-    return requests <= 2 ? new Response('', { status: 429 }) : new Response(JSON.stringify({ audioUrl: 'ipfs://song' }));
+    return requests <= 3 ? new Response('', { status: 429 }) : new Response(JSON.stringify({ audioUrl: 'ipfs://song' }));
   }, { wait: async delay => delays.push(delay) });
   assert.equal(metadata.audioUrl, 'ipfs://song');
   assert.deepEqual(delays, [1000]);
@@ -22,13 +22,13 @@ test('metadata retries transient gateway failures and falls back for HTTP IPFS U
     urls.push(url);
     return url.includes('unavailable.example') ? new Response('', { status: 503 }) : new Response(JSON.stringify({ name: 'Recovered' }));
   }), { name: 'Recovered' });
-  assert.equal(urls[1], 'https://gateway.pinata.cloud/ipfs/metadata');
+  assert.equal(urls[1], 'https://ipfs.orbitor.dev/ipfs/metadata');
   await assert.rejects(fetchMintMetadata('ipfs://missing', async () => new Response('', { status: 404 })),
     /ipfs:\/\/missing.*404.*duplicate mints/);
   let bestEffortCalls = 0;
   await assert.rejects(fetchMintMetadata('ipfs://best-effort', async () => { bestEffortCalls++; return new Response('', { status: 503 }); },
     { attempts: 1 }), /ipfs:\/\/best-effort/);
-  assert.equal(bestEffortCalls, 2);
+  assert.equal(bestEffortCalls, 3);
 });
 
 test('discovers the account dedicated Pinata gateway without exposing the JWT to content requests', async () => {

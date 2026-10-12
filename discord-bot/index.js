@@ -181,7 +181,7 @@ function syncMintedTracks(config, { required = false } = {}) {
     _mintSyncTask = Promise.resolve().then(async () => {
       if (!_nftMetadataGateways) {
         const dedicated = await discoverPinataMetadataGateway({ pinataJwt: config.pinataJwt });
-        _nftMetadataGateways = [dedicated];
+        _nftMetadataGateways = ['https://ipfs.orbitor.dev/ipfs/', dedicated];
       }
       return syncMintedTracksFromChain({
         rpcUrl: config.baseRpcUrl,
