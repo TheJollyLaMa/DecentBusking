@@ -19,8 +19,15 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(html, /id="devert-campaigns" aria-label="My DeVert advertisements"/);
   assert.match(html, /id="devert-search-results"/);
   assert.match(html, /id="devert-price">5\.00<\/strong>/);
-  assert.match(html, /id="devert-offer"[^>]*value="5\.00"/);
-  assert.match(html, /id="devert-max-payment"[^>]*value="5\.00"/);
+  assert.match(html, /id="devert-audio-uri"[^>]*readonly/);
+  assert.match(html, /id="devert-weeks"[^>]*value="1"/);
+  assert.match(html, /Priority Queue Bump<\/td><td>\$1 · positions 1–7/);
+  assert.match(html, /Priority Queue Bump<\/td><td>\$2 · positions 8–14/);
+  assert.match(html, /Priority Queue Bump<\/td><td>\$4 · positions 15–21/);
+  assert.match(html, /Campaign Instructions: Submit, Receive &amp; Run/);
+  assert.doesNotMatch(html, /<details class="devert-workflow-details">/);
+  assert.doesNotMatch(html, /id="devert-offer"/);
+  assert.doesNotMatch(html, /id="devert-max-payment"/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /api\/devert\/ads/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /buildDevertAdsAuthorizationMessage/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /renderAdLibrary/);
@@ -29,7 +36,7 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(fs.readFileSync(path.join(__dirname, '../discord-bot/index.js'), 'utf8'), /getDevertAdsForWallet\(address/);
   assert.doesNotMatch(html, /id="devert-profile"/);
   assert.doesNotMatch(html, /id="devert-mute-ads"|id="devert-listen-radio"|id="devert-listen-ads"/);
-  assert.equal((html.match(/id="devert-max-payment"/g) || []).length, 1);
+  assert.equal((html.match(/id="devert-max-payment"/g) || []).length, 0);
   const panel = fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8');
   assert.match(panel, /from '\.\/radio-sync\.js\?v=20261010-listens'/);
   assert.match(panel, /document\.addEventListener\('wallet-connected', refresh\)/);
@@ -61,7 +68,7 @@ function fixture({ nativeBalance = 1_000_000_000_000_000_000n, allowance = 0n } 
   const usdc = {
     target: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     decimals: async () => 6,
-    balanceOf: async () => OFFER,
+    balanceOf: async () => 5_000_000n,
     allowance: async () => currentAllowance,
     approve: async (_spender, amount) => {
       calls.approvals.push(amount);
@@ -72,19 +79,19 @@ function fixture({ nativeBalance = 1_000_000_000_000_000_000n, allowance = 0n } 
   return { signer, contract, usdc, calls };
 }
 
-test('DeVert purchase attaches the current fee-cap top-up and keeps USDC approval exact', async () => {
+test('DeVert purchase attaches the current worker-gas top-up and keeps USDC approval exact', async () => {
   const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
   const state = fixture();
   const hash = await purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio',
-    offerUnits: OFFER, maxPaymentUnits: OFFER, onStep: message => state.calls.steps.push(message) });
+    weeks: 1, onStep: message => state.calls.steps.push(message) });
   const expectedTopUp = 500_000n * FEE_CAP;
   assert.equal(hash, '0xabc');
-  assert.deepEqual(state.calls.approvals, [OFFER]);
+  assert.deepEqual(state.calls.approvals, [5_000_000n]);
   assert.equal(state.calls.simulations[0][4].value, expectedTopUp);
   assert.equal(state.calls.simulations[0][4].maxFeePerGas, FEE_CAP);
   assert.equal(state.calls.simulations[0][4].maxPriorityFeePerGas, 50_000_000n);
   assert.equal(state.calls.purchases[0][4].value, expectedTopUp);
-  assert.ok(state.calls.steps.some(message => /scheduler top-up/.test(message)));
+  assert.ok(state.calls.steps.some(message => /worker-gas top-up/.test(message)));
 });
 
 test('DeVert purchase rejects insufficient top-up ETH before prompting for USDC approval', async () => {
@@ -92,17 +99,17 @@ test('DeVert purchase rejects insufficient top-up ETH before prompting for USDC 
   const topUp = 500_000n * FEE_CAP;
   const state = fixture({ nativeBalance: topUp - 1n });
   await assert.rejects(purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio',
-    offerUnits: OFFER, maxPaymentUnits: OFFER }), /Insufficient Base ETH for the scheduler top-up/);
+    weeks: 1 }), /Insufficient Base ETH for the scheduler top-up/);
   assert.deepEqual(state.calls.approvals, []);
   assert.deepEqual(state.calls.purchases, []);
 });
 
 test('DeVert purchase uses the legacy gasPrice quote when maxFeePerGas is unavailable', async () => {
   const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
-  const state = fixture({ allowance: OFFER });
+  const state = fixture({ allowance: 5_000_000n });
   state.signer.provider.getFeeData = async () => ({ gasPrice: 1_000_000_000n });
   await purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio',
-    offerUnits: OFFER, maxPaymentUnits: OFFER });
+    weeks: 1 });
   assert.equal(state.calls.purchases[0][4].value, 500_000_000_000_000n);
   assert.equal(state.calls.purchases[0][4].gasPrice, 1_000_000_000n);
 });

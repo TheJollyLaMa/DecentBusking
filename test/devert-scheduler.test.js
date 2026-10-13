@@ -8,16 +8,16 @@ const campaign = (campaignId, offerUnits = '1000000', overrides = {}) => ({
   mainRadioPlays: 0, devertPlays: 0, djukeBoosts: 0, ...overrides,
 });
 
-test('DeVert weekly minimum is one USDC and the queue price doubles every eight campaigns', async () => {
+test('DeVert weekly minimum is one USDC and the queue price doubles every seven campaigns', async () => {
   const { quoteDevertCampaign } = await import('../js/devert-scheduler.mjs');
   assert.equal(quoteDevertCampaign({ campaigns: [], mainRadioSlots: 2 }).minimumOfferUnits, 1000000n);
   const quote = quoteDevertCampaign({ campaigns: [campaign('a'), campaign('b', '7000000')], mainRadioSlots: 2 });
   assert.equal(quote.minimumOfferUnits, 1000000n);
   assert.equal(quote.bumpedCampaignId, 'a');
-  const tiered = quoteDevertCampaign({ campaigns: Array.from({ length: 8 }, (_, index) => campaign(String.fromCharCode(97 + index))),
+  const tiered = quoteDevertCampaign({ campaigns: Array.from({ length: 7 }, (_, index) => campaign(String.fromCharCode(97 + index))),
     mainRadioSlots: 2 });
   assert.equal(tiered.minimumOfferUnits, 2000000n);
-  const doubleTier = quoteDevertCampaign({ campaigns: Array.from({ length: 16 }, (_, index) => campaign(String.fromCharCode(97 + (index % 26)), '5000000', {
+  const doubleTier = quoteDevertCampaign({ campaigns: Array.from({ length: 14 }, (_, index) => campaign(String.fromCharCode(97 + (index % 26)), '5000000', {
     startedAt: new Date(index * 1000).toISOString(),
   })), mainRadioSlots: 2 });
   assert.equal(doubleTier.minimumOfferUnits, 4000000n);
@@ -51,7 +51,7 @@ test('DeVert rejects malformed campaigns and campaign terms longer than one week
   assert.throws(() => planDevertQueues({ campaigns: [campaign('long', '1000000', { expiresAt: new Date(8 * 86400000).toISOString() })], completedSongPlays: 10, now: 1 }), /seven days/);
 });
 
-test('advertiser checkout quotes on Base, caps the offer and approves only the exact USDC amount', async () => {
+test('advertiser checkout quotes on Base, prices campaigns by week, and approves only the exact USDC amount', async () => {
   const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
   const calls = [];
   const signer = { provider: { getNetwork: async () => ({ chainId: 8453n }), getBlock: async () => ({ timestamp: 1234 }),
@@ -69,13 +69,13 @@ test('advertiser checkout quotes on Base, caps the offer and approves only the e
     balanceOf: async () => 10_000_000n, allowance: async () => 0n,
     approve: async (target, amount) => { calls.push(['approve', target, amount]); return { wait: async () => ({ status: 1 }) }; } };
   const hash = await purchaseDevertCampaign({ signer, contract, usdc, title: 'Set announcement', audioURI: 'ipfs://bafy-audio',
-    offerUnits: 1_010_000n, maxPaymentUnits: 6_000_000n });
+    weeks: 1 });
   assert.equal(hash, '0xcampaign');
   assert.deepEqual(calls.map(call => call[0]), ['approve', 'static', 'purchase']);
-  assert.equal(calls[0][2], 1_010_000n);
-  assert.equal(calls[1][4], 6_000_000n);
+  assert.equal(calls[0][2], 5_000_000n);
+  assert.equal(calls[1][4], 5_000_000n);
   await assert.rejects(purchaseDevertCampaign({ signer, contract, usdc, title: 'Set announcement', audioURI: 'ipfs://bafy-audio',
-    offerUnits: 1_000_000n, maxPaymentUnits: 6_000_000n }), /Current minimum offer/);
+    weeks: 0 }), /Choose at least one week/);
   assert.equal(calls.length, 3);
 });
 
@@ -84,7 +84,7 @@ test('advertiser checkout refuses wrong chain and non-IPFS audio before token ap
   const signer = { provider: { getNetwork: async () => ({ chainId: 1n }) } };
   const contract = { target: `0x${'22'.repeat(20)}` };
   const usdc = { target: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: async () => 6 };
-  await assert.rejects(purchaseDevertCampaign({ signer, contract, usdc, title: 'A', audioURI: 'ipfs://a', offerUnits: 1_000_000n, maxPaymentUnits: 1_000_000n }), /Base/);
+  await assert.rejects(purchaseDevertCampaign({ signer, contract, usdc, title: 'A', audioURI: 'ipfs://a', weeks: 1 }), /Base/);
   signer.provider.getNetwork = async () => ({ chainId: 8453n });
-  await assert.rejects(purchaseDevertCampaign({ signer, contract, usdc, title: 'A', audioURI: 'https://example.invalid/ad.mp3', offerUnits: 1_000_000n, maxPaymentUnits: 1_000_000n }), /IPFS/);
+  await assert.rejects(purchaseDevertCampaign({ signer, contract, usdc, title: 'A', audioURI: 'https://example.invalid/ad.mp3', weeks: 1 }), /IPFS/);
 });

@@ -47,7 +47,7 @@ export function quoteDevertCampaign({ campaigns, mainRadioSlots, minimumPriceUni
     typeof minimumBidIncrementUnits !== 'bigint' || minimumBidIncrementUnits < 1n) throw new Error('Invalid DeVert quote inputs');
   if (campaigns.length >= DEVERT_MAX_WEEKLY_CAMPAIGNS) throw new Error('Weekly DeVert campaign limit reached');
   const incumbents = campaigns.map(validateCampaign).sort(comparePriority);
-  const queueTier = Math.floor(incumbents.length / 8);
+  const queueTier = Math.floor(incumbents.length / 7);
   const tieredMinimum = minimumPriceUnits * (2n ** BigInt(queueTier));
   if (mainRadioSlots === 0 || incumbents.length < mainRadioSlots) return {
    minimumOfferUnits: tieredMinimum, bumpedCampaignId: null, mainRadioSlots,

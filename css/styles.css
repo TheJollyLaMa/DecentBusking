@@ -915,8 +915,11 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 #devert-ad-artist { box-sizing: border-box; width: 100%; min-height: 36px; padding: 7px 9px; color: #f6efdd; background: #17140d; border: 1px solid #806532; border-radius: 4px; font: inherit; }
 #devert-purchase-status { color: #dfd3b3; font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
 #devert-panel button:focus-visible { outline-offset: 2px; }
-.devert-tiers, .devert-workflow-details { border-top: 1px solid #554522; padding-top: 10px; margin-top: 12px; font-size: .72rem; }
-.devert-tiers summary, .devert-workflow-details summary { cursor: pointer; color: #f5cf66; font-weight: 600; }
+.devert-run-campaign { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #554522; }
+.devert-workflow-details { display: grid; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #554522; font-size: .72rem; }
+.devert-run-campaign h3, .devert-workflow-details h3 { margin: 0; color: #f5cf66; font-size: .82rem; }
+.devert-tiers { border-top: 1px solid #554522; padding-top: 10px; margin-top: 12px; font-size: .72rem; }
+.devert-tiers summary { cursor: pointer; color: #f5cf66; font-weight: 600; }
 .devert-tiers table { width: 100%; border-collapse: collapse; margin-top: 6px; font-variant-numeric: tabular-nums; }
 .devert-tiers th, .devert-tiers td { padding: 6px 4px; text-align: left; border-bottom: 1px solid #3d3219; }
 .devert-tiers th { color: #dfd3b3; font-weight: 500; }
