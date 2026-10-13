@@ -95,6 +95,17 @@
       "amount": "0.00001",
       "queuedAt": "2026-04-11T08:17:59.694Z",
       "queuedBy": "github-actions[bot]"
+    },
+    {
+      "issueRef": "TheJollyLaMa/DecentBusking#115",
+      "currency": "USDC",
+      "fund": "dbusk-repo-dev",
+      "queuedAt": "2026-10-13T17:34:21.381Z",
+      "queuedBy": "TheJollyLaMa",
+      "prNumber": 131,
+      "contributor": "0x23A457AD3C33d68E4fAd2FCa7c5d9a511E0C350e",
+      "contributorGithub": "copilot",
+      "amount": "1"
     }
   ],
   "settled": []

@@ -33,10 +33,12 @@
         "TheJollyLaMa/DecentBusking#14",
         "TheJollyLaMa/DecentBusking#16",
         "TheJollyLaMa/DecentBusking#18",
-        "TheJollyLaMa/DecentBusking#58"
+        "TheJollyLaMa/DecentBusking#58",
+        "TheJollyLaMa/DecentBusking#115"
       ],
       "registeredAt": "2026-04-01T00:00:00.000Z",
-      "notes": "GitHub Copilot AI contributor."
+      "notes": "GitHub Copilot AI contributor.",
+      "usdcPending": 1
     }
   ]
 }
