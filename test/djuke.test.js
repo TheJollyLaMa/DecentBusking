@@ -53,15 +53,17 @@ test('DJuke rejects missing and ambiguous queue data instead of assuming an empt
 
 function paymentFixture({ chainId = 8453n, price = 250000n, balance = 1000000n, allowance = 0n } = {}) {
   const calls = [];
+  let currentChainId = chainId;
+  let currentAllowance = allowance;
   const confirmed = hash => ({ hash, wait: async () => ({ status: 1 }) });
   const requestPlay = async (songId, maxPrice) => { calls.push(['requestPlay', songId, maxPrice]); return confirmed('0xrequest'); };
   requestPlay.staticCall = async () => {};
   const djuke = { target: `0x${'d'.repeat(40)}`, quote: async () => price, requestPlay };
   const usdc = { target: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: async () => 6n,
-    balanceOf: async () => balance, allowance: async () => allowance,
-    approve: async (spender, amount) => { calls.push(['approve', spender, amount]); return confirmed('0xapprove'); } };
-  const signer = { provider: { getNetwork: async () => ({ chainId }) }, getAddress: async () => `0x${'1'.repeat(40)}` };
-  return { calls, signer, djuke, usdc, songId: `0x${'a'.repeat(64)}`, maxPriceUnits: 250000n };
+    balanceOf: async () => balance, allowance: async () => currentAllowance,
+    approve: async (spender, amount) => { calls.push(['approve', spender, amount]); currentAllowance = amount; return confirmed('0xapprove'); } };
+  const signer = { provider: { getNetwork: async () => ({ chainId: currentChainId }) }, getAddress: async () => `0x${'1'.repeat(40)}` };
+  return { calls, signer, djuke, usdc, songId: `0x${'a'.repeat(64)}`, maxPriceUnits: 250000n, setChainId: chainId => { currentChainId = chainId; } };
 }
 
 test('DJuke payment approves exactly the current price and caps the request at the quoted price', async () => {
@@ -74,12 +76,25 @@ test('DJuke payment approves exactly the current price and caps the request at t
   assert.deepEqual(approved.calls.map(call => call[0]), ['requestPlay']);
 });
 
-test('DJuke payment refuses wrong networks, price increases and low balances before any wallet prompt', async () => {
+test('DJuke payment switches to Base, then refuses price increases and low balances before any wallet prompt', async () => {
   const { payForDjukeSong } = await import('../js/djuke.mjs');
-  for (const [options, message] of [[{ chainId: 1n }, /Base/], [{ price: 500000n }, /Price rose/], [{ balance: 1n }, /need 0.25 USDC/]]) {
-    const fixture = paymentFixture(options);
-    await assert.rejects(payForDjukeSong(fixture), message);
-    assert.deepEqual(fixture.calls, []);
+  const requests = [];
+  const previousWindow = global.window;
+  const chain = paymentFixture({ chainId: 1n, balance: 1_000_000n });
+  global.window = { ethereum: { request: async ({ method, params }) => {
+    requests.push([method, params]);
+    if (method === 'wallet_switchEthereumChain') chain.setChainId(8453n);
+  } } };
+  try {
+    await payForDjukeSong(chain);
+    assert.equal(requests[0][0], 'wallet_switchEthereumChain');
+    for (const [options, message] of [[{ price: 500000n }, /Price rose/], [{ balance: 1n }, /need 0.25 USDC/]]) {
+      const fixture = paymentFixture(options);
+      await assert.rejects(payForDjukeSong(fixture), message);
+      assert.deepEqual(fixture.calls, []);
+    }
+  } finally {
+    global.window = previousWindow;
   }
 });
 
@@ -147,19 +162,16 @@ test('DJuke search matches song titles and creators without selecting a song imp
 
 test('v0.2 payment verifies a worker quote and sends exactly the doubled ETH contribution', async () => {
   const { payForDjukeSong } = await import('../js/djuke.mjs');
-  const { createRequire } = require('node:module');
-  const library = createRequire(require('node:path').join(__dirname, '../discord-bot/package.json'))('ethers');
-  const { GAS_QUOTE_TYPES } = await import('../discord-bot/djuke-gas.js');
   const previous = global.ethers;
-  global.ethers = library;
   try {
-    const worker = library.Wallet.createRandom();
+    const worker = { address: `0x${'3'.repeat(40)}`, signTypedData: async () => '0xsignature' };
+    global.ethers = { verifyTypedData: () => worker.address };
     const fixture = paymentFixture({ allowance: 250000n });
     fixture.signer.provider.getBalance = async () => 100000n;
     const listener = await fixture.signer.getAddress();
     const quote = { listener, songId: fixture.songId, maxPrice: '250000', fulfillmentCostWei: '1000', nonce: '0',
       deadline: Math.floor(Date.now() / 1000) + 120, contributionWei: '2000', contractAddress: fixture.djuke.target, chainId: 8453 };
-    quote.signature = await worker.signTypedData({ name: 'DecentJukeBox', version: '0.2', chainId: 8453, verifyingContract: fixture.djuke.target }, GAS_QUOTE_TYPES, quote);
+    quote.signature = await worker.signTypedData();
     fixture.djuke.gasWorker = async () => worker.address;
     fixture.djuke.maxGasContributionWei = async () => 10000n;
     fixture.djuke.gasQuoteNonces = async () => 0n;

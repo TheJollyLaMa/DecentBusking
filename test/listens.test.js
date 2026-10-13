@@ -6,13 +6,15 @@ const vm = require('node:vm');
 
 const songId = `0x${'a'.repeat(64)}`;
 async function load() {
+  const { ensureBaseNetwork, waitForAllowance, retryMissingRevertData } = await import('../js/base-chain.mjs');
   const { supportsDjukeAlbumsAndGas } = await import('../js/djuke-version.mjs');
   const source = fs.readFileSync(path.join(__dirname, '../js/listens.mjs'), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/^if \(typeof document[^\n]*$/m, '');
-  const context = vm.createContext({ crypto, setInterval, clearInterval, setTimeout, Promise, BigInt, JSON, AbortSignal, supportsDjukeAlbumsAndGas });
+  const context = vm.createContext({ crypto, setInterval, clearInterval, setTimeout, Promise, BigInt, JSON, AbortSignal,
+    supportsDjukeAlbumsAndGas, ensureBaseNetwork, waitForAllowance, retryMissingRevertData });
   vm.runInContext(`${source}\nglobalThis.api = { createListenController, createListenPlaylist, purchaseListens, audioCid, formatUsdc };`, context);
-  return context.api;
+  return { ...context.api, context };
 }
 
 test('listen gate plays free while payments are off and previews 30 seconds once live', async () => {
@@ -133,26 +135,40 @@ test('playlist storage dedupes, caps size and survives broken storage', async ()
 
 function purchaseFixture({ chainId = 8453n, balance = 10_000_000n, allowance = 0n } = {}) {
   const calls = [];
+  let currentAllowance = allowance;
   const confirmed = hash => ({ hash, wait: async () => ({ status: 1 }) });
   const purchaseListens = async (ids, total) => { calls.push(['purchase', ids.length, total]); return confirmed('0xlisten'); };
   purchaseListens.staticCall = async () => {};
   return { calls, signer: { provider: { getNetwork: async () => ({ chainId }) }, getAddress: async () => `0x${'1'.repeat(40)}` },
     djuke: { target: `0x${'d'.repeat(40)}`, purchaseListens },
     usdc: { target: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: async () => 6n, balanceOf: async () => balance,
-      allowance: async () => allowance, approve: async (_spender, amount) => { calls.push(['approve', amount]); return confirmed('0xapprove'); } } };
+      allowance: async () => currentAllowance, approve: async (_spender, amount) => { calls.push(['approve', amount]); currentAllowance = amount; return confirmed('0xapprove'); } } };
 }
 
-test('listen purchases approve exactly 0.25 USDC per song and refuse unsafe states before prompting', async () => {
+test('listen purchases approve exactly 0.25 USDC per song and switch to Base before prompting', async () => {
   const api = await load();
   const fixture = purchaseFixture();
   const result = await api.purchaseListens({ ...fixture, songIds: [songId, songId, songId] });
   assert.equal(result.totalUnits, 750000n);
   assert.deepEqual(fixture.calls, [['approve', 750000n], ['purchase', 3, 750000n]]);
-  for (const [options, ids, message] of [[{ chainId: 1n }, [songId], /Base/], [{ balance: 1n }, [songId], /need 0.25 USDC/],
-    [{}, [], /1 to 50/], [{}, Array(51).fill(songId), /1 to 50/], [{}, ['0xbad'], /1 to 50/]]) {
-    const unsafe = purchaseFixture(options);
-    await assert.rejects(api.purchaseListens({ ...unsafe, songIds: ids }), message);
-    assert.deepEqual(unsafe.calls, []);
+  const requests = [];
+  const previousWindow = global.window;
+  const switched = purchaseFixture({ chainId: 1n, balance: 1_000_000n });
+  global.window = { ethereum: { request: async ({ method, params }) => {
+    requests.push([method, params]);
+    if (method === 'wallet_switchEthereumChain') switched.signer.provider.getNetwork = async () => ({ chainId: 8453n });
+  } } };
+  try {
+    await api.purchaseListens({ ...switched, songIds: [songId] });
+    assert.equal(requests[0][0], 'wallet_switchEthereumChain');
+    for (const [options, ids, message] of [[{ balance: 1n }, [songId], /need 0.25 USDC/],
+      [{}, [], /1 to 50/], [{}, Array(51).fill(songId), /1 to 50/], [{}, ['0xbad'], /1 to 50/]]) {
+      const unsafe = purchaseFixture(options);
+      await assert.rejects(api.purchaseListens({ ...unsafe, songIds: ids }), message);
+      assert.deepEqual(unsafe.calls, []);
+    }
+  } finally {
+    global.window = previousWindow;
   }
   assert.equal(api.audioCid('ipfs://bafyx'), 'bafyx');
   assert.equal(api.audioCid('https://gateway.pinata.cloud/ipfs/bafyy?x=1'), 'bafyy');
