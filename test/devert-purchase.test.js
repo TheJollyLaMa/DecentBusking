@@ -29,7 +29,7 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.doesNotMatch(html, /id="devert-offer"/);
   assert.doesNotMatch(html, /id="devert-max-payment"/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /api\/devert\/ads/);
-  assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /buildDevertAdsAuthorizationMessage/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /api\/devert\/ads\?wallet=/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8'), /renderAdLibrary/);
   assert.match(fs.readFileSync(path.join(__dirname, '../css/styles.css'), 'utf8'), /#devert-search-results \{/);
   assert.match(fs.readFileSync(path.join(__dirname, '../css/styles.css'), 'utf8'), /\.devert-library-card/);
@@ -41,6 +41,7 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(panel, /from '\.\/radio-sync\.js\?v=20261010-listens'/);
   assert.match(panel, /document\.addEventListener\('wallet-connected', refresh\)/);
   assert.match(panel, /adMediaStatus\.textContent = 'Submitted for review\.';\s*await refresh\(\)/);
+  assert.match(panel, /scanPending \? 3_000 : 30_000/);
 });
 
 function fixture({ nativeBalance = 1_000_000_000_000_000_000n, allowance = 0n } = {}) {
