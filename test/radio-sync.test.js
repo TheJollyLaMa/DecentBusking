@@ -303,6 +303,68 @@ test('switchTo broadcasts now-playing after the site audio begins and stops on p
   assert.equal(stopped.length > 0, true);
 });
 
+test('switchTo reveals now-playing before tune-in when autoplay is blocked', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
+    .replace(/export /g, '');
+  const events = [];
+  const document = new EventTarget();
+  document.addEventListener('dbusk-now-playing', (event) => events.push(event.detail));
+  const audio = new EventTarget();
+  let position = 0;
+  Object.assign(audio, {
+    duration: 180,
+    paused: true,
+    seeking: false,
+    readyState: 1,
+    seekable: { length: 1, start: () => 0, end: () => 180 },
+    pause() { this.paused = true; this.dispatchEvent(new Event('pause')); },
+    removeAttribute() {},
+    querySelectorAll: () => [],
+    appendChild() {},
+    load() {
+      setTimeout(() => { this.readyState = 4; this.dispatchEvent(new Event('loadedmetadata')); }, 0);
+    },
+    async play() { throw Object.assign(new Error('blocked'), { name: 'NotAllowedError' }); },
+  });
+  Object.defineProperties(audio, {
+    currentTime: { get: () => position, set: (value) => { position = value; } },
+    volume: { get: () => 0, set: () => {} },
+  });
+  document.createElement = () => ({ });
+  const context = vm.createContext({
+    performance,
+    setTimeout,
+    clearTimeout,
+    console,
+    audio,
+    document,
+    CustomEvent,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } },
+  });
+  vm.runInContext(`${source}\n_audio = audio; _audioPlayer = audio; globalThis.switchTrack = _switchTo;`, context);
+  await context.switchTrack({
+    title: 'Signal Fire',
+    artist: 'Synth Artist',
+    url: 'https://audio.example/song',
+    mime: 'audio/mpeg',
+    nowPlaying: {
+      source: 'radio',
+      playId: 'play-42',
+      trackId: 'track-42',
+      title: 'Signal Fire',
+      artist: 'Synth Artist',
+      audioUrl: 'https://gateway.example/ipfs/bafy-fire',
+      mediaType: 'audio/mpeg',
+      ipfsCid: 'bafy-fire',
+      nft: null,
+    },
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].playId, 'play-42');
+  assert.equal(events[0].title, 'Signal Fire');
+  assert.equal(audio.paused, true);
+});
+
 test('site votes post only the current play and anonymous browser ID, with no wallet', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
   const context = vm.createContext({ AbortSignal, console });

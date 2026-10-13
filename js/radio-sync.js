@@ -623,6 +623,14 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     return;
   }
   if (at > 0) canSeekImmediately = _seekTo(at);
+  _broadcastNowPlaying(nowPlaying || {
+    source: _mode,
+    title,
+    artist,
+    audioUrl: url,
+    mediaType: mime || _mimeType(url),
+    nft: nowPlaying?.nft ?? null,
+  });
 
   try {
     try {
@@ -641,14 +649,6 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     _playBtn?.classList.remove('hidden');
     return;
   }
-  _broadcastNowPlaying(nowPlaying || {
-    source: _mode,
-    title,
-    artist,
-    audioUrl: url,
-    mediaType: mime || _mimeType(url),
-    nft: nowPlaying?.nft ?? null,
-  });
   if (token !== _switchToken) return;
   if (at > 0) {
     const seek = _prepareRadioSeek(offset, token);
