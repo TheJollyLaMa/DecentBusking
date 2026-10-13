@@ -128,6 +128,7 @@ test('DeVert uses only the main-radio queue and advances by confirmed impression
   const main = await runtime.nextMainRadioAd();
   assert.equal(main.track.trackId, 'devert:high');
   assert.equal(main.mainRadio, true);
+  assert.deepEqual((await runtime.nextMainRadioAd({ count: 2 })).map(ad => ad.track.trackId), ['devert:high', 'devert:low']);
   campaigns.find(item => item.campaignId === 'high').mainRadioPlays = 1;
   const afterOne = harness({ campaigns, slots: 2, impressions: 1 });
   const next = await makeRuntime(afterOne);

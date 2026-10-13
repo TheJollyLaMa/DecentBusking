@@ -3,7 +3,7 @@ export const DEVERT_MINIMUM_WEEKLY_PRICE = 1n * USDC;
 export const DEVERT_MINIMUM_BID_INCREMENT = 10_000n;
 export const DEVERT_CAMPAIGN_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 export const DEVERT_SONGS_PER_MAIN_AD = 10;
-export const DEVERT_MAX_AD_SECONDS = 60;
+export const DEVERT_MAX_AD_SECONDS = 120;
 export const DEVERT_MAX_WEEKLY_CAMPAIGNS = 1000;
 
 export function buildDevertAdsAuthorizationMessage({ address, origin, issuedAt }) {
@@ -47,12 +47,16 @@ export function quoteDevertCampaign({ campaigns, mainRadioSlots, minimumPriceUni
     typeof minimumBidIncrementUnits !== 'bigint' || minimumBidIncrementUnits < 1n) throw new Error('Invalid DeVert quote inputs');
   if (campaigns.length >= DEVERT_MAX_WEEKLY_CAMPAIGNS) throw new Error('Weekly DeVert campaign limit reached');
   const incumbents = campaigns.map(validateCampaign).sort(comparePriority);
+  const queueTier = Math.floor(incumbents.length / 8);
+  const tieredMinimum = minimumPriceUnits * (2n ** BigInt(queueTier));
   if (mainRadioSlots === 0 || incumbents.length < mainRadioSlots) return {
-    minimumOfferUnits: minimumPriceUnits, bumpedCampaignId: null, mainRadioSlots,
+   minimumOfferUnits: tieredMinimum, bumpedCampaignId: null, mainRadioSlots,
   };
-  const threshold = BigInt(incumbents[mainRadioSlots - 1].offerUnits) + minimumBidIncrementUnits;
-  return { minimumOfferUnits: threshold > minimumPriceUnits ? threshold : minimumPriceUnits,
-    bumpedCampaignId: incumbents[mainRadioSlots - 1].campaignId, mainRadioSlots };
+  return {
+   minimumOfferUnits: tieredMinimum,
+   bumpedCampaignId: incumbents[mainRadioSlots - 1].campaignId,
+   mainRadioSlots,
+  };
 }
 
 export function planDevertQueues({ campaigns, completedSongPlays, now = Date.now(), songsPerMainAd = DEVERT_SONGS_PER_MAIN_AD }) {

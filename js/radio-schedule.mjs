@@ -227,12 +227,11 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
   return { ...fallback, type: 'normal_rotation' };
 }
 
-function chooseAdCampaign(adCampaigns, showType) {
+function chooseAdCampaigns(adCampaigns, showType, count = 1) {
   const list = Array.isArray(adCampaigns) ? adCampaigns : [];
-  if (!list.length) return null;
-  if (showType === 'live_performance') return null;
+  if (!list.length || showType === 'live_performance') return [];
   const seated = list.filter(campaign => campaign && campaign.mainRadio !== false && campaign.kind !== 'overflow');
-  return seated[0] || list[0] || null;
+  return (seated[0] ? seated : list).slice(0, Math.max(0, count));
 }
 
 export function buildRadioProgram({
@@ -267,15 +266,15 @@ export function buildRadioProgram({
     program.push({ type: 'song', ...track });
     const shouldInsertAd = index + 1 < rankedTracks.length && (index + 1) % songsPerMainAd === 0;
     if (shouldInsertAd) {
-      const ad = chooseAdCampaign(adCampaigns, show.type);
-      if (ad) {
+      const ads = chooseAdCampaigns(adCampaigns, show.type, 2);
+      for (const ad of ads) {
         program.push({ type: 'ad', ...ad, slot: 'main-radio' });
       }
     }
   }
 
   if (program.length === 0 && Array.isArray(adCampaigns) && adCampaigns.length) {
-    const ad = chooseAdCampaign(adCampaigns, show.type);
+    const [ad] = chooseAdCampaigns(adCampaigns, show.type, 1);
     if (ad) program.push({ type: 'ad', ...ad, slot: 'overflow' });
   }
 
