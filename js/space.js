@@ -1077,11 +1077,29 @@ function _ensureNowPlayingEdge(mesh) {
     blending: THREE.AdditiveBlending ?? undefined,
   });
   const LineCtor = THREE.LineLoop || THREE.Line;
-  const edge = new LineCtor(geometry, material);
-  edge.position.set(0, 0, -0.06);
-  edge.scale.setScalar(1.2);
-  edge.renderOrder = 22;
-  mesh.add(edge);
+  const specs = [
+    { scale: 1.18, opacity: 1, order: 24 },
+    { scale: 1.28, opacity: 0.42, order: 23 },
+    { scale: 1.40, opacity: 0.24, order: 22 },
+    { scale: 1.56, opacity: 0.12, order: 21 },
+  ];
+  const layers = specs.map((spec, index) => {
+    const layer = new LineCtor(geometry, index === 0 ? material : new THREE.LineBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      vertexColors: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending ?? undefined,
+    }));
+    layer.position.set(0, 0, -0.06);
+    layer.scale.setScalar(spec.scale);
+    layer.renderOrder = spec.order;
+    layer.userData = { ...(layer.userData || {}), layerSpec: spec };
+    mesh.add(layer);
+    return layer;
+  });
+  const edge = layers[0];
+  ud.nowPlayingEdgeLayers = layers;
   ud.nowPlayingEdge = edge;
   ud.nowPlayingEdgeSegments = segments;
   ud.nowPlayingEdgePositions = positions;
@@ -1142,6 +1160,7 @@ function _updateNowPlayingEdge(mesh, intensity = 0, dt = 16, settle = false, zoo
   const positions = ud.nowPlayingEdgePositions;
   const colors = ud.nowPlayingEdgeColors;
   const segments = ud.nowPlayingEdgeSegments || 64;
+  const layers = ud.nowPlayingEdgeLayers || [edge];
   const left = _nowPlayingLeftWaveData;
   const right = _nowPlayingRightWaveData;
   const baseRadius = 1.98;
@@ -1169,11 +1188,15 @@ function _updateNowPlayingEdge(mesh, intensity = 0, dt = 16, settle = false, zoo
   edge.geometry.attributes.position.needsUpdate = true;
   edge.geometry.attributes.color.needsUpdate = true;
   const opacity = settle
-    ? Math.max(0, Math.min(0.8, intensity * 0.15))
-    : Math.max(0, Math.min(0.98, 0.18 + intensity * 0.78 + zoomBoost * 0.08));
-  edge.material.opacity = opacity;
-  edge.scale.setScalar((ud.nowPlayingEdgeBaseScale ?? 1) * (1 + intensity * 0.14));
-  _applyMaterialColor(edge.material, ..._hslToRgb((phase + 0.14) % 1, 0.95, Math.min(0.9, brightness + 0.12)));
+    ? Math.max(0, Math.min(0.72, intensity * 0.12))
+    : Math.max(0, Math.min(1, 0.2 + intensity * 0.78 + zoomBoost * 0.08));
+  const scaleOffsets = [1, 1.07, 1.15, 1.24];
+  const opacityOffsets = [1, 0.42, 0.24, 0.12];
+  layers.forEach((layer, index) => {
+    layer.material.opacity = opacity * (opacityOffsets[index] || 1);
+    layer.scale.setScalar((ud.nowPlayingEdgeBaseScale ?? 1) * (scaleOffsets[index] || 1) * (1 + intensity * 0.14));
+    _applyMaterialColor(layer.material, ..._hslToRgb((phase + 0.14 + index * 0.03) % 1, 0.95, Math.min(0.92, brightness + 0.08 + index * 0.03)));
+  });
   if (mesh.userData.nowPlayingGlow?.material) {
     _applyMaterialColor(mesh.userData.nowPlayingGlow.material, ..._hslToRgb((phase + 0.05) % 1, 0.9, Math.min(0.94, brightness + 0.2)));
   }
@@ -1224,8 +1247,8 @@ function _applyNowPlayingNeighborDimming(mesh, pulse = 0, zoomBoost = 0) {
     ud.baseRenderOrder ??= other.renderOrder || 0;
     const distance = center.distanceTo(other.position || center);
     const overlap = Math.max(0, 1 - distance / orbitRadius);
-    const targetOpacity = ud.baseOpacity * (1 - overlap * 0.82);
-    other.material.opacity = _approachLevel(other.material.opacity ?? ud.baseOpacity, targetOpacity, 40, 180, 16);
+    const targetOpacity = ud.baseOpacity * Math.max(0.08, 0.22 - overlap * 0.14);
+    other.material.opacity = targetOpacity;
     other.renderOrder = overlap > 0.03 ? -1 : ud.baseRenderOrder;
   }
 }

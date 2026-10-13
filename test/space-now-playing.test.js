@@ -236,6 +236,7 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   assert.ok(vm.runInContext('_allNFTs[0].mesh.material.opacity < 1', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingGlow.material.opacity > 0.18', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdge.material.opacity > 0', context));
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdgeLayers.length >= 4', context));
   const colors = vm.runInContext('Array.from(_allNFTs[0].mesh.userData.nowPlayingEdge.geometry.attributes.color.array)', context);
   assert.ok(new Set(colors.map((value) => value.toFixed(2))).size > 8);
   const neighbor = vm.runInContext(`_spawnMesh({
@@ -249,7 +250,7 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   }, false)`, context);
   vm.runInContext('_allNFTs[1].mesh.position.copy(_allNFTs[0].mesh.position).add(new THREE.Vector3(2, 0, 0));', context);
   vm.runInContext('_updateNowPlayingPulse();', context);
-  assert.ok(vm.runInContext('_allNFTs[1].mesh.material.opacity < 1', context));
+  assert.ok(vm.runInContext('_allNFTs[1].mesh.material.opacity < 0.3', context));
 
   audio.paused = true;
   for (let i = 0; i < 12; i += 1) vm.runInContext('_updateNowPlayingPulse();', context);
