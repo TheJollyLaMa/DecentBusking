@@ -18,6 +18,7 @@ function makeThreeStubs() {
     addScaledVector(v, s) { return this.set(this.x + v.x * s, this.y + v.y * s, this.z + v.z * s); }
     clone() { return new Vector3(this.x, this.y, this.z); }
     setScalar(s) { return this.set(s, s, s); }
+    distanceTo(v) { return Math.hypot(this.x - v.x, this.y - v.y, this.z - v.z); }
   }
   class Mesh {
     constructor(geometry, material) {
@@ -57,11 +58,23 @@ function makeThreeStubs() {
     Vector2: class {},
     Vector3,
     CircleGeometry: class {},
-    MeshBasicMaterial: class { constructor(options = {}) { Object.assign(this, options); this.opacity = options.opacity ?? 1; } },
+    MeshBasicMaterial: class {
+      constructor(options = {}) {
+        Object.assign(this, options);
+        this.opacity = options.opacity ?? 1;
+        this.color = { r: 1, g: 1, b: 1, setRGB(r, g, b) { this.r = r; this.g = g; this.b = b; } };
+      }
+    },
     Mesh,
     DoubleSide: 2,
     CanvasTexture: class { constructor(image) { this.image = image; this.needsUpdate = false; } },
-    LineBasicMaterial: class { constructor(options = {}) { Object.assign(this, options); this.opacity = options.opacity ?? 1; } },
+    LineBasicMaterial: class {
+      constructor(options = {}) {
+        Object.assign(this, options);
+        this.opacity = options.opacity ?? 1;
+        this.color = { r: 1, g: 1, b: 1, setRGB(r, g, b) { this.r = r; this.g = g; this.b = b; } };
+      }
+    },
     Line: class {
       constructor(geometry, material) {
         this.geometry = geometry;
@@ -223,11 +236,26 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   assert.ok(vm.runInContext('_allNFTs[0].mesh.material.opacity < 1', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingGlow.material.opacity > 0.18', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdge.material.opacity > 0', context));
+  const colors = vm.runInContext('Array.from(_allNFTs[0].mesh.userData.nowPlayingEdge.geometry.attributes.color.array)', context);
+  assert.ok(new Set(colors.map((value) => value.toFixed(2))).size > 8);
+  const neighbor = vm.runInContext(`_spawnMesh({
+    tokenId: 8,
+    contractAddress: ${JSON.stringify(`0x${'1'.repeat(40)}`)},
+    chainId: 8453,
+    name: 'Neighbor Pulse',
+    artist: ${JSON.stringify(`0x${'2'.repeat(40)}`)},
+    mintedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+    audioUrl: 'ipfs://bafyneighbor',
+  }, false)`, context);
+  vm.runInContext('_allNFTs[1].mesh.position.copy(_allNFTs[0].mesh.position).add(new THREE.Vector3(2, 0, 0));', context);
+  vm.runInContext('_updateNowPlayingPulse();', context);
+  assert.ok(vm.runInContext('_allNFTs[1].mesh.material.opacity < 1', context));
 
   audio.paused = true;
   for (let i = 0; i < 12; i += 1) vm.runInContext('_updateNowPlayingPulse();', context);
   assert.ok(vm.runInContext('_allNFTs[0].mesh.scale.x <= 1.001', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdge.material.opacity <= 0.05', context));
+  assert.ok(vm.runInContext('_allNFTs[1].mesh.material.opacity >= 0.95', context));
   assert.equal(vm.runInContext('_allNFTs[0].mesh.visible', context), true);
   vm.runInContext(`_activeArtist = 'different-artist'; _timelineOffsetDays = 999; _updateVisibility();`, context);
   assert.equal(vm.runInContext('_allNFTs[0].mesh.visible', context), true);

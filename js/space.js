@@ -146,8 +146,10 @@ function _applyNowPlaying(detail) {
   _nowPlayingMedia = _activeMediaElement();
   _pendingNowPlaying = null;
   entry.mesh.userData.pinnedVisible = true;
+  entry.mesh.userData.nowPlayingHueSeed = Math.random();
   _ensureNowPlayingGlow(entry.mesh);
   _ensureNowPlayingEdge(entry.mesh);
+  entry.mesh.renderOrder = 20;
   entry.mesh.visible = true;
   if (wasMissing) _focusNowPlaying(entry.mesh);
   _updateVisibility();
@@ -957,6 +959,8 @@ function _updateNowPlayingPulse() {
   const now = performance.now();
   const dt = ud.nowPlayingLastTick ? Math.max(16, now - ud.nowPlayingLastTick) : 16;
   ud.nowPlayingLastTick = now;
+  const cameraDistance = _camera?.position?.distanceTo?.(mesh.position) ?? 0;
+  const zoomBoost = Math.max(0, Math.min(1, (cameraDistance - 10) / 24));
 
   let level = 0;
   const playing = media && !media.paused && !media.ended && !document.hidden && !_prefersReducedMotion();
@@ -1015,7 +1019,8 @@ function _updateNowPlayingPulse() {
     if (mesh.material) mesh.material.opacity = ud.baseOpacity;
     if (glow?.material) glow.material.opacity = (ud.nowPlayingGlowBaseOpacity ?? glow.material.opacity) * Math.max(0, Math.min(1, settleLevel * 2.5));
     if (glow) glow.scale.setScalar(ud.nowPlayingGlowBaseScale ?? 1);
-    _updateNowPlayingEdge(mesh, settleLevel, dt, true);
+    _updateNowPlayingEdge(mesh, settleLevel, dt, true, zoomBoost, now);
+    _restoreNowPlayingNeighborDimming(mesh);
     return;
   }
 
@@ -1029,7 +1034,8 @@ function _updateNowPlayingPulse() {
   if (mesh.material) mesh.material.opacity = ud.baseOpacity * (0.55 + pulse * 0.35);
   if (glow?.material) glow.material.opacity = Math.min(0.96, (ud.nowPlayingGlowBaseOpacity ?? 0.18) + pulse * 0.55 + beat * 0.12);
   if (glow) glow.scale.setScalar((ud.nowPlayingGlowBaseScale ?? 1) * (1 + pulse * 0.18 + beat * 0.1));
-  _updateNowPlayingEdge(mesh, wave, dt);
+  _updateNowPlayingEdge(mesh, wave, dt, false, zoomBoost, now);
+  _applyNowPlayingNeighborDimming(mesh, pulse, zoomBoost);
 }
 
 function _ensureNowPlayingGlow(mesh) {
@@ -1046,6 +1052,7 @@ function _ensureNowPlayingGlow(mesh) {
   const glow = new THREE.Mesh(new THREE.CircleGeometry(2.65, 64), glowMaterial);
   glow.position.set(0, 0, -0.04);
   glow.scale.setScalar(1.12);
+  glow.renderOrder = 21;
   mesh.add(glow);
   ud.nowPlayingGlow = glow;
   ud.nowPlayingGlowBaseOpacity = glowMaterial.opacity;
@@ -1073,6 +1080,7 @@ function _ensureNowPlayingEdge(mesh) {
   const edge = new LineCtor(geometry, material);
   edge.position.set(0, 0, -0.06);
   edge.scale.setScalar(1.2);
+  edge.renderOrder = 22;
   mesh.add(edge);
   ud.nowPlayingEdge = edge;
   ud.nowPlayingEdgeSegments = segments;
@@ -1096,7 +1104,9 @@ function _resetNowPlayingPulse(mesh) {
   if (glow?.material) glow.material.opacity = ud.nowPlayingGlowBaseOpacity ?? glow.material.opacity ?? 0.18;
   if (glow) glow.scale.setScalar(ud.nowPlayingGlowBaseScale ?? 1);
   if (ud.baseScale) mesh.scale.setScalar(ud.baseScale);
+  mesh.renderOrder = 0;
   _updateNowPlayingEdge(mesh, 0, 0, true);
+  _restoreNowPlayingNeighborDimming(mesh);
 }
 
 function _fallbackNowPlayingPulse(media, now) {
@@ -1125,7 +1135,7 @@ function _waveformLevel(left, right) {
   return Math.min(1, (compute(left) + compute(right)) * 1.15);
 }
 
-function _updateNowPlayingEdge(mesh, intensity = 0, dt = 16, settle = false) {
+function _updateNowPlayingEdge(mesh, intensity = 0, dt = 16, settle = false, zoomBoost = 0, now = performance.now()) {
   const ud = mesh.userData || {};
   const edge = ud.nowPlayingEdge || _ensureNowPlayingEdge(mesh);
   if (!edge?.geometry) return;
@@ -1136,8 +1146,9 @@ function _updateNowPlayingEdge(mesh, intensity = 0, dt = 16, settle = false) {
   const right = _nowPlayingRightWaveData;
   const baseRadius = 1.98;
   const maxOffset = settle ? 0 : 0.34;
-  const leftTint = { r: 1.0, g: 0.58, b: 0.26 };
-  const rightTint = { r: 0.28, g: 0.6, b: 1.0 };
+  const hueSeed = ud.nowPlayingHueSeed ?? 0;
+  const phase = (now / (2200 - zoomBoost * 900) + hueSeed) % 1;
+  const brightness = Math.max(0.42, Math.min(0.72, 0.5 + zoomBoost * 0.16 + intensity * 0.12));
   for (let i = 0; i <= segments; i += 1) {
     const t = i / segments;
     const angle = t * Math.PI * 2 - Math.PI / 2;
@@ -1149,19 +1160,74 @@ function _updateNowPlayingEdge(mesh, intensity = 0, dt = 16, settle = false) {
     positions[i * 3 + 0] = Math.cos(angle) * radius;
     positions[i * 3 + 1] = Math.sin(angle) * radius;
     positions[i * 3 + 2] = 0;
-    const tint = channel ? rightTint : leftTint;
-    const colorBoost = 0.25 + intensity * 0.75 + Math.abs(sample) * 0.2;
-    colors[i * 3 + 0] = Math.min(1, tint.r * colorBoost);
-    colors[i * 3 + 1] = Math.min(1, tint.g * colorBoost);
-    colors[i * 3 + 2] = Math.min(1, tint.b * colorBoost);
+    const hue = (phase + (t * (0.84 + zoomBoost * 0.1)) + channel * 0.075) % 1;
+    const [r, g, b] = _hslToRgb(hue, 0.98, Math.min(0.95, brightness + Math.abs(sample) * 0.06));
+    colors[i * 3 + 0] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
   }
   edge.geometry.attributes.position.needsUpdate = true;
   edge.geometry.attributes.color.needsUpdate = true;
   const opacity = settle
     ? Math.max(0, Math.min(0.8, intensity * 0.15))
-    : Math.max(0, Math.min(0.95, 0.12 + intensity * 0.82));
+    : Math.max(0, Math.min(0.98, 0.18 + intensity * 0.78 + zoomBoost * 0.08));
   edge.material.opacity = opacity;
   edge.scale.setScalar((ud.nowPlayingEdgeBaseScale ?? 1) * (1 + intensity * 0.14));
+  _applyMaterialColor(edge.material, ..._hslToRgb((phase + 0.14) % 1, 0.95, Math.min(0.9, brightness + 0.12)));
+  if (mesh.userData.nowPlayingGlow?.material) {
+    _applyMaterialColor(mesh.userData.nowPlayingGlow.material, ..._hslToRgb((phase + 0.05) % 1, 0.9, Math.min(0.94, brightness + 0.2)));
+  }
+}
+
+function _hslToRgb(h, s, l) {
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const hue = ((h % 1) + 1) % 1;
+  if (s <= 0) return [l, l, l];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [hue2rgb(p, q, hue + 1 / 3), hue2rgb(p, q, hue), hue2rgb(p, q, hue - 1 / 3)];
+}
+
+function _applyMaterialColor(material, r, g, b) {
+  if (!material) return;
+  if (material.color?.setRGB) {
+    material.color.setRGB(r, g, b);
+    return;
+  }
+  material.color = { r, g, b, setRGB(rr, gg, bb) { this.r = rr; this.g = gg; this.b = bb; } };
+}
+
+function _restoreNowPlayingNeighborDimming(mesh) {
+  for (const { mesh: other } of _allNFTs) {
+    if (!other || other === mesh || !other.material) continue;
+    const ud = other.userData || {};
+    other.material.opacity = ud.baseOpacity ?? other.material.opacity ?? 1;
+    other.renderOrder = ud.baseRenderOrder ?? 0;
+  }
+}
+
+function _applyNowPlayingNeighborDimming(mesh, pulse = 0, zoomBoost = 0) {
+  const center = mesh?.position;
+  if (!center?.distanceTo) return;
+  const orbitRadius = 4.2 + pulse * 1.6 + zoomBoost * 1.2;
+  for (const { mesh: other } of _allNFTs) {
+    if (!other || other === mesh || !other.visible || !other.material) continue;
+    const ud = other.userData || {};
+    ud.baseOpacity ??= other.material.opacity ?? 1;
+    ud.baseRenderOrder ??= other.renderOrder || 0;
+    const distance = center.distanceTo(other.position || center);
+    const overlap = Math.max(0, 1 - distance / orbitRadius);
+    const targetOpacity = ud.baseOpacity * (1 - overlap * 0.82);
+    other.material.opacity = _approachLevel(other.material.opacity ?? ud.baseOpacity, targetOpacity, 40, 180, 16);
+    other.renderOrder = overlap > 0.03 ? -1 : ud.baseRenderOrder;
+  }
 }
 
 // ── Animation Loop ─────────────────────────────────────────────────────────
