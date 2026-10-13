@@ -60,8 +60,15 @@ let _pendingNowPlaying = null;
 let _nowPlayingMedia = null;
 let _nowPlayingAudioContext = null;
 let _nowPlayingMediaSource = null;
+let _nowPlayingChannelSplitter = null;
+let _nowPlayingLeftAnalyser = null;
+let _nowPlayingRightAnalyser = null;
 let _nowPlayingAnalyser = null;
 let _nowPlayingAudioData = null;
+let _nowPlayingLeftWaveData = null;
+let _nowPlayingRightWaveData = null;
+let _nowPlayingFrequencyData = null;
+let _nowPlayingReducedMotion = null;
 let _nowPlayingLookupToken = 0;
 
 // Spaceship
@@ -70,6 +77,9 @@ const _ship = { speed: 0.3 };
 if (typeof document !== 'undefined' && document?.addEventListener) {
   document.addEventListener('dbusk-now-playing', (event) => {
     void _handleNowPlaying(event.detail || {});
+  });
+  document.addEventListener('dbusk-now-playing-stopped', () => {
+    if (_nowPlayingMesh) _resetNowPlayingPulse(_nowPlayingMesh);
   });
 }
 
@@ -133,9 +143,11 @@ function _applyNowPlaying(detail) {
   }
   _nowPlayingKey = key;
   _nowPlayingMesh = entry.mesh;
+  _nowPlayingMedia = _activeMediaElement();
   _pendingNowPlaying = null;
   entry.mesh.userData.pinnedVisible = true;
   _ensureNowPlayingGlow(entry.mesh);
+  _ensureNowPlayingEdge(entry.mesh);
   entry.mesh.visible = true;
   if (wasMissing) _focusNowPlaying(entry.mesh);
   _updateVisibility();
@@ -856,13 +868,81 @@ function _activeMediaElement() {
   return document.getElementById('audio-player');
 }
 
-function _ensureNowPlayingAnalyser(media) {
-  if (!media) return null;
-  if (_nowPlayingMedia === media) return _nowPlayingAnalyser;
-  _nowPlayingMedia = media;
+function _prefersReducedMotion() {
+  if (_nowPlayingReducedMotion == null) {
+    _nowPlayingReducedMotion = typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-reduced-motion: reduce)')
+      : { matches: false };
+  }
+  return Boolean(_nowPlayingReducedMotion?.matches);
+}
+
+function _releaseNowPlayingAnalyser() {
+  if (_nowPlayingMediaSource?.disconnect) {
+    try { _nowPlayingMediaSource.disconnect(); } catch {}
+  }
+  if (_nowPlayingChannelSplitter?.disconnect) {
+    try { _nowPlayingChannelSplitter.disconnect(); } catch {}
+  }
+  if (_nowPlayingLeftAnalyser?.disconnect) {
+    try { _nowPlayingLeftAnalyser.disconnect(); } catch {}
+  }
+  if (_nowPlayingRightAnalyser?.disconnect) {
+    try { _nowPlayingRightAnalyser.disconnect(); } catch {}
+  }
+  if (_nowPlayingAnalyser?.disconnect) {
+    try { _nowPlayingAnalyser.disconnect(); } catch {}
+  }
+  _nowPlayingMediaSource = null;
+  _nowPlayingChannelSplitter = null;
+  _nowPlayingLeftAnalyser = null;
+  _nowPlayingRightAnalyser = null;
   _nowPlayingAnalyser = null;
   _nowPlayingAudioData = null;
-  return null;
+  _nowPlayingLeftWaveData = null;
+  _nowPlayingRightWaveData = null;
+  _nowPlayingFrequencyData = null;
+}
+
+function _ensureNowPlayingAnalyser(media) {
+  if (!media) return null;
+  if (document.hidden || _prefersReducedMotion()) return null;
+  if (_nowPlayingMedia === media && (_nowPlayingLeftAnalyser || _nowPlayingAnalyser)) return _nowPlayingLeftAnalyser || _nowPlayingAnalyser;
+  _releaseNowPlayingAnalyser();
+  _nowPlayingMedia = media;
+  const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
+  if (!AudioContextCtor) return null;
+  try {
+    _nowPlayingAudioContext ||= new AudioContextCtor();
+    if (_nowPlayingAudioContext.state === 'suspended') _nowPlayingAudioContext.resume?.().catch?.(() => {});
+    _nowPlayingMediaSource = _nowPlayingAudioContext.createMediaElementSource(media);
+    _nowPlayingAnalyser = _nowPlayingAudioContext.createAnalyser();
+    _nowPlayingAnalyser.fftSize = 256;
+    _nowPlayingAnalyser.smoothingTimeConstant = 0.25;
+    _nowPlayingAudioData = new Uint8Array(_nowPlayingAnalyser.fftSize);
+    _nowPlayingFrequencyData = new Uint8Array(_nowPlayingAnalyser.frequencyBinCount);
+    _nowPlayingMediaSource.connect(_nowPlayingAnalyser);
+    _nowPlayingMediaSource.connect(_nowPlayingAudioContext.destination);
+    if (typeof _nowPlayingAudioContext.createChannelSplitter === 'function') {
+      _nowPlayingChannelSplitter = _nowPlayingAudioContext.createChannelSplitter(2);
+      _nowPlayingLeftAnalyser = _nowPlayingAudioContext.createAnalyser();
+      _nowPlayingRightAnalyser = _nowPlayingAudioContext.createAnalyser();
+      for (const analyser of [_nowPlayingLeftAnalyser, _nowPlayingRightAnalyser]) {
+       analyser.fftSize = 128;
+       analyser.smoothingTimeConstant = 0.2;
+      }
+      _nowPlayingLeftWaveData = new Uint8Array(_nowPlayingLeftAnalyser.fftSize);
+      _nowPlayingRightWaveData = new Uint8Array(_nowPlayingRightAnalyser.fftSize);
+      _nowPlayingMediaSource.connect(_nowPlayingChannelSplitter);
+      _nowPlayingChannelSplitter.connect(_nowPlayingLeftAnalyser, 0);
+      _nowPlayingChannelSplitter.connect(_nowPlayingRightAnalyser, 1);
+    }
+  } catch (error) {
+    console.warn('[space] Failed to build analyser for now-playing audio:', error.message);
+    _releaseNowPlayingAnalyser();
+    return null;
+  }
+  return _nowPlayingLeftAnalyser || _nowPlayingAnalyser;
 }
 
 function _updateNowPlayingPulse() {
@@ -873,49 +953,83 @@ function _updateNowPlayingPulse() {
   ud.baseScale ??= mesh.scale.x || 1;
   ud.baseOpacity ??= mesh.material?.opacity ?? 1;
   const glow = ud.nowPlayingGlow || _ensureNowPlayingGlow(mesh);
+  const edge = ud.nowPlayingEdge || _ensureNowPlayingEdge(mesh);
   const now = performance.now();
+  const dt = ud.nowPlayingLastTick ? Math.max(16, now - ud.nowPlayingLastTick) : 16;
+  ud.nowPlayingLastTick = now;
 
   let level = 0;
-  const playing = media && !media.paused && !media.ended;
+  const playing = media && !media.paused && !media.ended && !document.hidden && !_prefersReducedMotion();
   if (playing) {
     const analyser = _ensureNowPlayingAnalyser(media);
     if (analyser && _nowPlayingAudioData) {
+      _nowPlayingFrequencyData ||= new Uint8Array(analyser.frequencyBinCount || 1);
       analyser.getByteTimeDomainData(_nowPlayingAudioData);
+      analyser.getByteFrequencyData(_nowPlayingFrequencyData);
+      const channels = [];
+      if (_nowPlayingLeftAnalyser && _nowPlayingLeftWaveData && _nowPlayingRightAnalyser && _nowPlayingRightWaveData) {
+       _nowPlayingLeftAnalyser.getByteTimeDomainData(_nowPlayingLeftWaveData);
+       _nowPlayingRightAnalyser.getByteTimeDomainData(_nowPlayingRightWaveData);
+       channels.push(_nowPlayingLeftWaveData, _nowPlayingRightWaveData);
+      } else {
+       channels.push(_nowPlayingAudioData, _nowPlayingAudioData);
+      }
       let sum = 0;
       for (const sample of _nowPlayingAudioData) {
        const centered = (sample - 128) / 128;
        sum += centered * centered;
       }
       const rms = Math.sqrt(sum / _nowPlayingAudioData.length);
-      if (rms > 0.012) {
-       ud.nowPlayingSilenceSince = null;
-       level = Math.min(1, rms * 2.4);
-      } else if (ud.nowPlayingSilenceSince == null) {
-       ud.nowPlayingSilenceSince = now;
-      } else if (now - ud.nowPlayingSilenceSince >= 1000) {
-       level = _fallbackNowPlayingPulse(media, now);
+      const bassBins = Math.max(1, Math.floor((_nowPlayingFrequencyData?.length || 1) * 0.12));
+      let bassSum = 0;
+      let bassPeak = 0;
+      for (let i = 0; i < bassBins; i += 1) {
+       const value = _nowPlayingFrequencyData[i] || 0;
+       bassSum += value;
+       if (value > bassPeak) bassPeak = value;
       }
+      const bassEnergy = bassSum / (bassBins * 255);
+      ud.nowPlayingBassAverage = ud.nowPlayingBassAverage == null ? bassEnergy : (ud.nowPlayingBassAverage * 0.92 + bassEnergy * 0.08);
+      const bassBeat = Math.max(0, bassEnergy - ud.nowPlayingBassAverage * 1.05) + (bassPeak / 255) * 0.08;
+      const waveform = _waveformLevel(channels[0], channels[1]);
+      ud.nowPlayingSilenceSince = null;
+      level = Math.min(1, (rms * 2.1) + (bassBeat * 3.1) + (waveform * 0.45));
+      ud.nowPlayingColorLevel = Math.min(1, 0.2 + bassEnergy * 0.75);
+      ud.nowPlayingBeatLevel = Math.min(1, bassBeat * 2.25);
+      ud.nowPlayingWaveLevel = Math.min(1, waveform);
     } else {
       level = _fallbackNowPlayingPulse(media, now);
+      ud.nowPlayingColorLevel = 0.35;
+      ud.nowPlayingBeatLevel = 0.2;
+      ud.nowPlayingWaveLevel = 0.2;
     }
   }
 
   if (!playing) {
-    ud.pulseLevel = 0;
+    ud.pulseLevel = _approachLevel(ud.pulseLevel || 0, 0, 200, dt);
+    ud.nowPlayingBeatLevel = _approachLevel(ud.nowPlayingBeatLevel || 0, 0, 200, dt);
+    ud.nowPlayingWaveLevel = _approachLevel(ud.nowPlayingWaveLevel || 0, 0, 220, dt);
     ud.nowPlayingSilenceSince = null;
+    const settleLevel = Math.max(ud.pulseLevel || 0, ud.nowPlayingBeatLevel || 0, ud.nowPlayingWaveLevel || 0);
     mesh.scale.setScalar(ud.baseScale);
     if (mesh.material) mesh.material.opacity = ud.baseOpacity;
-    if (glow?.material) glow.material.opacity = ud.nowPlayingGlowBaseOpacity ?? glow.material.opacity;
+    if (glow?.material) glow.material.opacity = (ud.nowPlayingGlowBaseOpacity ?? glow.material.opacity) * Math.max(0, Math.min(1, settleLevel * 2.5));
     if (glow) glow.scale.setScalar(ud.nowPlayingGlowBaseScale ?? 1);
+    _updateNowPlayingEdge(mesh, settleLevel, dt, true);
     return;
   }
 
-  ud.pulseLevel = ud.pulseLevel == null ? level : (ud.pulseLevel * 0.82 + level * 0.18);
+  ud.pulseLevel = _approachLevel(ud.pulseLevel || 0, level, 30, 200, dt);
+  ud.nowPlayingBeatLevel = _approachLevel(ud.nowPlayingBeatLevel || 0, ud.nowPlayingBeatLevel ? Math.max(level, ud.nowPlayingBeatLevel) : level, 30, 200, dt);
+  ud.nowPlayingWaveLevel = _approachLevel(ud.nowPlayingWaveLevel || 0, ud.nowPlayingWaveLevel ? Math.max(level, ud.nowPlayingWaveLevel) : level, 30, 200, dt);
   const pulse = Math.max(0, Math.min(1, ud.pulseLevel));
-  mesh.scale.setScalar(ud.baseScale * (1 + pulse * 0.08));
-  if (mesh.material) mesh.material.opacity = ud.baseOpacity * (0.6 + pulse * 0.4);
-  if (glow?.material) glow.material.opacity = Math.min(0.92, (ud.nowPlayingGlowBaseOpacity ?? 0.18) + pulse * 0.65);
-  if (glow) glow.scale.setScalar((ud.nowPlayingGlowBaseScale ?? 1) * (1 + pulse * 0.24));
+  const beat = Math.max(0, Math.min(1, ud.nowPlayingBeatLevel || 0));
+  const wave = Math.max(0, Math.min(1, ud.nowPlayingWaveLevel || 0));
+  mesh.scale.setScalar(ud.baseScale * (1 + pulse * 0.08 + beat * 0.02));
+  if (mesh.material) mesh.material.opacity = ud.baseOpacity * (0.55 + pulse * 0.35);
+  if (glow?.material) glow.material.opacity = Math.min(0.96, (ud.nowPlayingGlowBaseOpacity ?? 0.18) + pulse * 0.55 + beat * 0.12);
+  if (glow) glow.scale.setScalar((ud.nowPlayingGlowBaseScale ?? 1) * (1 + pulse * 0.18 + beat * 0.1));
+  _updateNowPlayingEdge(mesh, wave, dt);
 }
 
 function _ensureNowPlayingGlow(mesh) {
@@ -939,21 +1053,115 @@ function _ensureNowPlayingGlow(mesh) {
   return glow;
 }
 
+function _ensureNowPlayingEdge(mesh) {
+  const ud = mesh.userData || (mesh.userData = {});
+  if (ud.nowPlayingEdge) return ud.nowPlayingEdge;
+  const segments = 64;
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array((segments + 1) * 3);
+  const colors = new Float32Array((segments + 1) * 3);
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const material = new THREE.LineBasicMaterial({
+    transparent: true,
+    opacity: 0,
+    vertexColors: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending ?? undefined,
+  });
+  const LineCtor = THREE.LineLoop || THREE.Line;
+  const edge = new LineCtor(geometry, material);
+  edge.position.set(0, 0, -0.06);
+  edge.scale.setScalar(1.2);
+  mesh.add(edge);
+  ud.nowPlayingEdge = edge;
+  ud.nowPlayingEdgeSegments = segments;
+  ud.nowPlayingEdgePositions = positions;
+  ud.nowPlayingEdgeColors = colors;
+  ud.nowPlayingEdgeBaseScale = edge.scale.x || 1;
+  ud.nowPlayingEdgeBaseOpacity = material.opacity;
+  return edge;
+}
+
 function _resetNowPlayingPulse(mesh) {
   if (!mesh) return;
   const ud = mesh.userData || {};
   ud.pulseLevel = 0;
+  ud.nowPlayingBeatLevel = 0;
+  ud.nowPlayingWaveLevel = 0;
   ud.nowPlayingSilenceSince = null;
+  ud.nowPlayingLastTick = null;
   if (mesh.material) mesh.material.opacity = ud.baseOpacity ?? mesh.material.opacity ?? 1;
   const glow = ud.nowPlayingGlow;
   if (glow?.material) glow.material.opacity = ud.nowPlayingGlowBaseOpacity ?? glow.material.opacity ?? 0.18;
   if (glow) glow.scale.setScalar(ud.nowPlayingGlowBaseScale ?? 1);
   if (ud.baseScale) mesh.scale.setScalar(ud.baseScale);
+  _updateNowPlayingEdge(mesh, 0, 0, true);
 }
 
 function _fallbackNowPlayingPulse(media, now) {
   const phase = ((now + ((media?.currentTime || 0) * 1000)) / 250) * Math.PI;
   return 0.5 + 0.5 * Math.sin(phase);
+}
+
+function _approachLevel(current, target, attackMs, releaseMs, dtMs) {
+  const delta = Math.max(1, dtMs || 16);
+  const timeConstant = target > current ? attackMs : releaseMs;
+  const factor = 1 - Math.exp(-delta / Math.max(1, timeConstant));
+  return current + (target - current) * factor;
+}
+
+function _waveformLevel(left, right) {
+  if (!left && !right) return 0;
+  const compute = (samples) => {
+    if (!samples?.length) return 0;
+    let sum = 0;
+    for (const sample of samples) {
+      const centered = (sample - 128) / 128;
+      sum += centered * centered;
+    }
+    return Math.sqrt(sum / samples.length);
+  };
+  return Math.min(1, (compute(left) + compute(right)) * 1.15);
+}
+
+function _updateNowPlayingEdge(mesh, intensity = 0, dt = 16, settle = false) {
+  const ud = mesh.userData || {};
+  const edge = ud.nowPlayingEdge || _ensureNowPlayingEdge(mesh);
+  if (!edge?.geometry) return;
+  const positions = ud.nowPlayingEdgePositions;
+  const colors = ud.nowPlayingEdgeColors;
+  const segments = ud.nowPlayingEdgeSegments || 64;
+  const left = _nowPlayingLeftWaveData;
+  const right = _nowPlayingRightWaveData;
+  const baseRadius = 1.98;
+  const maxOffset = settle ? 0 : 0.34;
+  const leftTint = { r: 1.0, g: 0.58, b: 0.26 };
+  const rightTint = { r: 0.28, g: 0.6, b: 1.0 };
+  for (let i = 0; i <= segments; i += 1) {
+    const t = i / segments;
+    const angle = t * Math.PI * 2 - Math.PI / 2;
+    const channelSamples = i <= segments / 2 ? left : right;
+    const channel = i <= segments / 2 ? 0 : 1;
+    const waveformIndex = channelSamples?.length ? Math.min(channelSamples.length - 1, Math.floor(t * (channelSamples.length - 1))) : 0;
+    const sample = channelSamples?.length ? ((channelSamples[waveformIndex] - 128) / 128) : 0;
+    const radius = baseRadius + (Math.max(0, sample) * maxOffset * (0.35 + intensity)) + (intensity * 0.08);
+    positions[i * 3 + 0] = Math.cos(angle) * radius;
+    positions[i * 3 + 1] = Math.sin(angle) * radius;
+    positions[i * 3 + 2] = 0;
+    const tint = channel ? rightTint : leftTint;
+    const colorBoost = 0.25 + intensity * 0.75 + Math.abs(sample) * 0.2;
+    colors[i * 3 + 0] = Math.min(1, tint.r * colorBoost);
+    colors[i * 3 + 1] = Math.min(1, tint.g * colorBoost);
+    colors[i * 3 + 2] = Math.min(1, tint.b * colorBoost);
+  }
+  edge.geometry.attributes.position.needsUpdate = true;
+  edge.geometry.attributes.color.needsUpdate = true;
+  const opacity = settle
+    ? Math.max(0, Math.min(0.8, intensity * 0.15))
+    : Math.max(0, Math.min(0.95, 0.12 + intensity * 0.82));
+  edge.material.opacity = opacity;
+  edge.scale.setScalar((ud.nowPlayingEdgeBaseScale ?? 1) * (1 + intensity * 0.14));
 }
 
 // ── Animation Loop ─────────────────────────────────────────────────────────

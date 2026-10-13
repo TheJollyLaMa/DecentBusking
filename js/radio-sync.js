@@ -45,6 +45,16 @@ function _renderVideo() {
   }
 }
 
+function _onPause(event) {
+  if (_suppressPauseStop) {
+    _suppressPauseStop = false;
+    return;
+  }
+  if (event?.target && event.target !== _audio && event?.target !== _videoPlayer) return;
+  if (!_audio?.paused && !_videoPlayer?.paused) return;
+  _broadcastNowPlayingStopped('paused');
+}
+
 /** @type {'radio'|'takeover'|'archive'} */
 let _mode = 'radio';
 let _archiveSession = null;
@@ -72,6 +82,8 @@ let _fadeLevel = 0;
 let _fadeNextRadioSwitch = false;
 let _muteBtn, _volumeInput, _volumeDial;
 let _nowPlayingBroadcastKey = null;
+let _nowPlayingBroadcastDetail = null;
+let _suppressPauseStop = false;
 
 function _applyRadioVolume() {
   if (!_audio) return;
@@ -79,30 +91,42 @@ function _applyRadioVolume() {
   _audio.volume = _fadeLevel * (_mode === 'archive' ? 1 : _radioVolume);
 }
 
-function _broadcastNowPlaying() {
+function _broadcastNowPlaying(detail) {
   if (typeof document === 'undefined' || !document?.dispatchEvent) return;
-  if (_mode !== 'radio' || !_radio) {
-    _nowPlayingBroadcastKey = null;
-    return;
-  }
-  const key = [_radio.playId || _radio.trackId || '', _radio.ipfsCid || '', _radio.title || '', _radio.uploader || ''].join('|');
+  const key = [
+   detail?.playId || '',
+   detail?.trackId || '',
+   detail?.audioUrl || '',
+   detail?.title || '',
+   detail?.artist || '',
+   detail?.ipfsCid || '',
+   detail?.source || '',
+  ].join('|');
   if (key === _nowPlayingBroadcastKey) return;
   const CustomEventCtor = globalThis.CustomEvent || document.defaultView?.CustomEvent;
   if (!CustomEventCtor) return;
   _nowPlayingBroadcastKey = key;
+  _nowPlayingBroadcastDetail = detail ? { ...detail } : null;
   document.dispatchEvent(new CustomEventCtor('dbusk-now-playing', {
-    detail: {
-      source: 'radio',
-      playId: _radio.playId || null,
-      trackId: _radio.trackId || null,
-      title: _radio.title || '',
-      artist: _radio.uploader || '',
-      audioUrl: _radio.ipfsCid ? _gatewayUrl(_radio.ipfsCid) : '',
-      mediaType: _radio.mediaType || _mimeType(_radio.filename || ''),
-      ipfsCid: _radio.ipfsCid || null,
-      nft: null,
-    },
+   detail,
   }));
+}
+
+function _broadcastNowPlayingStopped(reason = 'stopped') {
+  if (typeof document === 'undefined' || !document?.dispatchEvent) return;
+  const CustomEventCtor = globalThis.CustomEvent || document.defaultView?.CustomEvent;
+  if (!CustomEventCtor) return;
+  const detail = _nowPlayingBroadcastDetail ? { ..._nowPlayingBroadcastDetail, reason } : null;
+  _nowPlayingBroadcastKey = null;
+  _nowPlayingBroadcastDetail = null;
+  document.dispatchEvent(new CustomEventCtor('dbusk-now-playing-stopped', { detail }));
+}
+
+function _pauseAudio() {
+  if (!_audio) return;
+  _suppressPauseStop = true;
+  _audio.pause();
+  setTimeout(() => { if (_suppressPauseStop) _suppressPauseStop = false; }, 0);
 }
 
 function _renderAudioControls() {
@@ -276,6 +300,8 @@ export function initRadioSync() {
   _renderVoting();
 
   _audio.addEventListener('ended', _onEnded);
+  _audio.addEventListener('pause', _onPause);
+  _videoPlayer?.addEventListener('pause', _onPause);
   _videoPlayer?.addEventListener('ended', _onEnded);
   _videoToggle?.addEventListener('click', () => { _videoHidden = !_videoHidden; _renderVideo(); });
   _playBtn?.addEventListener('click', _unlock);
@@ -315,7 +341,7 @@ export function setDevertListenMode(mode) {
 }
 
 /** Play a user-selected archive track; the radio stays muted until returnToRadio(). */
-export function playArchiveTrack({ title, artist, audioUrl, mediaType, sessionId = null, onEnded = null }) {
+export function playArchiveTrack({ title, artist, audioUrl, mediaType, nft = null, sessionId = null, onEnded = null }) {
   if (!_audio) return;
   _archiveSession = { id: sessionId, onEnded };
   if (_takeover) _takeoverQueue.unshift(_takeover.track);
@@ -329,7 +355,13 @@ export function playArchiveTrack({ title, artist, audioUrl, mediaType, sessionId
   _setLabel('🎧 From the Archive');
   _radioBtn?.classList.remove('hidden');
   _setActivity('🎧 Playing from the archive — the radio is muted here');
-  _switchTo({ title, artist, url: audioUrl, mime: mediaType || _mimeType(audioUrl) });
+  _switchTo({
+    title,
+    artist,
+    url: audioUrl,
+    mime: mediaType || _mimeType(audioUrl),
+    nowPlaying: { source: 'archive', nft, title, artist, audioUrl, mediaType: mediaType || _mimeType(audioUrl) },
+  });
 }
 
 export function returnToRadio() {
@@ -414,11 +446,11 @@ function _radioPositionS() {
 function _syncRadio(message) {
   _setLabel('📻 Live on JukeLoop');
   _renderVoting();
-  _broadcastNowPlaying();
   if (_devertListenMode === 'ads-only') return;
   if (!_radio) {
     if (!_audio.paused) return;
     _loadedPlayId = null;
+    _broadcastNowPlayingStopped('radio-empty');
     _setTrack('—', '');
     _setActivity(message || '🌙 The JukeLoop is between tracks — waiting for the next song');
     return;
@@ -447,6 +479,17 @@ function _syncRadio(message) {
     url: _gatewayUrl(_radio.ipfsCid),
     mime: _radio.mediaType || _mimeType(_radio.filename || ''),
     offset: () => 0,
+    nowPlaying: {
+      source: 'radio',
+      playId: _radio.playId || null,
+      trackId: _radio.trackId || null,
+      title: _radio.title || '',
+      artist: _radio.uploader || '',
+      audioUrl: _radio.ipfsCid ? _gatewayUrl(_radio.ipfsCid) : '',
+      mediaType: _radio.mediaType || _mimeType(_radio.filename || ''),
+      ipfsCid: _radio.ipfsCid || null,
+      nft: null,
+    },
   });
 }
 
@@ -460,6 +503,7 @@ function _startNextTakeover() {
     _mode = 'radio';
     _notifyRadioSourceMode();
     _loadedPlayId = null;
+    _broadcastNowPlayingStopped('takeover-finished');
     _syncRadio('📻 Back to mirroring the Discord JukeLoop');
     return;
   }
@@ -481,6 +525,17 @@ function _startNextTakeover() {
     artist: track.uploader,
     url: _gatewayUrl(track.ipfsCid),
     mime: track.mediaType || _mimeType(track.filename || ''),
+    nowPlaying: {
+      source: 'takeover',
+      playId: track.playId || null,
+      trackId: track.trackId || null,
+      title: track.title || '',
+      artist: track.uploader || '',
+      audioUrl: track.ipfsCid ? _gatewayUrl(track.ipfsCid) : '',
+      mediaType: track.mediaType || _mimeType(track.filename || ''),
+      ipfsCid: track.ipfsCid || null,
+      nft: track.nft || null,
+    },
   });
 }
 
@@ -502,6 +557,7 @@ function _clearTakeover() {
 
 function _onEnded(event) {
   if (event?.target && event.target !== _audio) return;
+  _broadcastNowPlayingStopped('ended');
   if (_mode === 'takeover') {
     _startNextTakeover();
   } else if (_mode === 'archive') {
@@ -529,13 +585,14 @@ function _gatewayUrl(cid) {
   return `${gateway}${cid}`;
 }
 
-async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = () => 0 }) {
+async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = () => 0, nowPlaying = null }) {
   const token = ++_switchToken;
   _setTrack(title, artist);
   const at = offset();
   let canSeekImmediately = false;
 
-  _audio.pause();
+  _broadcastNowPlayingStopped('switching');
+  _pauseAudio();
   _fadeLevel = 0;
   const previous = _audio;
   _audioPlayer ||= previous;
@@ -545,9 +602,10 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     previous.querySelectorAll('source').forEach(source => source.remove());
     previous.load();
   }
-  _audio.pause();
+  _pauseAudio();
   _renderVideo();
   _applyRadioVolume();
+  if (_audio) _audio.crossOrigin = 'anonymous';
   _audio.removeAttribute('src');
   _audio.querySelectorAll('source').forEach((source) => source.remove());
   const source = document.createElement('source');
@@ -583,6 +641,14 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     _playBtn?.classList.remove('hidden');
     return;
   }
+  _broadcastNowPlaying(nowPlaying || {
+    source: _mode,
+    title,
+    artist,
+    audioUrl: url,
+    mediaType: mime || _mimeType(url),
+    nft: nowPlaying?.nft ?? null,
+  });
   if (token !== _switchToken) return;
   if (at > 0) {
     const seek = _prepareRadioSeek(offset, token);
@@ -688,14 +754,15 @@ function _fadeMainRadioOut(ms = FADE_IN_MS) {
     _fadeLevel = initial * (1 - progress) ** 2;
     _applyRadioVolume();
     if (progress < 1) setTimeout(step, 30);
-    else _audio?.pause();
+    else _pauseAudio();
   };
   step();
 }
 
 function _stopAudio() {
   ++_switchToken;
-  _audio.pause();
+  _broadcastNowPlayingStopped('stopped');
+  _pauseAudio();
   if (_videoStage) _videoStage.hidden = true;
   _videoToggle?.classList.add('hidden');
 }

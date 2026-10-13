@@ -37,8 +37,12 @@ function makeThreeStubs() {
     Scene: class { constructor() { this.children = []; } add(child) { this.children.push(child); } remove(child) { this.children = this.children.filter(item => item !== child); } },
     Color: class {},
     FogExp2: class {},
-    BufferGeometry: class { setAttribute() {} setFromPoints() { return this; } },
-    BufferAttribute: class {},
+    BufferGeometry: class {
+      constructor() { this.attributes = {}; }
+      setAttribute(name, attribute) { this.attributes[name] = attribute; return this; }
+      setFromPoints() { return this; }
+    },
+    BufferAttribute: class { constructor(array, itemSize) { this.array = array; this.itemSize = itemSize; this.needsUpdate = false; } },
     PointsMaterial: class {},
     Points: class {},
     PerspectiveCamera: class {
@@ -57,8 +61,29 @@ function makeThreeStubs() {
     Mesh,
     DoubleSide: 2,
     CanvasTexture: class { constructor(image) { this.image = image; this.needsUpdate = false; } },
-    LineBasicMaterial: class {},
-    Line: class {},
+    LineBasicMaterial: class { constructor(options = {}) { Object.assign(this, options); this.opacity = options.opacity ?? 1; } },
+    Line: class {
+      constructor(geometry, material) {
+        this.geometry = geometry;
+        this.material = material;
+        this.position = new Vector3();
+        this.scale = new Vector3(1, 1, 1);
+        this.userData = {};
+        this.children = [];
+      }
+      add(child) { this.children.push(child); child.parent = this; }
+    },
+    LineLoop: class {
+      constructor(geometry, material) {
+        this.geometry = geometry;
+        this.material = material;
+        this.position = new Vector3();
+        this.scale = new Vector3(1, 1, 1);
+        this.userData = {};
+        this.children = [];
+      }
+      add(child) { this.children.push(child); child.parent = this; }
+    },
     OrbitControls: class {
       constructor() { this.target = new Vector3(); this.minDistance = 0; this.maxDistance = 0; }
       update() {}
@@ -160,7 +185,12 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
     nftArtistKey: (nft) => String(nft.artist || nft.creator || nft.uploader || 'Unknown artist').trim().toLowerCase(),
     setTimeout,
     clearTimeout,
-    playArchiveTrack: (payload) => playCalls.push(payload),
+    playArchiveTrack: (payload) => {
+      playCalls.push(payload);
+      document.dispatchEvent(new CustomEvent('dbusk-now-playing', {
+        detail: { ...payload, nft: payload.nft || nft },
+      }));
+    },
     THREE: makeThreeStubs(),
   });
 
@@ -179,17 +209,25 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   assert.equal(vm.runInContext('_nowPlayingMesh === _allNFTs[0].mesh', context), true);
 
   vm.runInContext(`_nowPlayingMedia = document.getElementById('audio-player');
-    _nowPlayingAnalyser = { fftSize: 8, getByteTimeDomainData(buffer) { buffer.fill(128); } };
-    _nowPlayingAudioData = new Uint8Array(8);`, context);
+    _nowPlayingAnalyser = {
+      fftSize: 8,
+      frequencyBinCount: 4,
+      getByteTimeDomainData(buffer) { buffer.fill(176); },
+      getByteFrequencyData(buffer) { buffer.set([220, 180, 90, 40]); },
+    };
+    _nowPlayingAudioData = new Uint8Array(8);
+    _nowPlayingFrequencyData = new Uint8Array(4);`, context);
   audio.paused = false;
   for (let i = 0; i < 15; i += 1) vm.runInContext('_updateNowPlayingPulse();', context);
   assert.ok(vm.runInContext('_allNFTs[0].mesh.scale.x > 1.01', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.material.opacity < 1', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingGlow.material.opacity > 0.18', context));
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdge.material.opacity > 0', context));
 
   audio.paused = true;
   for (let i = 0; i < 12; i += 1) vm.runInContext('_updateNowPlayingPulse();', context);
   assert.ok(vm.runInContext('_allNFTs[0].mesh.scale.x <= 1.001', context));
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdge.material.opacity <= 0.05', context));
   assert.equal(vm.runInContext('_allNFTs[0].mesh.visible', context), true);
   vm.runInContext(`_activeArtist = 'different-artist'; _timelineOffsetDays = 999; _updateVisibility();`, context);
   assert.equal(vm.runInContext('_allNFTs[0].mesh.visible', context), true);

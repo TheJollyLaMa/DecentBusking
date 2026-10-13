@@ -178,7 +178,7 @@ export function initListens() {
   const controller = createListenController({
     getLive,
     play: song => playArchiveTrack({ title: song.title, artist: song.artist, audioUrl: httpUrl(song.audioUrl),
-      mediaType: song.mediaType, sessionId: song.sessionId, onEnded: song.onEnded }),
+      mediaType: song.mediaType, nft: song.nft || null, sessionId: song.sessionId, onEnded: song.onEnded }),
     freePlay: song => setNowPlaying(song),
     getSession: archiveSessionId,
     getMedia: archiveMedia,
