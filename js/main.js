@@ -4,6 +4,7 @@
 import { initWallet } from './wallet.js';
 import { initStage } from './stage.js?v=20261012-paging';
 import { initSpace } from './space.js?v=20261012-paging';
+import { initTutorial } from './tutorial.js?v=20261013-walkthrough';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.
 
@@ -25,4 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialise the hat / guitar-case stage interactions
   initStage();
+
+  // Initialise the interactive onboarding tutorial
+  initTutorial();
 });

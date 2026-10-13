@@ -3,6 +3,8 @@
 // Intercepts the CDN DecentHead 'about-modal' custom element definition and
 // replaces it with a DecentBusking-specific version.
 //
+import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261013-walkthrough';
+
 // The CDN's AboutModal.js hard-codes a filter for listings whose note field
 // contains "decenthead", which causes BigNuten / DecentHead Supporter NFTs to
 // appear instead of DecentBusking Supporter DNFTs.  This override replaces
@@ -522,6 +524,8 @@ class DecentBuskingAboutModal extends HTMLElement {
         .about-hero-copy { margin: 7px 0 0; color: #c4c7d8; font-size: .92rem; line-height: 1.45; }
         .about-status-row { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 11px; }
         .about-status { padding: 5px 9px; border: 1px solid rgba(124,222,207,.25); border-radius: 999px; color: #a4e5d9; background: rgba(72,166,154,.1); font-size: .7rem; font-weight: 650; }
+        .about-tutorial-btn { padding: 5px 10px; border: 1px solid rgba(145,221,211,.34); border-radius: 999px; color: #d7fff5; background: rgba(145,221,211,.1); font-size: .72rem; font-weight: 700; cursor: pointer; }
+        .about-tutorial-btn:hover { background: rgba(145,221,211,.18); }
         .about-section { margin: 22px 0; color: #e5e3ee; line-height: 1.56; }
         .about-section h3 { margin: 0 0 10px; color: #e9d5ff; font-size: 1.08rem; }
         .about-section p { color: #c8cad7; }
@@ -585,6 +589,8 @@ class DecentBuskingAboutModal extends HTMLElement {
         .about-hero-copy { margin: 7px 0 0; color: #c9cad8; font-size: .92rem; line-height: 1.45; }
         .about-status-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
         .about-status { padding: 5px 9px; color: #a6e8dd; background: rgba(87,195,179,.09); border: 1px solid rgba(105,221,204,.22); border-radius: 999px; font-size: .68rem; font-weight: 700; }
+        .about-tutorial-btn { padding: 5px 10px; border: 1px solid rgba(145,221,211,.34); border-radius: 999px; color: #d7fff5; background: rgba(145,221,211,.1); font-size: .72rem; font-weight: 700; cursor: pointer; }
+        .about-tutorial-btn:hover { background: rgba(145,221,211,.18); }
         .about-section { margin: 21px 0; color: #e2e2ec; line-height: 1.58; }
         .about-section h3 { margin: 0 0 9px; color: #d8c9ff; font-size: 1.05rem; }
         .about-section p { color: #c7c9d7; }
@@ -757,7 +763,7 @@ class DecentBuskingAboutModal extends HTMLElement {
                 <p class="about-kicker">Listen · Loop · Busk</p>
                 <h1>${_esc(appName)}</h1>
                 <p class="about-hero-copy">A community listening room, a 3D music archive, and direct artist support using Base and public IPFS.</p>
-                <div class="about-status-row"><span class="about-status">Base Mainnet</span><span class="about-status">IPFS · Pinata</span><span class="about-status">JukeLoop Radio</span></div>
+                <div class="about-status-row"><span class="about-status">Base Mainnet</span><span class="about-status">IPFS · Pinata</span><span class="about-status">JukeLoop Radio</span><button class="about-tutorial-btn" type="button" data-tutorial-launch>Start Tutorial</button></div>
               </div>
             </header>
 
@@ -837,6 +843,10 @@ class DecentBuskingAboutModal extends HTMLElement {
     `;
 
     this.shadowRoot.getElementById('close-about').addEventListener('click', () => this.close());
+    this.shadowRoot.querySelectorAll('[data-tutorial-launch]').forEach((button) => {
+      button.addEventListener('click', () => startTutorial());
+    });
+    syncTutorialLaunchButtons(this.shadowRoot);
     this.shadowRoot.getElementById('paypal-btn-container')?.addEventListener('click', (e) => {
       if (e.target.id === 'paypal-launch-btn') this._handlePayPalLaunch();
     });
