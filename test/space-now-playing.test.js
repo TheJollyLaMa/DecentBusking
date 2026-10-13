@@ -28,8 +28,10 @@ function makeThreeStubs() {
       this.scale = new Vector3(1, 1, 1);
       this.userData = {};
       this.visible = false;
+      this.children = [];
     }
     lookAt() {}
+    add(child) { this.children.push(child); child.parent = this; }
   }
   return {
     Scene: class { constructor() { this.children = []; } add(child) { this.children.push(child); } remove(child) { this.children = this.children.filter(item => item !== child); } },
@@ -146,11 +148,12 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
     mintedAt: new Date(Date.now() - 86_400_000).toISOString(),
     audioUrl: 'ipfs://bafytrack',
   };
+  let fakeNow = 0;
   const context = vm.createContext({
     console,
     document,
     window: { DecentConfig: { ipfsGateway: 'https://gateway.pinata.cloud/ipfs/', ipfsUploadServiceUrl: 'https://service.example' } },
-    performance,
+    performance: { now: () => { fakeNow += 120; return fakeNow; } },
     CustomEvent,
     Event,
     Option: class { constructor(text, value) { this.text = text; this.value = value; } },
@@ -172,19 +175,21 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   const entry = vm.runInContext('_allNFTs[0]', context);
   assert.equal(entry.mesh.visible, true);
   assert.equal(entry.mesh.userData.pinnedVisible, true);
+  assert.ok(entry.mesh.userData.nowPlayingGlow);
   assert.equal(vm.runInContext('_nowPlayingMesh === _allNFTs[0].mesh', context), true);
 
   vm.runInContext(`_nowPlayingMedia = document.getElementById('audio-player');
-    _nowPlayingAnalyser = { fftSize: 8, getByteTimeDomainData(buffer) { buffer.set([128, 184, 128, 72, 128, 184, 128, 72]); } };
+    _nowPlayingAnalyser = { fftSize: 8, getByteTimeDomainData(buffer) { buffer.fill(128); } };
     _nowPlayingAudioData = new Uint8Array(8);`, context);
   audio.paused = false;
-  vm.runInContext('_updateNowPlayingPulse();', context);
-  assert.ok(vm.runInContext('_allNFTs[0].mesh.scale.x > 1', context));
+  for (let i = 0; i < 15; i += 1) vm.runInContext('_updateNowPlayingPulse();', context);
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.scale.x > 1.01', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.material.opacity < 1', context));
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingGlow.material.opacity > 0.18', context));
 
   audio.paused = true;
   for (let i = 0; i < 12; i += 1) vm.runInContext('_updateNowPlayingPulse();', context);
-  assert.ok(vm.runInContext('_allNFTs[0].mesh.scale.x <= 1.02', context));
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.scale.x <= 1.001', context));
   assert.equal(vm.runInContext('_allNFTs[0].mesh.visible', context), true);
   vm.runInContext(`_activeArtist = 'different-artist'; _timelineOffsetDays = 999; _updateVisibility();`, context);
   assert.equal(vm.runInContext('_allNFTs[0].mesh.visible', context), true);

@@ -128,12 +128,14 @@ function _applyNowPlaying(detail) {
   if (!entry) return;
 
   if (_nowPlayingMesh && _nowPlayingMesh !== entry.mesh) {
+    _resetNowPlayingPulse(_nowPlayingMesh);
     _nowPlayingMesh.userData.pinnedVisible = true;
   }
   _nowPlayingKey = key;
   _nowPlayingMesh = entry.mesh;
   _pendingNowPlaying = null;
   entry.mesh.userData.pinnedVisible = true;
+  _ensureNowPlayingGlow(entry.mesh);
   entry.mesh.visible = true;
   if (wasMissing) _focusNowPlaying(entry.mesh);
   _updateVisibility();
@@ -856,37 +858,11 @@ function _activeMediaElement() {
 
 function _ensureNowPlayingAnalyser(media) {
   if (!media) return null;
-  if (_nowPlayingMedia === media && _nowPlayingAnalyser) return _nowPlayingAnalyser;
-  const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
-  if (!AudioContextCtor) {
-    _nowPlayingMedia = media;
-    _nowPlayingAnalyser = null;
-    return null;
-  }
-  try {
-    if (_nowPlayingMediaSource) {
-      try { _nowPlayingMediaSource.disconnect(); } catch {}
-    }
-    if (_nowPlayingAnalyser) {
-      try { _nowPlayingAnalyser.disconnect(); } catch {}
-    }
-    if (!_nowPlayingAudioContext) _nowPlayingAudioContext = new AudioContextCtor();
-    const source = _nowPlayingAudioContext.createMediaElementSource(media);
-    const analyser = _nowPlayingAudioContext.createAnalyser();
-    analyser.fftSize = 256;
-    source.connect(analyser);
-    analyser.connect(_nowPlayingAudioContext.destination);
-    _nowPlayingAudioContext.resume?.().catch(() => {});
-    _nowPlayingMedia = media;
-    _nowPlayingMediaSource = source;
-    _nowPlayingAnalyser = analyser;
-    _nowPlayingAudioData = new Uint8Array(analyser.fftSize);
-    return analyser;
-  } catch {
-    _nowPlayingMedia = media;
-    _nowPlayingAnalyser = null;
-    return null;
-  }
+  if (_nowPlayingMedia === media) return _nowPlayingAnalyser;
+  _nowPlayingMedia = media;
+  _nowPlayingAnalyser = null;
+  _nowPlayingAudioData = null;
+  return null;
 }
 
 function _updateNowPlayingPulse() {
@@ -896,6 +872,8 @@ function _updateNowPlayingPulse() {
   const ud = mesh.userData;
   ud.baseScale ??= mesh.scale.x || 1;
   ud.baseOpacity ??= mesh.material?.opacity ?? 1;
+  const glow = ud.nowPlayingGlow || _ensureNowPlayingGlow(mesh);
+  const now = performance.now();
 
   let level = 0;
   const playing = media && !media.paused && !media.ended;
@@ -905,19 +883,77 @@ function _updateNowPlayingPulse() {
       analyser.getByteTimeDomainData(_nowPlayingAudioData);
       let sum = 0;
       for (const sample of _nowPlayingAudioData) {
-        const centered = (sample - 128) / 128;
-        sum += centered * centered;
+       const centered = (sample - 128) / 128;
+       sum += centered * centered;
       }
-      level = Math.min(1, Math.sqrt(sum / _nowPlayingAudioData.length) * 1.9);
+      const rms = Math.sqrt(sum / _nowPlayingAudioData.length);
+      if (rms > 0.012) {
+       ud.nowPlayingSilenceSince = null;
+       level = Math.min(1, rms * 2.4);
+      } else if (ud.nowPlayingSilenceSince == null) {
+       ud.nowPlayingSilenceSince = now;
+      } else if (now - ud.nowPlayingSilenceSince >= 1000) {
+       level = _fallbackNowPlayingPulse(media, now);
+      }
     } else {
-      level = 0.18 + 0.08 * Math.sin((performance.now() + (media.currentTime || 0) * 1000) / 90);
+      level = _fallbackNowPlayingPulse(media, now);
     }
   }
 
-  ud.pulseLevel = ud.pulseLevel == null ? level : (ud.pulseLevel * 0.8 + level * 0.2);
+  if (!playing) {
+    ud.pulseLevel = 0;
+    ud.nowPlayingSilenceSince = null;
+    mesh.scale.setScalar(ud.baseScale);
+    if (mesh.material) mesh.material.opacity = ud.baseOpacity;
+    if (glow?.material) glow.material.opacity = ud.nowPlayingGlowBaseOpacity ?? glow.material.opacity;
+    if (glow) glow.scale.setScalar(ud.nowPlayingGlowBaseScale ?? 1);
+    return;
+  }
+
+  ud.pulseLevel = ud.pulseLevel == null ? level : (ud.pulseLevel * 0.82 + level * 0.18);
   const pulse = Math.max(0, Math.min(1, ud.pulseLevel));
-  mesh.scale.setScalar(ud.baseScale * (1 + pulse * 0.16));
-  if (mesh.material) mesh.material.opacity = ud.baseOpacity * (1 - pulse * 0.12);
+  mesh.scale.setScalar(ud.baseScale * (1 + pulse * 0.08));
+  if (mesh.material) mesh.material.opacity = ud.baseOpacity * (0.6 + pulse * 0.4);
+  if (glow?.material) glow.material.opacity = Math.min(0.92, (ud.nowPlayingGlowBaseOpacity ?? 0.18) + pulse * 0.65);
+  if (glow) glow.scale.setScalar((ud.nowPlayingGlowBaseScale ?? 1) * (1 + pulse * 0.24));
+}
+
+function _ensureNowPlayingGlow(mesh) {
+  const ud = mesh.userData || (mesh.userData = {});
+  if (ud.nowPlayingGlow) return ud.nowPlayingGlow;
+  const glowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffedbd,
+    transparent: true,
+    opacity: 0.18,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending ?? undefined,
+  });
+  const glow = new THREE.Mesh(new THREE.CircleGeometry(2.65, 64), glowMaterial);
+  glow.position.set(0, 0, -0.04);
+  glow.scale.setScalar(1.12);
+  mesh.add(glow);
+  ud.nowPlayingGlow = glow;
+  ud.nowPlayingGlowBaseOpacity = glowMaterial.opacity;
+  ud.nowPlayingGlowBaseScale = glow.scale.x || 1;
+  return glow;
+}
+
+function _resetNowPlayingPulse(mesh) {
+  if (!mesh) return;
+  const ud = mesh.userData || {};
+  ud.pulseLevel = 0;
+  ud.nowPlayingSilenceSince = null;
+  if (mesh.material) mesh.material.opacity = ud.baseOpacity ?? mesh.material.opacity ?? 1;
+  const glow = ud.nowPlayingGlow;
+  if (glow?.material) glow.material.opacity = ud.nowPlayingGlowBaseOpacity ?? glow.material.opacity ?? 0.18;
+  if (glow) glow.scale.setScalar(ud.nowPlayingGlowBaseScale ?? 1);
+  if (ud.baseScale) mesh.scale.setScalar(ud.baseScale);
+}
+
+function _fallbackNowPlayingPulse(media, now) {
+  const phase = ((now + ((media?.currentTime || 0) * 1000)) / 250) * Math.PI;
+  return 0.5 + 0.5 * Math.sin(phase);
 }
 
 // ── Animation Loop ─────────────────────────────────────────────────────────
