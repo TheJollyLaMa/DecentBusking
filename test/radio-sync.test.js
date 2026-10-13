@@ -106,6 +106,39 @@ test('radio corrects a play-time position reset while silent, then starts immedi
   assert.equal(volume, 1);
 });
 
+test('radio still starts playback when the gateway cannot seek yet', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  let position = 0;
+  let volume = 0;
+  const audio = new EventTarget();
+  Object.assign(audio, {
+    duration: 180,
+    paused: true,
+    seeking: false,
+    readyState: 1,
+    seekable: { length: 0, start: () => 0, end: () => 0 },
+    pause() { this.paused = true; },
+    removeAttribute() {},
+    querySelectorAll: () => [],
+    appendChild() {},
+    load() {
+      setTimeout(() => { this.readyState = 4; this.dispatchEvent(new Event('loadedmetadata')); }, 0);
+    },
+    async play() { this.paused = false; position = 0; },
+  });
+  Object.defineProperties(audio, {
+    currentTime: { get: () => position, set: (value) => { position = value; } },
+    volume: { get: () => volume, set: (value) => { volume = value; } },
+  });
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console, audio,
+    document: { createElement: () => ({}) } });
+  vm.runInContext(`${source}\n_audio = audio; _audioPlayer = audio; globalThis.switchTrack = _switchTo;`, context);
+  await context.switchTrack({ title: 'Radio', artist: 'Artist', url: 'https://audio.example/song', offset: () => 25 });
+  assert.equal(audio.paused, false);
+  assert.equal(position, 0);
+  assert.equal(volume, 1);
+});
+
 test('radio keeps the current song playing until it ends before starting the next track from the top', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
     .replace(/export /g, '');
