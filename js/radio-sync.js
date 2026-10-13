@@ -389,7 +389,7 @@ function _syncRadio(message) {
   _renderVoting();
   if (_devertListenMode === 'ads-only') return;
   if (!_radio) {
-    if (_loadedPlayId || !_audio.paused) _stopAudio();
+    if (!_audio.paused) return;
     _loadedPlayId = null;
     _setTrack('—', '');
     _setActivity(message || '🌙 The JukeLoop is between tracks — waiting for the next song');
@@ -399,6 +399,11 @@ function _syncRadio(message) {
   if (_radio.playId === _loadedPlayId) {
     const expected = _radioPositionS();
     if (!_audio.paused && Math.abs(_audio.currentTime - expected) > DRIFT_TOLERANCE_S) _seekTo(expected);
+    return;
+  }
+
+  if (_loadedPlayId && !_audio.paused) {
+    _setActivity(message || '📻 Waiting for the current song to finish before switching tracks');
     return;
   }
 
@@ -415,7 +420,7 @@ function _syncRadio(message) {
     artist: _radio.uploader,
     url: _gatewayUrl(_radio.ipfsCid),
     mime: _radio.mediaType || _mimeType(_radio.filename || ''),
-    offset: () => (_radio ? _radioPositionS() : 0),
+    offset: () => 0,
   });
 }
 

@@ -106,6 +106,43 @@ test('radio corrects a play-time position reset while silent, then starts immedi
   assert.equal(volume, 1);
 });
 
+test('radio keeps the current song playing until it ends before starting the next track from the top', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
+    .replace(/export /g, '');
+  let position = 90;
+  const audio = new EventTarget();
+  Object.assign(audio, {
+    duration: 180,
+    paused: false,
+    seeking: false,
+    readyState: 4,
+    seekable: { length: 1, start: () => 0, end: () => 180 },
+    pause() { this.paused = true; },
+    removeAttribute() {},
+    querySelectorAll: () => [],
+    appendChild() {},
+    load() {},
+    async play() { this.paused = false; position = 0; },
+  });
+  Object.defineProperties(audio, {
+    currentTime: { get: () => position, set: (value) => { position = value; } },
+    volume: { get: () => 1, set: () => {} },
+  });
+
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console, audio,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } } });
+  vm.runInContext(`${source}\n_audio = audio; _loadedPlayId = 'track-1'; _radio = {
+    playId: 'track-2', title: 'Next', uploader: 'Artist', ipfsCid: 'bafy-next',
+    filename: 'next.mp3', receivedAt: performance.now(), positionMs: 12_000,
+  }; globalThis.started = []; _switchTo = options => started.push(options); _syncRadio();`, context);
+  assert.equal(audio.paused, false);
+  assert.equal(vm.runInContext('started.length', context), 0);
+
+  vm.runInContext('_audio.paused = true; _syncRadio();', context);
+  assert.equal(vm.runInContext('started.length', context), 1);
+  assert.equal(vm.runInContext('started[0].offset()', context), 0);
+});
+
 test('site votes post only the current play and anonymous browser ID, with no wallet', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
   const context = vm.createContext({ AbortSignal, console });
