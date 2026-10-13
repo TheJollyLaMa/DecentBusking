@@ -110,11 +110,7 @@ export function initDjuke() {
   const count = document.getElementById('djuke-count');
   const select = document.getElementById('djuke-song');
   const search = document.getElementById('djuke-search');
-  const searchResults = document.getElementById('djuke-search-results');
   const searchState = document.getElementById('djuke-search-state');
-  const searchMore = document.getElementById('djuke-search-more');
-  let shownSongs = 20;
-  const connect = document.getElementById('djuke-connect');
   const paymentStatus = document.getElementById('djuke-payment-state');
   const tiers = document.getElementById('djuke-price-tiers');
   const pay = document.getElementById('djuke-pay');
@@ -181,36 +177,22 @@ export function initDjuke() {
   };
   const renderSongs = () => {
     const previous = select.value;
-    const tracks = filterDjukeSongs(live?.tracks, search?.value || '');
+    const liveTracks = Array.isArray(live?.tracks) ? live.tracks : [];
+    const tracks = filterDjukeSongs(liveTracks, search?.value || '');
     const placeholder = node('option', tracks.length ? 'Select one song' : 'No matching songs');
     placeholder.value = '';
     select.replaceChildren(placeholder);
-    searchResults?.replaceChildren();
-    const visible = tracks.slice(0, shownSongs);
-    const previousTrack = tracks.find(track => track.trackId === previous);
-    const options = previousTrack && !visible.includes(previousTrack) ? [...visible, previousTrack] : visible;
+    const previousTrack = liveTracks.find(track => track.trackId === previous);
+    const options = previousTrack && !tracks.some(track => track.trackId === previousTrack.trackId)
+      ? [...tracks, previousTrack] : tracks;
     for (const track of options) {
       const option = node('option', track.artist ? `${track.title} - ${track.artist}` : track.title);
       option.value = track.trackId;
       select.append(option);
     }
-    for (const track of visible) {
-      const item = node('li');
-      const button = node('button', track.artist ? `${track.title} - ${track.artist}` : track.title);
-      button.type = 'button';
-      button.setAttribute('aria-pressed', String(track.trackId === previous));
-      button.addEventListener('click', () => {
-        select.value = track.trackId;
-        renderSongs();
-        refreshGasQuote();
-      });
-      item.append(button);
-      searchResults?.append(item);
-    }
-    if (searchState) searchState.textContent = `${visible.length} of ${tracks.length} matching songs`;
-    if (searchMore) searchMore.hidden = visible.length >= tracks.length;
-    select.value = tracks.some(track => track.trackId === previous) ? previous : '';
-    select.disabled = !tracks.length;
+    if (searchState) searchState.textContent = tracks.length ? `${tracks.length} matching songs` : 'No matching songs';
+    select.value = options.some(track => track.trackId === previous) ? previous : '';
+    select.disabled = !options.length;
     syncPayButton();
   };
   const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
@@ -236,21 +218,16 @@ export function initDjuke() {
     count.textContent = '—';
     select.replaceChildren(node('option', 'Song catalog unavailable'));
     select.disabled = true;
-    searchResults?.replaceChildren();
     if (searchState) searchState.textContent = 'Song catalog unavailable; refresh to retry.';
-    if (searchMore) searchMore.hidden = true;
     renderTiers(null);
     status.textContent = message;
     syncPayButton();
   };
   const updateWallet = () => {
     const address = window._wallet?.address;
-    connect.disabled = !!address;
-    connect.hidden = !!address;
-    connect.querySelector('span:last-child').textContent = 'Connect Wallet';
     if (!busy) {
       paymentStatus.textContent = !paymentsLive() ? 'Payments not live'
-        : !address ? 'Connect a Base wallet to queue a song'
+        : !address ? 'Connect your wallet in the header to queue a song'
         : window._wallet?.chainId !== 8453 ? 'Switch your wallet to Base' : 'Pick a song, then queue it';
     }
     syncPayButton();
@@ -335,8 +312,7 @@ export function initDjuke() {
     'Queued! Your song plays after the paid requests ahead of it.');
   });
   select.addEventListener('change', () => { renderSongs(); refreshGasQuote(); });
-  search?.addEventListener('input', () => { shownSongs = 20; renderSongs(); refreshGasQuote(); });
-  searchMore?.addEventListener('click', () => { shownSongs += 20; renderSongs(); });
+  search?.addEventListener('input', () => { renderSongs(); refreshGasQuote(); });
   const close = () => {
     clearTimeout(timer);
     generation++;
@@ -369,15 +345,6 @@ export function initDjuke() {
   document.addEventListener('click', event => {
     const path = event.composedPath();
     if (isOpen() && !path.includes(panel) && !path.includes(toggle)) close();
-  });
-  connect.addEventListener('click', async () => {
-    if (!window._wallet?.connect || !window.ethereum) {
-      paymentStatus.textContent = 'Wallet provider unavailable · payments not live';
-      return;
-    }
-    connect.disabled = true;
-    try { await window._wallet.connect(); }
-    finally { updateWallet(); }
   });
   document.addEventListener('wallet-connected', updateWallet);
   document.addEventListener('wallet-disconnected', updateWallet);
