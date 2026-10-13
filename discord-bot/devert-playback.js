@@ -156,7 +156,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       await flushMusicBatch();
       return true;
     }),
-    async nextMainRadioAd({ excludeCampaignIds = [] } = {}) {
+    async nextMainRadioAd({ excludeCampaignIds = [], count = 1 } = {}) {
       requireReady();
       await retryPendingImpressions();
       const snapshot = await readCampaigns();
@@ -170,10 +170,15 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       for (const entry of journal.adVotes) {
         voteScores.set(entry.campaignId, (voteScores.get(entry.campaignId) || 0) + entry.vote);
       }
-      const campaign = plan.mainRadio.filter(item => !excluded.has(item.campaignId))
+      const limit = Number.isSafeInteger(count) && count > 0 ? count : 1;
+      const campaigns = plan.mainRadio.filter(item => !excluded.has(item.campaignId))
         .sort((first, second) => (voteScores.get(second.campaignId) || 0) - (voteScores.get(first.campaignId) || 0))
-        .slice(0, 10)[0];
-      return campaign ? { campaignId: campaign.campaignId, mainRadio: true, track: campaignTrack(campaign, 'main-radio') } : null;
+        .slice(0, limit);
+      if (limit === 1) {
+        const [campaign] = campaigns;
+        return campaign ? { campaignId: campaign.campaignId, mainRadio: true, track: campaignTrack(campaign, 'main-radio') } : null;
+      }
+      return campaigns.map(campaign => ({ campaignId: campaign.campaignId, mainRadio: true, track: campaignTrack(campaign, 'main-radio') }));
     },
     recordMainRadioAdVote: ({ campaignId, radioPlayId, voterId, vote }) => run(async () => {
       requireReady();

@@ -392,6 +392,7 @@ export class JukeLoopSession {
     this.devertPlayback = devertPlayback || null;
     this._musicSinceAd = 0;
     this._currentDevertAd = null;
+    this._pendingDevertAds = [];
     this._failedDevertCampaignIds = new Set();
     this.schedule     = Array.isArray(schedule) ? schedule : defaultRadioSchedule();
     this.livePerformanceEvents = Array.isArray(livePerformanceEvents) ? livePerformanceEvents : [];
@@ -489,6 +490,7 @@ export class JukeLoopSession {
         this._announcementMsg = null;
         this._announcementContext = null;
       }
+      this._pendingDevertAds = [];
       if (this._ffmpeg) {
         try { this._ffmpeg.kill(); } catch {}
         this._ffmpeg = null;
@@ -682,9 +684,17 @@ export class JukeLoopSession {
     }
 
     let devertAd = null;
-    if (!paid && this.devertPlayback && this._musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD && activeShow.type !== 'weekly_top10') {
-      devertAd = await this.devertPlayback.nextMainRadioAd({ excludeCampaignIds: [...this._failedDevertCampaignIds] })
-        .catch(error => { console.warn('[devert] Main-radio ad selection deferred:', error.message); return null; });
+    if (!paid && this._pendingDevertAds.length) {
+      devertAd = this._pendingDevertAds.shift();
+    } else if (!paid && this.devertPlayback && this._musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD && activeShow.type !== 'weekly_top10') {
+      const ads = await this.devertPlayback.nextMainRadioAd({
+        excludeCampaignIds: [...this._failedDevertCampaignIds],
+        count: 2,
+      }).catch(error => { console.warn('[devert] Main-radio ad selection deferred:', error.message); return null; });
+      const selectedAds = Array.isArray(ads) ? ads : ads ? [ads] : [];
+      if (selectedAds.length) {
+        [devertAd, ...this._pendingDevertAds] = selectedAds;
+      }
     }
 
     // Refill + reshuffle if we've exhausted the current pass
@@ -1006,6 +1016,7 @@ export class JukeLoopSession {
     this._paidPollTimer = null;
     this._disposePrepared(this._preparedNext, 'Radio stopped');
     this._preparedNext = null;
+    this._pendingDevertAds = [];
     if (this._scheduleWatcher) {
       clearInterval(this._scheduleWatcher);
       this._scheduleWatcher = null;

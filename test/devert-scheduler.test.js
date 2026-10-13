@@ -8,12 +8,19 @@ const campaign = (campaignId, offerUnits = '1000000', overrides = {}) => ({
   mainRadioPlays: 0, devertPlays: 0, djukeBoosts: 0, ...overrides,
 });
 
-test('DeVert weekly minimum is one USDC and occupied main slots require an overbid', async () => {
+test('DeVert weekly minimum is one USDC and the queue price doubles every eight campaigns', async () => {
   const { quoteDevertCampaign } = await import('../js/devert-scheduler.mjs');
   assert.equal(quoteDevertCampaign({ campaigns: [], mainRadioSlots: 2 }).minimumOfferUnits, 1000000n);
   const quote = quoteDevertCampaign({ campaigns: [campaign('a'), campaign('b', '7000000')], mainRadioSlots: 2 });
-  assert.equal(quote.minimumOfferUnits, 1010000n);
+  assert.equal(quote.minimumOfferUnits, 1000000n);
   assert.equal(quote.bumpedCampaignId, 'a');
+  const tiered = quoteDevertCampaign({ campaigns: Array.from({ length: 8 }, (_, index) => campaign(String.fromCharCode(97 + index))),
+    mainRadioSlots: 2 });
+  assert.equal(tiered.minimumOfferUnits, 2000000n);
+  const doubleTier = quoteDevertCampaign({ campaigns: Array.from({ length: 16 }, (_, index) => campaign(String.fromCharCode(97 + (index % 26)), '5000000', {
+    startedAt: new Date(index * 1000).toISOString(),
+  })), mainRadioSlots: 2 });
+  assert.equal(doubleTier.minimumOfferUnits, 4000000n);
   assert.equal(quoteDevertCampaign({ campaigns: [], mainRadioSlots: 0 }).minimumOfferUnits, 1000000n);
 });
 

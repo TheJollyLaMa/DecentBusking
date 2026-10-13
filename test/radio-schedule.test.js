@@ -156,9 +156,10 @@ test('DeVert ads are inserted into the main radio cadence at ten-song intervals 
   const songCount = program.filter(entry => entry.type === 'song').length;
   const adCount = program.filter(entry => entry.type === 'ad').length;
   assert.equal(songCount, 12);
-  assert.equal(adCount, 1);
+  assert.equal(adCount, 2);
   assert.equal(program[10].type, 'ad');
-  assert.equal(program[11].type, 'song');
+  assert.equal(program[11].type, 'ad');
+  assert.equal(program[12].type, 'song');
 });
 
 test('normal rotation keeps its weighted order independently of the Top 10 pool', async () => {
