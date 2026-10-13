@@ -1,12 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { MessageFlags } = require('discord.js');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+
+const botRequire = createRequire(path.join(__dirname, '../discord-bot/package.json'));
+const { MessageFlags } = botRequire('discord.js');
 
 test('VertLoop uses a separate voice registry without replacing DBusker connection', async () => {
   const fs = require('node:fs');
   const vm = require('node:vm');
-  const { joinVoiceChannel, getVoiceConnection, createAudioPlayer } = await import('@discordjs/voice');
+  const { joinVoiceChannel, getVoiceConnection, createAudioPlayer } = botRequire('@discordjs/voice');
   const guildId = 'voice-isolation-test';
   const adapterCreator = () => ({ sendPayload: () => true, destroy() {} });
   const mainConnection = joinVoiceChannel({ channelId: 'jukeloop', guildId, adapterCreator });

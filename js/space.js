@@ -87,6 +87,10 @@ export function initSpace() {
 
 // Called by mint.js after a new busk is minted — places it at the front.
 export function addNFTToSpace(nft) {
+  if (!_scene) {
+    console.warn('[space] Scene not initialized; skipping mesh spawn for', nft?.tokenId);
+    return;
+  }
   _spawnMesh(nft, true /* isNew */);
 }
 

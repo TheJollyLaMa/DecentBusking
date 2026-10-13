@@ -50,6 +50,9 @@
       <p id="djuke-queue-state" role="status" aria-live="polite">Queue unavailable</p>
       <label class="djuke-song-label" for="djuke-song">Song</label>
       <input id="djuke-search" type="search" aria-label="Search songs and creators" placeholder="Search songs or creators" />
+      <ul id="djuke-search-results"></ul>
+      <p id="djuke-search-state" role="status" aria-live="polite"></p>
+      <button id="djuke-search-more" type="button" hidden>Show more songs</button>
       <select id="djuke-song" disabled><option value="">Song catalog unavailable</option></select>
       <p class="worker-gas-notice">Operator reminder: top up the worker with ETH on Base for playback fulfillment before accepting paid requests. Worker: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Balance is not checked here.</p>
       <div class="djuke-wallet-actions">
@@ -457,6 +460,7 @@
         </div>
         <details class="worker-gas-notice"><summary>⛽ Worker funding</summary><p>Worker ETH for registration and playback: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Mint gas comes from your wallet. Worker balance is not checked here.</p></details>
         <div id="admin-mint-queue" class="admin-mint-queue"></div>
+        <button id="admin-mint-more-btn" class="admin-btn admin-btn-secondary hidden" type="button">Load more requests</button>
         <div class="admin-mint-toolbar">
           <label><input id="admin-mint-select-all" type="checkbox" /> Select all</label>
           <button id="admin-mint-selected-btn" class="admin-btn admin-btn-primary" type="button">Mint selected in batches</button>
@@ -661,6 +665,7 @@
   <script type="module" src="js/creator-profile.mjs?v=20261010-creator-profile"></script>
   <script type="module" src="js/listens.mjs?v=20261010-listens"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
+  <script type="module" src="js/worker-gas.mjs?v=20261012-worker-gas"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js?v=20261012-ignore-rollout-week';
     document.addEventListener('DOMContentLoaded', initPayroll);

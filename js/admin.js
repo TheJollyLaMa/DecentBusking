@@ -9,7 +9,7 @@
 import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolveBatchMintArtwork, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261011-batch-artwork-default';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261011-batch-upload-signature';
 import { reportMintCompletion } from './mint-reconciliation.js';
-import { addNFTToSpace } from './space.js?v=20261010-listens';
+import { addNFTToSpace } from './space.js?v=20261012-paging';
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261010-public-calendar';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides } from './radio-schedule.mjs';
@@ -30,11 +30,15 @@ const ROLE_GRANT_ABI = [
 let _modal, _connectedAddr, _roleSection,
   _targetAddr, _roleSelect, _statusEl, _grantBtn, _closeBtn,
   _mintSection, _mintQueueEl, _mintRefreshBtn, _mintSelectedBtn,
-  _mintSelectAll, _mintStatusEl, _radioScheduleSection, _radioScheduleForm,
+  _mintSelectAll, _mintStatusEl, _mintMoreBtn, _radioScheduleSection, _radioScheduleForm,
   _radioScheduleEventsEl, _radioScheduleStatusEl, _radioWeeklyForm;
 let _adminSigner = null;
 let _adminAddress = null;
 let _mintQueue = [];
+let _mintQueueOffset = 0;
+let _mintQueueNextOffset = null;
+let _mintQueueTotal = 0;
+let _mintQueueLoading = false;
 let _mintBusy = false;
 let _adminOpen = false;
 let _radioSchedule = null;
@@ -57,6 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
   _mintSelectedBtn = document.getElementById('admin-mint-selected-btn');
   _mintSelectAll = document.getElementById('admin-mint-select-all');
   _mintStatusEl = document.getElementById('admin-mint-status');
+  _mintMoreBtn  = document.getElementById('admin-mint-more-btn');
   _radioScheduleSection = document.getElementById('admin-radio-schedule');
   _radioScheduleForm = document.getElementById('admin-radio-schedule-form');
   _radioScheduleEventsEl = document.getElementById('admin-radio-schedule-events');
@@ -67,7 +72,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   _grantBtn?.addEventListener('click', _grantRole);
   _closeBtn?.addEventListener('click', _closeModal);
-  _mintRefreshBtn?.addEventListener('click', _loadMintQueue);
+  _mintRefreshBtn?.addEventListener('click', () => _loadMintQueue({ reset: true }));
+  _mintMoreBtn?.addEventListener('click', () => _loadMintQueue({ reset: false }));
   document.getElementById('admin-radio-schedule-refresh')?.addEventListener('click', _loadRadioSchedule);
   document.getElementById('admin-radio-event-reset')?.addEventListener('click', _resetRadioScheduleForm);
   _radioWeeklyForm?.addEventListener('submit', _saveRadioWeeklySchedule);
@@ -206,6 +212,11 @@ function _resetAdminWallet() {
   _adminSigner = null;
   _adminAddress = null;
   _mintQueue = [];
+  _mintQueueOffset = 0;
+  _mintQueueNextOffset = null;
+  _mintQueueTotal = 0;
+  _mintQueueLoading = false;
+  if (_mintMoreBtn) _mintMoreBtn.classList.add('hidden');
   if (_connectedAddr) _connectedAddr.textContent = '';
   _mintQueueEl?.replaceChildren();
   _mintSection?.classList.add('hidden');
@@ -381,24 +392,64 @@ function _setRadioScheduleStatus(message, isError = false) {
 }
 
 // ── NFT Mint Queue ───────────────────────────────────────────────────────────
-  async function _loadMintQueue() {
-    if (!_adminSigner || !_adminAddress || _mintBusy) return;
+  async function _loadMintQueue({ reset = true } = {}) {
+    if (!_adminSigner || !_adminAddress || _mintBusy || _mintQueueLoading) return;
     const checkId = _walletCheckId;
-    _setMintStatus('Loading private mint queue…');
+    _mintQueueLoading = true;
+    const targetOffset = reset ? 0 : (_mintQueueNextOffset ?? _mintQueue.length);
+    _setMintStatus(reset ? 'Loading private mint queue…' : 'Loading more requests…');
+    if (_mintMoreBtn) _mintMoreBtn.disabled = true;
     try {
       const cfg = window.DecentConfig || {};
-      const requests = await fetchMintQueue({
+      const response = await fetchMintQueue({
         serviceUrl: cfg.ipfsUploadServiceUrl,
         signer: _adminSigner,
         address: _adminAddress,
         origin: window.location.origin,
+        offset: targetOffset,
+        limit: 20,
       });
       if (checkId !== _walletCheckId) return;
-      _mintQueue = requests;
+
+      let newItems = [];
+      if (Array.isArray(response)) {
+        newItems = response;
+        _mintQueueNextOffset = null;
+        _mintQueueTotal = response.length;
+      } else {
+        newItems = response.requests || [];
+        _mintQueueNextOffset = response.nextOffset;
+        _mintQueueTotal = response.total || (targetOffset + newItems.length);
+      }
+
+      if (reset) {
+        _mintQueue = newItems;
+        _mintQueueOffset = 0;
+      } else {
+        _mintQueue = _mintQueue.concat(newItems);
+        _mintQueueOffset = targetOffset;
+      }
+
       _renderMintQueue();
-      _setMintStatus(_mintQueue.length ? `${_mintQueue.length} pending request(s).` : 'The mint queue is empty.');
+
+      if (_mintMoreBtn) {
+        if (_mintQueueNextOffset !== null && _mintQueue.length < _mintQueueTotal) {
+          _mintMoreBtn.classList.remove('hidden');
+          _mintMoreBtn.disabled = false;
+        } else {
+          _mintMoreBtn.classList.add('hidden');
+        }
+      }
+
+      const totalDisplay = _mintQueueTotal > _mintQueue.length
+        ? `${_mintQueue.length} of ${_mintQueueTotal} pending request(s) loaded.`
+        : `${_mintQueue.length} pending request(s).`;
+      _setMintStatus(_mintQueue.length ? totalDisplay : 'The mint queue is empty.');
     } catch (err) {
       if (checkId === _walletCheckId) _setMintStatus(`❌ ${err.message}`, true);
+    } finally {
+      _mintQueueLoading = false;
+      if (_mintMoreBtn) _mintMoreBtn.disabled = false;
     }
   }
 
@@ -647,6 +698,7 @@ function _setRadioScheduleStatus(message, isError = false) {
   function _setMintControlsDisabled(disabled) {
     if (_mintRefreshBtn) _mintRefreshBtn.disabled = disabled;
     if (_mintSelectedBtn) _mintSelectedBtn.disabled = disabled;
+    if (_mintMoreBtn) _mintMoreBtn.disabled = disabled;
     _mintQueueEl?.querySelectorAll('button, input').forEach((control) => { control.disabled = disabled; });
   }
 
