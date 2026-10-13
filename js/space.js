@@ -62,13 +62,14 @@ let _nowPlayingAudioContext = null;
 let _nowPlayingMediaSource = null;
 let _nowPlayingAnalyser = null;
 let _nowPlayingAudioData = null;
+let _nowPlayingLookupToken = 0;
 
 // Spaceship
 const _ship = { speed: 0.3 };
 
 if (typeof document !== 'undefined' && document?.addEventListener) {
   document.addEventListener('dbusk-now-playing', (event) => {
-    _applyNowPlaying(event.detail || {});
+    void _handleNowPlaying(event.detail || {});
   });
 }
 
@@ -136,6 +137,67 @@ function _applyNowPlaying(detail) {
   entry.mesh.visible = true;
   if (wasMissing) _focusNowPlaying(entry.mesh);
   _updateVisibility();
+}
+
+async function _handleNowPlaying(detail) {
+  if (!detail) return;
+  const token = ++_nowPlayingLookupToken;
+  if (detail.nft) {
+    _applyNowPlaying(detail);
+    return;
+  }
+  const nft = await _resolveNowPlayingNFT(detail);
+  if (token !== _nowPlayingLookupToken) return;
+  if (!nft) return;
+  _applyNowPlaying({ ...detail, nft });
+}
+
+function _textKey(value = '') {
+  return String(value).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function _audioUrlMatches(detail, nft) {
+  const cid = String(detail?.ipfsCid || '').trim().toLowerCase();
+  const audioUrls = [nft?.audioUrl, nft?.videoUrl, nft?.animation_url, nft?.metadataUri].filter(Boolean).map((value) => String(value).toLowerCase());
+  if (cid && audioUrls.some((value) => value.includes(cid))) return true;
+  const audioUrl = String(detail?.audioUrl || '').toLowerCase();
+  return !!audioUrl && audioUrls.some((value) => value === audioUrl || value.includes(audioUrl.replace(/^https?:\/\//, '')));
+}
+
+function _matchesNowPlaying(detail, nft) {
+  if (!nft) return false;
+  const title = _textKey(detail?.title);
+  const artist = _textKey(detail?.artist);
+  const nftTitle = _textKey(nft.name || nft.title);
+  const nftArtist = _textKey(_artistLabel(nft));
+  if (_audioUrlMatches(detail, nft)) return true;
+  if (title && nftTitle === title) return !artist || nftArtist.includes(artist) || artist.includes(nftArtist);
+  return false;
+}
+
+async function _resolveNowPlayingNFT(detail) {
+  const direct = _allNFTs.find(({ nft }) => _matchesNowPlaying(detail, nft));
+  if (direct) return direct.nft;
+
+  const cfg = window.DecentConfig || {};
+  if (!cfg.ipfsUploadServiceUrl) return null;
+  const query = [detail?.title, detail?.artist].filter(Boolean).join(' ').trim();
+  if (!query) return null;
+
+  let offset = 0;
+  for (let page = 0; page < 8; page += 1) {
+    const result = await fetchNftCatalogPage({
+      config: cfg,
+      query,
+      offset,
+    }).catch(() => null);
+    if (!result?.nfts?.length) return null;
+    const match = result.nfts.find((nft) => _matchesNowPlaying(detail, nft));
+    if (match) return match;
+    if (result.nextOffset === null) return null;
+    offset = result.nextOffset;
+  }
+  return null;
 }
 
 // Fetch metadata for a single token by ID — used by mint.js for parent preview.

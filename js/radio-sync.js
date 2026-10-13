@@ -71,11 +71,38 @@ let _devertListenMode = 'radio';
 let _fadeLevel = 0;
 let _fadeNextRadioSwitch = false;
 let _muteBtn, _volumeInput, _volumeDial;
+let _nowPlayingBroadcastKey = null;
 
 function _applyRadioVolume() {
   if (!_audio) return;
   _audio.muted = _mode === 'archive' ? _archiveMuted : _radioMuted;
   _audio.volume = _fadeLevel * (_mode === 'archive' ? 1 : _radioVolume);
+}
+
+function _broadcastNowPlaying() {
+  if (typeof document === 'undefined' || !document?.dispatchEvent) return;
+  if (_mode !== 'radio' || !_radio) {
+    _nowPlayingBroadcastKey = null;
+    return;
+  }
+  const key = [_radio.playId || _radio.trackId || '', _radio.ipfsCid || '', _radio.title || '', _radio.uploader || ''].join('|');
+  if (key === _nowPlayingBroadcastKey) return;
+  const CustomEventCtor = globalThis.CustomEvent || document.defaultView?.CustomEvent;
+  if (!CustomEventCtor) return;
+  _nowPlayingBroadcastKey = key;
+  document.dispatchEvent(new CustomEventCtor('dbusk-now-playing', {
+    detail: {
+      source: 'radio',
+      playId: _radio.playId || null,
+      trackId: _radio.trackId || null,
+      title: _radio.title || '',
+      artist: _radio.uploader || '',
+      audioUrl: _radio.ipfsCid ? _gatewayUrl(_radio.ipfsCid) : '',
+      mediaType: _radio.mediaType || _mimeType(_radio.filename || ''),
+      ipfsCid: _radio.ipfsCid || null,
+      nft: null,
+    },
+  }));
 }
 
 function _renderAudioControls() {
@@ -387,6 +414,7 @@ function _radioPositionS() {
 function _syncRadio(message) {
   _setLabel('📻 Live on JukeLoop');
   _renderVoting();
+  _broadcastNowPlaying();
   if (_devertListenMode === 'ads-only') return;
   if (!_radio) {
     if (!_audio.paused) return;
