@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
+const { PassThrough } = require('node:stream');
 const { pathToFileURL } = require('node:url');
 
 test('playlist tracks each attachment and persists its IPFS pin state', async (t) => {
@@ -717,6 +719,107 @@ test('scheduled live performance blocks paid picks and resumes the queue when ca
   assert.equal(resumeCalls, 1);
   assert.match(notices[0].content, /Live performance block: Live Test Set/);
   assert.equal(notices[0].flags, 4096);
+});
+
+test('JukeLoop prepares the next paid request and starts it before prior-play bookkeeping finishes', async (t) => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const player = new EventEmitter();
+  const played = [];
+  player.play = resource => played.push(resource);
+  player.stop = () => {};
+  let finishCompletion;
+  const completionPending = new Promise(resolve => { finishCompletion = resolve; });
+  const firstPaid = { id: 'paid-1' };
+  const secondPaid = { id: 'paid-2' };
+  const paidTrack = {
+    trackId: 'paid-track-2',
+    title: 'Paid Track Two',
+    uploader: 'Paid Artist',
+    messageId: 'paid-message-2',
+  };
+  let paidPicks = 0;
+  const session = new JukeLoopSession({
+    voiceChannel: { guild: { id: 'djuke-gap-test' } },
+    textChannel: { send: async () => ({}) },
+    client: {},
+    audioPlayer: player,
+    createStream: () => {
+      const stream = new PassThrough();
+      const process = new EventEmitter();
+      process.kill = () => {};
+      stream.write(Buffer.from('first audio frame'));
+      return { stream, ffmpegProcess: process };
+    },
+    djuke: {
+      nextPaid: async () => {
+        paidPicks++;
+        return { record: secondPaid, track: paidTrack };
+      },
+      complete: async record => {
+        assert.equal(record, firstPaid);
+        await completionPending;
+      },
+      fail: async () => {},
+    },
+  });
+  t.after(() => {
+    finishCompletion();
+    session.destroy();
+  });
+  session._getFreshUrl = async () => 'https://audio.example/paid-two.mp3';
+  session._queue = [{ trackId: 'regular-track', title: 'Regular Track' }];
+  session._queueIndex = 0;
+  session._currentPaid = firstPaid;
+  session._currentTrack = { trackId: 'paid-track-1', title: 'Paid Track One' };
+  session._nowPlaying = {
+    playId: 'paid-track-1:1000',
+    trackId: 'paid-track-1',
+    title: 'Paid Track One',
+    startedAt: Date.now() - 35_000,
+    audible: true,
+  };
+
+  session._primeNext();
+  await session._prepareTask;
+  assert.equal(session._preparedNext.paid.record, secondPaid);
+  assert.equal(session._queueIndex, 0);
+
+  player.emit('idle');
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(played.length, 1);
+  assert.equal(session._currentPaid, secondPaid);
+  assert.equal(session._currentTrack, paidTrack);
+  assert.equal(paidPicks, 1);
+  assert.equal(session._queueIndex, 0);
+  finishCompletion();
+});
+
+test('JukeLoop audio readiness preserves the first prebuffered bytes', async () => {
+  const { waitForAudioReady } = await import('../discord-bot/jukeloop.js');
+  const stream = new PassThrough();
+  const process = new EventEmitter();
+  stream.write(Buffer.from('intro'));
+
+  await waitForAudioReady(stream, process);
+
+  assert.equal(stream.read(5).toString(), 'intro');
+});
+
+test('JukeLoop does not fall back to regular rotation when the paid queue is unavailable', async (t) => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const session = new JukeLoopSession({
+    voiceChannel: { guild: { id: 'djuke-priority-test' } },
+    textChannel: { send: async () => ({}) },
+    client: {},
+    djuke: { nextPaid: async () => { throw new Error('DJuke queue timed out'); } },
+  });
+  t.after(() => session.destroy());
+  session._queue = [{ trackId: 'regular-track', title: 'Regular Track' }];
+  session._queueIndex = 0;
+
+  await assert.rejects(session._prepareNextPlayback(), /timed out/);
+  assert.equal(session._queueIndex, 0);
 });
 
 test('JukeLoop counts qualified music toward the next ad and resets after an audible ad', async (t) => {

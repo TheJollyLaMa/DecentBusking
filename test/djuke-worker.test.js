@@ -234,10 +234,57 @@ test('runtime gives radio a timely answer when the queue is slow or unplayable',
   const api = await import('../discord-bot/djuke.js');
   const slow = api.createDjukeRuntime({ readState: () => new Promise(() => {}), journal: memoryJournal(api),
     fulfill: async () => {}, getTrack: () => null, timeoutMs: 20 });
-  assert.equal(await slow.nextPaid(), null);
+  await assert.rejects(slow.nextPaid(), /timed out/);
   const unplayable = api.createDjukeRuntime({ journal: memoryJournal(api), fulfill: async () => {}, getTrack: () => null,
     readState: async () => ({ requests: [{ requestId: 'r', chainRequestId: '0', songId: id('x'), revision: '0', trackId: 'x', playable: false }] }) });
-  assert.equal(await unplayable.nextPaid(), null);
+  await assert.rejects(unplayable.nextPaid(), /not playable/);
+});
+
+test('runtime does not skip a paid request while a timed-out claim finishes', async () => {
+  const api = await import('../discord-bot/djuke.js');
+  const requests = ['a', 'b'].map((trackId, index) => ({
+    requestId: `r${index}`, chainRequestId: String(index), songId: id(trackId),
+    revision: '0', trackId, playable: true,
+  }));
+  let releaseFirstRead;
+  let reads = 0;
+  const runtime = api.createDjukeRuntime({
+    readState: async () => {
+      reads++;
+      if (reads === 1) await new Promise(resolve => { releaseFirstRead = resolve; });
+      return { requests };
+    },
+    journal: memoryJournal(api),
+    fulfill: async () => {},
+    getTrack: trackId => ({ trackId }),
+    timeoutMs: 20,
+    log: { warn() {} },
+  });
+
+  await assert.rejects(runtime.nextPaid(), /timed out/);
+  let secondSettled = false;
+  const second = runtime.nextPaid().then(result => {
+    secondSettled = true;
+    return result;
+  });
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(secondSettled, false);
+
+  releaseFirstRead();
+  assert.equal((await second).track.trackId, 'a');
+});
+
+test('runtime can reserve the next paid request while the current paid track is playing', async () => {
+  const api = await import('../discord-bot/djuke.js');
+  const requests = ['a', 'b'].map((trackId, index) => ({
+    requestId: `r${index}`, chainRequestId: String(index), songId: id(trackId),
+    revision: '0', trackId, playable: true,
+  }));
+  const runtime = api.createDjukeRuntime({ readState: async () => ({ requests }), journal: memoryJournal(api),
+    fulfill: async () => {}, getTrack: trackId => ({ trackId }), log: { warn() {} } });
+  assert.equal((await runtime.nextPaid()).track.trackId, 'a');
+  assert.equal((await runtime.nextPaid()).track.trackId, 'b');
+  assert.equal(await runtime.nextPaid(), null);
 });
 
 test('durable playback journal retains failed requests and completed plays through restarts', async () => {

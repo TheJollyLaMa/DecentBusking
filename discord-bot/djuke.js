@@ -147,6 +147,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
       if (JSON.stringify(next) !== JSON.stringify(records)) await commit(next);
     }),
     peek: () => { requireReady(); const record = records.find(entry => entry.state !== 'fulfilled'); return record ? copy(record) : null; },
+    peekPending: () => { requireReady(); const record = records.find(entry => entry.state === 'pending'); return record ? copy(record) : null; },
     resetPlayed: requestId => update(requestId, record => {
       if (record.state !== 'played') throw new Error('DJuke request has no completed playback');
       record.state = 'pending';
@@ -157,6 +158,17 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
       const next = copy(records);
       const record = next.find(entry => entry.state !== 'fulfilled');
       if (!record || record.state !== 'pending') return null;
+      record.state = 'playing';
+      record.attempts++;
+      record.startedAt = new Date(now()).toISOString();
+      await commit(next);
+      return copy(record);
+    }),
+    reserveNext: () => run(async () => {
+      requireReady();
+      const next = copy(records);
+      const record = next.find(entry => entry.state === 'pending');
+      if (!record) return null;
       record.state = 'playing';
       record.attempts++;
       record.startedAt = new Date(now()).toISOString();
@@ -270,6 +282,8 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
 export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVerifiedRequests, minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
   let initialized = null;
   let settling = Promise.resolve();
+  let claimSerial = Promise.resolve();
+  let abandonedClaim = Promise.resolve();
   const ready = () => { initialized ||= journal.initialize().catch(error => { initialized = null; throw error; }); return initialized; };
   const settleSerial = state => { const run = settling.then(() => settle(state)); settling = run.catch(() => {}); return run; };
   async function settle(state) {
@@ -292,24 +306,36 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       .catch(error => log.warn(`[djuke] Confirmed-request hook deferred: ${error.message}`));
     await journal.synchronize(state.requests);
     await settleSerial(state);
-    const head = journal.peek();
-    if (head?.state !== 'pending') return null;
+    const head = journal.peekPending();
+    if (!head) return null;
     const request = state.requests.find(entry => entry.requestId === head.requestId);
     const track = request?.playable ? getTrack(request.trackId) : null;
-    if (!track) return null;
-    const record = await journal.acquire();
+    if (!track) throw new Error(`Paid DJuke request ${head.requestId} is not playable`);
+    const record = await journal.reserveNext();
     return record ? { record, track } : null;
   }
-  return {
-    async nextPaid() {
-      const pending = claim();
-      let timer;
-      const timedOut = Symbol('timeout');
-      const result = await Promise.race([pending, new Promise(resolve => { timer = setTimeout(() => resolve(timedOut), timeoutMs); })]);
+  async function nextPaid() {
+    await abandonedClaim;
+    const pending = claim();
+    let timer;
+    const timedOut = Symbol('timeout');
+    let result;
+    try {
+      result = await Promise.race([pending, new Promise(resolve => { timer = setTimeout(() => resolve(timedOut), timeoutMs); })]);
+    } finally {
       clearTimeout(timer);
-      if (result !== timedOut) return result;
-      pending.then(late => late && journal.fail(late.record.requestId, 'Claimed after radio moved on')).catch(() => {});
-      return null;
+    }
+    if (result !== timedOut) return result;
+    abandonedClaim = pending
+      .then(late => late && journal.fail(late.record.requestId, 'Claimed after radio moved on'))
+      .catch(() => {});
+    throw new Error('DJuke queue check timed out');
+  }
+  return {
+    nextPaid() {
+      const run = claimSerial.then(nextPaid);
+      claimSerial = run.catch(() => {});
+      return run;
     },
     async complete(record, play) {
       if (!play || play.audibleMs < minAudibleMs) return journal.fail(record.requestId, 'Paid play was not audible long enough');

@@ -57,11 +57,9 @@ import { mediaTypeFor, isDiscordAttachmentWithinLimit } from './media.js';
 const AUDIO_EXTENSIONS_RE = /\.(mp3|m4a|wav|ogg|flac|aac|opus|weba|mp4)$/i;
 const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
 
-// Delay between the end of one track and the start of the next (ms).
-// Gives Discord a moment to flush the connection before the next resource
-// is attached and provides a natural pause for listeners.
-const BETWEEN_TRACK_DELAY_MS = 1_500;
 const FADE_IN_SECONDS = 0.6;
+const NEXT_TRACK_READY_TIMEOUT_MS = 20_000;
+const DJUKE_PREFETCH_POLL_MS = 5_000;
 
 // How long to wait before retrying when the playlist is empty (ms).
 const EMPTY_PLAYLIST_RETRY_MS = 60_000;
@@ -339,6 +337,40 @@ function createFFmpegStream(url, { ad = false } = {}) {
   return { stream: ffmpegProcess.stdout, ffmpegProcess };
 }
 
+export function waitForAudioReady(stream, ffmpegProcess, timeoutMs = NEXT_TRACK_READY_TIMEOUT_MS) {
+  if (stream.readableLength > 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      stream.off('readable', ready);
+      stream.off('error', failed);
+      stream.off('end', ended);
+      ffmpegProcess?.off?.('error', failed);
+      ffmpegProcess?.off?.('exit', exited);
+    };
+    const ready = () => {
+      cleanup();
+      resolve();
+    };
+    const failed = error => {
+      cleanup();
+      reject(error);
+    };
+    const ended = () => failed(new Error('FFmpeg ended before producing audio'));
+    const exited = code => {
+      if (stream.readableLength === 0) failed(new Error(`FFmpeg exited before producing audio (${code ?? 'unknown'})`));
+    };
+    stream.once('readable', ready);
+    stream.once('error', failed);
+    stream.once('end', ended);
+    ffmpegProcess?.once?.('error', failed);
+    ffmpegProcess?.once?.('exit', exited);
+    timer = setTimeout(() => failed(new Error('Timed out preparing the next track')), timeoutMs);
+    timer.unref?.();
+  });
+}
+
 // ── JukeLoopSession ───────────────────────────────────────────────────────────
 
 export class JukeLoopSession {
@@ -349,7 +381,8 @@ export class JukeLoopSession {
    * @param {import('discord.js').Client}            opts.client        - Discord client (for re-fetching CDN URLs)
     * @param {() => void} [opts.onTerminalDisconnect] - Called after Discord voice recovery fails
    */
-    constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback, schedule, livePerformanceEvents }) {
+    constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback,
+      schedule, livePerformanceEvents, audioPlayer, createStream }) {
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
@@ -368,11 +401,17 @@ export class JukeLoopSession {
     this._started = false;
     this._currentPaid = null;
     this._djukeCooldownUntil = 0;
+    this._createStream = createStream || createFFmpegStream;
 
     this._destroyed   = false;
     this._ffmpeg      = null;
+    this._preparedNext = null;
+    this._prepareTask = null;
+    this._paidPollTimer = null;
+    this._transitionTask = null;
+    this._preparationEpoch = 0;
     this.connection   = null;
-    this.player       = createAudioPlayer();
+    this.player       = audioPlayer || createAudioPlayer();
 
     /** Shuffled queue for the current loop pass */
     this._queue      = [];
@@ -390,15 +429,15 @@ export class JukeLoopSession {
     this.player.on('stateChange', (oldState, newState) => {
       if (
         newState.status === AudioPlayerStatus.Playing &&
-        oldState.status === AudioPlayerStatus.Buffering &&
         this._nowPlaying && !this._nowPlaying.audible
       ) {
         this._nowPlaying.startedAt = Date.now();
         this._nowPlaying.audible = true;
+        this._primeNext();
       }
     });
 
-    this.player.on(AudioPlayerStatus.Idle, async () => {
+    this.player.on(AudioPlayerStatus.Idle, () => {
       if (this._nowPlaying?.audible) {
         const endedAt = Date.now();
         this._completedPlay = {
@@ -413,20 +452,18 @@ export class JukeLoopSession {
         if (this._currentDevertAd) this._musicSinceAd = 0;
         else if (this._completedPlay.audibleMs >= 30_000) this._musicSinceAd++;
         if (this.devertPlayback) {
-          try {
-            if (this._currentDevertAd) {
-              await this.devertPlayback.recordCampaignImpression({ campaignId: this._currentDevertAd.campaignId,
+          const durableRecord = this._currentDevertAd
+            ? this.devertPlayback.recordCampaignImpression({ campaignId: this._currentDevertAd.campaignId,
                 radioPlayId: this._nowPlaying.playId, mainRadio: this._currentDevertAd.mainRadio,
+                audibleMs: this._completedPlay.audibleMs })
+            : this.devertPlayback.recordCompletedMusicPlay({ playId: this._nowPlaying.playId,
                 audibleMs: this._completedPlay.audibleMs });
-            } else {
-              await this.devertPlayback.recordCompletedMusicPlay({ playId: this._nowPlaying.playId,
-                audibleMs: this._completedPlay.audibleMs });
-            }
-          } catch (error) {
-            console.warn('[devert] Durable play record deferred:', error.message);
-          }
+          Promise.resolve(durableRecord)
+            .catch(error => console.warn('[devert] Durable play record deferred:', error.message));
         }
       }
+      this._collectReactions()
+        .catch(error => console.warn('[jukeloop] Previous-track bookkeeping deferred:', error.message));
       this._currentDevertAd = null;
       this._nowPlaying = null;
       const activeShow = resolveActiveShow({
@@ -435,11 +472,9 @@ export class JukeLoopSession {
         livePerformanceEvents: this.livePerformanceEvents,
       });
       if (!this._destroyed && activeShow.type !== 'live_performance') {
-        setTimeout(() => {
-          this._playNext().catch((err) =>
-            console.error('[jukeloop] Unhandled error in _playNext:', err),
-          );
-        }, BETWEEN_TRACK_DELAY_MS);
+        this._playNext().catch((err) =>
+          console.error('[jukeloop] Unhandled error in _playNext:', err),
+        );
       }
     });
 
@@ -459,9 +494,9 @@ export class JukeLoopSession {
         this._ffmpeg = null;
       }
       if (!this._destroyed) {
-        setTimeout(() => {
-          this._playNext().catch(() => {});
-        }, BETWEEN_TRACK_DELAY_MS);
+        this._collectReactions().catch(() => {});
+        this._nowPlaying = null;
+        this._playNext().catch(() => {});
       }
     });
   }
@@ -549,6 +584,9 @@ export class JukeLoopSession {
     }
 
     if (showKey !== this._activeShowKey) {
+      this._preparationEpoch++;
+      this._disposePrepared(this._preparedNext, 'Scheduled radio mode changed');
+      this._preparedNext = null;
       const previousShowKey = this._activeShowKey;
       this._activeShowKey = showKey;
       if (show.type === 'weekly_top10' && !previousShowKey?.startsWith('weekly_top10:')) {
@@ -624,18 +662,8 @@ export class JukeLoopSession {
     }
   }
 
-  async _playNext() {
-    // Kill any lingering FFmpeg process
-    if (this._ffmpeg) {
-      try { this._ffmpeg.kill(); } catch {}
-      this._ffmpeg = null;
-    }
-
-    if (this._destroyed) return;
-
-    // Collect ratings from the previous track's announcement
-    await this._collectReactions();
-
+  async _prepareNextPlayback(forcedPaid = null) {
+    if (this._destroyed) return null;
     const activeShow = resolveActiveShow({
       now: Date.now(),
       schedule: this.schedule,
@@ -644,15 +672,12 @@ export class JukeLoopSession {
     if (activeShow.type === 'live_performance') return;
 
     // Paid DJuke requests jump ahead without consuming the free rotation slot.
-    let paid = null;
-    if (this.djuke && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
-      paid = await this.djuke.nextPaid().catch((err) => {
-        console.warn('[jukeloop] DJuke queue unavailable:', err.message);
+    let paid = forcedPaid;
+    if (!paid && this.djuke && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
+      paid = await this.djuke.nextPaid();
+      if (this._destroyed && paid) {
+        await this.djuke.fail(paid.record, new Error('Radio stopped')).catch(() => {});
         return null;
-      });
-      if (this._destroyed) {
-        if (paid) await this.djuke.fail(paid.record, new Error('Radio stopped')).catch(() => {});
-        return;
       }
     }
 
@@ -676,21 +701,12 @@ export class JukeLoopSession {
           flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] },
         })
         .catch(() => {});
-      setTimeout(() => {
-        if (!this._destroyed) this._playNext().catch(() => {});
-      }, EMPTY_PLAYLIST_RETRY_MS);
-      return;
+      return null;
     }
 
     const track = paid ? paid.track : devertAd ? devertAd.track : this._queue[this._queueIndex];
-    if (!paid && !devertAd) this._queueIndex++;
-    this._currentPaid     = paid?.record || null;
-    this._currentDevertAd = devertAd;
-    this._currentTrack    = track;
-    this._announcementMsg = null;
-    this._announcementContext = null;
+    const queueIndex = !paid && !devertAd ? this._queueIndex : null;
 
-    // Resolve a fresh CDN URL
     const url = await this._getFreshUrl(track);
     if (!url) {
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
@@ -700,10 +716,12 @@ export class JukeLoopSession {
           flags: MessageFlags.SuppressNotifications,
         })
         .catch(() => {});
-      await this._releasePaid('Paid recording could not be fetched');
-      this._currentTrack = null;
-      await this._playNext();
-      return;
+      if (paid && this.djuke) {
+        await this.djuke.fail(paid.record, new Error('Paid recording could not be fetched')).catch(() => {});
+        throw new Error(`Paid recording "${track.title}" could not be fetched`);
+      }
+      if (queueIndex !== null) this._queueIndex++;
+      return this._prepareNextPlayback();
     }
 
     const showAfterMediaLookup = resolveActiveShow({
@@ -712,73 +730,205 @@ export class JukeLoopSession {
       livePerformanceEvents: this.livePerformanceEvents,
     });
     if (showAfterMediaLookup.type === 'live_performance') {
-      this._currentTrack = null;
-      this._currentDevertAd = null;
-      if (paid) await this._releasePaid('Live performance block began before playback');
-      else this._queueIndex = Math.max(0, this._queueIndex - 1);
-      return;
+      if (paid && this.djuke) await this.djuke.fail(paid.record, new Error('Live performance block began before playback')).catch(() => {});
+      return null;
     }
 
     try {
-      const { stream, ffmpegProcess } = createFFmpegStream(url, { ad: !!devertAd });
-      this._ffmpeg = ffmpegProcess;
-
-      const resource = createAudioResource(stream, { inputType: StreamType.Raw });
-      this.player.play(resource);
-      this._nowPlaying = {
-        // Fixed at play start; startedAt is refined once audio flows, which must not look like a new song.
-        playId: `${track.trackId}:${Date.now()}`,
-        trackId: track.trackId,
-        title: track.title,
-        uploader: track.uploader,
-        filename: track.filename || null,
-        mediaType: mediaTypeFor(track.filename, track.mediaType),
-        ipfsCid: track.ipfsCid || null,
-        isDevert: !!devertAd,
-        firstWeekBonus: track.firstWeekBonus === true,
-        startedAt: Date.now(),
-        audible: false,
-      };
-
-      // Announce the track and add reaction buttons
-      const totalTracks = this._queue.length;
-      const announcementContext = {
-        playId: this._nowPlaying.playId,
-        queueIndex: this._queueIndex,
-        totalTracks,
-        url,
-        paid: !!this._currentPaid,
-      };
-      const message = devertAd
-        ? `📢 **Sponsored campaign:** ${track.title} · campaign #${devertAd.campaignId}`
-        : buildNowPlayingMessage(track, announcementContext);
-      const msg = await this.textChannel
-        .send({ content: message, flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
-        .catch(() => null);
-
-      if (msg && !devertAd) {
-        await msg.react('👍').catch(() => {});
-        await msg.react('👎').catch(() => {});
-        this._announcementMsg = msg;
-        this._announcementContext = announcementContext;
+      const { stream, ffmpegProcess } = this._createStream(url, { ad: !!devertAd });
+      await waitForAudioReady(stream, ffmpegProcess);
+      if (this._destroyed) {
+        try { ffmpegProcess.kill(); } catch {}
+        if (paid && this.djuke) await this.djuke.fail(paid.record, new Error('Radio stopped')).catch(() => {});
+        return null;
       }
-
-      console.log(`[jukeloop] Now playing: "${track.title}" by ${track.uploader}`);
+      const resource = createAudioResource(stream, { inputType: StreamType.Raw });
+      return { track, paid, devertAd, queueIndex, url, resource, ffmpegProcess };
     } catch (err) {
-      console.error('[jukeloop] Failed to start track:', err.message);
+      console.error('[jukeloop] Failed to prepare track:', err.message);
       if (devertAd) {
         this._failedDevertCampaignIds.add(devertAd.campaignId);
-        this._currentDevertAd = null;
       }
       await this.textChannel
         .send({ content: `⚠️ Skipping **${track.title}**: ${err.message}`, flags: MessageFlags.SuppressNotifications })
         .catch(() => {});
-      await this._releasePaid(err.message);
-      this._currentTrack    = null;
-      this._announcementMsg = null;
-      this._announcementContext = null;
-      await this._playNext();
+      if (paid && this.djuke) {
+        await this.djuke.fail(paid.record, err).catch(() => {});
+        throw err;
+      }
+      if (queueIndex !== null) this._queueIndex++;
+      return this._prepareNextPlayback();
     }
+  }
+
+  _disposePrepared(prepared, reason = 'Prepared playback discarded') {
+    if (!prepared) return;
+    try { prepared.ffmpegProcess?.kill(); } catch {}
+    if (prepared.paid?.record && this.djuke) {
+      this.djuke.fail(prepared.paid.record, new Error(reason))
+        .catch(error => console.warn('[jukeloop] Could not release prepared DJuke request:', error.message));
+    }
+  }
+
+  _schedulePaidPriorityCheck() {
+    clearTimeout(this._paidPollTimer);
+    this._paidPollTimer = null;
+    const activeShow = resolveActiveShow({
+      now: Date.now(),
+      schedule: this.schedule,
+      livePerformanceEvents: this.livePerformanceEvents,
+    });
+    if (!this.djuke || !this._preparedNext || this._preparedNext.paid ||
+      activeShow.type === 'weekly_top10' || activeShow.type === 'live_performance' ||
+      this.player.state.status !== AudioPlayerStatus.Playing) return;
+    this._paidPollTimer = setTimeout(() => {
+      this._paidPollTimer = null;
+      this._checkPreparedPaidPriority();
+    }, DJUKE_PREFETCH_POLL_MS);
+    this._paidPollTimer.unref?.();
+  }
+
+  _checkPreparedPaidPriority() {
+    if (this._destroyed || this._prepareTask || !this._preparedNext || this._preparedNext.paid) return;
+    const epoch = this._preparationEpoch;
+    const task = (async () => {
+      const paid = await this.djuke.nextPaid();
+      if (!paid) {
+        this._schedulePaidPriorityCheck();
+        return this._preparedNext;
+      }
+      const regular = this._preparedNext;
+      this._preparedNext = null;
+      this._disposePrepared(regular);
+      const prepared = await this._prepareNextPlayback(paid);
+      if (epoch !== this._preparationEpoch) {
+        this._disposePrepared(prepared, 'Scheduled radio mode changed');
+        return null;
+      }
+      this._preparedNext = prepared;
+      return prepared;
+    })().catch(error => {
+      console.warn('[jukeloop] DJuke priority check deferred:', error.message);
+      this._schedulePaidPriorityCheck();
+      return this._preparedNext;
+    }).finally(() => {
+      if (this._prepareTask === task) this._prepareTask = null;
+    });
+    this._prepareTask = task;
+  }
+
+  _primeNext() {
+    if (this._destroyed || this._preparedNext || this._prepareTask) return;
+    const epoch = this._preparationEpoch;
+    const task = this._prepareNextPlayback()
+      .then(prepared => {
+        if (this._destroyed || epoch !== this._preparationEpoch) {
+          this._disposePrepared(prepared, this._destroyed ? 'Radio stopped' : 'Scheduled radio mode changed');
+          return null;
+        }
+        this._preparedNext = prepared;
+        this._schedulePaidPriorityCheck();
+        return prepared;
+      })
+      .catch(error => {
+        console.warn('[jukeloop] Next track preparation deferred:', error.message);
+        if (!this._destroyed && this.player.state.status === AudioPlayerStatus.Playing) {
+          setTimeout(() => this._primeNext(), 1_000).unref?.();
+        }
+        return null;
+      })
+      .finally(() => {
+        if (this._prepareTask === task) this._prepareTask = null;
+      });
+    this._prepareTask = task;
+  }
+
+  async _announcePrepared(prepared, playId) {
+    const { track, devertAd, url } = prepared;
+    const announcementContext = {
+      playId,
+      queueIndex: this._queueIndex,
+      totalTracks: this._queue.length,
+      url,
+      paid: !!prepared.paid,
+    };
+    const message = devertAd
+      ? `📢 **Sponsored campaign:** ${track.title} · campaign #${devertAd.campaignId}`
+      : buildNowPlayingMessage(track, announcementContext);
+    const msg = await this.textChannel
+      .send({ content: message, flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
+      .catch(() => null);
+    if (!msg || devertAd || this._nowPlaying?.playId !== playId) return;
+    await msg.react('👍').catch(() => {});
+    await msg.react('👎').catch(() => {});
+    if (this._nowPlaying?.playId === playId) {
+      this._announcementMsg = msg;
+      this._announcementContext = announcementContext;
+    }
+  }
+
+  _startPrepared(prepared) {
+    if (!prepared || this._destroyed) return false;
+    if (this._ffmpeg && this._ffmpeg !== prepared.ffmpegProcess) {
+      try { this._ffmpeg.kill(); } catch {}
+    }
+    this._ffmpeg = prepared.ffmpegProcess;
+    this._currentPaid = prepared.paid?.record || null;
+    this._currentDevertAd = prepared.devertAd;
+    this._currentTrack = prepared.track;
+    this._announcementMsg = null;
+    this._announcementContext = null;
+    if (prepared.queueIndex !== null && prepared.queueIndex === this._queueIndex) this._queueIndex++;
+    const playId = `${prepared.track.trackId}:${Date.now()}`;
+    this._nowPlaying = {
+      playId,
+      trackId: prepared.track.trackId,
+      title: prepared.track.title,
+      uploader: prepared.track.uploader,
+      filename: prepared.track.filename || null,
+      mediaType: mediaTypeFor(prepared.track.filename, prepared.track.mediaType),
+      ipfsCid: prepared.track.ipfsCid || null,
+      isDevert: !!prepared.devertAd,
+      firstWeekBonus: prepared.track.firstWeekBonus === true,
+      startedAt: Date.now(),
+      audible: false,
+    };
+    this.player.play(prepared.resource);
+    this._announcePrepared(prepared, playId)
+      .catch(error => console.warn('[jukeloop] Now-playing announcement deferred:', error.message));
+    console.log(`[jukeloop] Now playing: "${prepared.track.title}" by ${prepared.track.uploader}`);
+    return true;
+  }
+
+  async _playNext() {
+    if (this._destroyed) return;
+    if (this._transitionTask) return this._transitionTask;
+    const transition = (async () => {
+      clearTimeout(this._paidPollTimer);
+      this._paidPollTimer = null;
+      let retryDelay = EMPTY_PLAYLIST_RETRY_MS;
+      try {
+        if (this._prepareTask) await this._prepareTask;
+        let prepared = this._preparedNext;
+        this._preparedNext = null;
+        if (!prepared) prepared = await this._prepareNextPlayback();
+        if (prepared) {
+          this._startPrepared(prepared);
+          return;
+        }
+      } catch (error) {
+        retryDelay = 1_000;
+        console.warn('[jukeloop] Next playback blocked:', error.message);
+      }
+      if (!this._destroyed) {
+        const retry = setTimeout(() => this._playNext().catch(() => {}), retryDelay);
+        retry.unref?.();
+      }
+    })().finally(() => {
+      if (this._transitionTask === transition) this._transitionTask = null;
+    });
+    this._transitionTask = transition;
+    return transition;
   }
 
   /**
@@ -852,6 +1002,10 @@ export class JukeLoopSession {
   /** Stop all playback and disconnect from the voice channel. */
   destroy() {
     this._destroyed = true;
+    clearTimeout(this._paidPollTimer);
+    this._paidPollTimer = null;
+    this._disposePrepared(this._preparedNext, 'Radio stopped');
+    this._preparedNext = null;
     if (this._scheduleWatcher) {
       clearInterval(this._scheduleWatcher);
       this._scheduleWatcher = null;
