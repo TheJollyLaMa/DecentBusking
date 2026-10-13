@@ -64,7 +64,8 @@ test('on-chain ad library recovers wallet-owned DecentAdvert NFTs from legacy me
     uri: async tokenId => `ipfs://metadata-${tokenId}`,
   } };
   const result = await readOwnedDevertAds({ collections: [collection], address: owner, pauseMs: 0,
-    metadataReader: async () => ({ name: 'DecentAdvert0001', videoUrl: `ipfs://${mediaCid}`, mediaType: 'video/mp4' }),
+    metadataReader: async () => ({ name: 'DecentAdvert0001', videoUrl: `ipfs://${mediaCid}`, mediaType: 'video/mp4',
+      image: 'ipfs://bafybeiadvert-artwork' }),
     log: { warn() {} } });
   const ads = result.ads;
   assert.equal(ads.length, 1);
@@ -73,6 +74,7 @@ test('on-chain ad library recovers wallet-owned DecentAdvert NFTs from legacy me
   assert.equal(ads[0].state, 'ready');
   assert.equal(ads[0].ipfsCid, mediaCid);
   assert.equal(ads[0].mediaType, 'video/mp4');
+  assert.equal(ads[0].image, 'ipfs://bafybeiadvert-artwork');
 });
 
 test('wallet ad recovery checks newest owned tokens first', async () => {

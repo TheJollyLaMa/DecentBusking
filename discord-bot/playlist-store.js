@@ -631,6 +631,8 @@ export function getDevertAdsForWallet(address, campaigns = [], now = Date.now())
         trackId: track.trackId,
         title: track.title,
         ipfsCid: track.ipfsCid,
+        image: track.artworkCid || '',
+        artworkCid: track.artworkCid || '',
         mediaType: track.mediaType || 'audio/mpeg',
         filename: track.filename || '',
         mintStatus: minted ? 'minted' : 'pending',
