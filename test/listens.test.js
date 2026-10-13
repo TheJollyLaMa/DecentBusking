@@ -70,6 +70,41 @@ test('switching songs during a preview cancels the old gate', async () => {
   assert.equal(gates.length, 0);
 });
 
+test('a paid single-view play replaces the preview with an uninterrupted full listen', async () => {
+  const api = await load();
+  const media = { currentTime: 0, pause() { this.paused = true; }, play: async () => {} };
+  let session = null;
+  const plays = [];
+  const gates = [];
+  const controller = api.createListenController({ getLive: async () => ({ songIdForCid: () => songId }),
+    play: song => { session = song.sessionId; plays.push(song); }, freePlay: () => {}, getSession: () => session,
+    getMedia: () => media, onPreviewEnded: gate => gates.push(gate), pollMs: 5 });
+  assert.equal(await controller.playSong({ title: 'Song', audioUrl: 'ipfs://a' }), 'preview');
+  controller.playPurchased([{ title: 'Song', audioUrl: 'ipfs://a', songId }]);
+  media.currentTime = 45;
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(gates.length, 0);
+  assert.equal(media.paused, undefined);
+  assert.equal(plays.length, 2);
+  assert.equal(controller.endPreview(), false, 'closing the card keeps a purchased listen playing');
+});
+
+test('closing the single view ends only an active preview', async () => {
+  const api = await load();
+  const media = { currentTime: 0, pause() {}, play: async () => {} };
+  let session = null;
+  const gates = [];
+  const controller = api.createListenController({ getLive: async () => ({ songIdForCid: () => songId }),
+    play: song => { session = song.sessionId; }, freePlay: () => {}, getSession: () => session,
+    getMedia: () => media, onPreviewEnded: gate => gates.push(gate), pollMs: 5 });
+  await controller.playSong({ title: 'Song', audioUrl: 'ipfs://a' });
+  assert.equal(controller.endPreview(), true);
+  media.currentTime = 45;
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(gates.length, 0);
+  assert.equal(controller.endPreview(), false);
+});
+
 test('purchased playlists play straight through without preview gates', async () => {
   const api = await load();
   const plays = [];

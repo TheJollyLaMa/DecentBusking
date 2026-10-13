@@ -17,6 +17,23 @@ function _notifyRadioSourceMode() {
   if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('radio-source-mode-change', { detail: _mode }));
 }
 
+// Mute state for archive listens (previews and purchased plays), separate from the radio mute.
+let _archiveMuted = false;
+
+function _notifyArchiveMute() {
+  if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('dbusk-archive-mute', { detail: { muted: _archiveMuted } }));
+}
+
+export function setArchiveMuted(muted) {
+  _archiveMuted = Boolean(muted);
+  _applyRadioVolume();
+  _notifyArchiveMute();
+}
+
+export function archiveMuted() {
+  return _archiveMuted;
+}
+
 function _renderVideo() {
   const videoActive = _videoPlayer && _audio === _videoPlayer;
   if (_videoStage) _videoStage.hidden = !videoActive || _videoHidden;
@@ -57,7 +74,7 @@ let _muteBtn, _volumeInput, _volumeDial;
 
 function _applyRadioVolume() {
   if (!_audio) return;
-  _audio.muted = _mode !== 'archive' && _radioMuted;
+  _audio.muted = _mode === 'archive' ? _archiveMuted : _radioMuted;
   _audio.volume = _fadeLevel * (_mode === 'archive' ? 1 : _radioVolume);
 }
 
@@ -278,6 +295,7 @@ export function playArchiveTrack({ title, artist, audioUrl, mediaType, sessionId
   _clearTakeover();
   _burst = _takeoverQueue.length > 1;
   _mode = 'archive';
+  if (_archiveMuted) setArchiveMuted(false);
   _notifyRadioSourceMode();
   _renderVoting();
   _loadedPlayId = null;
@@ -518,7 +536,15 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
   if (at > 0 && !await _prepareRadioSeek(offset, token)) return;
 
   try {
-    await _audio.play();
+    try {
+      await _audio.play();
+    } catch (error) {
+      // Browsers may block audible autoplay; start archive previews muted so the
+      // listener can unmute from the NFT card instead of losing the preview.
+      if (_mode !== 'archive' || _archiveMuted || error?.name !== 'NotAllowedError' || token !== _switchToken) throw error;
+      setArchiveMuted(true);
+      await _audio.play();
+    }
     _blocked = false;
     _playBtn?.classList.add('hidden');
   } catch {

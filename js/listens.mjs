@@ -74,13 +74,20 @@ export function createListenPlaylist(storage = globalThis.localStorage, key = 'd
 export function createListenController({ getLive, play, freePlay, getSession, getMedia, onPreviewEnded,
   previewSeconds = PREVIEW_SECONDS, pollMs = 500, newSessionId = () => crypto.randomUUID() }) {
   let watch = null;
+  let previewSession = null;
   const stopWatch = () => { clearInterval(watch); watch = null; };
+  function playFree(song) {
+    stopWatch();
+    previewSession = null;
+    freePlay(song);
+  }
   async function playSong(song) {
     const live = await getLive().catch(() => null);
     const songId = live?.songIdForCid(audioCid(song.audioUrl));
-    if (!songId) { stopWatch(); freePlay(song); return 'free'; }
+    if (!songId) { playFree(song); return 'free'; }
     const sessionId = newSessionId();
     stopWatch();
+    previewSession = sessionId;
     play({ ...song, sessionId });
     watch = setInterval(() => {
       if (getSession() !== sessionId) { stopWatch(); return; }
@@ -95,13 +102,21 @@ export function createListenController({ getLive, play, freePlay, getSession, ge
   }
   function playPurchased(items) {
     stopWatch();
+    previewSession = null;
     const start = index => {
       const sessionId = newSessionId();
       play({ ...items[index], sessionId, onEnded: () => (index + 1 < items.length ? (start(index + 1), true) : false) });
     };
     if (items.length) start(0);
   }
-  return { playSong, playPurchased, stop: stopWatch };
+  /** Cancels the current preview; returns true when a preview was still the active archive session. */
+  function endPreview() {
+    const active = previewSession !== null && getSession() === previewSession;
+    stopWatch();
+    previewSession = null;
+    return active;
+  }
+  return { playSong, playPurchased, playFree, endPreview, stop: stopWatch };
 }
 
 function nftSong(nft) {
@@ -157,6 +172,8 @@ export function initListens() {
     getSession: archiveSessionId,
     getMedia: archiveMedia,
     onPreviewEnded: ({ song, resume }) => {
+      // An open NFT card handles the end of its own preview with its Play button.
+      if (!document.dispatchEvent(new CustomEvent('dbusk-preview-ended', { cancelable: true, detail: { song } }))) return;
       pendingGate = { song, resume };
       gateText.textContent = supportsDjukeAlbumsAndGas(cfg.djukeContractVersion)
         ? `Personal listen for ${song.title}. The current creator price will be quoted before payment.`
@@ -226,8 +243,41 @@ export function initListens() {
   });
   document.addEventListener('dbusk-listen', event => {
     event.preventDefault();
-    controller.playSong(nftSong(event.detail.nft));
+    const song = nftSong(event.detail.nft);
+    controller.playSong(song).then(mode => {
+      document.dispatchEvent(new CustomEvent('dbusk-listen-started', { detail: { mode, song } }));
+    });
   });
+  // Single-view Play: pay for one full listen up front, then play from the start without a preview gate.
+  async function buyFullListen(song, status) {
+    if (busy) throw new Error('A payment is already in progress');
+    const live = await getLive().catch(() => null);
+    const songId = live?.songIdForCid(audioCid(song.audioUrl));
+    if (!songId) { controller.playFree(song); status('Playing the full track.'); return 'free'; }
+    busy = true;
+    renderPlaylist();
+    try {
+      status('Opening your wallet\u2026');
+      await purchaseListens({ ...(await ensureWallet()), songIds: [songId], onStep: status });
+      if (gate.open) gate.close();
+      pendingGate = null;
+      controller.playPurchased([{ ...song, songId }]);
+      status('Enjoy the full track!');
+      return 'purchased';
+    } finally { busy = false; renderPlaylist(); }
+  }
+  document.addEventListener('dbusk-buy-listen', event => {
+    event.preventDefault();
+    const status = event.detail.status || (() => {});
+    event.detail.result = buyFullListen(nftSong(event.detail.nft), status).catch(error => {
+      status(error.shortMessage || error.reason || error.message);
+      return 'failed';
+    });
+  });
+  document.addEventListener('dbusk-preview-close', () => {
+    if (controller.endPreview()) returnToRadio();
+  });
+  getLive().catch(() => {});
   document.addEventListener('dbusk-playlist-add', event => {
     event.preventDefault();
     addToPlaylist(nftSong(event.detail.nft), event.detail.status || (() => {}));

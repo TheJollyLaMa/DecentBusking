@@ -4,6 +4,43 @@
 
 import { fetchNFTMetaById } from './space.js?v=20261012-paging';
 
+// NFT currently shown in the single view; its preview auto-plays when the card opens.
+let _cardNft = null;
+
+function _cardAudioUrl(nft) {
+  return nft ? (nft.videoUrl || nft.audioUrl || nft.animation_url || '') : '';
+}
+
+function _renderMute(content, muted) {
+  const button = content?.querySelector('.nft-mute-btn');
+  if (!button) return;
+  const label = muted ? 'Unmute' : 'Mute';
+  button.setAttribute('aria-pressed', String(muted));
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.textContent = muted ? '🔇' : '🔊';
+}
+
+function _cardStatus(text) {
+  const el = document.getElementById('nft-panel-content')?.querySelector('.nft-listen-status');
+  if (el) el.textContent = text;
+}
+
+document.addEventListener?.('dbusk-archive-mute', (event) => {
+  if (_cardNft) _renderMute(document.getElementById('nft-panel-content'), event.detail.muted);
+});
+document.addEventListener?.('dbusk-listen-started', (event) => {
+  if (!_cardNft || event.detail.song.audioUrl !== _cardAudioUrl(_cardNft)) return;
+  _cardStatus(event.detail.mode === 'preview'
+    ? '🎧 Playing a 30-second preview. Press ▶ Play Full Track to buy one full listen.'
+    : '🎧 Playing the full track.');
+});
+document.addEventListener?.('dbusk-preview-ended', (event) => {
+  if (!_cardNft || event.detail.song.audioUrl !== _cardAudioUrl(_cardNft)) return;
+  event.preventDefault();
+  _cardStatus('Preview ended. Press ▶ Play Full Track to keep listening.');
+});
+
 // ── Public API ───────────────────────────────────────────────────────────
 export function renderNFTCard(nft) {
   const panel = document.getElementById('nft-panel');
@@ -28,6 +65,8 @@ export function renderNFTCard(nft) {
   panel.onclose = () => {
     panel.classList.add('hidden');
     content.querySelectorAll('audio').forEach((audio) => audio.pause());
+    _cardNft = null;
+    document.dispatchEvent?.(new CustomEvent('dbusk-preview-close', { detail: { nft } }));
   };
   panel.onclick = (event) => {
     const bounds = panel.getBoundingClientRect();
@@ -39,16 +78,36 @@ export function renderNFTCard(nft) {
   if (closeBtn) {
     closeBtn.onclick = () => panel.close();
   }
-  content.querySelector('.nft-listen-btn')?.addEventListener('click', async () => {
-    if (!document.dispatchEvent(new CustomEvent('dbusk-listen', { cancelable: true, detail: { nft } }))) {
-      if (nft.videoUrl || nft.mediaType === 'video/mp4') panel.close();
+  _cardNft = nft;
+  const listenStatus = text => {
+    const el = content.querySelector('.nft-listen-status');
+    if (el) el.textContent = text;
+  };
+  content.querySelector('.nft-listen-btn')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const isVideo = nft.videoUrl || nft.mediaType === 'video/mp4';
+    const purchase = new CustomEvent('dbusk-buy-listen', { cancelable: true, detail: { nft, status: listenStatus } });
+    if (!document.dispatchEvent(purchase)) {
+      button.disabled = true;
+      const result = await purchase.detail.result;
+      button.disabled = false;
+      if (result !== 'failed' && isVideo) panel.close();
       return;
     }
     const { setNowPlaying } = await import('./stage.js?v=20261012-paging');
     setNowPlaying({ title: nft.name || nft.title, artist: nft.artist || nft.creator,
       audioUrl: nft.videoUrl || nft.audioUrl || nft.animation_url, mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : '') });
-    if (nft.videoUrl || nft.mediaType === 'video/mp4') panel.close();
+    if (isVideo) panel.close();
   });
+
+  content.querySelector('.nft-mute-btn')?.addEventListener('click', async (event) => {
+    const muted = event.currentTarget.getAttribute('aria-pressed') !== 'true';
+    const { setArchiveMuted } = await import('./radio-sync.js?v=20261010-listens');
+    setArchiveMuted(muted);
+  });
+  import('./radio-sync.js?v=20261010-listens')
+    .then(({ archiveMuted }) => { if (_cardNft === nft) _renderMute(content, archiveMuted()); })
+    .catch(() => {});
 
   content.querySelector('.nft-playlist-btn')?.addEventListener('click', event => {
     const button = event.currentTarget;
@@ -124,7 +183,12 @@ function _buildCardHTML(nft) {
     ${/^https?:\/\//i.test(imageUrl) ? `<img class="nft-detail-image" src="${_esc(imageUrl)}" alt="Artwork for ${_esc(nft.name || nft.title || 'this NFT')}" />` : ''}
     <h3 id="nft-detail-title">${_esc(nft.name || nft.title || `Track #${nft.tokenId}`)}</h3>
 
-    ${audioUrl ? '<button class="nft-listen-btn nft-buy-btn" type="button">▶ Play Track</button><button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>' : ''}
+    ${audioUrl ? `<div class="nft-play-row">
+      <button class="nft-listen-btn nft-buy-btn" type="button" title="Pay with your wallet, then hear the whole track without interruption">▶ Play Full Track</button>
+      <button class="nft-mute-btn nft-buy-btn" type="button" aria-pressed="false" aria-label="Mute preview" title="Mute preview">🔊</button>
+    </div>
+    <p class="nft-listen-status" role="status" aria-live="polite"></p>
+    <button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>` : ''}
     ${/^0x[0-9a-fA-F]{40}$/.test(nft.artist || nft.creator || '') ? `<button class="nft-creator-profile nft-buy-btn" type="button" data-creator="${_esc(nft.artist || nft.creator)}" data-album="${_esc(nft.djukeAlbumId || '')}">Creator Profile / Collaborators</button>` : ''}
 
     ${parentSection}

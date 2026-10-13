@@ -440,6 +440,30 @@ decent-header {
   transform: translateY(-1px);
 }
 
+.nft-buy-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+  transform: none;
+}
+
+.nft-play-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.nft-play-row .nft-mute-btn {
+  width: auto;
+  min-width: 3rem;
+  flex: 0 0 auto;
+}
+
+.nft-listen-status {
+  min-height: 1.1em;
+  margin: 0.4rem 0;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
 /* ── NFT Parent / Remix section ──────────────────────────────────────────── */
 .nft-parent-section {
   margin-bottom: 0.75rem;
