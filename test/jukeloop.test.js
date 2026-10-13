@@ -386,10 +386,14 @@ test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages
   });
   assert.match(message, /All-time:\*\* 👍 12 · 👎 3 · ▶️ 8/);
   assert.match(message, /React 👍 to boost it/);
-  assert.match(message, /Track ID: \|\|attachment-1\|\|/);
+  assert.match(message, /Track `attachment-1`/);
+  assert.doesNotMatch(message, /\|\|/);
   assert.deepEqual(parseNowPlayingMessage(
-    '🎵 Now playing: **Track** by *artist* (1/10)\nTrack ID: ||attachment-1||',
+    '🎵 Now playing: **Track** by *artist* (1/10)\nTrack `attachment-1`',
   ), { title: 'Track', uploader: 'artist', trackId: 'attachment-1' });
+  assert.deepEqual(parseNowPlayingMessage(
+    '🎵 Now playing: **Track** by *artist* (1/10)\nTrack ID: ||attachment-1||\nPlay ID: ||play-1||',
+  ), { title: 'Track', uploader: 'artist', trackId: 'attachment-1', playId: 'play-1' });
   assert.deepEqual(parseNowPlayingMessage(
     '🎵 Now playing: **Legacy Track** by *legacy_artist* (1/10) — rate this track!',
   ), { title: 'Legacy Track', uploader: 'legacy_artist', trackId: null });
@@ -468,6 +472,8 @@ test('Discord and site votes update one track ledger without bot votes or duplic
   store.loadPlaylist([{ trackId: 'track', title: 'Song', uploader: 'Artist', uploaderId: 'artist', messageId: 'upload',
     mintRecipient: '0x1111111111111111111111111111111111111111', likes: 0, dislikes: 0, plays: 0 }]);
   const content = buildNowPlayingMessage(store.getPlaylist()[0], { queueIndex: 1, totalTracks: 1, playId: 'play-1', votingOpen: false });
+  assert.match(content, /Track `track` · Play `play-1`/);
+  assert.doesNotMatch(content, /\|\|/);
   assert.equal(parseNowPlayingMessage(content).playId, 'play-1');
   const reactions = new Map([
     ['up', { emoji: { name: '👍' }, count: 2, me: true }],
