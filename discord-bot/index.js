@@ -877,7 +877,7 @@ async function main() {
         ownershipUnavailable: chainResult.ownershipUnavailable,
         scanPending };
     },
-    getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null },
+    getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null, voiceConnected: false },
     onDevertLoopVote: payload => _devertLoopWorker ? _devertLoopWorker.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),
     getRadioHistory: async ({ weeks, wallet, includeAllTime, calendar }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime, calendar }),
     getWeeklyPayflow: ({ wallet }) => payflow.getState({ wallet }),

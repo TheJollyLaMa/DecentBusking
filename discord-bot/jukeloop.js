@@ -32,6 +32,7 @@ import {
   entersState,
   StreamType,
 } from '@discordjs/voice';
+import { createVoiceConnectionSupervisor } from './voice-connection.js';
 import {
   loadPlaylist,
   addTrack,
@@ -412,6 +413,7 @@ export class JukeLoopSession {
     this._transitionTask = null;
     this._preparationEpoch = 0;
     this.connection   = null;
+    this._voiceConnection = null;
     this.player       = audioPlayer || createAudioPlayer();
 
     /** Shuffled queue for the current loop pass */
@@ -507,33 +509,19 @@ export class JukeLoopSession {
 
   /** Join the JukeLoop voice channel and subscribe the audio player to it. */
   async connect() {
-    this.connection = joinVoiceChannel({
-      channelId:      this.voiceChannel.id,
-      guildId:        this.voiceChannel.guild.id,
-      adapterCreator: this.voiceChannel.guild.voiceAdapterCreator,
+    this._voiceConnection = createVoiceConnectionSupervisor({
+      name: 'jukeloop',
+      voiceChannel: this.voiceChannel,
+      player: this.player,
+      joinVoiceChannel,
+      entersState,
+      VoiceConnectionStatus,
+      subscribe: connection => connection.subscribe(this.player),
+      onReady: async connection => { this.connection = connection; },
+      log: console,
     });
-    this.connection.on('error', error => {
-      console.error(`[jukeloop] Voice connection error in ${this.voiceChannel.name} (${this.voiceChannel.id}):`, error.message);
-    });
-
-    await entersState(this.connection, VoiceConnectionStatus.Ready, 30_000);
-    this.connection.subscribe(this.player);
-
-    this.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      try {
-        // Give Discord a moment to reconnect before giving up
-        await Promise.race([
-          entersState(this.connection, VoiceConnectionStatus.Signalling, 5_000),
-          entersState(this.connection, VoiceConnectionStatus.Connecting, 5_000),
-        ]);
-      } catch {
-        if (!this._destroyed) {
-          console.warn('[jukeloop] Voice reconnect timed out; scheduling a fresh session.');
-          this.destroy();
-          this.onTerminalDisconnect?.();
-        }
-      }
-    });
+    await this._voiceConnection.connect();
+    this.connection = this._voiceConnection.connection;
   }
 
   // ── Playback ────────────────────────────────────────────────────────────────
@@ -1031,10 +1019,8 @@ export class JukeLoopSession {
       try { this._ffmpeg.kill(); } catch {}
       this._ffmpeg = null;
     }
-    if (this.connection) {
-      try { this.connection.destroy(); } catch {}
-      this.connection = null;
-    }
+    this._voiceConnection?.stop();
+    this.connection = null;
     try { this.player.stop(true); } catch {}
   }
 }

@@ -194,9 +194,10 @@ export function initDevertTab() {
   function syncListenControls() {
     const adsOnly = previewPlayer.dataset.listenMode === 'ads-only';
     const canSwitch = canSetDevertListenMode();
+    const reconnecting = adLoopState?.voiceConnected === false && adLoopState?.ready !== false;
     audioModeButton.setAttribute('aria-pressed', String(adsOnly));
     audioModeButton.textContent = adsOnly ? 'Return to Main Radio' : 'Listen to VertLoop';
-    audioModeButton.disabled = !canSwitch || audioModeBusy || (!adsOnly && adLoopState?.ready !== true);
+    audioModeButton.disabled = !canSwitch || audioModeBusy || (!adsOnly && (reconnecting || adLoopState?.ready !== true));
     const playId = normalizeAdLoopNowPlaying(adLoopState)?.playId;
     previewPlayer.hidden = !adsOnly || !playId;
     for (const button of adVoteButtons) {
@@ -244,6 +245,11 @@ export function initDevertTab() {
 
   function syncAdLoopAudio(state) {
     if (previewPlayer.dataset.listenMode !== 'ads-only') return;
+    if (state?.voiceConnected === false && state?.ready !== false) {
+      if (adLoopPlayId) stopAdLoopMirror('VertLoop reconnecting…');
+      else listenStatus.textContent = 'VertLoop reconnecting…';
+      return;
+    }
     const item = normalizeAdLoopNowPlaying(state);
     if (!item) {
       if (adLoopPlayId) stopAdLoopMirror('Between ads');
@@ -281,7 +287,7 @@ export function initDevertTab() {
 
   async function readAdLoopState() {
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
-    if (!service) return { ready: false, nowPlaying: null };
+    if (!service) return { ready: false, nowPlaying: null, voiceConnected: false };
     const response = await fetch(`${service}/api/devert/loop`, { cache: 'no-store', signal: AbortSignal.timeout(12_000) });
     if (!response.ok) throw new Error(`AdLoop state unavailable (${response.status})`);
     return response.json();
@@ -294,7 +300,7 @@ export function initDevertTab() {
       syncAdLoopAudio(adLoopState);
       syncListenControls();
     } catch (error) {
-      adLoopState = { ready: false, nowPlaying: null };
+      adLoopState = { ready: false, nowPlaying: null, voiceConnected: false };
       if (previewPlayer.dataset.listenMode === 'ads-only') stopAdLoopMirror(`${error.message}; retrying.`);
       syncListenControls();
     }

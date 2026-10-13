@@ -27,6 +27,16 @@ test('VertLoop uses a separate voice registry without replacing DBusker connecti
   }
   const context = vm.createContext({ Client: MockClient, Events: { ClientReady: 'ready', Error: 'error' },
     GatewayIntentBits: {}, joinVoiceChannel, entersState: async () => {}, VoiceConnectionStatus: {},
+    createVoiceConnectionSupervisor: options => {
+      const connection = options.joinVoiceChannel(options.joinOptions());
+      options.subscribe?.(connection);
+      return {
+        connection,
+        connect: async () => { await options.onReady?.(connection, { reconnected: false, elapsedMs: 0 }); },
+        stop() { connection.destroy(); },
+        getState: () => ({ voiceConnected: true, reconnecting: false }),
+      };
+    },
     createAudioPlayer,
     createDevertLoopController: () => ({ start: async () => {}, stop() {}, getState: () => ({ ready: true }) }),
     console });
