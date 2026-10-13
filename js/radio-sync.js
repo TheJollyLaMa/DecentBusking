@@ -532,6 +532,8 @@ function _gatewayUrl(cid) {
 async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = () => 0 }) {
   const token = ++_switchToken;
   _setTrack(title, artist);
+  const at = offset();
+  let canSeekImmediately = false;
 
   _audio.pause();
   _fadeLevel = 0;
@@ -562,9 +564,7 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     _setActivity('⚠️ Couldn’t load this track from IPFS — waiting for the next one');
     return;
   }
-
-  const at = offset();
-  if (at > 0 && !await _prepareRadioSeek(offset, token)) return;
+  if (at > 0) canSeekImmediately = _seekTo(at);
 
   try {
     try {
@@ -584,9 +584,19 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     return;
   }
   if (token !== _switchToken) return;
-  if (at > 0 && !await _prepareRadioSeek(offset, token)) {
-    if (token === _switchToken) _audio.pause();
-    return;
+  if (at > 0) {
+    const seek = _prepareRadioSeek(offset, token);
+    if (canSeekImmediately) {
+      if (!await seek && token === _switchToken) {
+        _setActivity('📻 Playing while the audio gateway catches up with this track');
+      }
+    } else {
+      seek.then((synced) => {
+        if (!synced && token === _switchToken) {
+          _setActivity('📻 Playing while the audio gateway catches up with this track');
+        }
+      }).catch(() => {});
+    }
   }
   if (_fadeNextRadioSwitch) {
     _fadeNextRadioSwitch = false;
@@ -693,7 +703,6 @@ function _stopAudio() {
 async function _unlock() {
   _fadeLevel = 1;
   _applyRadioVolume();
-  if (_mode === 'radio' && _radio && !await _prepareRadioSeek(_radioPositionS, _switchToken)) return;
   try {
     await _audio.play();
   } catch (err) {
@@ -702,9 +711,21 @@ async function _unlock() {
   }
   _blocked = false;
   _playBtn?.classList.add('hidden');
-  if (_mode === 'radio' && _radio && !await _prepareRadioSeek(_radioPositionS, _switchToken)) {
-    _audio.pause();
-    return;
+  if (_mode === 'radio' && _radio) {
+    const target = _radioPositionS();
+    if (target > 0) {
+      const canSeekImmediately = _seekTo(target);
+      const seek = _prepareRadioSeek(_radioPositionS, _switchToken);
+      if (canSeekImmediately) {
+        if (!await seek) {
+          _setActivity('📻 Playing while the audio gateway catches up with this track');
+        }
+      } else {
+        seek.then((synced) => {
+          if (!synced) _setActivity('📻 Playing while the audio gateway catches up with this track');
+        }).catch(() => {});
+      }
+    }
   }
 }
 
