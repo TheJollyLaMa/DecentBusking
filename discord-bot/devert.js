@@ -81,7 +81,7 @@ function normalizeCampaign(campaignId, raw, weekId) {
   }
   const offerUnits = BigInt(raw.offerUnits);
   const paidUnits = BigInt(raw.paidUnits);
-  if (offerUnits < 5_000_000n || paidUnits < 5_000_000n) throw new Error('Invalid DeVert campaign payment');
+  if (offerUnits < 1_000_000n || paidUnits < 1_000_000n) throw new Error('Invalid DeVert campaign payment');
   return {
     campaignId: BigInt(campaignId).toString(),
     advertiser: raw.advertiser,
@@ -104,7 +104,7 @@ function normalizeMarket(raw) {
   const seated = asSafeNumber(raw.seated, 'seated campaign count');
   const lowest = BigInt(raw.lowestSeatedOfferUnits);
   const mainRadioImpressions = asSafeNumber(raw.mainRadioImpressions ?? 0, 'main-radio impression count');
-  if (seated > slots || mainRadioImpressions > slots || (seated > 0 && lowest < 5_000_000n)) {
+  if (seated > slots || mainRadioImpressions > slots || (seated > 0 && lowest < 1_000_000n)) {
     throw new Error('Invalid DeVert market snapshot');
   }
   return { slots, seated, lowestSeatedOfferUnits: lowest.toString(), mainRadioImpressions };

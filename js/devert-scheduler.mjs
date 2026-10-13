@@ -1,9 +1,9 @@
 const USDC = 1_000_000n;
-export const DEVERT_MINIMUM_WEEKLY_PRICE = 5n * USDC;
+export const DEVERT_MINIMUM_WEEKLY_PRICE = 1n * USDC;
 export const DEVERT_MINIMUM_BID_INCREMENT = 10_000n;
 export const DEVERT_CAMPAIGN_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 export const DEVERT_SONGS_PER_MAIN_AD = 10;
-export const DEVERT_MAX_AD_SECONDS = 150;
+export const DEVERT_MAX_AD_SECONDS = 60;
 export const DEVERT_MAX_WEEKLY_CAMPAIGNS = 1000;
 
 export function buildDevertAdsAuthorizationMessage({ address, origin, issuedAt }) {
