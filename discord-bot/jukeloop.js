@@ -145,6 +145,7 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
 
 export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true, playId, paid = false }) {
   const listenLink = track.ipfsCid && /\/ipfs\//.test(url || '') ? `\n[Open IPFS audio](${url})` : '';
+  const idLine = `\nTrack \`${track.trackId}\`` + (playId ? ` · Play \`${playId}\`` : '');
   const votingLine = votingOpen
     ? 'React 👍 to boost it or 👎 to send it lower in the rotation.'
     : 'This play has finished. Your 👍 / 👎 reactions still update the master tally.';
@@ -153,8 +154,7 @@ export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, vo
     `(${queueIndex}/${totalTracks})\n` +
     (paid ? '💸 **DJuke paid request**\n' : '') +
     `**All-time:** 👍 ${track.likes ?? 0} · 👎 ${track.dislikes ?? 0} · ▶️ ${track.plays ?? 0}\n` +
-    `Track ID: ||${track.trackId}||\n` +
-    (playId ? `Play ID: ||${playId}||\n` : '') +
+    `${idLine}\n` +
     `${votingLine}${listenLink}`
   );
 }
@@ -162,8 +162,8 @@ export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, vo
 export function parseNowPlayingMessage(content) {
   const match = content.match(/^🎵 Now playing: \*\*(.+?)\*\* by \*(.+?)\*/);
   if (!match) return null;
-  const trackId = content.match(/Track ID: \|\|(.+?)\|\|/)?.[1] || null;
-  const playId = content.match(/Play ID: \|\|(.+?)\|\|/)?.[1];
+  const trackId = content.match(/Track(?: ID)?:? (?:\|\||`)(.+?)(?:\|\||`)/)?.[1] || null;
+  const playId = content.match(/Play(?: ID)?:? (?:\|\||`)(.+?)(?:\|\||`)/)?.[1];
   return { title: match[1], uploader: match[2], trackId, ...(playId ? { playId } : {}) };
 }
 
