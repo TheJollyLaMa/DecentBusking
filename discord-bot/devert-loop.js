@@ -3,6 +3,7 @@ import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
 import { AudioPlayerStatus, createAudioPlayer, createAudioResource, entersState,
   joinVoiceChannel, StreamType, VoiceConnectionStatus } from '@discordjs/voice';
 import { resolveStreamableIpfsUrl } from './jukeloop.js';
+import { createVoiceConnectionSupervisor } from './voice-connection.js';
 import { DEVERT_MAX_AD_SECONDS } from '../js/devert-scheduler.mjs';
 
 const MIN_AUDIBLE_MS = 30_000;
@@ -138,7 +139,8 @@ export async function startDevertLoopWorker({ token, voiceChannelId, textChannel
     GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions,
     ...(onAdMessage ? [GatewayIntentBits.MessageContent] : [])] });
   let controller = null;
-  let connection = null;
+  let voice = null;
+  let controllerStarted = false;
   let readyError;
   let resolveReady;
   let rejectReady;
@@ -148,15 +150,28 @@ export async function startDevertLoopWorker({ token, voiceChannelId, textChannel
       const voiceChannel = await readyClient.channels.fetch(voiceChannelId);
       const textChannel = textChannelId ? await readyClient.channels.fetch(textChannelId).catch(() => null) : null;
       if (!voiceChannel?.isVoiceBased()) throw new Error('VERTLOOP_VOICE_CHANNEL_ID must refer to a voice channel');
-      connection = joinVoiceChannel({ channelId: voiceChannel.id, guildId: voiceChannel.guild.id,
-        adapterCreator: voiceChannel.guild.voiceAdapterCreator, group: `devert:${readyClient.user.id}` });
-      connection.on('error', error => log.warn(`[devert-loop] Voice connection error in ${voiceChannel.name} (${voiceChannel.id}):`, error.message));
-      await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
       const player = createAudioPlayer();
-      connection.subscribe(player);
+      voice = createVoiceConnectionSupervisor({
+        name: 'devert-loop',
+        voiceChannel,
+        player,
+        joinVoiceChannel,
+        entersState,
+        VoiceConnectionStatus,
+        joinOptions: () => ({ channelId: voiceChannel.id, guildId: voiceChannel.guild.id,
+          adapterCreator: voiceChannel.guild.voiceAdapterCreator, group: `devert:${readyClient.user.id}` }),
+        subscribe: connection => connection.subscribe(player),
+        onReady: async () => {
+          if (controller && !controllerStarted) {
+            controllerStarted = true;
+            await controller.start();
+          }
+        },
+        log,
+      });
       controller = createDevertLoopController({ player, playback, voiceChannel, textChannel, log });
       player.on('error', error => log.warn('[devert-loop] Discord audio player:', error.message));
-      await controller.start();
+      await voice.connect();
       log.log(`[devert-loop] Logged in as ${readyClient.user.tag}; joined ${voiceChannel.name}.`);
       resolveReady();
     } catch (error) {
@@ -176,10 +191,13 @@ export async function startDevertLoopWorker({ token, voiceChannelId, textChannel
       .catch(error => log.warn('[devert-loop] Vote rejected:', error.message));
   });
   try { await client.login(token); await ready; }
-  catch (error) { controller?.stop(); connection?.destroy(); client.destroy(); throw readyError || error; }
+  catch (error) { controller?.stop(); voice?.stop(); client.destroy(); throw readyError || error; }
   return {
-    getState: () => controller?.getState() || { ready: false, nowPlaying: null },
+    getState: () => {
+      const base = controller?.getState() || { ready: false, nowPlaying: null };
+      return { ...base, ...(voice?.getState() || {}) };
+    },
     submitVote: payload => controller ? controller.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),
-    stop() { controller?.stop(); connection?.destroy(); client.destroy(); },
+    stop() { controller?.stop(); voice?.stop(); client.destroy(); },
   };
 }

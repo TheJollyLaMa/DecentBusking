@@ -317,7 +317,7 @@ export function createWorkerRequestHandler({
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/devert/loop') {
-        if (!getDevertLoopState) { sendJson(response, 200, { ready: false, nowPlaying: null }, '*'); return; }
+        if (!getDevertLoopState) { sendJson(response, 200, { ready: false, nowPlaying: null, voiceConnected: false }, '*'); return; }
         sendJson(response, 200, await getDevertLoopState(), '*');
         return;
       }
