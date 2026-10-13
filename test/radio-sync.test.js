@@ -143,6 +143,56 @@ test('radio keeps the current song playing until it ends before starting the nex
   assert.equal(vm.runInContext('started[0].offset()', context), 0);
 });
 
+test('radio sync broadcasts now-playing details for the 3D stage when a new song starts', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
+    .replace(/export /g, '');
+  const events = [];
+  const document = new EventTarget();
+  document.addEventListener('dbusk-now-playing', (event) => events.push(event.detail));
+  const audio = {
+    paused: true,
+    ended: false,
+    readyState: 4,
+    volume: 1,
+    muted: false,
+    pause() { this.paused = true; },
+    removeAttribute() {},
+    querySelectorAll: () => [],
+    appendChild() {},
+    load() {},
+  };
+  const context = vm.createContext({
+    performance,
+    setTimeout,
+    clearTimeout,
+    console,
+    audio,
+    document,
+    CustomEvent,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } },
+  });
+  vm.runInContext(`${source}\n_audio = audio; _mode = 'radio'; _radio = {
+    playId: 'play-42',
+    trackId: 'track-42',
+    title: 'Signal Fire',
+    uploader: 'Synth Artist',
+    ipfsCid: 'bafy-fire',
+    filename: 'signal-fire.mp3',
+    receivedAt: performance.now(),
+    positionMs: 0,
+  }; _switchTo = () => {}; _syncRadio();`, context);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].source, 'radio');
+  assert.equal(events[0].playId, 'play-42');
+  assert.equal(events[0].trackId, 'track-42');
+  assert.equal(events[0].title, 'Signal Fire');
+  assert.equal(events[0].artist, 'Synth Artist');
+  assert.equal(events[0].audioUrl, 'https://gateway.example/ipfs/bafy-fire');
+  assert.equal(events[0].mediaType, 'audio/mpeg');
+  assert.equal(events[0].ipfsCid, 'bafy-fire');
+  assert.equal(events[0].nft, null);
+});
+
 test('site votes post only the current play and anonymous browser ID, with no wallet', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
   const context = vm.createContext({ AbortSignal, console });
