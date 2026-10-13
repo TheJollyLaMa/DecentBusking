@@ -254,6 +254,9 @@ export function initListens() {
     const live = await getLive().catch(() => null);
     const songId = live?.songIdForCid(audioCid(song.audioUrl));
     if (!songId) { controller.playFree(song); status('Playing the full track.'); return 'free'; }
+    // Cancel the active archive preview before opening the wallet so the user is not
+    // left with a half-complete 30-second preview while waiting for a transaction.
+    controller.endPreview();
     busy = true;
     renderPlaylist();
     try {

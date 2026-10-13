@@ -794,6 +794,17 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 .devert-heading p { margin: 3px 0 0; color: #c7b98f; font-size: .72rem; }
 #devert-close, #devert-refresh { display: grid; place-items: center; width: 32px; height: 32px; padding: 4px; color: #f6efdd; background: #302714; border: 1px solid #806532; border-radius: 4px; cursor: pointer; }
 .devert-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.devert-price-display { display: grid; justify-items: center; gap: 4px; padding: 10px; margin-bottom: 10px; background: #0c0a06; border: 1px solid #735b2c; border-radius: 4px; }
+.devert-price-display span { color: #c7b98f; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; }
+#devert-price { max-width: 100%; overflow-wrap: anywhere; color: #f5cf66; font-family: var(--font-display); font-size: 1.8rem; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.devert-search-label { display: block; margin-top: 10px; margin-bottom: 4px; color: #dfd3b3; font-size: .72rem; }
+#devert-search { box-sizing: border-box; width: 100%; min-width: 0; min-height: 36px; padding: 7px 9px; color: #f6efdd; background: #17140d; border: 1px solid #806532; border-radius: 4px; font: inherit; font-size: .76rem; }
+#devert-search:focus-visible { outline: 2px solid #f5cf66; outline-offset: 2px; }
+#devert-search-results { padding: 0; margin: 6px 0 0; list-style: none; max-height: 140px; overflow-y: auto; }
+#devert-search-results li { display: grid; gap: 3px; padding: 6px 4px; border-bottom: 1px solid #3d3219; font-size: .72rem; }
+#devert-search-results strong { color: #fff4d0; }
+#devert-search-results span { color: #c7b98f; font-size: .66rem; }
+#devert-search-state { margin: 4px 0 8px; color: #c7b98f; font-size: .68rem; line-height: 1.4; }
 .devert-radio-state { padding: 10px; border-left: 2px solid #f5cf66; background: #241d10; }
 .devert-radio-state h3, .devert-campaign-heading h3 { margin: 0; color: #f5cf66; font-size: .82rem; }
 .devert-radio-state p, #devert-campaign-status, .devert-checkout-status { color: #c7b98f; font-size: .72rem; line-height: 1.45; }
@@ -828,12 +839,18 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 #devert-ad-queue:disabled { opacity: .5; cursor: not-allowed; }
 #devert-ad-artist { box-sizing: border-box; width: 100%; min-height: 36px; padding: 7px 9px; color: #f6efdd; background: #17140d; border: 1px solid #806532; border-radius: 4px; font: inherit; }
 #devert-purchase-status { color: #dfd3b3; font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
-#devert-purchase-form { display: grid; gap: 8px; margin: 10px 0; }
-#devert-purchase-form[hidden], #devert-connect-wallet[hidden] { display: none; }
-#devert-purchase-form label { display: grid; gap: 4px; color: #dfd3b3; font-size: .72rem; }
-#devert-purchase-form input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 38px; padding: 7px 9px; color: #f6efdd; background: #17140d; border: 1px solid #806532; border-radius: 4px; font: inherit; }
-#devert-purchase-status { color: #dfd3b3; font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
 #devert-panel button:focus-visible { outline-offset: 2px; }
+.devert-tiers, .devert-workflow-details { border-top: 1px solid #554522; padding-top: 10px; margin-top: 12px; font-size: .72rem; }
+.devert-tiers summary, .devert-workflow-details summary { cursor: pointer; color: #f5cf66; font-weight: 600; }
+.devert-tiers table { width: 100%; border-collapse: collapse; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.devert-tiers th, .devert-tiers td { padding: 6px 4px; text-align: left; border-bottom: 1px solid #3d3219; }
+.devert-tiers th { color: #dfd3b3; font-weight: 500; }
+.devert-tiers td:last-child, .devert-tiers th:last-child { text-align: right; }
+.devert-tiers tr.is-current { color: #f5cf66; background: #2f2512; }
+.devert-workflow { display: grid; gap: 8px; margin: 8px 0; padding-left: 0; list-style: none; counter-reset: workflow-step; }
+.devert-workflow li { display: grid; gap: 2px; padding: 6px 8px; border: 1px solid #44371b; border-radius: 4px; background: #1c170d; font-size: .72rem; }
+.devert-workflow li strong { color: #f5cf66; }
+.devert-workflow li span { color: #c7b98f; font-size: .68rem; line-height: 1.35; }
 .community-pin { margin-top: 12px; padding-top: 10px; border-top: 1px solid #425349; }
 .community-pin h3 { margin: 0 0 6px; font-size: .8rem; }
 .community-pin p { margin: 5px 0; color: #b6c6bb; font-size: .7rem; line-height: 1.4; }

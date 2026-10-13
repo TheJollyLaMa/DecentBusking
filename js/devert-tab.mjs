@@ -141,6 +141,11 @@ export function initDevertTab() {
   if (!panel || !toggle) return;
   const closeButton = document.getElementById('devert-close');
   const refreshButton = document.getElementById('devert-refresh');
+  const searchInput = document.getElementById('devert-search');
+  const searchResults = document.getElementById('devert-search-results');
+  const searchState = document.getElementById('devert-search-state');
+  const priceDisplay = document.getElementById('devert-price');
+  let currentAds = [];
   const campaignList = document.getElementById('devert-campaigns');
   const campaignStatus = document.getElementById('devert-campaign-status');
   const radioStatus = document.getElementById('devert-radio-status');
