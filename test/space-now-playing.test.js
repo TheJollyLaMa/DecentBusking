@@ -220,6 +220,7 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   assert.equal(entry.mesh.userData.pinnedVisible, true);
   assert.ok(entry.mesh.userData.nowPlayingGlow);
   assert.equal(vm.runInContext('_nowPlayingMesh === _allNFTs[0].mesh', context), true);
+  assert.equal(vm.runInContext('_allNFTs[0].mesh.material.depthTest', context), false);
 
   vm.runInContext(`_nowPlayingMedia = document.getElementById('audio-player');
     _nowPlayingAnalyser = {
@@ -237,6 +238,7 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingGlow.material.opacity > 0.18', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdge.material.opacity > 0', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdgeLayers.length >= 4', context));
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdgeLayers.every(layer => layer.material.depthTest === false)', context));
   const colors = vm.runInContext('Array.from(_allNFTs[0].mesh.userData.nowPlayingEdge.geometry.attributes.color.array)', context);
   assert.ok(new Set(colors.map((value) => value.toFixed(2))).size > 8);
   const neighbor = vm.runInContext(`_spawnMesh({
@@ -305,8 +307,9 @@ test('radio now-playing events resolve and load the matching NFT outside the vis
     nftArtistKey: (nft) => String(nft.artist || nft.creator || nft.uploader || 'Unknown artist').trim().toLowerCase(),
     setTimeout,
     clearTimeout,
-    fetchNftCatalogPage: async ({ query }) => {
-      queries.push(query);
+    fetchNftCatalogPage: async ({ query, offset }) => {
+      queries.push({ query, offset });
+      if (queries.length < 4) return { nfts: [], total: 1, nextOffset: offset + 25, artists: [] };
       return { nfts: [radioNft], total: 1, nextOffset: null, artists: [] };
     },
     THREE: makeThreeStubs(),
@@ -324,8 +327,9 @@ test('radio now-playing events resolve and load the matching NFT outside the vis
     mediaType: 'audio/mpeg',
   });`, context);
 
-  assert.ok(queries[0].includes('Moonlit Signal'));
-  assert.ok(queries[0].includes('Synth Artist'));
+  assert.ok(queries[0].query.includes('Moonlit Signal'));
+  assert.ok(queries[0].query.includes('Synth Artist'));
+  assert.ok(queries.length >= 4);
   assert.equal(vm.runInContext('_allNFTs.length', context), 1);
   const entry = vm.runInContext('_allNFTs[0]', context);
   assert.equal(entry.mesh.visible, true);

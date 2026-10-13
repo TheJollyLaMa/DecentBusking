@@ -149,7 +149,12 @@ function _applyNowPlaying(detail) {
   entry.mesh.userData.nowPlayingHueSeed = Math.random();
   _ensureNowPlayingGlow(entry.mesh);
   _ensureNowPlayingEdge(entry.mesh);
-  entry.mesh.renderOrder = 20;
+  if (entry.mesh.material) {
+    entry.mesh.material.depthTest = false;
+    entry.mesh.material.depthWrite = false;
+    entry.mesh.material.transparent = true;
+  }
+  entry.mesh.renderOrder = 100;
   entry.mesh.visible = true;
   if (wasMissing) _focusNowPlaying(entry.mesh);
   _updateVisibility();
@@ -201,14 +206,14 @@ async function _resolveNowPlayingNFT(detail) {
   if (!query) return null;
 
   let offset = 0;
-  for (let page = 0; page < 8; page += 1) {
+  for (let page = 0; page < 64; page += 1) {
     const result = await fetchNftCatalogPage({
       config: cfg,
       query,
       offset,
     }).catch(() => null);
-    if (!result?.nfts?.length) return null;
-    const match = result.nfts.find((nft) => _matchesNowPlaying(detail, nft));
+    if (!result) return null;
+    const match = Array.isArray(result.nfts) ? result.nfts.find((nft) => _matchesNowPlaying(detail, nft)) : null;
     if (match) return match;
     if (result.nextOffset === null) return null;
     offset = result.nextOffset;
@@ -308,7 +313,7 @@ function _buildControls() {
     // Enable panning so the user can slide the view along the Z timeline.
     _controls.enablePan = true;
     _controls.rotateSpeed = 1.35;
-    _controls.zoomSpeed = 1.6;
+    _controls.zoomSpeed = 0.85;
     _controls.panSpeed = 1.5;
     _controls.screenSpacePanning = true;
   }
@@ -686,6 +691,8 @@ function _bindTimelineNav() {
       const offset = _camera.position.clone().sub(_controls.target);
       if (action === 'left' || action === 'right') {
         offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), action === 'left' ? Math.PI / 12 : -Math.PI / 12);
+      } else if (action === 'up' || action === 'down') {
+        offset.addScaledVector(new THREE.Vector3(0, 1, 0), action === 'up' ? 1.8 : -1.8);
       } else if (action === 'in' || action === 'out') {
         offset.multiplyScalar(action === 'in' ? .8 : 1.25);
         offset.clampLength(_controls.minDistance, _controls.maxDistance);
@@ -1047,6 +1054,7 @@ function _ensureNowPlayingGlow(mesh) {
     opacity: 0.18,
     side: THREE.DoubleSide,
     depthWrite: false,
+    depthTest: false,
     blending: THREE.AdditiveBlending ?? undefined,
   });
   const glow = new THREE.Mesh(new THREE.CircleGeometry(2.65, 64), glowMaterial);
@@ -1074,14 +1082,15 @@ function _ensureNowPlayingEdge(mesh) {
     opacity: 0,
     vertexColors: true,
     depthWrite: false,
+    depthTest: false,
     blending: THREE.AdditiveBlending ?? undefined,
   });
   const LineCtor = THREE.LineLoop || THREE.Line;
   const specs = [
-    { scale: 1.18, opacity: 1, order: 24 },
-    { scale: 1.28, opacity: 0.42, order: 23 },
-    { scale: 1.40, opacity: 0.24, order: 22 },
-    { scale: 1.56, opacity: 0.12, order: 21 },
+    { scale: 1.28, opacity: 1, order: 24 },
+    { scale: 1.46, opacity: 0.56, order: 23 },
+    { scale: 1.68, opacity: 0.34, order: 22 },
+    { scale: 1.92, opacity: 0.18, order: 21 },
   ];
   const layers = specs.map((spec, index) => {
     const layer = new LineCtor(geometry, index === 0 ? material : new THREE.LineBasicMaterial({
@@ -1089,6 +1098,7 @@ function _ensureNowPlayingEdge(mesh) {
       opacity: 0,
       vertexColors: true,
       depthWrite: false,
+      depthTest: false,
       blending: THREE.AdditiveBlending ?? undefined,
     }));
     layer.position.set(0, 0, -0.06);
@@ -1164,7 +1174,7 @@ function _updateNowPlayingEdge(mesh, intensity = 0, dt = 16, settle = false, zoo
   const left = _nowPlayingLeftWaveData;
   const right = _nowPlayingRightWaveData;
   const baseRadius = 1.98;
-  const maxOffset = settle ? 0 : 0.34;
+  const maxOffset = settle ? 0 : 0.5;
   const hueSeed = ud.nowPlayingHueSeed ?? 0;
   const phase = (now / (2200 - zoomBoost * 900) + hueSeed) % 1;
   const brightness = Math.max(0.42, Math.min(0.72, 0.5 + zoomBoost * 0.16 + intensity * 0.12));
@@ -1247,7 +1257,7 @@ function _applyNowPlayingNeighborDimming(mesh, pulse = 0, zoomBoost = 0) {
     ud.baseRenderOrder ??= other.renderOrder || 0;
     const distance = center.distanceTo(other.position || center);
     const overlap = Math.max(0, 1 - distance / orbitRadius);
-    const targetOpacity = ud.baseOpacity * Math.max(0.08, 0.22 - overlap * 0.14);
+    const targetOpacity = ud.baseOpacity * Math.max(0.04, 0.12 - overlap * 0.06);
     other.material.opacity = targetOpacity;
     other.renderOrder = overlap > 0.03 ? -1 : ud.baseRenderOrder;
   }
