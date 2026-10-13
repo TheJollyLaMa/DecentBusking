@@ -83,8 +83,11 @@ test('DJuke payment refuses wrong networks, price increases and low balances bef
 test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
   const config = require('node:fs').readFileSync(require('node:path').join(__dirname, '../decent.config.js'), 'utf8');
-  for (const id of ['djuke-tab', 'djuke-panel', 'djuke-queue', 'djuke-price-tiers', 'djuke-connect', 'devert-tab', 'devert-panel']) {
+  for (const id of ['djuke-tab', 'djuke-panel', 'djuke-queue', 'djuke-price-tiers', 'devert-tab', 'devert-panel']) {
     assert.match(html, new RegExp(`id="${id}"`));
+  }
+  for (const id of ['djuke-connect', 'djuke-search-results', 'djuke-search-more', 'djuke-profile', 'djuke-playlist', 'community-pin-heading']) {
+    assert.doesNotMatch(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /class="djuke-tab-mark"/);
   assert.match(html, /class="djuke-note/);
@@ -98,6 +101,8 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   assert.match(html, /id="djuke-pay"[^>]*disabled/);
   assert.match(html, /id="djuke-panel"[^>]*inert/);
   assert.match(html, /id="devert-panel"[^>]*inert/);
+  assert.match(html, /<dt>IPFS pinning rewards<\/dt><dd>8%<\/dd>/);
+  assert.match(html, /<dt>Repo development fund<\/dt><dd>2%<\/dd>/);
   assert.match(config, /contractAddress: "0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3"/);
   assert.match(config, /additionalNftContractAddresses: \["0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B"\]/);
   assert.match(config, /djukeContractAddress: "0x5d07489163feBCdB39C9F579CCC36dff5A067FF9"/);
@@ -106,19 +111,22 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   for (const tab of ['top-ten', 'djuke', 'devert']) assert.match(html, new RegExp(`id="${tab}-tab"[^>]*aria-controls="${tab}-panel"`));
   assert.match(html, /class="djuke-tab-slot">⚸🎰🧞‍♂️/);
   assert.match(html, /class="djuke-tab-coin">🪙/);
+  const search = html.indexOf('id="djuke-search"');
+  const select = html.indexOf('id="djuke-song"');
+  const queue = html.indexOf('id="djuke-pay"');
+  const worker = html.indexOf('class="worker-gas-notice"');
+  assert.ok(search < select && select < queue && queue < worker);
 });
 
 test('worker funding remains available beside mint and paid queue controls', () => {
   const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
-  for (const [startId, controlId] of [['djuke-body', 'djuke-pay'], ['admin-mint-section', 'admin-mint-queue']]) {
-    const start = startId === 'djuke-body' ? html.indexOf('class="djuke-body"') : html.indexOf(`id="${startId}"`);
-    const control = html.indexOf(`id="${controlId}"`, start);
-    const notice = html.slice(start, control);
-    assert.match(notice, /class="worker-gas-notice"/);
-    assert.match(notice, /ETH/);
-    assert.match(notice, /0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F/);
-    assert.match(notice, /[Bb]alance is not checked here/);
-  }
+  const djukePay = html.indexOf('id="djuke-pay"');
+  const workerNotice = html.indexOf('class="worker-gas-notice"');
+  assert.ok(djukePay < workerNotice);
+  const notice = html.slice(workerNotice, html.indexOf('id="djuke-payment-state"', workerNotice));
+  assert.match(notice, /ETH/);
+  assert.match(notice, /0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F/);
+  assert.match(notice, /[Bb]alance is not checked here/);
   assert.match(html, /Mint gas comes from your wallet/);
   assert.doesNotMatch(html, /id="admin-reviewed-album-import"/);
   assert.match(html, /<details id="admin-radio-schedule"/);

@@ -184,6 +184,7 @@ export function initListens() {
   });
 
   function renderPlaylist() {
+    if (!playlistEl || !playlistTotal || !playlistBuy) return;
     const items = playlist.list();
     playlistEl.replaceChildren();
     for (const item of items) {
@@ -204,6 +205,10 @@ export function initListens() {
     playlistBuy.disabled = !items.length || busy;
   }
   async function addToPlaylist(song, status) {
+    if (!playlistEl || !playlistTotal || !playlistBuy) {
+      status('Playlists are no longer shown in the DJuke panel.');
+      return;
+    }
     const live = await getLive().catch(() => null);
     const songId = song.songId || live?.songIdForCid(audioCid(song.audioUrl));
     if (!songId) { status('Personal playlists open when DJuke payments are live.'); return; }
@@ -227,7 +232,7 @@ export function initListens() {
     if (pendingGate) addToPlaylist(pendingGate.song, text => { gateStatus.textContent = text; });
   });
   document.getElementById('listen-gate-radio').addEventListener('click', () => { gate.close(); pendingGate = null; returnToRadio(); });
-  playlistBuy.addEventListener('click', async () => {
+  playlistBuy?.addEventListener('click', async () => {
     const items = playlist.list();
     if (!items.length || busy) return;
     busy = true;
