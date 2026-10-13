@@ -141,8 +141,17 @@ export function initDjuke() {
     pay.disabled = !ready;
     pay.title = paymentsLive() ? 'Pay to queue the selected song' : 'DJuke payments are not live yet';
   };
-  const refreshGasQuote = async () => {
+  let gasQuoteKey = '';
+  const currentGasKey = () => `${window._wallet?.address?.toLowerCase() || ''}|${selectedSongId()}|${live?.priceUnits || ''}`;
+  const refreshGasQuote = async ({ force = false } = {}) => {
+    const key = currentGasKey();
+    // Reuse a matching quote (or one already loading) so queue polls and typing don't hammer the worker RPC.
+    if (force !== true && key === gasQuoteKey && (!gasQuote || gasQuote.deadline - 30 > Date.now() / 1000)) {
+      syncPayButton();
+      return;
+    }
     gasQuote = null;
+    gasQuoteKey = key;
     const check = ++gasGeneration;
     if (gasStatus) gasStatus.textContent = '';
     syncPayButton();
@@ -156,7 +165,12 @@ export function initDjuke() {
       if (check !== gasGeneration) return;
       gasQuote = result;
       if (gasStatus) gasStatus.textContent = `Worker gas: ${ethers.formatEther(result.contributionWei)} ETH on Base (2x estimate), plus your transaction gas`;
-    } catch (error) { if (check === gasGeneration && gasStatus) gasStatus.textContent = error.message; }
+    } catch (error) {
+      if (check !== gasGeneration) return;
+      gasQuoteKey = '';
+      if (gasStatus) gasStatus.textContent = /request limit|rate limit|too many/i.test(error.message)
+        ? 'Worker gas estimate is busy; retrying shortly' : error.message;
+    }
     syncPayButton();
   };
   const node = (tag, text, className) => {
@@ -296,6 +310,9 @@ export function initDjuke() {
       paymentStatus.textContent = error.shortMessage || error.reason || error.message;
     } finally {
       busy = false;
+      // Any payment attempt may consume the signed quote nonce; fetch a fresh one next time.
+      gasQuote = null;
+      gasQuoteKey = '';
       syncPayButton();
       refresh();
     }
@@ -310,7 +327,7 @@ export function initDjuke() {
     const songId = selectedSongId();
     if (!paymentsLive() || !songId || !live?.priceUnits) return;
     if (supportsDjukeAlbumsAndGas(window.DecentConfig?.djukeContractVersion) && (!gasQuote || gasQuote.deadline <= Date.now() / 1000)) {
-      refreshGasQuote();
+      refreshGasQuote({ force: true });
       return;
     }
     runPayment(() => payForDjukeSong({ ...contracts(), songId, maxPriceUnits: BigInt(live.priceUnits), gasQuote,
