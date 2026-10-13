@@ -71,7 +71,7 @@
   <aside id="devert-panel" aria-label="DVert advertising" aria-hidden="true" inert>
     <div class="devert-heading"><div><h2>DVert</h2><p>Ad studio · Base</p></div><button id="devert-close" type="button" aria-label="Close DVert" title="Close DVert">✕</button></div>
     <div class="devert-body">
-      <div class="devert-price-display"><span>Queuing an Ad</span><strong id="devert-price">5.00</strong><span>USDC · 7 Days</span></div>
+      <div class="devert-price-display"><span>Queuing an Ad</span><strong id="devert-price">1.00</strong><span>USDC · 7 Days</span></div>
 
       <label class="devert-search-label" for="devert-search">Ads &amp; Creators</label>
       <input id="devert-search" type="search" aria-label="Search ads and creators" placeholder="Search ads or creators" />
@@ -101,15 +101,15 @@
         <h3>Submit Ad</h3>
         <label>Ad title<input id="devert-title" type="text" maxlength="120" required /></label>
         <label>Audio or MP4<input id="devert-ad-file" type="file" accept="audio/*,video/mp4" /></label>
-        <p class="devert-file-limit">Up to 250 MB · 2½ minutes</p>
+        <p class="devert-file-limit">Up to 250 MB · 1 minute</p>
         <label>Creator name<input id="devert-ad-artist" type="text" maxlength="80" /></label>
         <button id="devert-ad-queue" type="button" disabled>Submit for Review</button>
         <p id="devert-ad-queue-status" class="devert-checkout-status" role="status" aria-live="polite"></p>
         <details class="devert-run-campaign"><summary>Run Campaign</summary>
           <p class="devert-checkout-status">Once your approved NFT arrives, purchase its campaign using the media URI.</p>
           <label>Ad NFT’s media URI<input id="devert-audio-uri" type="text" inputmode="url" placeholder="ipfs://..." required /></label>
-          <div class="devert-payment-fields"><label>Offer · USDC<input id="devert-offer" type="number" min="5" step="0.01" value="5.00" required /></label><label>Payment cap · USDC<input id="devert-max-payment" type="number" min="5" step="0.01" value="5.00" required /></label></div>
-          <p class="devert-checkout-status">7 days · from 5 USDC + ETH worker funding and network gas</p>
+          <div class="devert-payment-fields"><label>Offer · USDC<input id="devert-offer" type="number" min="1" step="0.01" value="1.00" required /></label><label>Payment cap · USDC<input id="devert-max-payment" type="number" min="1" step="0.01" value="1.00" required /></label></div>
+          <p class="devert-checkout-status">7 days · from 1 USDC + ETH worker funding and network gas</p>
           <button id="devert-purchase" type="submit" disabled>Purchase Campaign</button>
         </details>
       </form>
@@ -120,7 +120,7 @@
         <table>
           <thead><tr><th scope="col">Campaign Type</th><th scope="col">Rate</th></tr></thead>
           <tbody id="devert-price-tiers">
-            <tr class="is-current"><td>Weekly Ad Campaign</td><td>5.00 USDC / wk</td></tr>
+            <tr class="is-current"><td>Weekly Ad Campaign</td><td>1.00 USDC / wk</td></tr>
             <tr><td>Main Radio Rotation</td><td>1 ad every 10 songs</td></tr>
             <tr><td>Priority Queue Bump</td><td>+0.01 USDC bid</td></tr>
             <tr><td>24/7 VertLoop</td><td>Included (continuous)</td></tr>

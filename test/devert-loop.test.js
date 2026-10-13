@@ -99,16 +99,16 @@ test('AdLoop exposes the live play and records only completed audible non-main i
   controller.stop();
 });
 
-test('VertLoop FFmpeg caps an ad output at 150 seconds', () => {
+test('VertLoop FFmpeg caps an ad output at 60 seconds', () => {
   const fs = require('node:fs');
   const vm = require('node:vm');
   const source = fs.readFileSync(require('node:path').join(__dirname, '../discord-bot/devert-loop.js'), 'utf8');
   let argumentsUsed;
-  const context = vm.createContext({ FFMPEG_BIN: 'ffmpeg', DEVERT_MAX_AD_SECONDS: 150,
+  const context = vm.createContext({ FFMPEG_BIN: 'ffmpeg', DEVERT_MAX_AD_SECONDS: 60,
     spawn: (_binary, args) => { argumentsUsed = args; return { on() {} }; } });
   vm.runInContext(source.slice(source.indexOf('function createStream('), source.indexOf('export function createDevertLoopController')), context);
   context.createStream('https://media.example/ad.mp4');
-  assert.equal(argumentsUsed[argumentsUsed.indexOf('-t') + 1], '150');
+  assert.equal(argumentsUsed[argumentsUsed.indexOf('-t') + 1], '60');
 });
 
 test('AdLoop retries unstreamable campaigns without reporting an impression', async () => {

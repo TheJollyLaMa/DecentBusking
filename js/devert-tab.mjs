@@ -106,8 +106,8 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   if (usdc.target.toLowerCase() !== DEVERT_USDC_ADDRESS.toLowerCase() || Number(await usdc.decimals()) !== 6) {
     throw new Error('Configured token is not native Base USDC');
   }
-  if (typeof offerUnits !== 'bigint' || typeof maxPaymentUnits !== 'bigint' || offerUnits < 5_000_000n || offerUnits > maxPaymentUnits) {
-    throw new Error('Offer must be at least 5 USDC and no greater than your maximum');
+  if (typeof offerUnits !== 'bigint' || typeof maxPaymentUnits !== 'bigint' || offerUnits < 1_000_000n || offerUnits > maxPaymentUnits) {
+    throw new Error('Offer must be at least 1 USDC and no greater than your maximum');
   }
   const campaignTitle = String(title || '').trim();
   const mediaUri = String(audioURI || '').trim();

@@ -85,7 +85,7 @@ The second bot uses its own voice connection group, so it cannot reuse DBusker's
 connection or redirect the music player into VertLoop. Both text channels retain
 playback logs without push notification pings.
 
-VertLoop ads have a 150-second playback ceiling, including the soundtrack of MP4
+VertLoop ads have a 60-second playback ceiling, including the soundtrack of MP4
 ads. Main-radio ads have the same ceiling; ordinary songs are not truncated.
 DBusker waits for ten qualifying audible music plays between ad selections,
 subject to the current show and on-chain campaign-slot eligibility. VertLoop's

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const OFFER = 5_000_000n;
+const OFFER = 1_000_000n;
 const FEE_CAP = 2_000_000_000n;
 const ADVERTISER = '0x1111111111111111111111111111111111111111';
 const CONTRACT_ADDRESS = '0x2222222222222222222222222222222222222222';
