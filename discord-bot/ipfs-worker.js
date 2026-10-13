@@ -2,7 +2,6 @@ import { Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
 import { catalogPage } from '../js/nft-loader.js';
-import { buildDevertAdsAuthorizationMessage } from '../js/devert-scheduler.mjs';
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 const SIGNED_UPLOAD_OVERHEAD_BYTES = 64 * 1024;
@@ -212,7 +211,7 @@ export function createWorkerRequestHandler({
       if (request.method === 'OPTIONS') {
         response.writeHead(corsOrigin ? 204 : 403, {
           ...(corsOrigin ? { 'access-control-allow-origin': corsOrigin, vary: 'origin' } : {}),
-          'access-control-allow-methods': 'POST, OPTIONS',
+          'access-control-allow-methods': 'GET, POST, OPTIONS',
           'access-control-allow-headers': 'content-type',
         });
         response.end();
@@ -307,18 +306,14 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, await getDevertState(), '*');
         return;
       }
-      if (request.method === 'POST' && requestUrl.pathname === '/api/devert/ads') {
-        if (!corsOrigin) throw new Error('Origin is not allowed');
+      if ((request.method === 'GET' || request.method === 'POST') && requestUrl.pathname === '/api/devert/ads') {
         if (!getDevertAds) { sendJson(response, 404, { error: 'Advert library is not configured' }, '*'); return; }
-        const { address, issuedAt, signature } = await readJson(request);
-        if (!/^0x[0-9a-fA-F]{40}$/.test(address || '') || typeof signature !== 'string') throw new Error('Invalid ad library authorization');
-        const issuedAtMs = Date.parse(issuedAt);
-        if (!Number.isFinite(issuedAtMs) || Math.abs(now() - issuedAtMs) > MAX_SIGNATURE_AGE_MS) throw new Error('Ad library authorization expired; refresh and retry');
-        if (verifyMessage(buildDevertAdsAuthorizationMessage({ address, origin, issuedAt }), signature).toLowerCase() !== address.toLowerCase()) {
-          throw new Error('Ad library signature does not match the connected wallet');
-        }
+        const body = request.method === 'POST' ? await readJson(request) : {};
+        const address = (requestUrl.searchParams.get('wallet') || requestUrl.searchParams.get('address') ||
+          body.wallet || body.address || '').toString();
+        if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error('Invalid wallet address');
         const library = await getDevertAds({ address });
-        sendJson(response, 200, Array.isArray(library) ? { ads: library } : library, corsOrigin);
+        sendJson(response, 200, Array.isArray(library) ? { ads: library } : library, request.method === 'GET' ? '*' : corsOrigin);
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/devert/loop') {

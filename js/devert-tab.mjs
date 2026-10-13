@@ -2,29 +2,17 @@ import { canSetDevertListenMode, setDevertListenMode } from './radio-sync.js?v=2
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { submitMediaForApproval } from './mint-submission.js';
-import { buildDevertAdsAuthorizationMessage } from './devert-scheduler.mjs';
 
 const MAX_DEVERT_MEDIA_BYTES = 250 * 1024 * 1024;
-let devertAdsAuthorization = null;
 
-async function readWalletAds(service, wallet) {
-  if (!wallet?.address || !wallet?.signer) throw new Error('Connect your wallet to view your ads.');
-  const key = `${service}:${wallet.address.toLowerCase()}:${window.location.origin}`;
-  if (!devertAdsAuthorization || devertAdsAuthorization.key !== key ||
-      devertAdsAuthorization.signer !== wallet.signer || devertAdsAuthorization.expiresAt <= Date.now()) {
-    const issuedAt = new Date().toISOString();
-    const authorization = { address: wallet.address, origin: window.location.origin, issuedAt };
-    const signature = await wallet.signer.signMessage(buildDevertAdsAuthorizationMessage(authorization));
-    devertAdsAuthorization = { key, signer: wallet.signer, authorization, signature,
-      expiresAt: Date.now() + 4 * 60_000 };
-  }
-  const response = await fetch(`${service}/api/devert/ads`, { method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ...devertAdsAuthorization.authorization, signature: devertAdsAuthorization.signature }),
-    cache: 'no-store', signal: AbortSignal.timeout(12_000) });
+async function readWalletAds(service, address) {
+  if (!address) throw new Error('Connect your wallet to view your ads.');
+  const response = await fetch(`${service}/api/devert/ads?wallet=${encodeURIComponent(address)}`, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(12_000),
+  });
   const result = await response.json();
   if (!response.ok) {
-    devertAdsAuthorization = null;
     throw new Error(result.error || `Ad library unavailable (${response.status})`);
   }
   return { ads: Array.isArray(result.ads) ? result.ads : [], metadataUnavailable: Number(result.metadataUnavailable || 0),
@@ -562,7 +550,7 @@ export function initDevertTab() {
       let ownershipUnavailable = 0;
       let scanPending = false;
       if (walletAddress) {
-        const library = await readWalletAds(service, window._wallet);
+        const library = await readWalletAds(service, walletAddress);
         if (request !== generation || !isOpen()) return;
         ads = library.ads;
         metadataUnavailable = library.metadataUnavailable;
@@ -614,7 +602,7 @@ export function initDevertTab() {
       radioStatus.textContent = 'Main-radio ad scheduling is not live yet.';
       syncCheckout();
     }
-    if (isOpen()) refreshTimer = setTimeout(refresh, scanPending ? 10_000 : 30_000);
+    if (isOpen()) refreshTimer = setTimeout(refresh, scanPending ? 3_000 : 30_000);
   }
 
   async function checkAdLoopReady() {
@@ -652,7 +640,6 @@ export function initDevertTab() {
   document.addEventListener('wallet-connected', syncCheckout);
   document.addEventListener('wallet-connected', refresh);
   document.addEventListener('wallet-disconnected', () => {
-    devertAdsAuthorization = null;
     currentAds = [];
     adLibraryStatus = 'Connect your wallet to browse ads.';
     renderAdLibrary();
