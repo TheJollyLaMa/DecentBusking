@@ -54,7 +54,8 @@ test('DeVert rejects malformed campaigns and campaign terms longer than one week
 test('advertiser checkout quotes on Base, prices campaigns by week, and approves only the exact USDC amount', async () => {
   const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
   const calls = [];
-  const signer = { provider: { getNetwork: async () => ({ chainId: 8453n }), getBlock: async () => ({ timestamp: 1234 }),
+  let currentChainId = 8453n;
+  const signer = { provider: { getNetwork: async () => ({ chainId: currentChainId }), getBlock: async () => ({ timestamp: 1234 }),
     getFeeData: async () => ({ gasPrice: 1_000_000_000n }), getBalance: async () => 1_000_000_000_000_000_000n },
     getAddress: async () => `0x${'11'.repeat(20)}` };
   const createCampaign = async (...args) => {
@@ -65,9 +66,10 @@ test('advertiser checkout quotes on Base, prices campaigns by week, and approves
   const contract = { target: `0x${'22'.repeat(20)}`, campaignWeek: async timestamp => { assert.equal(timestamp, 1234); return 8n; },
     quoteCampaign: async weekId => { assert.equal(weekId, 8n); return { minimumOfferUnits: 1_010_000n }; },
     quoteSchedulerGasTopUp: async gasPrice => 500_000n * gasPrice, createCampaign };
+  let currentAllowance = 0n;
   const usdc = { target: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: async () => 6,
-    balanceOf: async () => 10_000_000n, allowance: async () => 0n,
-    approve: async (target, amount) => { calls.push(['approve', target, amount]); return { wait: async () => ({ status: 1 }) }; } };
+    balanceOf: async () => 10_000_000n, allowance: async () => currentAllowance,
+    approve: async (target, amount) => { calls.push(['approve', target, amount]); currentAllowance = amount; return { wait: async () => ({ status: 1 }) }; } };
   const hash = await purchaseDevertCampaign({ signer, contract, usdc, title: 'Set announcement', audioURI: 'ipfs://bafy-audio',
     weeks: 1 });
   assert.equal(hash, '0xcampaign');
@@ -81,10 +83,21 @@ test('advertiser checkout quotes on Base, prices campaigns by week, and approves
 
 test('advertiser checkout refuses wrong chain and non-IPFS audio before token approval', async () => {
   const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
-  const signer = { provider: { getNetwork: async () => ({ chainId: 1n }) } };
+  let currentChainId = 1n;
+  const signer = { provider: { getNetwork: async () => ({ chainId: currentChainId }), getBlock: async () => ({ timestamp: 1234 }),
+    getFeeData: async () => ({ gasPrice: 1_000_000_000n }), getBalance: async () => 1_000_000_000_000_000_000n },
+    getAddress: async () => `0x${'11'.repeat(20)}` };
   const contract = { target: `0x${'22'.repeat(20)}` };
-  const usdc = { target: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: async () => 6 };
-  await assert.rejects(purchaseDevertCampaign({ signer, contract, usdc, title: 'A', audioURI: 'ipfs://a', weeks: 1 }), /Base/);
-  signer.provider.getNetwork = async () => ({ chainId: 8453n });
-  await assert.rejects(purchaseDevertCampaign({ signer, contract, usdc, title: 'A', audioURI: 'https://example.invalid/ad.mp3', weeks: 1 }), /IPFS/);
+  let allowance = 0n;
+  const usdc = { target: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: async () => 6,
+    balanceOf: async () => 10_000_000n, allowance: async () => allowance,
+    approve: async () => ({ wait: async () => { allowance = 5_000_000n; return { status: 1 }; } }) };
+  const previousWindow = global.window;
+  global.window = { ethereum: { request: async ({ method }) => { if (method === 'wallet_switchEthereumChain') currentChainId = 8453n; } } };
+  try {
+    await assert.rejects(purchaseDevertCampaign({ signer, contract, usdc, title: 'A', audioURI: 'https://example.invalid/ad.mp3', weeks: 1 }), /IPFS/);
+    assert.equal(currentChainId, 8453n);
+  } finally {
+    global.window = previousWindow;
+  }
 });

@@ -46,8 +46,9 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
 
 function fixture({ nativeBalance = 1_000_000_000_000_000_000n, allowance = 0n } = {}) {
   const calls = { approvals: [], simulations: [], purchases: [], steps: [] };
+  let currentChainId = 8453n;
   const provider = {
-    getNetwork: async () => ({ chainId: 8453n }),
+    getNetwork: async () => ({ chainId: currentChainId }),
     getBlock: async () => ({ timestamp: 1_800_000_000 }),
     getFeeData: async () => ({ maxFeePerGas: FEE_CAP, maxPriorityFeePerGas: 50_000_000n, gasPrice: FEE_CAP }),
     getBalance: async () => nativeBalance,
@@ -77,7 +78,7 @@ function fixture({ nativeBalance = 1_000_000_000_000_000_000n, allowance = 0n } 
       return { wait: async () => ({ status: 1 }) };
     },
   };
-  return { signer, contract, usdc, calls };
+  return { signer, contract, usdc, calls, setChainId: chainId => { currentChainId = chainId; } };
 }
 
 test('DeVert purchase attaches the current worker-gas top-up and keeps USDC approval exact', async () => {
@@ -113,6 +114,39 @@ test('DeVert purchase uses the legacy gasPrice quote when maxFeePerGas is unavai
     weeks: 1 });
   assert.equal(state.calls.purchases[0][4].value, 500_000_000_000_000n);
   assert.equal(state.calls.purchases[0][4].gasPrice, 1_000_000_000n);
+});
+
+test('DeVert purchase switches the wallet to Base and waits for allowance confirmation before creating the campaign', async () => {
+  const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
+  const state = fixture();
+  state.setChainId(1n);
+  let allowanceReads = 0;
+  let allowance = 0n;
+  state.usdc.allowance = async () => {
+    allowanceReads++;
+    return allowanceReads >= 3 ? allowance : 0n;
+  };
+  state.usdc.approve = async (spender, amount) => {
+    state.calls.approvals.push(amount);
+    allowance = amount;
+    return { wait: async () => ({ status: 1 }) };
+  };
+  const requests = [];
+  const previousWindow = global.window;
+  global.window = { ethereum: { request: async ({ method, params }) => {
+    requests.push([method, params]);
+    if (method === 'wallet_switchEthereumChain') state.setChainId(8453n);
+  } } };
+  try {
+    const hash = await purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio', weeks: 1 });
+    assert.equal(hash, '0xabc');
+    assert.equal(requests[0][0], 'wallet_switchEthereumChain');
+    assert.equal(allowanceReads >= 3, true);
+    assert.deepEqual(state.calls.approvals, [5_000_000n]);
+    assert.deepEqual(state.calls.simulations[0][4].value, 500_000n * FEE_CAP);
+  } finally {
+    global.window = previousWindow;
+  }
 });
 
 test('Ads Only mirrors only an audible live AdLoop state and its radio play position', async () => {

@@ -1,4 +1,5 @@
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
+import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 
 export function quoteDjuke(pendingCount) {
   if (!Number.isSafeInteger(pendingCount) || pendingCount < 0) throw new RangeError('Invalid pending queue count');
@@ -70,7 +71,7 @@ export const USDC_BROWSER_ABI = [
 ];
 
 export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUnits, gasQuote = null, onStep = () => {} }) {
-  if (Number((await signer.provider.getNetwork()).chainId) !== 8453) throw new Error('Switch your wallet to Base');
+  await ensureBaseNetwork(signer.provider);
   if (usdc.target.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase() || Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');
   if (!/^0x[0-9a-fA-F]{64}$/.test(songId || '')) throw new Error('Select a song');
   const address = await signer.getAddress();
@@ -92,13 +93,22 @@ export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUni
     if (await signer.provider.getBalance(address) < contribution) throw new Error('Insufficient Base ETH for worker gas contribution');
   }
   if (await usdc.allowance(address, djuke.target) < price) {
-    onStep(`Approve exactly ${formatDjukeUsdc(price)} USDC`);
+    onStep(`Approving exactly ${formatDjukeUsdc(price)} USDC`);
     if ((await (await usdc.approve(djuke.target, price)).wait())?.status !== 1) throw new Error('USDC approval did not confirm');
+    onStep('Confirming approval…');
+    await waitForAllowance(usdc, address, djuke.target, price);
   }
   const args = gasQuote ? [songId, maxPriceUnits, BigInt(gasQuote.fulfillmentCostWei), gasQuote.deadline, gasQuote.signature,
     { value: BigInt(gasQuote.contributionWei) }] : [songId, maxPriceUnits];
   const request = gasQuote ? djuke.requestPlayWithGas : djuke.requestPlay;
-  await request.staticCall(...args);
+  onStep('Creating request…');
+  await retryMissingRevertData(
+    () => request.staticCall(...args),
+    async () => {
+      onStep('Confirming approval…');
+      await waitForAllowance(usdc, address, djuke.target, price);
+    },
+  );
   onStep('Confirm your DJuke request');
   const transaction = await request(...args);
   onStep('Waiting for Base confirmation…');

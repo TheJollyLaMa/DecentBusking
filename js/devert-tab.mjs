@@ -2,6 +2,7 @@ import { canSetDevertListenMode, setDevertListenMode } from './radio-sync.js?v=2
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { submitMediaForApproval } from './mint-submission.js';
+import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 
 const MAX_DEVERT_MEDIA_BYTES = 250 * 1024 * 1024;
 
@@ -102,7 +103,7 @@ export const DEVERT_USDC_ABI = [
 export const DEVERT_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
 export async function purchaseDevertCampaign({ signer, contract, usdc, title, audioURI, weeks, onStep = () => {} }) {
-  if (Number((await signer.provider.getNetwork()).chainId) !== 8453) throw new Error('Switch your wallet to Base');
+  await ensureBaseNetwork(signer.provider);
   if (usdc.target.toLowerCase() !== DEVERT_USDC_ADDRESS.toLowerCase() || Number(await usdc.decimals()) !== 6) {
     throw new Error('Configured token is not native Base USDC');
   }
@@ -122,12 +123,21 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   if (await usdc.balanceOf(advertiser) < offerUnits) throw new Error('Insufficient Base USDC balance');
   let gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser);
   if (await usdc.allowance(advertiser, contract.target) < offerUnits) {
-    onStep(`Approve exactly ${formatUsdc(offerUnits.toString())}; estimated worker-gas top-up ${formatEth(gasQuote.amount)} plus transaction gas`);
+    onStep(`Approving exactly ${formatUsdc(offerUnits.toString())}; estimated worker-gas top-up ${formatEth(gasQuote.amount)} plus transaction gas`);
     const approval = await usdc.approve(contract.target, offerUnits);
     if ((await approval.wait())?.status !== 1) throw new Error('USDC approval did not confirm');
+    onStep('Confirming approval…');
+    await waitForAllowance(usdc, advertiser, contract.target, offerUnits);
   }
   gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser);
-  await contract.createCampaign.staticCall(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides);
+  onStep(`Creating campaign…`);
+  await retryMissingRevertData(
+    () => contract.createCampaign.staticCall(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides),
+    async () => {
+      onStep('Confirming approval…');
+      await waitForAllowance(usdc, advertiser, contract.target, offerUnits);
+    },
+  );
   onStep(`Confirm the ${weeks}-week campaign purchase: ${formatUsdc(offerUnits.toString())} plus ${formatEth(gasQuote.amount)} worker-gas top-up; transaction gas is separate`);
   const transaction = await contract.createCampaign(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides);
   onStep('Waiting for Base confirmation…');

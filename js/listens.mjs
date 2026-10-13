@@ -3,6 +3,7 @@
 import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261010-listens';
 import { setNowPlaying } from './stage.js?v=20261012-paging';
 import { supportsDjukeAlbumsAndGas } from './djuke-version.mjs';
+import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 
 export const LISTEN_PRICE_UNITS = 250000n;
 export const PREVIEW_SECONDS = 30;
@@ -27,7 +28,7 @@ export function audioCid(value) {
 }
 
 export async function purchaseListens({ signer, djuke, usdc, songIds, contractVersion = '0.1', onStep = () => {} }) {
-  if (Number((await signer.provider.getNetwork()).chainId) !== 8453) throw new Error('Switch your wallet to Base');
+  await ensureBaseNetwork(signer.provider);
   if (usdc.target.toLowerCase() !== BASE_USDC.toLowerCase() || Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');
   if (!Array.isArray(songIds) || !songIds.length || songIds.length > MAX_PLAYLIST || songIds.some(id => !/^0x[0-9a-fA-F]{64}$/.test(id))) {
     throw new Error(`Choose 1 to ${MAX_PLAYLIST} songs`);
@@ -38,10 +39,19 @@ export async function purchaseListens({ signer, djuke, usdc, songIds, contractVe
   const address = await signer.getAddress();
   if (await usdc.balanceOf(address) < total) throw new Error(`You need ${formatUsdc(total)} USDC on Base`);
   if (await usdc.allowance(address, djuke.target) < total) {
-    onStep(`Approve exactly ${formatUsdc(total)} USDC`);
+    onStep(`Approving exactly ${formatUsdc(total)} USDC`);
     if ((await (await usdc.approve(djuke.target, total)).wait())?.status !== 1) throw new Error('USDC approval did not confirm');
+    onStep('Confirming approval…');
+    await waitForAllowance(usdc, address, djuke.target, total);
   }
-  await djuke.purchaseListens.staticCall(songIds, total);
+  onStep('Creating request…');
+  await retryMissingRevertData(
+    () => djuke.purchaseListens.staticCall(songIds, total),
+    async () => {
+      onStep('Confirming approval…');
+      await waitForAllowance(usdc, address, djuke.target, total);
+    },
+  );
   onStep('Confirm your listen purchase');
   const transaction = await djuke.purchaseListens(songIds, total);
   onStep('Waiting for Base confirmation\u2026');
