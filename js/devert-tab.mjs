@@ -51,9 +51,9 @@ function formatUsdc(units) {
     const amount = BigInt(units);
     const whole = amount / 1_000_000n;
     const fraction = String(amount % 1_000_000n).padStart(6, '0').replace(/0+$/, '');
-    return `${whole}${fraction ? `.${fraction}` : ''} USDC offer`;
+    return `${whole}${fraction ? `.${fraction}` : ''} USDC`;
   } catch {
-    return 'Offer unavailable';
+    return 'USDC unavailable';
   }
 }
 
@@ -113,14 +113,14 @@ export const DEVERT_USDC_ABI = [
 ];
 export const DEVERT_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
-export async function purchaseDevertCampaign({ signer, contract, usdc, title, audioURI, offerUnits, maxPaymentUnits, onStep = () => {} }) {
+export async function purchaseDevertCampaign({ signer, contract, usdc, title, audioURI, weeks, onStep = () => {} }) {
   if (Number((await signer.provider.getNetwork()).chainId) !== 8453) throw new Error('Switch your wallet to Base');
   if (usdc.target.toLowerCase() !== DEVERT_USDC_ADDRESS.toLowerCase() || Number(await usdc.decimals()) !== 6) {
     throw new Error('Configured token is not native Base USDC');
   }
-  if (typeof offerUnits !== 'bigint' || typeof maxPaymentUnits !== 'bigint' || offerUnits < 1_000_000n || offerUnits > maxPaymentUnits) {
-    throw new Error('Offer must be at least 1 USDC and no greater than your maximum');
-  }
+  if (!Number.isSafeInteger(weeks) || weeks < 1) throw new Error('Choose at least one week');
+  const offerUnits = 5_000_000n * BigInt(weeks);
+  const maxPaymentUnits = offerUnits;
   const campaignTitle = String(title || '').trim();
   const mediaUri = String(audioURI || '').trim();
   if (!campaignTitle || campaignTitle.length > 160 || !mediaUri.startsWith('ipfs://') || mediaUri.length > 256) {
@@ -134,13 +134,13 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   if (await usdc.balanceOf(advertiser) < offerUnits) throw new Error('Insufficient Base USDC balance');
   let gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser);
   if (await usdc.allowance(advertiser, contract.target) < offerUnits) {
-    onStep(`Approve exactly ${formatUsdc(offerUnits.toString())}; estimated scheduler top-up ${formatEth(gasQuote.amount)} plus transaction gas`);
+    onStep(`Approve exactly ${formatUsdc(offerUnits.toString())}; estimated worker-gas top-up ${formatEth(gasQuote.amount)} plus transaction gas`);
     const approval = await usdc.approve(contract.target, offerUnits);
     if ((await approval.wait())?.status !== 1) throw new Error('USDC approval did not confirm');
   }
   gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser);
   await contract.createCampaign.staticCall(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides);
-  onStep(`Confirm the seven-day campaign purchase: ${formatUsdc(offerUnits.toString())} plus ${formatEth(gasQuote.amount)} scheduler top-up; transaction gas is separate`);
+  onStep(`Confirm the ${weeks}-week campaign purchase: ${formatUsdc(offerUnits.toString())} plus ${formatEth(gasQuote.amount)} worker-gas top-up; transaction gas is separate`);
   const transaction = await contract.createCampaign(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides);
   onStep('Waiting for Base confirmation…');
   if ((await transaction.wait())?.status !== 1) throw new Error('Campaign purchase did not confirm');
@@ -332,10 +332,15 @@ export function initDevertTab() {
     const wallet = window._wallet;
     const confirmedContract = !!address && !!snapshot && snapshot.contractAddress?.toLowerCase() === address.toLowerCase();
     const verifiedContract = confirmedContract && snapshot.paused === false;
+    const weeksValue = Number(document.getElementById('devert-weeks')?.value || 1);
+    const weeks = Number.isSafeInteger(weeksValue) && weeksValue > 0 ? weeksValue : 1;
+    const totalUnits = 5_000_000n * BigInt(weeks);
+    const campaignTotal = document.getElementById('devert-campaign-total');
     purchaseForm.hidden = !verifiedContract;
     walletButton.hidden = !verifiedContract || !!wallet?.address;
     purchaseButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || purchaseBusy;
     adMediaQueueButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || adMediaBusy || !adMediaFile.files?.[0];
+    if (campaignTotal) campaignTotal.textContent = `Total: ${weeks} × 5.00 USDC = ${formatUsdc(totalUnits.toString())} + worker-gas ETH`;
     if (!address) minimumOffer.textContent = 'Campaigns unavailable';
     else if (confirmedContract && snapshot.paused) minimumOffer.textContent = 'Campaign purchases paused';
     else if (!verifiedContract) minimumOffer.textContent = 'Connecting…';
@@ -348,9 +353,7 @@ export function initDevertTab() {
     if (ad.state !== 'ready') return;
     document.getElementById('devert-title').value = String(ad.title || '');
     document.getElementById('devert-audio-uri').value = `ipfs://${ad.ipfsCid}`;
-    const campaignDetails = document.querySelector('.devert-run-campaign');
-    campaignDetails.open = true;
-    document.getElementById('devert-offer').focus();
+    document.getElementById('devert-weeks').focus();
   }
 
   function renderAdLibrary() {
@@ -415,12 +418,11 @@ export function initDevertTab() {
     try {
       const contract = new ethers.Contract(address, DEVERT_BROWSER_ABI, signer);
       const usdc = new ethers.Contract(DEVERT_USDC_ADDRESS, DEVERT_USDC_ABI, signer);
-      const offerUnits = ethers.parseUnits(document.getElementById('devert-offer').value, 6);
-      const maxPaymentUnits = ethers.parseUnits(document.getElementById('devert-max-payment').value, 6);
+      const weeks = Number(document.getElementById('devert-weeks').value);
       const hash = await purchaseDevertCampaign({ signer, contract, usdc,
         title: document.getElementById('devert-title').value,
         audioURI: document.getElementById('devert-audio-uri').value,
-        offerUnits, maxPaymentUnits, onStep: message => { purchaseStatus.textContent = message; } });
+        weeks, onStep: message => { purchaseStatus.textContent = message; } });
       purchaseStatus.textContent = `Campaign confirmed: ${hash}`;
       await refresh();
     } catch (error) {
@@ -591,9 +593,7 @@ export function initDevertTab() {
           select.addEventListener('click', () => {
             document.getElementById('devert-title').value = ad.title;
             document.getElementById('devert-audio-uri').value = `ipfs://${ad.ipfsCid}`;
-            const campaignDetails = document.querySelector('.devert-run-campaign');
-            campaignDetails.open = true;
-            document.getElementById('devert-offer').focus();
+            document.getElementById('devert-weeks').focus();
           });
           item.append(select);
         }
@@ -643,6 +643,7 @@ export function initDevertTab() {
   refreshButton?.addEventListener('click', refresh);
   searchInput?.addEventListener('input', renderAdLibrary);
   purchaseForm?.addEventListener('submit', submitCampaign);
+  document.getElementById('devert-weeks')?.addEventListener('input', syncCheckout);
   adVoteButtons[0]?.addEventListener('click', () => voteOnAd(1));
   adVoteButtons[1]?.addEventListener('click', () => voteOnAd(-1));
   adMediaFile?.addEventListener('change', syncCheckout);

@@ -72,6 +72,14 @@
     <div class="devert-heading"><div><h2>DVert</h2><p>Ad studio · Base</p></div><button id="devert-close" type="button" aria-label="Close DVert" title="Close DVert">✕</button></div>
     <div class="devert-body">
       <div class="devert-price-display"><span>Queuing an Ad</span><strong id="devert-price">5.00</strong><span>USDC · 7 Days</span></div>
+      <section class="devert-workflow-details">
+        <h3>Campaign Instructions: Submit, Receive &amp; Run</h3>
+        <ol class="devert-workflow" aria-label="Ad campaign workflow">
+          <li><strong>1 · Submit</strong><span>Upload your audio or MP4 ad for review</span></li>
+          <li><strong>2 · Receive</strong><span>Approved NFT sent to your wallet</span></li>
+          <li><strong>3 · Run</strong><span>Select the minted NFT, choose weeks, and purchase the campaign</span></li>
+        </ol>
+      </section>
 
       <label class="devert-search-label" for="devert-search">Ads &amp; Creators</label>
       <input id="devert-search" type="search" aria-label="Search ads and creators" placeholder="Search ads or creators" />
@@ -105,13 +113,14 @@
         <label>Creator name<input id="devert-ad-artist" type="text" maxlength="80" /></label>
         <button id="devert-ad-queue" type="button" disabled>Submit for Review</button>
         <p id="devert-ad-queue-status" class="devert-checkout-status" role="status" aria-live="polite"></p>
-        <details class="devert-run-campaign"><summary>Run Campaign</summary>
-          <p class="devert-checkout-status">Once your approved NFT arrives, purchase its campaign using the media URI.</p>
-          <label>Ad NFT’s media URI<input id="devert-audio-uri" type="text" inputmode="url" placeholder="ipfs://..." required /></label>
-          <div class="devert-payment-fields"><label>Offer · USDC<input id="devert-offer" type="number" min="1" step="0.01" value="5.00" required /></label><label>Payment cap · USDC<input id="devert-max-payment" type="number" min="1" step="0.01" value="5.00" required /></label></div>
-          <p class="devert-checkout-status">7 days · from 1 USDC + ETH worker funding and network gas</p>
+        <section class="devert-run-campaign">
+          <h3>Run Campaign</h3>
+          <p class="devert-checkout-status">Once your approved NFT arrives, select it below, choose the number of weeks, and purchase at $5.00 USDC per week.</p>
+          <label>Selected media URI<input id="devert-audio-uri" type="text" inputmode="url" placeholder="ipfs://..." readonly required /></label>
+          <label>Weeks<input id="devert-weeks" type="number" min="1" step="1" value="1" required /></label>
+          <p id="devert-campaign-total" class="devert-checkout-status">Total: 1 × 5.00 USDC = 5.00 USDC + worker-gas ETH</p>
           <button id="devert-purchase" type="submit" disabled>Purchase Campaign</button>
-        </details>
+        </section>
       </form>
       <p id="devert-purchase-status" role="status" aria-live="polite"></p>
 
@@ -122,19 +131,13 @@
           <tbody id="devert-price-tiers">
             <tr class="is-current"><td>Weekly Ad Campaign</td><td>5.00 USDC / wk</td></tr>
             <tr><td>Main Radio Rotation</td><td>1 ad every 10 songs</td></tr>
-            <tr><td>Priority Queue Bump</td><td>+0.01 USDC bid</td></tr>
+            <tr><td>Priority Queue Bump</td><td>$1 · positions 1–7</td></tr>
+            <tr><td>Priority Queue Bump</td><td>$2 · positions 8–14</td></tr>
+            <tr><td>Priority Queue Bump</td><td>$4 · positions 15–21</td></tr>
+            <tr><td>Priority Queue Bump</td><td>Doubling each block of 7 positions</td></tr>
             <tr><td>24/7 VertLoop</td><td>Included (continuous)</td></tr>
           </tbody>
         </table>
-      </details>
-
-      <details class="devert-workflow-details" open>
-        <summary>Campaign Instructions: Submit, Receive &amp; Run</summary>
-        <ol class="devert-workflow" aria-label="Ad campaign workflow">
-          <li><strong>1 · Submit</strong><span>Upload your audio or MP4 ad for review</span></li>
-          <li><strong>2 · Receive</strong><span>Approved NFT sent to your wallet</span></li>
-          <li><strong>3 · Run</strong><span>Purchase a campaign ($5/wk) to enter VertLoop &amp; Main Radio</span></li>
-        </ol>
       </details>
       <p id="devert-radio-status" class="devert-secondary-status" role="status" aria-live="polite"></p>
     </div>
