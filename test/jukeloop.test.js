@@ -260,9 +260,12 @@ test('DeVert ad library is scoped to wallet and reports mint/campaign state', as
   const owner = '0x1111111111111111111111111111111111111111';
   const other = '0x2222222222222222222222222222222222222222';
   store.loadPlaylist([
-    { trackId: 'pending', title: 'Pending Ad', ipfsCid: 'cid-pending', isDevertAd: true, mintRecipient: owner, mintStatus: 'requested' },
-    { trackId: 'ready', title: 'Ready Ad', ipfsCid: 'cid-ready', isDevertAd: true, mintRecipient: owner, mintStatus: 'minted', tokenId: '41' },
-    { trackId: 'active', title: 'Active Ad', ipfsCid: 'cid-active', isDevertAd: true, mintRecipient: owner, mintStatus: 'minted', tokenId: '42' },
+    { trackId: 'pending', title: 'Pending Ad', ipfsCid: 'cid-pending', artworkCid: 'ipfs://art-pending',
+      isDevertAd: true, mintRecipient: owner, mintStatus: 'requested' },
+    { trackId: 'ready', title: 'Ready Ad', ipfsCid: 'cid-ready', artworkCid: 'ipfs://art-ready',
+      isDevertAd: true, mintRecipient: owner, mintStatus: 'minted', tokenId: '41' },
+    { trackId: 'active', title: 'Active Ad', ipfsCid: 'cid-active', artworkCid: 'ipfs://art-active',
+      isDevertAd: true, mintRecipient: owner, mintStatus: 'minted', tokenId: '42' },
     { trackId: 'other', title: 'Other Wallet Ad', ipfsCid: 'cid-other', isDevertAd: true, mintRecipient: other, mintStatus: 'requested' },
     { trackId: 'song', title: 'Song', ipfsCid: 'cid-song', mintRecipient: owner, mintStatus: 'requested' },
   ]);
@@ -273,6 +276,8 @@ test('DeVert ad library is scoped to wallet and reports mint/campaign state', as
   assert.deepEqual(ads.map(ad => [ad.trackId, ad.state]), [['active', 'active'], ['pending', 'pending'], ['ready', 'ready']]);
   assert.equal(ads[0].campaignId, '9');
   assert.equal(ads[0].secondsRemaining, 3600);
+  assert.equal(ads.find(ad => ad.trackId === 'pending').image, 'ipfs://art-pending');
+  assert.equal(ads.find(ad => ad.trackId === 'ready').artworkCid, 'ipfs://art-ready');
   assert.equal(ads[2].tokenId, '41');
 });
 
@@ -282,14 +287,18 @@ test('DeVert library prefers owned minted NFTs over stale pending rows for dupli
   const { mergeDevertAdsForWallet } = await import(storeUrl.href);
   const cid = 'bafy-ad-media';
   const merged = mergeDevertAdsForWallet([
-    { trackId: 'site:owner:media', title: 'DecentAdvert0001', ipfsCid: cid, mintStatus: 'requested', state: 'pending' },
+    { trackId: 'site:owner:media', title: 'DecentAdvert0001', ipfsCid: cid, artworkCid: 'ipfs://pending-art',
+      mintStatus: 'requested', state: 'pending' },
   ], [
-    { trackId: 'nft:collection:40', title: 'DecentAdvert0001', ipfsCid: cid, mintStatus: 'minted', tokenId: '40', state: 'ready' },
-    { trackId: 'nft:collection:41', title: 'DecentAdvert0001', ipfsCid: cid, mintStatus: 'minted', tokenId: '41', state: 'ready' },
+    { trackId: 'nft:collection:40', title: 'DecentAdvert0001', ipfsCid: cid, artworkCid: 'ipfs://art-40',
+      mintStatus: 'minted', tokenId: '40', state: 'ready' },
+    { trackId: 'nft:collection:41', title: 'DecentAdvert0001', ipfsCid: cid, artworkCid: 'ipfs://art-41',
+      mintStatus: 'minted', tokenId: '41', state: 'ready' },
   ]);
   assert.equal(merged.length, 1);
   assert.equal(merged[0].tokenId, '41');
   assert.equal(merged[0].state, 'ready');
+  assert.equal(merged[0].artworkCid, 'ipfs://art-41');
 });
 
 test('JukeLoop sends DeVert main-radio votes to the campaign vote journal', async () => {

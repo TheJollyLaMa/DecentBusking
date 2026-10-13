@@ -1,5 +1,6 @@
 import { canSetDevertListenMode, setDevertListenMode } from './radio-sync.js?v=20261010-listens';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
+import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { submitMediaForApproval } from './mint-submission.js';
 import { buildDevertAdsAuthorizationMessage } from './devert-scheduler.mjs';
 
@@ -61,6 +62,17 @@ function formatEth(units) {
   const whole = amount / 1_000_000_000_000_000_000n;
   const fraction = String(amount % 1_000_000_000_000_000_000n).padStart(18, '0').replace(/0+$/, '');
   return `${whole}${fraction ? `.${fraction}` : ''} ETH`;
+}
+
+function resolveAdArtworkUrl(uri, gateway) {
+  const value = String(uri || '').trim();
+  if (!value) return '';
+  if (value.startsWith('ipfs://')) return buildIpfsGatewayUrls(value, gateway)[0] || '';
+  return value;
+}
+
+function adSearchText(ad) {
+  return [ad.title, ad.artist, ad.filename, ad.tokenId, ad.state, ad.mintStatus].filter(Boolean).join(' ').toLowerCase();
 }
 
 export function normalizeAdLoopNowPlaying(state) {
@@ -146,6 +158,7 @@ export function initDevertTab() {
   const searchState = document.getElementById('devert-search-state');
   const priceDisplay = document.getElementById('devert-price');
   let currentAds = [];
+  let adLibraryStatus = 'Connect your wallet to browse ads.';
   const campaignList = document.getElementById('devert-campaigns');
   const campaignStatus = document.getElementById('devert-campaign-status');
   const radioStatus = document.getElementById('devert-radio-status');
@@ -331,6 +344,66 @@ export function initDevertTab() {
     else minimumOffer.textContent = '';
   }
 
+  function selectAdForCampaign(ad) {
+    if (ad.state !== 'ready') return;
+    document.getElementById('devert-title').value = String(ad.title || '');
+    document.getElementById('devert-audio-uri').value = `ipfs://${ad.ipfsCid}`;
+    const campaignDetails = document.querySelector('.devert-run-campaign');
+    campaignDetails.open = true;
+    document.getElementById('devert-offer').focus();
+  }
+
+  function renderAdLibrary() {
+    const query = searchInput.value.trim().toLowerCase();
+    const gateway = (window.DecentConfig?.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/').replace(/\/?$/, '/');
+    const visibleAds = currentAds
+      .slice()
+      .sort((first, second) => (first.state === 'ready' ? 0 : first.state === 'active' ? 1 : 2) -
+        (second.state === 'ready' ? 0 : second.state === 'active' ? 1 : 2) ||
+        String(first.title || '').localeCompare(String(second.title || '')) ||
+        String(first.tokenId || '').localeCompare(String(second.tokenId || '')))
+      .filter(ad => !query || adSearchText(ad).includes(query));
+    searchResults.replaceChildren();
+    if (!visibleAds.length) {
+      searchResults.append(node('li', query ? `No ads match “${query}”.` : adLibraryStatus, 'devert-library-empty'));
+      return;
+    }
+    for (const ad of visibleAds) {
+      const item = node('li', undefined, `devert-library-item${ad.state !== 'ready' ? ' is-pending' : ''}`);
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'devert-library-card';
+      card.disabled = ad.state !== 'ready';
+      card.setAttribute('aria-label', ad.state === 'ready'
+        ? `Use ${ad.title} in a campaign`
+        : `${ad.title} is waiting for mint`);
+      if (ad.state !== 'ready') card.setAttribute('aria-disabled', 'true');
+      const art = node('span', undefined, 'devert-library-art');
+      const imageUrl = resolveAdArtworkUrl(ad.image || ad.artworkCid || '', gateway);
+      if (imageUrl) {
+        const image = document.createElement('img');
+        image.className = 'devert-library-image';
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.alt = `${String(ad.title || 'Ad')} artwork`;
+        image.src = imageUrl;
+        art.append(image);
+      } else {
+        art.append(node('span', String(ad.title || 'AD').slice(0, 2).toUpperCase(), 'devert-library-fallback'));
+      }
+      const body = node('span', undefined, 'devert-library-copy');
+      body.append(node('strong', ad.title), node('span',
+        ad.state === 'active' ? 'Active campaign'
+          : ad.state === 'ready' ? 'Minted · ready to run'
+            : 'Waiting for mint', 'devert-library-status'));
+      if (ad.tokenId != null) body.append(node('span', `Token #${ad.tokenId}`, 'devert-library-meta'));
+      card.append(art, body, node('span', ad.state === 'ready' ? 'Select' : 'Locked', 'devert-library-badge'));
+      if (ad.state === 'ready') card.addEventListener('click', () => selectAdForCampaign(ad));
+      item.append(card);
+      searchResults.append(item);
+    }
+  }
+
   async function submitCampaign(event) {
     event.preventDefault();
     if (purchaseBusy || !snapshot) return;
@@ -464,6 +537,9 @@ export function initDevertTab() {
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service) {
       snapshot = null;
+      currentAds = [];
+      adLibraryStatus = 'DVert campaign service is not configured.';
+      renderAdLibrary();
       campaignStatus.textContent = 'DVert campaign service is not configured.';
       radioStatus.textContent = 'Main radio ad scheduling is not live yet.';
       syncCheckout();
@@ -491,6 +567,16 @@ export function initDevertTab() {
         ownershipUnavailable = library.ownershipUnavailable;
         scanPending = library.scanPending;
       }
+      currentAds = ads;
+      adLibraryStatus = !walletAddress ? 'Connect your wallet to browse minted and pending ads.'
+        : scanPending && !ads.length ? 'Checking Base for wallet-owned ad NFTs. Your ads will appear automatically.'
+          : scanPending ? `${ads.length} ad${ads.length === 1 ? '' : 's'} found; checking Base for other ads.`
+            : metadataUnavailable && !ads.length ? 'IPFS gateways are rate-limiting NFT metadata. Your ad library could not be fully checked; refresh shortly.'
+              : metadataUnavailable ? `${ads.length} ad${ads.length === 1 ? '' : 's'} found; ${metadataUnavailable} NFT metadata item${metadataUnavailable === 1 ? '' : 's'} could not be checked yet.`
+                : ownershipUnavailable && !ads.length ? 'Wallet ownership could not be fully checked; refresh shortly.'
+                  : ownershipUnavailable ? `${ads.length} ad${ads.length === 1 ? '' : 's'} found; some wallet ownership checks failed. Refresh shortly.`
+                    : ads.length ? `${ads.length} ad${ads.length === 1 ? '' : 's'} linked to this wallet.` : 'No ads submitted from this wallet yet.';
+      renderAdLibrary();
       for (const ad of ads) {
         const item = node('li', undefined, 'devert-campaign');
         const details = node('span', undefined, 'devert-campaign-details');
@@ -513,20 +599,16 @@ export function initDevertTab() {
         }
         campaignList.append(item);
       }
-      campaignStatus.textContent = !walletAddress ? 'Connect your wallet to view your ads.'
-        : scanPending && !ads.length ? 'Checking Base for wallet-owned ad NFTs. Your ads will appear automatically.'
-          : scanPending ? `${ads.length} ad${ads.length === 1 ? '' : 's'} found; checking Base for other ads.`
-            : metadataUnavailable && !ads.length ? 'IPFS gateways are rate-limiting NFT metadata. Your ad library could not be fully checked; refresh shortly.'
-              : metadataUnavailable ? `${ads.length} ad${ads.length === 1 ? '' : 's'} found; ${metadataUnavailable} NFT metadata item${metadataUnavailable === 1 ? '' : 's'} could not be checked yet.`
-                : ownershipUnavailable && !ads.length ? 'Wallet ownership could not be fully checked; refresh shortly.'
-                  : ownershipUnavailable ? `${ads.length} ad${ads.length === 1 ? '' : 's'} found; some wallet ownership checks failed. Refresh shortly.`
-                    : ads.length ? `${ads.length} ad${ads.length === 1 ? '' : 's'} linked to this wallet.` : 'No ads submitted from this wallet yet.';
+      campaignStatus.textContent = adLibraryStatus;
       radioStatus.textContent = 'Main-radio ads follow the ten-song program; AdLoop is a separate 24/7 channel.';
       await checkAdLoopReady();
       syncCheckout();
     } catch (error) {
       if (request !== generation || !isOpen()) return;
       snapshot = null;
+      currentAds = [];
+      adLibraryStatus = error.message;
+      renderAdLibrary();
       campaignList.replaceChildren();
       campaignStatus.textContent = error.message;
       radioStatus.textContent = 'Main-radio ad scheduling is not live yet.';
@@ -559,6 +641,7 @@ export function initDevertTab() {
   });
   closeButton?.addEventListener('click', async () => { await close(); toggle.focus(); });
   refreshButton?.addEventListener('click', refresh);
+  searchInput?.addEventListener('input', renderAdLibrary);
   purchaseForm?.addEventListener('submit', submitCampaign);
   adVoteButtons[0]?.addEventListener('click', () => voteOnAd(1));
   adVoteButtons[1]?.addEventListener('click', () => voteOnAd(-1));
@@ -567,7 +650,15 @@ export function initDevertTab() {
   walletButton?.addEventListener('click', () => window._wallet?.connect?.());
   document.addEventListener('wallet-connected', syncCheckout);
   document.addEventListener('wallet-connected', refresh);
-  document.addEventListener('wallet-disconnected', () => { devertAdsAuthorization = null; syncCheckout(); campaignList.replaceChildren(); campaignStatus.textContent = 'Connect your wallet to view your ads.'; });
+  document.addEventListener('wallet-disconnected', () => {
+    devertAdsAuthorization = null;
+    currentAds = [];
+    adLibraryStatus = 'Connect your wallet to browse ads.';
+    renderAdLibrary();
+    syncCheckout();
+    campaignList.replaceChildren();
+    campaignStatus.textContent = 'Connect your wallet to view your ads.';
+  });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close().then(() => toggle.focus()); } });
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
   document.addEventListener('click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target)) close(); });
