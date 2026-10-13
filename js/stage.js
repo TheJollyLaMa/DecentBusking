@@ -14,7 +14,7 @@ export function initStage() {
 
 // Play a selected archive NFT; the synced JukeLoop radio is muted until the
 // listener returns to it.
-export function setNowPlaying({ title = '—', artist = '', audioUrl = '', mediaType = '' } = {}) {
+export function setNowPlaying({ title = '—', artist = '', audioUrl = '', mediaType = '', nft = null } = {}) {
   if (!audioUrl) return;
   const cfg = window.DecentConfig || {};
   const gateway = cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/';
@@ -27,6 +27,9 @@ export function setNowPlaying({ title = '—', artist = '', audioUrl = '', media
     console.warn('[stage] setNowPlaying: rejected non-HTTP(S) audio URL:', httpUrl);
     return;
   }
+  document.dispatchEvent?.(new CustomEvent('dbusk-now-playing', {
+    detail: { nft, title, artist, audioUrl: httpUrl, mediaType },
+  }));
   playArchiveTrack({ title, artist, audioUrl: httpUrl, mediaType });
 }
 
