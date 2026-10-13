@@ -121,7 +121,8 @@ export function createListenController({ getLive, play, freePlay, getSession, ge
 
 function nftSong(nft) {
   return { title: nft.name || nft.title || `Track #${nft.tokenId}`, artist: nft.artist || nft.creator || '',
-    audioUrl: nft.videoUrl || nft.audioUrl || nft.animation_url || '', mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : '') };
+    audioUrl: nft.videoUrl || nft.audioUrl || nft.animation_url || '', mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : ''),
+    nft };
 }
 
 export function initListens() {

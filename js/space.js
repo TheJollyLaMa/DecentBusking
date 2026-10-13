@@ -54,9 +54,23 @@ let _timelineOffsetDays = 0;   // how many days back from "now" the window start
 // List & selection state
 let _allNFTs   = [];           // { nft, mesh } for every loaded token
 let _activeId  = null;         // currently selected tokenId
+let _nowPlayingKey = null;
+let _nowPlayingMesh = null;
+let _pendingNowPlaying = null;
+let _nowPlayingMedia = null;
+let _nowPlayingAudioContext = null;
+let _nowPlayingMediaSource = null;
+let _nowPlayingAnalyser = null;
+let _nowPlayingAudioData = null;
 
 // Spaceship
 const _ship = { speed: 0.3 };
+
+if (typeof document !== 'undefined' && document?.addEventListener) {
+  document.addEventListener('dbusk-now-playing', (event) => {
+    _applyNowPlaying(event.detail || {});
+  });
+}
 
 // ── NFT paging state ──────────────────────────────────────────────────────
 let _archiveNext = 0;
@@ -72,6 +86,7 @@ let _activeArtist = '';
 export function initSpace() {
   _buildScene();
   _buildControls();
+  if (_pendingNowPlaying) _applyNowPlaying(_pendingNowPlaying);
   _addTimelineLine();
   _bindArtistFilters();
   _loadNFTs();
@@ -92,6 +107,35 @@ export function addNFTToSpace(nft) {
     return;
   }
   _spawnMesh(nft, true /* isNew */);
+}
+
+function _applyNowPlaying(detail) {
+  const nft = detail?.nft;
+  if (!nft) return;
+  if (!_scene) {
+    _pendingNowPlaying = detail;
+    return;
+  }
+
+  const key = _nftKey(nft);
+  let entry = _allNFTs.find((item) => _nftKey(item.nft) === key);
+  const wasMissing = !entry;
+  if (!entry) {
+    const mesh = _spawnMesh(nft, false);
+    entry = mesh ? { nft, mesh } : null;
+  }
+  if (!entry) return;
+
+  if (_nowPlayingMesh && _nowPlayingMesh !== entry.mesh) {
+    _nowPlayingMesh.userData.pinnedVisible = true;
+  }
+  _nowPlayingKey = key;
+  _nowPlayingMesh = entry.mesh;
+  _pendingNowPlaying = null;
+  entry.mesh.userData.pinnedVisible = true;
+  entry.mesh.visible = true;
+  if (wasMissing) _focusNowPlaying(entry.mesh);
+  _updateVisibility();
 }
 
 // Fetch metadata for a single token by ID — used by mint.js for parent preview.
@@ -241,15 +285,24 @@ async function _loadNFTs(reset = true) {
     const page = await fetchNftCatalogPage({ config: cfg, ...options, signal: controller.signal });
     if (generation !== _archiveGeneration) return;
     if (reset) {
+      const retained = _allNFTs.filter(({ mesh }) => mesh.userData.pinnedVisible);
+      const retainedKeys = new Set(retained.map(({ nft }) => _nftKey(nft)));
       for (const mesh of _nftMeshes) {
-        _scene.remove(mesh);
-        mesh.geometry.dispose();
-        mesh.material.map?.dispose();
-        mesh.material.dispose();
+       if (mesh.userData.pinnedVisible) continue;
+       _scene.remove(mesh);
+       mesh.geometry.dispose();
+       mesh.material.map?.dispose();
+       mesh.material.dispose();
       }
-      _nftMeshes = [];
-      _allNFTs = [];
-      document.getElementById('dnft-list-items').replaceChildren();
+      _nftMeshes = retained.map(({ mesh }) => mesh);
+      _allNFTs = retained;
+      const list = document.getElementById('dnft-list-items');
+      if (list) {
+       if (!retainedKeys.size) list.replaceChildren();
+       else list.querySelectorAll('.dnft-list-item').forEach((item) => {
+         if (!retainedKeys.has(item.dataset.nftId || item.dataset.tokenId || '')) item.remove();
+       });
+      }
     }
     _catalogArtists = page.artists;
     for (const nft of page.nfts) {
@@ -449,7 +502,8 @@ function _nftRow(nft) {
 function _updateVisibility() {
   for (const { mesh } of _allNFTs) {
     const { ageDays } = mesh.userData;
-    mesh.visible = _isInWindow(ageDays) && _matchesArtist(mesh.userData.nft);
+    const pinned = mesh.userData.pinnedVisible || _nftKey(mesh.userData.nft) === _nowPlayingKey;
+    mesh.visible = pinned || (_isInWindow(ageDays) && _matchesArtist(mesh.userData.nft));
   }
   let matched = 0;
   for (const { nft } of _allNFTs) {
@@ -724,6 +778,86 @@ function _selectNFT(nft, mesh, listItem, showCard = true) {
   }
 }
 
+function _focusNowPlaying(mesh) {
+  if (!_controls || !_camera || !mesh) return;
+  _controls.target.copy(mesh.position);
+  _camera.position.copy(mesh.position).add(new THREE.Vector3(0, 2, 10));
+  _controls.update();
+}
+
+function _activeMediaElement() {
+  const videoStage = document.getElementById('radio-video-stage');
+  const videoPlayer = document.getElementById('radio-video-player');
+  if (videoStage && !videoStage.hidden && videoPlayer) return videoPlayer;
+  return document.getElementById('audio-player');
+}
+
+function _ensureNowPlayingAnalyser(media) {
+  if (!media) return null;
+  if (_nowPlayingMedia === media && _nowPlayingAnalyser) return _nowPlayingAnalyser;
+  const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
+  if (!AudioContextCtor) {
+    _nowPlayingMedia = media;
+    _nowPlayingAnalyser = null;
+    return null;
+  }
+  try {
+    if (_nowPlayingMediaSource) {
+      try { _nowPlayingMediaSource.disconnect(); } catch {}
+    }
+    if (_nowPlayingAnalyser) {
+      try { _nowPlayingAnalyser.disconnect(); } catch {}
+    }
+    if (!_nowPlayingAudioContext) _nowPlayingAudioContext = new AudioContextCtor();
+    const source = _nowPlayingAudioContext.createMediaElementSource(media);
+    const analyser = _nowPlayingAudioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    analyser.connect(_nowPlayingAudioContext.destination);
+    _nowPlayingAudioContext.resume?.().catch(() => {});
+    _nowPlayingMedia = media;
+    _nowPlayingMediaSource = source;
+    _nowPlayingAnalyser = analyser;
+    _nowPlayingAudioData = new Uint8Array(analyser.fftSize);
+    return analyser;
+  } catch {
+    _nowPlayingMedia = media;
+    _nowPlayingAnalyser = null;
+    return null;
+  }
+}
+
+function _updateNowPlayingPulse() {
+  if (!_nowPlayingMesh) return;
+  const mesh = _nowPlayingMesh;
+  const media = _activeMediaElement();
+  const ud = mesh.userData;
+  ud.baseScale ??= mesh.scale.x || 1;
+  ud.baseOpacity ??= mesh.material?.opacity ?? 1;
+
+  let level = 0;
+  const playing = media && !media.paused && !media.ended;
+  if (playing) {
+    const analyser = _ensureNowPlayingAnalyser(media);
+    if (analyser && _nowPlayingAudioData) {
+      analyser.getByteTimeDomainData(_nowPlayingAudioData);
+      let sum = 0;
+      for (const sample of _nowPlayingAudioData) {
+        const centered = (sample - 128) / 128;
+        sum += centered * centered;
+      }
+      level = Math.min(1, Math.sqrt(sum / _nowPlayingAudioData.length) * 1.9);
+    } else {
+      level = 0.18 + 0.08 * Math.sin((performance.now() + (media.currentTime || 0) * 1000) / 90);
+    }
+  }
+
+  ud.pulseLevel = ud.pulseLevel == null ? level : (ud.pulseLevel * 0.8 + level * 0.2);
+  const pulse = Math.max(0, Math.min(1, ud.pulseLevel));
+  mesh.scale.setScalar(ud.baseScale * (1 + pulse * 0.16));
+  if (mesh.material) mesh.material.opacity = ud.baseOpacity * (1 - pulse * 0.12);
+}
+
 // ── Animation Loop ─────────────────────────────────────────────────────────
 function _animate() {
   _animFrameId = requestAnimationFrame(_animate);
@@ -739,6 +873,8 @@ function _animate() {
       mesh.lookAt(_camera.position);
     }
   }
+
+  _updateNowPlayingPulse();
 
   // WASD / Arrow keys are always active — they move the camera AND the
   // OrbitControls target together so the orbit centre follows the flight.
@@ -865,6 +1001,7 @@ function _playNFT(nft) {
     .replace('ipfs://', gateway);
 
   setNowPlaying({
+    nft,
     title:    nft.name || nft.title || `Track #${nft.tokenId}`,
     artist:   nft.artist || nft.creator || '',
     audioUrl,
