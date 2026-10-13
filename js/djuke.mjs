@@ -15,6 +15,20 @@ export function formatDjukeUsdc(units) {
   return `${units / 1000000n}.${fraction}`;
 }
 
+export function formatDjukeEth(units, precision = 6) {
+  if (typeof units !== 'bigint' || units < 0n) throw new RangeError('Invalid ETH amount');
+  if (!Number.isInteger(precision) || precision < 0 || precision > 18) throw new RangeError('Invalid ETH precision');
+  if (precision === 0) return `${units / 1000000000000000000n}`;
+  const wei = String(units % 1000000000000000000n).padStart(18, '0').slice(0, precision).replace(/0+$/, '');
+  return wei ? `${units / 1000000000000000000n}.${wei}` : `${units / 1000000000000000000n}`;
+}
+
+export function splitDjukeCharges(priceUnits) {
+  if (typeof priceUnits !== 'bigint' || priceUnits < 0n) throw new RangeError('Invalid USDC amount');
+  const fundUnits = priceUnits / 10n;
+  return { artistUnits: priceUnits - fundUnits, fundUnits };
+}
+
 export function readDjukeQueue(snapshot) {
   if (!snapshot || !Array.isArray(snapshot.requests)) throw new Error('Invalid DJuke queue response');
   const ids = new Set();
@@ -160,10 +174,11 @@ export function initDjuke() {
       if (!response.ok) throw new Error(result.error || 'Gas quote unavailable');
       if (check !== gasGeneration) return;
       gasQuote = result;
-      if (gasStatus) gasStatus.textContent = `Worker gas: ${ethers.formatEther(result.contributionWei)} ETH on Base (2x estimate), plus your transaction gas`;
+      renderGasStatus();
     } catch (error) {
       if (check !== gasGeneration) return;
       gasQuoteKey = '';
+      if (gasStatus) gasStatus.replaceChildren();
       if (gasStatus) gasStatus.textContent = /request limit|rate limit|too many/i.test(error.message)
         ? 'Worker gas estimate is busy; retrying shortly' : error.message;
     }
@@ -174,6 +189,30 @@ export function initDjuke() {
     if (text !== undefined) element.textContent = text;
     if (className) element.className = className;
     return element;
+  };
+  const renderGasStatus = () => {
+    if (!gasStatus) return;
+    if (!gasQuote || !live?.priceUnits) {
+      gasStatus.replaceChildren();
+      return;
+    }
+    const priceUnits = BigInt(live.priceUnits);
+    const { artistUnits, fundUnits } = splitDjukeCharges(priceUnits);
+    const summary = node('section', undefined, 'djuke-gas-summary');
+    summary.append(node('h4', 'Charge breakdown', 'djuke-gas-summary-title'));
+    const list = node('dl', undefined, 'djuke-gas-summary-list');
+    const rows = [
+      ['Artist / collaborators', `${formatDjukeUsdc(artistUnits)} USDC`],
+      ['Platform funds', `${formatDjukeUsdc(fundUnits)} USDC (8% pinning, 2% dev fund)`],
+      ['Worker wallet ETH contribution', `~${formatDjukeEth(BigInt(gasQuote.contributionWei))} ETH`],
+    ];
+    for (const [label, value] of rows) {
+      const row = node('div', undefined, 'djuke-gas-summary-row');
+      row.append(node('dt', label), node('dd', value));
+      list.append(row);
+    }
+    summary.append(list, node('p', 'Worker ETH funds automated playback execution on Base so listeners do not face a surprise ETH prompt.'));
+    gasStatus.replaceChildren(summary);
   };
   const renderSongs = () => {
     const previous = select.value;
@@ -246,7 +285,6 @@ export function initDjuke() {
       const snapshot = await response.json();
       const requests = readDjukeQueue(snapshot);
       if (requestGeneration !== generation || !isOpen()) return;
-      live = snapshot;
       const wallet = window._wallet?.address?.toLowerCase();
       queue.replaceChildren();
       requests.forEach((request, index) => {
@@ -263,6 +301,7 @@ export function initDjuke() {
         queue.append(item);
       });
       const quote = quoteDjuke(requests.length);
+      live = { ...snapshot, priceUnits: quote.priceUnits.toString() };
       price.textContent = formatDjukeUsdc(quote.priceUnits);
       count.textContent = String(requests.length);
       renderTiers(requests.length);
@@ -290,6 +329,7 @@ export function initDjuke() {
       // Any payment attempt may consume the signed quote nonce; fetch a fresh one next time.
       gasQuote = null;
       gasQuoteKey = '';
+      renderGasStatus();
       syncPayButton();
       refresh();
     }
