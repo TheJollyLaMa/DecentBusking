@@ -425,8 +425,6 @@ function _syncRadio(message) {
   }
 
   if (_radio.playId === _loadedPlayId) {
-    const expected = _radioPositionS();
-    if (!_audio.paused && Math.abs(_audio.currentTime - expected) > DRIFT_TOLERANCE_S) _seekTo(expected);
     return;
   }
 
