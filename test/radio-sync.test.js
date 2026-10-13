@@ -143,6 +143,19 @@ test('radio keeps the current song playing until it ends before starting the nex
   assert.equal(vm.runInContext('started[0].offset()', context), 0);
 });
 
+test('radio sync does not force-seek an actively playing track on poll', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
+    .replace(/export /g, '');
+  const audio = {
+    paused: false,
+    currentTime: 3,
+  };
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console, audio });
+  vm.runInContext(`${source}\n_audio = audio; _loadedPlayId = 'play-1'; _radio = { playId: 'play-1', positionMs: 18_000, receivedAt: performance.now() }; var seekCalls = 0; _seekTo = () => { seekCalls += 1; return true; }; _syncRadio();`, context);
+  assert.equal(vm.runInContext('seekCalls', context), 0);
+  assert.equal(audio.currentTime, 3);
+});
+
 test('radio sync broadcasts now-playing details for the 3D stage when a new song starts', () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
     .replace(/export /g, '');
