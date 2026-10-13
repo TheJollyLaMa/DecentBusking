@@ -213,28 +213,50 @@ export async function fetchMintMetadata(uri, fetchImpl, { attempts = 3, baseDela
 }
 
 /** Map audio CID → lowest minted token ID for every minted DecentNFT token. */
+function markMetadataChecked(metadata, checkedAt) {
+  Object.defineProperty(metadata, '_metadataCheckedAt', {
+    value: checkedAt,
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
+  return metadata;
+}
+
 export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry = {}, pauseMs = 250, artistWalletByAudioCid,
-  tokenCache = new Map(), nfts = [], metadataGateways }) {
+  tokenCache = new Map(), nfts = [], metadataGateways, metadataCacheMs = 300_000, now = Date.now }) {
   const tokenIdByAudioCid = new Map();
   const nextTokenId = Number(await withRetry(() => contract.nextTokenId(), retry));
   if (!Number.isSafeInteger(nextTokenId) || nextTokenId < 0) throw new Error('Invalid NFT token count');
+  const fresh = cached => cached && now() - (cached._metadataCheckedAt ?? -Infinity) < metadataCacheMs;
   const load = async tokenId => {
     let cached = tokenCache.get(tokenId);
-    if (!cached) {
-      const mintedSupply = Number(await withRetry(() => contract.totalMinted(tokenId), retry));
-      if (mintedSupply === 0) return null;
-      const uri = await withRetry(() => contract.uri(tokenId), retry);
+    if (!fresh(cached)) {
+      const [mintedSupply, uri] = await Promise.all([
+        withRetry(() => contract.totalMinted(tokenId), retry).then(Number),
+        withRetry(() => contract.uri(tokenId), retry),
+      ]);
+      if (mintedSupply === 0) {
+        tokenCache.delete(tokenId);
+        return null;
+      }
+      if (cached?.metadataUri === uri) {
+        cached.mintedSupply = mintedSupply;
+        markMetadataChecked(cached, now());
+        return cached;
+      }
       const metadata = await fetchMintMetadata(uri, fetchImpl,
         metadataGateways?.length ? { gateways: metadataGateways } : undefined);
       cached = { ...metadata, tokenId, contractAddress: contract.target || contract.address || '',
         chainId: 8453, metadataUri: uri, mintedSupply };
+      markMetadataChecked(cached, now());
       tokenCache.set(tokenId, cached);
     }
     return cached;
   };
   for (let start = 0; start < nextTokenId; start += 3) {
     const ids = Array.from({ length: Math.min(3, nextTokenId - start) }, (_, index) => start + index);
-    if (pauseMs && ids.some(tokenId => !tokenCache.has(tokenId))) await new Promise(resolve => setTimeout(resolve, pauseMs));
+    if (pauseMs && ids.some(tokenId => !fresh(tokenCache.get(tokenId)))) await new Promise(resolve => setTimeout(resolve, pauseMs));
     const results = await Promise.allSettled(ids.map(load));
     const failed = results.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;
@@ -255,7 +277,7 @@ export async function readMintedAudioCids({ contract, fetchImpl = fetch, retry =
 
 /** Mark playlist tracks whose audio is already minted on Base. */
 export async function readMintedCollections({ collections, fetchImpl = fetch, pauseMs, retry,
-  tokenCaches = new Map(), nfts = [], metadataGateways }) {
+  tokenCaches = new Map(), nfts = [], metadataGateways, metadataCacheMs, now }) {
   if (!Array.isArray(collections) || !collections.length) throw new Error('NFT collections are required');
   const minted = new Map();
   const artistWalletByAudioCid = new Map();
@@ -273,7 +295,7 @@ export async function readMintedCollections({ collections, fetchImpl = fetch, pa
     }
     const artists = new Map();
     const tokens = await readMintedAudioCids({ contract: collection.contract, fetchImpl, pauseMs, retry,
-      artistWalletByAudioCid: artists, tokenCache, nfts, metadataGateways });
+      artistWalletByAudioCid: artists, tokenCache, nfts, metadataGateways, metadataCacheMs, now });
     for (const [cid, tokenId] of tokens) {
       if (!minted.has(cid)) minted.set(cid, tokenId);
       if (!artistWalletByAudioCid.has(cid) && artists.has(cid)) artistWalletByAudioCid.set(cid, artists.get(cid));
@@ -297,6 +319,8 @@ export async function syncMintedTracksFromChain({
   pauseMs,
   tokenCaches = new Map(),
   metadataGateways,
+  metadataCacheMs,
+  now,
   onCatalog,
 }) {
   let result;
@@ -304,12 +328,12 @@ export async function syncMintedTracksFromChain({
     const provider = collections ? null : new JsonRpcProvider(rpcUrl);
     result = await readMintedCollections({ collections: collections || contractAddresses.map(address => ({
       contractAddress: address, contract: new Contract(address, NFT_ABI, provider),
-    })), fetchImpl, pauseMs, tokenCaches, metadataGateways });
+    })), fetchImpl, pauseMs, tokenCaches, metadataGateways, metadataCacheMs, now });
   } else {
     const artistWalletByAudioCid = new Map();
     const minted = await readMintedAudioCids({
       contract: contract || new Contract(contractAddress, NFT_ABI, new JsonRpcProvider(rpcUrl)),
-      fetchImpl, pauseMs, artistWalletByAudioCid, metadataGateways,
+      fetchImpl, pauseMs, artistWalletByAudioCid, metadataGateways, metadataCacheMs, now,
     });
     result = { minted, artistWalletByAudioCid, nfts: [] };
   }

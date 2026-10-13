@@ -230,6 +230,37 @@ test('collection cache retains verified tokens when a later cold batch fails', a
   assert.deepEqual([...metadataReads.entries()], [[0, 1], [1, 1], [2, 1], [3, 2]]);
 });
 
+test('collection cache reloads metadata when a token URI changes after the cache TTL', async () => {
+  const { readMintedCollections } = await import(moduleUrl);
+  const address = `0x${'2'.repeat(40)}`;
+  const tokenCaches = new Map();
+  let now = 1_000;
+  let metadataCid = 'metadata-old';
+  let uriReads = 0;
+  const collection = { contractAddress: address, contract: {
+    nextTokenId: async () => 1n,
+    totalMinted: async () => 1n,
+    uri: async () => { uriReads++; return `ipfs://${metadataCid}`; },
+  } };
+  const fetchImpl = async url => new Response(JSON.stringify({
+    audioUrl: 'ipfs://audio', image: url.includes('updated') ? 'ipfs://new-image' : '',
+  }));
+  const options = { collections: [collection], tokenCaches, fetchImpl, pauseMs: 0,
+    metadataGateways: ['https://metadata.example/ipfs/'], metadataCacheMs: 300_000, now: () => now };
+  const first = await readMintedCollections(options);
+  assert.equal(first.nfts[0].image, '');
+  metadataCid = 'metadata-updated';
+  now += 299_999;
+  const cached = await readMintedCollections(options);
+  assert.equal(cached.nfts[0].image, '');
+  assert.equal(uriReads, 1);
+  now += 2;
+  const refreshed = await readMintedCollections(options);
+  assert.equal(refreshed.nfts[0].image, 'ipfs://new-image');
+  assert.equal(uriReads, 2);
+  assert.equal(Object.hasOwn(refreshed.nfts[0], '_metadataCheckedAt'), false);
+});
+
 test('marks tracks minted from Base so lost state cannot re-queue an existing NFT', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-mint-sync-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
