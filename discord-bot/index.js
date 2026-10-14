@@ -492,12 +492,14 @@ async function main() {
     const scheduler = new Wallet(devertSchedulerPrivateKey, new JsonRpcProvider(config.baseRpcUrl));
     const contract = new Contract(process.env.DEVERT_CONTRACT_ADDRESS, DEVERT_ABI, scheduler);
     _devertSchedulerContract = contract;
+    const workerMinBalanceWei = process.env.WORKER_MIN_BALANCE_WEI ? BigInt(process.env.WORKER_MIN_BALANCE_WEI) : 0n;
     const journalStore = createPinataStateStore({ pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-devert-main-radio.json',
       tags: { app: 'decentbusking', kind: 'devert-main-radio', schema: '1' }, serialize: value => value,
       deserialize: value => value, retainSnapshots: Infinity });
     _devertPlaybackRuntime = createDevertPlaybackRuntime({ contract, provider: scheduler.provider,
       restore: journalStore.restore, save: journalStore.save, readCampaigns: readDevertState,
+      workerAddress: scheduler.address, workerMinBalanceWei,
       resolveCampaignMedia: (campaign, cid) => getPlaylist().find(track => track.isDevertAd && track.ipfsCid === cid &&
         track.mintRecipient?.toLowerCase() === campaign.advertiser.toLowerCase()) });
     _devertPlaybackInitialization = initializeDevertPlaybackWithRetry({

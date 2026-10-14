@@ -53,7 +53,7 @@
       <p id="djuke-search-state" role="status" aria-live="polite"></p>
       <select id="djuke-song" disabled><option value="">Song catalog unavailable</option></select>
       <button id="djuke-pay" type="button" disabled title="DJuke payment contract is not deployed">Queue Song</button>
-      <p class="worker-gas-notice">Operator reminder: top up the worker with ETH on Base for playback fulfillment before accepting paid requests. Worker: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Balance is not checked here.</p>
+      <p class="worker-gas-notice">Operator reminder: top up the worker with ETH on Base for playback fulfillment before accepting paid requests. Worker: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Worker balance is monitored.</p>
       <p id="djuke-payment-state" role="status" aria-live="polite">Payments not live</p>
       <p id="djuke-gas-status" role="status" aria-live="polite"></p>
       <details class="djuke-tiers" open>
@@ -500,7 +500,7 @@
           </div>
           <button id="admin-mint-refresh-btn" class="admin-btn admin-btn-secondary" type="button">Refresh</button>
         </div>
-        <details class="worker-gas-notice"><summary>⛽ Worker funding</summary><p>Worker ETH for registration and playback: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Mint gas comes from your wallet. Worker balance is not checked here.</p></details>
+        <details class="worker-gas-notice"><summary>⛽ Worker funding</summary><p>Worker ETH for registration and playback: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Mint gas comes from your wallet. Worker balance is monitored.</p></details>
         <div id="admin-mint-queue" class="admin-mint-queue"></div>
         <button id="admin-mint-more-btn" class="admin-btn admin-btn-secondary hidden" type="button">Load more requests</button>
         <div class="admin-mint-toolbar">

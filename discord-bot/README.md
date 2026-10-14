@@ -60,6 +60,8 @@ cp .env.example .env
 | `DEVERT_CONTRACT_ADDRESS`    | DeVert    | Deployed DeVert campaign contract address; endpoint stays unavailable when unset |
 | `DEVERT_SCHEDULER_PRIVATE_KEY` | DeVert   | Optional override; defaults to the existing `DJUKE_FULFILLER_PRIVATE_KEY` |
 | `DEVERT_CONFIRMATIONS`       | ❌        | Confirmations for public DeVert campaign reads (default: `2`) |
+| `WORKER_MIN_BALANCE_WEI`     | DeVert   | Optional low-balance threshold for optional DeVert reporting; below this, impressions and music reports stay in the journal until the worker is funded again |
+| `WORKER_ESTIMATED_DAILY_BURN_WEI` | DeVert | Optional runway estimate for the worker-gas notice; defaults to the observed daily burn rate used in the operator UI |
 | `DVERT_LOOP_DISCORD_TOKEN`   | AdLoop   | Separate bot token for the dedicated ad-only voice channel |
 | `VERT_LOOP_CHANNEL_ID`       | AdLoop   | ID of the `#vertloop` text channel for announcements/submissions |
 | `VERTLOOP_VOICE_CHANNEL_ID`  | AdLoop   | ID of the `VertLoop` voice channel for the dedicated ad rotation |
@@ -76,6 +78,16 @@ that live loop; browser playback never creates paid impressions. The optional
 ad-mute preference affects only the visitor's main-radio audio. A confirmed DJuke
 request boosts a campaign only when the payer has exactly one active campaign;
 ambiguous requests are skipped rather than assigned arbitrarily.
+
+Worker gas is monitored. Optional DeVert reporting is deferred below
+`WORKER_MIN_BALANCE_WEI` and retried automatically once the worker is funded
+again. VertLoop on-chain impressions are capped to one submission per campaign
+per hour in the worker journal so a single looping ad cannot drain the wallet
+with one transaction per play. The notice panel shows the worker wallet, live
+balance, threshold, and a rough runway estimate using
+`WORKER_ESTIMATED_DAILY_BURN_WEI` (defaults to the observed daily burn rate).
+The worker wallet also funds `reportCompletedMusicPlays`; those batches use the
+same balance check and retry queue.
 
 Create the AdLoop voice channel as `VertLoop` and its announcement/submission text
 channel as `#vertloop`. Channel names are for people; the worker connects using

@@ -91,6 +91,7 @@ async function panelFixture({ wallet = null } = {}) {
       if (countdown.status === 'playing') return 'Main radio ad: Advert playing now';
       if (countdown.status === 'paused') return `Main radio ad: Deferred during ${countdown.activeShow?.label || 'this show'}`;
       if (countdown.status === 'none') return 'Main radio ad: No eligible campaign available';
+      if (countdown.status === 'unavailable' && countdown.reason === 'worker gas low') return 'Ad reporting paused – worker gas low';
       return 'Main radio ad: unavailable';
     },
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },

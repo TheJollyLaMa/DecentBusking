@@ -1,5 +1,6 @@
 import { id, isAddress } from 'ethers';
 import { planDevertQueues } from '../js/devert-scheduler.mjs';
+import { readWorkerGasState } from '../js/worker-gas.mjs';
 
 const SCHEMA_VERSION = 1;
 const MUSIC_PLAYS_PER_MAIN_AD = 10;
@@ -8,6 +9,13 @@ const MAX_SAVED_IDS = 2000;
 const MIN_AUDIBLE_MS = 30_000;
 const INITIAL_RESTORE_RETRY_MS = 5_000;
 const MAX_RESTORE_RETRY_MS = 5 * 60_000;
+const VERTLOOP_IMPRESSION_MIN_INTERVAL_MS = 60 * 60_000;
+const WORKER_GAS_CHECK_MS = 60_000;
+const WORKER_GAS_DAILY_BURN_WEI = 86_000_000_000_000n;
+
+function isInsufficientFundsError(error) {
+  return /insufficient funds/i.test(error?.shortMessage || error?.message || '') || error?.code === 'INSUFFICIENT_FUNDS';
+}
 
 export async function initializeDevertPlaybackWithRetry({ initialize, wait = delay => new Promise(resolve => setTimeout(resolve, delay)), log = console }) {
   let attempt = 0;
@@ -38,7 +46,8 @@ function validateJournal(value) {
   for (const entry of value.impressions) {
     if (!entry || typeof entry.impressionId !== 'string' || !/^0x[0-9a-f]{64}$/i.test(entry.impressionId) ||
       !['pending', 'recorded'].includes(entry.state) || !Number.isSafeInteger(Number(entry.campaignId)) ||
-      typeof entry.mainRadio !== 'boolean') throw new Error('Invalid DeVert impression journal entry');
+      typeof entry.mainRadio !== 'boolean' || entry.nextRetryAt !== undefined && (!Number.isSafeInteger(entry.nextRetryAt) || entry.nextRetryAt < 0) ||
+      entry.submittedAt !== undefined && !Number.isFinite(Date.parse(entry.submittedAt))) throw new Error('Invalid DeVert impression journal entry');
     if (impressionIds.has(entry.impressionId)) throw new Error('Duplicate DeVert impression journal entry');
     impressionIds.add(entry.impressionId);
   }
@@ -60,7 +69,9 @@ function validateJournal(value) {
 }
 
 export function createDevertPlaybackRuntime({ contract, provider = contract?.runner?.provider, restore, save,
-  readCampaigns, resolveCampaignMedia = () => null, now = () => Date.now(), minimumAudibleMs = MIN_AUDIBLE_MS, log = console }) {
+  readCampaigns, resolveCampaignMedia = () => null, now = () => Date.now(), minimumAudibleMs = MIN_AUDIBLE_MS, log = console,
+  workerAddress, workerMinBalanceWei = 0n, workerDailyBurnWei = WORKER_GAS_DAILY_BURN_WEI, workerGasReader = readWorkerGasState,
+  workerGasCheckMs = WORKER_GAS_CHECK_MS }) {
   if (!contract || typeof restore !== 'function' || typeof save !== 'function' || typeof readCampaigns !== 'function') {
     throw new Error('DeVert playback requires a contract and durable journal store');
   }
@@ -68,6 +79,12 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
   let journal = emptyJournal();
   let initialized = false;
   let queue = Promise.resolve();
+  let retryTimer = null;
+  let workerGasState = null;
+  let workerGasCheckedAt = 0;
+  let workerGasWarningAt = 0;
+  const workerWallet = workerAddress && isAddress(workerAddress) ? workerAddress : null;
+  const vertLoopNextRetryAtByCampaign = new Map();
 
   const run = operation => {
     const result = queue.then(operation);
@@ -82,8 +99,79 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
   };
   const requireReady = () => { if (!initialized) throw new Error('DeVert playback journal is not initialized'); };
 
+  const warnWorkerGas = state => {
+    if (!state || state.checkedAt <= workerGasWarningAt) return;
+    workerGasWarningAt = state.checkedAt;
+    if (state.unavailable) {
+      log.warn(`[devert] Worker gas check unavailable${workerWallet ? ` for ${workerWallet}` : ''}: ${state.reason}`);
+      return;
+    }
+    if (state.lowBalance) {
+      const thresholdWei = state.thresholdWei ?? workerMinBalanceWei;
+      log.warn(`[devert] Worker gas low${workerWallet ? ` for ${workerWallet}` : ''}: ${state.balanceWei} wei (threshold ${thresholdWei} wei; runway ~${state.runwayDays ?? 'unknown'} day${state.runwayDays === 1 ? '' : 's'})`);
+    }
+  };
+
+  const hydrateVertLoopRetryState = () => {
+    vertLoopNextRetryAtByCampaign.clear();
+    const campaignRetryAt = new Map();
+    for (const entry of journal.impressions) {
+      if (entry.mainRadio || entry.state !== 'recorded') continue;
+      const submittedAt = Number.isFinite(Date.parse(entry.submittedAt || entry.recordedAt || ''))
+        ? Date.parse(entry.submittedAt || entry.recordedAt) : 0;
+      const nextEligibleAt = submittedAt > 0 ? submittedAt + VERTLOOP_IMPRESSION_MIN_INTERVAL_MS : 0;
+      if (nextEligibleAt > 0) campaignRetryAt.set(entry.campaignId, Math.max(campaignRetryAt.get(entry.campaignId) || 0, nextEligibleAt));
+    }
+    for (const [campaignId, retryAt] of campaignRetryAt) vertLoopNextRetryAtByCampaign.set(campaignId, retryAt);
+    journal = {
+      ...journal,
+      impressions: journal.impressions.map(entry => {
+        if (entry.mainRadio) return entry;
+        if (entry.state === 'recorded') {
+          return entry;
+        }
+        const submittedAt = Number.isFinite(Date.parse(entry.submittedAt || entry.recordedAt || ''))
+          ? Date.parse(entry.submittedAt || entry.recordedAt) : 0;
+        const retryFloor = vertLoopNextRetryAtByCampaign.get(entry.campaignId) || 0;
+        const nextRetryAt = Number.isSafeInteger(entry.nextRetryAt) && entry.nextRetryAt > 0
+          ? Math.max(entry.nextRetryAt, retryFloor) : Math.max(retryFloor, submittedAt || now());
+        return nextRetryAt === entry.nextRetryAt ? entry : { ...entry, nextRetryAt };
+      }),
+    };
+  };
+
+  const refreshWorkerGasState = async ({ force = false } = {}) => {
+    if (!workerWallet || typeof workerGasReader !== 'function') {
+      workerGasState = { checkedAt: now(), unavailable: true, lowBalance: false, reason: 'worker wallet unavailable', workerAddress: workerWallet };
+      return workerGasState;
+    }
+    if (!force && workerGasState && now() - workerGasCheckedAt < workerGasCheckMs) return workerGasState;
+    try {
+      const state = await workerGasReader({ provider, workerAddress: workerWallet, minBalanceWei: workerMinBalanceWei, estimatedDailyBurnWei: workerDailyBurnWei });
+      workerGasCheckedAt = now();
+      workerGasState = { ...state, checkedAt: workerGasCheckedAt };
+    } catch (error) {
+      workerGasCheckedAt = now();
+      workerGasState = {
+        checkedAt: workerGasCheckedAt,
+        unavailable: true,
+        lowBalance: false,
+        reason: error?.shortMessage || error?.message || 'worker gas check failed',
+        workerAddress: workerWallet,
+      };
+    }
+    warnWorkerGas(workerGasState);
+    return workerGasState;
+  };
+
+  const canSpendWorkerGas = async () => {
+    const state = await refreshWorkerGasState();
+    return state && !state.unavailable && !state.lowBalance;
+  };
+
   async function flushMusicBatch() {
     if (journal.pendingMusicPlayIds.length < MUSIC_BATCH_SIZE) return false;
+    if (!await canSpendWorkerGas()) return false;
     const block = await provider.getBlock('latest');
     const chainWeek = Number(await contract.campaignWeek(block.timestamp));
     if (chainWeek !== journal.musicWeekId) {
@@ -91,32 +179,120 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       return false;
     }
     const batch = journal.pendingMusicPlayIds.slice(0, MUSIC_BATCH_SIZE);
-    await contract.reportCompletedMusicPlays.staticCall(batch);
-    const transaction = await contract.reportCompletedMusicPlays(batch);
-    if ((await transaction.wait(2))?.status !== 1) throw new Error(`DeVert music-play report failed: ${transaction.hash}`);
+    try {
+      await contract.reportCompletedMusicPlays.staticCall(batch);
+      const transaction = await contract.reportCompletedMusicPlays(batch);
+      if ((await transaction.wait(2))?.status !== 1) throw new Error(`DeVert music-play report failed: ${transaction.hash}`);
+    } catch (error) {
+      if (!isInsufficientFundsError(error)) throw error;
+      workerGasState = {
+        checkedAt: now(),
+        unavailable: false,
+        lowBalance: true,
+        reason: error?.shortMessage || error?.message || 'worker gas low',
+        workerAddress: workerWallet,
+        thresholdWei: workerMinBalanceWei,
+        runwayDays: 0,
+      };
+      warnWorkerGas(workerGasState);
+      return false;
+    }
     await commit({ ...journal, pendingMusicPlayIds: journal.pendingMusicPlayIds.slice(batch.length) });
     return true;
   }
 
   async function submitImpression(entry) {
     if (entry.state === 'recorded') return entry;
+    if (!entry.mainRadio && Number.isSafeInteger(entry.nextRetryAt) && entry.nextRetryAt > now()) return false;
+    if (!await canSpendWorkerGas()) return false;
     if (await contract.usedImpressionIds(entry.impressionId)) {
-      const next = { ...journal, impressions: journal.impressions.map(item => item.impressionId === entry.impressionId ? { ...item, state: 'recorded' } : item) };
+      const submittedAt = new Date(now()).toISOString();
+      const nextEligibleAt = !entry.mainRadio ? Date.parse(submittedAt) + VERTLOOP_IMPRESSION_MIN_INTERVAL_MS : 0;
+      const next = { ...journal, impressions: journal.impressions.map(item => {
+        if (item.impressionId === entry.impressionId) return { ...item, state: 'recorded', submittedAt };
+        if (!entry.mainRadio && item.state === 'pending' && item.campaignId === entry.campaignId) {
+          return { ...item, nextRetryAt: Math.max(Number.isSafeInteger(item.nextRetryAt) ? item.nextRetryAt : 0, nextEligibleAt) };
+        }
+        return item;
+      }) };
       await commit(next);
+      if (!entry.mainRadio) {
+        vertLoopNextRetryAtByCampaign.set(entry.campaignId, Math.max(vertLoopNextRetryAtByCampaign.get(entry.campaignId) || 0, nextEligibleAt));
+      }
       return next.impressions.find(item => item.impressionId === entry.impressionId);
     }
-    await contract.recordCampaignPlay.staticCall(BigInt(entry.campaignId), entry.mainRadio, entry.impressionId);
-    const transaction = await contract.recordCampaignPlay(BigInt(entry.campaignId), entry.mainRadio, entry.impressionId);
-    if ((await transaction.wait(2))?.status !== 1) throw new Error(`DeVert impression failed: ${transaction.hash}`);
-    const next = { ...journal, impressions: journal.impressions.map(item => item.impressionId === entry.impressionId
-      ? { ...item, state: 'recorded', transactionHash: transaction.hash } : item) };
-    await commit(next);
-    return next.impressions.find(item => item.impressionId === entry.impressionId);
+    try {
+      await contract.recordCampaignPlay.staticCall(BigInt(entry.campaignId), entry.mainRadio, entry.impressionId);
+      const transaction = await contract.recordCampaignPlay(BigInt(entry.campaignId), entry.mainRadio, entry.impressionId);
+      if ((await transaction.wait(2))?.status !== 1) throw new Error(`DeVert impression failed: ${transaction.hash}`);
+      const submittedAt = new Date(now()).toISOString();
+      const nextEligibleAt = !entry.mainRadio ? Date.parse(submittedAt) + VERTLOOP_IMPRESSION_MIN_INTERVAL_MS : 0;
+      const next = { ...journal, impressions: journal.impressions.map(item => {
+        if (item.impressionId === entry.impressionId) {
+          return { ...item, state: 'recorded', submittedAt, transactionHash: transaction.hash };
+        }
+        if (!entry.mainRadio && item.state === 'pending' && item.campaignId === entry.campaignId) {
+          return { ...item, nextRetryAt: Math.max(Number.isSafeInteger(item.nextRetryAt) ? item.nextRetryAt : 0, nextEligibleAt) };
+        }
+        return item;
+      }) };
+      await commit(next);
+      if (!entry.mainRadio) {
+        vertLoopNextRetryAtByCampaign.set(entry.campaignId, Math.max(vertLoopNextRetryAtByCampaign.get(entry.campaignId) || 0, nextEligibleAt));
+      }
+      return next.impressions.find(item => item.impressionId === entry.impressionId);
+    } catch (error) {
+      if (!isInsufficientFundsError(error)) throw error;
+      workerGasState = {
+        checkedAt: now(),
+        unavailable: false,
+        lowBalance: true,
+        reason: error?.shortMessage || error?.message || 'worker gas low',
+        workerAddress: workerWallet,
+        thresholdWei: workerMinBalanceWei,
+        runwayDays: 0,
+      };
+      warnWorkerGas(workerGasState);
+      return false;
+    }
   }
 
-  async function retryPendingImpressions() {
-    for (const entry of journal.impressions.filter(item => item.state === 'pending')) await submitImpression(entry);
+  async function retryPendingImpressions({ force = false } = {}) {
+    if (!journal.impressions.some(item => item.state === 'pending')) return false;
+    const state = await refreshWorkerGasState({ force });
+    if (!state || state.unavailable || state.lowBalance) return false;
+    let progressed = false;
+    for (const impressionId of journal.impressions.filter(item => item.state === 'pending').map(item => item.impressionId)) {
+      const entry = journal.impressions.find(item => item.impressionId === impressionId && item.state === 'pending');
+      if (!entry) continue;
+      const submitted = await submitImpression(entry);
+      if (submitted && submitted.state === 'recorded') progressed = true;
+    }
+    return progressed;
   }
+
+  const retryDeferredWork = async () => {
+    if (!initialized) return false;
+    const force = Boolean(workerGasState?.lowBalance || workerGasState?.unavailable);
+    const state = await refreshWorkerGasState({ force });
+    if (!state || state.unavailable || state.lowBalance) return false;
+    let progressed = false;
+    while (journal.pendingMusicPlayIds.length >= MUSIC_BATCH_SIZE) {
+      const flushed = await flushMusicBatch();
+      if (!flushed) break;
+      progressed = true;
+    }
+    if (await retryPendingImpressions({ force })) progressed = true;
+    return progressed;
+  };
+
+  const startRetryTimer = () => {
+    if (retryTimer) return;
+    retryTimer = setInterval(() => {
+      run(() => retryDeferredWork().catch(error => log.warn(`[devert] Deferred worker retry failed: ${error.message}`)));
+    }, workerGasCheckMs);
+    retryTimer.unref?.();
+  };
 
   function campaignTrack(campaign, kind) {
     const ipfsCid = campaign.audioURI.slice('ipfs://'.length);
@@ -133,14 +309,10 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
     initialize: () => run(async () => {
       const restored = await restore();
       journal = restored ? validateJournal(restored) : emptyJournal();
+      hydrateVertLoopRetryState();
       initialized = true;
-      while (journal.pendingMusicPlayIds.length >= MUSIC_BATCH_SIZE) {
-        try { await flushMusicBatch(); }
-        catch (error) { log.warn(`[devert] Music-play report retry deferred: ${error.message}`); break; }
-      }
-      for (const entry of journal.impressions.filter(item => item.state === 'pending')) {
-        await submitImpression(entry).catch(error => log.warn(`[devert] Impression retry deferred: ${error.message}`));
-      }
+      startRetryTimer();
+      await retryDeferredWork();
       return structuredClone(journal);
     }),
     recordCompletedMusicPlay: ({ playId, audibleMs }) => run(async () => {
@@ -156,12 +328,12 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       pendingMusicPlayIds.push(musicPlayId);
       const nextSeen = [...journal.seenMusicPlayIds, musicPlayId].slice(-MAX_SAVED_IDS);
       await commit({ ...journal, musicWeekId: weekId, pendingMusicPlayIds, seenMusicPlayIds: nextSeen });
-      await flushMusicBatch();
+      await retryDeferredWork();
       return true;
     }),
     async nextMainRadioAd({ excludeCampaignIds = [], count = 1 } = {}) {
       requireReady();
-      await retryPendingImpressions();
+      await retryPendingImpressions({ force: Boolean(workerGasState?.lowBalance || workerGasState?.unavailable) });
       const snapshot = await readCampaigns();
       if (snapshot.chainId !== 8453 || snapshot.paused || !Array.isArray(snapshot.campaigns) ||
         snapshot.market.mainRadioImpressions >= snapshot.market.slots) return null;
@@ -197,7 +369,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
     }),
     async nextDevertLoopAd({ excludeCampaignIds = [] } = {}) {
       requireReady();
-      await retryPendingImpressions();
+      await retryPendingImpressions({ force: Boolean(workerGasState?.lowBalance || workerGasState?.unavailable) });
       const snapshot = await readCampaigns();
       if (snapshot.chainId !== 8453 || snapshot.paused || !Array.isArray(snapshot.campaigns)) return null;
       const nowMs = Date.parse(snapshot.snapshotAt);
@@ -222,12 +394,14 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       if (entry?.state === 'recorded') return true;
       if (!entry) {
         entry = { impressionId, campaignId: String(campaignId), mainRadio: mainRadio === true, radioPlayId,
-          recordedAt: new Date(now()).toISOString(), state: 'pending' };
+          recordedAt: new Date(now()).toISOString(), state: 'pending', nextRetryAt: mainRadio === true ? 0
+            : Math.max(vertLoopNextRetryAtByCampaign.get(String(campaignId)) || 0, now()) };
         await commit({ ...journal, impressions: [...journal.impressions, entry].slice(-MAX_SAVED_IDS) });
       }
       await submitImpression(entry);
       return true;
     }),
     getState: () => { requireReady(); return structuredClone(journal); },
+    getWorkerGasState: async () => structuredClone(await refreshWorkerGasState()),
   };
 }

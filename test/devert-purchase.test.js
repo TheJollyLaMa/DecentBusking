@@ -97,6 +97,14 @@ test('DeVert purchase attaches the current worker-gas top-up and keeps USDC appr
   assert.ok(state.calls.steps.some(message => /worker-gas top-up/.test(message)));
 });
 
+test('DeVert purchase scales the worker-gas top-up with campaign duration', async () => {
+  const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
+  const state = fixture({ nativeBalance: 5_000_000_000_000_000n });
+  state.usdc.balanceOf = async () => 20_000_000n;
+  await purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio', weeks: 3 });
+  assert.equal(state.calls.purchases[0][4].value, 3n * 500_000n * FEE_CAP);
+});
+
 test('DeVert purchase rejects insufficient top-up ETH before prompting for USDC approval', async () => {
   const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
   const topUp = 500_000n * FEE_CAP;
@@ -155,7 +163,8 @@ test('Ads Only mirrors only an audible live AdLoop state and its radio play posi
   const state = { ready: true, nowPlaying: { campaignId: '9', radioPlayId: 'adloop:9:1',
     title: 'Campaign 9', ipfsCid: 'bafy-nine', mediaType: 'audio/mp4', audible: true, positionMs: 42_000 } };
   assert.deepEqual(normalizeAdLoopNowPlaying(state), {
-    playId: 'adloop:9:1', title: 'Campaign 9', ipfsCid: 'bafy-nine', mediaType: 'audio/mp4', positionMs: 42_000,
+    playId: 'adloop:9:1', title: 'Campaign 9', ipfsCid: 'bafy-nine', mediaType: 'audio/mp4', videoUrl: '',
+    positionMs: 42_000,
   });
   assert.equal(normalizeAdLoopNowPlaying({ ...state, ready: false }), null);
   assert.equal(normalizeAdLoopNowPlaying({ ...state, nowPlaying: { ...state.nowPlaying, audible: false } }), null);

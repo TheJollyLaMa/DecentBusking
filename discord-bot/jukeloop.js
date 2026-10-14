@@ -189,6 +189,24 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
     return { ...summary, status: 'unavailable', reason: 'main-radio scheduler unavailable' };
   }
 
+  try {
+    const gas = session.devertPlayback.getWorkerGasState ? await session.devertPlayback.getWorkerGasState() : null;
+    if (gas?.lowBalance) {
+      return {
+        ...summary,
+        status: 'unavailable',
+        reason: 'worker gas low',
+        workerAddress: gas.workerAddress || '',
+        balanceWei: gas.balanceWei ?? null,
+        thresholdWei: gas.thresholdWei ?? null,
+        runwayDays: gas.runwayDays ?? null,
+      };
+    }
+  } catch (error) {
+    console.warn('[devert] Worker gas status unavailable:', error.message);
+    return { ...summary, status: 'unavailable', reason: 'worker gas check unavailable' };
+  }
+
   if (activeShow.type === 'live_performance' || activeShow.type === 'weekly_top10') {
     return {
       ...summary,
