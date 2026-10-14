@@ -4,6 +4,7 @@
 
 import { fetchNFTMetaById } from './space.js?v=20261014-celebrate';
 import { returnToRadio } from './radio-sync.js?v=20261010-listens';
+import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
 
 // NFT currently shown in the single view; previews and purchases are handled explicitly.
 let _cardNft = null;
@@ -77,6 +78,7 @@ export function renderNFTCard(nft) {
     }
   };
   panel.onclose = () => {
+    document.removeEventListener('creator-watchlist-changed', watchlistListener);
     panel.classList.add('hidden');
     content.querySelectorAll('audio').forEach((audio) => audio.pause());
     _renderPreviewButton(content, false);
@@ -94,6 +96,24 @@ export function renderNFTCard(nft) {
     closeBtn.onclick = () => panel.close();
   }
   _cardNft = nft;
+  const watchlistBtn = content.querySelector('.nft-watchlist-btn');
+  const watchlistStatus = content.querySelector('.nft-watchlist-status');
+  const renderWatchlist = (options = {}) => {
+    if (!watchlistBtn) return;
+    const state = applyCreatorWatchlistButton(watchlistBtn, nft, options);
+    if (watchlistStatus) {
+      watchlistStatus.textContent = state.mode === 'saved'
+        ? 'Saved to your watchlist.'
+        : state.mode === 'pending'
+          ? 'Verifying the exact NFT…'
+          : state.mode === 'loading'
+            ? 'Loading your watchlist…'
+            : state.mode === 'connect'
+              ? 'Connect your wallet to save this NFT.'
+              : '';
+    }
+  };
+  renderWatchlist({ loading: false });
   const listenStatus = text => {
     const el = content.querySelector('.nft-listen-status');
     if (el) el.textContent = text;
@@ -142,6 +162,26 @@ export function renderNFTCard(nft) {
       status('Playlists open soon');
     }
   });
+  watchlistBtn?.addEventListener('click', async () => {
+    if (!window._wallet?.address || !window._wallet?.signer) {
+      await window._wallet?.connect?.();
+      renderWatchlist();
+      return;
+    }
+    renderWatchlist({ saving: true });
+    try {
+      await toggleCreatorWatchlist(creatorWatchlistEntrySnapshot(nft));
+      renderWatchlist();
+      if (watchlistStatus) watchlistStatus.textContent = isCreatorWatchlisted(nft)
+        ? 'Saved to your watchlist.'
+        : 'Removed from your watchlist.';
+    } catch (error) {
+      if (watchlistStatus) watchlistStatus.textContent = error.message;
+      renderWatchlist();
+    }
+  });
+  const watchlistListener = () => { if (_cardNft === nft) renderWatchlist(); };
+  document.addEventListener('creator-watchlist-changed', watchlistListener);
 
   // Wire parent-play button if present
   const parentPlayBtn = content.querySelector('.nft-parent-play-btn');
@@ -215,8 +255,12 @@ function _buildCardHTML(nft) {
       <button class="nft-listen-btn nft-buy-btn" type="button" title="Pay with your wallet for the whole track without interruption">🎧 Listen (${listenPrice})</button>
       <button class="nft-mute-btn nft-buy-btn" type="button" aria-pressed="false" aria-label="Mute preview" title="Mute preview">🔊</button>
     </div>
-    <p class="nft-listen-status" role="status" aria-live="polite"></p>
-    <button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>` : ''}
+    <p class="nft-listen-status" role="status" aria-live="polite"></p>` : ''}
+    <div class="nft-card-actions">
+      <button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>
+      <button class="nft-watchlist-btn nft-buy-btn" type="button" aria-pressed="false" title="Save to watchlist">👀 Save</button>
+    </div>
+    <p class="nft-watchlist-status" role="status" aria-live="polite"></p>
     ${/^0x[0-9a-fA-F]{40}$/.test(nft.artist || nft.creator || '') ? `<button class="nft-creator-profile nft-buy-btn" type="button" data-creator="${_esc(nft.artist || nft.creator)}" data-album="${_esc(nft.djukeAlbumId || '')}">Creator Profile / Collaborators</button>` : ''}
 
     ${parentSection}

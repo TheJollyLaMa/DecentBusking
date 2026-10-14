@@ -226,12 +226,15 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, creatorProfiles.get(requestUrl.searchParams.get('address')), '*');
         return;
       }
-      if (request.method === 'POST' && ['/api/creator/profile', '/api/creator/link-discord'].includes(requestUrl.pathname)) {
+      if (request.method === 'POST' && ['/api/creator/profile', '/api/creator/link-discord', '/api/creator/watchlist'].includes(requestUrl.pathname)) {
         if (!corsOrigin) throw new Error('Origin is not allowed');
         if (!creatorProfiles) throw new Error('Creator profiles are not configured');
         const body = await readJson(request);
         const result = requestUrl.pathname.endsWith('link-discord')
-          ? creatorProfiles.startLink(body, origin) : await creatorProfiles.update(body, origin);
+          ? creatorProfiles.startLink(body, origin)
+          : requestUrl.pathname.endsWith('watchlist')
+            ? await creatorProfiles.updateWatchlist(body, origin)
+            : await creatorProfiles.update(body, origin);
         sendJson(response, 200, result, corsOrigin);
         return;
       }

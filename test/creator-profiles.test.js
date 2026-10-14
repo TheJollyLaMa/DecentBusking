@@ -33,6 +33,47 @@ test('creator profiles require wallet signatures and verified Discord confirmati
   assert.equal(reloaded.get(wallet.address).displayName, 'Creator');
 });
 
+test('creator profiles keep watchlists separate from profile updates and reject replayed watchlist signatures', async () => {
+  const { createCreatorProfiles } = await import('../discord-bot/creator-profiles.js');
+  const { buildCreatorAuthorizationMessage, buildCreatorWatchlistAuthorizationMessage } = await import('../js/creator-profile-data.mjs');
+  const wallet = Wallet.createRandom();
+  const origin = 'https://busking.example';
+  let snapshot = null;
+  const store = createCreatorProfiles({ restore: async () => snapshot, save: async next => { snapshot = next; return 'ipfs://profile'; } });
+  await store.initialize();
+  const sign = async body => ({
+    ...body,
+    signature: await wallet.signMessage(body.action.includes('watchlist')
+      ? buildCreatorWatchlistAuthorizationMessage(body)
+      : buildCreatorAuthorizationMessage(body)),
+  });
+  const profileBody = await sign({ address: wallet.address, origin, action: 'save', profile: { displayName: 'Listener' },
+    nonce: require('node:crypto').randomUUID(), issuedAt: new Date().toISOString() });
+  await store.update(profileBody, origin);
+  const entry = { chainId: 8453, contractAddress: `0x${'1'.repeat(40)}`, tokenId: 17, title: 'Moonlit Signal', artist: 'Synth Artist', artworkURI: 'ipfs://art' };
+  const add = await sign({ address: wallet.address, origin, action: 'save-watchlist', entry,
+    nonce: require('node:crypto').randomUUID(), issuedAt: new Date().toISOString() });
+  await store.updateWatchlist(add, origin);
+  await assert.rejects(store.updateWatchlist(add, origin), /already used/);
+  assert.equal(store.get(wallet.address).displayName, 'Listener');
+  assert.equal(store.get(wallet.address).watchlist.length, 1);
+  assert.equal(store.get(wallet.address).watchlist[0].title, 'Moonlit Signal');
+  const duplicate = await sign({ address: wallet.address, origin, action: 'save-watchlist', entry,
+    nonce: require('node:crypto').randomUUID(), issuedAt: new Date().toISOString() });
+  await store.updateWatchlist(duplicate, origin);
+  assert.equal(store.get(wallet.address).watchlist.length, 1);
+  const remove = await sign({ address: wallet.address, origin, action: 'remove-watchlist', entry,
+    nonce: require('node:crypto').randomUUID(), issuedAt: new Date().toISOString() });
+  await store.updateWatchlist(remove, origin);
+  assert.equal(store.get(wallet.address).watchlist.length, 0);
+  await assert.rejects(store.updateWatchlist({ ...await sign({ address: Wallet.createRandom().address, origin, action: 'save-watchlist', entry,
+    nonce: require('node:crypto').randomUUID(), issuedAt: new Date().toISOString() }), address: Wallet.createRandom().address }, origin), /does not match/);
+  const reloaded = createCreatorProfiles({ restore: async () => snapshot, save: async () => 'ipfs://profile' });
+  await reloaded.initialize();
+  assert.equal(reloaded.get(wallet.address).displayName, 'Listener');
+  assert.equal(reloaded.get(wallet.address).watchlist.length, 0);
+});
+
 test('creator images prefer uploaded IPFS, then verified ENS, then Discord', async () => {
   const { creatorPresentation, creatorImageURL, resolveCreatorENS } = await import('../js/creator-profile-data.mjs');
   const discord = { displayName: 'Discord', avatarURI: 'https://cdn.discordapp.com/avatar.png' };

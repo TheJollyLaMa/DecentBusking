@@ -383,3 +383,58 @@ test('radio now-playing events resolve and load the matching NFT outside the vis
   assert.equal(entry.mesh.userData.pinnedVisible, true);
   assert.equal(vm.runInContext('_nowPlayingMesh === _allNFTs[0].mesh', context), true);
 });
+
+test('radio watchlist resolution requires an exact media match instead of title guessing', async () => {
+  const audio = { paused: true, ended: false, readyState: 4, currentTime: 0, volume: 1, muted: false };
+  const video = { paused: true, ended: false, readyState: 4, currentTime: 0, volume: 1, muted: false };
+  const list = {
+    children: [],
+    prepend(node) { this.children.unshift(node); },
+    append(node) { this.children.push(node); },
+    replaceChildren(...nodes) { this.children = [...nodes]; },
+    querySelector(selector) { return selector === '.dnft-list-empty' ? null : null; },
+    querySelectorAll() { return [...this.children]; },
+  };
+  const fields = {
+    'dnft-list-items': list,
+    'dnft-list-count': { textContent: '' },
+    'dnft-list-count-badge': { textContent: '' },
+    'artist-filter-count': { textContent: '' },
+    'scene-artist-filter': { replaceChildren() {}, value: '', addEventListener() {} },
+    'archive-artist-filter': { replaceChildren() {}, value: '', addEventListener() {} },
+    'radio-video-stage': { hidden: true },
+  };
+  const document = new MockDocument(audio, video, list, fields);
+  const queries = [];
+  const context = vm.createContext({
+    console,
+    document,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.pinata.cloud/ipfs/', ipfsUploadServiceUrl: 'https://service.example' } },
+    performance,
+    CustomEvent,
+    Event,
+    Option: class { constructor(text, value) { this.text = text; this.value = value; } },
+    nftArtistKey: (nft) => String(nft.artist || nft.creator || nft.uploader || 'Unknown artist').trim().toLowerCase(),
+    setTimeout,
+    clearTimeout,
+    fetchNftCatalogPage: async ({ query }) => {
+      queries.push(query);
+      return { nfts: [{ tokenId: 21, contractAddress: `0x${'5'.repeat(40)}`, chainId: 8453, name: 'Moonlit Signal', artist: '0xartist', audioUrl: 'ipfs://different' }],
+        total: 1, nextOffset: null, artists: [] };
+    },
+    THREE: makeThreeStubs(),
+  });
+
+  vm.runInContext(`${spaceSource}\n_scene = new THREE.Scene();`, context);
+  const result = await vm.runInContext(`resolveNowPlayingNFT({
+    title: 'Moonlit Signal',
+    artist: 'Synth Artist',
+    audioUrl: 'https://gateway.pinata.cloud/ipfs/bafywrong',
+    ipfsCid: 'bafywrong',
+    mediaType: 'audio/mpeg',
+  }, { requireMediaMatch: true });`, context);
+
+  assert.equal(result, null);
+  assert.ok(queries[0].includes('Moonlit Signal'));
+  assert.ok(queries[0].includes('Synth Artist') || queries[0] === 'Moonlit Signal');
+});

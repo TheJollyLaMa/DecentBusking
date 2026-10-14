@@ -11,10 +11,33 @@ export function normalizeCreatorProfile(input = {}) {
   return profile;
 }
 
+export function normalizeCreatorWatchlistEntry(input = {}) {
+  const chainId = Number(input.chainId ?? 8453);
+  const tokenId = Number(input.tokenId);
+  const contractAddress = typeof input.contractAddress === 'string' ? input.contractAddress.trim() : '';
+  if (!Number.isSafeInteger(chainId) || chainId <= 0 || !/^0x[0-9a-fA-F]{40}$/.test(contractAddress) ||
+      !Number.isSafeInteger(tokenId) || tokenId < 0 || /^0x0{40}$/i.test(contractAddress)) {
+    throw new Error('Invalid watchlist NFT');
+  }
+  const entry = { chainId, contractAddress: contractAddress.toLowerCase(), tokenId };
+  for (const [field, limit] of [['title', 120], ['artist', 120], ['artworkURI', 300], ['metadataUri', 300], ['audioUrl', 300]]) {
+    const value = input[field] ?? '';
+    if (typeof value !== 'string' || value.length > limit) throw new Error(`Invalid watchlist ${field}`);
+    entry[field] = value.trim();
+  }
+  return entry;
+}
+
 export function buildCreatorAuthorizationMessage({ address, origin, action, nonce, issuedAt, profile = {} }) {
   return ['DecentBusking creator profile', `Wallet: ${address.toLowerCase()}`, `Origin: ${origin}`,
     `Action: ${action}`, `Nonce: ${nonce}`, `Issued At: ${issuedAt}`,
     `Profile: ${JSON.stringify(normalizeCreatorProfile(profile))}`].join('\n');
+}
+
+export function buildCreatorWatchlistAuthorizationMessage({ address, origin, action, nonce, issuedAt, entry = {} }) {
+  return ['DecentBusking creator watchlist', `Wallet: ${address.toLowerCase()}`, `Origin: ${origin}`,
+    `Action: ${action}`, `Nonce: ${nonce}`, `Issued At: ${issuedAt}`,
+    `Entry: ${JSON.stringify(normalizeCreatorWatchlistEntry(entry))}`].join('\n');
 }
 
 export function creatorImageURL(value, gateway = 'https://gateway.pinata.cloud/ipfs/') {

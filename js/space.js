@@ -70,6 +70,7 @@ let _nowPlayingRightWaveData = null;
 let _nowPlayingFrequencyData = null;
 let _nowPlayingReducedMotion = null;
 let _nowPlayingLookupToken = 0;
+let _openNFTLookupToken = 0;
 
 // Spaceship
 const _ship = { speed: 0.3 };
@@ -254,6 +255,25 @@ export async function fetchNFTMetaById(tokenId, collectionAddress) {
     console.warn('[space] fetchNFTMetaById failed:', err.message);
     return null;
   }
+}
+
+export async function openNFTByIdentity(detail = {}) {
+  const tokenId = Number(detail?.tokenId);
+  const contractAddress = detail?.contractAddress || window.DecentConfig?.contractAddress || '';
+  if (!/^0x[0-9a-fA-F]{40}$/.test(contractAddress) || !Number.isSafeInteger(tokenId) || tokenId < 0) return false;
+  if (!_scene) return false;
+  const lookup = ++_openNFTLookupToken;
+  const key = `${Number(detail.chainId || 8453)}:${contractAddress.toLowerCase()}:${tokenId}`;
+  let entry = _allNFTs.find((item) => _nftKey(item.nft) === key);
+  if (!entry) {
+    const nft = detail.nft || await fetchNFTMetaById(tokenId, contractAddress);
+    if (lookup !== _openNFTLookupToken || !nft) return false;
+    const mesh = _spawnMesh(nft, false);
+    entry = mesh ? { nft, mesh } : null;
+  }
+  if (!entry || lookup !== _openNFTLookupToken) return false;
+  _selectNFT(entry.nft, entry.mesh, _nftRow(entry.nft), true);
+  return true;
 }
 
 // Move the timeline window to a specific day-offset (called from nav controls).

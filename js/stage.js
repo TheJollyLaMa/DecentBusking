@@ -6,6 +6,7 @@ import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261010-list
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { resolveNowPlayingNFT } from './space.js?v=20261014-celebrate';
 import { nftArtistLabel } from './nft-loader.js?v=20261012-paging';
+import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, getCreatorWatchlistState, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
 
 let _tipPlayingTrack = null;
 let _tipHistory = [];
@@ -15,19 +16,33 @@ let _tipLookupGeneration = 0;
 let _tipBusy = false;
 let _tipSelectionState = 'idle';
 let _tipSelectionMessage = '';
+let _watchlistTrack = null;
+let _watchlistResolvedNFT = null;
+let _watchlistLookupGeneration = 0;
+let _watchlistBusy = false;
 const _tipHistoryLimit = 12;
 
 // ── Public API ────────────────────────────────────────────────────────────
 export function initStage() {
   document.addEventListener('dbusk-now-playing', (event) => {
     _recordTipPlayingTrack(event.detail);
+    _watchlistTrack = event.detail ? { ...event.detail } : null;
+    _watchlistResolvedNFT = event.detail?.nft || null;
+    void _resolveWatchlistTrack(event.detail || {});
     if (!_tipBusy && !_tipSnapshot && !_tipHistory.length) _renderTipState();
   });
   document.addEventListener('dbusk-now-playing-stopped', () => {
     _tipPlayingTrack = null;
+    _watchlistTrack = null;
+    _watchlistResolvedNFT = null;
+    _renderWatchlistState();
   });
+  document.addEventListener('creator-watchlist-changed', () => _renderWatchlistState());
+  document.addEventListener('wallet-connected', () => _renderWatchlistState());
+  document.addEventListener('wallet-disconnected', () => _renderWatchlistState());
   _bindHat();
   _bindGuitarCase();
+  _bindWatchlistButton();
   _bindTipModal();
   initRadioSync();
 }
@@ -48,6 +63,66 @@ export function setNowPlaying({ title = '—', artist = '', audioUrl = '', media
     return;
   }
   playArchiveTrack({ title, artist, audioUrl: httpUrl, mediaType, nft });
+}
+
+function _watchlistButton() {
+  return document.getElementById('now-playing-watchlist-btn');
+}
+
+function _watchlistStatus() {
+  return document.getElementById('now-playing-watchlist-status');
+}
+
+function _renderWatchlistState({ loading = false, resolving = false, saving = false } = {}) {
+  const button = _watchlistButton();
+  const status = _watchlistStatus();
+  if (!button) return;
+  if (!_watchlistTrack) {
+    button.classList.add('hidden');
+    if (status) status.textContent = '';
+    return;
+  }
+  button.classList.remove('hidden');
+  const nft = _watchlistResolvedNFT || _watchlistTrack?.nft || null;
+  const state = applyCreatorWatchlistButton(button, nft, { loading, resolving, saving, unavailable: !!_watchlistTrack && !nft && !loading && !resolving });
+  if (status) {
+    status.textContent = state.mode === 'saved'
+      ? 'Saved to your watchlist.'
+      : state.mode === 'pending'
+        ? 'Verifying the exact NFT…'
+        : state.mode === 'unavailable'
+          ? 'No verified NFT is available for this song yet.'
+        : state.mode === 'loading'
+          ? 'Loading your watchlist…'
+          : state.mode === 'connect'
+            ? 'Connect your wallet to save this NFT.'
+            : '';
+  }
+}
+
+async function _resolveWatchlistTrack(detail) {
+  const lookup = ++_watchlistLookupGeneration;
+  if (!detail) {
+    _watchlistResolvedNFT = null;
+    _renderWatchlistState();
+    return;
+  }
+  if (detail.nft) {
+    _watchlistResolvedNFT = detail.nft;
+    _renderWatchlistState();
+    return;
+  }
+  _renderWatchlistState({ resolving: true });
+  try {
+    const nft = await resolveNowPlayingNFT(detail, { requireMediaMatch: true });
+    if (lookup !== _watchlistLookupGeneration) return;
+    _watchlistResolvedNFT = nft;
+    _renderWatchlistState({ resolving: false });
+  } catch {
+    if (lookup !== _watchlistLookupGeneration) return;
+    _watchlistResolvedNFT = null;
+    _renderWatchlistState({ resolving: false });
+  }
 }
 
 // ── Hat (tip) ─────────────────────────────────────────────────────────────
@@ -121,6 +196,40 @@ function _bindGuitarCase() {
   btn.addEventListener('click', () => {
     openMintModal();
   });
+}
+
+function _bindWatchlistButton() {
+  const button = _watchlistButton();
+  if (!button) return;
+  button.addEventListener('click', async () => {
+    if (!window._wallet?.address || !window._wallet?.signer) {
+      await window._wallet?.connect?.();
+      _renderWatchlistState({ loading: getCreatorWatchlistState().loading });
+      return;
+    }
+    if (!_watchlistResolvedNFT && _watchlistTrack) await _resolveWatchlistTrack(_watchlistTrack);
+    const nft = _watchlistResolvedNFT || _watchlistTrack?.nft;
+    if (!nft) {
+      _renderWatchlistState();
+      if (_watchlistStatus()) _watchlistStatus().textContent = 'No verified NFT is available for this song yet.';
+      return;
+    }
+    _watchlistBusy = true;
+    _renderWatchlistState({ saving: true });
+    try {
+      const save = !isCreatorWatchlisted(nft);
+      await toggleCreatorWatchlist(creatorWatchlistEntrySnapshot(nft));
+      _renderWatchlistState();
+      if (_watchlistStatus()) _watchlistStatus().textContent = save ? 'Saved to your watchlist.' : 'Removed from your watchlist.';
+    } catch (error) {
+      _renderWatchlistState();
+      if (_watchlistStatus()) _watchlistStatus().textContent = error.message;
+    } finally {
+      _watchlistBusy = false;
+      _renderWatchlistState();
+    }
+  });
+  _renderWatchlistState({ loading: getCreatorWatchlistState().loading });
 }
 
 // ── Tip modal wiring ──────────────────────────────────────────────────────
