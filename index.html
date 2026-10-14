@@ -407,8 +407,10 @@
           <button id="radio-video-toggle" type="button" class="hidden" title="Hide video" aria-label="Hide video" aria-pressed="true">
             <img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/video.svg" width="18" height="18" alt="" />
           </button>
+          <button id="now-playing-watchlist-btn" type="button" class="hidden" title="Save to watchlist" aria-label="Save to watchlist" aria-pressed="false">👀</button>
           <button id="now-playing-play-btn" class="hidden" title="Tune in" aria-label="Tune in">▶ Tune in</button>
           <button id="now-playing-radio-btn" class="hidden" title="Return to radio" aria-label="Return to radio">📻 Radio</button>
+          <span id="now-playing-watchlist-status" role="status" aria-live="polite"></span>
         </div>
       </div>
       <span id="radio-activity" role="status" aria-live="polite" hidden></span>
@@ -722,6 +724,12 @@
       <button type="submit">Sign and Save Profile</button>
     </form>
     <div class="creator-profile-discord"><button type="button" data-discord-link>Link Discord</button><code data-discord-code hidden></code></div>
+    <section class="creator-watchlist" data-watchlist-section hidden>
+      <div class="creator-watchlist-heading"><h3>Watchlist</h3><span data-watchlist-count></span></div>
+      <p data-watchlist-status role="status" aria-live="polite">Connect your wallet to load your watchlist.</p>
+      <p data-watchlist-empty hidden></p>
+      <ol data-watchlist-items class="creator-watchlist-list"></ol>
+    </section>
     <details><summary>Albums and Collaborators</summary>
       <form data-album-form>
         <label>Album ID or Slug<input name="albumId" required maxlength="100" /></label><button type="button" data-album-load>Load Album</button>
