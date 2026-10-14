@@ -721,6 +721,59 @@ test('JukeLoop falls back to Pinata when the configured IPFS gateway cannot stre
   assert.equal(await resolveStreamableIpfsUrl('https://dweb.link', 'bafy-song', async () => new Response('', { status: 429 })), null);
 });
 
+test('JukeLoop streams from the dedicated Pinata gateway when public gateways rate-limit', async () => {
+  const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'));
+  const { resolveStreamableIpfsUrl, buildIpfsGatewayUrl } = await import(moduleUrl.href);
+  const dedicated = 'https://peach.mypinata.cloud/ipfs/?pinataGatewayToken=secret';
+  assert.equal(buildIpfsGatewayUrl(dedicated, 'bafy-song'), 'https://peach.mypinata.cloud/ipfs/bafy-song?pinataGatewayToken=secret');
+  const requested = [];
+  const fetchImpl = async url => {
+    requested.push(url);
+    return new Response('x', { status: url.includes('mypinata.cloud') ? 206 : 429 });
+  };
+  assert.equal(await resolveStreamableIpfsUrl('https://dweb.link', 'bafy-song', fetchImpl, [dedicated]),
+    'https://peach.mypinata.cloud/ipfs/bafy-song?pinataGatewayToken=secret');
+  assert.equal(requested.length, 3);
+});
+
+test('an unfetchable paid request stays queued while free rotation keeps the radio playing', async (t) => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const sent = [];
+  const failed = [];
+  let paidChecks = 0;
+  const paidTrack = { trackId: 'album:paid', title: 'Paid Song', ipfsCid: 'bafy-paid' };
+  const session = new JukeLoopSession({
+    voiceChannel: { guild: { id: 'djuke-unfetchable-test' } },
+    textChannel: { send: async message => { sent.push(message.content); return {}; } },
+    client: {},
+    djuke: {
+      nextPaid: async () => { paidChecks++; return { record: { requestId: 'req-1' }, track: paidTrack }; },
+      fail: async (record, error) => { failed.push([record.requestId, error.message]); },
+    },
+  });
+  t.after(() => session.destroy());
+  session._queue = [{ trackId: 'regular-track', title: 'Regular Track' }];
+  session._queueIndex = 0;
+  session._getFreshUrl = async track => {
+    if (track.trackId === 'regular-track') throw new Error('stop after selection');
+    return null;
+  };
+
+  await assert.rejects(session._prepareNextPlayback(), /stop after selection/);
+  assert.deepEqual(failed, [['req-1', 'Paid recording could not be fetched']]);
+  assert.equal(paidChecks, 1);
+  assert.ok(session._djukeCooldownUntil > Date.now());
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /stays queued/);
+
+  await assert.rejects(session._prepareNextPlayback(), /stop after selection/);
+  assert.equal(paidChecks, 1, 'paid picks pause during the cooldown');
+  session._djukeCooldownUntil = 0;
+  await assert.rejects(session._prepareNextPlayback(), /stop after selection/);
+  assert.equal(paidChecks, 2);
+  assert.equal(sent.length, 1, 'the channel is notified once per request');
+});
+
 test('admin batch queue requests every archived unminted upload by one artist, oldest first', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-queue-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');

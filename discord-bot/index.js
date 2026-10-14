@@ -100,6 +100,7 @@ import {
   backfillFromChannel,
   getAttachmentTitle,
   synchronizeDiscordRating,
+  setDedicatedIpfsGateways,
 } from './jukeloop.js';
 import {
   upsertLivePerformanceEvent,
@@ -130,6 +131,26 @@ let _nftCatalog = null;
 let _nftCatalogCheckedAt = 0;
 let _nftCatalogError = '';
 let _nftMetadataGateways = null;
+let _dedicatedGatewayTask = null;
+
+/** Discover the account's dedicated Pinata gateway once; null when unavailable. */
+function discoverDedicatedGateway(config) {
+  if (!_dedicatedGatewayTask) {
+    _dedicatedGatewayTask = (config.pinataJwt
+      ? discoverPinataMetadataGateway({ pinataJwt: config.pinataJwt })
+      : Promise.reject(new Error('PINATA_JWT is not configured')))
+      .then(gateway => {
+        setDedicatedIpfsGateways([gateway]);
+        return gateway;
+      })
+      .catch(error => {
+        console.warn('[ipfs] Dedicated Pinata gateway discovery failed, using public gateways:', error.message);
+        _dedicatedGatewayTask = null;
+        return null;
+      });
+  }
+  return _dedicatedGatewayTask;
+}
 const IPFS_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_RESTORE_ATTEMPTS = 3;
 const WEEKLY_REPORT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -183,12 +204,7 @@ function syncMintedTracks(config, { required = false } = {}) {
   if (!_mintSyncTask) {
     _mintSyncTask = Promise.resolve().then(async () => {
       if (!_nftMetadataGateways) {
-        let dedicated = null;
-        try {
-          dedicated = await discoverPinataMetadataGateway({ pinataJwt: config.pinataJwt });
-        } catch (err) {
-          console.warn('[mint-sync] Dedicated Pinata gateway discovery failed, using fallback gateways:', err.message);
-        }
+        const dedicated = await discoverDedicatedGateway(config);
         _nftMetadataGateways = [
           ...(dedicated ? [dedicated] : []),
           'https://gateway.pinata.cloud/ipfs/',
@@ -1674,6 +1690,8 @@ async function startJukeLoop(client, config) {
       return false;
     }
     guildId = voiceChannel.guild.id;
+
+    await discoverDedicatedGateway(config);
 
     // Backfill all historic uploads from #DecentJukebox
     if (jukeboxCh) {

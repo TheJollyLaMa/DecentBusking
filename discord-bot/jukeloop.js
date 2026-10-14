@@ -61,6 +61,7 @@ const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
 const FADE_IN_SECONDS = 0.6;
 const NEXT_TRACK_READY_TIMEOUT_MS = 20_000;
 const DJUKE_PREFETCH_POLL_MS = 5_000;
+const PAID_FETCH_RETRY_MS = 60_000;
 
 // How long to wait before retrying when the playlist is empty (ms).
 const EMPTY_PLAYLIST_RETRY_MS = 60_000;
@@ -79,8 +80,9 @@ export function getAttachmentTitle(attachment) {
 
 /** Build a gateway URL for a raw IPFS CID. */
 export function buildIpfsGatewayUrl(gateway, cid) {
-  const base = gateway.replace(/\/$/, '');
-  return `${base}${base.endsWith('/ipfs') ? '' : '/ipfs'}/${cid}`;
+  const [rawBase, query = ''] = gateway.split('?');
+  const base = rawBase.replace(/\/$/, '');
+  return `${base}${base.endsWith('/ipfs') ? '' : '/ipfs'}/${cid}${query ? `?${query}` : ''}`;
 }
 
 const FALLBACK_IPFS_GATEWAY = 'https://gateway.pinata.cloud';
@@ -100,9 +102,15 @@ export async function isUrlStreamable(url, fetchImpl = fetch) {
   }
 }
 
-/** First gateway URL (configured, then Pinata) that can actually stream the CID, or null. */
-export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch) {
-  const gateways = [...new Set([gateway, FALLBACK_IPFS_GATEWAY].filter(Boolean))];
+// The account's dedicated Pinata gateway; public gateways rate-limit shared hosting IPs.
+let dedicatedIpfsGateways = [];
+export function setDedicatedIpfsGateways(gateways) {
+  dedicatedIpfsGateways = (Array.isArray(gateways) ? gateways : [gateways]).filter(value => typeof value === 'string' && value);
+}
+
+/** First gateway URL (configured, public Pinata, then dedicated Pinata) that can actually stream the CID, or null. */
+export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch, extraGateways = dedicatedIpfsGateways) {
+  const gateways = [...new Set([gateway, FALLBACK_IPFS_GATEWAY, ...extraGateways].filter(Boolean))];
   for (const candidate of gateways) {
     const url = buildIpfsGatewayUrl(candidate, cid);
     if (await isUrlStreamable(url, fetchImpl)) return url;
@@ -526,6 +534,7 @@ export class JukeLoopSession {
     this._started = false;
     this._currentPaid = null;
     this._djukeCooldownUntil = 0;
+    this._paidFetchNotices = new Set();
     this._createStream = createStream || createFFmpegStream;
 
     this._destroyed   = false;
@@ -832,14 +841,22 @@ export class JukeLoopSession {
     if (!url) {
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
       if (devertAd) this._failedDevertCampaignIds.add(devertAd.campaignId);
-      await this.textChannel
-        .send({ content: `⚠️ Skipping **${track.title}** — the original upload could not be found.`,
-          flags: MessageFlags.SuppressNotifications,
-        })
-        .catch(() => {});
+      const skipNoticeKey = paid ? `paid:${paid.record.requestId}` : null;
+      if (!skipNoticeKey || !this._paidFetchNotices.has(skipNoticeKey)) {
+        if (skipNoticeKey) this._paidFetchNotices.add(skipNoticeKey);
+        await this.textChannel
+          .send({ content: paid
+            ? `⏳ Paid request **${track.title}** can't be fetched right now — it stays queued and will retry while the radio keeps playing.`
+            : `⚠️ Skipping **${track.title}** — the original upload could not be found.`,
+            flags: MessageFlags.SuppressNotifications,
+          })
+          .catch(() => {});
+      }
       if (paid && this.djuke) {
+        // Keep the request queued, but let free rotation play instead of leaving the radio silent.
+        this._djukeCooldownUntil = Date.now() + PAID_FETCH_RETRY_MS;
         await this.djuke.fail(paid.record, new Error('Paid recording could not be fetched')).catch(() => {});
-        throw new Error(`Paid recording "${track.title}" could not be fetched`);
+        return this._prepareNextPlayback();
       }
       if (queueIndex !== null) this._queueIndex++;
       return this._prepareNextPlayback();
@@ -905,7 +922,7 @@ export class JukeLoopSession {
     this._paidPollTimer = setTimeout(() => {
       this._paidPollTimer = null;
       this._checkPreparedPaidPriority();
-    }, DJUKE_PREFETCH_POLL_MS);
+    }, Math.max(DJUKE_PREFETCH_POLL_MS, this._djukeCooldownUntil - Date.now()));
     this._paidPollTimer.unref?.();
   }
 
@@ -913,6 +930,10 @@ export class JukeLoopSession {
     if (this._destroyed || this._prepareTask || !this._preparedNext || this._preparedNext.paid) return;
     const epoch = this._preparationEpoch;
     const task = (async () => {
+      if (Date.now() < this._djukeCooldownUntil) {
+        this._schedulePaidPriorityCheck();
+        return this._preparedNext;
+      }
       const paid = await this.djuke.nextPaid();
       if (!paid) {
         this._schedulePaidPriorityCheck();
@@ -927,6 +948,7 @@ export class JukeLoopSession {
         return null;
       }
       this._preparedNext = prepared;
+      if (prepared && !prepared.paid) this._schedulePaidPriorityCheck();
       return prepared;
     })().catch(error => {
       console.warn('[jukeloop] DJuke priority check deferred:', error.message);

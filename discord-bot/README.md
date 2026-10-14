@@ -53,7 +53,7 @@ cp .env.example .env
 | `PINATA_FILES_API_URL`       | ❌        | Files API used to discover the latest JukeLoop state snapshot |
 | `IPFS_API_URL`               | Local     | Kubo RPC API; defaults to `http://127.0.0.1:5001` |
 | `SITE_URL`                   | ❌        | DecentBusking site URL (default: `https://thejollylama.github.io/DecentBusking`) |
-| `IPFS_GATEWAY`               | ❌        | IPFS HTTP gateway base URL (default: `https://w3s.link`) |
+| `IPFS_GATEWAY`               | ❌        | IPFS HTTP gateway base URL (default: `https://dweb.link`). Radio playback falls back to `gateway.pinata.cloud`, then to the account's dedicated Pinata gateway (discovered via `PINATA_JWT`) when public gateways rate-limit. A paid request that still can't be fetched stays queued and retries every 60s while free rotation keeps playing. |
 | `FFMPEG_PATH`                | ❌        | Path to `ffmpeg` binary (default: `ffmpeg` from `PATH`) |
 | `JUKE_LOOP_VOICE_CHANNEL_ID` | ❌        | Numeric ID of the `JukeLoop` **voice** channel — enables 24/7 radio |
 | `JUKE_LOOP_TEXT_CHANNEL_ID`  | ❌        | Numeric ID of the `JukeLoop` **text** channel — where "Now Playing" posts go |
