@@ -2,12 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const vm = require('node:vm');
 
 const stageSource = fs.readFileSync(path.join(__dirname, '../js/stage.js'), 'utf8')
   .replace(/^import .*;$/gm, '').replace(/export /g, '');
 const spaceSource = fs.readFileSync(path.join(__dirname, '../js/space.js'), 'utf8')
   .replace(/^import .*;$/gm, '').replace(/export /g, '');
+const loaderUrl = pathToFileURL(path.join(__dirname, '../js/nft-loader.js')).href;
 
 function makeThreeStubs() {
   class Vector3 {
@@ -382,6 +384,105 @@ test('radio now-playing events resolve and load the matching NFT outside the vis
   assert.equal(entry.mesh.visible, true);
   assert.equal(entry.mesh.userData.pinnedVisible, true);
   assert.equal(vm.runInContext('_nowPlayingMesh === _allNFTs[0].mesh', context), true);
+});
+
+test('shared NFT links load the exact target without autoplaying audio', async () => {
+  const { configuredNftCollections, parseNftIdentitySearch, isMusicNft } = await import(loaderUrl);
+  const audio = { paused: true, ended: false, readyState: 4, currentTime: 0, volume: 1, muted: false };
+  const video = { paused: true, ended: false, readyState: 4, currentTime: 0, volume: 1, muted: false };
+  const list = {
+    children: [],
+    prepend(node) { this.children.unshift(node); },
+    append(node) { this.children.push(node); },
+    replaceChildren(...nodes) { this.children = [...nodes]; },
+    querySelector(selector) { return selector === '.dnft-list-empty' ? null : null; },
+    querySelectorAll() { return [...this.children]; },
+  };
+  const panel = {
+    open: false,
+    classList: { add() {}, remove() {} },
+    showModal() { this.open = true; },
+    close() { this.open = false; },
+  };
+  const content = {
+    innerHTML: '',
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  const fields = {
+    'dnft-list-items': list,
+    'dnft-list-count': { textContent: '' },
+    'dnft-list-count-badge': { textContent: '' },
+    'artist-filter-count': { textContent: '' },
+    'scene-artist-filter': { replaceChildren() {}, value: '', addEventListener() {} },
+    'archive-artist-filter': { replaceChildren() {}, value: '', addEventListener() {} },
+    'radio-video-stage': { hidden: true },
+    'nft-panel': panel,
+    'nft-panel-content': content,
+    'nft-panel-close': { onclick: null },
+  };
+  const document = new MockDocument(audio, video, list, fields);
+  const nft = {
+    tokenId: 23,
+    contractAddress: `0x${'7'.repeat(40)}`,
+    chainId: 8453,
+    name: 'Shared Signal',
+    artist: `0x${'8'.repeat(40)}`,
+    mintedAt: new Date(Date.now() - 12 * 86_400_000).toISOString(),
+    audioUrl: 'ipfs://bafyshared',
+  };
+  const context = vm.createContext({
+    console,
+    document,
+    window: {
+      DecentConfig: {
+        chainId: 8453,
+        contractAddress: nft.contractAddress,
+        ipfsGateway: 'https://gateway.pinata.cloud/ipfs/',
+        ipfsUploadServiceUrl: 'https://service.example',
+        rpcUrl: 'https://rpc.example',
+      },
+      location: {
+        search: `?chainId=8453&contract=${nft.contractAddress}&tokenId=23`,
+        href: `https://busking.example/app/?chainId=8453&contract=${nft.contractAddress}&tokenId=23`,
+      },
+      addEventListener() {},
+    },
+    performance: { now: () => 0 },
+    CustomEvent,
+    Event,
+    Option: class { constructor(text, value) { this.text = text; this.value = value; } },
+    nftArtistKey: (value) => String(value.artist || value.creator || value.uploader || 'Unknown artist').trim().toLowerCase(),
+    configuredNftCollections,
+    parseNftIdentitySearch,
+    isMusicNft,
+    setTimeout,
+    clearTimeout,
+    fetchNftCatalogPage: async () => ({ nfts: [], total: 0, nextOffset: null, artists: [] }),
+    fetchIpfsJson: async () => ({ name: nft.name, audioUrl: nft.audioUrl, artist: nft.artist }),
+    loadMintedToken: async () => ({ ...nft, metadataUri: 'ipfs://metadata', mintedSupply: 1 }),
+    renderNFTCard: (card) => { content.innerHTML = `<h3 id="nft-detail-title">${card.name}</h3>`; },
+    ethers: {
+      JsonRpcProvider: class { constructor(url) { this.url = url; } },
+      Contract: class {
+        constructor(address, abi, provider) { this.address = address; this.provider = provider; }
+        async totalMinted() { return 1n; }
+        async uri() { return 'ipfs://metadata'; }
+        async creatorOf() { return nft.artist; }
+      },
+    },
+    THREE: makeThreeStubs(),
+  });
+
+  vm.runInContext(`${spaceSource}\n_scene = new THREE.Scene();`, context);
+  await vm.runInContext(`_focusSharedNFTFromLocation();`, context);
+
+  assert.equal(panel.open, true);
+  assert.match(content.innerHTML, /Shared Signal/);
+  assert.equal(vm.runInContext('_allNFTs.length', context), 1);
+  assert.equal(vm.runInContext('_allNFTs[0].mesh.userData.pinnedVisible', context), true);
+  assert.equal(vm.runInContext('_nowPlayingKey', context), null);
+  assert.equal(vm.runInContext('_nowPlayingMesh', context), null);
 });
 
 test('radio watchlist resolution requires an exact media match instead of title guessing', async () => {
