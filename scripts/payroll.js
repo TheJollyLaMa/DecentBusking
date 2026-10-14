@@ -139,10 +139,23 @@ function findAccount(accounts, login) {
   );
 }
 
+// Accounts whose bounties are never paid out; the amount stays in the repo-dev fund.
+function isRetainInFund(account) {
+  return String(account?.payoutMode || '').trim().toLowerCase() === 'retain-in-fund';
+}
+
+function blockedPayoutReason(address, config = PAYROLL_ASSET_CONFIG) {
+  const normalized = String(address || '').trim().toLowerCase();
+  if (!normalized) return null;
+  const match = (config.blockedPayoutAddresses || [])
+    .find(item => String(item.address || '').trim().toLowerCase() === normalized);
+  return match ? (match.reason || 'blocked payout address') : null;
+}
+
 function requireWhitelistedAccount(accounts, candidates, description) {
   for (const login of candidates) {
     const account = findAccount(accounts, login);
-    if (account && String(account.walletAddress || '').trim()) return account;
+    if (account && (String(account.walletAddress || '').trim() || isRetainInFund(account))) return account;
   }
   throw new Error(`No whitelisted wallet found for ${description}: ${candidates.filter(Boolean).join(', ') || 'none'}`);
 }
@@ -157,7 +170,7 @@ function isDuplicate(queue, candidate) {
   const candidateRole = entryRole(candidate);
   const candidateCurrency = normalizeCurrency(candidate);
 
-  return [...(queue.pending || []), ...(queue.settled || [])].some(entry => {
+  return [...(queue.pending || []), ...(queue.settled || []), ...(queue.retained || [])].some(entry => {
     if (String(entry.issueRef || '').trim() !== candidateIssueRef) return false;
     if (normalizeCurrency(entry) !== candidateCurrency) return false;
 
@@ -216,21 +229,30 @@ function createBountyEntries({ issue, pr, accounts, queue, repoSlug, queuedAt, q
       queuedBy,
       prNumber: pr.number,
     };
+    const forAccount = (account, fields) => {
+      if (isRetainInFund(account)) return { ...common, contributorGithub: account.github, ...fields, retainedInFund: true };
+      const blocked = blockedPayoutReason(account.walletAddress);
+      if (blocked) throw new Error(`Refusing to queue a payout for @${account.github}: ${blocked}`);
+      return { ...common, contributor: account.walletAddress, contributorGithub: account.github, ...fields };
+    };
     if (originator) {
       const split = splitIdeaCredit(bounty.amount, bounty.currency, assetRegistry);
       entries.push(
-        { ...common, contributor: implementer.walletAddress, contributorGithub: implementer.github, amount: split.implementer, role: 'implementer' },
-        { ...common, contributor: originator.walletAddress, contributorGithub: originator.github, amount: split.originator, role: 'idea-originator' },
+        forAccount(implementer, { amount: split.implementer, role: 'implementer' }),
+        forAccount(originator, { amount: split.originator, role: 'idea-originator' }),
       );
     } else {
-      entries.push({ ...common, contributor: implementer.walletAddress, contributorGithub: implementer.github, amount: bounty.amount });
+      entries.push(forAccount(implementer, { amount: bounty.amount }));
     }
   }
 
-  const newEntries = entries.filter(entry => !isDuplicate(queue, entry));
+  const fresh = entries.filter(entry => !isDuplicate(queue, entry));
+  const newEntries = fresh.filter(entry => !entry.retainedInFund);
+  const retained = fresh.filter(entry => entry.retainedInFund);
   return {
     entries: newEntries,
-    skippedDuplicates: entries.length - newEntries.length,
+    retained,
+    skippedDuplicates: entries.length - fresh.length,
     bountyLabel: bounties.map(bounty => bounty.label).join(', '),
   };
 }
@@ -263,6 +285,17 @@ function applyAccountAccrual(accounts, entries) {
       if (!Array.isArray(account.ideasCredited)) account.ideasCredited = [];
       if (!account.ideasCredited.includes(entry.issueRef)) account.ideasCredited.push(entry.issueRef);
     }
+  }
+}
+
+function applyRetainedAccrual(accounts, entries) {
+  for (const entry of entries) {
+    const account = findAccount(accounts, entry.contributorGithub);
+    if (!account) continue;
+    const currency = normalizeCurrency(entry);
+    updateAccountTotal(account, accountField(currency, 'RetainedInFund'), entry.amount, currency);
+    if (!Array.isArray(account.issuesClosed)) account.issuesClosed = [];
+    if (!account.issuesClosed.includes(entry.issueRef)) account.issuesClosed.push(entry.issueRef);
   }
 }
 
@@ -315,7 +348,10 @@ module.exports = {
   SUPPORTED_CURRENCIES,
   TEST_BOUNTY_LABEL_RE,
   applyAccountAccrual,
+  applyRetainedAccrual,
+  blockedPayoutReason,
   createBountyEntries,
+  isRetainInFund,
   extractIssueNumbers,
   findAccount,
   isDuplicate,

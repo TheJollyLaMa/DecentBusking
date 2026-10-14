@@ -5,6 +5,8 @@ const {
   BOUNTY_LABEL_RE,
   TEST_BOUNTY_LABEL_RE,
   applyAccountAccrual,
+  applyRetainedAccrual,
+  blockedPayoutReason,
   createBountyEntries,
   extractIssueNumbers,
   isDuplicate,
@@ -243,4 +245,49 @@ test('role-filtered settlement touches only the selected work credit', () => {
   assert.equal(queue.pending[0].role, 'idea-originator');
   assert.equal(accounts.contributors[0].artPending, 20);
   assert.equal(accounts.contributors[0].artEarned, 80);
+});
+const copilot = { github: 'copilot', payoutMode: 'retain-in-fund' };
+
+test('retain-in-fund contributors get credit but no payable entry', () => {
+  const result = createBountyEntries(fixture({
+    issue: { number: 50, labels: ['bounty: 1 USDC'], assignees: [{ login: 'copilot' }] },
+    accounts: { contributors: [{ ...owner }, { ...copilot }] },
+  }));
+  assert.equal(result.entries.length, 0);
+  assert.equal(result.retained.length, 1);
+  assert.equal(result.retained[0].contributorGithub, 'copilot');
+  assert.equal(result.retained[0].retainedInFund, true);
+  assert.equal(result.retained[0].contributor, undefined);
+
+  const accounts = { contributors: [{ ...copilot }] };
+  applyRetainedAccrual(accounts, result.retained);
+  assert.equal(accounts.contributors[0].usdcRetainedInFund, 1);
+  assert.equal(accounts.contributors[0].usdcPending, undefined);
+  assert.deepEqual(accounts.contributors[0].issuesClosed, ['TheJollyLaMa/DecentBusking#50']);
+
+  const again = createBountyEntries(fixture({
+    issue: { number: 50, labels: ['bounty: 1 USDC'], assignees: [{ login: 'copilot' }] },
+    accounts: { contributors: [{ ...owner }, { ...copilot }] },
+    queue: { pending: [], settled: [], retained: result.retained },
+  }));
+  assert.equal(again.retained.length, 0);
+});
+
+test('idea credit pays the human originator while the retained implementer share stays in the fund', () => {
+  const result = createBountyEntries(fixture({
+    issue: { number: 51, labels: ['bounty: 1 USDC', `idea-credit: @${owner.github}`], assignees: [{ login: 'copilot' }] },
+    accounts: { contributors: [{ ...owner }, { ...copilot }] },
+  }));
+  assert.deepEqual(result.entries.map(entry => [entry.contributorGithub, entry.amount]), [[owner.github, '0.2']]);
+  assert.deepEqual(result.retained.map(entry => [entry.contributorGithub, entry.amount]), [['copilot', '0.8']]);
+});
+
+test('blocked payout addresses are refused when queueing', () => {
+  const escrow = '0x23A457AD3C33d68E4fAd2FCa7c5d9a511E0C350e';
+  assert.match(blockedPayoutReason(escrow.toLowerCase()), /Optimism/);
+  assert.equal(blockedPayoutReason(owner.walletAddress), null);
+  assert.throws(() => createBountyEntries(fixture({
+    issue: { number: 52, labels: ['bounty: 1 USDC'], assignees: [{ login: 'legacy' }] },
+    accounts: { contributors: [{ github: 'legacy', walletAddress: escrow }] },
+  })), /Refusing to queue a payout for @legacy/);
 });

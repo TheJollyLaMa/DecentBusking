@@ -558,6 +558,12 @@ async function _payTokenEntry(entry) {
   if (!fundSlug || fundSlug !== String(_payrollAssetConfig.fundSlug || '').trim().toLowerCase()) {
     throw new Error(`Unexpected payroll fund: ${fundSlug || '(missing)'}`);
   }
+  if (entry.retainedInFund || !String(entry.contributor || '').trim()) {
+    throw new Error(`@${entry.contributorGithub}'s credit stays in the ${fundSlug} fund and is not paid out.`);
+  }
+  const blocked = (_payrollAssetConfig.blockedPayoutAddresses || [])
+    .find(item => String(item.address || '').toLowerCase() === String(entry.contributor).toLowerCase());
+  if (blocked) throw new Error(`Refusing to pay ${entry.contributor}: ${blocked.reason}`);
 
   const statusEl = document.getElementById('payroll-queue-status');
   const signer = await _getSigner(Number(_payrollAssetConfig.chainId));

@@ -4,6 +4,9 @@
   "routerAddress": "0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5",
   "fundSlug": "dbusk-repo-dev",
   "pinnerFundSlug": "dbusk-pinners",
+  "blockedPayoutAddresses": [
+    { "address": "0x23A457AD3C33d68E4fAd2FCa7c5d9a511E0C350e", "reason": "DecentEscrow contract on Optimism only; nothing is deployed at this address on Base, so payouts would be unrecoverable" }
+  ],
   "communityAlbumRoots": [
     { "title": "Jones Drive Sessions AA", "cid": "bafybeidxx4rufx7xrn5lmt3npyaej6doupxajyh53ibb4fp43whdvgfm2u" },
     { "title": "Jones Drive Sessions AB", "cid": "bafybeicsbobnagvxy7tw47kqahluncyv52umlvieplkmr643covtfimnua" },

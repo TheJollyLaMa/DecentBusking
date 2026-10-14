@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { applyAccountAccrual, createBountyEntries, extractIssueNumbers } = require('./payroll');
+const { applyAccountAccrual, applyRetainedAccrual, createBountyEntries, extractIssueNumbers } = require('./payroll');
 const { renderArtFiComment } = require('./commentArt');
 const { githubRequest, postIssueComment, repositoryCoordinates } = require('./githubApi');
 
@@ -17,16 +17,21 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function buildMergedPayrollComment({ entries, isManual, prNumber, issueNumber }) {
+function buildMergedPayrollComment({ entries, retained = [], isManual, prNumber, issueNumber }) {
   const lines = entries.map(entry =>
     `- **${entry.amount} ${entry.currency || 'ART'}** from ${entry.fund || 'dbusk-repo-dev'} to @${entry.contributorGithub}${entry.role ? ` (${entry.role})` : ''}`
   );
+  const retainedLines = retained.map(entry =>
+    `- **${entry.amount} ${entry.currency || 'ART'}** credited to @${entry.contributorGithub}${entry.role ? ` (${entry.role})` : ''} stays in ${entry.fund || 'dbusk-repo-dev'}`
+  );
   return renderArtFiComment([
-    `✅ Payroll queued from ${isManual ? 'manual recovery for' : 'merged'} PR #${prNumber}:`,
+    `✅ Payroll ${entries.length ? 'queued' : 'recorded'} from ${isManual ? 'manual recovery for' : 'merged'} PR #${prNumber}:`,
     '',
     ...lines,
+    ...(retainedLines.length ? [...(lines.length ? [''] : []), ...retainedLines] : []),
     '',
-    'The entries are queued for settlement from the dbusk-repo-dev fund on the shared Base Settlement Router.',
+    ...(lines.length ? ['The entries are queued for settlement from the dbusk-repo-dev fund on the shared Base Settlement Router.'] : []),
+    ...(retainedLines.length ? ['Retained credit is not paid out; it remains in the repo-dev fund for future contributor payroll.'] : []),
   ].join('\n'), issueNumber, 'merged-payroll');
 }
 
@@ -96,9 +101,11 @@ async function main() {
   const accounts = readJson(ACCOUNTS_PATH);
   if (!Array.isArray(queue.pending)) queue.pending = [];
   if (!Array.isArray(queue.settled)) queue.settled = [];
+  if (!Array.isArray(queue.retained)) queue.retained = [];
   if (!Array.isArray(accounts.contributors)) accounts.contributors = [];
 
   const planned = [];
+  const plannedRetained = [];
   const results = [];
   for (const issueNumber of issueNumbers) {
     const issue = await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}`);
@@ -107,7 +114,7 @@ async function main() {
       issue,
       pr,
       accounts,
-      queue: { pending: [...queue.pending, ...planned], settled: queue.settled },
+      queue: { pending: [...queue.pending, ...planned], settled: queue.settled, retained: [...queue.retained, ...plannedRetained] },
       repoSlug: `${owner}/${repo}`,
       queuedAt: new Date().toISOString(),
       queuedBy: process.env.GITHUB_ACTOR || 'github-actions[bot]',
@@ -116,33 +123,38 @@ async function main() {
       console.log(`Skipping issue #${issueNumber}: no supported "bounty: <amount> SYMBOL" label.`);
       continue;
     }
-    if (isManual) result.entries.forEach(entry => { entry.retroactive = true; });
+    if (isManual) [...result.entries, ...result.retained].forEach(entry => { entry.retroactive = true; });
+    result.retained.forEach(entry => { entry.retainedAt = entry.queuedAt; entry.retainedBy = entry.queuedBy; });
     planned.push(...result.entries);
+    plannedRetained.push(...result.retained);
     results.push({ issueNumber, result });
   }
 
-  if (planned.length === 0) {
+  if (planned.length === 0 && plannedRetained.length === 0) {
     console.log('No new payroll entries were needed.');
     return;
   }
   queue.pending.push(...planned);
+  queue.retained.push(...plannedRetained);
   applyAccountAccrual(accounts, planned);
+  applyRetainedAccrual(accounts, plannedRetained);
   writeJson(QUEUE_PATH, queue);
   writeJson(ACCOUNTS_PATH, accounts);
 
   for (const { issueNumber, result } of results) {
-    if (result.entries.length === 0) continue;
+    if (result.entries.length === 0 && result.retained.length === 0) continue;
     await postIssueComment(owner, repo, issueNumber, buildMergedPayrollComment({
       entries: result.entries,
+      retained: result.retained,
       isManual,
       prNumber: pr.number,
       issueNumber,
     }));
   }
   if (process.env.GITHUB_STEP_SUMMARY) {
-    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Payroll queue updated\n\nQueued ${planned.length} token payout entries from PR #${pr.number}.\n`);
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Payroll queue updated\n\nQueued ${planned.length} token payout entries (${plannedRetained.length} retained in fund) from PR #${pr.number}.\n`);
   }
-  console.log(`Queued ${planned.length} token payout entries from PR #${pr.number}.`);
+  console.log(`Queued ${planned.length} token payout entries (${plannedRetained.length} retained in fund) from PR #${pr.number}.`);
 }
 
 if (require.main === module) {

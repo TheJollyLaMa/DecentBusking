@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { DBUSK_REPO_FUND, normalizeAmount, normalizeCurrency, PAYROLL_ASSET_CONFIG, SUPPORTED_CURRENCIES } = require('./payroll');
+const { DBUSK_REPO_FUND, blockedPayoutReason, isRetainInFund, normalizeAmount, normalizeCurrency, PAYROLL_ASSET_CONFIG, SUPPORTED_CURRENCIES } = require('./payroll');
 
 const QUEUE_PATH = path.join(__dirname, '..', 'payroll-queue.json');
 const ACCOUNTS_PATH = path.join(__dirname, '..', 'contributor-accounts.json');
@@ -30,6 +30,8 @@ try { accounts = readJson(ACCOUNTS_PATH); } catch (error) { fail(`contributor-ac
 if (!queue || typeof queue !== 'object' || Array.isArray(queue)) fail('payroll-queue.json must be a JSON object');
 if (!Array.isArray(queue.pending)) fail('payroll-queue.json.pending must be an array');
 if (!Array.isArray(queue.settled)) fail('payroll-queue.json.settled must be an array');
+if (queue.retained !== undefined && !Array.isArray(queue.retained)) fail('payroll-queue.json.retained must be an array');
+if (!Array.isArray(queue.retained)) queue.retained = [];
 if (!accounts || typeof accounts !== 'object' || Array.isArray(accounts)) fail('contributor-accounts.json must be a JSON object');
 if (!Array.isArray(accounts.contributors)) fail('contributor-accounts.json.contributors must be an array');
 
@@ -38,6 +40,13 @@ if (!/^0x[a-fA-F0-9]{40}$/.test(String(PAYROLL_ASSET_CONFIG.routerAddress || '')
 if (!/^[a-z0-9][a-z0-9-]*$/.test(String(PAYROLL_ASSET_CONFIG.fundSlug || ''))) fail('payroll-assets.json.fundSlug must be a lowercase slug');
 if (!PAYROLL_ASSET_CONFIG.assets || typeof PAYROLL_ASSET_CONFIG.assets !== 'object' || Array.isArray(PAYROLL_ASSET_CONFIG.assets) || Object.keys(PAYROLL_ASSET_CONFIG.assets).length === 0) {
   fail('payroll-assets.json.assets must contain at least one configured token');
+}
+if (PAYROLL_ASSET_CONFIG.blockedPayoutAddresses !== undefined && !Array.isArray(PAYROLL_ASSET_CONFIG.blockedPayoutAddresses)) {
+  fail('payroll-assets.json.blockedPayoutAddresses must be an array');
+}
+for (const [index, item] of (PAYROLL_ASSET_CONFIG.blockedPayoutAddresses || []).entries()) {
+  if (!ADDRESS_RE.test(String(item?.address || ''))) fail(`payroll-assets.json.blockedPayoutAddresses[${index}].address must be a valid address`);
+  if (!String(item?.reason || '').trim()) fail(`payroll-assets.json.blockedPayoutAddresses[${index}].reason is required`);
 }
 if (PAYROLL_ASSET_CONFIG.assets?.ETH) fail('ETH is reserved for historical Optimism payouts and cannot be configured as a Base token');
 for (const [symbol, asset] of Object.entries(PAYROLL_ASSET_CONFIG.assets || {})) {
@@ -57,10 +66,14 @@ for (const [index, contributor] of accounts.contributors.entries()) {
   const github = String(contributor.github || '').trim();
   const wallet = String(contributor.walletAddress || '').trim();
   if (!github) fail(`contributor-accounts.json.contributors[${index}].github is required`);
-  if (!ADDRESS_RE.test(wallet)) fail(`contributor-accounts.json.contributors[${index}].walletAddress must be a valid Ethereum address`);
+  const retain = isRetainInFund(contributor);
+  if (contributor.payoutMode !== undefined && !retain) fail(`contributor-accounts.json.contributors[${index}].payoutMode must be "retain-in-fund" when set`);
+  if (retain && wallet) fail(`contributor-accounts.json.contributors[${index}] retains credit in the fund and must not have a walletAddress`);
+  if (!retain && !ADDRESS_RE.test(wallet)) fail(`contributor-accounts.json.contributors[${index}].walletAddress must be a valid Ethereum address`);
+  if (!retain && blockedPayoutReason(wallet)) fail(`contributor-accounts.json.contributors[${index}].walletAddress is blocked: ${blockedPayoutReason(wallet)}`);
   const key = github.toLowerCase();
   if (contributors.has(key)) fail(`duplicate contributor GitHub handle: ${github}`);
-  contributors.set(key, wallet.toLowerCase());
+  contributors.set(key, retain ? null : wallet.toLowerCase());
 }
 
 const seen = new Set();
@@ -76,7 +89,11 @@ function validateEntry(entry, section, index) {
 
   if (!ISSUE_REF_RE.test(issueRef)) fail(`${section}[${index}].issueRef must look like owner/repo#123`);
   if (!github) fail(`${section}[${index}].contributorGithub is required`);
-  if (!ADDRESS_RE.test(wallet)) fail(`${section}[${index}].contributor must be a valid Ethereum address`);
+  if (section === 'retained') {
+    if (wallet) fail(`${section}[${index}].contributor must be omitted for retained credit`);
+    if (entry.retainedInFund !== true) fail(`${section}[${index}].retainedInFund must be true`);
+  } else if (!ADDRESS_RE.test(wallet)) fail(`${section}[${index}].contributor must be a valid Ethereum address`);
+  if (section === 'pending' && blockedPayoutReason(wallet)) fail(`${section}[${index}].contributor is blocked: ${blockedPayoutReason(wallet)}`);
   if (!amount || !Number.isFinite(Number(amount)) || Number(amount) <= 0) fail(`${section}[${index}].amount must be positive`);
   if (!VALID_CURRENCIES.has(currency)) fail(`${section}[${index}].currency must be configured in payroll-assets.json or be legacy ETH`);
   if (SUPPORTED_CURRENCIES.includes(currency)) {
@@ -89,9 +106,11 @@ function validateEntry(entry, section, index) {
   const key = `${issueRef}:${github.toLowerCase()}:${role}:${currency}`;
   if (seen.has(key)) fail(`duplicate payroll entry detected for ${issueRef} / ${github} / ${currency}`);
   seen.add(key);
+  if (!contributors.has(github.toLowerCase())) fail(`${section}[${index}].contributorGithub is not registered in contributor-accounts.json`);
   const registeredWallet = contributors.get(github.toLowerCase());
-  if (!registeredWallet) fail(`${section}[${index}].contributorGithub is not registered in contributor-accounts.json`);
-  if (registeredWallet !== wallet.toLowerCase()) fail(`${section}[${index}].contributor does not match the registered wallet for ${github}`);
+  if (section !== 'retained' && registeredWallet === null) fail(`${section}[${index}] cannot be paid: ${github} retains credit in the fund`);
+  if (section !== 'retained' && registeredWallet !== wallet.toLowerCase()) fail(`${section}[${index}].contributor does not match the registered wallet for ${github}`);
+  if (section === 'retained' && registeredWallet !== null) fail(`${section}[${index}].contributorGithub must use payoutMode "retain-in-fund"`);
 
   if (!queuedAt) fail(`${section}[${index}].queuedAt is required`);
   if (!String(entry.queuedBy || '').trim()) fail(`${section}[${index}].queuedBy is required`);
@@ -99,8 +118,13 @@ function validateEntry(entry, section, index) {
     if (!String(entry.settledAt || '').trim()) fail(`${section}[${index}].settledAt is required`);
     if (!String(entry.settledBy || '').trim()) fail(`${section}[${index}].settledBy is required`);
   }
+  if (section === 'retained') {
+    if (!String(entry.retainedAt || '').trim()) fail(`${section}[${index}].retainedAt is required`);
+    if (!String(entry.retainedBy || '').trim()) fail(`${section}[${index}].retainedBy is required`);
+  }
 }
 
 queue.pending.forEach((entry, index) => validateEntry(entry, 'pending', index));
 queue.settled.forEach((entry, index) => validateEntry(entry, 'settled', index));
-console.log(`✅ payroll-queue.json and contributor-accounts.json validated (${queue.pending.length} pending, ${queue.settled.length} settled; currency-less entries treated as legacy ETH)`);
+queue.retained.forEach((entry, index) => validateEntry(entry, 'retained', index));
+console.log(`✅ payroll-queue.json and contributor-accounts.json validated (${queue.pending.length} pending, ${queue.settled.length} settled, ${queue.retained.length} retained in fund; currency-less entries treated as legacy ETH)`);

@@ -99,6 +99,8 @@ The Bounty Bot runs when a pull request merges into `main`. It combines closing 
 
 Contributors request access using the Contributor Request issue form. After the maintainer verifies their GitHub handle and wallet, the maintainer adds the account to `contributor-accounts.json`. A known bot login falls back to a registered issue assignee. Duplicate checks include currency, so rewards in different configured tokens can coexist for the same issue and contributor, as can a new token reward and a historical ETH reward.
 
+An account with `"payoutMode": "retain-in-fund"` and no `walletAddress` (currently `copilot`) is credited but never paid. Its share goes into `payroll-queue.json.retained` with `retainedInFund: true`, and the money stays in `dbusk-repo-dev` for future contributor payroll. If the issue also has an idea credit, the human originator's 20% is still queued for payment as usual. `payroll-assets.json.blockedPayoutAddresses` lists addresses that must never receive Base payouts, for example the Optimism-only DecentEscrow `0x23A4…350e`. Validation, bounty queueing and the Admin settle button all refuse them.
+
 ## Testing Rewards
 
 An assigned tester posts `/test-complete`. The repository owner posts `/test-approved`, optionally followed by `@tester`. With no explicit tester, the latest assigned tester who posted `/test-complete` is selected. Ambiguous assignments fail instead of choosing a wallet silently. Approved test rewards also use `dbusk-repo-dev`.
