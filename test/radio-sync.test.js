@@ -4,9 +4,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-test('radio stays silent until a delayed initial seek completes', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
+function radioSyncSource() {
+  return fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
+    .replace(/^import[^\n]*\n/gm, '')
     .replace(/export /g, '');
+}
+
+
+test('radio stays silent until a delayed initial seek completes', async () => {
+  const source = radioSyncSource();
   let seekable = false;
   let position = 0;
   const audio = {
@@ -47,7 +53,7 @@ test('radio stays silent until a delayed initial seek completes', async () => {
 });
 
 test('radio rejects a finished seek that landed at zero and waits for buffered sync', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   let position = 0;
   let assignments = 0;
   const audio = {
@@ -73,8 +79,7 @@ test('radio rejects a finished seek that landed at zero and waits for buffered s
 });
 
 test('radio corrects a play-time position reset while silent, then starts immediately in sync', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
-    .replace(/export /g, '').replace('const FADE_IN_MS = 1_500;', 'const FADE_IN_MS = 1;');
+  const source = radioSyncSource().replace('const FADE_IN_MS = 1_500;', 'const FADE_IN_MS = 1;');
   const audiblePositions = [];
   let position = 0;
   let volume = 0;
@@ -107,7 +112,7 @@ test('radio corrects a play-time position reset while silent, then starts immedi
 });
 
 test('radio still starts playback when the gateway cannot seek yet', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   let position = 0;
   let volume = 0;
   const audio = new EventTarget();
@@ -140,8 +145,7 @@ test('radio still starts playback when the gateway cannot seek yet', async () =>
 });
 
 test('radio keeps the current song playing until it ends before starting the next track from the top', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
-    .replace(/export /g, '');
+  const source = radioSyncSource();
   let position = 90;
   const audio = new EventTarget();
   Object.assign(audio, {
@@ -177,7 +181,7 @@ test('radio keeps the current song playing until it ends before starting the nex
 });
 
 test('radio sync renders the shared main-radio countdown in the footer and broadcasts state', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   const nodes = new Map();
   const listeners = new Map();
   function element(id) {
@@ -194,6 +198,7 @@ test('radio sync renders the shared main-radio countdown in the footer and broad
       classList: { toggle() {}, add() {}, remove() {} },
       addEventListener(name, callback) { handlers.set(name, callback); },
       setAttribute() {},
+      removeAttribute() {},
       querySelector(selector) {
         if (selector === '[data-volume-on]' || selector === '[data-volume-off]') return { hidden: false };
         return null;
@@ -247,8 +252,7 @@ test('radio sync renders the shared main-radio countdown in the footer and broad
 });
 
 test('radio sync does not force-seek an actively playing track on poll', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
-    .replace(/export /g, '');
+  const source = radioSyncSource();
   const audio = {
     paused: false,
     currentTime: 3,
@@ -260,7 +264,7 @@ test('radio sync does not force-seek an actively playing track on poll', () => {
 });
 
 test('radio sync uses a friendly worker-gas message instead of surfacing raw balance errors', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   const context = vm.createContext({ performance, setTimeout, clearTimeout, console });
   vm.runInContext(`${source}\nglobalThis.formatStatus = formatMainRadioAdCountdown;`, context);
   assert.equal(vm.runInContext(`formatStatus({ status: 'unavailable', reason: 'worker gas low' })`, context),
@@ -269,9 +273,18 @@ test('radio sync uses a friendly worker-gas message instead of surfacing raw bal
     'Main radio ad: unavailable (something else)');
 });
 
+test('radio sponsor tags format DJuke and DeVert labels with short addresses', () => {
+  const source = radioSyncSource();
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console });
+  vm.runInContext(`${source}\nglobalThis.formatSponsor = formatRadioSponsor;`, context);
+  assert.equal(vm.runInContext(`formatSponsor({ kind: 'djuke', wallet: '0x4051c7f0f9f0c7f0f9f0c7f0f9f0c7f0f9f0235f', amountUnits: '1000000', requestId: '8453:1' }, 'thejollylama.eth').text`,
+    context), '💸 DJuke · bumped by thejollylama.eth · 1 USDC');
+  assert.equal(vm.runInContext(`formatSponsor({ kind: 'devert', wallet: '0x4051c7f0f9f0c7f0f9f0c7f0f9f0c7f0f9f0235f', campaignId: '42' }).text`,
+    context), '📣 DeVert ad · sponsored by 0x4051…235f');
+});
+
 test('radio sync waits for playback to start before broadcasting now-playing details', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
-    .replace(/export /g, '');
+  const source = radioSyncSource();
   const events = [];
   const document = new EventTarget();
   document.addEventListener('dbusk-now-playing', (event) => events.push(event.detail));
@@ -306,13 +319,13 @@ test('radio sync waits for playback to start before broadcasting now-playing det
     filename: 'signal-fire.mp3',
     receivedAt: performance.now(),
     positionMs: 0,
+    sponsor: { kind: 'djuke', wallet: '0x1111111111111111111111111111111111111111', amountUnits: '1000000', requestId: '8453:1' },
   }; _switchTo = () => {}; _syncRadio();`, context);
   assert.equal(events.length, 0);
 });
 
 test('switchTo broadcasts now-playing after the site audio begins and stops on pause', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
-    .replace(/export /g, '');
+  const source = radioSyncSource();
   const events = [];
   const stopped = [];
   const document = new EventTarget();
@@ -366,6 +379,7 @@ test('switchTo broadcasts now-playing after the site audio begins and stops on p
       mediaType: 'audio/mpeg',
       ipfsCid: 'bafy-fire',
       nft: null,
+      sponsor: { kind: 'djuke', wallet: '0x1111111111111111111111111111111111111111', amountUnits: '1000000', requestId: '8453:1' },
     },
   });
   assert.equal(events.length, 1);
@@ -378,14 +392,14 @@ test('switchTo broadcasts now-playing after the site audio begins and stops on p
   assert.equal(events[0].mediaType, 'audio/mpeg');
   assert.equal(events[0].ipfsCid, 'bafy-fire');
   assert.equal(events[0].nft, null);
+  assert.deepEqual(events[0].sponsor, { kind: 'djuke', wallet: '0x1111111111111111111111111111111111111111', amountUnits: '1000000', requestId: '8453:1' });
   audio.pause();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(stopped.length > 0, true);
 });
 
 test('switchTo reveals now-playing before tune-in when autoplay is blocked', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
-    .replace(/export /g, '');
+  const source = radioSyncSource();
   const events = [];
   const document = new EventTarget();
   document.addEventListener('dbusk-now-playing', (event) => events.push(event.detail));
@@ -446,7 +460,7 @@ test('switchTo reveals now-playing before tune-in when autoplay is blocked', asy
 });
 
 test('site votes post only the current play and anonymous browser ID, with no wallet', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   const context = vm.createContext({ AbortSignal, console });
   vm.runInContext(source, context);
   const result = await context.sendRadioVote({ radioUrl: 'https://worker.example/api/radio', playId: 'track:1',
@@ -464,7 +478,7 @@ test('site votes post only the current play and anonymous browser ID, with no wa
 });
 
 test('DeVert main-radio ads allow live-program votes while non-radio previews remain disabled', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   const button = { dataset: { radioVote: '1' }, disabled: false, setAttribute() {} };
   const context = vm.createContext({ performance, setTimeout, clearTimeout, console, button });
   vm.runInContext(`${source}\n_voteButtons = [button]; _mode = 'radio'; _radioReachable = true;\n` +
@@ -476,7 +490,7 @@ test('DeVert main-radio ads allow live-program votes while non-radio previews re
 });
 
 test('MP4 playback uses one video stream and returns cleanly to audio with radio preferences intact', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   const makePlayer = () => {
     const player = new EventTarget();
     Object.assign(player, { volume: 0, muted: false, duration: 180, currentTime: 0, paused: true,
@@ -509,7 +523,7 @@ test('MP4 playback uses one video stream and returns cleanly to audio with radio
 });
 
 test('radio sync promotes a video stream when the state preserves an IPFS video source', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   const started = [];
   const audio = { paused: true, volume: 0, muted: false };
   const context = vm.createContext({
@@ -538,7 +552,7 @@ test('radio sync promotes a video stream when the state preserves an IPFS video 
 });
 
 test('radio volume survives fades and mute does not affect archive playback', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   const audio = { volume: 0, muted: false };
   const saved = new Map();
   const context = vm.createContext({ performance, setTimeout, console, audio,
@@ -566,7 +580,7 @@ test('radio volume survives fades and mute does not affect archive playback', as
 });
 
 test('DVert audio toggle fades out main radio and can return without hijacking archive playback', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   const audio = { paused: false, pause() { this.paused = true; } };
   const context = vm.createContext({ performance, setTimeout, clearTimeout, console, audio });
   vm.runInContext(`${source}\n_audio = audio; _mode = 'radio'; globalThis.setListenMode = setDevertListenMode;\n` +
@@ -584,7 +598,7 @@ test('DVert audio toggle fades out main radio and can return without hijacking a
 });
 
 test('legacy sponsored-ad mute preference does not skip a main-radio ad', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   const context = vm.createContext({ performance, setTimeout, clearTimeout, console,
     window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } } });
   vm.runInContext(`${source}\n_radio = { playId: 'ad-play', title: 'Campaign', uploader: 'Advertiser',
@@ -596,7 +610,7 @@ test('legacy sponsored-ad mute preference does not skip a main-radio ad', () => 
 });
 
 test('recorded browser votes survive reload and reset only for another radio play', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const source = radioSyncSource();
   const buttons = [1, -1].map((vote) => ({ dataset: { radioVote: String(vote) }, attributes: {},
     setAttribute(name, value) { this.attributes[name] = value; } }));
   const context = vm.createContext({ buttons, window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example' } },

@@ -4,7 +4,7 @@
 
 import { fetchNFTMetaById } from './space.js?v=20261014-upload-resilience';
 import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
-import { returnToRadio } from './radio-sync.js?v=20261014-worker-gas';
+import { returnToRadio } from './radio-sync.js?v=20261014-paid-sponsors';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
 
 // NFT currently shown in the single view; previews and purchases are handled explicitly.
@@ -162,10 +162,10 @@ export function renderNFTCard(nft) {
 
   content.querySelector('.nft-mute-btn')?.addEventListener('click', async (event) => {
     const muted = event.currentTarget.getAttribute('aria-pressed') !== 'true';
-    const { setArchiveMuted } = await import('./radio-sync.js?v=20261014-worker-gas');
+    const { setArchiveMuted } = await import('./radio-sync.js?v=20261014-paid-sponsors');
     setArchiveMuted(muted);
   });
-  import('./radio-sync.js?v=20261014-worker-gas')
+  import('./radio-sync.js?v=20261014-paid-sponsors')
     .then(({ archiveMuted }) => { if (_cardNft === nft) _renderMute(content, archiveMuted()); })
     .catch(() => {});
 

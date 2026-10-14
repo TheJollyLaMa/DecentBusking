@@ -21,6 +21,7 @@
 // right before playback to obtain a fresh URL.
 
 import { spawn } from 'child_process';
+import { getAddress } from 'ethers';
 import { MessageFlags } from 'discord.js';
 import { DEVERT_MAX_AD_SECONDS, DEVERT_SONGS_PER_MAIN_AD } from '../js/devert-scheduler.mjs';
 import {
@@ -76,6 +77,41 @@ export function getAttachmentTitle(attachment) {
   if (original) return original;
   const filename = attachment.name || '';
   return filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || filename || 'Untitled';
+}
+
+function checksumAddress(address) {
+  try { return getAddress(address); } catch { return address; }
+}
+
+function normalizeSponsor(sponsor) {
+  if (!sponsor) return null;
+  if (sponsor.kind === 'djuke') {
+    return {
+      kind: 'djuke',
+      wallet: checksumAddress(sponsor.wallet),
+      amountUnits: String(sponsor.amountUnits),
+      requestId: sponsor.requestId,
+    };
+  }
+  if (sponsor.kind === 'devert') {
+    return {
+      kind: 'devert',
+      wallet: checksumAddress(sponsor.wallet),
+      campaignId: String(sponsor.campaignId),
+    };
+  }
+  return null;
+}
+
+function shortAddress(address) {
+  const value = String(address || '');
+  return value.length > 10 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
+}
+
+function formatUsdcUnits(units) {
+  const value = BigInt(units || '0');
+  const fraction = (value % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return `${value / 1_000_000n}${fraction ? `.${fraction}` : ''}`;
 }
 
 /** Build a gateway URL for a raw IPFS CID. */
@@ -140,6 +176,7 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
           const videoUrl = nowPlaying.videoUrl || (mediaTypeFor(nowPlaying.filename, nowPlaying.mediaType) === 'video/mp4'
             ? `ipfs://${nowPlaying.ipfsCid}`
             : '');
+          const sponsor = normalizeSponsor(nowPlaying.sponsor);
           return {
             playId: nowPlaying.playId || `${nowPlaying.trackId}:${nowPlaying.startedAt}`,
             trackId: nowPlaying.trackId,
@@ -150,6 +187,7 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
             ...(videoUrl ? { videoUrl } : {}),
             ipfsCid: nowPlaying.ipfsCid || null,
             isDevert: nowPlaying.isDevert === true,
+            ...(sponsor ? { sponsor } : {}),
             startedAt: nowPlaying.startedAt,
             positionMs: Math.max(0, now - nowPlaying.startedAt),
           };
@@ -271,16 +309,21 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
   };
 }
 
-export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true, playId, paid = false }) {
+export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true, playId, paid = false, sponsor = null }) {
   const listenLink = track.ipfsCid && /\/ipfs\//.test(url || '') ? `\n[Open IPFS audio](${url})` : '';
   const idLine = `\nTrack \`${track.trackId}\`` + (playId ? ` · Play \`${playId}\`` : '');
   const votingLine = votingOpen
     ? 'React 👍 to boost it or 👎 to send it lower in the rotation.'
     : 'This play has finished. Your 👍 / 👎 reactions still update the master tally.';
+  const sponsorLine = sponsor?.kind === 'djuke'
+    ? `💸 **DJuke paid request** · bumped by \`${shortAddress(sponsor.wallet)}\` · ${formatUsdcUnits(sponsor.amountUnits)} USDC\n`
+    : sponsor?.kind === 'devert'
+      ? `📣 **DeVert ad** · sponsored by \`${shortAddress(sponsor.wallet)}\`\n`
+      : '';
   return (
     `🎵 Now playing: **${track.title}** by *${track.uploader}* ` +
     `(${queueIndex}/${totalTracks})\n` +
-    (paid ? '💸 **DJuke paid request**\n' : '') +
+    (paid ? sponsorLine || '💸 **DJuke paid request**\n' : '') +
     `**All-time:** 👍 ${track.likes ?? 0} · 👎 ${track.dislikes ?? 0} · ▶️ ${track.plays ?? 0}\n` +
     `${idLine}\n` +
     `${votingLine}${listenLink}`
@@ -994,6 +1037,7 @@ export class JukeLoopSession {
       totalTracks: this._queue.length,
       url,
       paid: !!prepared.paid,
+      sponsor: this._nowPlaying?.sponsor || null,
     };
     const message = devertAd
       ? `📢 **Sponsored campaign:** ${track.title} · campaign #${devertAd.campaignId}`
@@ -1036,6 +1080,20 @@ export class JukeLoopSession {
       ...(videoUrl ? { videoUrl } : {}),
       ipfsCid: prepared.track.ipfsCid || null,
       isDevert: !!prepared.devertAd,
+      ...(prepared.paid ? {
+        sponsor: {
+          kind: 'djuke',
+          wallet: checksumAddress(prepared.paid.record.payer),
+          amountUnits: prepared.paid.record.amountUnits,
+          requestId: prepared.paid.record.requestId,
+        },
+      } : prepared.devertAd ? {
+        sponsor: {
+          kind: 'devert',
+          wallet: checksumAddress(prepared.devertAd.track.advertiser),
+          campaignId: prepared.devertAd.campaignId,
+        },
+      } : {}),
       firstWeekBonus: prepared.track.firstWeekBonus === true,
       startedAt: Date.now(),
       audible: false,

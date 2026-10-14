@@ -78,6 +78,9 @@ that live loop; browser playback never creates paid impressions. The optional
 ad-mute preference affects only the visitor's main-radio audio. A confirmed DJuke
 request boosts a campaign only when the payer has exactly one active campaign;
 ambiguous requests are skipped rather than assigned arbitrarily.
+`GET /api/radio` includes `nowPlaying.sponsor` for paid DJuke requests and
+DeVert ads so the site can show the payer/advertiser next to the live player;
+DJuke sponsors include the verified payer address, `requestId`, and `amountUnits`.
 
 Worker gas is monitored. Optional DeVert reporting is deferred below
 `WORKER_MIN_BALANCE_WEI` and retried automatically once the worker is funded

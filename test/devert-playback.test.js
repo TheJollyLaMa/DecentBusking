@@ -180,6 +180,17 @@ test('main-radio impressions are never throttled by the VertLoop window', async 
   assert.deepEqual(fixture.impressionCalls.map(call => call.mainRadio), [false, true, true]);
 });
 
+test('DeVert ad tracks carry the verified advertiser address into playback state', async () => {
+  const fixture = harness({
+    campaigns: [campaign('42', { advertiser: address('4') })],
+    slots: 1,
+  });
+  const runtime = await makeRuntime(fixture);
+  const next = await runtime.nextMainRadioAd();
+  assert.equal(next.track.advertiser, address('4'));
+  assert.equal(next.campaignId, '42');
+});
+
 test('restoring a legacy VertLoop backlog keeps one pending entry per campaign and every main-radio entry', async () => {
   const fixture = harness({ balance: 0n, workerMinBalanceWei: 1n });
   const pending = (key, campaignId, mainRadio) => ({ impressionId: id(key), campaignId, mainRadio, radioPlayId: key,

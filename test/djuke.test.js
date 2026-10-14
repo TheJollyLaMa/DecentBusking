@@ -51,6 +51,29 @@ test('DJuke rejects missing and ambiguous queue data instead of assuming an empt
   }
 });
 
+test('DJuke journal keeps payer and amount metadata on the claimed record', async () => {
+  const { createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
+  const writes = [];
+  const journal = createDjukePlaybackJournal({
+    restore: async () => ({ schemaVersion: 1, records: [] }),
+    save: async snapshot => { writes.push(snapshot); return 'ipfs://journal'; },
+  });
+  await journal.initialize();
+  await journal.synchronize([{
+    requestId: '8453:0xabc:1',
+    chainRequestId: '1',
+    songId: '0x' + 'a'.repeat(64),
+    revision: '2',
+    trackId: 'track-1',
+    payer: '0x1111111111111111111111111111111111111111',
+    amountUnits: '1000000',
+  }]);
+  const record = await journal.reserveNext();
+  assert.equal(record.payer, '0x1111111111111111111111111111111111111111');
+  assert.equal(record.amountUnits, '1000000');
+  assert.equal(writes.at(-1).records[0].payer, '0x1111111111111111111111111111111111111111');
+});
+
 function paymentFixture({ chainId = 8453n, price = 250000n, balance = 1000000n, allowance = 0n } = {}) {
   const calls = [];
   let currentChainId = chainId;

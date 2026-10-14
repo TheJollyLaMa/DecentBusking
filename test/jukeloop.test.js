@@ -446,6 +446,7 @@ test('radio state publishes the audible track position and newest uploads', asyn
     nowPlaying: {
       trackId: 'track-1', title: 'Song', uploader: 'artist', filename: 'song.m4a',
       ipfsCid: 'bafy-song', startedAt: 40_000, audible: true,
+      sponsor: { kind: 'djuke', wallet: '0x1111111111111111111111111111111111111111', amountUnits: '1000000', requestId: '8453:0xabc:1' },
     },
     playlist: [
       { trackId: 'old', title: 'Old', uploader: 'a', filename: 'old.mp3', ipfsCid: 'bafy-old', addedAt: '2026-10-01T00:00:00.000Z', uploaderId: 'secret' },
@@ -461,12 +462,31 @@ test('radio state publishes the audible track position and newest uploads', asyn
     mediaType: 'audio/mp4',
     ipfsCid: 'bafy-song',
     isDevert: false,
+    sponsor: { kind: 'djuke', wallet: '0x1111111111111111111111111111111111111111', amountUnits: '1000000', requestId: '8453:0xabc:1' },
     startedAt: 40_000,
     positionMs: 60_000,
   });
   assert.deepEqual(state.recent.map((track) => [track.trackId, track.ipfsCid]), [['new', null], ['old', 'bafy-old']]);
   assert.equal('uploaderId' in state.recent[1], false);
   assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).nowPlaying, null);
+});
+
+test('radio state omits sponsor metadata for regular rotation', async () => {
+  const moduleUrl = pathToFileURL(path.join(__dirname, '../discord-bot/jukeloop.js'));
+  const { buildRadioState } = await import(moduleUrl.href);
+  const state = buildRadioState({
+    now: 100_000,
+    nowPlaying: {
+      trackId: 'track-2',
+      title: 'Song',
+      uploader: 'artist',
+      filename: 'song.mp3',
+      startedAt: 40_000,
+      audible: true,
+    },
+    playlist: [],
+  });
+  assert.equal('sponsor' in state.nowPlaying, false);
 });
 
 test('main-radio ad countdown reports shared scheduler state without browser-side guesses', async () => {
