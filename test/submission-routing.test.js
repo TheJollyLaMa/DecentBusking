@@ -7,7 +7,7 @@ test('explicit DeVert ads route from VertLoop or as a JukeBox fallback when inta
     jukeboxChannelId: 'jukebox',
     vertLoopChannelId: 'vertloop',
     adIntakeEnabled: false,
-  }), true);
+  }), false);
   assert.equal(shouldHandleDevertLoopSubmission({ channelId: 'jukebox', content: '!devert-ad Title | ipfs://cid | video/mp4' }, {
     jukeboxChannelId: 'jukebox',
     vertLoopChannelId: 'vertloop',
@@ -17,5 +17,5 @@ test('explicit DeVert ads route from VertLoop or as a JukeBox fallback when inta
     jukeboxChannelId: 'jukebox',
     vertLoopChannelId: 'vertloop',
     adIntakeEnabled: true,
-  }), false);
+  }), true);
 });

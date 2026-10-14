@@ -112,16 +112,19 @@ or the DVert panel. Main-radio selection ranks the top ten eligible campaigns
 using those votes. Opening Ads Only hushes the main-radio browser player and
 mirrors VertLoop; a browser mirror never creates a second paid impression.
 
+Media uploads in `#DecentJukebox`, `#jukeLoop`, and `#vertloop` now get a short
+prompt with **Song** and **Advert** buttons. JukeLoop/DecentJukebox default to
+Song; VertLoop defaults to Advert. Only the uploader or a moderator can choose,
+and a timeout falls back to the channel default.
+
 To enable DVertLoop ad intake, enable Message Content intent for the DVertLoop
 application and set `DVERT_LOOP_AD_INTAKE_ENABLED=true`. Give the bot View Channel,
 Read Message History, and Send Messages in DecentJukebox, plus Add Reactions in
-the vertloop text channel. After linking your advertiser wallet and Discord
-account, post `!devert-ad Title | ipfs://CID | video/mp4` in DecentJukebox, or post
-`!devert-ad` with an audio/MP4 attachment (up to 10 MB). Larger media uploads use
-the DVert panel. The main bot also keeps that explicit ad command working when the
-dedicated DVertLoop intake worker is not enabled. Explicitly marked ads are not
-ingested as songs by DBusker. Ad submissions queue owner NFT review separately from
-campaign purchase.
+the vertloop text channel. If the advertiser wallet is not linked yet, the bot
+shows a **Link wallet** button and keeps the same upload pending until the user
+clicks **Continue**. Larger media uploads use the DVert panel. The old
+`!devert-ad` command still works as a hidden shortcut, but normal uploads no longer
+need it. Ad submissions queue owner NFT review separately from campaign purchase.
 Existing DJuke v0.2 requests still boost only a payer's sole active campaign;
 multi-campaign targeting and a dedicated ad purchase UI are not implemented.
 
@@ -215,7 +218,21 @@ The site's briefcase supports audio/MP4 file uploads up to 50 MB, or an existing
 
 Site submissions join the existing private owner mint queue. They remain outside radio rotation and new-upload previews until the owner mints and the verified transaction is reconciled. The owner Admin panel and CLI preserve video type, artwork, tip wallet, and parent-token lineage in NFT metadata. Neither a submission nor an upload sends a blockchain transaction. Redeploy the Render bot/worker and publish the static frontend together to enable these routes; no new environment variables are required.
 
-Successful Discord media uploads receive a **Request NFT** button. It embeds the Track ID automatically and opens a private wallet/artwork form for the original uploader. A single previously used artist wallet is prefilled for confirmation; otherwise the artist enters it. Artwork is optional: attach PNG, JPEG, WebP, or GIF up to 10 MB, or enter an already-uploaded IPFS image file CID for larger artwork. The CID field accepts a bare CID or `ipfs://CID`, not directory paths or gateway URLs, and does not re-upload the image or impose the Discord attachment-size cap. Choose one source, not both. Leaving both fields blank keeps existing artwork or uses the Discord profile image by default when no artwork exists. The bot explicitly reminds the artist of that default and queues owner approval; it does not send a mint transaction. If the profile image cannot be archived, the artist is asked to retry or supply artwork rather than silently queuing an image-less NFT. Old confirmation messages do not gain buttons automatically; `/jukebox request-mint` remains available for those tracks and as a fallback.
+Successful Discord media uploads still receive a **Request NFT** button after the
+file is pinned. It embeds the Track ID automatically and opens a private
+wallet/artwork form for the original uploader. A single previously used artist
+wallet is prefilled for confirmation; otherwise the artist enters it. Artwork is
+optional: attach PNG, JPEG, WebP, or GIF up to 10 MB, or enter an already-uploaded
+IPFS image file CID for larger artwork. The CID field accepts a bare CID or
+`ipfs://CID`, not directory paths or gateway URLs, and does not re-upload the
+image or impose the Discord attachment-size cap. Choose one source, not both.
+Leaving both fields blank keeps existing artwork or uses the Discord profile image
+by default when no artwork exists. The bot explicitly reminds the artist of that
+default and queues owner approval; it does not send a mint transaction. If the
+profile image cannot be archived, the artist is asked to retry or supply artwork
+rather than silently queuing an image-less NFT. Old confirmation messages do not
+gain buttons automatically; `/jukebox request-mint` remains available for those
+tracks and as a fallback.
 
 `/jukebox request-mint` only queues a request; it does not submit a blockchain transaction. Artists may attach PNG, JPEG, WebP, or GIF artwork up to 10 MB; the bot pins it immediately and stores its CID with the request. The contract owner opens **Admin** in the DecentBusking dapp, uses the connected `DEFAULT_ADMIN_ROLE` wallet, and authorizes the private queue. Artist artwork is previewed and preloaded, with an optional replacement control. Each request has an individual Mint action. Multiple selected requests can be processed sequentially; the current contract has no batch registration method, so MetaMask still requires two Base transaction confirmations per track. The browser reports each confirmed mint to the Render worker. After the worker verifies the owner, contract, recipient, token ID, and `EditionMinted` event on Base, the bot removes the item from the backlog and announces the NFT in both configured public text channels. `/jukeloop mint-queue` and `/jukeloop mark-minted` remain recovery tools.
 
