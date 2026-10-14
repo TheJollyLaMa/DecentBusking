@@ -57,6 +57,7 @@ import { createDjukeGasQuoteReader, DJUKE_GAS_ABI } from './djuke-gas.js';
 import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
 import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
+import { createSubmissionIntake, buildWalletButtons } from './submission-intake.js';
 import { mediaTypeFor, normalizeMediaCid, MEDIA_TYPES, DISCORD_UPLOAD_MAX_BYTES, isDiscordAttachmentWithinLimit } from './media.js';
 import { shouldHandleDevertLoopSubmission } from './submission-routing.js';
 import { fetchTrackList, createSession, getSession } from './radio.js';
@@ -586,6 +587,38 @@ async function main() {
       return uri.replace('ipfs://', '');
     },
   });
+  const submissionIntake = createSubmissionIntake({
+    siteUrl: config.siteUrl,
+    isAdmin: interaction => interaction.memberPermissions?.has('ManageMessages') || interaction.memberPermissions?.has('Administrator'),
+    onChoose: async ({ choice, record, interaction, resume }) => {
+      if (choice === 'song') {
+        const attachment = record.attachment;
+        const filename = attachment.name || 'track.mp3';
+        const track = {
+          attachmentId: attachment.id,
+          messageId: record.message.id,
+          channelId: record.message.channelId,
+          filename,
+          mediaType: mediaTypeFor(filename, attachment.contentType),
+          title: getAttachmentTitle(attachment),
+          uploader: record.message.author.tag ?? record.message.author.username ?? 'Unknown',
+          uploaderId: record.message.author.id,
+          pinStatus: config.disableMintFlow ? 'disabled' : 'pending',
+        };
+        const trackId = getTrackId(track);
+        addTrack(track);
+        if (!config.disableMintFlow) await handleAudioAttachment(record.message, attachment, config, trackId);
+        return { handled: true };
+      }
+      const linked = creatorProfiles?.getByDiscordId(record.message.author.id);
+      const result = await handleDevertLoopSubmission(record.message, config, creatorProfiles, {
+        submissionKey: record.key,
+        linked,
+      });
+      if (result?.awaitingLink) return { keepPending: true };
+      return { handled: true };
+    },
+  });
   const verifyMintTransaction = createMintTransactionVerifier({
     rpcUrl: config.baseRpcUrl,
     contractAddress: config.nftContractAddress,
@@ -1113,7 +1146,9 @@ async function main() {
   client.on(Events.MessageCreate, async (message) => {
     // Ignore bots and messages outside the configured channel
     if (message.author.bot) return;
-    if (shouldHandleDevertLoopSubmission(message, {
+    const devertCommand = message.channelId === config.jukeboxChannelId && /^!devert-ad\b/i.test(message.content || '');
+    if (devertCommand && process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true') return;
+    if (devertCommand || shouldHandleDevertLoopSubmission(message, {
       jukeboxChannelId: config.jukeboxChannelId,
       vertLoopChannelId: process.env.VERT_LOOP_CHANNEL_ID,
       adIntakeEnabled: process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true',
@@ -1121,44 +1156,20 @@ async function main() {
       await handleDevertLoopSubmission(message, config, creatorProfiles);
       return;
     }
-    if (message.channelId !== config.jukeboxChannelId) return;
+    const intakeChannels = new Set([config.jukeboxChannelId, config.jukeLoopTextChannelId, process.env.VERT_LOOP_CHANNEL_ID].filter(Boolean));
+    if (!intakeChannels.has(message.channelId)) return;
 
     const audioAttachments = [...message.attachments.values()].filter(isAudioAttachment);
     if (!audioAttachments.length) return;
-
     for (const attachment of audioAttachments) {
-      if (!isDiscordAttachmentWithinLimit(attachment)) {
-        await message.reply('Discord media attachments must be no larger than 10 MB. Use /jukebox submit with a file CID, or upload through DecentBusking instead.').catch(() => {});
-        continue;
-      }
-      const filename = attachment.name || 'track.mp3';
-      const title    = getAttachmentTitle(attachment);
-      const track = {
-        attachmentId: attachment.id,
-        messageId:  message.id,
-        channelId:  message.channelId,
-        filename,
-        mediaType: mediaTypeFor(filename, attachment.contentType),
-        title,
-        uploader:   message.author.tag ?? message.author.username ?? 'Unknown',
-        uploaderId: message.author.id,
-        pinStatus:  config.disableMintFlow ? 'disabled' : 'pending',
-      };
-      const trackId = getTrackId(track);
-
-      // Persist upload provenance even when voice playback is temporarily disabled.
-      addTrack(track);
-
-      // ── Existing IPFS / mint flow (opt-out with DISABLE_MINT_FLOW=true) ──────
-      if (!config.disableMintFlow) {
-        await handleAudioAttachment(message, attachment, config, trackId);
-      }
+      await submissionIntake.prompt(message, attachment, message.channelId === process.env.VERT_LOOP_CHANNEL_ID ? 'advert' : 'song');
     }
   });
 
   // ── Slash command interactions ───────────────────────────────────────────────
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
+      if (await submissionIntake.handleInteraction(interaction)) return;
       if (await handleMintRequestInteraction(interaction)) return;
     } catch (error) {
       console.error('[mint-request] Interaction failed:', error.message);
@@ -1483,11 +1494,16 @@ async function handleJukeboxCommand(interaction, config) {
 
 // ── Per-attachment handler ────────────────────────────────────────────────────
 
-async function handleDevertLoopSubmission(message, config, profiles) {
-  const linked = profiles?.getByDiscordId(message.author.id);
+async function handleDevertLoopSubmission(message, config, profiles, { submissionKey = '', linked: linkedOverride = null } = {}) {
+  const linked = linkedOverride || profiles?.getByDiscordId(message.author.id);
   if (!linked) {
-    await message.reply('Link this Discord account to your creator wallet in the DVert panel before submitting an ad.').catch(() => {});
-    return;
+    const components = buildWalletButtons({ linkUrl: config.siteUrl, key: submissionKey }).filter(row => row.components.length);
+    await message.reply({
+      content: 'Link your wallet first.',
+      components,
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
+    return { awaitingLink: true };
   }
 
   let title = '';
@@ -1538,6 +1554,7 @@ async function handleDevertLoopSubmission(message, config, profiles) {
     ipfsCid, mediaType, filename, recipient: address, isDevertAd: true });
   await waitForRemotePersistence();
   await message.reply(`Ad media added to the owner NFT mint queue: **${track.title}** · ${track.trackId} · ipfs://${track.ipfsCid}`).catch(() => {});
+  return { queued: track };
 }
 
 /**
