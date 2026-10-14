@@ -2,6 +2,7 @@ import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation,
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
+import { formatAmount, readContractEarnings, scanLogEarnings, summarizeEarnings } from './creator-earnings.mjs?v=20261014-profile-earnings2';
 
 const WALLET_BREATHE_ICON = 'img/Ens_Eth_Breathe.png';
 
@@ -54,7 +55,8 @@ export function initCreatorProfile() {
   const status = dialog.querySelector('[data-profile-status]');
   const form = dialog.querySelector('[data-profile-form]');
   const albumForm = dialog.querySelector('[data-album-form]');
-  const editSection = dialog.querySelector('[data-profile-edit-section]');
+  const editDialog = dialog.querySelector('[data-profile-edit-dialog]');
+  const editStatus = dialog.querySelector('[data-profile-edit-status]');
   const bannerImage = dialog.querySelector('[data-profile-banner]');
   const bannerFallback = dialog.querySelector('[data-profile-banner-fallback]');
   const copyAddressButton = dialog.querySelector('[data-profile-copy-address]');
@@ -85,7 +87,7 @@ export function initCreatorProfile() {
   const config = () => window.DecentConfig || {};
   const service = () => String(config().ipfsUploadServiceUrl || '').replace(/\/$/, '');
   const editable = () => address && window._wallet?.address?.toLowerCase() === address.toLowerCase();
-  const message = text => { status.textContent = text; };
+  const message = text => { status.textContent = text; if (editStatus) editStatus.textContent = text; };
   const signer = () => {
     if (!editable() || !window._wallet?.signer) throw new Error('Connect the profile wallet in the page header');
     return window._wallet.signer;
@@ -101,7 +103,7 @@ export function initCreatorProfile() {
     form.querySelectorAll('input, textarea, button').forEach(element => { element.disabled = busy || !editable(); });
     dialog.querySelector('[data-discord-link]').disabled = busy || !editable();
     if (copyAddressButton) copyAddressButton.hidden = !address;
-    if (editSection) editSection.hidden = !editable();
+    if (!editable() && editDialog?.open) editDialog.close();
     if (editButton) editButton.hidden = !editable();
     if (discordCopy) discordCopy.disabled = busy || !discordCode?.textContent;
     albumForm.querySelectorAll('input, textarea, button').forEach(element => {
@@ -328,6 +330,11 @@ export function initCreatorProfile() {
     const altName = profile.displayName && profile.displayName !== heading ? profile.displayName : '';
     dialog.querySelector('[data-profile-ens]').textContent = altName;
     dialog.querySelector('[data-profile-discord]').textContent = profile.discord ? `Discord ${profile.discord.displayName}` : 'Discord not linked';
+    const ensChip = dialog.querySelector('[data-profile-ens-chip]');
+    if (ensChip) {
+      ensChip.hidden = !ens?.name;
+      ensChip.textContent = ens?.name ? `ENS ${ens.name}` : 'ENS';
+    }
     dialog.querySelector('[data-profile-bio]').textContent = profile.bio || '';
     const copyButton = dialog.querySelector('[data-profile-copy-address]');
     if (copyButton) copyButton.hidden = !address;
@@ -381,6 +388,63 @@ export function initCreatorProfile() {
     ensLoading = false;
     display();
   };
+  const earningsTotal = dialog.querySelector('[data-earnings-total]');
+  const earningsStatus = dialog.querySelector('[data-earnings-status]');
+  const earningsList = dialog.querySelector('[data-earnings-list]');
+  const link = (href, text) => Object.assign(document.createElement('a'), { href, textContent: text, target: '_blank', rel: 'noopener noreferrer' });
+  const renderEarnings = (entries, note) => {
+    if (!earningsList) return;
+    earningsList.replaceChildren();
+    const totals = summarizeEarnings(entries);
+    const usdc = totals.USDC || { paid: 0n, unclaimed: 0n };
+    earningsTotal.textContent = formatAmount(usdc.paid + usdc.unclaimed, 'USDC');
+    const extra = Object.entries(totals).filter(([asset]) => asset !== 'USDC').map(([asset, value]) => formatAmount(value.paid + value.unclaimed, asset));
+    for (const entry of entries.sort((a, b) => (b.units > a.units ? 1 : b.units < a.units ? -1 : 0))) {
+      const item = document.createElement('li');
+      const label = document.createElement('span');
+      label.className = 'creator-earnings-label';
+      label.textContent = entry.label;
+      if (entry.count) label.append(Object.assign(document.createElement('small'), { textContent: ` · ${entry.count} payout${entry.count === 1 ? '' : 's'}` }));
+      const amount = document.createElement('strong');
+      amount.textContent = formatAmount(entry.units, entry.asset);
+      const proof = document.createElement('span');
+      proof.className = 'creator-earnings-proof';
+      if (entry.status === 'unclaimed') proof.append(Object.assign(document.createElement('em'), { textContent: 'unclaimed · ' }));
+      if (entry.proofUrl) proof.append(link(entry.proofUrl, `proof: ${entry.proofLabel}`));
+      for (const transaction of (entry.transactions || []).slice(0, 3)) proof.append(' ', link(transaction.url, `tx ${transaction.hash.slice(0, 8)}…`));
+      if ((entry.transactions || []).length > 3) proof.append(` +${entry.transactions.length - 3} more`);
+      item.append(label, amount, proof);
+      earningsList.append(item);
+    }
+    const unclaimed = usdc.unclaimed > 0n ? `${formatAmount(usdc.unclaimed, 'USDC')} earned but not yet claimed. ` : '';
+    earningsStatus.textContent = `${entries.length ? '' : 'No earnings recorded on-chain yet. '}${unclaimed}${extra.length ? `Also ${extra.join(', ')}. ` : ''}${note || ''}`.trim();
+  };
+  const loadEarnings = async check => {
+    if (!earningsList || !window.ethers) return;
+    const target = address;
+    earningsTotal.textContent = '…';
+    earningsList.replaceChildren();
+    earningsStatus.textContent = 'Reading DecentBusking contracts on Base…';
+    const baseNetwork = ethers.Network.from(8453);
+    const publicProvider = new ethers.JsonRpcProvider(config().rpcUrl || 'https://mainnet.base.org', baseNetwork, { staticNetwork: baseNetwork });
+    try {
+      let viewEntries = [];
+      try { viewEntries = await readContractEarnings({ ethers, provider: publicProvider, address: target }); }
+      catch { if (check === revision) earningsStatus.textContent = 'Base RPC unavailable; earnings could not be verified right now.'; return; }
+      if (check !== revision) return;
+      renderEarnings(viewEntries, 'Checking router payouts…');
+      let walletProvider = null;
+      try {
+        if (window._wallet?.provider && Number((await window._wallet.provider.getNetwork()).chainId) === 8453) walletProvider = window._wallet.provider;
+      } catch { walletProvider = null; }
+      const logs = await scanLogEarnings({ ethers, providers: [walletProvider, publicProvider], address: target });
+      if (check !== revision) return;
+      const note = logs.complete ? '' : logs.partialThrough
+        ? `Router payouts verified through block ${logs.partialThrough.toLocaleString('en-US')}; connect a wallet on Base to check newer ones.`
+        : 'Router payouts (payroll, playback, Top 10) not yet verified — connect a wallet on Base to scan them.';
+      renderEarnings([...viewEntries, ...logs.entries], note);
+    } finally { publicProvider.destroy(); }
+  };
   const open = async detail => {
     const target = detail?.address || window._wallet?.address;
     if (!/^0x[0-9a-fA-F]{40}$/.test(target || '')) { message('Connect your wallet in the page header'); if (!dialog.open) dialog.showModal(); return; }
@@ -398,6 +462,11 @@ export function initCreatorProfile() {
     display();
     message('Loading profile');
     if (check !== revision) return;
+    void loadEarnings(check).catch(() => {
+      if (check !== revision) return;
+      earningsTotal.textContent = '—';
+      earningsStatus.textContent = 'Earnings could not be verified right now.';
+    });
     await loadProfileData({ resolveEns: true });
     if (detail?.albumId) albumForm.elements.namedItem('albumId').value = detail.albumId;
   };
@@ -440,8 +509,9 @@ export function initCreatorProfile() {
    message('Confirm this private code with the Discord bot within five minutes, then refresh');
    startDiscordLinkPolling(Date.parse(result.expiresAt));
   }));
-  dialog.querySelector('[data-profile-refresh]').addEventListener('click', () => run(() => open({ address })));
-  dialog.querySelector('[data-profile-close]').addEventListener('click', () => { revision++; clearDiscordLinkTimers(); dialog.close(); });
+  dialog.querySelector('[data-profile-close]').addEventListener('click', () => { revision++; clearDiscordLinkTimers(); editDialog?.close(); dialog.close(); });
+  dialog.querySelector('[data-profile-edit-close]')?.addEventListener('click', () => editDialog?.close());
+  editDialog?.addEventListener('click', event => { if (event.target === editDialog) editDialog.close(); });
   dialog.querySelector('[data-profile-copy-address]').addEventListener('click', async () => {
    if (!address) return;
    const copied = await navigator.clipboard.writeText(address).then(() => true, () => false);
@@ -454,12 +524,12 @@ export function initCreatorProfile() {
      copiedTimer = setTimeout(() => copiedNote.classList.remove('is-visible'), 1800);
    }
   });
-  editButton?.addEventListener('click', () => {
-   if (!editable() || !editSection) return;
-   editSection.open = true;
-   editSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const openEditor = () => {
+   if (!editable() || !editDialog) return;
+   if (!editDialog.open) editDialog.showModal();
    form.elements.namedItem('displayName')?.focus({ preventScroll: true });
-  });
+  };
+  editButton?.addEventListener('click', openEditor);
   dialog.querySelector('[data-discord-copy]').addEventListener('click', async () => {
    if (!discordCode?.textContent) return;
    await navigator.clipboard.writeText(discordCode.textContent).catch(() => {});
@@ -469,8 +539,8 @@ export function initCreatorProfile() {
    if (!editable()) return;
    const kind = button.dataset.profileAvatarBubble;
    if (kind === 'ens') window.open('https://app.ens.domains/', '_blank', 'noopener,noreferrer');
-   else if (kind === 'discord') dialog.querySelector('[data-discord-link]')?.click();
-   else if (kind === 'uploaded') form.elements.namedItem('avatar')?.click();
+   else if (kind === 'discord') { openEditor(); dialog.querySelector('[data-discord-link]')?.click(); }
+   else if (kind === 'uploaded') { openEditor(); form.elements.namedItem('avatar')?.click(); }
   }));
   bannerImage?.addEventListener('error', () => {
    bannerCandidateIndex += 1;
