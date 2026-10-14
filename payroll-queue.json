@@ -488,6 +488,19 @@
       "retainedAt": "2026-10-14T19:30:00.000Z",
       "retainedBy": "TheJollyLaMa",
       "retainedReason": "Copilot credit stays in the repo-dev fund; the old payout address was an Optimism-only DecentEscrow contract."
+    },
+    {
+      "issueRef": "TheJollyLaMa/DecentBusking#187",
+      "currency": "USDC",
+      "fund": "dbusk-repo-dev",
+      "queuedAt": "2026-10-14T22:24:15.425Z",
+      "queuedBy": "TheJollyLaMa",
+      "prNumber": 188,
+      "contributorGithub": "copilot",
+      "amount": "1",
+      "retainedInFund": true,
+      "retainedAt": "2026-10-14T22:24:15.425Z",
+      "retainedBy": "TheJollyLaMa"
     }
   ]
 }

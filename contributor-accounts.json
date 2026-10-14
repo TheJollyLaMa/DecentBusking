@@ -68,12 +68,13 @@
         "TheJollyLaMa/DecentBusking#175",
         "TheJollyLaMa/DecentBusking#179",
         "TheJollyLaMa/DecentBusking#180",
-        "TheJollyLaMa/DecentBusking#181"
+        "TheJollyLaMa/DecentBusking#181",
+        "TheJollyLaMa/DecentBusking#187"
       ],
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "GitHub Copilot AI contributor. Credit is recorded but retained in the dbusk-repo-dev fund (no payout wallet). Previously pointed at the Optimism-only DecentEscrow 0x23A457AD3C33d68E4fAd2FCa7c5d9a511E0C350e.",
       "usdcPending": 0,
-      "usdcRetainedInFund": 17.6,
+      "usdcRetainedInFund": 18.6,
       "ethRetainedInFund": 0.00006
     },
     {
