@@ -1428,7 +1428,7 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
   border-radius: var(--stage-radius);
   padding: 2rem;
   width: 90vw;
-  max-width: 400px;
+  max-width: 520px;
   box-shadow: 0 0 60px rgba(240, 192, 64, 0.12);
 }
 
@@ -1442,6 +1442,61 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
   color: var(--text-dim);
   font-size: 0.875rem;
   margin-bottom: 1.25rem;
+}
+
+.tip-track-picker {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.tip-track-picker button {
+  width: 2.5rem;
+  min-height: 2.5rem;
+  padding: 0;
+  border: 1px solid rgba(240, 192, 64, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--gold);
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: background var(--transition), transform var(--transition), opacity var(--transition);
+}
+
+.tip-track-picker button:hover:not(:disabled) {
+  background: rgba(240, 192, 64, 0.14);
+  transform: translateY(-1px);
+}
+
+.tip-track-picker button:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.tip-track-picker button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.tip-track-details {
+  min-width: 0;
+  text-align: center;
+}
+
+.tip-track-details p {
+  margin-bottom: 0;
+}
+
+.tip-track-position {
+  margin-bottom: 0.35rem !important;
+  color: var(--gold-dim) !important;
+  font-size: 0.74rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  min-height: 1em;
 }
 
 #tip-form label {
@@ -1537,6 +1592,22 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 
 #tip-cancel-btn:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 600px) {
+  #tip-modal-inner {
+    width: min(94vw, 520px);
+    padding: 1.25rem;
+  }
+
+  .tip-track-picker {
+    gap: 0.5rem;
+  }
+
+  .tip-track-picker button {
+    width: 2.25rem;
+    min-height: 2.25rem;
+  }
 }
 
 /* ── Footer ──────────────────────────────────────────────────────────────── */
