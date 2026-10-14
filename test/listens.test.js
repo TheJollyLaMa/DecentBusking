@@ -8,13 +8,15 @@ const songId = `0x${'a'.repeat(64)}`;
 async function load() {
   const { ensureBaseNetwork, waitForAllowance, retryMissingRevertData } = await import('../js/base-chain.mjs');
   const { supportsDjukeAlbumsAndGas } = await import('../js/djuke-version.mjs');
+  const celebrationCalls = [];
   const source = fs.readFileSync(path.join(__dirname, '../js/listens.mjs'), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/^if \(typeof document[^\n]*$/m, '');
   const context = vm.createContext({ crypto, setInterval, clearInterval, setTimeout, Promise, BigInt, JSON, AbortSignal,
-    supportsDjukeAlbumsAndGas, ensureBaseNetwork, waitForAllowance, retryMissingRevertData });
+    supportsDjukeAlbumsAndGas, ensureBaseNetwork, waitForAllowance, retryMissingRevertData,
+    announcePaymentCelebration: detail => { celebrationCalls.push(detail); return { accepted: true }; } });
   vm.runInContext(`${source}\nglobalThis.api = { createListenController, createListenPlaylist, purchaseListens, audioCid, formatUsdc };`, context);
-  return { ...context.api, context };
+  return { ...context.api, context, celebrationCalls };
 }
 
 test('listen gate plays free while payments are off and previews 30 seconds once live', async () => {
@@ -47,7 +49,7 @@ test('listen gate plays free while payments are off and previews 30 seconds once
 });
 
 test('v02 and v03 personal listen purchases use the actual creator quote, not the legacy fixed price', async () => {
-  const api = await load();
+  const { celebrationCalls, ...api } = await load();
   for (const contractVersion of ['0.2', '0.3']) {
     const fixture = purchaseFixture();
     fixture.djuke.quoteListens = async () => 900000n;
@@ -55,6 +57,9 @@ test('v02 and v03 personal listen purchases use the actual creator quote, not th
     assert.equal(result.totalUnits, 900000n);
     assert.deepEqual(fixture.calls, [['approve', 900000n], ['purchase', 1, 900000n]]);
   }
+  assert.equal(celebrationCalls.length, 2);
+  assert.equal(celebrationCalls[0].amountText, '0.90');
+  assert.equal(celebrationCalls[0].assetText, 'USDC');
 });
 
 test('switching songs during a preview cancels the old gate', async () => {
@@ -151,6 +156,7 @@ test('listen purchases approve exactly 0.25 USDC per song and switch to Base bef
   const result = await api.purchaseListens({ ...fixture, songIds: [songId, songId, songId] });
   assert.equal(result.totalUnits, 750000n);
   assert.deepEqual(fixture.calls, [['approve', 750000n], ['purchase', 3, 750000n]]);
+  assert.equal((await load()).celebrationCalls?.length ?? 0, 0);
   const requests = [];
   const previousWindow = global.window;
   const switched = purchaseFixture({ chainId: 1n, balance: 1_000_000n });

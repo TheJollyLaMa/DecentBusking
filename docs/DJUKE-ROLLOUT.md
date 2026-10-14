@@ -1,5 +1,18 @@
 # DJuke and DNft rollout
 
+## Hat tips
+
+The bottom-left hat captures the playing song when opened, not the last archive
+card selected. Its modal shows that song, artist, and verified NFT tip wallet:
+the first six address characters, four ENS/Ethereum icons, and the last four
+characters (the full address is available in the tooltip and accessible label).
+Radio tracks are matched to catalog NFTs by their media before tips are enabled.
+If no wallet can be verified, tipping is disabled rather than using a previous
+artist's wallet. Track changes do not change an already-open tip recipient.
+Tips send native ETH on the configured chain, and success is reported only after
+a successful on-chain receipt. Confirmed tips also trigger the shared rotating
+payment celebration, using the captured artist, song, recipient, and ETH amount.
+
 ## October 12 fixes and live readiness check
 
 These browser/worker changes and the DecentMarket v0.3 contract candidate are

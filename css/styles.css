@@ -1453,6 +1453,19 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
   margin-bottom: 0.3rem;
 }
 
+.tip-wallet-address {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-family: monospace;
+}
+
+.tip-wallet-address img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
 #tip-form label .hint {
   font-size: 0.75rem;
   text-transform: none;

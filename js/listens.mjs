@@ -1,9 +1,10 @@
 // On-demand personal listens: 30-second preview, then 0.25 USDC per song via DJuke.
 // Fails open to free playback whenever payments are not live, matching today's behavior.
 import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261010-listens';
-import { setNowPlaying } from './stage.js?v=20261012-paging';
+import { setNowPlaying } from './stage.js?v=20261014-celebrate';
 import { supportsDjukeAlbumsAndGas } from './djuke-version.mjs';
 import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
+import { announcePaymentCelebration } from './payment-celebration.mjs';
 
 export const LISTEN_PRICE_UNITS = 250000n;
 export const PREVIEW_SECONDS = 30;
@@ -56,6 +57,14 @@ export async function purchaseListens({ signer, djuke, usdc, songIds, contractVe
   const transaction = await djuke.purchaseListens(songIds, total);
   onStep('Waiting for Base confirmation\u2026');
   if ((await transaction.wait())?.status !== 1) throw new Error('Listen purchase did not confirm');
+  announcePaymentCelebration({
+    chainId: 8453,
+    txHash: transaction.hash,
+    amountText: formatUsdc(total),
+    assetText: 'USDC',
+    summary: 'Listen purchase confirmed',
+    txLabel: 'Listen purchase confirmed',
+  });
   return { txHash: transaction.hash, totalUnits: total };
 }
 

@@ -1,3 +1,12 @@
+import { announcePaymentCelebration } from './payment-celebration.mjs';
+
+function formatUsdc(units) {
+  const amount = typeof units === 'bigint' ? units : BigInt(units);
+  const whole = amount / 1000000n;
+  const fraction = String(amount % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
+  return `${whole}${fraction ? `.${fraction}` : ''}`;
+}
+
 export function configuredSettlementFunds(config = {}) {
   return [
     { label: 'Playback Payroll', slug: config.radioFunds?.playback },
@@ -115,6 +124,14 @@ export async function recoverSettlementUsdc({ router, token, signer, owner, fund
   const receipt = await transaction.wait();
   if (receipt?.status !== 1) throw new Error('Recovery was not confirmed successfully; check its receipt before retrying');
   verifySettlementRecoveryReceipt({ receipt, router, token, owner: address, fundId, amountUnits });
+  announcePaymentCelebration({
+    chainId: 8453,
+    txHash: transaction.hash,
+    amountText: formatUsdc(amountUnits),
+    assetText: 'USDC',
+    summary: 'Fund recovery confirmed',
+    txLabel: 'Recovery confirmed',
+  });
   return { txHash: transaction.hash, recipient: address };
 }
 
@@ -165,5 +182,13 @@ export async function depositSettlementUsdc({ router, token, signer, owner, fund
   const transaction = await router.fundToken(fundId, token.target, amountUnits);
   onBroadcast({ stage: 'deposit', txHash: transaction.hash });
   if ((await transaction.wait())?.status !== 1) throw new Error('USDC deposit did not confirm');
+  announcePaymentCelebration({
+    chainId: 8453,
+    txHash: transaction.hash,
+    amountText: formatUsdc(amountUnits),
+    assetText: 'USDC',
+    summary: 'Fund deposit confirmed',
+    txLabel: 'Deposit confirmed',
+  });
   return { txHash: transaction.hash };
 }
