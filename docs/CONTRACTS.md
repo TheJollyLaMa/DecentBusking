@@ -1,7 +1,7 @@
 # DecentBusking contracts (Base mainnet, chain 8453)
 
 Every contract the site or worker asks a wallet to interact with. All sources are
-published and match the deployed bytecode exactly. Verify Basescan publication
+published and match the deployed bytecode exactly. All are verified on Basescan and Sourcify (2026-10-14). Re-check
 with `node scripts/verify-basescan.mjs` (needs only a free Etherscan V2 API key;
 no private key).
 

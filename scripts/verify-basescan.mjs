@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Publishes Sourcify exact-match sources to Basescan (Etherscan V2 API).
 // Usage: ETHERSCAN_API_KEY=... node scripts/verify-basescan.mjs [--dry-run]
-// The key may also be read from ../DecentMarket/.env (BASESCAN_API_KEY or ETHERSCAN_API_KEY).
+// The key may also be read from discord-bot/.env or ../DecentMarket/.env (BASESCAN_API_KEY or ETHERSCAN_API_KEY).
 // No private key is needed; verification only publishes source code.
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -28,16 +28,18 @@ async function loadKey() {
   const fromEnv = process.env.ETHERSCAN_API_KEY || process.env.BASESCAN_API_KEY;
   if (fromEnv) return fromEnv.trim();
   const here = path.dirname(fileURLToPath(import.meta.url));
-  try {
-    const env = await readFile(path.resolve(here, "../../DecentMarket/.env"), "utf8");
-    const m = env.match(/^\s*(?:ETHERSCAN|BASESCAN)_API_KEY\s*=\s*["']?([^"'\s#]+)/m);
-    return m?.[1] || "";
-  } catch {
-    return "";
+  for (const file of ["../discord-bot/.env", "../../DecentMarket/.env"]) {
+    try {
+      const env = await readFile(path.resolve(here, file), "utf8");
+      const m = env.match(/^\s*(?:ETHERSCAN|BASESCAN)_API_KEY\s*=\s*["']?([^"'\s#]+)/m);
+      if (m) return m[1];
+    } catch {}
   }
+  return "";
 }
 
 async function etherscan(params, key, method = "GET") {
+  await sleep(400); // free tier allows 3 calls/sec
   const body = new URLSearchParams({ ...params, apikey: key });
   const res = method === "GET"
     ? await fetch(`${ETHERSCAN}&${body}`)
