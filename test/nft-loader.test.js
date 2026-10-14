@@ -117,18 +117,61 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   const source = fs.readFileSync(path.join(__dirname, '../js/nft-card.js'), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/export /g, '');
   const classes = new Set(['hidden']);
+  const events = [];
+  const listeners = new Map();
+  const makeButton = () => ({
+    textContent: '',
+    title: '',
+    attributes: {},
+    listeners: {},
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    getAttribute(name) { return this.attributes[name]; },
+    addEventListener(type, handler) { this.listeners[type] = handler; },
+  });
+  const previewBtn = makeButton();
+  const listenBtn = makeButton();
+  const muteBtn = makeButton();
+  const playlistBtn = makeButton();
+  const listenStatus = { textContent: '' };
   const panel = {
     open: false,
     classList: { remove: (name) => classes.delete(name), add: (name) => classes.add(name) },
     showModal() { this.open = true; },
     close() { this.open = false; this.onclose(); },
   };
-  const content = { innerHTML: '', querySelector: () => null, querySelectorAll: () => [] };
+  const content = {
+    innerHTML: '',
+    querySelector(selector) {
+      if (selector === '.nft-preview-btn') return previewBtn;
+      if (selector === '.nft-listen-btn') return listenBtn;
+      if (selector === '.nft-mute-btn') return muteBtn;
+      if (selector === '.nft-playlist-btn') return playlistBtn;
+      if (selector === '.nft-listen-status') return listenStatus;
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
   const close = {};
   const elements = { 'nft-panel': panel, 'nft-panel-content': content, 'nft-panel-close': close };
   const context = vm.createContext({
-    document: { getElementById: (id) => elements[id] },
+    returnToRadio: () => { events.push('returnToRadio'); },
+    document: {
+      getElementById: (id) => elements[id],
+      addEventListener: (type, handler) => {
+        if (!listeners.has(type)) listeners.set(type, []);
+        listeners.get(type).push(handler);
+      },
+      dispatchEvent: (event) => {
+        events.push(event.type);
+        for (const handler of listeners.get(event.type) || []) handler(event);
+        return !event.defaultPrevented;
+      },
+    },
     window: { DecentConfig: { chainName: 'Base Mainnet', contractAddress: '0xcontract' } }, URL,
+    CustomEvent: class CustomEvent {
+      constructor(type, init = {}) { this.type = type; this.detail = init.detail; this.cancelable = Boolean(init.cancelable); this.defaultPrevented = false; }
+      preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
+    },
   });
   vm.runInContext(source, context);
   context.renderNFTCard({ tokenId: 12, contractAddress: '0xsecondcollection', name: '<script>bad</script>', image: 'ipfs://artwork',
@@ -142,6 +185,21 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   assert.match(content.innerHTML, /token\/0xsecondcollection\?a=12/);
   assert.doesNotMatch(content.innerHTML, /token\/0xcontract\?/);
   assert.doesNotMatch(content.innerHTML, /<audio/);
+  assert.match(content.innerHTML, /▶ Preview/);
+  assert.match(content.innerHTML, /🎧 Listen \(0\.25 USDC\)/);
+  assert.equal(events.includes('dbusk-listen'), false);
+  previewBtn.listeners.click();
+  assert.equal(events.at(-1), 'dbusk-listen');
+  context.document.dispatchEvent(new context.CustomEvent('dbusk-listen-started', {
+    detail: { mode: 'preview', song: { audioUrl: 'ipfs://audio' } },
+  }));
+  assert.equal(previewBtn.textContent, '⏹ Stop preview');
+  context.document.dispatchEvent(new context.CustomEvent('dbusk-preview-ended', {
+    cancelable: true,
+    detail: { song: { audioUrl: 'ipfs://audio' } },
+  }));
+  assert.equal(events.includes('returnToRadio'), true);
+  assert.equal(previewBtn.textContent, '▶ Preview');
   close.onclick();
   assert.equal(panel.open, false);
   assert.equal(classes.has('hidden'), true);

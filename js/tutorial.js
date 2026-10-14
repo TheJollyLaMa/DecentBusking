@@ -37,7 +37,7 @@ const TUTORIAL_STEPS = [
   },
   {
     title: 'DJuke Jukebox',
-    body: 'Open DJuke to queue any community track on demand with micro-payments and support artists directly.',
+    body: 'Open DJuke to queue any community track on demand with micro-payments and support artists directly. On NFT cards, click Preview for a free 30-second taste or Listen to play the whole song.',
     target: '#djuke-tab',
   },
 ];

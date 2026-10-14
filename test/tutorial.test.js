@@ -137,3 +137,9 @@ test('about modal exposes a tutorial launch button', () => {
   assert.match(aboutSource, /data-tutorial-launch/);
   assert.match(aboutSource, /Start Tutorial/);
 });
+
+test('tutorial copy now mentions NFT card Preview and Listen actions', () => {
+  const { context } = createTutorialContext();
+  assert.match(vm.runInContext('TUTORIAL_STEPS[6].body', context), /Preview for a free 30-second taste/);
+  assert.match(vm.runInContext('TUTORIAL_STEPS[6].body', context), /Listen to play the whole song/);
+});
