@@ -74,12 +74,15 @@ test('creator profiles keep watchlists separate from profile updates and reject 
   assert.equal(reloaded.get(wallet.address).watchlist.length, 0);
 });
 
-test('creator images prefer uploaded IPFS, then verified ENS, then Discord', async () => {
+test('creator images prefer verified ENS, then uploaded IPFS, then Discord', async () => {
   const { creatorPresentation, creatorImageURL, resolveCreatorENS } = await import('../js/creator-profile-data.mjs');
   const discord = { displayName: 'Discord', avatarURI: 'https://cdn.discordapp.com/avatar.png' };
   const ens = { name: 'thejollylama.eth', avatarURI: 'https://example.com/ens.png', bannerURI: 'https://example.com/banner.png' };
+  assert.equal(creatorPresentation({}).name, 'Profile');
+  assert.equal(creatorPresentation({}, ens).name, 'thejollylama.eth');
   assert.equal(creatorPresentation({ discord }, ens).avatarURI, ens.avatarURI);
-  assert.equal(creatorPresentation({ discord, avatarURI: 'ipfs://bafyimage' }, ens).avatarURI, 'ipfs://bafyimage');
+  assert.equal(creatorPresentation({ discord, avatarURI: 'ipfs://bafyimage' }, ens).avatarURI, ens.avatarURI);
+  assert.equal(creatorPresentation({ discord, avatarURI: 'ipfs://bafyimage' }, { name: 'thejollylama.eth', avatarURI: 'javascript:alert(1)' }).avatarURI, 'ipfs://bafyimage');
   assert.equal(creatorPresentation({ discord }).avatarURI, discord.avatarURI);
   assert.equal(creatorImageURL('javascript:alert(1)'), '');
   assert.equal(creatorImageURL('ipfs://bafyimage'), 'https://gateway.pinata.cloud/ipfs/bafyimage');

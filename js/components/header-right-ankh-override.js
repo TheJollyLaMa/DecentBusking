@@ -50,7 +50,7 @@ class CleanRightAnkh extends HTMLElement {
           <span class="ankh-coin" role="button" aria-haspopup="true" aria-label="Right menu">☥</span>
           <ul class="dropdown-menu right-ankh-menu"
               style="display:none;">
-            <li class="wallet-item"><button class="wallet-btn" id="creator-profile-btn">Creator Profile</button></li>
+            <li class="wallet-item"><button class="wallet-btn" id="creator-profile-btn">Profile</button></li>
             <li class="wallet-item">
                 <button class="wallet-btn" id="radio-schedule-btn"><img class="calendar-icon" src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/calendar-days.svg" alt="" /> Public Schedule</button>
             </li>
