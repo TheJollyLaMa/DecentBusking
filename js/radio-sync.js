@@ -3,15 +3,19 @@
 // Discord uploads briefly take over the site radio for their first play, and
 // archive selections mute the radio until the listener returns to it.
 
+import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-paid-sponsors';
+
 const POLL_MS = 8_000;
 const FADE_IN_MS = 600;
 const PREVIEW_MS = 30_000;
 const DRIFT_TOLERANCE_S = 8;
 const LOAD_TIMEOUT_MS = 20_000;
 
-let _audio, _labelEl, _titleEl, _artistEl, _activityEl, _adCountdownEl, _playBtn, _radioBtn;
+let _audio, _labelEl, _sponsorEl, _titleEl, _artistEl, _activityEl, _adCountdownEl, _playBtn, _radioBtn;
 let _audioPlayer, _videoPlayer, _videoStage, _videoToggle;
 let _videoHidden = false;
+const _sponsorEnsCache = new Map();
+const _sponsorEnsPending = new Map();
 
 function _notifyRadioSourceMode() {
   if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('radio-source-mode-change', { detail: _mode }));
@@ -32,6 +36,77 @@ export function setArchiveMuted(muted) {
 
 export function archiveMuted() {
   return _archiveMuted;
+}
+
+function _shortAddress(address) {
+  const value = String(address || '');
+  return value.length > 10 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
+}
+
+function _formatUsdcUnits(units) {
+  const value = BigInt(units || '0');
+  const fraction = (value % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return `${value / 1_000_000n}${fraction ? `.${fraction}` : ''}`;
+}
+
+export function formatRadioSponsor(sponsor, ensName = '') {
+  if (!sponsor) return null;
+  const name = ensName || _shortAddress(sponsor.wallet);
+  if (sponsor.kind === 'djuke') {
+    return {
+      text: `💸 DJuke · bumped by ${name} · ${_formatUsdcUnits(sponsor.amountUnits)} USDC`,
+      title: `Paid by ${sponsor.wallet}`,
+    };
+  }
+  if (sponsor.kind === 'devert') {
+    return {
+      text: `📣 DeVert ad · sponsored by ${name}`,
+      title: `Sponsored by ${sponsor.wallet}`,
+    };
+  }
+  return null;
+}
+
+async function _resolveSponsorName(wallet) {
+  const key = String(wallet || '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(key) || _sponsorEnsCache.has(key) || _sponsorEnsPending.has(key) || !globalThis.window?.ethers?.JsonRpcProvider) return null;
+  const provider = new globalThis.window.ethers.JsonRpcProvider(globalThis.window.DecentConfig?.ensRpcUrl || 'https://ethereum-rpc.publicnode.com', 1);
+  const task = (async () => {
+    try {
+      const profile = await resolveCreatorENS(wallet, provider);
+      const name = profile?.name || null;
+      if (name) _sponsorEnsCache.set(key, name);
+      return name;
+    } catch {
+      return null;
+    } finally {
+      provider.destroy?.();
+    }
+  })().finally(() => _sponsorEnsPending.delete(key));
+  _sponsorEnsPending.set(key, task);
+  return task;
+}
+
+function _renderSponsorTag(sponsor) {
+  if (!_sponsorEl) return;
+  if (!sponsor) {
+    _sponsorEl.hidden = true;
+    _sponsorEl.removeAttribute('data-creator');
+    _sponsorEl.removeAttribute('title');
+    _sponsorEl.textContent = '';
+    return;
+  }
+  const key = String(sponsor.wallet || '').toLowerCase();
+  const sponsorText = formatRadioSponsor(sponsor, _sponsorEnsCache.get(key) || '');
+  if (!sponsorText) return _renderSponsorTag(null);
+  _sponsorEl.hidden = false;
+  _sponsorEl.classList.remove('hidden');
+  _sponsorEl.dataset.creator = sponsor.wallet;
+  _sponsorEl.textContent = sponsorText.text;
+  _sponsorEl.title = sponsorText.title;
+  void _resolveSponsorName(sponsor.wallet).then((name) => {
+    if (name && _sponsorEl?.dataset?.creator === sponsor.wallet) _renderSponsorTag(sponsor);
+  });
 }
 
 function _renderVideo() {
@@ -111,6 +186,7 @@ function _broadcastNowPlaying(detail) {
   document.dispatchEvent(new CustomEventCtor('dbusk-now-playing', {
    detail,
   }));
+  _renderSponsorTag(detail?.source === 'radio' ? detail.sponsor || null : null);
 }
 
 function _broadcastNowPlayingStopped(reason = 'stopped') {
@@ -120,6 +196,7 @@ function _broadcastNowPlayingStopped(reason = 'stopped') {
   const detail = _nowPlayingBroadcastDetail ? { ..._nowPlayingBroadcastDetail, reason } : null;
   _nowPlayingBroadcastKey = null;
   _nowPlayingBroadcastDetail = null;
+  _renderSponsorTag(null);
   document.dispatchEvent(new CustomEventCtor('dbusk-now-playing-stopped', { detail }));
 }
 
@@ -337,6 +414,7 @@ export function initRadioSync() {
   _videoStage = document.getElementById('radio-video-stage');
   _videoToggle = document.getElementById('radio-video-toggle');
   _labelEl = document.getElementById('now-playing-label');
+  _sponsorEl = document.getElementById('now-playing-sponsor');
   _titleEl = document.getElementById('now-playing-title');
   _artistEl = document.getElementById('now-playing-artist');
   _adCountdownEl = document.getElementById('radio-ad-countdown');
@@ -358,6 +436,7 @@ export function initRadioSync() {
   _videoToggle?.addEventListener('click', () => { _videoHidden = !_videoHidden; _renderVideo(); });
   _playBtn?.addEventListener('click', _unlock);
   _radioBtn?.addEventListener('click', returnToRadio);
+  _renderSponsorTag(null);
 
   _setLabel('📻 Live on JukeLoop');
   _setActivity('⏳ Tuning in to the Discord JukeLoop…');
@@ -516,12 +595,16 @@ function _radioPositionS() {
 function _syncRadio(message) {
   _setLabel('📻 Live on JukeLoop');
   _renderVoting();
-  if (_devertListenMode === 'ads-only') return;
+  if (_devertListenMode === 'ads-only') {
+    _renderSponsorTag(null);
+    return;
+  }
   if (!_radio) {
     if (!_audio.paused) return;
     _loadedPlayId = null;
     _broadcastNowPlayingStopped('radio-empty');
     _setTrack('—', '');
+    _renderSponsorTag(null);
     _setActivity(message || '🌙 The JukeLoop is between tracks — waiting for the next song');
     return;
   }

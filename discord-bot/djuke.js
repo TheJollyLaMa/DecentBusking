@@ -135,7 +135,14 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
           typeof request.trackId !== 'string' || !request.trackId || seen.has(request.requestId)) throw new Error('Invalid verified DJuke request');
         seen.add(request.requestId);
         const existing = next.find(entry => entry.requestId === request.requestId);
-        const fields = { chainRequestId: request.chainRequestId, songId: request.songId, revision: request.revision, trackId: request.trackId };
+        const fields = {
+          chainRequestId: request.chainRequestId,
+          songId: request.songId,
+          revision: request.revision,
+          trackId: request.trackId,
+          payer: request.payer,
+          amountUnits: request.amountUnits,
+        };
         if (!existing) next.push({ requestId: request.requestId, ...fields, state: 'pending', attempts: 0 });
         else if (existing.state !== 'fulfilled' && (existing.trackId !== request.trackId || existing.revision !== request.revision)) {
           Object.assign(existing, fields);
