@@ -177,6 +177,10 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
         if (!listeners.has(type)) listeners.set(type, []);
         listeners.get(type).push(handler);
       },
+      removeEventListener: (type, handler) => {
+        const handlers = listeners.get(type) || [];
+        listeners.set(type, handlers.filter((entry) => entry !== handler));
+      },
       dispatchEvent: (event) => {
         events.push(event.type);
         for (const handler of listeners.get(event.type) || []) handler(event);

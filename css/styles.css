@@ -464,6 +464,22 @@ decent-header {
   color: var(--text-dim);
 }
 
+.nft-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.45rem;
+}
+
+.nft-card-actions .nft-buy-btn {
+  width: auto;
+  min-width: 7rem;
+}
+
+.nft-watchlist-btn {
+  padding-inline: 0.75rem;
+}
+
 .nft-share-status {
   min-height: 1.1em;
   margin: 0.4rem 0 0.75rem;
@@ -482,6 +498,12 @@ decent-header {
   font: inherit;
 }
 
+.nft-watchlist-status {
+  min-height: 1.1em;
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
 /* ── NFT Parent / Remix section ──────────────────────────────────────────── */
 .nft-parent-section {
   margin-bottom: 0.75rem;
@@ -2112,6 +2134,20 @@ decent-foot {
 #creator-profile output, #creator-profile code, #creator-profile p { overflow-wrap: anywhere; }
 .creator-profile-image-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .creator-profile-discord { display: grid; gap: 8px; padding: 12px 0; }
+.creator-watchlist { display: grid; gap: 10px; padding: 12px 0; border-top: 1px solid var(--panel-border); }
+.creator-watchlist-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.creator-watchlist-heading h3 { margin: 0; font-size: .9rem; }
+.creator-watchlist-heading span { color: var(--text-dim); font-size: .72rem; }
+.creator-watchlist-list { display: grid; gap: 10px; padding: 0; margin: 0; list-style: none; }
+.creator-watchlist-item { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px; border: 1px solid var(--panel-border); border-radius: 8px; background: rgba(5, 3, 18, 0.4); }
+.creator-watchlist-art { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; background: #111827; }
+.creator-watchlist-fallback { display: grid; place-items: center; color: var(--gold); font-size: 1.4rem; }
+.creator-watchlist-copy { display: grid; gap: 4px; min-width: 0; }
+.creator-watchlist-copy strong { font-size: .82rem; }
+.creator-watchlist-copy span { color: var(--text-dim); font-size: .72rem; overflow-wrap: anywhere; }
+.creator-watchlist-meta { font-size: .65rem; }
+.creator-watchlist-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.creator-watchlist-actions button { min-height: 30px; padding: 5px 10px; }
 #djuke-search { margin: 0 0 8px; }
 #djuke-search-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 220px; overflow-y: auto; }
 #djuke-search-results button, #djuke-search-more { width: 100%; padding: 8px; text-align: left; border: 1px solid #52675a; border-radius: 4px; color: var(--text); background: #1b2924; font: inherit; font-size: .8rem; cursor: pointer; }
@@ -2594,6 +2630,19 @@ decent-foot {
   border-radius: 4px;
   animation: none;
 }
+#radio-footer #now-playing-watchlist-btn {
+  min-height: 28px;
+  padding: 2px 8px;
+  margin: 0;
+  border-radius: 4px;
+  border: 1px solid var(--gold-dim);
+  background: rgba(5, 3, 18, 0.75);
+  color: var(--gold);
+  font-size: .72rem;
+}
+#radio-footer #now-playing-watchlist-btn[aria-pressed="true"] { border-color: var(--teal); background: #17372e; }
+#radio-footer #now-playing-watchlist-btn:disabled { opacity: .55; cursor: default; }
+#radio-footer #now-playing-watchlist-status { grid-column: 1 / -1; font-size: .64rem; color: var(--text-dim); overflow-wrap: anywhere; }
 #radio-voting { display: grid; grid-template-columns: repeat(2, 36px); gap: 4px; align-content: center; }
 #radio-voting button {
   width: 36px;

@@ -1,6 +1,7 @@
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
+import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
 
 export const CREATOR_ALBUM_ABI = [
   'function getAlbum(bytes32) view returns ((address mainOwner,string title,string manifestURI,uint256 revision,uint256 listenPrice,uint256 albumPrice,address[] recipients,uint16[] sharesBps,string[] positions,bytes32[] songIds))',
@@ -61,6 +62,97 @@ export function initCreatorProfile() {
     albumForm.querySelectorAll('input, textarea, button').forEach(element => {
       element.disabled = busy || !editable() || !supportsDjukeAlbumsAndGas(config().djukeContractVersion);
     });
+    const watchlistSection = dialog.querySelector('[data-watchlist-section]');
+    if (watchlistSection) watchlistSection.hidden = !editable();
+  };
+  const watchlistSection = dialog.querySelector('[data-watchlist-section]');
+  const watchlistCount = dialog.querySelector('[data-watchlist-count]');
+  const watchlistStatus = dialog.querySelector('[data-watchlist-status]');
+  const watchlistItems = dialog.querySelector('[data-watchlist-items]');
+  const watchlistEmpty = dialog.querySelector('[data-watchlist-empty]');
+  const renderWatchlist = () => {
+    if (!watchlistSection || !watchlistStatus || !watchlistItems) return;
+    const state = getCreatorWatchlistState();
+    const items = editable() ? (profile.watchlist || state.watchlist || []) : [];
+    watchlistSection.hidden = !editable();
+    if (watchlistCount) watchlistCount.textContent = `${items.length} saved`;
+    if (!editable()) return;
+    watchlistItems.replaceChildren();
+    if (state.loading && !items.length) {
+      watchlistStatus.textContent = 'Loading your watchlist…';
+      watchlistEmpty.hidden = false;
+      watchlistEmpty.textContent = 'Loading…';
+      return;
+    }
+    if (state.error && !items.length) {
+      watchlistStatus.textContent = state.error;
+      watchlistEmpty.hidden = false;
+      watchlistEmpty.textContent = 'Could not load your watchlist.';
+      return;
+    }
+    if (!items.length) {
+      watchlistStatus.textContent = 'No saved songs yet.';
+      watchlistEmpty.hidden = false;
+      watchlistEmpty.textContent = 'Your saved songs will appear here.';
+      return;
+    }
+    watchlistStatus.textContent = state.error || '';
+    watchlistEmpty.hidden = true;
+    const sorted = [...items].sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
+    for (const entry of sorted) {
+      const li = document.createElement('li');
+      li.className = 'creator-watchlist-item';
+      const artwork = creatorImageURL(entry.artworkURI || entry.image || '', config().ipfsGateway);
+      const buttonRow = document.createElement('div');
+      buttonRow.className = 'creator-watchlist-actions';
+      const openButton = document.createElement('button');
+      openButton.type = 'button';
+      openButton.textContent = 'Open';
+      openButton.addEventListener('click', () => {
+        run(async () => {
+          const { openNFTByIdentity } = await import('./space.js?v=20261014-celebrate');
+          const opened = await openNFTByIdentity(entry);
+          if (!opened) throw new Error('Could not open this NFT in the space view');
+          message('Opened saved NFT in the space view');
+        });
+      });
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.textContent = 'Remove';
+      removeButton.addEventListener('click', () => {
+        run(async () => {
+          await removeCreatorWatchlist(entry);
+          profile.watchlist = getCreatorWatchlistState().watchlist;
+          renderWatchlist();
+          message('Removed from watchlist');
+        });
+      });
+      buttonRow.append(openButton, removeButton);
+      const copy = document.createElement('div');
+      copy.className = 'creator-watchlist-copy';
+      const title = document.createElement('strong');
+      title.textContent = entry.title || `Track #${entry.tokenId}`;
+      const artist = document.createElement('span');
+      artist.textContent = entry.artist || entry.creator || 'Unknown artist';
+      const meta = document.createElement('span');
+      meta.className = 'creator-watchlist-meta';
+      meta.textContent = `${entry.contractAddress} · #${entry.tokenId}`;
+      copy.append(title, artist, meta, buttonRow);
+      if (artwork) {
+        const image = document.createElement('img');
+        image.className = 'creator-watchlist-art';
+        image.alt = entry.title ? `Artwork for ${entry.title}` : 'Watchlist artwork';
+        image.src = artwork;
+        li.append(image);
+      } else {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'creator-watchlist-art creator-watchlist-fallback';
+        placeholder.textContent = '👀';
+        li.append(placeholder);
+      }
+      li.append(copy);
+      watchlistItems.append(li);
+    }
   };
   const display = () => {
     const presentation = creatorPresentation(profile, ens);
@@ -75,6 +167,7 @@ export function initCreatorProfile() {
     }
     for (const field of ['displayName', 'bio']) form.elements.namedItem(field).value = profile[field] || '';
     setControls();
+    renderWatchlist();
   };
   const run = async operation => {
     if (busy) return;
@@ -111,6 +204,7 @@ export function initCreatorProfile() {
     const response = await fetch(`${service()}/api/creator/profile?${new URLSearchParams({ address })}`, { signal: AbortSignal.timeout(15000) }).catch(() => null);
     if (check !== revision) return;
     if (response?.ok) profile = await response.json();
+    if (editable()) void syncCreatorWatchlist(address).catch(() => {});
     display();
     message(response?.ok ? '' : 'Profile service unavailable; ENS and read-only profile remain available');
     let resolvedENS = null;
@@ -157,6 +251,11 @@ export function initCreatorProfile() {
   dialog.querySelector('[data-profile-refresh]').addEventListener('click', () => run(() => open({ address })));
   dialog.querySelector('[data-profile-close]').addEventListener('click', () => { revision++; dialog.close(); });
   dialog.querySelectorAll('img').forEach(image => image.addEventListener('error', () => { image.hidden = true; }));
+  document.addEventListener('creator-watchlist-changed', event => {
+    if (event.detail?.address && event.detail.address !== address.toLowerCase()) return;
+    if (event.detail?.watchlist && editable()) profile.watchlist = event.detail.watchlist;
+    renderWatchlist();
+  });
   const getAlbumId = () => /^0x[0-9a-fA-F]{64}$/.test(albumValue('albumId')) ? albumValue('albumId') : ethers.id(albumValue('albumId').trim());
   const loadAlbum = async () => {
     const contract = albumContract();
