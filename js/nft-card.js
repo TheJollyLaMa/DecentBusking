@@ -3,6 +3,7 @@
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
 import { fetchNFTMetaById } from './space.js?v=20261014-celebrate';
+import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
 import { returnToRadio } from './radio-sync.js?v=20261010-listens';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
 
@@ -36,6 +37,19 @@ function _renderPreviewButton(content, playing) {
 function _cardStatus(text) {
   const el = document.getElementById('nft-panel-content')?.querySelector('.nft-listen-status');
   if (el) el.textContent = text;
+}
+
+function _shareStatus(content, text, url = '') {
+  const el = content?.querySelector('.nft-share-status');
+  if (!el) return;
+  if (url) {
+    el.innerHTML = `${_esc(text)} <input class="nft-share-link" type="text" readonly value="${_esc(url)}" aria-label="Share link" />`;
+    const input = el.querySelector('.nft-share-link');
+    input?.focus?.();
+    input?.select?.();
+    return;
+  }
+  el.textContent = text;
 }
 
 document.addEventListener?.('dbusk-archive-mute', (event) => {
@@ -183,6 +197,38 @@ export function renderNFTCard(nft) {
   const watchlistListener = () => { if (_cardNft === nft) renderWatchlist(); };
   document.addEventListener('creator-watchlist-changed', watchlistListener);
 
+  content.querySelector('.nft-share-btn')?.addEventListener('click', async () => {
+    const title = nft.name || nft.title || `Track #${nft.tokenId}`;
+    const artist = nft.artistName || nft.artist || nft.creator || '';
+    const shareText = artist ? `${title} by ${artist}` : title;
+    const shareUrl = buildNftShareUrl(nft, window.location.href);
+    try {
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ title, text: shareText, url: shareUrl }))) {
+        await navigator.share({ title, text: shareText, url: shareUrl });
+        _shareStatus(content, 'Shared.');
+        return;
+      }
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        _shareStatus(content, 'Share cancelled.');
+        return;
+      }
+      console.warn('[nft-card] Native share failed:', error?.message || error);
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+        _shareStatus(content, 'Link copied.');
+        return;
+      }
+    } catch (error) {
+      console.warn('[nft-card] Clipboard copy failed:', error?.message || error);
+      _shareStatus(content, 'Copy failed. Select this link:', shareUrl);
+      return;
+    }
+    _shareStatus(content, 'Copy unavailable. Select this link:', shareUrl);
+  });
+
   // Wire parent-play button if present
   const parentPlayBtn = content.querySelector('.nft-parent-play-btn');
   if (parentPlayBtn) {
@@ -262,6 +308,9 @@ function _buildCardHTML(nft) {
     </div>
     <p class="nft-watchlist-status" role="status" aria-live="polite"></p>
     ${/^0x[0-9a-fA-F]{40}$/.test(nft.artist || nft.creator || '') ? `<button class="nft-creator-profile nft-buy-btn" type="button" data-creator="${_esc(nft.artist || nft.creator)}" data-album="${_esc(nft.djukeAlbumId || '')}">Creator Profile / Collaborators</button>` : ''}
+
+    <button class="nft-share-btn nft-buy-btn" type="button" title="Share a link to this NFT">Share</button>
+    <p class="nft-share-status" role="status" aria-live="polite"></p>
 
     ${parentSection}
 

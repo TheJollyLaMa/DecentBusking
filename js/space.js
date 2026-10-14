@@ -25,7 +25,7 @@
 import { renderNFTCard } from './nft-card.js?v=20261014-celebrate';
 import { setNowPlaying } from './stage.js?v=20261014-celebrate';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
-import { loadMintedToken, nftArtistKey, fetchNftCatalogPage } from './nft-loader.js?v=20261012-paging';
+import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft } from './nft-loader.js?v=20261012-paging';
 
 // ── Timeline constants ────────────────────────────────────────────────────
 const UNITS_PER_DAY   = 5;          // 3-D units per day on the Z-axis
@@ -93,6 +93,7 @@ let _catalogArtists = [];
 let _archiveQuery = '';
 let _pointerStart = null;
 let _activeArtist = '';
+let _sharedFocusLookupToken = 0;
 
 // ── Public API ────────────────────────────────────────────────────────────
 export function initSpace() {
@@ -110,6 +111,8 @@ export function initSpace() {
   window.addEventListener('keydown', _onKeyDown);
   window.addEventListener('keyup', _onKeyUp);
   window.addEventListener('blur', () => { _keysDown = {}; });
+  window.addEventListener('popstate', () => { void _focusSharedNFTFromLocation(); });
+  void _focusSharedNFTFromLocation();
 }
 
 // Called by mint.js after a new busk is minted — places it at the front.
@@ -172,6 +175,88 @@ async function _handleNowPlaying(detail) {
   if (token !== _nowPlayingLookupToken) return;
   if (!nft) return;
   _applyNowPlaying({ ...detail, nft });
+}
+
+function _showSharedNFTStatus(title, message) {
+  const panel = document.getElementById('nft-panel');
+  const content = document.getElementById('nft-panel-content');
+  const closeBtn = document.getElementById('nft-panel-close');
+  if (!panel || !content) return;
+  content.innerHTML = `
+    <h3 id="nft-detail-title">${_esc(title)}</h3>
+    <p class="nft-share-loading" role="status" aria-live="polite">${_esc(message)}</p>
+  `;
+  panel.classList.remove('hidden');
+  if (!panel.open) panel.showModal();
+  panel.oncancel = (event) => {
+    event.preventDefault();
+    panel.close();
+  };
+  panel.onkeydown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      panel.close();
+    }
+  };
+  panel.onclose = () => {
+    panel.classList.add('hidden');
+  };
+  panel.onclick = (event) => {
+    const bounds = panel.getBoundingClientRect();
+    if (event.target === panel && (event.clientX < bounds.left || event.clientX > bounds.right ||
+        event.clientY < bounds.top || event.clientY > bounds.bottom)) panel.close();
+  };
+  if (closeBtn) closeBtn.onclick = () => panel.close();
+}
+
+function _showSharedNFTError(message) {
+  _showSharedNFTStatus('Shared NFT unavailable', message);
+}
+
+async function _focusSharedNFTFromLocation() {
+  const token = ++_sharedFocusLookupToken;
+  const search = window.location?.search || '';
+  if (!search) return;
+
+  let identity;
+  try {
+    identity = parseNftIdentitySearch(search);
+  } catch (error) {
+    _showSharedNFTError(error.message);
+    return;
+  }
+
+  _showSharedNFTStatus('Opening shared NFT', 'Loading the requested NFT…');
+  try {
+    const nft = await _resolveSharedNFT(identity);
+    if (token !== _sharedFocusLookupToken) return;
+    if (!nft) throw new Error('The requested NFT could not be found.');
+    if (!isMusicNft(nft)) throw new Error('The requested NFT media is not viewable in this scene.');
+    const entry = _allNFTs.find((item) => _nftKey(item.nft) === _nftKey(nft));
+    const mesh = entry?.mesh || _spawnMesh(nft, false);
+    if (!mesh) throw new Error('The requested NFT could not be displayed.');
+    mesh.userData.pinnedVisible = true;
+    const row = _nftRow(nft);
+    _selectNFT(nft, mesh, row, true, { pinVisible: true, play: false });
+  } catch (error) {
+    if (token !== _sharedFocusLookupToken) return;
+    _showSharedNFTError(error.message || 'The requested NFT could not be opened.');
+  }
+}
+
+async function _resolveSharedNFT({ chainId, contractAddress, tokenId }) {
+  const cfg = window.DecentConfig || {};
+  const configuredChainId = Number(cfg.chainId || 8453);
+  if (chainId !== configuredChainId) throw new Error(`This link targets chain ${chainId}, but this scene only supports chain ${configuredChainId}.`);
+  const collections = new Set(configuredNftCollections(cfg).map((entry) => entry.contractAddress));
+  if (!collections.has(contractAddress.toLowerCase())) {
+    throw new Error('This NFT collection is not available in this scene.');
+  }
+  const direct = _allNFTs.find(({ nft }) => _nftKey(nft) === `${chainId}:${contractAddress.toLowerCase()}:${tokenId}`);
+  if (direct) return direct.nft;
+  const nft = await fetchNFTMetaById(tokenId, contractAddress);
+  if (!nft || nft.chainId !== chainId || nft.contractAddress?.toLowerCase() !== contractAddress.toLowerCase()) return null;
+  return nft;
 }
 
 function _textKey(value = '') {
@@ -802,6 +887,7 @@ function _addListItem(nft, mesh, isNew = false) {
   li.className = 'dnft-list-item';
   li.dataset.tokenId = String(nft.tokenId);
   li.dataset.nftId = _nftKey(nft);
+  if (_activeId === _nftKey(nft)) li.classList.add('active');
 
   const title    = nft.name || nft.title || `Track #${nft.tokenId}`;
   const artist   = _artistLabel(nft);
@@ -855,8 +941,9 @@ function _bindShowAllBtn() {
 }
 
 // ── NFT Selection ──────────────────────────────────────────────────────────
-function _selectNFT(nft, mesh, listItem, showCard = true) {
+function _selectNFT(nft, mesh, listItem, showCard = true, options = {}) {
   _activeId = _nftKey(nft);
+  if (options.pinVisible) mesh.userData.pinnedVisible = true;
 
   // Highlight active list item
   document.querySelectorAll('.dnft-list-item').forEach(el => el.classList.remove('active'));
@@ -881,7 +968,7 @@ function _selectNFT(nft, mesh, listItem, showCard = true) {
     _updateNavUI();
   }
 
-  _playNFT(nft);
+  if (options.play !== false) _playNFT(nft);
   if (showCard) {
     if (_controls) {
       _controls.target.copy(mesh.position);

@@ -91,6 +91,32 @@ export function nftIdentity({ chainId = 8453, contractAddress, tokenId }) {
   return `${chainId}:${contractAddress.toLowerCase()}:${tokenId}`;
 }
 
+export function parseNftIdentitySearch(search = '') {
+  const params = search instanceof URLSearchParams ? search : new URLSearchParams(String(search || ''));
+  const chainId = Number.parseInt(params.get('chainId') || '', 10);
+  const contractAddress = params.get('contract') || '';
+  const tokenId = Number.parseInt(params.get('tokenId') || '', 10);
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error('Missing or invalid NFT chainId');
+  if (!/^0x[0-9a-fA-F]{40}$/.test(contractAddress)) throw new Error('Missing or invalid NFT contract');
+  if (!Number.isSafeInteger(tokenId) || tokenId < 0) throw new Error('Missing or invalid NFT tokenId');
+  return { chainId, contractAddress: contractAddress.toLowerCase(), tokenId };
+}
+
+export function buildNftShareUrl(nft, baseUrl = globalThis.location?.href || 'https://example.com/') {
+  const chainId = nft?.chainId ?? 8453;
+  const contractAddress = nft?.contractAddress;
+  const tokenId = nft?.tokenId;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(contractAddress || '') || !Number.isSafeInteger(tokenId) || tokenId < 0 ||
+      !Number.isSafeInteger(chainId) || chainId <= 0) throw new Error('Invalid NFT identity');
+  const url = new URL(baseUrl);
+  url.hash = '';
+  url.search = '';
+  url.searchParams.set('chainId', String(chainId));
+  url.searchParams.set('contract', contractAddress.toLowerCase());
+  url.searchParams.set('tokenId', String(tokenId));
+  return url.toString();
+}
+
 export async function readNftContract(call) {
   for (let attempt = 0; ; attempt++) {
     try {

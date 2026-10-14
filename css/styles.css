@@ -457,6 +457,13 @@ decent-header {
   flex: 0 0 auto;
 }
 
+.nft-listen-status {
+  min-height: 1.1em;
+  margin: 0.4rem 0;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
 .nft-card-actions {
   display: flex;
   gap: 0.5rem;
@@ -473,11 +480,22 @@ decent-header {
   padding-inline: 0.75rem;
 }
 
-.nft-listen-status {
+.nft-share-status {
   min-height: 1.1em;
-  margin: 0.4rem 0;
+  margin: 0.4rem 0 0.75rem;
   font-size: 0.8rem;
   color: var(--text-dim);
+}
+
+.nft-share-link {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font: inherit;
 }
 
 .nft-watchlist-status {
@@ -486,7 +504,6 @@ decent-header {
   font-size: 0.75rem;
   color: var(--text-dim);
 }
-
 /* ── NFT Parent / Remix section ──────────────────────────────────────────── */
 .nft-parent-section {
   margin-bottom: 0.75rem;
