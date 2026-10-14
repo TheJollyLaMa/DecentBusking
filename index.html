@@ -357,7 +357,14 @@
     <div id="tip-modal-inner">
       <h2>🎩 Throw Some Coins In</h2>
       <p>Tip the artist of the song playing when you opened the hat:</p>
-      <p><strong id="tip-artist"></strong><br /><span id="tip-song"></span></p>
+      <div class="tip-track-picker" aria-label="Played song navigation">
+        <button id="tip-prev-btn" type="button" aria-label="Previous played song">←</button>
+        <div class="tip-track-details">
+          <p id="tip-track-position" class="tip-track-position" role="status" aria-live="polite"></p>
+          <p><strong id="tip-artist"></strong><br /><span id="tip-song"></span></p>
+        </div>
+        <button id="tip-next-btn" type="button" aria-label="Next played song">→</button>
+      </div>
       <p id="tip-to-label">Tip the busker directly, wallet to wallet.</p>
       <div id="tip-form">
         <label for="tip-amount">Amount <span class="hint">(ETH)</span></label>

@@ -39,7 +39,7 @@ function element() {
 
 function setup({ resolve = async () => null, receipt = async () => ({ status: 1 }), chainId = 8453n } = {}) {
   const ids = ['hat-btn', 'tip-modal', 'tip-to-label', 'tip-artist', 'tip-song', 'tip-status',
-    'tip-send-btn', 'tip-cancel-btn', 'tip-amount'];
+    'tip-track-position', 'tip-prev-btn', 'tip-next-btn', 'tip-send-btn', 'tip-cancel-btn', 'tip-amount'];
   const elements = Object.fromEntries(ids.map(id => [id, element()]));
   const listeners = new Map();
   const document = {
@@ -78,6 +78,7 @@ test('hat shows the playing artist/song and first 6 + four ENS icons + last 4 of
   const { elements, play, transfers, celebrations } = setup();
   play(songA);
   await elements['hat-btn'].click();
+  assert.match(elements['tip-track-position'].textContent, /current song/i);
   assert.equal(elements['tip-artist'].textContent, 'Artist A');
   assert.equal(elements['tip-song'].textContent, 'Song A');
   const label = elements['tip-to-label'];
@@ -101,6 +102,27 @@ test('hat shows the playing artist/song and first 6 + four ENS icons + last 4 of
   assert.equal(celebrations[0].amountText, '0.01');
   assert.equal(celebrations[0].assetText, 'ETH');
   assert.match(celebrations[0].summary, /Artist A.*Song A.*0x1212/);
+});
+
+test('played-song arrows move through history without changing playback', async () => {
+  const { elements, play } = setup({ resolve: async (track) => (track.title === 'Song A' ? songA.nft : songB.nft) });
+  play({ ...songA, nft: null });
+  await elements['hat-btn'].click();
+  assert.equal(elements['tip-prev-btn'].disabled, true);
+  assert.equal(elements['tip-next-btn'].disabled, true);
+  play({ ...songB, nft: null });
+  assert.match(elements['tip-track-position'].textContent, /newer track/i);
+  await elements['tip-next-btn'].click();
+  assert.equal(elements['tip-artist'].textContent, 'Artist B');
+  assert.equal(elements['tip-song'].textContent, 'Song B');
+  assert.equal(elements['tip-to-label'].title, walletB);
+  assert.match(elements['tip-track-position'].textContent, /current song/i);
+  assert.equal(elements['tip-next-btn'].disabled, true);
+  assert.equal(elements['tip-prev-btn'].disabled, false);
+  await elements['tip-prev-btn'].click();
+  assert.equal(elements['tip-to-label'].title, walletA);
+  assert.equal(elements['tip-artist'].textContent, 'Artist A');
+  assert.equal(elements['tip-song'].textContent, 'Song A');
 });
 
 test('radio lookup captures the clicked track even if playback changes during lookup', async () => {
@@ -177,6 +199,8 @@ test('tips wait for successful receipts and prevent double submission', async ()
   const sending = elements['tip-send-btn'].click();
   await new Promise(resolve => setImmediate(resolve));
   assert.match(elements['tip-status'].textContent, /Waiting for on-chain confirmation/);
+  assert.equal(elements['tip-prev-btn'].disabled, true);
+  assert.equal(elements['tip-next-btn'].disabled, true);
   assert.equal(celebrations.length, 0);
   await elements['tip-send-btn'].click();
   assert.equal(transfers.length, 1);
@@ -238,6 +262,9 @@ test('strict catalog lookup rejects title-only matches and propagates service fa
 test('the reused wallet icon exists and tip form describes native ETH only', () => {
   assert.ok(fs.statSync(path.join(__dirname, '../img/Ens_Eth_Breathe.png')).size > 0);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /id="tip-prev-btn"/);
+  assert.match(html, /id="tip-next-btn"/);
+  assert.match(html, /id="tip-track-position"/);
   assert.match(html, /id="tip-artist"/);
   assert.match(html, /id="tip-song"/);
   assert.match(html, /Amount <span class="hint">\(ETH\)/);

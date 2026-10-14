@@ -8,14 +8,20 @@ import { resolveNowPlayingNFT } from './space.js?v=20261014-celebrate';
 import { nftArtistLabel } from './nft-loader.js?v=20261012-paging';
 
 let _tipPlayingTrack = null;
+let _tipHistory = [];
+let _tipSelectionIndex = -1;
 let _tipSnapshot = null;
 let _tipLookupGeneration = 0;
 let _tipBusy = false;
+let _tipSelectionState = 'idle';
+let _tipSelectionMessage = '';
+const _tipHistoryLimit = 12;
 
 // ── Public API ────────────────────────────────────────────────────────────
 export function initStage() {
   document.addEventListener('dbusk-now-playing', (event) => {
-    _tipPlayingTrack = event.detail ? { ...event.detail } : null;
+    _recordTipPlayingTrack(event.detail);
+    if (!_tipBusy && !_tipSnapshot && !_tipHistory.length) _renderTipState();
   });
   document.addEventListener('dbusk-now-playing-stopped', () => {
     _tipPlayingTrack = null;
@@ -50,42 +56,27 @@ function _bindHat() {
   if (!hatBtn) return;
 
   hatBtn.addEventListener('click', async () => {
-    if (_tipBusy) return;
     const modal = document.getElementById('tip-modal');
     if (!modal) return;
-    const generation = ++_tipLookupGeneration;
-    const track = _tipPlayingTrack ? { ..._tipPlayingTrack } : null;
-    _tipSnapshot = null;
-    document.getElementById('tip-send-btn').disabled = true;
-    document.getElementById('tip-artist').textContent = track?.artist || 'Unknown artist';
-    document.getElementById('tip-song').textContent = track?.title || 'No song playing';
-    _renderTipWallet('');
-    _showStatus('tip-status', '');
+    const wasHidden = modal.classList.contains('hidden');
     modal.classList.remove('hidden');
-    if (!track) {
+    if (!wasHidden || _tipBusy || _tipSelectionState === 'sent') {
+      _renderTipState();
+      return;
+    }
+    if (_tipSelectionState === 'loading') {
+      ++_tipLookupGeneration;
+      _tipSelectionState = 'idle';
+      _tipSelectionMessage = '';
+    }
+    const latestIndex = _tipHistory.length - 1;
+    if (latestIndex < 0) {
+      _tipSelectionIndex = -1;
+      _renderTipState();
       _showStatus('tip-status', 'No song is playing. Play a song before opening the tip hat.', true);
       return;
     }
-    _showStatus('tip-status', 'Looking up this song\'s tip wallet...');
-    try {
-      const nft = track.nft || await resolveNowPlayingNFT(track, { requireMediaMatch: true });
-      if (generation !== _tipLookupGeneration) return;
-      const wallet = nft?.tipWallet || '';
-      if (!/^0x[0-9a-fA-F]{40}$/.test(wallet) || /^0x0{40}$/i.test(wallet)) {
-        _showStatus('tip-status', 'No verified tip wallet is available for this song. Tips are disabled.', true);
-        return;
-      }
-      _tipSnapshot = { wallet, artist: nftArtistLabel(nft),
-        title: track.title || nft.name || nft.title || 'Unknown song' };
-      document.getElementById('tip-artist').textContent = _tipSnapshot.artist;
-      document.getElementById('tip-song').textContent = _tipSnapshot.title;
-      _renderTipWallet(wallet);
-      document.getElementById('tip-send-btn').disabled = !window.ethereum;
-      _showStatus('tip-status', window.ethereum ? '' : '🦊 MetaMask not detected. Install it to send tips.', !window.ethereum);
-    } catch (error) {
-      if (generation !== _tipLookupGeneration) return;
-      _showStatus('tip-status', `Could not verify this song's tip wallet: ${error.message}`, true);
-    }
+    await _selectTipHistoryEntry(latestIndex, { openModal: true });
   });
 }
 
@@ -136,6 +127,8 @@ function _bindGuitarCase() {
 function _bindTipModal() {
   const sendBtn = document.getElementById('tip-send-btn');
   const cancelBtn = document.getElementById('tip-cancel-btn');
+  const prevBtn = document.getElementById('tip-prev-btn');
+  const nextBtn = document.getElementById('tip-next-btn');
   const modal = document.getElementById('tip-modal');
 
   if (cancelBtn) {
@@ -146,12 +139,22 @@ function _bindTipModal() {
     sendBtn.addEventListener('click', _handleSendTip);
   }
 
+  prevBtn?.addEventListener('click', () => _stepTipHistory(-1));
+  nextBtn?.addEventListener('click', () => _stepTipHistory(1));
+
   // Close on backdrop click
   if (modal) {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) _closeTipModal();
     });
   }
+}
+
+function _stepTipHistory(direction) {
+  if (_tipBusy) return;
+  const nextIndex = _tipSelectionIndex + direction;
+  if (nextIndex < 0 || nextIndex >= _tipHistory.length) return;
+  return _selectTipHistoryEntry(nextIndex);
 }
 
 async function _handleSendTip() {
@@ -181,17 +184,22 @@ async function _handleSendTip() {
 
   try {
     _tipBusy = true;
+    _renderTipState();
     sendBtn.disabled = true;
     _showStatus('tip-status', '⏳ Waiting for MetaMask…');
 
     const signer = window._wallet?.signer;
     if (!signer) {
+      _tipSelectionState = 'ready';
+      _tipSelectionMessage = '🦊 Please connect your wallet via the header first.';
       _showStatus('tip-status', '🦊 Please connect your wallet via the header first.', true);
       return;
     }
 
     const chainId = Number((await signer.provider.getNetwork()).chainId);
     if (chainId !== (cfg.chainId || 8453)) {
+      _tipSelectionState = 'ready';
+      _tipSelectionMessage = `⚠️ Switch MetaMask to ${cfg.chainName || 'Base Mainnet'} (chain ID ${cfg.chainId || 8453}).`;
       _showStatus('tip-status', `⚠️ Switch MetaMask to ${cfg.chainName || 'Base Mainnet'} (chain ID ${cfg.chainId || 8453}).`, true);
       return;
     }
@@ -204,8 +212,9 @@ async function _handleSendTip() {
     _showStatus('tip-status', 'Tip submitted. Waiting for on-chain confirmation...');
     const receipt = await tx.wait();
     if (receipt?.status !== 1) throw new Error('Tip was not confirmed successfully');
-    _tipSnapshot = null;
-    _showStatus('tip-status', `✅ Tip confirmed for ${tip.artist} — ${tip.title}. TX: ${_shortAddr(tx.hash)}`);
+    _tipSelectionState = 'sent';
+    _tipSelectionMessage = `✅ Tip confirmed for ${tip.artist} — ${tip.title}. TX: ${_shortAddr(tx.hash)}`;
+    _showStatus('tip-status', _tipSelectionMessage);
     announcePaymentCelebration({
       chainId,
       txHash: receipt.hash || tx.hash,
@@ -215,14 +224,193 @@ async function _handleSendTip() {
       txLabel: 'Tip confirmed',
     });
   } catch (err) {
-    _showStatus('tip-status', `❌ ${err.message || 'Transaction failed'}`, true);
+    _tipSelectionState = 'ready';
+    _tipSelectionMessage = `❌ ${err.message || 'Transaction failed'}`;
+    _showStatus('tip-status', _tipSelectionMessage, true);
   } finally {
     _tipBusy = false;
-    sendBtn.disabled = !_tipSnapshot;
+    _renderTipState();
   }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+function _tipTrackKey(track = {}) {
+  return [
+    track.playId || '',
+    track.trackId || '',
+    track.audioUrl || '',
+    track.ipfsCid || '',
+    track.title || '',
+    track.artist || '',
+  ].join('|');
+}
+
+function _recordTipPlayingTrack(detail) {
+  if (!detail) {
+    _tipPlayingTrack = null;
+    return;
+  }
+  const track = { ...detail };
+  _tipPlayingTrack = track;
+  const key = _tipTrackKey(track);
+  if (!key) return;
+  const latest = _tipHistory[_tipHistory.length - 1];
+  if (latest && latest.key === key) {
+    latest.track = track;
+    if (_tipSelectionIndex === _tipHistory.length - 1) _renderTipState();
+    return;
+  }
+  _tipHistory.push({ key, track });
+  if (_tipHistory.length > _tipHistoryLimit) {
+    const overflow = _tipHistory.length - _tipHistoryLimit;
+    _tipHistory.splice(0, overflow);
+    _tipSelectionIndex = Math.max(-1, _tipSelectionIndex - overflow);
+  }
+  if (_tipSelectionIndex === -1) _tipSelectionIndex = _tipHistory.length - 1;
+  const modal = document.getElementById('tip-modal');
+  if (modal && !modal.classList.contains('hidden')) {
+    if (_tipSelectionState === 'idle' && _tipSelectionIndex === _tipHistory.length - 1) {
+      void _selectTipHistoryEntry(_tipSelectionIndex);
+      return;
+    }
+    _renderTipState();
+  }
+}
+
+function _selectedTipEntry() {
+  return _tipHistory[_tipSelectionIndex] || null;
+}
+
+function _tipHistoryLabel() {
+  if (_tipSelectionIndex < 0 || !_tipHistory.length) return '';
+  const position = `${_tipSelectionIndex + 1} of ${_tipHistory.length}`;
+  if (_tipSelectionIndex === _tipHistory.length - 1) return `Played song ${position} · Current song`;
+  const newer = _tipHistory.length - 1 - _tipSelectionIndex;
+  return `Played song ${position} · Previously played · ${newer} newer track${newer === 1 ? '' : 's'} available`;
+}
+
+function _syncTipNavState() {
+  const prevBtn = document.getElementById('tip-prev-btn');
+  const nextBtn = document.getElementById('tip-next-btn');
+  const hasSelection = _tipSelectionIndex >= 0 && _tipSelectionIndex < _tipHistory.length;
+  const atStart = !hasSelection || _tipSelectionIndex <= 0;
+  const atEnd = !hasSelection || _tipSelectionIndex >= _tipHistory.length - 1;
+  if (prevBtn) prevBtn.disabled = _tipBusy || atStart;
+  if (nextBtn) nextBtn.disabled = _tipBusy || atEnd;
+}
+
+function _renderTipState() {
+  const sendBtn = document.getElementById('tip-send-btn');
+  const entry = _selectedTipEntry();
+  const track = entry?.track || _tipPlayingTrack;
+  const hasSelection = Boolean(track);
+  const artistEl = document.getElementById('tip-artist');
+  const songEl = document.getElementById('tip-song');
+  const positionEl = document.getElementById('tip-track-position');
+  if (artistEl) artistEl.textContent = track?.artist || 'Unknown artist';
+  if (songEl) songEl.textContent = track?.title || 'No song playing';
+  if (positionEl) positionEl.textContent = _tipHistoryLabel();
+  _syncTipNavState();
+  if (!hasSelection) {
+    _tipSnapshot = null;
+    _tipSelectionState = 'idle';
+    _tipSelectionMessage = '';
+    _renderTipWallet('');
+    if (sendBtn) sendBtn.disabled = true;
+    _showStatus('tip-status', 'No song is playing. Play a song before opening the tip hat.', true);
+    return;
+  }
+  if (_tipBusy) {
+    if (sendBtn) sendBtn.disabled = true;
+    return;
+  }
+  if (_tipSelectionState === 'loading') {
+    _showStatus('tip-status', _tipSelectionMessage || 'Looking up this song\'s tip wallet...');
+    if (sendBtn) sendBtn.disabled = true;
+    return;
+  }
+  if (_tipSelectionState === 'error') {
+    if (sendBtn) sendBtn.disabled = true;
+    _showStatus('tip-status', _tipSelectionMessage, true);
+    return;
+  }
+  if (_tipSelectionState === 'sent') {
+    if (sendBtn) sendBtn.disabled = true;
+    _showStatus('tip-status', _tipSelectionMessage || '', false);
+    return;
+  }
+  if (!_tipSnapshot || _tipSnapshot.trackKey !== _tipTrackKey(track)) {
+    _tipSnapshot = null;
+    _tipSelectionState = 'loading';
+    _tipSelectionMessage = _tipSelectionIndex === _tipHistory.length - 1
+      ? 'Looking up this song\'s tip wallet...'
+      : 'Looking up this previously played song\'s tip wallet...';
+    _renderTipWallet('');
+  }
+  if (sendBtn) sendBtn.disabled = !_tipSnapshot || !window.ethereum;
+  if (_tipSnapshot) {
+    _tipSelectionState = 'ready';
+    if (!_tipSelectionMessage || _tipSelectionMessage === 'Loading…') {
+      _tipSelectionMessage = window.ethereum ? '' : '🦊 MetaMask not detected. Install it to send tips.';
+    }
+    _showStatus('tip-status', _tipSelectionMessage, Boolean(_tipSelectionMessage));
+  }
+}
+
+async function _selectTipHistoryEntry(index, { openModal = false } = {}) {
+  const modal = document.getElementById('tip-modal');
+  if (index < 0 || index >= _tipHistory.length || _tipBusy) return;
+  _tipSelectionIndex = index;
+  if (openModal && modal) modal.classList.remove('hidden');
+  const entry = _selectedTipEntry();
+  if (!entry) return;
+  const track = entry.track || {};
+  const generation = ++_tipLookupGeneration;
+  _tipSelectionState = 'loading';
+  _tipSelectionMessage = index === _tipHistory.length - 1
+    ? 'Looking up this song\'s tip wallet...'
+    : 'Looking up this previously played song\'s tip wallet...';
+  _tipSnapshot = null;
+  _renderTipState();
+  try {
+    const nft = track.nft || await resolveNowPlayingNFT(track, { requireMediaMatch: true });
+    if (generation !== _tipLookupGeneration || _tipSelectionIndex !== index) return;
+    const wallet = nft?.tipWallet || '';
+    if (!/^0x[0-9a-fA-F]{40}$/.test(wallet) || /^0x0{40}$/i.test(wallet)) {
+      _tipSnapshot = null;
+      _tipSelectionState = 'error';
+      _tipSelectionMessage = 'No verified tip wallet is available for this song. Tips are disabled.';
+      _renderTipWallet('');
+      _showStatus('tip-status', _tipSelectionMessage, true);
+      _syncTipNavState();
+      return;
+    }
+    track.nft = nft;
+    _tipHistory[index] = { ...entry, track };
+    _tipSnapshot = {
+      wallet,
+      artist: nftArtistLabel(nft),
+      title: track.title || nft.name || nft.title || 'Unknown song',
+      trackKey: _tipTrackKey(track),
+    };
+    document.getElementById('tip-artist').textContent = _tipSnapshot.artist;
+    document.getElementById('tip-song').textContent = _tipSnapshot.title;
+    _renderTipWallet(wallet);
+    _tipSelectionState = 'ready';
+    _tipSelectionMessage = window.ethereum ? '' : '🦊 MetaMask not detected. Install it to send tips.';
+    _showStatus('tip-status', window.ethereum ? '' : '🦊 MetaMask not detected. Install it to send tips.', !window.ethereum);
+    _renderTipState();
+  } catch (error) {
+    if (generation !== _tipLookupGeneration || _tipSelectionIndex !== index) return;
+    _tipSnapshot = null;
+    _tipSelectionState = 'error';
+    _tipSelectionMessage = `Could not verify this song's tip wallet: ${error.message}`;
+    _renderTipWallet('');
+    _showStatus('tip-status', _tipSelectionMessage, true);
+    _syncTipNavState();
+  }
+}
+
 function _showStatus(elId, msg, isError = false) {
   const el = document.getElementById(elId);
   if (!el) return;
