@@ -704,7 +704,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261010-left-djuke"></script>
   <script type="module" src="js/djuke.mjs?v=20261014-celebrate"></script>
   <script type="module" src="js/devert-tab.mjs?v=20261014-worker-gas"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261014-profile-fallback"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261014-profile-card"></script>
   <script type="module" src="js/listens.mjs?v=20261014-celebrate"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261014-worker-gas"></script>
@@ -714,16 +714,64 @@
   </script>
 
   <dialog id="creator-profile" aria-labelledby="creator-profile-title">
-    <div class="creator-profile-toolbar"><h2 id="creator-profile-title">Profile</h2><button type="button" data-profile-refresh title="Refresh profile" aria-label="Refresh profile"><span data-profile-icon="RefreshCw" aria-hidden="true">↻</span></button><button type="button" data-profile-close title="Close profile" aria-label="Close profile"><span data-profile-icon="X" aria-hidden="true">×</span></button></div>
-    <img data-profile-banner class="creator-profile-banner" alt="Profile banner" hidden />
-    <div class="creator-profile-identity"><img data-profile-avatar class="creator-profile-avatar" alt="Profile avatar" hidden /><div><h3 data-profile-name>Profile</h3><p data-profile-ens></p><p data-profile-ens-note></p><p data-profile-discord>Discord not linked</p><p data-profile-media-note></p></div></div>
-    <form data-profile-form>
-      <label>Display Name<input name="displayName" maxlength="80" /></label>
-      <label>Bio<textarea name="bio" maxlength="1000" rows="3"></textarea></label>
-      <div class="creator-profile-image-fields"><label>Avatar<input name="avatar" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label><label>Banner<input name="banner" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label></div>
-      <button type="submit">Sign and Save Profile</button>
-    </form>
-    <div class="creator-profile-discord"><button type="button" data-discord-link>Link Discord</button><code data-discord-code hidden></code></div>
+    <div class="creator-profile-toolbar"><h2 id="creator-profile-title">Profile</h2><button type="button" data-profile-refresh title="Refresh Profile" aria-label="Refresh Profile"><span data-profile-icon="RefreshCw" aria-hidden="true">↻</span></button><button type="button" data-profile-close title="Close profile" aria-label="Close profile"><span data-profile-icon="X" aria-hidden="true">×</span></button></div>
+    <section class="creator-profile-card" aria-label="Profile card">
+      <div class="creator-profile-banner-shell">
+        <img data-profile-banner class="creator-profile-banner" alt="Profile banner" hidden />
+        <div data-profile-banner-fallback class="creator-profile-banner-fallback" aria-hidden="true"></div>
+        <div class="creator-profile-bubbles" aria-label="Avatar sources">
+          <button type="button" class="creator-profile-bubble" data-profile-avatar-bubble="ens" title="ENS avatar" aria-label="ENS avatar">
+            <img data-profile-avatar-image="ens" alt="ENS avatar" hidden />
+            <span data-profile-avatar-plus="ens" class="creator-profile-bubble-plus" hidden>+</span>
+            <span class="creator-profile-bubble-label">ENS</span>
+          </button>
+          <button type="button" class="creator-profile-bubble" data-profile-avatar-bubble="discord" title="Discord avatar" aria-label="Discord avatar">
+            <img data-profile-avatar-image="discord" alt="Discord avatar" hidden />
+            <span data-profile-avatar-plus="discord" class="creator-profile-bubble-plus" hidden>+</span>
+            <span class="creator-profile-bubble-label">Discord</span>
+          </button>
+          <button type="button" class="creator-profile-bubble" data-profile-avatar-bubble="uploaded" title="Uploaded avatar" aria-label="Uploaded avatar">
+            <img data-profile-avatar-image="uploaded" alt="Uploaded avatar" hidden />
+            <span data-profile-avatar-plus="uploaded" class="creator-profile-bubble-plus" hidden>+</span>
+            <span class="creator-profile-bubble-label">Uploaded</span>
+          </button>
+        </div>
+      </div>
+      <div class="creator-profile-identity">
+        <div class="creator-profile-name-row">
+          <h3 data-profile-name>Profile</h3>
+          <button type="button" data-profile-copy-address hidden>Copy</button>
+        </div>
+        <p data-profile-wallet></p>
+        <p data-profile-ens></p>
+        <p data-profile-discord class="creator-profile-discord-chip">Discord not linked</p>
+        <p data-profile-bio></p>
+        <p data-profile-ens-note></p>
+        <p data-profile-media-note></p>
+      </div>
+    </section>
+    <details data-profile-edit-section hidden>
+      <summary>Edit profile</summary>
+      <form data-profile-form>
+        <label>Display Name<input name="displayName" maxlength="80" /></label>
+        <label>Bio<textarea name="bio" maxlength="1000" rows="3"></textarea></label>
+        <div class="creator-profile-image-fields"><label>Avatar<input name="avatar" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label><label>Banner<input name="banner" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label></div>
+        <button type="submit">Sign and Save Profile</button>
+      </form>
+      <div class="creator-profile-discord">
+        <button type="button" data-discord-link>Link Discord</button>
+        <div class="creator-profile-discord-steps" data-discord-steps hidden>
+          <p>1. Sign to generate a one-time link code.</p>
+          <p>2. In Discord, run <code>/creator-link code:…</code>.</p>
+          <p>3. Refreshes for up to 5 minutes while the link is pending.</p>
+        </div>
+        <div class="creator-profile-discord-command">
+          <code data-discord-code hidden></code>
+          <button type="button" data-discord-copy hidden>Copy command</button>
+        </div>
+        <p data-discord-expiry hidden></p>
+      </div>
+    </details>
     <section class="creator-watchlist" data-watchlist-section hidden>
       <div class="creator-watchlist-heading"><h3>Watchlist</h3><span data-watchlist-count></span></div>
       <p data-watchlist-status role="status" aria-live="polite">Connect your wallet to load your watchlist.</p>

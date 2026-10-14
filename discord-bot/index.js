@@ -1159,7 +1159,7 @@ async function main() {
         if (!creatorProfiles) throw new Error('Creator profiles are not configured');
         const user = await interaction.user.fetch();
         await creatorProfiles.confirmDiscord(interaction.options.getString('code', true), user);
-        await interaction.editReply('Discord identity verified. Refresh your creator profile to see the link.');
+        await interaction.editReply('Discord identity verified. Refresh your Profile to see the link.');
       } catch (error) { await interaction.editReply(error.message); }
       return;
     }
