@@ -10,6 +10,7 @@ const stageSource = fs.readFileSync(path.join(__dirname, '../js/stage.js'), 'utf
 const spaceSource = fs.readFileSync(path.join(__dirname, '../js/space.js'), 'utf8')
   .replace(/^import .*;$/gm, '').replace(/export /g, '');
 const loaderUrl = pathToFileURL(path.join(__dirname, '../js/nft-loader.js')).href;
+const gatewayUrl = pathToFileURL(path.join(__dirname, '../js/ipfs-gateway.js')).href;
 
 function makeThreeStubs() {
   class Vector3 {
@@ -292,6 +293,7 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
 
 test('only the active now-playing GIF coin animates and releases cleanly on switch, pause, and hidden tabs', async () => {
   const flush = () => new Promise((resolve) => setImmediate(resolve));
+  const { buildIpfsGatewayUrls } = await import(gatewayUrl);
   const audio = { paused: true, ended: false, readyState: 4, currentTime: 0, volume: 1, muted: false };
   const video = { paused: true, ended: false, readyState: 4, currentTime: 0, volume: 1, muted: false };
   const list = {
@@ -366,6 +368,7 @@ test('only the active now-playing GIF coin animates and releases cleanly on swit
     Blob,
     Response,
     Image: MockImage,
+    AbortSignal,
     window: {
       DecentConfig: {
         ipfsGateway: 'https://primary.example/ipfs/',
@@ -379,6 +382,7 @@ test('only the active now-playing GIF coin animates and releases cleanly on swit
     nftArtistKey: (nft) => String(nft.artist || nft.creator || nft.uploader || 'Unknown artist').trim().toLowerCase(),
     setTimeout,
     clearTimeout,
+    buildIpfsGatewayUrls,
     THREE: makeThreeStubs(),
   });
 
@@ -439,7 +443,11 @@ test('only the active now-playing GIF coin animates and releases cleanly on swit
   audio.paused = false;
   await vm.runInContext(`_handleNowPlaying({ nft: ${JSON.stringify(gifOne)} });`, context);
   await flush();
-  for (let index = 0; index < 4; index += 1) vm.runInContext('_updateNowPlayingPulse();', context);
+  await flush();
+  vm.runInContext('_updateNowPlayingPulse();', context);
+  await flush();
+  await flush();
+  for (let index = 0; index < 3; index += 1) vm.runInContext('_updateNowPlayingPulse();', context);
   assert.ok(gifOneCanvas.drawImageCalls > 1);
   const gifOneBeforeSwitch = gifOneCanvas.drawImageCalls;
   const gifTwoBeforeSwitch = gifTwoCanvas.drawImageCalls;
@@ -447,7 +455,11 @@ test('only the active now-playing GIF coin animates and releases cleanly on swit
 
   await vm.runInContext(`_handleNowPlaying({ nft: ${JSON.stringify(gifTwo)} });`, context);
   await flush();
-  for (let index = 0; index < 4; index += 1) vm.runInContext('_updateNowPlayingPulse();', context);
+  await flush();
+  vm.runInContext('_updateNowPlayingPulse();', context);
+  await flush();
+  await flush();
+  for (let index = 0; index < 3; index += 1) vm.runInContext('_updateNowPlayingPulse();', context);
   assert.equal(gifOneCanvas.drawImageCalls, gifOneBeforeSwitch);
   assert.ok(gifTwoCanvas.drawImageCalls > gifTwoBeforeSwitch);
   assert.equal(staticCanvas.drawImageCalls, staticBeforeSwitch);
@@ -455,7 +467,11 @@ test('only the active now-playing GIF coin animates and releases cleanly on swit
 
   await vm.runInContext(`_handleNowPlaying({ nft: ${JSON.stringify(staticOne)} });`, context);
   await flush();
-  for (let index = 0; index < 3; index += 1) vm.runInContext('_updateNowPlayingPulse();', context);
+  await flush();
+  vm.runInContext('_updateNowPlayingPulse();', context);
+  await flush();
+  await flush();
+  for (let index = 0; index < 2; index += 1) vm.runInContext('_updateNowPlayingPulse();', context);
   assert.equal(staticCanvas.drawImageCalls, staticBeforeSwitch);
   assert.equal(gifTwoCanvas.drawImageCalls, gifTwoBeforeStaticSwitch);
 
