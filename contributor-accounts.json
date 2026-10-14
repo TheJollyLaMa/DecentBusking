@@ -66,6 +66,20 @@
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "GitHub Copilot AI contributor.",
       "usdcPending": 15
+    },
+    {
+      "github": "withinthevacuum",
+      "displayName": "withinthevacuum",
+      "role": "tester",
+      "walletAddress": "0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f",
+      "ethEarned": 0,
+      "ethPending": 0,
+      "issuesClosed": [
+        "TheJollyLaMa/DecentBusking#176"
+      ],
+      "registeredAt": "2026-10-14T18:31:34.269Z",
+      "notes": "First outside tester; reported the briefcase upload \"Failed to fetch\" bug (#176). Whitelisted by the maintainer.",
+      "usdcPending": 5
     }
   ]
 }
