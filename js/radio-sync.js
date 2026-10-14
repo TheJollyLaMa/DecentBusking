@@ -445,7 +445,9 @@ export function initRadioSync() {
 }
 
 function _mediaTypeForTrack(track = {}) {
-  return track.mediaType || _mimeType(track.filename || '') || (track.videoUrl ? 'video/mp4' : '');
+  return (track.videoUrl || track.mediaType === 'video/mp4')
+    ? 'video/mp4'
+    : track.mediaType || _mimeType(track.filename || '') || '';
 }
 
 export function canSetDevertListenMode() {
