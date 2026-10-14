@@ -3,8 +3,21 @@ import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { submitMediaForApproval } from './mint-submission.js';
 import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
+import { planDevertQueues, quoteDevertCampaign, DEVERT_SONGS_PER_MAIN_AD } from './devert-scheduler.mjs';
 
 const MAX_DEVERT_MEDIA_BYTES = 250 * 1024 * 1024;
+
+export function devertPublicQueue(snapshot) {
+  if (snapshot?.chainId !== 8453 || !Number.isFinite(Date.parse(snapshot.snapshotAt))) {
+    throw new Error('Invalid public queue snapshot');
+  }
+  const plan = planDevertQueues({ campaigns: snapshot.campaigns,
+    completedSongPlays: snapshot.market?.slots * DEVERT_SONGS_PER_MAIN_AD,
+    now: Date.parse(snapshot.snapshotAt) });
+  const campaigns = [...plan.mainRadio, ...plan.mainRadioOverflow];
+  const quote = quoteDevertCampaign({ campaigns, mainRadioSlots: plan.mainRadioSlots });
+  return { campaigns, minimumOfferUnits: quote.minimumOfferUnits };
+}
 
 async function readWalletAds(service, address) {
   if (!address) throw new Error('Connect your wallet to view your ads.');
@@ -35,11 +48,11 @@ function node(tag, text, className) {
   return element;
 }
 
-function formatUsdc(units) {
+function formatUsdc(units, minimumFractionDigits = 0) {
   try {
     const amount = BigInt(units);
     const whole = amount / 1_000_000n;
-    const fraction = String(amount % 1_000_000n).padStart(6, '0').replace(/0+$/, '');
+    const fraction = String(amount % 1_000_000n).padStart(6, '0').replace(/0+$/, '').padEnd(minimumFractionDigits, '0');
     return `${whole}${fraction ? `.${fraction}` : ''} USDC`;
   } catch {
     return 'USDC unavailable';
@@ -150,11 +163,16 @@ export function initDevertTab() {
   const toggle = document.getElementById('devert-tab');
   if (!panel || !toggle) return;
   const closeButton = document.getElementById('devert-close');
+  const infoButton = document.getElementById('devert-info');
+  const instructions = document.getElementById('devert-instructions');
+  const instructionsClose = document.getElementById('devert-instructions-close');
   const refreshButton = document.getElementById('devert-refresh');
   const searchInput = document.getElementById('devert-search');
   const searchResults = document.getElementById('devert-search-results');
   const searchState = document.getElementById('devert-search-state');
   const priceDisplay = document.getElementById('devert-price');
+  const publicQueue = document.getElementById('devert-queue');
+  const queueStatus = document.getElementById('devert-queue-status');
   let currentAds = [];
   let adLibraryStatus = 'Connect your wallet to browse ads.';
   const campaignList = document.getElementById('devert-campaigns');
@@ -353,10 +371,32 @@ export function initDevertTab() {
     else minimumOffer.textContent = '';
   }
 
+  function queueState(message, price = 'Unavailable') {
+    publicQueue.replaceChildren();
+    priceDisplay.textContent = price;
+    queueStatus.textContent = message;
+  }
+
+  function renderPublicQueue(result) {
+    const { campaigns, minimumOfferUnits } = devertPublicQueue(result);
+    publicQueue.replaceChildren();
+    for (const campaign of campaigns) {
+      const item = node('li');
+      item.append(node('strong', campaign.title),
+        node('span', `Campaign #${campaign.campaignId} · ${campaign.advertiser}`));
+      publicQueue.append(item);
+    }
+    priceDisplay.textContent = formatUsdc(minimumOfferUnits.toString(), 2).replace(' USDC', '');
+    queueStatus.textContent = campaigns.length
+      ? `${campaigns.length} queued · next position ${campaigns.length + 1}`
+      : 'No ads queued · next position 1';
+  }
+
   function selectAdForCampaign(ad) {
     if (ad.state !== 'ready') return;
     document.getElementById('devert-title').value = String(ad.title || '');
     document.getElementById('devert-audio-uri').value = `ipfs://${ad.ipfsCid}`;
+    document.getElementById('devert-run-campaign').open = true;
     document.getElementById('devert-weeks').focus();
   }
 
@@ -481,6 +521,7 @@ export function initDevertTab() {
   }
 
   async function close() {
+    if (instructions.open) instructions.close();
     clearTimeout(refreshTimer);
     generation++;
     if (previewPlayer.dataset.listenMode === 'ads-only') {
@@ -540,9 +581,13 @@ export function initDevertTab() {
     clearTimeout(refreshTimer);
     if (!isOpen()) return;
     const request = ++generation;
+    let scanPending = false;
+    let publicLoaded = false;
+    queueState('Loading public queue…', 'Loading…');
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service) {
       snapshot = null;
+      queueState('Public queue unavailable: DVert campaign service is not configured.');
       currentAds = [];
       adLibraryStatus = 'DVert campaign service is not configured.';
       renderAdLibrary();
@@ -558,13 +603,14 @@ export function initDevertTab() {
       if (request !== generation || !isOpen()) return;
       if (response.status === 404) throw new Error('Campaign contract is not deployed');
       if (!response.ok) throw new Error(result.error || `Campaigns unavailable (${response.status})`);
+      renderPublicQueue(result);
+      publicLoaded = true;
       snapshot = result;
       campaignList.replaceChildren();
       const walletAddress = window._wallet?.address;
       let ads = [];
       let metadataUnavailable = 0;
       let ownershipUnavailable = 0;
-      let scanPending = false;
       if (walletAddress) {
         const library = await readWalletAds(service, walletAddress);
         if (request !== generation || !isOpen()) return;
@@ -594,11 +640,7 @@ export function initDevertTab() {
           const select = node('button', 'Run Campaign', 'devert-use-ad');
           select.type = 'button';
           select.setAttribute('aria-label', `Use ${ad.title} in a campaign`);
-          select.addEventListener('click', () => {
-            document.getElementById('devert-title').value = ad.title;
-            document.getElementById('devert-audio-uri').value = `ipfs://${ad.ipfsCid}`;
-            document.getElementById('devert-weeks').focus();
-          });
+          select.addEventListener('click', () => selectAdForCampaign(ad));
           item.append(select);
         }
         campaignList.append(item);
@@ -609,6 +651,7 @@ export function initDevertTab() {
       syncCheckout();
     } catch (error) {
       if (request !== generation || !isOpen()) return;
+      if (!publicLoaded) queueState(`Public queue unavailable: ${error.message}`);
       snapshot = null;
       currentAds = [];
       adLibraryStatus = error.message;
@@ -618,7 +661,7 @@ export function initDevertTab() {
       radioStatus.textContent = 'Main-radio ad scheduling is not live yet.';
       syncCheckout();
     }
-    if (isOpen()) refreshTimer = setTimeout(refresh, scanPending ? 3_000 : 30_000);
+    if (request === generation && isOpen()) refreshTimer = setTimeout(refresh, scanPending ? 3_000 : 30_000);
   }
 
   async function checkAdLoopReady() {
@@ -644,7 +687,13 @@ export function initDevertTab() {
     refresh();
   });
   closeButton?.addEventListener('click', async () => { await close(); toggle.focus(); });
+  infoButton.addEventListener('click', () => instructions.showModal());
+  instructionsClose.addEventListener('click', () => instructions.close());
+  instructions.addEventListener('close', () => {
+    if (isOpen()) infoButton.focus();
+  });
   refreshButton?.addEventListener('click', refresh);
+  document.getElementById('devert-queue-refresh').addEventListener('click', refresh);
   searchInput?.addEventListener('input', renderAdLibrary);
   purchaseForm?.addEventListener('submit', submitCampaign);
   document.getElementById('devert-weeks')?.addEventListener('input', syncCheckout);
@@ -663,9 +712,9 @@ export function initDevertTab() {
     campaignList.replaceChildren();
     campaignStatus.textContent = 'Connect your wallet to view your ads.';
   });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close().then(() => toggle.focus()); } });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen() && !instructions.open) { close().then(() => toggle.focus()); } });
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
-  document.addEventListener('click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target)) close(); });
+  document.addEventListener('click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target) && !instructions.contains(event.target)) close(); });
 }
 
 if (typeof document !== 'undefined') {

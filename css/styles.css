@@ -788,20 +788,24 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 #devert-panel {
   position: fixed; left: 0; top: var(--left-tab-top);
   bottom: max(120px, calc(var(--radio-footer-height, 96px) + 20px)); z-index: 110;
-  width: var(--devert-width); box-sizing: border-box; padding: 14px;
-  display: flex; flex-direction: column; min-height: 0; gap: 10px;
-  color: #f6efdd; background: #17140d; border: 1px solid #c49a45; border-left: 0;
-  border-radius: 0 8px 8px 0; box-shadow: 6px 6px 28px #0009;
+  width: var(--devert-width); box-sizing: border-box; padding: 7px;
+  display: flex; flex-direction: column; min-height: 0; gap: 0; overflow: hidden;
+  color: #f6efdd; background: linear-gradient(100deg, #776138, #f7df91 18%, #aeb9b5 48%, #fff0b6 82%, #806435);
+  border: 2px solid #d9c68c; border-left: 0;
+  border-radius: 100px 100px 12px 0; box-shadow: 6px 6px 28px #0009, inset 0 0 3px #fff9;
   transform: translateX(calc(-100% - 2px)); visibility: hidden; pointer-events: none;
   transition: transform var(--transition), visibility var(--transition);
 }
 #devert-panel.is-open { transform: translateX(0); visibility: visible; pointer-events: auto; }
-.devert-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid #735b2c; }
+.devert-heading { position: relative; display: flex; justify-content: center; align-items: center; gap: 10px; flex: 0 0 76px; box-sizing: border-box; padding: 12px 42px 0; background: #302714; border: 3px solid #c49a45; border-bottom: 0; border-radius: 96px 96px 0 0; }
+.devert-brand { display: flex; align-items: center; gap: 8px; }
 .devert-heading h2 { margin: 0; color: #f5cf66; font-family: var(--font-display); font-size: 1.1rem; }
 .devert-heading p { margin: 3px 0 0; color: #c7b98f; font-size: .72rem; }
 #devert-close, #devert-refresh { display: grid; place-items: center; width: 32px; height: 32px; padding: 4px; color: #f6efdd; background: #302714; border: 1px solid #806532; border-radius: 4px; cursor: pointer; }
-.devert-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.devert-price-display { display: grid; justify-items: center; gap: 4px; padding: 10px; margin-bottom: 10px; background: #0c0a06; border: 1px solid #735b2c; border-radius: 4px; }
+#devert-close { position: absolute; right: 24px; bottom: 12px; }
+#devert-panel #devert-info { width: 30px; min-height: 30px; padding: 2px; border-radius: 50%; color: #201a0f; background: linear-gradient(#fff5ca, #c7a34e); }
+.devert-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px; background: #17140d; border: 3px solid #c49a45; border-top: 0; border-radius: 0 0 8px 0; }
+.devert-price-display { display: grid; justify-items: center; gap: 4px; padding: 10px; margin-bottom: 10px; background: #0c0a06; border: 1px solid #735b2c; border-radius: 12px; }
 .devert-price-display span { color: #c7b98f; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; }
 #devert-price { max-width: 100%; overflow-wrap: anywhere; color: #f5cf66; font-family: var(--font-display); font-size: 1.8rem; line-height: 1.25; font-variant-numeric: tabular-nums; }
 .devert-search-label { display: block; margin-top: 10px; margin-bottom: 4px; color: #dfd3b3; font-size: .72rem; }
@@ -884,7 +888,7 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 .devert-radio-state h3, .devert-campaign-heading h3 { margin: 0; color: #f5cf66; font-size: .82rem; }
 .devert-radio-state p, #devert-campaign-status, .devert-checkout-status { color: #c7b98f; font-size: .72rem; line-height: 1.45; }
 .devert-radio-state p { margin: 6px 0 0; }
-.devert-listen-controls { display: grid; gap: 8px; margin: 12px 0; padding: 9px; border: 1px solid #554522; min-width: 0; }
+.devert-listen-controls { display: grid; gap: 8px; margin: 0 0 12px; padding: 9px; border: 1px solid #554522; border-radius: 12px; min-width: 0; }
 .devert-listen-controls legend { padding: 0 4px; color: #dfd3b3; font-size: .72rem; }
 .devert-listen-controls > p { margin: 0; color: #c7b98f; font-size: .7rem; line-height: 1.35; }
 .devert-listen-controls > #devert-audio-mode { width: 100%; min-height: 38px; color: #201a0f; background: #f5cf66; border-color: #c49a45; font-weight: 700; }
@@ -899,6 +903,20 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 #devert-ad-preview { width: 100%; min-width: 0; min-height: 36px; }
 #devert-listen-status { margin: 0; color: #c7b98f; font-size: .68rem; line-height: 1.4; overflow-wrap: anywhere; }
 .devert-campaign-heading { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
+.devert-public-queue .devert-campaign-heading { margin-top: 0; }
+#devert-queue { max-height: 210px; overflow-y: auto; padding-left: 26px; margin: 8px 0; font-size: .76rem; font-variant-numeric: tabular-nums; }
+#devert-queue li { padding: 6px 2px; border-bottom: 1px solid #554522; overflow-wrap: anywhere; }
+#devert-queue li span { display: block; margin-top: 3px; color: #c7b98f; font-size: .65rem; }
+#devert-queue-status { color: #c7b98f; }
+.devert-disclosure { margin-top: 12px; border: 1px solid #735b2c; border-radius: 12px; padding: 10px; }
+.devert-disclosure summary { cursor: pointer; color: #f5cf66; font-size: .85rem; }
+.devert-disclosure[open] > :not(summary) { margin-top: 10px; }
+#devert-panel summary:focus-visible, #devert-instructions button:focus-visible { outline: 2px solid #f5cf66; outline-offset: 3px; }
+#devert-instructions { box-sizing: border-box; width: min(500px, calc(100vw - 28px)); max-height: calc(100dvh - 32px); margin: auto; padding: 22px; overflow-y: auto; color: #f6efdd; background: #17140d; border: 2px solid #d9c68c; border-radius: 22px; box-shadow: 0 0 24px #f5cf6622; }
+#devert-instructions::backdrop { background: #000b; }
+#devert-instructions h3 { margin: 0 0 18px; color: #f5cf66; font-size: 1rem; }
+#devert-instructions .devert-workflow { grid-template-columns: 1fr; gap: 16px; border: 0; }
+#devert-instructions button { margin-top: 16px; padding: 8px 14px; border: 1px solid #c49a45; border-radius: 10px; color: #201a0f; background: linear-gradient(#fff5ca, #c7a34e); font: inherit; cursor: pointer; }
 #devert-campaigns { display: grid; gap: 5px; margin: 8px 0; padding: 0; list-style: none; }
 .devert-campaign { padding: 8px; border: 1px solid #554522; background: #201a0f; }
 .devert-campaign-details { display: grid; gap: 4px; }

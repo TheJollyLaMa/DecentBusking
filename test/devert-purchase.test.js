@@ -18,7 +18,8 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(html, /My Ads/);
   assert.match(html, /id="devert-campaigns" aria-label="My DeVert advertisements"/);
   assert.match(html, /id="devert-search-results"/);
-  assert.match(html, /id="devert-price">5\.00<\/strong>/);
+  assert.match(html, /Current Queue Price/);
+  assert.match(html, /id="devert-price"[^>]*>Loading…<\/strong>/);
   assert.match(html, /id="devert-audio-uri"[^>]*readonly/);
   assert.match(html, /id="devert-weeks"[^>]*value="1"/);
   assert.match(html, /Priority Queue Bump<\/td><td>\$1 · positions 1–7/);
