@@ -67,15 +67,25 @@ export async function resolveCreatorENS(address, provider) {
   const [avatar, banner, header] = await Promise.all([
     resolver.getAvatar().catch(() => null), resolver.getText('banner').catch(() => ''), resolver.getText('header').catch(() => ''),
   ]);
-  return { name, avatarURI: avatar?.url || '', bannerURI: banner || header || '' };
+  return {
+    name,
+    avatarURI: typeof avatar === 'string' ? avatar : avatar?.url || creatorImageURL(await resolver.getText('avatar').catch(() => '')) || '',
+    bannerURI: banner || header || '',
+  };
 }
 
 export function creatorPresentation(profile = {}, ens = null) {
-  const avatar = pickPreferredImage(ens?.avatarURI, profile.avatarURI, profile.discord?.avatarURI);
+  const avatars = {
+    ens: ens?.avatarURI || '',
+    discord: profile.discord?.avatarURI || '',
+    uploaded: profile.avatarURI || '',
+  };
+  const avatar = pickPreferredImage(avatars.ens, avatars.uploaded, avatars.discord);
   const banner = pickPreferredImage(ens?.bannerURI, profile.bannerURI, profile.discord?.bannerURI);
   return {
     name: profile.displayName || ens?.name || profile.discord?.displayName || 'Profile',
     avatarURI: avatar.source,
+    avatars,
     bannerURI: banner.source,
     avatarCandidates: avatar.candidates,
     bannerCandidates: banner.candidates,

@@ -81,6 +81,8 @@ test('creator images prefer verified ENS, then uploaded IPFS, then Discord', asy
   assert.equal(creatorPresentation({}).name, 'Profile');
   assert.equal(creatorPresentation({}, ens).name, 'thejollylama.eth');
   assert.equal(creatorPresentation({ discord }, ens).avatarURI, ens.avatarURI);
+  assert.deepEqual(creatorPresentation({ discord, avatarURI: 'ipfs://bafyimage' }, ens).avatars,
+    { ens: ens.avatarURI, discord: discord.avatarURI, uploaded: 'ipfs://bafyimage' });
   assert.equal(creatorPresentation({ discord, avatarURI: 'ipfs://bafyimage' }, ens).avatarURI, ens.avatarURI);
   assert.equal(creatorPresentation({ discord, avatarURI: 'ipfs://bafyimage' }, { name: 'thejollylama.eth', avatarURI: 'javascript:alert(1)' }).avatarURI, 'ipfs://bafyimage');
   assert.equal(creatorPresentation({ discord }).avatarURI, discord.avatarURI);
@@ -98,9 +100,10 @@ test('ENS profile reads avatar and optional banner only after forward verificati
   const address = Wallet.createRandom().address;
   const records = [];
   const profile = await resolveCreatorENS(address, { lookupAddress: async () => 'thejollylama.eth', resolveName: async () => address,
-    getResolver: async () => ({ getAvatar: async () => ({ url: 'https://example.com/avatar.png' }),
+    getResolver: async () => ({ getAvatar: async () => 'https://example.com/avatar.png',
       getText: async key => { records.push(key); return key === 'banner' ? 'ipfs://bafybanner' : ''; } }) });
   assert.equal(profile.name, 'thejollylama.eth');
+  assert.equal(profile.avatarURI, 'https://example.com/avatar.png');
   assert.equal(profile.bannerURI, 'ipfs://bafybanner');
   assert.deepEqual(records, ['banner', 'header']);
 });

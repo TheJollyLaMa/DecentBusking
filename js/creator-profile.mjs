@@ -1,4 +1,4 @@
-import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-fallback';
+import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
@@ -33,6 +33,15 @@ export function initCreatorProfile() {
   const status = dialog.querySelector('[data-profile-status]');
   const form = dialog.querySelector('[data-profile-form]');
   const albumForm = dialog.querySelector('[data-album-form]');
+  const editSection = dialog.querySelector('[data-profile-edit-section]');
+  const bannerImage = dialog.querySelector('[data-profile-banner]');
+  const bannerFallback = dialog.querySelector('[data-profile-banner-fallback]');
+  const copyAddressButton = dialog.querySelector('[data-profile-copy-address]');
+  const discordCode = dialog.querySelector('[data-discord-code]');
+  const discordCopy = dialog.querySelector('[data-discord-copy]');
+  const discordSteps = dialog.querySelector('[data-discord-steps]');
+  const discordExpiry = dialog.querySelector('[data-discord-expiry]');
+  const avatarBubbles = [...dialog.querySelectorAll('[data-profile-avatar-bubble]')];
   const value = name => form.elements.namedItem(name).value;
   const albumValue = name => albumForm.elements.namedItem(name).value;
   let address = '';
@@ -41,10 +50,14 @@ export function initCreatorProfile() {
   let ensError = '';
   let ensLoading = false;
   let viewingOwnProfile = false;
-  const imageCandidates = { avatar: [], banner: [] };
   let revision = 0;
   let album = null;
   let busy = false;
+  let bannerCandidates = [];
+  let bannerCandidateIndex = 0;
+  let discordLinkExpiryAt = 0;
+  let discordLinkCountdownTimer = null;
+  let discordLinkPollTimer = null;
   const config = () => window.DecentConfig || {};
   const service = () => String(config().ipfsUploadServiceUrl || '').replace(/\/$/, '');
   const editable = () => address && window._wallet?.address?.toLowerCase() === address.toLowerCase();
@@ -63,6 +76,9 @@ export function initCreatorProfile() {
   const setControls = () => {
     form.querySelectorAll('input, textarea, button').forEach(element => { element.disabled = busy || !editable(); });
     dialog.querySelector('[data-discord-link]').disabled = busy || !editable();
+    if (copyAddressButton) copyAddressButton.hidden = !address;
+    if (editSection) editSection.hidden = !editable();
+    if (discordCopy) discordCopy.disabled = busy || !discordCode?.textContent;
     albumForm.querySelectorAll('input, textarea, button').forEach(element => {
       element.disabled = busy || !editable() || !supportsDjukeAlbumsAndGas(config().djukeContractVersion);
     });
@@ -158,6 +174,62 @@ export function initCreatorProfile() {
       watchlistItems.append(li);
     }
   };
+  const formatRemaining = milliseconds => {
+    const seconds = Math.max(0, Math.ceil(milliseconds / 1000));
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  };
+  const clearDiscordLinkTimers = () => {
+    if (discordLinkCountdownTimer) clearInterval(discordLinkCountdownTimer);
+    if (discordLinkPollTimer) clearInterval(discordLinkPollTimer);
+    discordLinkCountdownTimer = null;
+    discordLinkPollTimer = null;
+  };
+  const renderDiscordLinkFlow = () => {
+    if (!discordCode || !discordCopy || !discordSteps || !discordExpiry) return;
+    const active = discordLinkExpiryAt > Date.now() && !!discordCode.textContent;
+    discordSteps.hidden = !active;
+    discordCode.hidden = !active;
+    discordCopy.hidden = !active;
+    if (!active) {
+      discordExpiry.hidden = true;
+      discordExpiry.textContent = '';
+      return;
+    }
+    const remaining = discordLinkExpiryAt - Date.now();
+    discordExpiry.hidden = false;
+    discordExpiry.textContent = remaining > 0 ? `Link code expires in ${formatRemaining(remaining)}.` : 'Link code expired.';
+    if (remaining <= 0) clearDiscordLinkTimers();
+  };
+  const refreshLinkedProfile = async () => {
+    const response = await fetch(`${service()}/api/creator/profile?${new URLSearchParams({ address })}`, { signal: AbortSignal.timeout(15000) }).catch(() => null);
+    if (!response?.ok) return false;
+    profile = await response.json();
+    display();
+    return !!profile.discord;
+  };
+  const startDiscordLinkPolling = expiresAt => {
+    clearDiscordLinkTimers();
+    discordLinkExpiryAt = expiresAt;
+    renderDiscordLinkFlow();
+    discordLinkCountdownTimer = setInterval(renderDiscordLinkFlow, 1000);
+    discordLinkPollTimer = setInterval(async () => {
+      if (!discordLinkExpiryAt || Date.now() >= discordLinkExpiryAt || profile.discord) {
+        discordLinkExpiryAt = 0;
+        clearDiscordLinkTimers();
+        renderDiscordLinkFlow();
+        if (profile.discord) message('Discord linked');
+        return;
+      }
+      try {
+        if (await refreshLinkedProfile()) {
+          discordLinkExpiryAt = 0;
+          clearDiscordLinkTimers();
+          renderDiscordLinkFlow();
+          message('Discord linked');
+        }
+      } catch {}
+    }, 10_000);
+  };
   const updateIdentityNotes = (presentation) => {
     const ensNote = dialog.querySelector('[data-profile-ens-note]');
     const mediaNote = dialog.querySelector('[data-profile-media-note]');
@@ -188,26 +260,57 @@ export function initCreatorProfile() {
       mediaNote.textContent = '';
     }
   };
-  const showImageCandidate = (image, kind, index) => {
-    const uri = imageCandidates[kind][index] || '';
-    image.dataset.candidateIndex = String(index);
-    image.hidden = !uri;
-    if (uri) image.src = uri; else image.removeAttribute('src');
+  const renderBanner = () => {
+    if (!bannerImage || !bannerFallback) return;
+    const uri = bannerCandidates[bannerCandidateIndex] || '';
+    if (!uri) {
+      bannerImage.hidden = true;
+      bannerImage.removeAttribute('src');
+      bannerFallback.hidden = false;
+      return;
+    }
+    bannerFallback.hidden = true;
+    bannerImage.hidden = false;
+    bannerImage.src = uri;
+  };
+  const renderAvatarBubble = kind => {
+    const button = dialog.querySelector(`[data-profile-avatar-bubble="${kind}"]`);
+    const image = dialog.querySelector(`[data-profile-avatar-image="${kind}"]`);
+    const plus = dialog.querySelector(`[data-profile-avatar-plus="${kind}"]`);
+    const source = creatorImageURL(profile.discord && kind === 'discord' ? profile.discord.avatarURI : kind === 'ens' ? ens?.avatarURI : profile.avatarURI, config().ipfsGateway);
+    if (!button || !image || !plus) return;
+    const title = kind === 'ens' ? 'ENS avatar' : kind === 'discord' ? 'Discord avatar' : 'Uploaded avatar';
+    button.title = source ? title : editable() ? `${title} missing — click to add` : title;
+    button.hidden = !source && !editable();
+    if (!source) {
+      image.hidden = true;
+      image.removeAttribute('src');
+      plus.hidden = !editable();
+      button.classList.toggle('is-placeholder', editable());
+      return;
+    }
+    plus.hidden = true;
+    button.classList.remove('is-placeholder');
+    image.hidden = false;
+    image.alt = title;
+    image.src = source;
   };
   const display = () => {
     const presentation = creatorPresentation(profile, ens);
     dialog.querySelector('[data-profile-name]').textContent = presentation.name;
-    dialog.querySelector('[data-profile-ens]').textContent = ens?.name || '';
-    dialog.querySelector('[data-profile-discord]').textContent = profile.discord ? `Discord verified: ${profile.discord.displayName}` : 'Discord not linked';
+    dialog.querySelector('[data-profile-wallet]').textContent = address ? `Wallet ${address.slice(0, 6)}…${address.slice(-4)}` : '';
+    dialog.querySelector('[data-profile-ens]').textContent = ens?.name ? `ENS ${ens.name}` : '';
+    dialog.querySelector('[data-profile-discord]').textContent = profile.discord ? `Discord ${profile.discord.displayName}` : 'Discord not linked';
+    dialog.querySelector('[data-profile-bio]').textContent = profile.bio || '';
+    const copyButton = dialog.querySelector('[data-profile-copy-address]');
+    if (copyButton) copyButton.hidden = !address;
     updateIdentityNotes(presentation);
-    for (const kind of ['avatar', 'banner']) {
-      const image = dialog.querySelector(`[data-profile-${kind}]`);
-      image.dataset.profileKind = kind;
-      imageCandidates[kind] = (presentation[`${kind}Candidates`] || [])
-        .map(source => creatorImageURL(source, config().ipfsGateway)).filter(Boolean);
-      showImageCandidate(image, kind, 0);
-    }
+    bannerCandidates = (presentation.bannerCandidates || []).map(source => creatorImageURL(source, config().ipfsGateway)).filter(Boolean);
+    bannerCandidateIndex = 0;
+    renderBanner();
+    for (const kind of ['ens', 'discord', 'uploaded']) renderAvatarBubble(kind);
     for (const field of ['displayName', 'bio']) form.elements.namedItem(field).value = profile[field] || '';
+    renderDiscordLinkFlow();
     setControls();
     renderWatchlist();
   };
@@ -232,6 +335,25 @@ export function initCreatorProfile() {
     if (!response.ok) throw new Error(result.error || 'Creator request failed');
     return result;
   };
+  const loadProfileData = async ({ resolveEns = true } = {}) => {
+    const check = revision;
+    const response = await fetch(`${service()}/api/creator/profile?${new URLSearchParams({ address })}`, { signal: AbortSignal.timeout(15000) }).catch(() => null);
+    if (check !== revision) return;
+    if (response?.ok) profile = await response.json();
+    if (editable()) void syncCreatorWatchlist(address).catch(() => {});
+    display();
+    message(response?.ok ? '' : 'Profile service unavailable; ENS and read-only profile remain available');
+    if (!resolveEns) return;
+    let resolvedENS = null;
+    try {
+      const provider = new ethers.JsonRpcProvider(config().ensRpcUrl || 'https://ethereum-rpc.publicnode.com', 1);
+      try { resolvedENS = await resolveCreatorENS(address, provider); } finally { provider.destroy(); }
+    } catch (error) { ensError = error?.shortMessage || error?.reason || error?.message || 'ENS lookup unavailable'; resolvedENS = null; }
+    if (check !== revision) return;
+    ens = resolvedENS;
+    ensLoading = false;
+    display();
+  };
   const open = async detail => {
     const target = detail?.address || window._wallet?.address;
     if (!/^0x[0-9a-fA-F]{40}$/.test(target || '')) { message('Connect your wallet in the page header'); if (!dialog.open) dialog.showModal(); return; }
@@ -242,25 +364,14 @@ export function initCreatorProfile() {
     ensError = '';
     ensLoading = true;
     album = null;
+    clearDiscordLinkTimers();
+    discordLinkExpiryAt = 0;
     const check = ++revision;
     if (!dialog.open) dialog.showModal();
     display();
     message('Loading profile');
-    const response = await fetch(`${service()}/api/creator/profile?${new URLSearchParams({ address })}`, { signal: AbortSignal.timeout(15000) }).catch(() => null);
     if (check !== revision) return;
-    if (response?.ok) profile = await response.json();
-    if (editable()) void syncCreatorWatchlist(address).catch(() => {});
-    display();
-    message(response?.ok ? '' : 'Profile service unavailable; ENS and read-only profile remain available');
-    let resolvedENS = null;
-    try {
-      const provider = new ethers.JsonRpcProvider(config().ensRpcUrl || 'https://ethereum-rpc.publicnode.com', 1);
-      try { resolvedENS = await resolveCreatorENS(target, provider); } finally { provider.destroy(); }
-    } catch (error) { ensError = error?.shortMessage || error?.reason || error?.message || 'ENS lookup unavailable'; resolvedENS = null; }
-    if (check !== revision) return;
-    ens = resolvedENS;
-    ensLoading = false;
-    display();
+    await loadProfileData({ resolveEns: true });
     if (detail?.albumId) albumForm.elements.namedItem('albumId').value = detail.albumId;
   };
   form.addEventListener('submit', event => {
@@ -289,30 +400,70 @@ export function initCreatorProfile() {
   });
   dialog.querySelector('[data-discord-link]').addEventListener('click', () => run(async () => {
     const result = await request('link-discord');
-    const code = dialog.querySelector('[data-discord-code]');
-    code.textContent = `/creator-link code:${result.code}`;
-    code.hidden = false;
-    message('Confirm this private code with the Discord bot within five minutes, then refresh');
+   if (discordCode) {
+     discordCode.textContent = `/creator-link code:${result.code}`;
+     discordCode.hidden = false;
+   }
+   if (discordSteps) discordSteps.hidden = false;
+   if (discordCopy) discordCopy.hidden = false;
+   if (discordExpiry) {
+     discordExpiry.hidden = false;
+     discordExpiry.textContent = 'Link code expires in 5:00.';
+   }
+   message('Confirm this private code with the Discord bot within five minutes, then refresh');
+   startDiscordLinkPolling(Date.parse(result.expiresAt));
   }));
   dialog.querySelector('[data-profile-refresh]').addEventListener('click', () => run(() => open({ address })));
-  dialog.querySelector('[data-profile-close]').addEventListener('click', () => { revision++; dialog.close(); });
-  dialog.querySelectorAll('[data-profile-avatar], [data-profile-banner]').forEach(image => image.addEventListener('error', () => {
-    if (!image.getAttribute('src')) return;
-    const kind = image.dataset.profileKind || 'avatar';
-    const next = Number(image.dataset.candidateIndex || 0) + 1;
-    showImageCandidate(image, kind, next);
-    const mediaNote = dialog.querySelector('[data-profile-media-note]');
-    if (mediaNote) {
-      mediaNote.hidden = false;
-      const label = kind.replace(/^\w/, value => value.toUpperCase());
-      mediaNote.textContent = imageCandidates[kind][next]
-        ? `${label} image could not be loaded; showing a fallback image.`
-        : `${label} image could not be loaded and no fallback is available.`;
-    }
+  dialog.querySelector('[data-profile-close]').addEventListener('click', () => { revision++; clearDiscordLinkTimers(); dialog.close(); });
+  dialog.querySelector('[data-profile-copy-address]').addEventListener('click', async () => {
+   if (!address) return;
+   await navigator.clipboard.writeText(address).catch(() => {});
+   message('Wallet address copied');
+  });
+  dialog.querySelector('[data-discord-copy]').addEventListener('click', async () => {
+   if (!discordCode?.textContent) return;
+   await navigator.clipboard.writeText(discordCode.textContent).catch(() => {});
+   message('Discord command copied');
+  });
+  avatarBubbles.forEach(button => button.addEventListener('click', () => {
+   if (!editable()) return;
+   const kind = button.dataset.profileAvatarBubble;
+   if (kind === 'ens') window.open('https://app.ens.domains/', '_blank', 'noopener,noreferrer');
+   else if (kind === 'discord') dialog.querySelector('[data-discord-link]')?.click();
+   else if (kind === 'uploaded') form.elements.namedItem('avatar')?.click();
+  }));
+  bannerImage?.addEventListener('error', () => {
+   bannerCandidateIndex += 1;
+   if (bannerCandidateIndex < bannerCandidates.length) {
+     renderBanner();
+     return;
+   }
+   bannerImage.hidden = true;
+   bannerImage.removeAttribute('src');
+   if (bannerFallback) bannerFallback.hidden = false;
+  });
+  dialog.querySelectorAll('[data-profile-avatar-image]').forEach(image => image.addEventListener('error', () => {
+   const kind = image.dataset.profileAvatarImage;
+   const button = dialog.querySelector(`[data-profile-avatar-bubble="${kind}"]`);
+   const plus = dialog.querySelector(`[data-profile-avatar-plus="${kind}"]`);
+   image.hidden = true;
+   image.removeAttribute('src');
+   if (editable()) {
+     if (button) button.classList.add('is-placeholder');
+     if (plus) plus.hidden = false;
+   } else if (button) {
+     button.hidden = true;
+   }
+   const mediaNote = dialog.querySelector('[data-profile-media-note]');
+   if (mediaNote) {
+     mediaNote.hidden = false;
+     const label = kind.replace(/^\w/, value => value.toUpperCase());
+     mediaNote.textContent = `${label} image could not be loaded${editable() ? '; showing the add-avatar placeholder instead.' : '.'}`;
+   }
   }));
   document.addEventListener('creator-watchlist-changed', event => {
-    if (event.detail?.address && event.detail.address !== address.toLowerCase()) return;
-    if (event.detail?.watchlist && editable()) profile.watchlist = event.detail.watchlist;
+   if (event.detail?.address && event.detail.address !== address.toLowerCase()) return;
+   if (event.detail?.watchlist && editable()) profile.watchlist = event.detail.watchlist;
     renderWatchlist();
   });
   const getAlbumId = () => /^0x[0-9a-fA-F]{64}$/.test(albumValue('albumId')) ? albumValue('albumId') : ethers.id(albumValue('albumId').trim());
