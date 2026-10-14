@@ -34,6 +34,7 @@ import http from 'http';
 import fs from 'node:fs';
 import { Contract, Interface, JsonRpcProvider, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
+import { createFundLedger } from './fund-ledger.js';
 import { createWeeklyPayflow, findBlockAtOrBefore, readClosingFundBalance } from './weekly-payflow.js';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
 
@@ -705,6 +706,7 @@ async function main() {
     'function fundBalances(bytes32,address) view returns(uint256)',
     'function approvedAssets(address) view returns(bool)',
     'function completedWorkReferences(bytes32) view returns(bool)',
+    'event FundFunded(bytes32 indexed fundId, address indexed asset, address indexed funder, uint256 amount)',
   ], paymentProvider);
   const archiveProvider = new JsonRpcProvider(process.env.PAYROLL_ARCHIVE_RPC_URL || 'https://mainnet.base.org');
   const archivePayflowRouter = new Contract(payrollAssets.routerAddress, [
@@ -739,13 +741,40 @@ async function main() {
   };
   setInterval(refreshPayflow, 15_000).unref();
 
+  const fundStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+    uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+    name: 'decentbusking-fund-ledger.json', tags: { app: 'decentbusking', kind: 'fund-ledger', schema: '1' },
+    retainSnapshots: Infinity, serialize: value => value, deserialize: value => value }) : null;
+  const fundLedger = createFundLedger({
+    provider: paymentProvider,
+    router: payflowRouter,
+    config: payrollAssets,
+    getWeeklyPayflow: () => payflow.getState(),
+    readDevertState: () => readDevertState?.(),
+    readDjukeState: () => readDjukeState?.(),
+    restore: fundStore ? fundStore.restore : undefined,
+    save: fundStore ? fundStore.save : undefined,
+    startBlock: process.env.PAYROLL_START_BLOCK ? Number(process.env.PAYROLL_START_BLOCK) : undefined,
+  });
+  let fundLedgerReady = false;
+  let fundLedgerTask = null;
+  const refreshFundLedger = () => {
+    if (!fundLedgerTask) fundLedgerTask = (fundLedgerReady ? fundLedger.refresh() : fundLedger.initialize())
+      .then(() => { fundLedgerReady = true; })
+      .catch(error => console.warn('[fund-ledger]', error.message))
+      .finally(() => { fundLedgerTask = null; });
+    return fundLedgerTask;
+  };
+  setInterval(refreshFundLedger, 60_000).unref();
+  refreshFundLedger();
+
   const djukeAddress = process.env.DJUKE_CONTRACT_ADDRESS;
   const quoteSigner = supportsDjukeAlbumsAndGas(process.env.DJUKE_CONTRACT_VERSION) && process.env.DJUKE_FULFILLER_PRIVATE_KEY
     ? new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, new JsonRpcProvider(config.baseRpcUrl)) : null;
   const getDjukeGasQuote = quoteSigner ? createDjukeGasQuoteReader({ provider: quoteSigner.provider, signer: quoteSigner,
     contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, 'function quote() view returns(uint256)'], quoteSigner),
     fulfillmentGasUnits: BigInt(process.env.DJUKE_FULFILLMENT_GAS_UNITS || '1000000') }) : null;
-  const readDjukeState = djukeAddress ? createDjukeQueueReader({
+  let readDjukeState = djukeAddress ? createDjukeQueueReader({
     rpcUrl: config.baseRpcUrl, contractAddress: djukeAddress,
     paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
     getPlaylist: () => {
@@ -878,6 +907,7 @@ async function main() {
       };
     },
     getDevertState: readDevertState,
+    getFunds: async () => fundLedger.getCurrentState(),
     getDevertAds: async ({ address }) => {
       if (!playlistReady) throw new Error('Advert library is restoring; retry shortly');
       const snapshot = await readDevertState?.();

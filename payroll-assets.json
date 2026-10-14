@@ -27,6 +27,9 @@
     "playback": "dbusk-playback",
     "topTen": "dbusk-top10"
   },
+  "sponsorAliases": {
+    "0x807061DF657A7697c04045dA7d16D941861cAABc": ["thejollylama.eth", "decentcanopy.eth"]
+  },
   "radioPayflow": {
     "timeZone": "America/New_York",
     "fundShareBps": 10000,

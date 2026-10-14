@@ -73,10 +73,10 @@ async function readJson(request) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-function sendJson(response, status, body, corsOrigin = '') {
+function sendJson(response, status, body, corsOrigin = '', cacheControl = 'no-store') {
   response.writeHead(status, {
     'content-type': 'application/json',
-    'cache-control': 'no-store',
+    'cache-control': cacheControl,
     ...(corsOrigin ? { 'access-control-allow-origin': corsOrigin, vary: 'origin' } : {}),
   });
   response.end(JSON.stringify(body));
@@ -167,6 +167,7 @@ export function createWorkerRequestHandler({
   getRadioHistory,
   getWeeklyPayflow,
   getPaymentLedger,
+  getFunds,
   reconcilePayment,
   onRadioVote,
   onMediaSubmission,
@@ -356,6 +357,11 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/ledger') {
         if (!getPaymentLedger) throw new Error('Payment ledger is not configured');
         sendJson(response, 200, await getPaymentLedger(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/funds') {
+        if (!getFunds) throw new Error('Fund balances are not configured');
+        sendJson(response, 200, await getFunds(), '*', 'public, max-age=60, stale-while-revalidate=30');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/weekly') {
