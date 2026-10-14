@@ -54,6 +54,7 @@ const ROUTER_ABI = [
   'function setContributorApproved(address wallet, bytes32 githubIdHash, bool approved)',
   'function completedWorkReferences(bytes32 workReference) view returns (bool)',
   'function payout(bytes32 fundId, address asset, address recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)',
+  'function payoutBatch(bytes32 fundId, address asset, address recipient, uint256[] amounts, bytes32[] workReferences, bytes32[] repositoryIdHashes, bytes32[] contributorIdHashes, string[] metadataUris, bytes32[] metadataHashes)',
 ];
 const USDC_ABI = ['function decimals() view returns (uint8)', 'function balanceOf(address) view returns (uint256)',
   'function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)',
@@ -549,21 +550,54 @@ async function _getSigner(chainId) {
   return provider.getSigner();
 }
 
+function _payoutGroupKey(entry) {
+  const fund = String(entry.fund || _payrollAssetConfig?.fundSlug || '').trim().toLowerCase();
+  return `${fund}|${_entryCurrency(entry)}|${String(entry.contributor || '').toLowerCase()}|${String(entry.contributorGithub || '').trim().toLowerCase()}`;
+}
+
+const MAX_PAYOUT_BATCH = 20;
+
+export function groupPayoutEntries(entries, keyOf = _payoutGroupKey, maxBatch = MAX_PAYOUT_BATCH) {
+  const groups = new Map();
+  for (const entry of entries) {
+    const key = keyOf(entry);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  }
+  return [...groups.values()].flatMap(group => {
+    const chunks = [];
+    for (let start = 0; start < group.length; start += maxBatch) chunks.push(group.slice(start, start + maxBatch));
+    return chunks;
+  });
+}
+
 async function _payTokenEntry(entry) {
+  return _payTokenEntries([entry]);
+}
+
+// Pays every entry for one recipient/fund/asset in a single router transaction.
+async function _payTokenEntries(entries) {
+  if (!entries.length) throw new Error('No payroll entries selected.');
   if (!_isRouterConfigured()) throw new Error('Payroll Settlement Router is not configured.');
-  const currency = _entryCurrency(entry);
+  const [first] = entries;
+  if (new Set(entries.map(_payoutGroupKey)).size !== 1) throw new Error('A batch must share one recipient, fund, and token.');
+  const currency = _entryCurrency(first);
   const asset = _getAssetConfig(currency);
   if (!asset) throw new Error(`No configured Base token matches ${currency}.`);
-  const fundSlug = String(entry.fund || _payrollAssetConfig.fundSlug || '').trim().toLowerCase();
+  const fundSlug = String(first.fund || _payrollAssetConfig.fundSlug || '').trim().toLowerCase();
   if (!fundSlug || fundSlug !== String(_payrollAssetConfig.fundSlug || '').trim().toLowerCase()) {
     throw new Error(`Unexpected payroll fund: ${fundSlug || '(missing)'}`);
   }
-  if (entry.retainedInFund || !String(entry.contributor || '').trim()) {
-    throw new Error(`@${entry.contributorGithub}'s credit stays in the ${fundSlug} fund and is not paid out.`);
+  for (const entry of entries) {
+    if (entry.retainedInFund || !String(entry.contributor || '').trim()) {
+      throw new Error(`@${entry.contributorGithub}'s credit stays in the ${fundSlug} fund and is not paid out.`);
+    }
   }
+  const githubNames = new Set(entries.map(entry => String(entry.contributorGithub).trim()));
+  if (githubNames.size !== 1) throw new Error('A batch must belong to one GitHub contributor.');
   const blocked = (_payrollAssetConfig.blockedPayoutAddresses || [])
-    .find(item => String(item.address || '').toLowerCase() === String(entry.contributor).toLowerCase());
-  if (blocked) throw new Error(`Refusing to pay ${entry.contributor}: ${blocked.reason}`);
+    .find(item => String(item.address || '').toLowerCase() === String(first.contributor).toLowerCase());
+  if (blocked) throw new Error(`Refusing to pay ${first.contributor}: ${blocked.reason}`);
 
   const statusEl = document.getElementById('payroll-queue-status');
   const signer = await _getSigner(Number(_payrollAssetConfig.chainId));
@@ -587,17 +621,18 @@ async function _payTokenEntry(entry) {
   if (!hasPayrollRole) throw new Error('The connected wallet does not have PAYROLL_ROLE on the shared Settlement Router.');
   if (!assetApproved) throw new Error(`${currency} is not approved as a payout asset on the shared Settlement Router.`);
 
-  const workReference = _artWorkReference(entry);
-  if (await router.completedWorkReferences(workReference)) {
-    throw new Error('This work reference is already paid on-chain. Refresh the queue.');
-  }
+  const workReferences = entries.map(_artWorkReference);
+  if (new Set(workReferences).size !== workReferences.length) throw new Error('Duplicate payroll entries in this batch. Refresh the queue.');
+  const alreadyPaid = await Promise.all(workReferences.map(reference => router.completedWorkReferences(reference)));
+  if (alreadyPaid.some(Boolean)) throw new Error('One of these work references is already paid on-chain. Refresh the queue.');
 
   const fund = await router.funds(fundId);
   if (!(fund.exists ?? fund[2])) throw new Error(`Create the ${fundSlug} allocation on the shared router before paying.`);
   if (!(fund.active ?? fund[1])) throw new Error(`The ${fundSlug} allocation is inactive.`);
 
-  const recipient = ethers.getAddress(entry.contributor);
-  const contributorHash = ethers.id(String(entry.contributorGithub).trim());
+  const githubName = [...githubNames][0];
+  const recipient = ethers.getAddress(first.contributor);
+  const contributorHash = ethers.id(githubName);
   const contributor = await router.contributors(recipient);
   const registeredHash = String(contributor.githubIdHash ?? contributor[0]).toLowerCase();
   if (registeredHash !== ethers.ZeroHash.toLowerCase() && registeredHash !== contributorHash.toLowerCase()) {
@@ -607,49 +642,53 @@ async function _payTokenEntry(entry) {
     if (!(await router.hasRole(contributorAdminRole, owner))) {
       throw new Error('The connected wallet cannot approve contributors on the shared Settlement Router.');
     }
-    _setStatus(statusEl, `⏳ Approving @${entry.contributorGithub} on the shared router… confirm in MetaMask.`);
+    _setStatus(statusEl, `⏳ Approving @${githubName} on the shared router… confirm in MetaMask.`);
     await (await router.setContributorApproved(recipient, contributorHash, true)).wait();
   }
 
-  const amount = ethers.parseUnits(String(entry.amount), asset.decimals);
+  const amounts = entries.map(entry => ethers.parseUnits(String(entry.amount), asset.decimals));
+  const total = amounts.reduce((sum, amount) => sum + amount, 0n);
   const available = await router.fundBalances(fundId, asset.address);
-  if (available < amount) {
+  if (available < total) {
     throw new Error(`The ${fundSlug} fund has insufficient ${currency}. Available: ${ethers.formatUnits(available, asset.decimals)} ${currency}.`);
   }
 
-  const repository = String(entry.issueRef).split('#')[0];
-  const metadataUri = `https://github.com/${entry.issueRef.replace('#', '/issues/')}`;
-  const metadataHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify({
-    issueRef: entry.issueRef,
-    contributorGithub: entry.contributorGithub,
-    role: entry.role || 'contributor',
-    amount: String(entry.amount),
-    currency,
-    fund: fundSlug,
-  })));
-  const payoutArgs = [
-    fundId,
-    asset.address,
-    recipient,
-    amount,
-    workReference,
-    ethers.id(repository),
-    contributorHash,
-    metadataUri,
-    metadataHash,
-  ];
-
-  await router.payout.staticCall(...payoutArgs);
-  _setStatus(statusEl, `⏳ Paying ${entry.amount} ${currency} to @${entry.contributorGithub} from ${fundSlug}… confirm in MetaMask.`);
-  const tx = await router.payout(...payoutArgs);
+  const metadata = entries.map(entry => ({
+    repositoryIdHash: ethers.id(String(entry.issueRef).split('#')[0]),
+    uri: `https://github.com/${entry.issueRef.replace('#', '/issues/')}`,
+    hash: ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify({
+      issueRef: entry.issueRef,
+      contributorGithub: entry.contributorGithub,
+      role: entry.role || 'contributor',
+      amount: String(entry.amount),
+      currency,
+      fund: fundSlug,
+    }))),
+  }));
+  const totalText = ethers.formatUnits(total, asset.decimals);
+  let tx;
+  if (entries.length === 1) {
+    const payoutArgs = [fundId, asset.address, recipient, amounts[0], workReferences[0],
+      metadata[0].repositoryIdHash, contributorHash, metadata[0].uri, metadata[0].hash];
+    await router.payout.staticCall(...payoutArgs);
+    _setStatus(statusEl, `⏳ Paying ${first.amount} ${currency} to @${githubName} from ${fundSlug}… confirm in MetaMask.`);
+    tx = await router.payout(...payoutArgs);
+  } else {
+    const batchArgs = [fundId, asset.address, recipient, amounts, workReferences,
+      metadata.map(item => item.repositoryIdHash), entries.map(() => contributorHash),
+      metadata.map(item => item.uri), metadata.map(item => item.hash)];
+    await router.payoutBatch.staticCall(...batchArgs);
+    _setStatus(statusEl, `⏳ Paying ${entries.length} entries (${totalText} ${currency}) to @${githubName} in one transaction… confirm once in MetaMask.`);
+    tx = await router.payoutBatch(...batchArgs);
+  }
   if ((await tx.wait())?.status !== 1) throw new Error('Repository payout was not confirmed successfully');
   announcePaymentCelebration({
     chainId: BASE_CHAIN_ID,
     txHash: tx.hash,
-    amountText: String(entry.amount),
+    amountText: totalText,
     assetText: currency,
-    summary: 'Repository payout confirmed',
-    txLabel: `Paid ${entry.contributorGithub}`,
+    summary: entries.length === 1 ? 'Repository payout confirmed' : `Repository batch payout confirmed (${entries.length} entries)`,
+    txLabel: `Paid ${githubName}`,
   });
   _queuePaymentProof(tx.hash);
   return tx.hash;
@@ -711,7 +750,9 @@ async function _settleAll() {
   const counts = new Map();
   for (const entry of payable) counts.set(_entryCurrency(entry), (counts.get(_entryCurrency(entry)) || 0) + 1);
   const networks = [...counts].map(([currency, count]) => `${count} ${currency} on Base`).join(' and ');
-  if (!confirm(`Settle ${networks}? Each transaction is final.`)) {
+  const groups = groupPayoutEntries(payable);
+  const txText = groups.length === 1 ? 'one MetaMask confirmation' : `${groups.length} MetaMask confirmations (one per recipient)`;
+  if (!confirm(`Settle ${networks} with ${txText}? Each transaction is final.`)) {
     return;
   }
 
@@ -720,14 +761,14 @@ async function _settleAll() {
     if (settleBtn) settleBtn.disabled = true;
 
     const hashes = [];
-    for (const entry of payable) {
-      const txHash = await _payTokenEntry(entry);
+    for (const group of groups) {
+      const txHash = await _payTokenEntries(group);
       hashes.push(txHash);
-      console.log(`✅ Settled ${entry.amount} ${_entryCurrency(entry)} to ${entry.contributor} (${entry.contributorGithub}) — ${txHash}`);
+      console.log(`✅ Settled ${group.length} ${_entryCurrency(group[0])} entr${group.length === 1 ? 'y' : 'ies'} to ${group[0].contributor} (${group[0].contributorGithub}) — ${txHash}`);
     }
 
-    _setStatus(statusEl, `✅ All ${payable.length} payroll transaction(s) confirmed.`);
-    _showSettleWorkflowHint(hashes[hashes.length - 1]);
+    _setStatus(statusEl, `✅ ${payable.length} payroll entr${payable.length === 1 ? 'y' : 'ies'} paid in ${hashes.length} transaction${hashes.length === 1 ? '' : 's'}.`);
+    _showSettleWorkflowHint(hashes);
 
     await loadPayrollQueue();
 
@@ -741,13 +782,15 @@ async function _settleAll() {
 
 // ─── Post-settlement hint ─────────────────────────────────────────────────────
 
-function _showSettleWorkflowHint(txHash) {
+function _showSettleWorkflowHint(txHashes) {
   const hintEl = document.getElementById('payroll-settle-hint');
   if (!hintEl) return;
+  const hashes = (Array.isArray(txHashes) ? txHashes : [txHashes]).filter(Boolean);
   hintEl.innerHTML =
     `Confirmed on-chain. Run the <a href="https://github.com/TheJollyLaMa/DecentBusking/actions/workflows/settle-payroll.yml" ` +
-    `target="_blank" rel="noopener" class="payroll-link">Settle Payroll workflow</a> to mirror the transaction in the repository ledger.` +
-    (txHash ? `<br><small>Last tx: <code>${txHash}</code></small>` : '');
+    `target="_blank" rel="noopener" class="payroll-link">Settle Payroll workflow</a> and paste just the tx hash ` +
+    `to mirror every entry it paid in the repository ledger.` +
+    hashes.map(hash => `<br><small>Tx: <code>${_esc(hash)}</code></small>`).join('');
   hintEl.style.display = 'block';
 }
 

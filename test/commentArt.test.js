@@ -62,3 +62,14 @@ test('production comment builders preserve ART workflow messages', () => {
     assert.match(comment, /ENS and Ethereum logo/);
   }
 });
+test('settlement workflow can settle every entry proven by one batch tx', () => {
+  const { selectSettlementCandidates, groupByIssue } = require('../scripts/settlePayroll');
+  const queue = { pending: [
+    { contributorGithub: 'A', issueRef: 'o/r#1', role: 'idea-originator', currency: 'USDC' },
+    { contributorGithub: 'A', issueRef: 'o/r#2', role: 'idea-originator', currency: 'USDC' },
+    { contributorGithub: 'B', issueRef: 'o/r#3', amount: '0.00001' },
+  ] };
+  assert.equal(selectSettlementCandidates(queue).length, 2);
+  assert.equal(selectSettlementCandidates(queue, { issueRef: 'o/r#2' }).length, 1);
+  assert.deepEqual(groupByIssue(queue.pending.slice(0, 2)).map(group => group.issueRef), ['o/r#1', 'o/r#2']);
+});

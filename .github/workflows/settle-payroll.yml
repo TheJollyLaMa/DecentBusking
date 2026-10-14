@@ -4,28 +4,30 @@ on:
   workflow_dispatch:
     inputs:
       contributor_github:
-        description: Contributor GitHub username
-        required: true
+        description: Contributor GitHub username (optional; leave blank to settle everything the tx paid)
+        required: false
         type: string
       issue_ref:
-        description: Issue ref (owner/repo#123)
-        required: true
+        description: Issue ref (owner/repo#123) (optional)
+        required: false
         type: string
       role:
-        description: Work role recorded on the queue entry
-        required: true
+        description: Work role recorded on the queue entry (optional)
+        required: false
         type: choice
+        default: any
         options:
+          - any
           - contributor
           - implementer
           - idea-originator
           - tester
       currency:
-        description: Token symbol exactly as shown on the queue entry
-        required: true
+        description: Token symbol exactly as shown on the queue entry (optional)
+        required: false
         type: string
       tx_hash:
-        description: Confirmed transaction hash for this payment
+        description: Confirmed transaction hash (single or batch payout)
         required: true
         type: string
 

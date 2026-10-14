@@ -2,7 +2,7 @@ import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation,
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
-import { formatAmount, readContractEarnings, scanLogEarnings, summarizeEarnings } from './creator-earnings.mjs?v=20261014-profile-earnings2';
+import { FUND_LABELS, formatAmount, readContractEarnings, scanBlockscoutEarnings, scanLogEarnings, summarizeEarnings } from './creator-earnings.mjs?v=20261014-earnings-blockscout';
 
 const WALLET_BREATHE_ICON = 'img/Ens_Eth_Breathe.png';
 
@@ -433,15 +433,22 @@ export function initCreatorProfile() {
       catch { if (check === revision) earningsStatus.textContent = 'Base RPC unavailable; earnings could not be verified right now.'; return; }
       if (check !== revision) return;
       renderEarnings(viewEntries, 'Checking router payouts…');
-      let walletProvider = null;
-      try {
-        if (window._wallet?.provider && Number((await window._wallet.provider.getNetwork()).chainId) === 8453) walletProvider = window._wallet.provider;
-      } catch { walletProvider = null; }
-      const logs = await scanLogEarnings({ ethers, providers: [walletProvider, publicProvider], address: target });
+      let logs;
+      try { logs = await scanBlockscoutEarnings({ ethers, address: target }); }
+      catch {
+        let walletProvider = null;
+        try {
+          if (window._wallet?.provider && Number((await window._wallet.provider.getNetwork()).chainId) === 8453) walletProvider = window._wallet.provider;
+        } catch { walletProvider = null; }
+        logs = await scanLogEarnings({ ethers, providers: [walletProvider, publicProvider], address: target });
+      }
       if (check !== revision) return;
-      const note = logs.complete ? '' : logs.partialThrough
-        ? `Router payouts verified through block ${logs.partialThrough.toLocaleString('en-US')}; connect a wallet on Base to check newer ones.`
-        : 'Router payouts (payroll, playback, Top 10) not yet verified — connect a wallet on Base to scan them.';
+      const unpaidFunds = Object.values(FUND_LABELS).filter(label => !logs.entries.some(entry => entry.label === label));
+      const note = logs.complete
+        ? (unpaidFunds.length ? `No ${unpaidFunds.join(', ').replace(/, ([^,]*)$/, ' or $1')} payouts to this wallet on-chain yet.` : '')
+        : logs.partialThrough
+          ? `Router payouts verified through block ${logs.partialThrough.toLocaleString('en-US')}; connect a wallet on Base to check newer ones.`
+          : 'Router payouts (payroll, pinner, playback, Top 10) could not be verified right now — try again shortly.';
       renderEarnings([...viewEntries, ...logs.entries], note);
     } finally { publicProvider.destroy(); }
   };

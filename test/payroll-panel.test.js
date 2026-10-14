@@ -238,3 +238,20 @@ test('Left Ankh has public tally first and owner-only NFT Admin and Payroll in o
   assert.equal(menu.children[1].hidden, true);
   assert.equal(menu.children[2].hidden, true);
 });
+test('settle all pays each recipient group with one payoutBatch transaction', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/payroll.js'), 'utf8');
+  const start = source.indexOf('const MAX_PAYOUT_BATCH');
+  const end = source.indexOf('async function _payTokenEntry(entry)');
+  const context = {};
+  vm.runInNewContext(`${source.slice(start, end).replace('export function', 'function')}; this.groupPayoutEntries = groupPayoutEntries;`, context);
+  const entries = [
+    { id: 1, to: 'a' }, { id: 2, to: 'b' }, { id: 3, to: 'a' }, { id: 4, to: 'a' },
+  ];
+  const groups = context.groupPayoutEntries(entries, entry => entry.to, 2);
+  assert.equal(JSON.stringify(groups.map(group => group.map(entry => entry.id))), "[[1,3],[4],[2]]");
+  const settleAll = source.slice(source.indexOf('async function _settleAll()'), source.indexOf('// ─── Post-settlement hint'));
+  assert.match(settleAll, /groupPayoutEntries\(payable\)/);
+  assert.match(settleAll, /_payTokenEntries\(group\)/);
+  assert.doesNotMatch(settleAll, /_payTokenEntry\(entry\)/);
+  assert.match(source, /router\.payoutBatch\.staticCall\(\.\.\.batchArgs\)/);
+});
