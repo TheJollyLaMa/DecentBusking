@@ -88,7 +88,8 @@
       ],
       "registeredAt": "2026-10-14T18:31:34.269Z",
       "notes": "First outside tester; reported the briefcase upload \"Failed to fetch\" bug (#176). Whitelisted by the maintainer.",
-      "usdcPending": 5
+      "usdcPending": 0,
+      "usdcEarned": 5
     }
   ]
 }
