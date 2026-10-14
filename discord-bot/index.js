@@ -57,6 +57,7 @@ import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipf
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
 import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
 import { mediaTypeFor, normalizeMediaCid, MEDIA_TYPES, DISCORD_UPLOAD_MAX_BYTES, isDiscordAttachmentWithinLimit } from './media.js';
+import { shouldHandleDevertLoopSubmission } from './submission-routing.js';
 import { fetchTrackList, createSession, getSession } from './radio.js';
 import {
   loadPlaylist,
@@ -1092,8 +1093,11 @@ async function main() {
   client.on(Events.MessageCreate, async (message) => {
     // Ignore bots and messages outside the configured channel
     if (message.author.bot) return;
-    if (message.channelId === config.jukeboxChannelId && /^!devert-ad\b/i.test(message.content)) return;
-    if (process.env.VERT_LOOP_CHANNEL_ID && message.channelId === process.env.VERT_LOOP_CHANNEL_ID) {
+    if (shouldHandleDevertLoopSubmission(message, {
+      jukeboxChannelId: config.jukeboxChannelId,
+      vertLoopChannelId: process.env.VERT_LOOP_CHANNEL_ID,
+      adIntakeEnabled: process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true',
+    })) {
       await handleDevertLoopSubmission(message, config, creatorProfiles);
       return;
     }

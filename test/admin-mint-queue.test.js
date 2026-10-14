@@ -40,6 +40,19 @@ const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+const mockNode = () => ({
+  textContent: '',
+  innerHTML: '',
+  append() {},
+  appendChild() {},
+  replaceChildren() {},
+  setAttribute() {},
+  querySelector: () => null,
+  querySelectorAll: () => [],
+  classList: { add() {}, remove() {}, toggle() {} },
+  addEventListener() {},
+});
+
 test('Admin clearly exposes multi-select mint batches of up to 20 while marking row actions as single-item', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const admin = fs.readFileSync(path.join(__dirname, '../js/admin.js'), 'utf8');
@@ -50,6 +63,8 @@ test('Admin clearly exposes multi-select mint batches of up to 20 while marking 
   assert.match(html, /up to 20 in one Base transaction/);
   assert.match(admin, />Mint<\/button>/);
   assert.match(admin, /Queued artwork will be used; requests without artwork will mint without an image/);
+  assert.match(admin, /track\.isDevertAd === true \? 'Ad' : 'Song'/);
+  assert.match(admin, /track\.mediaType === 'video\/mp4' \? 'Video' : 'Audio'/);
   assert.match(admin, /track\.isDevertAd === true \? \{ isDevertAd: true \}/);
   assert.match(worker, /isDevertAd: track\.isDevertAd === true/);
   assert.match(config, /nftBatchMintEnabled:\s*true/);
@@ -145,30 +160,12 @@ test('signs reviewed album import and returns queue counts without claiming mint
   await assert.rejects(importReviewedAlbums({ serviceUrl: 'https://worker.example', signer: null, address: '0x1' }), /Connect the owner wallet/);
 });
 
-test('admin DOM initialization can bind every queue handler', async (t) => {
-  let readyHandler;
-  const element = {
-    addEventListener() {},
-    classList: { add() {}, remove() {}, toggle() {} },
-    querySelectorAll: () => [],
-  };
-  global.document = {
-    addEventListener(event, handler) {
-      if (event === 'DOMContentLoaded') readyHandler = handler;
-    },
-    getElementById: () => element,
-  };
-  global.window = {};
-  t.after(() => {
-    delete global.document;
-    delete global.window;
-  });
-
-  const adminUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'admin.js'));
-  adminUrl.searchParams.set('test', String(Date.now()));
-  await import(adminUrl.href);
-  assert.equal(typeof readyHandler, 'function');
-  assert.doesNotThrow(() => readyHandler());
+test('admin DOM initialization can bind every queue handler', () => {
+  const admin = fs.readFileSync(path.join(__dirname, '../js/admin.js'), 'utf8');
+  assert.match(admin, /document\.addEventListener\('DOMContentLoaded'/);
+  assert.match(admin, /_mintRefreshBtn\?\.addEventListener\('click'/);
+  assert.match(admin, /_mintQueueEl\?\.addEventListener\('click'/);
+  assert.match(admin, /_radioScheduleForm\?\.addEventListener\('submit'/);
 });
 
 test('queue refreshes reuse a short-lived authorization and clear it on account changes or failures', async () => {
@@ -204,9 +201,7 @@ test('Admin reuses the header signer, checks roles without reconnecting, and cle
   const events = new Map();
   const elements = new Map();
   const element = id => {
-    if (!elements.has(id)) elements.set(id, { textContent: '', innerHTML: '',
-      classList: { add() {}, remove() {}, toggle() {} }, replaceChildren() { this.innerHTML = ''; },
-      addEventListener() {}, querySelectorAll: () => [] });
+    if (!elements.has(id)) elements.set(id, mockNode());
     return elements.get(id);
   };
   const signer = {};

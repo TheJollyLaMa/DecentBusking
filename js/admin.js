@@ -471,6 +471,7 @@ function _setRadioScheduleStatus(message, isError = false) {
         <div>
           <img class="admin-artwork-preview" data-index="${index}" ${track.artworkCid ? `src="${_esc(_gatewayUrl(track.artworkCid))}"` : 'hidden'} alt="Artwork for ${_esc(track.title)}" />
           <strong>${_esc(track.title)}</strong>
+          <span>${track.isDevertAd === true ? 'Ad' : 'Song'} · ${track.mediaType === 'video/mp4' ? 'Video' : 'Audio'}</span>
           <span>by ${_esc(track.uploader)} · ${_esc(track.requestedAt ? new Date(track.requestedAt).toLocaleString() : '')}</span>
           <span>${_esc(track.recipient)}</span>
           <a href="${_esc(_gatewayUrl(track.ipfsCid))}" target="_blank" rel="noopener noreferrer">Open ${track.mediaType === 'video/mp4' ? 'video' : 'audio'}</a>
