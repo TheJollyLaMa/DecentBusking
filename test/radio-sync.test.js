@@ -189,7 +189,7 @@ test('radio sync does not force-seek an actively playing track on poll', () => {
   assert.equal(audio.currentTime, 3);
 });
 
-test('radio sync broadcasts now-playing details for the 3D stage when a new song starts', () => {
+test('radio sync waits for playback to start before broadcasting now-playing details', () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
     .replace(/export /g, '');
   const events = [];
@@ -227,6 +227,67 @@ test('radio sync broadcasts now-playing details for the 3D stage when a new song
     receivedAt: performance.now(),
     positionMs: 0,
   }; _switchTo = () => {}; _syncRadio();`, context);
+  assert.equal(events.length, 0);
+});
+
+test('switchTo broadcasts now-playing after the site audio begins and stops on pause', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
+    .replace(/export /g, '');
+  const events = [];
+  const stopped = [];
+  const document = new EventTarget();
+  document.addEventListener('dbusk-now-playing', (event) => events.push(event.detail));
+  document.addEventListener('dbusk-now-playing-stopped', (event) => stopped.push(event.detail));
+  let position = 0;
+  const audio = new EventTarget();
+  Object.assign(audio, {
+    duration: 180,
+    paused: true,
+    seeking: false,
+    readyState: 1,
+    seekable: { length: 1, start: () => 0, end: () => 180 },
+    pause() { this.paused = true; this.dispatchEvent(new Event('pause')); },
+    removeAttribute() {},
+    querySelectorAll: () => [],
+    appendChild() {},
+    load() {
+      setTimeout(() => { this.readyState = 4; this.dispatchEvent(new Event('loadedmetadata')); }, 0);
+    },
+    async play() { this.paused = false; position = 0; },
+  });
+  Object.defineProperties(audio, {
+    currentTime: { get: () => position, set: (value) => { position = value; } },
+    volume: { get: () => 0, set: () => {} },
+  });
+  const context = vm.createContext({
+    performance,
+    setTimeout,
+    clearTimeout,
+    console,
+    audio,
+    document,
+    CustomEvent,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } },
+  });
+  document.createElement = () => ({ });
+  vm.runInContext(`${source}\n_audio = audio; _audioPlayer = audio; globalThis.switchTrack = _switchTo;`, context);
+  await context.switchTrack({
+    title: 'Signal Fire',
+    artist: 'Synth Artist',
+    url: 'https://audio.example/song',
+    mime: 'audio/mpeg',
+    nowPlaying: {
+      source: 'radio',
+      playId: 'play-42',
+      trackId: 'track-42',
+      title: 'Signal Fire',
+      artist: 'Synth Artist',
+      audioUrl: 'https://gateway.example/ipfs/bafy-fire',
+      mediaType: 'audio/mpeg',
+      ipfsCid: 'bafy-fire',
+      nft: null,
+    },
+  });
   assert.equal(events.length, 1);
   assert.equal(events[0].source, 'radio');
   assert.equal(events[0].playId, 'play-42');
@@ -237,6 +298,71 @@ test('radio sync broadcasts now-playing details for the 3D stage when a new song
   assert.equal(events[0].mediaType, 'audio/mpeg');
   assert.equal(events[0].ipfsCid, 'bafy-fire');
   assert.equal(events[0].nft, null);
+  audio.pause();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(stopped.length > 0, true);
+});
+
+test('switchTo reveals now-playing before tune-in when autoplay is blocked', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
+    .replace(/export /g, '');
+  const events = [];
+  const document = new EventTarget();
+  document.addEventListener('dbusk-now-playing', (event) => events.push(event.detail));
+  const audio = new EventTarget();
+  let position = 0;
+  Object.assign(audio, {
+    duration: 180,
+    paused: true,
+    seeking: false,
+    readyState: 1,
+    seekable: { length: 1, start: () => 0, end: () => 180 },
+    pause() { this.paused = true; this.dispatchEvent(new Event('pause')); },
+    removeAttribute() {},
+    querySelectorAll: () => [],
+    appendChild() {},
+    load() {
+      setTimeout(() => { this.readyState = 4; this.dispatchEvent(new Event('loadedmetadata')); }, 0);
+    },
+    async play() { throw Object.assign(new Error('blocked'), { name: 'NotAllowedError' }); },
+  });
+  Object.defineProperties(audio, {
+    currentTime: { get: () => position, set: (value) => { position = value; } },
+    volume: { get: () => 0, set: () => {} },
+  });
+  document.createElement = () => ({ });
+  const context = vm.createContext({
+    performance,
+    setTimeout,
+    clearTimeout,
+    console,
+    audio,
+    document,
+    CustomEvent,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } },
+  });
+  vm.runInContext(`${source}\n_audio = audio; _audioPlayer = audio; globalThis.switchTrack = _switchTo;`, context);
+  await context.switchTrack({
+    title: 'Signal Fire',
+    artist: 'Synth Artist',
+    url: 'https://audio.example/song',
+    mime: 'audio/mpeg',
+    nowPlaying: {
+      source: 'radio',
+      playId: 'play-42',
+      trackId: 'track-42',
+      title: 'Signal Fire',
+      artist: 'Synth Artist',
+      audioUrl: 'https://gateway.example/ipfs/bafy-fire',
+      mediaType: 'audio/mpeg',
+      ipfsCid: 'bafy-fire',
+      nft: null,
+    },
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].playId, 'play-42');
+  assert.equal(events[0].title, 'Signal Fire');
+  assert.equal(audio.paused, true);
 });
 
 test('site votes post only the current play and anonymous browser ID, with no wallet', async () => {

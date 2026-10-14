@@ -27,10 +27,7 @@ export function setNowPlaying({ title = '—', artist = '', audioUrl = '', media
     console.warn('[stage] setNowPlaying: rejected non-HTTP(S) audio URL:', httpUrl);
     return;
   }
-  document.dispatchEvent?.(new CustomEvent('dbusk-now-playing', {
-    detail: { nft, title, artist, audioUrl: httpUrl, mediaType },
-  }));
-  playArchiveTrack({ title, artist, audioUrl: httpUrl, mediaType });
+  playArchiveTrack({ title, artist, audioUrl: httpUrl, mediaType, nft });
 }
 
 // ── Hat (tip) ─────────────────────────────────────────────────────────────
