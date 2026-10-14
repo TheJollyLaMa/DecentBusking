@@ -18,7 +18,8 @@
         "TheJollyLaMa/DecentBusking#152",
         "TheJollyLaMa/DecentBusking#161",
         "TheJollyLaMa/DecentBusking#158",
-        "TheJollyLaMa/DecentBusking#165"
+        "TheJollyLaMa/DecentBusking#165",
+        "TheJollyLaMa/DecentBusking#167"
       ],
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "Repo owner and maintainer.",
@@ -26,9 +27,10 @@
         "TheJollyLaMa/DecentBusking#152",
         "TheJollyLaMa/DecentBusking#161",
         "TheJollyLaMa/DecentBusking#158",
-        "TheJollyLaMa/DecentBusking#165"
+        "TheJollyLaMa/DecentBusking#165",
+        "TheJollyLaMa/DecentBusking#167"
       ],
-      "usdcPending": 0.8
+      "usdcPending": 1
     },
     {
       "github": "copilot",
@@ -57,11 +59,12 @@
         "TheJollyLaMa/DecentBusking#161",
         "TheJollyLaMa/DecentBusking#158",
         "TheJollyLaMa/DecentBusking#165",
-        "TheJollyLaMa/DecentBusking#169"
+        "TheJollyLaMa/DecentBusking#169",
+        "TheJollyLaMa/DecentBusking#167"
       ],
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "GitHub Copilot AI contributor.",
-      "usdcPending": 13.2
+      "usdcPending": 14
     }
   ]
 }
