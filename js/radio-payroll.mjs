@@ -1,4 +1,12 @@
-import { BASE_USDC_ADDRESS } from './settlement-funds.mjs';
+import { BASE_USDC_ADDRESS } from './settlement-funds.mjs?v=20261014-celebrate';
+import { announcePaymentCelebration } from './payment-celebration.mjs';
+
+function formatUsdc(units) {
+  const amount = typeof units === 'bigint' ? units : BigInt(units);
+  const whole = amount / 1000000n;
+  const fraction = String(amount % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
+  return `${whole}${fraction ? `.${fraction}` : ''}`;
+}
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE, overlappingUtcWeeks } from './payroll-week.mjs';
 
 const WALLET = /^0x[0-9a-fA-F]{40}$/;
@@ -177,6 +185,14 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     const transaction = await router.payout(...args);
     if ((await transaction.wait())?.status !== 1) throw new Error('Radio payout did not confirm; refresh before retrying');
     confirmed.push({ wallet: entry.wallet, txHash: transaction.hash });
+    announcePaymentCelebration({
+      chainId: 8453,
+      txHash: transaction.hash,
+      amountText: `${formatUsdc(BigInt(entry.amountUnits))} USDC`,
+      assetText: 'USDC',
+      summary: `${allocation.category === 'playback' ? 'Playback' : 'Top 10'} payout confirmed`,
+      txLabel: `Paid ${entry.wallet.slice(0, 6)}…`,
+    });
     await onConfirmed({ ...entry, txHash: transaction.hash });
   }
   return { confirmed, skipped: allocation.entries.length - unpaid.length };

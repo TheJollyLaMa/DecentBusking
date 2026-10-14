@@ -4,6 +4,7 @@ import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { submitMediaForApproval } from './mint-submission.js';
 import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { planDevertQueues, quoteDevertCampaign, DEVERT_SONGS_PER_MAIN_AD } from './devert-scheduler.mjs';
+import { announcePaymentCelebration } from './payment-celebration.mjs';
 
 const MAX_DEVERT_MEDIA_BYTES = 250 * 1024 * 1024;
 
@@ -155,6 +156,14 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   const transaction = await contract.createCampaign(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides);
   onStep('Waiting for Base confirmation…');
   if ((await transaction.wait())?.status !== 1) throw new Error('Campaign purchase did not confirm');
+  announcePaymentCelebration({
+    chainId: 8453,
+    txHash: transaction.hash,
+    amountText: formatUsdc(offerUnits.toString()),
+    assetText: 'USDC',
+    summary: `Campaign purchase confirmed · ${formatEth(gasQuote.amount)} worker-gas ETH included`,
+    txLabel: 'Campaign purchase confirmed',
+  });
   return transaction.hash;
 }
 

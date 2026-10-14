@@ -1,5 +1,6 @@
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
+import { announcePaymentCelebration } from './payment-celebration.mjs';
 
 export function quoteDjuke(pendingCount) {
   if (!Number.isSafeInteger(pendingCount) || pendingCount < 0) throw new RangeError('Invalid pending queue count');
@@ -113,6 +114,14 @@ export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUni
   const transaction = await request(...args);
   onStep('Waiting for Base confirmation…');
   if ((await transaction.wait())?.status !== 1) throw new Error('DJuke request did not confirm');
+  announcePaymentCelebration({
+    chainId: 8453,
+    txHash: transaction.hash,
+    amountText: formatDjukeUsdc(price),
+    assetText: 'USDC',
+    summary: 'DJuke queue payment confirmed',
+    txLabel: 'DJuke request confirmed',
+  });
   return { txHash: transaction.hash, priceUnits: price };
 }
 

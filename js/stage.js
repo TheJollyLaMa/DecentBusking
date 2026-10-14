@@ -3,6 +3,7 @@
 
 import { openMintModal } from './mint.js?v=20261012-paging';
 import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261010-listens';
+import { announcePaymentCelebration } from './payment-celebration.mjs';
 
 // ── Public API ────────────────────────────────────────────────────────────
 export function initStage() {
@@ -138,8 +139,18 @@ async function _handleSendTip() {
       to: recipientWallet,
       value: amountWei,
     });
-
-    _showStatus('tip-status', `✅ Tip sent! TX: ${_shortAddr(tx.hash)}`);
+    _showStatus('tip-status', `⏳ Waiting for confirmation… TX: ${_shortAddr(tx.hash)}`);
+    const receipt = await tx.wait();
+    if (receipt?.status !== 1) throw new Error('Tip did not confirm on chain');
+    announcePaymentCelebration({
+      chainId: Number(chainId || cfg.chainId || 8453),
+      txHash: tx.hash,
+      amountText: `${ethers.formatEther(amountWei)} ETH`,
+      assetText: 'ETH',
+      summary: `Direct tip confirmed to ${_shortAddr(recipientWallet)}`,
+      txLabel: 'Tip confirmed',
+    });
+    _showStatus('tip-status', `✅ Tip confirmed! TX: ${_shortAddr(tx.hash)}`);
     // Close modal after short delay
     setTimeout(() => {
       document.getElementById('tip-modal')?.classList.add('hidden');

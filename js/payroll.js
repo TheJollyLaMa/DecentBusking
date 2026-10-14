@@ -21,9 +21,10 @@
  */
 
 import { isAdminWallet } from './admin-access.mjs';
-import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs';
-import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs';
+import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261014-celebrate';
+import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261014-celebrate';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-upload-size-fix';
+import { announcePaymentCelebration } from './payment-celebration.mjs';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -636,6 +637,14 @@ async function _payTokenEntry(entry) {
   _setStatus(statusEl, `⏳ Paying ${entry.amount} ${currency} to @${entry.contributorGithub} from ${fundSlug}… confirm in MetaMask.`);
   const tx = await router.payout(...payoutArgs);
   if ((await tx.wait())?.status !== 1) throw new Error('Repository payout was not confirmed successfully');
+  announcePaymentCelebration({
+    chainId: BASE_CHAIN_ID,
+    txHash: tx.hash,
+    amountText: `${entry.amount} ${currency}`,
+    assetText: currency,
+    summary: 'Repository payout confirmed',
+    txLabel: `Paid ${entry.contributorGithub}`,
+  });
   _queuePaymentProof(tx.hash);
   return tx.hash;
 }

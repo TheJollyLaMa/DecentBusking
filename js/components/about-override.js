@@ -1,4 +1,6 @@
 // js/components/about-override.js — DecentBusking
+
+import { announcePaymentCelebration } from '../payment-celebration.mjs';
 //
 // Intercepts the CDN DecentHead 'about-modal' custom element definition and
 // replaces it with a DecentBusking-specific version.
@@ -277,13 +279,14 @@ class DecentBuskingAboutModal extends HTMLElement {
     const rawToken    = listing.priceToken;
 
     let purchaseTx;
+    let paymentToken = _USDC_ADDRESS;
 
     if (priceETH > 0n) {
       setStatus('⏳ Confirm purchase in MetaMask…');
       btn.textContent = '⏳ Purchasing…';
       purchaseTx = await escrow.purchaseWithETH(listingId, 1, { value: priceETH });
     } else {
-      const paymentToken = (rawToken && rawToken !== _ZERO_ADDRESS)
+      paymentToken = (rawToken && rawToken !== _ZERO_ADDRESS)
         ? rawToken
         : _USDC_ADDRESS;
 
@@ -305,7 +308,16 @@ class DecentBuskingAboutModal extends HTMLElement {
     }
 
     setStatus('⏳ Waiting for purchase confirmation…');
-    await purchaseTx.wait();
+    const receipt = await purchaseTx.wait();
+    if (receipt?.status !== 1) throw new Error('Supporter DNFT purchase did not confirm');
+    announcePaymentCelebration({
+      chainId: 8453,
+      txHash: purchaseTx.hash,
+      amountText: priceETH > 0n ? `${ethers.formatEther(priceETH)} ETH` : `${ethers.formatUnits(tokenAmount, 6)} ${paymentToken === _USDC_ADDRESS ? 'USDC' : 'token'}`,
+      assetText: priceETH > 0n ? 'ETH' : (paymentToken === _USDC_ADDRESS ? 'USDC' : 'token'),
+      summary: 'Supporter DNFT purchase confirmed',
+      txLabel: 'Supporter DNFT transferred',
+    });
 
     btn.disabled = false;
     btn.textContent = '✅ Purchased!';
