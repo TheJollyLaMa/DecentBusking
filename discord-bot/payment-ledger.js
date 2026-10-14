@@ -1,10 +1,11 @@
-import { Interface, id, JsonRpcProvider, parseUnits } from 'ethers';
+import { Interface, id, parseUnits } from 'ethers';
+import { createFailoverProvider } from './rpc-failover.js';
 
 export const PAYMENT_EVENT_ABI = ['event PayrollPaid(bytes32 indexed fundId,address indexed asset,address indexed recipient,uint256 amount,bytes32 workReference,bytes32 repositoryIdHash,bytes32 contributorIdHash,string metadataUri,bytes32 metadataHash)'];
 const iface = new Interface(PAYMENT_EVENT_ABI);
 const repositoryHash = id('TheJollyLaMa/DecentBusking');
 
-export async function verifyRepositoryPayment({ entry, config, txHash, provider = new JsonRpcProvider(config.rpcUrl) }) {
+export async function verifyRepositoryPayment({ entry, config, txHash, provider = createFailoverProvider(config) }) {
   const currency = String(entry.currency || '').toUpperCase();
   const asset = config.assets[currency];
   if (!asset || currency === 'ETH') throw new Error('Only configured Base repository assets can settle');

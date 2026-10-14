@@ -1,6 +1,7 @@
 {
   "chainId": 8453,
   "rpcUrl": "https://base-rpc.publicnode.com",
+  "rpcFallbackUrls": ["https://mainnet.base.org", "https://base.drpc.org"],
   "routerAddress": "0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5",
   "fundSlug": "dbusk-repo-dev",
   "pinnerFundSlug": "dbusk-pinners",

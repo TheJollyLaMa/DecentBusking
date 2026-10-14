@@ -34,6 +34,7 @@ import http from 'http';
 import fs from 'node:fs';
 import { Contract, Interface, JsonRpcProvider, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
+import { createFailoverProvider } from './rpc-failover.js';
 import { createFundLedger } from './fund-ledger.js';
 import { createWeeklyPayflow, findBlockAtOrBefore, readClosingFundBalance } from './weekly-payflow.js';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
@@ -656,7 +657,7 @@ async function main() {
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-payment-ledger.json', tags: { app: 'decentbusking', kind: 'payment-ledger', schema: '1' },
     retainSnapshots: Infinity, serialize: value => value, deserialize: (value, uri) => ({ ...value, snapshotUri: uri }) }) : null;
-  const paymentProvider = new JsonRpcProvider(payrollAssets.rpcUrl);
+  const paymentProvider = createFailoverProvider(payrollAssets);
   const dispatchedPayments = new Set();
   let repositorySyncError = '';
   const syncRepositoryLedger = async payment => {
