@@ -22,7 +22,7 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261012-paging';
+import { renderNFTCard } from './nft-card.js?v=20261014-celebrate';
 import { setNowPlaying } from './stage.js?v=20261014-celebrate';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, nftArtistKey, fetchNftCatalogPage } from './nft-loader.js?v=20261012-paging';
@@ -167,7 +167,7 @@ async function _handleNowPlaying(detail) {
     _applyNowPlaying(detail);
     return;
   }
-  const nft = await _resolveNowPlayingNFT(detail);
+  const nft = await resolveNowPlayingNFT(detail);
   if (token !== _nowPlayingLookupToken) return;
   if (!nft) return;
   _applyNowPlaying({ ...detail, nft });
@@ -177,7 +177,14 @@ function _textKey(value = '') {
   return String(value).trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function _audioUrlMatches(detail, nft) {
+function _audioUrlMatches(detail, nft, exact = false) {
+  if (exact) {
+    const identity = (value) => String(value || '').replace(/^ipfs:\/\/(?:ipfs\/)?/, '/ipfs/')
+      .match(/\/ipfs\/([^?#]+)/)?.[1] || String(value || '');
+    const media = [nft?.audioUrl, nft?.videoUrl, nft?.animation_url].filter(Boolean);
+    const expected = identity(detail?.audioUrl) || String(detail?.ipfsCid || '');
+    return !!expected && media.some(value => identity(value) === expected);
+  }
   const cid = String(detail?.ipfsCid || '').trim().toLowerCase();
   const audioUrls = [nft?.audioUrl, nft?.videoUrl, nft?.animation_url, nft?.metadataUri].filter(Boolean).map((value) => String(value).toLowerCase());
   if (cid && audioUrls.some((value) => value.includes(cid))) return true;
@@ -196,13 +203,15 @@ function _matchesNowPlaying(detail, nft) {
   return false;
 }
 
-async function _resolveNowPlayingNFT(detail) {
-  const direct = _allNFTs.find(({ nft }) => _matchesNowPlaying(detail, nft));
+export async function resolveNowPlayingNFT(detail, { requireMediaMatch = false } = {}) {
+  const matches = (nft) => requireMediaMatch ? _audioUrlMatches(detail, nft, true) : _matchesNowPlaying(detail, nft);
+  const direct = _allNFTs.find(({ nft }) => matches(nft));
   if (direct) return direct.nft;
 
   const cfg = window.DecentConfig || {};
   if (!cfg.ipfsUploadServiceUrl) return null;
-  const query = [detail?.title, detail?.artist].filter(Boolean).join(' ').trim();
+  const query = (requireMediaMatch ? String(detail?.title || '')
+    : [detail?.title, detail?.artist].filter(Boolean).join(' ')).trim();
   if (!query) return null;
 
   let offset = 0;
@@ -211,9 +220,12 @@ async function _resolveNowPlayingNFT(detail) {
       config: cfg,
       query,
       offset,
-    }).catch(() => null);
+    }).catch((error) => {
+      if (requireMediaMatch) throw error;
+      return null;
+    });
     if (!result) return null;
-    const match = Array.isArray(result.nfts) ? result.nfts.find((nft) => _matchesNowPlaying(detail, nft)) : null;
+    const match = Array.isArray(result.nfts) ? result.nfts.find(matches) : null;
     if (match) return match;
     if (result.nextOffset === null) return null;
     offset = result.nextOffset;

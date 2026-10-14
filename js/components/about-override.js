@@ -310,14 +310,17 @@ class DecentBuskingAboutModal extends HTMLElement {
     setStatus('⏳ Waiting for purchase confirmation…');
     const receipt = await purchaseTx.wait();
     if (receipt?.status !== 1) throw new Error('Supporter DNFT purchase did not confirm');
-    announcePaymentCelebration({
-      chainId: 8453,
-      txHash: purchaseTx.hash,
-      amountText: priceETH > 0n ? `${ethers.formatEther(priceETH)} ETH` : `${ethers.formatUnits(tokenAmount, 6)} ${paymentToken === _USDC_ADDRESS ? 'USDC' : 'token'}`,
-      assetText: priceETH > 0n ? 'ETH' : (paymentToken === _USDC_ADDRESS ? 'USDC' : 'token'),
-      summary: 'Supporter DNFT purchase confirmed',
-      txLabel: 'Supporter DNFT transferred',
-    });
+    if (priceETH > 0n || tokenAmount > 0n) {
+      announcePaymentCelebration({
+        chainId: Number(_OPTIMISM_CHAIN_ID),
+        txHash: receipt.hash || purchaseTx.hash,
+        amountText: priceETH > 0n ? ethers.formatEther(priceETH)
+          : paymentToken === _USDC_ADDRESS ? ethers.formatUnits(tokenAmount, 6) : String(tokenAmount),
+        assetText: priceETH > 0n ? 'ETH' : (paymentToken === _USDC_ADDRESS ? 'USDC' : 'token base units'),
+        summary: 'Supporter DNFT purchase confirmed',
+        txLabel: 'Supporter DNFT transferred',
+      });
+    }
 
     btn.disabled = false;
     btn.textContent = '✅ Purchased!';

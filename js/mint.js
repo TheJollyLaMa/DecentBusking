@@ -1,4 +1,4 @@
-import { fetchNFTMetaById } from './space.js?v=20261012-paging';
+import { fetchNFTMetaById } from './space.js?v=20261014-celebrate';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-mp4';
 import { submitMediaForApproval } from './mint-submission.js';
 

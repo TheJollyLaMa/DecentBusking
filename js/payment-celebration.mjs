@@ -33,6 +33,7 @@ function styleString(style = {}) {
 }
 
 function emoji(tag, text, style = {}) {
+  if (tag.includes('pc-particle')) style = { '--drift': `${rand(-18, 18)}vw`, ...style };
   return `<span class="${tag}" aria-hidden="true"${Object.keys(style).length ? ` style="${styleString(style)}"` : ''}>${text}</span>`;
 }
 
@@ -41,7 +42,9 @@ function rand(min, max) {
 }
 
 function defaultExplorerUrl(chainId, txHash) {
-  return Number(chainId) === 8453 ? `https://basescan.org/tx/${txHash}` : `https://basescan.org/tx/${txHash}`;
+  if (Number(chainId) === 8453) return `https://basescan.org/tx/${txHash}`;
+  if (Number(chainId) === 10) return `https://optimistic.etherscan.io/tx/${txHash}`;
+  throw new Error(`No payment explorer configured for chain ${chainId}`);
 }
 
 function loadSeen(storage = globalThis.localStorage) {
@@ -389,7 +392,8 @@ function ensureStyles(documentRef) {
 .pc-coin { left: var(--x); top: var(--y); animation: pc-fountain var(--duration) cubic-bezier(.12,.75,.2,1) var(--delay) both; }
 .pc-rocket { left: 18%; bottom: 12%; font-size: clamp(2rem, 4vw, 3.2rem); animation: pc-rocket var(--duration, 2.3s) cubic-bezier(.2,.8,.2,1) .1s both; }
 .pc-rocket-trail { position: absolute; left: 25%; bottom: 20%; font-size: clamp(1rem, 2vw, 1.5rem); animation: pc-trail 2.1s ease-in-out .15s both; }
-.pc-trail { position: relative; margin: 0 .08rem; animation: pc-trail-spark 1.6s ease-out var(--delay) both; }
+.pc-trail { position: relative; margin: 0 .08rem; --drift: 0px; animation: pc-trail-spark 1.6s ease-out var(--delay, 0s) both; }
+.pc-burst { left: var(--x); top: var(--y); animation: pc-trail-spark var(--duration) ease-out var(--delay) both; }
 .pc-confetti-piece { left: var(--x); top: var(--y); animation: pc-confetti var(--duration) cubic-bezier(.2,.7,.15,1) var(--delay) both; }
 .pc-treasure-box { position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); font-size: clamp(2.6rem, 5vw, 4rem); animation: pc-treasure 2.2s cubic-bezier(.2,.8,.2,1) .1s both; }
 .pc-chest-lid, .pc-chest-body { display: block; line-height: 1; text-align: center; }
@@ -472,12 +476,12 @@ function ensureStyles(documentRef) {
 @keyframes pc-trail-spark {
   0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.6); }
   30% { opacity: 1; }
-  100% { opacity: 0; transform: translate3d(calc(var(--rot) / 16), -14vh, 0) scale(1.2); }
+  100% { opacity: 0; transform: translate3d(var(--drift), -14vh, 0) scale(1.2); }
 }
 @keyframes pc-confetti {
   0% { opacity: 0; transform: translate3d(0, -2vh, 0) rotate(0deg) scale(.5); }
   15% { opacity: 1; }
-  100% { opacity: 0; transform: translate3d(calc(var(--rot) / 12), 24vh, 0) rotate(var(--rot)) scale(1); }
+  100% { opacity: 0; transform: translate3d(var(--drift), 24vh, 0) rotate(var(--rot)) scale(1); }
 }
 @keyframes pc-treasure {
   0% { transform: translate(-50%, -50%) scale(.84); }
@@ -487,7 +491,7 @@ function ensureStyles(documentRef) {
 @keyframes pc-treasure-spark {
   0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.5); }
   20% { opacity: 1; }
-  100% { opacity: 0; transform: translate3d(calc(var(--rot) / 8), -18vh, 0) scale(1.15); }
+  100% { opacity: 0; transform: translate3d(var(--drift), -18vh, 0) scale(1.15); }
 }
 @keyframes pc-tornado {
   0% { transform: translate(-50%, -50%) rotate(var(--start)) translateX(var(--radius)) rotate(calc(var(--start) * -1)); opacity: 0; }
@@ -503,7 +507,7 @@ function ensureStyles(documentRef) {
 @keyframes pc-rainbow-spark {
   0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.5); }
   20% { opacity: 1; }
-  100% { opacity: 0; transform: translate3d(calc(var(--rot) / 10), -20vh, 0) scale(1.1); }
+  100% { opacity: 0; transform: translate3d(var(--drift), -20vh, 0) scale(1.1); }
 }
 @keyframes pc-hat {
   0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(.8); opacity: 0; }
@@ -520,7 +524,7 @@ function ensureStyles(documentRef) {
 @keyframes pc-note {
   0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.65); }
   22% { opacity: 1; }
-  100% { opacity: 0; transform: translate3d(calc(var(--rot) / 7), -18vh, 0) scale(1.08); }
+  100% { opacity: 0; transform: translate3d(var(--drift), -18vh, 0) scale(1.08); }
 }
 @keyframes pc-firework {
   0% { opacity: 0; transform: scale(.5); }
@@ -531,7 +535,7 @@ function ensureStyles(documentRef) {
 @keyframes pc-firework-spark {
   0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.55); }
   20% { opacity: 1; }
-  100% { opacity: 0; transform: translate3d(calc(var(--rot) / 12), -22vh, 0) scale(1.15); }
+  100% { opacity: 0; transform: translate3d(var(--drift), -22vh, 0) scale(1.15); }
 }
 @keyframes pc-ripple {
   0% { transform: scale(.3); opacity: 0; }
@@ -541,7 +545,7 @@ function ensureStyles(documentRef) {
 @keyframes pc-ripple-coin {
   0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.6); }
   20% { opacity: 1; }
-  100% { opacity: 0; transform: translate3d(calc(var(--rot) / 18), -16vh, 0) scale(1.15); }
+  100% { opacity: 0; transform: translate3d(var(--drift), -16vh, 0) scale(1.15); }
 }
 @keyframes pc-parade {
   0% { transform: translate3d(-22vw, 0, 0) rotate(-4deg); opacity: 0; }
@@ -552,7 +556,7 @@ function ensureStyles(documentRef) {
 @keyframes pc-parade-float {
   0% { opacity: 0; transform: translate3d(0, 6vh, 0) scale(.7); }
   15% { opacity: 1; }
-  100% { opacity: 0; transform: translate3d(calc(var(--rot) / 10), -18vh, 0) scale(1.08); }
+  100% { opacity: 0; transform: translate3d(var(--drift), -18vh, 0) scale(1.08); }
 }
 @media (prefers-reduced-motion: reduce) {
   #payment-celebration-root * {
@@ -625,7 +629,12 @@ function ensureController(documentRef = globalThis.document, windowRef = globalT
     subtitle.textContent = detail.txLabel || detail.source || `Tx ${detail.txHash.slice(0, 10)}…`;
     link.href = detail.explorerUrl;
     link.textContent = `Open ${detail.txHash.slice(0, 10)}…`;
-    stage.innerHTML = (RENDERERS[detail.effectId] || renderFlyingMonies)(detail, reducedMotion);
+    try {
+      stage.innerHTML = RENDERERS[detail.effectId](detail, reducedMotion);
+    } catch (error) {
+      stage.replaceChildren();
+      console.error('[payment-celebration] Animation failed; payment remains confirmed:', error);
+    }
     state.timer = windowRef.setTimeout(() => {
       hide();
       state.timer = null;

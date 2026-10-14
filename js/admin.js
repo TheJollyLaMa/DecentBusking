@@ -9,7 +9,7 @@
 import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolveBatchMintArtwork, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261011-batch-artwork-default';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261011-batch-upload-signature';
 import { reportMintCompletion } from './mint-reconciliation.js';
-import { addNFTToSpace } from './space.js?v=20261012-paging';
+import { addNFTToSpace } from './space.js?v=20261014-celebrate';
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261010-public-calendar';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides } from './radio-schedule.mjs';

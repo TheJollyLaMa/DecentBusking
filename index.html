@@ -356,13 +356,15 @@
   <div id="tip-modal" class="hidden">
     <div id="tip-modal-inner">
       <h2>🎩 Throw Some Coins In</h2>
+      <p>Tip the artist of the song playing when you opened the hat:</p>
+      <p><strong id="tip-artist"></strong><br /><span id="tip-song"></span></p>
       <p id="tip-to-label">Tip the busker directly, wallet to wallet.</p>
       <div id="tip-form">
-        <label for="tip-amount">Amount <span class="hint">(ETH or ERC-20)</span></label>
+        <label for="tip-amount">Amount <span class="hint">(ETH)</span></label>
         <input id="tip-amount" type="number" step="0.01" min="0.01" value="1.0" />
-        <div id="tip-status"></div>
+        <div id="tip-status" role="status" aria-live="polite"></div>
         <div class="tip-form-actions">
-          <button id="tip-send-btn">💸 Send Tip</button>
+          <button id="tip-send-btn" disabled>💸 Send Tip</button>
           <button id="tip-cancel-btn">Cancel</button>
         </div>
       </div>
@@ -684,7 +686,7 @@
   <script type="module" src="js/main.js?v=20261014-celebrate"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261011-clean-admin"></script>
+  <script type="module" src="js/admin.js?v=20261014-celebrate"></script>
 
   <script type="module" src="js/payroll.js?v=20261014-celebrate"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>

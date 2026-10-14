@@ -640,7 +640,7 @@ async function _payTokenEntry(entry) {
   announcePaymentCelebration({
     chainId: BASE_CHAIN_ID,
     txHash: tx.hash,
-    amountText: `${entry.amount} ${currency}`,
+    amountText: String(entry.amount),
     assetText: currency,
     summary: 'Repository payout confirmed',
     txLabel: `Paid ${entry.contributorGithub}`,

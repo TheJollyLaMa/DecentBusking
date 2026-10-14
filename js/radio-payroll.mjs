@@ -188,7 +188,7 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     announcePaymentCelebration({
       chainId: 8453,
       txHash: transaction.hash,
-      amountText: `${formatUsdc(BigInt(entry.amountUnits))} USDC`,
+      amountText: formatUsdc(BigInt(entry.amountUnits)),
       assetText: 'USDC',
       summary: `${allocation.category === 'playback' ? 'Playback' : 'Top 10'} payout confirmed`,
       txLabel: `Paid ${entry.wallet.slice(0, 6)}…`,
