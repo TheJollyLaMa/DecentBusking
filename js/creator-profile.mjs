@@ -38,6 +38,7 @@ export function initCreatorProfile() {
   let address = '';
   let profile = {};
   let ens = null;
+  let ensError = '';
   let revision = 0;
   let album = null;
   let busy = false;
@@ -154,13 +155,39 @@ export function initCreatorProfile() {
       watchlistItems.append(li);
     }
   };
+  const updateIdentityNotes = (presentation) => {
+    const ensNote = dialog.querySelector('[data-profile-ens-note]');
+    const mediaNote = dialog.querySelector('[data-profile-media-note]');
+    if (ensNote) {
+      if (ensError) {
+        ensNote.hidden = false;
+        ensNote.textContent = 'ENS lookup is temporarily unavailable; your wallet-linked Profile is still available.';
+      } else if (!ens?.name) {
+        ensNote.hidden = false;
+        ensNote.innerHTML = 'No verified ENS name found. Optional: register one at <a href="https://app.ens.domains/" target="_blank" rel="noreferrer">app.ens.domains</a>, set it as the wallet primary name, and add avatar/banner records.';
+      } else if (presentation.avatarUnsupported || presentation.bannerUnsupported) {
+        const unsupported = [presentation.avatarUnsupported && 'avatar', presentation.bannerUnsupported && 'banner'].filter(Boolean).join(' and ');
+        ensNote.hidden = false;
+        ensNote.textContent = `Verified ENS ${unsupported} record${unsupported.includes(' and ') ? 's are' : ' is'} unsupported here, so Profile is using another available image if present.`;
+      } else {
+        ensNote.hidden = true;
+        ensNote.textContent = '';
+      }
+    }
+    if (mediaNote) {
+      mediaNote.hidden = true;
+      mediaNote.textContent = '';
+    }
+  };
   const display = () => {
     const presentation = creatorPresentation(profile, ens);
     dialog.querySelector('[data-profile-name]').textContent = presentation.name;
     dialog.querySelector('[data-profile-ens]').textContent = ens?.name || '';
     dialog.querySelector('[data-profile-discord]').textContent = profile.discord ? `Discord verified: ${profile.discord.displayName}` : 'Discord not linked';
+    updateIdentityNotes(presentation);
     for (const kind of ['avatar', 'banner']) {
       const image = dialog.querySelector(`[data-profile-${kind}]`);
+      image.dataset.profileKind = kind;
       const uri = creatorImageURL(presentation[`${kind}URI`], config().ipfsGateway);
       image.hidden = !uri;
       if (uri) image.src = uri; else image.removeAttribute('src');
@@ -196,6 +223,7 @@ export function initCreatorProfile() {
     address = target;
     profile = {};
     ens = null;
+    ensError = '';
     album = null;
     const check = ++revision;
     if (!dialog.open) dialog.showModal();
@@ -211,7 +239,7 @@ export function initCreatorProfile() {
     try {
       const provider = new ethers.JsonRpcProvider(config().ensRpcUrl || 'https://ethereum-rpc.publicnode.com', 1);
       try { resolvedENS = await resolveCreatorENS(target, provider); } finally { provider.destroy(); }
-    } catch { resolvedENS = null; }
+    } catch (error) { ensError = error?.shortMessage || error?.reason || error?.message || 'ENS lookup unavailable'; resolvedENS = null; }
     if (check !== revision) return;
     ens = resolvedENS;
     display();
@@ -250,7 +278,14 @@ export function initCreatorProfile() {
   }));
   dialog.querySelector('[data-profile-refresh]').addEventListener('click', () => run(() => open({ address })));
   dialog.querySelector('[data-profile-close]').addEventListener('click', () => { revision++; dialog.close(); });
-  dialog.querySelectorAll('img').forEach(image => image.addEventListener('error', () => { image.hidden = true; }));
+  dialog.querySelectorAll('[data-profile-avatar], [data-profile-banner]').forEach(image => image.addEventListener('error', () => {
+    image.hidden = true;
+    const mediaNote = dialog.querySelector('[data-profile-media-note]');
+    if (mediaNote) {
+      mediaNote.hidden = false;
+      mediaNote.textContent = `${String(image.dataset.profileKind || 'profile').replace(/^\w/, value => value.toUpperCase())} image could not be loaded; showing fallback images where available.`;
+    }
+  }));
   document.addEventListener('creator-watchlist-changed', event => {
     if (event.detail?.address && event.detail.address !== address.toLowerCase()) return;
     if (event.detail?.watchlist && editable()) profile.watchlist = event.detail.watchlist;
@@ -344,13 +379,17 @@ export function initCreatorProfile() {
     await loadAlbum();
   }));
   document.addEventListener('open-creator-profile', event => { run(() => open(event.detail)); });
+  document.addEventListener('wallet-connected', event => {
+    revision++;
+    setControls();
+    if (dialog.open) void open({ address: event.detail?.address || window._wallet?.address || '' });
+  });
   document.addEventListener('click', event => {
     const button = event.target.closest?.('.nft-creator-profile');
     if (button) run(() => open({ address: button.dataset.creator, albumId: button.dataset.album }));
   });
   document.getElementById('djuke-profile')?.addEventListener('click', () => { run(() => open({})); });
   document.addEventListener('wallet-disconnected', () => { revision++; setControls(); });
-  document.addEventListener('wallet-connected', () => { revision++; setControls(); });
   import('https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm').then(icons => {
     for (const element of dialog.querySelectorAll('[data-profile-icon]')) {
       const icon = icons[element.dataset.profileIcon];

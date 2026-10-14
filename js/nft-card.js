@@ -307,7 +307,7 @@ function _buildCardHTML(nft) {
       <button class="nft-watchlist-btn nft-buy-btn" type="button" aria-pressed="false" title="Save to watchlist">👀 Save</button>
     </div>
     <p class="nft-watchlist-status" role="status" aria-live="polite"></p>
-    ${/^0x[0-9a-fA-F]{40}$/.test(nft.artist || nft.creator || '') ? `<button class="nft-creator-profile nft-buy-btn" type="button" data-creator="${_esc(nft.artist || nft.creator)}" data-album="${_esc(nft.djukeAlbumId || '')}">Creator Profile / Collaborators</button>` : ''}
+    ${/^0x[0-9a-fA-F]{40}$/.test(nft.artist || nft.creator || '') ? `<button class="nft-creator-profile nft-buy-btn" type="button" data-creator="${_esc(nft.artist || nft.creator)}" data-album="${_esc(nft.djukeAlbumId || '')}">Profile / Collaborators</button>` : ''}
 
     <button class="nft-share-btn nft-buy-btn" type="button" title="Share a link to this NFT">Share</button>
     <p class="nft-share-status" role="status" aria-live="polite"></p>

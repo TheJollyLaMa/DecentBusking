@@ -46,6 +46,18 @@ export function creatorImageURL(value, gateway = 'https://gateway.pinata.cloud/i
   try { const url = new URL(value); return url.protocol === 'https:' ? url.href : ''; } catch { return ''; }
 }
 
+function pickPreferredImage(primary, ...fallbacks) {
+  const sources = [primary, ...fallbacks].filter(value => typeof value === 'string' && value.trim());
+  const resolved = sources.map(source => ({ source, uri: creatorImageURL(source) })).find(entry => entry.uri);
+  const source = resolved?.source || '';
+  return {
+    source,
+    uri: resolved?.uri || '',
+    fallbackUsed: !!source && source !== sources[0],
+    primaryUnsupported: !!sources[0] && !creatorImageURL(sources[0]),
+  };
+}
+
 export async function resolveCreatorENS(address, provider) {
   const name = await provider.lookupAddress(address);
   if (!name || String(await provider.resolveName(name)).toLowerCase() !== address.toLowerCase()) return null;
@@ -58,9 +70,15 @@ export async function resolveCreatorENS(address, provider) {
 }
 
 export function creatorPresentation(profile = {}, ens = null) {
+  const avatar = pickPreferredImage(ens?.avatarURI, profile.avatarURI, profile.discord?.avatarURI);
+  const banner = pickPreferredImage(ens?.bannerURI, profile.bannerURI, profile.discord?.bannerURI);
   return {
-    name: profile.displayName || ens?.name || profile.discord?.displayName || 'Creator',
-    avatarURI: profile.avatarURI || ens?.avatarURI || profile.discord?.avatarURI || '',
-    bannerURI: profile.bannerURI || ens?.bannerURI || profile.discord?.bannerURI || '',
+    name: profile.displayName || ens?.name || profile.discord?.displayName || 'Profile',
+    avatarURI: avatar.source,
+    bannerURI: banner.source,
+    avatarFallbackUsed: avatar.fallbackUsed,
+    bannerFallbackUsed: banner.fallbackUsed,
+    avatarUnsupported: avatar.primaryUnsupported,
+    bannerUnsupported: banner.primaryUnsupported,
   };
 }
