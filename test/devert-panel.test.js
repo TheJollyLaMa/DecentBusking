@@ -45,6 +45,7 @@ async function panelFixture({ wallet = null } = {}) {
   const nodes = new Map();
   const documentListeners = new Map();
   let focused;
+  let radioSnapshot = null;
   function element(id) {
     if (nodes.has(id)) return nodes.get(id);
     const listeners = new Map();
@@ -81,6 +82,17 @@ async function panelFixture({ wallet = null } = {}) {
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example',
       devertContractAddress: snapshot().contractAddress }, _wallet: wallet },
     canSetDevertListenMode: () => true, setDevertListenMode: () => true, AbortSignal,
+    getRadioStateSnapshot: () => radioSnapshot,
+    formatMainRadioAdCountdown: (countdown, { disconnected } = {}) => {
+      if (disconnected) return 'Main radio ad: disconnected';
+      if (!countdown) return 'Main radio ad: scheduling unavailable';
+      if (countdown.status === 'countdown') return `Main radio ad: Next advert after ${countdown.remainingSongs} more songs (current song not counted)`;
+      if (countdown.status === 'up_next') return 'Main radio ad: Advert up next';
+      if (countdown.status === 'playing') return 'Main radio ad: Advert playing now';
+      if (countdown.status === 'paused') return `Main radio ad: Deferred during ${countdown.activeShow?.label || 'this show'}`;
+      if (countdown.status === 'none') return 'Main radio ad: No eligible campaign available';
+      return 'Main radio ad: unavailable';
+    },
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
     clearTimeout() {}, clearInterval() {},
@@ -97,6 +109,7 @@ async function panelFixture({ wallet = null } = {}) {
   const settle = () => new Promise(resolve => setImmediate(resolve));
   return { element, document, timers, requests, settle, focus: () => focused,
     read: callback => { read = callback; }, readAds: callback => { readAds = callback; },
+    setRadioState: (state) => { radioSnapshot = state; document.dispatchEvent({ type: 'dbusk-radio-state', detail: state }); },
     click: id => element(id).listeners.get('click')({ stopPropagation() {} }) };
 }
 
@@ -131,6 +144,20 @@ test('wallet library failures do not hide the public quote or queue', async () =
   assert.equal(ui.element('devert-price').textContent, '1.00');
   assert.equal(ui.element('devert-queue').children.length, 1);
   assert.match(ui.element('devert-campaign-status').textContent, /library offline/);
+});
+
+test('main radio countdown note mirrors the shared main-radio status', async () => {
+  const ui = await panelFixture();
+  ui.setRadioState({
+    mainRadioAdCountdown: { status: 'countdown', remainingSongs: 3, includesCurrentSong: false },
+  });
+  await ui.click('devert-tab');
+  await ui.settle();
+  assert.equal(ui.element('devert-radio-status').textContent, 'Main radio ad: Next advert after 3 more songs (current song not counted)');
+  ui.setRadioState({ mainRadioAdCountdown: { status: 'up_next', remainingSongs: 0, includesCurrentSong: false } });
+  assert.equal(ui.element('devert-radio-status').textContent, 'Main radio ad: Advert up next');
+  ui.setRadioState({ mainRadioAdCountdown: { status: 'unavailable', reason: 'disconnected' } });
+  assert.equal(ui.element('devert-radio-status').textContent, 'Main radio ad: disconnected');
 });
 
 test('superseded queue responses cannot overwrite newer queue and pricing state', async () => {

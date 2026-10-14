@@ -6,6 +6,7 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { pathToFileURL } = require('node:url');
+const vm = require('node:vm');
 
 test('playlist tracks each attachment and persists its IPFS pin state', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-jukeloop-'));
@@ -451,7 +452,6 @@ test('radio state publishes the audible track position and newest uploads', asyn
       { trackId: 'new', title: 'New', uploader: 'b', filename: 'new.mp3', addedAt: '2026-10-02T00:00:00.000Z' },
     ],
   });
-
   assert.deepEqual(state.nowPlaying, {
     playId: 'track-1:40000',
     trackId: 'track-1',
@@ -467,6 +467,87 @@ test('radio state publishes the audible track position and newest uploads', asyn
   assert.deepEqual(state.recent.map((track) => [track.trackId, track.ipfsCid]), [['new', null], ['old', 'bafy-old']]);
   assert.equal('uploaderId' in state.recent[1], false);
   assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).nowPlaying, null);
+});
+
+test('main-radio ad countdown reports shared scheduler state without browser-side guesses', async () => {
+  const { defaultRadioSchedule } = await import(pathToFileURL(path.join(__dirname, '..', 'js', 'radio-schedule.mjs')).href);
+  const source = fs.readFileSync(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'), 'utf8')
+    .replace(/^import[\s\S]*?;\n/gm, '')
+    .replace(/export /g, '');
+  const radioSchedule = await import(pathToFileURL(path.join(__dirname, '..', 'js', 'radio-schedule.mjs')).href);
+  const context = vm.createContext({
+    process,
+    console,
+    resolveActiveShow: radioSchedule.resolveActiveShow,
+    DEVERT_SONGS_PER_MAIN_AD: 10,
+  });
+  vm.runInContext(source, context);
+
+  const countdown = await context.buildMainRadioAdCountdown({
+    now: 100_000,
+    session: {
+      schedule: defaultRadioSchedule(),
+      livePerformanceEvents: [],
+      _musicSinceAd: 7,
+      _currentDevertAd: null,
+      _failedDevertCampaignIds: new Set(),
+      devertPlayback: {
+        nextMainRadioAd: async () => { throw new Error('should not be queried before the threshold'); },
+      },
+    },
+  });
+
+  assert.equal(countdown.updatedAt, 100_000);
+  assert.equal(countdown.activeShow.type, 'normal_rotation');
+  assert.equal(typeof countdown.activeShow.label, 'string');
+  assert.equal(countdown.includesCurrentSong, false);
+  assert.equal(countdown.status, 'countdown');
+  assert.equal(countdown.remainingSongs, 3);
+  assert.equal(countdown.mainRadio, true);
+
+  const playing = await context.buildMainRadioAdCountdown({
+    now: 100_000,
+    session: {
+      schedule: defaultRadioSchedule(),
+      livePerformanceEvents: [],
+      _musicSinceAd: 10,
+      _currentDevertAd: {
+        campaignId: '42',
+        track: { title: 'Spotlight' },
+      },
+      _nowPlaying: { audible: true },
+      _failedDevertCampaignIds: new Set(),
+      devertPlayback: {
+        nextMainRadioAd: async () => null,
+      },
+    },
+  });
+
+  assert.equal(playing.status, 'playing');
+  assert.equal(playing.campaignId, '42');
+  assert.equal(playing.title, 'Spotlight');
+
+  const paused = await context.buildMainRadioAdCountdown({
+    now: Date.parse('2026-10-10T00:30:00Z'),
+    session: {
+      schedule: defaultRadioSchedule(),
+      livePerformanceEvents: [{
+        id: 'live-1',
+        title: 'Live set',
+        startUtc: '2026-10-10T00:00:00Z',
+        endUtc: '2026-10-10T01:00:00Z',
+      }],
+      _musicSinceAd: 10,
+      _currentDevertAd: null,
+      _failedDevertCampaignIds: new Set(),
+      devertPlayback: {
+        nextMainRadioAd: async () => null,
+      },
+    },
+  });
+
+  assert.equal(paused.status, 'paused');
+  assert.match(paused.reason, /Live set|live_performance/);
 });
 
 test('radio state preserves video metadata for video now-playing tracks', async () => {

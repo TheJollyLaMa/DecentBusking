@@ -9,7 +9,7 @@ const PREVIEW_MS = 30_000;
 const DRIFT_TOLERANCE_S = 8;
 const LOAD_TIMEOUT_MS = 20_000;
 
-let _audio, _labelEl, _titleEl, _artistEl, _activityEl, _playBtn, _radioBtn;
+let _audio, _labelEl, _titleEl, _artistEl, _activityEl, _adCountdownEl, _playBtn, _radioBtn;
 let _audioPlayer, _videoPlayer, _videoStage, _videoToggle;
 let _videoHidden = false;
 
@@ -84,6 +84,7 @@ let _muteBtn, _volumeInput, _volumeDial;
 let _nowPlayingBroadcastKey = null;
 let _nowPlayingBroadcastDetail = null;
 let _suppressPauseStop = false;
+let _radioState = null;
 
 function _applyRadioVolume() {
   if (!_audio) return;
@@ -120,6 +121,55 @@ function _broadcastNowPlayingStopped(reason = 'stopped') {
   _nowPlayingBroadcastKey = null;
   _nowPlayingBroadcastDetail = null;
   document.dispatchEvent(new CustomEventCtor('dbusk-now-playing-stopped', { detail }));
+}
+
+function _cloneRadioState(state) {
+  if (!state) return null;
+  const countdown = state.mainRadioAdCountdown;
+  return {
+    ...state,
+    mainRadioAdCountdown: countdown ? { ...countdown, activeShow: countdown.activeShow ? { ...countdown.activeShow } : countdown.activeShow } : null,
+  };
+}
+
+function _broadcastRadioState() {
+  if (typeof document === 'undefined' || !document?.dispatchEvent) return;
+  const CustomEventCtor = globalThis.CustomEvent || document.defaultView?.CustomEvent;
+  if (!CustomEventCtor) return;
+  document.dispatchEvent(new CustomEventCtor('dbusk-radio-state', { detail: getRadioStateSnapshot() }));
+}
+
+function _setRadioState(state) {
+  _radioState = _cloneRadioState(state);
+  _broadcastRadioState();
+  _renderMainRadioAdCountdown();
+}
+
+export function getRadioStateSnapshot() {
+  return _cloneRadioState(_radioState);
+}
+
+export function formatMainRadioAdCountdown(countdown, { disconnected = false } = {}) {
+  if (disconnected) return 'Main radio ad: disconnected';
+  if (!countdown) return 'Main radio ad: scheduling unavailable';
+  if (countdown.status === 'countdown' && Number.isSafeInteger(countdown.remainingSongs)) {
+    const songs = countdown.remainingSongs;
+    return `Main radio ad: Next advert after ${songs} more song${songs === 1 ? '' : 's'}${countdown.includesCurrentSong ? ' (current song counted)' : ' (current song not counted)'}`;
+  }
+  if (countdown.status === 'up_next') return 'Main radio ad: Advert up next';
+  if (countdown.status === 'playing') return 'Main radio ad: Advert playing now';
+  if (countdown.status === 'paused') return `Main radio ad: Deferred during ${countdown.activeShow?.label || countdown.reason || 'this show'}`;
+  if (countdown.status === 'none') return 'Main radio ad: No eligible campaign available';
+  if (countdown.status === 'unavailable' && countdown.reason === 'disconnected') return 'Main radio ad: disconnected';
+  if (countdown.status === 'unavailable') return `Main radio ad: unavailable${countdown.reason ? ` (${countdown.reason})` : ''}`;
+  return 'Main radio ad: scheduling unavailable';
+}
+
+function _renderMainRadioAdCountdown() {
+  if (!_adCountdownEl) return;
+  const disconnected = _radioState?.mainRadioAdCountdown?.reason === 'disconnected';
+  const text = formatMainRadioAdCountdown(_radioState?.mainRadioAdCountdown, { disconnected });
+  if (_adCountdownEl.textContent !== text) _adCountdownEl.textContent = text;
 }
 
 function _pauseAudio() {
@@ -288,6 +338,7 @@ export function initRadioSync() {
   _labelEl = document.getElementById('now-playing-label');
   _titleEl = document.getElementById('now-playing-title');
   _artistEl = document.getElementById('now-playing-artist');
+  _adCountdownEl = document.getElementById('radio-ad-countdown');
   _activityEl = document.getElementById('radio-activity');
   _playBtn = document.getElementById('now-playing-play-btn');
   _radioBtn = document.getElementById('now-playing-radio-btn');
@@ -309,6 +360,7 @@ export function initRadioSync() {
 
   _setLabel('📻 Live on JukeLoop');
   _setActivity('⏳ Tuning in to the Discord JukeLoop…');
+  _renderMainRadioAdCountdown();
   _poll();
 }
 
@@ -403,11 +455,15 @@ async function _poll() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const state = await response.json();
     _radioReachable = true;
+    _setRadioState(state);
     _radio = state.nowPlaying ? { ...state.nowPlaying, receivedAt: performance.now() } : null;
     _detectNewUploads(Array.isArray(state.recent) ? state.recent : [], state.serverTime);
     if (_mode === 'radio') _syncRadio();
   } catch (err) {
     console.warn('[radio] Could not reach the JukeLoop radio:', err.message);
+    _setRadioState({
+      mainRadioAdCountdown: { status: 'unavailable', reason: 'disconnected' },
+    });
     if (_radioReachable && _mode === 'radio') {
       _setActivity('📴 Can’t reach the JukeLoop radio right now — retrying…');
     }

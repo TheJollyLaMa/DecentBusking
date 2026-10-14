@@ -111,7 +111,7 @@ export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch) 
 }
 
 /** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
-export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recentLimit = 10 }) {
+export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recentLimit = 10, mainRadioAdCountdown = null }) {
   const mediaTypeForTrack = (track) => mediaTypeFor(track.filename, track.mediaType) || (track.videoUrl ? 'video/mp4' : '');
   const recent = playlist.filter(track => !track.isDevertAd && (track.source !== 'site' || track.mintStatus === 'minted'))
     .sort((first, second) => Date.parse(second.addedAt) - Date.parse(first.addedAt))
@@ -148,6 +148,98 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
         })()
       : null,
     recent,
+    mainRadioAdCountdown: mainRadioAdCountdown ? { ...mainRadioAdCountdown } : null,
+  };
+}
+
+export async function buildMainRadioAdCountdown({ session, now = Date.now(), songsPerMainAd = DEVERT_SONGS_PER_MAIN_AD } = {}) {
+  if (!session) {
+    return { status: 'unavailable', reason: 'radio session unavailable', updatedAt: now, includesCurrentSong: false };
+  }
+
+  const activeShow = resolveActiveShow({
+    now,
+    schedule: session.schedule,
+    livePerformanceEvents: session.livePerformanceEvents,
+  });
+  const summary = {
+    updatedAt: now,
+    activeShow: {
+      type: activeShow.type,
+      label: activeShow.label || '',
+      window: activeShow.window || '',
+    },
+    includesCurrentSong: false,
+  };
+
+  if (session._currentDevertAd) {
+    const audible = session._nowPlaying?.audible === true;
+    return {
+      ...summary,
+      status: audible ? 'playing' : 'up_next',
+      campaignId: String(session._currentDevertAd.campaignId),
+      title: session._currentDevertAd.track?.title || 'Main radio advert',
+      mainRadio: true,
+      remainingSongs: 0,
+      includesCurrentSong: false,
+    };
+  }
+
+  if (!session.devertPlayback) {
+    return { ...summary, status: 'unavailable', reason: 'main-radio scheduler unavailable' };
+  }
+
+  if (activeShow.type === 'live_performance' || activeShow.type === 'weekly_top10') {
+    return {
+      ...summary,
+      status: 'paused',
+      reason: activeShow.label || activeShow.type,
+    };
+  }
+
+  const songsSinceAd = Number.isSafeInteger(session._musicSinceAd) ? session._musicSinceAd : 0;
+  const remainingSongs = Math.max(0, songsPerMainAd - songsSinceAd);
+  if (remainingSongs > 0) {
+    return {
+      ...summary,
+      status: 'countdown',
+      remainingSongs,
+      mainRadio: true,
+    };
+  }
+
+  let nextAd = null;
+  try {
+    nextAd = await session.devertPlayback.nextMainRadioAd({
+      excludeCampaignIds: [...session._failedDevertCampaignIds],
+      count: 1,
+    });
+  } catch (error) {
+    return {
+      ...summary,
+      status: 'unavailable',
+      reason: error?.message || 'main-radio scheduler unavailable',
+    };
+  }
+
+  const campaign = Array.isArray(nextAd) ? nextAd[0] : nextAd;
+  if (!campaign) {
+    return {
+      ...summary,
+      status: 'none',
+      reason: 'no eligible campaign available',
+      remainingSongs: 0,
+      mainRadio: true,
+    };
+  }
+
+  return {
+    ...summary,
+    status: 'up_next',
+    campaignId: String(campaign.campaignId),
+    title: campaign.track?.title || 'Main radio advert',
+    remainingSongs: 0,
+    mainRadio: true,
   };
 }
 
@@ -285,6 +377,10 @@ export function getJukeLoopNowPlaying() {
     if (session._nowPlaying) return { ...session._nowPlaying };
   }
   return null;
+}
+
+export function getActiveJukeLoopSession() {
+  return _sessions.values().next().value ?? null;
 }
 
 export function updateJukeLoopRadioSchedule({ events, schedule }) {
@@ -1006,6 +1102,10 @@ export class JukeLoopSession {
     this._djukeCooldownUntil = Date.now() + 60_000;
     await this.djuke.fail(record, new Error(reason))
       .catch((err) => console.warn('[jukeloop] DJuke release failed:', err.message));
+  }
+
+  async getMainRadioAdCountdown(now = Date.now()) {
+    return buildMainRadioAdCountdown({ session: this, now });
   }
 
   /** Stop all playback and disconnect from the voice channel. */

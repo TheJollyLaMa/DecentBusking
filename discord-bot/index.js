@@ -87,6 +87,7 @@ import {
 import { buildWeeklyPlayReportMessage } from './weekly-play-report.js';
 import {
   createJukeLoopSession,
+  getActiveJukeLoopSession,
   getJukeLoopSession,
   getJukeLoopNowPlaying,
   updateJukeLoopRadioSchedule,
@@ -805,11 +806,23 @@ async function main() {
       isDevertAd: track.isDevertAd === true,
       requestedAt: track.mintRequestedAt,
     })),
-    getRadioState: async () => ({ ...buildRadioState({
-      nowPlaying: getJukeLoopNowPlaying(),
-      playlist: getPlaylist(),
-    }), paymentLedger: { endpoint: '/api/payroll/ledger', snapshotUri: paymentLedger.getState().snapshotUri,
-      lastCheckedAt: paymentLedger.getState().lastCheckedAt, ready: paymentLedgerReady } }),
+    getRadioState: async () => {
+      const jukeLoopSession = getActiveJukeLoopSession();
+      const mainRadioAdCountdown = jukeLoopSession ? await jukeLoopSession.getMainRadioAdCountdown() : null;
+      return {
+        ...buildRadioState({
+          nowPlaying: getJukeLoopNowPlaying(),
+          playlist: getPlaylist(),
+          mainRadioAdCountdown,
+        }),
+        paymentLedger: {
+          endpoint: '/api/payroll/ledger',
+          snapshotUri: paymentLedger.getState().snapshotUri,
+          lastCheckedAt: paymentLedger.getState().lastCheckedAt,
+          ready: paymentLedgerReady,
+        },
+      };
+    },
     getDevertState: readDevertState,
     getDevertAds: async ({ address }) => {
       if (!playlistReady) throw new Error('Advert library is restoring; retry shortly');
