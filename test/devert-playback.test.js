@@ -30,7 +30,15 @@ test('DeVert scheduler restore retries transient failures with capped exponentia
   assert.deepEqual(delays, [5_000, 10_000, 20_000]);
 });
 
-function harness({ campaigns = [], slots = 0, impressions = 0, failImpression = false, failMusic = false, save = async () => 'ipfs://journal' } = {}) {
+function harness({
+  campaigns = [],
+  slots = 0,
+  impressions = 0,
+  failImpression = false,
+  failMusic = false,
+  save = async () => 'ipfs://journal',
+  resolveCampaignMedia = () => null,
+} = {}) {
   const recorded = new Set();
   const musicBatches = [];
   const impressionCalls = [];
@@ -55,7 +63,7 @@ function harness({ campaigns = [], slots = 0, impressions = 0, failImpression = 
   const state = { schemaVersion: 1, musicWeekId: null, pendingMusicPlayIds: [], seenMusicPlayIds: [], impressions: [] };
   let saves = 0;
   const runtime = null;
-  return { contract, recorded, musicBatches, impressionCalls, state, get saves() { return saves; },
+  return { contract, recorded, musicBatches, impressionCalls, state, resolveCampaignMedia, get saves() { return saves; },
     setSave(fn) { save = fn; }, save: async snapshot => { saves++; await save(snapshot); Object.assign(state, snapshot); return 'ipfs://journal'; },
     readCampaigns: async () => ({ chainId: 8453, snapshotAt: new Date(NOW).toISOString(), weekId: WEEK_ID,
       campaigns, market: { slots, seated: Math.min(slots, campaigns.length), lowestSeatedOfferUnits: campaigns[0]?.offerUnits || '0', mainRadioImpressions: impressions } }),
@@ -66,7 +74,7 @@ async function makeRuntime(fixture) {
   const { createDevertPlaybackRuntime } = await import('../discord-bot/devert-playback.js');
   const runtime = createDevertPlaybackRuntime({ contract: fixture.contract, provider: fixture.contract.runner.provider,
     restore: async () => fixture.state.schemaVersion === 1 ? structuredClone(fixture.state) : null,
-    save: fixture.save, readCampaigns: fixture.readCampaigns, now: () => NOW });
+    save: fixture.save, readCampaigns: fixture.readCampaigns, now: () => NOW, resolveCampaignMedia: fixture.resolveCampaignMedia });
   await runtime.initialize();
   return runtime;
 }
@@ -133,6 +141,20 @@ test('DeVert uses only the main-radio queue and advances by confirmed impression
   const afterOne = harness({ campaigns, slots: 2, impressions: 1 });
   const next = await makeRuntime(afterOne);
   assert.equal((await next.nextMainRadioAd()).track.trackId, 'devert:low');
+});
+
+test('DeVert main-radio video ads preserve a video source and mime type when metadata is sparse', async () => {
+  const campaigns = [campaign('video', { audioURI: 'ipfs://bafy-video', offerUnits: '8000000' })];
+  const fixture = harness({
+    campaigns,
+    slots: 2,
+    resolveCampaignMedia: () => ({ videoUrl: 'ipfs://bafy-video', mediaType: '', filename: '' }),
+  });
+  const runtime = await makeRuntime(fixture);
+  const ad = await runtime.nextMainRadioAd();
+  assert.equal(ad.track.mediaType, 'video/mp4');
+  assert.equal(ad.track.videoUrl, 'ipfs://bafy-video');
+  assert.match(ad.track.filename, /\.mp4$/);
 });
 
 test('main-radio listener votes are durable and reorder only seated campaigns', async () => {

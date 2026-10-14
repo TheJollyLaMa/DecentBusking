@@ -114,13 +114,15 @@ export async function readOwnedDevertAds({ collections, address, fetchImpl = fet
             const mediaUri = metadata.videoUrl || metadata.audioUrl || metadata.animation_url || '';
             const ipfsCid = audioCidFromMetadata({ ...metadata, audioUrl: mediaUri });
             if (!ipfsCid) return;
+            const mediaType = metadata.mediaType || (metadata.videoUrl ? 'video/mp4' : '');
             const artworkUri = String(metadata.image || metadata.imageUrl || metadata.thumbnailUrl || '');
             ads.set(`${collection.contractAddress.toLowerCase()}:${tokenId}`, {
               trackId: `nft:${collection.contractAddress.toLowerCase()}:${tokenId}`,
               title: String(metadata.name || `DeVert ad #${tokenId}`), ipfsCid,
               image: artworkUri,
               artworkCid: artworkUri,
-              mediaType: metadata.mediaType || (metadata.videoUrl ? 'video/mp4' : 'audio/mpeg'),
+              mediaType,
+              videoUrl: metadata.videoUrl || (mediaType === 'video/mp4' ? mediaUri : ''),
               filename: String(metadata.filename || ''), mintStatus: 'minted', tokenId: String(tokenId),
               state: 'ready', campaignId: null, expiresAt: null, secondsRemaining: 0,
             });

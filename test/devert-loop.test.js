@@ -91,6 +91,8 @@ test('AdLoop exposes the live play and records only completed audible non-main i
     allowedMentions: { parse: [] } }]);
   assert.equal(controller.getState().ready, true);
   assert.equal(controller.getState().nowPlaying.audible, false);
+  assert.equal(controller.getState().nowPlaying.mediaType, 'video/mp4');
+  assert.equal(controller.getState().nowPlaying.videoUrl, 'ipfs://bafy-ad');
   await assert.rejects(controller.submitVote({ playId: 'devert-loop:17:10000', voterId: 'listener-browser-0001', vote: 1 }), /audible/);
   assert.deepEqual(impressions, []);
   player.emit('stateChange', { status: 'buffering' }, { status: 'playing' });

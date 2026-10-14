@@ -121,9 +121,12 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
   function campaignTrack(campaign, kind) {
     const ipfsCid = campaign.audioURI.slice('ipfs://'.length);
     const media = resolveCampaignMedia(campaign, ipfsCid);
+    const mediaType = media?.mediaType || (media?.videoUrl ? 'video/mp4' : '');
     return { campaignId: campaign.campaignId, source: 'devert', kind, trackId: `devert:${campaign.campaignId}`,
-      title: campaign.title, uploader: 'DeVert advertiser', filename: media?.filename || `devert-${campaign.campaignId}.mp3`,
-      mediaType: media?.mediaType || 'audio/mpeg', ipfsCid, pinStatus: 'untracked' };
+      title: campaign.title, uploader: 'DeVert advertiser',
+      filename: media?.filename || `devert-${campaign.campaignId}.${mediaType === 'video/mp4' ? 'mp4' : 'mp3'}`,
+      mediaType, videoUrl: media?.videoUrl || (mediaType === 'video/mp4' ? `ipfs://${ipfsCid}` : ''),
+      ipfsCid, pinStatus: 'untracked' };
   }
 
   return {

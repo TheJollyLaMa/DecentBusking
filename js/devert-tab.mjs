@@ -83,7 +83,8 @@ export function normalizeAdLoopNowPlaying(state) {
   if (state?.ready !== true || !item?.audible || typeof item.radioPlayId !== 'string' ||
       typeof item.ipfsCid !== 'string' || !item.ipfsCid || !Number.isFinite(Number(item.positionMs))) return null;
   return { playId: item.radioPlayId, title: item.title || 'DeVert ad', ipfsCid: item.ipfsCid,
-    mediaType: item.mediaType || 'audio/mpeg', positionMs: Math.max(0, Number(item.positionMs)) };
+    mediaType: item.mediaType || (item.videoUrl ? 'video/mp4' : ''), videoUrl: item.videoUrl || '',
+    positionMs: Math.max(0, Number(item.positionMs)) };
 }
 
 async function getSchedulerTopUpQuote(signer, contract, advertiser) {

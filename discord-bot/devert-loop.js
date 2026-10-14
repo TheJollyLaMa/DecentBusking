@@ -97,8 +97,10 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
     const radioPlayId = `devert-loop:${ad.campaignId}:${timestamp}`;
     announcement = null;
     child = streamFactory(url);
+    const mediaType = ad.track.mediaType || (ad.track.videoUrl ? 'video/mp4' : '');
     current = { campaignId: ad.campaignId, radioPlayId, title: ad.track.title,
-      ipfsCid: ad.track.ipfsCid, mediaType: ad.track.mediaType || 'audio/mpeg',
+      ipfsCid: ad.track.ipfsCid, mediaType,
+      videoUrl: ad.track.videoUrl || (mediaType === 'video/mp4' ? `ipfs://${ad.track.ipfsCid}` : ''),
       startedAt: timestamp, audible: false };
     try { player.play(createResource(child.stdout, { inputType: StreamType.Raw })); }
     catch (error) {

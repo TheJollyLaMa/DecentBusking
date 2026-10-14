@@ -112,6 +112,7 @@ export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch) 
 
 /** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
 export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recentLimit = 10 }) {
+  const mediaTypeForTrack = (track) => mediaTypeFor(track.filename, track.mediaType) || (track.videoUrl ? 'video/mp4' : '');
   const recent = playlist.filter(track => !track.isDevertAd && (track.source !== 'site' || track.mintStatus === 'minted'))
     .sort((first, second) => Date.parse(second.addedAt) - Date.parse(first.addedAt))
     .slice(0, recentLimit)
@@ -120,25 +121,31 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
       title: track.title,
       uploader: track.uploader,
       filename: track.filename || null,
-      mediaType: mediaTypeFor(track.filename, track.mediaType),
+      mediaType: mediaTypeForTrack(track),
       ipfsCid: track.ipfsCid || null,
       addedAt: track.addedAt,
     }));
   return {
     serverTime: now,
     nowPlaying: nowPlaying && nowPlaying.audible !== false
-      ? {
-          playId: nowPlaying.playId || `${nowPlaying.trackId}:${nowPlaying.startedAt}`,
-          trackId: nowPlaying.trackId,
-          title: nowPlaying.title,
-          uploader: nowPlaying.uploader,
-          filename: nowPlaying.filename || null,
-          mediaType: mediaTypeFor(nowPlaying.filename, nowPlaying.mediaType),
-          ipfsCid: nowPlaying.ipfsCid || null,
-          isDevert: nowPlaying.isDevert === true,
-          startedAt: nowPlaying.startedAt,
-          positionMs: Math.max(0, now - nowPlaying.startedAt),
-        }
+      ? (() => {
+          const videoUrl = nowPlaying.videoUrl || (mediaTypeFor(nowPlaying.filename, nowPlaying.mediaType) === 'video/mp4'
+            ? `ipfs://${nowPlaying.ipfsCid}`
+            : '');
+          return {
+            playId: nowPlaying.playId || `${nowPlaying.trackId}:${nowPlaying.startedAt}`,
+            trackId: nowPlaying.trackId,
+            title: nowPlaying.title,
+            uploader: nowPlaying.uploader,
+            filename: nowPlaying.filename || null,
+            mediaType: mediaTypeForTrack(nowPlaying),
+            ...(videoUrl ? { videoUrl } : {}),
+            ipfsCid: nowPlaying.ipfsCid || null,
+            isDevert: nowPlaying.isDevert === true,
+            startedAt: nowPlaying.startedAt,
+            positionMs: Math.max(0, now - nowPlaying.startedAt),
+          };
+        })()
       : null,
     recent,
   };
@@ -878,13 +885,17 @@ export class JukeLoopSession {
     this._announcementContext = null;
     if (prepared.queueIndex !== null && prepared.queueIndex === this._queueIndex) this._queueIndex++;
     const playId = `${prepared.track.trackId}:${Date.now()}`;
+    const videoUrl = prepared.track.videoUrl || (mediaTypeFor(prepared.track.filename, prepared.track.mediaType) === 'video/mp4'
+      ? `ipfs://${prepared.track.ipfsCid}`
+      : '');
     this._nowPlaying = {
       playId,
       trackId: prepared.track.trackId,
       title: prepared.track.title,
       uploader: prepared.track.uploader,
       filename: prepared.track.filename || null,
-      mediaType: mediaTypeFor(prepared.track.filename, prepared.track.mediaType),
+      mediaType: mediaTypeFor(prepared.track.filename, prepared.track.mediaType) || (prepared.track.videoUrl ? 'video/mp4' : ''),
+      ...(videoUrl ? { videoUrl } : {}),
       ipfsCid: prepared.track.ipfsCid || null,
       isDevert: !!prepared.devertAd,
       firstWeekBonus: prepared.track.firstWeekBonus === true,
