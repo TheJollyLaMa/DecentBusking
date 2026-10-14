@@ -2190,6 +2190,21 @@ decent-foot {
 #creator-profile .creator-profile-bubble:hover .creator-profile-bubble-label, #creator-profile .creator-profile-bubble:focus-visible .creator-profile-bubble-label { opacity: 1; }
 .creator-profile-identity { display: grid; gap: 8px; padding: 56px 0 0; }
 .creator-profile-identity h3 { font-size: 1.35rem; margin: 0; }
+.creator-profile-name-row h3 { flex: 0 1 auto; overflow-wrap: anywhere; }
+.creator-profile-name-row { gap: 6px; }
+#creator-profile .creator-profile-icon-button { display: inline-grid; place-items: center; width: 26px; height: 26px; min-height: 0; padding: 4px; border: 1px solid transparent; border-radius: 50%; background: transparent; color: #e9d7a0; opacity: .7; }
+#creator-profile .creator-profile-icon-button:hover, #creator-profile .creator-profile-icon-button:focus-visible { opacity: 1; border-color: rgba(233, 215, 160, .5); background: rgba(233, 215, 160, .1); }
+#creator-profile .creator-profile-icon-button[hidden] { display: none; }
+.creator-profile-icon-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.creator-profile-wallet-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.creator-profile-wallet-row p[data-profile-wallet] { display: inline-flex; align-items: center; gap: 4px; margin: 0; }
+.creator-profile-wallet-row code { font-size: .85rem; color: #cfd7d2; background: none; padding: 0; }
+.creator-profile-wallet-icons { display: inline-flex; gap: 1px; }
+.creator-profile-wallet-icons img { width: 16px; height: 16px; border-radius: 50%; animation: creator-wallet-breathe 2.4s ease-in-out infinite; }
+@keyframes creator-wallet-breathe { 0%, 100% { opacity: .65; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.05); } }
+@media (prefers-reduced-motion: reduce) { .creator-profile-wallet-icons img { animation: none; } }
+.creator-profile-copied { font-size: .72rem; color: #93ffbb; opacity: 0; transform: translateX(-4px); transition: opacity .2s ease, transform .2s ease; pointer-events: none; }
+.creator-profile-copied.is-visible { opacity: 1; transform: none; }
 .creator-profile-identity p { margin: 0; font-size: .85rem; }
 .creator-profile-discord-chip { display: inline-flex; align-items: center; width: fit-content; padding: 4px 10px; border-radius: 999px; background: rgba(24, 62, 46, .9); border: 1px solid rgba(118, 205, 155, .5); color: #d9f5e6; }
 .creator-profile-discord-chip::before { content: '✓'; margin-right: 6px; color: #93ffbb; }

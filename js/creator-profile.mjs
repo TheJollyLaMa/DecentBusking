@@ -3,6 +3,27 @@ import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-re
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
 
+const WALLET_BREATHE_ICON = 'img/Ens_Eth_Breathe.png';
+
+// Shows 0x1234 + four breathing ENS/ETH icons + abcd in place of an ellipsis.
+function renderWallet(element, address) {
+  if (!element) return;
+  element.replaceChildren();
+  element.title = address || '';
+  if (!address) return;
+  const part = text => Object.assign(document.createElement('code'), { textContent: text });
+  const icons = document.createElement('span');
+  icons.className = 'creator-profile-wallet-icons';
+  icons.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 4; i++) {
+    const icon = Object.assign(document.createElement('img'), { src: WALLET_BREATHE_ICON, alt: '', loading: 'lazy' });
+    icon.style.animationDelay = `${i * 0.25}s`;
+    icons.append(icon);
+  }
+  element.setAttribute('aria-label', `Wallet ${address}`);
+  element.append(part(address.slice(0, 6)), icons, part(address.slice(-4)));
+}
+
 export const CREATOR_ALBUM_ABI = [
   'function getAlbum(bytes32) view returns ((address mainOwner,string title,string manifestURI,uint256 revision,uint256 listenPrice,uint256 albumPrice,address[] recipients,uint16[] sharesBps,string[] positions,bytes32[] songIds))',
   'function createAlbum(bytes32,string,string,address[],uint16[],string[],uint256,uint256)',
@@ -37,6 +58,9 @@ export function initCreatorProfile() {
   const bannerImage = dialog.querySelector('[data-profile-banner]');
   const bannerFallback = dialog.querySelector('[data-profile-banner-fallback]');
   const copyAddressButton = dialog.querySelector('[data-profile-copy-address]');
+  const editButton = dialog.querySelector('[data-profile-edit]');
+  const copiedNote = dialog.querySelector('[data-profile-copied]');
+  let copiedTimer = null;
   const discordCode = dialog.querySelector('[data-discord-code]');
   const discordCopy = dialog.querySelector('[data-discord-copy]');
   const discordSteps = dialog.querySelector('[data-discord-steps]');
@@ -78,6 +102,7 @@ export function initCreatorProfile() {
     dialog.querySelector('[data-discord-link]').disabled = busy || !editable();
     if (copyAddressButton) copyAddressButton.hidden = !address;
     if (editSection) editSection.hidden = !editable();
+    if (editButton) editButton.hidden = !editable();
     if (discordCopy) discordCopy.disabled = busy || !discordCode?.textContent;
     albumForm.querySelectorAll('input, textarea, button').forEach(element => {
       element.disabled = busy || !editable() || !supportsDjukeAlbumsAndGas(config().djukeContractVersion);
@@ -297,9 +322,11 @@ export function initCreatorProfile() {
   };
   const display = () => {
     const presentation = creatorPresentation(profile, ens);
-    dialog.querySelector('[data-profile-name]').textContent = presentation.name;
-    dialog.querySelector('[data-profile-wallet]').textContent = address ? `Wallet ${address.slice(0, 6)}…${address.slice(-4)}` : '';
-    dialog.querySelector('[data-profile-ens]').textContent = ens?.name ? `ENS ${ens.name}` : '';
+    const heading = ens?.name || (presentation.name !== 'Profile' ? presentation.name : '') || (address ? `${address.slice(0, 6)}…${address.slice(-4)}` : 'Profile');
+    dialog.querySelector('[data-profile-name]').textContent = heading;
+    renderWallet(dialog.querySelector('[data-profile-wallet]'), address);
+    const altName = profile.displayName && profile.displayName !== heading ? profile.displayName : '';
+    dialog.querySelector('[data-profile-ens]').textContent = altName;
     dialog.querySelector('[data-profile-discord]').textContent = profile.discord ? `Discord ${profile.discord.displayName}` : 'Discord not linked';
     dialog.querySelector('[data-profile-bio]').textContent = profile.bio || '';
     const copyButton = dialog.querySelector('[data-profile-copy-address]');
@@ -417,8 +444,21 @@ export function initCreatorProfile() {
   dialog.querySelector('[data-profile-close]').addEventListener('click', () => { revision++; clearDiscordLinkTimers(); dialog.close(); });
   dialog.querySelector('[data-profile-copy-address]').addEventListener('click', async () => {
    if (!address) return;
-   await navigator.clipboard.writeText(address).catch(() => {});
-   message('Wallet address copied');
+   const copied = await navigator.clipboard.writeText(address).then(() => true, () => false);
+   const text = copied ? 'Address copied!' : 'Copy failed — select the address manually';
+   message(copied ? 'Wallet address copied' : text);
+   if (copiedNote) {
+     copiedNote.textContent = text;
+     copiedNote.classList.add('is-visible');
+     clearTimeout(copiedTimer);
+     copiedTimer = setTimeout(() => copiedNote.classList.remove('is-visible'), 1800);
+   }
+  });
+  editButton?.addEventListener('click', () => {
+   if (!editable() || !editSection) return;
+   editSection.open = true;
+   editSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+   form.elements.namedItem('displayName')?.focus({ preventScroll: true });
   });
   dialog.querySelector('[data-discord-copy]').addEventListener('click', async () => {
    if (!discordCode?.textContent) return;

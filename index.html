@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261014-dvert-panel" />
+  <link rel="stylesheet" href="css/styles.css?v=20261014-profile-identity" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -711,7 +711,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261014-funds"></script>
   <script type="module" src="js/djuke.mjs?v=20261014-celebrate"></script>
   <script type="module" src="js/devert-tab.mjs?v=20261014-upload-resilience"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261014-upload-resilience"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261014-profile-identity"></script>
   <script type="module" src="js/listens.mjs?v=20261014-upload-resilience"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261014-worker-gas"></script>
@@ -747,9 +747,13 @@
       <div class="creator-profile-identity">
         <div class="creator-profile-name-row">
           <h3 data-profile-name>Profile</h3>
-          <button type="button" data-profile-copy-address hidden>Copy</button>
+          <button type="button" class="creator-profile-icon-button" data-profile-edit hidden title="Edit profile" aria-label="Edit profile"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
         </div>
-        <p data-profile-wallet></p>
+        <div class="creator-profile-wallet-row">
+          <p data-profile-wallet></p>
+          <button type="button" class="creator-profile-icon-button" data-profile-copy-address hidden title="Copy wallet address" aria-label="Copy wallet address"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+          <span class="creator-profile-copied" data-profile-copied role="status" aria-live="polite"></span>
+        </div>
         <p data-profile-ens></p>
         <p data-profile-discord class="creator-profile-discord-chip">Discord not linked</p>
         <p data-profile-bio></p>
