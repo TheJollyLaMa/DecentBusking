@@ -1,3 +1,5 @@
+import { escapeHtml, formatUsdcUnits, renderFundSourcesTable, resolveWalletLabel, renderWalletButton } from './fund-display.mjs?v=20261014-funds';
+
 export function rankTopTenSongs(tracks, nowPlayingId = '') {
   return tracks.filter(track => typeof track.trackId === 'string' && Number.isSafeInteger(track.votes) &&
     (track.plays > 0 || track.votes !== 0))
@@ -26,12 +28,40 @@ export function initTopTenBoard() {
   const toggle = document.getElementById('top-ten-tab');
   const panel = document.getElementById('top-ten-panel');
   const content = document.getElementById('top-ten-content');
+  const fundsSummary = document.getElementById('top-ten-fund-summary');
   const status = document.getElementById('top-ten-status');
   const header = document.getElementById('top-ten-week');
-  if (!toggle || !panel || !content || !status || !header) return;
+  if (!toggle || !panel || !content || !status || !header || !fundsSummary) return;
   let generation = 0;
   let timer;
+  const aliasCache = new Map();
   const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
+  const provider = window.ethers && (new window.ethers.JsonRpcProvider(window.DecentConfig?.ensRpcUrl || window.DecentConfig?.rpcUrl));
+  async function prepareFund(fund, sponsorAliases) {
+    const sources = [];
+    for (const source of fund.sources || []) {
+      const address = source.funder || source.advertiser || source.payer || '';
+      const wallet = address && provider ? await resolveWalletLabel(address, provider, sponsorAliases, aliasCache)
+        : { address, label: address || '', aliases: [] };
+      const walletHtml = renderWalletButton(wallet, { role: source.kind });
+      sources.push({
+        ...source,
+        displayLabel: wallet.label,
+        walletHtml,
+        advertiserHtml: source.kind === 'advert' ? walletHtml : '',
+        advertiserLabel: source.kind === 'advert' ? wallet.label : '',
+        payerHtml: source.kind === 'djuke' ? walletHtml : '',
+        payerLabel: source.kind === 'djuke' ? wallet.label : '',
+      });
+    }
+    return { ...fund, sources };
+  }
+  async function renderFundSummary(state) {
+    const fund = state?.funds?.topTen;
+    if (!fund) { fundsSummary.innerHTML = '<p class="top-ten-funds-unavailable">Fund balances unavailable right now</p>'; return; }
+    const prepared = await prepareFund(fund, state.sponsorAliases || {});
+    fundsSummary.innerHTML = `<details class="fund-disclosure top-ten-fund-disclosure"><summary>🏆 Top 10 fund: <strong>${formatUsdcUnits(prepared.balanceUnits)} USDC</strong> · available ${formatUsdcUnits(prepared.availableUnits)} · <span>Where it comes from ▾</span></summary><div class="fund-disclosure-body">${prepared.description ? `<p class="fund-description">${escapeHtml(prepared.description)}</p>` : ''}${renderFundSourcesTable(prepared)}</div></details>`;
+  }
   const close = () => {
     clearTimeout(timer);
     toggle.setAttribute('aria-expanded', 'false');
@@ -81,21 +111,28 @@ export function initTopTenBoard() {
     if (!service) { status.textContent = 'JukeLoop service is not configured.'; return; }
     status.textContent = 'Loading this week’s song votes…';
     try {
-      const [historyResponse, radioResponse] = await Promise.all([
+      const fundsRequest = fetch(`${service}/api/funds`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+      const [historyResponse, radioResponse, fundsResponse] = await Promise.all([
         fetch(`${service}/api/radio/history?weeks=1&calendar=new-york`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }),
         fetch(`${service}/api/radio`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }),
+        fundsRequest,
       ]);
-      const [history, radio] = await Promise.all([historyResponse.json(), radioResponse.json()]);
+      const [history, radio, funds] = await Promise.all([
+        historyResponse.json(), radioResponse.json(), fundsResponse.json().catch(() => null),
+      ]);
       if (request !== generation || !isOpen()) return;
       if (!historyResponse.ok) throw new Error(history.error || `Weekly votes unavailable (${historyResponse.status})`);
       if (!radioResponse.ok) throw new Error(radio.error || `Live track unavailable (${radioResponse.status})`);
       const report = (history.weeks || []).find(entry => entry.current) || (history.weeks || []).at(-1);
       if (!report) { header.textContent = 'Top 10 Songs'; content.replaceChildren(el('p', 'top-ten-empty', 'Weekly song votes are not available yet.')); }
       else render(report, radio.nowPlaying);
+      if (fundsResponse.ok && funds && funds.ready && !funds.lastError) await renderFundSummary(funds);
+      else fundsSummary.innerHTML = '<p class="top-ten-funds-unavailable">Fund balances unavailable right now</p>';
       status.textContent = 'Songs ranked by New York-week net votes (upvotes minus downvotes). This is a song chart, not the artist payout ranking.';
     } catch (error) {
       if (request !== generation || !isOpen()) return;
       status.textContent = `${error.message}. Retrying while this panel is open.`;
+      fundsSummary.innerHTML = '<p class="top-ten-funds-unavailable">Fund balances unavailable right now</p>';
     }
     if (isOpen()) timer = setTimeout(refresh, 15000);
   }

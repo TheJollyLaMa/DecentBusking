@@ -6,6 +6,7 @@ import { announcePaymentCelebration } from '../payment-celebration.mjs';
 // replaces it with a DecentBusking-specific version.
 //
 import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261013-walkthrough';
+import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261014-funds';
 
 // The CDN's AboutModal.js hard-codes a filter for listings whose note field
 // contains "decenthead", which causes BigNuten / DecentHead Supporter NFTs to
@@ -70,6 +71,52 @@ class DecentBuskingAboutModal extends HTMLElement {
 
   connectedCallback() {
     this.render();
+  }
+
+  async _prepareFund(fund, sponsorAliases, provider, aliasCache) {
+    const sources = [];
+    for (const source of fund.sources || []) {
+      const address = source.funder || source.advertiser || source.payer || '';
+      const wallet = address && provider ? await resolveWalletLabel(address, provider, sponsorAliases, aliasCache)
+        : { address, label: address || '', aliases: [] };
+      const walletHtml = renderWalletButton(wallet, { role: source.kind });
+      sources.push({
+        ...source,
+        displayLabel: wallet.label,
+        walletHtml,
+        advertiserHtml: source.kind === 'advert' ? walletHtml : '',
+        advertiserLabel: source.kind === 'advert' ? wallet.label : '',
+        payerHtml: source.kind === 'djuke' ? walletHtml : '',
+        payerLabel: source.kind === 'djuke' ? wallet.label : '',
+      });
+    }
+    return { ...fund, sources };
+  }
+
+  async _loadCommunityFunds() {
+    const container = this.shadowRoot.getElementById('community-funds');
+    if (!container) return;
+    const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+    if (!service) {
+      container.innerHTML = '<p class="community-funds-unavailable">Fund balances unavailable right now</p>';
+      return;
+    }
+    try {
+      const response = await fetch(`${service}/api/funds`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+      const state = await response.json().catch(() => null);
+      if (!response.ok || !state?.ready || state.lastError) throw new Error(state?.lastError || `Fund balances unavailable (${response.status})`);
+      const provider = window.ethers && new window.ethers.JsonRpcProvider(window.DecentConfig?.ensRpcUrl || window.DecentConfig?.rpcUrl);
+      const aliasCache = new Map();
+      const funds = [];
+      for (const slug of ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners']) {
+        const fund = state.funds?.[slug];
+        if (!fund) continue;
+        funds.push(await this._prepareFund(fund, state.sponsorAliases || {}, provider, aliasCache));
+      }
+      container.innerHTML = renderFundsSection(funds, 'Community Funds');
+    } catch (error) {
+      container.innerHTML = '<p class="community-funds-unavailable">Fund balances unavailable right now</p>';
+    }
   }
 
   open() {
@@ -609,6 +656,26 @@ class DecentBuskingAboutModal extends HTMLElement {
         .about-section { margin: 21px 0; color: #e2e2ec; line-height: 1.58; }
         .about-section h3 { margin: 0 0 9px; color: #d8c9ff; font-size: 1.05rem; }
         .about-section p { color: #c7c9d7; }
+        .community-funds-section {
+          margin: 18px 0 22px;
+          padding: 14px 15px;
+          border: 1px solid rgba(171,163,225,.22);
+          border-radius: 12px;
+          background: rgba(10,14,28,.72);
+        }
+        .community-funds-section h3 { margin: 0 0 10px; color: #91ddd3; font-size: 1rem; }
+        .fund-disclosure { margin: 0 0 10px; padding: 10px 12px; border: 1px solid rgba(171,163,225,.16); border-radius: 10px; background: rgba(20,23,42,.78); }
+        .fund-disclosure summary { cursor: pointer; color: #f7eef7; list-style: none; }
+        .fund-disclosure summary::-webkit-details-marker { display: none; }
+        .fund-disclosure-body { margin-top: 10px; }
+        .fund-description { margin: 0 0 10px; color: #c8cad7; }
+        .fund-wallet-link { border: 0; background: transparent; color: #91ddd3; font: inherit; cursor: pointer; padding: 0; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+        .fund-wallet-aliases { margin-left: 6px; color: #a8a8bd; font-size: .82rem; }
+        .fund-source-table { margin-top: 8px; width: 100%; }
+        .fund-source-table th, .fund-source-table td { padding: 7px 8px; vertical-align: top; }
+        .fund-source-table td { color: #d8dbe8; }
+        .fund-source-table a { color: #98ded6; }
+        .fund-source-empty, .community-funds-unavailable { margin: 0; color: #b8bac9; }
         .about-roadmap { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 10px 0 18px; }
         .about-roadmap section { padding: 14px 15px; background: rgba(10,14,28,.68); border: 1px solid rgba(171,163,225,.2); border-radius: 10px; }
         .about-roadmap h3 { margin: 0 0 9px; font-size: .92rem; }
@@ -782,6 +849,8 @@ class DecentBuskingAboutModal extends HTMLElement {
               </div>
             </header>
 
+            <div id="community-funds"></div>
+
             <div class="about-section">
               <h3>🎧 Make the loop</h3>
               <p>Listen and explore without a wallet. Artists submit tracks for owner review; listeners can support the chosen artist wallet directly. This is a hybrid system: Discord and the operator run the radio, while Base records NFTs and treasury payments.</p>
@@ -862,6 +931,7 @@ class DecentBuskingAboutModal extends HTMLElement {
       button.addEventListener('click', () => startTutorial());
     });
     syncTutorialLaunchButtons(this.shadowRoot);
+    this._loadCommunityFunds();
     this.shadowRoot.getElementById('paypal-btn-container')?.addEventListener('click', (e) => {
       if (e.target.id === 'paypal-launch-btn') this._handlePayPalLaunch();
     });

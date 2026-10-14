@@ -693,6 +693,30 @@ body.devert-open #top-ten-tab, body.devert-open #djuke-tab, body.devert-open #de
 .top-ten-panel-heading p { margin: 4px 0 0; color: var(--text-dim); font-size: .72rem; }
 #top-ten-panel-close { flex: 0 0 32px; width: 32px; height: 32px; color: var(--text-primary); background: #141720; border: 1px solid var(--panel-border); border-radius: 4px; font-size: 1.2rem; cursor: pointer; }
 .top-ten-chart-note, #top-ten-status { margin: 0; color: var(--text-dim); font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
+.top-ten-fund-summary { margin: 4px 0 8px; }
+.top-ten-fund-summary .fund-disclosure {
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 7px;
+  background: rgba(20,23,42,.76);
+}
+.top-ten-fund-summary .fund-disclosure summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-primary);
+  font-size: .75rem;
+  line-height: 1.35;
+}
+.top-ten-fund-summary .fund-disclosure summary::-webkit-details-marker { display: none; }
+.top-ten-fund-summary .fund-disclosure-body { margin-top: 8px; }
+.top-ten-fund-summary .fund-description { margin: 0 0 8px; color: var(--text-dim); font-size: .72rem; line-height: 1.35; }
+.top-ten-fund-summary .fund-source-table { width: 100%; border-collapse: collapse; font-size: .7rem; }
+.top-ten-fund-summary .fund-source-table th, .top-ten-fund-summary .fund-source-table td { padding: 5px 4px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.08); vertical-align: top; overflow-wrap: anywhere; }
+.top-ten-fund-summary .fund-source-table th:last-child, .top-ten-fund-summary .fund-source-table td:last-child { text-align: right; }
+.top-ten-fund-summary .fund-wallet-link { border: 0; padding: 0; background: transparent; color: var(--teal); cursor: pointer; font: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.top-ten-fund-summary .fund-wallet-aliases { margin-left: 5px; color: var(--text-dim); font-size: .68rem; }
+.top-ten-fund-summary .fund-source-empty, .top-ten-fund-summary .top-ten-funds-unavailable { margin: 0; color: var(--text-dim); font-size: .72rem; line-height: 1.35; }
 #top-ten-status { min-height: 1em; }
 #top-ten-content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .top-ten-live { margin: 0 0 8px; padding: 8px; color: var(--text-primary); background: rgba(0, 212, 170, .08); border-left: 2px solid var(--teal); font-size: .76rem; line-height: 1.35; overflow-wrap: anywhere; }

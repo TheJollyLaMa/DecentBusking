@@ -81,6 +81,11 @@ ambiguous requests are skipped rather than assigned arbitrarily.
 `GET /api/radio` includes `nowPlaying.sponsor` for paid DJuke requests and
 DeVert ads so the site can show the payer/advertiser next to the live player;
 DJuke sponsors include the verified payer address, `requestId`, and `amountUnits`.
+`GET /api/funds` exposes the four configured settlement funds, current balances,
+and proof-of-funding sources. The source ledger scans the router incrementally
+from `PAYROLL_START_BLOCK` (or the stored cursor) and is cached for about 60s.
+Owner-maintained sponsor aliases live in `payroll-assets.json.sponsorAliases` and
+are only shown after a reverse lookup or verified forward resolution.
 
 Worker gas is monitored. Optional DeVert reporting is deferred below
 `WORKER_MIN_BALANCE_WEI` and retried automatically once the worker is funded
