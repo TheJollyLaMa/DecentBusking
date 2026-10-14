@@ -489,6 +489,7 @@ async function _loadNFTs(reset = true) {
       const retainedKeys = new Set(retained.map(({ nft }) => _nftKey(nft)));
       for (const mesh of _nftMeshes) {
        if (mesh.userData.pinnedVisible) continue;
+       mesh.userData.artworkTexture?.userData?.artwork?.dispose?.();
        _scene.remove(mesh);
        mesh.geometry.dispose();
        mesh.material.map?.dispose();
@@ -582,7 +583,7 @@ function _spawnMesh(nft, isNew) {
   // Determine initial visibility within the current 30-day window.
   mesh.visible = isNew || _isInWindow(ageDays);
 
-  mesh.userData = { nft, mintedAt, ageMs, ageDays, isNew };
+  mesh.userData = { nft, mintedAt, ageMs, ageDays, isNew, artworkTexture: texture };
 
   _scene.add(mesh);
   _nftMeshes.push(mesh);
@@ -610,6 +611,36 @@ function _makeNFTTexture(nft) {
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
   const texture = new THREE.CanvasTexture(canvas);
+  const artwork = {
+    active: false,
+    disposed: false,
+    isGif: false,
+    image: null,
+    objectUrl: null,
+    loading: false,
+    loadedOnce: false,
+    loadSession: 0,
+    loadGeneration: 0,
+    loadPromise: null,
+    sourceUrls: [],
+  };
+
+  texture.userData ||= {};
+  texture.userData.artwork = artwork;
+
+  const releaseImage = () => {
+    if (artwork.image) {
+      artwork.image.onload = null;
+      artwork.image.onerror = null;
+      try { artwork.image.src = ''; } catch {}
+    }
+    if (artwork.objectUrl) {
+      try { URL.revokeObjectURL(artwork.objectUrl); } catch {}
+    }
+    artwork.image = null;
+    artwork.objectUrl = null;
+  };
+
   const drawFace = (image) => {
     ctx.clearRect(0, 0, 512, 512);
     ctx.save();
@@ -656,21 +687,121 @@ function _makeNFTTexture(nft) {
     ctx.stroke();
     texture.needsUpdate = true;
   };
+
+  const isGifBytes = (bytes) => bytes?.length >= 6
+    && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46
+    && bytes[3] === 0x38 && (bytes[4] === 0x37 || bytes[4] === 0x39) && bytes[5] === 0x61;
+
+  const looksLikeGifUrl = (url) => {
+    try {
+      return /\.gif(?:[?#].*)?$/i.test(new URL(url, window.location?.href || 'https://example.invalid/').pathname);
+    } catch {
+      return /\.gif(?:[?#].*)?$/i.test(url || '');
+    }
+  };
+
+  const loadFromUrl = async (url) => {
+    const requestGeneration = ++artwork.loadGeneration;
+    try {
+      const fetchImpl = globalThis.fetch;
+      if (!fetchImpl) throw new Error('fetch unavailable');
+      const response = await fetchImpl(url, { signal: AbortSignal.timeout(8000) });
+      if (requestGeneration !== artwork.loadGeneration || artwork.disposed) return false;
+      if (!response.ok) return false;
+      const contentType = response.headers?.get?.('content-type') || '';
+      const buffer = await response.arrayBuffer();
+      if (requestGeneration !== artwork.loadGeneration || artwork.disposed) return false;
+      const objectUrl = URL.createObjectURL(new Blob([buffer], { type: contentType || undefined }));
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.decoding = 'async';
+      artwork.objectUrl = objectUrl;
+      image.onload = () => {
+        if (requestGeneration !== artwork.loadGeneration || artwork.disposed) {
+          releaseImage();
+          return;
+        }
+        artwork.image = image;
+        artwork.isGif = Boolean(contentType && /image\/gif/i.test(contentType)) || isGifBytes(new Uint8Array(buffer)) || looksLikeGifUrl(url);
+        artwork.loadedOnce = true;
+        drawFace(image);
+        if (!artwork.active || !artwork.isGif) releaseImage();
+      };
+      image.onerror = () => {
+        if (requestGeneration === artwork.loadGeneration && artwork.objectUrl === objectUrl) releaseImage();
+      };
+      image.src = objectUrl;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const loadArtwork = async () => {
+    if (artwork.disposed) return false;
+    if (!artwork.sourceUrls.length) {
+      drawFace(null);
+      return false;
+    }
+    if (artwork.loading) return artwork.loadPromise || false;
+    const session = ++artwork.loadSession;
+    artwork.loading = true;
+    artwork.loadPromise = (async () => {
+      for (const url of artwork.sourceUrls) {
+        if (await loadFromUrl(url)) return true;
+        if (artwork.disposed) return false;
+      }
+      if (!artwork.disposed) {
+        console.warn('[space] Failed to load NFT artwork from any source for', nft.tokenId ?? nft.name ?? 'unknown NFT');
+      }
+      return false;
+    })();
+    try {
+      return await artwork.loadPromise;
+    } finally {
+      if (artwork.loadSession === session) {
+        artwork.loading = false;
+        artwork.loadPromise = null;
+      }
+    }
+  };
+
+  artwork.setActive = (active) => {
+    if (artwork.disposed) return;
+    if (artwork.active === active) {
+      if (!active) return;
+      if (artwork.image || artwork.loading || (artwork.loadedOnce && !artwork.isGif)) return;
+    }
+    artwork.active = active;
+    if (!active) {
+      artwork.loadGeneration += 1;
+      artwork.loadSession += 1;
+      artwork.loading = false;
+      releaseImage();
+      return;
+    }
+    if (!artwork.image && !artwork.loading && (!artwork.loadedOnce || artwork.isGif)) void loadArtwork();
+  };
+
+  artwork.tick = () => {
+    if (!artwork.active || !artwork.isGif || !artwork.image || artwork.disposed) return;
+    drawFace(artwork.image);
+  };
+
+  artwork.dispose = () => {
+    if (artwork.disposed) return;
+    artwork.disposed = true;
+    artwork.active = false;
+    artwork.loadGeneration += 1;
+    releaseImage();
+  };
+
   drawFace(null);
   if (nft.image) {
     const cfg = window.DecentConfig || {};
-    const imageUrls = buildIpfsGatewayUrls(nft.image, cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/')
+    artwork.sourceUrls = buildIpfsGatewayUrls(nft.image, cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/')
       .filter((url) => /^https?:\/\//i.test(url));
-    if (imageUrls.length) {
-      const image = new Image();
-      image.crossOrigin = 'anonymous';
-      image.onload = () => drawFace(image);
-      let attempt = 0;
-      image.onerror = () => {
-        if (++attempt < imageUrls.length) image.src = imageUrls[attempt];
-      };
-      image.src = imageUrls[0];
-    }
+    if (artwork.sourceUrls.length) void loadArtwork();
   }
   return texture;
 }
@@ -1076,6 +1207,7 @@ function _updateNowPlayingPulse() {
   const mesh = _nowPlayingMesh;
   const media = _activeMediaElement();
   const ud = mesh.userData;
+  const artwork = ud.artworkTexture?.userData?.artwork || mesh.material?.map?.userData?.artwork || null;
   ud.baseScale ??= mesh.scale.x || 1;
   ud.baseOpacity ??= mesh.material?.opacity ?? 1;
   const glow = ud.nowPlayingGlow || _ensureNowPlayingGlow(mesh);
@@ -1088,6 +1220,8 @@ function _updateNowPlayingPulse() {
 
   let level = 0;
   const playing = media && !media.paused && !media.ended && !document.hidden && !_prefersReducedMotion();
+  artwork?.setActive?.(playing);
+  if (playing && artwork?.isGif) artwork.tick?.();
   if (playing) {
     const analyser = _ensureNowPlayingAnalyser(media);
     if (analyser && _nowPlayingAudioData) {
@@ -1266,6 +1400,7 @@ function _ensureNowPlayingEdge(mesh) {
 function _resetNowPlayingPulse(mesh) {
   if (!mesh) return;
   const ud = mesh.userData || {};
+  ud.artworkTexture?.userData?.artwork?.setActive?.(false);
   ud.pulseLevel = 0;
   ud.nowPlayingBeatLevel = 0;
   ud.nowPlayingWaveLevel = 0;
