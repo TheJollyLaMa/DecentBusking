@@ -469,6 +469,41 @@ test('radio state publishes the audible track position and newest uploads', asyn
   assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).nowPlaying, null);
 });
 
+test('radio state preserves video metadata for video now-playing tracks', async () => {
+  const moduleUrl = pathToFileURL(path.join(__dirname, '../discord-bot/jukeloop.js'));
+  const { buildRadioState } = await import(moduleUrl.href);
+
+  const state = buildRadioState({
+    now: 100_000,
+    nowPlaying: {
+      trackId: 'track-video',
+      title: 'Video',
+      uploader: 'artist',
+      filename: '',
+      mediaType: '',
+      videoUrl: 'ipfs://bafy-video',
+      ipfsCid: 'bafy-video',
+      startedAt: 40_000,
+      audible: true,
+    },
+    playlist: [],
+  });
+
+  assert.deepEqual(state.nowPlaying, {
+    playId: 'track-video:40000',
+    trackId: 'track-video',
+    title: 'Video',
+    uploader: 'artist',
+    filename: null,
+    mediaType: 'video/mp4',
+    videoUrl: 'ipfs://bafy-video',
+    ipfsCid: 'bafy-video',
+    isDevert: false,
+    startedAt: 40_000,
+    positionMs: 60_000,
+  });
+});
+
 test('Discord and site votes update one track ledger without bot votes or duplicate plays', async (t) => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-master-votes-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(temp, 'playlist.json');

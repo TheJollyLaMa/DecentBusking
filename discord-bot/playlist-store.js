@@ -163,8 +163,9 @@ export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, f
   const trackId = `site:${address.toLowerCase()}:${ipfsCid}`;
   const existing = _playlist.find(track => track.trackId === trackId);
   if (existing) return existing;
+  const videoUrl = mediaType === 'video/mp4' ? `ipfs://${ipfsCid}` : '';
   addTrack({ attachmentId: trackId, source: 'site', uploaderId: `wallet:${address.toLowerCase()}`,
-    uploader: artist, title, ipfsCid, mediaType, filename, pinStatus: 'pinned', artworkCid,
+    uploader: artist, title, ipfsCid, mediaType, filename, pinStatus: 'pinned', artworkCid, videoUrl,
     tipWallet: tipWallet || recipient, parentTokenId, isDevertAd,
     mintStatus: 'requested', mintRecipient: recipient, mintRequestedAt: new Date().toISOString() });
   return _playlist.find(track => track.trackId === trackId);
@@ -633,7 +634,8 @@ export function getDevertAdsForWallet(address, campaigns = [], now = Date.now())
         ipfsCid: track.ipfsCid,
         image: track.artworkCid || '',
         artworkCid: track.artworkCid || '',
-        mediaType: track.mediaType || 'audio/mpeg',
+        mediaType: track.mediaType || (track.videoUrl ? 'video/mp4' : ''),
+        videoUrl: track.videoUrl || (track.mediaType === 'video/mp4' ? `ipfs://${track.ipfsCid}` : ''),
         filename: track.filename || '',
         mintStatus: minted ? 'minted' : 'pending',
         tokenId: minted ? String(track.tokenId) : null,

@@ -428,6 +428,35 @@ test('MP4 playback uses one video stream and returns cleanly to audio with radio
   assert.equal(stage.hidden, true);
 });
 
+test('radio sync promotes a video stream when the state preserves an IPFS video source', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const started = [];
+  const audio = { paused: true, volume: 0, muted: false };
+  const context = vm.createContext({
+    performance,
+    setTimeout,
+    clearTimeout,
+    console,
+    audio,
+    started,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } },
+  });
+  vm.runInContext(`${source}\n_audio = audio; _audioPlayer = audio; _radio = {
+    playId: 'play-video',
+    title: 'Video Ad',
+    uploader: 'Advertiser',
+    ipfsCid: 'bafy-video',
+    videoUrl: 'ipfs://bafy-video',
+    mediaType: '',
+    filename: '',
+    receivedAt: performance.now(),
+    positionMs: 0,
+  }; _switchTo = options => started.push(options); _syncRadio();`, context);
+  assert.equal(started.length, 1);
+  assert.equal(started[0].mime, 'video/mp4');
+  assert.equal(started[0].nowPlaying.videoUrl, 'ipfs://bafy-video');
+});
+
 test('radio volume survives fades and mute does not affect archive playback', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
   const audio = { volume: 0, muted: false };

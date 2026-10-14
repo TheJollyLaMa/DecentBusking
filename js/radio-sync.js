@@ -312,6 +312,10 @@ export function initRadioSync() {
   _poll();
 }
 
+function _mediaTypeForTrack(track = {}) {
+  return track.mediaType || _mimeType(track.filename || '') || (track.videoUrl ? 'video/mp4' : '');
+}
+
 export function canSetDevertListenMode() {
   return _mode === 'radio';
 }
@@ -360,7 +364,15 @@ export function playArchiveTrack({ title, artist, audioUrl, mediaType, nft = nul
     artist,
     url: audioUrl,
     mime: mediaType || _mimeType(audioUrl),
-    nowPlaying: { source: 'archive', nft, title, artist, audioUrl, mediaType: mediaType || _mimeType(audioUrl) },
+    nowPlaying: {
+      source: 'archive',
+      nft,
+      title,
+      artist,
+      audioUrl,
+      mediaType: mediaType || _mimeType(audioUrl),
+      videoUrl: nft?.videoUrl || (mediaType === 'video/mp4' ? audioUrl : ''),
+    },
   });
 }
 
@@ -477,7 +489,7 @@ function _syncRadio(message) {
     title: _radio.title,
     artist: _radio.uploader,
     url: _gatewayUrl(_radio.ipfsCid),
-    mime: _radio.mediaType || _mimeType(_radio.filename || ''),
+    mime: _mediaTypeForTrack(_radio),
     offset: () => 0,
     nowPlaying: {
       source: 'radio',
@@ -486,7 +498,8 @@ function _syncRadio(message) {
       title: _radio.title || '',
       artist: _radio.uploader || '',
       audioUrl: _radio.ipfsCid ? _gatewayUrl(_radio.ipfsCid) : '',
-      mediaType: _radio.mediaType || _mimeType(_radio.filename || ''),
+      mediaType: _mediaTypeForTrack(_radio),
+      videoUrl: _radio.videoUrl || (_mediaTypeForTrack(_radio) === 'video/mp4' ? _gatewayUrl(_radio.ipfsCid) : ''),
       ipfsCid: _radio.ipfsCid || null,
       nft: null,
     },
@@ -524,7 +537,7 @@ function _startNextTakeover() {
     title: track.title,
     artist: track.uploader,
     url: _gatewayUrl(track.ipfsCid),
-    mime: track.mediaType || _mimeType(track.filename || ''),
+    mime: _mediaTypeForTrack(track),
     nowPlaying: {
       source: 'takeover',
       playId: track.playId || null,
@@ -532,7 +545,8 @@ function _startNextTakeover() {
       title: track.title || '',
       artist: track.uploader || '',
       audioUrl: track.ipfsCid ? _gatewayUrl(track.ipfsCid) : '',
-      mediaType: track.mediaType || _mimeType(track.filename || ''),
+      mediaType: _mediaTypeForTrack(track),
+      videoUrl: track.videoUrl || (_mediaTypeForTrack(track) === 'video/mp4' ? _gatewayUrl(track.ipfsCid) : ''),
       ipfsCid: track.ipfsCid || null,
       nft: track.nft || null,
     },
@@ -629,6 +643,7 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     artist,
     audioUrl: url,
     mediaType: mime || _mimeType(url),
+    videoUrl: nowPlaying?.videoUrl || (mime === 'video/mp4' ? url : ''),
     nft: nowPlaying?.nft ?? null,
   });
 
