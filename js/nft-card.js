@@ -3,8 +3,9 @@
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
 import { fetchNFTMetaById } from './space.js?v=20261012-paging';
+import { returnToRadio } from './radio-sync.js?v=20261010-listens';
 
-// NFT currently shown in the single view; its preview auto-plays when the card opens.
+// NFT currently shown in the single view; previews and purchases are handled explicitly.
 let _cardNft = null;
 
 function _cardAudioUrl(nft) {
@@ -21,6 +22,16 @@ function _renderMute(content, muted) {
   button.textContent = muted ? '🔇' : '🔊';
 }
 
+function _renderPreviewButton(content, playing) {
+  const button = content?.querySelector('.nft-preview-btn');
+  if (!button) return;
+  button.textContent = playing ? '⏹ Stop preview' : '▶ Preview';
+  button.setAttribute('aria-pressed', String(playing));
+  button.title = playing
+    ? 'Stop the 30-second preview and return to the radio'
+    : 'Play a free 30-second preview';
+}
+
 function _cardStatus(text) {
   const el = document.getElementById('nft-panel-content')?.querySelector('.nft-listen-status');
   if (el) el.textContent = text;
@@ -31,14 +42,17 @@ document.addEventListener?.('dbusk-archive-mute', (event) => {
 });
 document.addEventListener?.('dbusk-listen-started', (event) => {
   if (!_cardNft || event.detail.song.audioUrl !== _cardAudioUrl(_cardNft)) return;
+  _renderPreviewButton(document.getElementById('nft-panel-content'), event.detail.mode === 'preview');
   _cardStatus(event.detail.mode === 'preview'
-    ? '🎧 Playing a 30-second preview. Press ▶ Play Full Track to buy one full listen.'
+    ? '🎧 Playing a 30-second preview. Press ⏹ Stop preview to return to the radio.'
     : '🎧 Playing the full track.');
 });
 document.addEventListener?.('dbusk-preview-ended', (event) => {
   if (!_cardNft || event.detail.song.audioUrl !== _cardAudioUrl(_cardNft)) return;
   event.preventDefault();
-  _cardStatus('Preview ended. Press ▶ Play Full Track to keep listening.');
+  _renderPreviewButton(document.getElementById('nft-panel-content'), false);
+  _cardStatus('Preview ended. Returning to the radio.');
+  returnToRadio();
 });
 
 // ── Public API ───────────────────────────────────────────────────────────
@@ -65,6 +79,7 @@ export function renderNFTCard(nft) {
   panel.onclose = () => {
     panel.classList.add('hidden');
     content.querySelectorAll('audio').forEach((audio) => audio.pause());
+    _renderPreviewButton(content, false);
     _cardNft = null;
     document.dispatchEvent?.(new CustomEvent('dbusk-preview-close', { detail: { nft } }));
   };
@@ -83,6 +98,17 @@ export function renderNFTCard(nft) {
     const el = content.querySelector('.nft-listen-status');
     if (el) el.textContent = text;
   };
+  const previewBtn = content.querySelector('.nft-preview-btn');
+  previewBtn?.addEventListener('click', () => {
+    if (previewBtn.getAttribute('aria-pressed') === 'true') {
+      _renderPreviewButton(content, false);
+      _cardStatus('Preview stopped. Returning to the radio.');
+      document.dispatchEvent?.(new CustomEvent('dbusk-preview-close', { detail: { nft } }));
+      return;
+    }
+    _cardStatus('▶ Starting preview…');
+    document.dispatchEvent?.(new CustomEvent('dbusk-listen', { cancelable: true, detail: { nft } }));
+  });
   content.querySelector('.nft-listen-btn')?.addEventListener('click', async (event) => {
     const button = event.currentTarget;
     const isVideo = nft.videoUrl || nft.mediaType === 'video/mp4';
@@ -154,6 +180,7 @@ function _buildCardHTML(nft) {
 
   const audioUrl = (nft.videoUrl || nft.audioUrl || nft.animation_url || '')
     .replace('ipfs://', gateway);
+  const listenPrice = '0.25 USDC';
 
   const shortCreator = _shortAddr(nft.artist || nft.creator || '');
   const shortOwner = _shortAddr(nft.owner || '');
@@ -184,7 +211,8 @@ function _buildCardHTML(nft) {
     <h3 id="nft-detail-title">${_esc(nft.name || nft.title || `Track #${nft.tokenId}`)}</h3>
 
     ${audioUrl ? `<div class="nft-play-row">
-      <button class="nft-listen-btn nft-buy-btn" type="button" title="Pay with your wallet, then hear the whole track without interruption">▶ Play Full Track</button>
+      <button class="nft-preview-btn nft-buy-btn" type="button" aria-pressed="false" title="Play a free 30-second preview">▶ Preview</button>
+      <button class="nft-listen-btn nft-buy-btn" type="button" title="Pay with your wallet for the whole track without interruption">🎧 Listen (${listenPrice})</button>
       <button class="nft-mute-btn nft-buy-btn" type="button" aria-pressed="false" aria-label="Mute preview" title="Mute preview">🔊</button>
     </div>
     <p class="nft-listen-status" role="status" aria-live="polite"></p>

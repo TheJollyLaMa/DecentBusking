@@ -36,7 +36,7 @@ Votes influence the radio rotation. New Top 10 prize drafts use weekly net votes
 
 ## 3. Meet A Song And Its Artist
 
-Select a music NFT in the **3D music space / archive**. Inspect its song details and artwork. Selecting an archive recording is different from listening to the live radio: use **Radio** in the bottom bar to return to JukeLoop.
+Select a music NFT in the **3D music space / archive**. Inspect its song details and artwork. Click **Preview** for a free 30-second taste or **Listen** to play the whole song. Selecting an archive recording is different from listening to the live radio: use **Radio** in the bottom bar to return to JukeLoop.
 
 Click **Archive** near the upper-right of the music space for the song list, or use the **Artist** selector below the header to focus on one artist. Wait for metadata to load if the archive is initially empty.
 
