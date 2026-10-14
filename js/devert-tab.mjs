@@ -1,7 +1,7 @@
 import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261014-worker-gas';
-import { createBrowserIpfsUploader } from './ipfs-upload.js';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
-import { submitMediaForApproval } from './mint-submission.js';
+import { submitMediaForApproval } from './mint-submission.js?v=20261014-upload-resilience';
 import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { planDevertQueues, quoteDevertCampaign, DEVERT_SONGS_PER_MAIN_AD } from './devert-scheduler.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';

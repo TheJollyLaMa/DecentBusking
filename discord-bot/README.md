@@ -46,7 +46,7 @@ cp .env.example .env
 | `IPFS_UPLOAD_PROVIDER`       | ✅        | `pinata` on Render or `local` with Kubo/IPFS Desktop |
 | `PINATA_JWT`                 | Pinata    | Server-only Pinata JWT; never expose it in browser code |
 | `PUBLIC_WORKER_URL`          | Pinata    | Public URL of this Render service |
-| `IPFS_ALLOWED_ORIGINS`       | Pinata    | Comma-separated browser origins allowed to request upload URLs |
+| `IPFS_ALLOWED_ORIGINS`       | Pinata    | Comma-separated browser origins allowed to request upload URLs (for example: `https://thejollylama.github.io,https://decentbusking.com,https://www.decentbusking.com,http://localhost:4173,http://127.0.0.1:4173`) |
 | `MINT_OWNER_WALLET`          | Pinata    | Base admin wallet allowed to authorize browser uploads |
 | `PINATA_API_URL`             | ❌        | Direct upload API; defaults to Pinata v3 |
 | `PINATA_SIGN_URL`            | ❌        | Signed upload API; defaults to Pinata v3 |
@@ -129,7 +129,7 @@ multi-campaign targeting and a dedicated ad purchase UI are not implemented.
 IPFS_UPLOAD_PROVIDER=pinata
 PINATA_JWT=<server-only JWT from Pinata>
 PUBLIC_WORKER_URL=https://<service>.onrender.com
-IPFS_ALLOWED_ORIGINS=https://thejollylama.github.io
+IPFS_ALLOWED_ORIGINS=https://thejollylama.github.io,https://decentbusking.com,https://www.decentbusking.com,http://localhost:4173,http://127.0.0.1:4173
 MINT_OWNER_WALLET=0x...
 
 # Local alternative

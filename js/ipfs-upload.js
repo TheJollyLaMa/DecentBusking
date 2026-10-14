@@ -24,20 +24,102 @@ function extractCid(result) {
   return result.data?.cid || result.cid || result.IpfsHash || result.Hash;
 }
 
-async function uploadForm(endpoint, file, fetchImpl, includeNetwork = false) {
+function readResponseError(response, fallbackMessage) {
+  return response.text().then(async text => {
+    const result = text ? JSON.parse(text) : {};
+    const detail = typeof result.error === 'string' ? result.error
+      : result.error?.message || result.error?.reason || result.message || result.Message;
+    const error = new Error(detail || fallbackMessage);
+    error.status = response.status;
+    error.retryable = response.status >= 500 || response.status === 429 || response.status === 408;
+    return error;
+  }).catch(() => {
+    const error = new Error(fallbackMessage);
+    error.status = response.status;
+    error.retryable = response.status >= 500 || response.status === 429 || response.status === 408;
+    return error;
+  });
+}
+
+function uploadWithProgress(endpoint, file, fetchImpl, includeNetwork, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const form = new FormData();
+    form.append('file', file, file.name);
+    if (includeNetwork) form.append('network', 'public');
+    xhr.open('POST', endpoint, true);
+    xhr.responseType = 'text';
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable && typeof onProgress === 'function') {
+        onProgress({ loaded: event.loaded, total: event.total, progress: event.total ? event.loaded / event.total : 0 });
+      }
+    };
+    xhr.onload = async () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(await readResponseError({ status: xhr.status, text: async () => xhr.responseText }, `IPFS upload failed (${xhr.status}) for ${file.name}`));
+        return;
+      }
+      try {
+        const cid = extractCid(JSON.parse(xhr.responseText || '{}'));
+        if (!cid) throw new Error('IPFS upload response did not include a CID');
+        resolve(`ipfs://${cid}`);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    xhr.onerror = () => reject(new Error(`Network error uploading ${file.name}`));
+    xhr.onabort = () => reject(new Error(`Upload aborted for ${file.name}`));
+    xhr.timeout = 0;
+    xhr.send(form);
+  });
+}
+
+async function uploadForm(endpoint, file, fetchImpl, includeNetwork = false, { onProgress } = {}) {
+  if (typeof XMLHttpRequest !== 'undefined' && typeof onProgress === 'function') {
+    return uploadWithProgress(endpoint, file, fetchImpl, includeNetwork, onProgress);
+  }
   const form = new FormData();
   form.append('file', file, file.name);
   if (includeNetwork) form.append('network', 'public');
   const response = await fetchImpl(endpoint, { method: 'POST', body: form });
   if (!response.ok) {
-    const result = await response.json().catch(() => ({}));
-    const detail = typeof result.error === 'string' ? result.error
-      : result.error?.message || result.error?.reason || result.message || result.Message;
-    throw new Error(`IPFS upload failed (${response.status}) for ${file.name}${typeof detail === 'string' ? `: ${detail.slice(0, 400)}` : ''}`);
+    throw await readResponseError(response, `IPFS upload failed (${response.status}) for ${file.name}`);
   }
   const cid = extractCid(await response.json());
   if (!cid) throw new Error('IPFS upload response did not include a CID');
   return `ipfs://${cid}`;
+}
+
+function isRetryableError(error) {
+  return Boolean(error?.retryable || /Failed to fetch|NetworkError|network|load failed|fetch failed|aborted|AbortError/i.test(error?.message || ''));
+}
+
+function stepError(prefix, step, detail, suggestion) {
+  const message = `${prefix} (${step}) — ${detail || suggestion}`;
+  const error = new Error(message);
+  error.step = step;
+  return error;
+}
+
+async function withRetries(step, action, {
+  retries = 2,
+  prefix,
+  retrySuggestion,
+  logPrefix = '[ipfs-upload]',
+}) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await action(attempt);
+    } catch (error) {
+      lastError = error;
+      const retryable = attempt < retries && isRetryableError(error);
+      console.warn(logPrefix, step, { attempt: attempt + 1, retryable, error });
+      if (!retryable) break;
+      await new Promise(resolve => setTimeout(resolve, 250 * (2 ** attempt)));
+    }
+  }
+  throw stepError(prefix, step, lastError?.message, retrySuggestion);
 }
 
 export function createBrowserIpfsUploader({
@@ -49,40 +131,67 @@ export function createBrowserIpfsUploader({
   origin,
   purpose,
   fetchImpl = globalThis.fetch,
+  retries = 2,
 }) {
-  const upload = async function upload(file) {
+  const upload = async function upload(file, options = {}) {
+    const { onProgress } = options || {};
     if (provider === 'local') {
       const endpoint = `${ipfsApiUrl.replace(/\/$/, '')}/api/v0/add?cid-version=1&pin=true`;
-      return uploadForm(endpoint, file, fetchImpl);
+      return withRetries('step 1/2', () => uploadForm(endpoint, file, fetchImpl, false, { onProgress }), {
+        retries,
+        prefix: 'Upload to IPFS failed',
+        retrySuggestion: 'retry, or try a smaller file',
+      });
     }
     if (provider !== 'pinata') throw new Error(`Unsupported IPFS upload provider: ${provider}`);
     if (!serviceUrl) throw new Error('The Render IPFS worker URL is not configured');
     if (!signer || !address) throw new Error('Connect your wallet before uploading');
 
-    const issuedAt = new Date().toISOString();
-    const authorization = {
-      address,
-      origin,
-      name: file.name,
-      size: file.size,
-      type: file.type || 'application/octet-stream',
-      issuedAt,
-      ...(purpose === 'submission' ? { purpose } : {}),
-    };
-    const signature = await signer.signMessage(buildUploadAuthorizationMessage(authorization));
     const endpoint = purpose === 'submission' ? 'submission-upload-url' : 'upload-url';
-    const signingResponse = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/ipfs/${endpoint}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...authorization, signature }),
-    });
-    if (!signingResponse.ok) {
-      const result = await signingResponse.json().catch(() => ({}));
-      throw new Error(result.error || `Pinata signing failed (${signingResponse.status})`);
+    let lastUploadError;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      let url;
+      try {
+        const issuedAt = new Date().toISOString();
+        const authorization = {
+          address,
+          origin,
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          issuedAt,
+          ...(purpose === 'submission' ? { purpose } : {}),
+        };
+        const signature = await signer.signMessage(buildUploadAuthorizationMessage(authorization));
+        const signingResponse = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/ipfs/${endpoint}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...authorization, signature }),
+        });
+        if (!signingResponse.ok) {
+          throw await readResponseError(signingResponse, `Pinata signing failed (${signingResponse.status})`);
+        }
+        const signingResult = await signingResponse.json();
+        url = signingResult.url;
+        if (!url) throw new Error('Pinata signing response did not include a URL');
+      } catch (error) {
+        const retryable = attempt < retries && isRetryableError(error);
+        console.warn('[ipfs-upload]', 'step 1/2', { attempt: attempt + 1, retryable, error });
+        if (!retryable) throw stepError('Couldn’t reach the upload service', 'step 1/2', error.message, 'please retry');
+        await new Promise(resolve => setTimeout(resolve, 250 * (2 ** attempt)));
+        continue;
+      }
+      try {
+        return await uploadForm(url, file, fetchImpl, true, { onProgress });
+      } catch (error) {
+        lastUploadError = error;
+        const retryable = attempt < retries && isRetryableError(error);
+        console.warn('[ipfs-upload]', 'step 2/2', { attempt: attempt + 1, retryable, error });
+        if (!retryable) break;
+        await new Promise(resolve => setTimeout(resolve, 250 * (2 ** attempt)));
+      }
     }
-    const { url } = await signingResponse.json();
-    if (!url) throw new Error('Pinata signing response did not include a URL');
-    return uploadForm(url, file, fetchImpl, true);
+    throw stepError('Upload to IPFS failed', 'step 2/2', lastUploadError?.message, 'retry, or try a smaller file');
   };
 
   upload.batch = async files => {
@@ -105,14 +214,18 @@ export function createBrowserIpfsUploader({
       body: JSON.stringify({ ...authorization, signature }),
     });
     if (!response.ok) {
-      const result = await response.json().catch(() => ({}));
-      throw new Error(result.error || `Pinata batch signing failed (${response.status})`);
+      throw await readResponseError(response, `Pinata batch signing failed (${response.status})`);
     }
     const result = await response.json();
     if (!Array.isArray(result.urls) || result.urls.length !== files.length || result.urls.some(url => typeof url !== 'string' || !url)) {
       throw new Error('Pinata batch signing response did not include one URL per metadata file');
     }
-    return Promise.all(files.map((file, index) => uploadForm(result.urls[index], file, fetchImpl, true)));
+    return Promise.all(files.map((file, index) => withRetries(`batch ${index + 1}/${files.length}`, () =>
+      uploadForm(result.urls[index], file, fetchImpl, true, {}), {
+        retries,
+        prefix: 'Upload to IPFS failed',
+        retrySuggestion: 'retry, or try a smaller file',
+      })));
   };
 
   return upload;

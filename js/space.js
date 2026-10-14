@@ -23,7 +23,7 @@
 //   • OrbitControls  (from three@0.128.0 examples)
 
 import { renderNFTCard } from './nft-card.js?v=20261014-celebrate';
-import { setNowPlaying } from './stage.js?v=20261014-tip-guard';
+import { setNowPlaying } from './stage.js?v=20261014-upload-resilience';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft } from './nft-loader.js?v=20261012-paging';
 

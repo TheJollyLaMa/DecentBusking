@@ -1,5 +1,5 @@
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
-import { createBrowserIpfsUploader } from './ipfs-upload.js';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
 
@@ -130,7 +130,7 @@ export function initCreatorProfile() {
       openButton.textContent = 'Open';
       openButton.addEventListener('click', () => {
         run(async () => {
-          const { openNFTByIdentity } = await import('./space.js?v=20261014-celebrate');
+          const { openNFTByIdentity } = await import('./space.js?v=20261014-upload-resilience');
           const opened = await openNFTByIdentity(entry);
           if (!opened) throw new Error('Could not open this NFT in the space view');
           message('Opened saved NFT in the space view');

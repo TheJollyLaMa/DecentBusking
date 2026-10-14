@@ -261,6 +261,38 @@ test('worker issues a Pinata URL only for a fresh owner signature', async () => 
   });
 });
 
+test('worker returns a readable 403 for disallowed upload origins and exposes a public pending count', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const origin = 'https://busking.example';
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: [origin],
+    ownerWallet: Wallet.createRandom().address,
+    getMintQueue: () => [{ trackId: 'one' }, { trackId: 'two' }],
+    pinataJwt: 'server-secret',
+    fetchImpl: async () => new Response(JSON.stringify({ data: 'https://uploads.example/signed' })),
+  });
+  await withServer(handler, async baseUrl => {
+    const count = await fetch(`${baseUrl}/api/mint-queue/pending-count`).then(response => response.json());
+    assert.deepEqual(count, { count: 2 });
+    const response = await fetch(`${baseUrl}/api/ipfs/upload-url`, {
+      method: 'POST',
+      headers: { origin: 'https://unlisted.example', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        address: Wallet.createRandom().address,
+        origin: 'https://unlisted.example',
+        name: 'song.mp3',
+        size: 1,
+        type: 'audio/mpeg',
+        issuedAt: new Date().toISOString(),
+        signature: '0xsigned',
+      }),
+    });
+    assert.equal(response.status, 403);
+    assert.equal(response.headers.get('access-control-allow-origin'), 'https://unlisted.example');
+    assert.match((await response.json()).error, /authorized for uploads/);
+  });
+});
+
 test('worker grants one owner signature a one-use set of metadata upload URLs', async () => {
   const { buildUploadBatchAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom();

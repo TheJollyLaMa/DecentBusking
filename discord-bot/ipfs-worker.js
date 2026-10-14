@@ -6,6 +6,7 @@ import { catalogPage } from '../js/nft-loader.js';
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 const SIGNED_UPLOAD_OVERHEAD_BYTES = 64 * 1024;
 const MAX_SIGNATURE_AGE_MS = 5 * 60 * 1000;
+const MAX_UPLOAD_SIGNATURE_AGE_MS = 15 * 60 * 1000;
 const MINT_EVENT_ABI = [
   'event EditionMinted(uint256 indexed tokenId, address indexed to, uint256 amount, address indexed minter)',
 ];
@@ -81,14 +82,20 @@ function sendJson(response, status, body, corsOrigin = '') {
   response.end(JSON.stringify(body));
 }
 
+function sendCorsError(response, origin, error) {
+  sendJson(response, 403, { error }, origin || '*');
+}
+
 export async function requestPinataSignedUrl({ pinataJwt, pinataSignUrl, name, size, type, fetchImpl = fetch }) {
+  const headers = { 'content-type': 'application/json' };
+  if (pinataJwt) headers.authorization = `Bearer ${pinataJwt}`;
   const response = await fetchImpl(pinataSignUrl, {
     method: 'POST',
-    headers: { authorization: `Bearer ${pinataJwt}`, 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify({
       network: 'public',
       date: Math.floor(Date.now() / 1000),
-      expires: 60,
+      expires: 15 * 60,
       max_file_size: size + SIGNED_UPLOAD_OVERHEAD_BYTES,
       allow_mime_types: [type],
       filename: name,
@@ -208,9 +215,12 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, result);
         return;
       }
+      const uploadRoute = requestUrl.pathname === '/api/ipfs/upload-url' ||
+        requestUrl.pathname === '/api/ipfs/submission-upload-url' ||
+        requestUrl.pathname === '/api/ipfs/upload-batch-urls';
       if (request.method === 'OPTIONS') {
-        response.writeHead(corsOrigin ? 204 : 403, {
-          ...(corsOrigin ? { 'access-control-allow-origin': corsOrigin, vary: 'origin' } : {}),
+        response.writeHead(uploadRoute ? 204 : (corsOrigin ? 204 : 403), {
+          ...(uploadRoute || corsOrigin ? { 'access-control-allow-origin': corsOrigin || origin || '*', vary: 'origin' } : {}),
           'access-control-allow-methods': 'GET, POST, OPTIONS',
           'access-control-allow-headers': 'content-type',
         });
@@ -381,6 +391,12 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, { weeks: await getRadioHistory({ weeks, wallet, includeAllTime, ...(calendar ? { calendar } : {}) }) }, '*');
         return;
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/mint-queue/pending-count') {
+        if (!getMintQueue) throw new Error('Mint queue is not configured');
+        const requests = await getMintQueue();
+        sendJson(response, 200, { count: Array.isArray(requests) ? requests.length : 0 }, '*');
+        return;
+      }
       if (request.method === 'POST' && requestUrl.pathname === '/api/radio/vote') {
         if (!corsOrigin) throw new Error('Origin is not allowed');
         if (!onRadioVote) throw new Error('Radio voting is not configured');
@@ -487,7 +503,10 @@ export function createWorkerRequestHandler({
         sendJson(response, 404, { error: 'Not found' }, corsOrigin);
         return;
       }
-      if (!corsOrigin) throw new Error('Origin is not allowed');
+      if (!corsOrigin) {
+        sendCorsError(response, origin, 'This site address isn’t authorized for uploads');
+        return;
+      }
 
       const body = await readJson(request);
       if (batchUpload) {
@@ -501,7 +520,7 @@ export function createWorkerRequestHandler({
           throw new Error('Metadata batch must contain valid JSON files no larger than 250 MB');
         }
         const issuedAtMs = Date.parse(issuedAt);
-        if (!Number.isFinite(issuedAtMs) || Math.abs(now() - issuedAtMs) > MAX_SIGNATURE_AGE_MS) {
+        if (!Number.isFinite(issuedAtMs) || Math.abs(now() - issuedAtMs) > MAX_UPLOAD_SIGNATURE_AGE_MS) {
           throw new Error('Upload authorization has expired');
         }
         const recovered = verifyMessage(buildUploadBatchAuthorizationMessage({ address, origin: signedOrigin, issuedAt, files }), signature).toLowerCase();
@@ -524,7 +543,7 @@ export function createWorkerRequestHandler({
         throw new Error('Artist uploads must be supported audio, MP4, or artwork');
       }
       const issuedAtMs = Date.parse(issuedAt);
-      if (!Number.isFinite(issuedAtMs) || Math.abs(now() - issuedAtMs) > MAX_SIGNATURE_AGE_MS) {
+      if (!Number.isFinite(issuedAtMs) || Math.abs(now() - issuedAtMs) > MAX_UPLOAD_SIGNATURE_AGE_MS) {
         throw new Error('Upload authorization has expired');
       }
 

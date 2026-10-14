@@ -53,7 +53,13 @@ export function loadConfig() {
     pinataSignUrl:          process.env.PINATA_SIGN_URL || 'https://uploads.pinata.cloud/v3/files/sign',
     pinataFilesApiUrl:      (process.env.PINATA_FILES_API_URL || 'https://api.pinata.cloud/v3/files').replace(/\/public\/?$/, ''),
     ipfsApiUrl:             process.env.IPFS_API_URL || 'http://127.0.0.1:5001',
-    allowedOrigins:         (process.env.IPFS_ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean),
+    allowedOrigins:         [...new Set([
+      ...(process.env.IPFS_ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean),
+      (() => {
+        try { return new URL((process.env.SITE_URL || 'https://thejollylama.github.io/DecentBusking').replace(/\/$/, '')).origin; }
+        catch { return null; }
+      })(),
+    ].filter(Boolean))],
     mintOwnerWallet:        process.env.MINT_OWNER_WALLET || '',
     publicWorkerUrl:        (process.env.PUBLIC_WORKER_URL || '').replace(/\/$/, ''),
     nftContractAddress:     process.env.DECENT_NFT_CONTRACT_ADDRESS || '0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3',
