@@ -551,6 +551,38 @@ test('radio sync promotes a video stream when the state preserves an IPFS video 
   assert.equal(started[0].nowPlaying.videoUrl, 'ipfs://bafy-video');
 });
 
+test('radio sync prefers the visible video player when a main-radio ad exposes video metadata over an audio filename', async () => {
+  const source = radioSyncSource();
+  const started = [];
+  const audio = { paused: true, volume: 0, muted: false };
+  const context = vm.createContext({
+    performance,
+    setTimeout,
+    clearTimeout,
+    console,
+    audio,
+    started,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } },
+  });
+  vm.runInContext(`${source}\n_audio = audio; _audioPlayer = audio; _videoPlayer = { paused: true, volume: 0, muted: false, duration: 180,
+    currentTime: 0, seekable: { length: 1, start: () => 0, end: () => 180 }, readyState: 4, seeking: false, play() { this.paused = false; },
+    pause() { this.paused = true; }, removeAttribute() {}, querySelectorAll: () => [], appendChild() {}, load() {} };
+    _videoStage = { hidden: true }; _radio = {
+      playId: 'play-video',
+      title: 'Video Ad',
+      uploader: 'Advertiser',
+      ipfsCid: 'bafy-video',
+      videoUrl: 'ipfs://bafy-video',
+      mediaType: '',
+      filename: 'ad.mp3',
+      receivedAt: performance.now(),
+      positionMs: 0,
+    }; _switchTo = options => started.push(options); _syncRadio();`, context);
+  assert.equal(started.length, 1);
+  assert.equal(started[0].mime, 'video/mp4');
+  assert.equal(started[0].nowPlaying.videoUrl, 'ipfs://bafy-video');
+});
+
 test('radio volume survives fades and mute does not affect archive playback', async () => {
   const source = radioSyncSource();
   const audio = { volume: 0, muted: false };

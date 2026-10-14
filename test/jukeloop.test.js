@@ -471,6 +471,31 @@ test('radio state publishes the audible track position and newest uploads', asyn
   assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).nowPlaying, null);
 });
 
+test('radio state keeps video MIME for main-radio ads even when the filename looks audio-only', async () => {
+  const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'));
+  const { buildRadioState } = await import(moduleUrl.href);
+
+  const state = buildRadioState({
+    nowPlaying: {
+      trackId: 'devert:video',
+      title: 'Sponsored Video',
+      uploader: 'Advertiser',
+      filename: 'sponsored-ad.mp3',
+      mediaType: 'video/mp4',
+      videoUrl: 'ipfs://bafy-video',
+      ipfsCid: 'bafy-video',
+      startedAt: 40_000,
+      audible: true,
+      isDevert: true,
+    },
+    playlist: [],
+    now: 100_000,
+  });
+
+  assert.equal(state.nowPlaying.mediaType, 'video/mp4');
+  assert.equal(state.nowPlaying.videoUrl, 'ipfs://bafy-video');
+});
+
 test('radio state omits sponsor metadata for regular rotation', async () => {
   const moduleUrl = pathToFileURL(path.join(__dirname, '../discord-bot/jukeloop.js'));
   const { buildRadioState } = await import(moduleUrl.href);
