@@ -2,7 +2,7 @@
 // Initialises the header, footer, stage interactions, and the 3-D space field.
 
 import { initWallet } from './wallet.js';
-import { initStage } from './stage.js?v=20261014-celebrate';
+import { initStage } from './stage.js?v=20261014-tip-guard';
 import { initSpace } from './space.js?v=20261014-celebrate';
 import { initTutorial } from './tutorial.js?v=20261013-walkthrough';
 

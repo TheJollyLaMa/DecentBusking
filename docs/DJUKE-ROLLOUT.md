@@ -305,7 +305,9 @@ paths are:
 At the observed October 14 fee level, that is roughly 0.00000037 ETH,
 0.00000047 ETH, and 0.0000018 ETH respectively. A single continuous VertLoop
 campaign now records at most one on-chain impression per campaign per hour; extra
-plays stay journaled locally/Pinata and retry automatically after funding.
+loop plays inside that hour are intentionally not recorded. Main-radio impressions
+and music batches below `WORKER_MIN_BALANCE_WEI` (default 0.00002 ETH) stay
+journaled locally/Pinata and retry automatically after funding.
 
 **Current status:** the contract is deployed and unpaused, and the public campaign
 checkout is configured. The Base-fork rehearsal checked the USDC split, main-radio

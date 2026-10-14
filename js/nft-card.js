@@ -4,7 +4,7 @@
 
 import { fetchNFTMetaById } from './space.js?v=20261014-celebrate';
 import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
-import { returnToRadio } from './radio-sync.js?v=20261014-celebrate';
+import { returnToRadio } from './radio-sync.js?v=20261014-worker-gas';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
 
 // NFT currently shown in the single view; previews and purchases are handled explicitly.
@@ -154,7 +154,7 @@ export function renderNFTCard(nft) {
       if (result !== 'failed' && isVideo) panel.close();
       return;
     }
-    const { setNowPlaying } = await import('./stage.js?v=20261014-celebrate');
+    const { setNowPlaying } = await import('./stage.js?v=20261014-tip-guard');
     setNowPlaying({ nft, title: nft.name || nft.title, artist: nft.artist || nft.creator,
       audioUrl: nft.videoUrl || nft.audioUrl || nft.animation_url, mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : '') });
     if (isVideo) panel.close();
@@ -162,10 +162,10 @@ export function renderNFTCard(nft) {
 
   content.querySelector('.nft-mute-btn')?.addEventListener('click', async (event) => {
     const muted = event.currentTarget.getAttribute('aria-pressed') !== 'true';
-    const { setArchiveMuted } = await import('./radio-sync.js?v=20261014-celebrate');
+    const { setArchiveMuted } = await import('./radio-sync.js?v=20261014-worker-gas');
     setArchiveMuted(muted);
   });
-  import('./radio-sync.js?v=20261014-celebrate')
+  import('./radio-sync.js?v=20261014-worker-gas')
     .then(({ archiveMuted }) => { if (_cardNft === nft) _renderMute(content, archiveMuted()); })
     .catch(() => {});
 
@@ -341,7 +341,7 @@ function _buildCardHTML(nft) {
 // ── Parent Track Playback ─────────────────────────────────────────────────
 async function _playParent(parentTokenId) {
   if (!parentTokenId) return;
-  const { setNowPlaying } = await import('./stage.js?v=20261014-celebrate');
+  const { setNowPlaying } = await import('./stage.js?v=20261014-tip-guard');
   const meta = await fetchNFTMetaById(parentTokenId);
   if (!meta) return;
   const cfg = window.DecentConfig || {};

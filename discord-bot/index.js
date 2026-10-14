@@ -47,6 +47,7 @@ import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime,
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
 import { startDevertLoopWorker } from './devert-loop.js';
+import { DEFAULT_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
 import { createPinataStateStore } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
@@ -492,7 +493,8 @@ async function main() {
     const scheduler = new Wallet(devertSchedulerPrivateKey, new JsonRpcProvider(config.baseRpcUrl));
     const contract = new Contract(process.env.DEVERT_CONTRACT_ADDRESS, DEVERT_ABI, scheduler);
     _devertSchedulerContract = contract;
-    const workerMinBalanceWei = process.env.WORKER_MIN_BALANCE_WEI ? BigInt(process.env.WORKER_MIN_BALANCE_WEI) : 0n;
+    const workerMinBalanceWei = process.env.WORKER_MIN_BALANCE_WEI
+      ? BigInt(process.env.WORKER_MIN_BALANCE_WEI) : DEFAULT_WORKER_MIN_BALANCE_WEI;
     const journalStore = createPinataStateStore({ pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-devert-main-radio.json',
       tags: { app: 'decentbusking', kind: 'devert-main-radio', schema: '1' }, serialize: value => value,

@@ -39,7 +39,7 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.doesNotMatch(html, /id="devert-mute-ads"|id="devert-listen-radio"|id="devert-listen-ads"/);
   assert.equal((html.match(/id="devert-max-payment"/g) || []).length, 0);
   const panel = fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8');
-  assert.match(panel, /from '\.\/radio-sync\.js\?v=20261014-celebrate'/);
+  assert.match(panel, /from '\.\/radio-sync\.js\?v=20261014-worker-gas'/);
   assert.match(panel, /document\.addEventListener\('wallet-connected', refresh\)/);
   assert.match(panel, /adMediaStatus\.textContent = 'Submitted for review\.';\s*await refresh\(\)/);
   assert.match(panel, /scanPending \? 3_000 : 30_000/);

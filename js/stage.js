@@ -2,7 +2,7 @@
 // Hat (tip) + Guitar Case (mint) interactions and the now-playing banner.
 
 import { openMintModal } from './mint.js?v=20261014-celebrate';
-import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261014-celebrate';
+import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261014-worker-gas';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { resolveNowPlayingNFT } from './space.js?v=20261014-celebrate';
 import { nftArtistLabel } from './nft-loader.js?v=20261012-paging';
@@ -270,7 +270,7 @@ async function _handleSendTip() {
   const amountInput = document.getElementById('tip-amount');
   const sendBtn = document.getElementById('tip-send-btn');
   const cfg = window.DecentConfig || {};
-  if (_tipBusy) return;
+  if (_tipBusy || _tipSelectionState === 'sent') return;
 
   _showStatus('tip-status', '');
 

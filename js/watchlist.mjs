@@ -1,4 +1,4 @@
-import { buildCreatorWatchlistAuthorizationMessage, normalizeCreatorWatchlistEntry } from './creator-profile-data.mjs';
+import { buildCreatorWatchlistAuthorizationMessage, normalizeCreatorWatchlistEntry } from './creator-profile-data.mjs?v=20261014-profile-fallback';
 import { nftIdentity } from './nft-loader.js';
 
 const WATCHLIST_EVENT = 'creator-watchlist-changed';

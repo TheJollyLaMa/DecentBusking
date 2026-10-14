@@ -48,11 +48,12 @@ export function creatorImageURL(value, gateway = 'https://gateway.pinata.cloud/i
 
 function pickPreferredImage(primary, ...fallbacks) {
   const sources = [primary, ...fallbacks].filter(value => typeof value === 'string' && value.trim());
-  const resolved = sources.map(source => ({ source, uri: creatorImageURL(source) })).find(entry => entry.uri);
-  const source = resolved?.source || '';
+  const candidates = sources.filter(source => creatorImageURL(source));
+  const source = candidates[0] || '';
   return {
     source,
-    uri: resolved?.uri || '',
+    candidates,
+    uri: source ? creatorImageURL(source) : '',
     fallbackUsed: !!source && source !== sources[0],
     primaryUnsupported: !!sources[0] && !creatorImageURL(sources[0]),
   };
@@ -76,6 +77,8 @@ export function creatorPresentation(profile = {}, ens = null) {
     name: profile.displayName || ens?.name || profile.discord?.displayName || 'Profile',
     avatarURI: avatar.source,
     bannerURI: banner.source,
+    avatarCandidates: avatar.candidates,
+    bannerCandidates: banner.candidates,
     avatarFallbackUsed: avatar.fallbackUsed,
     bannerFallbackUsed: banner.fallbackUsed,
     avatarUnsupported: avatar.primaryUnsupported,

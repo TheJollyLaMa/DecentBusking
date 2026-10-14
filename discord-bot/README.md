@@ -60,7 +60,7 @@ cp .env.example .env
 | `DEVERT_CONTRACT_ADDRESS`    | DeVert    | Deployed DeVert campaign contract address; endpoint stays unavailable when unset |
 | `DEVERT_SCHEDULER_PRIVATE_KEY` | DeVert   | Optional override; defaults to the existing `DJUKE_FULFILLER_PRIVATE_KEY` |
 | `DEVERT_CONFIRMATIONS`       | ❌        | Confirmations for public DeVert campaign reads (default: `2`) |
-| `WORKER_MIN_BALANCE_WEI`     | DeVert   | Optional low-balance threshold for optional DeVert reporting; below this, impressions and music reports stay in the journal until the worker is funded again |
+| `WORKER_MIN_BALANCE_WEI`     | DeVert   | Optional low-balance threshold (wei) for DeVert reporting; defaults to `20000000000000` (0.00002 ETH). Below this, impressions and music reports stay in the journal until the worker is funded again |
 | `WORKER_ESTIMATED_DAILY_BURN_WEI` | DeVert | Optional runway estimate for the worker-gas notice; defaults to the observed daily burn rate used in the operator UI |
 | `DVERT_LOOP_DISCORD_TOKEN`   | AdLoop   | Separate bot token for the dedicated ad-only voice channel |
 | `VERT_LOOP_CHANNEL_ID`       | AdLoop   | ID of the `#vertloop` text channel for announcements/submissions |
@@ -81,9 +81,12 @@ ambiguous requests are skipped rather than assigned arbitrarily.
 
 Worker gas is monitored. Optional DeVert reporting is deferred below
 `WORKER_MIN_BALANCE_WEI` and retried automatically once the worker is funded
-again. VertLoop on-chain impressions are capped to one submission per campaign
-per hour in the worker journal so a single looping ad cannot drain the wallet
-with one transaction per play. The notice panel shows the worker wallet, live
+again. If the node still rejects a write with "insufficient funds", reporting
+stays paused until the worker balance actually rises. VertLoop on-chain
+impressions are coalesced to one submission per campaign per hour: additional
+loop plays inside that window are not recorded on chain, so a single looping ad
+cannot drain the wallet with one transaction per play. Main-radio impressions are
+never coalesced. The notice panel shows the worker wallet, live
 balance, threshold, and a rough runway estimate using
 `WORKER_ESTIMATED_DAILY_BURN_WEI` (defaults to the observed daily burn rate).
 The worker wallet also funds `reportCompletedMusicPlays`; those batches use the

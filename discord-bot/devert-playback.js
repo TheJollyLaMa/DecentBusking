@@ -1,6 +1,6 @@
 import { id, isAddress } from 'ethers';
 import { planDevertQueues } from '../js/devert-scheduler.mjs';
-import { readWorkerGasState } from '../js/worker-gas.mjs';
+import { DEFAULT_WORKER_MIN_BALANCE_WEI, readWorkerGasState } from '../js/worker-gas.mjs';
 
 const SCHEMA_VERSION = 1;
 const MUSIC_PLAYS_PER_MAIN_AD = 10;
@@ -70,7 +70,7 @@ function validateJournal(value) {
 
 export function createDevertPlaybackRuntime({ contract, provider = contract?.runner?.provider, restore, save,
   readCampaigns, resolveCampaignMedia = () => null, now = () => Date.now(), minimumAudibleMs = MIN_AUDIBLE_MS, log = console,
-  workerAddress, workerMinBalanceWei = 0n, workerDailyBurnWei = WORKER_GAS_DAILY_BURN_WEI, workerGasReader = readWorkerGasState,
+  workerAddress, workerMinBalanceWei = DEFAULT_WORKER_MIN_BALANCE_WEI, workerDailyBurnWei = WORKER_GAS_DAILY_BURN_WEI, workerGasReader = readWorkerGasState,
   workerGasCheckMs = WORKER_GAS_CHECK_MS }) {
   if (!contract || typeof restore !== 'function' || typeof save !== 'function' || typeof readCampaigns !== 'function') {
     throw new Error('DeVert playback requires a contract and durable journal store');
@@ -83,6 +83,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
   let workerGasState = null;
   let workerGasCheckedAt = 0;
   let workerGasWarningAt = 0;
+  let insufficientFundsBalanceWei = null;
   const workerWallet = workerAddress && isAddress(workerAddress) ? workerAddress : null;
   const vertLoopNextRetryAtByCampaign = new Map();
 
@@ -138,6 +139,17 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
         return nextRetryAt === entry.nextRetryAt ? entry : { ...entry, nextRetryAt };
       }),
     };
+    // Collapse any legacy VertLoop backlog to the oldest pending entry per campaign.
+    const keptVertLoopPending = new Set();
+    journal = {
+      ...journal,
+      impressions: journal.impressions.filter(entry => {
+        if (entry.mainRadio || entry.state !== 'pending') return true;
+        if (keptVertLoopPending.has(entry.campaignId)) return false;
+        keptVertLoopPending.add(entry.campaignId);
+        return true;
+      }),
+    };
   };
 
   const refreshWorkerGasState = async ({ force = false } = {}) => {
@@ -149,7 +161,13 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
     try {
       const state = await workerGasReader({ provider, workerAddress: workerWallet, minBalanceWei: workerMinBalanceWei, estimatedDailyBurnWei: workerDailyBurnWei });
       workerGasCheckedAt = now();
-      workerGasState = { ...state, checkedAt: workerGasCheckedAt };
+      // A node-reported shortfall stays latched until the balance actually rises, even if it clears the threshold.
+      let lowBalance = Boolean(state.lowBalance);
+      if (insufficientFundsBalanceWei !== null) {
+        if (typeof state.balanceWei === 'bigint' && state.balanceWei > insufficientFundsBalanceWei) insufficientFundsBalanceWei = null;
+        else lowBalance = true;
+      }
+      workerGasState = { ...state, lowBalance, checkedAt: workerGasCheckedAt };
     } catch (error) {
       workerGasCheckedAt = now();
       workerGasState = {
@@ -169,6 +187,25 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
     return state && !state.unavailable && !state.lowBalance;
   };
 
+  const markInsufficientFunds = async error => {
+    let balanceWei = null;
+    try { if (workerWallet) balanceWei = await provider.getBalance(workerWallet); } catch {}
+    if (typeof balanceWei !== 'bigint') balanceWei = typeof workerGasState?.balanceWei === 'bigint' ? workerGasState.balanceWei : 0n;
+    insufficientFundsBalanceWei = balanceWei;
+    workerGasState = {
+      checkedAt: now(),
+      unavailable: false,
+      lowBalance: true,
+      reason: error?.shortMessage || error?.message || 'worker gas low',
+      workerAddress: workerWallet,
+      balanceWei,
+      thresholdWei: workerMinBalanceWei,
+      runwayDays: 0,
+    };
+    workerGasCheckedAt = workerGasState.checkedAt;
+    warnWorkerGas(workerGasState);
+  };
+
   async function flushMusicBatch() {
     if (journal.pendingMusicPlayIds.length < MUSIC_BATCH_SIZE) return false;
     if (!await canSpendWorkerGas()) return false;
@@ -185,16 +222,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       if ((await transaction.wait(2))?.status !== 1) throw new Error(`DeVert music-play report failed: ${transaction.hash}`);
     } catch (error) {
       if (!isInsufficientFundsError(error)) throw error;
-      workerGasState = {
-        checkedAt: now(),
-        unavailable: false,
-        lowBalance: true,
-        reason: error?.shortMessage || error?.message || 'worker gas low',
-        workerAddress: workerWallet,
-        thresholdWei: workerMinBalanceWei,
-        runwayDays: 0,
-      };
-      warnWorkerGas(workerGasState);
+      await markInsufficientFunds(error);
       return false;
     }
     await commit({ ...journal, pendingMusicPlayIds: journal.pendingMusicPlayIds.slice(batch.length) });
@@ -243,16 +271,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       return next.impressions.find(item => item.impressionId === entry.impressionId);
     } catch (error) {
       if (!isInsufficientFundsError(error)) throw error;
-      workerGasState = {
-        checkedAt: now(),
-        unavailable: false,
-        lowBalance: true,
-        reason: error?.shortMessage || error?.message || 'worker gas low',
-        workerAddress: workerWallet,
-        thresholdWei: workerMinBalanceWei,
-        runwayDays: 0,
-      };
-      warnWorkerGas(workerGasState);
+      await markInsufficientFunds(error);
       return false;
     }
   }
@@ -393,6 +412,12 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       let entry = journal.impressions.find(item => item.impressionId === impressionId);
       if (entry?.state === 'recorded') return true;
       if (!entry) {
+        // VertLoop coalesces: at most one pending or recently recorded impression per campaign per window.
+        if (mainRadio !== true) {
+          const key = String(campaignId);
+          const hasPending = journal.impressions.some(item => !item.mainRadio && item.state === 'pending' && item.campaignId === key);
+          if (hasPending || (vertLoopNextRetryAtByCampaign.get(key) || 0) > now()) return false;
+        }
         entry = { impressionId, campaignId: String(campaignId), mainRadio: mainRadio === true, radioPlayId,
           recordedAt: new Date(now()).toISOString(), state: 'pending', nextRetryAt: mainRadio === true ? 0
             : Math.max(vertLoopNextRetryAtByCampaign.get(String(campaignId)) || 0, now()) };

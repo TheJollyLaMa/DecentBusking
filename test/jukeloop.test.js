@@ -524,6 +524,25 @@ test('main-radio ad countdown reports shared scheduler state without browser-sid
   });
 
   assert.equal(playing.status, 'playing');
+
+  const failingSession = error => ({
+    schedule: defaultRadioSchedule(),
+    livePerformanceEvents: [],
+    _musicSinceAd: 10,
+    _currentDevertAd: null,
+    _failedDevertCampaignIds: new Set(),
+    devertPlayback: { nextMainRadioAd: async () => { throw error; } },
+  });
+  const rawRpcError = Object.assign(new Error('insufficient funds for intrinsic transaction cost (transaction="0x02f8d1")'),
+    { code: 'INSUFFICIENT_FUNDS' });
+  const gasLow = await context.buildMainRadioAdCountdown({ now: 100_000, session: failingSession(rawRpcError) });
+  assert.equal(gasLow.status, 'unavailable');
+  assert.equal(gasLow.reason, 'worker gas low');
+  context.console = { ...console, warn: () => {} };
+  const otherFailure = await context.buildMainRadioAdCountdown({ now: 100_000,
+    session: failingSession(new Error('could not coalesce error (data="0xdeadbeef")')) });
+  context.console = console;
+  assert.equal(otherFailure.reason, 'main-radio scheduler unavailable');
   assert.equal(playing.campaignId, '42');
   assert.equal(playing.title, 'Spotlight');
 

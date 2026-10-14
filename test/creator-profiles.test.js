@@ -84,6 +84,9 @@ test('creator images prefer verified ENS, then uploaded IPFS, then Discord', asy
   assert.equal(creatorPresentation({ discord, avatarURI: 'ipfs://bafyimage' }, ens).avatarURI, ens.avatarURI);
   assert.equal(creatorPresentation({ discord, avatarURI: 'ipfs://bafyimage' }, { name: 'thejollylama.eth', avatarURI: 'javascript:alert(1)' }).avatarURI, 'ipfs://bafyimage');
   assert.equal(creatorPresentation({ discord }).avatarURI, discord.avatarURI);
+  assert.deepEqual(creatorPresentation({ discord, avatarURI: 'ipfs://bafyimage' }, { name: 'x.eth', avatarURI: 'javascript:alert(1)' }).avatarCandidates,
+    ['ipfs://bafyimage', discord.avatarURI]);
+  assert.deepEqual(creatorPresentation({ bannerURI: 'ipfs://bafybanner' }, ens).bannerCandidates, [ens.bannerURI, 'ipfs://bafybanner']);
   assert.equal(creatorImageURL('javascript:alert(1)'), '');
   assert.equal(creatorImageURL('ipfs://bafyimage'), 'https://gateway.pinata.cloud/ipfs/bafyimage');
   const address = Wallet.createRandom().address;

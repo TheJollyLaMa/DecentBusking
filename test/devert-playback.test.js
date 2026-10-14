@@ -81,7 +81,7 @@ async function makeRuntime(fixture) {
   const { createDevertPlaybackRuntime } = await import('../discord-bot/devert-playback.js');
   const runtime = createDevertPlaybackRuntime({ contract: fixture.contract, provider: fixture.contract.runner.provider,
     restore: async () => fixture.state.schemaVersion === 1 ? structuredClone(fixture.state) : null,
-    save: fixture.save, readCampaigns: fixture.readCampaigns, now: () => NOW, resolveCampaignMedia: fixture.resolveCampaignMedia,
+    save: fixture.save, readCampaigns: fixture.readCampaigns, now: () => fixture.now ?? NOW, resolveCampaignMedia: fixture.resolveCampaignMedia,
     workerAddress: fixture.workerAddress, workerMinBalanceWei: fixture.workerMinBalanceWei });
   await runtime.initialize();
   return runtime;
@@ -151,7 +151,7 @@ test('DeVert impression is checkpointed before its chain write and retry uses th
   assert.equal(fixture.impressionCalls[1].impressionId, pending.impressionId);
 });
 
-test('DeVert caps VertLoop on-chain impressions and leaves extra loops pending for later retry', async () => {
+test('DeVert coalesces VertLoop impressions to one on-chain record per campaign per hour', async () => {
   const fixture = harness({
     balance: 10n,
     workerMinBalanceWei: 1n,
@@ -160,11 +160,62 @@ test('DeVert caps VertLoop on-chain impressions and leaves extra loops pending f
   });
   const runtime = await makeRuntime(fixture);
   assert.equal(await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'loop-1', mainRadio: false, audibleMs: 30_000 }), true);
-  assert.equal(await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'loop-2', mainRadio: false, audibleMs: 30_000 }), true);
+  for (let loop = 2; loop <= 30; loop++) {
+    assert.equal(await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: `loop-${loop}`, mainRadio: false, audibleMs: 30_000 }), false);
+  }
   assert.equal(fixture.impressionCalls.length, 1);
-  assert.equal(fixture.state.impressions.length, 2);
-  assert.equal(fixture.state.impressions[1].state, 'pending');
-  assert.ok(fixture.state.impressions[1].nextRetryAt > NOW);
+  assert.equal(fixture.state.impressions.length, 1);
+  fixture.now = NOW + 60 * 60_000;
+  assert.equal(await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'loop-next-hour', mainRadio: false, audibleMs: 30_000 }), true);
+  assert.equal(fixture.impressionCalls.length, 2);
+  assert.ok(fixture.state.impressions.every(entry => entry.state === 'recorded'));
+});
+
+test('main-radio impressions are never throttled by the VertLoop window', async () => {
+  const fixture = harness();
+  const runtime = await makeRuntime(fixture);
+  await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'loop-1', mainRadio: false, audibleMs: 30_000 });
+  await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'main-1', mainRadio: true, audibleMs: 30_000 });
+  await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'main-2', mainRadio: true, audibleMs: 30_000 });
+  assert.deepEqual(fixture.impressionCalls.map(call => call.mainRadio), [false, true, true]);
+});
+
+test('restoring a legacy VertLoop backlog keeps one pending entry per campaign and every main-radio entry', async () => {
+  const fixture = harness({ balance: 0n, workerMinBalanceWei: 1n });
+  const pending = (key, campaignId, mainRadio) => ({ impressionId: id(key), campaignId, mainRadio, radioPlayId: key,
+    recordedAt: new Date(NOW - 1000).toISOString(), state: 'pending' });
+  fixture.state.impressions = [pending('a1', '1', false), pending('a2', '1', false), pending('b1', '2', false),
+    pending('m1', '1', true), pending('m2', '1', true), pending('a3', '1', false)];
+  const runtime = await makeRuntime(fixture);
+  assert.deepEqual(runtime.getState().impressions.map(entry => entry.radioPlayId), ['a1', 'b1', 'm1', 'm2']);
+});
+
+test('a node-reported insufficient-funds failure stays deferred until the worker balance rises', async () => {
+  let balance = 5_000n;
+  const fixture = harness({ workerMinBalanceWei: 1n });
+  fixture.contract.runner.provider.getBalance = async () => balance;
+  let failing = true;
+  fixture.contract.recordCampaignPlay = async (campaignId, mainRadio, impressionId) => {
+    fixture.impressionCalls.push({ campaignId: String(campaignId), mainRadio, impressionId });
+    if (failing) throw Object.assign(new Error('insufficient funds for gas * price + value'), { code: 'INSUFFICIENT_FUNDS' });
+    fixture.recorded.add(impressionId);
+    return { wait: async () => ({ status: 1 }) };
+  };
+  fixture.contract.recordCampaignPlay.staticCall = async () => {};
+  const runtime = await makeRuntime(fixture);
+  assert.equal(await runtime.recordCampaignImpression({ campaignId: '9', radioPlayId: 'main-1', mainRadio: true, audibleMs: 30_000 }), true);
+  assert.equal(fixture.impressionCalls.length, 1);
+  assert.equal((await runtime.getWorkerGasState()).lowBalance, true);
+  fixture.now = NOW + 5 * 60_000;
+  assert.equal((await runtime.getWorkerGasState()).lowBalance, true, 'balance above threshold but unchanged must stay latched');
+  await runtime.recordCampaignImpression({ campaignId: '9', radioPlayId: 'main-2', mainRadio: true, audibleMs: 30_000 });
+  assert.equal(fixture.impressionCalls.length, 1, 'no RPC hammering while latched');
+  failing = false;
+  balance = 10n ** 15n;
+  fixture.now = NOW + 10 * 60_000;
+  assert.equal((await runtime.getWorkerGasState()).lowBalance, false);
+  await runtime.nextMainRadioAd();
+  assert.ok(runtime.getState().impressions.every(entry => entry.state === 'recorded'));
 });
 
 test('DeVert uses only the main-radio queue and advances by confirmed impressions', async () => {

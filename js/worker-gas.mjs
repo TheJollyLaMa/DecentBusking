@@ -1,4 +1,6 @@
 const DEFAULT_ESTIMATED_DAILY_BURN_WEI = 86_000_000_000_000n;
+// 0.00002 ETH: roughly ten music-play reports or fifty impressions at October 2026 Base fees.
+export const DEFAULT_WORKER_MIN_BALANCE_WEI = 20_000_000_000_000n;
 
 function formatEth(wei) {
   if (typeof wei !== 'bigint' || wei < 0n) return '0 ETH';
@@ -60,7 +62,7 @@ export function initWorkerGasNotices() {
   async function check() {
     const cfg = window.DecentConfig || {};
     const provider = new ethers.JsonRpcProvider(cfg.rpcUrl || 'https://mainnet.base.org');
-    const thresholdWei = safeBigInt(cfg.workerMinBalanceWei, 0n);
+    const thresholdWei = safeBigInt(cfg.workerMinBalanceWei, DEFAULT_WORKER_MIN_BALANCE_WEI);
     const estimatedDailyBurnWei = safeBigInt(cfg.workerEstimatedDailyBurnWei, DEFAULT_ESTIMATED_DAILY_BURN_WEI);
     let timeout;
     try {

@@ -144,7 +144,7 @@ test('worker funding remains available beside mint and paid queue controls', () 
   const notice = html.slice(workerNotice, html.indexOf('id="djuke-payment-state"', workerNotice));
   assert.match(notice, /ETH/);
   assert.match(notice, /0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F/);
-  assert.match(notice, /[Bb]alance is not checked here/);
+  assert.match(notice, /Worker balance is monitored/);
   assert.match(html, /Mint gas comes from your wallet/);
   assert.doesNotMatch(html, /id="admin-reviewed-album-import"/);
   assert.match(html, /<details id="admin-radio-schedule"/);

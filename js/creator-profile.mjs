@@ -1,4 +1,4 @@
-import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs';
+import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-fallback';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
@@ -39,6 +39,9 @@ export function initCreatorProfile() {
   let profile = {};
   let ens = null;
   let ensError = '';
+  let ensLoading = false;
+  let viewingOwnProfile = false;
+  const imageCandidates = { avatar: [], banner: [] };
   let revision = 0;
   let album = null;
   let busy = false;
@@ -159,12 +162,18 @@ export function initCreatorProfile() {
     const ensNote = dialog.querySelector('[data-profile-ens-note]');
     const mediaNote = dialog.querySelector('[data-profile-media-note]');
     if (ensNote) {
-      if (ensError) {
+      if (ensLoading) {
         ensNote.hidden = false;
-        ensNote.textContent = 'ENS lookup is temporarily unavailable; your wallet-linked Profile is still available.';
+        ensNote.textContent = 'Checking ENS…';
+      } else if (ensError) {
+        ensNote.hidden = false;
+        ensNote.textContent = 'ENS lookup is temporarily unavailable; this wallet-linked Profile is still available.';
+      } else if (!ens?.name && !editable()) {
+        ensNote.hidden = false;
+        ensNote.textContent = 'No verified ENS name for this wallet.';
       } else if (!ens?.name) {
         ensNote.hidden = false;
-        ensNote.innerHTML = 'No verified ENS name found. Optional: register one at <a href="https://app.ens.domains/" target="_blank" rel="noreferrer">app.ens.domains</a>, set it as the wallet primary name, and add avatar/banner records.';
+        ensNote.innerHTML = 'No verified ENS name found. Optional: register one at <a href="https://app.ens.domains/" target="_blank" rel="noreferrer">app.ens.domains</a>, set it as the wallet primary name, and add avatar/banner records. Registering alone does not set the primary name or images.';
       } else if (presentation.avatarUnsupported || presentation.bannerUnsupported) {
         const unsupported = [presentation.avatarUnsupported && 'avatar', presentation.bannerUnsupported && 'banner'].filter(Boolean).join(' and ');
         ensNote.hidden = false;
@@ -179,6 +188,12 @@ export function initCreatorProfile() {
       mediaNote.textContent = '';
     }
   };
+  const showImageCandidate = (image, kind, index) => {
+    const uri = imageCandidates[kind][index] || '';
+    image.dataset.candidateIndex = String(index);
+    image.hidden = !uri;
+    if (uri) image.src = uri; else image.removeAttribute('src');
+  };
   const display = () => {
     const presentation = creatorPresentation(profile, ens);
     dialog.querySelector('[data-profile-name]').textContent = presentation.name;
@@ -188,9 +203,9 @@ export function initCreatorProfile() {
     for (const kind of ['avatar', 'banner']) {
       const image = dialog.querySelector(`[data-profile-${kind}]`);
       image.dataset.profileKind = kind;
-      const uri = creatorImageURL(presentation[`${kind}URI`], config().ipfsGateway);
-      image.hidden = !uri;
-      if (uri) image.src = uri; else image.removeAttribute('src');
+      imageCandidates[kind] = (presentation[`${kind}Candidates`] || [])
+        .map(source => creatorImageURL(source, config().ipfsGateway)).filter(Boolean);
+      showImageCandidate(image, kind, 0);
     }
     for (const field of ['displayName', 'bio']) form.elements.namedItem(field).value = profile[field] || '';
     setControls();
@@ -221,9 +236,11 @@ export function initCreatorProfile() {
     const target = detail?.address || window._wallet?.address;
     if (!/^0x[0-9a-fA-F]{40}$/.test(target || '')) { message('Connect your wallet in the page header'); if (!dialog.open) dialog.showModal(); return; }
     address = target;
+    viewingOwnProfile = !detail?.address || editable();
     profile = {};
     ens = null;
     ensError = '';
+    ensLoading = true;
     album = null;
     const check = ++revision;
     if (!dialog.open) dialog.showModal();
@@ -242,6 +259,7 @@ export function initCreatorProfile() {
     } catch (error) { ensError = error?.shortMessage || error?.reason || error?.message || 'ENS lookup unavailable'; resolvedENS = null; }
     if (check !== revision) return;
     ens = resolvedENS;
+    ensLoading = false;
     display();
     if (detail?.albumId) albumForm.elements.namedItem('albumId').value = detail.albumId;
   };
@@ -279,11 +297,17 @@ export function initCreatorProfile() {
   dialog.querySelector('[data-profile-refresh]').addEventListener('click', () => run(() => open({ address })));
   dialog.querySelector('[data-profile-close]').addEventListener('click', () => { revision++; dialog.close(); });
   dialog.querySelectorAll('[data-profile-avatar], [data-profile-banner]').forEach(image => image.addEventListener('error', () => {
-    image.hidden = true;
+    if (!image.getAttribute('src')) return;
+    const kind = image.dataset.profileKind || 'avatar';
+    const next = Number(image.dataset.candidateIndex || 0) + 1;
+    showImageCandidate(image, kind, next);
     const mediaNote = dialog.querySelector('[data-profile-media-note]');
     if (mediaNote) {
       mediaNote.hidden = false;
-      mediaNote.textContent = `${String(image.dataset.profileKind || 'profile').replace(/^\w/, value => value.toUpperCase())} image could not be loaded; showing fallback images where available.`;
+      const label = kind.replace(/^\w/, value => value.toUpperCase());
+      mediaNote.textContent = imageCandidates[kind][next]
+        ? `${label} image could not be loaded; showing a fallback image.`
+        : `${label} image could not be loaded and no fallback is available.`;
     }
   }));
   document.addEventListener('creator-watchlist-changed', event => {
@@ -382,7 +406,8 @@ export function initCreatorProfile() {
   document.addEventListener('wallet-connected', event => {
     revision++;
     setControls();
-    if (dialog.open) void open({ address: event.detail?.address || window._wallet?.address || '' });
+    if (dialog.open && viewingOwnProfile) void run(() => open({}));
+    else if (dialog.open) display();
   });
   document.addEventListener('click', event => {
     const button = event.target.closest?.('.nft-creator-profile');

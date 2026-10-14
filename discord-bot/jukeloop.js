@@ -233,10 +233,12 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
       count: 1,
     });
   } catch (error) {
+    const lowGas = error?.code === 'INSUFFICIENT_FUNDS' || /insufficient funds/i.test(error?.shortMessage || error?.message || '');
+    if (!lowGas) console.warn('[devert] Main radio ad lookup failed:', error?.message || error);
     return {
       ...summary,
       status: 'unavailable',
-      reason: error?.message || 'main-radio scheduler unavailable',
+      reason: lowGas ? 'worker gas low' : 'main-radio scheduler unavailable',
     };
   }
 
