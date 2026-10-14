@@ -9,7 +9,7 @@ const gatewayUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'ipfs-gateway.
 const loaderUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'nft-loader.js')).href;
 
 test('NFT identities and caches distinguish identical token IDs across collections', async () => {
-  const { loadMintedToken, nftIdentity, configuredNftCollections } = await import(loaderUrl);
+  const { loadMintedToken, nftIdentity, configuredNftCollections, buildNftShareUrl, parseNftIdentitySearch } = await import(loaderUrl);
   const oldAddress = `0x${'1'.repeat(40)}`;
   const newAddress = `0x${'2'.repeat(40)}`;
   const values = new Map();
@@ -27,6 +27,14 @@ test('NFT identities and caches distinguish identical token IDs across collectio
   assert.throws(() => nftIdentity({ contractAddress: 'invalid', tokenId: 0 }));
   assert.deepEqual(configuredNftCollections({ contractAddress: oldAddress,
     additionalNftContractAddresses: [oldAddress, newAddress] }).map(entry => entry.contractAddress), [oldAddress, newAddress]);
+  const shareUrl = buildNftShareUrl({ chainId: 8453, contractAddress: oldAddress, tokenId: 9 }, 'https://busking.example/app/index.html?foo=bar');
+  assert.equal(shareUrl, 'https://busking.example/app/index.html?chainId=8453&contract=0x1111111111111111111111111111111111111111&tokenId=9');
+  assert.deepEqual(parseNftIdentitySearch(new URL(shareUrl).search), {
+    chainId: 8453,
+    contractAddress: oldAddress,
+    tokenId: 9,
+  });
+  assert.throws(() => parseNftIdentitySearch('?chainId=8453&contract=bad&tokenId=9'));
 });
 
 test('falls back to the Pinata browser gateway for IPFS metadata', async () => {
@@ -113,12 +121,16 @@ test('archive retries transient RPC errors instead of silently dropping a track'
   assert.equal(nft.name, 'Song');
 });
 
-test('NFT details open an accessible dialog with artwork and escaped metadata without another audio player', () => {
+test('NFT details open an accessible dialog with artwork and escaped metadata without another audio player', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/nft-card.js'), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/export /g, '');
+  const { buildNftShareUrl } = await import(loaderUrl);
   const classes = new Set(['hidden']);
   const events = [];
+  const shareCalls = [];
+  const copiedLinks = [];
   const listeners = new Map();
+  const contractAddress = `0x${'2'.repeat(40)}`;
   const makeButton = () => ({
     textContent: '',
     title: '',
@@ -132,7 +144,9 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   const listenBtn = makeButton();
   const muteBtn = makeButton();
   const playlistBtn = makeButton();
+  const shareBtn = makeButton();
   const listenStatus = { textContent: '' };
+  const shareStatus = { innerHTML: '', textContent: '', querySelector: () => null };
   const panel = {
     open: false,
     classList: { remove: (name) => classes.delete(name), add: (name) => classes.add(name) },
@@ -146,7 +160,9 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
       if (selector === '.nft-listen-btn') return listenBtn;
       if (selector === '.nft-mute-btn') return muteBtn;
       if (selector === '.nft-playlist-btn') return playlistBtn;
+      if (selector === '.nft-share-btn') return shareBtn;
       if (selector === '.nft-listen-status') return listenStatus;
+      if (selector === '.nft-share-status') return shareStatus;
       return null;
     },
     querySelectorAll: () => [],
@@ -167,14 +183,22 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
         return !event.defaultPrevented;
       },
     },
-    window: { DecentConfig: { chainName: 'Base Mainnet', contractAddress: '0xcontract' } }, URL,
+    window: { DecentConfig: { chainName: 'Base Mainnet', contractAddress: '0xcontract' },
+      location: { href: 'https://busking.example/app/?foo=bar' } },
+    URL,
+    buildNftShareUrl,
     CustomEvent: class CustomEvent {
       constructor(type, init = {}) { this.type = type; this.detail = init.detail; this.cancelable = Boolean(init.cancelable); this.defaultPrevented = false; }
       preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
     },
+    navigator: {
+      canShare: () => true,
+      share: async (payload) => { shareCalls.push(payload); },
+      clipboard: { writeText: async (value) => copiedLinks.push(value) },
+    },
   });
   vm.runInContext(source, context);
-  context.renderNFTCard({ tokenId: 12, contractAddress: '0xsecondcollection', name: '<script>bad</script>', image: 'ipfs://artwork',
+  context.renderNFTCard({ tokenId: 12, contractAddress, name: '<script>bad</script>', image: 'ipfs://artwork',
     audioUrl: 'ipfs://audio', metadataUri: 'ipfs://metadata', artist: '0xartist', description: '<b>description</b>' });
   assert.equal(panel.open, true);
   assert.equal(classes.has('hidden'), false);
@@ -182,12 +206,22 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   assert.match(content.innerHTML, /&lt;script&gt;bad&lt;\/script&gt;/);
   assert.match(content.innerHTML, /ipfs:\/\/metadata/);
   assert.match(content.innerHTML, /Base Mainnet/);
-  assert.match(content.innerHTML, /token\/0xsecondcollection\?a=12/);
+  assert.match(content.innerHTML, new RegExp(`token\\/${contractAddress}\\?a=12`));
   assert.doesNotMatch(content.innerHTML, /token\/0xcontract\?/);
   assert.doesNotMatch(content.innerHTML, /<audio/);
   assert.match(content.innerHTML, /▶ Preview/);
   assert.match(content.innerHTML, /🎧 Listen \(0\.25 USDC\)/);
+  assert.match(content.innerHTML, /Share/);
   assert.equal(events.includes('dbusk-listen'), false);
+  await shareBtn.listeners.click();
+  assert.equal(shareCalls[0].title, '<script>bad</script>');
+  assert.equal(shareCalls[0].text, '<script>bad</script> by 0xartist');
+  assert.equal(shareCalls[0].url, `https://busking.example/app/?chainId=8453&contract=${contractAddress}&tokenId=12`);
+  assert.equal(shareStatus.textContent, 'Shared.');
+  context.navigator.share = undefined;
+  await shareBtn.listeners.click();
+  assert.equal(copiedLinks[0], `https://busking.example/app/?chainId=8453&contract=${contractAddress}&tokenId=12`);
+  assert.equal(shareStatus.textContent, 'Link copied.');
   previewBtn.listeners.click();
   assert.equal(events.at(-1), 'dbusk-listen');
   context.document.dispatchEvent(new context.CustomEvent('dbusk-listen-started', {
