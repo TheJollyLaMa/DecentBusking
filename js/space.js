@@ -1108,8 +1108,35 @@ function _ensureNowPlayingEdge(mesh) {
     mesh.add(layer);
     return layer;
   });
+  const moonMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.98,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.AdditiveBlending ?? undefined,
+  });
+  const moons = specs.map((spec, index) => {
+    const moon = new THREE.Mesh(
+      new THREE.CircleGeometry(0.12 + index * 0.02, 10),
+      moonMaterial.clone ? moonMaterial.clone() : new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.98,
+        depthWrite: false,
+        depthTest: false,
+        blending: THREE.AdditiveBlending ?? undefined,
+      }),
+    );
+    moon.position.set(0, 0, 0.08 + index * 0.01);
+    moon.renderOrder = spec.order + 10;
+    moon.userData = { ...(moon.userData || {}), moonIndex: index, moonPhase: Math.random() };
+    mesh.add(moon);
+    return moon;
+  });
   const edge = layers[0];
   ud.nowPlayingEdgeLayers = layers;
+  ud.nowPlayingMoonLayers = moons;
   ud.nowPlayingEdge = edge;
   ud.nowPlayingEdgeSegments = segments;
   ud.nowPlayingEdgePositions = positions;
@@ -1171,6 +1198,7 @@ function _updateNowPlayingEdge(mesh, intensity = 0, dt = 16, settle = false, zoo
   const colors = ud.nowPlayingEdgeColors;
   const segments = ud.nowPlayingEdgeSegments || 64;
   const layers = ud.nowPlayingEdgeLayers || [edge];
+  const moons = ud.nowPlayingMoonLayers || [];
   const left = _nowPlayingLeftWaveData;
   const right = _nowPlayingRightWaveData;
   const baseRadius = 1.98;
@@ -1206,6 +1234,23 @@ function _updateNowPlayingEdge(mesh, intensity = 0, dt = 16, settle = false, zoo
     layer.material.opacity = opacity * (opacityOffsets[index] || 1);
     layer.scale.setScalar((ud.nowPlayingEdgeBaseScale ?? 1) * (scaleOffsets[index] || 1) * (1 + intensity * 0.14));
     _applyMaterialColor(layer.material, ..._hslToRgb((phase + 0.14 + index * 0.03) % 1, 0.95, Math.min(0.92, brightness + 0.08 + index * 0.03)));
+  });
+  moons.forEach((moon, index) => {
+    const moonPhase = (moon.userData?.moonPhase ?? 0) + now / (6200 + index * 900);
+    const moonAngle = (moonPhase % 1) * Math.PI * 2 - Math.PI / 2;
+    const sampleIndex = Math.abs(Math.floor(((moonAngle + Math.PI / 2) / (Math.PI * 2)) * segments)) % segments;
+    const sample = positions ? ((positions[(sampleIndex * 3) % positions.length] || 0) / Math.max(1, ud.nowPlayingEdgeBaseScale ?? 1)) : 0;
+    const layerScale = scaleOffsets[index] || 1;
+    const orbitRadius = baseRadius * layerScale + 0.02 + Math.max(0, sample) * 0.28 + intensity * 0.06;
+    moon.position.set(
+      Math.cos(moonAngle) * orbitRadius,
+      Math.sin(moonAngle) * orbitRadius,
+      0.1 + Math.max(0, sample) * 0.08,
+    );
+    moon.rotation.z = moonAngle + Math.PI / 2;
+    moon.scale.setScalar(1 + intensity * 0.22 + Math.max(0, sample) * 0.3);
+    moon.material.opacity = Math.min(1, 0.72 + intensity * 0.25 + Math.max(0, sample) * 0.18);
+    _applyMaterialColor(moon.material, ..._hslToRgb((phase + 0.24 + index * 0.17) % 1, 0.92, Math.min(0.96, brightness + 0.16)));
   });
   if (mesh.userData.nowPlayingGlow?.material) {
     _applyMaterialColor(mesh.userData.nowPlayingGlow.material, ..._hslToRgb((phase + 0.05) % 1, 0.9, Math.min(0.94, brightness + 0.2)));

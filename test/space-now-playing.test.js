@@ -238,9 +238,12 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingGlow.material.opacity > 0.18', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdge.material.opacity > 0', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdgeLayers.length >= 4', context));
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingMoonLayers.length >= 4', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdgeLayers.every(layer => layer.material.depthTest === false)', context));
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingMoonLayers.every(moon => moon.material.depthTest === false)', context));
   const colors = vm.runInContext('Array.from(_allNFTs[0].mesh.userData.nowPlayingEdge.geometry.attributes.color.array)', context);
   assert.ok(new Set(colors.map((value) => value.toFixed(2))).size > 8);
+  const moonPositionsBefore = vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingMoonLayers.map(moon => [moon.position.x, moon.position.y, moon.position.z])', context);
   const neighbor = vm.runInContext(`_spawnMesh({
     tokenId: 8,
     contractAddress: ${JSON.stringify(`0x${'1'.repeat(40)}`)},
@@ -252,6 +255,8 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   }, false)`, context);
   vm.runInContext('_allNFTs[1].mesh.position.copy(_allNFTs[0].mesh.position).add(new THREE.Vector3(2, 0, 0));', context);
   vm.runInContext('_updateNowPlayingPulse();', context);
+  const moonPositionsAfter = vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingMoonLayers.map(moon => [moon.position.x, moon.position.y, moon.position.z])', context);
+  assert.notDeepEqual(moonPositionsAfter, moonPositionsBefore);
   assert.ok(vm.runInContext('_allNFTs[1].mesh.material.opacity < 0.3', context));
 
   audio.paused = true;
