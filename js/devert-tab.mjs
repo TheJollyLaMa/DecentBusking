@@ -2,7 +2,7 @@ import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapsh
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { submitMediaForApproval } from './mint-submission.js?v=20261014-upload-resilience';
-import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
+import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { planDevertQueues, quoteDevertCampaign, DEVERT_SONGS_PER_MAIN_AD } from './devert-scheduler.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 
@@ -139,7 +139,7 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   if (await usdc.balanceOf(advertiser) < offerUnits) throw new Error('Insufficient Base USDC balance');
   let gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser, weeks);
   if (await usdc.allowance(advertiser, contract.target) < offerUnits) {
-    onStep(`Approving exactly ${formatUsdc(offerUnits.toString())}; estimated worker-gas top-up ${formatEth(gasQuote.amount)} plus transaction gas`);
+    onStep(`${approvalNotice(formatUsdc(offerUnits.toString()))} Estimated worker-gas top-up ${formatEth(gasQuote.amount)} plus transaction gas`);
     const approval = await usdc.approve(contract.target, offerUnits);
     if ((await approval.wait())?.status !== 1) throw new Error('USDC approval did not confirm');
     onStep('Confirming approval…');

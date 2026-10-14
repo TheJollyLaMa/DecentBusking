@@ -3,7 +3,7 @@
 import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261014-paid-sponsors';
 import { setNowPlaying } from './stage.js?v=20261014-upload-resilience';
 import { supportsDjukeAlbumsAndGas } from './djuke-version.mjs';
-import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
+import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 
 export const LISTEN_PRICE_UNITS = 250000n;
@@ -40,7 +40,7 @@ export async function purchaseListens({ signer, djuke, usdc, songIds, contractVe
   const address = await signer.getAddress();
   if (await usdc.balanceOf(address) < total) throw new Error(`You need ${formatUsdc(total)} USDC on Base`);
   if (await usdc.allowance(address, djuke.target) < total) {
-    onStep(`Approving exactly ${formatUsdc(total)} USDC`);
+    onStep(approvalNotice(formatUsdc(total)));
     if ((await (await usdc.approve(djuke.target, total)).wait())?.status !== 1) throw new Error('USDC approval did not confirm');
     onStep('Confirming approval…');
     await waitForAllowance(usdc, address, djuke.target, total);

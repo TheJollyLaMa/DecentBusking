@@ -23,6 +23,12 @@ export async function ensureBaseNetwork(provider) {
   }
 }
 
+// Shown before every token approval so a wallet security banner doesn't surprise users.
+export function approvalNotice(amountText) {
+  const amount = String(amountText).replace(/\s*USDC$/i, '');
+  return `Approve exactly ${amount} USDC — nothing more. All our contracts are verified on Basescan (see docs/CONTRACTS.md); if your wallet shows a caution banner, you can review the contract there.`;
+}
+
 export async function waitForAllowance(token, owner, spender, minimumAmount, { retries = 10, delayMs = 50 } = {}) {
   for (let attempt = 0; attempt < retries; attempt++) {
     if (await token.allowance(owner, spender) >= minimumAmount) return;

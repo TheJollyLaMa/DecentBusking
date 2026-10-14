@@ -1,5 +1,5 @@
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
-import { ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
+import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 
 export function quoteDjuke(pendingCount) {
@@ -94,7 +94,7 @@ export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUni
     if (await signer.provider.getBalance(address) < contribution) throw new Error('Insufficient Base ETH for worker gas contribution');
   }
   if (await usdc.allowance(address, djuke.target) < price) {
-    onStep(`Approving exactly ${formatDjukeUsdc(price)} USDC`);
+    onStep(approvalNotice(formatDjukeUsdc(price)));
     if ((await (await usdc.approve(djuke.target, price)).wait())?.status !== 1) throw new Error('USDC approval did not confirm');
     onStep('Confirming approval…');
     await waitForAllowance(usdc, address, djuke.target, price);
