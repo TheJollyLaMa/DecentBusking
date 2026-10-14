@@ -58,6 +58,13 @@ function makeThreeStubs() {
     Vector2: class {},
     Vector3,
     CircleGeometry: class {},
+    SphereGeometry: class {
+      constructor(radius, widthSegments, heightSegments) {
+        this.radius = radius;
+        this.widthSegments = widthSegments;
+        this.heightSegments = heightSegments;
+      }
+    },
     MeshBasicMaterial: class {
       constructor(options = {}) {
         Object.assign(this, options);
@@ -241,6 +248,8 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingMoonLayers.length >= 4', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingEdgeLayers.every(layer => layer.material.depthTest === false)', context));
   assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingMoonLayers.every(moon => moon.material.depthTest === false)', context));
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingMoonLayers.every((moon, index) => moon.parent === _allNFTs[0].mesh.userData.nowPlayingEdgeLayers[index])', context));
+  assert.ok(vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingMoonLayers.every(moon => moon.geometry.radius <= 0.17)', context));
   const colors = vm.runInContext('Array.from(_allNFTs[0].mesh.userData.nowPlayingEdge.geometry.attributes.color.array)', context);
   assert.ok(new Set(colors.map((value) => value.toFixed(2))).size > 8);
   const moonPositionsBefore = vm.runInContext('_allNFTs[0].mesh.userData.nowPlayingMoonLayers.map(moon => [moon.position.x, moon.position.y, moon.position.z])', context);
