@@ -44,7 +44,7 @@
 .devert-workflow li { display: grid; gap: 5px; font-size: .72rem; }
 .devert-workflow strong { color: #f5cf66; }
 .devert-workflow span { color: #c7b98f; font-size: .66rem; line-height: 1.4; }
-.devert-secondary-status { display: none; }
+.devert-secondary-status { display: block; color: #f5cf66; font-size: .7rem; line-height: 1.35; }
 .devert-file-limit { color: #c7b98f; font-size: .68rem; margin: 0; }
 .devert-run-campaign { padding-top: 14px; border-top: 1px solid #806532; margin-top: 12px; }
 .devert-run-campaign summary { cursor: pointer; font-size: .85rem; font-weight: 700; color: #f5cf66; }
@@ -2558,6 +2558,14 @@ decent-foot {
 }
 .radio-title-window:hover #now-playing-title { animation-play-state: paused; }
 #radio-footer #now-playing-artist { font-size: .75rem; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#radio-footer .radio-ad-countdown {
+  font-size: .68rem;
+  color: var(--gold);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 #radio-footer .now-playing-actions { justify-content: flex-start; }
 #radio-footer #now-playing-play-btn, #radio-footer #now-playing-radio-btn {
   font-family: inherit;
@@ -2596,6 +2604,7 @@ decent-foot {
   #footer-discord-link { grid-column: 1; font-size: .75rem; }
   .radio-title-window { width: 100%; }
   #radio-footer #now-playing-artist { max-width: 100%; }
+  #radio-footer .radio-ad-countdown { max-width: 100%; white-space: normal; }
 }
 @media (max-width: 380px) {
   #radio-footer { padding: 8px 72px; }

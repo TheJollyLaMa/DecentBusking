@@ -1,4 +1,4 @@
-import { canSetDevertListenMode, setDevertListenMode } from './radio-sync.js?v=20261010-listens';
+import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261010-listens';
 import { createBrowserIpfsUploader } from './ipfs-upload.js';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { submitMediaForApproval } from './mint-submission.js';
@@ -215,9 +215,16 @@ export function initDevertTab() {
   let snapshot = null;
   let purchaseBusy = false;
   let adMediaBusy = false;
+  let radioState = getRadioStateSnapshot();
 
   const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
   previewPlayer.dataset.listenMode ||= 'radio';
+
+  function syncRadioStatus() {
+    radioStatus.textContent = formatMainRadioAdCountdown(radioState?.mainRadioAdCountdown, {
+      disconnected: radioState?.mainRadioAdCountdown?.reason === 'disconnected',
+    });
+  }
 
   function syncListenControls() {
     const adsOnly = previewPlayer.dataset.listenMode === 'ads-only';
@@ -231,6 +238,12 @@ export function initDevertTab() {
     for (const button of adVoteButtons) {
       if (button) button.disabled = !adsOnly || !playId || adVoteBusy || votedAdPlays.has(playId);
     }
+
+    document.addEventListener('dbusk-radio-state', (event) => {
+      radioState = event.detail || null;
+      syncRadioStatus();
+    });
+    syncRadioStatus();
   }
 
   function stopAdLoopMirror(message = '') {
@@ -602,7 +615,7 @@ export function initDevertTab() {
       adLibraryStatus = 'DVert campaign service is not configured.';
       renderAdLibrary();
       campaignStatus.textContent = 'DVert campaign service is not configured.';
-      radioStatus.textContent = 'Main radio ad scheduling is not live yet.';
+      syncRadioStatus();
       syncCheckout();
       return;
     }
@@ -656,7 +669,7 @@ export function initDevertTab() {
         campaignList.append(item);
       }
       campaignStatus.textContent = adLibraryStatus;
-      radioStatus.textContent = 'Main-radio ads follow the ten-song program; AdLoop is a separate 24/7 channel.';
+      syncRadioStatus();
       await checkAdLoopReady();
       syncCheckout();
     } catch (error) {
@@ -668,7 +681,7 @@ export function initDevertTab() {
       renderAdLibrary();
       campaignList.replaceChildren();
       campaignStatus.textContent = error.message;
-      radioStatus.textContent = 'Main-radio ad scheduling is not live yet.';
+      syncRadioStatus();
       syncCheckout();
     }
     if (request === generation && isOpen()) refreshTimer = setTimeout(refresh, scanPending ? 3_000 : 30_000);

@@ -176,6 +176,76 @@ test('radio keeps the current song playing until it ends before starting the nex
   assert.equal(vm.runInContext('started[0].offset()', context), 0);
 });
 
+test('radio sync renders the shared main-radio countdown in the footer and broadcasts state', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const nodes = new Map();
+  const listeners = new Map();
+  function element(id) {
+    if (nodes.has(id)) return nodes.get(id);
+    const handlers = new Map();
+    const item = {
+      id,
+      hidden: false,
+      paused: true,
+      volume: 1,
+      value: '100',
+      textContent: '',
+      style: { setProperty() {} },
+      classList: { toggle() {}, add() {}, remove() {} },
+      addEventListener(name, callback) { handlers.set(name, callback); },
+      setAttribute() {},
+      querySelector(selector) {
+        if (selector === '[data-volume-on]' || selector === '[data-volume-off]') return { hidden: false };
+        return null;
+      },
+      focus() {},
+      pause() {},
+      play: async () => {},
+      load() {},
+    };
+    nodes.set(id, item);
+    return item;
+  }
+  const document = {
+    readyState: 'loading',
+    defaultView: { CustomEvent },
+    getElementById: element,
+    querySelectorAll: () => [],
+    addEventListener(name, callback) {
+      if (!listeners.has(name)) listeners.set(name, []);
+      listeners.get(name).push(callback);
+    },
+    dispatchEvent(event) {
+      for (const callback of listeners.get(event.type) || []) callback(event);
+    },
+  };
+  const states = [];
+  const context = vm.createContext({
+    performance,
+    setTimeout,
+    clearTimeout,
+    console,
+    document,
+    CustomEvent,
+    states,
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        serverTime: 100,
+        nowPlaying: null,
+        recent: [],
+        mainRadioAdCountdown: { status: 'countdown', remainingSongs: 3, includesCurrentSong: false },
+      }),
+    }),
+    window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example' } },
+  });
+  vm.runInContext(`${source}\ndocument.readyState = 'complete';\ndocument.addEventListener('dbusk-radio-state', (event) => states.push(event.detail));\ninitRadioSync();`, context);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(element('radio-ad-countdown').textContent, 'Main radio ad: Next advert after 3 more songs (current song not counted)');
+  assert.equal(states.at(-1).mainRadioAdCountdown.remainingSongs, 3);
+});
+
 test('radio sync does not force-seek an actively playing track on poll', () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
     .replace(/export /g, '');
