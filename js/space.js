@@ -508,13 +508,11 @@ function _makeNFTTexture(nft) {
         image.width * scale, image.height * scale);
       ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = 'rgba(3,5,12,.38)';
-    ctx.fillRect(46, 110, 420, 294);
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#fff8df';
+    ctx.fillStyle = 'rgba(255, 248, 223, .96)';
     ctx.font = 'bold 30px Bungee, Impact, sans-serif';
-    ctx.shadowColor = '#000';
-    ctx.shadowBlur = 5;
+    ctx.shadowColor = 'rgba(0, 0, 0, .45)';
+    ctx.shadowBlur = 2;
     const words = String(nft.name || nft.title || `Track #${nft.tokenId}`).split(/\s+/);
     const lines = [];
     let line = '';
@@ -525,10 +523,10 @@ function _makeNFTTexture(nft) {
     if (line) lines.push(line);
     lines.slice(0, 4).forEach((text, index) => ctx.fillText(text, 256, 156 + index * 38, 350));
     ctx.font = 'bold 24px sans-serif';
-    ctx.fillStyle = '#a5f1d8';
+    ctx.fillStyle = 'rgba(169, 255, 232, .96)';
     ctx.fillText(_artistLabel(nft).split(' · ')[0], 256, 334, 350);
     ctx.font = '21px sans-serif';
-    ctx.fillStyle = '#fff8df';
+    ctx.fillStyle = 'rgba(255, 248, 223, .95)';
     const date = nft.mintedAt ? new Date(nft.mintedAt).toLocaleDateString() : '—';
     ctx.fillText(date, 256, 375, 320);
     ctx.font = '18px monospace';

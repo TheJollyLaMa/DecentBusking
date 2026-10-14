@@ -279,6 +279,39 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   assert.equal(vm.runInContext('_allNFTs[0].mesh.visible', context), true);
 });
 
+test('NFT coin textures print details without a shaded panel', () => {
+  let fillRectCalls = 0;
+  const draw = {
+    globalAlpha: 1,
+    fillStyle: '',
+    shadowColor: '',
+    shadowBlur: 0,
+    textAlign: '',
+    font: '',
+    clearRect() {},
+    save() {},
+    restore() {},
+    beginPath() {},
+    arc() {},
+    clip() {},
+    fillRect() { fillRectCalls += 1; },
+    measureText: (text) => ({ width: text.length * 12 }),
+    fillText() {},
+    drawImage() {},
+    stroke() {},
+  };
+  const canvas = { width: 0, height: 0, getContext: () => draw };
+  const context = vm.createContext({
+    document: { createElement: () => canvas },
+    THREE: { CanvasTexture: class { constructor(image) { this.image = image; this.needsUpdate = false; } } },
+  });
+
+  vm.runInContext(spaceSource, context);
+  vm.runInContext(`_makeNFTTexture({ tokenId: 12, name: 'Coin Song', artist: '0xartist' });`, context);
+
+  assert.equal(fillRectCalls, 1);
+});
+
 test('radio now-playing events resolve and load the matching NFT outside the visible window', async () => {
   const audio = { paused: true, ended: false, readyState: 4, currentTime: 0, volume: 1, muted: false };
   const video = { paused: true, ended: false, readyState: 4, currentTime: 0, volume: 1, muted: false };
