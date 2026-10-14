@@ -113,6 +113,8 @@ approval or payment was signed during this work.
   “balance unavailable” status, never an assumed empty wallet. A positive balance
   does not guarantee sufficient gas for future batches. The observed worker
   balance was 0.000102336629037513 ETH.
+  The operator notice now also shows the live balance, threshold, and a rough
+  runway estimate from `WORKER_ESTIMATED_DAILY_BURN_WEI`.
 
 Ship the worker first; verify `/api/nfts` pages and authenticated 20-request
 mint pages, then publish the browser. None of these changes requires switching
@@ -289,10 +291,21 @@ radio scheduler reuses the existing DJuke fulfiller wallet by default; its
 private key stays in the existing Render service environment. The same worker
 address receives DeVert's scheduler role, while the project owner remains the
 contract admin. Each campaign purchase adds a Base ETH top-up quoted at 500,000
-scheduler gas units times the current fee cap. The contract validates coverage
-against the included transaction's effective gas price and forwards the attached
-ETH to the worker; any fee-cap surplus remains as worker gas reserve. The top-up
-is separate from the USDC offer/split and from the buyer's transaction gas.
+scheduler gas units times the current fee cap, multiplied by the campaign length
+in weeks. The contract validates coverage against the included transaction's
+effective gas price and forwards the attached ETH to the worker; any fee-cap
+surplus remains as worker gas reserve. The top-up is separate from the USDC
+offer/split and from the buyer's transaction gas. The worker-spent reporting
+paths are:
+
+- `recordCampaignPlay(campaign, true)` — main-radio impressions, ~77.7k gas.
+- `recordCampaignPlay(campaign, false)` — VertLoop impressions, ~61.6k gas.
+- `reportCompletedMusicPlays([10])` — every ten qualifying music plays, ~293k gas.
+
+At the observed October 14 fee level, that is roughly 0.00000037 ETH,
+0.00000047 ETH, and 0.0000018 ETH respectively. A single continuous VertLoop
+campaign now records at most one on-chain impression per campaign per hour; extra
+plays stay journaled locally/Pinata and retry automatically after funding.
 
 **Current status:** the contract is deployed and unpaused, and the public campaign
 checkout is configured. The Base-fork rehearsal checked the USDC split, main-radio

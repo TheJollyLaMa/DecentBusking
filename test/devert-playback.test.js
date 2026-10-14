@@ -36,6 +36,9 @@ function harness({
   impressions = 0,
   failImpression = false,
   failMusic = false,
+  balance = 1_000_000_000_000_000_000n,
+  workerAddress = address('3'),
+  workerMinBalanceWei = 0n,
   save = async () => 'ipfs://journal',
   resolveCampaignMedia = () => null,
 } = {}) {
@@ -43,7 +46,11 @@ function harness({
   const musicBatches = [];
   const impressionCalls = [];
   const contract = {
-    target: address('2'), runner: { provider: { getBlock: async () => ({ timestamp: NOW / 1000 }) } },
+    target: address('2'), runner: { provider: {
+      getBlock: async () => ({ timestamp: NOW / 1000 }),
+      getNetwork: async () => ({ chainId: 8453n }),
+      getBalance: async () => balance,
+    } },
     campaignWeek: async () => BigInt(WEEK_ID),
     usedImpressionIds: async impressionId => recorded.has(impressionId),
     reportCompletedMusicPlays: async playIds => {
@@ -64,7 +71,7 @@ function harness({
   let saves = 0;
   const runtime = null;
   return { contract, recorded, musicBatches, impressionCalls, state, resolveCampaignMedia, get saves() { return saves; },
-    setSave(fn) { save = fn; }, save: async snapshot => { saves++; await save(snapshot); Object.assign(state, snapshot); return 'ipfs://journal'; },
+    workerAddress, workerMinBalanceWei, setBalance(next) { balance = next; }, setSave(fn) { save = fn; }, save: async snapshot => { saves++; await save(snapshot); Object.assign(state, snapshot); return 'ipfs://journal'; },
     readCampaigns: async () => ({ chainId: 8453, snapshotAt: new Date(NOW).toISOString(), weekId: WEEK_ID,
       campaigns, market: { slots, seated: Math.min(slots, campaigns.length), lowestSeatedOfferUnits: campaigns[0]?.offerUnits || '0', mainRadioImpressions: impressions } }),
     unused: runtime };
@@ -74,7 +81,8 @@ async function makeRuntime(fixture) {
   const { createDevertPlaybackRuntime } = await import('../discord-bot/devert-playback.js');
   const runtime = createDevertPlaybackRuntime({ contract: fixture.contract, provider: fixture.contract.runner.provider,
     restore: async () => fixture.state.schemaVersion === 1 ? structuredClone(fixture.state) : null,
-    save: fixture.save, readCampaigns: fixture.readCampaigns, now: () => NOW, resolveCampaignMedia: fixture.resolveCampaignMedia });
+    save: fixture.save, readCampaigns: fixture.readCampaigns, now: () => NOW, resolveCampaignMedia: fixture.resolveCampaignMedia,
+    workerAddress: fixture.workerAddress, workerMinBalanceWei: fixture.workerMinBalanceWei });
   await runtime.initialize();
   return runtime;
 }
@@ -110,6 +118,21 @@ test('DeVert flushes a complete music milestone from the durable journal after r
   assert.equal(fixture.state.pendingMusicPlayIds.length, 0);
 });
 
+test('DeVert defers worker-gas-spent reports below threshold and retries after funding', async () => {
+  const fixture = harness({ balance: 0n, workerMinBalanceWei: 1n });
+  const runtime = await makeRuntime(fixture);
+  for (let index = 0; index < 10; index++) {
+    assert.equal(await runtime.recordCompletedMusicPlay({ playId: id(`low-gas-song-${index}`), audibleMs: 30_000 }), true);
+  }
+  assert.equal(fixture.musicBatches.length, 0);
+  assert.equal(fixture.state.pendingMusicPlayIds.length, 10);
+  fixture.setBalance(2n);
+  assert.equal(await runtime.recordCompletedMusicPlay({ playId: id('low-gas-song-10'), audibleMs: 30_000 }), true);
+  assert.equal(fixture.musicBatches.length, 1);
+  assert.equal(fixture.musicBatches[0].length, 10);
+  assert.equal(fixture.state.pendingMusicPlayIds.length, 1);
+});
+
 test('DeVert impression is checkpointed before its chain write and retry uses the same idempotency key', async () => {
   const fixture = harness({ failImpression: true });
   const runtime = await makeRuntime(fixture);
@@ -126,6 +149,22 @@ test('DeVert impression is checkpointed before its chain write and retry uses th
   const retry = await makeRuntime(fixture);
   assert.equal(retry.getState().impressions[0].state, 'recorded');
   assert.equal(fixture.impressionCalls[1].impressionId, pending.impressionId);
+});
+
+test('DeVert caps VertLoop on-chain impressions and leaves extra loops pending for later retry', async () => {
+  const fixture = harness({
+    balance: 10n,
+    workerMinBalanceWei: 1n,
+    campaigns: [campaign('17', { offerUnits: '5000000', devertPlays: 0 })],
+    slots: 0,
+  });
+  const runtime = await makeRuntime(fixture);
+  assert.equal(await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'loop-1', mainRadio: false, audibleMs: 30_000 }), true);
+  assert.equal(await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'loop-2', mainRadio: false, audibleMs: 30_000 }), true);
+  assert.equal(fixture.impressionCalls.length, 1);
+  assert.equal(fixture.state.impressions.length, 2);
+  assert.equal(fixture.state.impressions[1].state, 'pending');
+  assert.ok(fixture.state.impressions[1].nextRetryAt > NOW);
 });
 
 test('DeVert uses only the main-radio queue and advances by confirmed impressions', async () => {

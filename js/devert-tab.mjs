@@ -87,13 +87,14 @@ export function normalizeAdLoopNowPlaying(state) {
     positionMs: Math.max(0, Number(item.positionMs)) };
 }
 
-async function getSchedulerTopUpQuote(signer, contract, advertiser) {
+async function getSchedulerTopUpQuote(signer, contract, advertiser, weeks = 1) {
   const feeData = await signer.provider.getFeeData();
   const maxFeePerGas = feeData.maxFeePerGas ?? feeData.gasPrice;
   if (typeof maxFeePerGas !== 'bigint' || maxFeePerGas <= 0n) throw new Error('Current Base gas fee is unavailable');
-  const amount = await contract.quoteSchedulerGasTopUp(maxFeePerGas);
+  const weeklyTopUp = await contract.quoteSchedulerGasTopUp(maxFeePerGas);
+  const amount = weeklyTopUp * BigInt(weeks);
   if (await signer.provider.getBalance(advertiser) < amount) {
-    throw new Error(`Insufficient Base ETH for the scheduler top-up (${formatEth(amount)}); transaction gas is additional`);
+   throw new Error(`Insufficient Base ETH for the scheduler top-up (${formatEth(amount)}); transaction gas is additional`);
   }
   const overrides = { value: amount };
   if (feeData.maxFeePerGas != null) {
@@ -136,7 +137,7 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   if (offerUnits < quote.minimumOfferUnits) throw new Error(`Current minimum offer is ${formatUsdc(quote.minimumOfferUnits.toString())}`);
   const advertiser = await signer.getAddress();
   if (await usdc.balanceOf(advertiser) < offerUnits) throw new Error('Insufficient Base USDC balance');
-  let gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser);
+  let gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser, weeks);
   if (await usdc.allowance(advertiser, contract.target) < offerUnits) {
     onStep(`Approving exactly ${formatUsdc(offerUnits.toString())}; estimated worker-gas top-up ${formatEth(gasQuote.amount)} plus transaction gas`);
     const approval = await usdc.approve(contract.target, offerUnits);
@@ -144,7 +145,7 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
     onStep('Confirming approval…');
     await waitForAllowance(usdc, advertiser, contract.target, offerUnits);
   }
-  gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser);
+  gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser, weeks);
   onStep(`Creating campaign…`);
   await retryMissingRevertData(
     () => contract.createCampaign.staticCall(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides),

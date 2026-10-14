@@ -161,6 +161,7 @@ export function formatMainRadioAdCountdown(countdown, { disconnected = false } =
   if (countdown.status === 'paused') return `Main radio ad: Deferred during ${countdown.activeShow?.label || countdown.reason || 'this show'}`;
   if (countdown.status === 'none') return 'Main radio ad: No eligible campaign available';
   if (countdown.status === 'unavailable' && countdown.reason === 'disconnected') return 'Main radio ad: disconnected';
+  if (countdown.status === 'unavailable' && /worker gas/i.test(countdown.reason || '')) return 'Ad reporting paused – worker gas low';
   if (countdown.status === 'unavailable') return `Main radio ad: unavailable${countdown.reason ? ` (${countdown.reason})` : ''}`;
   return 'Main radio ad: scheduling unavailable';
 }
@@ -471,6 +472,7 @@ async function _poll() {
   }
   _renderVoting();
   _pollTimer = setTimeout(_poll, POLL_MS);
+  _pollTimer?.unref?.();
 }
 
 // Discord snowflake IDs encode their creation time.
@@ -588,7 +590,10 @@ function _startNextTakeover() {
   _setActivity(preview
     ? `✨ New song NFTs are pouring in — 30-second preview (${queued ? `${queued} more queued` : 'last one, then back to the JukeLoop'})`
     : '✨ New song posted in Discord — its first play is here, then back to the JukeLoop');
-  if (preview) _takeover.timer = setTimeout(_startNextTakeover, PREVIEW_MS);
+  if (preview) {
+    _takeover.timer = setTimeout(_startNextTakeover, PREVIEW_MS);
+    _takeover.timer?.unref?.();
+  }
   _switchTo({
     title: track.title,
     artist: track.uploader,
@@ -618,6 +623,7 @@ function _capTakeoverToPreview() {
   _takeover.preview = true;
   const remaining = PREVIEW_MS - (performance.now() - _takeover.startedAt);
   _takeover.timer = setTimeout(_startNextTakeover, Math.max(0, remaining));
+  _takeover.timer?.unref?.();
 }
 
 function _clearTakeover() {
@@ -644,6 +650,7 @@ function _onEnded(event) {
     _setActivity('📻 Waiting for the JukeLoop’s next track…');
     clearTimeout(_pollTimer);
     _pollTimer = setTimeout(_poll, 1_500);
+    _pollTimer?.unref?.();
   }
 }
 
@@ -752,12 +759,12 @@ async function _prepareRadioSeek(offset, token) {
     if (!_audio.seeking && _audio.readyState >= 3 && Math.abs(_audio.currentTime - target) <= 0.75) return true;
     if (_seekTo(target)) {
       while ((_audio.seeking || _audio.readyState < 3) && token === _switchToken && performance.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 40));
+        await new Promise((resolve) => { const timer = setTimeout(resolve, 40); timer.unref?.(); });
       }
       if (token !== _switchToken) return false;
       if (performance.now() >= deadline) break;
     }
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await new Promise((resolve) => { const timer = setTimeout(resolve, 40); timer.unref?.(); });
   }
   if (token === _switchToken) {
     _loadedPlayId = null;
@@ -791,6 +798,7 @@ function _waitForMetadata() {
     const onLoaded = () => finish(true);
     const onError = () => finish(false);
     const timer = setTimeout(() => finish(false), LOAD_TIMEOUT_MS);
+    timer.unref?.();
     player.addEventListener('loadedmetadata', onLoaded);
     player.addEventListener('error', onError, true);
   });
@@ -808,7 +816,10 @@ function _fadeIn(token = _switchToken, ms = FADE_IN_MS) {
       // Squared ramp sounds even to the ear; a linear ramp jumps in loudness early.
       _fadeLevel = t * t;
       _applyRadioVolume();
-      if (t < 1) setTimeout(step, 40);
+      if (t < 1) {
+        const timer = setTimeout(step, 40);
+        timer.unref?.();
+      }
       else resolve();
     };
     step();
@@ -824,7 +835,10 @@ function _fadeMainRadioOut(ms = FADE_IN_MS) {
     const progress = Math.min(1, (performance.now() - startedAt) / ms);
     _fadeLevel = initial * (1 - progress) ** 2;
     _applyRadioVolume();
-    if (progress < 1) setTimeout(step, 30);
+    if (progress < 1) {
+      const timer = setTimeout(step, 30);
+      timer.unref?.();
+    }
     else _pauseAudio();
   };
   step();

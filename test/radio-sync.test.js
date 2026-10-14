@@ -259,6 +259,16 @@ test('radio sync does not force-seek an actively playing track on poll', () => {
   assert.equal(audio.currentTime, 3);
 });
 
+test('radio sync uses a friendly worker-gas message instead of surfacing raw balance errors', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8').replace(/export /g, '');
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console });
+  vm.runInContext(`${source}\nglobalThis.formatStatus = formatMainRadioAdCountdown;`, context);
+  assert.equal(vm.runInContext(`formatStatus({ status: 'unavailable', reason: 'worker gas low' })`, context),
+    'Ad reporting paused – worker gas low');
+  assert.equal(vm.runInContext(`formatStatus({ status: 'unavailable', reason: 'something else' })`, context),
+    'Main radio ad: unavailable (something else)');
+});
+
 test('radio sync waits for playback to start before broadcasting now-playing details', () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
     .replace(/export /g, '');
