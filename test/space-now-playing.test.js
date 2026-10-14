@@ -319,16 +319,17 @@ test('only the active now-playing GIF coin animates and releases cleanly on swit
   const requested = [];
   const fetchImpl = async (url) => {
     requested.push(url);
-    if (url.includes('primary.example/ipfs/') && url.includes('gif-one')) {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.hostname === 'primary.example' && parsedUrl.pathname === '/ipfs/gif-one') {
       return new Response(gifBytes, { status: 200, headers: { 'content-type': 'image/gif' } });
     }
-    if (url.includes('primary.example/ipfs/') && url.includes('gif-two')) {
+    if (parsedUrl.hostname === 'primary.example' && parsedUrl.pathname === '/ipfs/gif-two') {
       return new Response('', { status: 404 });
     }
-    if (url.includes('gateway.pinata.cloud/ipfs/') && url.includes('gif-two')) {
+    if (parsedUrl.hostname === 'gateway.pinata.cloud' && parsedUrl.pathname === '/ipfs/gif-two') {
       return new Response(gifBytes, { status: 200, headers: { 'content-type': 'image/gif' } });
     }
-    if (url.includes('primary.example/ipfs/') && url.includes('static-one')) {
+    if (parsedUrl.hostname === 'primary.example' && parsedUrl.pathname === '/ipfs/static-one') {
       return new Response(pngBytes, { status: 200, headers: { 'content-type': 'image/png' } });
     }
     return new Response('', { status: 404 });
