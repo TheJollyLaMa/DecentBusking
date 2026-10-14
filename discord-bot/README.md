@@ -100,8 +100,10 @@ Read Message History, and Send Messages in DecentJukebox, plus Add Reactions in
 the vertloop text channel. After linking your advertiser wallet and Discord
 account, post `!devert-ad Title | ipfs://CID | video/mp4` in DecentJukebox, or post
 `!devert-ad` with an audio/MP4 attachment (up to 10 MB). Larger media uploads use
-the DVert panel. Explicitly marked ads are not ingested as songs by DBusker.
-Ad submissions queue owner NFT review separately from campaign purchase.
+the DVert panel. The main bot also keeps that explicit ad command working when the
+dedicated DVertLoop intake worker is not enabled. Explicitly marked ads are not
+ingested as songs by DBusker. Ad submissions queue owner NFT review separately from
+campaign purchase.
 Existing DJuke v0.2 requests still boost only a payer's sole active campaign;
 multi-campaign targeting and a dedicated ad purchase UI are not implemented.
 
