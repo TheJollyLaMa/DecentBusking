@@ -60,6 +60,7 @@ test('Admin clearly exposes multi-select mint batches of up to 20 while marking 
   const config = fs.readFileSync(path.join(__dirname, '../decent.config.js'), 'utf8');
   assert.match(html, /id="admin-mint-select-all"[^>]*> Select all/);
   assert.match(html, />Mint selected in batches</);
+  assert.match(html, /id="admin-mint-pending-badge"/);
   assert.match(html, /up to 20 in one Base transaction/);
   assert.match(admin, />Mint<\/button>/);
   assert.match(admin, /Queued artwork will be used; requests without artwork will mint without an image/);
@@ -68,6 +69,7 @@ test('Admin clearly exposes multi-select mint batches of up to 20 while marking 
   assert.match(admin, /track\.isDevertAd === true \? \{ isDevertAd: true \}/);
   assert.match(worker, /isDevertAd: track\.isDevertAd === true/);
   assert.match(config, /nftBatchMintEnabled:\s*true/);
+  assert.match(html, /header-admin-inject\.js\?v=20261014-mint-badge/);
 });
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'admin-mint-queue.js')).href;

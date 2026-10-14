@@ -492,7 +492,7 @@
         <ul id="admin-radio-schedule-events" class="admin-schedule-events"></ul>
         </details>
       <details id="admin-mint-section" class="hidden" open>
-        <summary>💼 NFT Requests</summary>
+        <summary>💼 NFT Requests <span id="admin-mint-pending-badge" hidden aria-hidden="true"></span></summary>
         <div class="admin-section-header">
           <div>
             <h3>Pending NFT Requests</h3>
@@ -688,28 +688,31 @@
   <!-- Inject 💸 Payroll link into left ankh header dropdown -->
   <script type="module" src="js/components/header-payroll-inject.js?v=20261006-owner-payroll"></script>
 
+  <!-- Inject 🔑 Admin link + owner pending mint badge -->
+  <script type="module" src="js/components/header-admin-inject.js?v=20261014-mint-badge"></script>
+
   <!-- Override .title-main color to DecentBusking orange inside AppTitle shadow root -->
   <script type="module" src="js/components/header-title-color-override.js?v=20261002-header-refresh-5"></script>
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261014-celebrate"></script>
+  <script type="module" src="js/main.js?v=20261014-upload-resilience"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261014-celebrate"></script>
+  <script type="module" src="js/admin.js?v=20261014-upload-resilience"></script>
 
-  <script type="module" src="js/payroll.js?v=20261014-celebrate"></script>
+  <script type="module" src="js/payroll.js?v=20261014-upload-resilience"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261010-public-calendar"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261010-left-djuke"></script>
   <script type="module" src="js/djuke.mjs?v=20261014-celebrate"></script>
-  <script type="module" src="js/devert-tab.mjs?v=20261014-worker-gas"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261014-profile-card"></script>
-  <script type="module" src="js/listens.mjs?v=20261014-celebrate"></script>
+  <script type="module" src="js/devert-tab.mjs?v=20261014-upload-resilience"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261014-upload-resilience"></script>
+  <script type="module" src="js/listens.mjs?v=20261014-upload-resilience"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261014-worker-gas"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261012-ignore-rollout-week';
+    import { initPayroll } from './js/payroll.js?v=20261014-upload-resilience';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

@@ -85,5 +85,73 @@ test('failed artwork upload reports the filename and Pinata rejection reason', a
       ? new Response(JSON.stringify({ url: 'https://uploads.example/signed' }))
       : new Response(JSON.stringify({ error: { reason: 'File size exceeds signed limit' } }), { status: 400 }),
   });
-  await assert.rejects(upload(new File(['image'], 'cover.png', { type: 'image/png' })), /400.*cover\.png.*File size exceeds signed limit/);
+  await assert.rejects(upload(new File(['image'], 'cover.png', { type: 'image/png' })), /Upload to IPFS failed \(step 2\/2\).*File size exceeds signed limit/);
+});
+
+test('browser uploader retries transient upload failures and reports progress', async () => {
+  const { createBrowserIpfsUploader } = await import(moduleUrl);
+  const progress = [];
+  const signed = [];
+  let uploads = 0;
+  const originalXHR = global.XMLHttpRequest;
+  class FakeXHR {
+    constructor() {
+      this.upload = {};
+      this.status = 0;
+      this.responseText = '';
+      FakeXHR.instances.push(this);
+    }
+    open(method, url) { this.method = method; this.url = url; }
+    send() {
+      uploads++;
+      this.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
+      if (uploads === 1) {
+        this.onerror?.(new TypeError('Failed to fetch'));
+      } else {
+        this.status = 200;
+        this.responseText = JSON.stringify({ data: { cid: 'bafyretry' } });
+        this.onload?.();
+      }
+    }
+  }
+  FakeXHR.instances = [];
+  global.XMLHttpRequest = FakeXHR;
+  try {
+    const upload = createBrowserIpfsUploader({
+      provider: 'pinata',
+      serviceUrl: 'https://worker.example',
+      signer: { signMessage: async message => { signed.push(message); return '0xsigned'; } },
+      address: '0x1111111111111111111111111111111111111111',
+      origin: 'https://busking.example',
+      fetchImpl: async (url, options) => {
+        if (url.endsWith('/api/ipfs/upload-url')) {
+          return new Response(JSON.stringify({ url: `https://uploads.example/${signed.length}` }), { status: 200 });
+        }
+        throw new Error(`Unexpected fetch ${url} ${options?.method || ''}`);
+      },
+      retries: 1,
+    });
+    assert.equal(await upload(new File(['abc'], 'song.mp3', { type: 'audio/mpeg' }), {
+      onProgress: event => progress.push(Math.round(event.progress * 100)),
+    }), 'ipfs://bafyretry');
+    assert.equal(signed.length, 2);
+    assert.equal(uploads, 2);
+    assert.ok(progress.includes(50));
+  } finally {
+    global.XMLHttpRequest = originalXHR;
+  }
+});
+
+test('browser uploader returns a readable owner-only CORS error', async () => {
+  const { createBrowserIpfsUploader } = await import(moduleUrl);
+  const upload = createBrowserIpfsUploader({
+    provider: 'pinata',
+    serviceUrl: 'https://worker.example',
+    signer: { signMessage: async () => '0xsigned' },
+    address: '0x1111111111111111111111111111111111111111',
+    origin: 'https://unlisted.example',
+    fetchImpl: async () => new Response(JSON.stringify({ error: 'This site address isn’t authorized for uploads' }), { status: 403 }),
+  });
+  await assert.rejects(upload(new File(['image'], 'cover.png', { type: 'image/png' })),
+    /step 1\/2.*authorized for uploads/);
 });

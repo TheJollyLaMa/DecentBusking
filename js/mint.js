@@ -1,12 +1,45 @@
-import { fetchNFTMetaById } from './space.js?v=20261014-celebrate';
-import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261005-mp4';
-import { submitMediaForApproval } from './mint-submission.js';
+import { fetchNFTMetaById } from './space.js?v=20261014-upload-resilience';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
+import { submitMediaForApproval } from './mint-submission.js?v=20261014-upload-resilience';
 
 const MEDIA_TYPES = {
   mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg',
   flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', weba: 'audio/webm', mp4: 'video/mp4',
 };
 let pending = false;
+
+function fileSignature(file) {
+  return file ? [file.name, file.size, file.lastModified || 0, file.type || ''].join('::') : '';
+}
+
+function uploadCache(input) {
+  return input?.dataset || (input ? (input.__uploadCache || (input.__uploadCache = {})) : {});
+}
+
+function cachedUploadCid(input, file) {
+  const signature = fileSignature(file);
+  const cache = uploadCache(input);
+  if (!signature || cache.uploadSignature !== signature || !cache.uploadCid) return '';
+  return cache.uploadCid;
+}
+
+function rememberUploadCid(input, file, cid) {
+  if (!file || !cid) return;
+  const cache = uploadCache(input);
+  cache.uploadSignature = fileSignature(file);
+  cache.uploadCid = cid;
+}
+
+function progressReporter(prefix) {
+  let lastPercent = -1;
+  return ({ progress, loaded, total }) => {
+    const percent = Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress * 100)))
+      : (Number.isFinite(total) && total > 0 ? Math.max(0, Math.min(100, Math.round((loaded / total) * 100))) : -1);
+    if (percent < 0 || percent === lastPercent) return;
+    lastPercent = percent;
+    setStatus(`${prefix} ${percent}%`);
+  };
+}
 
 function setSource() {
   const cidMode = document.getElementById('mint-source-cid')?.checked;
@@ -83,14 +116,31 @@ async function handleSubmission(event) {
       serviceUrl: cfg.ipfsUploadServiceUrl, ipfsApiUrl: cfg.ipfsApiUrl, signer, address,
       origin: window.location.origin, purpose: 'submission' });
     if (!cidMode) {
-      setStatus('Uploading media to IPFS...');
-      ipfsCid = (await upload(new File([file], file.name, { type: mediaType }))).replace('ipfs://', '');
+      const cachedCid = cachedUploadCid(document.getElementById('mint-file'), file);
+      if (cachedCid) {
+        ipfsCid = cachedCid;
+        setStatus('Reusing the previously uploaded media CID...');
+      } else {
+        setStatus('Uploading media to IPFS...');
+        ipfsCid = (await upload(new File([file], file.name, { type: mediaType }), {
+          onProgress: progressReporter('Uploading media to IPFS…'),
+        })).replace('ipfs://', '');
+        rememberUploadCid(document.getElementById('mint-file'), file, ipfsCid);
+      }
       document.getElementById('mint-cid-input').value = ipfsCid;
     }
     let artworkCid = '';
     if (artwork) {
-      setStatus('Uploading artwork to IPFS...');
-      artworkCid = (await upload(artwork)).replace('ipfs://', '');
+      const cachedArtworkCid = cachedUploadCid(document.getElementById('mint-image'), artwork);
+      if (cachedArtworkCid) {
+        artworkCid = cachedArtworkCid;
+      } else {
+        setStatus('Uploading artwork to IPFS...');
+        artworkCid = (await upload(artwork, {
+          onProgress: progressReporter('Uploading artwork to IPFS…'),
+        })).replace('ipfs://', '');
+        rememberUploadCid(document.getElementById('mint-image'), artwork, artworkCid);
+      }
     }
     setStatus('Sign your submission for owner approval...');
     const result = await submitMediaForApproval({ serviceUrl: cfg.ipfsUploadServiceUrl, signer, address,

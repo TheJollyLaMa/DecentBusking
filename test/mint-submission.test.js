@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { pathToFileURL } = require('node:url');
 
 const cid = 'bafybeifynaihnl2t37s3nfez3k5vbwwziaqyvayadqwt4bou3yv6jstxye';
 const address = '0x1111111111111111111111111111111111111111';
@@ -10,7 +11,7 @@ const address = '0x1111111111111111111111111111111111111111';
 function formPage({ useCid = false, file } = {}) {
   const nodes = new Map();
   const node = id => {
-    if (!nodes.has(id)) nodes.set(id, { value: '', files: [], classList: { toggle() {}, add() {}, remove() {} } });
+    if (!nodes.has(id)) nodes.set(id, { value: '', files: [], dataset: {}, classList: { toggle() {}, add() {}, remove() {} } });
     return nodes.get(id);
   };
   node('mint-source-cid').checked = useCid;
@@ -107,4 +108,25 @@ test('briefcase rejects oversized media and directory CIDs before requesting upl
   await directory.submit();
   assert.match(directory.node('mint-status').textContent, /file CID/);
   assert.equal(directory.submissions.length, 0);
+});
+
+test('submission retries transient network failures with fresh signatures', async () => {
+  const { submitMediaForApproval } = await import(pathToFileURL(path.join(__dirname, '..', 'js', 'mint-submission.js')).href);
+  const signed = [];
+  let attempts = 0;
+  const result = await submitMediaForApproval({
+    serviceUrl: 'https://worker.example',
+    signer: { signMessage: async message => { signed.push(message); return `0xsigned-${signed.length}`; } },
+    address,
+    origin: 'https://site.example',
+    media: { title: 'Song', artist: 'Artist', recipient: address, tipWallet: address, parentTokenId: 0, filename: 'song.mp3', mediaType: 'audio/mpeg', ipfsCid: cid, artworkCid: '' },
+    fetchImpl: async () => {
+      attempts++;
+      if (attempts === 1) throw new TypeError('Failed to fetch');
+      return new Response(JSON.stringify({ status: 'requested', trackId: 'track-1' }), { status: 200 });
+    },
+  });
+  assert.deepEqual(result, { status: 'requested', trackId: 'track-1' });
+  assert.equal(attempts, 2);
+  assert.equal(signed.length, 2);
 });

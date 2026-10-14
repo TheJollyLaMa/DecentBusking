@@ -7,9 +7,9 @@
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
 import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolveBatchMintArtwork, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261011-batch-artwork-default';
-import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261011-batch-upload-signature';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
 import { reportMintCompletion } from './mint-reconciliation.js';
-import { addNFTToSpace } from './space.js?v=20261014-celebrate';
+import { addNFTToSpace } from './space.js?v=20261014-upload-resilience';
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261010-public-calendar';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides } from './radio-schedule.mjs';
@@ -30,7 +30,7 @@ const ROLE_GRANT_ABI = [
 let _modal, _connectedAddr, _roleSection,
   _targetAddr, _roleSelect, _statusEl, _grantBtn, _closeBtn,
   _mintSection, _mintQueueEl, _mintRefreshBtn, _mintSelectedBtn,
-  _mintSelectAll, _mintStatusEl, _mintMoreBtn, _radioScheduleSection, _radioScheduleForm,
+  _mintSelectAll, _mintStatusEl, _mintMoreBtn, _mintPendingBadge, _radioScheduleSection, _radioScheduleForm,
   _radioScheduleEventsEl, _radioScheduleStatusEl, _radioWeeklyForm;
 let _adminSigner = null;
 let _adminAddress = null;
@@ -62,6 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
   _mintSelectAll = document.getElementById('admin-mint-select-all');
   _mintStatusEl = document.getElementById('admin-mint-status');
   _mintMoreBtn  = document.getElementById('admin-mint-more-btn');
+  _mintPendingBadge = document.getElementById('admin-mint-pending-badge');
   _radioScheduleSection = document.getElementById('admin-radio-schedule');
   _radioScheduleForm = document.getElementById('admin-radio-schedule-form');
   _radioScheduleEventsEl = document.getElementById('admin-radio-schedule-events');
@@ -114,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
     _resetAdminWallet();
     if (_adminOpen) _setStatus('Connect your wallet in the header to use admin tools.');
   });
+  document.addEventListener('mint-queue-count-updated', event => _setMintPendingCount(event.detail?.count));
 });
 
 // ── Open / Close ──────────────────────────────────────────────────────────────
@@ -219,11 +221,20 @@ function _resetAdminWallet() {
   if (_mintMoreBtn) _mintMoreBtn.classList.add('hidden');
   if (_connectedAddr) _connectedAddr.textContent = '';
   _mintQueueEl?.replaceChildren();
+  _setMintPendingCount(0);
   _mintSection?.classList.add('hidden');
   _roleSection?.classList.add('hidden');
   _radioScheduleSection?.classList.add('hidden');
   _radioSchedule = null;
   _radioScheduleEventsEl?.replaceChildren();
+}
+
+function _setMintPendingCount(count) {
+  if (!_mintPendingBadge) return;
+  const value = Number.isSafeInteger(count) && count > 0 ? count : 0;
+  _mintPendingBadge.textContent = value > 0 ? String(value) : '';
+  _mintPendingBadge.hidden = value <= 0;
+  _mintPendingBadge.classList.toggle('is-pending', value > 0);
 }
 
 async function _loadRadioSchedule() {
@@ -445,6 +456,10 @@ function _setRadioScheduleStatus(message, isError = false) {
         ? `${_mintQueue.length} of ${_mintQueueTotal} pending request(s) loaded.`
         : `${_mintQueue.length} pending request(s).`;
       _setMintStatus(_mintQueue.length ? totalDisplay : 'The mint queue is empty.');
+      _setMintPendingCount(_mintQueueTotal || _mintQueue.length);
+      document.dispatchEvent(new CustomEvent('mint-queue-count-updated', {
+        detail: { count: _mintQueueTotal || _mintQueue.length },
+      }));
     } catch (err) {
       if (checkId === _walletCheckId) _setMintStatus(`❌ ${err.message}`, true);
     } finally {
