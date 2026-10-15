@@ -1,4 +1,4 @@
-import { id } from '../discord-bot/node_modules/ethers';
+import { id } from '../discord-bot/node_modules/ethers/lib.esm/index.js';
 import { payrollPeriodFromKey } from './payroll-week.mjs';
 
 function normalize(value) {
