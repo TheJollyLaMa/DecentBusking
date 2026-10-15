@@ -89,3 +89,13 @@ test('getBaseReadProvider reads through the transport without a chainId round tr
   assert.ok(!methods.includes('eth_chainId'));
   provider.destroy();
 });
+
+test('the shared browser read provider survives callers that destroy() it', async () => {
+  const { getBaseReadProvider } = await import(url);
+  const config = { rpcUrl: 'https://shared.example', ipfsUploadServiceUrl: '' };
+  const first = getBaseReadProvider({ ethers, config });
+  first.destroy();
+  const second = getBaseReadProvider({ ethers, config });
+  assert.equal(first, second);
+  assert.equal(second.destroyed, false);
+});

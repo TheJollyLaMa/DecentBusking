@@ -175,6 +175,10 @@ export function getBaseReadProvider({ ethers = globalThis.window?.ethers || glob
     }
   }
   const provider = new BaseReadProvider();
-  if (!fetchImpl) readProviders.set(cacheKey, { ethers, provider });
+  if (!fetchImpl) {
+    // Shared across modules: callers may still call destroy(), which must not break everyone else.
+    provider.destroy = () => {};
+    readProviders.set(cacheKey, { ethers, provider });
+  }
   return provider;
 }

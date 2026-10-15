@@ -1,4 +1,4 @@
-import { getBaseReadProvider } from './base-chain.mjs?v=20261017-read-rpc';
+import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 const DEFAULT_ESTIMATED_DAILY_BURN_WEI = 86_000_000_000_000n;
 // 0.00002 ETH: roughly ten music-play reports or fifty impressions at October 2026 Base fees.
 export const DEFAULT_WORKER_MIN_BALANCE_WEI = 20_000_000_000_000n;

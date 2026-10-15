@@ -1,5 +1,5 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
-import { getBaseReadProvider } from './base-chain.mjs?v=20261017-read-rpc';
+import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { canEditArtwork } from './artwork-update.mjs';
@@ -244,7 +244,7 @@ export function initCreatorProfile() {
   let myNftsAbort = null;
   const openNftCard = async identity => {
     try {
-      const { openNFTByIdentity } = await import('./space.js?v=20261017-read-rpc');
+      const { openNFTByIdentity } = await import('./space.js?v=20261018-shared-provider');
       dialog.querySelector('[data-profile-close]')?.click();
       if (!await openNFTByIdentity(identity)) throw new Error('Could not open this NFT in the space view');
     } catch (error) {

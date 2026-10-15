@@ -25,7 +25,7 @@ import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, 
 import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261014-celebrate';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { getBaseReadProvider } from './base-chain.mjs?v=20261017-read-rpc';
+import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

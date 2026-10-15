@@ -1,5 +1,5 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
-import { getBaseReadProvider } from './base-chain.mjs?v=20261017-read-rpc';
+import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { escapeHtml, formatUsdcUnits, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261014-funds';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
