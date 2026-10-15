@@ -3,7 +3,8 @@ import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-snif
 import { canEditArtwork } from './artwork-update.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
-import { FUND_LABELS, formatAmount, readContractEarnings, scanBlockscoutEarnings, scanLogEarnings, summarizeEarnings } from './creator-earnings.mjs?v=20261014-earnings-blockscout';
+import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanBlockscoutEarnings, scanLogEarnings,
+  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261015-earnings-worker';
 
 const WALLET_BREATHE_ICON = 'img/Ens_Eth_Breathe.png';
 
@@ -113,6 +114,52 @@ export function buildNftListItem({ index = 0, title, subtitle = '', meta = '', a
     li.append(remove);
   }
   return li;
+}
+
+export async function collectCreatorEarnings({
+  ethers,
+  address: target,
+  serviceUrl = '',
+  publicProvider,
+  walletProvider = null,
+  fetchImpl = globalThis.fetch,
+  readContracts = readContractEarnings,
+  fetchWorker = fetchWorkerEarnings,
+  scanBlockscout = scanBlockscoutEarnings,
+  scanLogs = scanLogEarnings,
+}) {
+  const viewEntries = await readContracts({ ethers, provider: publicProvider, address: target });
+  let logs = null;
+  let note = '';
+  if (serviceUrl) {
+    try {
+      const worker = await fetchWorker({ fetch: fetchImpl, serviceUrl, address: target });
+      const grouped = groupLogEarnings(worker.entries || [], ethers);
+      const verified = grouped.length
+        ? await verifyGroupedEarningsProofs({ ethers, provider: publicProvider, address: target, entries: grouped })
+        : [];
+      logs = { complete: !!worker.ready, partialThrough: worker.through, entries: verified };
+      if (!worker.ready) note = worker.through ? `Indexing payouts… verified through block ${worker.through.toLocaleString('en-US')}.` : 'Indexing payouts…';
+    } catch {
+      note = 'Earnings index unavailable; checking on-chain fallbacks.';
+    }
+  }
+  if (!logs) {
+    try { logs = await scanBlockscout({ ethers, address: target, fetch: fetchImpl }); }
+    catch {
+      logs = await scanLogs({ ethers, providers: [walletProvider, publicProvider], address: target });
+      if (!logs.complete && !logs.partialThrough && !note) note = 'Earnings index unavailable; retrying on-chain fallbacks shortly.';
+    }
+  }
+  const unpaidFunds = Object.values(FUND_LABELS).filter(label => !logs.entries.some(entry => entry.label === label));
+  if (!note) {
+    note = logs.complete
+      ? (unpaidFunds.length ? `No ${unpaidFunds.join(', ').replace(/, ([^,]*)$/, ' or $1')} payouts to this wallet on-chain yet.` : '')
+      : logs.partialThrough
+        ? `Router payouts verified through block ${logs.partialThrough.toLocaleString('en-US')}; connect a wallet on Base to check newer ones.`
+        : 'Earnings index unavailable; retrying on-chain fallbacks shortly.';
+  }
+  return { viewEntries, logs, note };
 }
 
 export function initCreatorProfile() {
@@ -504,8 +551,15 @@ export function initCreatorProfile() {
       proof.className = 'creator-earnings-proof';
       if (entry.status === 'unclaimed') proof.append(Object.assign(document.createElement('em'), { textContent: 'unclaimed · ' }));
       if (entry.proofUrl) proof.append(link(entry.proofUrl, `proof: ${entry.proofLabel}`));
-      for (const transaction of (entry.transactions || []).slice(0, 3)) proof.append(' ', link(transaction.url, `tx ${transaction.hash.slice(0, 8)}…`));
-      if ((entry.transactions || []).length > 3) proof.append(` +${entry.transactions.length - 3} more`);
+      if ((entry.transactions || []).length) {
+        const txs = document.createElement('details');
+        txs.className = 'creator-earnings-transactions';
+        const summary = document.createElement('summary');
+        summary.textContent = `${entry.transactions.length} tx${entry.transactions.length === 1 ? '' : 's'}`;
+        txs.append(summary);
+        for (const transaction of entry.transactions) txs.append(' ', link(transaction.url, `tx ${transaction.hash.slice(0, 8)}…`));
+        proof.append(' ', txs);
+      }
       item.append(label, amount, proof);
       earningsList.append(item);
     }
@@ -521,28 +575,21 @@ export function initCreatorProfile() {
     const baseNetwork = ethers.Network.from(8453);
     const publicProvider = new ethers.JsonRpcProvider(config().rpcUrl || 'https://mainnet.base.org', baseNetwork, { staticNetwork: baseNetwork });
     try {
-      let viewEntries = [];
-      try { viewEntries = await readContractEarnings({ ethers, provider: publicProvider, address: target }); }
-      catch { if (check === revision) earningsStatus.textContent = 'Base RPC unavailable; earnings could not be verified right now.'; return; }
-      if (check !== revision) return;
-      renderEarnings(viewEntries, 'Checking router payouts…');
-      let logs;
-      try { logs = await scanBlockscoutEarnings({ ethers, address: target }); }
-      catch {
-        let walletProvider = null;
-        try {
-          if (window._wallet?.provider && Number((await window._wallet.provider.getNetwork()).chainId) === 8453) walletProvider = window._wallet.provider;
-        } catch { walletProvider = null; }
-        logs = await scanLogEarnings({ ethers, providers: [walletProvider, publicProvider], address: target });
+      let result;
+      try {
+        result = await collectCreatorEarnings({
+          ethers,
+          address: target,
+          serviceUrl: config().ipfsUploadServiceUrl || '',
+          publicProvider,
+          walletProvider: window._wallet?.provider || null,
+        });
+      } catch {
+        if (check === revision) earningsStatus.textContent = 'Base RPC unavailable; earnings could not be verified right now.';
+        return;
       }
       if (check !== revision) return;
-      const unpaidFunds = Object.values(FUND_LABELS).filter(label => !logs.entries.some(entry => entry.label === label));
-      const note = logs.complete
-        ? (unpaidFunds.length ? `No ${unpaidFunds.join(', ').replace(/, ([^,]*)$/, ' or $1')} payouts to this wallet on-chain yet.` : '')
-        : logs.partialThrough
-          ? `Router payouts verified through block ${logs.partialThrough.toLocaleString('en-US')}; connect a wallet on Base to check newer ones.`
-          : 'Router payouts (payroll, pinner, playback, Top 10) could not be verified right now — try again shortly.';
-      renderEarnings([...viewEntries, ...logs.entries], note);
+      renderEarnings([...result.viewEntries, ...result.logs.entries], result.note);
     } finally { publicProvider.destroy(); }
   };
   const open = async detail => {

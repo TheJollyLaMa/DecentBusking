@@ -2250,6 +2250,9 @@ decent-foot {
 .creator-earnings-proof { grid-column: 1 / -1; font-size: .72rem; color: var(--text-dim); }
 .creator-earnings-proof a { color: #9fd8b5; }
 .creator-earnings-proof em { color: #f0c36a; font-style: normal; }
+.creator-earnings-transactions { display: inline; }
+.creator-earnings-transactions summary { cursor: pointer; display: inline; }
+.creator-earnings-transactions summary::-webkit-details-marker { display: none; }
 .creator-earnings-status, .creator-earnings-note { margin: 8px 0 0; font-size: .74rem; color: var(--text-dim); }
 .creator-earnings-status:empty { display: none; }
 #creator-profile .creator-profile-edit-dialog { position: fixed; inset: 0; margin: auto; height: fit-content; width: min(520px, calc(100vw - 40px)); max-height: calc(100dvh - 40px); overflow: auto; box-sizing: border-box; padding: 16px 18px; color: var(--text); background: var(--bg, #111); border: 1px solid #e9d7a0; border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); }

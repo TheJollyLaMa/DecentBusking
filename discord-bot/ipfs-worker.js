@@ -215,6 +215,7 @@ export function createWorkerRequestHandler({
   getWeeklyPayflow,
   getPaymentLedger,
   getFunds,
+  getEarnings,
   reconcilePayment,
   onRadioVote,
   onMediaSubmission,
@@ -414,6 +415,13 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/api/funds') {
         if (!getFunds) throw new Error('Fund balances are not configured');
         sendJson(response, 200, await getFunds(), '*', 'public, max-age=60, stale-while-revalidate=30');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/earnings/')) {
+        if (!getEarnings) throw new Error('Earnings index is not configured');
+        const address = requestUrl.pathname.split('/').pop();
+        if (!/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('Invalid wallet address');
+        sendJson(response, 200, await getEarnings({ address }), '*', 'public, max-age=30, stale-while-revalidate=30');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/weekly') {
