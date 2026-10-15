@@ -1,14 +1,8 @@
-import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
-import { escapeHtml, formatUsdcUnits, renderFundSourcesTable, resolveWalletLabel, renderWalletButton } from './fund-display.mjs?v=20261014-funds';
+import { renderUsdcAmount } from './fund-display.mjs?v=20261015-weekly-funds';
 import { weekNumberFromKey } from './payroll-week.mjs';
+import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
 
-export function rankTopTenSongs(tracks, nowPlayingId = '') {
-  return tracks.filter(track => typeof track.trackId === 'string' && Number.isSafeInteger(track.votes) &&
-    (track.plays > 0 || track.votes !== 0))
-    .slice().sort((first, second) => second.votes - first.votes || second.plays - first.plays ||
-      String(first.title).localeCompare(String(second.title)) || first.trackId.localeCompare(second.trackId))
-    .slice(0, 10).map((track, index) => ({ ...track, rank: index + 1, nowPlaying: track.trackId === nowPlayingId }));
-}
+export { rankTopTenSongs };
 
 export function topTenDisplayRows(tracks, nowPlaying) {
   const ranked = rankTopTenSongs(tracks, nowPlaying?.trackId);
@@ -19,6 +13,13 @@ export function topTenDisplayRows(tracks, nowPlaying) {
     plays: Number.isSafeInteger(recorded?.plays) ? recorded.plays : 0, rank: null, nowPlaying: true, outsideTopTen: true }, ...ranked];
 }
 
+export function topTenPrizeRows(tracks, nowPlaying, { budgetUnits = null, minimumUnits } = {}) {
+  const prizes = budgetUnits === null ? null : new Map(previewTopTenSongPayroll({ tracks, budgetUnits: BigInt(budgetUnits),
+    ...(minimumUnits != null ? { minimumUnits: BigInt(minimumUnits) } : {}) }).entries.map(entry => [entry.trackId, entry.amountUnits]));
+  return topTenDisplayRows(tracks, nowPlaying).map(song => ({ ...song,
+    prizeUnits: song.outsideTopTen || !prizes ? null : prizes.get(song.trackId) ?? 0n }));
+}
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -26,44 +27,81 @@ function el(tag, className, text) {
   return node;
 }
 
+export function chartFlightFrames(from, to, lift = 18) {
+  const transform = (point, tilt = 0) => `translate(${point.x}px, ${point.y}px) translate(-50%, -50%) rotate(${tilt}deg)`;
+  return [
+    { transform: transform(from), offset: 0 },
+    { transform: transform({ x: from.x + (to.x - from.x) * .45, y: from.y + (to.y - from.y) * .45 - lift }, -8), offset: .45 },
+    { transform: transform({ x: to.x + 3, y: to.y - 3 }, 6), offset: .82 },
+    { transform: transform(to), offset: 1 },
+  ];
+}
+
+export function chartRankGains(previousRows, rows) {
+  const previous = new Map((previousRows || []).filter(row => Number.isInteger(row.rank)).map(row => [row.trackId, row.rank]));
+  return new Map(rows.filter(row => Number.isInteger(row.rank) && previous.has(row.trackId) && previous.get(row.trackId) > row.rank)
+    .map(row => [row.trackId, previous.get(row.trackId) - row.rank]));
+}
+
 export function initTopTenBoard() {
   const toggle = document.getElementById('top-ten-tab');
   const panel = document.getElementById('top-ten-panel');
   const content = document.getElementById('top-ten-content');
-  const fundsSummary = document.getElementById('top-ten-fund-summary');
   const status = document.getElementById('top-ten-status');
   const header = document.getElementById('top-ten-week');
-  if (!toggle || !panel || !content || !status || !header || !fundsSummary) return;
+  if (!toggle || !panel || !content || !status || !header) return;
   let generation = 0;
   let timer;
-  const aliasCache = new Map();
+  let previousChart = null;
+  let rankAnimations = [];
   const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
-  const provider = workerEnsProvider;
-  async function prepareFund(fund, sponsorAliases) {
-    const sources = [];
-    for (const source of fund.sources || []) {
-      const address = source.funder || source.advertiser || source.payer || '';
-      const wallet = address && provider ? await resolveWalletLabel(address, provider, sponsorAliases, aliasCache)
-        : { address, label: address || '', aliases: [] };
-      const walletHtml = renderWalletButton(wallet, { role: source.kind });
-      sources.push({
-        ...source,
-        displayLabel: wallet.label,
-        walletHtml,
-        advertiserHtml: source.kind === 'advert' ? walletHtml : '',
-        advertiserLabel: source.kind === 'advert' ? wallet.label : '',
-        payerHtml: source.kind === 'djuke' ? walletHtml : '',
-        payerLabel: source.kind === 'djuke' ? wallet.label : '',
-      });
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const flightLayer = el('div', 'top-ten-flight-layer');
+  flightLayer.setAttribute('aria-hidden', 'true');
+  const visitors = ['\u{1F4B8}', '\u{1F41D}', '\u{1F41D}'].map((symbol, index) => {
+    const node = el('span', `top-ten-visitor top-ten-visitor-${index}`, symbol);
+    flightLayer.append(node);
+    return { node, index, step: index * 5, position: null, animation: null };
+  });
+  panel.append(flightLayer);
+  const canFly = () => isOpen() && !reducedMotion.matches && !document.hidden;
+  const fly = visitor => {
+    if (!canFly() || visitor.animation) return;
+    const bounds = panel.getBoundingClientRect();
+    const viewport = content.getBoundingClientRect();
+    const targets = [...content.querySelectorAll('.top-ten-song-title, .top-ten-net-votes, .top-ten-prize')]
+      .map(node => node.getBoundingClientRect())
+      .filter(rect => rect.top >= viewport.top && rect.bottom <= viewport.bottom && rect.width > 0)
+      .map(rect => ({ x: Math.max(14, Math.min(bounds.width - 14, rect.left + rect.width / 2 - bounds.left)),
+        y: Math.max(viewport.top - bounds.top + 10, Math.min(viewport.bottom - bounds.top - 10, rect.top - bounds.top - 5)) }));
+    if (!targets.length) return;
+    const target = targets[visitor.step % targets.length];
+    visitor.step += visitor.index === 1 ? 2 : visitor.index === 2 ? 5 : 1;
+    const from = visitor.position || targets[(visitor.step + visitor.index * 3) % targets.length];
+    visitor.node.style.visibility = 'visible';
+    const animation = visitor.node.animate(chartFlightFrames(from, target, 12 + visitor.index * 5), {
+      duration: 5200 + visitor.index * 1100, easing: 'ease-in-out', fill: 'forwards',
+    });
+    visitor.animation = animation;
+    animation.finished.then(() => {
+      visitor.position = target;
+      visitor.animation = null;
+      visitor.node.style.transform = chartFlightFrames(target, target)[0].transform;
+      animation.cancel();
+      fly(visitor);
+    }).catch(() => {});
+  };
+  const syncFlights = () => {
+    if (reducedMotion.matches) for (const animation of rankAnimations) animation.cancel();
+    for (const visitor of visitors) {
+      if (canFly()) fly(visitor);
+      else {
+        visitor.animation?.cancel();
+        visitor.animation = null;
+        visitor.node.style.visibility = 'hidden';
+      }
     }
-    return { ...fund, sources };
-  }
-  async function renderFundSummary(state) {
-    const fund = state?.funds?.topTen;
-    if (!fund) { fundsSummary.replaceChildren(); return; }
-    const prepared = await prepareFund(fund, state.sponsorAliases || {});
-    fundsSummary.innerHTML = `<details class="fund-disclosure top-ten-fund-disclosure"><summary>🏆 Top 10 fund: <strong>${formatUsdcUnits(prepared.balanceUnits)} USDC</strong> · available ${formatUsdcUnits(prepared.availableUnits)} · <span>Where it comes from ▾</span></summary><div class="fund-disclosure-body">${prepared.description ? `<p class="fund-description">${escapeHtml(prepared.description)}</p>` : ''}${renderFundSourcesTable(prepared)}</div></details>`;
-  }
+  };
   const close = () => {
     clearTimeout(timer);
     toggle.setAttribute('aria-expanded', 'false');
@@ -71,6 +109,7 @@ export function initTopTenBoard() {
     panel.classList.remove('is-open');
     panel.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('top-ten-open');
+    syncFlights();
   };
   const open = () => {
     toggle.setAttribute('aria-expanded', 'true');
@@ -81,8 +120,18 @@ export function initTopTenBoard() {
     document.dispatchEvent(new CustomEvent('left-drawer-open', { detail: 'top-ten' }));
     refresh();
   };
-  const render = (report, nowPlaying) => {
-    const rows = topTenDisplayRows(report.tracks || [], nowPlaying);
+  const render = (report, nowPlaying, weekly) => {
+    const rows = topTenPrizeRows(report.tracks || [], nowPlaying, {
+      budgetUnits: weekly?.funds?.top10?.budgetUnits ?? null, minimumUnits: weekly?.minimumPayoutUnits,
+    });
+    const sameWeek = previousChart?.week === report.week;
+    const gains = chartRankGains(sameWeek ? previousChart.rows : null, rows);
+    const previousPositions = new Map(sameWeek ? [...content.querySelectorAll('.top-ten-song[data-track-id]')]
+      .map(node => [node.dataset.trackId, node.getBoundingClientRect().top]) : []);
+    const scrollTop = content.scrollTop;
+    for (const animation of rankAnimations) animation.cancel();
+    rankAnimations = [];
+    previousChart = { week: report.week, rows };
     header.textContent = `Top 10 Songs · Week ${weekNumberFromKey(report.week)}`;
     content.replaceChildren();
     if (!rows.length) {
@@ -93,6 +142,11 @@ export function initTopTenBoard() {
     const list = el('ol', 'top-ten-list');
     for (const track of rows) {
       const item = el('li', `top-ten-song${track.nowPlaying ? ' is-now-playing' : ''}${track.outsideTopTen ? ' is-live-outside-chart' : ''}`);
+      item.dataset.trackId = track.trackId;
+      if (gains.has(track.trackId) && !reducedMotion.matches) {
+        item.classList.add('is-rank-climbing');
+        item.dataset.rankGain = String(gains.get(track.trackId));
+      }
       const rank = el('span', `top-ten-rank${track.outsideTopTen ? ' top-ten-live-rank' : ''}`, track.outsideTopTen ? '▶' : String(track.rank));
       const details = el('span', 'top-ten-song-details');
       details.append(el('strong', 'top-ten-song-title', track.title || 'Untitled song'),
@@ -100,10 +154,29 @@ export function initTopTenBoard() {
       if (track.nowPlaying) details.append(el('span', 'top-ten-live-badge', 'LIVE NOW'));
       const score = el('span', 'top-ten-vote-score');
       score.append(el('span', 'top-ten-net-votes', `${track.votes > 0 ? '+' : ''}${track.votes}`), el('span', 'top-ten-vote-label', 'net votes'));
-      item.append(rank, details, score);
+      const prize = el('span', 'top-ten-prize');
+      if (track.prizeUnits === null) {
+        prize.textContent = '—';
+        prize.title = track.outsideTopTen ? 'Outside the prize chart' : 'Current weekly prize estimate unavailable';
+      } else {
+        if (track.prizeUnits > 0n) prize.innerHTML = renderUsdcAmount(track.prizeUnits);
+        else prize.textContent = '—';
+        prize.title = track.prizeUnits === 0n ? 'No payable prize at this rank; prizes must exceed $0.10' : 'Estimated prize if this song holds its rank at Monday midnight, America/New_York';
+        if (!/^0x(?!0{40}$)[0-9a-fA-F]{40}$/i.test(track.wallet || '')) prize.title += ' · Artist payout wallet must be linked before closeout';
+      }
+      item.append(rank, details, score, prize);
       list.append(item);
     }
     content.append(list);
+    content.scrollTop = scrollTop;
+    if (!reducedMotion.matches) for (const item of list.children) {
+      const previousTop = previousPositions.get(item.dataset.trackId);
+      const delta = previousTop == null ? 0 : previousTop - item.getBoundingClientRect().top;
+      if (Math.abs(delta) > 1) rankAnimations.push(item.animate([
+        { transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' },
+      ], { duration: 850, easing: 'cubic-bezier(.22, 1, .36, 1)' }));
+    }
+    syncFlights();
   };
   async function refresh() {
     clearTimeout(timer);
@@ -113,32 +186,34 @@ export function initTopTenBoard() {
     if (!service) { status.textContent = 'JukeLoop service is not configured.'; return; }
     status.textContent = 'Loading this week’s song votes…';
     try {
-      const fundsRequest = fetch(`${service}/api/funds`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
-      const [historyResponse, radioResponse, fundsResponse] = await Promise.all([
+      const [historyResponse, radioResponse, weeklyResponse] = await Promise.all([
         fetch(`${service}/api/radio/history?weeks=1&calendar=new-york`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }),
         fetch(`${service}/api/radio`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }),
-        fundsRequest,
+        fetch(`${service}/api/payroll/weekly`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }).catch(() => null),
       ]);
-      const [history, radio, funds] = await Promise.all([
-        historyResponse.json(), radioResponse.json(), fundsResponse.json().catch(() => null),
+      const [history, radio, weeklyState] = await Promise.all([
+        historyResponse.json(), radioResponse.json(),
+        weeklyResponse?.json().catch(() => null) ?? null,
       ]);
       if (request !== generation || !isOpen()) return;
       if (!historyResponse.ok) throw new Error(history.error || `Weekly votes unavailable (${historyResponse.status})`);
       if (!radioResponse.ok) throw new Error(radio.error || `Live track unavailable (${radioResponse.status})`);
       const report = (history.weeks || []).find(entry => entry.current) || (history.weeks || []).at(-1);
+      const weekly = weeklyResponse?.ok && weeklyState?.ready && !weeklyState.lastError && weeklyState.currentPeriod?.week === report?.week &&
+        /^\d+$/.test(String(weeklyState.funds?.top10?.budgetUnits ?? '')) ? weeklyState : null;
       if (!report) { header.textContent = 'Top 10 Songs'; content.replaceChildren(el('p', 'top-ten-empty', 'Weekly song votes are not available yet.')); }
-      else render(report, radio.nowPlaying);
-      if (fundsResponse.ok && funds && funds.ready && !funds.lastError) await renderFundSummary(funds);
-      else fundsSummary.replaceChildren();
-      status.textContent = '';
+      else render(report, radio.nowPlaying, weekly);
+      status.textContent = weekly ? '' : 'Prize estimates are unavailable. Song votes are current.';
     } catch (error) {
       if (request !== generation || !isOpen()) return;
       status.textContent = `${error.message}. Retrying while this panel is open.`;
-      fundsSummary.replaceChildren();
     }
     if (isOpen()) timer = setTimeout(refresh, 15000);
   }
   toggle.addEventListener('click', event => { event.stopPropagation(); isOpen() ? close() : open(); });
+  reducedMotion.addEventListener('change', syncFlights);
+  document.addEventListener('visibilitychange', syncFlights);
+  content.addEventListener('scroll', syncFlights, { passive: true });
   document.getElementById('top-ten-panel-close')?.addEventListener('click', () => { close(); toggle.focus(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); } });
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'top-ten' && isOpen()) close(); });

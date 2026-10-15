@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261019-earnings-receipts" />
+  <link rel="stylesheet" href="css/styles.css?v=20261015-weekly-funds" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -30,7 +30,6 @@
       <button id="top-ten-panel-close" type="button" aria-label="Fold away Top 10 Songs">‹</button>
     </div>
     <p class="top-ten-chart-note">Weekly net votes · upvotes minus downvotes</p>
-    <div id="top-ten-fund-summary" class="top-ten-fund-summary"></div>
     <p id="top-ten-status" role="status" aria-live="polite">Open the tab to load this week’s votes.</p>
     <div id="top-ten-content"></div>
   </aside>
@@ -172,6 +171,7 @@
         <h3 id="fund-breakdown-title">Fund breakdown</h3>
         <button id="fund-breakdown-close" type="button" aria-label="Close fund breakdown">×</button>
       </div>
+      <p class="fund-pending-notice">Payments are marked Pending because rankings and estimated amounts change with votes, plays, and funding throughout the week. They freeze at Sunday/Monday midnight in New York (America/New_York). Frozen allocations still await payment; only confirmed transactions are recorded on-chain.</p>
       <p id="fund-breakdown-summary"></p>
       <p id="fund-breakdown-note" role="status" aria-live="polite"></p>
       <div id="fund-breakdown-body"></div>
@@ -721,11 +721,11 @@
   <!-- Admin role-grant panel -->
   <script type="module" src="js/admin.js?v=20261018-shared-provider"></script>
 
-  <script type="module" src="js/payroll.js?v=20261018-shared-provider"></script>
+  <script type="module" src="js/payroll.js?v=20261015-weekly-funds"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261010-public-calendar"></script>
-  <script type="module" src="js/fund-header.mjs?v=20261018-shared-provider"></script>
-  <script type="module" src="js/top-ten-board.mjs?v=20261016-ens-worker"></script>
+  <script type="module" src="js/fund-header.mjs?v=20261015-weekly-funds"></script>
+  <script type="module" src="js/top-ten-board.mjs?v=20261015-weekly-funds"></script>
   <script type="module" src="js/djuke.mjs?v=20261014-celebrate"></script>
   <script type="module" src="js/devert-tab.mjs?v=20261018-shared-provider"></script>
   <script type="module" src="js/creator-profile.mjs?v=20261019-earnings-receipts"></script>
@@ -734,7 +734,7 @@
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261018-shared-provider"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261018-shared-provider';
+    import { initPayroll } from './js/payroll.js?v=20261015-weekly-funds';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

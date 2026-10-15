@@ -18,7 +18,7 @@ Open the [DecentBusking town square](https://thejollylama.github.io/DecentBuskin
 
 Join [DecentBusking on Discord](https://discord.gg/SCtcBggHPa), head to **#DecentJukebox**, and tune in to the **JukeLoop** voice channel. The radio rotates community uploads; listeners can react 👍 or 👎. The bot tracks cumulative votes and plays, and the ratings influence future rotation.
 
-Open the **Top 10** pull-tab on the upper-left to see this New York week's most-voted songs. The live track is highlighted. This public song chart is a discovery view; Top 10 prize drafts rank artist wallets separately.
+Open the **Top 10** pull-tab on the upper-left to see this New York week's most-voted songs and their current USDC prize estimates. Each song holds its own prize place, even when one artist has several winning songs. First place receives half the weekly pot, each subsequent place receives half the remaining pot, and the last payable place receives the remainder. Every payable prize must exceed $0.10; a smaller pot supports fewer payable places. Estimates change with votes and confirmed funding, then freeze at Monday midnight in America/New_York. Payments still require owner approval.
 
 ## Bring A Track
 

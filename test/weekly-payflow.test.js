@@ -9,8 +9,8 @@ async function fixture() {
   const config = { routerAddress: `0x${'1'.repeat(40)}`, assets: { USDC: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' } },
     radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' } };
   const reports = [{ week: 'NY-2026-09-28', startAt: '2026-09-28T04:00:00.000Z', current: false,
-    tracks: [{ wallet: `0x${'2'.repeat(40)}`, artist: 'Artist', plays: 1, votes: 2 }] },
-    { week: 'NY-2026-10-05', current: true, tracks: [{ wallet: `0x${'2'.repeat(40)}`, artist: 'Artist', plays: 1, votes: 2 }] }];
+    tracks: [{ trackId: 'song-1', title: 'Song', wallet: `0x${'2'.repeat(40)}`, artist: 'Artist', plays: 1, votes: 2 }] },
+    { week: 'NY-2026-10-05', current: true, tracks: [{ trackId: 'song-1', title: 'Song', wallet: `0x${'2'.repeat(40)}`, artist: 'Artist', plays: 1, votes: 2 }] }];
   const paid = new Set();
   const snapshots = [];
   let uploads = 0;
@@ -37,6 +37,142 @@ test('weekly payflow freezes funded closed-week shares, reserves unpaid receipts
   await restored.initialize();
   assert.equal(restored.getState().allocations.length, 2);
   assert.equal(value.uploads(), 2);
+});
+
+test('song prizes grow with funding, move with votes, and freeze at New York Monday midnight', async () => {
+  const { createWeeklyPayflow } = await import(url);
+  const value = await fixture();
+  let clock = Date.parse('2026-10-18T23:58:00-04:00');
+  let balance = 12250000n;
+  const tracks = [
+    { trackId: 'first', title: 'First', wallet: `0x${'2'.repeat(40)}`, artist: 'Artist', plays: 1, votes: 17 },
+    { trackId: 'second', title: 'Second', wallet: `0x${'2'.repeat(40)}`, artist: 'Artist', plays: 1, votes: 8 },
+    { trackId: 'third', title: 'Third', wallet: `0x${'3'.repeat(40)}`, artist: 'Other', plays: 1, votes: 4 },
+  ];
+  const reports = [{ week: 'NY-2026-10-12', startAt: '2026-10-12T04:00:00.000Z', current: true, tracks }];
+  value.options.router.fundBalances = async () => balance;
+  const scheduler = createWeeklyPayflow({ ...value.options, now: () => clock, getReports: async () => reports, getClosingBalance: async () => 24500000n });
+  await scheduler.initialize();
+  assert.equal(scheduler.getState().funds.top10.estimatedShares[0].amountUnits, '6125000');
+  balance = 24500000n;
+  await scheduler.tick();
+  assert.equal(scheduler.getState().funds.top10.estimatedShares[0].amountUnits, '12250000');
+  tracks[1].votes = 99;
+  await scheduler.tick();
+  assert.equal(scheduler.getState().funds.top10.estimatedShares[0].trackId, 'second');
+  clock = Date.parse('2026-10-19T00:00:00-04:00');
+  reports[0] = { ...reports[0], current: false, tracks: structuredClone(tracks) };
+  reports.push({ week: 'NY-2026-10-19', startAt: '2026-10-19T04:00:00.000Z', current: true, tracks: [] });
+  await scheduler.tick();
+  const frozen = scheduler.getState().allocations.find(record => record.allocation.category === 'top10');
+  assert.equal(frozen.allocation.schemaVersion, 5);
+  assert.deepEqual(frozen.allocation.entries.map(entry => [entry.trackId, entry.amountUnits]), [['second', '12250000'], ['first', '6125000'], ['third', '6125000']]);
+  const receipt = JSON.stringify(frozen);
+  balance = 49000000n;
+  tracks[0].votes = 1000;
+  await scheduler.tick();
+  assert.equal(JSON.stringify(scheduler.getState().allocations.find(record => record.allocation.category === 'top10')), receipt);
+  assert.equal(scheduler.getState().funds.top10.availableUnits, '24500000');
+});
+
+test('both fund modals roll live song estimates into frozen archives and confirmed payouts without spending next week deposits', async context => {
+  const { createServer } = require('node:http');
+  const { id } = require('../discord-bot/node_modules/ethers');
+  const { createWeeklyPayflow } = await import(url);
+  const { createWorkerRequestHandler } = await import('../discord-bot/ipfs-worker.js');
+  const { loadFundState, fundStateFor } = await import('../js/fund-header.mjs');
+  const { renderFundPendingTable, renderFundWeeklyArchive } = await import('../js/fund-display.mjs');
+  const { settleRadioAllocation, validateRadioReceipt } = await import('../js/radio-payroll.mjs');
+  const value = await fixture();
+  let clock = Date.parse('2026-10-18T23:59:59-04:00');
+  context.mock.method(Date, 'now', () => clock);
+  const slugs = ['dbusk-top10', 'dbusk-playback'];
+  const balances = new Map([['dbusk-top10', 12250000n], ['dbusk-playback', 8000000n]]);
+  const closing = new Map(balances);
+  const payouts = [];
+  const tracks = [
+    { trackId: 'first', title: 'First', wallet: `0x${'2'.repeat(40)}`, artist: 'Artist', plays: 3, votes: 17 },
+    { trackId: 'second', title: 'Second', wallet: `0x${'3'.repeat(40)}`, artist: 'Other', plays: 1, votes: 8 },
+  ];
+  const reports = [{ week: 'NY-2026-10-12', startAt: '2026-10-12T04:00:00.000Z', current: true, tracks }];
+  value.options.router.fundBalances = async fundId => balances.get(slugs.find(slug => id(slug) === fundId));
+  const options = { ...value.options, now: () => clock, getReports: async () => reports, getClosingBalance: async ({ fundSlug }) => closing.get(fundSlug) };
+  let scheduler = createWeeklyPayflow(options);
+  await scheduler.initialize();
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: value.options.config.routerAddress,
+    getWeeklyPayflow: ({ wallet }) => scheduler.getState({ wallet }), getRadioHistory: async () => reports,
+    getFunds: async () => ({ ready: true, funds: Object.fromEntries(slugs.map(slug => [slug, { slug, balanceUnits: String(balances.get(slug)), sources: [], payouts: payouts.filter(payment => payment.slug === slug) }])) }) });
+  const server = createServer(handler);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  context.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); });
+  const serviceUrl = `http://127.0.0.1:${server.address().port}`;
+  const readArchive = async slug => {
+    const response = await fetch(`${serviceUrl}/api/funds/${slug}/weeks`, { headers: { Origin: 'http://127.0.0.1:3000' } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    return response.json();
+  };
+  const live = await loadFundState({ serviceUrl, now: clock });
+  for (const slug of slugs) {
+    const fund = fundStateFor(live, slug);
+    assert.equal(fund.pendingRows.length, 2);
+    assert.match(renderFundPendingTable(fund.pendingRows, { fundSlug: slug }), /Pending ·/);
+    assert.equal((await readArchive(slug)).weeks.length, 0);
+  }
+  clock = Date.parse('2026-10-19T00:00:01-04:00');
+  reports[0] = { ...reports[0], current: false, tracks: structuredClone(tracks) };
+  reports.push({ week: 'NY-2026-10-19', startAt: '2026-10-19T04:00:00.000Z', current: true, tracks: [{ ...tracks[0], trackId: 'new-week', plays: 1, votes: 1 }] });
+  for (const slug of slugs) balances.set(slug, balances.get(slug) + 5000000n);
+  await scheduler.tick();
+  const receipts = scheduler.getState().allocations;
+  for (const record of receipts) validateRadioReceipt(record.allocation, { routerAddress: value.options.config.routerAddress, assetAddress: value.options.config.assets.USDC.address, funds: value.options.config.radioFunds });
+  const next = await loadFundState({ serviceUrl, now: clock });
+  for (const slug of slugs) {
+    assert.equal(fundStateFor(next, slug).budgetUnits, '5000000');
+    assert.equal(fundStateFor(next, slug).pendingRows[0].trackId, 'new-week');
+    const archive = await readArchive(slug);
+    assert.equal(archive.weeks[0].status, 'queued');
+    assert.match(renderFundWeeklyArchive(archive), /Frozen · awaiting payment/);
+  }
+  let interrupt = true;
+  let attempts = 0;
+  const payout = async (fundId, asset, recipient, amount, workReference, _repository, _contributor, metadataUri) => {
+    attempts++;
+    if (interrupt && attempts === 2) throw new Error('Simulated interruption');
+    const slug = slugs.find(candidate => id(candidate) === fundId);
+    const txHash = `0x${String(attempts).padStart(64, '0')}`;
+    return { hash: txHash, wait: async () => {
+      balances.set(slug, balances.get(slug) - amount);
+      value.paid.add(workReference);
+      payouts.push({ slug, asset, recipient, amountUnits: String(amount), workReference, metadataUri, txHash, logIndex: 0, blockNumber: attempts, timestamp: Math.floor(clock / 1000) });
+      return { status: 1 };
+    } };
+  };
+  payout.staticCall = async () => {};
+  const router = { ...value.options.router, target: value.options.config.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll', hasRole: async () => true, contributors: async () => ({ approved: true }), payout };
+  const settle = record => settleRadioAllocation({ ...record, router, owner: value.options.config.routerAddress, hashReference: id,
+    signer: { provider: { getNetwork: async () => ({ chainId: 8453 }) }, getAddress: async () => value.options.config.routerAddress } });
+  const top = receipts.find(record => record.allocation.category === 'top10');
+  await assert.rejects(settle(top), /Simulated interruption/);
+  assert.equal((await readArchive('dbusk-top10')).weeks[0].status, 'partial');
+  interrupt = false;
+  for (const record of receipts) await settle(record);
+  const count = payouts.length;
+  for (const record of receipts) await settle(record);
+  assert.equal(payouts.length, count);
+  await scheduler.tick();
+  scheduler = createWeeklyPayflow({ ...options, restore: async () => value.snapshots.at(-1) });
+  await scheduler.initialize();
+  for (const slug of slugs) {
+    const archive = await readArchive(slug);
+    assert.equal(archive.weeks[0].status, 'paid');
+    assert.equal(archive.weeks[0].paidUnits, String(closing.get(slug)));
+    assert.match(renderFundWeeklyArchive(archive), /fund-weekly-confirmed/);
+    assert.match(renderFundWeeklyArchive(archive), /basescan\.org\/tx/);
+    assert.equal(balances.get(slug), 5000000n);
+    assert.equal(fundStateFor(await loadFundState({ serviceUrl, now: clock }), slug).budgetUnits, '5000000');
+  }
+  assert.equal(scheduler.getState().allocations.length, 2);
 });
 
 test('ignored partial week removes its stale reservation and keeps its USDC available', async () => {

@@ -2,11 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const path = require('node:path');
-const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 
-const botRequire = createRequire(path.join(__dirname, '..', 'discord-bot', 'package.json'));
-const { Interface, Wallet } = botRequire('ethers');
+const { Interface, Wallet, id } = require('../discord-bot/node_modules/ethers');
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'ipfs-worker.js')).href;
 
 async function withServer(handler, callback) {
@@ -197,6 +195,78 @@ test('weekly payflow endpoint filters artists and New York history calendar is e
     const history = await (await fetch(`${base}/api/radio/history?calendar=new-york`)).json();
     assert.equal(history.weeks[0].calendar, 'new-york');
   });
+});
+
+test('fund week archive groups payroll payouts by week and surfaces queued entries', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const { finalizeRadioAllocation } = await import('../js/radio-payroll.mjs');
+  const fundSlug = 'dbusk-top10';
+  const routerAddress = `0x${'1'.repeat(40)}`;
+  const assetAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+  const report = { week: 'NY-2026-10-05', current: false, tracks: [{ wallet: `0x${'2'.repeat(40)}`, artist: 'Artist One', plays: 12, votes: 12 },
+    { wallet: `0x${'3'.repeat(40)}`, artist: 'Artist Two', plays: 9, votes: 9 }] };
+  const allocation = finalizeRadioAllocation({ report, category: 'top10', budgetUnits: 1000000n, minimumUnits: 0n, fundSlug, routerAddress, assetAddress,
+    now: Date.parse('2026-10-13T12:00:00Z') });
+  const firstReference = allocation.entries[0].workReferenceText;
+  const payout = { slug: fundSlug, workReference: id(firstReference),
+    recipient: allocation.entries[0].wallet, amountUnits: allocation.entries[0].amountUnits, txHash: '0x' + '7'.repeat(64), blockNumber: 10, timestamp: 10_000, metadataUri: 'ipfs://meta' };
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: [],
+    ownerWallet: Wallet.createRandom().address,
+    getFunds: async () => ({ funds: { [fundSlug]: { slug: fundSlug, payouts: [payout] } } }),
+    getWeeklyPayflow: async ({ wallet }) => { assert.equal(wallet, undefined); return { currentPeriod: { week: 'NY-2026-10-12' }, allocations: [{ allocation, metadataUri: 'ipfs://meta' }] }; },
+  });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/funds/${fundSlug}/weeks`, { headers: { Origin: 'http://127.0.0.1:3000' } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    const body = await response.json();
+    assert.equal(body.weeks.length, 1);
+    assert.equal(body.weeks[0].status, 'partial');
+    assert.equal(body.weeks[0].paidUnits, allocation.entries[0].amountUnits);
+    assert.equal(body.weeks[0].entries[0].paid, true);
+    assert.equal(body.weeks[0].entries[1].paid, false);
+    assert.equal(body.weeks[0].metadataUri, 'ipfs://meta');
+  });
+});
+
+test('weekly fund archive errors remain readable from local and hosted browsers', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  for (const origin of ['http://127.0.0.1:3000', 'https://thejollylama.github.io']) {
+    const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+      getFunds: async () => { throw new Error('Index unavailable'); }, getWeeklyPayflow: async ({ wallet }) => ({ wallet }) });
+    await withServer(handler, async base => {
+      const response = await fetch(`${base}/api/funds/dbusk-top10/weeks`, { headers: { Origin: origin } });
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('access-control-allow-origin'), '*');
+      assert.match((await response.json()).error, /archive unavailable/);
+    });
+  }
+});
+
+test('weekly archive reports actual paid amounts, recipient discrepancies, duplicate logs, and unmatched payments', async () => {
+  const { buildFundWeeklyArchive } = await import('../js/fund-archive.mjs');
+  const fundSlug = 'dbusk-top10';
+  const wallet = `0x${'1'.repeat(40)}`;
+  const workReferenceText = `decentbusking:radio:v4:8453:NY-2026-10-05:top10:${wallet}:song-a`;
+  const record = { metadataUri: 'ipfs://receipt', allocation: { fundSlug, category: 'top10', week: 'NY-2026-10-05', entries: [{ wallet, workReferenceText, amountUnits: '1000000', trackId: 'song-a', title: 'Song A' }] } };
+  const payout = { slug: fundSlug, workReference: id(workReferenceText), recipient: wallet, amountUnits: '100000', metadataUri: 'ipfs://receipt', txHash: `0x${'2'.repeat(64)}`, logIndex: 0 };
+  const build = payouts => buildFundWeeklyArchive({ fundSlug, fund: { payouts }, weeklyPayflow: { allocations: [record] } });
+  const mismatch = build([payout, payout]);
+  assert.equal(mismatch.weeks[0].paidUnits, '100000');
+  assert.equal(mismatch.weeks[0].totalUnits, '1000000');
+  assert.equal(mismatch.weeks[0].status, 'mismatch');
+  assert.equal(mismatch.weeks[0].entries[0].paid, false);
+  assert.equal(mismatch.weeks[0].entries[0].title, 'Song A');
+  const wrongRecipient = build([{ ...payout, amountUnits: '1000000', recipient: `0x${'3'.repeat(40)}` }]);
+  assert.equal(wrongRecipient.weeks[0].status, 'mismatch');
+  assert.equal(wrongRecipient.weeks[0].remainingUnits, '1000000');
+  assert.equal(build([{ ...payout, amountUnits: '1000000' }]).weeks[0].status, 'paid');
+  const orphan = buildFundWeeklyArchive({ fundSlug, fund: { payouts: [payout] }, weeklyPayflow: { allocations: [] } });
+  assert.equal(orphan.weeks.length, 0);
+  assert.equal(orphan.unmatchedPayouts.length, 1);
+  assert.equal(orphan.unmatchedPaidUnits, '100000');
+  assert.equal(build([{ ...payout, slug: 'dbusk-playback' }]).weeks[0].paidUnits, '0');
 });
 
 test('artwork CID validation normalizes file CIDs without imposing an attachment-size limit', async () => {

@@ -19,7 +19,8 @@ test('weekly payroll surfaces counted plays and copyable work references without
   const source = fs.readFileSync(path.join(__dirname, '../js/payroll.js'), 'utf8');
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(source, /_appendRadioWorkReference\(target, entry\.workReferenceText, category\)/);
-  assert.match(source, /radioWorkReferenceText\(\{ week: report\.week, category, wallet: entry\.wallet \}\)/);
+  assert.match(source, /radioWorkReferenceText\(\{ week: report\.week, category, wallet: entry\.wallet,/);
+  assert.match(source, /songPrizes \? \{ trackId: entry\.trackId \}/);
   assert.match(source, /navigator\.clipboard\.writeText\(reference\)/);
   assert.match(source, /Current week \$\{report\.week\}: \$\{report\.totalPlays\} qualified plays/);
   assert.match(source, /Tracking began \$\{trackingStartedAt\}; earlier activity may be missing/);

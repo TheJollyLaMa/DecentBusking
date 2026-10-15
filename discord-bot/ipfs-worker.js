@@ -1,6 +1,7 @@
 import { Contract, Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
+import { buildFundWeeklyArchive } from '../js/fund-archive.mjs';
 import { catalogPage } from '../js/nft-loader.js';
 import { uploadToIPFS } from './ipfs.js';
 import { readRawBody } from './alchemy-webhook.js';
@@ -423,6 +424,27 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/api/funds') {
         if (!getFunds) throw new Error('Fund balances are not configured');
         sendJson(response, 200, await getFunds(), '*', 'public, max-age=60, stale-while-revalidate=30');
+        return;
+      }
+      if (request.method === 'GET' && /^\/api\/funds\/[^/]+\/weeks$/.test(requestUrl.pathname)) {
+        try {
+          const fundSlug = decodeURIComponent(requestUrl.pathname.split('/')[3] || '');
+          if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fundSlug)) {
+            sendJson(response, 400, { error: 'Invalid fund slug' }, '*'); return;
+          }
+          if (!getFunds || !getWeeklyPayflow) {
+            sendJson(response, 503, { error: 'Fund payout history is not configured' }, '*'); return;
+          }
+          const [funds, weekly] = await Promise.all([getFunds(), getWeeklyPayflow({})]);
+          if (funds?.ready === false || weekly?.ready === false || funds?.lastError || weekly?.lastError) {
+            sendJson(response, 503, { error: 'Fund payout history is still indexing; retry shortly' }, '*'); return;
+          }
+          const fund = funds?.funds?.[fundSlug];
+          if (!fund) { sendJson(response, 404, { error: 'Unknown fund' }, '*'); return; }
+          sendJson(response, 200, buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow: weekly }), '*', 'public, max-age=30, stale-while-revalidate=60');
+        } catch {
+          sendJson(response, 503, { error: 'Weekly fund archive unavailable; retry shortly' }, '*');
+        }
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/earnings/')) {
