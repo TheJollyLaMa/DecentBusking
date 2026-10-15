@@ -52,7 +52,7 @@ import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolve
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
 import { startDevertLoopWorker } from './devert-loop.js';
 import { DEFAULT_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
-import { createPinataStateStore } from './ipfs-state.js';
+import { createPinataStateStore, recoverVerifiedPlaylistBaseline } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
 import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
@@ -1223,10 +1223,23 @@ async function main() {
         if (attempt < STATE_RESTORE_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 5_000 * attempt));
       }
     }
+    const recovery = await recoverVerifiedPlaylistBaseline(restoredPlaylist, {
+      store: stateStore,
+      cid: 'bafybeibzxkm6ttknixv5w4ywjczazrw6dp7aqi7bszw5waav5im3wursau',
+      savedAt: '2026-10-15T22:33:36.952Z', week: 'NY-2026-10-12', expectedTracks: 268,
+      expectedPlays: 1136, expectedVotes: 120,
+      expectedSongs: [
+        { trackId: '1556130244510097426', votes: 17, plays: 29 },
+        { trackId: '1559282391413952582', votes: 8, plays: 23 },
+      ],
+    });
+    restoredPlaylist = recovery.playlist;
+    if (recovery.recovered) console.log(`[playlist-recovery] Restored approved 2026-10-15 22:33:36 baseline; checkpoint ${recovery.uri}.`);
     loadPlaylist(restoredPlaylist);
     configureRemotePersistence(stateStore.save);
-    const payrollRecoveryCids = (process.env.JUKELOOP_PAYROLL_RECOVERY_CID || PAYROLL_RECOVERY_CIDS.join(','))
-      .split(',').map(cid => cid.trim()).filter(Boolean);
+    const payrollRecoveryCids = restoredPlaylist.some(track => track.playlistBaselineCid)
+      ? [] : (process.env.JUKELOOP_PAYROLL_RECOVERY_CID || PAYROLL_RECOVERY_CIDS.join(','))
+        .split(',').map(cid => cid.trim()).filter(Boolean);
     let recoveryCids = payrollRecoveryCids;
     if (!getPlaylist().length && recoveryCids.length) {
       const baselineCid = recoveryCids[0];

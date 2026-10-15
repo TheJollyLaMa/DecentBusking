@@ -5,6 +5,44 @@ const { pathToFileURL } = require('node:url');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'ipfs-state.js')).href;
 
+test('approved baseline replaces incorrect counters exactly once and retains later activity on restart', async () => {
+  const { recoverVerifiedPlaylistBaseline } = await import(moduleUrl);
+  const cid = 'bafyapprovedbaseline';
+  const week = 'NY-2026-10-12';
+  const baseline = [{ trackId: 'first', payrollPlays: { [week]: 29 }, payrollVotes: { [week]: 17 } },
+    { trackId: 'second', payrollPlays: { [week]: 23 }, payrollVotes: { [week]: 8 } }];
+  let restores = 0;
+  let saves = 0;
+  const options = { cid, week, savedAt: '2026-10-15T22:33:36.952Z', expectedTracks: 2, expectedPlays: 52, expectedVotes: 25,
+    expectedSongs: [{ trackId: 'first', plays: 29, votes: 17 }],
+    store: { restoreCid: async () => { restores++; return structuredClone(baseline); }, getLatestSnapshotSavedAt: () => '2026-10-15T22:33:36.952Z',
+      save: async () => { saves++; return 'ipfs://recovered'; } } };
+  const result = await recoverVerifiedPlaylistBaseline([{ trackId: 'first', payrollPlays: { [week]: 1 } }], options);
+  assert.equal(result.recovered, true);
+  assert.equal(result.playlist[0].payrollPlays[week], 29);
+  assert.equal(result.playlist[0].payrollVotes[week], 17);
+  result.playlist[0].payrollPlays[week]++;
+  result.playlist.push({ trackId: 'new-song' });
+  const restarted = await recoverVerifiedPlaylistBaseline(result.playlist, options);
+  assert.equal(restarted.recovered, false);
+  assert.equal(restarted.playlist[0].payrollPlays[week], 30);
+  assert.equal(restarted.playlist.length, 3);
+  assert.equal(restores, 1);
+  assert.equal(saves, 1);
+});
+
+test('baseline recovery refuses unexpected totals and does not adopt state when checkpointing fails', async () => {
+  const { recoverVerifiedPlaylistBaseline } = await import(moduleUrl);
+  let saves = 0;
+  const options = { cid: 'bafyapprovedbaseline', week: 'NY-2026-10-12', savedAt: '2026-10-15T22:33:36.952Z', expectedTracks: 1, expectedPlays: 29, expectedVotes: 17,
+    store: { restoreCid: async () => [{ trackId: 'first', payrollPlays: { 'NY-2026-10-12': 1 } }], getLatestSnapshotSavedAt: () => '2026-10-15T22:33:36.952Z',
+      save: async () => { saves++; throw new Error('Checkpoint unavailable'); } } };
+  await assert.rejects(recoverVerifiedPlaylistBaseline([], options), /totals do not match/);
+  assert.equal(saves, 0);
+  options.store.restoreCid = async () => [{ trackId: 'first', payrollPlays: { 'NY-2026-10-12': 29 }, payrollVotes: { 'NY-2026-10-12': 17 } }];
+  await assert.rejects(recoverVerifiedPlaylistBaseline([], options), /Checkpoint unavailable/);
+});
+
 test('restores the newest tagged JukeLoop snapshot from Pinata', async () => {
   const { createPinataStateStore } = await import(moduleUrl);
   const requests = [];

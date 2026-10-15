@@ -39,6 +39,32 @@ async function responseError(response, fallback) {
   return detail ? `${fallback} (${response.status}): ${detail}` : `${fallback} (${response.status})`;
 }
 
+export async function recoverVerifiedPlaylistBaseline(playlist, { store, cid, savedAt, week, expectedTracks, expectedPlays, expectedVotes, expectedSongs = [] }) {
+  if (playlist?.some(track => track.playlistBaselineCid === cid)) return { playlist, recovered: false };
+  const baseline = await store.restoreCid(cid, { attempts: 3, baseDelayMs: 15000 });
+  if (!Array.isArray(baseline) || baseline.length !== expectedTracks || store.getLatestSnapshotSavedAt() !== savedAt) throw new Error('Recovery checkpoint identity does not match the approved baseline');
+  const identities = new Set();
+  let plays = 0;
+  let votes = 0;
+  for (const track of baseline) {
+    if (!track.trackId || identities.has(track.trackId)) throw new Error('Recovery checkpoint has invalid or duplicate song identities');
+    identities.add(track.trackId);
+    const trackPlays = track.payrollPlays?.[week] || 0;
+    const trackVotes = track.payrollVotes?.[week] || 0;
+    if (!Number.isSafeInteger(trackPlays) || trackPlays < 0 || !Number.isSafeInteger(trackVotes)) throw new Error('Recovery checkpoint contains invalid weekly counters');
+    plays += trackPlays;
+    votes += trackVotes;
+  }
+  if (plays !== expectedPlays || votes !== expectedVotes || expectedSongs.some(expected => {
+    const track = baseline.find(candidate => candidate.trackId === expected.trackId);
+    return track?.payrollPlays?.[week] !== expected.plays || track?.payrollVotes?.[week] !== expected.votes;
+  })) throw new Error('Recovery checkpoint totals do not match the approved baseline');
+  const recovered = baseline.map(track => ({ ...track, playlistBaselineCid: cid }));
+  const uri = await store.save(recovered);
+  if (!/^ipfs:\/\//.test(uri || '')) throw new Error('Recovery baseline could not be durably checkpointed');
+  return { playlist: recovered, recovered: true, uri };
+}
+
 export function createPinataStateStore({
   pinataJwt,
   uploadUrl = 'https://uploads.pinata.cloud/v3/files',
