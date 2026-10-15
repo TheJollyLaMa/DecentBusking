@@ -7,7 +7,7 @@ import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
-  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261018-djuke-v03-only';
+  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261019-earnings-receipts';
 
 const WALLET_BREATHE_ICON = 'img/Ens_Eth_Breathe.png';
 
@@ -116,6 +116,81 @@ export function buildNftListItem({ index = 0, title, subtitle = '', meta = '', a
     li.append(remove);
   }
   return li;
+}
+
+function receiptDate(transaction) {
+  if (!transaction.timestamp) return `block ${Number(transaction.blockNumber).toLocaleString('en-US')}`;
+  return new Date(transaction.timestamp * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+// Receipt-style ledger: every on-chain payout with a tx link and a running total that adds up to the line amount.
+export function buildEarningsReceipt(entry, doc = document) {
+  const transactions = entry.transactions || [];
+  const details = doc.createElement('details');
+  details.className = 'creator-earnings-receipt';
+  const summary = doc.createElement('summary');
+  summary.textContent = `View ${transactions.length} transaction${transactions.length === 1 ? '' : 's'}`;
+  const table = doc.createElement('table');
+  const songPlays = entry.kind === 'song-play';
+  const head = doc.createElement('thead');
+  const headRow = doc.createElement('tr');
+  for (const heading of ['#', 'Date', songPlays ? 'Song' : 'Payout', 'Amount', 'Running total', 'Proof']) {
+    headRow.append(Object.assign(doc.createElement('th'), { scope: 'col', textContent: heading }));
+  }
+  head.append(headRow);
+  const body = doc.createElement('tbody');
+  const chronological = [...transactions].sort((a, b) => a.blockNumber - b.blockNumber);
+  let running = 0n;
+  const rows = chronological.map((transaction, index) => {
+    running += BigInt(transaction.units || 0);
+    const row = doc.createElement('tr');
+    const detail = songPlays
+      ? (transaction.title || (transaction.requestId ? `Paid play #${transaction.requestId}` : 'Paid play'))
+      : entry.label;
+    const proofCell = doc.createElement('td');
+    const anchor = Object.assign(doc.createElement('a'), { href: transaction.url, target: '_blank', rel: 'noopener',
+      textContent: `${transaction.hash.slice(0, 10)}…`, title: `View transaction ${transaction.hash} on Basescan` });
+    proofCell.append(anchor);
+    row.append(
+      Object.assign(doc.createElement('td'), { textContent: String(index + 1) }),
+      Object.assign(doc.createElement('td'), { textContent: receiptDate(transaction) }),
+      Object.assign(doc.createElement('td'), { textContent: detail }),
+      Object.assign(doc.createElement('td'), { className: 'num', textContent: formatAmount(transaction.units, entry.asset) }),
+      Object.assign(doc.createElement('td'), { className: 'num', textContent: formatAmount(running, entry.asset) }),
+      proofCell);
+    return row;
+  });
+  body.append(...rows.reverse());
+  const foot = doc.createElement('tfoot');
+  const footRow = doc.createElement('tr');
+  footRow.append(
+    Object.assign(doc.createElement('th'), { scope: 'row', colSpan: 3, textContent: `Total · ${transactions.length} payout${transactions.length === 1 ? '' : 's'}` }),
+    Object.assign(doc.createElement('td'), { className: 'num', textContent: formatAmount(running, entry.asset) }),
+    doc.createElement('td'),
+    doc.createElement('td'));
+  foot.append(footRow);
+  table.append(head, body, foot);
+  const wrap = doc.createElement('div');
+  wrap.className = 'creator-earnings-receipt-scroll';
+  wrap.append(table);
+  details.append(summary, wrap);
+  return details;
+}
+
+// When per-play receipts are available, they replace the contract's aggregate artistLedger total.
+export function mergeLedgerReceipts(viewEntries, logEntries) {
+  const notes = [];
+  const kept = viewEntries.filter(view => {
+    if (view.status !== 'paid' || view.proofLabel !== 'artistLedger') return true;
+    const contract = String(view.key || '').split(':')[0].toLowerCase();
+    const receipts = logEntries.find(entry => entry.kind === 'song-play' && String(entry.contract || '').toLowerCase() === contract);
+    if (!receipts) return true;
+    if (BigInt(receipts.units) !== BigInt(view.units)) {
+      notes.push(`${view.label}: contract ledger reports ${formatAmount(view.units, view.asset)}; ${formatAmount(receipts.units, receipts.asset)} has tx receipts so far.`);
+    }
+    return false;
+  });
+  return { viewEntries: kept, note: notes.join(' ') };
 }
 
 export async function collectCreatorEarnings({
@@ -553,16 +628,8 @@ export function initCreatorProfile() {
       const proof = document.createElement('span');
       proof.className = 'creator-earnings-proof';
       if (entry.status === 'unclaimed') proof.append(Object.assign(document.createElement('em'), { textContent: 'unclaimed · ' }));
-      if (entry.proofUrl) proof.append(link(entry.proofUrl, `proof: ${entry.proofLabel}`));
-      if ((entry.transactions || []).length) {
-        const txs = document.createElement('details');
-        txs.className = 'creator-earnings-transactions';
-        const summary = document.createElement('summary');
-        summary.textContent = `${entry.transactions.length} tx${entry.transactions.length === 1 ? '' : 's'}`;
-        txs.append(summary);
-        for (const transaction of entry.transactions) txs.append(' ', link(transaction.url, `tx ${transaction.hash.slice(0, 8)}…`));
-        proof.append(' ', txs);
-      }
+      if (entry.proofUrl && !(entry.transactions || []).length) proof.append(link(entry.proofUrl, `proof: ${entry.proofLabel}`));
+      if ((entry.transactions || []).length) proof.append(buildEarningsReceipt(entry));
       item.append(label, amount, proof);
       earningsList.append(item);
     }
@@ -591,7 +658,8 @@ export function initCreatorProfile() {
         return;
       }
       if (check !== revision) return;
-      renderEarnings([...result.viewEntries, ...result.logs.entries], result.note);
+      const merged = mergeLedgerReceipts(result.viewEntries, result.logs.entries);
+      renderEarnings([...merged.viewEntries, ...result.logs.entries], [merged.note, result.note].filter(Boolean).join(' '));
     } finally { publicProvider.destroy(); }
   };
   const open = async detail => {

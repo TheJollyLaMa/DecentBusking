@@ -24,10 +24,14 @@ const DJUKE_ABI = [
 ];
 const PAYROLL_EVENT = 'event PayrollPaid(bytes32 indexed fundId, address indexed asset, address indexed recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)';
 const WITHDRAW_EVENT = 'event ArtistWithdrawal(address indexed artist, uint256 amount)';
-const CACHE_PREFIX = 'dbusk-earnings-v1:';
+const ARTIST_PAID_EVENT = 'event ArtistPaid(address indexed artist, uint256 amount, uint256 cumulativePaid)';
+const PLAY_FULFILLED_EVENT = 'event PlayFulfilled(uint256 indexed requestId, bytes32 indexed songId, bytes32 playbackProof, uint256 fundAmount)';
+const EARNING_EVENTS = [PAYROLL_EVENT, WITHDRAW_EVENT, ARTIST_PAID_EVENT, PLAY_FULFILLED_EVENT];
+const CACHE_PREFIX = 'dbusk-earnings-v2:';
 const EARNINGS_KIND = {
   payroll: 'payroll',
   withdrawal: 'withdrawal',
+  songPlay: 'song-play',
 };
 
 export const readProof = contract => `${BASESCAN}/address/${contract}#readContract`;
@@ -37,6 +41,7 @@ export function assetSymbol(asset) {
   const value = String(asset || '').toLowerCase();
   if (value === USDC_ADDRESS.toLowerCase()) return 'USDC';
   if (value === ART_ADDRESS.toLowerCase()) return 'ART';
+  if (value === 'usdc' || value === 'art') return value.toUpperCase();
   return 'TOKEN';
 }
 
@@ -88,7 +93,7 @@ export async function fetchWorkerEarnings({ fetch: fetchImpl = globalThis.fetch,
 }
 
 export async function verifyGroupedEarningsProofs({ ethers, provider, address, entries, contracts = DJUKE_EARNING_CONTRACTS }) {
-  const iface = new ethers.Interface([PAYROLL_EVENT, WITHDRAW_EVENT]);
+  const iface = new ethers.Interface(EARNING_EVENTS);
   const byHash = new Map();
   for (const entry of entries) {
     for (const tx of entry.transactions || []) {
@@ -117,12 +122,12 @@ export async function verifyGroupedEarningsProofs({ ethers, provider, address, e
           matched = true;
           verifiedTx.add(txHash);
         }
-      } else if (event?.name === 'ArtistWithdrawal') {
+      } else if (event?.name === 'ArtistWithdrawal' || event?.name === 'ArtistPaid') {
         const artist = String(event.args.artist || '').toLowerCase();
-        if (artist !== lowerAddress) continue;
-        const source = contractByAddress.get(log.address?.toLowerCase() || '');
+        if (artist !== lowerAddress || !contractByAddress.has(log.address?.toLowerCase() || '')) continue;
+        const kind = event.name === 'ArtistPaid' ? EARNINGS_KIND.songPlay : EARNINGS_KIND.withdrawal;
         for (const { entry, tx } of pairings) {
-          if (entry.kind !== EARNINGS_KIND.withdrawal) continue;
+          if (entry.kind !== kind) continue;
           if (entry.contract && entry.contract.toLowerCase() !== log.address.toLowerCase()) continue;
           if (String(tx.units || '0') !== String(event.args.amount.toString())) continue;
           matched = true;
@@ -163,11 +168,15 @@ export function createEarningsLedger({
   now = () => Date.now(),
   log = console,
 } = {}) {
-  const iface = new ethers.Interface([PAYROLL_EVENT, WITHDRAW_EVENT]);
+  const iface = new ethers.Interface(EARNING_EVENTS);
   const contractMap = new Map(contracts.map(source => [source.address.toLowerCase(), source]));
+  const ledgerContracts = contracts.filter(source => source.ledger);
+  const songPlayStart = ledgerContracts.length ? Math.min(...ledgerContracts.map(source => source.startBlock || ROUTER_START_BLOCK)) : null;
   let items = [];
   let scannedFrom = null;
   let scannedThrough = null;
+  // Song-play payouts were added after the first index; they backfill separately up to scannedThrough.
+  let songPlaysThrough = null;
   let lastCheckedAt = null;
   let lastError = '';
   let task = Promise.resolve();
@@ -179,7 +188,7 @@ export function createEarningsLedger({
   };
 
   function snapshot() {
-    return { schemaVersion: 1, chainId: 8453, routerAddress: ROUTER_ADDRESS, scannedFrom, scannedThrough, lastCheckedAt, items };
+    return { schemaVersion: 2, chainId: 8453, routerAddress: ROUTER_ADDRESS, scannedFrom, scannedThrough, songPlaysThrough, lastCheckedAt, items };
   }
 
   async function getBlockTimestamp(blockNumber) {
@@ -187,8 +196,51 @@ export function createEarningsLedger({
     return Number(block?.timestamp || 0);
   }
 
+  async function scanSongPlays(fromBlock, toBlock) {
+    if (!ledgerContracts.length || toBlock < fromBlock) return [];
+    const addresses = ledgerContracts.map(source => source.address);
+    const [paid, fulfilled] = await Promise.all([
+      getLogsWithRetry(provider, { address: addresses, topics: [iface.getEvent('ArtistPaid').topicHash] }, fromBlock, toBlock, wait),
+      getLogsWithRetry(provider, { address: addresses, topics: [iface.getEvent('PlayFulfilled').topicHash] }, fromBlock, toBlock, wait),
+    ]);
+    const plays = new Map();
+    for (const logEntry of fulfilled) {
+      const event = iface.parseLog(logEntry);
+      if (event?.name === 'PlayFulfilled') plays.set(logEntry.transactionHash, { requestId: event.args.requestId.toString(), songId: event.args.songId });
+    }
+    const next = [];
+    for (const logEntry of paid) {
+      const event = iface.parseLog(logEntry);
+      if (!event || event.name !== 'ArtistPaid') continue;
+      const source = contractMap.get(String(logEntry.address || '').toLowerCase()) || null;
+      next.push({
+        kind: EARNINGS_KIND.songPlay,
+        contract: logEntry.address,
+        contractLabel: source?.label || 'DJuke',
+        asset: 'USDC',
+        units: event.args.amount.toString(),
+        cumulativePaid: event.args.cumulativePaid.toString(),
+        artist: event.args.artist,
+        ...(plays.get(logEntry.transactionHash) || {}),
+        txHash: logEntry.transactionHash,
+        logIndex: Number(logEntry.index ?? logEntry.logIndex ?? 0),
+        blockNumber: Number(logEntry.blockNumber),
+        timestamp: await getBlockTimestamp(logEntry.blockNumber),
+      });
+    }
+    return next;
+  }
+
+  function merge(next) {
+    if (!next.length) return false;
+    const existing = new Map(items.map(item => [`${item.txHash}:${item.logIndex}`, item]));
+    for (const item of next) existing.set(`${item.txHash}:${item.logIndex}`, item);
+    items = [...existing.values()].sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
+    return true;
+  }
+
   async function scanRange(fromBlock, toBlock) {
-    const [payroll, withdrawals] = await Promise.all([
+    const [payroll, withdrawals, songPlays] = await Promise.all([
       getLogsWithRetry(provider, {
         address: ROUTER_ADDRESS,
         topics: [iface.getEvent('PayrollPaid').topicHash],
@@ -197,8 +249,9 @@ export function createEarningsLedger({
         address: contracts.map(source => source.address),
         topics: [iface.getEvent('ArtistWithdrawal').topicHash],
       }, fromBlock, toBlock, wait),
+      songPlayStart !== null && toBlock >= songPlayStart ? scanSongPlays(Math.max(fromBlock, songPlayStart), toBlock) : [],
     ]);
-    const next = [];
+    const next = [...songPlays];
     for (const logEntry of payroll) {
       const event = iface.parseLog(logEntry);
       if (!event || event.name !== 'PayrollPaid') continue;
@@ -242,16 +295,18 @@ export function createEarningsLedger({
         if (scannedFrom === null) scannedFrom = Number.isSafeInteger(startBlock) && startBlock >= 0 ? startBlock : ROUTER_START_BLOCK;
         if (scannedThrough === null) scannedThrough = scannedFrom - 1;
         let changed = false;
+        if (songPlaysThrough === null) songPlaysThrough = songPlayStart === null ? scannedThrough : Math.max(scannedFrom, songPlayStart) - 1;
+        for (let from = songPlaysThrough + 1; from <= scannedThrough; from += chunkSize) {
+          const to = Math.min(scannedThrough, from + chunkSize - 1);
+          merge(await scanSongPlays(from, to));
+          changed = true;
+          songPlaysThrough = to;
+        }
         for (let from = Math.max(scannedFrom, scannedThrough + 1); from <= head; from += chunkSize) {
           const to = Math.min(head, from + chunkSize - 1);
-          const next = await scanRange(from, to);
-          if (next.length) {
-            const existing = new Map(items.map(item => [`${item.txHash}:${item.logIndex}`, item]));
-            for (const item of next) existing.set(`${item.txHash}:${item.logIndex}`, item);
-            items = [...existing.values()].sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
-            changed = true;
-          }
+          if (merge(await scanRange(from, to))) changed = true;
           scannedThrough = to;
+          songPlaysThrough = to;
         }
         lastCheckedAt = new Date(now()).toISOString();
         if (changed || !items.length) await save(snapshot());
@@ -266,13 +321,14 @@ export function createEarningsLedger({
   async function initialize() {
     const saved = await restore();
     if (saved) {
-      if (saved.schemaVersion !== 1 || saved.chainId !== 8453 || saved.routerAddress?.toLowerCase() !== ROUTER_ADDRESS.toLowerCase() || !Array.isArray(saved.items)) {
+      if (![1, 2].includes(saved.schemaVersion) || saved.chainId !== 8453 || saved.routerAddress?.toLowerCase() !== ROUTER_ADDRESS.toLowerCase() || !Array.isArray(saved.items)) {
         throw new Error('Invalid earnings checkpoint');
       }
       // Retired test contracts (DJuke v0.1/v0.2) are no longer tracked; drop their indexed withdrawals.
-      items = saved.items.filter(item => item.kind !== 'withdrawal' || contractMap.has(String(item.contract).toLowerCase()));
+      items = saved.items.filter(item => item.kind === EARNINGS_KIND.payroll || contractMap.has(String(item.contract).toLowerCase()));
       scannedFrom = saved.scannedFrom;
       scannedThrough = saved.scannedThrough;
+      songPlaysThrough = Number.isSafeInteger(saved.songPlaysThrough) ? saved.songPlaysThrough : null;
       lastCheckedAt = saved.lastCheckedAt || null;
     }
     return refresh();
@@ -321,7 +377,7 @@ function writeCache(storage, address, value) {
 // Event-based earnings (router payroll payouts and DJuke credit withdrawals). Needs eth_getLogs,
 // which public Base RPCs mostly refuse, so callers pass providers in preference order.
 export async function scanLogEarnings({ ethers, providers, address, storage = globalThis.localStorage, contracts = DJUKE_EARNING_CONTRACTS, maxRequests = 96, timeoutMs = 25000 }) {
-  const iface = new ethers.Interface([PAYROLL_EVENT, WITHDRAW_EVENT]);
+  const iface = new ethers.Interface(EARNING_EVENTS);
   const recipientTopic = ethers.zeroPadValue(address, 32).toLowerCase();
   const cached = readCache(storage, address);
   let lastError = null;
@@ -360,6 +416,18 @@ export async function scanLogEarnings({ ethers, providers, address, storage = gl
         items.push({ kind: 'withdrawal', contract: log.address, units: event.args.amount.toString(), txHash: log.transactionHash,
           logIndex: Number(log.index ?? log.logIndex), blockNumber: Number(log.blockNumber) });
       }
+      const ledgerContracts = contracts.filter(source => source.ledger);
+      if (ledgerContracts.length) {
+        const songPlays = await getLogsAdaptive(provider, { address: ledgerContracts.map(source => source.address),
+          topics: [iface.getEvent('ArtistPaid').topicHash, recipientTopic] },
+          Math.max(from, Math.min(...ledgerContracts.map(source => source.startBlock))), head, budget);
+        for (const log of songPlays) {
+          const event = iface.parseLog(log);
+          items.push({ kind: EARNINGS_KIND.songPlay, contract: log.address, units: event.args.amount.toString(),
+            cumulativePaid: event.args.cumulativePaid.toString(), txHash: log.transactionHash,
+            logIndex: Number(log.index ?? log.logIndex), blockNumber: Number(log.blockNumber) });
+        }
+      }
     }
     const unique = [...new Map(items.map(item => [`${item.txHash}:${item.logIndex}`, item])).values()];
     return { items: unique, cache: { through: Math.max(head, Number(cached?.through || 0)), items: unique } };
@@ -370,18 +438,25 @@ export function groupLogEarnings(items, ethers, contracts = DJUKE_EARNING_CONTRA
   const groups = new Map();
   const tracked = new Set(contracts.map(source => source.address.toLowerCase()));
   for (const item of items) {
-    if (item.kind === 'withdrawal' && !tracked.has(String(item.contract).toLowerCase())) continue;
-    const asset = item.kind === 'payroll' ? assetSymbol(item.asset) : 'USDC';
-    const label = item.kind === 'payroll' ? fundLabel(item.fundId, ethers)
-      : `${contracts.find(source => source.address.toLowerCase() === String(item.contract).toLowerCase())?.label || 'DJuke'} claimed credits`;
+    if (item.kind !== EARNINGS_KIND.payroll && !tracked.has(String(item.contract).toLowerCase())) continue;
+    const asset = item.kind === EARNINGS_KIND.payroll ? assetSymbol(item.asset) : 'USDC';
+    const contractLabel = contracts.find(source => source.address.toLowerCase() === String(item.contract).toLowerCase())?.label || 'DJuke';
+    const label = item.kind === EARNINGS_KIND.payroll ? fundLabel(item.fundId, ethers)
+      : item.kind === EARNINGS_KIND.songPlay ? `${contractLabel} song plays` : `${contractLabel} claimed credits`;
     const key = `${label}:${asset}`;
-    const group = groups.get(key) || { key, kind: item.kind, label, status: 'paid', asset, units: 0n, count: 0, transactions: [], ...(item.kind === 'payroll' ? { fundId: item.fundId } : {}), ...(item.kind === 'withdrawal' ? { contract: item.contract } : {}) };
+    const group = groups.get(key) || { key, kind: item.kind, label, status: 'paid', asset, units: 0n, count: 0, transactions: [],
+      ...(item.kind === EARNINGS_KIND.payroll ? { fundId: item.fundId } : { contract: item.contract }) };
     group.units += BigInt(item.units);
     group.count += 1;
-    group.transactions.push({ hash: item.txHash, units: item.units, blockNumber: item.blockNumber, url: txProof(item.txHash) });
+    group.transactions.push({ hash: item.txHash, units: item.units, blockNumber: item.blockNumber, url: txProof(item.txHash),
+      ...(item.timestamp ? { timestamp: item.timestamp } : {}),
+      ...(item.songId ? { songId: item.songId } : {}),
+      ...(item.trackTitle ? { title: item.trackTitle } : {}),
+      ...(item.requestId ? { requestId: item.requestId } : {}) });
     groups.set(key, group);
   }
-  return [...groups.values()].map(group => ({ ...group, transactions: group.transactions.sort((a, b) => b.blockNumber - a.blockNumber) }));
+  return [...groups.values()].map(group => ({ ...group,
+    transactions: group.transactions.sort((a, b) => b.blockNumber - a.blockNumber || String(b.hash).localeCompare(String(a.hash))) }));
 }
 
 export function summarizeEarnings(entries) {

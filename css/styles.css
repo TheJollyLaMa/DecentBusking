@@ -2250,9 +2250,14 @@ decent-foot {
 .creator-earnings-proof { grid-column: 1 / -1; font-size: .72rem; color: var(--text-dim); }
 .creator-earnings-proof a { color: #9fd8b5; }
 .creator-earnings-proof em { color: #f0c36a; font-style: normal; }
-.creator-earnings-transactions { display: inline; }
-.creator-earnings-transactions summary { cursor: pointer; display: inline; }
-.creator-earnings-transactions summary::-webkit-details-marker { display: none; }
+.creator-earnings-receipt { margin-top: 4px; }
+.creator-earnings-receipt summary { cursor: pointer; color: #9fd8b5; }
+.creator-earnings-receipt-scroll { overflow-x: auto; margin-top: 6px; border: 1px dashed rgba(233, 215, 160, .3); border-radius: 6px; background: rgba(0, 0, 0, .18); }
+.creator-earnings-receipt table { width: 100%; border-collapse: collapse; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .7rem; color: var(--text, #e8f0ea); }
+.creator-earnings-receipt th, .creator-earnings-receipt td { padding: 4px 8px; text-align: left; white-space: nowrap; border-bottom: 1px dotted rgba(255, 255, 255, .1); }
+.creator-earnings-receipt thead th { color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: .62rem; }
+.creator-earnings-receipt td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.creator-earnings-receipt tfoot th, .creator-earnings-receipt tfoot td { border-top: 1px solid rgba(233, 215, 160, .45); border-bottom: 0; color: #f3e6bd; font-weight: 700; }
 .creator-earnings-status, .creator-earnings-note { margin: 8px 0 0; font-size: .74rem; color: var(--text-dim); }
 .creator-earnings-status:empty { display: none; }
 #creator-profile .creator-profile-edit-dialog { position: fixed; inset: 0; margin: auto; height: fit-content; width: min(520px, calc(100vw - 40px)); max-height: calc(100dvh - 40px); overflow: auto; box-sizing: border-box; padding: 16px 18px; color: var(--text); background: var(--bg, #111); border: 1px solid #e9d7a0; border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); }

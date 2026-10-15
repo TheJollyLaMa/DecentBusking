@@ -45,8 +45,10 @@ test('scanLogEarnings groups router payouts by fund with tx proofs and caches pr
   const iface = new ethers.Interface([
     'event PayrollPaid(bytes32 indexed fundId, address indexed asset, address indexed recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)',
     'event ArtistWithdrawal(address indexed artist, uint256 amount)',
+    'event ArtistPaid(address indexed artist, uint256 amount, uint256 cumulativePaid)',
   ]);
   const zero = ethers.ZeroHash;
+  const DJUKE = '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9';
   const payroll = (fund, amount, hash) => ({ ...iface.encodeEventLog('PayrollPaid', [ethers.id(fund), USDC_ADDRESS, WALLET, amount, zero, zero, zero, '', zero]),
     address: ROUTER_ADDRESS, transactionHash: hash, index: 0, blockNumber: ROUTER_START_BLOCK + 10 });
   const calls = [];
@@ -57,6 +59,11 @@ test('scanLogEarnings groups router payouts by fund with tx proofs and caches pr
       if (filter.topics[0] === iface.getEvent('PayrollPaid').topicHash) {
         assert.equal(filter.topics[3], ethers.zeroPadValue(WALLET, 32).toLowerCase());
         return [payroll('dbusk-playback', 300000n, '0x' + '1'.repeat(64)), payroll('dbusk-playback', 200000n, '0x' + '2'.repeat(64)), payroll('dbusk-top10', 1000000n, '0x' + '3'.repeat(64))];
+      }
+      if (filter.topics[0] === iface.getEvent('ArtistPaid').topicHash) {
+        assert.equal(filter.topics[1], ethers.zeroPadValue(WALLET, 32).toLowerCase());
+        return [225000n, 225000n].map((amount, index) => ({ ...iface.encodeEventLog('ArtistPaid', [WALLET, amount, amount * BigInt(index + 1)]),
+          address: DJUKE, transactionHash: '0x' + String(5 + index).repeat(64), index: 0, blockNumber: ROUTER_START_BLOCK + 30 + index }));
       }
       return [{ ...iface.encodeEventLog('ArtistWithdrawal', [WALLET, 50000n]), address: '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9',
         transactionHash: '0x' + '4'.repeat(64), index: 1, blockNumber: ROUTER_START_BLOCK + 20 }];
@@ -71,12 +78,16 @@ test('scanLogEarnings groups router payouts by fund with tx proofs and caches pr
   assert.match(playback.transactions[0].url, /basescan\.org\/tx\/0x/);
   assert.equal(result.entries.find(entry => entry.label === 'Top 10 rewards').units, 1000000n);
   assert.equal(result.entries.find(entry => /claimed credits/.test(entry.label)).units, 50000n);
-  assert.equal(summarizeEarnings(result.entries).USDC.paid, 1550000n);
+  const plays = result.entries.find(entry => entry.kind === 'song-play');
+  assert.equal(plays.label, 'DJuke v0.3 song plays');
+  assert.equal(plays.units, 450000n);
+  assert.equal(plays.transactions.length, 2);
+  assert.equal(summarizeEarnings(result.entries).USDC.paid, 2000000n);
 
   calls.length = 0;
   const again = await scanLogEarnings({ ethers, providers: [provider], address: WALLET, storage });
   assert.equal(calls.length, 0, 'cached scan should not re-query already scanned blocks');
-  assert.equal(summarizeEarnings(again.entries).USDC.paid, 1550000n);
+  assert.equal(summarizeEarnings(again.entries).USDC.paid, 2000000n);
 });
 
 test('scanLogEarnings reports incomplete instead of guessing when no provider can read logs', async () => {
@@ -230,4 +241,73 @@ test('retired DJuke v0.1/v0.2 withdrawals are no longer tracked in groups or res
       lastCheckedAt: null, items: [withdrawal(v02, '0x' + 'a'.repeat(64)), withdrawal(v03, '0x' + 'b'.repeat(64))] }) });
   await ledger.initialize();
   assert.deepEqual(ledger.getAddressState(WALLET).entries.map(item => item.contract), [v03]);
+});
+
+test('earnings ledger backfills DJuke song-play payouts with song ids from a v1 checkpoint', async () => {
+  const { createEarningsLedger, groupLogEarnings, ROUTER_ADDRESS } = await load();
+  const DJUKE = '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9';
+  const start = 52526453;
+  const iface = new ethers.Interface([
+    'event ArtistPaid(address indexed artist, uint256 amount, uint256 cumulativePaid)',
+    'event PlayFulfilled(uint256 indexed requestId, bytes32 indexed songId, bytes32 playbackProof, uint256 fundAmount)',
+  ]);
+  const songId = ethers.id('track-1');
+  const logs = [1, 2].flatMap(n => [
+    { ...iface.encodeEventLog('PlayFulfilled', [BigInt(n), songId, ethers.ZeroHash, 250000n]), address: DJUKE,
+      transactionHash: '0x' + String(n).repeat(64), index: 0, blockNumber: start + n * 10 },
+    { ...iface.encodeEventLog('ArtistPaid', [WALLET, 225000n, 225000n * BigInt(n)]), address: DJUKE,
+      transactionHash: '0x' + String(n).repeat(64), index: 1, blockNumber: start + n * 10 },
+  ]);
+  const head = start + 3000;
+  const filters = [];
+  const provider = {
+    getBlockNumber: async () => head,
+    getBlock: async blockNumber => ({ timestamp: blockNumber }),
+    getLogs: async filter => {
+      filters.push(filter);
+      return logs.filter(log => log.topics[0] === filter.topics[0] && log.blockNumber >= filter.fromBlock && log.blockNumber <= filter.toBlock);
+    },
+  };
+  const saved = [];
+  const ledger = createEarningsLedger({
+    ethers, provider, wait: async () => {}, chunkSize: 2000,
+    restore: async () => ({ schemaVersion: 1, chainId: 8453, routerAddress: ROUTER_ADDRESS, scannedFrom: start - 100, scannedThrough: head, items: [] }),
+    save: async snapshot => { saved.push(snapshot); },
+  });
+  await ledger.initialize();
+  assert.equal(saved.length, 1, 'backfill progress must be checkpointed');
+  assert.equal(saved[0].schemaVersion, 2);
+  assert.equal(saved[0].songPlaysThrough, head);
+  assert.ok(filters.every(filter => filter.fromBlock >= start), 'backfill starts at the DJuke v0.3 deploy block');
+  const state = ledger.getAddressState(WALLET);
+  assert.equal(state.entries.length, 2);
+  assert.deepEqual(state.entries.map(entry => [entry.kind, entry.requestId, entry.songId, entry.cumulativePaid]),
+    [['song-play', '1', songId, '225000'], ['song-play', '2', songId, '450000']]);
+  const [group] = groupLogEarnings(state.entries.map(entry => ({ ...entry, trackTitle: 'Track One' })), ethers);
+  assert.equal(group.label, 'DJuke v0.3 song plays');
+  assert.equal(group.units, 450000n);
+  assert.equal(group.transactions[0].title, 'Track One');
+  assert.equal(group.transactions[0].timestamp, start + 20);
+});
+
+test('worker payroll entries with symbol assets count as USDC instead of TOKEN', async () => {
+  const { groupLogEarnings, summarizeEarnings } = await load();
+  const entries = groupLogEarnings(Array.from({ length: 9 }, (_, index) => ({ kind: 'payroll', fundId: ethers.id('dbusk-repo-dev'),
+    asset: 'USDC', units: '200000', txHash: '0x' + index.toString(16).repeat(64), logIndex: 0, blockNumber: 100 + index })), ethers);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].asset, 'USDC');
+  assert.equal(entries[0].label, 'Repo dev payroll');
+  assert.equal(summarizeEarnings(entries).USDC.paid, 1800000n);
+});
+
+test('verified song-play receipts accept ArtistPaid logs from tracked DJuke contracts', async () => {
+  const { verifyGroupedEarningsProofs } = await load();
+  const DJUKE = '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9';
+  const iface = new ethers.Interface(['event ArtistPaid(address indexed artist, uint256 amount, uint256 cumulativePaid)']);
+  const hash = '0x' + 'a'.repeat(64);
+  const entry = { kind: 'song-play', contract: DJUKE, transactions: [{ hash, units: '225000' }] };
+  const receipt = { status: 1, logs: [{ ...iface.encodeEventLog('ArtistPaid', [WALLET, 225000n, 225000n]), address: DJUKE }] };
+  assert.equal((await verifyGroupedEarningsProofs({ ethers, provider: { getTransactionReceipt: async () => receipt }, address: WALLET, entries: [entry] })).length, 1);
+  const forged = { status: 1, logs: [{ ...receipt.logs[0], address: '0x' + 'b'.repeat(40) }] };
+  assert.equal((await verifyGroupedEarningsProofs({ ethers, provider: { getTransactionReceipt: async () => forged }, address: WALLET, entries: [entry] })).length, 0);
 });

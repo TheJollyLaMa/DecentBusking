@@ -1091,7 +1091,13 @@ async function main() {
     },
     getDevertState: readDevertState,
     getFunds: async () => fundLedger.getCurrentState(),
-    getEarnings: async ({ address }) => earningsLedger.getAddressState(address),
+    getEarnings: async ({ address }) => {
+      const state = earningsLedger.getAddressState(address);
+      if (!playlistReady || !state.entries.some(entry => entry.songId)) return state;
+      const titles = new Map(getPlaylist().map(track => [id(track.trackId), track.title || track.filename || '']));
+      return { ...state, entries: state.entries.map(entry => (entry.songId && titles.get(entry.songId)
+        ? { ...entry, trackTitle: titles.get(entry.songId) } : entry)) };
+    },
     ensResolver: createEnsResolver(),
     getDevertAds: async ({ address }) => {
       if (!playlistReady) throw new Error('Advert library is restoring; retry shortly');

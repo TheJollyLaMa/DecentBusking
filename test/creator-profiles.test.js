@@ -180,3 +180,35 @@ test('creator earnings still show indexed payouts when DJuke balance reads fail'
   assert.equal(result.logs.complete, true);
   assert.match(result.note, /DJuke song-play balances could not be read/);
 });
+test('song-play receipts replace the aggregate artistLedger line and receipts add up row by row', async () => {
+  const { mergeLedgerReceipts, buildEarningsReceipt } = await import('../js/creator-profile.mjs');
+  const contract = '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9';
+  const view = [
+    { key: `${contract}:ledger`, label: 'DJuke v0.3 song plays', status: 'paid', asset: 'USDC', units: 450000n, proofLabel: 'artistLedger' },
+    { key: `${contract}:credits`, label: 'DJuke v0.3 song plays', status: 'unclaimed', asset: 'USDC', units: 1n },
+  ];
+  const receipts = { kind: 'song-play', contract, label: 'DJuke v0.3 song plays', asset: 'USDC', units: 450000n, transactions: [
+    { hash: '0x' + '2'.repeat(64), units: '225000', blockNumber: 20, url: 'https://basescan.org/tx/0x2', title: 'Second' },
+    { hash: '0x' + '1'.repeat(64), units: '225000', blockNumber: 10, url: 'https://basescan.org/tx/0x1', title: 'First' },
+  ] };
+  const merged = mergeLedgerReceipts(view, [receipts]);
+  assert.deepEqual(merged.viewEntries.map(entry => entry.status), ['unclaimed']);
+  assert.equal(merged.note, '');
+  assert.match(mergeLedgerReceipts(view, [{ ...receipts, units: 225000n }]).note, /contract ledger reports 0\.45 USDC/);
+
+  const make = tag => {
+    const el = { tag, children: [], _text: '', append(...nodes) { this.children.push(...nodes.map(node => typeof node === 'string' ? { _text: node, children: [] } : node)); } };
+    Object.defineProperty(el, 'textContent', { get() { return this._text + this.children.map(child => child.textContent ?? child._text).join(''); }, set(value) { this._text = value; } });
+    return el;
+  };
+  const find = (node, tag) => [...(node.tag === tag ? [node] : []), ...node.children.flatMap(child => find(child, tag))];
+  const receipt = buildEarningsReceipt(receipts, { createElement: make });
+  const [body] = find(receipt, 'tbody');
+  const rows = find(body, 'tr').map(row => row.children.map(cell => cell.textContent));
+  assert.deepEqual(rows.map(row => [row[0], row[2], row[3], row[4]]), [
+    ['2', 'Second', '0.225 USDC', '0.45 USDC'],
+    ['1', 'First', '0.225 USDC', '0.225 USDC'],
+  ]);
+  assert.equal(find(body, 'a')[0].href, 'https://basescan.org/tx/0x2');
+  assert.match(find(receipt, 'tfoot')[0].textContent, /Total · 2 payouts0\.45 USDC/);
+});
