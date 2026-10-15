@@ -36,6 +36,7 @@ import { Contract, Interface, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
 import { BUDGET_MODES, DEFAULT_MONTHLY_CU_BUDGET, baseRpcEndpointsFromEnv, createRpcRouter } from './rpc-router.js';
 import { createRpcProxy } from './rpc-proxy.js';
+import { createAlchemyWebhook } from './alchemy-webhook.js';
 import { createFundLedger } from './fund-ledger.js';
 import { createWeeklyPayflow, findBlockAtOrBefore, readClosingFundBalance } from './weekly-payflow.js';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
@@ -209,10 +210,13 @@ async function runWeeklyPlayReport(client, config) {
 
 // Background pollers slow down when the Alchemy budget is tight; user-facing and transaction paths are unaffected.
 const BUDGET_POLL_FLOOR_MS = { [BUDGET_MODES.conserve]: 3 * 60_000, [BUDGET_MODES.criticalOnly]: 5 * 60_000, [BUDGET_MODES.exhausted]: 5 * 60_000 };
+// With verified Alchemy webhooks pushing changes, chain pollers become a slow safety net.
+const WEBHOOK_SAFETY_POLL_MS = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY
+  ? Math.max(60_000, Number(process.env.WEBHOOK_SAFETY_POLL_MS || 5 * 60_000)) : 0;
 function budgetPaced(task) {
   let lastRun = 0;
   return () => {
-    const floor = BUDGET_POLL_FLOOR_MS[getRpcRouter().mode()] || 0;
+    const floor = Math.max(BUDGET_POLL_FLOOR_MS[getRpcRouter().mode()] || 0, WEBHOOK_SAFETY_POLL_MS);
     if (Date.now() - lastRun < floor) return undefined;
     lastRun = Date.now();
     return task();
@@ -964,7 +968,19 @@ async function main() {
   }
 
   console.log(`[rpc] Base tiers: ${getRpcRouter().health().tiers.paid} paid, ${getRpcRouter().health().tiers.public} public; consumers: ${getRpcRouter().describe()}`);
+  const alchemyWebhook = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY ? createAlchemyWebhook({
+    signingKey: process.env.ALCHEMY_WEBHOOK_SIGNING_KEY,
+    routes: [
+      { label: 'router', addresses: [payrollAssets.routerAddress],
+        refresh: [comparePayments, refreshPayflow, refreshFundLedger, refreshEarningsLedger] },
+      { label: 'devert', addresses: [process.env.DEVERT_CONTRACT_ADDRESS], refresh: [syncDevertDjukeBoosts, refreshFundLedger] },
+      { label: 'djuke', addresses: [djukeAddress], refresh: [syncDevertDjukeBoosts, refreshFundLedger] },
+      { label: 'nft', addresses: config.nftContractAddresses || [config.nftContractAddress], refresh: [() => syncMintedTracks(config)] },
+    ],
+  }) : null;
+  if (alchemyWebhook) console.log(`[alchemy-webhook] Enabled; chain pollers relaxed to every ${WEBHOOK_SAFETY_POLL_MS / 1000}s as a safety net.`);
   const requestHandler = createWorkerRequestHandler({
+    alchemyWebhook,
     checkpointMirror,
     creatorProfiles,
     getDjukeState: readDjukeState,

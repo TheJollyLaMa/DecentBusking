@@ -108,6 +108,8 @@ The static dapp can be explored without a wallet. Connect MetaMask on Base for w
 
 Browsers read Base from free public RPCs and only fall back to the worker's read-only `POST /api/rpc` proxy when those are rate-limited. Fund breakdowns and creator earnings come from the worker's indexes (`/api/funds`, `/api/earnings/:address`), not browser log scans. The worker keeps the paid (Alchemy) URLs in Render env vars only, paces them against a monthly compute-unit budget and falls back to public endpoints when that runs low; see `discord-bot/.env.example` and `GET /api/rpc-health`. Never put RPC keys in `decent.config.js`.
 
+Optional push updates: create an Alchemy **Custom Webhook** on Base Mainnet that sends logs from the settlement router, DeVert, DJuke and DecentNFT contracts to `POST /api/webhooks/alchemy`, and set its signing key as `ALCHEMY_WEBHOOK_SIGNING_KEY`. The worker verifies the `X-Alchemy-Signature` HMAC and only uses a delivery as a signal to refresh the matching ledgers from the chain, so payload contents are never trusted. While it is configured, background pollers slow to a 5-minute safety net (`WEBHOOK_SAFETY_POLL_MS`). Delivery stats appear under `webhook` in `GET /api/rpc-health`.
+
 ## Links
 
 - [Listen in the DecentBusking town square](https://thejollylama.github.io/DecentBusking/)

@@ -3,6 +3,7 @@ import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizat
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
 import { catalogPage } from '../js/nft-loader.js';
 import { uploadToIPFS } from './ipfs.js';
+import { readRawBody } from './alchemy-webhook.js';
 import { fetchMintMetadata } from './mint-sync.js';
 import { buildArtworkUpdateAuthorizationMessage, buildArtworkUpdateMetadata } from '../js/artwork-update.mjs';
 
@@ -226,6 +227,7 @@ export function createWorkerRequestHandler({
   rpcProvider = null,
   getRpcHealth,
   rpcProxy = null,
+  alchemyWebhook = null,
   pinataApiUrl = 'https://uploads.pinata.cloud/v3/files',
   ipfsApiUrl = 'http://127.0.0.1:5001',
   fetchImpl = fetch,
@@ -438,9 +440,16 @@ export function createWorkerRequestHandler({
         sendJson(response, status, body, corsOrigin);
         return;
       }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/webhooks/alchemy') {
+        if (!alchemyWebhook) { sendJson(response, 404, { error: 'Alchemy webhooks are not configured' }); return; }
+        const { status, body } = alchemyWebhook.handle(await readRawBody(request),
+          String(request.headers['x-alchemy-signature'] || ''));
+        sendJson(response, status, body);
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/rpc-health') {
         if (!getRpcHealth) throw new Error('RPC routing is not configured');
-        sendJson(response, 200, getRpcHealth(), '*', 'no-store');
+        sendJson(response, 200, { ...getRpcHealth(), ...(alchemyWebhook ? { webhook: alchemyWebhook.health() } : {}) }, '*', 'no-store');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/ens/')) {
