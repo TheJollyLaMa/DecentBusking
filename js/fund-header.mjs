@@ -1,5 +1,5 @@
 import { escapeHtml, formatUsdcUnits, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261014-funds';
-import { currentPayrollPeriod } from './payroll-week.mjs';
+import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -14,15 +14,10 @@ const FUNDS = [
   { slug: 'dbusk-top10', emoji: '🏆', label: 'Top10 fund' },
   { slug: 'dbusk-playback', emoji: '🎧', label: 'Playback fund' },
 ];
-
-// Week 0 is the New York payroll week starting Monday 2026-10-12.
-const WEEK_ZERO_KEY = 'NY-2026-10-12';
 const USDC_ICON = '<img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">';
 
 export function fundWeekNumber(now = Date.now()) {
-  const current = Date.parse(`${currentPayrollPeriod(now).week.slice(3)}T00:00:00Z`);
-  const zero = Date.parse(`${WEEK_ZERO_KEY.slice(3)}T00:00:00Z`);
-  return Math.max(0, Math.round((current - zero) / (7 * 86400000)));
+  return weekNumberFromKey(currentPayrollPeriod(now).week);
 }
 
 export function fundTitle(fund, now = Date.now()) {

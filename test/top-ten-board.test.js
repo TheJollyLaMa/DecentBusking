@@ -27,6 +27,12 @@ test('public song leaderboard is limited to ten and uses stable tie ordering', a
   assert.equal(songs[9].trackId, '09');
 });
 
+test('new york week keys render as listener-friendly week numbers', async () => {
+  const { weekNumberFromKey } = await import(pathToFileURL(path.join(__dirname, '../js/payroll-week.mjs')).href);
+  assert.equal(weekNumberFromKey('NY-2026-10-12'), 0);
+  assert.equal(weekNumberFromKey('NY-2026-10-19'), 1);
+});
+
 test('currently playing song stays highlighted when it is outside the ranked top ten', async () => {
   const { topTenDisplayRows } = await import(url);
   const tracks = Array.from({ length: 12 }, (_, index) => ({ trackId: `song-${index}`, title: `Song ${index}`, votes: 12 - index, plays: index + 1 }));
@@ -51,10 +57,13 @@ test('pullout leaderboard exposes public weekly ranking and a distinct current-p
   assert.match(html, /id="top-ten-tab"/);
   assert.match(html, /id="top-ten-panel"/);
   assert.match(html, /weekly net votes/i);
+  assert.doesNotMatch(html, /current song stays highlighted/i);
   assert.match(html, /aria-expanded="false"/);
   const board = require('node:fs').readFileSync(path.join(__dirname, '../js/top-ten-board.mjs'), 'utf8');
   assert.match(board, /is-now-playing/);
   assert.match(board, /nowPlayingId/);
+  assert.doesNotMatch(board, /Fund balances unavailable right now/);
+  assert.doesNotMatch(board, /Songs ranked by New York-week net votes/i);
   const paper = require('node:fs').readFileSync(path.join(__dirname, '../WHITEPAPER.md'), 'utf8');
   assert.match(paper, /fold-away public Top 10 Songs drawer/);
   assert.match(paper, /distinct from the payout rule/);
