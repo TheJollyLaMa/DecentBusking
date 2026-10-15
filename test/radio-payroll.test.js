@@ -5,6 +5,58 @@ const { pathToFileURL } = require('node:url');
 const url = pathToFileURL(path.join(__dirname, '../js/radio-payroll.mjs')).href;
 const track = (wallet, plays) => ({ wallet: `0x${String(wallet).repeat(40)}`, plays, votes: plays, artist: `Artist ${wallet}` });
 
+test('song-ranked receipts freeze separate prizes for songs by the same artist and preserve historical validation', async () => {
+  const { finalizeRadioAllocation, validateRadioReceipt, radioAllocationMatchesReport } = await import(url);
+  const config = { routerAddress: track(3, 1).wallet, assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', funds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' } };
+  const report = { week: 'NY-2026-10-05', current: false, tracks: [
+    { ...track(1, 2), trackId: 'song-a', title: 'First', votes: 17 },
+    { ...track(1, 1), trackId: 'song-b', title: 'Second', votes: 8 },
+    { ...track(2, 1), trackId: 'song-c', title: 'Third', votes: 4 },
+  ] };
+  const allocation = finalizeRadioAllocation({ ...config, report, category: 'top10', fundSlug: 'dbusk-top10', budgetUnits: 12250000n, minimumUnits: 10000n, topTenScheduleVersion: 3, now: Date.parse('2026-10-13T12:00:00Z') });
+  assert.equal(allocation.schemaVersion, 5);
+  assert.deepEqual(allocation.entries.map(entry => entry.amountUnits), ['6125000', '3062500', '3062500']);
+  assert.notEqual(allocation.entries[0].workReferenceText, allocation.entries[1].workReferenceText);
+  assert.equal(radioAllocationMatchesReport(report, allocation), true);
+  assert.equal(validateRadioReceipt(allocation, config), allocation);
+  const changed = structuredClone(allocation);
+  changed.entries[0].amountUnits = '6000000';
+  changed.entries[1].amountUnits = '3187500';
+  assert.throws(() => validateRadioReceipt(changed, config), /frozen chart/);
+  assert.equal(radioAllocationMatchesReport({ ...report, tracks: [...report.tracks].map(song => ({ ...song, votes: song.trackId === 'song-b' ? 99 : song.votes })) }, allocation), false);
+});
+
+test('song settlement pays each winning song once and rejects an overlapping artist-based payout', async () => {
+  const { finalizeRadioAllocation, settleRadioAllocation, radioWorkReferenceText } = await import(url);
+  const { id } = require('../discord-bot/node_modules/ethers');
+  const owner = track(9, 1).wallet;
+  const allocation = finalizeRadioAllocation({ report: { week: 'NY-2026-10-05', current: false, tracks: [
+    { ...track(1, 2), trackId: 'song-a', title: 'First' }, { ...track(1, 1), trackId: 'song-b', title: 'Second' },
+  ] }, category: 'top10', budgetUnits: 12250000n, minimumUnits: 10000n, topTenScheduleVersion: 3,
+  fundSlug: 'dbusk-top10', routerAddress: track(3, 1).wallet, assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-13T12:00:00Z') });
+  const paid = new Set();
+  const sent = [];
+  const payout = async (...args) => {
+    sent.push(args);
+    return { hash: `tx-${sent.length}`, wait: async () => { paid.add(args[4]); return { status: 1 }; } };
+  };
+  payout.staticCall = async () => {};
+  const options = { allocation, metadataUri: 'ipfs://song-receipt', metadataHash: `0x${'1'.repeat(64)}`, owner, hashReference: id,
+    signer: { provider: { getNetwork: async () => ({ chainId: 8453 }) }, getAddress: async () => owner },
+    router: { target: allocation.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll', hasRole: async () => true,
+      approvedAssets: async () => true, funds: async () => ({ exists: true, active: true }), contributors: async () => ({ approved: true }),
+      completedWorkReferences: async reference => paid.has(reference), fundBalances: async () => 12250000n, payout } };
+  assert.equal((await settleRadioAllocation(options)).confirmed.length, 2);
+  assert.equal(sent.reduce((sum, args) => sum + args[3], 0n), 12250000n);
+  assert.notEqual(sent[0][4], sent[1][4]);
+  assert.equal((await settleRadioAllocation(options)).skipped, 2);
+  assert.equal(sent.length, 2);
+  paid.clear();
+  paid.add(id(radioWorkReferenceText({ week: allocation.week, category: 'top10', wallet: track(1, 1).wallet })));
+  await assert.rejects(settleRadioAllocation(options), /artist-based prize was already paid/);
+  assert.equal(sent.length, 2);
+});
+
 test('playback preview groups artists, caps its budget, and retains dust and rounding', async () => {
   const { previewPlaybackPayroll } = await import(url);
   const result = previewPlaybackPayroll({ tracks: [track(1, 1), track(1, 1), track(2, 1), track(3, 1), { plays: 999 }],

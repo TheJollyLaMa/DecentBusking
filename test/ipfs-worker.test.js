@@ -214,11 +214,12 @@ test('fund week archive groups payroll payouts by week and surfaces queued entri
     allowedOrigins: [],
     ownerWallet: Wallet.createRandom().address,
     getFunds: async () => ({ funds: { [fundSlug]: { slug: fundSlug, payouts: [payout] } } }),
-    getWeeklyPayflow: async () => ({ currentPeriod: { week: 'NY-2026-10-12' }, allocations: [{ allocation, metadataUri: 'ipfs://meta' }] }),
+    getWeeklyPayflow: async ({ wallet }) => { assert.equal(wallet, undefined); return { currentPeriod: { week: 'NY-2026-10-12' }, allocations: [{ allocation, metadataUri: 'ipfs://meta' }] }; },
   });
   await withServer(handler, async base => {
-    const response = await fetch(`${base}/api/funds/${fundSlug}/weeks`);
+    const response = await fetch(`${base}/api/funds/${fundSlug}/weeks`, { headers: { Origin: 'http://127.0.0.1:3000' } });
     assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
     const body = await response.json();
     assert.equal(body.weeks.length, 1);
     assert.equal(body.weeks[0].status, 'partial');
@@ -227,6 +228,45 @@ test('fund week archive groups payroll payouts by week and surfaces queued entri
     assert.equal(body.weeks[0].entries[1].paid, false);
     assert.equal(body.weeks[0].metadataUri, 'ipfs://meta');
   });
+});
+
+test('weekly fund archive errors remain readable from local and hosted browsers', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  for (const origin of ['http://127.0.0.1:3000', 'https://thejollylama.github.io']) {
+    const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+      getFunds: async () => { throw new Error('Index unavailable'); }, getWeeklyPayflow: async ({ wallet }) => ({ wallet }) });
+    await withServer(handler, async base => {
+      const response = await fetch(`${base}/api/funds/dbusk-top10/weeks`, { headers: { Origin: origin } });
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('access-control-allow-origin'), '*');
+      assert.match((await response.json()).error, /archive unavailable/);
+    });
+  }
+});
+
+test('weekly archive reports actual paid amounts, recipient discrepancies, duplicate logs, and unmatched payments', async () => {
+  const { buildFundWeeklyArchive } = await import('../js/fund-archive.mjs');
+  const fundSlug = 'dbusk-top10';
+  const wallet = `0x${'1'.repeat(40)}`;
+  const workReferenceText = `decentbusking:radio:v4:8453:NY-2026-10-05:top10:${wallet}:song-a`;
+  const record = { metadataUri: 'ipfs://receipt', allocation: { fundSlug, category: 'top10', week: 'NY-2026-10-05', entries: [{ wallet, workReferenceText, amountUnits: '1000000', trackId: 'song-a', title: 'Song A' }] } };
+  const payout = { slug: fundSlug, workReference: id(workReferenceText), recipient: wallet, amountUnits: '100000', metadataUri: 'ipfs://receipt', txHash: `0x${'2'.repeat(64)}`, logIndex: 0 };
+  const build = payouts => buildFundWeeklyArchive({ fundSlug, fund: { payouts }, weeklyPayflow: { allocations: [record] } });
+  const mismatch = build([payout, payout]);
+  assert.equal(mismatch.weeks[0].paidUnits, '100000');
+  assert.equal(mismatch.weeks[0].totalUnits, '1000000');
+  assert.equal(mismatch.weeks[0].status, 'mismatch');
+  assert.equal(mismatch.weeks[0].entries[0].paid, false);
+  assert.equal(mismatch.weeks[0].entries[0].title, 'Song A');
+  const wrongRecipient = build([{ ...payout, amountUnits: '1000000', recipient: `0x${'3'.repeat(40)}` }]);
+  assert.equal(wrongRecipient.weeks[0].status, 'mismatch');
+  assert.equal(wrongRecipient.weeks[0].remainingUnits, '1000000');
+  assert.equal(build([{ ...payout, amountUnits: '1000000' }]).weeks[0].status, 'paid');
+  const orphan = buildFundWeeklyArchive({ fundSlug, fund: { payouts: [payout] }, weeklyPayflow: { allocations: [] } });
+  assert.equal(orphan.weeks.length, 0);
+  assert.equal(orphan.unmatchedPayouts.length, 1);
+  assert.equal(orphan.unmatchedPaidUnits, '100000');
+  assert.equal(build([{ ...payout, slug: 'dbusk-playback' }]).weeks[0].paidUnits, '0');
 });
 
 test('artwork CID validation normalizes file CIDs without imposing an attachment-size limit', async () => {

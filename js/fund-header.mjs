@@ -1,8 +1,10 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { escapeHtml, formatUsdcUnits, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261014-funds';
+import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261014-funds';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
+import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
+import { previewPlaybackPayroll } from './radio-payroll.mjs?v=20261014-celebrate';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -23,9 +25,7 @@ export function usdcAmountHtml(balanceUnits) {
   return renderUsdcAmount(balanceUnits);
 }
 
-const historyCache = new Map();
 const balanceCache = new Map();
-let stateCache = null;
 
 function ethersLib() {
   return window.ethers;
@@ -45,6 +45,30 @@ function normalizeAddress(value) {
 
 function parseUnitsLike(value) {
   return typeof value === 'bigint' ? value : BigInt(value || 0);
+}
+
+export function fundPendingRows({ fundSlug, report, budgetUnits, minimumUnits = '10000' }) {
+  if (!report?.current || budgetUnits == null || !Array.isArray(report.tracks)) return null;
+  const tracks = report.tracks;
+  if (fundSlug === 'dbusk-top10') {
+    const plan = previewTopTenSongPayroll({ tracks, budgetUnits: BigInt(budgetUnits), minimumUnits: BigInt(minimumUnits) });
+    const amounts = new Map(plan.entries.map(entry => [entry.trackId, entry.amountUnits]));
+    return rankTopTenSongs(tracks).map(track => ({ ...track, amountUnits: String(amounts.get(track.trackId) ?? 0n) }));
+  }
+  const plan = previewPlaybackPayroll({ tracks, budgetUnits: BigInt(budgetUnits), minimumUnits: BigInt(minimumUnits) });
+  const artists = new Map(plan.entries.map(entry => [entry.wallet.toLowerCase(), entry]));
+  const progress = new Map();
+  return tracks.filter(track => Number.isSafeInteger(track.plays) && track.plays > 0)
+    .slice().sort((first, second) => second.plays - first.plays || String(first.trackId).localeCompare(String(second.trackId)))
+    .map((track, index) => {
+      const key = String(track.wallet || '').toLowerCase();
+      const artist = artists.get(key);
+      const prior = progress.get(key) || { plays: 0n, units: 0n };
+      const plays = prior.plays + BigInt(track.plays);
+      const units = artist?.payable ? artist.amountUnits * plays / BigInt(artist.plays) : 0n;
+      progress.set(key, { plays, units });
+      return { ...track, rank: index + 1, amountUnits: String(units - prior.units) };
+    });
 }
 
 function baseScanUrl(path) {
@@ -157,12 +181,16 @@ async function decorateWeeklyArchive(archive, { ensProvider, sponsorAliases }) {
 
 // History comes from the worker's fund ledger (/api/funds), which indexes deposits and payouts on the paid RPC tier.
 export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanceUnits = 0n, ensProvider = providerForEns(), sponsorAliases = {} }) {
-  const cacheKey = `${fundSlug}:${fundState?.lastCheckedAt || ''}:${fundState?.lastError || ''}`;
-  const cached = historyCache.get(cacheKey);
-  if (cached) return cached;
+  const pendingCache = new Map();
+  const pendingRows = fundState?.pendingRows == null ? null : await Promise.all(fundState.pendingRows.map(async row => {
+    const wallet = row.wallet ? await resolveWallet(row.wallet, ensProvider, sponsorAliases, pendingCache) : null;
+    return { ...row, walletHtml: wallet ? renderWalletButton(wallet, { role: 'pending' }) : '' };
+  }));
+  const budget = { budgetUnits: fundState?.budgetUnits ?? null, reservedUnits: fundState?.reservedUnits ?? null,
+    pendingRows, currentWeek: fundState?.currentWeek || '' };
   const fallbackBalance = parseUnitsLike(fundState?.balanceUnits ?? fundBalanceUnits ?? 0n);
   if (!fundState || !Array.isArray(fundState.sources) || !Array.isArray(fundState.payouts)) {
-    return { historyAvailable: false, error: new Error('Fund history is still indexing'), rows: [], inflows: [], outflows: [], inflowUnits: 0n, outflowUnits: 0n, netUnits: 0n, balanceUnits: fallbackBalance, reconciles: false };
+    return { ...budget, historyAvailable: false, error: new Error('Fund history is still indexing'), rows: [], inflows: [], outflows: [], inflowUnits: 0n, outflowUnits: 0n, netUnits: 0n, balanceUnits: fallbackBalance, reconciles: false };
   }
   const cache = new Map();
   try {
@@ -177,18 +205,18 @@ export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanc
     const balanceUnits = parseUnitsLike(fundState.balanceUnits ?? fundBalanceUnits ?? netUnits);
     const service = (typeof window !== 'undefined' ? window.DecentConfig?.ipfsUploadServiceUrl : '')?.replace(/\/$/, '') || '';
     let weeklyArchive = null;
+    let archiveError = '';
     if (service) {
       try {
         const response = await fetch(`${service}/api/funds/${encodeURIComponent(fundSlug)}/weeks`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
-        if (response.ok) weeklyArchive = await response.json();
-      } catch {}
+        if (!response.ok) throw new Error(`Weekly archive unavailable (${response.status})`);
+        weeklyArchive = await response.json();
+      } catch (error) { archiveError = error.message || 'Weekly archive unavailable'; }
     }
     const archive = weeklyArchive ? await decorateWeeklyArchive(weeklyArchive, { ensProvider, sponsorAliases }) : null;
-    const result = { historyAvailable: true, rows, inflows, outflows, inflowUnits, outflowUnits, netUnits, balanceUnits, reconciles: balanceUnits === netUnits, weeklyArchive: archive };
-    historyCache.set(cacheKey, result);
-    return result;
+    return { ...budget, historyAvailable: true, rows, inflows, outflows, inflowUnits, outflowUnits, netUnits, balanceUnits, reconciles: balanceUnits === netUnits, weeklyArchive: archive, archiveError };
   } catch (error) {
-    return { historyAvailable: false, error, rows: [], inflows: [], outflows: [], inflowUnits: 0n, outflowUnits: 0n, netUnits: 0n, balanceUnits: fallbackBalance, reconciles: false };
+    return { ...budget, historyAvailable: false, error, rows: [], inflows: [], outflows: [], inflowUnits: 0n, outflowUnits: 0n, netUnits: 0n, balanceUnits: fallbackBalance, reconciles: false };
   }
 }
 
@@ -210,48 +238,84 @@ function dialogElements() {
 function renderBreakdown(details, fund, fundState) {
   const { body, summary, note, title } = dialogElements();
   if (!body || !summary || !note || !title) return;
+  const expandedWeeks = new Set([...body.querySelectorAll('details[open][data-fund-week]')].map(element => element.dataset.fundWeek));
+  const expandedPending = body.querySelector('details[open][data-fund-pending]')?.dataset.fundPending;
+  const scrollLeft = body.scrollLeft;
   title.textContent = fundTitle(fund);
-  summary.innerHTML = `Balance ${usdcAmountHtml(details.balanceUnits)} · in ${renderUsdcAmount(details.inflowUnits)} · out ${renderUsdcAmount(details.outflowUnits)} · net ${renderUsdcAmount(details.netUnits)}`;
+  const summaryHtml = renderFundSummary(details, { indexing: !details.historyAvailable || fundState?.ready === false });
+  if (!summary.querySelector('.fund-prize-orbit')) summary.innerHTML = summaryHtml;
+  else {
+    const template = document.createElement('template');
+    template.innerHTML = summaryHtml;
+    for (const selector of ['.fund-prize-label', '.fund-prize-amount', '.fund-prize-caption', '.fund-balance-totals', '.fund-flow-totals:not(.fund-balance-totals)']) {
+      summary.querySelector(selector).innerHTML = template.content.querySelector(selector).innerHTML;
+    }
+  }
   note.textContent = fundState?.ready === false
     ? `History indexing${fundState?.lastError ? ` paused: ${fundState.lastError}` : '…'}`
     : details.historyAvailable
       ? (details.reconciles ? 'History reconciles against the on-chain balance.' : 'History loaded, but the totals do not fully reconcile yet.')
       : `${details.error?.message || 'Breakdown unavailable'}, try again shortly.`;
+  if (details.archiveError) note.textContent += ` ${details.archiveError}. Retrying while this panel is open.`;
   const rows = details.rows.length
     ? details.rows.map(row => `
         <tr class="fund-breakdown-row fund-breakdown-${escapeHtml(row.direction)} fund-breakdown-${escapeHtml(row.kind)}">
           <td>${escapeHtml(row.dateText)}</td>
           <td>${escapeHtml(row.typeLabel || sourceKindLabel(row.kind))}</td>
           <td>${row.sourceHtml}${row.extra ? `<div class="fund-breakdown-extra">${escapeHtml(row.extra)}</div>` : ''}</td>
-          <td class="fund-breakdown-amount">${row.direction === 'in' ? renderUsdcAmount(row.amountUnits, { className: 'usdc-amount--sponsor' }) : ''}</td>
-          <td class="fund-breakdown-amount">${row.direction === 'out' ? renderUsdcAmount(row.amountUnits, { className: 'usdc-amount--artist' }) : ''}</td>
+          <td class="fund-breakdown-amount">${row.direction === 'in' ? renderUsdcAmount(row.amountUnits, { className: 'fund-amount-in' }) : ''}</td>
+          <td class="fund-breakdown-amount">${row.direction === 'out' ? renderUsdcAmount(row.amountUnits, { className: 'fund-amount-out' }) : ''}</td>
           <td><a href="${escapeHtml(row.txUrl)}" target="_blank" rel="noopener">Basescan</a></td>
         </tr>`).join('')
-    : `<tr><td colspan="6" class="fund-breakdown-empty">Breakdown unavailable, try again.</td></tr>`;
+    : `<tr><td colspan="6" class="fund-breakdown-empty">${details.historyAvailable ? 'No confirmed fund transactions yet.' : 'Confirmed activity is still indexing.'}</td></tr>`;
   body.innerHTML = `
+    ${renderFundPendingTable(details.pendingRows, { fundSlug: fund.slug, week: details.currentWeek })}
+    <section class="fund-confirmed-section" aria-labelledby="fund-confirmed-title">
+    <h4 id="fund-confirmed-title">Confirmed on-chain activity</h4>
     <table class="fund-breakdown-table">
       <thead>
         <tr><th>Date</th><th>Type</th><th>Source</th><th>In</th><th>Out</th><th>Tx</th></tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
-    ${details.weeklyArchive?.weeks?.length ? `<section class="fund-weekly-section"><h4>Weekly payout archive</h4>${renderFundWeeklyArchive(details.weeklyArchive)}</section>` : ''}
+    </section>
+    <section class="fund-weekly-section"><h4>Weekly payout archive</h4>${details.weeklyArchive ? renderFundWeeklyArchive(details.weeklyArchive) : '<p class="fund-weekly-empty">Weekly archive unavailable. Retrying.</p>'}</section>
   `;
+  for (const element of body.querySelectorAll('details[data-fund-week]')) element.open = expandedWeeks.has(element.dataset.fundWeek);
+  const pendingDetails = body.querySelector('details[data-fund-pending]');
+  if (pendingDetails) pendingDetails.open = pendingDetails.dataset.fundPending === expandedPending;
+  body.scrollLeft = scrollLeft;
 }
 
-async function loadState() {
-  if (stateCache) return stateCache;
-  const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+export async function loadFundState({ serviceUrl = globalThis.window?.DecentConfig?.ipfsUploadServiceUrl || '', fetchImpl = globalThis.fetch, now = Date.now() } = {}) {
+  const service = serviceUrl.replace(/\/$/, '');
   if (!service) return null;
-  try {
-    const response = await fetch(`${service}/api/funds`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
-    const state = await response.json().catch(() => null);
-    if (!response.ok || !state) return null;
-    if (state.ready && !state.lastError) stateCache = state;
-    return state;
-  } catch {
-    return null;
-  }
+  const read = async path => {
+    try {
+      const response = await fetchImpl(`${service}${path}`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+      return response.ok ? await response.json() : null;
+    } catch { return null; }
+  };
+  const [state, weekly, history] = await Promise.all([read('/api/funds'), read('/api/payroll/weekly'), read('/api/radio/history?weeks=1&calendar=new-york')]);
+  const currentWeek = currentPayrollPeriod(now).week;
+  const checked = weekly?.lastCheckedAt ? Date.parse(weekly.lastCheckedAt) : null;
+  const current = weekly?.ready && !weekly.lastError && weekly.currentPeriod?.week === currentWeek &&
+    (checked == null || Number.isFinite(checked) && currentPayrollPeriod(checked).week === currentWeek) &&
+    (weekly.chainId == null || weekly.chainId === 8453);
+  const currentReport = current ? history?.weeks?.find(report => report.current && report.week === currentWeek) || null : null;
+  return { ...(state || {}), weekly: current ? weekly : null, currentReport };
+}
+
+export function fundStateFor(state, fundSlug, fallbackBalanceUnits = '0') {
+  const fund = state?.funds?.[fundSlug] || { balanceUnits: fallbackBalanceUnits };
+  const category = fundSlug === 'dbusk-top10' ? 'top10' : 'playback';
+  const weekly = state?.weekly?.funds?.[category];
+  const budgetUnits = /^\d+$/.test(String(weekly?.budgetUnits ?? '')) ? weekly.budgetUnits : null;
+  return { ...fund, ready: state?.ready ?? false, balanceUnits: weekly?.balanceUnits ?? fund.balanceUnits,
+    budgetUnits,
+    currentWeek: state?.currentReport?.week || state?.weekly?.currentPeriod?.week || '',
+    pendingRows: fundPendingRows({ fundSlug, report: state?.currentReport, budgetUnits, minimumUnits: state?.weekly?.minimumPayoutUnits }),
+    reservedUnits: weekly?.reservedUnits ?? fund.reservedUnits ?? null };
 }
 
 async function loadBalance(fundSlug, state) {
@@ -265,49 +329,69 @@ async function loadBalance(fundSlug, state) {
   return { balanceUnits };
 }
 
-async function openBreakdown(fund, button) {
-  const { dialog } = dialogElements();
-  if (!dialog) return;
-  button.disabled = true;
-  const state = stateCache || await loadState();
-  const fundState = state?.funds?.[fund.slug] || null;
-  const details = await loadFundBreakdown({
-    fundSlug: fund.slug,
-    fundState,
-    fundBalanceUnits: balanceCache.get(fund.slug) ?? 0n,
-    sponsorAliases: state?.sponsorAliases || {},
-    ensProvider: providerForEns(),
-  });
-  renderBreakdown(details, fund, fundState);
-  dialog.showModal();
-  button.disabled = false;
-}
-
 export async function initFundHeader() {
   const bar = document.getElementById('artist-filter-bar');
   if (!bar || bar.dataset.fundHeaderReady === '1') return;
   bar.dataset.fundHeaderReady = '1';
-  const state = await loadState();
-  const balances = await Promise.all(FUNDS.map(async fund => {
-    const fundState = state?.funds?.[fund.slug] || await loadBalance(fund.slug, state);
-    balanceCache.set(fund.slug, fundState.balanceUnits ?? '0');
-    return [fund.slug, fundState];
-  }));
-  const balanceMap = Object.fromEntries(balances);
+  const { dialog, close } = dialogElements();
+  let state = null;
+  let activeFund = null;
+  let pending = null;
+  let opening = false;
+  const renderActive = async () => {
+    const fund = activeFund;
+    if (!fund) return;
+    const fundState = fundStateFor(state, fund.slug, balanceCache.get(fund.slug));
+    const details = await loadFundBreakdown({ fundSlug: fund.slug, fundState,
+      sponsorAliases: state?.sponsorAliases || {}, ensProvider: providerForEns() });
+    if (activeFund === fund) renderBreakdown(details, fund, fundState);
+  };
+  const refresh = () => {
+    if (pending) return pending;
+    pending = (async () => {
+      state = await loadFundState();
+      for (const fund of FUNDS) {
+        const fallback = balanceCache.has(fund.slug) ? balanceCache.get(fund.slug) : (await loadBalance(fund.slug, state)).balanceUnits;
+        const fundState = fundStateFor(state, fund.slug, fallback);
+        balanceCache.set(fund.slug, fundState.balanceUnits ?? '0');
+        const button = document.getElementById(`${fund.slug}-button`);
+        if (!button) continue;
+        const amount = fundState.budgetUnits ?? fundState.balanceUnits ?? '0';
+        button.innerHTML = fundButtonHtml(fund, amount);
+        button.title = fundState.budgetUnits != null ? 'Current weekly pot; older unpaid prizes are reserved separately' : 'Total balance; weekly budget unavailable';
+        button.setAttribute('aria-label', `${fundTitle(fund)}: $${formatUsdcUnits(amount)} USDC${fundState.budgetUnits == null ? ' balance; weekly budget unavailable' : ' weekly pot'}`);
+        button.disabled = false;
+      }
+      if (dialog?.open) await renderActive();
+    })().finally(() => { pending = null; });
+    return pending;
+  };
   for (const fund of FUNDS) {
     const button = document.getElementById(`${fund.slug}-button`);
     if (!button) continue;
-    const balanceUnits = balanceMap[fund.slug]?.balanceUnits ?? '0';
-    button.innerHTML = fundButtonHtml(fund, balanceUnits);
-    button.setAttribute('aria-label', `${fundTitle(fund)}: $${formatUsdcUnits(balanceUnits)} USDC`);
-    button.disabled = false;
-    button.addEventListener('click', () => openBreakdown(fund, button).catch(() => { button.disabled = false; }));
+    button.addEventListener('click', async () => {
+      if (opening || !dialog) return;
+      opening = true;
+      activeFund = fund;
+      button.disabled = true;
+      try {
+        await refresh();
+        await renderActive();
+        if (activeFund === fund && !dialog.open) dialog.showModal();
+      } catch {
+        const { note } = dialogElements();
+        if (note) note.textContent = 'Unable to refresh fund details. Try again shortly.';
+      } finally { opening = false; button.disabled = false; }
+    });
   }
-  const { dialog, close } = dialogElements();
   close?.addEventListener('click', () => dialog?.close());
+  dialog?.addEventListener('close', () => { activeFund = null; });
   dialog?.addEventListener('click', event => {
     if (event.target === dialog) dialog.close();
   });
+  await refresh();
+  setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 15000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh().catch(() => {}); });
 }
 
 if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', () => { initFundHeader().catch(() => {}); }, { once: true });

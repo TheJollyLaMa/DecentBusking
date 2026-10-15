@@ -688,6 +688,19 @@ body.devert-open #top-ten-tab, body.devert-open #djuke-tab, body.devert-open #de
   transition: transform var(--transition), visibility var(--transition);
 }
 #top-ten-panel.is-open { transform: translateX(0); visibility: visible; pointer-events: auto; }
+#top-ten-panel.is-open { animation: top-ten-charge 14s ease-in-out infinite; }
+#top-ten-panel::before { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none; background: linear-gradient(0deg, transparent 20%, rgba(111, 235, 190, .03) 38%, rgba(231, 223, 152, .13) 49%, rgba(196, 235, 246, .06) 58%, transparent 76%); transform: translateY(100%); animation: top-ten-charge-rise 12s linear infinite; animation-play-state: paused; }
+#top-ten-panel.is-open::before { animation-play-state: running; }
+#top-ten-panel > :not(.top-ten-flight-layer) { position: relative; z-index: 1; }
+.top-ten-flight-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+.top-ten-visitor { position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; font-size: 16px; line-height: 1; opacity: .7; filter: drop-shadow(0 0 5px #ddd99a55); }
+.top-ten-visitor-0 { font-size: 18px; opacity: .75; }
+@keyframes top-ten-charge { 0%, 100% { background-color: rgba(8, 10, 16, .96); } 50% { background-color: rgba(8, 18, 19, .81); } }
+@keyframes top-ten-charge-rise { from { transform: translateY(100%); } to { transform: translateY(-100%); } }
+@media (prefers-reduced-motion: reduce) {
+  #top-ten-panel.is-open, #top-ten-panel::before { animation: none; }
+  #top-ten-panel::before, .top-ten-flight-layer { display: none; }
+}
 .top-ten-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .top-ten-panel-heading h2 { margin: 0; color: var(--gold); font-family: var(--font-display); font-size: .95rem; }
 .top-ten-panel-heading p { margin: 4px 0 0; color: var(--text-dim); font-size: .72rem; }
@@ -722,8 +735,19 @@ body.devert-open #top-ten-tab, body.devert-open #djuke-tab, body.devert-open #de
 .top-ten-live { margin: 0 0 8px; padding: 8px; color: var(--text-primary); background: rgba(0, 212, 170, .08); border-left: 2px solid var(--teal); font-size: .76rem; line-height: 1.35; overflow-wrap: anywhere; }
 .top-ten-empty { color: var(--text-dim); font-size: .8rem; line-height: 1.45; }
 .top-ten-list { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; counter-reset: none; }
-.top-ten-song { display: grid; grid-template-columns: 25px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 48px; padding: 7px 6px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.top-ten-song { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; align-items: center; gap: 7px; min-height: 56px; padding: 7px 4px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.top-ten-prize { min-width: 72px; text-align: right; color: #cbe6ff; font-size: .72rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.top-ten-prize .usdc-icon { width: 12px; height: 12px; }
+.top-ten-prize .usdc-amount-text { color: transparent; background-image: linear-gradient(110deg, #8dc8ff, #f5f7ff, #a6d8ff, #e2e7ee); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; text-shadow: 0 0 12px #9ccfff45; animation: usdc-sponsor-shimmer 9s linear infinite; }
 .top-ten-song.is-now-playing { background: rgba(0, 212, 170, .11); box-shadow: inset 2px 0 var(--teal); }
+.top-ten-song.is-rank-climbing { position: relative; z-index: 2; overflow: hidden; animation: top-ten-rank-glow 1800ms ease-out; }
+.top-ten-song.is-rank-climbing::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(105deg, transparent 20%, #eff5b83d 48%, #8be8bd24 58%, transparent 80%); animation: top-ten-rank-shimmer 1600ms ease-in-out both; }
+.top-ten-song.is-rank-climbing .top-ten-rank { color: #e9f4b9; }
+@keyframes top-ten-rank-glow { 0% { background-color: #a9e6a32b; box-shadow: inset 2px 0 #dfefad, 0 0 12px #c9e8a02b; } 100% { background-color: transparent; box-shadow: inset 2px 0 transparent, 0 0 0 transparent; } }
+@keyframes top-ten-rank-shimmer { 0% { transform: translateX(-100%); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateX(100%); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .top-ten-song.is-rank-climbing, .top-ten-song.is-rank-climbing::after { animation: none; }
+}
 .top-ten-song.is-live-outside-chart { margin-bottom: 8px; border: 1px solid rgba(0, 212, 170, .28); border-radius: 5px; }
 .top-ten-live-rank { color: var(--teal); font-size: .9rem; }
 .top-ten-rank { color: var(--text-dim); font-size: .75rem; font-variant-numeric: tabular-nums; text-align: center; }
@@ -731,7 +755,7 @@ body.devert-open #top-ten-tab, body.devert-open #djuke-tab, body.devert-open #de
 .top-ten-song-title { overflow: hidden; color: var(--text-primary); font-size: .78rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .top-ten-song-artist { overflow: hidden; color: var(--text-dim); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
 .top-ten-live-badge { width: fit-content; padding: 2px 5px; color: #06120f; background: var(--teal); border-radius: 3px; font-size: .58rem; font-weight: 800; }
-.top-ten-vote-score { display: grid; justify-items: end; min-width: 42px; font-variant-numeric: tabular-nums; }
+.top-ten-vote-score { display: grid; justify-items: end; min-width: 32px; font-variant-numeric: tabular-nums; }
 .top-ten-net-votes { color: var(--gold); font-size: .95rem; font-weight: 750; }
 .top-ten-vote-label { color: var(--text-dim); font-size: .58rem; }
 @media (max-width: 600px) {
@@ -2798,11 +2822,77 @@ decent-foot {
 .fund-header-right { justify-self: end; color: var(--teal); border-color: rgba(0, 212, 170, .28); }
 .artist-filter-core label { white-space: nowrap; }
 .artist-filter-core select { width: 100%; min-width: 0; }
-.fund-breakdown-shell { min-width: min(90vw, 900px); max-width: min(92vw, 980px); padding: 16px; background: #0a0814; color: var(--text-primary); }
+#fund-breakdown-dialog { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: min(960px, calc(100vw - 28px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; overflow: auto; border: 1px solid rgba(220, 233, 222, .3); border-radius: 8px; background: rgba(14, 22, 24, .88); color: var(--text-primary); box-shadow: 0 24px 90px #0009, 0 0 36px #a0d6ba18; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+#fund-breakdown-dialog::backdrop { background: rgba(0, 0, 0, .46); backdrop-filter: blur(3px); }
+.fund-breakdown-shell { min-width: 0; padding: 22px; background: transparent; color: var(--text-primary); }
 .fund-breakdown-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .fund-breakdown-heading h3 { margin: 0; color: var(--gold); }
 #fund-breakdown-close { width: 32px; height: 32px; color: var(--text-primary); background: #141720; border: 1px solid var(--panel-border); border-radius: 4px; }
 #fund-breakdown-summary, #fund-breakdown-note { margin: 0 0 10px; color: var(--text-dim); font-size: .82rem; line-height: 1.4; overflow-wrap: anywhere; }
+#fund-breakdown-summary { display: block; }
+.fund-prize { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 240px; padding: 38px 48px 64px; box-sizing: border-box; overflow: hidden; text-align: center; background: radial-gradient(ellipse at 50% 46%, #d7e68c19, transparent 65%); }
+.fund-prize-label { color: #e6e6bd; font-size: .8rem; text-transform: uppercase; letter-spacing: 0; }
+.fund-prize .fund-prize-amount { position: relative; z-index: 1; max-width: 100%; font-size: 3.5rem; font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.fund-prize-amount .usdc-amount-text { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.fund-prize-caption { position: relative; z-index: 1; max-width: 100%; color: #bac8c2; font-size: .7rem; }
+.fund-prize-orbit, .fund-prize-crowd { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
+.fund-prize-dollar { position: absolute; top: 0; left: 0; offset-path: ellipse(44% 38% at 50% 46%); offset-rotate: 0deg; color: #d9f69e; font-size: 1.1rem; font-weight: 800; text-shadow: 0 0 12px #a8e588a6; animation: fund-dollar-flight calc(32s + var(--index) * 2.8s) linear infinite; animation-delay: calc(var(--index) * -6s); }
+.fund-prize-dollar:nth-child(even) { animation-direction: reverse; }
+.fund-prize-dollar:nth-child(2), .fund-prize-dollar:nth-child(5) { offset-path: polygon(8% 28%, 24% 12%, 84% 20%, 50% 50%, 12% 76%, 74% 82%, 92% 34%, 36% 46%, 8% 28%); }
+.fund-prize-busker { position: absolute; bottom: 10px; left: calc(15% + var(--index) * 16%); font-size: 1.65rem; line-height: 1.5; filter: drop-shadow(0 0 8px #e4d98e40); animation: fund-busker-dance 4s ease-in-out infinite; animation-delay: calc(var(--index) * -.8s); }
+.fund-flow-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 16px 0; margin-bottom: 12px; border-top: 1px solid #d5e3d522; border-bottom: 1px solid #d5e3d522; text-align: center; }
+.fund-flow-totals > span { min-width: 0; }
+.fund-balance-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; border-bottom: 0; }
+.fund-weekly-warning { color: #ffbd9a; font-size: .68rem; }
+.fund-weekly-mismatch { border-color: #ffbd9a88; }
+.fund-flow-label { display: block; margin-bottom: 4px; color: #b8c5bf; font-size: .68rem; }
+.fund-flow-totals .usdc-amount { font-size: 1.05rem; font-weight: 700; }
+#fund-breakdown-body { overflow-x: auto; }
+.fund-pending-section h4, .fund-confirmed-section h4, .fund-weekly-section h4 { margin: 0 0 12px; font-size: .88rem; }
+.fund-pending-section { margin-top: 18px; }
+.fund-pending-notice { margin: 0 0 12px; color: #bdc9c4; font-size: .74rem; line-height: 1.55; }
+.fund-pending-details { margin-top: 12px; }
+.fund-pending-details > summary { width: fit-content; padding: 8px 0; color: #c8d5d0; font-size: .76rem; cursor: pointer; }
+.fund-pending-details[open] > summary { margin-bottom: 6px; }
+.fund-pending-meta, .fund-pending-empty { color: #b4babd; font-size: .72rem; font-style: italic; }
+.fund-pending-table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: .76rem; }
+.fund-pending-table th, .fund-pending-table td { padding: 9px 6px; text-align: left; border-bottom: 1px dashed #c7d0d32b; vertical-align: top; }
+.fund-pending-table th { color: #c6cdcf; font-size: .68rem; }
+.fund-pending-row { color: #b4babd; font-style: italic; }
+#fund-breakdown-dialog .fund-pending-row .usdc-amount-text { color: #b4babd; background: none; -webkit-text-fill-color: currentColor; text-shadow: none; animation: none; }
+.fund-pending-row .fund-wallet-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; }
+.fund-pending-row .usdc-icon { opacity: .65; filter: grayscale(1); }
+.fund-pending-table .fund-breakdown-amount { text-align: right; }
+.fund-confirmed-section, .fund-weekly-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid #cededb45; }
+.fund-confirmed-section .fund-breakdown-row { color: #e1e9e4; font-style: normal; }
+.fund-weekly-frozen { font-style: normal; }
+.fund-weekly-confirmed { color: #e1e9e4; font-style: normal; }
+#fund-breakdown-body .fund-breakdown-table, #fund-breakdown-body .fund-weekly-table { min-width: 620px; }
+#fund-breakdown-dialog .fund-amount-in .usdc-amount-text,
+#fund-breakdown-dialog .fund-prize-amount .usdc-amount-text { color: #ddf5a0; background: linear-gradient(110deg, #8ce8b2 10%, #f9dc84 35%, #fff9d5 48%, #a4f5bf 62%, #f9dc84 90%); background-size: 240% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 0 16px #b4e36c40; animation: fund-amount-shimmer 7s linear infinite; }
+#fund-breakdown-dialog .fund-amount-out .usdc-amount-text,
+#fund-breakdown-dialog .fund-weekly-archive .usdc-amount:not(.usdc-amount--queued) .usdc-amount-text { color: #cbe6ff; background: linear-gradient(110deg, #8dc8ff 10%, #d7e0ec 35%, #fff 48%, #a6d8ff 62%, #e2e7ee 90%); background-size: 240% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 0 14px #9ccfff45; animation: fund-amount-shimmer 9s linear infinite; }
+#fund-breakdown-dialog .fund-prize-amount .usdc-amount-text { text-shadow: 0 0 28px #b9eb6d55, 0 0 60px #f0ce7a30; }
+@keyframes fund-dollar-flight { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+@keyframes fund-busker-dance { 0%, 100% { transform: translate(-10px, 0) rotate(-7deg); } 50% { transform: translate(10px, -7px) rotate(7deg); } }
+@keyframes fund-amount-shimmer { from { background-position: 200% 50%; } to { background-position: -40% 50%; } }
+@media (max-width: 600px) {
+  .fund-breakdown-shell { padding: 14px; }
+  .fund-breakdown-heading h3 { font-size: .9rem; }
+  #fund-breakdown-close { flex-shrink: 0; }
+  .fund-prize { min-height: 226px; padding: 34px 20px 62px; }
+  .fund-prize .fund-prize-amount { font-size: 2.5rem; }
+  .fund-flow-totals { gap: 4px; }
+  .fund-flow-totals .usdc-amount { font-size: .8rem; }
+  .fund-prize-busker { font-size: 1.35rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #fund-breakdown-dialog .usdc-amount-text, .fund-prize-dollar, .fund-prize-busker { animation: none !important; }
+  #fund-breakdown-dialog .usdc-amount .usdc-amount-text { -webkit-text-fill-color: currentColor; }
+  #fund-breakdown-dialog .fund-amount-in, #fund-breakdown-dialog .fund-prize-amount { color: #ddf5a0; }
+  #fund-breakdown-dialog .fund-amount-out, #fund-breakdown-dialog .fund-weekly-archive .usdc-amount:not(.usdc-amount--queued) { color: #cbe6ff; }
+  .fund-prize-dollar { offset-distance: calc(var(--index) * 16.666%); }
+}
 .fund-breakdown-table { width: 100%; border-collapse: collapse; font-size: .76rem; }
 .fund-breakdown-table th, .fund-breakdown-table td { padding: 6px 5px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.08); vertical-align: top; overflow-wrap: anywhere; }
 .fund-breakdown-table th:last-child, .fund-breakdown-table td:last-child { white-space: nowrap; }

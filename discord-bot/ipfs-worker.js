@@ -427,13 +427,24 @@ export function createWorkerRequestHandler({
         return;
       }
       if (request.method === 'GET' && /^\/api\/funds\/[^/]+\/weeks$/.test(requestUrl.pathname)) {
-        if (!getFunds || !getWeeklyPayflow) throw new Error('Fund payout history is not configured');
-        const fundSlug = decodeURIComponent(requestUrl.pathname.split('/')[3] || '');
-        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fundSlug)) throw new Error('Invalid fund slug');
-        const [funds, weekly] = await Promise.all([getFunds(), getWeeklyPayflow()]);
-        const fund = funds?.funds?.[fundSlug];
-        if (!fund) { sendJson(response, 404, { error: 'Unknown fund' }, '*'); return; }
-        sendJson(response, 200, buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow: weekly }), '*', 'public, max-age=30, stale-while-revalidate=60');
+        try {
+          const fundSlug = decodeURIComponent(requestUrl.pathname.split('/')[3] || '');
+          if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fundSlug)) {
+            sendJson(response, 400, { error: 'Invalid fund slug' }, '*'); return;
+          }
+          if (!getFunds || !getWeeklyPayflow) {
+            sendJson(response, 503, { error: 'Fund payout history is not configured' }, '*'); return;
+          }
+          const [funds, weekly] = await Promise.all([getFunds(), getWeeklyPayflow({})]);
+          if (funds?.ready === false || weekly?.ready === false || funds?.lastError || weekly?.lastError) {
+            sendJson(response, 503, { error: 'Fund payout history is still indexing; retry shortly' }, '*'); return;
+          }
+          const fund = funds?.funds?.[fundSlug];
+          if (!fund) { sendJson(response, 404, { error: 'Unknown fund' }, '*'); return; }
+          sendJson(response, 200, buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow: weekly }), '*', 'public, max-age=30, stale-while-revalidate=60');
+        } catch {
+          sendJson(response, 503, { error: 'Weekly fund archive unavailable; retry shortly' }, '*');
+        }
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/earnings/')) {

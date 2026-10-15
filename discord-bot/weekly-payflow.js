@@ -1,7 +1,8 @@
 import { id } from 'ethers';
 import { currentPayrollPeriod, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
-import { finalizeRadioAllocation, previewPlaybackPayroll, previewTopTenPayroll, validateRadioReceipt } from '../js/radio-payroll.mjs';
+import { finalizeRadioAllocation, previewPlaybackPayroll, validateRadioReceipt } from '../js/radio-payroll.mjs';
 import { BASE_USDC_ADDRESS } from '../js/settlement-funds.mjs';
+import { previewTopTenSongPayroll } from '../js/top-ten-prizes.mjs';
 
 export async function findBlockAtOrBefore(provider, timestamp, { requestDelayMs = 100,
   wait = delay => new Promise(resolve => setTimeout(resolve, delay)) } = {}) {
@@ -72,7 +73,7 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
       const keys = new Set();
       for (const record of retainedAllocations) {
         validateRadioReceipt(record.allocation, receiptConfig);
-        if (![3, 4].includes(record.allocation.schemaVersion) || id(JSON.stringify(record.allocation)) !== record.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(record.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
+        if (![3, 4, 5].includes(record.allocation.schemaVersion) || id(JSON.stringify(record.allocation)) !== record.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(record.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
         const key = `${record.allocation.week}:${record.allocation.category}`;
         if (keys.has(key)) throw new Error('Duplicate scheduled allocation');
         keys.add(key);
@@ -121,9 +122,10 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
         const cap = closing < available ? closing : available;
         const budget = cap * BigInt(shareBps) / 10000n;
         const plan = category === 'playback' ? previewPlaybackPayroll({ tracks: report.tracks, budgetUnits: budget, minimumUnits })
-          : previewTopTenPayroll({ tracks: report.tracks, budgetUnits: budget, minimumUnits });
+          : previewTopTenSongPayroll({ tracks: report.tracks, budgetUnits: budget, minimumUnits });
         if (!plan.entries.some(entry => entry.payable)) continue;
         const allocation = finalizeRadioAllocation({ report, category, budgetUnits: budget, minimumUnits,
+          topTenScheduleVersion: 3,
           fundSlug: slug, routerAddress: config.routerAddress, assetAddress: asset, now: now() });
         const json = JSON.stringify(allocation);
         const metadataUri = await upload(Buffer.from(json), `${allocation.week}-${category}-allocation.json`, 'application/json');
@@ -137,7 +139,7 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
       const current = latestReports.find(report => report.current);
       const budget = available * BigInt(shareBps) / 10000n;
       const preview = category === 'playback' ? previewPlaybackPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits })
-        : previewTopTenPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits });
+        : previewTopTenSongPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits });
       const average = preview.entries.length ? budget / BigInt(preview.entries.length) : 0n;
       const warning = !(fund.exists ?? fund[2]) ? 'Fund has not been created' : !approved ? 'USDC not approved' : balance < reserved
         ? 'Balance is below unpaid scheduled allocations; add funds before paying' : available === 0n ? 'No unreserved USDC for this week'

@@ -15,6 +15,29 @@ export function renderUsdcAmount(units, { className = '' } = {}) {
   return `<span class="${classes}"><span class="usdc-amount-text">$${escapeHtml(formatUsdcUnits(units))}</span> ${USDC_ICON}</span>`;
 }
 
+export function renderFundSummary(details, { indexing = false } = {}) {
+  const hasBudget = details.budgetUnits != null;
+  const dollars = Array.from({ length: 6 }, (_, index) => `<span class="fund-prize-dollar" style="--index:${index}">${index % 2 ? '&#128184;' : '$'}</span>`).join('');
+  const crowd = ['&#127928;', '&#128378;', '&#127927;', '&#128131;', '&#127908;']
+    .map((character, index) => `<span class="fund-prize-busker" style="--index:${index}">${character}</span>`).join('');
+  return `<span class="fund-prize">
+    <span class="fund-prize-label">${hasBudget ? 'This week\'s prize pool' : 'Current fund balance'}</span>
+    ${renderUsdcAmount(hasBudget ? details.budgetUnits : details.balanceUnits, { className: 'fund-prize-amount' })}
+    <span class="fund-prize-caption">${hasBudget ? 'Unreserved weekly budget &middot; subject to approved allocation' : indexing ? 'History is still indexing &middot; weekly budget unavailable' : 'Weekly budget unavailable'}</span>
+    <span class="fund-prize-orbit" aria-hidden="true">${dollars}</span>
+    <span class="fund-prize-crowd" aria-hidden="true">${crowd}</span>
+  </span>
+  <span class="fund-flow-totals fund-balance-totals">
+    <span><span class="fund-flow-label">Total balance</span>${renderUsdcAmount(details.balanceUnits)}</span>
+    <span><span class="fund-flow-label">Reserved for older weeks</span>${details.reservedUnits != null ? renderUsdcAmount(details.reservedUnits) : 'Unavailable'}</span>
+  </span>
+  <span class="fund-flow-totals">
+    <span><span class="fund-flow-label">Total in</span>${renderUsdcAmount(details.inflowUnits, { className: 'fund-amount-in' })}</span>
+    <span><span class="fund-flow-label">Total out</span>${renderUsdcAmount(details.outflowUnits, { className: 'fund-amount-out' })}</span>
+    <span><span class="fund-flow-label">Net</span>${renderUsdcAmount(details.netUnits)}</span>
+  </span>`;
+}
+
 export function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -148,29 +171,46 @@ export function renderFundDisclosure(fund) {
   return `<details class="fund-disclosure"><summary><strong>${escapeHtml(fund.label)}</strong> · ${renderUsdcAmount(fund.balanceUnits)} · ${reserved}${avail}</summary><div class="fund-disclosure-body">${fund.description ? `<p class="fund-description">${escapeHtml(fund.description)}</p>` : ''}${renderFundSourcesTable(fund)}</div></details>`;
 }
 
+export function renderFundPendingTable(rows, { fundSlug, week = '' } = {}) {
+  const topTen = fundSlug === 'dbusk-top10';
+  const table = entries => `<table class="fund-pending-table"><thead><tr><th>Rank</th><th>Song</th><th>Artist / recipient</th><th>${topTen ? 'Net votes' : 'Qualified plays'}</th><th>Estimated payment</th><th>Status</th></tr></thead><tbody>${entries.map(row => {
+    const linked = /^0x(?!0{40}$)[0-9a-fA-F]{40}$/i.test(row.wallet || '');
+    const status = !linked ? 'Pending · wallet required' : BigInt(row.amountUnits || '0') > 0n ? 'Pending · estimate' : 'Pending · no payable share';
+    return `<tr class="fund-pending-row" data-pending-track="${escapeHtml(row.trackId || '')}"><td>${escapeHtml(row.rank)}</td><td>${escapeHtml(row.title || 'Untitled song')}</td><td>${row.artist ? `<span>${escapeHtml(row.artist)}</span>` : ''}${row.walletHtml ? `<div>${row.walletHtml}</div>` : ''}</td><td>${escapeHtml(topTen ? row.votes : row.plays)}</td><td class="fund-breakdown-amount">${renderUsdcAmount(row.amountUnits, { className: 'fund-amount-pending' })}</td><td>${status}</td></tr>`;
+  }).join('')}</tbody></table>`;
+  const content = rows == null ? '<p class="fund-pending-empty">Current-week estimates unavailable. Retrying.</p>'
+    : !rows.length ? '<p class="fund-pending-empty">No qualifying songs recorded this week.</p>'
+      : `${table(rows.slice(0, 4))}${rows.length > 4 ? `<details class="fund-pending-details" data-fund-pending="${escapeHtml(`${fundSlug}:${week}`)}"><summary>Show ${rows.length - 4} more pending payments</summary>${table(rows.slice(4))}</details>` : ''}`;
+  return `<section class="fund-pending-section" aria-labelledby="fund-pending-title"><h4 id="fund-pending-title">Pending · ${topTen ? 'Top 10 song prizes' : 'Playback song shares'}${week ? ` · ${escapeHtml(week)}` : ''}</h4>${!topTen ? '<p class="fund-pending-meta">Song contributions to artist-wallet payments</p>' : ''}${content}</section>`;
+}
+
 export function renderFundWeeklyArchive(archive = {}) {
   const weeks = Array.isArray(archive.weeks) ? archive.weeks : [];
-  if (!weeks.length) return '<p class="fund-weekly-empty">No paid weekly history has been indexed yet.</p>';
-  return `<div class="fund-weekly-archive">${weeks.map(week => {
+  const unmatched = Array.isArray(archive.unmatchedPayouts) ? archive.unmatchedPayouts : [];
+  if (!weeks.length && !unmatched.length) return '<p class="fund-weekly-empty">No weekly allocations or payments have been indexed yet.</p>';
+  const weeklyHtml = `<div class="fund-weekly-archive">${weeks.map(week => {
     const status = week.status || 'queued';
     const period = week.period || {};
-    const header = `${escapeHtml(week.week)} · ${status.toUpperCase()} · ${renderUsdcAmount(week.totalUnits)} total`;
+    const header = `${escapeHtml(week.week)} · ${status.toUpperCase()} · ${renderUsdcAmount(week.totalUnits)} scheduled · ${renderUsdcAmount(week.paidUnits || '0', { className: 'fund-amount-out' })} paid`;
     const rows = (week.entries || []).map((entry, index) => `
-      <tr class="fund-weekly-row fund-weekly-${escapeHtml(status)}">
-        <td>${escapeHtml(entry.artist || entry.walletLabel || entry.wallet || `Winner ${index + 1}`)}${entry.walletHtml ? `<div class="fund-weekly-sub">${entry.walletHtml}</div>` : ''}${entry.artist ? `<div class="fund-weekly-sub">${escapeHtml(entry.plays || entry.votes || 0)} ${entry.votes != null ? 'votes' : 'plays'}</div>` : ''}</td>
-        <td class="fund-breakdown-amount">${renderUsdcAmount(entry.amountUnits, { className: entry.paid ? 'usdc-amount--artist' : 'usdc-amount--queued' })}</td>
-        <td class="fund-breakdown-amount">${renderUsdcAmount((week.entries || []).slice(0, index + 1).reduce((sum, item) => sum + BigInt(item.amountUnits || 0), 0n), { className: 'usdc-amount--sponsor' })}</td>
-        <td>${entry.txHash ? `<a href="https://basescan.org/tx/${escapeHtml(entry.txHash)}" target="_blank" rel="noopener">BaseScan</a>` : `<span class="fund-weekly-queued">${status === 'queued' ? 'Queued' : 'Awaiting payout'}</span>`}</td>
+      <tr class="fund-weekly-row fund-weekly-${escapeHtml(status)} ${entry.paid ? 'fund-weekly-confirmed' : 'fund-weekly-frozen'}">
+        <td>${entry.title ? `<strong>${entry.rank ? `${escapeHtml(entry.rank)}. ` : ''}${escapeHtml(entry.title)}</strong><div class="fund-weekly-sub">${escapeHtml(entry.artist || entry.walletLabel || '')}</div>` : escapeHtml(entry.artist || entry.walletLabel || entry.wallet || `Winner ${index + 1}`)}${entry.walletHtml ? `<div class="fund-weekly-sub">${entry.walletHtml}</div>` : ''}${entry.artist ? `<div class="fund-weekly-sub">${escapeHtml(entry.votes ?? entry.plays ?? 0)} ${entry.votes != null ? 'votes' : 'plays'}</div>` : ''}</td>
+        <td class="fund-breakdown-amount">${renderUsdcAmount(entry.amountUnits, { className: entry.paid ? 'fund-amount-out' : 'fund-amount-frozen' })}</td>
+        <td class="fund-breakdown-amount">${renderUsdcAmount(entry.paidUnits ?? (entry.paid ? entry.amountUnits : '0'), { className: 'fund-amount-out' })}${entry.paymentMismatch ? '<div class="fund-weekly-warning">Payment mismatch</div>' : ''}</td>
+        <td class="fund-breakdown-amount">${renderUsdcAmount((week.entries || []).slice(0, index + 1).reduce((sum, item) => sum + BigInt(item.paidUnits ?? (item.paid ? item.amountUnits : '0')), 0n), { className: 'fund-amount-out' })}</td>
+        <td>${(entry.payments?.length ? entry.payments : entry.txHash ? [entry] : []).map(payment => `<a href="https://basescan.org/tx/${escapeHtml(payment.txHash)}" target="_blank" rel="noopener">BaseScan</a>${payment.timestamp ? `<div class="fund-weekly-sub">${escapeHtml(new Date(payment.timestamp * 1000).toLocaleString())}</div>` : ''}`).join(' ') || '<span class="fund-weekly-queued">Frozen · awaiting payment</span>'}</td>
       </tr>`).join('');
     const archiveLink = week.metadataUri ? `<a href="${escapeHtml(week.metadataUri.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'))}" target="_blank" rel="noopener">IPFS JSON</a>` : 'IPFS JSON unavailable';
-    return `<details class="fund-weekly-details fund-weekly-${escapeHtml(status)}">
+    return `<details class="fund-weekly-details fund-weekly-${escapeHtml(status)}" data-fund-week="${escapeHtml(week.week)}">
       <summary><strong>${header}</strong> · ${escapeHtml(status)} · ${escapeHtml(period.startAt || '')}</summary>
       <div class="fund-weekly-body">
         <p class="fund-weekly-meta">Allocation ${escapeHtml(week.metadataUri || 'unpublished')} · ${archiveLink}</p>
-        <table class="fund-weekly-table"><thead><tr><th>Recipient</th><th>Amount</th><th>Running total</th><th>Tx</th></tr></thead><tbody>${rows || `<tr><td colspan="4" class="fund-weekly-empty">No payouts indexed yet.</td></tr>`}</tbody></table>
+        <table class="fund-weekly-table"><thead><tr><th>Recipient</th><th>Scheduled</th><th>Paid</th><th>Running paid total</th><th>Tx</th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="fund-weekly-empty">No payouts indexed yet.</td></tr>`}</tbody></table>
       </div>
     </details>`;
   }).join('')}</div>`;
+  const unmatchedHtml = unmatched.length ? `<section class="fund-weekly-unmatched"><h4>Unmatched on-chain payments</h4><p class="fund-weekly-meta">Allocation receipts must be restored before these payments can be assigned to a prize week.</p><table class="fund-weekly-table"><thead><tr><th>Recipient</th><th>Paid</th><th>Tx</th></tr></thead><tbody>${unmatched.map(payment => `<tr><td>${renderWalletButton({ address: payment.recipient, label: shortAddress(payment.recipient) })}</td><td>${renderUsdcAmount(payment.amountUnits, { className: 'fund-amount-out' })}</td><td><a href="https://basescan.org/tx/${escapeHtml(payment.txHash)}" target="_blank" rel="noopener">BaseScan</a></td></tr>`).join('')}</tbody></table></section>` : '';
+  return weeklyHtml + unmatchedHtml;
 }
 
 export function renderFundsSection(funds = [], title = 'Community Funds') {

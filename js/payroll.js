@@ -22,6 +22,7 @@
 
 import { isAdminWallet } from './admin-access.mjs';
 import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261014-celebrate';
+import { previewTopTenSongPayroll } from './top-ten-prizes.mjs';
 import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261014-celebrate';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
@@ -907,7 +908,7 @@ async function _refreshWeeklyPayflow() {
       }
       for (const saved of state.allocations || []) {
         validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress, assetAddress: _getAssetConfig('USDC').address, funds: _payrollAssetConfig.radioFunds });
-        if (![3, 4].includes(saved.allocation.schemaVersion) || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(saved.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
+        if (![3, 4, 5].includes(saved.allocation.schemaVersion) || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(saved.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
         const key = _reviewKey(saved.allocation.category, saved.allocation.week);
         if (records[key] && records[key].metadataHash !== saved.metadataHash) throw new Error('A conflicting reviewed receipt exists; manual reconciliation required');
         records[key] = saved;
@@ -1303,7 +1304,7 @@ function _renderRadioReviews() {
     }
     for (const entry of saved.allocation.entries) {
       const row = document.createElement('div'); row.className = 'radio-payroll-artist';
-      const label = document.createElement('span'); label.textContent = `${entry.artist} · ${_shortAddr(entry.wallet)} · ${ethers.formatUnits(entry.amountUnits, 6)} USDC`;
+      const label = document.createElement('span'); label.textContent = `${entry.title ? `${entry.rank}. ${entry.title} · ` : ''}${entry.artist} · ${_shortAddr(entry.wallet)} · ${ethers.formatUnits(entry.amountUnits, 6)} USDC`;
       const state = _radioRecipientStates.get(entry.workReferenceText);
       label.textContent += state?.paid ? ' · Paid on Base' : state?.approved ? ' · Approved / unpaid' : state ? ' · Approval required' : ' · Checking Base';
       row.append(label);
@@ -1472,7 +1473,10 @@ function _previewRadioPayroll() {
     const playbackBudget = units('radio-playback-budget');
     const prizeBudget = units('radio-prize-budget');
     const playback = previewPlaybackPayroll({ tracks: report.tracks, budgetUnits: playbackBudget, minimumUnits });
-    const prizes = previewTopTenPayroll({ tracks: report.tracks, budgetUnits: prizeBudget, minimumUnits });
+    const receipt = _radioReviews.top10?.allocation;
+    const songPrizes = report.week.startsWith('NY-') && (!receipt || receipt.schemaVersion >= 5);
+    const prizes = songPrizes ? previewTopTenSongPayroll({ tracks: report.tracks, budgetUnits: prizeBudget, minimumUnits })
+      : previewTopTenPayroll({ tracks: report.tracks, budgetUnits: prizeBudget, minimumUnits });
     const render = (id, plan) => {
       const target = document.getElementById(id);
       target.replaceChildren();
@@ -1483,13 +1487,14 @@ function _previewRadioPayroll() {
         const row = document.createElement('div');
         row.className = 'radio-payroll-artist';
         const name = document.createElement('span');
-        name.textContent = `${entry.rank ? `${entry.rank}. ` : ''}${entry.artist || _shortAddr(entry.wallet)} · ${entry.votes !== undefined ? `${entry.votes} weekly net votes` : `${entry.plays} plays`} · ${_shortAddr(entry.wallet)}`;
+        name.textContent = `${entry.rank ? `${entry.rank}. ` : ''}${entry.title ? `${entry.title} · ` : ''}${entry.artist || _shortAddr(entry.wallet)} · ${entry.votes !== undefined ? `${entry.votes} weekly net votes` : `${entry.plays} plays`} · ${_shortAddr(entry.wallet)}`;
         const amount = document.createElement('strong');
         amount.textContent = `${ethers.formatUnits(entry.amountUnits, 6)} USDC${entry.payable ? '' : entry.amountUnits === 0n ? ' · no payout' : ' · held below minimum'}`;
         row.append(name, amount);
         target.append(row);
         const category = id === 'radio-playback-preview' ? 'playback' : 'top10';
-        _appendRadioWorkReference(target, radioWorkReferenceText({ week: report.week, category, wallet: entry.wallet }), category, true);
+        if (isValidEthAddress(entry.wallet)) _appendRadioWorkReference(target, radioWorkReferenceText({ week: report.week, category, wallet: entry.wallet,
+          ...(category === 'top10' && songPrizes ? { trackId: entry.trackId } : {}) }), category, true);
       }
     };
     render('radio-playback-preview', playback);

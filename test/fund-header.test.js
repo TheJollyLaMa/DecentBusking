@@ -92,5 +92,60 @@ test('fund header labels use the week number and a USDC icon', async () => {
   assert.equal(fundWeekNumber(Date.parse('2026-10-19T00:30:00-04:00')), 1);
   assert.equal(fundWeekNumber(Date.parse('2026-10-18T23:30:00-04:00')), 0);
   const html = fundButtonHtml({ emoji: '🏆', label: 'Top10 fund' }, '12250000', Date.parse('2026-10-14T20:00:00-04:00'));
-  assert.equal(html, '🏆 Week 0 Top10 fund: $12.25 <img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">');
+  assert.match(html, /Week 0 Top10 fund:/);
+  assert.match(html, /\$12\.25/);
+  assert.match(html, /class="usdc-icon"/);
+});
+
+test('fund snapshots refresh budgets and reservations and reject the previous week at turnover', async () => {
+  const { loadFundState, fundStateFor } = await import(url);
+  let balance = '17250000';
+  let reserved = '12250000';
+  let budget = '5000000';
+  let week = 'NY-2026-10-19';
+  let lastCheckedAt = '2026-10-19T04:00:30.000Z';
+  const now = Date.parse('2026-10-19T00:01:00-04:00');
+  const fetchImpl = async address => ({ ok: true, json: async () => address.endsWith('/api/funds')
+    ? { ready: true, funds: { [top10]: { balanceUnits: balance, sources: [], payouts: [] } } }
+    : { ready: true, chainId: 8453, currentPeriod: { week }, lastCheckedAt, funds: { top10: { budgetUnits: budget, reservedUnits: reserved } } } });
+  const snapshot = await loadFundState({ serviceUrl: 'https://worker.example', fetchImpl, now });
+  const first = fundStateFor(snapshot, top10);
+  assert.equal(first.balanceUnits, '17250000');
+  assert.equal(first.budgetUnits, '5000000');
+  assert.equal(first.reservedUnits, '12250000');
+  balance = '22250000'; budget = '10000000';
+  const updated = fundStateFor(await loadFundState({ serviceUrl: 'https://worker.example', fetchImpl, now }), top10);
+  assert.equal(updated.budgetUnits, '10000000');
+  assert.equal(updated.reservedUnits, '12250000');
+  balance = '10000000'; reserved = '0';
+  const paid = fundStateFor(await loadFundState({ serviceUrl: 'https://worker.example', fetchImpl, now }), top10);
+  assert.equal(paid.budgetUnits, '10000000');
+  assert.equal(paid.reservedUnits, '0');
+  week = 'NY-2026-10-12';
+  const stale = fundStateFor(await loadFundState({ serviceUrl: 'https://worker.example', fetchImpl, now }), top10);
+  assert.equal(stale.budgetUnits, null);
+  week = 'NY-2026-10-19'; lastCheckedAt = '2026-10-19T03:59:59.000Z';
+  const oldBudget = fundStateFor(await loadFundState({ serviceUrl: 'https://worker.example', fetchImpl, now }), top10);
+  assert.equal(oldBudget.budgetUnits, null);
+});
+
+test('fund pending songs move with ranks and funding and keep Playback separate from Top10', async () => {
+  const { fundPendingRows } = await import(url);
+  const wallet = `0x${'1'.repeat(40)}`;
+  const report = { current: true, tracks: [
+    { trackId: 'first', title: 'First', wallet, votes: 17, plays: 3 },
+    { trackId: 'second', title: 'Second', wallet, votes: 8, plays: 1 },
+    { trackId: 'third', title: 'Third', wallet: `0x${'2'.repeat(40)}`, votes: 4, plays: 4 },
+  ] };
+  const rows = fundPendingRows({ fundSlug: top10, report, budgetUnits: '12250000' });
+  assert.deepEqual(rows.map(row => row.amountUnits), ['6125000', '3062500', '3062500']);
+  report.tracks[1].votes = 99;
+  const changed = fundPendingRows({ fundSlug: top10, report, budgetUnits: '24500000' });
+  assert.equal(changed[0].trackId, 'second');
+  assert.equal(changed[0].amountUnits, '12250000');
+  const playback = fundPendingRows({ fundSlug: 'dbusk-playback', report, budgetUnits: '8000001', minimumUnits: '1' });
+  assert.deepEqual(playback.map(row => [row.trackId, row.amountUnits]), [['third', '4000000'], ['first', '3000000'], ['second', '1000000']]);
+  assert.equal(playback.reduce((sum, row) => sum + BigInt(row.amountUnits), 0n), 8000000n);
+  assert.equal(fundPendingRows({ fundSlug: top10, report, budgetUnits: null }), null);
+  assert.equal(fundPendingRows({ fundSlug: top10, report: { ...report, current: false }, budgetUnits: '12250000' }), null);
 });
