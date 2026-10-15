@@ -1,5 +1,5 @@
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
-import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { canEditArtwork } from './artwork-update.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
@@ -48,6 +48,71 @@ export function parseCreatorSplits(text) {
   if (!entries.length || entries.length > 16 || entries.reduce((sum, entry) => sum + entry.shares, 0) !== 10000 ||
       new Set(entries.map(entry => entry.address.toLowerCase())).size !== entries.length) throw new Error('Use 1-16 distinct wallets with percentages totaling 100');
   return { recipients: entries.map(entry => entry.address), shares: entries.map(entry => entry.shares), positions: entries.map(entry => entry.position) };
+}
+
+const PENCIL_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+const REMOVE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+
+export function displayArtist(value = '') {
+  const text = String(value || '').trim();
+  return /^0x[0-9a-fA-F]{40}$/.test(text) ? `${text.slice(0, 6)}…${text.slice(-4)}` : (text || 'Unknown artist');
+}
+
+export function buildNftListItem({ index = 0, title, subtitle = '', meta = '', artwork = '', fallback = '🎵', onOpen, onEdit = null, onRemove = null }) {
+  const li = document.createElement('li');
+  li.className = 'creator-nft-item';
+  li.style.setProperty('--i', String(Math.min(index, 12)));
+  const artWrap = document.createElement('div');
+  artWrap.className = 'creator-nft-art-wrap';
+  const art = document.createElement('button');
+  art.type = 'button';
+  art.className = 'creator-nft-art';
+  art.title = 'Open NFT card';
+  art.setAttribute('aria-label', `Open ${title}`);
+  if (artwork) {
+    const image = document.createElement('img');
+    image.alt = '';
+    image.loading = 'lazy';
+    image.src = artwork;
+    image.addEventListener('error', () => { image.remove(); art.textContent = fallback; }, { once: true });
+    art.append(image);
+  } else {
+    art.textContent = fallback;
+  }
+  art.addEventListener('click', () => onOpen?.());
+  artWrap.append(art);
+  if (onEdit) {
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'creator-nft-icon creator-nft-edit';
+    edit.title = 'Edit artwork';
+    edit.setAttribute('aria-label', `Edit artwork for ${title}`);
+    edit.innerHTML = PENCIL_ICON;
+    edit.addEventListener('click', event => { event.stopPropagation(); onEdit(); });
+    artWrap.append(edit);
+  }
+  const copy = document.createElement('div');
+  copy.className = 'creator-nft-copy';
+  const heading = document.createElement('strong');
+  heading.textContent = title;
+  const artist = document.createElement('span');
+  artist.textContent = subtitle;
+  const details = document.createElement('span');
+  details.className = 'creator-nft-meta';
+  details.textContent = meta;
+  copy.append(heading, artist, details);
+  li.append(artWrap, copy);
+  if (onRemove) {
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'creator-nft-icon creator-nft-remove';
+    remove.title = 'Remove from watchlist';
+    remove.setAttribute('aria-label', `Remove ${title} from watchlist`);
+    remove.innerHTML = REMOVE_ICON;
+    remove.addEventListener('click', () => onRemove());
+    li.append(remove);
+  }
+  return li;
 }
 
 export function initCreatorProfile() {
@@ -123,14 +188,24 @@ export function initCreatorProfile() {
   const myNftsSearch = dialog.querySelector('[data-my-nfts-search]');
   const myNftsStatus = dialog.querySelector('[data-my-nfts-status]');
   const myNftsItems = dialog.querySelector('[data-my-nfts-items]');
+  const myNftsCount = dialog.querySelector('[data-my-nfts-count]');
   let myNftsTimer = null;
   let myNftsAbort = null;
+  const openNftCard = async identity => {
+    try {
+      const { openNFTByIdentity } = await import('./space.js?v=20261014-upload-resilience');
+      dialog.querySelector('[data-profile-close]')?.click();
+      if (!await openNFTByIdentity(identity)) throw new Error('Could not open this NFT in the space view');
+    } catch (error) {
+      message(error.message);
+    }
+  };
   const renderWatchlist = () => {
     if (!watchlistSection || !watchlistStatus || !watchlistItems) return;
     const state = getCreatorWatchlistState();
     const items = editable() ? (profile.watchlist || state.watchlist || []) : [];
     watchlistSection.hidden = !editable();
-    if (watchlistCount) watchlistCount.textContent = `${items.length} saved`;
+    if (watchlistCount) watchlistCount.textContent = String(items.length);
     if (!editable()) return;
     watchlistItems.replaceChildren();
     if (state.loading && !items.length) {
@@ -154,60 +229,25 @@ export function initCreatorProfile() {
     watchlistStatus.textContent = state.error || '';
     watchlistEmpty.hidden = true;
     const sorted = [...items].sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
-    for (const entry of sorted) {
-      const li = document.createElement('li');
-      li.className = 'creator-watchlist-item';
-      const artwork = creatorImageURL(entry.artworkURI || entry.image || '', config().ipfsGateway);
-      const buttonRow = document.createElement('div');
-      buttonRow.className = 'creator-watchlist-actions';
-      const openButton = document.createElement('button');
-      openButton.type = 'button';
-      openButton.textContent = 'Open';
-      openButton.addEventListener('click', () => {
-        run(async () => {
-          const { openNFTByIdentity } = await import('./space.js?v=20261014-upload-resilience');
-          const opened = await openNFTByIdentity(entry);
-          if (!opened) throw new Error('Could not open this NFT in the space view');
-          message('Opened saved NFT in the space view');
-        });
-      });
-      const removeButton = document.createElement('button');
-      removeButton.type = 'button';
-      removeButton.textContent = 'Remove';
-      removeButton.addEventListener('click', () => {
-        run(async () => {
+    sorted.forEach((entry, index) => {
+      const title = entry.title || `Track #${entry.tokenId}`;
+      const li = buildNftListItem({
+        index,
+        title,
+        subtitle: displayArtist(entry.artist || entry.creator),
+        meta: `#${entry.tokenId}`,
+        artwork: creatorImageURL(entry.artworkURI || entry.image || '', config().ipfsGateway),
+        fallback: '👀',
+        onOpen: () => openNftCard(entry),
+        onRemove: () => run(async () => {
           await removeCreatorWatchlist(entry);
           profile.watchlist = getCreatorWatchlistState().watchlist;
           renderWatchlist();
           message('Removed from watchlist');
-        });
+        }),
       });
-      buttonRow.append(openButton, removeButton);
-      const copy = document.createElement('div');
-      copy.className = 'creator-watchlist-copy';
-      const title = document.createElement('strong');
-      title.textContent = entry.title || `Track #${entry.tokenId}`;
-      const artist = document.createElement('span');
-      artist.textContent = entry.artist || entry.creator || 'Unknown artist';
-      const meta = document.createElement('span');
-      meta.className = 'creator-watchlist-meta';
-      meta.textContent = `${entry.contractAddress} · #${entry.tokenId}`;
-      copy.append(title, artist, meta, buttonRow);
-      if (artwork) {
-        const image = document.createElement('img');
-        image.className = 'creator-watchlist-art';
-        image.alt = entry.title ? `Artwork for ${entry.title}` : 'Watchlist artwork';
-        image.src = artwork;
-        li.append(image);
-      } else {
-        const placeholder = document.createElement('div');
-        placeholder.className = 'creator-watchlist-art creator-watchlist-fallback';
-        placeholder.textContent = '👀';
-        li.append(placeholder);
-      }
-      li.append(copy);
       watchlistItems.append(li);
-    }
+    });
   };
   const renderMyNFTs = async () => {
     if (!myNftsSection || !myNftsStatus || !myNftsItems || !editable()) return;
@@ -225,55 +265,29 @@ export function initCreatorProfile() {
       const nfts = Array.isArray(result.nfts) ? result.nfts : [];
       myNftsItems.replaceChildren();
       if (!nfts.length) {
-        myNftsStatus.textContent = 'No matching NFTs found.';
+        myNftsStatus.textContent = query ? 'No matching NFTs found.' : 'No NFTs minted from this wallet yet.';
+        if (myNftsCount && !query) myNftsCount.textContent = '0';
         return;
       }
-      myNftsStatus.textContent = `${nfts.length} NFT${nfts.length === 1 ? '' : 's'} found.`;
-      for (const nft of nfts) {
-        const li = document.createElement('li');
-        li.className = 'creator-watchlist-item';
-        const artwork = creatorImageURL(nft.image || nft.artworkCid || '', config().ipfsGateway);
-        if (artwork) {
-          const image = document.createElement('img');
-          image.className = 'creator-watchlist-art';
-          image.alt = nft.name ? `Artwork for ${nft.name}` : 'NFT artwork';
-          image.src = artwork;
-          li.append(image);
-        }
-        const copy = document.createElement('div');
-        copy.className = 'creator-watchlist-copy';
-        copy.append(
-          Object.assign(document.createElement('strong'), { textContent: nft.name || nft.title || `Track #${nft.tokenId}` }),
-          Object.assign(document.createElement('span'), { textContent: nft.creator || nft.artist || 'Unknown artist' }),
-          Object.assign(document.createElement('span'), { textContent: `${nft.contractAddress} · #${nft.tokenId}` }),
-        );
-        const actions = document.createElement('div');
-        actions.className = 'creator-watchlist-actions';
-        if (canEditArtwork(nft, address)) {
-          const edit = document.createElement('button');
-          edit.type = 'button';
-          edit.textContent = 'Edit artwork';
-          edit.addEventListener('click', () => document.dispatchEvent(new CustomEvent('open-artwork-editor', { detail: { nft } })));
-          actions.append(edit);
-        }
-        const open = document.createElement('button');
-        open.type = 'button';
-        open.textContent = 'Open';
-        open.addEventListener('click', async () => {
-          try {
-            const { openNFTByIdentity } = await import('./space.js?v=20261014-upload-resilience');
-            const opened = await openNFTByIdentity(nft);
-            if (!opened) throw new Error('Could not open this NFT in the space view');
-            message('Opened NFT in the space view');
-          } catch (error) {
-            message(error.message);
-          }
+      myNftsStatus.textContent = query ? `${nfts.length} match${nfts.length === 1 ? '' : 'es'}` : 'Tap artwork to open its card · ✏️ edits artwork';
+      if (myNftsCount && !query) myNftsCount.textContent = String(nfts.length);
+      nfts.forEach((nft, index) => {
+        const title = nft.name || nft.title || `Track #${nft.tokenId}`;
+        const minted = Date.parse(nft.mintedAt || '');
+        const li = buildNftListItem({
+          index,
+          title,
+          subtitle: displayArtist(nft.artistName || nft.artist || nft.creator),
+          meta: `#${nft.tokenId}${Number.isFinite(minted) ? ` · ${new Date(minted).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}`,
+          artwork: creatorImageURL(nft.image || nft.artworkCid || '', config().ipfsGateway),
+          fallback: '🎵',
+          onOpen: () => openNftCard(nft),
+          onEdit: canEditArtwork(nft, address)
+            ? () => document.dispatchEvent(new CustomEvent('open-artwork-editor', { detail: { nft } }))
+            : null,
         });
-        actions.append(open);
-        copy.append(actions);
-        li.append(copy);
         myNftsItems.append(li);
-      }
+      });
     } catch (error) {
       if (error.name === 'AbortError') return;
       myNftsStatus.textContent = error.message;

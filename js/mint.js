@@ -1,5 +1,5 @@
 import { fetchNFTMetaById } from './space.js?v=20261014-upload-resilience';
-import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
+import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { submitMediaForApproval } from './mint-submission.js?v=20261014-upload-resilience';
 
 const MEDIA_TYPES = {

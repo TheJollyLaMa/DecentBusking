@@ -755,3 +755,14 @@ test('weekly radio history is public and clamps the requested range', async () =
     assert.equal(invalid.status, 400);
   });
 });
+
+test('signed artwork uploads accept any supported image type so mislabelled images still upload', async () => {
+  const { requestPinataSignedUrl } = await import(moduleUrl);
+  let body;
+  await requestPinataSignedUrl({ pinataSignUrl: 'https://pinata.example/sign', name: 'a.png', size: 10, type: 'image/png',
+    fetchImpl: async (_url, options) => { body = JSON.parse(options.body); return { ok: true, json: async () => ({ data: 'https://signed' }) }; } });
+  assert.deepEqual(body.allow_mime_types, ['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+  await requestPinataSignedUrl({ pinataSignUrl: 'https://pinata.example/sign', name: 'a.mp3', size: 10, type: 'audio/mpeg',
+    fetchImpl: async (_url, options) => { body = JSON.parse(options.body); return { ok: true, json: async () => ({ data: 'https://signed' }) }; } });
+  assert.deepEqual(body.allow_mime_types, ['audio/mpeg']);
+});

@@ -122,6 +122,24 @@ async function withRetries(step, action, {
   throw stepError(prefix, step, lastError?.message, retrySuggestion);
 }
 
+const IMAGE_SIGNATURES = [
+  { type: 'image/jpeg', ext: 'jpg', test: b => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  { type: 'image/png', ext: 'png', test: b => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 },
+  { type: 'image/gif', ext: 'gif', test: b => b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38 },
+  { type: 'image/webp', ext: 'webp', test: b => b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50 },
+];
+
+// Pinata checks the real file contents against the signed MIME type, so an image whose
+// extension doesn't match its bytes (e.g. a JPEG saved as .png) must be relabelled first.
+export async function normalizeImageFileType(file) {
+  if (!file || typeof file.slice !== 'function' || !String(file.type || '').startsWith('image/')) return file;
+  const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  const detected = IMAGE_SIGNATURES.find(signature => signature.test(bytes));
+  if (!detected || detected.type === file.type || typeof File === 'undefined') return file;
+  const base = String(file.name || 'artwork').replace(/\.[^.]*$/, '');
+  return new File([file], `${base}.${detected.ext}`, { type: detected.type, lastModified: file.lastModified });
+}
+
 export function createBrowserIpfsUploader({
   provider = 'pinata',
   serviceUrl,
@@ -146,6 +164,7 @@ export function createBrowserIpfsUploader({
     if (provider !== 'pinata') throw new Error(`Unsupported IPFS upload provider: ${provider}`);
     if (!serviceUrl) throw new Error('The Render IPFS worker URL is not configured');
     if (!signer || !address) throw new Error('Connect your wallet before uploading');
+    file = await normalizeImageFileType(file);
 
     const endpoint = purpose === 'submission' ? 'submission-upload-url' : 'upload-url';
     let lastUploadError;

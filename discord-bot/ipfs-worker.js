@@ -97,6 +97,8 @@ function sendCorsError(response, origin, error) {
   sendJson(response, 403, { error }, origin || '*');
 }
 
+const ARTWORK_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
 export async function requestPinataSignedUrl({ pinataJwt, pinataSignUrl, name, size, type, fetchImpl = fetch }) {
   const headers = { 'content-type': 'application/json' };
   if (pinataJwt) headers.authorization = `Bearer ${pinataJwt}`;
@@ -108,7 +110,7 @@ export async function requestPinataSignedUrl({ pinataJwt, pinataSignUrl, name, s
       date: Math.floor(Date.now() / 1000),
       expires: 15 * 60,
       max_file_size: size + SIGNED_UPLOAD_OVERHEAD_BYTES,
-      allow_mime_types: [type],
+      allow_mime_types: ARTWORK_MIME_TYPES.includes(type) ? ARTWORK_MIME_TYPES : [type],
       filename: name,
     }),
   });

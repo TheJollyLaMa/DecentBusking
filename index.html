@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261014-profile-earnings2-usdc2" />
+  <link rel="stylesheet" href="css/styles.css?v=20261015-nft-dropdowns" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -728,8 +728,8 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261014-funds"></script>
   <script type="module" src="js/djuke.mjs?v=20261014-celebrate"></script>
   <script type="module" src="js/devert-tab.mjs?v=20261014-upload-resilience"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261014-earnings-blockscout"></script>
-  <script type="module" src="js/artwork-editor.mjs?v=20261015-artwork-updates"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261015-nft-dropdowns"></script>
+  <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
   <script type="module" src="js/listens.mjs?v=20261014-upload-resilience"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261014-worker-gas"></script>
@@ -819,17 +819,22 @@
       </div>
       <p class="creator-profile-edit-status" data-profile-edit-status role="status" aria-live="polite"></p>
     </dialog>
-    <section class="creator-watchlist" data-watchlist-section hidden>
-      <div class="creator-watchlist-heading"><h3>Watchlist</h3><span data-watchlist-count></span></div>
-      <p data-watchlist-status role="status" aria-live="polite">Connect your wallet to load your watchlist.</p>
-      <p data-watchlist-empty hidden></p>
-      <ol data-watchlist-items class="creator-watchlist-list"></ol>
-    </section>
-    <section class="creator-watchlist" data-my-nfts-section hidden>
-      <div class="creator-watchlist-heading"><h3>My NFTs</h3><input data-my-nfts-search type="search" placeholder="Search title or token ID" aria-label="Search your NFTs" /></div>
-      <p data-my-nfts-status role="status" aria-live="polite">Connect your wallet to search your NFTs.</p>
-      <ol data-my-nfts-items class="creator-watchlist-list"></ol>
-    </section>
+    <details class="creator-dropdown" data-my-nfts-section hidden open>
+      <summary><span class="creator-dropdown-title">🎵 My NFTs</span><span class="creator-dropdown-count" data-my-nfts-count></span></summary>
+      <div class="creator-dropdown-body">
+        <label class="creator-dropdown-search"><span class="sr-only">Search your NFTs</span><input data-my-nfts-search type="search" placeholder="Search title or token ID…" /></label>
+        <p class="creator-dropdown-status" data-my-nfts-status role="status" aria-live="polite">Connect your wallet to search your NFTs.</p>
+        <ol data-my-nfts-items class="creator-nft-list"></ol>
+      </div>
+    </details>
+    <details class="creator-dropdown" data-watchlist-section hidden>
+      <summary><span class="creator-dropdown-title">👀 Watchlist</span><span class="creator-dropdown-count" data-watchlist-count></span></summary>
+      <div class="creator-dropdown-body">
+        <p class="creator-dropdown-status" data-watchlist-status role="status" aria-live="polite">Connect your wallet to load your watchlist.</p>
+        <p class="creator-dropdown-status" data-watchlist-empty hidden></p>
+        <ol data-watchlist-items class="creator-nft-list"></ol>
+      </div>
+    </details>
     <details><summary>Albums and Collaborators</summary>
       <form data-album-form>
         <label>Album ID or Slug<input name="albumId" required maxlength="100" /></label><button type="button" data-album-load>Load Album</button>
@@ -843,24 +848,33 @@
     <p data-profile-status role="status" aria-live="polite"></p>
   </dialog>
 
-  <dialog id="nft-artwork-editor" aria-labelledby="nft-artwork-editor-title">
-    <div class="creator-profile-toolbar">
-      <h3 id="nft-artwork-editor-title">Edit artwork</h3>
-      <button type="button" class="creator-profile-close" data-artwork-editor-close aria-label="Close artwork editor">✕</button>
+  <dialog id="nft-artwork-editor" class="artwork-editor" aria-labelledby="nft-artwork-editor-title">
+    <div class="artwork-editor-header">
+      <div>
+        <h3 id="nft-artwork-editor-title">Edit artwork</h3>
+        <p class="artwork-editor-subtitle">Pick a new cover. An admin approves it before it goes on-chain.</p>
+      </div>
+      <button type="button" class="artwork-editor-close" data-artwork-editor-close aria-label="Close artwork editor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
-    <div class="creator-profile-actions" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-      <figure>
-        <figcaption>Current image</figcaption>
-        <img data-artwork-current-preview alt="Current NFT artwork" style="max-width:100%;border-radius:12px;" />
+    <div class="artwork-editor-previews">
+      <figure class="artwork-editor-frame">
+        <img data-artwork-current-preview alt="Current NFT artwork" />
+        <figcaption>Current</figcaption>
       </figure>
-      <figure>
-        <figcaption>New image</figcaption>
-        <img data-artwork-new-preview alt="New NFT artwork preview" style="max-width:100%;border-radius:12px;" />
+      <span class="artwork-editor-arrow" aria-hidden="true">➜</span>
+      <figure class="artwork-editor-frame is-new">
+        <img data-artwork-new-preview alt="New NFT artwork preview" hidden />
+        <span class="artwork-editor-placeholder" data-artwork-new-placeholder aria-hidden="true">🖼️</span>
+        <figcaption>New</figcaption>
       </figure>
     </div>
-    <label>Choose image<input data-artwork-file type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label>
-    <button type="button" data-artwork-save>Save artwork</button>
-    <p data-artwork-status role="status" aria-live="polite"></p>
+    <label class="artwork-editor-picker">
+      <input data-artwork-file type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+      <span class="artwork-editor-picker-label">📁 Choose image</span>
+      <span class="artwork-editor-picker-name" data-artwork-file-name>PNG, JPG, WebP or GIF</span>
+    </label>
+    <button type="button" class="artwork-editor-save" data-artwork-save>✨ Sign &amp; submit artwork</button>
+    <p class="artwork-editor-status" data-artwork-status role="status" aria-live="polite"></p>
   </dialog>
 </body>
 </html>

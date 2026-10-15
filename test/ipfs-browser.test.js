@@ -155,3 +155,16 @@ test('browser uploader returns a readable owner-only CORS error', async () => {
   await assert.rejects(upload(new File(['image'], 'cover.png', { type: 'image/png' })),
     /step 1\/2.*authorized for uploads/);
 });
+test('image uploads are relabelled to the type their bytes actually contain', async () => {
+  const { normalizeImageFileType } = await import(moduleUrl);
+  const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
+  const mislabelled = new File([jpegBytes], 'cover.png', { type: 'image/png' });
+  const fixed = await normalizeImageFileType(mislabelled);
+  assert.equal(fixed.type, 'image/jpeg');
+  assert.equal(fixed.name, 'cover.jpg');
+  assert.equal(fixed.size, mislabelled.size);
+  const correct = new File([jpegBytes], 'cover.jpg', { type: 'image/jpeg' });
+  assert.equal(await normalizeImageFileType(correct), correct);
+  const audio = new File([jpegBytes], 'song.mp3', { type: 'audio/mpeg' });
+  assert.equal(await normalizeImageFileType(audio), audio);
+});
