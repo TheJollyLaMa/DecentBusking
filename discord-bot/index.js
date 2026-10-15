@@ -61,7 +61,7 @@ import { createEnsResolver } from './ens-resolver.js';
 import { createMintTransactionVerifier, createArtworkUpdateTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
 import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
-import { createEarningsLedger } from '../js/creator-earnings.mjs';
+import { ROUTER_START_BLOCK, createEarningsLedger } from '../js/creator-earnings.mjs';
 import { createSubmissionIntake, buildWalletButtons } from './submission-intake.js';
 import { mediaTypeFor, normalizeMediaCid, MEDIA_TYPES, DISCORD_UPLOAD_MAX_BYTES, isDiscordAttachmentWithinLimit } from './media.js';
 import { shouldHandleDevertLoopSubmission } from './submission-routing.js';
@@ -812,7 +812,9 @@ async function main() {
     readDjukeState: () => readDjukeState?.(),
     restore: fundStore ? fundStore.restore : undefined,
     save: fundStore ? fundStore.save : undefined,
-    startBlock: process.env.PAYROLL_START_BLOCK ? Number(process.env.PAYROLL_START_BLOCK) : undefined,
+    // The settlement router has no events before its deployment block, so never scan from genesis.
+    startBlock: Math.max(ROUTER_START_BLOCK, Number(process.env.PAYROLL_START_BLOCK || 0)),
+    chunkSize: Number(process.env.FUND_SCAN_CHUNK_SIZE || 10000),
   });
   let fundLedgerReady = false;
   let fundLedgerTask = null;

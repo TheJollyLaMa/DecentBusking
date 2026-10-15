@@ -113,18 +113,19 @@ export function createRpcRouter({
   const inflight = new Map();
   const cache = new Map();
   const consumers = {};
-  const usage = { day: '', dayCu: 0, minute: 0, minuteCu: 0 };
+  const usage = { day: '', dayCu: 0, minute: 0, minuteCu: 0, byMethod: {} };
   let requestId = 0;
 
   function chargeCu(method) {
     const time = now();
     const day = new Date(time).toISOString().slice(0, 10);
     const minute = Math.floor(time / 60_000);
-    if (usage.day !== day) Object.assign(usage, { day, dayCu: 0 });
+    if (usage.day !== day) Object.assign(usage, { day, dayCu: 0, byMethod: {} });
     if (usage.minute !== minute) Object.assign(usage, { minute, minuteCu: 0 });
     const cost = CU_COSTS[method] ?? 20;
     usage.dayCu += cost;
     usage.minuteCu += cost;
+    usage.byMethod[method] = (usage.byMethod[method] || 0) + cost;
   }
 
   const overBudget = () => usage.day === new Date(now()).toISOString().slice(0, 10) && usage.dayCu >= dailyCuSoftLimit;
@@ -314,6 +315,7 @@ export function createRpcRouter({
         lastMinute: usage.minute === Math.floor(time / 60_000) ? usage.minuteCu : 0,
         dailySoftLimit: Number.isFinite(dailyCuSoftLimit) ? dailyCuSoftLimit : null,
         overBudget: overBudget(),
+        todayByMethod: usage.day === new Date(time).toISOString().slice(0, 10) ? { ...usage.byMethod } : {},
       },
       endpoints: endpoints.map(endpoint => ({
         label: endpoint.label,
