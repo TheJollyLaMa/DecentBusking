@@ -1,4 +1,5 @@
 import { escapeHtml, formatUsdcUnits, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261014-funds';
+import { currentPayrollPeriod } from './payroll-week.mjs';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -10,9 +11,27 @@ const FUND_EVENT_ABI = [
 ];
 
 const FUNDS = [
-  { slug: 'dbusk-top10', emoji: '🏆', label: 'Top 10 fund' },
-  { slug: 'dbusk-playback', emoji: '🎧', label: 'Playback fund this week' },
+  { slug: 'dbusk-top10', emoji: '🏆', label: 'Top10 fund' },
+  { slug: 'dbusk-playback', emoji: '🎧', label: 'Playback fund' },
 ];
+
+// Week 0 is the New York payroll week starting Monday 2026-10-12.
+const WEEK_ZERO_KEY = 'NY-2026-10-12';
+const USDC_ICON = '<img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">';
+
+export function fundWeekNumber(now = Date.now()) {
+  const current = Date.parse(`${currentPayrollPeriod(now).week.slice(3)}T00:00:00Z`);
+  const zero = Date.parse(`${WEEK_ZERO_KEY.slice(3)}T00:00:00Z`);
+  return Math.max(0, Math.round((current - zero) / (7 * 86400000)));
+}
+
+export function fundTitle(fund, now = Date.now()) {
+  return `${fund.emoji} Week ${fundWeekNumber(now)} ${fund.label}`;
+}
+
+export function usdcAmountHtml(balanceUnits) {
+  return `$${escapeHtml(formatUsdcUnits(balanceUnits))} ${USDC_ICON}`;
+}
 
 const historyCache = new Map();
 const balanceCache = new Map();
@@ -210,8 +229,8 @@ export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanc
   }
 }
 
-function fundButtonText(fund, balanceUnits) {
-  return `${fund.emoji} ${fund.label} · ${formatUsdcUnits(balanceUnits)} USDC`;
+export function fundButtonHtml(fund, balanceUnits, now = Date.now()) {
+  return `${escapeHtml(fundTitle(fund, now))}: ${usdcAmountHtml(balanceUnits)}`;
 }
 
 function dialogElements() {
@@ -228,8 +247,8 @@ function dialogElements() {
 function renderBreakdown(details, fund, fundState) {
   const { body, summary, note, title } = dialogElements();
   if (!body || !summary || !note || !title) return;
-  title.textContent = `${fund.emoji} ${fund.label}`;
-  summary.textContent = `${formatUsdcUnits(details.balanceUnits)} USDC balance · in ${formatUsdcUnits(details.inflowUnits)} · out ${formatUsdcUnits(details.outflowUnits)} · net ${formatUsdcUnits(details.netUnits)}`;
+  title.textContent = fundTitle(fund);
+  summary.innerHTML = `Balance ${usdcAmountHtml(details.balanceUnits)} · in $${escapeHtml(formatUsdcUnits(details.inflowUnits))} · out $${escapeHtml(formatUsdcUnits(details.outflowUnits))} · net $${escapeHtml(formatUsdcUnits(details.netUnits))}`;
   note.textContent = details.historyAvailable
     ? (details.reconciles ? 'History reconciles against the on-chain balance.' : 'History loaded, but the totals do not fully reconcile yet.')
     : 'Breakdown unavailable, try again.';
@@ -315,7 +334,8 @@ export async function initFundHeader() {
     const button = document.getElementById(`${fund.slug}-button`);
     if (!button) continue;
     const balanceUnits = balanceMap[fund.slug]?.balanceUnits ?? '0';
-    button.textContent = fundButtonText(fund, balanceUnits);
+    button.innerHTML = fundButtonHtml(fund, balanceUnits);
+    button.setAttribute('aria-label', `${fundTitle(fund)}: $${formatUsdcUnits(balanceUnits)} USDC`);
     button.disabled = false;
     button.addEventListener('click', () => openBreakdown(fund, button).catch(() => { button.disabled = false; }));
   }

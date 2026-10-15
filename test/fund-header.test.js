@@ -106,3 +106,12 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
   assert.ok(payout);
   assert.match(payout.txUrl, /basescan\.org\/tx\/0x4+/);
 });
+
+test('fund header labels use the week number and a USDC icon', async () => {
+  const { fundWeekNumber, fundButtonHtml } = await import(url);
+  assert.equal(fundWeekNumber(Date.parse('2026-10-14T20:00:00-04:00')), 0);
+  assert.equal(fundWeekNumber(Date.parse('2026-10-19T00:30:00-04:00')), 1);
+  assert.equal(fundWeekNumber(Date.parse('2026-10-18T23:30:00-04:00')), 0);
+  const html = fundButtonHtml({ emoji: '🏆', label: 'Top10 fund' }, '12250000', Date.parse('2026-10-14T20:00:00-04:00'));
+  assert.equal(html, '🏆 Week 0 Top10 fund: $12.25 <img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">');
+});

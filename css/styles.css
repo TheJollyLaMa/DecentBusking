@@ -2654,7 +2654,8 @@ decent-foot {
 }
 .artist-filter-core {
   display: grid;
-  grid-template-columns: auto minmax(0, min(320px, 55vw)) auto;
+  flex: 0 1 420px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   min-width: 0;
@@ -2672,10 +2673,9 @@ decent-foot {
 #artist-filter-bar select { width: min(320px, 55vw); }
 #artist-filter-count { white-space: nowrap; color: var(--teal); }
 .fund-header-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: min(30vw, 320px);
+  display: inline-block;
+  flex: 0 0 auto;
+  white-space: nowrap;
   min-width: 0;
   padding: 7px 10px;
   color: var(--gold);
@@ -2686,13 +2686,12 @@ decent-foot {
   line-height: 1.2;
   text-align: left;
   cursor: pointer;
-  overflow-wrap: anywhere;
 }
 .fund-header-pill:disabled { opacity: .92; cursor: progress; }
 .fund-header-left { justify-self: start; }
 .fund-header-right { justify-self: end; color: var(--teal); border-color: rgba(0, 212, 170, .28); }
 .artist-filter-core label { white-space: nowrap; }
-.artist-filter-core select { width: min(320px, 55vw); }
+.artist-filter-core select { width: 100%; min-width: 0; }
 .fund-breakdown-shell { min-width: min(90vw, 900px); max-width: min(92vw, 980px); padding: 16px; background: #0a0814; color: var(--text-primary); }
 .fund-breakdown-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .fund-breakdown-heading h3 { margin: 0; color: var(--gold); }
@@ -2724,7 +2723,8 @@ decent-foot {
     gap: 6px;
   }
   .artist-filter-core label { font-size: .78rem; }
-  .fund-header-pill { max-width: none; width: 100%; justify-content: center; }
+  .fund-header-pill { width: 100%; text-align: center; }
+  .artist-filter-core { flex: none; }
   #hat-btn, #guitar-case-btn { width: 64px; height: 64px; bottom: 12px; font-size: 3.25rem; }
   #hat-btn { left: 4px; }
   #guitar-case-btn { right: 16px; }
@@ -2940,4 +2940,12 @@ decent-foot {
   .radio-history-filters { grid-template-columns: 1fr 1fr; }
   .radio-history-table { font-size: .75rem; }
   .radio-history-table th, .radio-history-table td { padding: 7px 4px; }
+}
+
+.fund-header-pill .usdc-icon,
+#fund-breakdown-summary .usdc-icon {
+  width: 1.05em;
+  height: 1.05em;
+  vertical-align: -0.18em;
+  margin-left: 0.15em;
 }
