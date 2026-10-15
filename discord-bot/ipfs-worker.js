@@ -223,6 +223,8 @@ export function createWorkerRequestHandler({
   artworkUpdateQueue,
   verifyArtworkUpdateTransaction,
   rpcUrl = 'https://mainnet.base.org',
+  rpcProvider = null,
+  getRpcHealth,
   pinataApiUrl = 'https://uploads.pinata.cloud/v3/files',
   ipfsApiUrl = 'http://127.0.0.1:5001',
   fetchImpl = fetch,
@@ -283,7 +285,9 @@ export function createWorkerRequestHandler({
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
-        sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured' }, '*');
+        const rpc = getRpcHealth?.();
+        sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured',
+          ...(rpc ? { rpc: { ...rpc.tiers, computeUnits: rpc.computeUnits } } : {}) }, '*');
         return;
       }
       if (requestUrl.pathname === '/api/creator/profile' && request.method === 'GET') {
@@ -423,6 +427,11 @@ export function createWorkerRequestHandler({
         const address = requestUrl.pathname.split('/').pop();
         if (!/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('Invalid wallet address');
         sendJson(response, 200, await getEarnings({ address }), '*', 'public, max-age=30, stale-while-revalidate=30');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/rpc-health') {
+        if (!getRpcHealth) throw new Error('RPC routing is not configured');
+        sendJson(response, 200, getRpcHealth(), '*', 'no-store');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/ens/')) {
@@ -565,7 +574,7 @@ export function createWorkerRequestHandler({
         const recovered = verifyMessage(message, body.signature).toLowerCase();
         if (recovered !== body.address.toLowerCase()) throw new Error('Artwork update signature mismatch: check the connected signing wallet and client/worker message format');
         const artworkCid = normalizeMediaCid(body.artworkCid);
-        const contract = new Contract(body.contractAddress, NFT_ARTWORK_ABI, new JsonRpcProvider(rpcUrl));
+        const contract = new Contract(body.contractAddress, NFT_ARTWORK_ABI, rpcProvider || new JsonRpcProvider(rpcUrl));
         const creator = String(await contract.creatorOf(Number(body.tokenId)).catch(() => '') || '').toLowerCase();
         if (!creator || creator !== body.address.toLowerCase()) throw new Error('Only the token creator can request artwork changes');
         const currentUri = await contract.uri(Number(body.tokenId));

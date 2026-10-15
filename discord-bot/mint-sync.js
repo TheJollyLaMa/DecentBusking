@@ -314,6 +314,7 @@ export async function readMintedCollections({ collections, fetchImpl = fetch, pa
 
 export async function syncMintedTracksFromChain({
   rpcUrl,
+  provider: rpcProvider,
   contractAddress,
   contract,
   contractAddresses,
@@ -330,14 +331,14 @@ export async function syncMintedTracksFromChain({
 }) {
   let result;
   if (collections || contractAddresses?.length) {
-    const provider = collections ? null : new JsonRpcProvider(rpcUrl);
+    const provider = collections ? null : (rpcProvider || new JsonRpcProvider(rpcUrl));
     result = await readMintedCollections({ collections: collections || contractAddresses.map(address => ({
       contractAddress: address, contract: new Contract(address, NFT_ABI, provider),
     })), fetchImpl, pauseMs, tokenCaches, metadataGateways, metadataCacheMs, now });
   } else {
     const artistWalletByAudioCid = new Map();
     const minted = await readMintedAudioCids({
-      contract: contract || new Contract(contractAddress, NFT_ABI, new JsonRpcProvider(rpcUrl)),
+      contract: contract || new Contract(contractAddress, NFT_ABI, rpcProvider || new JsonRpcProvider(rpcUrl)),
       fetchImpl, pauseMs, artistWalletByAudioCid, metadataGateways, metadataCacheMs, now,
     });
     result = { minted, artistWalletByAudioCid, nfts: [] };

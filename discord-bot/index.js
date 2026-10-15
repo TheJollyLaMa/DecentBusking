@@ -32,9 +32,9 @@ import {
 
 import http from 'http'; 
 import fs from 'node:fs';
-import { Contract, Interface, JsonRpcProvider, Wallet, id } from 'ethers';
+import { Contract, Interface, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
-import { createFailoverProvider } from './rpc-failover.js';
+import { DEFAULT_DAILY_CU_SOFT_LIMIT, baseRpcEndpointsFromEnv, createRpcRouter } from './rpc-router.js';
 import { createFundLedger } from './fund-ledger.js';
 import { createWeeklyPayflow, findBlockAtOrBefore, readClosingFundBalance } from './weekly-payflow.js';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
@@ -206,6 +206,18 @@ async function runWeeklyPlayReport(client, config) {
   console.log(`[weekly-play-report] Posted ${previousWeek}: ${report.totalPlays} qualifying plays.`);
 }
 
+let _rpcRouter = null;
+function getRpcRouter() {
+  if (!_rpcRouter) {
+    const assets = JSON.parse(fs.readFileSync(new URL('../payroll-assets.json', import.meta.url), 'utf8'));
+    const { publicUrls, paidUrls } = baseRpcEndpointsFromEnv(process.env, assets);
+    const softLimit = Number(process.env.ALCHEMY_DAILY_CU_SOFT_LIMIT || 0);
+    _rpcRouter = createRpcRouter({ chainId: 8453, publicUrls, paidUrls, dailyCuSoftLimit: softLimit > 0 ? softLimit : DEFAULT_DAILY_CU_SOFT_LIMIT });
+    if (!paidUrls.length) console.warn('[rpc] No paid Base RPC configured (ALCHEMY_BASE_URL); using public endpoints only.');
+  }
+  return _rpcRouter;
+}
+
 function syncMintedTracks(config, { required = false } = {}) {
   if (!_mintSyncTask) {
     _mintSyncTask = Promise.resolve().then(async () => {
@@ -220,6 +232,7 @@ function syncMintedTracks(config, { required = false } = {}) {
       }
       return syncMintedTracksFromChain({
         rpcUrl: config.baseRpcUrl,
+        provider: getRpcRouter().provider('read', 'mint-sync'),
         contractAddress: config.nftContractAddress,
         contractAddresses: config.nftContractAddresses,
         tokenCaches: _mintTokenCaches,
@@ -503,7 +516,7 @@ async function main() {
   if (process.env.DEVERT_CONTRACT_ADDRESS) {
     try {
       readDevertState = createDevertCampaignReader({
-        rpcUrl: config.baseRpcUrl,
+        provider: getRpcRouter().provider('read', 'devert-reader'),
         contractAddress: process.env.DEVERT_CONTRACT_ADDRESS,
         confirmations: Number(process.env.DEVERT_CONFIRMATIONS || 2),
       });
@@ -512,7 +525,7 @@ async function main() {
     }
   }
   if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt) {
-    const scheduler = new Wallet(devertSchedulerPrivateKey, new JsonRpcProvider(config.baseRpcUrl));
+    const scheduler = new Wallet(devertSchedulerPrivateKey, getRpcRouter().provider('critical', 'devert-scheduler'));
     const contract = new Contract(process.env.DEVERT_CONTRACT_ADDRESS, DEVERT_ABI, scheduler);
     _devertSchedulerContract = contract;
     const workerMinBalanceWei = process.env.WORKER_MIN_BALANCE_WEI
@@ -666,7 +679,7 @@ async function main() {
     },
   });
   const verifyMintTransaction = createMintTransactionVerifier({
-    rpcUrl: config.baseRpcUrl,
+    provider: getRpcRouter().provider('read', 'mint-verify'),
     contractAddress: config.nftContractAddress,
     contractAddresses: config.nftContractAddresses,
     ownerWallet: config.mintOwnerWallet,
@@ -701,7 +714,7 @@ async function main() {
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-payment-ledger.json', tags: { app: 'decentbusking', kind: 'payment-ledger', schema: '1' },
     retainSnapshots: Infinity, serialize: value => value, deserialize: (value, uri) => ({ ...value, snapshotUri: uri }) }) : null;
-  const paymentProvider = createFailoverProvider(payrollAssets);
+  const paymentProvider = getRpcRouter().provider('read', 'payroll-and-funds');
   const dispatchedPayments = new Set();
   let repositorySyncError = '';
   const syncRepositoryLedger = async payment => {
@@ -753,7 +766,7 @@ async function main() {
     'function completedWorkReferences(bytes32) view returns(bool)',
     'event FundFunded(bytes32 indexed fundId, address indexed asset, address indexed funder, uint256 amount)',
   ], paymentProvider);
-  const archiveProvider = new JsonRpcProvider(process.env.PAYROLL_ARCHIVE_RPC_URL || 'https://mainnet.base.org');
+  const archiveProvider = getRpcRouter().provider('logs', 'payroll-archive');
   const archivePayflowRouter = new Contract(payrollAssets.routerAddress, [
     'function fundBalances(bytes32,address) view returns(uint256)',
     'function completedWorkReferences(bytes32) view returns(bool)',
@@ -825,7 +838,7 @@ async function main() {
   }) : null;
   const earningsLedger = createEarningsLedger({
     ethers: { Interface, id },
-    provider: new JsonRpcProvider(config.baseLogsRpcUrl),
+    provider: getRpcRouter().provider('logs', 'earnings-index'),
     restore: earningsStore ? earningsStore.restore : async () => null,
     save: earningsStore ? earningsStore.save : async () => '',
     startBlock: process.env.ROUTER_START_BLOCK ? Number(process.env.ROUTER_START_BLOCK) : undefined,
@@ -845,12 +858,12 @@ async function main() {
 
   const djukeAddress = process.env.DJUKE_CONTRACT_ADDRESS;
   const quoteSigner = supportsDjukeAlbumsAndGas(process.env.DJUKE_CONTRACT_VERSION) && process.env.DJUKE_FULFILLER_PRIVATE_KEY
-    ? new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, new JsonRpcProvider(config.baseRpcUrl)) : null;
+    ? new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-gas-quote')) : null;
   const getDjukeGasQuote = quoteSigner ? createDjukeGasQuoteReader({ provider: quoteSigner.provider, signer: quoteSigner,
     contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, 'function quote() view returns(uint256)'], quoteSigner),
     fulfillmentGasUnits: BigInt(process.env.DJUKE_FULFILLMENT_GAS_UNITS || '1000000') }) : null;
   let readDjukeState = djukeAddress ? createDjukeQueueReader({
-    rpcUrl: config.baseRpcUrl, contractAddress: djukeAddress,
+    provider: getRpcRouter().provider('read', 'djuke-reader'), contractAddress: djukeAddress,
     paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
     getPlaylist: () => {
       if (!playlistReady) throw new Error('DJuke catalog is restoring');
@@ -870,7 +883,7 @@ async function main() {
     setInterval(syncDevertDjukeBoosts, 60_000).unref();
   }
   if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY) {
-    const worker = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, new JsonRpcProvider(config.baseRpcUrl));
+    const worker = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-registrar'));
     const registerSongs = createDjukeSongRegistrar({ contract: new Contract(djukeAddress, DJUKE_ABI, worker),
       getPlaylist: () => (playlistReady ? getPlaylist() : []), onRegistered: songIds => readDjukeState.invalidate(songIds) });
     const runRegistrar = () => registerSongs().catch(error => console.warn('[djuke] Song registration deferred:', error.shortMessage || error.message));
@@ -878,7 +891,7 @@ async function main() {
     setInterval(runRegistrar, 120_000).unref();
   }
   if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY && checkpointMirror && config.pinataJwt) {
-    const fulfiller = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, new JsonRpcProvider(config.baseRpcUrl));
+    const fulfiller = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-fulfiller'));
     const journalStore = createPinataStateStore({ pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-djuke-journal.json',
       tags: { app: 'decentbusking', kind: 'djuke-journal', schema: '1' }, serialize: value => value,
@@ -899,6 +912,7 @@ async function main() {
     console.warn('[djuke] Queue is read-only: DJUKE_FULFILLER_PRIVATE_KEY, CHECKPOINT_MIRROR_SECRET and PINATA_JWT are all required for paid playback.');
   }
 
+  console.log(`[rpc] Base tiers: ${getRpcRouter().health().tiers.paid} paid, ${getRpcRouter().health().tiers.public} public; consumers: ${getRpcRouter().describe()}`);
   const requestHandler = createWorkerRequestHandler({
     checkpointMirror,
     creatorProfiles,
@@ -943,7 +957,7 @@ async function main() {
     pinataSignUrl: config.pinataSignUrl,
     verifyMintTransaction,
     verifyArtworkUpdateTransaction: createArtworkUpdateTransactionVerifier({
-      rpcUrl: config.baseRpcUrl,
+      provider: getRpcRouter().provider('read', 'artwork-verify'),
       contractAddress: config.nftContractAddress,
       contractAddresses: config.nftContractAddresses,
       ownerWallet: config.mintOwnerWallet,
@@ -957,6 +971,8 @@ async function main() {
     },
     artworkUpdateQueue,
     rpcUrl: config.baseRpcUrl,
+    rpcProvider: getRpcRouter().provider('read', 'worker-reads'),
+    getRpcHealth: () => getRpcRouter().health(),
     pinataApiUrl: config.pinataApiUrl,
     ipfsApiUrl: config.ipfsApiUrl,
     getMintQueue: async () => {
@@ -1013,7 +1029,7 @@ async function main() {
         if (!_devertAdsOnChainScans.has(normalizedAddress)) {
           const scan = (async () => {
             try {
-              const provider = new JsonRpcProvider(config.baseRpcUrl);
+              const provider = getRpcRouter().provider('read', 'devert-ads-scan');
               const multicall = new Contract(BASE_MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
               const balanceInterface = new Interface(NFT_BALANCE_ABI);
               const currentCollection = config.nftContractAddress.toLowerCase();
