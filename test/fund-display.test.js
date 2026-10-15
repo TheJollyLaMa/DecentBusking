@@ -23,14 +23,26 @@ test('verified sponsor aliases are shown only when they forward-resolve to the s
       'decentcanopy.eth': '0x807061DF657A7697c04045dA7d16D941861cAABc',
       'wrong.eth': '0x0000000000000000000000000000000000000001',
     }[name] || null),
-    getResolver: async () => null,
+   getResolver: async () => null,
   };
   const wallet = await resolveWalletLabel('0x807061DF657A7697c04045dA7d16D941861cAABc', provider,
-    { '0x807061df657a7697c04045da7d16d941861caabc': ['thejollylama.eth', 'decentcanopy.eth', 'wrong.eth'] });
+   { '0x807061df657a7697c04045da7d16d941861caabc': ['thejollylama.eth', 'decentcanopy.eth', 'wrong.eth'] });
   assert.equal(wallet.label, 'thejollylama.eth');
   assert.deepEqual(wallet.aliases, ['decentcanopy.eth']);
   assert.match(renderWalletButton(wallet, { role: 'sponsor' }), /data-creator="0x807061DF657A7697c04045dA7d16D941861cAABc"/);
+  assert.match(renderWalletButton(wallet, { role: 'sponsor' }), /title="0x807061DF657A7697c04045dA7d16D941861cAABc"/);
   assert.match(renderWalletButton(wallet, { role: 'sponsor' }), /fund-wallet-link/);
+  const walletFromChecksumKey = await resolveWalletLabel('0x807061DF657A7697c04045dA7d16D941861cAABc', provider,
+   { '0x807061DF657A7697c04045dA7d16D941861cAABc': ['thejollylama.eth', 'decentcanopy.eth'] });
+  assert.deepEqual(walletFromChecksumKey.aliases, ['decentcanopy.eth']);
+});
+
+test('known contracts render as explorer badges instead of raw addresses', async () => {
+  const { resolveWalletLabel, renderWalletButton } = await import(url);
+  const wallet = await resolveWalletLabel('0x135Cbc573F87637158eb3186C87c584fb0B34CD9', null, {});
+  const html = renderWalletButton(wallet, { role: 'advert' });
+  assert.match(html, /📜 DeVert v0\.1/);
+  assert.match(html, /basescan\.org\/address\/0x135Cbc573F87637158eb3186C87c584fb0B34CD9#code/);
 });
 
 test('fund disclosure markup includes proof links and campaign references', async () => {

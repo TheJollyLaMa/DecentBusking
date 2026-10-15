@@ -8,6 +8,8 @@ const url = pathToFileURL(path.join(__dirname, '../discord-bot/fund-ledger.js'))
 const iface = new Interface(['event FundFunded(bytes32 indexed fundId, address indexed asset, address indexed funder, uint256 amount)']);
 const routerAddress = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const usdc = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const devertContract = '0x135Cbc573F87637158eb3186C87c584fb0B34CD9';
+const djukeContract = '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9';
 const funds = {
   playback: 'dbusk-playback',
   top10: 'dbusk-top10',
@@ -48,13 +50,13 @@ function makeRouter(logs, balances) {
 test('fund ledger classifies advert, djuke, and sponsor sources', async () => {
   const { createFundLedger } = await import(url);
   const logs = [
-    makeLog(funds.top10, '0x1111111111111111111111111111111111111111', 12250000n, '0x' + '1'.repeat(64), 10, 0),
-    makeLog(funds.pinners, '0x2222222222222222222222222222222222222222', 1020000n, '0x' + '2'.repeat(64), 11, 0),
+    makeLog(funds.top10, devertContract, 12250000n, '0x' + '1'.repeat(64), 10, 0),
+    makeLog(funds.pinners, djukeContract, 1020000n, '0x' + '2'.repeat(64), 11, 0),
     makeLog(funds.repo, '0x3333333333333333333333333333333333333333', 255000n, '0x' + '3'.repeat(64), 12, 0),
   ];
   const provider = makeProvider({ head: 12, logs, txFrom: new Map([
-    ['0x' + '1'.repeat(64), '0x1111111111111111111111111111111111111111'],
-    ['0x' + '2'.repeat(64), '0x2222222222222222222222222222222222222222'],
+    ['0x' + '1'.repeat(64), devertContract],
+    ['0x' + '2'.repeat(64), djukeContract],
     ['0x' + '3'.repeat(64), '0x4444444444444444444444444444444444444444'],
   ]) });
   const router = makeRouter(logs, new Map([
@@ -64,9 +66,9 @@ test('fund ledger classifies advert, djuke, and sponsor sources', async () => {
     [id(funds.pinners).toLowerCase(), 1020000n],
   ]));
   const state = {
-    campaigns: [{ advertiser: '0x1111111111111111111111111111111111111111', paidUnits: '12250000', campaignId: '7', title: 'Weekend shoutout' }],
+    campaigns: [{ advertiser: '0x1111111111111111111111111111111111111111', paidUnits: '12250000', campaignId: '7', title: 'Weekend shoutout', txHash: '0x' + '1'.repeat(64) }],
   };
-  const djuke = { requests: [{ payer: '0x2222222222222222222222222222222222222222', amountUnits: '1020000', chainRequestId: '42' }] };
+  const djuke = { requests: [{ payer: '0x2222222222222222222222222222222222222222', amountUnits: '1020000', chainRequestId: '42', txHash: '0x' + '2'.repeat(64) }] };
   const saved = [];
   const ledger = createFundLedger({
     provider,
@@ -96,7 +98,10 @@ test('fund ledger classifies advert, djuke, and sponsor sources', async () => {
   assert.equal(current.funds['dbusk-top10'].balanceUnits, '12250000');
   assert.equal(current.funds['dbusk-top10'].advertUnits, '12250000');
   assert.equal(current.funds['dbusk-top10'].sources[0].kind, 'advert');
+  assert.equal(current.funds['dbusk-top10'].sources[0].campaignId, '7');
+  assert.equal(current.funds['dbusk-top10'].sources[0].title, 'Weekend shoutout');
   assert.equal(current.funds['dbusk-pinners'].sources[0].kind, 'djuke');
+  assert.equal(current.funds['dbusk-pinners'].sources[0].requestId, '42');
   assert.equal(current.funds['dbusk-repo-dev'].sources[0].kind, 'sponsor');
   assert.ok(saved.at(-1).scannedThrough >= 12);
 });

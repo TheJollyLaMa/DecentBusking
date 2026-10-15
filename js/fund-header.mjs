@@ -1,4 +1,5 @@
 import { escapeHtml, formatUsdcUnits, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261014-funds';
+import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
@@ -39,6 +40,12 @@ function ethersLib() {
 function providerForRead() {
   const ethers = ethersLib();
   const rpcUrl = window.DecentConfig?.rpcUrl || window.DecentConfig?.ensRpcUrl;
+  return ethers && rpcUrl ? new ethers.JsonRpcProvider(rpcUrl) : null;
+}
+
+function providerForEns() {
+  const ethers = ethersLib();
+  const rpcUrl = window.DecentConfig?.ensRpcUrl || window.DecentConfig?.rpcUrl;
   return ethers && rpcUrl ? new ethers.JsonRpcProvider(rpcUrl) : null;
 }
 
@@ -109,7 +116,16 @@ async function resolveWallet(address, provider, sponsorAliases, cache) {
   return resolveWalletLabel(address, provider, sponsorAliases, cache);
 }
 
-async function collectInflows({ fetchImpl, ethers, provider, fundSlug, fundState, sponsorAliases, cache }) {
+function sourceKindLabel(kind) {
+  return {
+    advert: 'Advert purchase',
+    djuke: 'DJuke purchase',
+    sponsor: 'Sponsor deposit',
+    payout: 'Payroll payout',
+  }[kind] || 'Sponsor deposit';
+}
+
+async function collectInflows({ fetchImpl, ethers, provider, ensProvider, fundSlug, fundState, sponsorAliases, cache }) {
   const iface = eventInterface(ethers);
   const fundId = ethers.id(fundSlug);
   const logs = await blockscoutLogs(fetchImpl, {
@@ -126,11 +142,17 @@ async function collectInflows({ fetchImpl, ethers, provider, fundSlug, fundState
     const amountUnits = parsed.args.amount.toString();
     const block = provider ? await provider.getBlock(Number(BigInt(log.blockNumber || 0))) : null;
     const timestamp = Number(block?.timestamp || 0);
-    const wallet = await resolveWallet(parsed.args.funder || '', provider, sponsorAliases, cache);
+    const funder = normalizeAddress(parsed.args.funder || '');
+    const wallet = await resolveWallet(parsed.args.funder || '', ensProvider, sponsorAliases, cache);
     const hint = hints.get(`${normalizeAddress(txHash)}:${logIndex}`);
-    const kind = hint?.kind || 'sponsor';
+    const config = globalThis.window?.DecentConfig || {};
+    const devertContract = normalizeKnownAddress(config.devertContractAddress || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9');
+    const djukeContract = normalizeKnownAddress(config.djukeContractAddress || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9');
+    const kind = hint?.kind || (funder === devertContract ? 'advert' : funder === djukeContract ? 'djuke' : 'sponsor');
+    const typeLabel = sourceKindLabel(kind);
+    const advertiser = hint?.advertiser ? await resolveWallet(hint.advertiser, ensProvider, sponsorAliases, cache) : null;
     const extra = kind === 'advert'
-      ? [hint?.campaignId ? `Campaign #${escapeHtml(String(hint.campaignId))}` : '', hint?.title ? escapeHtml(hint.title) : '']
+      ? [hint?.campaignId ? `Campaign #${escapeHtml(String(hint.campaignId))}` : '', hint?.title ? escapeHtml(hint.title) : '', advertiser?.label ? `via ${advertiser.label}` : '']
         .filter(Boolean).join(' · ')
       : kind === 'djuke'
         ? hint?.requestId ? `DJuke request #${escapeHtml(String(hint.requestId))}` : 'DJuke purchase'
@@ -138,6 +160,7 @@ async function collectInflows({ fetchImpl, ethers, provider, fundSlug, fundState
     rows.push({
       direction: 'in',
       kind,
+      typeLabel,
       amountUnits,
       timestamp,
       dateText: formatDateTime(timestamp),
@@ -153,7 +176,7 @@ async function collectInflows({ fetchImpl, ethers, provider, fundSlug, fundState
   return rows;
 }
 
-async function collectOutflows({ fetchImpl, ethers, provider, fundSlug, sponsorAliases, cache }) {
+async function collectOutflows({ fetchImpl, ethers, provider, ensProvider, fundSlug, sponsorAliases, cache }) {
   const iface = eventInterface(ethers);
   const fundId = ethers.id(fundSlug);
   const logs = await blockscoutLogs(fetchImpl, {
@@ -169,10 +192,11 @@ async function collectOutflows({ fetchImpl, ethers, provider, fundSlug, sponsorA
     const amountUnits = parsed.args.amount.toString();
     const block = provider ? await provider.getBlock(Number(BigInt(log.blockNumber || 0))) : null;
     const timestamp = Number(block?.timestamp || 0);
-    const wallet = await resolveWallet(parsed.args.recipient || '', provider, sponsorAliases, cache);
+    const wallet = await resolveWallet(parsed.args.recipient || '', ensProvider, sponsorAliases, cache);
     rows.push({
       direction: 'out',
       kind: 'payout',
+      typeLabel: sourceKindLabel('payout'),
       amountUnits,
       timestamp,
       dateText: formatDateTime(timestamp),
@@ -188,8 +212,9 @@ async function collectOutflows({ fetchImpl, ethers, provider, fundSlug, sponsorA
   return rows;
 }
 
-export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanceUnits = 0n, fetchImpl = globalThis.fetch, provider = providerForRead(), sponsorAliases = {}, ethers = ethersLib() }) {
-  const cached = historyCache.get(fundSlug);
+export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanceUnits = 0n, fetchImpl = globalThis.fetch, provider = providerForRead(), ensProvider = providerForEns(), sponsorAliases = {}, ethers = ethersLib() }) {
+  const cacheKey = `${fundSlug}:${fundState?.lastCheckedAt || ''}:${fundState?.lastError || ''}`;
+  const cached = historyCache.get(cacheKey);
   if (cached) return cached;
   if (!ethers || !fetchImpl || !provider) {
     return { historyAvailable: false, error: new Error('Fund history unavailable'), rows: [], inflows: [], outflows: [] };
@@ -197,8 +222,8 @@ export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanc
   const cache = new Map();
   try {
     const [inflows, outflows] = await Promise.all([
-      collectInflows({ fetchImpl, ethers, provider, fundSlug, fundState: fundState || {}, sponsorAliases, cache }),
-      collectOutflows({ fetchImpl, ethers, provider, fundSlug, sponsorAliases, cache }),
+      collectInflows({ fetchImpl, ethers, provider, ensProvider, fundSlug, fundState: fundState || {}, sponsorAliases, cache }),
+      collectOutflows({ fetchImpl, ethers, provider, ensProvider, fundSlug, sponsorAliases, cache }),
     ]);
     const rows = [...inflows, ...outflows].sort((first, second) =>
       second.timestamp - first.timestamp || second.blockNumber - first.blockNumber || second.logIndex - first.logIndex);
@@ -217,7 +242,7 @@ export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanc
       balanceUnits,
       reconciles: balanceUnits === netUnits,
     };
-    historyCache.set(fundSlug, result);
+    historyCache.set(cacheKey, result);
     return result;
   } catch (error) {
     return { historyAvailable: false, error, rows: [], inflows: [], outflows: [], inflowUnits: 0n, outflowUnits: 0n, netUnits: 0n, balanceUnits: parseUnitsLike(fundState?.balanceUnits ?? fundBalanceUnits ?? 0n), reconciles: false };
@@ -244,14 +269,16 @@ function renderBreakdown(details, fund, fundState) {
   if (!body || !summary || !note || !title) return;
   title.textContent = fundTitle(fund);
   summary.innerHTML = `Balance ${usdcAmountHtml(details.balanceUnits)} · in $${escapeHtml(formatUsdcUnits(details.inflowUnits))} · out $${escapeHtml(formatUsdcUnits(details.outflowUnits))} · net $${escapeHtml(formatUsdcUnits(details.netUnits))}`;
-  note.textContent = details.historyAvailable
-    ? (details.reconciles ? 'History reconciles against the on-chain balance.' : 'History loaded, but the totals do not fully reconcile yet.')
-    : 'Breakdown unavailable, try again.';
+  note.textContent = fundState?.ready === false
+    ? `History indexing${fundState?.lastError ? ` paused: ${fundState.lastError}` : '…'}`
+    : details.historyAvailable
+      ? (details.reconciles ? 'History reconciles against the on-chain balance.' : 'History loaded, but the totals do not fully reconcile yet.')
+      : 'Breakdown unavailable, try again.';
   const rows = details.rows.length
     ? details.rows.map(row => `
         <tr class="fund-breakdown-row fund-breakdown-${escapeHtml(row.direction)} fund-breakdown-${escapeHtml(row.kind)}">
           <td>${escapeHtml(row.dateText)}</td>
-          <td>${escapeHtml(row.kind)}</td>
+          <td>${escapeHtml(row.typeLabel || sourceKindLabel(row.kind))}</td>
           <td>${row.sourceHtml}${row.extra ? `<div class="fund-breakdown-extra">${escapeHtml(row.extra)}</div>` : ''}</td>
           <td class="fund-breakdown-amount">${row.direction === 'in' ? formatUsdcUnits(row.amountUnits) : ''}</td>
           <td class="fund-breakdown-amount">${row.direction === 'out' ? formatUsdcUnits(row.amountUnits) : ''}</td>
@@ -275,8 +302,8 @@ async function loadState() {
   try {
     const response = await fetch(`${service}/api/funds`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
     const state = await response.json().catch(() => null);
-    if (!response.ok || !state?.ready || state.lastError) return null;
-    stateCache = state;
+    if (!response.ok || !state) return null;
+    if (state.ready && !state.lastError) stateCache = state;
     return state;
   } catch {
     return null;
@@ -301,12 +328,14 @@ async function openBreakdown(fund, button) {
   const state = stateCache || await loadState();
   const fundState = state?.funds?.[fund.slug] || null;
   const provider = providerForRead();
+  const ensProvider = providerForEns();
   const details = await loadFundBreakdown({
     fundSlug: fund.slug,
     fundState,
     fundBalanceUnits: balanceCache.get(fund.slug) ?? 0n,
     sponsorAliases: state?.sponsorAliases || {},
     provider,
+    ensProvider,
   });
   renderBreakdown(details, fund, fundState);
   dialog.showModal();
@@ -318,7 +347,6 @@ export async function initFundHeader() {
   if (!bar || bar.dataset.fundHeaderReady === '1') return;
   bar.dataset.fundHeaderReady = '1';
   const state = await loadState();
-  const provider = providerForRead();
   const balances = await Promise.all(FUNDS.map(async fund => {
     const fundState = state?.funds?.[fund.slug] || await loadBalance(fund.slug, state);
     balanceCache.set(fund.slug, fundState.balanceUnits ?? '0');

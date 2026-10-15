@@ -1,5 +1,6 @@
 import { Interface, id } from 'ethers';
 import { configuredSettlementFunds } from '../js/settlement-funds.mjs';
+import { normalizeKnownAddress } from '../js/known-addresses.mjs';
 
 const FUND_FUND_EVENT_ABI = ['event FundFunded(bytes32 indexed fundId, address indexed asset, address indexed funder, uint256 amount)'];
 const eventInterface = new Interface(FUND_FUND_EVENT_ABI);
@@ -74,32 +75,39 @@ export function createFundLedger({
     const fund = fundIds.get(fundId);
     if (!fund) return null;
     const funder = normalizeAddress(entry.funder);
+    const txHash = normalizeAddress(entry.txHash);
     const amount = toBigIntString(entry.amountUnits);
+    const devertContract = normalizeKnownAddress(config.devertContractAddress || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9');
+    const djukeContract = normalizeKnownAddress(config.djukeContractAddress || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9');
     const devert = snapshots.devert ?? await (readDevertState ? readDevertState().catch(() => null) : Promise.resolve(null));
     const djuke = snapshots.djuke ?? await (readDjukeState ? readDjukeState().catch(() => null) : Promise.resolve(null));
-    const campaign = devert?.campaigns?.find(item => normalizeAddress(item.advertiser) === funder && toBigIntString(item.paidUnits) === amount);
-    if (campaign) {
+    const campaign = devert?.campaigns?.find(item =>
+      (txHash && normalizeAddress(item.txHash || item.purchaseTxHash || item.transactionHash || item.eventTxHash) === txHash) ||
+      (normalizeAddress(item.advertiser) === funder && toBigIntString(item.paidUnits) === amount));
+    if (funder === devertContract || campaign) {
       return {
         ...entry,
         slug: fund.slug,
         label: fund.label,
         description: fund.description,
         kind: 'advert',
-        campaignId: campaign.campaignId,
-        title: campaign.title,
-        advertiser: campaign.advertiser,
+        campaignId: campaign?.campaignId,
+        title: campaign?.title,
+        advertiser: campaign?.advertiser,
       };
     }
-    const request = djuke?.requests?.find(item => normalizeAddress(item.payer) === funder && toBigIntString(item.amountUnits) === amount);
-    if (request) {
+    const request = djuke?.requests?.find(item =>
+      (txHash && normalizeAddress(item.txHash || item.purchaseTxHash || item.transactionHash || item.eventTxHash) === txHash) ||
+      (normalizeAddress(item.payer) === funder && toBigIntString(item.amountUnits) === amount));
+    if (funder === djukeContract || request) {
       return {
         ...entry,
         slug: fund.slug,
         label: fund.label,
         description: fund.description,
         kind: 'djuke',
-        payer: request.payer,
-        requestId: request.chainRequestId,
+        payer: request?.payer,
+        requestId: request?.chainRequestId,
       };
     }
     return {
