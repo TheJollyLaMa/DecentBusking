@@ -57,6 +57,7 @@ import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
 import { createCreatorProfiles } from './creator-profiles.js';
 import { createArtworkUpdateQueue } from './artwork-updates.js';
 import { createDjukeGasQuoteReader, DJUKE_GAS_ABI } from './djuke-gas.js';
+import { createEnsResolver } from './ens-resolver.js';
 import { createMintTransactionVerifier, createArtworkUpdateTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
 import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
@@ -998,6 +999,7 @@ async function main() {
     getDevertState: readDevertState,
     getFunds: async () => fundLedger.getCurrentState(),
     getEarnings: async ({ address }) => earningsLedger.getAddressState(address),
+    ensResolver: createEnsResolver(),
     getDevertAds: async ({ address }) => {
       if (!playlistReady) throw new Error('Advert library is restoring; retry shortly');
       const snapshot = await readDevertState?.();

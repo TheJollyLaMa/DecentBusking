@@ -1,3 +1,4 @@
+import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { escapeHtml, formatUsdcUnits, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261014-funds';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
@@ -44,9 +45,7 @@ function providerForRead() {
 }
 
 function providerForEns() {
-  const ethers = ethersLib();
-  const rpcUrl = window.DecentConfig?.ensRpcUrl || window.DecentConfig?.rpcUrl;
-  return ethers && rpcUrl ? new ethers.JsonRpcProvider(rpcUrl) : null;
+  return workerEnsProvider;
 }
 
 function normalizeAddress(value) {

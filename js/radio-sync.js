@@ -3,6 +3,7 @@
 // Discord uploads briefly take over the site radio for their first play, and
 // archive selections mute the radio until the listener returns to it.
 
+import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-paid-sponsors';
 
 const POLL_MS = 8_000;
@@ -69,8 +70,8 @@ export function formatRadioSponsor(sponsor, ensName = '') {
 
 async function _resolveSponsorName(wallet) {
   const key = String(wallet || '').toLowerCase();
-  if (!/^0x[0-9a-f]{40}$/.test(key) || _sponsorEnsCache.has(key) || _sponsorEnsPending.has(key) || !globalThis.window?.ethers?.JsonRpcProvider) return null;
-  const provider = new globalThis.window.ethers.JsonRpcProvider(globalThis.window.DecentConfig?.ensRpcUrl || 'https://ethereum-rpc.publicnode.com', 1);
+  if (!/^0x[0-9a-f]{40}$/.test(key) || _sponsorEnsCache.has(key) || _sponsorEnsPending.has(key)) return null;
+  const provider = workerEnsProvider;
   const task = (async () => {
     try {
       const profile = await resolveCreatorENS(wallet, provider);

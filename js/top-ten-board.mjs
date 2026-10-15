@@ -1,3 +1,4 @@
+import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { escapeHtml, formatUsdcUnits, renderFundSourcesTable, resolveWalletLabel, renderWalletButton } from './fund-display.mjs?v=20261014-funds';
 import { weekNumberFromKey } from './payroll-week.mjs';
 
@@ -37,7 +38,7 @@ export function initTopTenBoard() {
   let timer;
   const aliasCache = new Map();
   const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
-  const provider = window.ethers && (new window.ethers.JsonRpcProvider(window.DecentConfig?.ensRpcUrl || window.DecentConfig?.rpcUrl));
+  const provider = workerEnsProvider;
   async function prepareFund(fund, sponsorAliases) {
     const sources = [];
     for (const source of fund.sources || []) {

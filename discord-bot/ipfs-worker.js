@@ -216,6 +216,7 @@ export function createWorkerRequestHandler({
   getPaymentLedger,
   getFunds,
   getEarnings,
+  ensResolver,
   reconcilePayment,
   onRadioVote,
   onMediaSubmission,
@@ -422,6 +423,39 @@ export function createWorkerRequestHandler({
         const address = requestUrl.pathname.split('/').pop();
         if (!/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('Invalid wallet address');
         sendJson(response, 200, await getEarnings({ address }), '*', 'public, max-age=30, stale-while-revalidate=30');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/ens/')) {
+        if (!ensResolver) throw new Error('ENS lookups are not configured');
+        const kind = requestUrl.pathname.slice('/api/ens/'.length);
+        let lookup;
+        if (kind === 'lookup') {
+          const addresses = [...new Set(String(requestUrl.searchParams.get('addresses') || '').split(',')
+            .map(value => value.trim().toLowerCase()).filter(Boolean))];
+          if (!addresses.length || addresses.length > 25) throw new Error('Provide 1-25 comma-separated addresses');
+          if (addresses.some(address => !/^0x[0-9a-f]{40}$/.test(address))) throw new Error('Invalid wallet address');
+          lookup = async () => {
+            const results = await Promise.all(addresses.map(address => ensResolver.lookupAddress(address)));
+            return { results: Object.fromEntries(results.map(result => [result.address, result.name])) };
+          };
+        } else if (kind === 'resolve') {
+          const name = requestUrl.searchParams.get('name');
+          lookup = () => ensResolver.resolveName(name);
+        } else if (kind === 'records') {
+          const name = requestUrl.searchParams.get('name');
+          lookup = () => ensResolver.records(name);
+        } else {
+          throw new Error('Unknown ENS route');
+        }
+        let data;
+        try {
+          data = await lookup();
+        } catch (error) {
+          if (/^Invalid /.test(error.message)) throw error;
+          sendJson(response, 502, { error: 'ENS lookup unavailable' }, '*');
+          return;
+        }
+        sendJson(response, 200, data, '*', 'public, max-age=300, stale-while-revalidate=600');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/weekly') {

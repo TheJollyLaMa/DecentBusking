@@ -1,3 +1,4 @@
+import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { canEditArtwork } from './artwork-update.mjs';
@@ -520,8 +521,7 @@ export function initCreatorProfile() {
     if (!resolveEns) return;
     let resolvedENS = null;
     try {
-      const provider = new ethers.JsonRpcProvider(config().ensRpcUrl || 'https://ethereum-rpc.publicnode.com', 1);
-      try { resolvedENS = await resolveCreatorENS(address, provider); } finally { provider.destroy(); }
+      resolvedENS = await resolveCreatorENS(address, workerEnsProvider);
     } catch (error) { ensError = error?.shortMessage || error?.reason || error?.message || 'ENS lookup unavailable'; resolvedENS = null; }
     if (check !== revision) return;
     ens = resolvedENS;

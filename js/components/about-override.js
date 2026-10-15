@@ -6,6 +6,7 @@ import { announcePaymentCelebration } from '../payment-celebration.mjs';
 // replaces it with a DecentBusking-specific version.
 //
 import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261013-walkthrough';
+import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
 import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261014-funds';
 
 // The CDN's AboutModal.js hard-codes a filter for listings whose note field
@@ -105,7 +106,7 @@ class DecentBuskingAboutModal extends HTMLElement {
       const response = await fetch(`${service}/api/funds`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
       const state = await response.json().catch(() => null);
       if (!response.ok || !state?.ready || state.lastError) throw new Error(state?.lastError || `Fund balances unavailable (${response.status})`);
-      const provider = window.ethers && new window.ethers.JsonRpcProvider(window.DecentConfig?.ensRpcUrl || window.DecentConfig?.rpcUrl);
+      const provider = workerEnsProvider;
       const aliasCache = new Map();
       const funds = [];
       for (const slug of ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners']) {
