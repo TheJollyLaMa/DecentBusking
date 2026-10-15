@@ -361,7 +361,7 @@ test('JukeLoop player errors discard the active DeVert ad before an Idle event c
   assert.deepEqual(impressions, []);
   assert.equal(session._currentDevertAd, null);
   assert.equal(session._nowPlaying, null);
-  assert.ok(session._failedDevertCampaignIds.has('42'));
+  assert.ok(session._failedDevertCampaigns.has('42'));
   session.destroy();
 });
 
@@ -535,7 +535,7 @@ test('main-radio ad countdown reports shared scheduler state without browser-sid
       livePerformanceEvents: [],
       _musicSinceAd: 7,
       _currentDevertAd: null,
-      _failedDevertCampaignIds: new Set(),
+      _getActiveFailedDevertCampaignIds: () => [],
       devertPlayback: {
         nextMainRadioAd: async () => { throw new Error('should not be queried before the threshold'); },
       },
@@ -561,7 +561,7 @@ test('main-radio ad countdown reports shared scheduler state without browser-sid
         track: { title: 'Spotlight' },
       },
       _nowPlaying: { audible: true },
-      _failedDevertCampaignIds: new Set(),
+      _getActiveFailedDevertCampaignIds: () => [],
       devertPlayback: {
         nextMainRadioAd: async () => null,
       },
@@ -575,7 +575,10 @@ test('main-radio ad countdown reports shared scheduler state without browser-sid
     livePerformanceEvents: [],
     _musicSinceAd: 10,
     _currentDevertAd: null,
-    _failedDevertCampaignIds: new Set(),
+    _getActiveFailedDevertCampaignIds: () => [],
+    _setMainRadioAdSkip(reason, campaignId) {
+      this._lastMainRadioAdSkip = { reason, campaignId, at: 100_000 };
+    },
     devertPlayback: { nextMainRadioAd: async () => { throw error; } },
   });
   const rawRpcError = Object.assign(new Error('insufficient funds for intrinsic transaction cost (transaction="0x02f8d1")'),
@@ -583,11 +586,13 @@ test('main-radio ad countdown reports shared scheduler state without browser-sid
   const gasLow = await context.buildMainRadioAdCountdown({ now: 100_000, session: failingSession(rawRpcError) });
   assert.equal(gasLow.status, 'unavailable');
   assert.equal(gasLow.reason, 'worker gas low');
+  assert.equal(gasLow.lastSkip.reason, 'worker gas low');
   context.console = { ...console, warn: () => {} };
   const otherFailure = await context.buildMainRadioAdCountdown({ now: 100_000,
     session: failingSession(new Error('could not coalesce error (data="0xdeadbeef")')) });
   context.console = console;
   assert.equal(otherFailure.reason, 'main-radio scheduler unavailable');
+  assert.equal(otherFailure.lastSkip.reason, 'main-radio scheduler unavailable');
   assert.equal(playing.campaignId, '42');
   assert.equal(playing.title, 'Spotlight');
 
@@ -603,7 +608,7 @@ test('main-radio ad countdown reports shared scheduler state without browser-sid
       }],
       _musicSinceAd: 10,
       _currentDevertAd: null,
-      _failedDevertCampaignIds: new Set(),
+      _getActiveFailedDevertCampaignIds: () => [],
       devertPlayback: {
         nextMainRadioAd: async () => null,
       },
@@ -612,6 +617,178 @@ test('main-radio ad countdown reports shared scheduler state without browser-sid
 
   assert.equal(paused.status, 'paused');
   assert.match(paused.reason, /Live set|live_performance/);
+});
+
+test('JukeLoop restores a queued main-radio ad after restart and surfaces the last skip reason', async () => {
+  const { createJukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const saved = [];
+  const snapshot = {
+    schemaVersion: 1,
+    musicSinceAd: 10,
+    musicPlayCount: 4,
+    preparedDevertAd: {
+      campaignId: '7',
+      mainRadio: true,
+      track: { trackId: 'devert:7', title: 'Restored Ad', uploader: 'Advertiser', messageId: 'ad-message', channelId: 'ad-channel' },
+    },
+    pendingDevertAds: [{
+      campaignId: '8',
+      mainRadio: true,
+      track: { trackId: 'devert:8', title: 'Next Ad', uploader: 'Advertiser', messageId: 'next-message', channelId: 'ad-channel' },
+    }],
+    failedDevertCampaigns: [],
+    lastSkip: { reason: 'ad file could not be fetched', campaignId: '7', at: 1000 },
+  };
+  const store = {
+    async restore() { return structuredClone(snapshot); },
+    async save(value) {
+      saved.push(structuredClone(value));
+      snapshot.schemaVersion = value.schemaVersion;
+      snapshot.musicSinceAd = value.musicSinceAd;
+      snapshot.musicPlayCount = value.musicPlayCount;
+      snapshot.preparedDevertAd = value.preparedDevertAd;
+      snapshot.pendingDevertAds = value.pendingDevertAds;
+      snapshot.failedDevertCampaigns = value.failedDevertCampaigns;
+      snapshot.lastSkip = value.lastSkip;
+      return 'ipfs://jukeloop-state';
+    },
+  };
+
+  const session = createJukeLoopSession('main-radio-restart', {
+    voiceChannel: { guild: { id: 'main-radio-restart' } },
+    textChannel: { send: async () => ({}) },
+    client: {},
+    mainRadioAdStateStore: store,
+  });
+  session._getFreshUrl = async () => 'https://example.test/ad.mp3';
+  session._createStream = () => {
+    const stream = new PassThrough();
+    stream.write(Buffer.from([0]));
+    return { stream, ffmpegProcess: { kill() {} } };
+  };
+
+  try {
+    const countdown = await session.getMainRadioAdCountdown();
+    assert.equal(countdown.status, 'up_next');
+    assert.equal(countdown.campaignId, '7');
+    assert.equal(countdown.lastSkip.reason, 'ad file could not be fetched');
+
+    const prepared = await session._prepareNextPlayback();
+    assert.equal(prepared.devertAd.campaignId, '7');
+    assert.equal(prepared.track.trackId, 'devert:7');
+    assert.ok(saved.length > 0);
+  } finally {
+    session.destroy();
+  }
+});
+
+test('stale failed main-radio campaigns are retried after enough songs pass', async () => {
+  const { createJukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const excluded = [];
+  const session = createJukeLoopSession('main-radio-expiry', {
+    voiceChannel: { guild: { id: 'main-radio-expiry' } },
+    textChannel: { send: async () => ({}) },
+    client: {},
+    devertPlayback: {
+      nextMainRadioAd: async ({ excludeCampaignIds }) => {
+        excluded.push(...excludeCampaignIds);
+        return null;
+      },
+    },
+  });
+  session._musicSinceAd = 10;
+  session._musicPlayCount = 20;
+  session._failedDevertCampaigns = new Map([
+    ['42', { failedAt: Date.now() - 11 * 60_000, musicPlayCount: 9 }],
+  ]);
+
+  try {
+    await session.getMainRadioAdCountdown();
+    assert.equal(excluded.includes('42'), false);
+  } finally {
+    session.destroy();
+  }
+});
+
+test('paid DJuke requests still let the queued main-radio ad play next', async () => {
+  const { createJukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const nextPaid = [{ track: { trackId: 'paid:1', title: 'Paid Song', uploader: 'Buyer', messageId: 'paid-message', channelId: 'paid-channel' },
+    record: { requestId: 'request-1' } }, null];
+  let adCalls = 0;
+  const session = createJukeLoopSession('main-radio-paid', {
+    voiceChannel: { guild: { id: 'main-radio-paid' } },
+    textChannel: { send: async () => ({}) },
+    client: {},
+    djuke: {
+      nextPaid: async () => nextPaid.shift(),
+      fail: async () => {},
+    },
+    devertPlayback: {
+      nextMainRadioAd: async () => {
+        adCalls++;
+        return {
+          campaignId: '9',
+          mainRadio: true,
+          track: { trackId: 'devert:9', title: 'Paid-After Ad', uploader: 'Advertiser', messageId: 'ad-message', channelId: 'ad-channel' },
+        };
+      },
+    },
+  });
+  session._musicSinceAd = 10;
+  session._getFreshUrl = async () => 'https://example.test/audio.mp3';
+  session._createStream = () => {
+    const stream = new PassThrough();
+    stream.write(Buffer.from([0]));
+    return { stream, ffmpegProcess: { kill() {} } };
+  };
+
+  try {
+    const paid = await session._prepareNextPlayback();
+    assert.equal(paid.paid.record.requestId, 'request-1');
+    const ad = await session._prepareNextPlayback();
+    assert.equal(ad.devertAd.campaignId, '9');
+    assert.equal(adCalls, 1);
+  } finally {
+    session.destroy();
+  }
+});
+
+test('main-radio ads keep video MIME when the source is a video URL with an audio-looking filename', async () => {
+  const { createJukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const session = createJukeLoopSession('main-radio-video-mime', {
+    voiceChannel: { guild: { id: 'main-radio-video-mime' } },
+    textChannel: { send: async () => ({}) },
+    client: {},
+    audioPlayer: { on() {}, play() {}, stop() {}, state: { status: 'idle' } },
+  });
+  session._createStream = () => {
+    const stream = new PassThrough();
+    stream.write(Buffer.from([0]));
+    return { stream, ffmpegProcess: { kill() {} } };
+  };
+  try {
+    session._startPrepared({
+      track: {
+        trackId: 'devert:video',
+        title: 'Video Ad',
+        uploader: 'Advertiser',
+        filename: 'video-ad.mp3',
+        mediaType: 'audio/mpeg',
+        videoUrl: 'ipfs://bafy-video',
+        ipfsCid: 'bafy-video',
+      },
+      devertAd: { campaignId: '44', mainRadio: true, track: { trackId: 'devert:video' } },
+      resource: {},
+      ffmpegProcess: { kill() {} },
+      queueIndex: null,
+      paid: null,
+      url: 'https://example.test/video.mp4',
+    });
+    assert.equal(session._nowPlaying.mediaType, 'video/mp4');
+    assert.equal(session._nowPlaying.videoUrl, 'ipfs://bafy-video');
+  } finally {
+    session.destroy();
+  }
 });
 
 test('radio state preserves video metadata for video now-playing tracks', async () => {

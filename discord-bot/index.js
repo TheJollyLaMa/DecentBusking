@@ -551,6 +551,16 @@ async function main() {
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-creator-profiles.json', tags: { app: 'decentbusking', kind: 'creator-profiles', schema: '1' },
     serialize: value => value, deserialize: value => value }) : null;
+  config.jukeLoopMainRadioAdStore = config.pinataJwt ? createPinataStateStore({
+    pinataJwt: config.pinataJwt,
+    uploadUrl: config.pinataApiUrl,
+    filesApiUrl: config.pinataFilesApiUrl,
+    gateway: config.ipfsGateway,
+    name: 'decentbusking-jukeloop-state.json',
+    tags: { app: 'decentbusking', kind: 'jukeloop-state', schema: '1' },
+    serialize: value => value,
+    deserialize: value => value,
+  }) : null;
   const creatorProfiles = creatorStore ? createCreatorProfiles({ restore: creatorStore.restore, save: creatorStore.save }) : null;
   const initializeCreators = () => creatorProfiles?.initialize().catch(error => console.warn('[creator-profiles]', error.message));
   initializeCreators();
@@ -1763,6 +1773,7 @@ async function startJukeLoop(client, config) {
       livePerformanceEvents,
       schedule: defaultRadioSchedule(liveWeeklySchedule),
       devertPlayback: _devertPlaybackRuntime,
+      mainRadioAdStateStore: config.jukeLoopMainRadioAdStore,
       onTerminalDisconnect: () => {
         scheduleJukeLoopRestart(client, config, 'Voice reconnect timed out');
       },
