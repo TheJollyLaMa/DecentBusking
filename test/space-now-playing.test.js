@@ -671,6 +671,7 @@ test('shared NFT links load the exact target without autoplaying audio', async (
     fetchIpfsJson: async () => ({ name: nft.name, audioUrl: nft.audioUrl, artist: nft.artist }),
     loadMintedToken: async () => ({ ...nft, metadataUri: 'ipfs://metadata', mintedSupply: 1 }),
     renderNFTCard: (card) => { content.innerHTML = `<h3 id="nft-detail-title">${card.name}</h3>`; },
+    getBaseReadProvider: ({ ethers }) => new ethers.JsonRpcProvider('https://mainnet.base.org'),
     ethers: {
       JsonRpcProvider: class { constructor(url) { this.url = url; } },
       Contract: class {

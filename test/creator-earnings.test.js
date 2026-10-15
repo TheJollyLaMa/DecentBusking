@@ -215,29 +215,3 @@ test('scanLogEarnings splits block ranges only when the RPC rejects the range si
   assert.equal(result.complete, true);
   assert.ok(calls > 2);
 });
-
-test('scanBlockscoutEarnings groups indexed router payouts and filters other recipients', async () => {
-  const { scanBlockscoutEarnings, ROUTER_ADDRESS, USDC_ADDRESS } = await load();
-  const iface = new ethers.Interface(['event PayrollPaid(bytes32 indexed fundId, address indexed asset, address indexed recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)']);
-  const log = (recipient, amount, index, fund = 'dbusk-repo-dev') => {
-    const encoded = iface.encodeEventLog('PayrollPaid', [ethers.id(fund), USDC_ADDRESS, recipient, amount, ethers.id(`w${index}`), ethers.ZeroHash, ethers.ZeroHash, 'u', ethers.ZeroHash]);
-    return { address: ROUTER_ADDRESS.toLowerCase(), topics: encoded.topics, data: encoded.data, blockNumber: `0x${(100 + index).toString(16)}`,
-      logIndex: `0x${index.toString(16)}`, transactionHash: `0x${String(index).padStart(64, '0')}` };
-  };
-  const urls = [];
-  const fetch = async url => {
-    urls.push(url);
-    const result = url.includes(ROUTER_ADDRESS) ? [log(WALLET, 200000n, 1), log(WALLET, 200000n, 2), log(WALLET, 50000n, 3, 'dbusk-pinners'),
-      log('0x405bb3a0000000000000000000000000000000a1', 5000000n, 4)] : [];
-    return { ok: true, json: async () => (result.length ? { status: '1', message: 'OK', result } : { status: '0', message: 'No records found', result: [] }) };
-  };
-  const scan = await scanBlockscoutEarnings({ ethers, address: WALLET, fetch });
-  assert.equal(scan.complete, true);
-  const byLabel = Object.fromEntries(scan.entries.map(entry => [entry.label, entry]));
-  assert.equal(byLabel['Repo dev payroll'].units, 400000n);
-  assert.equal(byLabel['Repo dev payroll'].count, 2);
-  assert.equal(byLabel['Pinner rewards'].units, 50000n);
-  assert.equal(scan.entries.length, 2);
-  assert.ok(urls.every(url => url.startsWith('https://base.blockscout.com/api?')));
-  assert.ok(urls.some(url => url.includes('topic3=0x000000000000000000000000807061df657a7697c04045da7d16d941861caabc')));
-});

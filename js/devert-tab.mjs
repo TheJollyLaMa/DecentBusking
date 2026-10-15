@@ -1,7 +1,7 @@
 import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261014-paid-sponsors';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
-import { submitMediaForApproval } from './mint-submission.js?v=20261014-upload-resilience';
+import { submitMediaForApproval } from './mint-submission.js?v=20261017-read-rpc';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { planDevertQueues, quoteDevertCampaign, DEVERT_SONGS_PER_MAIN_AD } from './devert-scheduler.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';

@@ -165,3 +165,75 @@ test('fund ledger accepts a synchronous weekly payflow getter', async () => {
   const current = await ledger.getCurrentState();
   assert.equal(current.funds[funds.top10].balanceUnits, '12250000');
 });
+
+const paidIface = new Interface(['event PayrollPaid(bytes32 indexed fundId, address indexed asset, address indexed recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)']);
+
+function makePaidLog(fundSlug, recipient, amount, txHash, blockNumber, index) {
+  const encoded = paidIface.encodeEventLog('PayrollPaid', [id(fundSlug), usdc, recipient, amount, id('work'), id('repo'), id('who'), 'ipfs://meta', id('meta')]);
+  return { address: routerAddress, topics: encoded.topics, data: encoded.data, transactionHash: txHash, blockNumber, index, logIndex: index };
+}
+
+function logsProvider({ head, logs, txFrom }) {
+  const getLogsCalls = [];
+  return {
+    ...makeProvider({ head, logs, txFrom }),
+    getLogsCalls,
+    getLogs: async filter => {
+      getLogsCalls.push(filter);
+      const wanted = new Set(filter.topics[0]);
+      return logs.filter(log => log.blockNumber >= filter.fromBlock && log.blockNumber <= filter.toBlock && wanted.has(log.topics[0]));
+    },
+  };
+}
+
+test('fund ledger indexes deposits and payouts with one getLogs call per range', async () => {
+  const { createFundLedger } = await import(url);
+  const recipient = '0x5555555555555555555555555555555555555555';
+  const logs = [
+    makeLog(funds.top10, devertContract, 12250000n, '0x' + '1'.repeat(64), 10, 0),
+    makePaidLog(funds.top10, recipient, 3000000n, '0x' + '9'.repeat(64), 12, 1),
+  ];
+  const provider = logsProvider({ head: 12, logs, txFrom: new Map([['0x' + '1'.repeat(64), devertContract]]) });
+  const router = makeRouter(logs, new Map([[id(funds.top10).toLowerCase(), 9250000n]]));
+  const ledger = createFundLedger({
+    provider,
+    router,
+    config: { routerAddress, radioFunds: { topTen: funds.top10 }, assets: { USDC: { address: usdc } } },
+    getWeeklyPayflow: async () => ({ funds: { top10: { balanceUnits: '9250000', reservedUnits: '0', availableUnits: '9250000' } } }),
+    restore: async () => null,
+    save: async () => 'ipfs://saved',
+    startBlock: 10,
+  });
+  await ledger.initialize();
+  const fund = (await ledger.getCurrentState()).funds['dbusk-top10'];
+  assert.equal(provider.getLogsCalls.length, 1);
+  assert.equal(router.queryRanges.length, 0, 'queryFilter is only a fallback for providers without getLogs');
+  assert.equal(fund.sources.length, 1);
+  assert.equal(fund.payouts.length, 1);
+  assert.equal(fund.payouts[0].recipient.toLowerCase(), recipient);
+  assert.equal(fund.payouts[0].amountUnits, '3000000');
+  assert.equal(fund.payoutUnits, '3000000');
+});
+
+test('fund ledger rescans once to backfill payouts for checkpoints saved before payouts were indexed', async () => {
+  const { createFundLedger } = await import(url);
+  const logs = [
+    makeLog(funds.top10, devertContract, 12250000n, '0x' + '1'.repeat(64), 10, 0),
+    makePaidLog(funds.top10, '0x5555555555555555555555555555555555555555', 1000000n, '0x' + '9'.repeat(64), 11, 1),
+  ];
+  const provider = logsProvider({ head: 20, logs, txFrom: new Map([['0x' + '1'.repeat(64), devertContract]]) });
+  const saved = [];
+  const ledger = createFundLedger({
+    provider,
+    router: makeRouter(logs, new Map([[id(funds.top10).toLowerCase(), 11250000n]])),
+    config: { routerAddress, radioFunds: { topTen: funds.top10 }, assets: { USDC: { address: usdc } } },
+    getWeeklyPayflow: async () => ({ funds: { top10: { balanceUnits: '11250000', reservedUnits: '0', availableUnits: '11250000' } } }),
+    restore: async () => ({ schemaVersion: 1, chainId: 8453, routerAddress, scannedFrom: 10, scannedThrough: 20, sources: [] }),
+    save: async snapshot => { saved.push(snapshot); return 'ipfs://saved'; },
+    startBlock: 10,
+  });
+  await ledger.initialize();
+  assert.equal(provider.getLogsCalls[0].fromBlock, 10);
+  assert.equal((await ledger.getCurrentState()).funds['dbusk-top10'].payouts.length, 1);
+  assert.ok(Array.isArray(saved.at(-1).payouts));
+});

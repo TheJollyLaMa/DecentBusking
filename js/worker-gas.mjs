@@ -1,3 +1,4 @@
+import { getBaseReadProvider } from './base-chain.mjs?v=20261017-read-rpc';
 const DEFAULT_ESTIMATED_DAILY_BURN_WEI = 86_000_000_000_000n;
 // 0.00002 ETH: roughly ten music-play reports or fifty impressions at October 2026 Base fees.
 export const DEFAULT_WORKER_MIN_BALANCE_WEI = 20_000_000_000_000n;
@@ -61,7 +62,7 @@ export function initWorkerGasNotices() {
   let checkedAt = 0;
   async function check() {
     const cfg = window.DecentConfig || {};
-    const provider = new ethers.JsonRpcProvider(cfg.rpcUrl || 'https://mainnet.base.org');
+    const provider = getBaseReadProvider({ ethers });
     const thresholdWei = safeBigInt(cfg.workerMinBalanceWei, DEFAULT_WORKER_MIN_BALANCE_WEI);
     const estimatedDailyBurnWei = safeBigInt(cfg.workerEstimatedDailyBurnWei, DEFAULT_ESTIMATED_DAILY_BURN_WEI);
     let timeout;

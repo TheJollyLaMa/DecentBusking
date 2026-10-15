@@ -245,6 +245,7 @@ export function createRpcRouter({
     let first = paid;
     let second = pub;
     if (cls === 'read' || (cls === 'logs' && logRange(params) <= SMALL_LOG_RANGE)) [first, second] = [pub, paid];
+    // 'fallback' = the browser already tried public RPCs, so go paid-first while the budget allows.
     if (mode === BUDGET_MODES.conserve && !transactionPath) [first, second] = [pub, paid];
     if (mode === BUDGET_MODES.criticalOnly) {
       [first, second] = cls === 'critical' || transactionPath ? [paid, pub] : [pub, []];
@@ -377,7 +378,7 @@ export function createRpcRouter({
     if (method === 'eth_chainId') return { result: toHex(chainId) };
     const key = cls === 'critical' ? null : `${method}:${JSON.stringify(params)}`;
     const cacheMs = method === 'eth_blockNumber' ? 2000
-      : method === 'eth_call' && cls === 'read' ? (currentMode() === BUDGET_MODES.normal ? readCacheMs : readCacheMs * 6) : 0;
+      : method === 'eth_call' && (cls === 'read' || cls === 'fallback') ? (currentMode() === BUDGET_MODES.normal ? readCacheMs : readCacheMs * 6) : 0;
     if (cacheMs) {
       const hit = cache.get(key);
       if (hit && hit.expiresAt > now()) return hit.value;

@@ -25,6 +25,7 @@ import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, 
 import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261014-celebrate';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
+import { getBaseReadProvider } from './base-chain.mjs?v=20261017-read-rpc';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -239,7 +240,7 @@ async function _checkRecoveryReceipt() {
     if (!record) throw new Error('No unresolved recovery is recorded for this fund');
     const hash = document.getElementById('router-recovery-hash').value.trim() || record.txHash;
     if (!/^0x[0-9a-fA-F]{64}$/.test(hash || '')) throw new Error('Enter the recovery transaction hash from wallet history');
-    const provider = new ethers.JsonRpcProvider(_payrollAssetConfig.rpcUrl, BASE_CHAIN_ID);
+    const provider = _payrollReadProvider();
     const receipt = await provider.getTransactionReceipt(hash);
     if (!receipt) throw new Error('Recovery remains unresolved; do not resend');
     if (receipt.status !== 1) {
@@ -513,9 +514,14 @@ function _isPayableEntry(entry) {
   return isValidEthAddress(entry?.contributor) && _entryCurrency(entry) !== 'ETH' && _isRouterConfigured() && Boolean(_getAssetConfig(_entryCurrency(entry)));
 }
 
+function _payrollReadProvider() {
+  const site = window.DecentConfig || {};
+  return getBaseReadProvider({ ethers, config: { ...site, rpcUrl: _payrollAssetConfig.rpcUrl || site.rpcUrl,
+    rpcFallbackUrls: [...(_payrollAssetConfig.rpcFallbackUrls || []), ...(site.rpcFallbackUrls || [])] } });
+}
+
 function _readOnlyRouter() {
-  const provider = new ethers.JsonRpcProvider(_payrollAssetConfig.rpcUrl, _payrollAssetConfig.chainId, { batchMaxCount: 1 });
-  return new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, provider);
+  return new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, _payrollReadProvider());
 }
 
 function _artWorkReference(entry) {
@@ -1116,7 +1122,7 @@ async function _checkPendingDeposit() {
     if (!operation) throw new Error('No unresolved deposit is recorded for this fund');
     const txHash = document.getElementById('router-deposit-recovery-hash').value.trim() || operation.txHash;
     if (!/^0x[0-9a-fA-F]{64}$/.test(txHash || '')) throw new Error('Enter the transaction hash from your wallet history; do not repeat an uncertain transfer');
-    const provider = new ethers.JsonRpcProvider(_payrollAssetConfig.rpcUrl, BASE_CHAIN_ID);
+    const provider = _payrollReadProvider();
     const receipt = await provider.getTransactionReceipt(txHash);
     if (!receipt) throw new Error('Transaction is still unresolved; deposit remains locked');
     if (receipt.status !== 1) {

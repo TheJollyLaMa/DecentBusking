@@ -147,7 +147,7 @@ test('creator HTTP endpoints enforce allowed origins and signed updates without 
   }
 });
 
-test('creator earnings loading prefers the worker index before blockscout and log fallbacks', async () => {
+test('creator earnings loading prefers the worker index before the on-chain log fallback', async () => {
   const { collectCreatorEarnings } = await import('../js/creator-profile.mjs');
   const order = [];
   const result = await collectCreatorEarnings({
@@ -158,10 +158,9 @@ test('creator earnings loading prefers the worker index before blockscout and lo
     fetchImpl: async () => { order.push('worker'); throw new Error('offline'); },
     readContracts: async () => [{ label: 'Base proof', status: 'paid', asset: 'USDC', units: 1n }],
     fetchWorker: async () => { order.push('worker'); throw new Error('offline'); },
-    scanBlockscout: async () => { order.push('blockscout'); return { complete: true, entries: [] }; },
     scanLogs: async () => { order.push('logs'); return { complete: true, entries: [] }; },
   });
-  assert.deepEqual(order, ['worker', 'blockscout']);
+  assert.deepEqual(order, ['worker', 'logs']);
   assert.equal(result.logs.complete, true);
   assert.equal(result.viewEntries.length, 1);
 });

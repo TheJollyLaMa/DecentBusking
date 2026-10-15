@@ -1,10 +1,10 @@
 // js/stage.js — DecentBusking
 // Hat (tip) + Guitar Case (mint) interactions and the now-playing banner.
 
-import { openMintModal } from './mint.js?v=20261014-upload-resilience';
+import { openMintModal } from './mint.js?v=20261017-read-rpc';
 import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261014-paid-sponsors';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { resolveNowPlayingNFT } from './space.js?v=20261014-upload-resilience';
+import { resolveNowPlayingNFT } from './space.js?v=20261017-read-rpc';
 import { nftArtistLabel } from './nft-loader.js?v=20261012-paging';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, getCreatorWatchlistState, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
 

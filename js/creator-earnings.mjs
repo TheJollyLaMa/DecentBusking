@@ -367,65 +367,6 @@ export async function scanLogEarnings({ ethers, providers, address, storage = gl
   }
 }
 
-export const BLOCKSCOUT_API = 'https://base.blockscout.com/api';
-
-// Blockscout's indexed log API works from browsers without a key, unlike public eth_getLogs.
-async function blockscoutLogs(fetchImpl, { address, fromBlock, topic0, topicIndex, topicValue, pageLimit = 20 }) {
-  const logs = [];
-  let from = fromBlock;
-  for (let page = 0; page < pageLimit; page++) {
-    const params = new URLSearchParams({ module: 'logs', action: 'getLogs', address, fromBlock: String(from), toBlock: 'latest',
-      topic0, [`topic${topicIndex}`]: topicValue, [`topic0_${topicIndex}_opr`]: 'and' });
-    const response = await fetchImpl(`${BLOCKSCOUT_API}?${params}`, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Blockscout logs unavailable (${response.status})`);
-    const body = await response.json();
-    const result = Array.isArray(body.result) ? body.result : [];
-    if (body.status !== '1' && !(body.status === '0' && /no (records|logs)/i.test(body.message || '') && !result.length)) {
-      throw new Error(`Blockscout logs: ${body.message || 'unexpected response'}`);
-    }
-    logs.push(...result);
-    if (result.length < 1000) return logs;
-    // A full page may end mid-block; resume from that block and dedupe later.
-    from = Number(BigInt(result[result.length - 1].blockNumber));
-  }
-  throw new Error('Blockscout log pagination limit reached');
-}
-
-export async function scanBlockscoutEarnings({ ethers, address, fetch: fetchImpl = globalThis.fetch, contracts = DJUKE_EARNING_CONTRACTS, timeoutMs = 20000 }) {
-  const iface = new ethers.Interface([PAYROLL_EVENT, WITHDRAW_EVENT]);
-  const recipientTopic = ethers.zeroPadValue(address, 32).toLowerCase();
-  let timer;
-  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Blockscout scan timed out')), timeoutMs); });
-  const parse = log => iface.parseLog({ topics: log.topics.filter(Boolean), data: log.data });
-  const base = log => ({ txHash: log.transactionHash, logIndex: Number(BigInt(log.logIndex)), blockNumber: Number(BigInt(log.blockNumber)) });
-  const scan = (async () => {
-    const [payroll, ...withdrawals] = await Promise.all([
-      blockscoutLogs(fetchImpl, { address: ROUTER_ADDRESS, fromBlock: ROUTER_START_BLOCK,
-        topic0: iface.getEvent('PayrollPaid').topicHash, topicIndex: 3, topicValue: recipientTopic }),
-      ...contracts.map(source => blockscoutLogs(fetchImpl, { address: source.address, fromBlock: source.startBlock,
-        topic0: iface.getEvent('ArtistWithdrawal').topicHash, topicIndex: 1, topicValue: recipientTopic })),
-    ]);
-    const items = [];
-    for (const log of payroll) {
-      if (String(log.address).toLowerCase() !== ROUTER_ADDRESS.toLowerCase()) continue;
-      const event = parse(log);
-      if (event?.name !== 'PayrollPaid' || event.args.recipient.toLowerCase() !== address.toLowerCase()) continue;
-      items.push({ kind: 'payroll', fundId: event.args.fundId, asset: event.args.asset, units: event.args.amount.toString(), ...base(log) });
-    }
-    withdrawals.flat().forEach(log => {
-      const event = parse(log);
-      if (event?.name !== 'ArtistWithdrawal' || event.args.artist.toLowerCase() !== address.toLowerCase()) return;
-      items.push({ kind: 'withdrawal', contract: log.address, units: event.args.amount.toString(), ...base(log) });
-    });
-    return [...new Map(items.map(item => [`${item.txHash}:${item.logIndex}`, item])).values()];
-  })();
-  scan.catch(() => {});
-  try {
-    const items = await Promise.race([scan, timeout]);
-    return { complete: true, source: 'blockscout', entries: groupLogEarnings(items, ethers, contracts) };
-  } finally { clearTimeout(timer); }
-}
-
 export function groupLogEarnings(items, ethers, contracts = DJUKE_EARNING_CONTRACTS) {
   const groups = new Map();
   for (const item of items) {

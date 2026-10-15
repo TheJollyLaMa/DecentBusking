@@ -1,12 +1,13 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
+import { getBaseReadProvider } from './base-chain.mjs?v=20261017-read-rpc';
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { canEditArtwork } from './artwork-update.mjs';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
-import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanBlockscoutEarnings, scanLogEarnings,
-  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261015-earnings-worker';
+import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
+  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261017-read-rpc';
 
 const WALLET_BREATHE_ICON = 'img/Ens_Eth_Breathe.png';
 
@@ -126,7 +127,6 @@ export async function collectCreatorEarnings({
   fetchImpl = globalThis.fetch,
   readContracts = readContractEarnings,
   fetchWorker = fetchWorkerEarnings,
-  scanBlockscout = scanBlockscoutEarnings,
   scanLogs = scanLogEarnings,
 }) {
   const viewEntries = await readContracts({ ethers, provider: publicProvider, address: target });
@@ -146,11 +146,8 @@ export async function collectCreatorEarnings({
     }
   }
   if (!logs) {
-    try { logs = await scanBlockscout({ ethers, address: target, fetch: fetchImpl }); }
-    catch {
-      logs = await scanLogs({ ethers, providers: [walletProvider, publicProvider], address: target });
-      if (!logs.complete && !logs.partialThrough && !note) note = 'Earnings index unavailable; retrying on-chain fallbacks shortly.';
-    }
+    logs = await scanLogs({ ethers, providers: [walletProvider, publicProvider], address: target });
+    if (!logs.complete && !logs.partialThrough && !note) note = 'Earnings index unavailable; retrying on-chain fallbacks shortly.';
   }
   const unpaidFunds = Object.values(FUND_LABELS).filter(label => !logs.entries.some(entry => entry.label === label));
   if (!note) {
@@ -241,7 +238,7 @@ export function initCreatorProfile() {
   let myNftsAbort = null;
   const openNftCard = async identity => {
     try {
-      const { openNFTByIdentity } = await import('./space.js?v=20261014-upload-resilience');
+      const { openNFTByIdentity } = await import('./space.js?v=20261017-read-rpc');
       dialog.querySelector('[data-profile-close]')?.click();
       if (!await openNFTByIdentity(identity)) throw new Error('Could not open this NFT in the space view');
     } catch (error) {
@@ -572,8 +569,7 @@ export function initCreatorProfile() {
     earningsTotal.textContent = '…';
     earningsList.replaceChildren();
     earningsStatus.textContent = 'Reading DecentBusking contracts on Base…';
-    const baseNetwork = ethers.Network.from(8453);
-    const publicProvider = new ethers.JsonRpcProvider(config().rpcUrl || 'https://mainnet.base.org', baseNetwork, { staticNetwork: baseNetwork });
+    const publicProvider = getBaseReadProvider({ ethers });
     try {
       let result;
       try {

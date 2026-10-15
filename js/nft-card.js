@@ -2,7 +2,7 @@
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js?v=20261014-upload-resilience';
+import { fetchNFTMetaById } from './space.js?v=20261017-read-rpc';
 import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
 import { returnToRadio } from './radio-sync.js?v=20261014-paid-sponsors';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
@@ -156,7 +156,7 @@ export function renderNFTCard(nft) {
       if (result !== 'failed' && isVideo) panel.close();
       return;
     }
-    const { setNowPlaying } = await import('./stage.js?v=20261014-upload-resilience');
+    const { setNowPlaying } = await import('./stage.js?v=20261017-read-rpc');
     setNowPlaying({ nft, title: nft.name || nft.title, artist: nft.artist || nft.creator,
       audioUrl: nft.videoUrl || nft.audioUrl || nft.animation_url, mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : '') });
     if (isVideo) panel.close();
@@ -349,7 +349,7 @@ function _buildCardHTML(nft) {
 // ── Parent Track Playback ─────────────────────────────────────────────────
 async function _playParent(parentTokenId) {
   if (!parentTokenId) return;
-  const { setNowPlaying } = await import('./stage.js?v=20261014-upload-resilience');
+  const { setNowPlaying } = await import('./stage.js?v=20261017-read-rpc');
   const meta = await fetchNFTMetaById(parentTokenId);
   if (!meta) return;
   const cfg = window.DecentConfig || {};

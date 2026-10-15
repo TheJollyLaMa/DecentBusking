@@ -1,16 +1,11 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
+import { getBaseReadProvider } from './base-chain.mjs?v=20261017-read-rpc';
 import { escapeHtml, formatUsdcUnits, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261014-funds';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const BLOCKSCOUT_API = 'https://base.blockscout.com/api';
-const START_BLOCK = 51852000;
-const FUND_EVENT_ABI = [
-  'event FundFunded(bytes32 indexed fundId, address indexed asset, address indexed funder, uint256 amount)',
-  'event PayrollPaid(bytes32 indexed fundId, address indexed asset, address indexed recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)',
-];
 
 const FUNDS = [
   { slug: 'dbusk-top10', emoji: '🏆', label: 'Top10 fund' },
@@ -39,9 +34,7 @@ function ethersLib() {
 }
 
 function providerForRead() {
-  const ethers = ethersLib();
-  const rpcUrl = window.DecentConfig?.rpcUrl || window.DecentConfig?.ensRpcUrl;
-  return ethers && rpcUrl ? new ethers.JsonRpcProvider(rpcUrl) : null;
+  return getBaseReadProvider({ ethers: ethersLib() });
 }
 
 function providerForEns() {
@@ -65,38 +58,6 @@ function formatDateTime(timestamp) {
   return new Date(timestamp * 1000).toLocaleString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
   });
-}
-
-function eventInterface(ethers) {
-  return new ethers.Interface(FUND_EVENT_ABI);
-}
-
-async function blockscoutLogs(fetchImpl, { address, topic0, topic1, fromBlock = START_BLOCK }) {
-  const logs = [];
-  let from = fromBlock;
-  for (let page = 0; page < 16; page += 1) {
-    const params = new URLSearchParams({
-      module: 'logs',
-      action: 'getLogs',
-      address,
-      fromBlock: String(from),
-      toBlock: 'latest',
-      topic0,
-      topic1,
-      topic0_1_opr: 'and',
-    });
-    const response = await fetchImpl(`${BLOCKSCOUT_API}?${params.toString()}`, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Blockscout logs unavailable (${response.status})`);
-    const body = await response.json();
-    const result = Array.isArray(body.result) ? body.result : [];
-    if (body.status !== '1' && !(body.status === '0' && !result.length)) {
-      throw new Error(`Blockscout logs: ${body.message || 'unexpected response'}`);
-    }
-    logs.push(...result);
-    if (result.length < 1000) return logs;
-    from = Number(BigInt(result.at(-1).blockNumber));
-  }
-  throw new Error('Blockscout log pagination limit reached');
 }
 
 function sourceHintMap(fundState = {}) {
@@ -124,127 +85,85 @@ function sourceKindLabel(kind) {
   }[kind] || 'Sponsor deposit';
 }
 
-async function collectInflows({ fetchImpl, ethers, provider, ensProvider, fundSlug, fundState, sponsorAliases, cache }) {
-  const iface = eventInterface(ethers);
-  const fundId = ethers.id(fundSlug);
-  const logs = await blockscoutLogs(fetchImpl, {
-    address: ROUTER_ADDRESS,
-    topic0: iface.getEvent('FundFunded').topicHash,
-    topic1: fundId.toLowerCase(),
-  });
-  const hints = sourceHintMap(fundState);
-  const rows = [];
-  for (const log of logs) {
-    const parsed = iface.parseLog({ topics: log.topics.filter(Boolean), data: log.data });
-    const txHash = String(log.transactionHash || '');
-    const logIndex = Number(BigInt(log.logIndex || log.index || 0));
-    const amountUnits = parsed.args.amount.toString();
-    const block = provider ? await provider.getBlock(Number(BigInt(log.blockNumber || 0))) : null;
-    const timestamp = Number(block?.timestamp || 0);
-    const funder = normalizeAddress(parsed.args.funder || '');
-    const wallet = await resolveWallet(parsed.args.funder || '', ensProvider, sponsorAliases, cache);
-    const hint = hints.get(`${normalizeAddress(txHash)}:${logIndex}`);
-    const config = globalThis.window?.DecentConfig || {};
-    const devertContract = normalizeKnownAddress(config.devertContractAddress || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9');
-    const djukeContract = normalizeKnownAddress(config.djukeContractAddress || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9');
-    const kind = hint?.kind || (funder === devertContract ? 'advert' : funder === djukeContract ? 'djuke' : 'sponsor');
-    const typeLabel = sourceKindLabel(kind);
-    const advertiser = hint?.advertiser ? await resolveWallet(hint.advertiser, ensProvider, sponsorAliases, cache) : null;
-    const extra = kind === 'advert'
-      ? [hint?.campaignId ? `Campaign #${escapeHtml(String(hint.campaignId))}` : '', hint?.title ? escapeHtml(hint.title) : '', advertiser?.label ? `via ${advertiser.label}` : '']
-        .filter(Boolean).join(' · ')
-      : kind === 'djuke'
-        ? hint?.requestId ? `DJuke request #${escapeHtml(String(hint.requestId))}` : 'DJuke purchase'
-        : '';
-    rows.push({
-      direction: 'in',
-      kind,
-      typeLabel,
-      amountUnits,
-      timestamp,
-      dateText: formatDateTime(timestamp),
-      sourceHtml: renderWalletButton(wallet, { role: kind }),
-      sourceLabel: wallet.label || wallet.address,
-      extra,
-      txHash,
-      txUrl: baseScanUrl(`/tx/${txHash}`),
-      blockNumber: Number(BigInt(log.blockNumber || 0)),
-      logIndex,
-    });
-  }
-  return rows;
+async function inflowRow(source, { ensProvider, sponsorAliases, cache }) {
+  const funder = normalizeAddress(source.funder || '');
+  const wallet = await resolveWallet(source.funder || '', ensProvider, sponsorAliases, cache);
+  const config = globalThis.window?.DecentConfig || {};
+  const devertContract = normalizeKnownAddress(config.devertContractAddress || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9');
+  const djukeContract = normalizeKnownAddress(config.djukeContractAddress || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9');
+  const kind = source.kind || (funder === devertContract ? 'advert' : funder === djukeContract ? 'djuke' : 'sponsor');
+  const advertiser = source.advertiser ? await resolveWallet(source.advertiser, ensProvider, sponsorAliases, cache) : null;
+  const extra = kind === 'advert'
+    ? [source.campaignId ? `Campaign #${escapeHtml(String(source.campaignId))}` : '', source.title ? escapeHtml(source.title) : '', advertiser?.label ? `via ${advertiser.label}` : '']
+      .filter(Boolean).join(' · ')
+    : kind === 'djuke'
+      ? source.requestId ? `DJuke request #${escapeHtml(String(source.requestId))}` : 'DJuke purchase'
+      : '';
+  const timestamp = Number(source.timestamp || 0);
+  const txHash = String(source.txHash || '');
+  return {
+    direction: 'in',
+    kind,
+    typeLabel: sourceKindLabel(kind),
+    amountUnits: String(source.amountUnits || '0'),
+    timestamp,
+    dateText: formatDateTime(timestamp),
+    sourceHtml: renderWalletButton(wallet, { role: kind }),
+    sourceLabel: wallet.label || wallet.address,
+    extra,
+    txHash,
+    txUrl: baseScanUrl(`/tx/${txHash}`),
+    blockNumber: Number(source.blockNumber || 0),
+    logIndex: Number(source.logIndex || 0),
+  };
 }
 
-async function collectOutflows({ fetchImpl, ethers, provider, ensProvider, fundSlug, sponsorAliases, cache }) {
-  const iface = eventInterface(ethers);
-  const fundId = ethers.id(fundSlug);
-  const logs = await blockscoutLogs(fetchImpl, {
-    address: ROUTER_ADDRESS,
-    topic0: iface.getEvent('PayrollPaid').topicHash,
-    topic1: fundId.toLowerCase(),
-  });
-  const rows = [];
-  for (const log of logs) {
-    const parsed = iface.parseLog({ topics: log.topics.filter(Boolean), data: log.data });
-    const txHash = String(log.transactionHash || '');
-    const logIndex = Number(BigInt(log.logIndex || log.index || 0));
-    const amountUnits = parsed.args.amount.toString();
-    const block = provider ? await provider.getBlock(Number(BigInt(log.blockNumber || 0))) : null;
-    const timestamp = Number(block?.timestamp || 0);
-    const wallet = await resolveWallet(parsed.args.recipient || '', ensProvider, sponsorAliases, cache);
-    rows.push({
-      direction: 'out',
-      kind: 'payout',
-      typeLabel: sourceKindLabel('payout'),
-      amountUnits,
-      timestamp,
-      dateText: formatDateTime(timestamp),
-      sourceHtml: renderWalletButton(wallet, { role: 'payout' }),
-      sourceLabel: wallet.label || wallet.address,
-      extra: 'PayrollPaid',
-      txHash,
-      txUrl: baseScanUrl(`/tx/${txHash}`),
-      blockNumber: Number(BigInt(log.blockNumber || 0)),
-      logIndex,
-    });
-  }
-  return rows;
+async function outflowRow(payout, { ensProvider, sponsorAliases, cache }) {
+  const wallet = await resolveWallet(payout.recipient || '', ensProvider, sponsorAliases, cache);
+  const timestamp = Number(payout.timestamp || 0);
+  const txHash = String(payout.txHash || '');
+  return {
+    direction: 'out',
+    kind: 'payout',
+    typeLabel: sourceKindLabel('payout'),
+    amountUnits: String(payout.amountUnits || '0'),
+    timestamp,
+    dateText: formatDateTime(timestamp),
+    sourceHtml: renderWalletButton(wallet, { role: 'payout' }),
+    sourceLabel: wallet.label || wallet.address,
+    extra: 'PayrollPaid',
+    txHash,
+    txUrl: baseScanUrl(`/tx/${txHash}`),
+    blockNumber: Number(payout.blockNumber || 0),
+    logIndex: Number(payout.logIndex || 0),
+  };
 }
 
-export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanceUnits = 0n, fetchImpl = globalThis.fetch, provider = providerForRead(), ensProvider = providerForEns(), sponsorAliases = {}, ethers = ethersLib() }) {
+// History comes from the worker's fund ledger (/api/funds), which indexes deposits and payouts on the paid RPC tier.
+export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanceUnits = 0n, ensProvider = providerForEns(), sponsorAliases = {} }) {
   const cacheKey = `${fundSlug}:${fundState?.lastCheckedAt || ''}:${fundState?.lastError || ''}`;
   const cached = historyCache.get(cacheKey);
   if (cached) return cached;
-  if (!ethers || !fetchImpl || !provider) {
-    return { historyAvailable: false, error: new Error('Fund history unavailable'), rows: [], inflows: [], outflows: [] };
+  const fallbackBalance = parseUnitsLike(fundState?.balanceUnits ?? fundBalanceUnits ?? 0n);
+  if (!fundState || !Array.isArray(fundState.sources) || !Array.isArray(fundState.payouts)) {
+    return { historyAvailable: false, error: new Error('Fund history is still indexing'), rows: [], inflows: [], outflows: [], inflowUnits: 0n, outflowUnits: 0n, netUnits: 0n, balanceUnits: fallbackBalance, reconciles: false };
   }
   const cache = new Map();
   try {
-    const [inflows, outflows] = await Promise.all([
-      collectInflows({ fetchImpl, ethers, provider, ensProvider, fundSlug, fundState: fundState || {}, sponsorAliases, cache }),
-      collectOutflows({ fetchImpl, ethers, provider, ensProvider, fundSlug, sponsorAliases, cache }),
-    ]);
+    const context = { ensProvider, sponsorAliases, cache };
+    const inflows = await Promise.all(fundState.sources.map(source => inflowRow(source, context)));
+    const outflows = await Promise.all(fundState.payouts.map(payout => outflowRow(payout, context)));
     const rows = [...inflows, ...outflows].sort((first, second) =>
       second.timestamp - first.timestamp || second.blockNumber - first.blockNumber || second.logIndex - first.logIndex);
     const inflowUnits = inflows.reduce((sum, row) => sum + parseUnitsLike(row.amountUnits), 0n);
     const outflowUnits = outflows.reduce((sum, row) => sum + parseUnitsLike(row.amountUnits), 0n);
     const netUnits = inflowUnits - outflowUnits;
-    const balanceUnits = parseUnitsLike(fundState?.balanceUnits ?? fundBalanceUnits ?? netUnits);
-    const result = {
-      historyAvailable: true,
-      rows,
-      inflows,
-      outflows,
-      inflowUnits,
-      outflowUnits,
-      netUnits,
-      balanceUnits,
-      reconciles: balanceUnits === netUnits,
-    };
+    const balanceUnits = parseUnitsLike(fundState.balanceUnits ?? fundBalanceUnits ?? netUnits);
+    const result = { historyAvailable: true, rows, inflows, outflows, inflowUnits, outflowUnits, netUnits, balanceUnits, reconciles: balanceUnits === netUnits };
     historyCache.set(cacheKey, result);
     return result;
   } catch (error) {
-    return { historyAvailable: false, error, rows: [], inflows: [], outflows: [], inflowUnits: 0n, outflowUnits: 0n, netUnits: 0n, balanceUnits: parseUnitsLike(fundState?.balanceUnits ?? fundBalanceUnits ?? 0n), reconciles: false };
+    return { historyAvailable: false, error, rows: [], inflows: [], outflows: [], inflowUnits: 0n, outflowUnits: 0n, netUnits: 0n, balanceUnits: fallbackBalance, reconciles: false };
   }
 }
 
@@ -272,7 +191,7 @@ function renderBreakdown(details, fund, fundState) {
     ? `History indexing${fundState?.lastError ? ` paused: ${fundState.lastError}` : '…'}`
     : details.historyAvailable
       ? (details.reconciles ? 'History reconciles against the on-chain balance.' : 'History loaded, but the totals do not fully reconcile yet.')
-      : 'Breakdown unavailable, try again.';
+      : `${details.error?.message || 'Breakdown unavailable'}, try again shortly.`;
   const rows = details.rows.length
     ? details.rows.map(row => `
         <tr class="fund-breakdown-row fund-breakdown-${escapeHtml(row.direction)} fund-breakdown-${escapeHtml(row.kind)}">
@@ -326,15 +245,12 @@ async function openBreakdown(fund, button) {
   button.disabled = true;
   const state = stateCache || await loadState();
   const fundState = state?.funds?.[fund.slug] || null;
-  const provider = providerForRead();
-  const ensProvider = providerForEns();
   const details = await loadFundBreakdown({
     fundSlug: fund.slug,
     fundState,
     fundBalanceUnits: balanceCache.get(fund.slug) ?? 0n,
     sponsorAliases: state?.sponsorAliases || {},
-    provider,
-    ensProvider,
+    ensProvider: providerForEns(),
   });
   renderBreakdown(details, fund, fundState);
   dialog.showModal();
@@ -366,10 +282,6 @@ export async function initFundHeader() {
   dialog?.addEventListener('click', event => {
     if (event.target === dialog) dialog.close();
   });
-  if (!provider) {
-    const note = document.getElementById('fund-breakdown-note');
-    if (note) note.textContent = 'Breakdown unavailable, try again.';
-  }
 }
 
 if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', () => { initFundHeader().catch(() => {}); }, { once: true });

@@ -2,8 +2,13 @@ import { Interface, id } from 'ethers';
 import { configuredSettlementFunds } from '../js/settlement-funds.mjs';
 import { normalizeKnownAddress } from '../js/known-addresses.mjs';
 
-const FUND_FUND_EVENT_ABI = ['event FundFunded(bytes32 indexed fundId, address indexed asset, address indexed funder, uint256 amount)'];
-const eventInterface = new Interface(FUND_FUND_EVENT_ABI);
+const FUND_EVENT_ABI = [
+  'event FundFunded(bytes32 indexed fundId, address indexed asset, address indexed funder, uint256 amount)',
+  'event PayrollPaid(bytes32 indexed fundId, address indexed asset, address indexed recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)',
+];
+const eventInterface = new Interface(FUND_EVENT_ABI);
+const FUNDED_TOPIC = eventInterface.getEvent('FundFunded').topicHash;
+const PAID_TOPIC = eventInterface.getEvent('PayrollPaid').topicHash;
 
 function normalizeAddress(value) {
   return String(value || '').toLowerCase();
@@ -36,6 +41,8 @@ export function createFundLedger({
   let lastError = '';
   let backupPending = false;
   let sources = [];
+  // Payouts are indexed alongside deposits (same getLogs call) so browsers never need a log indexer.
+  let payouts = [];
   let task = Promise.resolve();
   const blockCache = new Map();
   const txCache = new Map();
@@ -55,6 +62,7 @@ export function createFundLedger({
       scannedThrough,
       lastCheckedAt,
       sources,
+      payouts,
     };
   }
 
@@ -119,18 +127,46 @@ export function createFundLedger({
     };
   }
 
+  async function fetchLogs(fromBlock, toBlock) {
+    if (typeof provider.getLogs === 'function') {
+      return provider.getLogs({ address: routerAddress, topics: [[FUNDED_TOPIC, PAID_TOPIC]], fromBlock, toBlock });
+    }
+    const filter = router.filters?.FundFunded?.();
+    return router.queryFilter(filter, fromBlock, toBlock);
+  }
+
   async function scanRange(fromBlock, toBlock, snapshots = {}) {
     if (fromBlock > toBlock) return false;
-    const filter = router.filters?.FundFunded?.();
-    const logs = filter
-      ? await router.queryFilter(filter, fromBlock, toBlock)
-      : await provider.getLogs({ address: routerAddress, topics: [eventInterface.getEvent('FundFunded').topicHash], fromBlock, toBlock });
+    const logs = await fetchLogs(fromBlock, toBlock);
     if (!logs.length) return false;
     const existing = new Map(sources.map(source => [`${source.txHash}:${source.logIndex}`, source]));
+    const existingPayouts = new Map(payouts.map(payout => [`${payout.txHash}:${payout.logIndex}`, payout]));
     let changed = false;
+    let payoutsChanged = false;
     for (const logEntry of logs) {
       const parsed = eventInterface.parseLog(logEntry);
-      const key = `${logEntry.transactionHash}:${logEntry.index ?? logEntry.logIndex ?? 0}`;
+      if (!parsed) continue;
+      const logIndex = Number(logEntry.index ?? logEntry.logIndex ?? 0);
+      const key = `${logEntry.transactionHash}:${logIndex}`;
+      if (parsed.name === 'PayrollPaid') {
+        const fund = fundIds.get(normalizeAddress(parsed.args.fundId));
+        if (!fund || existingPayouts.has(key)) continue;
+        existingPayouts.set(key, {
+          fundId: parsed.args.fundId,
+          slug: fund.slug,
+          asset: parsed.args.asset,
+          recipient: parsed.args.recipient,
+          amountUnits: parsed.args.amount.toString(),
+          workReference: parsed.args.workReference,
+          metadataUri: parsed.args.metadataUri,
+          txHash: logEntry.transactionHash,
+          blockNumber: logEntry.blockNumber,
+          timestamp: await getBlockTimestamp(logEntry.blockNumber),
+          logIndex,
+        });
+        payoutsChanged = true;
+        continue;
+      }
       const tx = await getTransaction(logEntry.transactionHash);
       const next = await classifySource({
         fundId: parsed.args.fundId,
@@ -139,7 +175,7 @@ export function createFundLedger({
         txHash: logEntry.transactionHash,
         blockNumber: logEntry.blockNumber,
         timestamp: await getBlockTimestamp(logEntry.blockNumber),
-        logIndex: Number(logEntry.index ?? logEntry.logIndex ?? 0),
+        logIndex,
       }, snapshots);
       if (!next) continue;
       if (JSON.stringify(existing.get(key)) !== JSON.stringify(next)) {
@@ -147,8 +183,10 @@ export function createFundLedger({
         changed = true;
       }
     }
-    if (changed) sources = [...existing.values()].sort((first, second) => second.blockNumber - first.blockNumber || second.logIndex - first.logIndex);
-    return changed;
+    const newestFirst = (first, second) => second.blockNumber - first.blockNumber || second.logIndex - first.logIndex;
+    if (changed) sources = [...existing.values()].sort(newestFirst);
+    if (payoutsChanged) payouts = [...existingPayouts.values()].sort(newestFirst);
+    return changed || payoutsChanged;
   }
 
   async function persistIfNeeded() {
@@ -198,6 +236,9 @@ export function createFundLedger({
       scannedThrough = saved.scannedThrough;
       lastCheckedAt = saved.lastCheckedAt || null;
       sources = saved.sources;
+      if (Array.isArray(saved.payouts)) payouts = saved.payouts;
+      // Checkpoints from before payouts were indexed rescan once from the start to backfill them.
+      else if (typeof provider.getLogs === 'function') scannedThrough = null;
       if (scannedFrom != null && (!Number.isSafeInteger(scannedFrom) || scannedFrom < 0)) throw new Error('Invalid fund scan checkpoint');
       if (scannedThrough != null && (!Number.isSafeInteger(scannedThrough) || scannedThrough < scannedFrom - 1)) throw new Error('Invalid fund scan checkpoint');
     }
@@ -234,6 +275,9 @@ export function createFundLedger({
       const list = grouped.get(source.slug);
       if (list) list.push(source);
     }
+    const paidBySlug = new Map(funds.map(fund => [fund.slug, []]));
+    for (const payout of payouts) paidBySlug.get(payout.slug)?.push(payout);
+    const payoutsIndexed = typeof provider.getLogs === 'function';
     return {
       schemaVersion: 1,
       chainId: 8453,
@@ -252,6 +296,10 @@ export function createFundLedger({
           ...fund,
           ...bySlug.get(fund.slug),
           sources: sourceList,
+          ...(payoutsIndexed ? {
+            payouts: paidBySlug.get(fund.slug) || [],
+            payoutUnits: (paidBySlug.get(fund.slug) || []).reduce((sum, payout) => sum + BigInt(payout.amountUnits || '0'), 0n).toString(),
+          } : {}),
           advertUnits: totals.advert.toString(),
           sponsorUnits: totals.sponsor.toString(),
           djukeUnits: totals.djuke.toString(),

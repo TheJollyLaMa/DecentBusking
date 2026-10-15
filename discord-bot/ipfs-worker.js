@@ -225,6 +225,7 @@ export function createWorkerRequestHandler({
   rpcUrl = 'https://mainnet.base.org',
   rpcProvider = null,
   getRpcHealth,
+  rpcProxy = null,
   pinataApiUrl = 'https://uploads.pinata.cloud/v3/files',
   ipfsApiUrl = 'http://127.0.0.1:5001',
   fetchImpl = fetch,
@@ -427,6 +428,14 @@ export function createWorkerRequestHandler({
         const address = requestUrl.pathname.split('/').pop();
         if (!/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('Invalid wallet address');
         sendJson(response, 200, await getEarnings({ address }), '*', 'public, max-age=30, stale-while-revalidate=30');
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/rpc') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!rpcProxy) throw new Error('RPC proxy is not configured');
+        const ip = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim() || request.socket?.remoteAddress || 'unknown';
+        const { status, body } = await rpcProxy.handle(await readJson(request), ip);
+        sendJson(response, status, body, corsOrigin);
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/rpc-health') {

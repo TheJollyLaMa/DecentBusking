@@ -35,6 +35,7 @@ import fs from 'node:fs';
 import { Contract, Interface, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
 import { BUDGET_MODES, DEFAULT_MONTHLY_CU_BUDGET, baseRpcEndpointsFromEnv, createRpcRouter } from './rpc-router.js';
+import { createRpcProxy } from './rpc-proxy.js';
 import { createFundLedger } from './fund-ledger.js';
 import { createWeeklyPayflow, findBlockAtOrBefore, readClosingFundBalance } from './weekly-payflow.js';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
@@ -1023,6 +1024,16 @@ async function main() {
     rpcUrl: config.baseRpcUrl,
     rpcProvider: getRpcRouter().provider('read', 'worker-reads'),
     getRpcHealth: () => getRpcRouter().health(),
+    rpcProxy: createRpcProxy({
+      request: (method, params) => getRpcRouter().request('fallback', method, params),
+      allowedContracts: [
+        ...(config.nftContractAddresses || [config.nftContractAddress]),
+        process.env.DJUKE_CONTRACT_ADDRESS || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9',
+        process.env.DEVERT_CONTRACT_ADDRESS || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9',
+        payrollAssets.routerAddress,
+        ...Object.values(payrollAssets.assets || {}).map(asset => asset?.address),
+      ],
+    }),
     pinataApiUrl: config.pinataApiUrl,
     ipfsApiUrl: config.ipfsApiUrl,
     getMintQueue: async () => {

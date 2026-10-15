@@ -22,8 +22,9 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261014-celebrate';
-import { setNowPlaying } from './stage.js?v=20261014-upload-resilience';
+import { renderNFTCard } from './nft-card.js?v=20261017-read-rpc';
+import { getBaseReadProvider } from './base-chain.mjs?v=20261017-read-rpc';
+import { setNowPlaying } from './stage.js?v=20261017-read-rpc';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft } from './nft-loader.js?v=20261012-paging';
 
@@ -326,8 +327,7 @@ export async function fetchNFTMetaById(tokenId, collectionAddress) {
   if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') return null;
 
   try {
-    const rpcUrl = cfg.rpcUrl || 'https://mainnet.base.org';
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const provider = getBaseReadProvider({ ethers });
     const abi = [
       'function uri(uint256 tokenId) view returns (string)',
       'function creatorOf(uint256 tokenId) view returns (address)',
