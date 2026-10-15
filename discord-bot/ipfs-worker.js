@@ -516,20 +516,21 @@ export function createWorkerRequestHandler({
           throw new Error('Invalid or expired artwork update authorization');
         }
         if (hasConsumedSignature(body.signature)) throw new Error('Artwork update authorization has already been used');
-        const artworkCid = normalizeMediaCid(body.artworkCid);
+        if (typeof body.artworkCid !== 'string') throw new Error('Invalid artwork CID');
         const message = buildArtworkUpdateAuthorizationMessage({
           address: body.address,
           origin,
           chainId: Number(body.chainId || 8453),
           contractAddress: body.contractAddress,
           tokenId: Number(body.tokenId),
-          artworkCid,
+          artworkCid: body.artworkCid,
           nonce: body.nonce,
           issuedAt: body.issuedAt,
           expiresAt: body.expiresAt,
         });
         const recovered = verifyMessage(message, body.signature).toLowerCase();
-        if (recovered !== body.address.toLowerCase()) throw new Error('Artwork update authorization does not match the creator wallet');
+        if (recovered !== body.address.toLowerCase()) throw new Error('Artwork update signature mismatch: check the connected signing wallet and client/worker message format');
+        const artworkCid = normalizeMediaCid(body.artworkCid);
         const contract = new Contract(body.contractAddress, NFT_ARTWORK_ABI, new JsonRpcProvider(rpcUrl));
         const creator = String(await contract.creatorOf(Number(body.tokenId)).catch(() => '') || '').toLowerCase();
         if (!creator || creator !== body.address.toLowerCase()) throw new Error('Only the token creator can request artwork changes');

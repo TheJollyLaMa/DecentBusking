@@ -7,6 +7,7 @@ import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
 import { returnToRadio } from './radio-sync.js?v=20261014-paid-sponsors';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
 import { canEditArtwork } from './artwork-update.mjs';
+import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 
 // NFT currently shown in the single view; previews and purchases are handled explicitly.
 let _cardNft = null;
@@ -297,7 +298,10 @@ function _buildCardHTML(nft) {
   const explorerUrl = `${cfg.blockExplorerUrl || 'https://basescan.org'}/token/${contractAddress}?a=${encodeURIComponent(nft.tokenId)}`;
 
   return `
-    ${/^https?:\/\//i.test(imageUrl) ? `<img class="nft-detail-image" src="${_esc(imageUrl)}" alt="Artwork for ${_esc(nft.name || nft.title || 'this NFT')}" />` : ''}
+    <div class="nft-detail-artwork">
+      ${/^https?:\/\//i.test(imageUrl) ? `<img class="nft-detail-image" src="${_esc(imageUrl)}" alt="Artwork for ${_esc(nft.name || nft.title || 'this NFT')}" />` : ''}
+      ${canEditArtwork(nft, window._wallet?.address) ? `<button class="nft-artwork-edit-btn artwork-edit-badge" type="button" aria-label="Edit artwork" title="Edit artwork">${PENCIL_ICON}</button>` : ''}
+    </div>
     <h3 id="nft-detail-title">${_esc(nft.name || nft.title || `Track #${nft.tokenId}`)}</h3>
 
     ${audioUrl ? `<div class="nft-play-row">
@@ -309,7 +313,6 @@ function _buildCardHTML(nft) {
     <div class="nft-card-actions">
       <button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>
       <button class="nft-watchlist-btn nft-buy-btn" type="button" aria-pressed="false" title="Save to watchlist">👀 Save</button>
-      ${canEditArtwork(nft, window._wallet?.address) ? '<button class="nft-artwork-edit-btn nft-buy-btn" type="button">✏️ Edit artwork</button>' : ''}
     </div>
     <p class="nft-watchlist-status" role="status" aria-live="polite"></p>
     ${/^0x[0-9a-fA-F]{40}$/.test(nft.artist || nft.creator || '') ? `<button class="nft-creator-profile nft-buy-btn" type="button" data-creator="${_esc(nft.artist || nft.creator)}" data-album="${_esc(nft.djukeAlbumId || '')}">Profile / Collaborators</button>` : ''}

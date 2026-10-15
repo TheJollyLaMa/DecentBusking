@@ -57,7 +57,7 @@ export async function submitArtworkUpdateRequest({
     chainId: Number(request.chainId || 8453),
     contractAddress: request.contractAddress,
     tokenId: Number(request.tokenId),
-    artworkCid: request.artworkCid,
+    artworkCid: String(request.artworkCid || '').trim().replace(/^ipfs:\/\//i, ''),
   };
   const signature = await signer.signMessage(buildArtworkUpdateAuthorizationMessage(payload));
   const response = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/artwork-update`, {
