@@ -64,6 +64,9 @@ test('fund UI files include the live fund summary and unavailable state copy', (
   const aboutSource = fs.readFileSync(path.join(__dirname, '../js/components/about-override.js'), 'utf8');
   const topTenSource = fs.readFileSync(path.join(__dirname, '../js/top-ten-board.mjs'), 'utf8');
   assert.match(indexHtml, /id="top-ten-fund-summary"/);
+  assert.match(indexHtml, /id="dbusk-top10-button"/);
+  assert.match(indexHtml, /id="dbusk-playback-button"/);
+  assert.match(indexHtml, /id="fund-breakdown-dialog"/);
   assert.match(aboutSource, /community-funds-section/);
   assert.match(aboutSource, /Fund balances unavailable right now/);
   assert.match(topTenSource, /Top 10 fund:/);
