@@ -176,7 +176,7 @@ export function finalizeRadioAllocation({ report, category, budgetUnits, minimum
   if (!entries.length) throw new Error('No payouts meet the minimum threshold');
   const songPrizes = category === 'top10' && topTenScheduleVersion >= 3;
   if (songPrizes && entries.some(entry => !WALLET.test(entry.wallet || '') || /^0x0{40}$/i.test(entry.wallet))) throw new Error('Link the artist wallet for every winning song before finalizing Top 10');
-  return { schemaVersion: songPrizes ? 5 : category === 'top10' || period ? 4 : 2, ...(period ? { timeZone: PAYROLL_TIME_ZONE, startAt: period.startAt, endAt: period.endAt, partial: Boolean(report.partial) } : {}),
+  return { schemaVersion: songPrizes ? 5 : category === 'top10' ? 4 : period ? 3 : 2, ...(period ? { timeZone: PAYROLL_TIME_ZONE, startAt: period.startAt, endAt: period.endAt, partial: Boolean(report.partial) } : {}),
     ranking: category === 'playback' ? 'qualified-plays' : songPrizes ? 'song-votes-halving' : `${normalizeTopTenRanking(ranking)}-halving`, station: 'decentbusking', chainId: 8453, category, week: report.week,
     routerAddress, assetAddress, fundSlug, budgetUnits: budgetUnits.toString(), minimumUnits: minimumUnits.toString(),
     allocatedUnits: plan.allocatedUnits.toString(), remainderUnits: plan.remainderUnits.toString(),
