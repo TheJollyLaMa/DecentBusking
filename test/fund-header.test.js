@@ -27,26 +27,31 @@ function encodeLog(eventName, args, blockNumber, transactionHash, logIndex) {
 }
 
 function fakeProvider() {
-  const names = new Map([
-    ['0x1111111111111111111111111111111111111111', 'thejollylama.eth'],
-    ['0x2222222222222222222222222222222222222222', 'decentcanopy.eth'],
-  ]);
   return {
-    lookupAddress: async address => names.get(address.toLowerCase()) || null,
+    getBlock: async blockNumber => ({ timestamp: 1_700_000_000 + Number(blockNumber) }),
+  };
+}
+
+function fakeEnsProvider() {
+  return {
+    lookupAddress: async address => ({
+      '0x807061df657a7697c04045da7d16d941861caabc': 'thejollylama.eth',
+      '0x4444444444444444444444444444444444444444': 'djuke-wallet.eth',
+    }[address.toLowerCase()] || null),
     resolveName: async name => ({
-      'thejollylama.eth': '0x1111111111111111111111111111111111111111',
-      'decentcanopy.eth': '0x2222222222222222222222222222222222222222',
+      'thejollylama.eth': '0x807061DF657A7697c04045dA7d16D941861cAABc',
+      'decentcanopy.eth': '0x807061DF657A7697c04045dA7d16D941861cAABc',
+      'djuke-wallet.eth': '0x4444444444444444444444444444444444444444',
     }[name] || null),
     getResolver: async () => null,
-    getBlock: async blockNumber => ({ timestamp: 1_700_000_000 + Number(blockNumber) }),
   };
 }
 
 function fakeFetch() {
   const inflows = [
-    encodeLog('FundFunded', [ethers.id(top10), usdc, '0x1111111111111111111111111111111111111111', 7_250_000n], 10, '0x' + '1'.repeat(64), 0),
-    encodeLog('FundFunded', [ethers.id(top10), usdc, '0x2222222222222222222222222222222222222222', 2_000_000n], 11, '0x' + '2'.repeat(64), 0),
-    encodeLog('FundFunded', [ethers.id(top10), usdc, '0x3333333333333333333333333333333333333333', 6_000_000n], 12, '0x' + '3'.repeat(64), 0),
+    encodeLog('FundFunded', [ethers.id(top10), usdc, '0x135Cbc573F87637158eb3186C87c584fb0B34CD9', 2_250_000n], 10, '0x' + '1'.repeat(64), 0),
+    encodeLog('FundFunded', [ethers.id(top10), usdc, '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9', 1_020_000n], 11, '0x' + '2'.repeat(64), 0),
+    encodeLog('FundFunded', [ethers.id(top10), usdc, '0x807061DF657A7697c04045dA7d16D941861cAABc', 11_980_000n], 12, '0x' + '3'.repeat(64), 0),
   ];
   const outflows = [
     encodeLog('PayrollPaid', [ethers.id(top10), usdc, '0x4444444444444444444444444444444444444444', 3_000_000n, ethers.ZeroHash, ethers.ZeroHash, ethers.ZeroHash, 'ipfs://pay', ethers.ZeroHash], 13, '0x' + '4'.repeat(64), 0),
@@ -69,8 +74,8 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
   const state = {
     balanceUnits: '12250000',
     sources: [
-      { txHash: '0x' + '1'.repeat(64), logIndex: 0, kind: 'advert', campaignId: '7', title: 'Weekend shoutout' },
-      { txHash: '0x' + '2'.repeat(64), logIndex: 0, kind: 'djuke', requestId: '42' },
+      { txHash: '0x' + '1'.repeat(64), logIndex: 0, kind: 'advert', campaignId: '7', title: 'Weekend shoutout', advertiser: '0x807061DF657A7697c04045dA7d16D941861cAABc' },
+      { txHash: '0x' + '2'.repeat(64), logIndex: 0, kind: 'djuke', requestId: '42', payer: '0x4444444444444444444444444444444444444444' },
       { txHash: '0x' + '3'.repeat(64), logIndex: 0, kind: 'sponsor' },
     ],
   };
@@ -80,8 +85,13 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
     fundBalanceUnits: 12_250_000n,
     fetchImpl: fakeFetch(),
     provider: fakeProvider(),
+    ensProvider: fakeEnsProvider(),
     ethers,
-    sponsorAliases: { '0x3333333333333333333333333333333333333333': ['sponsor.eth'] },
+    sponsorAliases: {
+      '0x807061df657a7697c04045da7d16d941861caabc': ['thejollylama.eth', 'decentcanopy.eth'],
+      '0x807061DF657A7697c04045dA7d16D941861cAABc': ['thejollylama.eth', 'decentcanopy.eth'],
+      '0x4444444444444444444444444444444444444444': ['djuke-wallet.eth'],
+    },
   });
 
   assert.equal(result.historyAvailable, true);
@@ -94,13 +104,20 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
   const advert = result.rows.find(row => row.kind === 'advert');
   assert.ok(advert);
   assert.equal(advert.direction, 'in');
-  assert.match(advert.sourceHtml, /thejollylama\.eth/);
+  assert.match(advert.sourceHtml, /📜 DeVert v0\.1/);
   assert.match(advert.extra, /Campaign #7/);
+  assert.match(advert.extra, /Weekend shoutout/);
 
   const djuke = result.rows.find(row => row.kind === 'djuke');
   assert.ok(djuke);
-  assert.match(djuke.sourceHtml, /decentcanopy\.eth/);
+  assert.match(djuke.sourceHtml, /📜 DJuke v0\.3/);
   assert.match(djuke.extra, /DJuke request #42/);
+
+  const sponsor = result.rows.find(row => row.kind === 'sponsor');
+  assert.ok(sponsor);
+  assert.match(sponsor.sourceHtml, /thejollylama\.eth/);
+  assert.match(sponsor.sourceHtml, /decentcanopy\.eth/);
+  assert.match(sponsor.typeLabel, /Sponsor deposit/);
 
   const payout = result.rows.find(row => row.direction === 'out');
   assert.ok(payout);

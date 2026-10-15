@@ -1,4 +1,5 @@
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
+import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs';
 
 export function formatUsdcUnits(units) {
   const value = typeof units === 'bigint' ? units : BigInt(units || 0);
@@ -40,8 +41,22 @@ async function verifyAlias(address, alias, provider, cache) {
   return cache.get(key);
 }
 
+function sponsorAliasList(sponsorAliases, address) {
+  const normalized = normalizeKnownAddress(address);
+  const keys = [normalized, address];
+  for (const key of keys) {
+    if (Array.isArray(sponsorAliases?.[key])) return sponsorAliases[key];
+  }
+  for (const [key, value] of Object.entries(sponsorAliases || {})) {
+    if (normalizeKnownAddress(key) === normalized && Array.isArray(value)) return value;
+  }
+  return [];
+}
+
 export async function resolveWalletLabel(address, provider, sponsorAliases = {}, cache = new Map()) {
   const normalized = normalizeAddress(address);
+  const known = labelKnownAddress(address);
+  if (known) return { ...known, aliases: [] };
   let primary = '';
   try {
     const resolved = await resolveCreatorENS(address, provider);
@@ -50,7 +65,7 @@ export async function resolveWalletLabel(address, provider, sponsorAliases = {},
     primary = '';
   }
   const aliases = [];
-  for (const alias of sponsorAliases[normalized] || sponsorAliases[address] || []) {
+  for (const alias of sponsorAliasList(sponsorAliases, address)) {
     if (typeof alias !== 'string' || !alias.trim()) continue;
     if (await verifyAlias(address, alias.trim(), provider, cache) && alias.trim().toLowerCase() !== primary.toLowerCase()) {
       aliases.push(alias.trim());
@@ -63,10 +78,23 @@ export async function resolveWalletLabel(address, provider, sponsorAliases = {},
   };
 }
 
-export function renderWalletButton({ address, label, aliases = [] }, { role = '', extraClass = '' } = {}) {
-  const aliasText = aliases.length ? `<span class="fund-wallet-aliases">(${aliases.map(escapeHtml).join(' · ')})</span>` : '';
+export function renderWalletButton({ address, label, aliases = [], kind = 'wallet', href = '' }, { role = '', extraClass = '' } = {}) {
+  const aliasText = aliases.length ? ` <span class="fund-wallet-aliases">(${aliases.map(escapeHtml).join(' · ')})</span>` : '';
+  if (kind === 'contract' && href) {
+    const classes = ['fund-wallet-link', 'fund-contract-link', extraClass].filter(Boolean).join(' ');
+    return `<a class="${classes}" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="${escapeHtml(address)}">${escapeHtml(label)}</a>${aliasText}`;
+  }
   const classes = ['nft-creator-profile', 'fund-wallet-link', extraClass].filter(Boolean).join(' ');
-  return `<button type="button" class="${classes}" data-creator="${escapeHtml(address)}"${role ? ` data-fund-role="${escapeHtml(role)}"` : ''}>${escapeHtml(label)}</button>${aliasText}`;
+  return `<button type="button" class="${classes}" data-creator="${escapeHtml(address)}"${role ? ` data-fund-role="${escapeHtml(role)}"` : ''} title="${escapeHtml(address)}">${escapeHtml(label)}</button>${aliasText}`;
+}
+
+function sourceKindLabel(kind) {
+  return {
+    advert: 'Advert purchase',
+    djuke: 'DJuke purchase',
+    sponsor: 'Sponsor deposit',
+    payout: 'Payroll payout',
+  }[kind] || 'Sponsor deposit';
 }
 
 function renderSourceRow(source) {
@@ -82,7 +110,7 @@ function renderSourceRow(source) {
     : source.kind === 'djuke'
       ? source.payerHtml || source.payerLabel || source.payer ? `<span>${escapeHtml(source.payerLabel || source.payer || '')}</span>` : ''
       : '';
-  return `<tr class="fund-source-row fund-source-${escapeHtml(source.kind || 'sponsor')}"><td>${wallet}</td><td>${escapeHtml(source.kind || 'sponsor')}</td><td class="radio-history-number">${amount}</td><td>${tx}${extra ? ` · ${extra}` : ''}</td></tr>`;
+  return `<tr class="fund-source-row fund-source-${escapeHtml(source.kind || 'sponsor')}"><td>${wallet}</td><td>${escapeHtml(sourceKindLabel(source.kind))}</td><td class="radio-history-number">${amount}</td><td>${tx}${extra ? ` · ${extra}` : ''}</td></tr>`;
 }
 
 export function renderFundSourcesTable(fund) {
