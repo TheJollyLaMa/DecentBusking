@@ -2,11 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const path = require('node:path');
-const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 
-const botRequire = createRequire(path.join(__dirname, '..', 'discord-bot', 'package.json'));
-const { Interface, Wallet } = botRequire('ethers');
+const { Interface, Wallet, id } = require('../discord-bot/node_modules/ethers');
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'ipfs-worker.js')).href;
 
 async function withServer(handler, callback) {
@@ -196,6 +194,38 @@ test('weekly payflow endpoint filters artists and New York history calendar is e
     assert.equal((await fetch(`${base}/api/payroll/weekly?wallet=bad`)).status, 400);
     const history = await (await fetch(`${base}/api/radio/history?calendar=new-york`)).json();
     assert.equal(history.weeks[0].calendar, 'new-york');
+  });
+});
+
+test('fund week archive groups payroll payouts by week and surfaces queued entries', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const { finalizeRadioAllocation } = await import('../js/radio-payroll.mjs');
+  const fundSlug = 'dbusk-top10';
+  const routerAddress = `0x${'1'.repeat(40)}`;
+  const assetAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+  const report = { week: 'NY-2026-10-05', current: false, tracks: [{ wallet: `0x${'2'.repeat(40)}`, artist: 'Artist One', plays: 12, votes: 12 },
+    { wallet: `0x${'3'.repeat(40)}`, artist: 'Artist Two', plays: 9, votes: 9 }] };
+  const allocation = finalizeRadioAllocation({ report, category: 'top10', budgetUnits: 1000000n, minimumUnits: 0n, fundSlug, routerAddress, assetAddress,
+    now: Date.parse('2026-10-13T12:00:00Z') });
+  const firstReference = allocation.entries[0].workReferenceText;
+  const payout = { slug: fundSlug, workReference: id(firstReference),
+    recipient: allocation.entries[0].wallet, amountUnits: allocation.entries[0].amountUnits, txHash: '0x' + '7'.repeat(64), blockNumber: 10, timestamp: 10_000, metadataUri: 'ipfs://meta' };
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: [],
+    ownerWallet: Wallet.createRandom().address,
+    getFunds: async () => ({ funds: { [fundSlug]: { slug: fundSlug, payouts: [payout] } } }),
+    getWeeklyPayflow: async () => ({ currentPeriod: { week: 'NY-2026-10-12' }, allocations: [{ allocation, metadataUri: 'ipfs://meta' }] }),
+  });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/funds/${fundSlug}/weeks`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.weeks.length, 1);
+    assert.equal(body.weeks[0].status, 'partial');
+    assert.equal(body.weeks[0].paidUnits, allocation.entries[0].amountUnits);
+    assert.equal(body.weeks[0].entries[0].paid, true);
+    assert.equal(body.weeks[0].entries[1].paid, false);
+    assert.equal(body.weeks[0].metadataUri, 'ipfs://meta');
   });
 });
 

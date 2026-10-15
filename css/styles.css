@@ -2203,6 +2203,20 @@ decent-foot {
 .creator-profile-wallet-icons img { width: 16px; height: 16px; border-radius: 50%; animation: creator-wallet-breathe 2.4s ease-in-out infinite; }
 @keyframes creator-wallet-breathe { 0%, 100% { opacity: .65; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.05); } }
 @media (prefers-reduced-motion: reduce) { .creator-profile-wallet-icons img { animation: none; } }
+@keyframes usdc-artist-shimmer { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+@keyframes usdc-sponsor-shimmer { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+.fund-wallet-avatar { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; margin-right: 5px; vertical-align: -4px; box-shadow: 0 0 0 1px rgba(255,255,255,.08); }
+.fund-wallet-address { display: inline-flex; align-items: center; gap: 1px; font-variant-numeric: tabular-nums; }
+.fund-wallet-address code { padding: 0; background: transparent; font: inherit; color: inherit; }
+.usdc-amount { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.usdc-amount-text { display: inline-block; background-size: 200% 100%; }
+.usdc-amount--artist .usdc-amount-text { color: #d9ffd5; text-shadow: 0 0 10px rgba(123, 255, 180, .15), 0 0 18px rgba(189, 200, 84, .16); animation: usdc-artist-shimmer 9s linear infinite; background-image: linear-gradient(90deg, #d5ffd4 0%, #f2f6bd 32%, #b6f4a6 50%, #ffe7a8 68%, #d5ffd4 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.usdc-amount--sponsor .usdc-amount-text { color: #dfeaff; text-shadow: 0 0 10px rgba(142, 189, 255, .15), 0 0 18px rgba(203, 211, 255, .12); animation: usdc-sponsor-shimmer 11s linear infinite; background-image: linear-gradient(90deg, #e7f0ff 0%, #b8d1ff 32%, #f5f7ff 50%, #d3deff 68%, #e7f0ff 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.usdc-amount--queued .usdc-amount-text { color: var(--text-dim); }
+.usdc-amount .usdc-icon { width: 14px; height: 14px; opacity: .95; filter: drop-shadow(0 0 2px rgba(255,255,255,.08)); }
+@media (prefers-reduced-motion: reduce) {
+  .usdc-amount-text { animation: none !important; background-image: none !important; color: inherit !important; text-shadow: none !important; }
+}
 .creator-profile-copied { font-size: .72rem; color: #93ffbb; opacity: 0; transform: translateX(-4px); transition: opacity .2s ease, transform .2s ease; pointer-events: none; }
 .creator-profile-copied.is-visible { opacity: 1; transform: none; }
 .creator-profile-identity p { margin: 0; font-size: .85rem; }
@@ -2800,6 +2814,21 @@ decent-foot {
 .fund-breakdown-table a { color: var(--gold); }
 .fund-breakdown-row.fund-breakdown-out .fund-breakdown-amount { color: #ff9e8f; }
 .fund-breakdown-row.fund-breakdown-in .fund-breakdown-amount { color: var(--teal); }
+.fund-weekly-archive { display: grid; gap: 8px; margin-top: 10px; }
+.fund-weekly-details { margin: 0; padding: 9px 10px; border: 1px solid rgba(255,255,255,.09); border-radius: 10px; background: rgba(17, 19, 30, .68); }
+.fund-weekly-details summary { cursor: pointer; list-style: none; }
+.fund-weekly-details summary::-webkit-details-marker { display: none; }
+.fund-weekly-details[open] { box-shadow: inset 0 0 0 1px rgba(255,255,255,.04); }
+.fund-weekly-body { margin-top: 8px; }
+.fund-weekly-meta { margin: 0 0 8px; color: var(--text-dim); font-size: .7rem; }
+.fund-weekly-table { width: 100%; border-collapse: collapse; font-size: .72rem; }
+.fund-weekly-table th, .fund-weekly-table td { padding: 6px 5px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.08); vertical-align: top; overflow-wrap: anywhere; }
+.fund-weekly-table th:last-child, .fund-weekly-table td:last-child { white-space: nowrap; }
+.fund-weekly-sub { margin-top: 2px; color: var(--text-dim); font-size: .64rem; }
+.fund-weekly-queued { color: #ffe49b; }
+.fund-weekly-details.fund-weekly-paid .usdc-amount-text { animation-duration: 13s; }
+.fund-weekly-details.fund-weekly-partial .usdc-amount-text { animation-duration: 11s; }
+.fund-weekly-details.fund-weekly-queued .usdc-amount-text { animation-duration: 0s; }
 .archive-artist-filter { display: grid; gap: 6px; padding: 10px 16px; font-size: .8rem; color: var(--text-dim); }
 #dnft-archive-toggle { top: calc(var(--header-height, 112px) + 58px); }
 #dnft-list { top: calc(var(--header-height, 112px) + 102px); bottom: calc(var(--radio-footer-height, 96px) + 12px); }

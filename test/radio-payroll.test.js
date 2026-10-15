@@ -26,8 +26,11 @@ test('Top 10 preview ranks unique artists by votes and splits only its capped pr
   const result = previewTopTenPayroll({ tracks: [track(1, 5), track(1, 4), track(2, 8), track(3, 2)], budgetUnits: 1000001n });
   assert.equal(result.entries.length, 3);
   assert.equal(result.entries[0].plays, 9);
-  assert.equal(result.allocatedUnits, 999999n);
-  assert.equal(result.remainderUnits, 2n);
+  assert.equal(result.entries[0].amountUnits, 500000n);
+  assert.equal(result.entries[1].amountUnits, 250000n);
+  assert.equal(result.entries[2].amountUnits, 250001n);
+  assert.equal(result.allocatedUnits, 1000001n);
+  assert.equal(result.remainderUnits, 0n);
   const many = previewTopTenPayroll({ tracks: Array.from({ length: 13 }, (_value, index) => track((index + 1).toString(16), 20 - index)), budgetUnits: 10000000n });
   assert.equal(many.entries.length, 10);
   assert.equal(many.allocatedUnits, 10000000n);
@@ -39,12 +42,21 @@ test('Top 10 preview ranks unique artists by votes and splits only its capped pr
   assert.equal(previewTopTenPayroll({ tracks: [track(1, 1), { ...track(1, 1), votes: -1 }], budgetUnits: 1n }).entries.length, 0);
 });
 
+test('Top 10 preview rolls sub-threshold prizes into the last payable winner', async () => {
+  const { previewTopTenPayroll } = await import(url);
+  const result = previewTopTenPayroll({ tracks: [track(1, 5), track(2, 4), track(3, 3), track(4, 2)], budgetUnits: 1000000n, minimumUnits: 300000n });
+  assert.equal(result.entries.length, 1);
+  assert.equal(result.entries[0].amountUnits, 1000000n);
+  assert.equal(result.remainderUnits, 0n);
+});
+
 test('finalization excludes live/all-time weeks and freezes stable identities independently of budget', async () => {
   const { finalizeRadioAllocation, radioWorkReferenceText } = await import(url);
   const args = { report: { week: '2026-W40', current: false, tracks: [track(1, 3)] }, category: 'playback',
     budgetUnits: 3000000n, minimumUnits: 1000000n, fundSlug: 'dbusk-playback', routerAddress: track(2, 1).wallet,
     assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-06T00:00:00Z') };
   const receipt = finalizeRadioAllocation(args);
+  assert.equal(receipt.schemaVersion, 2);
   assert.equal(receipt.entries[0].amountUnits, '3000000');
   assert.equal(finalizeRadioAllocation({ ...args, budgetUnits: 5000000n }).entries[0].workReferenceText, receipt.entries[0].workReferenceText);
   assert.throws(() => finalizeRadioAllocation({ ...args, report: { ...args.report, current: true } }), /completed/);
@@ -62,6 +74,17 @@ test('frozen receipts must match the recovered weekly report before settlement',
   assert.equal(radioAllocationMatchesReport(report, allocation), true);
   assert.equal(radioAllocationMatchesReport(report, { ...allocation, entries: [{ ...allocation.entries[0], plays: 126 }] }), false);
   assert.equal(radioAllocationMatchesReport(report, { ...allocation, entries: [{ ...allocation.entries[0], amountUnits: '9999999' }] }), false);
+});
+
+test('historical equal-split Top 10 receipts still validate after the halving schedule change', async () => {
+  const { finalizeRadioAllocation, radioAllocationMatchesReport } = await import(url);
+  const report = { week: 'NY-2026-10-05', current: false, tracks: [track(1, 5), track(2, 4), track(3, 3)] };
+  const legacy = finalizeRadioAllocation({ report, category: 'top10', budgetUnits: 1200000n, minimumUnits: 0n,
+    topTenScheduleVersion: 1, fundSlug: 'dbusk-top10', routerAddress: track(4, 1).wallet,
+    assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-13T12:00:00Z') });
+  legacy.schemaVersion = 3;
+  legacy.ranking = 'votes';
+  assert.equal(radioAllocationMatchesReport(report, legacy), true);
 });
 
 test('radio settlement skips paid references and retry does not pay confirmed entries twice', async () => {
@@ -101,7 +124,7 @@ test('receipt imports reject changed totals, funds, live weeks, and duplicate en
     category: 'top10', ranking: 'plays', budgetUnits: 1000000n, minimumUnits: 0n, fundSlug: config.funds.topTen,
     ...config, now: Date.parse('2026-10-06T00:00:00Z') });
   legacyTopTen.schemaVersion = 1;
-  delete legacyTopTen.ranking;
+  legacyTopTen.ranking = 'plays';
   assert.equal(validateRadioReceipt(legacyTopTen, config), legacyTopTen);
   assert.equal(legacyTopTen.entries[0].workReferenceText,
     finalizeRadioAllocation({ report: { week: '2026-W40', current: false, tracks: [track(1, 1)] }, category: 'top10',

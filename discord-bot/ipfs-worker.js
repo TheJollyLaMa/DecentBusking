@@ -1,6 +1,7 @@
 import { Contract, Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
+import { buildFundWeeklyArchive } from '../js/fund-archive.mjs';
 import { catalogPage } from '../js/nft-loader.js';
 import { uploadToIPFS } from './ipfs.js';
 import { readRawBody } from './alchemy-webhook.js';
@@ -423,6 +424,16 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/api/funds') {
         if (!getFunds) throw new Error('Fund balances are not configured');
         sendJson(response, 200, await getFunds(), '*', 'public, max-age=60, stale-while-revalidate=30');
+        return;
+      }
+      if (request.method === 'GET' && /^\/api\/funds\/[^/]+\/weeks$/.test(requestUrl.pathname)) {
+        if (!getFunds || !getWeeklyPayflow) throw new Error('Fund payout history is not configured');
+        const fundSlug = decodeURIComponent(requestUrl.pathname.split('/')[3] || '');
+        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fundSlug)) throw new Error('Invalid fund slug');
+        const [funds, weekly] = await Promise.all([getFunds(), getWeeklyPayflow()]);
+        const fund = funds?.funds?.[fundSlug];
+        if (!fund) { sendJson(response, 404, { error: 'Unknown fund' }, '*'); return; }
+        sendJson(response, 200, buildFundWeeklyArchive({ fundSlug, fund, weeklyPayflow: weekly }), '*', 'public, max-age=30, stale-while-revalidate=60');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/earnings/')) {

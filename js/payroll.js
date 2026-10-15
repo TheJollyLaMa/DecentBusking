@@ -907,7 +907,7 @@ async function _refreshWeeklyPayflow() {
       }
       for (const saved of state.allocations || []) {
         validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress, assetAddress: _getAssetConfig('USDC').address, funds: _payrollAssetConfig.radioFunds });
-        if (saved.allocation.schemaVersion !== 3 || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(saved.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
+        if (![3, 4].includes(saved.allocation.schemaVersion) || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(saved.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
         const key = _reviewKey(saved.allocation.category, saved.allocation.week);
         if (records[key] && records[key].metadataHash !== saved.metadataHash) throw new Error('A conflicting reviewed receipt exists; manual reconciliation required');
         records[key] = saved;

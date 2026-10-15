@@ -32,6 +32,7 @@ test('verified sponsor aliases are shown only when they forward-resolve to the s
   assert.match(renderWalletButton(wallet, { role: 'sponsor' }), /data-creator="0x807061DF657A7697c04045dA7d16D941861cAABc"/);
   assert.match(renderWalletButton(wallet, { role: 'sponsor' }), /title="0x807061DF657A7697c04045dA7d16D941861cAABc"/);
   assert.match(renderWalletButton(wallet, { role: 'sponsor' }), /fund-wallet-link/);
+  assert.match(renderWalletButton({ address: wallet.address, label: wallet.address }, { role: 'sponsor' }), /creator-profile-wallet-icons/);
   const walletFromChecksumKey = await resolveWalletLabel('0x807061DF657A7697c04045dA7d16D941861cAABc', provider,
    { '0x807061DF657A7697c04045dA7d16D941861cAABc': ['thejollylama.eth', 'decentcanopy.eth'] });
   assert.deepEqual(walletFromChecksumKey.aliases, ['decentcanopy.eth']);
@@ -69,6 +70,34 @@ test('fund disclosure markup includes proof links and campaign references', asyn
   assert.match(markup, /Campaign #7/);
   assert.match(markup, /nft-creator-profile/);
   assert.match(renderFundsSection([], 'Community Funds'), /Community Funds/);
+});
+
+test('weekly payout archive markup renders details rows and running totals', async () => {
+  const { renderFundWeeklyArchive, renderWalletAddress } = await import(url);
+  const html = renderFundWeeklyArchive({
+    weeks: [{
+      week: 'NY-2026-10-05',
+      status: 'partial',
+      totalUnits: '1000000',
+      metadataUri: 'ipfs://bafy-week',
+      period: { startAt: '2026-10-05T04:00:00.000Z' },
+      entries: [{
+        artist: 'Artist One',
+        walletLabel: 'thejollylama.eth',
+        walletHtml: renderWalletAddress('0x807061DF657A7697c04045dA7d16D941861cAABc'),
+        amountUnits: '500000',
+        paid: true,
+        txHash: '0x' + '1'.repeat(64),
+        plays: 12,
+      }],
+    }],
+  });
+  assert.match(html, /fund-weekly-details/);
+  assert.match(html, /NY-2026-10-05/);
+  assert.match(html, /partial/i);
+  assert.match(html, /BaseScan/);
+  assert.match(html, /IPFS JSON/);
+  assert.match(html, /creator-profile-wallet-icons/);
 });
 
 test('fund UI files include the live fund summary and unavailable state copy', () => {

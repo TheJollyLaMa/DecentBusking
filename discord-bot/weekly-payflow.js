@@ -72,7 +72,7 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
       const keys = new Set();
       for (const record of retainedAllocations) {
         validateRadioReceipt(record.allocation, receiptConfig);
-        if (record.allocation.schemaVersion !== 3 || id(JSON.stringify(record.allocation)) !== record.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(record.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
+        if (![3, 4].includes(record.allocation.schemaVersion) || id(JSON.stringify(record.allocation)) !== record.metadataHash || !/^ipfs:\/\/[^/\s]+$/.test(record.metadataUri)) throw new Error('Scheduled allocation proof is invalid');
         const key = `${record.allocation.week}:${record.allocation.category}`;
         if (keys.has(key)) throw new Error('Duplicate scheduled allocation');
         keys.add(key);

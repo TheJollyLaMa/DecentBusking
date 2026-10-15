@@ -1,6 +1,6 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { escapeHtml, formatUsdcUnits, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261014-funds';
+import { escapeHtml, formatUsdcUnits, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261014-funds';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
 
@@ -11,8 +11,6 @@ const FUNDS = [
   { slug: 'dbusk-top10', emoji: '🏆', label: 'Top10 fund' },
   { slug: 'dbusk-playback', emoji: '🎧', label: 'Playback fund' },
 ];
-const USDC_ICON = '<img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">';
-
 export function fundWeekNumber(now = Date.now()) {
   return weekNumberFromKey(currentPayrollPeriod(now).week);
 }
@@ -22,7 +20,7 @@ export function fundTitle(fund, now = Date.now()) {
 }
 
 export function usdcAmountHtml(balanceUnits) {
-  return `$${escapeHtml(formatUsdcUnits(balanceUnits))} ${USDC_ICON}`;
+  return renderUsdcAmount(balanceUnits);
 }
 
 const historyCache = new Map();
@@ -139,6 +137,24 @@ async function outflowRow(payout, { ensProvider, sponsorAliases, cache }) {
   };
 }
 
+async function decorateWeeklyArchive(archive, { ensProvider, sponsorAliases }) {
+  const cache = new Map();
+  const weeks = [];
+  for (const week of archive?.weeks || []) {
+    const entries = [];
+    for (const entry of week.entries || []) {
+      const wallet = entry.wallet ? await resolveWallet(entry.wallet, ensProvider, sponsorAliases, cache) : null;
+      entries.push({
+        ...entry,
+        walletHtml: wallet ? renderWalletButton(wallet, { role: week.category || 'payout' }) : '',
+        walletLabel: wallet?.label || entry.wallet || '',
+      });
+    }
+    weeks.push({ ...week, entries });
+  }
+  return { ...archive, weeks };
+}
+
 // History comes from the worker's fund ledger (/api/funds), which indexes deposits and payouts on the paid RPC tier.
 export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanceUnits = 0n, ensProvider = providerForEns(), sponsorAliases = {} }) {
   const cacheKey = `${fundSlug}:${fundState?.lastCheckedAt || ''}:${fundState?.lastError || ''}`;
@@ -159,7 +175,16 @@ export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanc
     const outflowUnits = outflows.reduce((sum, row) => sum + parseUnitsLike(row.amountUnits), 0n);
     const netUnits = inflowUnits - outflowUnits;
     const balanceUnits = parseUnitsLike(fundState.balanceUnits ?? fundBalanceUnits ?? netUnits);
-    const result = { historyAvailable: true, rows, inflows, outflows, inflowUnits, outflowUnits, netUnits, balanceUnits, reconciles: balanceUnits === netUnits };
+    const service = (typeof window !== 'undefined' ? window.DecentConfig?.ipfsUploadServiceUrl : '')?.replace(/\/$/, '') || '';
+    let weeklyArchive = null;
+    if (service) {
+      try {
+        const response = await fetch(`${service}/api/funds/${encodeURIComponent(fundSlug)}/weeks`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+        if (response.ok) weeklyArchive = await response.json();
+      } catch {}
+    }
+    const archive = weeklyArchive ? await decorateWeeklyArchive(weeklyArchive, { ensProvider, sponsorAliases }) : null;
+    const result = { historyAvailable: true, rows, inflows, outflows, inflowUnits, outflowUnits, netUnits, balanceUnits, reconciles: balanceUnits === netUnits, weeklyArchive: archive };
     historyCache.set(cacheKey, result);
     return result;
   } catch (error) {
@@ -186,7 +211,7 @@ function renderBreakdown(details, fund, fundState) {
   const { body, summary, note, title } = dialogElements();
   if (!body || !summary || !note || !title) return;
   title.textContent = fundTitle(fund);
-  summary.innerHTML = `Balance ${usdcAmountHtml(details.balanceUnits)} · in $${escapeHtml(formatUsdcUnits(details.inflowUnits))} · out $${escapeHtml(formatUsdcUnits(details.outflowUnits))} · net $${escapeHtml(formatUsdcUnits(details.netUnits))}`;
+  summary.innerHTML = `Balance ${usdcAmountHtml(details.balanceUnits)} · in ${renderUsdcAmount(details.inflowUnits)} · out ${renderUsdcAmount(details.outflowUnits)} · net ${renderUsdcAmount(details.netUnits)}`;
   note.textContent = fundState?.ready === false
     ? `History indexing${fundState?.lastError ? ` paused: ${fundState.lastError}` : '…'}`
     : details.historyAvailable
@@ -198,8 +223,8 @@ function renderBreakdown(details, fund, fundState) {
           <td>${escapeHtml(row.dateText)}</td>
           <td>${escapeHtml(row.typeLabel || sourceKindLabel(row.kind))}</td>
           <td>${row.sourceHtml}${row.extra ? `<div class="fund-breakdown-extra">${escapeHtml(row.extra)}</div>` : ''}</td>
-          <td class="fund-breakdown-amount">${row.direction === 'in' ? formatUsdcUnits(row.amountUnits) : ''}</td>
-          <td class="fund-breakdown-amount">${row.direction === 'out' ? formatUsdcUnits(row.amountUnits) : ''}</td>
+          <td class="fund-breakdown-amount">${row.direction === 'in' ? renderUsdcAmount(row.amountUnits, { className: 'usdc-amount--sponsor' }) : ''}</td>
+          <td class="fund-breakdown-amount">${row.direction === 'out' ? renderUsdcAmount(row.amountUnits, { className: 'usdc-amount--artist' }) : ''}</td>
           <td><a href="${escapeHtml(row.txUrl)}" target="_blank" rel="noopener">Basescan</a></td>
         </tr>`).join('')
     : `<tr><td colspan="6" class="fund-breakdown-empty">Breakdown unavailable, try again.</td></tr>`;
@@ -210,6 +235,7 @@ function renderBreakdown(details, fund, fundState) {
       </thead>
       <tbody>${rows}</tbody>
     </table>
+    ${details.weeklyArchive?.weeks?.length ? `<section class="fund-weekly-section"><h4>Weekly payout archive</h4>${renderFundWeeklyArchive(details.weeklyArchive)}</section>` : ''}
   `;
 }
 

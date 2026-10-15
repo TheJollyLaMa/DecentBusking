@@ -1,5 +1,5 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
-import { escapeHtml, formatUsdcUnits, renderFundSourcesTable, resolveWalletLabel, renderWalletButton } from './fund-display.mjs?v=20261014-funds';
+import { escapeHtml, renderFundSourcesTable, renderFundWeeklyArchive, renderUsdcAmount, resolveWalletLabel, renderWalletButton } from './fund-display.mjs?v=20261014-funds';
 import { weekNumberFromKey } from './payroll-week.mjs';
 
 export function rankTopTenSongs(tracks, nowPlayingId = '') {
@@ -58,11 +58,32 @@ export function initTopTenBoard() {
     }
     return { ...fund, sources };
   }
+  async function prepareArchive(archive, sponsorAliases) {
+    const cache = new Map();
+    const weeks = [];
+    for (const week of archive?.weeks || []) {
+      const entries = [];
+      for (const entry of week.entries || []) {
+        const wallet = entry.wallet ? await resolveWalletLabel(entry.wallet, provider, sponsorAliases, cache) : null;
+        entries.push({ ...entry, walletHtml: wallet ? renderWalletButton(wallet, { role: week.category || 'payout' }) : '', walletLabel: wallet?.label || entry.wallet || '' });
+      }
+      weeks.push({ ...week, entries });
+    }
+    return { ...archive, weeks };
+  }
   async function renderFundSummary(state) {
     const fund = state?.funds?.topTen;
     if (!fund) { fundsSummary.replaceChildren(); return; }
     const prepared = await prepareFund(fund, state.sponsorAliases || {});
-    fundsSummary.innerHTML = `<details class="fund-disclosure top-ten-fund-disclosure"><summary>🏆 Top 10 fund: <strong>${formatUsdcUnits(prepared.balanceUnits)} USDC</strong> · available ${formatUsdcUnits(prepared.availableUnits)} · <span>Where it comes from ▾</span></summary><div class="fund-disclosure-body">${prepared.description ? `<p class="fund-description">${escapeHtml(prepared.description)}</p>` : ''}${renderFundSourcesTable(prepared)}</div></details>`;
+    const service = (typeof window !== 'undefined' ? window.DecentConfig?.ipfsUploadServiceUrl : '')?.replace(/\/$/, '') || '';
+    let archive = null;
+    if (service) {
+      try {
+        const response = await fetch(`${service}/api/funds/${encodeURIComponent(prepared.slug)}/weeks`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+        if (response.ok) archive = await prepareArchive(await response.json(), state.sponsorAliases || {});
+      } catch {}
+    }
+    fundsSummary.innerHTML = `<details class="fund-disclosure top-ten-fund-disclosure"><summary>🏆 Top 10 fund: <strong>${renderUsdcAmount(prepared.balanceUnits)}</strong> · available ${renderUsdcAmount(prepared.availableUnits)} · <span>Where it comes from ▾</span></summary><div class="fund-disclosure-body">${prepared.description ? `<p class="fund-description">${escapeHtml(prepared.description)}</p>` : ''}${renderFundSourcesTable(prepared)}${archive?.weeks?.length ? renderFundWeeklyArchive(archive) : ''}</div></details>`;
   }
   const close = () => {
     clearTimeout(timer);

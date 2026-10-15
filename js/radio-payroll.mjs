@@ -61,15 +61,49 @@ function voteRankedArtists(tracks) {
     .sort((first, second) => second.votes - first.votes || first.wallet.toLowerCase().localeCompare(second.wallet.toLowerCase()));
 }
 
-export function previewTopTenPayroll({ tracks, budgetUnits, minimumUnits = 0n, ranking = 'votes' }) {
-  checkBudget(budgetUnits, minimumUnits);
-  if (!['votes', 'plays'].includes(ranking)) throw new Error('Invalid Top 10 ranking');
-  const artists = (ranking === 'votes' ? voteRankedArtists(tracks) : eligibleArtists(tracks)).slice(0, 10);
+function normalizeTopTenRanking(ranking) {
+  const value = String(ranking || 'votes').replace(/-halving$/, '');
+  return value === 'plays' ? 'plays' : 'votes';
+}
+
+function previewLegacyTopTenPayroll({ tracks, budgetUnits, minimumUnits = 0n, ranking = 'votes' }) {
+  const artists = (normalizeTopTenRanking(ranking) === 'votes' ? voteRankedArtists(tracks) : eligibleArtists(tracks)).slice(0, 10);
   const amountUnits = artists.length ? budgetUnits / BigInt(artists.length) : 0n;
   const entries = artists.map((artist, index) => ({ ...artist, rank: index + 1, amountUnits,
     payable: amountUnits > 0n && amountUnits >= minimumUnits }));
   const allocated = entries.reduce((total, entry) => total + (entry.payable ? entry.amountUnits : 0n), 0n);
   return { entries, allocatedUnits: allocated, remainderUnits: budgetUnits - allocated };
+}
+
+function previewHalvingTopTenPayroll({ tracks, budgetUnits, minimumUnits = 0n, ranking = 'votes' }) {
+  const artists = (normalizeTopTenRanking(ranking) === 'votes' ? voteRankedArtists(tracks) : eligibleArtists(tracks)).slice(0, 10);
+  if (!artists.length || budgetUnits === 0n) return { entries: [], allocatedUnits: 0n, remainderUnits: budgetUnits };
+  const theoretical = [];
+  let remaining = budgetUnits;
+  for (let index = 0; index < artists.length; index++) {
+    const amount = index === artists.length - 1 ? remaining : budgetUnits / (2n ** BigInt(index + 1));
+    theoretical.push(amount);
+    remaining -= amount;
+  }
+  let payableCount = artists.length;
+  for (let index = 0; index < theoretical.length - 1; index++) {
+    if (theoretical[index] < minimumUnits) { payableCount = index === 0 ? 1 : index; break; }
+  }
+  const entries = artists.slice(0, payableCount).map((artist, index) => {
+    const amountUnits = index < payableCount - 1
+      ? theoretical[index]
+      : budgetUnits - theoretical.slice(0, index).reduce((sum, amount) => sum + amount, 0n);
+    return { ...artist, rank: index + 1, amountUnits, payable: amountUnits > 0n && amountUnits >= minimumUnits };
+  });
+  const allocated = entries.reduce((sum, entry) => sum + entry.amountUnits, 0n);
+  return { entries, allocatedUnits: allocated, remainderUnits: budgetUnits - allocated };
+}
+
+export function previewTopTenPayroll({ tracks, budgetUnits, minimumUnits = 0n, ranking = 'votes' }) {
+  checkBudget(budgetUnits, minimumUnits);
+  const normalized = normalizeTopTenRanking(ranking);
+  if (!['votes', 'plays'].includes(normalized)) throw new Error('Invalid Top 10 ranking');
+  return previewHalvingTopTenPayroll({ tracks, budgetUnits, minimumUnits, ranking: normalized });
 }
 
 export function radioWorkReferenceText({ week, category, wallet }) {
@@ -86,10 +120,12 @@ export function radioAllocationMatchesReport(report, allocation) {
     if (!report || !allocation || report.current || report.week !== allocation.week || !Array.isArray(report.tracks)) return false;
     const budgetUnits = BigInt(allocation.budgetUnits);
     const minimumUnits = BigInt(allocation.minimumUnits);
-    const ranking = allocation.schemaVersion === 1 ? 'plays' : allocation.ranking;
+    const ranking = allocation.schemaVersion === 1 ? 'plays' : normalizeTopTenRanking(allocation.ranking);
     const plan = allocation.category === 'playback'
       ? previewPlaybackPayroll({ tracks: report.tracks, budgetUnits, minimumUnits })
-      : previewTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking });
+      : (allocation.schemaVersion < 4
+        ? previewLegacyTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking })
+        : previewTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking }));
     const expectedEntries = plan.entries.filter(entry => entry.payable);
     if (BigInt(allocation.allocatedUnits) !== plan.allocatedUnits || BigInt(allocation.remainderUnits) !== plan.remainderUnits ||
         expectedEntries.length !== allocation.entries?.length) return false;
@@ -106,7 +142,7 @@ export function radioAllocationMatchesReport(report, allocation) {
   }
 }
 
-export function finalizeRadioAllocation({ report, category, budgetUnits, minimumUnits, fundSlug, routerAddress, assetAddress, ranking = 'votes', now = Date.now() }) {
+export function finalizeRadioAllocation({ report, category, budgetUnits, minimumUnits, fundSlug, routerAddress, assetAddress, ranking = 'votes', topTenScheduleVersion = 2, now = Date.now() }) {
   if (!report || report.current || report.week === 'all-time') throw new Error('Only a completed week can be finalized');
   radioWorkReferenceText({ week: report.week, category, wallet: `0x${'1'.repeat(40)}` });
   const period = report.week.startsWith('NY-') ? payrollPeriodFromKey(report.week) : null;
@@ -122,16 +158,18 @@ export function finalizeRadioAllocation({ report, category, budgetUnits, minimum
   if (!WALLET.test(routerAddress || '') || !WALLET.test(assetAddress || '') || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fundSlug || '')) throw new Error('Invalid settlement configuration');
   if (budgetUnits <= 0n) throw new Error('Set a positive reviewed budget');
   const plan = category === 'playback' ? previewPlaybackPayroll({ tracks: report.tracks, budgetUnits, minimumUnits })
-    : previewTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking });
+    : (topTenScheduleVersion === 1
+      ? previewLegacyTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking })
+      : previewTopTenPayroll({ tracks: report.tracks, budgetUnits, minimumUnits, ranking }));
   const entries = plan.entries.filter(entry => entry.payable);
   if (!entries.length) throw new Error('No payouts meet the minimum threshold');
-  return { schemaVersion: period ? 3 : 2, ...(period ? { timeZone: PAYROLL_TIME_ZONE, startAt: period.startAt, endAt: period.endAt, partial: Boolean(report.partial) } : {}),
-    ranking: category === 'playback' ? 'qualified-plays' : ranking, station: 'decentbusking', chainId: 8453, category, week: report.week,
+  return { schemaVersion: category === 'top10' || period ? 4 : 2, ...(period ? { timeZone: PAYROLL_TIME_ZONE, startAt: period.startAt, endAt: period.endAt, partial: Boolean(report.partial) } : {}),
+    ranking: category === 'playback' ? 'qualified-plays' : `${normalizeTopTenRanking(ranking)}-halving`, station: 'decentbusking', chainId: 8453, category, week: report.week,
     routerAddress, assetAddress, fundSlug, budgetUnits: budgetUnits.toString(), minimumUnits: minimumUnits.toString(),
     allocatedUnits: plan.allocatedUnits.toString(), remainderUnits: plan.remainderUnits.toString(),
     finalizedAt: new Date(now).toISOString(),
     entries: entries.map(entry => ({ wallet: entry.wallet, artist: entry.artist || '', plays: entry.plays,
-      ...(category === 'top10' && ranking === 'votes' ? { votes: entry.votes, rank: entry.rank } : {}),
+      ...(category === 'top10' ? { votes: entry.votes, rank: entry.rank } : {}),
       amountUnits: entry.amountUnits.toString(), workReferenceText: radioWorkReferenceText({ week: report.week, category, wallet: entry.wallet }) })) };
 }
 
@@ -143,6 +181,7 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     tracks: allocation.entries },
     category: allocation.category, budgetUnits: BigInt(allocation.budgetUnits), minimumUnits: BigInt(allocation.minimumUnits),
     ranking: allocation.schemaVersion === 1 ? 'plays' : allocation.ranking,
+    topTenScheduleVersion: allocation.schemaVersion < 4 ? 1 : 2,
     fundSlug: allocation.fundSlug, routerAddress: allocation.routerAddress, assetAddress: allocation.assetAddress });
   if (validated.week !== allocation.week) throw new Error('Invalid completed week');
   if (Number((await signer.provider.getNetwork()).chainId) !== 8453 || (await signer.getAddress()).toLowerCase() !== owner?.toLowerCase()) throw new Error('Connect the Base owner wallet');
@@ -162,7 +201,7 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     reviewedTotal += BigInt(entry.amountUnits);
     const workReference = hashReference(identity);
     if (await router.completedWorkReferences(workReference)) continue;
-    if (allocation.schemaVersion === 3) {
+    if (allocation.schemaVersion >= 3 && String(allocation.week).startsWith('NY-')) {
       for (const legacyWeek of overlappingUtcWeeks(payrollPeriodFromKey(allocation.week))) {
         const legacy = radioWorkReferenceText({ week: legacyWeek, category: allocation.category, wallet: entry.wallet });
         if (await router.completedWorkReferences(hashReference(legacy))) throw new Error('A paid legacy UTC receipt overlaps this New York period; manual reconciliation required');
@@ -199,25 +238,26 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
 }
 
 export function validateRadioReceipt(allocation, { routerAddress, assetAddress, funds }) {
-  if (!allocation || ![1, 2, 3].includes(allocation.schemaVersion) || allocation.chainId !== 8453 ||
+  if (!allocation || ![1, 2, 3, 4].includes(allocation.schemaVersion) || allocation.chainId !== 8453 ||
       !['playback', 'top10'].includes(allocation.category) || allocation.station !== 'decentbusking' ||
       allocation.routerAddress?.toLowerCase() !== routerAddress.toLowerCase() || allocation.assetAddress?.toLowerCase() !== assetAddress.toLowerCase() ||
       allocation.fundSlug !== (allocation.category === 'playback' ? funds.playback : funds.topTen)) throw new Error('Receipt does not match this station, fund, asset, and router');
   if (!Array.isArray(allocation.entries) || !allocation.entries.length || allocation.entries.length > 1000) throw new Error('Invalid receipt entries');
-  if (allocation.schemaVersion === 3) {
+  if (String(allocation.week).startsWith('NY-')) {
     const period = payrollPeriodFromKey(allocation.week);
-    if (allocation.timeZone !== PAYROLL_TIME_ZONE || allocation.startAt !== period.startAt || allocation.endAt !== period.endAt) throw new Error('Receipt payroll timezone or boundaries do not match');
-  } else if (String(allocation.week).startsWith('NY-')) throw new Error('New York receipts require the new payroll schema');
+    if (allocation.schemaVersion < 3 || allocation.timeZone !== PAYROLL_TIME_ZONE || allocation.startAt !== period.startAt || allocation.endAt !== period.endAt) throw new Error('Receipt payroll timezone or boundaries do not match');
+  } else if (allocation.schemaVersion >= 3 && allocation.timeZone) throw new Error('New York receipts require the new payroll schema');
   finalizeRadioAllocation({ report: { week: allocation.week, current: false,
     tracks: allocation.entries },
     category: allocation.category, budgetUnits: BigInt(allocation.budgetUnits), minimumUnits: BigInt(allocation.minimumUnits),
     ranking: allocation.schemaVersion === 1 ? 'plays' : allocation.ranking,
+    topTenScheduleVersion: allocation.schemaVersion < 4 ? 1 : 2,
     fundSlug: allocation.fundSlug, routerAddress, assetAddress });
   const identities = new Set();
   let total = 0n;
   for (const entry of allocation.entries) {
     const identity = radioWorkReferenceText({ week: allocation.week, category: allocation.category, wallet: entry.wallet });
-    const validCount = allocation.category === 'top10' && allocation.ranking === 'votes'
+    const validCount = allocation.category === 'top10' && normalizeTopTenRanking(allocation.ranking) === 'votes'
       ? Number.isSafeInteger(entry.votes) && entry.votes > 0 && Number.isSafeInteger(entry.plays) && entry.plays >= 0
       : Number.isSafeInteger(entry.plays) && entry.plays > 0;
     if (identity !== entry.workReferenceText || identities.has(identity) || !validCount || BigInt(entry.amountUnits) <= 0n) throw new Error('Receipt has invalid or duplicate payout entries');
