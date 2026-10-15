@@ -129,7 +129,13 @@ export async function collectCreatorEarnings({
   fetchWorker = fetchWorkerEarnings,
   scanLogs = scanLogEarnings,
 }) {
-  const viewEntries = await readContracts({ ethers, provider: publicProvider, address: target });
+  let viewEntries = [];
+  let viewNote = '';
+  try {
+    viewEntries = await readContracts({ ethers, provider: publicProvider, address: target });
+  } catch {
+    viewNote = 'DJuke song-play balances could not be read right now.';
+  }
   let logs = null;
   let note = '';
   if (serviceUrl) {
@@ -157,7 +163,7 @@ export async function collectCreatorEarnings({
         ? `Router payouts verified through block ${logs.partialThrough.toLocaleString('en-US')}; connect a wallet on Base to check newer ones.`
         : 'Earnings index unavailable; retrying on-chain fallbacks shortly.';
   }
-  return { viewEntries, logs, note };
+  return { viewEntries, logs, note: [viewNote, note].filter(Boolean).join(' ') };
 }
 
 export function initCreatorProfile() {

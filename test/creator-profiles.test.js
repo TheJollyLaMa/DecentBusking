@@ -164,3 +164,19 @@ test('creator earnings loading prefers the worker index before the on-chain log 
   assert.equal(result.logs.complete, true);
   assert.equal(result.viewEntries.length, 1);
 });
+
+test('creator earnings still show indexed payouts when DJuke balance reads fail', async () => {
+  const { collectCreatorEarnings } = await import('../js/creator-profile.mjs');
+  const result = await collectCreatorEarnings({
+    ethers: { Contract: class {}, Interface: class {} },
+    address: '0x' + '1'.repeat(40),
+    serviceUrl: 'https://worker.example',
+    publicProvider: {},
+    readContracts: async () => { throw new Error('contract is not allow-listed'); },
+    fetchWorker: async () => ({ ready: true, entries: [] }),
+    scanLogs: async () => { throw new Error('should not scan'); },
+  });
+  assert.deepEqual(result.viewEntries, []);
+  assert.equal(result.logs.complete, true);
+  assert.match(result.note, /DJuke song-play balances could not be read/);
+});
