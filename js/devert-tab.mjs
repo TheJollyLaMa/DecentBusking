@@ -1,10 +1,11 @@
-import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261014-paid-sponsors';
+import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261015-usdc-cents';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { submitMediaForApproval } from './mint-submission.js?v=20261018-shared-provider';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { planDevertQueues, quoteDevertCampaign, DEVERT_SONGS_PER_MAIN_AD } from './devert-scheduler.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
 
 const MAX_DEVERT_MEDIA_BYTES = 250 * 1024 * 1024;
 
@@ -49,12 +50,9 @@ function node(tag, text, className) {
   return element;
 }
 
-function formatUsdc(units, minimumFractionDigits = 0) {
+function formatUsdc(units) {
   try {
-    const amount = BigInt(units);
-    const whole = amount / 1_000_000n;
-    const fraction = String(amount % 1_000_000n).padStart(6, '0').replace(/0+$/, '').padEnd(minimumFractionDigits, '0');
-    return `${whole}${fraction ? `.${fraction}` : ''} USDC`;
+    return `${formatUsdcUnits(units)} USDC`;
   } catch {
     return 'USDC unavailable';
   }
@@ -410,7 +408,7 @@ export function initDevertTab() {
         node('span', `Campaign #${campaign.campaignId} · ${campaign.advertiser}`));
       publicQueue.append(item);
     }
-    priceDisplay.textContent = formatUsdc(minimumOfferUnits.toString(), 2).replace(' USDC', '');
+    priceDisplay.textContent = formatUsdc(minimumOfferUnits.toString()).replace(' USDC', '');
     queueStatus.textContent = campaigns.length
       ? `${campaigns.length} queued · next position ${campaigns.length + 1}`
       : 'No ads queued · next position 1';

@@ -30,12 +30,12 @@ test('DJuke rejects invalid queue counts and prices beyond uint256', async () =>
   assert.throws(() => quoteDjuke(1912), RangeError);
 });
 
-test('DJuke displays prices and fractional-cent splits without rounding', async () => {
+test('DJuke rounds displayed USDC prices to cents without changing split calculations', async () => {
   const { formatDjukeUsdc, formatDjukeEth, splitDjukeCharges } = await import('../js/djuke.mjs');
   assert.equal(formatDjukeUsdc(250000n), '0.25');
   assert.equal(formatDjukeUsdc(1000000n), '1.00');
-  assert.equal(formatDjukeUsdc(225000n), '0.225');
-  assert.equal(formatDjukeUsdc(25000n), '0.025');
+  assert.equal(formatDjukeUsdc(225000n), '0.23');
+  assert.equal(formatDjukeUsdc(25000n), '0.03');
   assert.equal(formatDjukeEth(22010689501538n), '0.000022');
   assert.equal(formatDjukeEth(1000000000000000000n), '1');
   assert.deepEqual(splitDjukeCharges(250000n), { artistUnits: 225000n, fundUnits: 25000n });

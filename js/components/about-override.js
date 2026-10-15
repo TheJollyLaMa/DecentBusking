@@ -1,13 +1,14 @@
 // js/components/about-override.js — DecentBusking
 
 import { announcePaymentCelebration } from '../payment-celebration.mjs';
+import { formatUsdcUnits } from '../usdc-format.mjs?v=20261015-usdc-cents';
 //
 // Intercepts the CDN DecentHead 'about-modal' custom element definition and
 // replaces it with a DecentBusking-specific version.
 //
 import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261013-walkthrough';
 import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
-import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261014-funds';
+import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261015-usdc-cents';
 
 // The CDN's AboutModal.js hard-codes a filter for listings whose note field
 // contains "decenthead", which causes BigNuten / DecentHead Supporter NFTs to
@@ -191,7 +192,7 @@ class DecentBuskingAboutModal extends HTMLElement {
             || l.priceToken === _ZERO_ADDRESS
             || l.priceToken.toLowerCase() === _USDC_ADDRESS.toLowerCase();
           if (isUsdc) {
-            priceLabel = `$${(Number(l.priceAmount) / 1e6).toFixed(2)} USDC`;
+            priceLabel = `$${formatUsdcUnits(l.priceAmount)} USDC`;
           } else {
             priceLabel = `${l.priceAmount.toString()} raw units (${l.priceToken.slice(0, 8)}…)`;
           }
@@ -363,7 +364,7 @@ class DecentBuskingAboutModal extends HTMLElement {
         chainId: Number(_OPTIMISM_CHAIN_ID),
         txHash: receipt.hash || purchaseTx.hash,
         amountText: priceETH > 0n ? ethers.formatEther(priceETH)
-          : paymentToken === _USDC_ADDRESS ? ethers.formatUnits(tokenAmount, 6) : String(tokenAmount),
+          : paymentToken === _USDC_ADDRESS ? formatUsdcUnits(tokenAmount) : String(tokenAmount),
         assetText: priceETH > 0n ? 'ETH' : (paymentToken === _USDC_ADDRESS ? 'USDC' : 'token base units'),
         summary: 'Supporter DNFT purchase confirmed',
         txLabel: 'Supporter DNFT transferred',

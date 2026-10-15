@@ -1,10 +1,11 @@
 // On-demand personal listens: 30-second preview, then 0.25 USDC per song via DJuke.
 // Fails open to free playback whenever payments are not live, matching today's behavior.
-import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261014-paid-sponsors';
-import { setNowPlaying } from './stage.js?v=20261018-shared-provider';
+import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261015-usdc-cents';
+import { setNowPlaying } from './stage.js?v=20261015-usdc-cents';
 import { supportsDjukeAlbumsAndGas } from './djuke-version.mjs';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
 
 export const LISTEN_PRICE_UNITS = 250000n;
 export const PREVIEW_SECONDS = 30;
@@ -20,8 +21,7 @@ const USDC_ABI = [
 ];
 
 export function formatUsdc(units) {
-  const fraction = String(units % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
-  return `${units / 1000000n}.${fraction}`;
+  return formatUsdcUnits(units);
 }
 
 export function audioCid(value) {

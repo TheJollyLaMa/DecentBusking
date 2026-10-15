@@ -5,9 +5,12 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function radioSyncSource() {
-  return fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
+  const formatter = fs.readFileSync(path.join(__dirname, '../js/usdc-format.mjs'), 'utf8')
+    .replace('export function formatUsdcUnits', 'function _formatUsdcUnits');
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
     .replace(/^import[^\n]*\n/gm, '')
     .replace(/export /g, '');
+  return `${formatter}\n${source}`;
 }
 
 
@@ -278,7 +281,7 @@ test('radio sponsor tags format DJuke and DeVert labels with short addresses', (
   const context = vm.createContext({ performance, setTimeout, clearTimeout, console });
   vm.runInContext(`${source}\nglobalThis.formatSponsor = formatRadioSponsor;`, context);
   assert.equal(vm.runInContext(`formatSponsor({ kind: 'djuke', wallet: '0x4051c7f0f9f0c7f0f9f0c7f0f9f0c7f0f9f0235f', amountUnits: '1000000', requestId: '8453:1' }, 'thejollylama.eth').text`,
-    context), '💸 DJuke · bumped by thejollylama.eth · 1 USDC');
+    context), '💸 DJuke · bumped by thejollylama.eth · 1.00 USDC');
   assert.equal(vm.runInContext(`formatSponsor({ kind: 'devert', wallet: '0x4051c7f0f9f0c7f0f9f0c7f0f9f0c7f0f9f0235f', campaignId: '42' }).text`,
     context), '📣 DeVert ad · sponsored by 0x4051…235f');
 });

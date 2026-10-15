@@ -41,7 +41,10 @@ function historyPage(fetchImpl, funding) {
     ? Promise.resolve({ ok: Boolean(funding), json: async () => funding || {} }) : fetchImpl(url),
     document: { getElementById: node, createElement: () => new Node(),
       addEventListener: (name, callback) => events.set(name, callback) } });
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/radio-history.js'), 'utf8'), context);
+  const formatter = fs.readFileSync(path.join(__dirname, '../js/usdc-format.mjs'), 'utf8')
+    .replace('export function formatUsdcUnits', 'function usdc');
+  const source = fs.readFileSync(path.join(__dirname, '../js/radio-history.js'), 'utf8').replace(/^import[^\n]*\n/gm, '');
+  vm.runInContext(`${formatter}\n${source}`, context);
   events.get('DOMContentLoaded')();
   return { node, window, events, open: mode => events.get('open-radio-history')({ detail: { mode, wallet: walletB } }) };
 }
@@ -126,16 +129,16 @@ test('My Playbacks funding panel shows provisional wallet/song shares without a 
   await Promise.resolve(); await Promise.resolve();
   const panel = page.node('radio-history-rewards');
   assert.match(panel.textContent, /Allocation funds/);
-  assert.match(panel.textContent, /10 USDC.*1 USDC.*9 USDC.*2.5 USDC/);
+  assert.match(panel.textContent, /10\.00 USDC.*1\.00 USDC.*9\.00 USDC.*2\.50 USDC/);
   const fundScroll = panel.children.find(node => node.className?.includes('radio-history-table-scroll') && node.children[0]?.className?.includes('radio-history-fund-balances'));
   assert.deepEqual(fundScroll.children[0].children[1].children.map(row => row.children.map(cell => cell.textContent)), [
-    ['Playback', '10 USDC', '1 USDC', '9 USDC', '2.5 USDC'], ['Top 10 votes', '2 USDC', '0 USDC', '2 USDC', '1 USDC'],
+    ['Playback', '10.00 USDC', '1.00 USDC', '9.00 USDC', '2.50 USDC'], ['Top 10 votes', '2.00 USDC', '0.00 USDC', '2.00 USDC', '1.00 USDC'],
   ]);
   assert.match(panel.textContent, /Your song estimates · playback only/);
   const songScroll = panel.children.find(node => node.className?.includes('radio-history-table-scroll') && node.children[0]?.className?.includes('radio-history-song-estimates'));
   assert.ok(songScroll);
   const songTable = songScroll.children[0];
-  assert.deepEqual(songTable.children[1].children[0].children.map(cell => cell.textContent), ['Song A', '7', '3', '2.5 USDC']);
+  assert.deepEqual(songTable.children[1].children[0].children.map(cell => cell.textContent), ['Song A', '7', '3', '2.50 USDC']);
   assert.match(panel.textContent, /Top 10 prize estimates are per artist wallet/);
   assert.match(panel.textContent, /not accrued debt or claimable funds/);
 });

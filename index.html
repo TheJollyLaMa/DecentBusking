@@ -133,9 +133,9 @@
           <tbody id="devert-price-tiers">
             <tr class="is-current"><td>Weekly Ad Campaign</td><td>5.00 USDC / wk</td></tr>
             <tr><td>Main Radio Rotation</td><td>1 ad every 10 songs</td></tr>
-            <tr><td>Priority Queue Bump</td><td>$1 · positions 1–7</td></tr>
-            <tr><td>Priority Queue Bump</td><td>$2 · positions 8–14</td></tr>
-            <tr><td>Priority Queue Bump</td><td>$4 · positions 15–21</td></tr>
+            <tr><td>Priority Queue Bump</td><td>$1.00 · positions 1–7</td></tr>
+            <tr><td>Priority Queue Bump</td><td>$2.00 · positions 8–14</td></tr>
+            <tr><td>Priority Queue Bump</td><td>$4.00 · positions 15–21</td></tr>
             <tr><td>Priority Queue Bump</td><td>Doubling each block of 7 positions</td></tr>
             <tr><td>24/7 VertLoop</td><td>Included (continuous)</td></tr>
           </tbody>
@@ -697,7 +697,7 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js?v=20261016-ens-worker"></script>
+  <script type="module" src="js/components/about-override.js?v=20261015-usdc-cents"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
   <script type="module" src="js/components/header-right-ankh-override.js?v=20261011-creator-menu"></script>
@@ -716,25 +716,25 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261018-shared-provider"></script>
+  <script type="module" src="js/main.js?v=20261015-usdc-cents"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261018-shared-provider"></script>
+  <script type="module" src="js/admin.js?v=20261015-usdc-cents"></script>
 
-  <script type="module" src="js/payroll.js?v=20261015-weekly-funds"></script>
-  <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
+  <script type="module" src="js/payroll.js?v=20261015-usdc-cents"></script>
+  <script type="module" src="js/radio-history.js?v=20261015-usdc-cents"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261010-public-calendar"></script>
-  <script type="module" src="js/fund-header.mjs?v=20261015-weekly-funds"></script>
-  <script type="module" src="js/top-ten-board.mjs?v=20261015-weekly-funds"></script>
-  <script type="module" src="js/djuke.mjs?v=20261014-celebrate"></script>
-  <script type="module" src="js/devert-tab.mjs?v=20261018-shared-provider"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261019-earnings-receipts"></script>
+  <script type="module" src="js/fund-header.mjs?v=20261015-usdc-cents"></script>
+  <script type="module" src="js/top-ten-board.mjs?v=20261015-usdc-cents"></script>
+  <script type="module" src="js/djuke.mjs?v=20261015-usdc-cents"></script>
+  <script type="module" src="js/devert-tab.mjs?v=20261015-usdc-cents"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261015-usdc-cents"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
-  <script type="module" src="js/listens.mjs?v=20261018-shared-provider"></script>
+  <script type="module" src="js/listens.mjs?v=20261015-usdc-cents"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261018-shared-provider"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261015-weekly-funds';
+    import { initPayroll } from './js/payroll.js?v=20261015-usdc-cents';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

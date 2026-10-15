@@ -42,6 +42,7 @@ test('public queue follows shared scheduling priority, not API or wallet order, 
 
 async function panelFixture({ wallet = null } = {}) {
   const scheduler = await import('../js/devert-scheduler.mjs');
+  const { formatUsdcUnits } = await import('../js/usdc-format.mjs');
   const nodes = new Map();
   const documentListeners = new Map();
   let focused;
@@ -78,7 +79,7 @@ async function panelFixture({ wallet = null } = {}) {
   const requests = [];
   let read = async () => snapshot();
   let readAds = async () => ({ ads: [{ title: 'Ready ad', ipfsCid: 'ready', state: 'ready' }] });
-  const context = vm.createContext({ ...scheduler, document,
+  const context = vm.createContext({ ...scheduler, document, formatUsdcUnits,
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example',
       devertContractAddress: snapshot().contractAddress }, _wallet: wallet },
     canSetDevertListenMode: () => true, setDevertListenMode: () => true, AbortSignal,
@@ -203,7 +204,7 @@ test('ready-ad selection reveals Run Campaign before focus, keeps disclosures in
   assert.equal(ui.element('devert-run-campaign').open, true);
   ui.element('devert-weeks').value = '3';
   ui.element('devert-weeks').listeners.get('input')();
-  assert.match(ui.element('devert-campaign-total').textContent, /3 × 5.00 USDC = 15 USDC/);
+  assert.match(ui.element('devert-campaign-total').textContent, /3 × 5.00 USDC = 15\.00 USDC/);
 });
 
 test('instructions modal restores focus and Escape does not close its underlying panel', async () => {

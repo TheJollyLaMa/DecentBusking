@@ -7,7 +7,7 @@ import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
-  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261019-earnings-receipts';
+  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261015-usdc-cents';
 
 const WALLET_BREATHE_ICON = 'img/Ens_Eth_Breathe.png';
 
@@ -319,7 +319,7 @@ export function initCreatorProfile() {
   let myNftsAbort = null;
   const openNftCard = async identity => {
     try {
-      const { openNFTByIdentity } = await import('./space.js?v=20261018-shared-provider');
+      const { openNFTByIdentity } = await import('./space.js?v=20261015-usdc-cents');
       dialog.querySelector('[data-profile-close]')?.click();
       if (!await openNFTByIdentity(identity)) throw new Error('Could not open this NFT in the space view');
     } catch (error) {

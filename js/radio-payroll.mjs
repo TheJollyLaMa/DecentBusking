@@ -1,13 +1,7 @@
-import { BASE_USDC_ADDRESS } from './settlement-funds.mjs?v=20261014-celebrate';
+import { BASE_USDC_ADDRESS } from './settlement-funds.mjs?v=20261015-usdc-cents';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { previewTopTenSongPayroll } from './top-ten-prizes.mjs';
-
-function formatUsdc(units) {
-  const amount = typeof units === 'bigint' ? units : BigInt(units);
-  const whole = amount / 1000000n;
-  const fraction = String(amount % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
-  return `${whole}${fraction ? `.${fraction}` : ''}`;
-}
+import { formatUsdcUnits as formatUsdc } from './usdc-format.mjs?v=20261015-usdc-cents';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE, overlappingUtcWeeks } from './payroll-week.mjs';
 
 const WALLET = /^0x[0-9a-fA-F]{40}$/;
@@ -238,7 +232,7 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     const args = [fundId, allocation.assetAddress, entry.wallet, BigInt(entry.amountUnits), entry.workReference,
       hashReference('TheJollyLaMa/DecentBusking'), hashReference(`radio-artist:${entry.wallet.toLowerCase()}`), metadataUri, metadataHash];
     await router.payout.staticCall(...args);
-    onStep(`Confirm ${entry.amountUnits} USDC base units to ${entry.wallet}`);
+    onStep(`Confirm ${formatUsdc(entry.amountUnits)} USDC to ${entry.wallet}`);
     const transaction = await router.payout(...args);
     if ((await transaction.wait())?.status !== 1) throw new Error('Radio payout did not confirm; refresh before retrying');
     confirmed.push({ wallet: entry.wallet, txHash: transaction.hash });

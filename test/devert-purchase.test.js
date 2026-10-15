@@ -22,9 +22,9 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(html, /id="devert-price"[^>]*>Loading…<\/strong>/);
   assert.match(html, /id="devert-audio-uri"[^>]*readonly/);
   assert.match(html, /id="devert-weeks"[^>]*value="1"/);
-  assert.match(html, /Priority Queue Bump<\/td><td>\$1 · positions 1–7/);
-  assert.match(html, /Priority Queue Bump<\/td><td>\$2 · positions 8–14/);
-  assert.match(html, /Priority Queue Bump<\/td><td>\$4 · positions 15–21/);
+  assert.match(html, /Priority Queue Bump<\/td><td>\$1\.00 · positions 1–7/);
+  assert.match(html, /Priority Queue Bump<\/td><td>\$2\.00 · positions 8–14/);
+  assert.match(html, /Priority Queue Bump<\/td><td>\$4\.00 · positions 15–21/);
   assert.match(html, /Campaign Instructions: Submit, Receive &amp; Run/);
   assert.doesNotMatch(html, /<details class="devert-workflow-details">/);
   assert.doesNotMatch(html, /id="devert-offer"/);

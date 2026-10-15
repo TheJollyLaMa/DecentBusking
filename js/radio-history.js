@@ -1,4 +1,5 @@
 // Public totals from the Left Ankh and connected-wallet history from the Right Ankh.
+import { formatUsdcUnits as usdc } from './usdc-format.mjs?v=20261015-usdc-cents';
 
 let dialog;
 let weekSelect;
@@ -21,12 +22,6 @@ function element(tag, className, text) {
   if (className) node.className = className;
   if (text != null) node.textContent = text;
   return node;
-}
-
-function usdc(units) {
-  const value = BigInt(units || '0');
-  const fraction = (value % 1000000n).toString().padStart(6, '0').replace(/0+$/, '');
-  return `${value / 1000000n}${fraction ? `.${fraction}` : ''}`;
 }
 
 function renderFundingTable(rows, headers, className) {

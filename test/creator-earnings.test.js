@@ -10,10 +10,10 @@ function memoryStorage() {
   return { getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value) };
 }
 
-test('formatAmount renders USDC and ART units without rounding up', async () => {
+test('formatAmount rounds USDC displays to cents and preserves ART precision', async () => {
   const { formatAmount } = await load();
-  assert.equal(formatAmount(1125000n, 'USDC'), '1.125 USDC');
-  assert.equal(formatAmount(225000n, 'USDC'), '0.225 USDC');
+  assert.equal(formatAmount(1125000n, 'USDC'), '1.13 USDC');
+  assert.equal(formatAmount(225000n, 'USDC'), '0.23 USDC');
   assert.equal(formatAmount(0n, 'USDC'), '0.00 USDC');
   assert.equal(formatAmount(10n ** 18n * 3n / 2n, 'ART'), '1.50 ART');
 });

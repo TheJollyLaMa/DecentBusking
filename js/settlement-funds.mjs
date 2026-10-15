@@ -1,11 +1,5 @@
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-
-function formatUsdc(units) {
-  const amount = typeof units === 'bigint' ? units : BigInt(units);
-  const whole = amount / 1000000n;
-  const fraction = String(amount % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
-  return `${whole}${fraction ? `.${fraction}` : ''}`;
-}
+import { formatUsdcUnits as formatUsdc } from './usdc-format.mjs?v=20261015-usdc-cents';
 
 export function configuredSettlementFunds(config = {}) {
   return [

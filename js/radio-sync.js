@@ -5,6 +5,7 @@
 
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-paid-sponsors';
+import { formatUsdcUnits as _formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
 
 const POLL_MS = 8_000;
 const FADE_IN_MS = 600;
@@ -42,12 +43,6 @@ export function archiveMuted() {
 function _shortAddress(address) {
   const value = String(address || '');
   return value.length > 10 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
-}
-
-function _formatUsdcUnits(units) {
-  const value = BigInt(units || '0');
-  const fraction = (value % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
-  return `${value / 1_000_000n}${fraction ? `.${fraction}` : ''}`;
 }
 
 export function formatRadioSponsor(sponsor, ensName = '') {

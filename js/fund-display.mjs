@@ -1,14 +1,9 @@
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
 import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+export { formatUsdcUnits };
 const USDC_ICON = '<img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">';
 const WALLET_ICON = 'img/Ens_Eth_Breathe.png';
-
-export function formatUsdcUnits(units) {
-  const value = typeof units === 'bigint' ? units : BigInt(units || 0);
-  const whole = value / 1000000n;
-  const fraction = String(value % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
-  return `${whole}${fraction ? `.${fraction}` : ''}`;
-}
 
 export function renderUsdcAmount(units, { className = '' } = {}) {
   const classes = ['usdc-amount', className].filter(Boolean).join(' ');

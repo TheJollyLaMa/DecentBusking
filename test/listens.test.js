@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const songId = `0x${'a'.repeat(64)}`;
 async function load() {
+  const { formatUsdcUnits } = await import('../js/usdc-format.mjs');
   const { approvalNotice, ensureBaseNetwork, waitForAllowance, retryMissingRevertData } = await import('../js/base-chain.mjs');
   const { supportsDjukeAlbumsAndGas } = await import('../js/djuke-version.mjs');
   const celebrationCalls = [];
@@ -13,6 +14,7 @@ async function load() {
     .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/^if \(typeof document[^\n]*$/m, '');
   const context = vm.createContext({ crypto, setInterval, clearInterval, setTimeout, Promise, BigInt, JSON, AbortSignal,
+    formatUsdcUnits,
     supportsDjukeAlbumsAndGas, approvalNotice, ensureBaseNetwork, waitForAllowance, retryMissingRevertData,
     announcePaymentCelebration: detail => { celebrationCalls.push(detail); return { accepted: true }; } });
   vm.runInContext(`${source}\nglobalThis.api = { createListenController, createListenPlaylist, purchaseListens, audioCid, formatUsdc };`, context);

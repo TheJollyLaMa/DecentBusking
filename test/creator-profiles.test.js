@@ -206,8 +206,8 @@ test('song-play receipts replace the aggregate artistLedger line and receipts ad
   const [body] = find(receipt, 'tbody');
   const rows = find(body, 'tr').map(row => row.children.map(cell => cell.textContent));
   assert.deepEqual(rows.map(row => [row[0], row[2], row[3], row[4]]), [
-    ['2', 'Second', '0.225 USDC', '0.45 USDC'],
-    ['1', 'First', '0.225 USDC', '0.225 USDC'],
+    ['2', 'Second', '0.23 USDC', '0.45 USDC'],
+    ['1', 'First', '0.23 USDC', '0.23 USDC'],
   ]);
   assert.equal(find(body, 'a')[0].href, 'https://basescan.org/tx/0x2');
   assert.match(find(receipt, 'tfoot')[0].textContent, /Total · 2 payouts0\.45 USDC/);

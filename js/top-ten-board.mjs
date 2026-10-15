@@ -1,4 +1,4 @@
-import { renderUsdcAmount } from './fund-display.mjs?v=20261015-weekly-funds';
+import { renderUsdcAmount } from './fund-display.mjs?v=20261015-usdc-cents';
 import { weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
 

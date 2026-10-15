@@ -21,12 +21,21 @@
  */
 
 import { isAdminWallet } from './admin-access.mjs';
-import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261015-weekly-funds';
+import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261015-usdc-cents';
 import { previewTopTenSongPayroll } from './top-ten-prizes.mjs';
-import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261014-celebrate';
+import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261015-usdc-cents';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+
+function _displayTokenAmount(units, currency, decimals) {
+  return currency === 'USDC' ? formatUsdcUnits(units) : ethers.formatUnits(units, decimals);
+}
+
+function _displayEntryAmount(entry) {
+  return _entryCurrency(entry) === 'USDC' ? formatUsdcUnits(ethers.parseUnits(String(entry.amount), 6)) : String(entry.amount);
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -209,7 +218,7 @@ async function _recoverUsdc() {
     if (!asset || asset.decimals !== 6) throw new Error('Native Base USDC is not configured');
     const amountUnits = ethers.parseUnits(document.getElementById('router-recovery-amount').value || '0', 6);
     if (amountUnits <= 0n) throw new Error('Enter a positive recovery amount');
-    if (!confirm(`Recover ${ethers.formatUnits(amountUnits, 6)} USDC from ${slug} to your owner wallet ${_ownerAddress}? This reduces the funds available for artist payouts.`)) return;
+    if (!confirm(`Recover ${formatUsdcUnits(amountUnits)} USDC from ${slug} to your owner wallet ${_ownerAddress}? This reduces the funds available for artist payouts.`)) return;
     _settling = true;
     document.getElementById('router-recover-usdc').disabled = true;
     const signer = await _getSigner(BASE_CHAIN_ID);
@@ -456,7 +465,7 @@ export async function loadPayrollQueue() {
         </td>
         <td class="payroll-td">${walletDisplay}</td>
         <td class="payroll-td payroll-amount">
-          <strong>${_esc(entry.amount)} ${_esc(currency)}</strong>
+          <strong>${_esc(_displayEntryAmount(entry))} ${_esc(currency)}</strong>
           ${isRouterEntry ? `<br><small>Base · ${_esc(entry.fund || _payrollAssetConfig?.fundSlug || '')}</small>` : ''}
         </td>
         <td class="payroll-td payroll-issue">
@@ -657,7 +666,7 @@ async function _payTokenEntries(entries) {
   const total = amounts.reduce((sum, amount) => sum + amount, 0n);
   const available = await router.fundBalances(fundId, asset.address);
   if (available < total) {
-    throw new Error(`The ${fundSlug} fund has insufficient ${currency}. Available: ${ethers.formatUnits(available, asset.decimals)} ${currency}.`);
+    throw new Error(`The ${fundSlug} fund has insufficient ${currency}. Available: ${_displayTokenAmount(available, currency, asset.decimals)} ${currency}.`);
   }
 
   const metadata = entries.map(entry => ({
@@ -672,13 +681,13 @@ async function _payTokenEntries(entries) {
       fund: fundSlug,
     }))),
   }));
-  const totalText = ethers.formatUnits(total, asset.decimals);
+  const totalText = _displayTokenAmount(total, currency, asset.decimals);
   let tx;
   if (entries.length === 1) {
     const payoutArgs = [fundId, asset.address, recipient, amounts[0], workReferences[0],
       metadata[0].repositoryIdHash, contributorHash, metadata[0].uri, metadata[0].hash];
     await router.payout.staticCall(...payoutArgs);
-    _setStatus(statusEl, `⏳ Paying ${first.amount} ${currency} to @${githubName} from ${fundSlug}… confirm in MetaMask.`);
+    _setStatus(statusEl, `⏳ Paying ${_displayEntryAmount(first)} ${currency} to @${githubName} from ${fundSlug}… confirm in MetaMask.`);
     tx = await router.payout(...payoutArgs);
   } else {
     const batchArgs = [fundId, asset.address, recipient, amounts, workReferences,
@@ -723,7 +732,7 @@ async function _paySingle(index, btn) {
     if (btn) btn.disabled = true;
     const txHash = await _payTokenEntry(entry);
     const explorer = 'https://basescan.org/tx/';
-    _setStatus(statusEl, `✅ ${entry.amount} ${_entryCurrency(entry)} paid to @${entry.contributorGithub}. ${explorer}${txHash}`);
+    _setStatus(statusEl, `✅ ${_displayEntryAmount(entry)} ${_entryCurrency(entry)} paid to @${entry.contributorGithub}. ${explorer}${txHash}`);
 
     _showSettleWorkflowHint(txHash);
     await loadPayrollQueue();
@@ -861,8 +870,8 @@ async function _refreshRadioPayroll() {
     if (refreshId !== _radioRefreshId) return;
     _radioBalances = { playback, prizes, approved };
     document.getElementById('radio-gas-balance').textContent = `${ethers.formatEther(gas)} ETH`;
-    document.getElementById('radio-playback-balance').textContent = playback.exists ? `${ethers.formatUnits(playback.available, asset.decimals)} USDC` : 'Fund not created';
-    document.getElementById('radio-prize-balance').textContent = prizes.exists ? `${ethers.formatUnits(prizes.available, asset.decimals)} USDC` : 'Fund not created';
+    document.getElementById('radio-playback-balance').textContent = playback.exists ? `${formatUsdcUnits(playback.available)} USDC` : 'Fund not created';
+    document.getElementById('radio-prize-balance').textContent = prizes.exists ? `${formatUsdcUnits(prizes.available)} USDC` : 'Fund not created';
     await _refreshWeeklyPayflow();
     _applyScheduledBudgets();
     _loadRadioReviews();
@@ -930,9 +939,9 @@ async function _refreshWeeklyPayflow() {
         const balance = BigInt(fund.balanceUnits);
         const goal = BigInt(state.significantShareUnits) * BigInt(Math.max(1, fund.recipientCount || fund.estimatedShares?.length || 0));
         const meter = document.createElement('meter'); meter.min = 0; meter.max = 100; meter.value = Number((balance < goal ? balance : goal) * 10000n / goal) / 100;
-        meter.setAttribute('aria-label', `${title.textContent}: balance toward ${ethers.formatUnits(goal, 6)} USDC significant-share target`);
+        meter.setAttribute('aria-label', `${title.textContent}: balance toward ${formatUsdcUnits(goal)} USDC significant-share target`);
         const text = document.createElement('p');
-        text.textContent = `${ethers.formatUnits(balance, 6)} USDC balance · ${ethers.formatUnits(fund.reservedUnits, 6)} pending commitments · ${ethers.formatUnits(fund.availableUnits, 6)} unreserved · target ${ethers.formatUnits(goal, 6)} USDC`;
+        text.textContent = `${formatUsdcUnits(balance)} USDC balance · ${formatUsdcUnits(fund.reservedUnits)} pending commitments · ${formatUsdcUnits(fund.availableUnits)} unreserved · target ${formatUsdcUnits(goal)} USDC`;
         const warning = document.createElement('p'); warning.className = 'payroll-funding-warning'; warning.textContent = fund.warning || '';
         block.append(title, meter, text, warning); target?.append(block);
       }
@@ -1046,7 +1055,7 @@ async function _refreshSettlementFund() {
     document.getElementById('router-fund-id').textContent = id;
     document.getElementById('router-admin-role').textContent = allowed ? 'DEFAULT_ADMIN_ROLE verified' : 'DEFAULT_ADMIN_ROLE required';
     document.getElementById('router-fund-state').textContent = exists ? active ? 'Created · active' : 'Created · inactive' : 'Not created';
-    document.getElementById('router-fund-balance').textContent = usdc ? `${ethers.formatUnits(balance, usdc.decimals)} USDC` : 'USDC not configured';
+    document.getElementById('router-fund-balance').textContent = usdc ? `${formatUsdcUnits(balance)} USDC` : 'USDC not configured';
     _routerCreateAllowed = allowed && !exists && _metadataUriReady();
     if (saveButton) saveButton.disabled = !allowed || exists || _settling || select.value !== CUSTOM_FUND_OPTION;
     createButton.disabled = !_routerCreateAllowed || _settling;
@@ -1082,7 +1091,7 @@ async function _depositUsdc() {
     if (amountUnits <= 0n) throw new Error('Enter a positive USDC deposit amount');
     const operationKey = _depositKey();
     if (localStorage.getItem(operationKey)) throw new Error('A prior deposit is unresolved; verify it before retrying');
-    if (!confirm(`Deposit ${ethers.formatUnits(amountUnits, 6)} USDC into ${slug} on Base? This moves funds from your wallet; it does not pay artists.`)) return;
+    if (!confirm(`Deposit ${formatUsdcUnits(amountUnits)} USDC into ${slug} on Base? This moves funds from your wallet; it does not pay artists.`)) return;
     _settling = true; button.disabled = true;
     const operationDetails = { owner: _ownerAddress, router: _payrollAssetConfig.routerAddress,
       asset: asset.address, fundId: ethers.id(slug), amountUnits: amountUnits.toString() };
@@ -1190,7 +1199,7 @@ async function _syncPaymentLedger() {
         const asset = Object.entries(_payrollAssetConfig.assets || {}).find(([, value]) => value.address.toLowerCase() === entry.asset.toLowerCase());
         const fund = [...configuredSettlementFunds(_payrollAssetConfig), ...[..._customFundSlugs].map(slug => ({ slug, label: slug }))].find(value => ethers.id(value.slug) === entry.fundId);
         const label = document.createElement('span');
-        label.textContent = `${entry.paidAt} · ${fund?.label || _shortAddr(entry.fundId)} · ${_shortAddr(entry.recipient)} · ${asset ? `${ethers.formatUnits(entry.amountUnits, asset[1].decimals)} ${asset[0]}` : `${entry.amountUnits} base units`} · ${entry.verification}`;
+        label.textContent = `${entry.paidAt} · ${fund?.label || _shortAddr(entry.fundId)} · ${_shortAddr(entry.recipient)} · ${asset ? `${_displayTokenAmount(entry.amountUnits, asset[0], asset[1].decimals)} ${asset[0]}` : `${entry.amountUnits} base units`} · ${entry.verification}`;
         const link = document.createElement('a'); link.className = 'payroll-link'; link.target = '_blank'; link.rel = 'noopener noreferrer';
         link.href = `https://basescan.org/tx/${entry.txHash}`; link.textContent = 'Base proof';
         row.append(label, link); target?.append(row);
@@ -1304,7 +1313,7 @@ function _renderRadioReviews() {
     }
     for (const entry of saved.allocation.entries) {
       const row = document.createElement('div'); row.className = 'radio-payroll-artist';
-      const label = document.createElement('span'); label.textContent = `${entry.title ? `${entry.rank}. ${entry.title} · ` : ''}${entry.artist} · ${_shortAddr(entry.wallet)} · ${ethers.formatUnits(entry.amountUnits, 6)} USDC`;
+      const label = document.createElement('span'); label.textContent = `${entry.title ? `${entry.rank}. ${entry.title} · ` : ''}${entry.artist} · ${_shortAddr(entry.wallet)} · ${formatUsdcUnits(entry.amountUnits)} USDC`;
       const state = _radioRecipientStates.get(entry.workReferenceText);
       label.textContent += state?.paid ? ' · Paid on Base' : state?.approved ? ' · Approved / unpaid' : state ? ' · Approval required' : ' · Checking Base';
       row.append(label);
@@ -1481,7 +1490,7 @@ function _previewRadioPayroll() {
       const target = document.getElementById(id);
       target.replaceChildren();
       const total = document.createElement('p');
-      total.textContent = `${ethers.formatUnits(plan.allocatedUnits, 6)} USDC allocated · ${ethers.formatUnits(plan.remainderUnits, 6)} USDC held/unallocated`;
+      total.textContent = `${formatUsdcUnits(plan.allocatedUnits)} USDC allocated · ${formatUsdcUnits(plan.remainderUnits)} USDC held/unallocated`;
       target.append(total);
       for (const entry of plan.entries) {
         const row = document.createElement('div');
@@ -1489,7 +1498,7 @@ function _previewRadioPayroll() {
         const name = document.createElement('span');
         name.textContent = `${entry.rank ? `${entry.rank}. ` : ''}${entry.title ? `${entry.title} · ` : ''}${entry.artist || _shortAddr(entry.wallet)} · ${entry.votes !== undefined ? `${entry.votes} weekly net votes` : `${entry.plays} plays`} · ${_shortAddr(entry.wallet)}`;
         const amount = document.createElement('strong');
-        amount.textContent = `${ethers.formatUnits(entry.amountUnits, 6)} USDC${entry.payable ? '' : entry.amountUnits === 0n ? ' · no payout' : ' · held below minimum'}`;
+        amount.textContent = `${formatUsdcUnits(entry.amountUnits)} USDC${entry.payable ? '' : entry.amountUnits === 0n ? ' · no payout' : ' · held below minimum'}`;
         row.append(name, amount);
         target.append(row);
         const category = id === 'radio-playback-preview' ? 'playback' : 'top10';

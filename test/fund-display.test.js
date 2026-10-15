@@ -14,7 +14,7 @@ test('pending fund tables show song estimates without pretending to be on-chain 
   assert.match(top, /fund-pending-row/);
   assert.match(top, /&lt;Song&gt;/);
   assert.match(top, /artist\.eth/);
-  assert.match(top, /\$6\.125/);
+  assert.match(top, /\$6\.13/);
   assert.match(top, /Net votes/);
   assert.doesNotMatch(top, /basescan\.org/);
   const playback = renderFundPendingTable(rows, { fundSlug: 'dbusk-playback' });
@@ -79,12 +79,17 @@ test('archive markup distinguishes scheduled and paid amounts and surfaces unmat
   assert.match(renderFundWeeklyArchive({ unmatchedPayouts: [{ recipient: wallet, amountUnits: '250000', txHash }] }), /Unmatched on-chain payments/);
 });
 
-test('USDC amounts trim trailing zeros but keep two decimals minimum', async () => {
+test('USDC display rounds to exactly two decimals without changing base units', async () => {
   const { formatUsdcUnits } = await import(url);
   assert.equal(formatUsdcUnits(0n), '0.00');
   assert.equal(formatUsdcUnits(1200000n), '1.20');
-  assert.equal(formatUsdcUnits(1234500n), '1.2345');
-  assert.equal(formatUsdcUnits(1234000n), '1.234');
+  assert.equal(formatUsdcUnits(1234500n), '1.23');
+  assert.equal(formatUsdcUnits(1235000n), '1.24');
+  assert.equal(formatUsdcUnits(6125000n), '6.13');
+  assert.equal(formatUsdcUnits(999999n), '1.00');
+  assert.equal(formatUsdcUnits(-6125000n), '-6.13');
+  assert.equal(formatUsdcUnits(-1n), '0.00');
+  assert.equal(formatUsdcUnits(123456789012345678901234n), '123456789012345678.90');
 });
 
 test('verified sponsor aliases are shown only when they forward-resolve to the same wallet', async () => {

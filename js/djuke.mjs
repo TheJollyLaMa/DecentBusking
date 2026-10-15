@@ -1,6 +1,7 @@
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
 
 export function quoteDjuke(pendingCount) {
   if (!Number.isSafeInteger(pendingCount) || pendingCount < 0) throw new RangeError('Invalid pending queue count');
@@ -13,8 +14,7 @@ export function quoteDjuke(pendingCount) {
 
 export function formatDjukeUsdc(units) {
   if (typeof units !== 'bigint' || units < 0n) throw new RangeError('Invalid USDC amount');
-  const fraction = String(units % 1000000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
-  return `${units / 1000000n}.${fraction}`;
+  return formatUsdcUnits(units);
 }
 
 export function formatDjukeEth(units, precision = 6) {

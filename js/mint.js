@@ -1,4 +1,4 @@
-import { fetchNFTMetaById } from './space.js?v=20261018-shared-provider';
+import { fetchNFTMetaById } from './space.js?v=20261015-usdc-cents';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { submitMediaForApproval } from './mint-submission.js?v=20261018-shared-provider';
 

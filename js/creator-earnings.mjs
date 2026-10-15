@@ -1,6 +1,8 @@
 // On-chain creator earnings from DecentBusking contracts on Base. Every figure
 // is read from a contract view or an emitted event, and carries a Basescan proof link.
 
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+
 export const BASESCAN = 'https://basescan.org';
 export const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 export const ROUTER_START_BLOCK = 51852000;
@@ -48,6 +50,7 @@ export function assetSymbol(asset) {
 export function assetDecimals(symbol) { return symbol === 'USDC' ? 6 : 18; }
 
 export function formatAmount(units, symbol = 'USDC') {
+  if (symbol === 'USDC') return `${formatUsdcUnits(units)} USDC`;
   const value = BigInt(units || 0);
   const decimals = assetDecimals(symbol);
   const base = 10n ** BigInt(decimals);
