@@ -22,7 +22,8 @@
         "TheJollyLaMa/DecentBusking#167",
         "TheJollyLaMa/DecentBusking#179",
         "TheJollyLaMa/DecentBusking#181",
-        "TheJollyLaMa/DecentBusking#192"
+        "TheJollyLaMa/DecentBusking#192",
+        "TheJollyLaMa/DecentBusking#199"
       ],
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "Repo owner and maintainer.",
@@ -34,9 +35,10 @@
         "TheJollyLaMa/DecentBusking#167",
         "TheJollyLaMa/DecentBusking#179",
         "TheJollyLaMa/DecentBusking#181",
-        "TheJollyLaMa/DecentBusking#192"
+        "TheJollyLaMa/DecentBusking#192",
+        "TheJollyLaMa/DecentBusking#199"
       ],
-      "usdcPending": 1.6
+      "usdcPending": 1.8
     },
     {
       "github": "copilot",
@@ -74,12 +76,13 @@
         "TheJollyLaMa/DecentBusking#187",
         "TheJollyLaMa/DecentBusking#192",
         "TheJollyLaMa/DecentBusking#195",
-        "TheJollyLaMa/DecentBusking#191"
+        "TheJollyLaMa/DecentBusking#191",
+        "TheJollyLaMa/DecentBusking#199"
       ],
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "GitHub Copilot AI contributor. Credit is recorded but retained in the dbusk-repo-dev fund (no payout wallet). Previously pointed at the Optimism-only DecentEscrow 0x23A457AD3C33d68E4fAd2FCa7c5d9a511E0C350e.",
       "usdcPending": 0,
-      "usdcRetainedInFund": 21.2,
+      "usdcRetainedInFund": 22,
       "ethRetainedInFund": 0.00006
     },
     {
