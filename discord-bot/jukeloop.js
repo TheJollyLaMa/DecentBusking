@@ -270,6 +270,8 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
     includesCurrentSong: false,
     ...(session._lastMainRadioAdSkip ? { lastSkip: { ...session._lastMainRadioAdSkip } } : {}),
   };
+  // Skips recorded during this call must be reported, not the snapshot taken above.
+  const latestSkip = () => (session._lastMainRadioAdSkip ? { lastSkip: { ...session._lastMainRadioAdSkip } } : {});
 
   if (session._currentDevertAd) {
     const audible = session._nowPlaying?.audible === true;
@@ -284,7 +286,7 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
     };
   }
 
-  const queuedAd = session._preparedDevertAd || session._pendingDevertAds[0] || null;
+  const queuedAd = session._preparedDevertAd || session._pendingDevertAds?.[0] || null;
   if (queuedAd) {
     return {
       ...summary,
@@ -350,6 +352,7 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
     if (session._setMainRadioAdSkip) session._setMainRadioAdSkip(lowGas ? 'worker gas low' : 'main-radio scheduler unavailable', null);
     return {
       ...summary,
+      ...latestSkip(),
       status: 'unavailable',
       reason: lowGas ? 'worker gas low' : 'main-radio scheduler unavailable',
     };
@@ -367,6 +370,7 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
     if (session._setMainRadioAdSkip) session._setMainRadioAdSkip('no eligible campaign available', null);
     return {
       ...summary,
+      ...latestSkip(),
       status: 'none',
       reason: 'no eligible campaign available',
       remainingSongs: 0,

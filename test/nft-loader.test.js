@@ -169,7 +169,11 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   };
   const close = {};
   const elements = { 'nft-panel': panel, 'nft-panel-content': content, 'nft-panel-close': close };
+  const { canEditArtwork } = await import(pathToFileURL(path.join(__dirname, '../js/artwork-update.mjs')).href);
+  const { PENCIL_ICON } = await import(pathToFileURL(path.join(__dirname, '../js/artwork-edit-badge.mjs')).href);
   const context = vm.createContext({
+    canEditArtwork,
+    PENCIL_ICON,
     returnToRadio: () => { events.push('returnToRadio'); },
     document: {
       getElementById: (id) => elements[id],
@@ -316,7 +320,7 @@ test('artist filtering hides other artists in both the 3D scene and archive', as
   assert.equal(context._nftSpreadSeed({ tokenId: 12, contractAddress: '0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B' }), 12);
 });
 
-test('coin face clips translucent artwork to a circle and draws song, artist, and mint date', () => {
+test('coin face clips translucent artwork to a circle and draws song, artist, and mint date', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/space.js'), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/export /g, '');
   const labels = [];
@@ -334,12 +338,18 @@ test('coin face clips translucent artwork to a circle and draws song, artist, an
     constructor() { this.width = 512; this.height = 512; }
     set src(value) { this.onload(); }
   }
+  const fetched = [];
   const context = vm.createContext({ document: { createElement: () => canvas }, window: { DecentConfig: {} }, Image,
+    fetch: async (url) => { fetched.push(url); return { ok: true, headers: { get: () => 'image/png' }, arrayBuffer: async () => new ArrayBuffer(8) }; },
+    AbortSignal, Blob, Uint8Array, URL: { createObjectURL: () => 'blob:coin', revokeObjectURL() {} },
+    console: { ...console, warn() {} },
     buildIpfsGatewayUrls: () => ['https://gateway.example/ipfs/image'],
     THREE: { CanvasTexture: class { constructor(image) { this.image = image; } } } });
   vm.runInContext(source, context);
   context._makeNFTTexture({ tokenId: 12, name: 'Coin Song', artist: '0xartist',
     description: 'Shared through DecentJukebox by Alice', image: 'ipfs://image', mintedAt: '2026-10-03T00:00:00Z' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(fetched, ['https://gateway.example/ipfs/image']);
   assert.equal(canvas.width, 512);
   assert.equal(canvas.height, 512);
   assert.ok(arcs.some((args) => args[0] === 256 && args[1] === 256 && args[2] === 246));

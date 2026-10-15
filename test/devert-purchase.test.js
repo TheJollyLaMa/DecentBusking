@@ -39,7 +39,12 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.doesNotMatch(html, /id="devert-mute-ads"|id="devert-listen-radio"|id="devert-listen-ads"/);
   assert.equal((html.match(/id="devert-max-payment"/g) || []).length, 0);
   const panel = fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8');
-  assert.match(panel, /from '\.\/radio-sync\.js\?v=20261014-worker-gas'/);
+  // Every importer must share one radio-sync URL, or browsers load two copies with separate radio state.
+  const radioSyncTags = new Set(fs.readdirSync(path.join(__dirname, '../js'))
+    .filter(name => /\.m?js$/.test(name))
+    .flatMap(name => [...fs.readFileSync(path.join(__dirname, '../js', name), 'utf8').matchAll(/\.\/radio-sync\.js(\?v=[^'"]*)?['"]/g)].map(match => match[1] || '')));
+  assert.match(panel, /from '\.\/radio-sync\.js\?v=[^']+'/);
+  assert.equal(radioSyncTags.size, 1, `radio-sync.js imported with mixed cache tags: ${[...radioSyncTags].join(', ')}`);
   assert.match(panel, /document\.addEventListener\('wallet-connected', refresh\)/);
   assert.match(panel, /adMediaStatus\.textContent = 'Submitted for review\.';\s*await refresh\(\)/);
   assert.match(panel, /scanPending \? 3_000 : 30_000/);

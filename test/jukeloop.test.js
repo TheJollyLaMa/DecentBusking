@@ -676,7 +676,15 @@ test('JukeLoop restores a queued main-radio ad after restart and surfaces the la
     const prepared = await session._prepareNextPlayback();
     assert.equal(prepared.devertAd.campaignId, '7');
     assert.equal(prepared.track.trackId, 'devert:7');
-    assert.ok(saved.length > 0);
+    assert.equal(saved.length, 0, 'preparing a restored ad does not change the journal');
+
+    session.player.play = () => {};
+    assert.equal(session._startPrepared(prepared), true);
+    await session._mainRadioAdStateSaveTask;
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].preparedDevertAd, null, 'a started ad is cleared so a restart does not replay it');
+    assert.deepEqual(saved[0].pendingDevertAds.map(ad => ad.campaignId), ['8']);
+    assert.equal(saved[0].lastSkip.reason, 'ad file could not be fetched');
   } finally {
     session.destroy();
   }
