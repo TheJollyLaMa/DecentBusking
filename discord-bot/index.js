@@ -34,7 +34,7 @@ import http from 'http';
 import fs from 'node:fs';
 import { Contract, Interface, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
-import { DEFAULT_DAILY_CU_SOFT_LIMIT, baseRpcEndpointsFromEnv, createRpcRouter } from './rpc-router.js';
+import { BUDGET_MODES, DEFAULT_MONTHLY_CU_BUDGET, baseRpcEndpointsFromEnv, createRpcRouter } from './rpc-router.js';
 import { createFundLedger } from './fund-ledger.js';
 import { createWeeklyPayflow, findBlockAtOrBefore, readClosingFundBalance } from './weekly-payflow.js';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
@@ -206,13 +206,34 @@ async function runWeeklyPlayReport(client, config) {
   console.log(`[weekly-play-report] Posted ${previousWeek}: ${report.totalPlays} qualifying plays.`);
 }
 
+// Background pollers slow down when the Alchemy budget is tight; user-facing and transaction paths are unaffected.
+const BUDGET_POLL_FLOOR_MS = { [BUDGET_MODES.conserve]: 3 * 60_000, [BUDGET_MODES.criticalOnly]: 5 * 60_000, [BUDGET_MODES.exhausted]: 5 * 60_000 };
+function budgetPaced(task) {
+  let lastRun = 0;
+  return () => {
+    const floor = BUDGET_POLL_FLOOR_MS[getRpcRouter().mode()] || 0;
+    if (Date.now() - lastRun < floor) return undefined;
+    lastRun = Date.now();
+    return task();
+  };
+}
+
 let _rpcRouter = null;
+let flushRpcUsage = async () => {};
 function getRpcRouter() {
   if (!_rpcRouter) {
     const assets = JSON.parse(fs.readFileSync(new URL('../payroll-assets.json', import.meta.url), 'utf8'));
     const { publicUrls, paidUrls } = baseRpcEndpointsFromEnv(process.env, assets);
-    const softLimit = Number(process.env.ALCHEMY_DAILY_CU_SOFT_LIMIT || 0);
-    _rpcRouter = createRpcRouter({ chainId: 8453, publicUrls, paidUrls, dailyCuSoftLimit: softLimit > 0 ? softLimit : DEFAULT_DAILY_CU_SOFT_LIMIT });
+    const monthlyBudget = Number(process.env.ALCHEMY_MONTHLY_CU_BUDGET || 0);
+    const reserveFraction = Number(process.env.ALCHEMY_CU_RESERVE_FRACTION);
+    const dailySoftLimit = Number(process.env.ALCHEMY_DAILY_CU_SOFT_LIMIT || 0);
+    _rpcRouter = createRpcRouter({
+      chainId: 8453, publicUrls, paidUrls,
+      monthlyCuBudget: paidUrls.length ? (monthlyBudget > 0 ? monthlyBudget : DEFAULT_MONTHLY_CU_BUDGET) : Infinity,
+      ...(process.env.ALCHEMY_CU_RESERVE_FRACTION && reserveFraction >= 0 && reserveFraction < 1 ? { reserveFraction } : {}),
+      ...(dailySoftLimit > 0 ? { dailyCuSoftLimit: dailySoftLimit } : {}),
+      onModeChange: (mode, previous) => console.warn(`[rpc] Alchemy budget mode ${previous} -> ${mode}`),
+    });
     if (!paidUrls.length) console.warn('[rpc] No paid Base RPC configured (ALCHEMY_BASE_URL); using public endpoints only.');
   }
   return _rpcRouter;
@@ -709,6 +730,33 @@ async function main() {
     return completedTrack;
   };
 
+  // Alchemy spend survives restarts so monthly budget pacing stays honest.
+  const rpcUsageStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+    uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+    name: 'decentbusking-rpc-usage.json', tags: { app: 'decentbusking', kind: 'rpc-usage', schema: '1' },
+    retainSnapshots: 2, serialize: value => value, deserialize: value => value }) : null;
+  if (rpcUsageStore) {
+    let lastSavedUsage = '';
+    let usageRestored = false;
+    const saveRpcUsage = async () => {
+      if (!usageRestored) return; // never overwrite the month's total with only post-boot spend
+      const snapshot = getRpcRouter().usageSnapshot();
+      const key = JSON.stringify(snapshot);
+      if (key === lastSavedUsage || !snapshot.month) return;
+      await rpcUsageStore.save(snapshot);
+      lastSavedUsage = key;
+    };
+    flushRpcUsage = () => saveRpcUsage().catch(error => console.warn('[rpc] Usage save failed:', error.message));
+    const restoreRpcUsage = () => rpcUsageStore.restore()
+      .then(snapshot => {
+        usageRestored = true;
+        if (getRpcRouter().restoreUsage(snapshot)) console.log(`[rpc] Restored Alchemy usage: ${snapshot.monthCu} CU this month.`);
+      })
+      .catch(error => console.warn('[rpc] Usage restore failed; will retry:', error.message));
+    restoreRpcUsage();
+    setInterval(() => (usageRestored ? flushRpcUsage() : restoreRpcUsage()), 15 * 60_000).unref();
+  }
+
   const payrollAssets = JSON.parse(fs.readFileSync(new URL('../payroll-assets.json', import.meta.url), 'utf8'));
   const paymentStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
@@ -753,7 +801,7 @@ async function main() {
     return paymentLedgerTask;
   };
   comparePayments();
-  setInterval(comparePayments, 15_000).unref();
+  setInterval(budgetPaced(comparePayments), 15_000).unref();
 
   const payflowStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
@@ -797,7 +845,7 @@ async function main() {
       .finally(() => { payflowTask = null; });
     return payflowTask;
   };
-  setInterval(refreshPayflow, 15_000).unref();
+  setInterval(budgetPaced(refreshPayflow), 15_000).unref();
 
   const fundStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
@@ -825,7 +873,7 @@ async function main() {
       .finally(() => { fundLedgerTask = null; });
     return fundLedgerTask;
   };
-  setInterval(refreshFundLedger, 60_000).unref();
+  setInterval(budgetPaced(refreshFundLedger), 60_000).unref();
   refreshFundLedger();
   const earningsStore = config.pinataJwt ? createPinataStateStore({
     pinataJwt: config.pinataJwt,
@@ -855,7 +903,7 @@ async function main() {
       .finally(() => { earningsLedgerTask = null; });
     return earningsLedgerTask;
   };
-  setInterval(refreshEarningsLedger, 60_000).unref();
+  setInterval(budgetPaced(refreshEarningsLedger), 60_000).unref();
   refreshEarningsLedger();
 
   const djukeAddress = process.env.DJUKE_CONTRACT_ADDRESS;
@@ -882,7 +930,7 @@ async function main() {
   };
   if (readDevertState && readDjukeState && _devertSchedulerContract) {
     setTimeout(syncDevertDjukeBoosts, 30_000).unref();
-    setInterval(syncDevertDjukeBoosts, 60_000).unref();
+    setInterval(budgetPaced(syncDevertDjukeBoosts), 60_000).unref();
   }
   if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY) {
     const worker = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-registrar'));
@@ -890,7 +938,7 @@ async function main() {
       getPlaylist: () => (playlistReady ? getPlaylist() : []), onRegistered: songIds => readDjukeState.invalidate(songIds) });
     const runRegistrar = () => registerSongs().catch(error => console.warn('[djuke] Song registration deferred:', error.shortMessage || error.message));
     setTimeout(runRegistrar, 30_000).unref();
-    setInterval(runRegistrar, 120_000).unref();
+    setInterval(budgetPaced(runRegistrar), 120_000).unref();
   }
   if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY && checkpointMirror && config.pinataJwt) {
     const fulfiller = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-fulfiller'));
@@ -1344,7 +1392,7 @@ async function main() {
 
   const shutdown = async (signal) => {
     console.log(`[jukebox-bot] ${signal} received; flushing IPFS state checkpoint.`);
-    await waitForRemotePersistence();
+    await Promise.all([waitForRemotePersistence(), Promise.race([flushRpcUsage(), new Promise(resolve => setTimeout(resolve, 5000))])]);
     client.destroy();
     process.exit(0);
   };

@@ -24,7 +24,8 @@ test('env endpoints: Alchemy overrides become the paid tier and public URLs stay
   const assets = { rpcUrl: 'https://base-rpc.publicnode.com', rpcFallbackUrls: ['https://mainnet.base.org'] };
   const { publicUrls, paidUrls } = baseRpcEndpointsFromEnv({ BASE_RPC_URL: PAID, BASE_LOGS_RPC_URL: PAID, PAYROLL_ARCHIVE_RPC_URL: PUBLIC }, assets);
   assert.deepEqual(paidUrls, [PAID]);
-  assert.deepEqual(publicUrls, ['https://base-rpc.publicnode.com', 'https://mainnet.base.org', 'https://base.drpc.org']);
+  assert.deepEqual(publicUrls, ['https://base-rpc.publicnode.com', 'https://mainnet.base.org', 'https://base.gateway.tenderly.co',
+    'https://base-mainnet.public.blastapi.io', 'https://base.drpc.org']);
   assert.deepEqual(baseRpcEndpointsFromEnv({ BASE_PUBLIC_RPC_URLS: 'https://a.example, https://b.example' }).publicUrls,
     ['https://a.example', 'https://b.example']);
 });
@@ -155,4 +156,116 @@ test('range errors delivered with non-200 HTTP status still trigger splitting', 
   const router = createRpcRouter({ publicUrls: [PUBLIC], fetchImpl });
   const outcome = await router.request('logs', 'eth_getLogs', [{ fromBlock: '0x0', toBlock: '0x4e1f' }]);
   assert.equal(outcome.result.length, 2);
+});
+
+test('monthly budget paces spending: conserve when ahead of pace, critical-only after the spendable share', async () => {
+  const { createRpcRouter, BUDGET_MODES } = await import(moduleUrl);
+  const time = Date.UTC(2026, 9, 24, 12); // Oct 24 — the last week of the month
+  const { fetchImpl, calls } = mockFetch({ [PUBLIC]: () => ({ result: [] }), [PAID]: () => ({ result: '0x1' }) });
+  const modes = [];
+  const make = monthCu => createRpcRouter({ publicUrls: [PUBLIC], paidUrls: [PAID], fetchImpl, now: () => time,
+    monthlyCuBudget: 1_000_000, initialUsage: { month: '2026-10', monthCu }, onModeChange: (mode, previous) => modes.push([previous, mode]) });
+
+  assert.equal(make(500_000).mode(), BUDGET_MODES.normal);
+  const conserving = make(800_000);
+  assert.equal(conserving.mode(), BUDGET_MODES.conserve);
+  await conserving.request('logs', 'eth_getLogs', [{ fromBlock: '0x0', toBlock: '0x7d0' }]);
+  assert.equal(calls.at(-1).url, PUBLIC, 'backfills go public-first while conserving');
+  await conserving.request('critical', 'eth_sendRawTransaction', ['0x01']);
+  assert.equal(calls.at(-1).url, PAID, 'transactions stay on the paid tier');
+
+  const reserved = make(950_000);
+  assert.equal(reserved.mode(), BUDGET_MODES.criticalOnly);
+  calls.length = 0;
+  const publicDown = mockFetch({ [PUBLIC]: () => ({ status: 429 }), [PAID]: () => ({ result: '0x1' }) });
+  const reservedDown = createRpcRouter({ publicUrls: [PUBLIC], paidUrls: [PAID], fetchImpl: publicDown.fetchImpl, now: () => time,
+    monthlyCuBudget: 1_000_000, initialUsage: { month: '2026-10', monthCu: 950_000 } });
+  await assert.rejects(reservedDown.request('read', 'eth_call', [{ to: '0x1' }, 'latest']), /HTTP 429/);
+  assert.deepEqual(publicDown.calls.map(call => call.url), [PUBLIC], 'reads never touch the reserve');
+  assert.deepEqual(await reservedDown.request('critical', 'eth_sendRawTransaction', ['0x02']), { result: '0x1' });
+
+  assert.equal(make(1_000_000).mode(), BUDGET_MODES.exhausted);
+  const health = make(800_000).health().budget;
+  assert.equal(health.mode, BUDGET_MODES.conserve);
+  assert.equal(health.reserve, 100_000);
+  assert.ok(health.projectedMonthCu > 1_000_000);
+});
+
+test('usage from a previous month is ignored and snapshots round-trip', async () => {
+  const { createRpcRouter, BUDGET_MODES } = await import(moduleUrl);
+  const time = Date.UTC(2026, 10, 1, 1);
+  const { fetchImpl } = mockFetch({ [PAID]: () => ({ result: '0x1' }) });
+  const router = createRpcRouter({ paidUrls: [PAID], fetchImpl, now: () => time, monthlyCuBudget: 1_000_000,
+    initialUsage: { month: '2026-10', monthCu: 2_000_000 } });
+  assert.equal(router.mode(), BUDGET_MODES.normal);
+  await router.request('critical', 'eth_call', [{ to: '0x1' }, 'latest']);
+  assert.deepEqual(router.usageSnapshot(), { month: '2026-11', monthCu: 26, day: '2026-11-01', dayCu: 26 });
+});
+
+test('an Alchemy spending-cap refusal switches to public-only until the probe window passes', async () => {
+  const { createRpcRouter, BUDGET_MODES } = await import(moduleUrl);
+  let time = Date.UTC(2026, 9, 27);
+  let capped = true;
+  const { fetchImpl, calls } = mockFetch({
+    [PAID]: () => (capped ? { status: 429, error: undefined } : { result: '0xpaid' }),
+    [PUBLIC]: () => ({ result: '0xpublic' }),
+  });
+  const paidCap = async (url, init) => {
+    if (url === PAID && capped) {
+      calls.push({ url });
+      return { ok: false, status: 429, json: async () => ({ error: { code: 429, message: 'Monthly capacity limit exceeded. Upgrade your scaling policy.' } }) };
+    }
+    return fetchImpl(url, init);
+  };
+  const router = createRpcRouter({ publicUrls: [PUBLIC], paidUrls: [PAID], fetchImpl: paidCap, now: () => time });
+  assert.deepEqual(await router.request('critical', 'eth_sendRawTransaction', ['0x03']), { result: '0xpublic' });
+  assert.equal(router.mode(), BUDGET_MODES.exhausted);
+  calls.length = 0;
+  await router.request('critical', 'eth_sendRawTransaction', ['0x04']);
+  assert.deepEqual(calls.map(call => call.url), [PUBLIC]);
+  time += 31 * 60_000;
+  capped = false;
+  assert.equal(router.mode(), BUDGET_MODES.normal);
+  assert.deepEqual(await router.request('critical', 'eth_sendRawTransaction', ['0x05']), { result: '0xpaid' });
+});
+
+test('free-tier "archive" refusals skip the endpoint without tripping its breaker', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  const OTHER = 'https://base.gateway.tenderly.co';
+  const fetchImpl = async (url, init) => {
+    const { id } = JSON.parse(init.body);
+    if (url === PUBLIC) return { ok: false, status: 403, json: async () => ({ id, error: { code: -32602, message: 'Archive requests require a personal token.' } }) };
+    return { ok: true, status: 200, json: async () => ({ id, result: [] }) };
+  };
+  const router = createRpcRouter({ publicUrls: [PUBLIC, OTHER], fetchImpl });
+  await router.request('logs', 'eth_getLogs', [{ fromBlock: '0x0', toBlock: '0x10' }]);
+  const endpoint = router.health().endpoints.find(entry => entry.label.includes('mainnet.base.org'));
+  assert.equal(endpoint.breaker.open, false);
+  assert.equal(endpoint.rateLimited, 0);
+});
+
+test('read-tier eth_call results are cached briefly, longer while conserving', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  let time = Date.UTC(2026, 9, 2);
+  const { fetchImpl, calls } = mockFetch({ [PUBLIC]: () => ({ result: '0x1' }) });
+  const router = createRpcRouter({ publicUrls: [PUBLIC], fetchImpl, now: () => time });
+  await router.request('read', 'eth_call', [{ to: '0x1' }, 'latest']);
+  await router.request('read', 'eth_call', [{ to: '0x1' }, 'latest']);
+  assert.equal(calls.length, 1);
+  await router.request('critical', 'eth_call', [{ to: '0x1' }, 'latest']);
+  assert.equal(calls.length, 2, 'critical reads are never served from cache');
+  time += 11_000;
+  await router.request('read', 'eth_call', [{ to: '0x1' }, 'latest']);
+  assert.equal(calls.length, 3);
+});
+
+test('restoreUsage adds pre-restart spend to post-boot spend for the current month only', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  const time = Date.UTC(2026, 9, 20, 6);
+  const { fetchImpl } = mockFetch({ [PAID]: () => ({ result: '0x1' }) });
+  const router = createRpcRouter({ paidUrls: [PAID], fetchImpl, now: () => time, monthlyCuBudget: 1_000_000 });
+  await router.request('critical', 'eth_call', [{ to: '0x1' }, 'latest']);
+  assert.equal(router.restoreUsage({ month: '2026-09', monthCu: 999_999 }), false);
+  assert.equal(router.restoreUsage({ month: '2026-10', monthCu: 700_000, day: '2026-10-20', dayCu: 40_000 }), true);
+  assert.deepEqual(router.usageSnapshot(), { month: '2026-10', monthCu: 700_026, day: '2026-10-20', dayCu: 40_026 });
 });
