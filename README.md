@@ -104,6 +104,10 @@ npx serve .
 
 The static dapp can be explored without a wallet. Connect MetaMask on Base for wallet features. Local IPFS upload can use Kubo/IPFS Desktop; production uploads use the Render service and Pinata.
 
+### Base RPC
+
+Browsers read Base from free public RPCs and only fall back to the worker's read-only `POST /api/rpc` proxy when those are rate-limited. Fund breakdowns and creator earnings come from the worker's indexes (`/api/funds`, `/api/earnings/:address`), not browser log scans. The worker keeps the paid (Alchemy) URLs in Render env vars only, paces them against a monthly compute-unit budget and falls back to public endpoints when that runs low; see `discord-bot/.env.example` and `GET /api/rpc-health`. Never put RPC keys in `decent.config.js`.
+
 ## Links
 
 - [Listen in the DecentBusking town square](https://thejollylama.github.io/DecentBusking/)
