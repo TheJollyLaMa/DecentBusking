@@ -157,10 +157,26 @@
   </dialog>
 
   <div id="artist-filter-bar" role="group" aria-label="Filter NFTs by artist">
-    <label for="scene-artist-filter">Artist</label>
-    <select id="scene-artist-filter"><option value="">All artists</option></select>
-    <span id="artist-filter-count" aria-live="polite"></span>
+    <button id="dbusk-top10-button" class="fund-header-pill fund-header-left" type="button" disabled>🏆 Top 10 fund · Loading…</button>
+    <div class="artist-filter-core">
+      <label for="scene-artist-filter">Artist</label>
+      <select id="scene-artist-filter"><option value="">All artists</option></select>
+      <span id="artist-filter-count" aria-live="polite"></span>
+    </div>
+    <button id="dbusk-playback-button" class="fund-header-pill fund-header-right" type="button" disabled>🎧 Playback fund this week · Loading…</button>
   </div>
+
+  <dialog id="fund-breakdown-dialog" aria-labelledby="fund-breakdown-title">
+    <div class="fund-breakdown-shell">
+      <div class="fund-breakdown-heading">
+        <h3 id="fund-breakdown-title">Fund breakdown</h3>
+        <button id="fund-breakdown-close" type="button" aria-label="Close fund breakdown">×</button>
+      </div>
+      <p id="fund-breakdown-summary"></p>
+      <p id="fund-breakdown-note" role="status" aria-live="polite"></p>
+      <div id="fund-breakdown-body"></div>
+    </div>
+  </dialog>
 
   <!-- MAIN STAGE -->
   <main id="stage">
@@ -708,6 +724,7 @@
   <script type="module" src="js/payroll.js?v=20261014-batch-payouts"></script>
   <script type="module" src="js/radio-history.js?v=20261008-funding-shares"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261010-public-calendar"></script>
+  <script type="module" src="js/fund-header.mjs?v=20261015-fund-breakdown"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261014-funds"></script>
   <script type="module" src="js/djuke.mjs?v=20261014-celebrate"></script>
   <script type="module" src="js/devert-tab.mjs?v=20261014-upload-resilience"></script>
