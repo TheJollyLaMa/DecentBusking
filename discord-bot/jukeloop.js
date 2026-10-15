@@ -63,6 +63,9 @@ const FADE_IN_SECONDS = 0.6;
 const NEXT_TRACK_READY_TIMEOUT_MS = 20_000;
 const DJUKE_PREFETCH_POLL_MS = 5_000;
 const PAID_FETCH_RETRY_MS = 60_000;
+const MAIN_RADIO_STATE_SCHEMA_VERSION = 1;
+const MAIN_RADIO_FAILED_CAMPAIGN_SONGS = DEVERT_SONGS_PER_MAIN_AD;
+const MAIN_RADIO_FAILED_CAMPAIGN_MS = 10 * 60_000;
 
 // How long to wait before retrying when the playlist is empty (ms).
 const EMPTY_PLAYLIST_RETRY_MS = 60_000;
@@ -112,6 +115,53 @@ function formatUsdcUnits(units) {
   const value = BigInt(units || '0');
   const fraction = (value % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
   return `${value / 1_000_000n}${fraction ? `.${fraction}` : ''}`;
+}
+
+function normalizeMainRadioAd(ad) {
+  if (!ad || typeof ad !== 'object') return null;
+  if (!/^\d+$/.test(String(ad.campaignId)) || typeof ad.mainRadio !== 'boolean' || !ad.track || typeof ad.track.trackId !== 'string') {
+    throw new Error('Invalid DeVert main-radio ad journal entry');
+  }
+  return {
+    campaignId: String(ad.campaignId),
+    mainRadio: ad.mainRadio === true,
+    track: structuredClone(ad.track),
+  };
+}
+
+function validateMainRadioAdState(value) {
+  if (!value || value.schemaVersion !== MAIN_RADIO_STATE_SCHEMA_VERSION ||
+    !Number.isSafeInteger(value.musicSinceAd) || value.musicSinceAd < 0 ||
+    !Number.isSafeInteger(value.musicPlayCount) || value.musicPlayCount < 0 ||
+    !Array.isArray(value.pendingDevertAds) || !Array.isArray(value.failedDevertCampaigns)) {
+    throw new Error('Invalid DeVert main-radio ad journal');
+  }
+  return structuredClone({
+    schemaVersion: MAIN_RADIO_STATE_SCHEMA_VERSION,
+    musicSinceAd: value.musicSinceAd,
+    musicPlayCount: value.musicPlayCount,
+    preparedDevertAd: value.preparedDevertAd ? normalizeMainRadioAd(value.preparedDevertAd) : null,
+    pendingDevertAds: value.pendingDevertAds.map(normalizeMainRadioAd),
+    failedDevertCampaigns: value.failedDevertCampaigns.map(entry => {
+      if (!entry || !/^\d+$/.test(String(entry.campaignId)) ||
+        !Number.isSafeInteger(entry.failedAt) || entry.failedAt < 0 ||
+        !Number.isSafeInteger(entry.musicPlayCount) || entry.musicPlayCount < 0) {
+        throw new Error('Invalid DeVert main-radio failure journal entry');
+      }
+      return {
+        campaignId: String(entry.campaignId),
+        failedAt: entry.failedAt,
+        musicPlayCount: entry.musicPlayCount,
+      };
+    }),
+    lastSkip: value.lastSkip && typeof value.lastSkip === 'object'
+      ? {
+          reason: typeof value.lastSkip.reason === 'string' ? value.lastSkip.reason : '',
+          campaignId: value.lastSkip.campaignId ? String(value.lastSkip.campaignId) : null,
+          at: Number.isSafeInteger(value.lastSkip.at) && value.lastSkip.at >= 0 ? value.lastSkip.at : 0,
+        }
+      : null,
+  });
 }
 
 /** Build a gateway URL for a raw IPFS CID. */
@@ -218,6 +268,7 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
       window: activeShow.window || '',
     },
     includesCurrentSong: false,
+    ...(session._lastMainRadioAdSkip ? { lastSkip: { ...session._lastMainRadioAdSkip } } : {}),
   };
 
   if (session._currentDevertAd) {
@@ -227,6 +278,19 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
       status: audible ? 'playing' : 'up_next',
       campaignId: String(session._currentDevertAd.campaignId),
       title: session._currentDevertAd.track?.title || 'Main radio advert',
+      mainRadio: true,
+      remainingSongs: 0,
+      includesCurrentSong: false,
+    };
+  }
+
+  const queuedAd = session._preparedDevertAd || session._pendingDevertAds[0] || null;
+  if (queuedAd) {
+    return {
+      ...summary,
+      status: 'up_next',
+      campaignId: String(queuedAd.campaignId),
+      title: queuedAd.track?.title || 'Main radio advert',
       mainRadio: true,
       remainingSongs: 0,
       includesCurrentSong: false,
@@ -277,12 +341,13 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
   let nextAd = null;
   try {
     nextAd = await session.devertPlayback.nextMainRadioAd({
-      excludeCampaignIds: [...session._failedDevertCampaignIds],
+      excludeCampaignIds: session._getActiveFailedDevertCampaignIds ? session._getActiveFailedDevertCampaignIds() : [],
       count: 1,
     });
   } catch (error) {
     const lowGas = error?.code === 'INSUFFICIENT_FUNDS' || /insufficient funds/i.test(error?.shortMessage || error?.message || '');
     if (!lowGas) console.warn('[devert] Main radio ad lookup failed:', error?.message || error);
+    if (session._setMainRadioAdSkip) session._setMainRadioAdSkip(lowGas ? 'worker gas low' : 'main-radio scheduler unavailable', null);
     return {
       ...summary,
       status: 'unavailable',
@@ -292,6 +357,14 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
 
   const campaign = Array.isArray(nextAd) ? nextAd[0] : nextAd;
   if (!campaign) {
+    if (session._lastMainRadioAdSkip?.reason === 'selection deferred') {
+      return {
+        ...summary,
+        status: 'unavailable',
+        reason: 'main-radio scheduler unavailable',
+      };
+    }
+    if (session._setMainRadioAdSkip) session._setMainRadioAdSkip('no eligible campaign available', null);
     return {
       ...summary,
       status: 'none',
@@ -559,7 +632,7 @@ export class JukeLoopSession {
     * @param {() => void} [opts.onTerminalDisconnect] - Called after Discord voice recovery fails
    */
     constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback,
-      schedule, livePerformanceEvents, audioPlayer, createStream }) {
+      schedule, livePerformanceEvents, audioPlayer, createStream, mainRadioAdStateStore, restoreMainRadioAdState, saveMainRadioAdState }) {
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
@@ -567,10 +640,19 @@ export class JukeLoopSession {
     this.onTerminalDisconnect = onTerminalDisconnect;
     this.djuke        = djuke || null;
     this.devertPlayback = devertPlayback || null;
+    this._mainRadioAdStateStore = mainRadioAdStateStore || null;
+    this._restoreMainRadioAdState = restoreMainRadioAdState || this._mainRadioAdStateStore?.restore || null;
+    this._saveMainRadioAdState = saveMainRadioAdState || this._mainRadioAdStateStore?.save || null;
+    this._mainRadioAdStateReady = !this._restoreMainRadioAdState;
+    this._mainRadioAdStateLoadTask = null;
+    this._mainRadioAdStateSaveTask = Promise.resolve();
     this._musicSinceAd = 0;
+    this._musicPlayCount = 0;
     this._currentDevertAd = null;
+    this._preparedDevertAd = null;
     this._pendingDevertAds = [];
-    this._failedDevertCampaignIds = new Set();
+    this._failedDevertCampaigns = new Map();
+    this._lastMainRadioAdSkip = null;
     this.schedule     = Array.isArray(schedule) ? schedule : defaultRadioSchedule();
     this.livePerformanceEvents = Array.isArray(livePerformanceEvents) ? livePerformanceEvents : [];
     this._liveEventId = null;
@@ -629,8 +711,15 @@ export class JukeLoopSession {
           firstWeekBonus: this._nowPlaying.firstWeekBonus,
           announcementId: this._announcementMsg?.id,
         };
-        if (this._currentDevertAd) this._musicSinceAd = 0;
-        else if (this._completedPlay.audibleMs >= 30_000) this._musicSinceAd++;
+        if (this._currentDevertAd) {
+          this._musicSinceAd = 0;
+          this._musicPlayCount++;
+          this._persistMainRadioAdState();
+        } else if (this._completedPlay.audibleMs >= 30_000) {
+          this._musicSinceAd++;
+          this._musicPlayCount++;
+          this._persistMainRadioAdState();
+        }
         if (this.devertPlayback) {
           const durableRecord = this._currentDevertAd
             ? this.devertPlayback.recordCampaignImpression({ campaignId: this._currentDevertAd.campaignId,
@@ -661,7 +750,7 @@ export class JukeLoopSession {
     this.player.on('error', (err) => {
       console.error('[jukeloop] Audio player error:', err.message);
       if (this._currentDevertAd) {
-        this._failedDevertCampaignIds.add(this._currentDevertAd.campaignId);
+        this._recordMainRadioAdFailure(this._currentDevertAd.campaignId, 'audio player error');
         this._currentDevertAd = null;
         this._nowPlaying = null;
         this._completedPlay = null;
@@ -670,6 +759,8 @@ export class JukeLoopSession {
         this._announcementContext = null;
       }
       this._pendingDevertAds = [];
+      this._preparedDevertAd = null;
+      this._persistMainRadioAdState();
       if (this._ffmpeg) {
         try { this._ffmpeg.kill(); } catch {}
         this._ffmpeg = null;
@@ -707,6 +798,7 @@ export class JukeLoopSession {
   async start() {
     if (this._destroyed) return;
     this._started = true;
+    await this._ensureMainRadioAdState();
     this._syncScheduledShow({ requestPlayback: false });
     this._scheduleWatcher = setInterval(() => this._syncScheduledShow(), 1_000);
     this._scheduleWatcher.unref?.();
@@ -831,6 +923,7 @@ export class JukeLoopSession {
 
   async _prepareNextPlayback(forcedPaid = null) {
     if (this._destroyed) return null;
+    await this._ensureMainRadioAdState();
     const activeShow = resolveActiveShow({
       now: Date.now(),
       schedule: this.schedule,
@@ -849,16 +942,30 @@ export class JukeLoopSession {
     }
 
     let devertAd = null;
-    if (!paid && this._pendingDevertAds.length) {
-      devertAd = this._pendingDevertAds.shift();
+    let selectionDeferred = false;
+    if (!paid && this._preparedDevertAd) {
+      devertAd = this._preparedDevertAd;
+    } else if (!paid && this._pendingDevertAds.length) {
+      this._preparedDevertAd = this._pendingDevertAds.shift();
+      devertAd = this._preparedDevertAd;
+      this._persistMainRadioAdState();
     } else if (!paid && this.devertPlayback && this._musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD && activeShow.type !== 'weekly_top10') {
       const ads = await this.devertPlayback.nextMainRadioAd({
-        excludeCampaignIds: [...this._failedDevertCampaignIds],
+        excludeCampaignIds: this._getActiveFailedDevertCampaignIds(),
         count: 2,
-      }).catch(error => { console.warn('[devert] Main-radio ad selection deferred:', error.message); return null; });
+      }).catch(error => {
+        selectionDeferred = true;
+        this._setMainRadioAdSkip('selection deferred', null);
+        console.warn('[devert] Main-radio ad selection deferred:', error.message);
+        return null;
+      });
       const selectedAds = Array.isArray(ads) ? ads : ads ? [ads] : [];
       if (selectedAds.length) {
-        [devertAd, ...this._pendingDevertAds] = selectedAds;
+        [this._preparedDevertAd, ...this._pendingDevertAds] = selectedAds;
+        devertAd = this._preparedDevertAd;
+        this._persistMainRadioAdState();
+      } else {
+        this._setMainRadioAdSkip('no eligible campaign available', null);
       }
     }
 
@@ -885,7 +992,11 @@ export class JukeLoopSession {
     const url = await this._getFreshUrl(track);
     if (!url) {
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
-      if (devertAd) this._failedDevertCampaignIds.add(devertAd.campaignId);
+      if (devertAd) {
+        this._recordMainRadioAdFailure(devertAd.campaignId, 'ad file could not be fetched');
+        this._preparedDevertAd = null;
+        this._persistMainRadioAdState();
+      }
       const skipNoticeKey = paid ? `paid:${paid.record.requestId}` : null;
       if (!skipNoticeKey || !this._paidFetchNotices.has(skipNoticeKey)) {
         if (skipNoticeKey) this._paidFetchNotices.add(skipNoticeKey);
@@ -930,7 +1041,9 @@ export class JukeLoopSession {
     } catch (err) {
       console.error('[jukeloop] Failed to prepare track:', err.message);
       if (devertAd) {
-        this._failedDevertCampaignIds.add(devertAd.campaignId);
+        this._recordMainRadioAdFailure(devertAd.campaignId, err.message || 'ad playback failed');
+        this._preparedDevertAd = null;
+        this._persistMainRadioAdState();
       }
       await this.textChannel
         .send({ content: `⚠️ Skipping **${track.title}**: ${err.message}`, flags: MessageFlags.SuppressNotifications })
@@ -1078,7 +1191,9 @@ export class JukeLoopSession {
       title: prepared.track.title,
       uploader: prepared.track.uploader,
       filename: prepared.track.filename || null,
-      mediaType: mediaTypeFor(prepared.track.filename, prepared.track.mediaType) || (prepared.track.videoUrl ? 'video/mp4' : ''),
+      mediaType: prepared.track.videoUrl || mediaTypeFor(prepared.track.filename, prepared.track.mediaType) === 'video/mp4'
+        ? 'video/mp4'
+        : mediaTypeFor(prepared.track.filename, prepared.track.mediaType) || '',
       ...(videoUrl ? { videoUrl } : {}),
       ipfsCid: prepared.track.ipfsCid || null,
       isDevert: !!prepared.devertAd,
@@ -1100,6 +1215,10 @@ export class JukeLoopSession {
       startedAt: Date.now(),
       audible: false,
     };
+    if (prepared.devertAd) {
+      this._preparedDevertAd = null;
+      this._persistMainRadioAdState();
+    }
     this.player.play(prepared.resource);
     this._announcePrepared(prepared, playId)
       .catch(error => console.warn('[jukeloop] Now-playing announcement deferred:', error.message));
@@ -1207,7 +1326,110 @@ export class JukeLoopSession {
   }
 
   async getMainRadioAdCountdown(now = Date.now()) {
+    await this._ensureMainRadioAdState();
     return buildMainRadioAdCountdown({ session: this, now });
+  }
+
+  _ensureMainRadioAdState() {
+    if (this._mainRadioAdStateReady) return Promise.resolve();
+    if (!this._mainRadioAdStateLoadTask) {
+      this._mainRadioAdStateLoadTask = (async () => {
+        if (!this._restoreMainRadioAdState) {
+          this._mainRadioAdStateReady = true;
+          return;
+        }
+        try {
+          const restored = await this._restoreMainRadioAdState();
+          if (restored) this._applyMainRadioAdState(validateMainRadioAdState(restored));
+        } catch (error) {
+          console.warn('[devert] Main-radio ad state restore failed:', error.message);
+        } finally {
+          this._mainRadioAdStateReady = true;
+        }
+      })();
+    }
+    return this._mainRadioAdStateLoadTask;
+  }
+
+  _applyMainRadioAdState(state) {
+    this._musicSinceAd = Number.isSafeInteger(state.musicSinceAd) ? state.musicSinceAd : 0;
+    this._musicPlayCount = Number.isSafeInteger(state.musicPlayCount) ? state.musicPlayCount : 0;
+    this._preparedDevertAd = state.preparedDevertAd;
+    this._pendingDevertAds = Array.isArray(state.pendingDevertAds) ? state.pendingDevertAds : [];
+    this._failedDevertCampaigns = new Map((state.failedDevertCampaigns || []).map(entry => [String(entry.campaignId), {
+      failedAt: entry.failedAt,
+      musicPlayCount: entry.musicPlayCount,
+    }]));
+    this._lastMainRadioAdSkip = state.lastSkip || null;
+    this._pruneExpiredFailedDevertCampaigns();
+  }
+
+  _snapshotMainRadioAdState() {
+    return validateMainRadioAdState({
+      schemaVersion: MAIN_RADIO_STATE_SCHEMA_VERSION,
+      musicSinceAd: this._musicSinceAd,
+      musicPlayCount: this._musicPlayCount,
+      preparedDevertAd: this._preparedDevertAd,
+      pendingDevertAds: this._pendingDevertAds,
+      failedDevertCampaigns: [...this._failedDevertCampaigns.entries()].map(([campaignId, entry]) => ({
+        campaignId,
+        failedAt: entry.failedAt,
+        musicPlayCount: entry.musicPlayCount,
+      })),
+      lastSkip: this._lastMainRadioAdSkip,
+    });
+  }
+
+  _persistMainRadioAdState() {
+    if (!this._saveMainRadioAdState || this._destroyed) return Promise.resolve(null);
+    this._pruneExpiredFailedDevertCampaigns();
+    const snapshot = this._snapshotMainRadioAdState();
+    const next = async () => {
+      const uri = await this._saveMainRadioAdState(structuredClone(snapshot));
+      if (typeof uri !== 'string' || !uri.startsWith('ipfs://')) {
+        throw new Error('Main-radio ad state was not durably checkpointed');
+      }
+      return uri;
+    };
+    this._mainRadioAdStateSaveTask = this._mainRadioAdStateSaveTask.then(next, next)
+      .catch(error => {
+        console.warn('[devert] Main-radio ad state save failed:', error.message);
+      });
+    return this._mainRadioAdStateSaveTask;
+  }
+
+  _setMainRadioAdSkip(reason, campaignId) {
+    this._lastMainRadioAdSkip = {
+      reason,
+      campaignId: campaignId ? String(campaignId) : null,
+      at: Date.now(),
+    };
+    console.warn(`[devert] main-radio ad skipped: ${reason}${campaignId ? ` (campaign ${campaignId})` : ''}`);
+    void this._persistMainRadioAdState();
+  }
+
+  _recordMainRadioAdFailure(campaignId, reason) {
+    const key = String(campaignId);
+    this._failedDevertCampaigns.set(key, { failedAt: Date.now(), musicPlayCount: this._musicPlayCount });
+    this._setMainRadioAdSkip(reason, key);
+  }
+
+  _pruneExpiredFailedDevertCampaigns() {
+    const now = Date.now();
+    let changed = false;
+    for (const [campaignId, entry] of this._failedDevertCampaigns.entries()) {
+      if (now - entry.failedAt >= MAIN_RADIO_FAILED_CAMPAIGN_MS ||
+        this._musicPlayCount - entry.musicPlayCount >= MAIN_RADIO_FAILED_CAMPAIGN_SONGS) {
+        this._failedDevertCampaigns.delete(campaignId);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  _getActiveFailedDevertCampaignIds() {
+    this._pruneExpiredFailedDevertCampaigns();
+    return [...this._failedDevertCampaigns.keys()];
   }
 
   /** Stop all playback and disconnect from the voice channel. */
@@ -1218,6 +1440,7 @@ export class JukeLoopSession {
     this._disposePrepared(this._preparedNext, 'Radio stopped');
     this._preparedNext = null;
     this._pendingDevertAds = [];
+    this._preparedDevertAd = null;
     if (this._scheduleWatcher) {
       clearInterval(this._scheduleWatcher);
       this._scheduleWatcher = null;
