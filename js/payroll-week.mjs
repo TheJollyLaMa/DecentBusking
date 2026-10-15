@@ -29,6 +29,13 @@ export function payrollPeriodFromKey(key) {
   return { week: key, timeZone: PAYROLL_TIME_ZONE, startAt: new Date(startAt).toISOString(), endAt: new Date(endAt).toISOString() };
 }
 
+export function weekNumberFromKey(key) {
+  const zero = Date.parse('2026-10-12T00:00:00Z');
+  const weekStart = Date.parse(`${String(key || '').slice(3)}T00:00:00Z`);
+  if (!/^NY-\d{4}-\d{2}-\d{2}$/.test(key || '') || !Number.isFinite(weekStart)) throw new Error('Invalid New York payroll week');
+  return Math.max(0, Math.round((weekStart - zero) / (7 * 86400000)));
+}
+
 export function currentPayrollPeriod(now = Date.now()) {
   const local = parts(Number(now));
   const monday = new Date(Date.UTC(local.year, local.month - 1, local.day));

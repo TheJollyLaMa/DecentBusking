@@ -1,4 +1,5 @@
 import { escapeHtml, formatUsdcUnits, renderFundSourcesTable, resolveWalletLabel, renderWalletButton } from './fund-display.mjs?v=20261014-funds';
+import { weekNumberFromKey } from './payroll-week.mjs';
 
 export function rankTopTenSongs(tracks, nowPlayingId = '') {
   return tracks.filter(track => typeof track.trackId === 'string' && Number.isSafeInteger(track.votes) &&
@@ -58,7 +59,7 @@ export function initTopTenBoard() {
   }
   async function renderFundSummary(state) {
     const fund = state?.funds?.topTen;
-    if (!fund) { fundsSummary.innerHTML = '<p class="top-ten-funds-unavailable">Fund balances unavailable right now</p>'; return; }
+    if (!fund) { fundsSummary.replaceChildren(); return; }
     const prepared = await prepareFund(fund, state.sponsorAliases || {});
     fundsSummary.innerHTML = `<details class="fund-disclosure top-ten-fund-disclosure"><summary>🏆 Top 10 fund: <strong>${formatUsdcUnits(prepared.balanceUnits)} USDC</strong> · available ${formatUsdcUnits(prepared.availableUnits)} · <span>Where it comes from ▾</span></summary><div class="fund-disclosure-body">${prepared.description ? `<p class="fund-description">${escapeHtml(prepared.description)}</p>` : ''}${renderFundSourcesTable(prepared)}</div></details>`;
   }
@@ -81,7 +82,7 @@ export function initTopTenBoard() {
   };
   const render = (report, nowPlaying) => {
     const rows = topTenDisplayRows(report.tracks || [], nowPlaying);
-    header.textContent = `Top 10 Songs · ${report.week}`;
+    header.textContent = `Top 10 Songs · Week ${weekNumberFromKey(report.week)}`;
     content.replaceChildren();
     if (!rows.length) {
       content.append(el('p', 'top-ten-live', nowPlaying?.isDevert ? 'A sponsored campaign is playing between songs.' : 'No song is currently live on JukeLoop.'),
@@ -127,12 +128,12 @@ export function initTopTenBoard() {
       if (!report) { header.textContent = 'Top 10 Songs'; content.replaceChildren(el('p', 'top-ten-empty', 'Weekly song votes are not available yet.')); }
       else render(report, radio.nowPlaying);
       if (fundsResponse.ok && funds && funds.ready && !funds.lastError) await renderFundSummary(funds);
-      else fundsSummary.innerHTML = '<p class="top-ten-funds-unavailable">Fund balances unavailable right now</p>';
-      status.textContent = 'Songs ranked by New York-week net votes (upvotes minus downvotes). This is a song chart, not the artist payout ranking.';
+      else fundsSummary.replaceChildren();
+      status.textContent = '';
     } catch (error) {
       if (request !== generation || !isOpen()) return;
       status.textContent = `${error.message}. Retrying while this panel is open.`;
-      fundsSummary.innerHTML = '<p class="top-ten-funds-unavailable">Fund balances unavailable right now</p>';
+      fundsSummary.replaceChildren();
     }
     if (isOpen()) timer = setTimeout(refresh, 15000);
   }
