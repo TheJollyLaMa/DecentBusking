@@ -165,6 +165,23 @@ test('payment ledger is public but reconciliation requires an allowed origin and
   });
 });
 
+test('earnings index is public and filters entries by wallet address', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const requested = [];
+  const address = `0x${'1'.repeat(40)}`;
+  const entry = { kind: 'payroll', fundId: '0xabc', fundLabel: 'Repo dev payroll', asset: 'USDC', units: '100000', txHash: `0x${'2'.repeat(64)}`,
+    logIndex: 1, blockNumber: 123, timestamp: 456, recipient: address };
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+    getEarnings: async ({ address: wallet }) => { requested.push(wallet); return { ready: true, through: 123, entries: [entry] }; } });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/earnings/${address}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.deepEqual(await response.json(), { ready: true, through: 123, entries: [entry] });
+    assert.deepEqual(requested, [address]);
+  });
+});
+
 test('weekly payflow endpoint filters artists and New York history calendar is explicit', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const wallet = Wallet.createRandom().address;
@@ -343,29 +360,6 @@ test('worker rejects a valid signature from a non-owner wallet', async () => {
     issuedAt,
   };
   const signature = await stranger.signMessage(buildUploadAuthorizationMessage(authorization));
-  test('reviewed album import requires a fresh owner signature and returns queued counts without minting', async () => {
-    const { buildReviewedAlbumImportAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
-    const owner = Wallet.createRandom();
-    const origin = 'https://busking.example';
-    const issuedAt = new Date().toISOString();
-    let calls = 0;
-    const result = { added: 190, queued: 190, skipped: 0, checkpointUri: 'ipfs://playlist-checkpoint', minted: 0 };
-    const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address,
-      onReviewedAlbumImport: async () => { calls++; return result; } });
-    const authorization = { address: owner.address, origin, issuedAt };
-    const signature = await owner.signMessage(buildReviewedAlbumImportAuthorizationMessage(authorization));
-    await withServer(handler, async base => {
-      const request = () => fetch(`${base}/api/admin/reviewed-album-import`, { method: 'POST',
-        headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ ...authorization, signature }) });
-      const response = await request();
-      assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), result);
-      assert.equal(calls, 1);
-      assert.equal((await request()).status, 400);
-      assert.equal(calls, 1);
-    });
-  });
-
   const handler = createWorkerRequestHandler({
     allowedOrigins: [authorization.origin],
     ownerWallet: owner.address,
@@ -382,6 +376,29 @@ test('worker rejects a valid signature from a non-owner wallet', async () => {
     });
     assert.equal(response.status, 400);
     assert.match((await response.json()).error, /not from the mint owner/);
+  });
+});
+
+test('reviewed album import requires a fresh owner signature and returns queued counts without minting', async () => {
+  const { buildReviewedAlbumImportAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+  const owner = Wallet.createRandom();
+  const origin = 'https://busking.example';
+  const issuedAt = new Date().toISOString();
+  let calls = 0;
+  const result = { added: 190, queued: 190, skipped: 0, checkpointUri: 'ipfs://playlist-checkpoint', minted: 0 };
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address,
+    onReviewedAlbumImport: async () => { calls++; return result; } });
+  const authorization = { address: owner.address, origin, issuedAt };
+  const signature = await owner.signMessage(buildReviewedAlbumImportAuthorizationMessage(authorization));
+  await withServer(handler, async base => {
+    const request = () => fetch(`${base}/api/admin/reviewed-album-import`, { method: 'POST',
+      headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ ...authorization, signature }) });
+    const response = await request();
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), result);
+    assert.equal(calls, 1);
+    assert.equal((await request()).status, 400);
+    assert.equal(calls, 1);
   });
 });
 

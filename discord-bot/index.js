@@ -60,6 +60,7 @@ import { createDjukeGasQuoteReader, DJUKE_GAS_ABI } from './djuke-gas.js';
 import { createMintTransactionVerifier, createArtworkUpdateTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
 import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
+import { createEarningsLedger } from '../js/creator-earnings.mjs';
 import { createSubmissionIntake, buildWalletButtons } from './submission-intake.js';
 import { mediaTypeFor, normalizeMediaCid, MEDIA_TYPES, DISCORD_UPLOAD_MAX_BYTES, isDiscordAttachmentWithinLimit } from './media.js';
 import { shouldHandleDevertLoopSubmission } from './submission-routing.js';
@@ -810,6 +811,36 @@ async function main() {
   };
   setInterval(refreshFundLedger, 60_000).unref();
   refreshFundLedger();
+  const earningsStore = config.pinataJwt ? createPinataStateStore({
+    pinataJwt: config.pinataJwt,
+    uploadUrl: config.pinataApiUrl,
+    filesApiUrl: config.pinataFilesApiUrl,
+    gateway: config.ipfsGateway,
+    name: 'decentbusking-earnings-index.json',
+    tags: { app: 'decentbusking', kind: 'earnings-index', schema: '1' },
+    retainSnapshots: 2,
+    serialize: value => value,
+    deserialize: value => value,
+  }) : null;
+  const earningsLedger = createEarningsLedger({
+    ethers: { Interface, id },
+    provider: new JsonRpcProvider(config.baseLogsRpcUrl),
+    restore: earningsStore ? earningsStore.restore : async () => null,
+    save: earningsStore ? earningsStore.save : async () => '',
+    startBlock: process.env.ROUTER_START_BLOCK ? Number(process.env.ROUTER_START_BLOCK) : undefined,
+    chunkSize: Number(process.env.EARNINGS_SCAN_CHUNK_SIZE || 2000),
+  });
+  let earningsLedgerReady = false;
+  let earningsLedgerTask = null;
+  const refreshEarningsLedger = () => {
+    if (!earningsLedgerTask) earningsLedgerTask = (earningsLedgerReady ? earningsLedger.refresh() : earningsLedger.initialize())
+      .then(() => { earningsLedgerReady = true; })
+      .catch(error => console.warn('[earnings-ledger]', error.message))
+      .finally(() => { earningsLedgerTask = null; });
+    return earningsLedgerTask;
+  };
+  setInterval(refreshEarningsLedger, 60_000).unref();
+  refreshEarningsLedger();
 
   const djukeAddress = process.env.DJUKE_CONTRACT_ADDRESS;
   const quoteSigner = supportsDjukeAlbumsAndGas(process.env.DJUKE_CONTRACT_VERSION) && process.env.DJUKE_FULFILLER_PRIVATE_KEY
@@ -966,6 +997,7 @@ async function main() {
     },
     getDevertState: readDevertState,
     getFunds: async () => fundLedger.getCurrentState(),
+    getEarnings: async ({ address }) => earningsLedger.getAddressState(address),
     getDevertAds: async ({ address }) => {
       if (!playlistReady) throw new Error('Advert library is restoring; retry shortly');
       const snapshot = await readDevertState?.();

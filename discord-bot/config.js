@@ -18,6 +18,7 @@ import 'dotenv/config';
  * @property {string}      publicWorkerUrl         - Public Render service URL used in approval links
  * @property {string}      nftContractAddress      - Base DecentNFT contract address
  * @property {string}      baseRpcUrl              - Base JSON-RPC endpoint
+ * @property {string}      baseLogsRpcUrl          - Base JSON-RPC endpoint used for router log indexing
  * @property {string}      blockExplorerUrl        - Base block explorer root URL
  * @property {string|null} jukeLoopVoiceChannelId  - JukeLoop voice channel ID (JUKE_LOOP_VOICE_CHANNEL_ID) — optional
  * @property {string|null} jukeLoopTextChannelId   - JukeLoop announcement text channel ID (JUKE_LOOP_TEXT_CHANNEL_ID) — optional
@@ -70,6 +71,7 @@ export function loadConfig() {
       ...(process.env.DECENT_NFT_ADDITIONAL_ADDRESSES || '').split(','),
     ].filter(Boolean).map(address => address.trim().toLowerCase()).filter(Boolean))],
     baseRpcUrl:             process.env.BASE_RPC_URL || 'https://mainnet.base.org',
+    baseLogsRpcUrl:         process.env.BASE_LOGS_RPC_URL || process.env.BASE_RPC_URL || 'https://mainnet.base.org',
     blockExplorerUrl:       (process.env.BLOCK_EXPLORER_URL || 'https://basescan.org').replace(/\/$/, ''),
     jukeLoopVoiceChannelId: process.env.JUKE_LOOP_VOICE_CHANNEL_ID || null,
     jukeLoopTextChannelId:  process.env.JUKE_LOOP_TEXT_CHANNEL_ID  || null,

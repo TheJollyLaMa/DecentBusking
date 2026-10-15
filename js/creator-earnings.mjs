@@ -27,6 +27,10 @@ const DJUKE_ABI = [
 const PAYROLL_EVENT = 'event PayrollPaid(bytes32 indexed fundId, address indexed asset, address indexed recipient, uint256 amount, bytes32 workReference, bytes32 repositoryIdHash, bytes32 contributorIdHash, string metadataUri, bytes32 metadataHash)';
 const WITHDRAW_EVENT = 'event ArtistWithdrawal(address indexed artist, uint256 amount)';
 const CACHE_PREFIX = 'dbusk-earnings-v1:';
+const EARNINGS_KIND = {
+  payroll: 'payroll',
+  withdrawal: 'withdrawal',
+};
 
 export const readProof = contract => `${BASESCAN}/address/${contract}#readContract`;
 export const txProof = hash => `${BASESCAN}/tx/${hash}`;
@@ -73,6 +77,224 @@ export async function readContractEarnings({ ethers, provider, address, contract
       units: credits, count: 0, proofUrl: readProof(source.address), proofLabel: 'artistCredits' });
   }));
   return entries;
+}
+
+export async function fetchWorkerEarnings({ fetch: fetchImpl = globalThis.fetch, serviceUrl, address, timeoutMs = 15000 }) {
+  const base = String(serviceUrl || '').replace(/\/$/, '');
+  if (!base) throw new Error('Worker URL is not configured');
+  const response = await fetchImpl(`${base}/api/earnings/${address}`, { cache: 'no-store', signal: AbortSignal.timeout(timeoutMs) });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || `Earnings index unavailable (${response.status})`);
+  if (!result || typeof result !== 'object') throw new Error('Earnings index returned an invalid response');
+  return result;
+}
+
+export async function verifyGroupedEarningsProofs({ ethers, provider, address, entries, contracts = DJUKE_EARNING_CONTRACTS }) {
+  const iface = new ethers.Interface([PAYROLL_EVENT, WITHDRAW_EVENT]);
+  const byHash = new Map();
+  for (const entry of entries) {
+    for (const tx of entry.transactions || []) {
+      if (!byHash.has(tx.hash)) byHash.set(tx.hash, []);
+      byHash.get(tx.hash).push({ entry, tx });
+    }
+  }
+  const verifiedTx = new Set();
+  const contractByAddress = new Map(contracts.map(source => [source.address.toLowerCase(), source]));
+  for (const [txHash, pairings] of byHash) {
+    const receipt = await provider.getTransactionReceipt(txHash).catch(() => null);
+    if (!receipt || receipt.status !== 1) continue;
+    const lowerAddress = address.toLowerCase();
+    let matched = false;
+    for (const log of receipt.logs || []) {
+      let event;
+      try { event = iface.parseLog(log); } catch { continue; }
+      if (event?.name === 'PayrollPaid') {
+        const recipient = String(event.args.recipient || '').toLowerCase();
+        const fundId = String(event.args.fundId || '').toLowerCase();
+        if (log.address?.toLowerCase() !== ROUTER_ADDRESS.toLowerCase() || recipient !== lowerAddress) continue;
+        for (const { entry, tx } of pairings) {
+          if (entry.kind !== EARNINGS_KIND.payroll) continue;
+          if (entry.fundId && String(entry.fundId).toLowerCase() !== fundId) continue;
+          if (String(tx.units || '0') !== String(event.args.amount.toString())) continue;
+          matched = true;
+          verifiedTx.add(txHash);
+        }
+      } else if (event?.name === 'ArtistWithdrawal') {
+        const artist = String(event.args.artist || '').toLowerCase();
+        if (artist !== lowerAddress) continue;
+        const source = contractByAddress.get(log.address?.toLowerCase() || '');
+        for (const { entry, tx } of pairings) {
+          if (entry.kind !== EARNINGS_KIND.withdrawal) continue;
+          if (entry.contract && entry.contract.toLowerCase() !== log.address.toLowerCase()) continue;
+          if (String(tx.units || '0') !== String(event.args.amount.toString())) continue;
+          matched = true;
+          verifiedTx.add(txHash);
+        }
+      }
+    }
+    if (!matched) continue;
+  }
+  return entries.filter(entry => !entry.transactions?.length || entry.transactions.every(tx => verifiedTx.has(tx.hash)));
+}
+
+async function getLogsWithRetry(provider, filter, fromBlock, toBlock, wait, attempts = 4) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await provider.getLogs({ ...filter, fromBlock, toBlock });
+    } catch (error) {
+      lastError = error;
+      const message = `${error?.shortMessage || ''} ${error?.message || ''}`;
+      if (!/limit|rate|timeout|too many|429|503|502|exceed/i.test(message) || attempt === attempts - 1) throw error;
+      const delay = 250 * 2 ** attempt;
+      await wait(delay);
+    }
+  }
+  throw lastError;
+}
+
+export function createEarningsLedger({
+  ethers,
+  provider,
+  restore = async () => null,
+  save = async () => '',
+  startBlock = ROUTER_START_BLOCK,
+  chunkSize = 2000,
+  contracts = DJUKE_EARNING_CONTRACTS,
+  wait = delay => new Promise(resolve => setTimeout(resolve, delay)),
+  now = () => Date.now(),
+  log = console,
+} = {}) {
+  const iface = new ethers.Interface([PAYROLL_EVENT, WITHDRAW_EVENT]);
+  const contractMap = new Map(contracts.map(source => [source.address.toLowerCase(), source]));
+  let items = [];
+  let scannedFrom = null;
+  let scannedThrough = null;
+  let lastCheckedAt = null;
+  let lastError = '';
+  let task = Promise.resolve();
+
+  const run = operation => {
+    const result = task.then(operation);
+    task = result.catch(() => {});
+    return result;
+  };
+
+  function snapshot() {
+    return { schemaVersion: 1, chainId: 8453, routerAddress: ROUTER_ADDRESS, scannedFrom, scannedThrough, lastCheckedAt, items };
+  }
+
+  async function getBlockTimestamp(blockNumber) {
+    const block = await provider.getBlock(blockNumber).catch(() => null);
+    return Number(block?.timestamp || 0);
+  }
+
+  async function scanRange(fromBlock, toBlock) {
+    const [payroll, withdrawals] = await Promise.all([
+      getLogsWithRetry(provider, {
+        address: ROUTER_ADDRESS,
+        topics: [iface.getEvent('PayrollPaid').topicHash],
+      }, fromBlock, toBlock, wait),
+      getLogsWithRetry(provider, {
+        address: contracts.map(source => source.address),
+        topics: [iface.getEvent('ArtistWithdrawal').topicHash],
+      }, fromBlock, toBlock, wait),
+    ]);
+    const next = [];
+    for (const logEntry of payroll) {
+      const event = iface.parseLog(logEntry);
+      if (!event || event.name !== 'PayrollPaid') continue;
+      next.push({
+        kind: EARNINGS_KIND.payroll,
+        fundId: event.args.fundId,
+        fundLabel: fundLabel(event.args.fundId, ethers),
+        asset: assetSymbol(event.args.asset),
+        units: event.args.amount.toString(),
+        recipient: event.args.recipient,
+        txHash: logEntry.transactionHash,
+        logIndex: Number(logEntry.index ?? logEntry.logIndex ?? 0),
+        blockNumber: Number(logEntry.blockNumber),
+        timestamp: await getBlockTimestamp(logEntry.blockNumber),
+      });
+    }
+    for (const logEntry of withdrawals) {
+      const event = iface.parseLog(logEntry);
+      if (!event || event.name !== 'ArtistWithdrawal') continue;
+      const source = contractMap.get(String(logEntry.address || '').toLowerCase()) || null;
+      next.push({
+        kind: EARNINGS_KIND.withdrawal,
+        contract: logEntry.address,
+        contractLabel: source?.label || 'DJuke',
+        asset: 'USDC',
+        units: event.args.amount.toString(),
+        artist: event.args.artist,
+        txHash: logEntry.transactionHash,
+        logIndex: Number(logEntry.index ?? logEntry.logIndex ?? 0),
+        blockNumber: Number(logEntry.blockNumber),
+        timestamp: await getBlockTimestamp(logEntry.blockNumber),
+      });
+    }
+    return next;
+  }
+
+  async function refresh() {
+    return run(async () => {
+      try {
+        const head = await provider.getBlockNumber();
+        if (scannedFrom === null) scannedFrom = Number.isSafeInteger(startBlock) && startBlock >= 0 ? startBlock : ROUTER_START_BLOCK;
+        if (scannedThrough === null) scannedThrough = scannedFrom - 1;
+        let changed = false;
+        for (let from = Math.max(scannedFrom, scannedThrough + 1); from <= head; from += chunkSize) {
+          const to = Math.min(head, from + chunkSize - 1);
+          const next = await scanRange(from, to);
+          if (next.length) {
+            const existing = new Map(items.map(item => [`${item.txHash}:${item.logIndex}`, item]));
+            for (const item of next) existing.set(`${item.txHash}:${item.logIndex}`, item);
+            items = [...existing.values()].sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
+            changed = true;
+          }
+          scannedThrough = to;
+        }
+        lastCheckedAt = new Date(now()).toISOString();
+        if (changed || !items.length) await save(snapshot());
+      } catch (error) {
+        lastError = error.message;
+        throw error;
+      }
+      return getState();
+    });
+  }
+
+  async function initialize() {
+    const saved = await restore();
+    if (saved) {
+      if (saved.schemaVersion !== 1 || saved.chainId !== 8453 || saved.routerAddress?.toLowerCase() !== ROUTER_ADDRESS.toLowerCase() || !Array.isArray(saved.items)) {
+        throw new Error('Invalid earnings checkpoint');
+      }
+      items = saved.items;
+      scannedFrom = saved.scannedFrom;
+      scannedThrough = saved.scannedThrough;
+      lastCheckedAt = saved.lastCheckedAt || null;
+    }
+    return refresh();
+  }
+
+  function getState() {
+    return {
+      ...snapshot(),
+      lastCheckedAt,
+      lastError,
+      ready: Boolean(lastCheckedAt),
+    };
+  }
+
+  function getAddressState(address) {
+    const normalized = String(address || '').toLowerCase();
+    const filtered = items.filter(item => String(item.recipient || item.artist || '').toLowerCase() === normalized);
+    return { ready: Boolean(lastCheckedAt), through: scannedThrough, lastCheckedAt, entries: filtered };
+  }
+
+  return { initialize, refresh, getState, getAddressState };
 }
 
 async function getLogsAdaptive(provider, filter, fromBlock, toBlock, budget) {
@@ -211,7 +433,7 @@ export function groupLogEarnings(items, ethers, contracts = DJUKE_EARNING_CONTRA
     const label = item.kind === 'payroll' ? fundLabel(item.fundId, ethers)
       : `${contracts.find(source => source.address.toLowerCase() === String(item.contract).toLowerCase())?.label || 'DJuke'} claimed credits`;
     const key = `${label}:${asset}`;
-    const group = groups.get(key) || { key, label, status: 'paid', asset, units: 0n, count: 0, transactions: [] };
+    const group = groups.get(key) || { key, kind: item.kind, label, status: 'paid', asset, units: 0n, count: 0, transactions: [], ...(item.kind === 'payroll' ? { fundId: item.fundId } : {}), ...(item.kind === 'withdrawal' ? { contract: item.contract } : {}) };
     group.units += BigInt(item.units);
     group.count += 1;
     group.transactions.push({ hash: item.txHash, units: item.units, blockNumber: item.blockNumber, url: txProof(item.txHash) });
