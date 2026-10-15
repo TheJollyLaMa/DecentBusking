@@ -144,7 +144,7 @@ test('radio still starts playback when the gateway cannot seek yet', async () =>
   assert.equal(volume, 1);
 });
 
-test('radio keeps the current song playing until it ends before starting the next track from the top', async () => {
+test('radio keeps the current song playing until it ends before switching the next track at the live offset', async () => {
   const source = radioSyncSource();
   let position = 90;
   const audio = new EventTarget();
@@ -177,7 +177,7 @@ test('radio keeps the current song playing until it ends before starting the nex
 
   vm.runInContext('_audio.paused = true; _syncRadio();', context);
   assert.equal(vm.runInContext('started.length', context), 1);
-  assert.equal(vm.runInContext('started[0].offset()', context), 0);
+  assert.equal(Math.round(vm.runInContext('started[0].offset()', context)), 12);
 });
 
 test('radio sync renders the shared main-radio countdown in the footer and broadcasts state', async () => {
@@ -322,6 +322,45 @@ test('radio sync waits for playback to start before broadcasting now-playing det
     sponsor: { kind: 'djuke', wallet: '0x1111111111111111111111111111111111111111', amountUnits: '1000000', requestId: '8453:1' },
   }; _switchTo = () => {}; _syncRadio();`, context);
   assert.equal(events.length, 0);
+});
+
+test('radio sync resumes a reloaded listener at the live offset instead of the track start', async () => {
+  const source = radioSyncSource();
+  const started = [];
+  const audio = {
+    paused: true,
+    volume: 0,
+    muted: false,
+    duration: 180,
+    readyState: 4,
+    seeking: false,
+    seekable: { length: 1, start: () => 0, end: () => 180 },
+    pause() { this.paused = true; },
+    removeAttribute() {},
+    querySelectorAll: () => [],
+    appendChild() {},
+    load() {},
+    async play() { this.paused = false; },
+  };
+  const context = vm.createContext({
+    performance,
+    setTimeout,
+    clearTimeout,
+    console,
+    audio,
+    started,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } },
+  });
+  vm.runInContext(`${source}\n_audio = audio; _audioPlayer = audio; _radio = {
+    playId: 'play-live',
+    title: 'Live Now',
+    uploader: 'Synth Artist',
+    ipfsCid: 'bafy-live',
+    receivedAt: performance.now() - 90_000,
+    positionMs: 12_000,
+  }; _switchTo = options => started.push(options); _syncRadio();`, context);
+  assert.equal(started.length, 1);
+  assert.equal(Math.round(started[0].offset()), 102);
 });
 
 test('switchTo broadcasts now-playing after the site audio begins and stops on pause', async () => {

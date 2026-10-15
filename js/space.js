@@ -357,7 +357,7 @@ export async function openNFTByIdentity(detail = {}) {
     entry = mesh ? { nft, mesh } : null;
   }
   if (!entry || lookup !== _openNFTLookupToken) return false;
-  _selectNFT(entry.nft, entry.mesh, _nftRow(entry.nft), true);
+  _selectNFT(entry.nft, entry.mesh, _nftRow(entry.nft), true, { play: false });
   return true;
 }
 
@@ -597,7 +597,7 @@ function _spawnMesh(nft, isNew) {
 
   // Newly minted busk: auto-play and mark as active.
   if (isNew) {
-    _selectNFT(nft, mesh, null, false /* skipCard */);
+    _selectNFT(nft, mesh, null, false /* skipCard */, { play: false });
     window._currentBuskerWallet = nft.tipWallet || '';
   }
 
@@ -1032,7 +1032,7 @@ function _addListItem(nft, mesh, isNew = false) {
   `;
 
   li.addEventListener('click', () => {
-    _selectNFT(nft, mesh, li, true);
+    _selectNFT(nft, mesh, li, true, { play: false });
     _setArchiveOpen(false);
   });
 
@@ -1660,7 +1660,7 @@ function _onCanvasClick(e) {
   if (hits.length > 0) {
     const mesh = hits[0].object;
     const { nft } = mesh.userData;
-    _selectNFT(nft, mesh, null, true);
+    _selectNFT(nft, mesh, null, true, { play: false });
   }
 }
 
