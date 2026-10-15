@@ -6,6 +6,7 @@ import { fetchNFTMetaById } from './space.js?v=20261014-upload-resilience';
 import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
 import { returnToRadio } from './radio-sync.js?v=20261014-paid-sponsors';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
+import { canEditArtwork } from './artwork-update.mjs';
 
 // NFT currently shown in the single view; previews and purchases are handled explicitly.
 let _cardNft = null;
@@ -176,6 +177,9 @@ export function renderNFTCard(nft) {
       status('Playlists open soon');
     }
   });
+  content.querySelector('.nft-artwork-edit-btn')?.addEventListener('click', () => {
+    document.dispatchEvent?.(new CustomEvent('open-artwork-editor', { detail: { nft } }));
+  });
   watchlistBtn?.addEventListener('click', async () => {
     if (!window._wallet?.address || !window._wallet?.signer) {
       await window._wallet?.connect?.();
@@ -305,6 +309,7 @@ function _buildCardHTML(nft) {
     <div class="nft-card-actions">
       <button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>
       <button class="nft-watchlist-btn nft-buy-btn" type="button" aria-pressed="false" title="Save to watchlist">👀 Save</button>
+      ${canEditArtwork(nft, window._wallet?.address) ? '<button class="nft-artwork-edit-btn nft-buy-btn" type="button">✏️ Edit artwork</button>' : ''}
     </div>
     <p class="nft-watchlist-status" role="status" aria-live="polite"></p>
     ${/^0x[0-9a-fA-F]{40}$/.test(nft.artist || nft.creator || '') ? `<button class="nft-creator-profile nft-buy-btn" type="button" data-creator="${_esc(nft.artist || nft.creator)}" data-album="${_esc(nft.djukeAlbumId || '')}">Profile / Collaborators</button>` : ''}

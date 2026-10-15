@@ -1,7 +1,10 @@
-import { Interface, JsonRpcProvider, verifyMessage } from 'ethers';
+import { Contract, Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
 import { catalogPage } from '../js/nft-loader.js';
+import { uploadToIPFS } from './ipfs.js';
+import { fetchMintMetadata } from './mint-sync.js';
+import { buildArtworkUpdateAuthorizationMessage, buildArtworkUpdateMetadata } from '../js/artwork-update.mjs';
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 const SIGNED_UPLOAD_OVERHEAD_BYTES = 64 * 1024;
@@ -9,6 +12,14 @@ const MAX_SIGNATURE_AGE_MS = 5 * 60 * 1000;
 const MAX_UPLOAD_SIGNATURE_AGE_MS = 15 * 60 * 1000;
 const MINT_EVENT_ABI = [
   'event EditionMinted(uint256 indexed tokenId, address indexed to, uint256 amount, address indexed minter)',
+];
+const ARTWORK_EVENT_ABI = [
+  'event URI(string value,uint256 indexed id)',
+];
+const NFT_ARTWORK_ABI = [
+  'function uri(uint256 tokenId) view returns (string)',
+  'function creatorOf(uint256 tokenId) view returns (address)',
+  'function totalMinted(uint256 tokenId) view returns (uint256)',
 ];
 
 export function buildUploadAuthorizationMessage({ address, origin, name, size, type, issuedAt, purpose }) {
@@ -142,6 +153,40 @@ export function createMintTransactionVerifier({ rpcUrl, contractAddress, contrac
   };
 }
 
+export function createArtworkUpdateTransactionVerifier({ rpcUrl, contractAddress, contractAddresses = [], ownerWallet, provider }) {
+  const rpcProvider = provider || new JsonRpcProvider(rpcUrl);
+  const contracts = new Set([contractAddress, ...contractAddresses].filter(Boolean).map(address => address.toLowerCase()));
+  if (!contracts.size) throw new Error('At least one DecentNFT contract address is required');
+  const owner = ownerWallet.toLowerCase();
+  const iface = new Interface(ARTWORK_EVENT_ABI);
+
+  return async function verifyArtworkUpdate({ tokenId, txHash, expectedUri }) {
+    const [transaction, receipt] = await Promise.all([
+      rpcProvider.getTransaction(txHash),
+      rpcProvider.getTransactionReceipt(txHash),
+    ]);
+    if (!transaction || !receipt || receipt.status !== 1) throw new Error('Artwork update transaction is not confirmed');
+    if (transaction.from?.toLowerCase() !== owner) throw new Error('Artwork update was not submitted by the configured owner');
+    const matches = [];
+    for (const log of receipt.logs) {
+      if (!contracts.has(log.address?.toLowerCase())) continue;
+      try {
+        const event = iface.parseLog(log);
+        if (event?.name === 'URI' && event.args.id.toString() === String(tokenId)) {
+          if (expectedUri && String(event.args.value) !== String(expectedUri)) {
+            throw new Error('Artwork update URI does not match the queued request');
+          }
+          matches.push({ metadataUri: event.args.value, contractAddress: log.address });
+        }
+      } catch (error) {
+        if (error.message.includes('queued request')) throw error;
+      }
+    }
+    if (matches.length !== 1) throw new Error('Artwork update transaction does not contain exactly one URI event');
+    return { ...matches[0], txHash: receipt.hash || transaction.hash };
+  };
+}
+
 export function createWorkerRequestHandler({
   allowedOrigins,
   ownerWallet,
@@ -171,6 +216,11 @@ export function createWorkerRequestHandler({
   reconcilePayment,
   onRadioVote,
   onMediaSubmission,
+  artworkUpdateQueue,
+  verifyArtworkUpdateTransaction,
+  rpcUrl = 'https://mainnet.base.org',
+  pinataApiUrl = 'https://uploads.pinata.cloud/v3/files',
+  ipfsApiUrl = 'http://127.0.0.1:5001',
   fetchImpl = fetch,
   now = () => Date.now(),
 }) {
@@ -400,7 +450,7 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/api/mint-queue/pending-count') {
         if (!getMintQueue) throw new Error('Mint queue is not configured');
         const requests = await getMintQueue();
-        sendJson(response, 200, { count: Array.isArray(requests) ? requests.length : 0 }, '*');
+        sendJson(response, 200, { count: Array.isArray(requests) ? requests.filter(item => item?.status !== 'completed' && item?.status !== 'rejected').length : 0 }, '*');
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/radio/vote') {
@@ -433,6 +483,121 @@ export function createWorkerRequestHandler({
           const page = catalogPage(requests, { offset: body.offset ?? 0, limit: body.limit ?? 20 }, 20);
           sendJson(response, 200, { requests: page.items, total: page.total, nextOffset: page.nextOffset }, corsOrigin);
         }
+        return;
+      }
+      if (requestUrl.pathname === '/api/artwork-update' && request.method === 'GET') {
+        if (!artworkUpdateQueue) throw new Error('Artwork updates are not configured');
+        const tokenId = requestUrl.searchParams.get('tokenId');
+        const contractAddress = requestUrl.searchParams.get('contractAddress') || requestUrl.searchParams.get('contract');
+        const requestItem = artworkUpdateQueue.getRequest({ tokenId, contractAddress });
+        sendJson(response, 200, { request: requestItem || null }, '*');
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/artwork-update') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!artworkUpdateQueue) throw new Error('Artwork updates are not configured');
+        const body = await readJson(request);
+        const issuedAt = Date.parse(body.issuedAt);
+        const expiresAt = Date.parse(body.expiresAt);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') || typeof body.signature !== 'string' ||
+            !/^0x[0-9a-fA-F]{40}$/.test(body.contractAddress || '') || !Number.isSafeInteger(Number(body.tokenId)) ||
+            !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || expiresAt <= issuedAt || expiresAt - issuedAt > 15 * 60 * 1000 ||
+            Math.abs(now() - issuedAt) > MAX_SIGNATURE_AGE_MS) {
+          throw new Error('Invalid or expired artwork update authorization');
+        }
+        if (hasConsumedSignature(body.signature)) throw new Error('Artwork update authorization has already been used');
+        const artworkCid = normalizeMediaCid(body.artworkCid);
+        const message = buildArtworkUpdateAuthorizationMessage({
+          address: body.address,
+          origin,
+          chainId: Number(body.chainId || 8453),
+          contractAddress: body.contractAddress,
+          tokenId: Number(body.tokenId),
+          artworkCid,
+          nonce: body.nonce,
+          issuedAt: body.issuedAt,
+          expiresAt: body.expiresAt,
+        });
+        const recovered = verifyMessage(message, body.signature).toLowerCase();
+        if (recovered !== body.address.toLowerCase()) throw new Error('Artwork update authorization does not match the creator wallet');
+        const contract = new Contract(body.contractAddress, NFT_ARTWORK_ABI, new JsonRpcProvider(rpcUrl));
+        const creator = String(await contract.creatorOf(Number(body.tokenId)).catch(() => '') || '').toLowerCase();
+        if (!creator || creator !== body.address.toLowerCase()) throw new Error('Only the token creator can request artwork changes');
+        const currentUri = await contract.uri(Number(body.tokenId));
+        const currentMetadata = await fetchMintMetadata(currentUri, fetchImpl, { attempts: 3 });
+        const newMetadata = buildArtworkUpdateMetadata(currentMetadata, `ipfs://${artworkCid}`);
+        const newMetadataUri = await uploadToIPFS(
+          Buffer.from(JSON.stringify(newMetadata, null, 2)),
+          `token-${body.tokenId}-artwork.json`,
+          'application/json',
+          { provider: pinataJwt ? 'pinata' : 'local', pinataJwt, pinataApiUrl, ipfsApiUrl, fetchImpl },
+        );
+        const requestRecord = await artworkUpdateQueue.queueRequest({
+          requestType: 'artwork-update',
+          title: String(newMetadata.name || newMetadata.title || `Token #${body.tokenId}`),
+          tokenId: Number(body.tokenId),
+          chainId: Number(body.chainId || 8453),
+          contractAddress: body.contractAddress,
+          creator: body.address,
+          requestedAt: new Date().toISOString(),
+          oldUri: currentUri,
+          oldImageUri: String(currentMetadata.image || ''),
+          newImageCid: artworkCid,
+          newImageUri: `ipfs://${artworkCid}`,
+          metadataUri: newMetadataUri,
+          currentMetadata: currentMetadata,
+        });
+        consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
+        sendJson(response, 200, { request: requestRecord, pending: artworkUpdateQueue.getPendingCount() }, corsOrigin);
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/artwork-update-complete') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!artworkUpdateQueue || !verifyArtworkUpdateTransaction) throw new Error('Artwork update reconciliation is not configured');
+        const body = await readJson(request);
+        const issuedAt = Date.parse(body.issuedAt);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') || typeof body.signature !== 'string' ||
+            !Number.isFinite(issuedAt) || Math.abs(now() - issuedAt) > MAX_SIGNATURE_AGE_MS ||
+            !body.requestId || !/^0x[0-9a-fA-F]{64}$/.test(String(body.txHash || ''))) {
+          throw new Error('Invalid artwork update completion payload');
+        }
+        if (hasConsumedSignature(body.signature)) throw new Error('Artwork update completion authorization has already been used');
+        const message = buildAdminAuthorizationMessage({ address: body.address, origin, issuedAt: body.issuedAt });
+        const recovered = verifyMessage(message, body.signature).toLowerCase();
+        if (recovered !== body.address.toLowerCase() || recovered !== expectedOwner) {
+          throw new Error('Artwork update completion authorization is not from the configured owner');
+        }
+        const requestItem = artworkUpdateQueue.getRequest({ requestId: body.requestId });
+        if (!requestItem) throw new Error('Artwork update request not found');
+        const verified = await verifyArtworkUpdateTransaction({
+          tokenId: requestItem.tokenId,
+          txHash: body.txHash,
+          expectedUri: requestItem.metadataUri,
+        });
+        consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
+        sendJson(response, 200, await artworkUpdateQueue.completeRequest(requestItem.requestId, {
+          txHash: verified.txHash,
+          metadataUri: verified.metadataUri,
+        }), corsOrigin);
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/artwork-update-reject') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!artworkUpdateQueue) throw new Error('Artwork update reconciliation is not configured');
+        const body = await readJson(request);
+        const issuedAt = Date.parse(body.issuedAt);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') || typeof body.signature !== 'string' ||
+            !Number.isFinite(issuedAt) || Math.abs(now() - issuedAt) > MAX_SIGNATURE_AGE_MS || !body.requestId) {
+          throw new Error('Invalid artwork update rejection payload');
+        }
+        if (hasConsumedSignature(body.signature)) throw new Error('Artwork update rejection authorization has already been used');
+        const message = buildAdminAuthorizationMessage({ address: body.address, origin, issuedAt: body.issuedAt });
+        const recovered = verifyMessage(message, body.signature).toLowerCase();
+        if (recovered !== body.address.toLowerCase() || recovered !== expectedOwner) {
+          throw new Error('Artwork update rejection authorization is not from the configured owner');
+        }
+        consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
+        sendJson(response, 200, await artworkUpdateQueue.rejectRequest(body.requestId, body.reason || 'rejected'), corsOrigin);
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/admin/reviewed-album-import') {

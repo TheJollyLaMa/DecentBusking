@@ -10,6 +10,7 @@ import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolv
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261014-upload-resilience';
+import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artwork-update.mjs';
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261010-public-calendar';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides } from './radio-schedule.mjs';
@@ -92,8 +93,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
   _mintQueueEl?.addEventListener('click', (event) => {
-    const button = event.target.closest('.admin-mint-one');
-    if (button) _processQueue([Number(button.dataset.index)]);
+    const approve = event.target.closest('.admin-mint-one, .admin-artwork-approve');
+    const reject = event.target.closest('.admin-artwork-reject');
+    if (approve) _processQueue([Number(approve.dataset.index)]);
+    if (reject) _rejectArtworkUpdate(Number(reject.dataset.index));
   });
   _mintQueueEl?.addEventListener('change', event => {
     if (event.target.matches('.admin-artwork, .admin-artwork-cid')) _updateArtworkPreview(Number(event.target.dataset.index));
@@ -484,6 +487,18 @@ function _setRadioScheduleStatus(message, isError = false) {
       <div class="admin-mint-request">
         <input class="admin-mint-check" type="checkbox" data-index="${index}" aria-label="Select ${_esc(track.title)}" />
         <div>
+          ${track.requestType === 'artwork-update' ? `
+            <div class="admin-artwork-compare">
+              <img class="admin-artwork-preview" data-index="${index}" ${track.currentArtworkCid ? `src="${_esc(_gatewayUrl(track.currentArtworkCid))}"` : 'hidden'} alt="Current artwork for ${_esc(track.title)}" />
+              <span aria-hidden="true">→</span>
+              <img class="admin-artwork-preview" data-index="${index}" ${track.artworkCid ? `src="${_esc(_gatewayUrl(track.artworkCid))}"` : 'hidden'} alt="New artwork for ${_esc(track.title)}" />
+            </div>
+            <strong>${_esc(track.title)}</strong>
+            <span>Artwork update · Token #${_esc(track.tokenId)}</span>
+            <span>by ${_esc(track.uploader)} · ${_esc(track.requestedAt ? new Date(track.requestedAt).toLocaleString() : '')}</span>
+            <span>Current → new artwork</span>
+            <span class="admin-artwork-status" data-index="${index}" role="status">Pending review</span>
+          ` : `
           <img class="admin-artwork-preview" data-index="${index}" ${track.artworkCid ? `src="${_esc(_gatewayUrl(track.artworkCid))}"` : 'hidden'} alt="Artwork for ${_esc(track.title)}" />
           <strong>${_esc(track.title)}</strong>
           <span>${track.isDevertAd === true ? 'Ad' : 'Song'} · ${track.mediaType === 'video/mp4' ? 'Video' : 'Audio'}</span>
@@ -499,8 +514,11 @@ function _setRadioScheduleStatus(message, isError = false) {
             </label>
             <span class="admin-artwork-status" data-index="${index}" role="status">${track.artworkCid ? 'Queued artwork is selected by default. Leave both fields empty to keep it.' : 'No default image available; select artwork before minting.'}</span>
           `}
+          `}
         </div>
-        <button class="admin-btn admin-btn-secondary admin-mint-one" type="button" data-index="${index}">Mint</button>
+        ${track.requestType === 'artwork-update'
+          ? `<div class="admin-mint-actions"><button class="admin-btn admin-btn-secondary admin-artwork-approve" type="button" data-index="${index}">Approve</button><button class="admin-btn admin-btn-secondary admin-artwork-reject" type="button" data-index="${index}">Reject</button></div>`
+          : `<button class="admin-btn admin-btn-secondary admin-mint-one" type="button" data-index="${index}">Mint</button>`}
       </div>
     `).join('');
     if (_mintSelectedBtn) _mintSelectedBtn.disabled = false;
@@ -549,19 +567,22 @@ function _setRadioScheduleStatus(message, isError = false) {
     let completedBatches = 0;
     let failureMessage = '';
     try {
-      if (window.DecentConfig?.nftBatchMintEnabled === true) {
+      const selectedTracks = indices.map(index => ({ index, track: _mintQueue[index] })).filter(entry => entry.track);
+      const hasArtworkUpdates = selectedTracks.some(entry => entry.track.requestType === 'artwork-update');
+      if (!hasArtworkUpdates && window.DecentConfig?.nftBatchMintEnabled === true) {
         const batches = splitMintBatches(indices);
         for (let index = 0; index < batches.length; index++) {
           _setMintStatus(`Preparing batch ${index + 1}/${batches.length} (${batches[index].length} songs)…`);
           await _mintQueuedBatch(batches[index]);
           completedBatches++;
         }
-      } else for (let position = 0; position < indices.length; position++) {
-        const index = indices[position];
-        const track = _mintQueue[index];
-        if (!track) continue;
-        _setMintStatus(`Processing ${position + 1}/${indices.length}: ${track.title}`);
-        await _mintQueuedTrack(track, index);
+      } else {
+        for (let position = 0; position < selectedTracks.length; position++) {
+          const { index, track } = selectedTracks[position];
+          _setMintStatus(`Processing ${position + 1}/${selectedTracks.length}: ${track.title}`);
+          if (track.requestType === 'artwork-update') await _approveArtworkUpdate(track, index);
+          else await _mintQueuedTrack(track, index);
+        }
       }
       completed = true;
     } catch (err) {
@@ -664,6 +685,47 @@ function _setRadioScheduleStatus(message, isError = false) {
         `Token #${tokenId} minted, but Discord sync failed. Use /jukeloop mark-minted with ` +
         `track ${track.trackId}, token ${tokenId}, and tx ${txHash}. ${err.message}`,
       );
+    }
+  }
+
+  async function _approveArtworkUpdate(track, index) {
+    const cfg = window.DecentConfig || {};
+    if (!track || track.requestType !== 'artwork-update') throw new Error('Artwork update request not found');
+    const contract = new ethers.Contract(cfg.contractAddress, [
+      'function setTokenURI(uint256 tokenId,string uri) external',
+      'function multicall(bytes[] data) external returns (bytes[] results)',
+    ], _adminSigner);
+    _setMintStatus(`Updating artwork for token #${track.tokenId}…`);
+    const tx = await contract.setTokenURI(track.tokenId, track.metadataUri);
+    const receipt = await tx.wait();
+    const txHash = receipt.hash || tx.hash;
+    await completeArtworkUpdateRequest({
+      serviceUrl: cfg.ipfsUploadServiceUrl,
+      signer: _adminSigner,
+      address: _adminAddress,
+      origin: window.location.origin,
+      requestId: track.trackId,
+      txHash,
+    });
+    _setMintStatus(`✅ Artwork updated for ${track.title}.`);
+  }
+
+  async function _rejectArtworkUpdate(index) {
+    const track = _mintQueue[index];
+    if (!track || track.requestType !== 'artwork-update') return;
+    const cfg = window.DecentConfig || {};
+    try {
+      await rejectArtworkUpdateRequest({
+        serviceUrl: cfg.ipfsUploadServiceUrl,
+        signer: _adminSigner,
+        address: _adminAddress,
+        origin: window.location.origin,
+        requestId: track.trackId,
+      });
+      await _loadMintQueue();
+      _setMintStatus(`Rejected artwork update for ${track.title}.`);
+    } catch (error) {
+      _setMintStatus(`❌ ${error.message}`, true);
     }
   }
 

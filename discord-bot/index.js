@@ -55,8 +55,9 @@ import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-impor
 import { createCheckpointMirror } from './checkpoint-mirror.js';
 import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
 import { createCreatorProfiles } from './creator-profiles.js';
+import { createArtworkUpdateQueue } from './artwork-updates.js';
 import { createDjukeGasQuoteReader, DJUKE_GAS_ABI } from './djuke-gas.js';
-import { createMintTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
+import { createMintTransactionVerifier, createArtworkUpdateTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
 import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
 import { createSubmissionIntake, buildWalletButtons } from './submission-intake.js';
@@ -551,6 +552,15 @@ async function main() {
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-creator-profiles.json', tags: { app: 'decentbusking', kind: 'creator-profiles', schema: '1' },
     serialize: value => value, deserialize: value => value }) : null;
+  const artworkUpdateStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+    uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+    name: 'decentbusking-artwork-updates.json', tags: { app: 'decentbusking', kind: 'artwork-updates', schema: '1' },
+    serialize: value => value, deserialize: value => Array.isArray(value) ? value : [] }) : null;
+  const artworkUpdateQueue = createArtworkUpdateQueue({
+    restore: artworkUpdateStore ? artworkUpdateStore.restore : async () => [],
+    save: artworkUpdateStore ? artworkUpdateStore.save : async () => {},
+  });
+  await artworkUpdateQueue.initialize();
   config.jukeLoopMainRadioAdStore = config.pinataJwt ? createPinataStateStore({
     pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl,
@@ -577,6 +587,28 @@ async function main() {
       await syncMintedTracks(config, { required: true });
     },
     getRequests: getMintRequests,
+  });
+  const mapArtworkUpdateRequest = request => ({
+    trackId: request.requestId,
+    requestType: 'artwork-update',
+    title: request.title || `Token #${request.tokenId}`,
+    uploader: request.creator || 'Unknown artist',
+    uploaderId: request.creator || '',
+    recipient: request.creator || '',
+    ipfsCid: request.currentMetadata?.animation_url || request.currentMetadata?.audioUrl || '',
+    artworkCid: request.newImageCid || '',
+    filename: `token-${request.tokenId}.json`,
+    mediaType: '',
+    tipWallet: request.creator || '',
+    parentTokenId: 0,
+    isDevertAd: false,
+    requestedAt: request.requestedAt,
+    tokenId: String(request.tokenId),
+    contractAddress: request.contractAddress,
+    currentArtworkCid: String(request.oldImageUri || '').replace(/^ipfs:\/\//i, ''),
+    currentMetadataUri: request.oldUri || '',
+    metadataUri: request.metadataUri || '',
+    status: request.status,
   });
   const handleMintRequestInteraction = createMintRequestInteractionHandler({
     getPlaylist,
@@ -878,6 +910,12 @@ async function main() {
     pinataJwt: config.pinataJwt,
     pinataSignUrl: config.pinataSignUrl,
     verifyMintTransaction,
+    verifyArtworkUpdateTransaction: createArtworkUpdateTransactionVerifier({
+      rpcUrl: config.baseRpcUrl,
+      contractAddress: config.nftContractAddress,
+      contractAddresses: config.nftContractAddresses,
+      ownerWallet: config.mintOwnerWallet,
+    }),
     onMintComplete: reconcileMint,
     onMediaSubmission: async (submission) => {
       if (!playlistReady) throw new Error('Playlist is restoring; please retry shortly');
@@ -885,21 +923,30 @@ async function main() {
       await waitForRemotePersistence();
       return track;
     },
-    getMintQueue: async () => (await getVerifiedMintRequests()).map((track) => ({
-      trackId: track.trackId,
-      title: track.title,
-      uploader: track.uploader,
-      uploaderId: track.uploaderId,
-      recipient: track.mintRecipient,
-      ipfsCid: track.ipfsCid,
-      artworkCid: track.artworkCid || null,
-      filename: track.filename,
-      mediaType: mediaTypeFor(track.filename, track.mediaType),
-      tipWallet: track.tipWallet || track.mintRecipient,
-      parentTokenId: track.parentTokenId || 0,
-      isDevertAd: track.isDevertAd === true,
-      requestedAt: track.mintRequestedAt,
-    })),
+    artworkUpdateQueue,
+    rpcUrl: config.baseRpcUrl,
+    pinataApiUrl: config.pinataApiUrl,
+    ipfsApiUrl: config.ipfsApiUrl,
+    getMintQueue: async () => {
+      const mintRequests = (await getVerifiedMintRequests()).map((track) => ({
+        trackId: track.trackId,
+        title: track.title,
+        uploader: track.uploader,
+        uploaderId: track.uploaderId,
+        recipient: track.mintRecipient,
+        ipfsCid: track.ipfsCid,
+        artworkCid: track.artworkCid || null,
+        filename: track.filename,
+        mediaType: mediaTypeFor(track.filename, track.mediaType),
+        tipWallet: track.tipWallet || track.mintRecipient,
+        parentTokenId: track.parentTokenId || 0,
+        isDevertAd: track.isDevertAd === true,
+        requestedAt: track.mintRequestedAt,
+        requestType: 'mint',
+      }));
+      return mintRequests.concat(artworkUpdateQueue.getPendingRequests().map(mapArtworkUpdateRequest))
+        .sort((first, second) => Date.parse(first.requestedAt || 0) - Date.parse(second.requestedAt || 0));
+    },
     getRadioState: async () => {
       const jukeLoopSession = getActiveJukeLoopSession();
       const mainRadioAdCountdown = jukeLoopSession ? await jukeLoopSession.getMainRadioAdCountdown() : null;
