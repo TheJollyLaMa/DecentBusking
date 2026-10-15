@@ -2302,10 +2302,10 @@ decent-foot {
 #creator-profile .creator-nft-art { display: grid; place-items: center; width: 64px; height: 64px; min-height: 0; padding: 0; border: 2px solid rgba(233, 215, 160, .35); border-radius: 12px; background: #111827; color: #e9d7a0; font-size: 1.5rem; overflow: hidden; cursor: pointer; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
 #creator-profile .creator-nft-art:hover, #creator-profile .creator-nft-art:focus-visible { transform: scale(1.06); border-color: #e9d7a0; box-shadow: 0 0 0 3px rgba(233, 215, 160, .2), 0 6px 16px rgba(0, 0, 0, .45); outline: none; }
 .creator-nft-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
-#creator-profile .creator-nft-icon { display: grid; place-items: center; width: 28px; height: 28px; min-height: 0; padding: 0; border-radius: 50%; border: 1px solid rgba(233, 215, 160, .5); background: rgba(13, 18, 16, .92); color: #e9d7a0; cursor: pointer; transition: transform .18s ease, background .18s ease, color .18s ease; }
-#creator-profile .creator-nft-icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-#creator-profile .creator-nft-edit { position: absolute; right: -8px; bottom: -6px; box-shadow: 0 3px 10px rgba(0, 0, 0, .5); }
-#creator-profile .creator-nft-icon:hover, #creator-profile .creator-nft-icon:focus-visible { transform: scale(1.12) rotate(-8deg); background: #e9d7a0; color: #15221c; outline: none; }
+#creator-profile .creator-nft-icon, .artwork-edit-badge { display: grid; place-items: center; width: 28px; height: 28px; min-height: 0; padding: 0; border-radius: 50%; border: 1px solid rgba(233, 215, 160, .5); background: rgba(13, 18, 16, .92); color: #e9d7a0; cursor: pointer; transition: transform .18s ease, background .18s ease, color .18s ease; }
+#creator-profile .creator-nft-icon svg, .artwork-edit-badge svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.artwork-edit-badge { position: absolute; right: -8px; bottom: -6px; box-shadow: 0 3px 10px rgba(0, 0, 0, .5); }
+#creator-profile .creator-nft-icon:hover, #creator-profile .creator-nft-icon:focus-visible, .artwork-edit-badge:hover, .artwork-edit-badge:focus-visible { transform: scale(1.12) rotate(-8deg); background: #e9d7a0; color: #15221c; outline: none; }
 #creator-profile .creator-nft-remove { opacity: .55; }
 #creator-profile .creator-nft-remove:hover, #creator-profile .creator-nft-remove:focus-visible { opacity: 1; background: #b4473f; border-color: #e07a70; color: #fff; transform: scale(1.1) rotate(90deg); }
 .creator-nft-copy { display: grid; gap: 3px; min-width: 0; }
@@ -2353,6 +2353,8 @@ decent-foot {
 .artwork-editor-status.success { color: #9be3a6; font-weight: 700; animation: artwork-pop .35s ease both; }
 @keyframes artwork-shake { 0%, 100% { transform: none; } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 @media (prefers-reduced-motion: reduce) {
+  #creator-profile .artwork-edit-badge, .artwork-edit-badge { transition: none; }
+  #creator-profile .artwork-edit-badge:hover, #creator-profile .artwork-edit-badge:focus-visible, .artwork-edit-badge:hover, .artwork-edit-badge:focus-visible { transform: none; }
   .creator-dropdown-body, .creator-nft-item, #nft-artwork-editor[open], .artwork-editor-frame.has-image img, .artwork-editor-arrow, .artwork-editor-status, #nft-artwork-editor.is-busy .artwork-editor-save { animation: none !important; }
   .creator-nft-item:hover, #creator-profile .creator-nft-art:hover, #creator-profile .creator-nft-icon:hover, .artwork-editor-save:hover { transform: none; }
 }
@@ -2706,12 +2708,13 @@ decent-foot {
 }
 #nft-panel::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(4px); }
 #nft-panel-content { margin: 0; }
+.nft-detail-artwork { position: relative; width: min(100%, 280px); margin: 0 auto 20px; }
 .nft-detail-image {
   display: block;
   width: min(100%, 280px);
   aspect-ratio: 1;
   object-fit: contain;
-  margin: 0 auto 20px;
+  margin: 0;
   background: #08070d;
   border-radius: 4px;
 }
@@ -2815,7 +2818,7 @@ decent-foot {
   #camera-tools { bottom: 112px; z-index: 65; }
   #nft-panel { padding: 36px 16px 20px; }
   #nft-panel-content .nft-meta { grid-template-columns: 90px minmax(0,1fr); gap: 8px; }
-  .nft-detail-image { width: min(100%, 230px); }
+  .nft-detail-artwork { width: min(100%, 230px); }
   #mobile-discord-link { display: none; }
 }
 

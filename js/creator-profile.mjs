@@ -1,6 +1,7 @@
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { canEditArtwork } from './artwork-update.mjs';
+import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanBlockscoutEarnings, scanLogEarnings,
@@ -51,7 +52,6 @@ export function parseCreatorSplits(text) {
   return { recipients: entries.map(entry => entry.address), shares: entries.map(entry => entry.shares), positions: entries.map(entry => entry.position) };
 }
 
-const PENCIL_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
 const REMOVE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 
 export function displayArtist(value = '') {
@@ -85,7 +85,7 @@ export function buildNftListItem({ index = 0, title, subtitle = '', meta = '', a
   if (onEdit) {
     const edit = document.createElement('button');
     edit.type = 'button';
-    edit.className = 'creator-nft-icon creator-nft-edit';
+    edit.className = 'creator-nft-icon creator-nft-edit artwork-edit-badge';
     edit.title = 'Edit artwork';
     edit.setAttribute('aria-label', `Edit artwork for ${title}`);
     edit.innerHTML = PENCIL_ICON;
