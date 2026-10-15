@@ -553,6 +553,19 @@
       "retainedInFund": true,
       "retainedAt": "2026-10-15T00:55:06.111Z",
       "retainedBy": "TheJollyLaMa"
+    },
+    {
+      "issueRef": "TheJollyLaMa/DecentBusking#191",
+      "currency": "USDC",
+      "fund": "dbusk-repo-dev",
+      "queuedAt": "2026-10-15T09:09:18.438Z",
+      "queuedBy": "TheJollyLaMa",
+      "prNumber": 198,
+      "contributorGithub": "copilot",
+      "amount": "1",
+      "retainedInFund": true,
+      "retainedAt": "2026-10-15T09:09:18.438Z",
+      "retainedBy": "TheJollyLaMa"
     }
   ]
 }
