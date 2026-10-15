@@ -143,6 +143,18 @@
       "contributorGithub": "TheJollyLaMa",
       "amount": "0.2",
       "role": "idea-originator"
+    },
+    {
+      "issueRef": "TheJollyLaMa/DecentBusking#195",
+      "currency": "USDC",
+      "fund": "dbusk-repo-dev",
+      "queuedAt": "2026-10-15T00:55:06.111Z",
+      "queuedBy": "TheJollyLaMa",
+      "prNumber": 196,
+      "contributor": "0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f",
+      "contributorGithub": "withinthevacuum",
+      "amount": "0.2",
+      "role": "idea-originator"
     }
   ],
   "settled": [
@@ -526,6 +538,20 @@
       "role": "implementer",
       "retainedInFund": true,
       "retainedAt": "2026-10-15T00:34:28.271Z",
+      "retainedBy": "TheJollyLaMa"
+    },
+    {
+      "issueRef": "TheJollyLaMa/DecentBusking#195",
+      "currency": "USDC",
+      "fund": "dbusk-repo-dev",
+      "queuedAt": "2026-10-15T00:55:06.111Z",
+      "queuedBy": "TheJollyLaMa",
+      "prNumber": 196,
+      "contributorGithub": "copilot",
+      "amount": "0.8",
+      "role": "implementer",
+      "retainedInFund": true,
+      "retainedAt": "2026-10-15T00:55:06.111Z",
       "retainedBy": "TheJollyLaMa"
     }
   ]
