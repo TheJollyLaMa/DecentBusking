@@ -291,6 +291,66 @@ test('now-playing NFTs are auto-loaded, pulse with audio, and stay visible after
   assert.equal(vm.runInContext('_allNFTs[0].mesh.visible', context), true);
 });
 
+test('browsing an NFT opens the card without starting local playback', async () => {
+  const audio = { paused: true, ended: false, readyState: 4, currentTime: 0, volume: 1, muted: false };
+  const video = { paused: true, ended: false, readyState: 4, currentTime: 0, volume: 1, muted: false };
+  const list = { children: [], prepend(node) { this.children.unshift(node); }, append(node) { this.children.push(node); }, replaceChildren() {},
+    querySelector: () => null, querySelectorAll: () => [] };
+  const fields = {
+    'dnft-list-items': list,
+    'dnft-list-count': { textContent: '' },
+    'dnft-list-count-badge': { textContent: '' },
+    'artist-filter-count': { textContent: '' },
+    'scene-artist-filter': { replaceChildren() {}, value: '', addEventListener() {} },
+    'archive-artist-filter': { replaceChildren() {}, value: '', addEventListener() {} },
+    'radio-video-stage': { hidden: true },
+  };
+  const document = new MockDocument(audio, video, list, fields);
+  const renderCalls = [];
+  const playCalls = [];
+  const nft = {
+    tokenId: 99,
+    contractAddress: `0x${'9'.repeat(40)}`,
+    chainId: 8453,
+    name: 'Browse Only',
+    artist: `0x${'8'.repeat(40)}`,
+    mintedAt: new Date(Date.now() - 86_400_000).toISOString(),
+    audioUrl: 'ipfs://bafybrowse',
+  };
+  const THREE = makeThreeStubs();
+  const mesh = {
+    userData: { ageDays: 1, mintedAt: Date.now() - 86_400_000 },
+    position: new THREE.Vector3(),
+    visible: true,
+  };
+  const context = vm.createContext({
+    console,
+    document: {
+      ...document,
+      querySelectorAll: (selector) => (selector === '.dnft-list-item' ? [] : []),
+      querySelector: () => null,
+      dispatchEvent: () => true,
+    },
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.pinata.cloud/ipfs/', ipfsUploadServiceUrl: 'https://service.example' } },
+    performance,
+    CustomEvent,
+    Event,
+    Option: class { constructor(text, value) { this.text = text; this.value = value; } },
+    setTimeout,
+    clearTimeout,
+    THREE,
+    mesh,
+    renderNFTCard: (card) => renderCalls.push(card),
+    setNowPlaying: (payload) => playCalls.push(payload),
+  });
+  vm.runInContext(`${spaceSource}\n_scene = new THREE.Scene();\n_camera = new THREE.PerspectiveCamera();\n_controls = new THREE.OrbitControls();\n_allNFTs = [{ nft: ${JSON.stringify(nft)}, mesh }];`, context);
+  const result = await vm.runInContext(`openNFTByIdentity({ tokenId: 99, contractAddress: ${JSON.stringify(nft.contractAddress)}, chainId: 8453 })`, context);
+  assert.equal(result, true);
+  assert.equal(renderCalls.length, 1);
+  assert.equal(renderCalls[0].tokenId, 99);
+  assert.equal(playCalls.length, 0);
+});
+
 test('only the active now-playing GIF coin animates and releases cleanly on switch, pause, and hidden tabs', async () => {
   const flush = () => new Promise((resolve) => setImmediate(resolve));
   const { buildIpfsGatewayUrls } = await import(gatewayUrl);
