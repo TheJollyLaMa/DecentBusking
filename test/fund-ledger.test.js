@@ -143,3 +143,20 @@ test('fund ledger resumes from its saved cursor instead of rescanning from the s
   await secondLedger.initialize();
   assert.deepEqual(secondRouter.queryRanges.at(-1), [11, 14]);
 });
+
+test('fund ledger accepts a synchronous weekly payflow getter', async () => {
+  const { createFundLedger } = await import(url);
+  const logs = [makeLog(funds.top10, '0x1111111111111111111111111111111111111111', 12250000n, '0x' + '1'.repeat(64), 10, 0)];
+  const ledger = createFundLedger({
+    provider: makeProvider({ head: 10, logs, txFrom: new Map([['0x' + '1'.repeat(64), '0x1111111111111111111111111111111111111111']]) }),
+    router: makeRouter(logs, new Map([[id(funds.top10).toLowerCase(), 12250000n]])),
+    config: { routerAddress, radioFunds: { topTen: funds.top10 }, assets: { USDC: { address: usdc } } },
+    getWeeklyPayflow: () => ({ funds: { top10: { balanceUnits: '12250000', reservedUnits: '0', availableUnits: '12250000' } } }),
+    restore: async () => null,
+    save: async () => 'ipfs://saved',
+    startBlock: 10,
+  });
+  await ledger.initialize();
+  const current = await ledger.getCurrentState();
+  assert.equal(current.funds[funds.top10].balanceUnits, '12250000');
+});

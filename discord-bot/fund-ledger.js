@@ -197,7 +197,7 @@ export function createFundLedger({
   }
 
   async function buildFundState() {
-    const weekly = getWeeklyPayflow ? await getWeeklyPayflow().catch(() => null) : null;
+    const weekly = getWeeklyPayflow ? await Promise.resolve().then(() => getWeeklyPayflow()).catch(() => null) : null;
     const weeklyFunds = weekly?.funds || {};
     const bySlug = new Map();
     for (const fund of funds) {
