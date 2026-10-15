@@ -634,7 +634,7 @@ function _syncRadio(message) {
     artist: _radio.uploader,
     url: _gatewayUrl(_radio.ipfsCid),
     mime: _mediaTypeForTrack(_radio),
-    offset: () => 0,
+    offset: _radioPositionS,
     nowPlaying: {
       source: 'radio',
       playId: _radio.playId || null,
