@@ -58,7 +58,7 @@ test('scanLogEarnings groups router payouts by fund with tx proofs and caches pr
         assert.equal(filter.topics[3], ethers.zeroPadValue(WALLET, 32).toLowerCase());
         return [payroll('dbusk-playback', 300000n, '0x' + '1'.repeat(64)), payroll('dbusk-playback', 200000n, '0x' + '2'.repeat(64)), payroll('dbusk-top10', 1000000n, '0x' + '3'.repeat(64))];
       }
-      return [{ ...iface.encodeEventLog('ArtistWithdrawal', [WALLET, 50000n]), address: '0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59',
+      return [{ ...iface.encodeEventLog('ArtistWithdrawal', [WALLET, 50000n]), address: '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9',
         transactionHash: '0x' + '4'.repeat(64), index: 1, blockNumber: ROUTER_START_BLOCK + 20 }];
     },
   };
@@ -98,7 +98,7 @@ test('earnings ledger scans in chunks, filters by address, and checkpoints progr
       ethers.ZeroHash, ethers.ZeroHash, ethers.ZeroHash, 'ipfs://pay', ethers.ZeroHash]);
     return { address: ROUTER_ADDRESS, topics: encoded.topics, data: encoded.data, transactionHash: txHash, index: 0, blockNumber };
   };
-  const makeWithdrawal = (artist, amount, blockNumber, txHash, contract = '0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59') => ({
+  const makeWithdrawal = (artist, amount, blockNumber, txHash, contract = '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9') => ({
     ...iface.encodeEventLog(iface.getEvent('ArtistWithdrawal'), [artist, amount]), address: contract, transactionHash: txHash, index: 1, blockNumber,
   });
   const calls = [];
@@ -214,4 +214,20 @@ test('scanLogEarnings splits block ranges only when the RPC rejects the range si
   const result = await scanLogEarnings({ ethers, providers: [provider], address: WALLET, storage: memoryStorage() });
   assert.equal(result.complete, true);
   assert.ok(calls > 2);
+});
+
+test('retired DJuke v0.1/v0.2 withdrawals are no longer tracked in groups or restored indexes', async () => {
+  const { groupLogEarnings, createEarningsLedger, ROUTER_ADDRESS } = await load();
+  const v02 = '0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59';
+  const v03 = '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9';
+  const withdrawal = (contract, txHash) => ({ kind: 'withdrawal', contract, artist: WALLET, units: '50000', txHash, logIndex: 0, blockNumber: 1 });
+  const groups = groupLogEarnings([withdrawal(v02, '0x' + 'a'.repeat(64)), withdrawal(v03, '0x' + 'b'.repeat(64))], ethers);
+  assert.equal(groups.length, 1);
+  assert.match(groups[0].label, /v0\.3/);
+  const ledger = createEarningsLedger({ ethers, wait: async () => {},
+    provider: { getBlockNumber: async () => 100, getLogs: async () => [], getBlock: async () => ({ timestamp: 1 }) },
+    restore: async () => ({ schemaVersion: 1, chainId: 8453, routerAddress: ROUTER_ADDRESS, scannedFrom: 1, scannedThrough: 100,
+      lastCheckedAt: null, items: [withdrawal(v02, '0x' + 'a'.repeat(64)), withdrawal(v03, '0x' + 'b'.repeat(64))] }) });
+  await ledger.initialize();
+  assert.deepEqual(ledger.getAddressState(WALLET).entries.map(item => item.contract), [v03]);
 });

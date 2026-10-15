@@ -52,7 +52,6 @@ import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolve
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
 import { startDevertLoopWorker } from './devert-loop.js';
 import { DEFAULT_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
-import { DJUKE_EARNING_CONTRACTS } from '../js/creator-earnings.mjs';
 import { createPinataStateStore } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
@@ -1046,8 +1045,6 @@ async function main() {
       allowedContracts: [
         ...(config.nftContractAddresses || [config.nftContractAddress]),
         process.env.DJUKE_CONTRACT_ADDRESS || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9',
-        // Profiles still read artist credits from retired DJuke versions.
-        ...DJUKE_EARNING_CONTRACTS.map(source => source.address),
         process.env.DEVERT_CONTRACT_ADDRESS || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9',
         payrollAssets.routerAddress,
         ...Object.values(payrollAssets.assets || {}).map(asset => asset?.address),

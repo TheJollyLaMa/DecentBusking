@@ -7,7 +7,7 @@ import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
-  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261017-read-rpc';
+  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261018-djuke-v03-only';
 
 const WALLET_BREATHE_ICON = 'img/Ens_Eth_Breathe.png';
 

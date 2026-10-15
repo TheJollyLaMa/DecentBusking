@@ -9,8 +9,6 @@ export const ART_ADDRESS = '0x44c4516768e47cd97cfF2561B81a74699F23f8Ec';
 
 export const DJUKE_EARNING_CONTRACTS = [
   { label: 'DJuke v0.3', address: '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9', startBlock: 52526453, ledger: true },
-  { label: 'DJuke v0.2', address: '0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59', startBlock: 52445901 },
-  { label: 'DJuke v0.1', address: '0x153ef59a57C9A88cbB7822252B5d9D0B11E48F0E', startBlock: ROUTER_START_BLOCK },
 ];
 
 export const FUND_LABELS = {
@@ -271,7 +269,8 @@ export function createEarningsLedger({
       if (saved.schemaVersion !== 1 || saved.chainId !== 8453 || saved.routerAddress?.toLowerCase() !== ROUTER_ADDRESS.toLowerCase() || !Array.isArray(saved.items)) {
         throw new Error('Invalid earnings checkpoint');
       }
-      items = saved.items;
+      // Retired test contracts (DJuke v0.1/v0.2) are no longer tracked; drop their indexed withdrawals.
+      items = saved.items.filter(item => item.kind !== 'withdrawal' || contractMap.has(String(item.contract).toLowerCase()));
       scannedFrom = saved.scannedFrom;
       scannedThrough = saved.scannedThrough;
       lastCheckedAt = saved.lastCheckedAt || null;
@@ -369,7 +368,9 @@ export async function scanLogEarnings({ ethers, providers, address, storage = gl
 
 export function groupLogEarnings(items, ethers, contracts = DJUKE_EARNING_CONTRACTS) {
   const groups = new Map();
+  const tracked = new Set(contracts.map(source => source.address.toLowerCase()));
   for (const item of items) {
+    if (item.kind === 'withdrawal' && !tracked.has(String(item.contract).toLowerCase())) continue;
     const asset = item.kind === 'payroll' ? assetSymbol(item.asset) : 'USDC';
     const label = item.kind === 'payroll' ? fundLabel(item.fundId, ethers)
       : `${contracts.find(source => source.address.toLowerCase() === String(item.contract).toLowerCase())?.label || 'DJuke'} claimed credits`;
