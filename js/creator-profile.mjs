@@ -1,5 +1,6 @@
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261014-upload-resilience';
+import { canEditArtwork } from './artwork-update.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs';
 import { FUND_LABELS, formatAmount, readContractEarnings, scanBlockscoutEarnings, scanLogEarnings, summarizeEarnings } from './creator-earnings.mjs?v=20261014-earnings-blockscout';
@@ -111,12 +112,19 @@ export function initCreatorProfile() {
     });
     const watchlistSection = dialog.querySelector('[data-watchlist-section]');
     if (watchlistSection) watchlistSection.hidden = !editable();
+    if (myNftsSection) myNftsSection.hidden = !editable();
   };
   const watchlistSection = dialog.querySelector('[data-watchlist-section]');
   const watchlistCount = dialog.querySelector('[data-watchlist-count]');
   const watchlistStatus = dialog.querySelector('[data-watchlist-status]');
   const watchlistItems = dialog.querySelector('[data-watchlist-items]');
   const watchlistEmpty = dialog.querySelector('[data-watchlist-empty]');
+  const myNftsSection = dialog.querySelector('[data-my-nfts-section]');
+  const myNftsSearch = dialog.querySelector('[data-my-nfts-search]');
+  const myNftsStatus = dialog.querySelector('[data-my-nfts-status]');
+  const myNftsItems = dialog.querySelector('[data-my-nfts-items]');
+  let myNftsTimer = null;
+  let myNftsAbort = null;
   const renderWatchlist = () => {
     if (!watchlistSection || !watchlistStatus || !watchlistItems) return;
     const state = getCreatorWatchlistState();
@@ -199,6 +207,76 @@ export function initCreatorProfile() {
       }
       li.append(copy);
       watchlistItems.append(li);
+    }
+  };
+  const renderMyNFTs = async () => {
+    if (!myNftsSection || !myNftsStatus || !myNftsItems || !editable()) return;
+    if (myNftsAbort) myNftsAbort.abort();
+    myNftsAbort = new AbortController();
+    const query = myNftsSearch?.value?.trim() || '';
+    myNftsSection.hidden = false;
+    myNftsStatus.textContent = 'Loading your NFTs…';
+    myNftsItems.replaceChildren();
+    try {
+      const params = new URLSearchParams({ artist: address, limit: '25', query });
+      const response = await fetch(`${service()}/api/nfts?${params}`, { signal: myNftsAbort.signal });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `NFTs unavailable (${response.status})`);
+      const nfts = Array.isArray(result.nfts) ? result.nfts : [];
+      myNftsItems.replaceChildren();
+      if (!nfts.length) {
+        myNftsStatus.textContent = 'No matching NFTs found.';
+        return;
+      }
+      myNftsStatus.textContent = `${nfts.length} NFT${nfts.length === 1 ? '' : 's'} found.`;
+      for (const nft of nfts) {
+        const li = document.createElement('li');
+        li.className = 'creator-watchlist-item';
+        const artwork = creatorImageURL(nft.image || nft.artworkCid || '', config().ipfsGateway);
+        if (artwork) {
+          const image = document.createElement('img');
+          image.className = 'creator-watchlist-art';
+          image.alt = nft.name ? `Artwork for ${nft.name}` : 'NFT artwork';
+          image.src = artwork;
+          li.append(image);
+        }
+        const copy = document.createElement('div');
+        copy.className = 'creator-watchlist-copy';
+        copy.append(
+          Object.assign(document.createElement('strong'), { textContent: nft.name || nft.title || `Track #${nft.tokenId}` }),
+          Object.assign(document.createElement('span'), { textContent: nft.creator || nft.artist || 'Unknown artist' }),
+          Object.assign(document.createElement('span'), { textContent: `${nft.contractAddress} · #${nft.tokenId}` }),
+        );
+        const actions = document.createElement('div');
+        actions.className = 'creator-watchlist-actions';
+        if (canEditArtwork(nft, address)) {
+          const edit = document.createElement('button');
+          edit.type = 'button';
+          edit.textContent = 'Edit artwork';
+          edit.addEventListener('click', () => document.dispatchEvent(new CustomEvent('open-artwork-editor', { detail: { nft } })));
+          actions.append(edit);
+        }
+        const open = document.createElement('button');
+        open.type = 'button';
+        open.textContent = 'Open';
+        open.addEventListener('click', async () => {
+          try {
+            const { openNFTByIdentity } = await import('./space.js?v=20261014-upload-resilience');
+            const opened = await openNFTByIdentity(nft);
+            if (!opened) throw new Error('Could not open this NFT in the space view');
+            message('Opened NFT in the space view');
+          } catch (error) {
+            message(error.message);
+          }
+        });
+        actions.append(open);
+        copy.append(actions);
+        li.append(copy);
+        myNftsItems.append(li);
+      }
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      myNftsStatus.textContent = error.message;
     }
   };
   const formatRemaining = milliseconds => {
@@ -347,6 +425,7 @@ export function initCreatorProfile() {
     renderDiscordLinkFlow();
     setControls();
     renderWatchlist();
+    void renderMyNFTs();
   };
   const run = async operation => {
     if (busy) return;
@@ -582,6 +661,10 @@ export function initCreatorProfile() {
    if (event.detail?.address && event.detail.address !== address.toLowerCase()) return;
    if (event.detail?.watchlist && editable()) profile.watchlist = event.detail.watchlist;
     renderWatchlist();
+  });
+  myNftsSearch?.addEventListener('input', () => {
+   clearTimeout(myNftsTimer);
+   myNftsTimer = setTimeout(() => { void renderMyNFTs(); }, 250);
   });
   const getAlbumId = () => /^0x[0-9a-fA-F]{64}$/.test(albumValue('albumId')) ? albumValue('albumId') : ethers.id(albumValue('albumId').trim());
   const loadAlbum = async () => {

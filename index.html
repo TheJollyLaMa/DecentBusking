@@ -729,6 +729,7 @@
   <script type="module" src="js/djuke.mjs?v=20261014-celebrate"></script>
   <script type="module" src="js/devert-tab.mjs?v=20261014-upload-resilience"></script>
   <script type="module" src="js/creator-profile.mjs?v=20261014-earnings-blockscout"></script>
+  <script type="module" src="js/artwork-editor.mjs?v=20261015-artwork-updates"></script>
   <script type="module" src="js/listens.mjs?v=20261014-upload-resilience"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261014-worker-gas"></script>
@@ -824,6 +825,11 @@
       <p data-watchlist-empty hidden></p>
       <ol data-watchlist-items class="creator-watchlist-list"></ol>
     </section>
+    <section class="creator-watchlist" data-my-nfts-section hidden>
+      <div class="creator-watchlist-heading"><h3>My NFTs</h3><input data-my-nfts-search type="search" placeholder="Search title or token ID" aria-label="Search your NFTs" /></div>
+      <p data-my-nfts-status role="status" aria-live="polite">Connect your wallet to search your NFTs.</p>
+      <ol data-my-nfts-items class="creator-watchlist-list"></ol>
+    </section>
     <details><summary>Albums and Collaborators</summary>
       <form data-album-form>
         <label>Album ID or Slug<input name="albumId" required maxlength="100" /></label><button type="button" data-album-load>Load Album</button>
@@ -835,6 +841,26 @@
       </form>
     </details>
     <p data-profile-status role="status" aria-live="polite"></p>
+  </dialog>
+
+  <dialog id="nft-artwork-editor" aria-labelledby="nft-artwork-editor-title">
+    <div class="creator-profile-toolbar">
+      <h3 id="nft-artwork-editor-title">Edit artwork</h3>
+      <button type="button" class="creator-profile-close" data-artwork-editor-close aria-label="Close artwork editor">✕</button>
+    </div>
+    <div class="creator-profile-actions" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <figure>
+        <figcaption>Current image</figcaption>
+        <img data-artwork-current-preview alt="Current NFT artwork" style="max-width:100%;border-radius:12px;" />
+      </figure>
+      <figure>
+        <figcaption>New image</figcaption>
+        <img data-artwork-new-preview alt="New NFT artwork preview" style="max-width:100%;border-radius:12px;" />
+      </figure>
+    </div>
+    <label>Choose image<input data-artwork-file type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label>
+    <button type="button" data-artwork-save>Save artwork</button>
+    <p data-artwork-status role="status" aria-live="polite"></p>
   </dialog>
 </body>
 </html>

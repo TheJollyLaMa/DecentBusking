@@ -4,6 +4,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { createRequire } = require('node:module');
+
+const { Interface } = createRequire(path.join(__dirname, '../discord-bot/package.json'))('ethers');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'mint-sync.js')).href;
 
@@ -261,6 +264,22 @@ test('collection cache reloads metadata when a token URI changes after the cache
   assert.equal(refreshed.nfts[0].image, 'ipfs://new-image');
   assert.equal(uriReads, 2);
   assert.equal(Object.hasOwn(refreshed.nfts[0], '_metadataCheckedAt'), false);
+});
+
+test('URI events invalidate the cached token that changed on chain', async () => {
+  const { invalidateMintCache } = await import(moduleUrl);
+  const iface = new Interface(['event URI(string value,uint256 indexed id)']);
+  const log = iface.encodeEventLog(iface.getEvent('URI'), ['ipfs://updated', 7n]);
+  const cache = { tokens: new Map([[7, { tokenId: 7 }], [8, { tokenId: 8 }]]), blockNumber: 10, blockHash: '0xabc' };
+  const provider = {
+    getBlockNumber: async () => 12,
+    getBlock: async (blockNumber) => ({ hash: blockNumber >= 10 && blockNumber <= 12 ? '0xabc' : '0xdef' }),
+    getLogs: async () => [ { address: '0x2222222222222222222222222222222222222222', ...log } ],
+  };
+  const result = await invalidateMintCache({ cache, provider, contractAddress: '0x2222222222222222222222222222222222222222' });
+  assert.equal(cache.tokens.has(7), false);
+  assert.equal(cache.tokens.has(8), true);
+  assert.equal(result.blockHash, '0xabc');
 });
 
 test('marks tracks minted from Base so lost state cannot re-queue an existing NFT', async (t) => {
