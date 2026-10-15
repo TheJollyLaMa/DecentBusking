@@ -41,12 +41,10 @@ export function createArtworkUpdateQueue({ restore = async () => [], save = asyn
         entry.status === 'pending' && String(entry.tokenId) === normalized.tokenId &&
         entry.contractAddress === normalized.contractAddress);
       if (existingIndex >= 0) {
-        requests[existingIndex] = {
-          ...requests[existingIndex],
-          status: 'superseded',
-          supersededAt: normalized.requestedAt,
-          supersededBy: normalized.requestId,
-        };
+        const existing = requests[existingIndex];
+        existing.status = 'superseded';
+        existing.supersededAt = normalized.requestedAt;
+        existing.supersededBy = normalized.requestId;
       }
       requests.unshift(normalized);
       await persist();

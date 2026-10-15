@@ -1,8 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { Interface } = require('ethers');
+const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
+
+const { Interface } = createRequire(path.join(__dirname, '../discord-bot/package.json'))('ethers');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'artwork-update.mjs')).href;
 const workerUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'ipfs-worker.js')).href;
