@@ -44,7 +44,7 @@ import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs'
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
-import { syncMintedTracksFromChain, createVerifiedMintQueueReader, discoverPinataMetadataGateway, readOwnedDevertAds } from './mint-sync.js';
+import { syncMintedTracksFromChain, createVerifiedMintQueueReader, discoverPinataMetadataGateway, readOwnedDevertAds, resolveDevertCampaignMedia } from './mint-sync.js';
 import { nftCatalogPage } from '../js/nft-loader.js';
 import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
@@ -563,8 +563,9 @@ async function main() {
     _devertPlaybackRuntime = createDevertPlaybackRuntime({ contract, provider: scheduler.provider,
       restore: journalStore.restore, save: journalStore.save, readCampaigns: readDevertState,
       workerAddress: scheduler.address, workerMinBalanceWei,
-      resolveCampaignMedia: (campaign, cid) => getPlaylist().find(track => track.isDevertAd && track.ipfsCid === cid &&
-        track.mintRecipient?.toLowerCase() === campaign.advertiser.toLowerCase()) });
+      resolveCampaignMedia: (campaign, cid) => resolveDevertCampaignMedia(campaign, cid, {
+        playlist: getPlaylist(), nfts: _nftCatalog || [],
+      }) });
     _devertPlaybackInitialization = initializeDevertPlaybackWithRetry({
       initialize: () => _devertPlaybackRuntime.initialize(),
     }).then(() => console.log(`[devert] Durable scheduler journal ready; scheduler ${scheduler.address}.`));

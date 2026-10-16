@@ -10,6 +10,25 @@ const { Interface } = createRequire(path.join(__dirname, '../discord-bot/package
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'mint-sync.js')).href;
 
+test('campaign media recovers video metadata from the NFT catalog without a playlist entry', async () => {
+  const { resolveDevertCampaignMedia } = await import(moduleUrl);
+  const advertiser = '0x807061DF657A7697c04045dA7d16D941861cAABc';
+  const cid = 'bafybeiafj7ws74dbx5qvoci6tfyaxopzi5bgsqo6i2qwp3el3bpommsdim';
+  const metadata = { artist: advertiser.toLowerCase(), animation_url: `ipfs://${cid}`,
+    audioUrl: `ipfs://${cid}`, mediaType: 'video/mp4', videoUrl: `ipfs://${cid}` };
+  const recovered = resolveDevertCampaignMedia({ advertiser }, cid, { nfts: [metadata] });
+  assert.equal(recovered.mediaType, 'video/mp4');
+  assert.equal(recovered.videoUrl, `ipfs://${cid}`);
+  const track = { isDevertAd: true, ipfsCid: cid, mintRecipient: advertiser, filename: 'ad.mp3' };
+  assert.equal(resolveDevertCampaignMedia({ advertiser }, cid, { playlist: [track], nfts: [metadata] }).mediaType, 'video/mp4');
+  assert.equal(resolveDevertCampaignMedia({ advertiser }, cid, { playlist: [track] }), track);
+  assert.equal(resolveDevertCampaignMedia({ advertiser }, cid, { nfts: [{ ...metadata, artist: `0x${'1'.repeat(40)}` }] }), null);
+  assert.equal(resolveDevertCampaignMedia({ advertiser }, 'different-cid', { nfts: [metadata] }), null);
+  const { videoUrl, ...mimeOnly } = metadata;
+  assert.equal(resolveDevertCampaignMedia({ advertiser }, cid, { nfts: [mimeOnly] }).videoUrl, `ipfs://${cid}`);
+  assert.equal(resolveDevertCampaignMedia({ advertiser }, cid, { nfts: [{ ...mimeOnly, mediaType: 'audio/mpeg' }] }).videoUrl, '');
+});
+
 test('metadata retries transient gateway failures and falls back for HTTP IPFS URLs', async () => {
   const { fetchMintMetadata } = await import(moduleUrl);
   let requests = 0;

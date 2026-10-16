@@ -258,6 +258,22 @@ test('DeVert main-radio video ads preserve a video source and mime type when met
   assert.match(ad.track.filename, /\.mp4$/);
 });
 
+test('DeVert main-radio and VertLoop recover catalog video when the playlist has no advert', async () => {
+  const { resolveDevertCampaignMedia } = await import('../discord-bot/mint-sync.js');
+  const cid = 'bafybeiafj7ws74dbx5qvoci6tfyaxopzi5bgsqo6i2qwp3el3bpommsdim';
+  const campaigns = [campaign('1', { audioURI: `ipfs://${cid}` })];
+  const nfts = [{ name: 'DecentAdvert0001', artist: address('1'),
+    audioUrl: `ipfs://${cid}`, mediaType: 'video/mp4', videoUrl: `ipfs://${cid}` }];
+  const fixture = harness({ campaigns, slots: 1,
+    resolveCampaignMedia: (entry, mediaCid) => resolveDevertCampaignMedia(entry, mediaCid, { nfts }) });
+  const runtime = await makeRuntime(fixture);
+  for (const ad of [await runtime.nextMainRadioAd(), await runtime.nextDevertLoopAd()]) {
+    assert.equal(ad.track.mediaType, 'video/mp4');
+    assert.equal(ad.track.videoUrl, `ipfs://${cid}`);
+    assert.match(ad.track.filename, /\.mp4$/);
+  }
+});
+
 test('main-radio listener votes are durable and reorder only seated campaigns', async () => {
   const campaigns = [campaign('1', { offerUnits: '8000000' }), campaign('2', { offerUnits: '7000000' }),
     campaign('3', { offerUnits: '5000000' })];

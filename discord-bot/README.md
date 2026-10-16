@@ -81,6 +81,9 @@ ambiguous requests are skipped rather than assigned arbitrarily.
 `GET /api/radio` includes `nowPlaying.sponsor` for paid DJuke requests and
 DeVert ads so the site can show the payer/advertiser next to the live player;
 DJuke sponsors include the verified payer address, `requestId`, and `amountUnits`.
+Campaign video metadata is recovered from the on-chain NFT catalog as well as
+the playlist, matching the campaign media CID and advertiser wallet. A minted
+advert need not remain in the music playlist to play as video on the website.
 `GET /api/funds` exposes the four configured settlement funds, current balances,
 and proof-of-funding sources. The source ledger scans the router incrementally
 from `PAYROLL_START_BLOCK` (or the stored cursor) and is cached for about 60s.

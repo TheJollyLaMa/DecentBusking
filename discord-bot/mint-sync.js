@@ -4,6 +4,7 @@
 import { Contract, JsonRpcProvider, Interface, isAddress, id } from 'ethers';
 import { CID } from 'multiformats/cid';
 import * as playlistStore from './playlist-store.js';
+import { mediaTypeFor } from './media.js';
 
 const NFT_ABI = [
   'function nextTokenId() view returns (uint256)',
@@ -64,6 +65,21 @@ export function audioCidFromMetadata(metadata = {}) {
   let normalized = root;
   try { normalized = CID.parse(root).toV1().toString(); } catch {}
   return [normalized, ...segments].join('/');
+}
+
+export function resolveDevertCampaignMedia(campaign, cid, { playlist = [], nfts = [] } = {}) {
+  const advertiser = campaign.advertiser.toLowerCase();
+  const track = playlist.find(entry => entry.isDevertAd && entry.ipfsCid === cid &&
+    entry.mintRecipient?.toLowerCase() === advertiser);
+  const metadata = nfts.find(entry =>
+    (entry.artist || entry.creator)?.toLowerCase() === advertiser &&
+    audioCidFromMetadata({ audioUrl: entry.videoUrl || entry.audioUrl || entry.animation_url }) === cid);
+  if (!metadata) return track || null;
+  const videoUrl = metadata.videoUrl || track?.videoUrl || '';
+  const filename = metadata.filename || track?.filename || '';
+  const mediaType = videoUrl ? 'video/mp4' : metadata.mediaType || mediaTypeFor(filename, track?.mediaType);
+  return { ...track, filename, mediaType,
+    videoUrl: videoUrl || (mediaType === 'video/mp4' ? `ipfs://${cid}` : '') };
 }
 
 export async function readOwnedDevertAds({ collections, address, fetchImpl = fetch, retry = {}, pauseMs = 0,
