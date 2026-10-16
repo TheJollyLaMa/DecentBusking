@@ -91,6 +91,10 @@ Other unexpected contract failures still surface as errors.
 At track transitions, overdue adverts are checked again before prefetched music
 starts, because a slot can unlock after prefetch. Already prepared paid DJuke
 requests retain priority; lookup failures keep music playing and are logged.
+Advert cadence and queued-ad state use the separate
+`decentbusking-main-radio-ad-state.json` checkpoint (`main-radio-ad-state` tags).
+They must not share the playlist's `decentbusking-jukeloop-state.json` namespace:
+the schemas differ and each store prunes its own snapshots.
 `GET /api/funds` exposes the four configured settlement funds, current balances,
 and proof-of-funding sources. The source ledger scans the router incrementally
 from `PAYROLL_START_BLOCK` (or the stored cursor) and is cached for about 60s.
