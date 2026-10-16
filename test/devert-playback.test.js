@@ -151,6 +151,58 @@ test('DeVert impression is checkpointed before its chain write and retry uses th
   assert.equal(fixture.impressionCalls[1].impressionId, pending.impressionId);
 });
 
+test('a pending main-radio slot rejection does not block restore, VertLoop, or the next music milestone', async () => {
+  const fixture = harness({ campaigns: [campaign('1')], slots: 1, impressions: 1 });
+  const pendingId = id('pending-main-radio');
+  fixture.state.impressions = [{ impressionId: pendingId, campaignId: '1', mainRadio: true,
+    radioPlayId: 'pending-main-radio', recordedAt: new Date(NOW - 1000).toISOString(), state: 'pending' }];
+  let attempts = 0;
+  let slotAvailable = false;
+  fixture.contract.recordCampaignPlay.staticCall = async (_campaignId, mainRadio) => {
+    if (!mainRadio) return;
+    attempts++;
+    if (!slotAvailable) throw Object.assign(new Error('execution reverted'), {
+      code: 'CALL_EXCEPTION', reason: 'No seated main-radio slot',
+    });
+  };
+  const runtime = await makeRuntime(fixture);
+  assert.equal(attempts, 1);
+  assert.equal(fixture.state.impressions[0].state, 'pending');
+  assert.equal(fixture.state.impressions[0].nextRetryAt, NOW + 60_000);
+  assert.equal(await runtime.nextMainRadioAd(), null);
+  assert.equal((await runtime.nextDevertLoopAd()).campaignId, '1');
+  await runtime.recordCampaignImpression({ campaignId: '1', radioPlayId: 'new-loop', mainRadio: false, audibleMs: 30_000 });
+  assert.equal(fixture.state.impressions.find(entry => !entry.mainRadio).state, 'recorded');
+  assert.equal(fixture.state.impressions.find(entry => entry.mainRadio).nextRetryAt, NOW + 60_000,
+    'VertLoop hourly throttling must not postpone main-radio reporting');
+  await makeRuntime(fixture);
+  assert.equal(attempts, 1, 'persisted cooldown survives restart');
+  for (let index = 0; index < 10; index++) {
+    await runtime.recordCompletedMusicPlay({ playId: id(`unblocked-song-${index}`), audibleMs: 30_000 });
+  }
+  assert.equal(fixture.musicBatches.length, 1, 'music reporting can unlock another main-radio slot');
+  assert.equal(fixture.recorded.has(pendingId), false, 'unconfirmed receipts are never counted as confirmed impressions');
+  slotAvailable = true;
+  fixture.now = NOW + 60_000;
+  await runtime.nextDevertLoopAd();
+  assert.equal(attempts, 2);
+  assert.equal(fixture.state.impressions.find(entry => entry.impressionId === pendingId).state, 'recorded');
+  assert.equal(fixture.impressionCalls.filter(entry => entry.mainRadio).length, 1);
+  assert.equal(fixture.impressionCalls.find(entry => entry.mainRadio).impressionId, pendingId);
+});
+
+test('unexpected main-radio reverts still surface rather than being classified as slot cooldowns', async () => {
+  const fixture = harness();
+  const runtime = await makeRuntime(fixture);
+  fixture.contract.recordCampaignPlay.staticCall = async () => {
+    throw Object.assign(new Error('unexpected contract failure'), { code: 'CALL_EXCEPTION', reason: 'Access denied' });
+  };
+  await assert.rejects(runtime.recordCampaignImpression({
+    campaignId: '1', radioPlayId: 'unexpected-revert', mainRadio: true, audibleMs: 30_000,
+  }), /unexpected contract failure/);
+  assert.equal(fixture.state.impressions[0].nextRetryAt, 0);
+});
+
 test('DeVert coalesces VertLoop impressions to one on-chain record per campaign per hour', async () => {
   const fixture = harness({
     balance: 10n,
