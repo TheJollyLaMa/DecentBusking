@@ -2,7 +2,7 @@ import { renderUsdcAmount } from './fund-display.mjs?v=20261015-usdc-cents';
 import { weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
 import { addChartSongToPlaylist } from './top-ten-playlist.mjs';
-import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261016-top10-hype-7';
+import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261016-top10-hype-8';
 
 export { rankTopTenSongs };
 
@@ -11,7 +11,7 @@ let spectrumReader = null;
 let spectrumReaderLoad = null;
 function readRadioSpectrum(out) {
   if (spectrumReader) return spectrumReader(out);
-  spectrumReaderLoad ||= import('./space.js?v=20261016-top10-eq')
+  spectrumReaderLoad ||= import('./space.js?v=20261016-artwork-backoff')
     .then(module => { spectrumReader = typeof module.readNowPlayingSpectrum === 'function' ? module.readNowPlayingSpectrum : () => false; })
     .catch(error => console.warn('[top-ten] Live equalizer unavailable:', error.message));
   return false;

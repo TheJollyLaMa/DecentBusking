@@ -548,6 +548,24 @@ test('only the active now-playing GIF coin animates and releases cleanly on swit
   vm.runInContext('document.hidden = false; window.matchMedia = () => ({ matches: true }); _nowPlayingReducedMotion = null;', context);
   for (let index = 0; index < 4; index += 1) vm.runInContext('_updateNowPlayingPulse();', context);
   assert.equal(staticCanvas.drawImageCalls, staticBeforeSwitch);
+
+  // An artwork that cannot load (e.g. a huge GIF timing out) must not be re-downloaded every frame.
+  vm.runInContext('window.matchMedia = () => ({ matches: false }); _nowPlayingReducedMotion = null;', context);
+  const broken = { ...gifOne, tokenId: 34, name: 'Broken Gif', image: 'ipfs://gif-broken', audioUrl: 'ipfs://audio-four' };
+  vm.runInContext(`_spawnMesh(${JSON.stringify(broken)}, false);`, context);
+  for (let index = 0; index < 4; index += 1) await flush();
+  await vm.runInContext(`_handleNowPlaying({ nft: ${JSON.stringify(broken)} });`, context);
+  const brokenRequests = () => requested.filter((url) => url.endsWith('/gif-broken')).length;
+  for (let index = 0; index < 30; index += 1) {
+    vm.runInContext('_updateNowPlayingPulse();', context);
+    await flush();
+  }
+  const afterFirstFailure = brokenRequests();
+  for (let index = 0; index < 60; index += 1) {
+    vm.runInContext('_updateNowPlayingPulse();', context);
+    await flush();
+  }
+  assert.equal(brokenRequests(), afterFirstFailure, 'failed artwork backs off instead of re-fetching every frame');
 });
 
 test('NFT coin textures print details without a shaded panel', () => {

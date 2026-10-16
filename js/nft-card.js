@@ -2,7 +2,7 @@
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js?v=20261016-top10-eq';
+import { fetchNFTMetaById } from './space.js?v=20261016-artwork-backoff';
 import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
 import { returnToRadio } from './radio-sync.js?v=20261016-top10-hype';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';

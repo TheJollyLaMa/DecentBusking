@@ -319,7 +319,7 @@ export function initCreatorProfile() {
   let myNftsAbort = null;
   const openNftCard = async identity => {
     try {
-      const { openNFTByIdentity } = await import('./space.js?v=20261016-top10-eq');
+      const { openNFTByIdentity } = await import('./space.js?v=20261016-artwork-backoff');
       dialog.querySelector('[data-profile-close]')?.click();
       if (!await openNFTByIdentity(identity)) throw new Error('Could not open this NFT in the space view');
     } catch (error) {

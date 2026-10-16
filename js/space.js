@@ -623,6 +623,8 @@ function _makeNFTTexture(nft) {
     loadGeneration: 0,
     loadPromise: null,
     sourceUrls: [],
+    retryAfter: 0,
+    failures: 0,
   };
 
   texture.userData ||= {};
@@ -748,9 +750,13 @@ function _makeNFTTexture(nft) {
     artwork.loading = true;
     artwork.loadPromise = (async () => {
       for (const url of artwork.sourceUrls) {
-        if (await loadFromUrl(url)) return true;
-        if (artwork.disposed) return false;
+        if (await loadFromUrl(url)) { artwork.failures = 0; return true; }
+        if (artwork.disposed || artwork.loadSession !== session) return false;
       }
+      // setActive runs every frame; without a backoff a failed (e.g. oversized) image is re-downloaded
+      // continuously and gets the listener rate-limited by the IPFS gateway, which also breaks audio.
+      artwork.failures += 1;
+      artwork.retryAfter = Date.now() + Math.min(10 * 60_000, 60_000 * 2 ** (artwork.failures - 1));
       if (!artwork.disposed) {
         console.warn('[space] Failed to load NFT artwork from any source for', nft.tokenId ?? nft.name ?? 'unknown NFT');
       }
@@ -780,6 +786,7 @@ function _makeNFTTexture(nft) {
       releaseImage();
       return;
     }
+    if (Date.now() < artwork.retryAfter) return;
     if (!artwork.image && !artwork.loading && (!artwork.loadedOnce || artwork.isGif)) void loadArtwork();
   };
 
