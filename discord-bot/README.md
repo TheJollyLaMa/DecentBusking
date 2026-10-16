@@ -88,6 +88,9 @@ If a pending main-radio impression reverts with `No seated main-radio slot`,
 it stays pending with a durable retry cooldown. This does not block scheduler
 startup, VertLoop playback, or reporting the next music milestone to unlock slots.
 Other unexpected contract failures still surface as errors.
+At track transitions, overdue adverts are checked again before prefetched music
+starts, because a slot can unlock after prefetch. Already prepared paid DJuke
+requests retain priority; lookup failures keep music playing and are logged.
 `GET /api/funds` exposes the four configured settlement funds, current balances,
 and proof-of-funding sources. The source ledger scans the router incrementally
 from `PAYROLL_START_BLOCK` (or the stored cursor) and is cached for about 60s.

@@ -1241,6 +1241,19 @@ export class JukeLoopSession {
         if (this._prepareTask) await this._prepareTask;
         let prepared = this._preparedNext;
         this._preparedNext = null;
+        // Prefetch may have run before the last song unlocked the next advert slot.
+        if (prepared && !prepared.paid && !prepared.devertAd && this.devertPlayback &&
+          this._musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD) {
+          try {
+            const refreshed = await this._prepareNextPlayback();
+            if (refreshed) {
+              this._disposePrepared(prepared);
+              prepared = refreshed;
+            }
+          } catch (error) {
+            console.warn('[devert] Transition-time ad selection deferred; keeping prepared music:', error.message);
+          }
+        }
         if (!prepared) prepared = await this._prepareNextPlayback();
         if (prepared) {
           this._startPrepared(prepared);
