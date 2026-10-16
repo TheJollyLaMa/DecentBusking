@@ -109,6 +109,42 @@ Advert cadence and queued-ad state use the separate
 They must not share the playlist's `decentbusking-jukeloop-state.json` namespace:
 the schemas differ and each store prunes its own snapshots.
 
+### Friday Top10 Hype
+
+The Friday Hype slot snapshots the current New York week's eligible chart at
+entry and plays the fixed selection from its lowest opening place to #1, then
+labelled encores in the same order until the scheduled handoff. Sunday Final
+Listen and normal rotation keep their existing selection behavior. Paid requests
+and all prepared/pending adverts are deferred during Friday Hype, not discarded.
+
+The separate Pinata checkpoint `decentbusking-friday-top10-hype.json`
+(`friday-top10-hype` tags, schema 1) contains the show-instance identity, opening
+ranks, playback cursor, last reserved start, and skip reasons. A position is
+checkpointed **before** audio starts: after a restart, previously reserved starts
+are not replayed, even if the restart interrupted that song. Remaining places
+keep their original ranks. This store only restores the newest checkpoint:
+gateway fallback is allowed, but an older playback cursor must not be restored
+when the latest CID is unavailable. Storage/restore failures pause the countdown with an
+explicit public error instead of silently reshuffling or using regular rotation.
+Unavailable recordings are visibly skipped; a fully unavailable selection waits
+and retries rather than looping recursively forever. An empty opening chart stays
+empty for that show.
+
+Run the worker before the opening bell. If there is no saved snapshot and the
+worker first enters the slot over 15 seconds late, its on-arrival snapshot is
+explicitly labelled late; historical opening-bell votes cannot be reconstructed
+from current aggregates. A late snapshot is not presented as the exact opening
+chart. A restored snapshot retains its original capture time.
+
+`GET /api/radio` publishes `activeShow` and `topTenHype`, plus `nowPlaying.hype`
+for opening-rank/encore identification. The browser pins the existing chart panel,
+continues live voting/ranking/prize updates, respects reduced motion, and restores
+ordinary drawer behavior when the authoritative show ends (or its known deadline
+passes during disconnection). Friday retains its configured end time; no guarantee
+is made that all opening tracks fit. Weekly history includes media CIDs so the
+chart's **+** buttons resolve the exact NFT before using the existing signed
+profile-watchlist save flow. Unverified/unavailable media produces a visible error.
+
 An advert can run again after its paid campaign expires; a single advert cannot
 start another paid term from the DVert checkout while its current term is active.
 Availability is checked again before purchase, including after USDC approval.

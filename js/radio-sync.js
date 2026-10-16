@@ -138,6 +138,7 @@ function _onPause(event) {
 let _mode = 'radio';
 let _archiveSession = null;
 let _radio = null;
+let _activeShowId = null;
 let _radioReachable = true;
 let _loadedPlayId = null;
 let _seen = null;
@@ -553,6 +554,7 @@ async function _poll() {
     const state = await response.json();
     _radioReachable = true;
     _setRadioState(state);
+    _activeShowId = state.activeShow?.id || null;
     _radio = state.nowPlaying ? { ...state.nowPlaying, receivedAt: performance.now() } : null;
     _upNext = state.upNext && typeof state.upNext === 'object' ? state.upNext : null;
     _detectNewUploads(Array.isArray(state.recent) ? state.recent : [], state.serverTime);
@@ -618,8 +620,15 @@ function _radioPositionS() {
   return (_radio.positionMs + (performance.now() - _radio.receivedAt)) / 1000;
 }
 
+function _liveLabel() {
+  if (_activeShowId !== 'friday-top10-hype') return '📻 Live on JukeLoop';
+  const hype = _radio?.hype;
+  const place = hype?.encore ? ' · Encore' : Number.isInteger(hype?.openingRank) ? ` · #${hype.openingRank}` : '';
+  return `🎉 Listening to Top 10 Friday Night Hype${place}`;
+}
+
 function _syncRadio(message) {
-  _setLabel('📻 Live on JukeLoop');
+  _setLabel(_liveLabel());
   _renderVoting();
   if (_devertListenMode === 'ads-only') {
     _renderSponsorTag(null);

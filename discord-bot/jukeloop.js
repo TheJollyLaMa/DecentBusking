@@ -53,6 +53,7 @@ import {
   rankWeeklyTopTenTracks,
 } from '../js/radio-schedule.mjs';
 import { mediaTypeFor, isDiscordAttachmentWithinLimit } from './media.js';
+import { createTopTenHype } from './top-ten-hype.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -208,7 +209,8 @@ export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch, 
 }
 
 /** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
-export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Date.now(), recentLimit = 10, mainRadioAdCountdown = null }) {
+export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Date.now(), recentLimit = 10, mainRadioAdCountdown = null,
+  activeShow = null, topTenHype = null }) {
   const mediaTypeForTrack = (track) => (track.videoUrl || track.mediaType === 'video/mp4')
     ? 'video/mp4'
     : mediaTypeFor(track.filename, track.mediaType) || '';
@@ -226,6 +228,8 @@ export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Dat
     }));
   return {
     serverTime: now,
+    activeShow,
+    topTenHype,
     nowPlaying: nowPlaying && nowPlaying.audible !== false
       ? (() => {
           const videoUrl = nowPlaying.videoUrl || (mediaTypeFor(nowPlaying.filename, nowPlaying.mediaType) === 'video/mp4'
@@ -242,6 +246,7 @@ export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Dat
             ...(videoUrl ? { videoUrl } : {}),
             ipfsCid: nowPlaying.ipfsCid || null,
             isDevert: nowPlaying.isDevert === true,
+            ...(nowPlaying.hype ? { hype: { ...nowPlaying.hype } } : {}),
             ...(sponsor ? { sponsor } : {}),
             startedAt: nowPlaying.startedAt,
             positionMs: Math.max(0, now - nowPlaying.startedAt),
@@ -411,7 +416,7 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
   };
 }
 
-export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true, playId, paid = false, sponsor = null }) {
+export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true, playId, paid = false, sponsor = null, hype = null }) {
   const listenLink = track.ipfsCid && /\/ipfs\//.test(url || '') ? `\n[Open IPFS audio](${url})` : '';
   const idLine = `\nTrack \`${track.trackId}\`` + (playId ? ` · Play \`${playId}\`` : '');
   const votingLine = votingOpen
@@ -425,6 +430,7 @@ export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, vo
   return (
     `🎵 Now playing: **${track.title}** by *${track.uploader}* ` +
     `(${queueIndex}/${totalTracks})\n` +
+    (hype ? `🎉 **Friday Top10 Hype${hype.encore ? ' · Encore' : ''}** · Opening chart #${hype.openingRank}${hype.openingRank === 1 && !hype.encore ? ' · 🏆 Opening-chart headliner!' : ''}\nLive votes can change the current chart; this play order is fixed.\n` : '') +
     (paid ? sponsorLine || '💸 **DJuke paid request**\n' : '') +
     `**All-time:** 👍 ${track.likes ?? 0} · 👎 ${track.dislikes ?? 0} · ▶️ ${track.plays ?? 0}\n` +
     `${idLine}\n` +
@@ -668,7 +674,8 @@ export class JukeLoopSession {
     * @param {() => void} [opts.onTerminalDisconnect] - Called after Discord voice recovery fails
    */
     constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback,
-      schedule, livePerformanceEvents, audioPlayer, createStream, mainRadioAdStateStore, restoreMainRadioAdState, saveMainRadioAdState }) {
+      schedule, livePerformanceEvents, audioPlayer, createStream, mainRadioAdStateStore, restoreMainRadioAdState, saveMainRadioAdState,
+      topTenHype, topTenHypeStore }) {
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
@@ -676,6 +683,8 @@ export class JukeLoopSession {
     this.onTerminalDisconnect = onTerminalDisconnect;
     this.djuke        = djuke || null;
     this.devertPlayback = devertPlayback || null;
+    this._topTenHype = topTenHype || createTopTenHype({ store: topTenHypeStore });
+    this._hypeNotice = null;
     this._mainRadioAdStateStore = mainRadioAdStateStore || null;
     this._restoreMainRadioAdState = restoreMainRadioAdState || this._mainRadioAdStateStore?.restore || null;
     this._saveMainRadioAdState = saveMainRadioAdState || this._mainRadioAdStateStore?.save || null;
@@ -791,6 +800,10 @@ export class JukeLoopSession {
 
     this.player.on('error', (err) => {
       console.error('[jukeloop] Audio player error:', err.message);
+      if (this._nowPlaying?.hype) {
+        this._topTenHype.recordFailure(this._nowPlaying.trackId, `Audio playback failed: ${err.message}`)
+          .catch(error => console.error('[top10-hype] Failed to checkpoint audio failure:', error.message));
+      }
       if (this._currentDevertAd) {
         this._recordMainRadioAdFailure(this._currentDevertAd.campaignId, 'audio player error');
         this._currentDevertAd = null;
@@ -890,12 +903,20 @@ export class JukeLoopSession {
       this._preparedNext = null;
       const previousShowKey = this._activeShowKey;
       this._activeShowKey = showKey;
+      if (previousShowKey === 'weekly_top10:friday-top10-hype' && show.id !== 'friday-top10-hype') {
+        this.textChannel.send({ content: '🎉 **Friday Top 10 hype hour has ended at the scheduled handoff.** Any remaining opening-chart songs will not overrun the next show.',
+          allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications,
+        }).catch(error => console.warn('[top10-hype] Closing announcement failed:', error.message));
+      }
+      if (show.instanceId && show.id === 'friday-top10-hype') {
+        this._ensureTopTenHype(show).catch(error => console.error('[top10-hype] Opening chart blocked:', error.message));
+      }
       if (show.type === 'weekly_top10' && !previousShowKey?.startsWith('weekly_top10:')) {
         const message = show.window === 'final-payroll-hour'
           ? `📊 **${show.label}** is live. Vote through the New York payroll cutoff at midnight for this week's chart.`
           : `📊 **${show.label}** is live. React 👍 or 👎 to vote in this week's chart.`;
         this.textChannel.send({ content: message, allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications }).catch(() => {});
-      } else if (previousShowKey?.startsWith('weekly_top10:') && show.type === 'normal_rotation') {
+      } else if (previousShowKey?.startsWith('weekly_top10:') && previousShowKey !== 'weekly_top10:friday-top10-hype' && show.type === 'normal_rotation') {
         const finalListenEnded = previousShowKey === 'weekly_top10:weekly-top10-final-listen';
         const message = finalListenEnded
           ? '📊 The weekly Top 10 final listen has ended at the payroll cutoff. Normal rotation resumes.'
@@ -908,6 +929,10 @@ export class JukeLoopSession {
         this.player.stop(true);
       }
       if (this._started && show.type !== 'live_performance') this._refreshQueue();
+      if (requestPlayback && !previousEventId && this._started && show.id === 'friday-top10-hype' &&
+        this.player.state.status === AudioPlayerStatus.Idle) {
+        this._playNext().catch(error => console.error('[jukeloop] Scheduled playback blocked:', error.message));
+      }
     }
 
     if (!event && previousEventId && requestPlayback && this._started) {
@@ -924,6 +949,11 @@ export class JukeLoopSession {
     });
 
     if (activeShow.type === 'weekly_top10') {
+      if (activeShow.instanceId && activeShow.id === 'friday-top10-hype') {
+        this._queue = [];
+        this._queueIndex = 0;
+        return;
+      }
       const weeklyReport = getWeeklyPlayHistory({ weeks: 1, calendar: 'new-york' }).find(report => report.current);
       const topTenPool = rankWeeklyTopTenTracks(getPlaylist(), weeklyReport);
       this._queue = topTenPool.length > 0 ? topTenPool : getWeightedShuffledPlaylist();
@@ -932,7 +962,25 @@ export class JukeLoopSession {
     } else {
       this._queue = getWeightedShuffledPlaylist();
     }
+
     this._queueIndex = 0;
+  }
+
+  _ensureTopTenHype(show) {
+    return this._topTenHype.ensure({ show, playlist: getPlaylist(),
+      report: getWeeklyPlayHistory({ weeks: 1, calendar: 'new-york' }).find(report => report.current) });
+  }
+
+  getShowState(now = Date.now()) {
+    const activeShow = resolveActiveShow({ now, schedule: this.schedule, livePerformanceEvents: this.livePerformanceEvents });
+    return { activeShow, topTenHype: this._topTenHype.publicState(activeShow) };
+  }
+
+  async _skipHype(selection, reason, options) {
+    await this._topTenHype.advance(selection, reason);
+    await this.textChannel.send({ content: `⚠️ Friday Top10 opening #${selection.openingRank}: **${selection.title}** skipped — ${reason}`,
+      allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications });
+    return this._prepareNextPlayback(null, { ...options, hypeAttempts: (options.hypeAttempts || 0) + 1 });
   }
 
   /**
@@ -983,9 +1031,26 @@ export class JukeLoopSession {
       livePerformanceEvents: this.livePerformanceEvents,
     });
     if (activeShow.type === 'live_performance') return;
+    const isHype = !!activeShow.instanceId && activeShow.id === 'friday-top10-hype';
+    let hypeSelection = null;
+    if (isHype) {
+      await this._ensureTopTenHype(activeShow);
+      const state = this._topTenHype.publicState(activeShow);
+      if (!state.tracks.length || (options.hypeAttempts || 0) >= state.tracks.length) {
+        const notice = !state.tracks.length ? 'The opening Top10 chart is empty. No countdown is available; waiting until the scheduled handoff.'
+          : 'No opening-chart recording could be played. The countdown will retry; skipped places are shown in the live panel.';
+        if (this._hypeNotice !== notice) {
+          this._hypeNotice = notice;
+          await this.textChannel.send({ content: `📊 ${notice}`, allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications });
+        }
+        return null;
+      }
+      hypeSelection = this._topTenHype.next(getPlaylist());
+      if (!hypeSelection.track) return this._skipHype(hypeSelection, 'Recording is no longer eligible or available.', options);
+    }
 
     // Paid DJuke requests jump ahead without consuming the free rotation slot.
-    let paid = forcedPaid;
+    let paid = isHype ? null : forcedPaid;
     if (!paid && this.djuke && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
       paid = await this.djuke.nextPaid();
       if (this._destroyed && paid) {
@@ -997,7 +1062,7 @@ export class JukeLoopSession {
     let devertAd = null;
     let selectionDeferred = false;
     const musicSinceAd = Number.isFinite(projectedMusicSinceAd) ? projectedMusicSinceAd : this._musicSinceAd;
-    if (!allowAds) {
+    if (!allowAds || isHype) {
       // Music only: keep any selected advert queued for its real slot.
     } else if (!paid && this._preparedDevertAd) {
       devertAd = this._preparedDevertAd;
@@ -1027,12 +1092,12 @@ export class JukeLoopSession {
     }
 
     // Refill + reshuffle if we've exhausted the current pass
-    if (!paid && !devertAd && this._queueIndex >= this._queue.length) {
+    if (!isHype && !paid && !devertAd && this._queueIndex >= this._queue.length) {
       this._refreshQueue();
     }
 
     // Nothing to play → wait and retry
-    if (!paid && !devertAd && this._queue.length === 0) {
+    if (!isHype && !paid && !devertAd && this._queue.length === 0) {
       await this.textChannel
         .send({
           content: '📭 The JukeLoop playlist is empty.\n' +
@@ -1043,12 +1108,13 @@ export class JukeLoopSession {
       return null;
     }
 
-    const track = paid ? paid.track : devertAd ? devertAd.track : this._queue[this._queueIndex];
-    const queueIndex = !paid && !devertAd ? this._queueIndex : null;
+    const track = hypeSelection ? hypeSelection.track : paid ? paid.track : devertAd ? devertAd.track : this._queue[this._queueIndex];
+    const queueIndex = !hypeSelection && !paid && !devertAd ? this._queueIndex : null;
 
     const url = await this._getFreshUrl(track);
     if (!url) {
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
+      if (hypeSelection) return this._skipHype(hypeSelection, 'The recording could not be fetched.', options);
       if (devertAd) {
         this._recordMainRadioAdFailure(devertAd.campaignId, 'ad file could not be fetched');
         this._preparedDevertAd = null;
@@ -1094,9 +1160,10 @@ export class JukeLoopSession {
         return null;
       }
       const resource = createAudioResource(stream, { inputType: StreamType.Raw });
-      return { track, paid, devertAd, queueIndex, url, resource, ffmpegProcess };
+      return { track, paid, devertAd, queueIndex, url, resource, ffmpegProcess, hype: hypeSelection };
     } catch (err) {
       console.error('[jukeloop] Failed to prepare track:', err.message);
+      if (hypeSelection) return this._skipHype(hypeSelection, err.message, options);
       if (devertAd) {
         this._recordMainRadioAdFailure(devertAd.campaignId, err.message || 'ad playback failed');
         this._preparedDevertAd = null;
@@ -1207,8 +1274,9 @@ export class JukeLoopSession {
     const { track, devertAd, url } = prepared;
     const announcementContext = {
       playId,
-      queueIndex: this._queueIndex,
-      totalTracks: this._queue.length,
+      queueIndex: prepared.hype ? prepared.hype.cursor % prepared.hype.totalTracks + 1 : this._queueIndex,
+      totalTracks: prepared.hype ? prepared.hype.totalTracks : this._queue.length,
+      hype: prepared.hype,
       url,
       paid: !!prepared.paid,
       sponsor: this._nowPlaying?.sponsor || null,
@@ -1261,6 +1329,7 @@ export class JukeLoopSession {
       ...(videoUrl ? { videoUrl } : {}),
       ipfsCid: prepared.track.ipfsCid || null,
       isDevert: !!prepared.devertAd,
+      ...(prepared.hype ? { hype: { openingRank: prepared.hype.openingRank, encore: prepared.hype.encore } } : {}),
       ...(prepared.paid ? {
         sponsor: {
           kind: 'djuke',
@@ -1339,12 +1408,14 @@ export class JukeLoopSession {
       clearTimeout(this._paidPollTimer);
       this._paidPollTimer = null;
       let retryDelay = EMPTY_PLAYLIST_RETRY_MS;
+      let prepared = null;
+      const epoch = this._preparationEpoch;
       try {
         if (this._prepareTask) await this._prepareTask;
-        let prepared = this._preparedNext;
+        prepared = this._preparedNext;
         this._preparedNext = null;
         // Prefetch may have run before the last song unlocked the next advert slot.
-        if (prepared && !prepared.paid && !prepared.devertAd && this.devertPlayback &&
+        if (prepared && !prepared.hype && !prepared.paid && !prepared.devertAd && this.devertPlayback &&
           this._musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD) {
           try {
             const refreshed = await this._prepareNextPlayback();
@@ -1372,15 +1443,42 @@ export class JukeLoopSession {
           retryDelay = 1_000;
         }
         if (prepared) {
+          if (epoch !== this._preparationEpoch) {
+            this._disposePrepared(prepared, 'Scheduled radio mode changed');
+            prepared = null;
+            retryDelay = 1_000;
+          }
+        }
+        if (prepared) {
           prepared = await this._waitForChangeover(prepared);
           if (this._destroyed) return;
           if (!prepared) retryDelay = 1_000;
         }
         if (prepared) {
-          if (this._startPrepared(prepared)) return;
+          const show = this.getShowState().activeShow;
+          if (show.type === 'live_performance' || (prepared.hype
+            ? show.instanceId !== prepared.hype.instanceId
+            : show.id === 'friday-top10-hype')) {
+            this._disposePrepared(prepared, 'Scheduled handoff reached');
+            prepared = null;
+            retryDelay = 1_000;
+          }
+        }
+        if (prepared) {
+          if (prepared.hype) {
+            await this._topTenHype.advance(prepared.hype);
+            if (this._destroyed || epoch !== this._preparationEpoch ||
+              this.getShowState().activeShow.instanceId !== prepared.hype.instanceId) {
+              this._disposePrepared(prepared, 'Friday Top10 ended during checkpoint');
+              prepared = null;
+              retryDelay = 1_000;
+            }
+          }
+          if (prepared && this._startPrepared(prepared)) return;
           retryDelay = 1_000;
         }
       } catch (error) {
+        this._disposePrepared(prepared, 'Playback checkpoint failed');
         retryDelay = 1_000;
         console.warn('[jukeloop] Next playback blocked:', error.message);
       }

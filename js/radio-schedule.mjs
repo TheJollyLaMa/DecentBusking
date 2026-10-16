@@ -221,7 +221,17 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
   }
 
   const top10Show = (schedule || []).find(show => show.type === 'weekly_top10' && isShowActive(show, now));
-  if (top10Show) return { ...top10Show, type: 'weekly_top10' };
+  if (top10Show) {
+    const result = { ...top10Show, type: 'weekly_top10' };
+    if (top10Show.id === 'friday-top10-hype' && Number.isInteger(top10Show.startHourLocal) && Number.isInteger(top10Show.endHourLocal)) {
+      const local = localDateAndHour(now, top10Show.timeZone || PAYROLL_TIME_ZONE);
+      const startAt = Math.floor(now / 3_600_000) * 3_600_000 - (local.hour - top10Show.startHourLocal) * 3_600_000;
+      result.instanceId = `${top10Show.id}:${local.date}:${top10Show.startHourLocal}`;
+      result.startAt = new Date(startAt).toISOString();
+      result.endAt = new Date(startAt + (top10Show.endHourLocal - top10Show.startHourLocal) * 3_600_000).toISOString();
+    }
+    return result;
+  }
 
   const fallback = (schedule || []).find(show => show.type === 'normal_rotation') || { id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation', priority: 10 };
   return { ...fallback, type: 'normal_rotation' };

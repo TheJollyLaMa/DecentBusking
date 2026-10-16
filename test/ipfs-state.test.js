@@ -164,6 +164,31 @@ test('restoreCid fetches an explicit checkpoint without requiring it to remain i
   assert.equal(store.getLatestSnapshotUri(), `ipfs://${cid}`);
 });
 
+test('latest-only countdown restore never rewinds progress to an older available checkpoint', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  const source = require('node:fs').readFileSync(path.join(__dirname, '../discord-bot/index.js'), 'utf8');
+  const definition = source.match(/config\.topTenHypeStore = config\.pinataJwt \? createPinataStateStore\(([\s\S]*?)\) : null;/);
+  assert.ok(definition);
+  const options = require('node:vm').runInNewContext(`(${definition[1]})`, { config: {}, checkpointMirror: null });
+  assert.equal(options.restoreLatestOnly, true);
+  assert.equal(options.name, 'decentbusking-friday-top10-hype.json');
+  assert.equal(options.tags.kind, 'friday-top10-hype');
+  const fetched = [];
+  const store = createPinataStateStore({ ...options, pinataJwt: 'test-jwt',
+    fetchImpl: async url => {
+      fetched.push(url);
+      if (url.startsWith('https://api.pinata.cloud/')) return new Response(JSON.stringify({ data: { files: [
+        { cid: 'latest', name: 'decentbusking-friday-top10-hype.json', created_at: '2026-10-17T00:20:00Z' },
+        { cid: 'previous', name: 'decentbusking-friday-top10-hype.json', created_at: '2026-10-17T00:10:00Z' },
+      ] } }));
+      if (url.endsWith('/ipfs/latest')) return new Response('', { status: 429 });
+      return new Response(JSON.stringify({ cursor: 1 }));
+    } });
+  await assert.rejects(store.restore(), /tried 1 checkpoint/);
+  assert.equal(fetched.some(url => url.endsWith('/ipfs/previous')), false);
+  assert.equal(store.getLatestSnapshotUri(), '');
+});
+
 test('restoreCid retries a transient gateway 429 and restores the archived checkpoint', async () => {
   const { createPinataStateStore } = await import(moduleUrl);
   const cid = 'bafybeiamfpzoadbpbjbu4usncdlxpgbg3p5besebug7tofsipmp2g2mply';

@@ -1,8 +1,21 @@
 import { renderUsdcAmount } from './fund-display.mjs?v=20261015-usdc-cents';
 import { weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
+import { addChartSongToPlaylist } from './top-ten-playlist.mjs';
+import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261016-top10-hype-7';
 
 export { rankTopTenSongs };
+
+// Same module URL as main.js so the festival reads the shared radio analyser instead of building a second one.
+let spectrumReader = null;
+let spectrumReaderLoad = null;
+function readRadioSpectrum(out) {
+  if (spectrumReader) return spectrumReader(out);
+  spectrumReaderLoad ||= import('./space.js?v=20261016-top10-eq')
+    .then(module => { spectrumReader = typeof module.readNowPlayingSpectrum === 'function' ? module.readNowPlayingSpectrum : () => false; })
+    .catch(error => console.warn('[top-ten] Live equalizer unavailable:', error.message));
+  return false;
+}
 
 export function topTenDisplayRows(tracks, nowPlaying) {
   const ranked = rankTopTenSongs(tracks, nowPlaying?.trackId);
@@ -54,6 +67,26 @@ export function initTopTenBoard() {
   let timer;
   let previousChart = null;
   let rankAnimations = [];
+  let festival = null;
+  let hypeState = null;
+  let hypeDeadline = 0;
+  let hypeEndTimer;
+  let wasOpenBeforeHype = false;
+  let autoOpenedInstance = null;
+  let lastReport = null;
+  let lastWeekly = null;
+  let lastNowPlaying = null;
+  let lastPlayingId = null;
+  const closeButton = document.getElementById('top-ten-panel-close');
+  const playlistPending = new Set();
+  const playlistSaved = new Set();
+  const playlistStatus = el('p', 'top-ten-playlist-status');
+  playlistStatus.setAttribute('role', 'status');
+  playlistStatus.setAttribute('aria-live', 'polite');
+  content.before(playlistStatus);
+  document.addEventListener('wallet-disconnected', () => playlistSaved.clear());
+  document.addEventListener('wallet-connected', () => playlistSaved.clear());
+  document.addEventListener('creator-watchlist-changed', () => playlistSaved.clear());
   const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const flightLayer = el('div', 'top-ten-flight-layer');
@@ -64,7 +97,7 @@ export function initTopTenBoard() {
     return { node, index, step: index * 5, position: null, animation: null };
   });
   panel.append(flightLayer);
-  const canFly = () => isOpen() && !reducedMotion.matches && !document.hidden;
+  const canFly = () => isOpen() && !festival && !reducedMotion.matches && !document.hidden;
   const fly = visitor => {
     if (!canFly() || visitor.animation) return;
     const bounds = panel.getBoundingClientRect();
@@ -92,6 +125,7 @@ export function initTopTenBoard() {
     }).catch(() => {});
   };
   const syncFlights = () => {
+    festival?.resume();
     if (reducedMotion.matches) for (const animation of rankAnimations) animation.cancel();
     for (const visitor of visitors) {
       if (canFly()) fly(visitor);
@@ -120,7 +154,49 @@ export function initTopTenBoard() {
     document.dispatchEvent(new CustomEvent('left-drawer-open', { detail: 'top-ten' }));
     refresh();
   };
+  const endHype = () => {
+    if (!festival) return;
+    clearTimeout(hypeEndTimer);
+    festival.destroy();
+    festival = null;
+    hypeState = null;
+    if (!wasOpenBeforeHype && isOpen()) close();
+    if (lastReport) render(lastReport, lastNowPlaying, lastWeekly);
+    syncFlights();
+  };
+  const applyRadioState = radio => {
+    if (!radio) return;
+    const hype = radio.activeShow?.id === 'friday-top10-hype' ? radio.topTenHype : null;
+    if (!hype) {
+      if (radio.activeShow || performance.now() >= hypeDeadline) endHype();
+      return;
+    }
+    const remaining = Date.parse(hype.endAt) - radio.serverTime;
+    if (!(remaining > 0)) { endHype(); return; }
+    hypeState = hype;
+    hypeDeadline = performance.now() + remaining;
+    clearTimeout(hypeEndTimer);
+    hypeEndTimer = setTimeout(endHype, remaining);
+    if (!festival) {
+      wasOpenBeforeHype = isOpen();
+      festival = mountTopTenFestival(panel, { readSpectrum: readRadioSpectrum });
+      syncFlights();
+    }
+    const instance = hype.instanceId || radio.activeShow.instanceId || hype.startAt || 'friday-top10-hype';
+    if (autoOpenedInstance !== instance) {
+      autoOpenedInstance = instance;
+      if (!isOpen()) open();
+    }
+    const playing = radio.nowPlaying;
+    festival.update({ ...playing?.hype, title: playing?.hype ? playing.title : '', status: hype.status,
+      error: hype.error, lateSnapshot: hype.lateSnapshot, skipped: hype.skipped });
+    if (lastReport) render(lastReport, playing || null, lastWeekly);
+  };
   const render = (report, nowPlaying, weekly) => {
+    lastReport = report;
+    lastWeekly = weekly;
+    lastNowPlaying = nowPlaying;
+    const focusedTrack = content.contains(document.activeElement) ? document.activeElement.dataset.trackId : null;
     const rows = topTenPrizeRows(report.tracks || [], nowPlaying, {
       budgetUnits: weekly?.funds?.top10?.budgetUnits ?? null, minimumUnits: weekly?.minimumPayoutUnits,
     });
@@ -149,9 +225,12 @@ export function initTopTenBoard() {
       }
       const rank = el('span', `top-ten-rank${track.outsideTopTen ? ' top-ten-live-rank' : ''}`, track.outsideTopTen ? '▶' : String(track.rank));
       const details = el('span', 'top-ten-song-details');
-      details.append(el('strong', 'top-ten-song-title', track.title || 'Untitled song'),
-        el('span', 'top-ten-song-artist', track.artist || 'Artist wallet not linked'));
+      const titleLine = el('span', 'top-ten-song-title-line');
+      titleLine.append(el('strong', 'top-ten-song-title', track.title || 'Untitled song'));
+      details.append(titleLine, el('span', 'top-ten-song-artist', track.artist || 'Artist wallet not linked'));
       if (track.nowPlaying) details.append(el('span', 'top-ten-live-badge', 'LIVE NOW'));
+      const opening = hypeState?.tracks?.find(entry => entry.trackId === track.trackId);
+      if (opening) details.append(el('span', 'top-ten-opening-rank', `Opening #${opening.openingRank} \u00b7 live ${track.rank ? `#${track.rank}` : 'outside Top 10'}`));
       const score = el('span', 'top-ten-vote-score');
       score.append(el('span', 'top-ten-net-votes', `${track.votes > 0 ? '+' : ''}${track.votes}`), el('span', 'top-ten-vote-label', 'net votes'));
       const prize = el('span', 'top-ten-prize');
@@ -164,11 +243,39 @@ export function initTopTenBoard() {
         prize.title = track.prizeUnits === 0n ? 'No payable prize at this rank; prizes must exceed $0.10' : 'Estimated prize if this song holds its rank at Monday midnight, America/New_York';
         if (!/^0x(?!0{40}$)[0-9a-fA-F]{40}$/i.test(track.wallet || '')) prize.title += ' · Artist payout wallet must be linked before closeout';
       }
+      const add = el('button', 'top-ten-playlist-add', playlistSaved.has(track.trackId) ? '\u2713' : '+');
+      add.type = 'button';
+      add.dataset.trackId = track.trackId;
+      add.title = `Add ${track.title || 'song'} to your personal playlist (profile watchlist)`;
+      add.setAttribute('aria-label', add.title);
+      add.disabled = playlistPending.has(track.trackId);
+      add.addEventListener('click', async () => {
+        playlistPending.add(track.trackId);
+        add.disabled = true;
+        playlistStatus.textContent = `Adding ${track.title} to your personal playlist\u2026`;
+        try {
+          await addChartSongToPlaylist({ ...track, ipfsCid: track.ipfsCid || (track.nowPlaying ? nowPlaying?.ipfsCid : '') });
+          playlistSaved.add(track.trackId);
+          add.textContent = '\u2713';
+          playlistStatus.textContent = `${track.title} is saved in your personal playlist (profile watchlist).`;
+        } catch (error) {
+          playlistStatus.textContent = error.message;
+        } finally {
+          playlistPending.delete(track.trackId);
+          add.disabled = false;
+        }
+      });
+      titleLine.append(add);
       item.append(rank, details, score, prize);
       list.append(item);
     }
     content.append(list);
     content.scrollTop = scrollTop;
+    if (festival && nowPlaying?.trackId && nowPlaying.trackId !== lastPlayingId) {
+      [...list.children].find(item => item.dataset.trackId === nowPlaying.trackId)?.scrollIntoView({ block: 'nearest' });
+    }
+    lastPlayingId = nowPlaying?.trackId || null;
+    if (focusedTrack) [...content.querySelectorAll('.top-ten-playlist-add')].find(button => button.dataset.trackId === focusedTrack)?.focus({ preventScroll: true });
     if (!reducedMotion.matches) for (const item of list.children) {
       const previousTop = previousPositions.get(item.dataset.trackId);
       const delta = previousTop == null ? 0 : previousTop - item.getBoundingClientRect().top;
@@ -198,6 +305,7 @@ export function initTopTenBoard() {
       if (request !== generation || !isOpen()) return;
       if (!historyResponse.ok) throw new Error(history.error || `Weekly votes unavailable (${historyResponse.status})`);
       if (!radioResponse.ok) throw new Error(radio.error || `Live track unavailable (${radioResponse.status})`);
+      applyRadioState(radio);
       const report = (history.weeks || []).find(entry => entry.current) || (history.weeks || []).at(-1);
       const weekly = weeklyResponse?.ok && weeklyState?.ready && !weeklyState.lastError && weeklyState.currentPeriod?.week === report?.week &&
         /^\d+$/.test(String(weeklyState.funds?.top10?.budgetUnits ?? '')) ? weeklyState : null;
@@ -213,12 +321,18 @@ export function initTopTenBoard() {
   toggle.addEventListener('click', event => { event.stopPropagation(); isOpen() ? close() : open(); });
   reducedMotion.addEventListener('change', syncFlights);
   document.addEventListener('visibilitychange', syncFlights);
+  document.addEventListener('visibilitychange', () => { if (festival && performance.now() >= hypeDeadline) endHype(); });
+  document.addEventListener('dbusk-radio-state', event => applyRadioState(event.detail));
   content.addEventListener('scroll', syncFlights, { passive: true });
   document.getElementById('top-ten-panel-close')?.addEventListener('click', () => { close(); toggle.focus(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); } });
-  document.addEventListener('left-drawer-open', event => { if (event.detail !== 'top-ten' && isOpen()) close(); });
+  document.addEventListener('left-drawer-open', event => {
+    if (event.detail === 'top-ten' || !isOpen()) return;
+    close();
+  });
   document.addEventListener('click', event => {
-    if (isOpen() && !panel.contains(event.target) && event.target !== toggle) close();
+    // During the Hype hour, keep the board up for stray page clicks; it still minimizes via its controls.
+    if (isOpen() && !festival && !panel.contains(event.target) && event.target !== toggle) close();
   });
 }
 

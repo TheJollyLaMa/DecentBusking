@@ -75,6 +75,7 @@ export function createPinataStateStore({
   name = STATE_FILE_NAME,
   tags = STATE_KEYVALUES,
   retainSnapshots = SNAPSHOTS_TO_KEEP,
+  restoreLatestOnly = false,
   groupId,
   archiveGroupId,
   now = () => Date.now(),
@@ -161,7 +162,7 @@ export function createPinataStateStore({
     if (!snapshots.length) return null;
 
     const failures = [];
-    const candidates = snapshots.slice(0, MAX_RESTORE_CANDIDATES);
+    const candidates = snapshots.slice(0, restoreLatestOnly ? 1 : MAX_RESTORE_CANDIDATES);
     const gateways = await restoreGateways();
     for (const [index, candidate] of candidates.entries()) {
       if (!candidate.cid) continue;
