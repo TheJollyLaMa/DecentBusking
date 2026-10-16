@@ -3,7 +3,7 @@
 
 import { initWallet } from './wallet.js';
 import { initStage } from './stage.js?v=20261016-radio-preload';
-import { initSpace } from './space.js?v=20261016-top10-eq';
+import { initSpace } from './space.js?v=20261016-artwork-backoff';
 import { initTutorial } from './tutorial.js?v=20261013-walkthrough';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.
