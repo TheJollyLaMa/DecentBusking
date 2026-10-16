@@ -123,6 +123,34 @@ test('VertLoop FFmpeg caps an ad output at 120 seconds', () => {
   assert.equal(argumentsUsed[argumentsUsed.indexOf('-t') + 1], '120');
 });
 
+test('VertLoop removal stops the current ad and rejects one removed during media lookup', async () => {
+  const { createDevertLoopController } = await import('../discord-bot/devert-loop.js');
+  const player = new EventEmitter();
+  let plays = 0;
+  let stops = 0;
+  let kills = 0;
+  let removed = false;
+  player.play = () => { plays++; };
+  player.stop = () => { stops++; };
+  const controller = createDevertLoopController({ player,
+    playback: { nextDevertLoopAd: async () => ({ campaignId: '1', track: { title: 'Ad', ipfsCid: 'cid' } }),
+      isCampaignRemoved: () => removed },
+    voiceChannel: { name: 'AdLoop' }, resolveAdUrl: async () => 'https://example.test/ad',
+    createStream: () => ({ stdout: {}, kill: () => { kills++; } }), createResource: stream => stream,
+    setTimer: () => ({ unref() {} }), clearTimer() {}, log: { log() {}, warn() {} } });
+  await controller.start();
+  controller.removeCampaign('2');
+  assert.equal(stops, 0);
+  controller.removeCampaign('1');
+  assert.equal(stops, 1);
+  assert.equal(kills, 1);
+  assert.equal(controller.getState().nowPlaying, null);
+  removed = true;
+  await controller.start();
+  assert.equal(plays, 1);
+  controller.stop();
+});
+
 test('AdLoop retries unstreamable campaigns without reporting an impression', async () => {
   const { createDevertLoopController } = await import('../discord-bot/devert-loop.js');
   const player = new EventEmitter();

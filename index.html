@@ -488,6 +488,13 @@
       </div>
       <div id="admin-status" class="admin-status" role="status"></div>
       <p id="admin-payment-ledger-status" class="admin-status" role="status">Payment proofs not loaded.</p>
+      <details id="admin-devert-campaigns" class="hidden">
+        <summary>DVert campaign moderation</summary>
+        <p>Remove an advert from main radio and VertLoop. No refund; the paid term remains unchanged.</p>
+        <button id="admin-devert-refresh" type="button" class="admin-btn admin-btn-secondary">Refresh campaigns</button>
+        <p id="admin-devert-status" class="admin-status" role="status"></p>
+        <ul id="admin-devert-list"></ul>
+      </details>
       <details id="admin-radio-schedule" class="hidden" aria-labelledby="admin-radio-schedule-title">
         <summary>📻 Radio Programming</summary>
         <div class="admin-section-header">
@@ -719,7 +726,7 @@
   <script type="module" src="js/main.js?v=20261015-usdc-cents"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261015-usdc-cents"></script>
+  <script type="module" src="js/admin.js?v=20261016-campaign-removal"></script>
 
   <script type="module" src="js/payroll.js?v=20261015-usdc-cents"></script>
   <script type="module" src="js/radio-history.js?v=20261015-usdc-cents"></script>
@@ -727,7 +734,7 @@
   <script type="module" src="js/fund-header.mjs?v=20261015-usdc-cents"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261015-usdc-cents"></script>
   <script type="module" src="js/djuke.mjs?v=20261015-usdc-cents"></script>
-  <script type="module" src="js/devert-tab.mjs?v=20261015-usdc-cents"></script>
+  <script type="module" src="js/devert-tab.mjs?v=20261016-campaign-removal"></script>
   <script type="module" src="js/creator-profile.mjs?v=20261015-usdc-cents"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
   <script type="module" src="js/listens.mjs?v=20261015-usdc-cents"></script>

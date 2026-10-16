@@ -84,7 +84,8 @@ function fixture({ nativeBalance = 1_000_000_000_000_000_000n, allowance = 0n } 
       return { wait: async () => ({ status: 1 }) };
     },
   };
-  return { signer, contract, usdc, calls, setChainId: chainId => { currentChainId = chainId; } };
+  return { signer, contract, usdc, calls, readCampaigns: async () => ({ chainId: 8453, contractAddress: CONTRACT_ADDRESS, campaigns: [] }),
+    setChainId: chainId => { currentChainId = chainId; } };
 }
 
 test('DeVert purchase attaches the current worker-gas top-up and keeps USDC approval exact', async () => {
@@ -100,6 +101,52 @@ test('DeVert purchase attaches the current worker-gas top-up and keeps USDC appr
   assert.equal(state.calls.simulations[0][4].maxPriorityFeePerGas, 50_000_000n);
   assert.equal(state.calls.purchases[0][4].value, expectedTopUp);
   assert.ok(state.calls.steps.some(message => /worker-gas top-up/.test(message)));
+});
+
+test('DeVert purchase rejects a duplicate paid term before approval, including removed campaigns', async () => {
+  const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
+  for (const removed of [false, true]) {
+    const state = fixture();
+    state.readCampaigns = async () => ({ chainId: 8453, contractAddress: CONTRACT_ADDRESS, campaigns: [{ advertiser: ADVERTISER, audioURI: 'ipfs://bafy-audio',
+      startedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 100_000).toISOString(), removed }] });
+    await assert.rejects(purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio', weeks: 1 }),
+      /already has a paid campaign/);
+    assert.equal(state.calls.approvals.length, 0);
+    assert.equal(state.calls.purchases.length, 0);
+  }
+});
+
+test('expired advert can purchase a fresh $5 campaign and availability failures never charge', async () => {
+  const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
+  const state = fixture();
+  state.readCampaigns = async () => ({ chainId: 8453, contractAddress: CONTRACT_ADDRESS, campaigns: [{ advertiser: ADVERTISER, audioURI: 'ipfs://bafy-audio',
+    startedAt: new Date(Date.now() - 2000).toISOString(), expiresAt: new Date(Date.now() - 1000).toISOString() }] });
+  await purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio', weeks: 1 });
+  assert.equal(state.calls.purchases[0][2], 5_000_000n);
+  const unavailable = fixture();
+  unavailable.readCampaigns = async () => { throw new Error('Campaign RPC unavailable'); };
+  await assert.rejects(purchaseDevertCampaign({ ...unavailable, title: 'Campaign', audioURI: 'ipfs://bafy-audio', weeks: 1 }), /RPC unavailable/);
+  assert.equal(unavailable.calls.approvals.length, 0);
+});
+
+test('campaign availability is rechecked after approval and refuses mismatched contract snapshots', async () => {
+  const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
+  const state = fixture();
+  let checks = 0;
+  state.readCampaigns = async () => ({
+    chainId: 8453, contractAddress: CONTRACT_ADDRESS,
+    campaigns: ++checks === 1 ? [] : [{ advertiser: ADVERTISER, audioURI: 'ipfs://bafy-audio',
+      startedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 100_000).toISOString() }],
+  });
+  await assert.rejects(purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio', weeks: 1 }),
+    /already has a paid campaign/);
+  assert.equal(state.calls.approvals.length, 1);
+  assert.equal(state.calls.purchases.length, 0);
+  const wrongContract = fixture();
+  wrongContract.readCampaigns = async () => ({ chainId: 8453, contractAddress: ADVERTISER, campaigns: [] });
+  await assert.rejects(purchaseDevertCampaign({ ...wrongContract, title: 'Campaign', audioURI: 'ipfs://bafy-audio', weeks: 1 }),
+    /configured Base contract/);
+  assert.equal(wrongContract.calls.approvals.length, 0);
 });
 
 test('DeVert purchase scales the worker-gas top-up with campaign duration', async () => {

@@ -69,7 +69,7 @@ function validateJournal(value) {
 }
 
 export function createDevertPlaybackRuntime({ contract, provider = contract?.runner?.provider, restore, save,
-  readCampaigns, resolveCampaignMedia = () => null, now = () => Date.now(), minimumAudibleMs = MIN_AUDIBLE_MS, log = console,
+  readCampaigns, resolveCampaignMedia = () => null, isCampaignRemoved = () => false, now = () => Date.now(), minimumAudibleMs = MIN_AUDIBLE_MS, log = console,
   workerAddress, workerMinBalanceWei = DEFAULT_WORKER_MIN_BALANCE_WEI, workerDailyBurnWei = WORKER_GAS_DAILY_BURN_WEI, workerGasReader = readWorkerGasState,
   workerGasCheckMs = WORKER_GAS_CHECK_MS }) {
   if (!contract || typeof restore !== 'function' || typeof save !== 'function' || typeof readCampaigns !== 'function') {
@@ -331,6 +331,15 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
   }
 
   return {
+    isCampaignRemoved,
+    async canPlayCampaign(campaignId) {
+      requireReady();
+      if (isCampaignRemoved(campaignId)) return false;
+      const snapshot = await readCampaigns();
+      return snapshot.chainId === 8453 && !snapshot.paused && snapshot.campaigns.some(campaign =>
+        campaign.campaignId === String(campaignId) && !campaign.removed &&
+        Date.parse(campaign.startedAt) <= now() && now() < Date.parse(campaign.expiresAt));
+    },
     initialize: () => run(async () => {
       const restored = await restore();
       journal = restored ? validateJournal(restored) : emptyJournal();
@@ -371,7 +380,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
         voteScores.set(entry.campaignId, (voteScores.get(entry.campaignId) || 0) + entry.vote);
       }
       const limit = Number.isSafeInteger(count) && count > 0 ? count : 1;
-      const campaigns = plan.mainRadio.filter(item => !excluded.has(item.campaignId))
+      const campaigns = plan.mainRadio.filter(item => !item.removed && !excluded.has(item.campaignId))
         .sort((first, second) => (voteScores.get(second.campaignId) || 0) - (voteScores.get(first.campaignId) || 0))
         .slice(0, limit);
       if (limit === 1) {
@@ -402,7 +411,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       const campaign = snapshot.campaigns.filter(item => {
         const start = Date.parse(item.startedAt);
         const end = Date.parse(item.expiresAt);
-        return start <= nowMs && nowMs < end && !excluded.has(String(item.campaignId));
+        return start <= nowMs && nowMs < end && !item.removed && !excluded.has(String(item.campaignId));
       }).sort((first, second) => Number(second.djukeBoosts || 0) - Number(first.djukeBoosts || 0) ||
         Number(first.devertPlays || 0) - Number(second.devertPlays || 0) ||
         (BigInt(second.offerUnits) > BigInt(first.offerUnits) ? 1 : BigInt(second.offerUnits) < BigInt(first.offerUnits) ? -1 :

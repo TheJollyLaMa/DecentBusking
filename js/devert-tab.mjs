@@ -6,6 +6,7 @@ import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllow
 import { planDevertQueues, quoteDevertCampaign, DEVERT_SONGS_PER_MAIN_AD } from './devert-scheduler.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { activeDevertCampaign, removeDevertCampaign } from './devert-campaigns.mjs';
 
 const MAX_DEVERT_MEDIA_BYTES = 250 * 1024 * 1024;
 
@@ -16,7 +17,7 @@ export function devertPublicQueue(snapshot) {
   const plan = planDevertQueues({ campaigns: snapshot.campaigns,
     completedSongPlays: snapshot.market?.slots * DEVERT_SONGS_PER_MAIN_AD,
     now: Date.parse(snapshot.snapshotAt) });
-  const campaigns = [...plan.mainRadio, ...plan.mainRadioOverflow];
+  const campaigns = [...plan.mainRadio, ...plan.mainRadioOverflow].filter(campaign => !campaign.removed);
   const quote = quoteDevertCampaign({ campaigns, mainRadioSlots: plan.mainRadioSlots });
   return { campaigns, minimumOfferUnits: quote.minimumOfferUnits };
 }
@@ -116,7 +117,7 @@ export const DEVERT_USDC_ABI = [
 ];
 export const DEVERT_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
-export async function purchaseDevertCampaign({ signer, contract, usdc, title, audioURI, weeks, onStep = () => {} }) {
+export async function purchaseDevertCampaign({ signer, contract, usdc, title, audioURI, weeks, readCampaigns, onStep = () => {} }) {
   await ensureBaseNetwork(signer.provider);
   if (usdc.target.toLowerCase() !== DEVERT_USDC_ADDRESS.toLowerCase() || Number(await usdc.decimals()) !== 6) {
     throw new Error('Configured token is not native Base USDC');
@@ -134,6 +135,15 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   const quote = await contract.quoteCampaign(weekId);
   if (offerUnits < quote.minimumOfferUnits) throw new Error(`Current minimum offer is ${formatUsdc(quote.minimumOfferUnits.toString())}`);
   const advertiser = await signer.getAddress();
+  const checkExisting = async () => {
+    if (typeof readCampaigns !== 'function') throw new Error('Campaign availability must be checked before purchasing');
+    const current = await readCampaigns();
+    if (current.chainId !== 8453 || current.contractAddress?.toLowerCase() !== contract.target.toLowerCase() ||
+      !Array.isArray(current.campaigns)) throw new Error('Campaign availability could not be verified for the configured Base contract');
+    const existing = activeDevertCampaign(current.campaigns, advertiser, mediaUri);
+    if (existing) throw new Error(`This advert already has a paid campaign until ${new Date(existing.expiresAt).toLocaleString()}. Removing it from playback does not end its paid term.`);
+  };
+  await checkExisting();
   if (await usdc.balanceOf(advertiser) < offerUnits) throw new Error('Insufficient Base USDC balance');
   let gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser, weeks);
   if (await usdc.allowance(advertiser, contract.target) < offerUnits) {
@@ -144,6 +154,7 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
     await waitForAllowance(usdc, advertiser, contract.target, offerUnits);
   }
   gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser, weeks);
+  await checkExisting();
   onStep(`Creating campaign…`);
   await retryMissingRevertData(
     () => contract.createCampaign.staticCall(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides),
@@ -155,7 +166,7 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   onStep(`Confirm the ${weeks}-week campaign purchase: ${formatUsdc(offerUnits.toString())} plus ${formatEth(gasQuote.amount)} worker-gas top-up; transaction gas is separate`);
   const transaction = await contract.createCampaign(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides);
   onStep('Waiting for Base confirmation…');
-  if ((await transaction.wait())?.status !== 1) throw new Error('Campaign purchase did not confirm');
+  if ((await transaction.wait(2))?.status !== 1) throw new Error('Campaign purchase did not confirm');
   announcePaymentCelebration({
     chainId: 8453,
     txHash: transaction.hash,
@@ -422,6 +433,18 @@ export function initDevertTab() {
     document.getElementById('devert-weeks').focus();
   }
 
+  async function removeCampaign(campaignId, status) {
+    if (!window.confirm('Remove this campaign from main radio and VertLoop? No refund. You cannot run this advert again until its paid term ends.')) return;
+    status.textContent = 'Sign the campaign removal request in your wallet...';
+    try {
+      await removeDevertCampaign({ service: window.DecentConfig.ipfsUploadServiceUrl,
+        signer: window._wallet.signer, campaignId });
+      await refresh();
+    } catch (error) {
+      status.textContent = `Removal failed: ${error.message}`;
+    }
+  }
+
   function renderAdLibrary() {
     const query = searchInput.value.trim().toLowerCase();
     const gateway = (window.DecentConfig?.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/').replace(/\/?$/, '/');
@@ -445,7 +468,8 @@ export function initDevertTab() {
       card.disabled = ad.state !== 'ready';
       card.setAttribute('aria-label', ad.state === 'ready'
         ? `Use ${ad.title} in a campaign`
-        : `${ad.title} is waiting for mint`);
+        : ad.state === 'active' ? `${ad.title}: ${ad.removed ? 'removed from playback; paid term ends' : 'campaign active until'} ${new Date(ad.expiresAt).toLocaleString()}`
+          : `${ad.title} is waiting for mint`);
       if (ad.state !== 'ready') card.setAttribute('aria-disabled', 'true');
       const art = node('span', undefined, 'devert-library-art');
       const imageUrl = resolveAdArtworkUrl(ad.image || ad.artworkCid || '', gateway);
@@ -462,11 +486,12 @@ export function initDevertTab() {
       }
       const body = node('span', undefined, 'devert-library-copy');
       body.append(node('strong', ad.title), node('span',
-        ad.state === 'active' ? 'Active campaign'
+        ad.state === 'active' ? `${ad.removed ? 'Removed from playback · paid term ends' : 'Campaign active until'} ${new Date(ad.expiresAt).toLocaleString()}`
           : ad.state === 'ready' ? 'Minted · ready to run'
             : 'Waiting for mint', 'devert-library-status'));
       if (ad.tokenId != null) body.append(node('span', `Token #${ad.tokenId}`, 'devert-library-meta'));
-      card.append(art, body, node('span', ad.state === 'ready' ? 'Select' : 'Locked', 'devert-library-badge'));
+      card.append(art, body, node('span', ad.state === 'ready' ? 'Select'
+        : ad.state === 'active' ? ad.removed ? 'Removed' : 'Active' : 'Pending', 'devert-library-badge'));
       if (ad.state === 'ready') card.addEventListener('click', () => selectAdForCampaign(ad));
       item.append(card);
       searchResults.append(item);
@@ -488,7 +513,13 @@ export function initDevertTab() {
       const hash = await purchaseDevertCampaign({ signer, contract, usdc,
         title: document.getElementById('devert-title').value,
         audioURI: document.getElementById('devert-audio-uri').value,
-        weeks, onStep: message => { purchaseStatus.textContent = message; } });
+        weeks, readCampaigns: async () => {
+          const response = await fetch(`${window.DecentConfig.ipfsUploadServiceUrl.replace(/\/$/, '')}/api/devert`,
+            { cache: 'no-store', signal: AbortSignal.timeout(12_000) });
+          const state = await response.json();
+          if (!response.ok) throw new Error(state.error || 'Campaign availability could not be verified');
+          return state;
+        }, onStep: message => { purchaseStatus.textContent = message; } });
       purchaseStatus.textContent = `Campaign confirmed: ${hash}`;
       await refresh();
     } catch (error) {
@@ -650,11 +681,24 @@ export function initDevertTab() {
                 : ownershipUnavailable && !ads.length ? 'Wallet ownership could not be fully checked; refresh shortly.'
                   : ownershipUnavailable ? `${ads.length} ad${ads.length === 1 ? '' : 's'} found; some wallet ownership checks failed. Refresh shortly.`
                     : ads.length ? `${ads.length} ad${ads.length === 1 ? '' : 's'} linked to this wallet.` : 'No ads submitted from this wallet yet.';
+      const paidTerms = result.campaigns.filter(campaign => walletAddress &&
+        campaign.advertiser.toLowerCase() === walletAddress.toLowerCase() &&
+        Date.parse(campaign.startedAt) <= Date.now() && Date.now() < Date.parse(campaign.expiresAt));
+      if (paidTerms.length) {
+        adLibraryStatus = `${paidTerms.length} campaign(s) within their paid term: ${
+          paidTerms.map(campaign => `${campaign.title}${campaign.removed ? ' (removed from playback)' : ''} until ${
+            new Date(campaign.expiresAt).toLocaleString()}`).join('; ')}. ${adLibraryStatus}`;
+      }
       renderAdLibrary();
-      for (const ad of ads) {
+      const campaignRows = [...ads, ...paidTerms.filter(campaign => !ads.some(ad => ad.campaignId === campaign.campaignId))
+        .map(campaign => ({ ...campaign, state: 'active', secondsRemaining:
+          Math.max(0, Math.ceil((Date.parse(campaign.expiresAt) - Date.now()) / 1000)) }))];
+      for (const ad of campaignRows) {
         const item = node('li', undefined, 'devert-campaign');
         const details = node('span', undefined, 'devert-campaign-details');
-        const state = ad.state === 'active' ? 'Active campaign' : ad.state === 'ready' ? 'NFT minted · ready for campaign' : 'Waiting for admin mint';
+        const state = ad.state === 'active'
+          ? `${ad.removed ? 'Removed from playback · paid term ends' : 'Active until'} ${new Date(ad.expiresAt).toLocaleString()}`
+          : ad.state === 'ready' ? 'NFT minted · ready for campaign' : 'Waiting for admin mint';
         const remaining = ad.secondsRemaining > 0 ? ` · ${Math.floor(ad.secondsRemaining / 86400)}d ${Math.floor(ad.secondsRemaining % 86400 / 3600)}h left` : '';
         details.append(node('strong', ad.title), node('span', `${state}${remaining}`));
         item.append(details);
@@ -664,6 +708,12 @@ export function initDevertTab() {
           select.setAttribute('aria-label', `Use ${ad.title} in a campaign`);
           select.addEventListener('click', () => selectAdForCampaign(ad));
           item.append(select);
+        }
+        if (ad.state === 'active' && !ad.removed) {
+          const remove = node('button', 'Remove from playback', 'devert-use-ad');
+          remove.type = 'button';
+          remove.addEventListener('click', () => removeCampaign(ad.campaignId, campaignStatus));
+          item.append(remove);
         }
         campaignList.append(item);
       }

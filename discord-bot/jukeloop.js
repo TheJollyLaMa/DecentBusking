@@ -928,6 +928,10 @@ export class JukeLoopSession {
   async _prepareNextPlayback(forcedPaid = null) {
     if (this._destroyed) return null;
     await this._ensureMainRadioAdState();
+    this._pendingDevertAds = this._pendingDevertAds.filter(ad => !this.devertPlayback?.isCampaignRemoved?.(ad.campaignId));
+    if (this._preparedDevertAd && this.devertPlayback?.isCampaignRemoved?.(this._preparedDevertAd.campaignId)) {
+      this._preparedDevertAd = null;
+    }
     const activeShow = resolveActiveShow({
       now: Date.now(),
       schedule: this.schedule,
@@ -1175,6 +1179,10 @@ export class JukeLoopSession {
 
   _startPrepared(prepared) {
     if (!prepared || this._destroyed) return false;
+    if (prepared.devertAd && this.devertPlayback?.isCampaignRemoved?.(prepared.devertAd.campaignId)) {
+      this._disposePrepared(prepared, 'Advert removed from playback');
+      return false;
+    }
     if (this._ffmpeg && this._ffmpeg !== prepared.ffmpegProcess) {
       try { this._ffmpeg.kill(); } catch {}
     }
@@ -1255,9 +1263,17 @@ export class JukeLoopSession {
           }
         }
         if (!prepared) prepared = await this._prepareNextPlayback();
+        if (prepared?.devertAd && this.devertPlayback?.canPlayCampaign &&
+          !await this.devertPlayback.canPlayCampaign(prepared.devertAd.campaignId)) {
+          this._disposePrepared(prepared, 'Campaign expired or removed before playback');
+          this._preparedDevertAd = null;
+          await this._persistMainRadioAdState();
+          prepared = null;
+          retryDelay = 1_000;
+        }
         if (prepared) {
-          this._startPrepared(prepared);
-          return;
+          if (this._startPrepared(prepared)) return;
+          retryDelay = 1_000;
         }
       } catch (error) {
         retryDelay = 1_000;
@@ -1345,6 +1361,18 @@ export class JukeLoopSession {
   async getMainRadioAdCountdown(now = Date.now()) {
     await this._ensureMainRadioAdState();
     return buildMainRadioAdCountdown({ session: this, now });
+  }
+
+  async removeDevertCampaign(campaignId) {
+    const matches = ad => ad && String(ad.campaignId) === String(campaignId);
+    this._pendingDevertAds = this._pendingDevertAds.filter(ad => !matches(ad));
+    if (matches(this._preparedDevertAd)) this._preparedDevertAd = null;
+    if (matches(this._preparedNext?.devertAd)) {
+      this._disposePrepared(this._preparedNext, 'Advert removed from playback');
+      this._preparedNext = null;
+    }
+    await this._persistMainRadioAdState();
+    if (matches(this._currentDevertAd)) this.player.stop(true);
   }
 
   _ensureMainRadioAdState() {

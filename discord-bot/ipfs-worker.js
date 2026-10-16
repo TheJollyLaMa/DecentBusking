@@ -7,6 +7,7 @@ import { uploadToIPFS } from './ipfs.js';
 import { readRawBody } from './alchemy-webhook.js';
 import { fetchMintMetadata } from './mint-sync.js';
 import { buildArtworkUpdateAuthorizationMessage, buildArtworkUpdateMetadata } from '../js/artwork-update.mjs';
+import { buildDevertRemovalMessage } from '../js/devert-campaigns.mjs';
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 const SIGNED_UPLOAD_OVERHEAD_BYTES = 64 * 1024;
@@ -208,6 +209,7 @@ export function createWorkerRequestHandler({
   getDjukeState,
   getDjukeGasQuote,
   getDevertState,
+  removeDevertCampaign,
   getDevertAds,
   getDevertLoopState,
   onDevertLoopVote,
@@ -380,6 +382,23 @@ export function createWorkerRequestHandler({
           return;
         }
         sendJson(response, 200, await getDevertState(), '*');
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/devert/remove') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!getDevertState || !removeDevertCampaign) throw new Error('Campaign removal is unavailable');
+        const body = await readJson(request);
+        if (!/^0x[0-9a-f]{40}$/i.test(body.address || '') || !/^\d+$/.test(body.campaignId || '') ||
+          typeof body.signature !== 'string' || !Number.isFinite(Date.parse(body.issuedAt)) ||
+          Math.abs(now() - Date.parse(body.issuedAt)) > MAX_SIGNATURE_AGE_MS) throw new Error('Invalid or expired campaign removal authorization');
+        if (hasConsumedSignature(body.signature)) throw new Error('Campaign removal authorization has already been used');
+        const recovered = verifyMessage(buildDevertRemovalMessage({ ...body, origin }), body.signature).toLowerCase();
+        const snapshot = await getDevertState();
+        const campaign = snapshot.campaigns.find(item => item.campaignId === body.campaignId);
+        if (recovered !== body.address.toLowerCase() || !campaign ||
+          (recovered !== expectedOwner && recovered !== campaign.advertiser.toLowerCase())) throw new Error('Only the advertiser or radio owner can remove this campaign');
+        consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
+        sendJson(response, 200, await removeDevertCampaign({ campaignId: body.campaignId, address: recovered }), corsOrigin);
         return;
       }
       if ((request.method === 'GET' || request.method === 'POST') && requestUrl.pathname === '/api/devert/ads') {

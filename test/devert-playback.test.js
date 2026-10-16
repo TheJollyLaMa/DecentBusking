@@ -87,6 +87,26 @@ async function makeRuntime(fixture) {
   return runtime;
 }
 
+test('removed campaigns stay out of both radio selections without changing on-chain paid terms', async () => {
+  const removed = campaign('1', { removed: true });
+  const available = campaign('2');
+  const fixture = harness({ campaigns: [removed, available], slots: 10 });
+  const runtime = await makeRuntime(fixture);
+  assert.equal((await runtime.nextMainRadioAd()).campaignId, '2');
+  assert.equal((await runtime.nextDevertLoopAd()).campaignId, '2');
+  assert.equal(removed.expiresAt, campaign('1').expiresAt);
+  assert.equal(await runtime.canPlayCampaign('1'), false);
+  assert.equal(await runtime.canPlayCampaign('2'), true);
+  assert.equal(await runtime.canPlayCampaign('missing'), false);
+});
+
+test('removing a seated campaign does not grant its on-chain seat to an overflow campaign', async () => {
+  const fixture = harness({ campaigns: [campaign('1', { removed: true, offerUnits: '10000000' }), campaign('2')], slots: 1 });
+  const runtime = await makeRuntime(fixture);
+  assert.equal(await runtime.nextMainRadioAd(), null);
+  assert.equal((await runtime.nextDevertLoopAd()).campaignId, '2');
+});
+
 test('DeVert music milestone journal batches ten audible unique plays and retries safely', async () => {
   const fixture = harness();
   const runtime = await makeRuntime(fixture);

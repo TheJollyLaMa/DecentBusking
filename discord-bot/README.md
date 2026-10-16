@@ -95,6 +95,26 @@ Advert cadence and queued-ad state use the separate
 `decentbusking-main-radio-ad-state.json` checkpoint (`main-radio-ad-state` tags).
 They must not share the playlist's `decentbusking-jukeloop-state.json` namespace:
 the schemas differ and each store prunes its own snapshots.
+
+An advert can run again after its paid campaign expires; a single advert cannot
+start another paid term from the DVert checkout while its current term is active.
+Availability is checked again before purchase, including after USDC approval.
+This is an application rule, not a new restriction in the deployed contract:
+transactions made directly to that contract, or simultaneous transactions from
+separate clients, cannot be atomically prevented by this UI check.
+Active cards show their actual expiry rather than a generic locked state.
+An unavailable advert slot is not the same as an expired campaign.
+
+Advertisers can **Remove from playback** in My Ads; the radio owner has the same
+control under **DVert campaign moderation** in Admin. `POST /api/devert/remove`
+requires a fresh wallet signature bound to the campaign, origin and no-refund
+terms. Only the campaign advertiser or configured worker owner wallet is accepted.
+Removal is durably checkpointed before it takes effect. It excludes the campaign
+from main radio and VertLoop, drops prepared/queued resources, and stops a current
+server-side play. Already buffered client media cannot be remotely erased.
+The on-chain campaign and expiry stay unchanged, there is no refund or restart
+of that paid term, and the advert becomes reusable when the original term expires.
+Removed campaigns do not free on-chain seats for other campaigns.
 `GET /api/funds` exposes the four configured settlement funds, current balances,
 and proof-of-funding sources. The source ledger scans the router incrementally
 from `PAYROLL_START_BLOCK` (or the stored cursor) and is cached for about 60s.
@@ -162,7 +182,33 @@ IPFS_UPLOAD_PROVIDER=local
 IPFS_API_URL=http://127.0.0.1:5001
 ```
 
-In Pinata mode, the playlist, ratings, IPFS CIDs, and mint queue are checkpointed as tagged JSON on IPFS. On startup the bot discovers and restores the newest snapshot through Pinata's Files API. The newest three snapshots are retained, so Render's persistent disk is not required and `JUKELOOP_PLAYLIST_PATH` should be omitted on the free tier.
+In Pinata mode, the playlist, ratings, IPFS CIDs, and mint queue are checkpointed as tagged JSON on IPFS. On startup the bot discovers and restores the newest snapshot through Pinata's Files API. The latest plus four backups per state type are retained, so Render's persistent disk is not required and `JUKELOOP_PLAYLIST_PATH` should be omitted on the free tier.
+
+All worker checkpoint stores use the **DecentBusking - Live checkpoints** Pinata
+group (the dashboard's folder-like grouping). At the first save in each UTC
+Monday-based week, each state type also writes a complete snapshot in
+**DecentBusking - Weekly archives**. Archives contain `snapshot`, `week`, `kind`
+and `sourceSnapshotUri`; the `snapshot` field holds the original full serialized
+state, including cumulative ledger entries. It is not a replacement for the media
+files or NFT metadata, which are not pruned by checkpoint retention. To recover
+an archive manually, extract `snapshot` and validate it with the corresponding
+store's deserializer. Existing immutable CIDs cannot be overwritten in place:
+the living state is the newest complete snapshot, with five rolling copies.
+Weekly archives are retained independently; they do not preserve every
+intermediate checkpoint or guarantee that every old `previousSnapshotUri`
+remains pinned.
+
+The worker provisions/reuses these two groups at startup; its server-only Pinata
+key needs group read/write plus file read/write/delete permissions. Group setup
+or archive failures are explicit errors; pruning does not proceed after an
+archive failure. Saves are serialized per store, and pruning uses paginated
+listings scoped to the live group, exact filename and state tags. Legacy
+ungrouped files are left untouched pending review, as are weekly archives.
+Run `cd discord-bot && node checkpoint-inventory.js` for a **read-only**,
+paginated cleanup inventory. It identifies only allowlisted, app-tagged JSON
+checkpoints, preserves five recent copies per type in its proposal, and never
+deletes or moves files. Review cumulative data, proof references and recovery
+baseline CIDs, and archive necessary legacy history before approving any cleanup.
 
 ### 5. Run the bot
 

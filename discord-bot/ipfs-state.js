@@ -4,7 +4,7 @@ const STATE_KEYVALUES = {
   kind: 'jukeloop-state',
   schema: '1',
 };
-const SNAPSHOTS_TO_KEEP = 3;
+const SNAPSHOTS_TO_KEEP = 5;
 const MAX_RESTORE_CANDIDATES = 3;
 const RESTORE_REQUEST_TIMEOUT_MS = 15_000;
 // Bounded so a large backlog is pruned across several saves without tripping Pinata rate limits.
@@ -75,6 +75,9 @@ export function createPinataStateStore({
   name = STATE_FILE_NAME,
   tags = STATE_KEYVALUES,
   retainSnapshots = SNAPSHOTS_TO_KEEP,
+  groupId,
+  archiveGroupId,
+  now = () => Date.now(),
   beforeUpload,
   log = console,
   serialize = playlist => ({ schemaVersion: 1, savedAt: new Date().toISOString(), playlist }),
@@ -84,18 +87,38 @@ export function createPinataStateStore({
   },
 } = {}) {
   if (!pinataJwt) throw new Error('PINATA_JWT is required for playlist checkpoints');
+  if (retainSnapshots !== Infinity && (!Number.isSafeInteger(retainSnapshots) || retainSnapshots < 1)) {
+    throw new Error('Checkpoint retention must keep at least one snapshot');
+  }
+  if (archiveGroupId && !groupId) throw new Error('Archive storage requires a live checkpoint group');
   const headers = { authorization: `Bearer ${pinataJwt}` };
   let latestSnapshotUri = '';
   let latestSnapshotSavedAt = '';
   let restoreGatewaysPromise = null;
+  let archivedWeek = '';
+  let saveTask = Promise.resolve();
 
-  async function listSnapshots(limit = 100) {
-    const response = await fetchImpl(buildListUrl(filesApiUrl, limit, name), {
-      headers,
-      signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
-    });
-    if (!response.ok) throw new Error(await responseError(response, 'Pinata state listing failed'));
-    return extractFiles(await response.json())
+  async function listSnapshots(limit = 100, { fileName = name, group, allPages = false } = {}) {
+    const files = [];
+    let pageToken;
+    const seenTokens = new Set();
+    do {
+      const url = new URL(buildListUrl(filesApiUrl, limit, fileName));
+      if (group) url.searchParams.set('group', group);
+      if (pageToken) url.searchParams.set('pageToken', pageToken);
+      const response = await fetchImpl(url.toString(), {
+        headers,
+        signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(await responseError(response, 'Pinata state listing failed'));
+      const result = await response.json();
+      if (!Array.isArray(result.data?.files || result.files)) throw new Error('Invalid Pinata state listing');
+      files.push(...extractFiles(result));
+      pageToken = allPages ? result.data?.next_page_token : null;
+      if (pageToken && seenTokens.has(pageToken)) throw new Error('Pinata state listing repeated a page token');
+      if (pageToken) seenTokens.add(pageToken);
+    } while (pageToken);
+    return files
       .filter(file => isStateSnapshot(file, name, tags))
       .sort((first, second) => Date.parse(second.created_at || 0) - Date.parse(first.created_at || 0));
   }
@@ -208,38 +231,77 @@ export function createPinataStateStore({
     throw new Error(`IPFS state restore failed for ${cid}: ${failures.join('; ')}`);
   }
 
-  async function save(playlist) {
-    const snapshot = serialize(playlist);
-    const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
+  async function upload(bytes, fileName, keyvalues, targetGroup) {
     const form = new FormData();
-    form.append('file', new Blob([bytes], { type: 'application/json' }), name);
+    form.append('file', new Blob([bytes], { type: 'application/json' }), fileName);
     form.append('network', 'public');
-    form.append('name', name);
-    form.append('keyvalues', JSON.stringify(tags));
-
-    const response = await fetchImpl(uploadUrl, { method: 'POST', headers, body: form });
+    form.append('name', fileName);
+    form.append('keyvalues', JSON.stringify(keyvalues));
+    if (targetGroup) form.append('group_id', targetGroup);
+    const response = await fetchImpl(uploadUrl, { method: 'POST', headers, body: form,
+      signal: AbortSignal.timeout(60_000) });
     if (!response.ok) throw new Error(await responseError(response, 'Pinata state upload failed'));
     const result = await response.json();
     const cid = result.data?.cid || result.cid || result.IpfsHash;
     if (!cid) throw new Error('Pinata state upload did not return a CID');
+    return cid;
+  }
+
+  async function saveSnapshot(playlist) {
+    const snapshot = serialize(playlist);
+    const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
+    const cid = await upload(bytes, name, tags, groupId);
     latestSnapshotUri = `ipfs://${cid}`;
+    latestSnapshotSavedAt = snapshot.savedAt || new Date(now()).toISOString();
     if (beforeUpload) Promise.resolve().then(() => beforeUpload(bytes, cid))
       .then(mirroredCid => {
         if (mirroredCid && mirroredCid !== cid) console.warn(`[ipfs-state] Local mirror CID ${mirroredCid} differs from shared Pinata CID ${cid}`);
       })
       .catch(error => console.warn(`[ipfs-state] Shared checkpoint ${cid} is saved; local/community mirror deferred: ${error.message}`));
 
-    const snapshots = await listSnapshots();
+    if (archiveGroupId) {
+      const date = new Date(now());
+      date.setUTCDate(date.getUTCDate() - (date.getUTCDay() + 6) % 7);
+      const week = date.toISOString().slice(0, 10);
+      if (archivedWeek !== week) {
+        const archiveName = name.replace(/\.json$/, '') + `.archive-${week}.json`;
+        const url = new URL(buildListUrl(filesApiUrl, 100, archiveName));
+        url.searchParams.set('group', archiveGroupId);
+        const response = await fetchImpl(url.toString(), { headers, signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS) });
+        if (!response.ok) throw new Error(await responseError(response, 'Pinata archive listing failed; pruning stopped'));
+        const existing = extractFiles(await response.json()).some(file => file.name === archiveName &&
+          file.group_id === archiveGroupId && file.keyvalues?.kind === `${tags.kind}-archive`);
+        if (!existing) {
+          const archiveBytes = new TextEncoder().encode(JSON.stringify({
+            schemaVersion: 1, kind: tags.kind, week, sourceSnapshotUri: `ipfs://${cid}`, snapshot,
+          }));
+          await upload(archiveBytes, archiveName, { ...tags, kind: `${tags.kind}-archive`, week }, archiveGroupId);
+        }
+        archivedWeek = week;
+      }
+    }
+    const snapshots = await listSnapshots(100, { group: groupId, allPages: true });
     const normalizedFilesUrl = filesApiUrl.replace(/\/(public|private)?\/?$/, '');
-    const stale = retainSnapshots === Infinity ? [] : snapshots.slice(retainSnapshots).slice(-MAX_PRUNE_PER_SAVE);
+    // Never remove legacy ungrouped files: their cleanup requires a reviewed inventory.
+    const owned = groupId ? snapshots.filter(file => file.group_id === groupId &&
+      file.name === name && file.keyvalues?.app === tags.app && file.keyvalues?.kind === tags.kind &&
+      file.keyvalues?.schema === tags.schema) : snapshots;
+    const stale = retainSnapshots === Infinity ? [] : owned.slice(retainSnapshots)
+      .filter(file => file.cid !== cid).slice(-MAX_PRUNE_PER_SAVE);
     await Promise.all(stale.map(async ({ id }) => {
       if (!id) return;
       const deleteResponse = await fetchImpl(`${normalizedFilesUrl}/public/${id}`, { method: 'DELETE', headers });
-      if (!deleteResponse.ok) console.warn(`[ipfs-state] Failed to prune snapshot ${id}: ${deleteResponse.status}`);
+      if (!deleteResponse.ok) log.warn(`[ipfs-state] Failed to prune snapshot ${id}: ${deleteResponse.status}`);
     }));
     return `ipfs://${cid}`;
   }
 
+  function save(value) {
+    const copy = structuredClone(value);
+    const next = saveTask.then(() => saveSnapshot(copy));
+    saveTask = next.catch(() => {});
+    return next;
+  }
   return { restore, restoreCid, save, getLatestSnapshotUri: () => latestSnapshotUri,
     getLatestSnapshotSavedAt: () => latestSnapshotSavedAt };
 }

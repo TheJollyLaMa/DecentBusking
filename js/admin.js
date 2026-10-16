@@ -14,6 +14,7 @@ import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artw
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261010-public-calendar';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides } from './radio-schedule.mjs';
+import { removeDevertCampaign } from './devert-campaigns.mjs';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -75,6 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
   _grantBtn?.addEventListener('click', _grantRole);
   _closeBtn?.addEventListener('click', _closeModal);
   _mintRefreshBtn?.addEventListener('click', () => _loadMintQueue({ reset: true }));
+  document.getElementById('admin-devert-refresh')?.addEventListener('click', _loadDevertCampaigns);
   _mintMoreBtn?.addEventListener('click', () => _loadMintQueue({ reset: false }));
   document.getElementById('admin-radio-schedule-refresh')?.addEventListener('click', _loadRadioSchedule);
   document.getElementById('admin-radio-event-reset')?.addEventListener('click', _resetRadioScheduleForm);
@@ -205,7 +207,8 @@ async function _connectWallet() {
     _mintSection?.classList.remove('hidden');
     _roleSection?.classList.remove('hidden');
     _radioScheduleSection?.classList.remove('hidden');
-    await Promise.all([_loadMintQueue(), _loadRadioSchedule()]);
+    document.getElementById('admin-devert-campaigns')?.classList.remove('hidden');
+    await Promise.all([_loadMintQueue(), _loadRadioSchedule(), _loadDevertCampaigns()]);
   } catch (err) {
     if (checkId === _walletCheckId) _setStatus(`❌ ${err.message || 'Wallet verification failed'}`, true);
   }
@@ -229,7 +232,58 @@ function _resetAdminWallet() {
   _roleSection?.classList.add('hidden');
   _radioScheduleSection?.classList.add('hidden');
   _radioSchedule = null;
+  document.getElementById('admin-devert-campaigns')?.classList.add('hidden');
+  document.getElementById('admin-devert-list')?.replaceChildren();
   _radioScheduleEventsEl?.replaceChildren();
+}
+
+async function _loadDevertCampaigns() {
+  const status = document.getElementById('admin-devert-status');
+  const list = document.getElementById('admin-devert-list');
+  if (!_adminSigner || !list || !status) return;
+  const checkId = _walletCheckId;
+  const signer = _adminSigner;
+  status.textContent = 'Loading confirmed campaigns...';
+  try {
+    const service = window.DecentConfig?.ipfsUploadServiceUrl;
+    if (!service) throw new Error('Radio service is not configured');
+    const response = await fetch(`${service.replace(/\/$/, '')}/api/devert`, { cache: 'no-store' });
+    const snapshot = await response.json();
+    if (!response.ok) throw new Error(snapshot.error || 'Campaigns could not be loaded');
+    if (checkId !== _walletCheckId || !_adminOpen) return;
+    list.replaceChildren();
+    const campaigns = snapshot.campaigns.filter(campaign => Date.parse(campaign.startedAt) <= Date.now() &&
+      Date.now() < Date.parse(campaign.expiresAt));
+    for (const campaign of campaigns) {
+      const item = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = `${campaign.title} (#${campaign.campaignId}) - ${campaign.advertiser} - ${
+        campaign.removed ? 'removed; paid term ends' : 'active until'} ${new Date(campaign.expiresAt).toLocaleString()} `;
+      item.append(label);
+      if (!campaign.removed) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = 'Remove from playback';
+        button.addEventListener('click', async () => {
+          if (checkId !== _walletCheckId || !window.confirm('Remove this campaign from both radio players? No refund; its paid term remains unchanged.')) return;
+          button.disabled = true;
+          status.textContent = 'Sign the removal request in your wallet...';
+          try {
+            await removeDevertCampaign({ service, signer, campaignId: campaign.campaignId });
+            await _loadDevertCampaigns();
+          } catch (error) {
+            status.textContent = `Removal failed: ${error.message}`;
+            button.disabled = false;
+          }
+        });
+        item.append(button);
+      }
+      list.append(item);
+    }
+    status.textContent = campaigns.length ? `${campaigns.length} campaign(s) within their paid term.` : 'No campaigns within their paid term.';
+  } catch (error) {
+    if (checkId === _walletCheckId) status.textContent = `Campaigns unavailable: ${error.message}`;
+  }
 }
 
 function _setMintPendingCount(count) {

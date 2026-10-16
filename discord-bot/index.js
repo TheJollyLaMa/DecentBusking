@@ -60,6 +60,8 @@ import { createCreatorProfiles } from './creator-profiles.js';
 import { createArtworkUpdateQueue } from './artwork-updates.js';
 import { createDjukeGasQuoteReader, DJUKE_GAS_ABI } from './djuke-gas.js';
 import { createEnsResolver } from './ens-resolver.js';
+import { createDevertRemovals } from './devert-removals.js';
+import { ensureCheckpointGroups } from './checkpoint-groups.js';
 import { createMintTransactionVerifier, createArtworkUpdateTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
 import { createMintRequestInteractionHandler, ensureDefaultMintArtwork } from './mint-interactions.js';
@@ -535,10 +537,12 @@ const SLASH_COMMANDS = [
 // ── Main ───────────────────────────────────────────────────────────────────────
 async function main() {
   const config = loadConfig();
+  config.checkpointStorage = config.pinataJwt ? await ensureCheckpointGroups({ pinataJwt: config.pinataJwt }) : {};
   const checkpointMirror = process.env.CHECKPOINT_MIRROR_SECRET
     ? createCheckpointMirror({ secret: process.env.CHECKPOINT_MIRROR_SECRET }) : null;
   const devertSchedulerPrivateKey = resolveDevertSchedulerPrivateKey();
   let readDevertState;
+  let devertRemovals;
   if (process.env.DEVERT_CONTRACT_ADDRESS) {
     try {
       readDevertState = createDevertCampaignReader({
@@ -546,6 +550,21 @@ async function main() {
         contractAddress: process.env.DEVERT_CONTRACT_ADDRESS,
         confirmations: Number(process.env.DEVERT_CONFIRMATIONS || 2),
       });
+      if (config.pinataJwt) {
+        const removalStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+          filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+          name: 'decentbusking-devert-removals.json', tags: { app: 'decentbusking', kind: 'devert-removals', schema: '1' },
+          serialize: value => value, deserialize: value => value });
+        devertRemovals = createDevertRemovals(removalStore);
+        await initializeDevertPlaybackWithRetry({ initialize: () => devertRemovals.initialize() });
+      }
+      const readChainCampaigns = readDevertState;
+      readDevertState = async () => {
+        const snapshot = await readChainCampaigns();
+        return { ...snapshot, campaigns: snapshot.campaigns.map(campaign => ({
+          ...campaign, removed: devertRemovals ? devertRemovals.isRemoved(campaign.campaignId) : false,
+        })) };
+      };
     } catch (error) {
       console.warn('[devert] Read-only campaign endpoint disabled:', error.message);
     }
@@ -556,16 +575,16 @@ async function main() {
     _devertSchedulerContract = contract;
     const workerMinBalanceWei = process.env.WORKER_MIN_BALANCE_WEI
       ? BigInt(process.env.WORKER_MIN_BALANCE_WEI) : DEFAULT_WORKER_MIN_BALANCE_WEI;
-    const journalStore = createPinataStateStore({ pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+    const journalStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-devert-main-radio.json',
       tags: { app: 'decentbusking', kind: 'devert-main-radio', schema: '1' }, serialize: value => value,
-      deserialize: value => value, retainSnapshots: Infinity });
+      deserialize: value => value });
     _devertPlaybackRuntime = createDevertPlaybackRuntime({ contract, provider: scheduler.provider,
       restore: journalStore.restore, save: journalStore.save, readCampaigns: readDevertState,
       workerAddress: scheduler.address, workerMinBalanceWei,
       resolveCampaignMedia: (campaign, cid) => resolveDevertCampaignMedia(campaign, cid, {
         playlist: getPlaylist(), nfts: _nftCatalog || [],
-      }) });
+      }), isCampaignRemoved: campaignId => devertRemovals ? devertRemovals.isRemoved(campaignId) : false });
     _devertPlaybackInitialization = initializeDevertPlaybackWithRetry({
       initialize: () => _devertPlaybackRuntime.initialize(),
     }).then(() => console.log(`[devert] Durable scheduler journal ready; scheduler ${scheduler.address}.`));
@@ -590,11 +609,11 @@ async function main() {
         .catch(error => console.warn('[devert-loop] AdLoop worker unavailable:', error.shortMessage || error.message));
     }
   }
-  const creatorStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+  const creatorStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-creator-profiles.json', tags: { app: 'decentbusking', kind: 'creator-profiles', schema: '1' },
     serialize: value => value, deserialize: value => value }) : null;
-  const artworkUpdateStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+  const artworkUpdateStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-artwork-updates.json', tags: { app: 'decentbusking', kind: 'artwork-updates', schema: '1' },
     serialize: value => value, deserialize: value => Array.isArray(value) ? value : [] }) : null;
@@ -604,6 +623,7 @@ async function main() {
   });
   await artworkUpdateQueue.initialize();
   config.jukeLoopMainRadioAdStore = config.pinataJwt ? createPinataStateStore({
+    ...config.checkpointStorage,
     pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl,
     filesApiUrl: config.pinataFilesApiUrl,
@@ -737,10 +757,10 @@ async function main() {
   };
 
   // Alchemy spend survives restarts so monthly budget pacing stays honest.
-  const rpcUsageStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+  const rpcUsageStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-rpc-usage.json', tags: { app: 'decentbusking', kind: 'rpc-usage', schema: '1' },
-    retainSnapshots: 2, serialize: value => value, deserialize: value => value }) : null;
+    serialize: value => value, deserialize: value => value }) : null;
   if (rpcUsageStore) {
     let lastSavedUsage = '';
     let usageRestored = false;
@@ -764,10 +784,10 @@ async function main() {
   }
 
   const payrollAssets = JSON.parse(fs.readFileSync(new URL('../payroll-assets.json', import.meta.url), 'utf8'));
-  const paymentStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+  const paymentStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-payment-ledger.json', tags: { app: 'decentbusking', kind: 'payment-ledger', schema: '1' },
-    retainSnapshots: Infinity, serialize: value => value, deserialize: (value, uri) => ({ ...value, snapshotUri: uri }) }) : null;
+    serialize: value => value, deserialize: (value, uri) => ({ ...value, snapshotUri: uri }) }) : null;
   const paymentProvider = getRpcRouter().provider('read', 'payroll-and-funds');
   const dispatchedPayments = new Set();
   let repositorySyncError = '';
@@ -809,10 +829,10 @@ async function main() {
   comparePayments();
   setInterval(budgetPaced(comparePayments), 15_000).unref();
 
-  const payflowStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+  const payflowStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-weekly-payflow.json', tags: { app: 'decentbusking', kind: 'weekly-payflow', schema: '1' },
-    retainSnapshots: Infinity, serialize: value => value, deserialize: value => value }) : null;
+    serialize: value => value, deserialize: value => value }) : null;
   const payflowRouter = new Contract(payrollAssets.routerAddress, [
     'function funds(bytes32) view returns(string metadataUri,bool active,bool exists)',
     'function fundBalances(bytes32,address) view returns(uint256)',
@@ -853,10 +873,10 @@ async function main() {
   };
   setInterval(budgetPaced(refreshPayflow), 15_000).unref();
 
-  const fundStore = config.pinataJwt ? createPinataStateStore({ pinataJwt: config.pinataJwt,
+  const fundStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-fund-ledger.json', tags: { app: 'decentbusking', kind: 'fund-ledger', schema: '1' },
-    retainSnapshots: Infinity, serialize: value => value, deserialize: value => value }) : null;
+    serialize: value => value, deserialize: value => value }) : null;
   const fundLedger = createFundLedger({
     provider: paymentProvider,
     router: payflowRouter,
@@ -882,13 +902,13 @@ async function main() {
   setInterval(budgetPaced(refreshFundLedger), 60_000).unref();
   refreshFundLedger();
   const earningsStore = config.pinataJwt ? createPinataStateStore({
+    ...config.checkpointStorage,
     pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl,
     filesApiUrl: config.pinataFilesApiUrl,
     gateway: config.ipfsGateway,
     name: 'decentbusking-earnings-index.json',
     tags: { app: 'decentbusking', kind: 'earnings-index', schema: '1' },
-    retainSnapshots: 2,
     serialize: value => value,
     deserialize: value => value,
   }) : null;
@@ -948,7 +968,7 @@ async function main() {
   }
   if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY && checkpointMirror && config.pinataJwt) {
     const fulfiller = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-fulfiller'));
-    const journalStore = createPinataStateStore({ pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+    const journalStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-djuke-journal.json',
       tags: { app: 'decentbusking', kind: 'djuke-journal', schema: '1' }, serialize: value => value,
       deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
@@ -1091,6 +1111,12 @@ async function main() {
       };
     },
     getDevertState: readDevertState,
+    removeDevertCampaign: devertRemovals ? async payload => {
+      const removal = await devertRemovals.remove(payload);
+      await getActiveJukeLoopSession()?.removeDevertCampaign(payload.campaignId);
+      _devertLoopWorker?.removeCampaign(payload.campaignId);
+      return removal;
+    } : undefined,
     getFunds: async () => fundLedger.getCurrentState(),
     getEarnings: async ({ address }) => {
       const state = earningsLedger.getAddressState(address);
@@ -1157,6 +1183,7 @@ async function main() {
         const campaign = snapshot?.campaigns?.find(item => item.advertiser?.toLowerCase() === normalizedAddress &&
           item.audioURI === `ipfs://${ad.ipfsCid}` && Date.parse(item.startedAt) <= Date.now() && Date.now() < Date.parse(item.expiresAt));
         ad.state = campaign ? 'active' : ad.mintStatus === 'minted' ? 'ready' : 'pending';
+        ad.removed = campaign?.removed === true;
         ad.campaignId = campaign?.campaignId || null;
         ad.expiresAt = campaign?.expiresAt || null;
         ad.secondsRemaining = campaign ? Math.max(0, Math.ceil((Date.parse(campaign.expiresAt) - Date.now()) / 1000)) : 0;
@@ -1186,6 +1213,7 @@ async function main() {
   // Restore durable state before Discord backfill or JukeLoop starts.
   if (config.ipfsUploadProvider === 'pinata') {
     const stateStore = createPinataStateStore({
+      ...config.checkpointStorage,
       pinataJwt: config.pinataJwt,
       uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl,
@@ -1194,6 +1222,7 @@ async function main() {
     });
     playlistStateStore = stateStore;
     liveScheduleStore = createPinataStateStore({
+      ...config.checkpointStorage,
       pinataJwt: config.pinataJwt,
       uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl,

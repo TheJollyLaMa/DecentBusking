@@ -8,6 +8,29 @@ const { PassThrough } = require('node:stream');
 const { pathToFileURL } = require('node:url');
 const vm = require('node:vm');
 
+test('main-radio removal discards prepared and persisted queued ads and blocks in-flight removed media', async () => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const session = Object.create(JukeLoopSession.prototype);
+  let stops = 0;
+  let disposals = 0;
+  let saves = 0;
+  const ad = { campaignId: '1' };
+  Object.assign(session, { _pendingDevertAds: [ad, { campaignId: '2' }],
+    _preparedDevertAd: ad, _preparedNext: { devertAd: ad }, _currentDevertAd: ad,
+    _persistMainRadioAdState: async () => { saves++; },
+    _disposePrepared: () => { disposals++; }, player: { stop: () => { stops++; } },
+    devertPlayback: { isCampaignRemoved: campaignId => campaignId === '1' } });
+  await session.removeDevertCampaign('1');
+  assert.equal(saves, 1);
+  assert.equal(stops, 1);
+  assert.equal(disposals, 1);
+  assert.equal(session._preparedNext, null);
+  assert.equal(session._preparedDevertAd, null);
+  assert.deepEqual(session._pendingDevertAds, [{ campaignId: '2' }]);
+  assert.equal(session._startPrepared({ devertAd: ad }), false);
+  assert.equal(disposals, 2);
+});
+
 test('playlist tracks each attachment and persists its IPFS pin state', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-jukeloop-'));
   const storePath = path.join(tempDir, 'playlist.json');
