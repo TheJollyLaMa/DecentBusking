@@ -91,6 +91,19 @@ Other unexpected contract failures still surface as errors.
 At track transitions, overdue adverts are checked again before prefetched music
 starts, because a slot can unlock after prefetch. Already prepared paid DJuke
 requests retain priority; lookup failures keep music playing and are logged.
+Between items the bot waits `CHANGEOVER_GAP_MS` (2.5 s) before starting the
+next prepared track, and `GET /api/radio` publishes it as `upNext` (`trackId`,
+`title`, `ipfsCid`, `mediaType`, `videoUrl`, `isDevert`, plus `startsAt` /
+`startsInMs` during the gap). The website preloads `upNext` into an in-memory
+Blob (≤ 80 MB; skipped for Save-Data/2G, blocked autoplay, ads-only and archive
+listeners), so each new song or advert starts from 0:00 instead of seeking past
+a slow gateway start. Listeners who join mid-song, or fall more than 45 s
+behind, still sync to the live position. Preloading never records an
+impression; the browser's `getRadioTransitionDiagnostics()` and `[radio]`
+console logs report preload vs network startup timing. An advert that becomes
+due on the current song is selected while that song plays so it can be
+preloaded; if the song ends before counting (under 30 s audible), the advert
+is held for the next break and music plays instead.
 Advert cadence and queued-ad state use the separate
 `decentbusking-main-radio-ad-state.json` checkpoint (`main-radio-ad-state` tags).
 They must not share the playlist's `decentbusking-jukeloop-state.json` namespace:

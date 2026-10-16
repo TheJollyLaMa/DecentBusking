@@ -61,6 +61,8 @@ const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
 
 const FADE_IN_SECONDS = 0.6;
 const NEXT_TRACK_READY_TIMEOUT_MS = 20_000;
+/** Silence between songs so website listeners can start the next track from 0:00 together. */
+export const CHANGEOVER_GAP_MS = 2_500;
 const DJUKE_PREFETCH_POLL_MS = 5_000;
 const PAID_FETCH_RETRY_MS = 60_000;
 const MAIN_RADIO_STATE_SCHEMA_VERSION = 1;
@@ -142,6 +144,7 @@ function validateMainRadioAdState(value) {
     musicPlayCount: value.musicPlayCount,
     preparedDevertAd: value.preparedDevertAd ? normalizeMainRadioAd(value.preparedDevertAd) : null,
     pendingDevertAds: value.pendingDevertAds.map(normalizeMainRadioAd),
+    breakAwaitingUnlock: value.breakAwaitingUnlock === true,
     failedDevertCampaigns: value.failedDevertCampaigns.map(entry => {
       if (!entry || !/^\d+$/.test(String(entry.campaignId)) ||
         !Number.isSafeInteger(entry.failedAt) || entry.failedAt < 0 ||
@@ -205,7 +208,7 @@ export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch, 
 }
 
 /** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
-export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recentLimit = 10, mainRadioAdCountdown = null }) {
+export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Date.now(), recentLimit = 10, mainRadioAdCountdown = null }) {
   const mediaTypeForTrack = (track) => (track.videoUrl || track.mediaType === 'video/mp4')
     ? 'video/mp4'
     : mediaTypeFor(track.filename, track.mediaType) || '';
@@ -242,6 +245,26 @@ export function buildRadioState({ nowPlaying, playlist, now = Date.now(), recent
             ...(sponsor ? { sponsor } : {}),
             startedAt: nowPlaying.startedAt,
             positionMs: Math.max(0, now - nowPlaying.startedAt),
+          };
+        })()
+      : null,
+    // The already-prepared next item, so browsers can preload it before the changeover.
+    upNext: upNext?.trackId
+      ? (() => {
+          const mediaType = mediaTypeForTrack(upNext);
+          const videoUrl = upNext.videoUrl || (mediaType === 'video/mp4' && upNext.ipfsCid ? `ipfs://${upNext.ipfsCid}` : '');
+          return {
+            trackId: upNext.trackId,
+            title: upNext.title,
+            uploader: upNext.uploader,
+            filename: upNext.filename || null,
+            mediaType,
+            ...(videoUrl ? { videoUrl } : {}),
+            ipfsCid: upNext.ipfsCid || null,
+            isDevert: upNext.isDevert === true,
+            ...(Number.isFinite(upNext.startsAt)
+              ? { startsAt: upNext.startsAt, startsInMs: Math.max(0, upNext.startsAt - now) }
+              : {}),
           };
         })()
       : null,
@@ -529,6 +552,15 @@ export function getJukeLoopNowPlaying() {
   return null;
 }
 
+/** The prepared next item in any JukeLoop voice session, or null. */
+export function getJukeLoopUpNext() {
+  for (const session of _sessions.values()) {
+    const upNext = session.getUpNext();
+    if (upNext) return upNext;
+  }
+  return null;
+}
+
 export function getActiveJukeLoopSession() {
   return _sessions.values().next().value ?? null;
 }
@@ -675,6 +707,11 @@ export class JukeLoopSession {
     this._paidPollTimer = null;
     this._transitionTask = null;
     this._preparationEpoch = 0;
+    /** Earliest time the next item may start, and the item waiting out that changeover gap. */
+    this._changeoverAt = 0;
+    this._changeoverPrepared = null;
+    /** True while the queued advert break was picked early and still needs the current song to count. */
+    this._breakAwaitingUnlock = false;
     this.connection   = null;
     this._voiceConnection = null;
     this.player       = audioPlayer || createAudioPlayer();
@@ -706,6 +743,7 @@ export class JukeLoopSession {
     this.player.on(AudioPlayerStatus.Idle, () => {
       if (this._nowPlaying?.audible) {
         const endedAt = Date.now();
+        this._changeoverAt = endedAt + CHANGEOVER_GAP_MS;
         this._completedPlay = {
           playId: this._nowPlaying.playId,
           trackId: this._nowPlaying.trackId,
@@ -925,7 +963,14 @@ export class JukeLoopSession {
     }
   }
 
-  async _prepareNextPlayback(forcedPaid = null) {
+  /**
+   * @param {object|null} [forcedPaid]
+   * @param {{ projectedMusicSinceAd?: number|null, allowAds?: boolean }} [options]
+   *   projectedMusicSinceAd selects a due advert while the song that unlocks it is still playing;
+   *   allowAds=false prepares music only and leaves any selected advert queued.
+   */
+  async _prepareNextPlayback(forcedPaid = null, options = {}) {
+    const { projectedMusicSinceAd = null, allowAds = true } = options;
     if (this._destroyed) return null;
     await this._ensureMainRadioAdState();
     this._pendingDevertAds = this._pendingDevertAds.filter(ad => !this.devertPlayback?.isCampaignRemoved?.(ad.campaignId));
@@ -951,13 +996,16 @@ export class JukeLoopSession {
 
     let devertAd = null;
     let selectionDeferred = false;
-    if (!paid && this._preparedDevertAd) {
+    const musicSinceAd = Number.isFinite(projectedMusicSinceAd) ? projectedMusicSinceAd : this._musicSinceAd;
+    if (!allowAds) {
+      // Music only: keep any selected advert queued for its real slot.
+    } else if (!paid && this._preparedDevertAd) {
       devertAd = this._preparedDevertAd;
     } else if (!paid && this._pendingDevertAds.length) {
       this._preparedDevertAd = this._pendingDevertAds.shift();
       devertAd = this._preparedDevertAd;
       this._persistMainRadioAdState();
-    } else if (!paid && this.devertPlayback && this._musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD && activeShow.type !== 'weekly_top10') {
+    } else if (!paid && this.devertPlayback && musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD && activeShow.type !== 'weekly_top10') {
       const ads = await this.devertPlayback.nextMainRadioAd({
         excludeCampaignIds: this._getActiveFailedDevertCampaignIds(),
         count: 2,
@@ -971,6 +1019,7 @@ export class JukeLoopSession {
       if (selectedAds.length) {
         [this._preparedDevertAd, ...this._pendingDevertAds] = selectedAds;
         devertAd = this._preparedDevertAd;
+        this._breakAwaitingUnlock = this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD;
         this._persistMainRadioAdState();
       } else {
         this._setMainRadioAdSkip('no eligible campaign available', null);
@@ -1020,10 +1069,10 @@ export class JukeLoopSession {
         // Keep the request queued, but let free rotation play instead of leaving the radio silent.
         this._djukeCooldownUntil = Date.now() + PAID_FETCH_RETRY_MS;
         await this.djuke.fail(paid.record, new Error('Paid recording could not be fetched')).catch(() => {});
-        return this._prepareNextPlayback();
+        return this._prepareNextPlayback(null, options);
       }
       if (queueIndex !== null) this._queueIndex++;
-      return this._prepareNextPlayback();
+      return this._prepareNextPlayback(null, options);
     }
 
     const showAfterMediaLookup = resolveActiveShow({
@@ -1061,7 +1110,7 @@ export class JukeLoopSession {
         throw err;
       }
       if (queueIndex !== null) this._queueIndex++;
-      return this._prepareNextPlayback();
+      return this._prepareNextPlayback(null, options);
     }
   }
 
@@ -1129,7 +1178,9 @@ export class JukeLoopSession {
   _primeNext() {
     if (this._destroyed || this._preparedNext || this._prepareTask) return;
     const epoch = this._preparationEpoch;
-    const task = this._prepareNextPlayback()
+    // If the playing song is music, it should count toward the advert cadence when it ends.
+    const projectedMusicSinceAd = this._currentDevertAd ? 0 : this._musicSinceAd + 1;
+    const task = this._prepareNextPlayback(null, { projectedMusicSinceAd })
       .then(prepared => {
         if (this._destroyed || epoch !== this._preparationEpoch) {
           this._disposePrepared(prepared, this._destroyed ? 'Radio stopped' : 'Scheduled radio mode changed');
@@ -1189,6 +1240,7 @@ export class JukeLoopSession {
     this._ffmpeg = prepared.ffmpegProcess;
     this._currentPaid = prepared.paid?.record || null;
     this._currentDevertAd = prepared.devertAd;
+    if (prepared.devertAd) this._breakAwaitingUnlock = false;
     this._currentTrack = prepared.track;
     this._announcementMsg = null;
     this._announcementContext = null;
@@ -1238,6 +1290,48 @@ export class JukeLoopSession {
     return true;
   }
 
+  _sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /** Hold the prepared item until the changeover gap ends; null if the radio mode changed meanwhile. */
+  async _waitForChangeover(prepared) {
+    const waitMs = this._changeoverAt - Date.now();
+    if (!(waitMs > 0)) return prepared;
+    const epoch = this._preparationEpoch;
+    this._changeoverPrepared = prepared;
+    try {
+      await this._sleep(waitMs);
+    } finally {
+      if (this._changeoverPrepared === prepared) this._changeoverPrepared = null;
+    }
+    if (this._destroyed || epoch !== this._preparationEpoch) {
+      this._disposePrepared(prepared, this._destroyed ? 'Radio stopped' : 'Scheduled radio mode changed');
+      return null;
+    }
+    return prepared;
+  }
+
+  /** Public metadata for the prepared next item, with its start time while the changeover gap runs. */
+  getUpNext() {
+    if (this._destroyed) return null;
+    const waiting = this._changeoverPrepared;
+    const prepared = waiting || this._preparedNext;
+    const track = prepared?.track;
+    if (!track?.trackId) return null;
+    return {
+      trackId: track.trackId,
+      title: track.title,
+      uploader: track.uploader,
+      filename: track.filename || null,
+      mediaType: track.mediaType || '',
+      ...(track.videoUrl ? { videoUrl: track.videoUrl } : {}),
+      ipfsCid: track.ipfsCid || null,
+      isDevert: !!prepared.devertAd,
+      ...(waiting ? { startsAt: this._changeoverAt } : {}),
+    };
+  }
+
   async _playNext() {
     if (this._destroyed) return;
     if (this._transitionTask) return this._transitionTask;
@@ -1263,6 +1357,12 @@ export class JukeLoopSession {
           }
         }
         if (!prepared) prepared = await this._prepareNextPlayback();
+        // An advert picked early stays queued if the song that should have unlocked it did not count.
+        if (prepared?.devertAd && !prepared.paid && this._breakAwaitingUnlock &&
+          this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD) {
+          this._disposePrepared(prepared, 'Advert slot not reached yet');
+          prepared = await this._prepareNextPlayback(null, { allowAds: false });
+        }
         if (prepared?.devertAd && this.devertPlayback?.canPlayCampaign &&
           !await this.devertPlayback.canPlayCampaign(prepared.devertAd.campaignId)) {
           this._disposePrepared(prepared, 'Campaign expired or removed before playback');
@@ -1270,6 +1370,11 @@ export class JukeLoopSession {
           await this._persistMainRadioAdState();
           prepared = null;
           retryDelay = 1_000;
+        }
+        if (prepared) {
+          prepared = await this._waitForChangeover(prepared);
+          if (this._destroyed) return;
+          if (!prepared) retryDelay = 1_000;
         }
         if (prepared) {
           if (this._startPrepared(prepared)) return;
@@ -1401,6 +1506,7 @@ export class JukeLoopSession {
     this._musicPlayCount = Number.isSafeInteger(state.musicPlayCount) ? state.musicPlayCount : 0;
     this._preparedDevertAd = state.preparedDevertAd;
     this._pendingDevertAds = Array.isArray(state.pendingDevertAds) ? state.pendingDevertAds : [];
+    this._breakAwaitingUnlock = state.breakAwaitingUnlock === true && Boolean(this._preparedDevertAd || this._pendingDevertAds.length);
     this._failedDevertCampaigns = new Map((state.failedDevertCampaigns || []).map(entry => [String(entry.campaignId), {
       failedAt: entry.failedAt,
       musicPlayCount: entry.musicPlayCount,
@@ -1416,6 +1522,7 @@ export class JukeLoopSession {
       musicPlayCount: this._musicPlayCount,
       preparedDevertAd: this._preparedDevertAd,
       pendingDevertAds: this._pendingDevertAds,
+      breakAwaitingUnlock: this._breakAwaitingUnlock,
       failedDevertCampaigns: [...this._failedDevertCampaigns.entries()].map(([campaignId, entry]) => ({
         campaignId,
         failedAt: entry.failedAt,

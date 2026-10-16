@@ -697,3 +697,167 @@ test('recorded browser votes survive reload and reset only for another radio pla
   vm.runInContext("_mode = 'archive'; _renderVoting();", context);
   assert.ok(buttons.every((button) => button.disabled));
 });
+function preloadHarness({ bytes = 4, contentLength = null, extra = {} } = {}) {
+  const source = radioSyncSource();
+  const fetches = [];
+  const revoked = [];
+  let created = 0;
+  const fetchImpl = async (url, { signal } = {}) => {
+    fetches.push({ url, signal });
+    const data = new Uint8Array(bytes);
+    let sent = false;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: name => (name === 'content-length' ? String(contentLength ?? bytes) : 'audio/mp4') },
+      body: { getReader: () => ({
+        read: async () => {
+          if (signal?.aborted) throw new Error('aborted');
+          if (sent) return { done: true };
+          sent = true;
+          return { done: false, value: data };
+        },
+        cancel: async () => {},
+      }) },
+    };
+  };
+  const context = vm.createContext({
+    performance, setTimeout, clearTimeout, console: { ...console, info() {}, warn() {} }, Blob, AbortController,
+    fetch: fetchImpl,
+    URL: { createObjectURL: () => `blob:preload-${++created}`, revokeObjectURL: url => revoked.push(url) },
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } },
+    ...extra,
+  });
+  vm.runInContext(source, context);
+  return { context, fetches, revoked };
+}
+
+test('radio starts the next song from 0:00 after the previous song played to its end', () => {
+  const source = radioSyncSource();
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } } });
+  vm.runInContext(`${source}\n_audio = { paused: true }; _mode = 'radio'; _loadedPlayId = 'song-1';
+    globalThis.started = []; _switchTo = options => started.push(options); _poll = () => {};
+    _onEnded();
+    globalThis.fastPoll = _handoffActive();
+    _radio = { playId: 'song-2', title: 'Next', uploader: 'Artist', ipfsCid: 'bafy-2', receivedAt: performance.now(), positionMs: 3_000 };
+    _syncRadio();`, context);
+  assert.equal(vm.runInContext('fastPoll', context), true, 'polls quickly while waiting for the next song');
+  assert.equal(vm.runInContext('started.length', context), 1);
+  assert.equal(vm.runInContext('started[0].offset()', context), 0);
+  assert.equal(vm.runInContext('started[0].preloadCid', context), 'bafy-2');
+  assert.equal(vm.runInContext('_radioHandoff', context), null);
+});
+
+test('radio handoff survives the JukeLoop changeover gap and still starts the next song from 0:00', () => {
+  const source = radioSyncSource();
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } } });
+  vm.runInContext(`${source}\n_audio = { paused: true }; _mode = 'radio'; _loadedPlayId = 'song-1';
+    _upNext = { title: 'Next Song', ipfsCid: 'bafy-2' };
+    globalThis.started = []; _switchTo = options => started.push(options); _poll = () => {};
+    _onEnded(); _radio = null; _syncRadio();
+    _radio = { playId: 'song-2', title: 'Next', ipfsCid: 'bafy-2', receivedAt: performance.now(), positionMs: 1_200 };
+    _syncRadio();`, context);
+  assert.equal(vm.runInContext('started[0].offset()', context), 0);
+});
+
+test('radio still syncs to the live position when a continuous listener has fallen far behind', () => {
+  const source = radioSyncSource();
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } } });
+  vm.runInContext(`${source}\n_audio = { paused: true }; _mode = 'radio'; _loadedPlayId = 'song-1';
+    globalThis.started = []; _switchTo = options => started.push(options); _poll = () => {};
+    _onEnded();
+    _radio = { playId: 'song-2', title: 'Next', ipfsCid: 'bafy-2', receivedAt: performance.now(), positionMs: 60_000 };
+    _syncRadio();`, context);
+  assert.equal(Math.round(vm.runInContext('started[0].offset()', context)), 60);
+});
+
+test('radio preloads the published next item once and hands the in-memory copy to the player', async () => {
+  const { context, fetches } = preloadHarness();
+  vm.runInContext(`_mode = 'radio'; _upNext = { trackId: 'next', title: 'Next', ipfsCid: 'bafy-next', filename: 'next.m4a' };
+    _maybePreload(); _maybePreload();`, context);
+  assert.equal(fetches.length, 1, 'one bounded download per upcoming item');
+  assert.equal(fetches[0].url, 'https://gateway.example/ipfs/bafy-next');
+  await vm.runInContext('_preload.done', context);
+  assert.equal(vm.runInContext('_preload.status', context), 'ready');
+
+  assert.equal(await vm.runInContext(`_takePreload('bafy-other')`, context), null);
+  const entry = await vm.runInContext(`_takePreload('bafy-next')`, context);
+  assert.equal(entry.blobUrl, 'blob:preload-1');
+  assert.equal(vm.runInContext('_preload', context), null);
+});
+
+test('radio switchTo plays a ready preload from memory and releases the previous blob', async () => {
+  const { context, revoked } = preloadHarness();
+  const player = new EventTarget();
+  const sources = [];
+  Object.assign(player, { volume: 0, muted: false, duration: 180, currentTime: 0, paused: true, readyState: 4, seeking: false,
+    seekable: { length: 1, start: () => 0, end: () => 180 }, pause() { this.paused = true; }, removeAttribute() {},
+    querySelectorAll: () => [], appendChild(node) { sources.push(node.src); },
+    load() { setTimeout(() => this.dispatchEvent(new Event('loadedmetadata')), 0); }, async play() { this.paused = false; } });
+  context.player = player;
+  context.document = { createElement: () => ({}) };
+  vm.runInContext(`_audio = player; _audioPlayer = player; _mode = 'radio'; _activeBlobUrl = 'blob:old-song';
+    _upNext = { trackId: 'next', title: 'Next', ipfsCid: 'bafy-next', filename: 'next.m4a' }; _maybePreload();`, context);
+  await vm.runInContext('_preload.done', context);
+  await vm.runInContext(`_switchTo({ title: 'Next', artist: 'Artist', url: 'https://gateway.example/ipfs/bafy-next', mime: 'audio/mp4', preloadCid: 'bafy-next' })`, context);
+  assert.deepEqual(sources, ['blob:preload-1']);
+  assert.deepEqual(revoked, ['blob:old-song']);
+  assert.equal(player.paused, false);
+  const diagnostics = vm.runInContext('getRadioTransitionDiagnostics()', context);
+  assert.equal(diagnostics.transitions.at(-1).media, 'preload');
+  assert.equal(diagnostics.transitions.at(-1).startedAtS, 0);
+});
+
+test('radio drops a stale preload when the next item changes and skips files over the preload limit', async () => {
+  const { context, fetches, revoked } = preloadHarness();
+  vm.runInContext(`_mode = 'radio'; _upNext = { title: 'First pick', ipfsCid: 'bafy-a' }; _maybePreload();`, context);
+  await vm.runInContext('_preload.done', context);
+  vm.runInContext(`_upNext = { title: 'Replacement', ipfsCid: 'bafy-b' }; _maybePreload();`, context);
+  assert.deepEqual(revoked, ['blob:preload-1']);
+  assert.equal(fetches.length, 2);
+  assert.equal(fetches[0].signal.aborted, true);
+
+  const big = preloadHarness({ contentLength: 200 * 1024 * 1024 });
+  vm.runInContext(`_mode = 'radio'; _upNext = { title: 'Huge video', ipfsCid: 'bafy-huge' }; _maybePreload();`, big.context);
+  await vm.runInContext('_preload.done', big.context);
+  assert.equal(vm.runInContext('_preload.status', big.context), 'failed');
+  assert.equal(await vm.runInContext(`_takePreload('bafy-huge')`, big.context), null, 'oversized media streams normally');
+});
+
+test('radio does not preload for blocked, ads-only, archive or data-saver listeners', () => {
+  for (const setup of [`_blocked = true`, `_devertListenMode = 'ads-only'`, `_mode = 'archive'`, `navigator.connection.saveData = true`]) {
+    const { context, fetches } = preloadHarness({ extra: { navigator: { connection: {} } } });
+    vm.runInContext(`_mode = 'radio'; ${setup}; _upNext = { title: 'Next', ipfsCid: 'bafy-next' }; _maybePreload();`, context);
+    assert.equal(fetches.length, 0, setup);
+  }
+});
+
+test('radio keeps the live item preloaded while this browser is still finishing the previous song', async () => {
+  const { context, fetches, revoked } = preloadHarness();
+  vm.runInContext(`_mode = 'radio'; _loadedPlayId = 'play-a';
+    _radio = { playId: 'play-a', ipfsCid: 'bafy-a' }; _upNext = { title: 'B', ipfsCid: 'bafy-b' }; _maybePreload();`, context);
+  await vm.runInContext('_preload.done', context);
+  vm.runInContext(`_radio = { playId: 'play-b', title: 'B', ipfsCid: 'bafy-b' }; _upNext = { title: 'C', ipfsCid: 'bafy-c' }; _maybePreload();`, context);
+  assert.equal(vm.runInContext('_preload.cid', context), 'bafy-b', 'B stays ready until this browser starts it');
+  assert.deepEqual(revoked, []);
+  assert.equal(fetches.length, 1);
+
+  const entry = await vm.runInContext(`_takePreload('bafy-b')`, context);
+  assert.equal(entry.blobUrl, 'blob:preload-1');
+  vm.runInContext(`_loadedPlayId = 'play-b'; _maybePreload();`, context);
+  assert.equal(vm.runInContext('_preload.cid', context), 'bafy-c');
+});
+
+test('radio cancels an in-flight preload when the listener stops being eligible', () => {
+  for (const change of [`_blocked = true`, `setDevertListenMode('ads-only')`, `navigator.connection.saveData = true; _maybePreload()`]) {
+    const { context, fetches } = preloadHarness({ extra: { navigator: { connection: {} } } });
+    vm.runInContext(`_mode = 'radio'; _upNext = { title: 'Next', ipfsCid: 'bafy-next' }; _maybePreload();
+      _setLabel = () => {}; _fadeMainRadioOut = () => {}; _setTrack = () => {}; _setActivity = () => {}; _renderVoting = () => {};
+      ${change}; _maybePreload();`, context);
+    assert.equal(fetches[0].signal.aborted, true, change);
+    assert.equal(vm.runInContext('_preload', context), null, change);
+  }
+});

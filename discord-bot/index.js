@@ -102,6 +102,7 @@ import {
   getActiveJukeLoopSession,
   getJukeLoopSession,
   getJukeLoopNowPlaying,
+  getJukeLoopUpNext,
   updateJukeLoopRadioSchedule,
   submitJukeLoopVote,
   buildRadioState,
@@ -1099,6 +1100,7 @@ async function main() {
       return {
         ...buildRadioState({
           nowPlaying: getJukeLoopNowPlaying(),
+          upNext: getJukeLoopUpNext(),
           playlist: getPlaylist(),
           mainRadioAdCountdown,
         }),
