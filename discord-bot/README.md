@@ -84,6 +84,10 @@ DJuke sponsors include the verified payer address, `requestId`, and `amountUnits
 Campaign video metadata is recovered from the on-chain NFT catalog as well as
 the playlist, matching the campaign media CID and advertiser wallet. A minted
 advert need not remain in the music playlist to play as video on the website.
+If a pending main-radio impression reverts with `No seated main-radio slot`,
+it stays pending with a durable retry cooldown. This does not block scheduler
+startup, VertLoop playback, or reporting the next music milestone to unlock slots.
+Other unexpected contract failures still surface as errors.
 `GET /api/funds` exposes the four configured settlement funds, current balances,
 and proof-of-funding sources. The source ledger scans the router incrementally
 from `PAYROLL_START_BLOCK` (or the stored cursor) and is cached for about 60s.

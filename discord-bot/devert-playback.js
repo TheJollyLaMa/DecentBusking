@@ -231,14 +231,14 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
 
   async function submitImpression(entry) {
     if (entry.state === 'recorded') return entry;
-    if (!entry.mainRadio && Number.isSafeInteger(entry.nextRetryAt) && entry.nextRetryAt > now()) return false;
+    if (Number.isSafeInteger(entry.nextRetryAt) && entry.nextRetryAt > now()) return false;
     if (!await canSpendWorkerGas()) return false;
     if (await contract.usedImpressionIds(entry.impressionId)) {
       const submittedAt = new Date(now()).toISOString();
       const nextEligibleAt = !entry.mainRadio ? Date.parse(submittedAt) + VERTLOOP_IMPRESSION_MIN_INTERVAL_MS : 0;
       const next = { ...journal, impressions: journal.impressions.map(item => {
         if (item.impressionId === entry.impressionId) return { ...item, state: 'recorded', submittedAt };
-        if (!entry.mainRadio && item.state === 'pending' && item.campaignId === entry.campaignId) {
+        if (!entry.mainRadio && !item.mainRadio && item.state === 'pending' && item.campaignId === entry.campaignId) {
           return { ...item, nextRetryAt: Math.max(Number.isSafeInteger(item.nextRetryAt) ? item.nextRetryAt : 0, nextEligibleAt) };
         }
         return item;
@@ -259,7 +259,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
         if (item.impressionId === entry.impressionId) {
           return { ...item, state: 'recorded', submittedAt, transactionHash: transaction.hash };
         }
-        if (!entry.mainRadio && item.state === 'pending' && item.campaignId === entry.campaignId) {
+        if (!entry.mainRadio && !item.mainRadio && item.state === 'pending' && item.campaignId === entry.campaignId) {
           return { ...item, nextRetryAt: Math.max(Number.isSafeInteger(item.nextRetryAt) ? item.nextRetryAt : 0, nextEligibleAt) };
         }
         return item;
@@ -270,6 +270,12 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       }
       return next.impressions.find(item => item.impressionId === entry.impressionId);
     } catch (error) {
+      if (entry.mainRadio && error.code === 'CALL_EXCEPTION' && error.reason === 'No seated main-radio slot') {
+        await commit({ ...journal, impressions: journal.impressions.map(item =>
+          item.impressionId === entry.impressionId ? { ...item, nextRetryAt: now() + workerGasCheckMs } : item) });
+        log.warn(`[devert] Main-radio impression ${entry.impressionId} for campaign ${entry.campaignId} remains pending: ${error.reason}; retrying after the slot cooldown.`);
+        return false;
+      }
       if (!isInsufficientFundsError(error)) throw error;
       await markInsufficientFunds(error);
       return false;
