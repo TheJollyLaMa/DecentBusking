@@ -36,7 +36,7 @@ export async function applyDevertDjukeBoosts({ contract, readCampaigns, readDjuk
   for (const request of djuke.requests) {
     if (!isAddress(request.payer) || BigInt(request.amountUnits || 0) <= 0n || !/^\d+$/.test(String(request.chainRequestId))) continue;
     const campaigns = snapshot.campaigns.filter(campaign => campaign.advertiser.toLowerCase() === request.payer.toLowerCase() &&
-      Date.parse(campaign.startedAt) <= time && time < Date.parse(campaign.expiresAt));
+      !campaign.removed && Date.parse(campaign.startedAt) <= time && time < Date.parse(campaign.expiresAt));
     if (campaigns.length !== 1) {
       if (campaigns.length > 1) log.warn(`[devert] DJuke request ${request.chainRequestId} has multiple active campaigns for its payer; choose a campaign before boosting.`);
       continue;

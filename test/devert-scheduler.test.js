@@ -71,7 +71,7 @@ test('advertiser checkout quotes on Base, prices campaigns by week, and approves
     balanceOf: async () => 10_000_000n, allowance: async () => currentAllowance,
     approve: async (target, amount) => { calls.push(['approve', target, amount]); currentAllowance = amount; return { wait: async () => ({ status: 1 }) }; } };
   const hash = await purchaseDevertCampaign({ signer, contract, usdc, title: 'Set announcement', audioURI: 'ipfs://bafy-audio',
-    weeks: 1 });
+    weeks: 1, readCampaigns: async () => ({ chainId: 8453, contractAddress: contract.target, campaigns: [] }) });
   assert.equal(hash, '0xcampaign');
   assert.deepEqual(calls.map(call => call[0]), ['approve', 'static', 'purchase']);
   assert.equal(calls[0][2], 5_000_000n);

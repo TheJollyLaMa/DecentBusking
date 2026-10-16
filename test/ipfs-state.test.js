@@ -267,7 +267,7 @@ test('payment snapshot namespace is separate and immutable payment backups are r
   assert.equal(requests.some(value => value.options.method === 'DELETE'), false);
 });
 
-test('uploads tagged state and prunes snapshots older than the newest three', async () => {
+test('uploads tagged state and prunes snapshots older than the newest five', async () => {
   const { createPinataStateStore } = await import(moduleUrl);
   const requests = [];
   const store = createPinataStateStore({
@@ -279,11 +279,11 @@ test('uploads tagged state and prunes snapshots older than the newest three', as
       }
       if (options.method === 'DELETE') return new Response('{}', { status: 200 });
       return new Response(JSON.stringify({
-        data: { files: ['new', 'two', 'three', 'old'].map((id, index) => ({
+        data: { files: ['new', 'two', 'three', 'four', 'five', 'old'].map((id, index) => ({
           id,
           cid: `bafy${id}`,
           name: 'decentbusking-jukeloop-state.json',
-          created_at: `2026-10-01T12:00:0${3 - index}.000Z`,
+          created_at: `2026-10-01T12:00:0${5 - index}.000Z`,
         })) },
       }), { status: 200 });
     },

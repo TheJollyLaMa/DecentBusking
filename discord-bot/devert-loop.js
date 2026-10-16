@@ -94,6 +94,16 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
       scheduleNext(1_000);
       return;
     }
+    if (playback.isCampaignRemoved?.(ad.campaignId)) { scheduleNext(1_000); return; }
+    if (playback.canPlayCampaign) {
+      try {
+        if (!await playback.canPlayCampaign(ad.campaignId)) { scheduleNext(1_000); return; }
+      } catch (error) {
+        log.warn('[devert-loop] Campaign availability check failed:', error.message);
+        scheduleNext(retryMs);
+        return;
+      }
+    }
     const radioPlayId = `devert-loop:${ad.campaignId}:${timestamp}`;
     announcement = null;
     child = streamFactory(url);
@@ -122,6 +132,13 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
 
   return {
     start: runNext,
+    removeCampaign(campaignId) {
+      if (String(current?.campaignId) !== String(campaignId)) return;
+      current = null;
+      stopChild();
+      player.stop(true);
+      scheduleNext(betweenAdsMs);
+    },
     async submitVote({ playId, voterId, vote, messageId }) {
       if (!current?.audible || playId && playId !== current.radioPlayId ||
           messageId && messageId !== announcement?.id) throw new Error('Vote only on the current audible VertLoop ad');
@@ -200,6 +217,7 @@ export async function startDevertLoopWorker({ token, voiceChannelId, textChannel
       return { ...base, ...(voice?.getState() || {}) };
     },
     submitVote: payload => controller ? controller.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),
+    removeCampaign: campaignId => controller?.removeCampaign(campaignId),
     stop() { controller?.stop(); voice?.stop(); client.destroy(); },
   };
 }
