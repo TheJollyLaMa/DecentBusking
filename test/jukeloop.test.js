@@ -1276,9 +1276,13 @@ test('JukeLoop prepares the next paid request and starts it before prior-play bo
   assert.equal(session._preparedNext.paid.record, secondPaid);
   assert.equal(session._queueIndex, 0);
 
+  const gaps = [];
+  session._sleep = async ms => { gaps.push(ms); };
   player.emit('idle');
   await new Promise(resolve => setImmediate(resolve));
 
+  assert.equal(gaps.length, 1);
+  assert.ok(gaps[0] > 2_000 && gaps[0] <= 2_500, `changeover gap was ${gaps[0]}ms`);
   assert.equal(played.length, 1);
   assert.equal(session._currentPaid, secondPaid);
   assert.equal(session._currentTrack, paidTrack);
@@ -1358,4 +1362,162 @@ test('JukeLoop announces the Top 10 final voting hour and its close', async (t) 
   session.schedule = [{ id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation' }];
   session._syncScheduledShow();
   assert.match(notices[1].content, /Top 10 hype hour has ended/i);
+});
+
+test('radio state publishes the prepared next item with its changeover start time for browser preloading', async () => {
+  const { buildRadioState } = await import('../discord-bot/jukeloop.js');
+  const waiting = buildRadioState({
+    nowPlaying: null,
+    playlist: [],
+    now: 10_000,
+    upNext: { trackId: 'devert:7', title: 'Video Ad', uploader: 'Advertiser', filename: 'ad.mp4',
+      mediaType: 'video/mp4', ipfsCid: 'bafy-ad', isDevert: true, startsAt: 11_500 },
+  });
+  assert.deepEqual(waiting.upNext, {
+    trackId: 'devert:7', title: 'Video Ad', uploader: 'Advertiser', filename: 'ad.mp4', mediaType: 'video/mp4',
+    videoUrl: 'ipfs://bafy-ad', ipfsCid: 'bafy-ad', isDevert: true, startsAt: 11_500, startsInMs: 1_500,
+  });
+  const prepared = buildRadioState({ nowPlaying: null, playlist: [], upNext: { trackId: 't', title: 'Song', filename: 'song.mp3', ipfsCid: 'bafy-song' } });
+  assert.equal(prepared.upNext.mediaType, 'audio/mpeg');
+  assert.equal('startsAt' in prepared.upNext, false);
+  assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).upNext, null);
+});
+
+test('JukeLoop waits out the changeover gap while publishing the next item, and drops it if the show changes', async (t) => {
+  const { JukeLoopSession, CHANGEOVER_GAP_MS } = await import('../discord-bot/jukeloop.js');
+  for (const scenario of ['starts-after-gap', 'show-changed']) {
+    await t.test(scenario, async () => {
+      const session = new JukeLoopSession({ voiceChannel: { guild: { id: `changeover-${scenario}` } }, textChannel: {}, client: {} });
+      const prepared = { track: { trackId: 'next', title: 'Next Song', uploader: 'Artist', ipfsCid: 'bafy-next', filename: 'next.m4a' } };
+      const started = [];
+      const disposed = [];
+      let release;
+      session._preparedNext = prepared;
+      session._changeoverAt = Date.now() + CHANGEOVER_GAP_MS;
+      session._sleep = () => new Promise(resolve => { release = resolve; });
+      session._startPrepared = value => { started.push(value); return true; };
+      session._disposePrepared = value => disposed.push(value);
+      try {
+        assert.equal(session.getUpNext().startsAt, undefined, 'prepared items have no start time until the song ends');
+        const transition = session._playNext();
+        await new Promise(resolve => setImmediate(resolve));
+        const upNext = session.getUpNext();
+        assert.equal(upNext.ipfsCid, 'bafy-next');
+        assert.equal(upNext.startsAt, session._changeoverAt);
+        assert.equal(started.length, 0, 'the next song waits for the gap');
+        if (scenario === 'show-changed') session._preparationEpoch++;
+        release();
+        await transition;
+        assert.equal(session.getUpNext(), null);
+        assert.deepEqual(started, scenario === 'starts-after-gap' ? [prepared] : []);
+        assert.deepEqual(disposed, scenario === 'show-changed' ? [prepared] : []);
+      } finally {
+        session.destroy();
+      }
+    });
+  }
+});
+
+test('JukeLoop selects a due advert during the unlocking song and keeps it queued if that song does not count', async (t) => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const { DEVERT_SONGS_PER_MAIN_AD } = await import('../js/devert-scheduler.mjs');
+  for (const scenario of ['song-counted', 'song-too-short']) {
+    await t.test(scenario, async () => {
+      const ad = { campaignId: '9', mainRadio: true,
+        track: { trackId: 'devert:9', title: 'Video Ad', uploader: 'Advertiser', ipfsCid: 'bafy-ad', mediaType: 'video/mp4' } };
+      let selections = 0;
+      const session = new JukeLoopSession({
+        voiceChannel: { guild: { id: `anticipated-${scenario}` } },
+        textChannel: { send: async () => ({}) },
+        client: {},
+        devertPlayback: { nextMainRadioAd: async () => { selections++; return [ad]; } },
+        createStream: () => {
+          const stream = new PassThrough();
+          const ffmpegProcess = new EventEmitter();
+          ffmpegProcess.kill = () => {};
+          stream.write(Buffer.from('audio'));
+          return { stream, ffmpegProcess };
+        },
+      });
+      const started = [];
+      session._getFreshUrl = async track => `https://media.example/${track.trackId}`;
+      session._persistMainRadioAdState = async () => {};
+      session._sleep = async () => {};
+      session._startPrepared = value => { started.push(value); return true; };
+      session._queue = [{ trackId: 'music-next', title: 'Music Next', ipfsCid: 'bafy-music' }];
+      session._queueIndex = 0;
+      session._musicSinceAd = DEVERT_SONGS_PER_MAIN_AD - 1;
+      try {
+        session._primeNext();
+        await session._prepareTask;
+        assert.equal(selections, 1);
+        assert.equal(session.getUpNext().ipfsCid, 'bafy-ad', 'the selected advert is published before its turn');
+        assert.equal(session.getUpNext().isDevert, true);
+
+        if (scenario === 'song-counted') session._musicSinceAd = DEVERT_SONGS_PER_MAIN_AD;
+        await session._playNext();
+        assert.equal(started.length, 1);
+        if (scenario === 'song-counted') {
+          assert.equal(started[0].devertAd, ad);
+        } else {
+          assert.equal(started[0].devertAd, null);
+          assert.equal(started[0].track.trackId, 'music-next');
+          assert.equal(session._preparedDevertAd, ad, 'the advert waits for its real slot');
+        }
+        assert.equal(selections, 1, 'no second selection at the changeover');
+      } finally {
+        session.destroy();
+      }
+    });
+  }
+
+  await t.test('restart before the unlocking song counts', async () => {
+    const ad = { campaignId: '9', mainRadio: true,
+      track: { trackId: 'devert:9', title: 'Video Ad', uploader: 'Advertiser', ipfsCid: 'bafy-ad', mediaType: 'video/mp4' } };
+    const makeSession = (id) => {
+      const session = new JukeLoopSession({
+        voiceChannel: { guild: { id } },
+        textChannel: { send: async () => ({}) },
+        client: {},
+        devertPlayback: { nextMainRadioAd: async () => [ad] },
+        createStream: () => {
+          const stream = new PassThrough();
+          const ffmpegProcess = new EventEmitter();
+          ffmpegProcess.kill = () => {};
+          stream.write(Buffer.from('audio'));
+          return { stream, ffmpegProcess };
+        },
+      });
+      session._getFreshUrl = async track => `https://media.example/${track.trackId}`;
+      session._persistMainRadioAdState = async () => {};
+      session._sleep = async () => {};
+      session._queue = [{ trackId: 'music-next', title: 'Music Next', ipfsCid: 'bafy-music' }];
+      session._queueIndex = 0;
+      return session;
+    };
+    const before = makeSession('anticipated-restart-a');
+    before._musicSinceAd = DEVERT_SONGS_PER_MAIN_AD - 1;
+    let snapshot;
+    try {
+      before._primeNext();
+      await before._prepareTask;
+      snapshot = before._snapshotMainRadioAdState();
+      assert.equal(snapshot.breakAwaitingUnlock, true);
+    } finally {
+      before.destroy();
+    }
+
+    const after = makeSession('anticipated-restart-b');
+    const started = [];
+    after._startPrepared = value => { started.push(value); return true; };
+    after._applyMainRadioAdState(snapshot);
+    try {
+      await after._playNext();
+      assert.equal(started.length, 1);
+      assert.equal(started[0].devertAd, null, 'a restored early pick still waits for its slot');
+      assert.equal(after._preparedDevertAd?.campaignId, '9');
+    } finally {
+      after.destroy();
+    }
+  });
 });

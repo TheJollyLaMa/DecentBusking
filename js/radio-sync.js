@@ -12,6 +12,14 @@ const FADE_IN_MS = 600;
 const PREVIEW_MS = 30_000;
 const DRIFT_TOLERANCE_S = 8;
 const LOAD_TIMEOUT_MS = 20_000;
+// After a song ends, poll quickly so the next one starts right after the JukeLoop changeover gap.
+const HANDOFF_POLL_MS = 750;
+const HANDOFF_WINDOW_MS = 30_000;
+// Continuous listeners start each new song from 0:00 unless they have fallen this far behind.
+const CONTINUOUS_START_MAX_S = 45;
+// One upcoming file is buffered in memory; larger files stream normally.
+const PRELOAD_MAX_BYTES = 80 * 1024 * 1024;
+const PRELOAD_WAIT_MS = 10_000;
 
 let _audio, _labelEl, _sponsorEl, _titleEl, _artistEl, _activityEl, _adCountdownEl, _playBtn, _radioBtn;
 let _audioPlayer, _videoPlayer, _videoStage, _videoToggle;
@@ -156,6 +164,13 @@ let _nowPlayingBroadcastKey = null;
 let _nowPlayingBroadcastDetail = null;
 let _suppressPauseStop = false;
 let _radioState = null;
+let _upNext = null;
+/** Set when a radio song played to its end, so the next song starts from its beginning. */
+let _radioHandoff = null;
+/** The single in-memory preload of the published next radio item. */
+let _preload = null;
+let _activeBlobUrl = null;
+const _transitionLog = [];
 
 function _applyRadioVolume() {
   if (!_audio) return;
@@ -456,6 +471,8 @@ export function setDevertListenMode(mode) {
   if (_devertListenMode === mode) return true;
   const returningToRadio = mode === 'radio' && _devertListenMode === 'ads-only';
   _devertListenMode = mode;
+  _radioHandoff = null;
+  _maybePreload();
   if (_mode !== 'radio') return mode === 'radio';
   _loadedPlayId = null;
   if (mode === 'ads-only') {
@@ -478,10 +495,12 @@ export function setDevertListenMode(mode) {
 export function playArchiveTrack({ title, artist, audioUrl, mediaType, nft = null, sessionId = null, onEnded = null }) {
   if (!_audio) return;
   _archiveSession = { id: sessionId, onEnded };
+  _radioHandoff = null;
   if (_takeover) _takeoverQueue.unshift(_takeover.track);
   _clearTakeover();
   _burst = _takeoverQueue.length > 1;
   _mode = 'archive';
+  _maybePreload();
   if (_archiveMuted) setArchiveMuted(false);
   _notifyRadioSourceMode();
   _renderVoting();
@@ -535,8 +554,10 @@ async function _poll() {
     _radioReachable = true;
     _setRadioState(state);
     _radio = state.nowPlaying ? { ...state.nowPlaying, receivedAt: performance.now() } : null;
+    _upNext = state.upNext && typeof state.upNext === 'object' ? state.upNext : null;
     _detectNewUploads(Array.isArray(state.recent) ? state.recent : [], state.serverTime);
     if (_mode === 'radio') _syncRadio();
+    _maybePreload();
   } catch (err) {
     console.warn('[radio] Could not reach the JukeLoop radio:', err.message);
     _setRadioState({
@@ -548,8 +569,15 @@ async function _poll() {
     _radioReachable = false;
   }
   _renderVoting();
-  _pollTimer = setTimeout(_poll, POLL_MS);
+  _pollTimer = setTimeout(_poll, _handoffActive() ? HANDOFF_POLL_MS : POLL_MS);
   _pollTimer?.unref?.();
+}
+
+function _handoffActive() {
+  if (_radioHandoff && (_mode !== 'radio' || performance.now() - _radioHandoff.endedAt > HANDOFF_WINDOW_MS)) {
+    _radioHandoff = null;
+  }
+  return !!_radioHandoff;
 }
 
 // Discord snowflake IDs encode their creation time.
@@ -603,7 +631,9 @@ function _syncRadio(message) {
     _broadcastNowPlayingStopped('radio-empty');
     _setTrack('—', '');
     _renderSponsorTag(null);
-    _setActivity(message || '🌙 The JukeLoop is between tracks — waiting for the next song');
+    _setActivity(message || (_radioHandoff && _upNext?.title
+      ? `📻 Up next: ${_upNext.title}`
+      : '🌙 The JukeLoop is between tracks — waiting for the next song'));
     return;
   }
 
@@ -617,6 +647,10 @@ function _syncRadio(message) {
   }
 
   _loadedPlayId = _radio.playId;
+  // A listener whose last song played to its end hears the next one from 0:00; joins and returns sync live.
+  const continuing = !!_radioHandoff && _radio.playId !== _radioHandoff.previousPlayId &&
+    _radioPositionS() <= CONTINUOUS_START_MAX_S;
+  _radioHandoff = null;
   if (!_radio.ipfsCid) {
     _stopAudio();
     _setTrack(_radio.title, _radio.uploader);
@@ -629,7 +663,8 @@ function _syncRadio(message) {
     artist: _radio.uploader,
     url: _gatewayUrl(_radio.ipfsCid),
     mime: _mediaTypeForTrack(_radio),
-    offset: _radioPositionS,
+    offset: continuing ? () => 0 : _radioPositionS,
+    preloadCid: _radio.ipfsCid,
     nowPlaying: {
       source: 'radio',
       playId: _radio.playId || null,
@@ -661,6 +696,8 @@ function _startNextTakeover() {
   }
 
   _mode = 'takeover';
+  _radioHandoff = null;
+  _maybePreload();
   _notifyRadioSourceMode();
   _renderVoting();
   if (_takeoverQueue.length > 0) _burst = true;
@@ -728,9 +765,10 @@ function _onEnded(event) {
     if (_takeoverQueue.length) _startNextTakeover();
     else _syncRadio('🎧 Archive track finished — back to the JukeLoop');
   } else {
-    _setActivity('📻 Waiting for the JukeLoop’s next track…');
+    _radioHandoff = { endedAt: performance.now(), previousPlayId: _loadedPlayId };
+    _setActivity(_upNext?.title ? `📻 Up next: ${_upNext.title}` : '📻 Waiting for the JukeLoop’s next track…');
     clearTimeout(_pollTimer);
-    _pollTimer = setTimeout(_poll, 1_500);
+    _pollTimer = setTimeout(_poll, HANDOFF_POLL_MS);
     _pollTimer?.unref?.();
   }
 }
@@ -743,9 +781,16 @@ function _gatewayUrl(cid) {
   return `${gateway}${cid}`;
 }
 
-async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = () => 0, nowPlaying = null }) {
+async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = () => 0, nowPlaying = null, preloadCid = null }) {
   const token = ++_switchToken;
+  const switchStartedAt = performance.now();
   _setTrack(title, artist);
+  const preloaded = preloadCid && _preload?.cid === preloadCid ? await _takePreload(preloadCid) : null;
+  if (token !== _switchToken) {
+    if (preloaded?.blobUrl) URL.revokeObjectURL(preloaded.blobUrl);
+    return;
+  }
+  const mediaUrl = preloaded?.blobUrl || url;
   const at = offset();
   let canSeekImmediately = false;
 
@@ -767,12 +812,13 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
   _audio.removeAttribute('src');
   _audio.querySelectorAll('source').forEach((source) => source.remove());
   const source = document.createElement('source');
-  source.src = url;
+  source.src = mediaUrl;
   if (mime) source.type = mime;
   _audio.appendChild(source);
   _audio.preload = 'auto';
   const metadataReady = _waitForMetadata();
   _audio.load();
+  _releaseActiveBlob(preloaded?.blobUrl || null);
 
   const loaded = await metadataReady;
   if (token !== _switchToken) return;
@@ -806,9 +852,18 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
   } catch {
     _blocked = true;
     _playBtn?.classList.remove('hidden');
+    _maybePreload();
     return;
   }
   if (token !== _switchToken) return;
+  _recordTransition({
+    source: nowPlaying?.source || _mode,
+    title,
+    media: preloaded ? 'preload' : 'network',
+    startupMs: Math.round(performance.now() - switchStartedAt),
+    startedAtS: Math.round(at * 10) / 10,
+    liveBehindS: _mode === 'radio' && _radio ? Math.round((_radioPositionS() - at) * 10) / 10 : null,
+  });
   if (at > 0) {
     const seek = _prepareRadioSeek(offset, token);
     if (canSeekImmediately) {
@@ -883,6 +938,135 @@ function _waitForMetadata() {
     player.addEventListener('loadedmetadata', onLoaded);
     player.addEventListener('error', onError, true);
   });
+}
+
+// ── Next-track preloading ───────────────────────────────────────────────────
+// The gateway can take several seconds to send its first byte, so the published next
+// item is downloaded during the current song and played from memory at the changeover.
+
+function _preloadAllowed() {
+  const connection = globalThis.navigator?.connection;
+  return _mode === 'radio' && _devertListenMode === 'radio' && !_blocked &&
+    typeof fetch === 'function' && typeof globalThis.URL?.createObjectURL === 'function' && typeof Blob === 'function' &&
+    connection?.saveData !== true && !/(^|-)2g$/.test(connection?.effectiveType || '');
+}
+
+function _maybePreload() {
+  if (!_preloadAllowed()) {
+    _discardPreload();
+    return;
+  }
+  // A live item this browser has not started yet (still finishing the previous song) is needed first.
+  const pendingLive = _radio?.ipfsCid && _radio.playId !== _loadedPlayId ? _radio : null;
+  const target = pendingLive || _upNext;
+  const cid = target?.ipfsCid || null;
+  if (_preload && _preload.cid !== cid) _discardPreload();
+  if (!cid || _preload) return;
+  _startPreload(target);
+}
+
+function _startPreload(track) {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const entry = {
+    cid: track.ipfsCid,
+    title: track.title || '',
+    mime: _mediaTypeForTrack(track),
+    status: 'loading',
+    blobUrl: null,
+    bytes: 0,
+    startedAt: performance.now(),
+    controller,
+    done: null,
+  };
+  _preload = entry;
+  entry.done = (async () => {
+    try {
+      const response = await fetch(_gatewayUrl(entry.cid), { signal: controller?.signal, mode: 'cors' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const declared = Number(response.headers?.get?.('content-length'));
+      if (declared > PRELOAD_MAX_BYTES) throw new Error(`file is ${_megabytes(declared)} MB, over the preload limit`);
+      const chunks = [];
+      const reader = response.body?.getReader?.();
+      if (reader) {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          entry.bytes += value.byteLength;
+          if (entry.bytes > PRELOAD_MAX_BYTES) {
+            reader.cancel().catch(() => {});
+            throw new Error('file is over the preload limit');
+          }
+          chunks.push(value);
+        }
+      } else {
+        const buffer = await response.arrayBuffer();
+        entry.bytes = buffer.byteLength;
+        if (entry.bytes > PRELOAD_MAX_BYTES) throw new Error('file is over the preload limit');
+        chunks.push(buffer);
+      }
+      if (entry.discarded) return;
+      const type = entry.mime || response.headers?.get?.('content-type') || '';
+      entry.blobUrl = URL.createObjectURL(new Blob(chunks, type ? { type } : {}));
+      entry.status = 'ready';
+      console.info(`[radio] Preloaded next track "${entry.title}" (${_megabytes(entry.bytes)} MB in ${((performance.now() - entry.startedAt) / 1000).toFixed(1)}s)`);
+    } catch (error) {
+      if (entry.discarded) return;
+      entry.status = 'failed';
+      entry.error = error?.message || String(error);
+      console.warn(`[radio] Could not preload "${entry.title}"; it will stream when it starts:`, entry.error);
+    }
+  })();
+}
+
+function _discardPreload(entry = _preload) {
+  if (!entry) return;
+  if (_preload === entry) _preload = null;
+  entry.discarded = true;
+  try { entry.controller?.abort(); } catch {}
+  if (entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
+}
+
+/** Hand the preloaded file for this CID to the player, waiting briefly if it is still downloading. */
+async function _takePreload(cid) {
+  const entry = _preload;
+  if (!entry || entry.cid !== cid) return null;
+  // Detach first so a poll that publishes the following item cannot discard this one mid-handoff.
+  _preload = null;
+  if (entry.status === 'loading') {
+    let timer;
+    await Promise.race([entry.done, new Promise((resolve) => { timer = setTimeout(resolve, PRELOAD_WAIT_MS); })]);
+    clearTimeout(timer);
+  }
+  if (entry.status !== 'ready') {
+    if (entry.status === 'loading') console.warn(`[radio] Preload of "${entry.title}" was not ready in time; streaming it instead`);
+    _discardPreload(entry);
+    return null;
+  }
+  return entry;
+}
+
+function _releaseActiveBlob(nextBlobUrl) {
+  if (_activeBlobUrl && _activeBlobUrl !== nextBlobUrl) URL.revokeObjectURL(_activeBlobUrl);
+  _activeBlobUrl = nextBlobUrl;
+}
+
+function _megabytes(bytes) {
+  return (bytes / (1024 * 1024)).toFixed(1);
+}
+
+function _recordTransition(entry) {
+  const record = { at: new Date().toISOString(), ...entry };
+  _transitionLog.push(record);
+  if (_transitionLog.length > 20) _transitionLog.shift();
+  console.info('[radio] Track started', record);
+}
+
+/** Recent track-start timings (startup delay, preload use, start position) for diagnosing playback. */
+export function getRadioTransitionDiagnostics() {
+  return {
+    transitions: _transitionLog.map(entry => ({ ...entry })),
+    preload: _preload ? { cid: _preload.cid, title: _preload.title, status: _preload.status, bytes: _preload.bytes, error: _preload.error || null } : null,
+  };
 }
 
 // Silence-to-music fade on every start; time-based steps keep it finishing in throttled background tabs.
