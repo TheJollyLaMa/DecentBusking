@@ -718,6 +718,42 @@ test('stale failed main-radio campaigns are retried after enough songs pass', as
   }
 });
 
+test('JukeLoop rechecks overdue adverts before starting prefetched music without dropping paid requests', async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  for (const scenario of ['due', 'not-due', 'paid', 'advert', 'no-replacement', 'lookup-error']) {
+    await t.test(scenario, async () => {
+      const session = new JukeLoopSession({
+        voiceChannel: { guild: { id: `ad-transition-${scenario}` } },
+        textChannel: {}, client: {}, devertPlayback: {},
+      });
+      const original = { track: { title: 'Prefetched music' },
+        paid: scenario === 'paid' ? { record: { requestId: 'paid-1' } } : null,
+        devertAd: scenario === 'advert' ? { campaignId: '1' } : null };
+      const replacement = { track: { title: 'Video advert', mediaType: 'video/mp4' }, devertAd: { campaignId: '1' } };
+      const disposed = [];
+      let started;
+      let selections = 0;
+      session._musicSinceAd = scenario === 'not-due' ? 9 : 10;
+      session._preparedNext = original;
+      session._prepareNextPlayback = async () => {
+        selections++;
+        if (scenario === 'lookup-error') throw new Error('scheduler unavailable');
+        return scenario === 'no-replacement' ? null : replacement;
+      };
+      session._disposePrepared = value => disposed.push(value);
+      session._startPrepared = value => { started = value; };
+      try {
+        await session._playNext();
+        assert.equal(started, scenario === 'due' ? replacement : original);
+        assert.deepEqual(disposed, scenario === 'due' ? [original] : []);
+        assert.equal(selections, ['due', 'no-replacement', 'lookup-error'].includes(scenario) ? 1 : 0);
+      } finally {
+        session.destroy();
+      }
+    });
+  }
+});
+
 test('paid DJuke requests still let the queued main-radio ad play next', async () => {
   const { createJukeLoopSession } = await import('../discord-bot/jukeloop.js');
   const nextPaid = [{ track: { trackId: 'paid:1', title: 'Paid Song', uploader: 'Buyer', messageId: 'paid-message', channelId: 'paid-channel' },
