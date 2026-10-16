@@ -1,4 +1,4 @@
-import { fetchNFTMetaById } from './space.js?v=20261016-radio-preload';
+import { fetchNFTMetaById } from './space.js?v=20261016-top10-eq';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { submitMediaForApproval } from './mint-submission.js?v=20261018-shared-provider';
 

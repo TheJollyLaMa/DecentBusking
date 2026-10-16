@@ -701,6 +701,78 @@ body.devert-open #top-ten-tab, body.devert-open #djuke-tab, body.devert-open #de
   #top-ten-panel.is-open, #top-ten-panel::before { animation: none; }
   #top-ten-panel::before, .top-ten-flight-layer { display: none; }
 }
+.hype-festival { position: relative; flex-shrink: 0; padding: 16px 12px 10px; overflow: hidden; border: 1px solid #d9af6359; border-radius: 12px; background: radial-gradient(ellipse at 50% 55%, #66326880, transparent 70%), linear-gradient(155deg, #251c38, #102c32 70%, #191b30); text-align: center; }
+.hype-eyebrow { color: #91e2ce; font-size: .53rem; font-weight: 800; letter-spacing: .15em; }
+.hype-title { margin: 7px 0 2px; font-family: var(--font-display); color: #ffe6a0; text-shadow: 0 2px #823e60, 0 0 25px #f5ba6550; letter-spacing: .025em; line-height: 1.05; }
+.hype-title span { display: block; }
+.hype-title-top { font-size: clamp(1.5rem, 3.2vw, 2.1rem); }
+.hype-title-show { font-size: clamp(1.05rem, 2.3vw, 1.4rem); color: #f7c8ef; }
+.hype-info-button { position: absolute; top: 9px; left: 9px; z-index: 2; width: 22px; height: 22px; padding: 0; border: 1px solid #ffe1a299; border-radius: 50%; background: #2b2140; color: #ffe1a2; font: italic 700 .8rem/1 Georgia, serif; cursor: pointer; }
+.hype-info-button:hover, .hype-info-button[aria-expanded="true"] { background: #4b3567; }
+.hype-info-popover { position: absolute; top: 37px; left: 9px; z-index: 3; max-width: min(330px, calc(100% - 18px)); margin: 0; padding: 10px 12px; border: 1px solid #ffe1a266; border-radius: 9px; background: #1b1628f5; box-shadow: 0 8px 22px #0009; color: #f0e4f2; font-size: .7rem; line-height: 1.5; text-align: left; }
+.hype-info-popover[hidden] { display: none; }
+.hype-subtitle { margin: 0; color: #e6cde7; font-size: .65rem; }
+.hype-stage { position: relative; height: 156px; margin: 6px -4px 0; overflow: hidden; background: conic-gradient(from 170deg at 50% 0%, transparent, #eabfff0a 12deg, transparent 24deg, #9fffe811 36deg, transparent 48deg, #eabfff0a 60deg, transparent 72deg); }
+.hype-stage > span { position: absolute; display: block; filter: drop-shadow(0 3px 7px #0006); }
+.hype-band { position: absolute; left: 14%; right: 8%; top: 40px; height: 70px; display: flex; justify-content: space-around; align-items: center; border-bottom: 2px solid #dbab7444; border-radius: 50%; background: radial-gradient(ellipse at bottom, #c57bd133, transparent 70%); }
+.hype-bandmate { position: relative; display: inline-block; font-size: 38px; animation: hype-rock 950ms ease-in-out infinite alternate; animation-delay: calc(var(--member) * -290ms); transform-origin: bottom center; }
+.hype-instrument { position: absolute; right: -13px; bottom: -7px; font-size: 28px; }
+.hype-planet { left: 3%; top: 8px; font-size: 36px; animation: hype-orbit 6s ease-in-out infinite alternate; }
+.hype-celestial { top: 5px; font-size: 26px; color: #f1c8ff; text-shadow: 0 0 15px #f2b7ff88; animation: hype-orbit 4s ease-in-out infinite alternate; }
+.hype-celestial-lilith { left: 27%; }
+.hype-celestial-venus { left: 50%; animation-delay: -2s; }
+.hype-celestial-mercury { left: 72%; animation-delay: -1s; }
+.hype-trophy { right: 1%; top: 7px; font-size: 28px; animation: hype-rock 2s ease-in-out infinite alternate; }
+.hype-stage .hype-rabbit-hole { left: 3%; bottom: 42px; font-size: 30px; opacity: .8; }
+.hype-stage .hype-spark { left: calc(5% + var(--i) * 10%); bottom: 3px; font-size: 14px; color: #ffe1a2; opacity: 0; animation: hype-float 4.8s linear infinite; animation-delay: calc(var(--i) * -.73s); }
+.hype-equalizer { position: absolute; bottom: 0; left: 5%; right: 5%; height: 34px; display: flex; align-items: end; gap: 4px; }
+.hype-equalizer i { flex: 1; height: 100%; border-radius: 3px 3px 0 0; background: linear-gradient(#f5cd87, #54cbb3); box-shadow: 0 0 8px #54cbb355; transform-origin: bottom; transform: scaleY(.04); opacity: .55; will-change: transform; }
+.hype-equalizer.is-live i { opacity: .9; }
+.hype-progress { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 10px 0 6px; font-size: .66rem; letter-spacing: .05em; color: #ffe1a2; }
+.hype-on-air { display: inline-flex; align-items: center; gap: 5px; color: #a8edce; font-size: .57rem; font-weight: 800; }
+.hype-on-air::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #8aebba; box-shadow: 0 0 9px #8aebba; }
+.hype-chart-explainer { margin: 3px 0 0; font-size: .61rem; line-height: 1.5; color: #cbc3d5; }
+.hype-warning:empty { display: none; }
+.hype-warning { margin: 6px 0 0; font-size: .66rem; line-height: 1.4; color: #ffd39b; }
+.top-ten-opening-rank { color: #e7c591; font-size: .65rem; }
+#top-ten-panel.is-hype-festival { border-color: #c3a36899; background: linear-gradient(175deg, #191b28fa, #0d171cfa); }
+body.top-ten-festival-open { --top-ten-drawer-width: min(650px, calc(100vw - 44px)); }
+.top-ten-playlist-status:empty { display: none; }
+.top-ten-playlist-status { margin: 0; color: var(--teal); font-size: .72rem; line-height: 1.4; }
+.top-ten-song-title-line { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.top-ten-playlist-add { flex: 0 0 18px; width: 18px; height: 18px; padding: 0; border: 1px solid #8fe0c866; border-radius: 50%; background: #142d2c; color: #adf4d9; font-size: .8rem; line-height: 1; cursor: pointer; }
+.top-ten-playlist-add:hover { background: #24534b; }
+.top-ten-playlist-add:disabled { opacity: .5; cursor: wait; }
+.is-hype-festival .top-ten-flight-layer { display: none; }
+.hype-festival.is-headliner { border-color: #ffe1a2; box-shadow: inset 0 0 24px #eebc4a25, 0 0 15px #eebc4a20; }
+.hype-festival.is-paused *, .hype-festival.is-paused .hype-stage > span { animation-play-state: paused; }
+@keyframes hype-rock { from { transform: rotate(-11deg) translateY(0); } to { transform: rotate(9deg) translateY(-5px); } }
+@keyframes hype-orbit { from { transform: translateY(0) rotate(-14deg); } to { transform: translateY(12px) rotate(14deg); } }
+@keyframes hype-float { 0% { opacity: 0; transform: translateY(0) rotate(-15deg); } 15%, 75% { opacity: .8; } 100% { opacity: 0; transform: translateY(-88px) rotate(25deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .hype-festival *, .hype-festival .hype-stage > span { animation: none; }
+  .hype-stage .hype-spark { display: none; }
+}
+@media (max-height: 760px), (max-width: 600px) {
+  #top-ten-panel.is-hype-festival { overflow-y: auto; }
+  .is-hype-festival #top-ten-content { flex: 1 0 150px; }
+  .hype-festival { padding: 8px; }
+  .hype-eyebrow { font-size: .46rem; }
+  .hype-title { margin: 3px 0; }
+  .hype-title-top { font-size: 1.15rem; }
+  .hype-title-show { font-size: .85rem; }
+  .hype-info-button { top: 6px; left: 6px; width: 19px; height: 19px; font-size: .7rem; }
+  .hype-info-popover { top: 30px; left: 6px; }
+  .hype-subtitle, .hype-chart-explainer { display: none; }
+  .hype-stage { height: 84px; margin-top: 0; }
+  .hype-band { top: 17px; height: 38px; }
+  .hype-bandmate { font-size: 24px; }
+  .hype-instrument { right: -10px; bottom: -4px; font-size: 19px; }
+  .hype-planet, .hype-celestial, .hype-trophy { top: 0; font-size: 19px; }
+  .hype-stage .hype-rabbit-hole { bottom: 22px; font-size: 20px; }
+  .hype-equalizer { height: 18px; }
+  .hype-progress { padding: 5px 0 0; font-size: .58rem; }
+}
 .top-ten-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .top-ten-panel-heading h2 { margin: 0; color: var(--gold); font-family: var(--font-display); font-size: .95rem; }
 .top-ten-panel-heading p { margin: 4px 0 0; color: var(--text-dim); font-size: .72rem; }

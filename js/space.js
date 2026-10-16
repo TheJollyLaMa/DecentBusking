@@ -1202,6 +1202,16 @@ function _ensureNowPlayingAnalyser(media) {
   return _nowPlayingLeftAnalyser || _nowPlayingAnalyser;
 }
 
+// Shares the single Web Audio graph on the radio element (createMediaElementSource is once-per-element).
+export function readNowPlayingSpectrum(out) {
+  const media = _activeMediaElement();
+  if (!out || !media || media.paused || media.ended) return false;
+  if (!_ensureNowPlayingAnalyser(media) || !_nowPlayingAnalyser) return false;
+  if (_nowPlayingAudioContext?.state === 'suspended') return false;
+  _nowPlayingAnalyser.getByteFrequencyData(out);
+  return true;
+}
+
 function _updateNowPlayingPulse() {
   if (!_nowPlayingMesh) return;
   const mesh = _nowPlayingMesh;

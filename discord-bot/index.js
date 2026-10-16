@@ -634,6 +634,19 @@ async function main() {
     serialize: value => value,
     deserialize: value => value,
   }) : null;
+  config.topTenHypeStore = config.pinataJwt ? createPinataStateStore({
+    ...config.checkpointStorage,
+    pinataJwt: config.pinataJwt,
+    uploadUrl: config.pinataApiUrl,
+    filesApiUrl: config.pinataFilesApiUrl,
+    gateway: config.ipfsGateway,
+    name: 'decentbusking-friday-top10-hype.json',
+    restoreLatestOnly: true,
+    tags: { app: 'decentbusking', kind: 'friday-top10-hype', schema: '1' },
+    beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined,
+    serialize: value => value,
+    deserialize: value => value,
+  }) : null;
   const creatorProfiles = creatorStore ? createCreatorProfiles({ restore: creatorStore.restore, save: creatorStore.save }) : null;
   const initializeCreators = () => creatorProfiles?.initialize().catch(error => console.warn('[creator-profiles]', error.message));
   initializeCreators();
@@ -1103,6 +1116,7 @@ async function main() {
           upNext: getJukeLoopUpNext(),
           playlist: getPlaylist(),
           mainRadioAdCountdown,
+          ...jukeLoopSession?.getShowState(),
         }),
         paymentLedger: {
           endpoint: '/api/payroll/ledger',
@@ -1999,6 +2013,7 @@ async function startJukeLoop(client, config) {
       schedule: defaultRadioSchedule(liveWeeklySchedule),
       devertPlayback: _devertPlaybackRuntime,
       mainRadioAdStateStore: config.jukeLoopMainRadioAdStore,
+      topTenHypeStore: config.topTenHypeStore,
       onTerminalDisconnect: () => {
         scheduleJukeLoopRestart(client, config, 'Voice reconnect timed out');
       },
