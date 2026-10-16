@@ -106,6 +106,19 @@
       "ideasCredited": [
         "TheJollyLaMa/DecentBusking#195"
       ]
+    },
+    {
+      "github": "joseacabrerav",
+      "displayName": "Jose Cabrera",
+      "role": "contributor",
+      "walletAddress": "0x29185eB8cfD22Aa719529217bFbadE61677e0Ad2",
+      "ethEarned": 0,
+      "ethPending": 0,
+      "usdcEarned": 0,
+      "usdcPending": 0,
+      "issuesClosed": [],
+      "registeredAt": "2026-10-15T19:01:59.000Z",
+      "notes": "Musician with two minted Dbusk songs; interested in helping shape the dapp."
     }
   ]
 }
