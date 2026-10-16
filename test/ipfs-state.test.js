@@ -5,6 +5,39 @@ const { pathToFileURL } = require('node:url');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'ipfs-state.js')).href;
 
+test('production advert cadence store is isolated from playlist snapshots on restore and prune', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const { createPinataStateStore } = await import(moduleUrl);
+  const source = fs.readFileSync(path.join(__dirname, '../discord-bot/index.js'), 'utf8');
+  const definition = source.match(/config\.jukeLoopMainRadioAdStore = config\.pinataJwt \? createPinataStateStore\(([\s\S]*?)\) : null;/);
+  assert.ok(definition);
+  const options = vm.runInNewContext(`(${definition[1]})`, { config: {} });
+  assert.equal(options.name, 'decentbusking-main-radio-ad-state.json');
+  assert.equal(options.tags.kind, 'main-radio-ad-state');
+  const requested = [];
+  const files = [
+    { id: 'playlist', cid: 'playlist-cid', name: 'decentbusking-jukeloop-state.json',
+      keyvalues: { app: 'decentbusking', kind: 'jukeloop-state', schema: '1' }, created_at: '2026-10-16T02:00:00Z' },
+    { id: 'ad', cid: 'ad-cid', name: options.name, keyvalues: options.tags, created_at: '2026-10-16T01:59:00Z' },
+  ];
+  const state = { schemaVersion: 1, musicSinceAd: 12, musicPlayCount: 12,
+    preparedDevertAd: null, pendingDevertAds: [], failedDevertCampaigns: [], lastSkip: null };
+  const store = createPinataStateStore({ ...options, pinataJwt: 'test-jwt', fetchImpl: async (url, init = {}) => {
+    requested.push({ url, method: init.method || 'GET' });
+    if (url.includes('/gateways')) return new Response(JSON.stringify({ data: { rows: [] } }));
+    if (init.method === 'POST') return new Response(JSON.stringify({ data: { cid: 'saved-ad-cid' } }));
+    if (url.includes('/files')) return new Response(JSON.stringify({ data: { files } }));
+    assert.match(url, /\/ad-cid$/);
+    return new Response(JSON.stringify(state));
+  } });
+  assert.deepEqual(await store.restore(), state);
+  await store.save(state);
+  assert.ok(requested.filter(r => r.url.includes('/files') && r.method === 'GET')
+    .every(r => new URL(r.url).searchParams.get('name') === options.name));
+  assert.equal(requested.some(r => r.method === 'DELETE' && r.url.endsWith('/playlist')), false);
+});
+
 test('approved baseline replaces incorrect counters exactly once and retains later activity on restart', async () => {
   const { recoverVerifiedPlaylistBaseline } = await import(moduleUrl);
   const cid = 'bafyapprovedbaseline';

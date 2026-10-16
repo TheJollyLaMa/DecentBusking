@@ -608,8 +608,8 @@ async function main() {
     uploadUrl: config.pinataApiUrl,
     filesApiUrl: config.pinataFilesApiUrl,
     gateway: config.ipfsGateway,
-    name: 'decentbusking-jukeloop-state.json',
-    tags: { app: 'decentbusking', kind: 'jukeloop-state', schema: '1' },
+    name: 'decentbusking-main-radio-ad-state.json',
+    tags: { app: 'decentbusking', kind: 'main-radio-ad-state', schema: '1' },
     serialize: value => value,
     deserialize: value => value,
   }) : null;
