@@ -3218,8 +3218,14 @@ decent-foot {
 #fund-breakdown-dialog { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: min(960px, calc(100vw - 28px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; overflow: auto; border: 1px solid rgba(220, 233, 222, .3); border-radius: 8px; background: rgba(14, 22, 24, .88); color: var(--text-primary); box-shadow: 0 24px 90px #0009, 0 0 36px #a0d6ba18; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
 #fund-breakdown-dialog::backdrop { background: rgba(0, 0, 0, .46); backdrop-filter: blur(3px); }
 .fund-breakdown-shell { min-width: 0; padding: 22px; background: transparent; color: var(--text-primary); }
-.fund-breakdown-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.fund-breakdown-heading { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .fund-breakdown-heading h3 { margin: 0; color: var(--gold); }
+.fund-breakdown-titlebar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fund-payment-info > summary { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1px solid var(--gold); border-radius: 50%; color: var(--gold); font: italic 700 .8rem/1 Georgia, serif; cursor: pointer; list-style: none; }
+.fund-payment-info > summary::-webkit-details-marker { display: none; }
+.fund-payment-info > summary:hover, .fund-payment-info[open] > summary { background: #4b3567; }
+.fund-payment-info > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.fund-payment-info .fund-pending-notice { position: absolute; top: 100%; left: 0; z-index: 3; width: min(380px, 100%); box-sizing: border-box; margin: 8px 0 0; padding: 12px; border: 1px solid var(--panel-border); border-radius: 8px; background: #141720; box-shadow: 0 8px 22px #0009; }
 #fund-breakdown-close { width: 32px; height: 32px; color: var(--text-primary); background: #141720; border: 1px solid var(--panel-border); border-radius: 4px; }
 #fund-breakdown-summary, #fund-breakdown-note { margin: 0 0 10px; color: var(--text-dim); font-size: .82rem; line-height: 1.4; overflow-wrap: anywhere; }
 #fund-breakdown-summary { display: block; }
@@ -3233,13 +3239,8 @@ decent-foot {
 .fund-prize-dollar:nth-child(even) { animation-direction: reverse; }
 .fund-prize-dollar:nth-child(2), .fund-prize-dollar:nth-child(5) { offset-path: polygon(8% 28%, 24% 12%, 84% 20%, 50% 50%, 12% 76%, 74% 82%, 92% 34%, 36% 46%, 8% 28%); }
 .fund-prize-busker { position: absolute; bottom: 10px; left: calc(15% + var(--index) * 16%); font-size: 1.65rem; line-height: 1.5; filter: drop-shadow(0 0 8px #e4d98e40); animation: fund-busker-dance 4s ease-in-out infinite; animation-delay: calc(var(--index) * -.8s); }
-.fund-flow-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 16px 0; margin-bottom: 12px; border-top: 1px solid #d5e3d522; border-bottom: 1px solid #d5e3d522; text-align: center; }
-.fund-flow-totals > span { min-width: 0; }
-.fund-balance-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; border-bottom: 0; }
 .fund-weekly-warning { color: #ffbd9a; font-size: .68rem; }
 .fund-weekly-mismatch { border-color: #ffbd9a88; }
-.fund-flow-label { display: block; margin-bottom: 4px; color: #b8c5bf; font-size: .68rem; }
-.fund-flow-totals .usdc-amount { font-size: 1.05rem; font-weight: 700; }
 #fund-breakdown-body { overflow-x: auto; }
 .fund-pending-section h4, .fund-confirmed-section h4, .fund-weekly-section h4 { margin: 0 0 12px; font-size: .88rem; }
 .fund-pending-section { margin-top: 18px; }
@@ -3275,8 +3276,6 @@ decent-foot {
   #fund-breakdown-close { flex-shrink: 0; }
   .fund-prize { min-height: 226px; padding: 34px 20px 62px; }
   .fund-prize .fund-prize-amount { font-size: 2.5rem; }
-  .fund-flow-totals { gap: 4px; }
-  .fund-flow-totals .usdc-amount { font-size: .8rem; }
   .fund-prize-busker { font-size: 1.35rem; }
 }
 @media (prefers-reduced-motion: reduce) {

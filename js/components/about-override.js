@@ -8,7 +8,7 @@ import { formatUsdcUnits } from '../usdc-format.mjs?v=20261017-mercury-release';
 //
 import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261017-rabbit-journey';
 import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
-import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261017-mercury-release';
+import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261017-fund-panel';
 
 // The CDN's AboutModal.js hard-codes a filter for listings whose note field
 // contains "decenthead", which causes BigNuten / DecentHead Supporter NFTs to
@@ -82,12 +82,14 @@ class DecentBuskingAboutModal extends HTMLElement {
       const wallet = address && provider ? await resolveWalletLabel(address, provider, sponsorAliases, aliasCache)
         : { address, label: address || '', aliases: [] };
       const walletHtml = renderWalletButton(wallet, { role: source.kind });
+      const advertiser = source.kind === 'advert' && source.advertiser
+        ? await resolveWalletLabel(source.advertiser, provider, sponsorAliases, aliasCache) : null;
       sources.push({
         ...source,
         displayLabel: wallet.label,
         walletHtml,
-        advertiserHtml: source.kind === 'advert' ? walletHtml : '',
-        advertiserLabel: source.kind === 'advert' ? wallet.label : '',
+        advertiserHtml: advertiser ? renderWalletButton(advertiser, { role: 'advertiser' }) : '',
+        advertiserLabel: advertiser?.label || '',
         payerHtml: source.kind === 'djuke' ? walletHtml : '',
         payerLabel: source.kind === 'djuke' ? wallet.label : '',
       });

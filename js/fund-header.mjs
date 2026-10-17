@@ -1,6 +1,6 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261017-mercury-release';
+import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261017-fund-panel';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
@@ -94,7 +94,6 @@ function sourceHintMap(fundState = {}) {
 
 async function resolveWallet(address, provider, sponsorAliases, cache) {
   if (!address) return { address: '', label: '' };
-  if (!provider) return { address, label: address, aliases: [] };
   return resolveWalletLabel(address, provider, sponsorAliases, cache);
 }
 
@@ -116,7 +115,7 @@ async function inflowRow(source, { ensProvider, sponsorAliases, cache }) {
   const kind = source.kind || (funder === devertContract ? 'advert' : funder === djukeContract ? 'djuke' : 'sponsor');
   const advertiser = source.advertiser ? await resolveWallet(source.advertiser, ensProvider, sponsorAliases, cache) : null;
   const extra = kind === 'advert'
-    ? [source.campaignId ? `Campaign #${escapeHtml(String(source.campaignId))}` : '', source.title ? escapeHtml(source.title) : '', advertiser?.label ? `via ${advertiser.label}` : '']
+    ? [source.campaignId ? `Campaign #${source.campaignId}` : '', source.title || '']
       .filter(Boolean).join(' · ')
     : kind === 'djuke'
       ? source.requestId ? `DJuke request #${escapeHtml(String(source.requestId))}` : 'DJuke purchase'
@@ -130,7 +129,9 @@ async function inflowRow(source, { ensProvider, sponsorAliases, cache }) {
     amountUnits: String(source.amountUnits || '0'),
     timestamp,
     dateText: formatDateTime(timestamp),
-    sourceHtml: renderWalletButton(wallet, { role: kind }),
+    sourceHtml: renderWalletButton(wallet, { role: kind }) + (kind === 'advert'
+      ? `<div class="fund-breakdown-extra">${advertiser ? `Purchased by ${renderWalletButton(advertiser, { role: 'advertiser' })}` : 'Purchaser unavailable'}</div>`
+      : ''),
     sourceLabel: wallet.label || wallet.address,
     extra,
     txHash,
@@ -247,9 +248,12 @@ function renderBreakdown(details, fund, fundState) {
   else {
     const template = document.createElement('template');
     template.innerHTML = summaryHtml;
-    for (const selector of ['.fund-prize-label', '.fund-prize-amount', '.fund-prize-caption', '.fund-balance-totals', '.fund-flow-totals:not(.fund-balance-totals)']) {
+    for (const selector of ['.fund-prize-label', '.fund-prize-amount']) {
       summary.querySelector(selector).innerHTML = template.content.querySelector(selector).innerHTML;
     }
+    summary.querySelector('.fund-prize-caption')?.remove();
+    const caption = template.content.querySelector('.fund-prize-caption');
+    if (caption) summary.querySelector('.fund-prize').append(caption);
   }
   note.textContent = fundState?.ready === false
     ? `History indexing${fundState?.lastError ? ` paused: ${fundState.lastError}` : '…'}`
@@ -307,15 +311,23 @@ export async function loadFundState({ serviceUrl = globalThis.window?.DecentConf
 }
 
 export function fundStateFor(state, fundSlug, fallbackBalanceUnits = '0') {
-  const fund = state?.funds?.[fundSlug] || { balanceUnits: fallbackBalanceUnits };
+  const fund = state?.funds?.[fundSlug] || {};
   const category = fundSlug === 'dbusk-top10' ? 'top10' : 'playback';
   const weekly = state?.weekly?.funds?.[category];
-  const budgetUnits = /^\d+$/.test(String(weekly?.budgetUnits ?? '')) ? weekly.budgetUnits : null;
-  return { ...fund, ready: state?.ready ?? false, balanceUnits: weekly?.balanceUnits ?? fund.balanceUnits,
+  const balanceUnits = fund.balanceUnits ?? weekly?.balanceUnits ?? fallbackBalanceUnits;
+  const reservedUnits = weekly?.reservedUnits ?? fund.reservedUnits ?? null;
+  let budgetUnits = /^\d+$/.test(String(weekly?.budgetUnits ?? '')) ? weekly.budgetUnits : null;
+  const shareBps = state?.weekly?.fundShareBps;
+  if (budgetUnits != null && /^\d+$/.test(String(balanceUnits)) && /^\d+$/.test(String(reservedUnits)) &&
+    Number.isInteger(shareBps) && shareBps > 0 && shareBps <= 10000) {
+    const available = BigInt(balanceUnits) > BigInt(reservedUnits) ? BigInt(balanceUnits) - BigInt(reservedUnits) : 0n;
+    budgetUnits = String(available * BigInt(shareBps) / 10000n);
+  }
+  return { ...fund, ready: state?.ready ?? false, balanceUnits,
     budgetUnits,
     currentWeek: state?.currentReport?.week || state?.weekly?.currentPeriod?.week || '',
     pendingRows: fundPendingRows({ fundSlug, report: state?.currentReport, budgetUnits, minimumUnits: state?.weekly?.minimumPayoutUnits }),
-    reservedUnits: weekly?.reservedUnits ?? fund.reservedUnits ?? null };
+    reservedUnits };
 }
 
 async function loadBalance(fundSlug, state) {

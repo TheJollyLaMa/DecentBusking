@@ -18,18 +18,9 @@ export function renderFundSummary(details, { indexing = false } = {}) {
   return `<span class="fund-prize">
     <span class="fund-prize-label">${hasBudget ? 'This week\'s prize pool' : 'Current fund balance'}</span>
     ${renderUsdcAmount(hasBudget ? details.budgetUnits : details.balanceUnits, { className: 'fund-prize-amount' })}
-    <span class="fund-prize-caption">${hasBudget ? 'Unreserved weekly budget &middot; subject to approved allocation' : indexing ? 'History is still indexing &middot; weekly budget unavailable' : 'Weekly budget unavailable'}</span>
+    ${hasBudget ? '' : `<span class="fund-prize-caption">${indexing ? 'History is still indexing &middot; weekly budget unavailable' : 'Weekly budget unavailable'}</span>`}
     <span class="fund-prize-orbit" aria-hidden="true">${dollars}</span>
     <span class="fund-prize-crowd" aria-hidden="true">${crowd}</span>
-  </span>
-  <span class="fund-flow-totals fund-balance-totals">
-    <span><span class="fund-flow-label">Total balance</span>${renderUsdcAmount(details.balanceUnits)}</span>
-    <span><span class="fund-flow-label">Reserved for older weeks</span>${details.reservedUnits != null ? renderUsdcAmount(details.reservedUnits) : 'Unavailable'}</span>
-  </span>
-  <span class="fund-flow-totals">
-    <span><span class="fund-flow-label">Total in</span>${renderUsdcAmount(details.inflowUnits, { className: 'fund-amount-in' })}</span>
-    <span><span class="fund-flow-label">Total out</span>${renderUsdcAmount(details.outflowUnits, { className: 'fund-amount-out' })}</span>
-    <span><span class="fund-flow-label">Net</span>${renderUsdcAmount(details.netUnits)}</span>
   </span>`;
 }
 
@@ -144,7 +135,7 @@ function renderSourceRow(source) {
   const extra = source.kind === 'advert'
     ? [source.campaignId ? `<a href="#devert-campaign-${escapeHtml(String(source.campaignId))}" target="_blank" rel="noopener">Campaign #${escapeHtml(String(source.campaignId))}</a>` : '',
       source.title ? `<span>${escapeHtml(source.title)}</span>` : '',
-      source.advertiserHtml || source.advertiser ? `<span>${escapeHtml(source.advertiserLabel || source.advertiser || '')}</span>` : '',
+      source.advertiserHtml || (source.advertiser ? `<span>${escapeHtml(source.advertiserLabel || source.advertiser)}</span>` : '<span>Purchaser unavailable</span>'),
       source.paidAdvert ? `<span>Paid request #${escapeHtml(String(source.requestId))} · payer ${escapeHtml(source.payer || '')}</span>` : '']
       .filter(Boolean).join(' · ')
     : source.kind === 'djuke'

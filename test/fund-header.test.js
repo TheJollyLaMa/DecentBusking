@@ -58,6 +58,8 @@ test('loadFundBreakdown groups inflows, payouts, and reconciles the balance', as
   assert.ok(advert);
   assert.equal(advert.direction, 'in');
   assert.match(advert.sourceHtml, /📜 DeVert v0\.1/);
+  assert.match(advert.sourceHtml, /Purchased by[\s\S]*thejollylama\.eth/);
+  assert.match(advert.sourceHtml, /data-fund-role="advertiser"/);
   assert.match(advert.extra, /Campaign #7/);
   assert.match(advert.extra, /Weekend shoutout/);
 
@@ -84,6 +86,29 @@ test('loadFundBreakdown reports indexing instead of scanning logs when the worke
   assert.equal(result.historyAvailable, false);
   assert.match(result.error.message, /indexing/);
   assert.equal(result.balanceUnits, 5n);
+});
+
+test('advert purchasers render as wallet buttons without ENS and campaign text is escaped only at rendering', async () => {
+  const { loadFundBreakdown } = await import(url);
+  const buyer = `0x${'1'.repeat(40)}`;
+  const result = await loadFundBreakdown({
+    fundSlug: top10,
+    fundState: {
+      balanceUnits: '4500000', payouts: [],
+      sources: [{ funder: '0x135Cbc573F87637158eb3186C87c584fb0B34CD9', kind: 'advert', amountUnits: '4500000', advertiser: buyer, title: '<Ad & music>', campaignId: '2' }],
+    },
+    ensProvider: null,
+  });
+  assert.match(result.rows[0].sourceHtml, /DeVert v0\.1/);
+  assert.match(result.rows[0].sourceHtml, new RegExp(`data-creator="${buyer}"`));
+  assert.match(result.rows[0].sourceHtml, /Purchased by/);
+  assert.equal(result.rows[0].extra, 'Campaign #2 · <Ad & music>');
+  const missing = await loadFundBreakdown({
+    fundSlug: top10,
+    fundState: { balanceUnits: '0', payouts: [], sources: [{ kind: 'advert', amountUnits: '1' }] },
+    ensProvider: null,
+  });
+  assert.match(missing.rows[0].sourceHtml, /Purchaser unavailable/);
 });
 
 test('fund header labels use the week number and a USDC icon', async () => {
@@ -148,4 +173,30 @@ test('fund pending songs move with ranks and funding and keep Playback separate 
   assert.equal(playback.reduce((sum, row) => sum + BigInt(row.amountUnits), 0n), 8000000n);
   assert.equal(fundPendingRows({ fundSlug: top10, report, budgetUnits: null }), null);
   assert.equal(fundPendingRows({ fundSlug: top10, report: { ...report, current: false }, budgetUnits: '12250000' }), null);
+});
+
+test('fresh fund balances and estimates are not overwritten by a stale weekly balance', async () => {
+  const { fundStateFor } = await import(url);
+  const state = {
+    ready: true,
+    funds: { [top10]: { balanceUnits: '16750000' } },
+    weekly: { fundShareBps: 10000, funds: { top10: {
+      balanceUnits: '12250000', reservedUnits: '0', budgetUnits: '12250000',
+    } } },
+    currentReport: { current: true, tracks: [{ trackId: 'song', wallet: `0x${'1'.repeat(40)}`, votes: 1, plays: 1 }] },
+  };
+  const current = fundStateFor(state, top10);
+  assert.equal(current.balanceUnits, '16750000');
+  assert.equal(current.budgetUnits, '16750000');
+  assert.equal(current.pendingRows[0].amountUnits, '16750000');
+  state.weekly.funds.top10.reservedUnits = '5000000';
+  state.weekly.fundShareBps = 5000;
+  assert.equal(fundStateFor(state, top10).budgetUnits, '5875000');
+  state.funds[top10].balanceUnits = '1000000';
+  assert.equal(fundStateFor(state, top10).budgetUnits, '0');
+  delete state.funds[top10];
+  assert.equal(fundStateFor(state, top10).balanceUnits, '12250000');
+  state.weekly = null;
+  assert.equal(fundStateFor(state, top10, '9000000').balanceUnits, '9000000');
+  assert.equal(fundStateFor(state, top10).budgetUnits, null);
 });
