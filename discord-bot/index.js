@@ -49,7 +49,7 @@ import { nftCatalogPage } from '../js/nft-loader.js';
 import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
 import { createDevertQueueReader, createDevertQueueRuntime, createDevertQueueCatalogSync, combinePaidQueues } from './devert-queue.js';
-import { DEVERT_QUEUE_ABI } from '../js/devert-queue.mjs';
+import { devertQueueAbi } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
 import { startDevertLoopWorker } from './devert-loop.js';
@@ -898,7 +898,8 @@ async function main() {
   const fundLedger = createFundLedger({
     provider: paymentProvider,
     router: payflowRouter,
-    config: { ...payrollAssets, devertQueueContractAddress: process.env.DEVERT_QUEUE_CONTRACT_ADDRESS },
+    config: { ...payrollAssets, devertQueueContractAddress: process.env.DEVERT_QUEUE_CONTRACT_ADDRESS,
+      devertQueueVersion: Number(process.env.DEVERT_QUEUE_VERSION || 1) },
     getWeeklyPayflow: () => payflow.getState(),
     readDevertState: () => readDevertState?.(),
     readDjukeState: () => readDjukeState?.(),
@@ -1010,16 +1011,17 @@ async function main() {
   let paidAdRuntime;
   let syncPaidAdRemovals;
   const paidAdAddress = process.env.DEVERT_QUEUE_CONTRACT_ADDRESS;
+  const paidAdVersion = Number(process.env.DEVERT_QUEUE_VERSION || 1);
   if (paidAdAddress) {
     let approvedAdCampaignIds = [];
     const provider = getRpcRouter().provider('critical', 'devert-paid-queue');
     const canFulfill = !!(readDevertState && devertSchedulerPrivateKey && checkpointMirror && config.pinataJwt && devertRemovals);
-    readDevertQueue = createDevertQueueReader({ provider, contractAddress: paidAdAddress,
+    readDevertQueue = createDevertQueueReader({ provider, contractAddress: paidAdAddress, version: paidAdVersion,
       paymentsEnabled: canFulfill && process.env.DEVERT_QUEUE_PAYMENTS_ENABLED === 'true',
       getApprovedCampaignIds: () => approvedAdCampaignIds, cacheMs: 5000 });
     if (canFulfill) {
       const worker = new Wallet(devertSchedulerPrivateKey, provider);
-      const queueContract = new Contract(paidAdAddress, DEVERT_QUEUE_ABI, worker);
+      const queueContract = new Contract(paidAdAddress, devertQueueAbi(paidAdVersion), worker);
       if ((await queueContract.campaigns()).toLowerCase() !== process.env.DEVERT_CONTRACT_ADDRESS?.toLowerCase()) {
         throw new Error('Paid advert queue uses a different campaign contract');
       }
@@ -1040,9 +1042,11 @@ async function main() {
       setInterval(() => syncPaidAdRemovals().catch(error => console.warn('[devert-queue] Catalog reconciliation pending:', error.message)), 15000).unref();
       const store = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
         uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
-        name: 'decentbusking-devert-paid-journal.json',
+        name: paidAdVersion === 1 ? 'decentbusking-devert-paid-journal.json'
+          : `decentbusking-devert-paid-${paidAdAddress.toLowerCase()}-journal.json`,
         requireLocalMirror: true,
-        tags: { app: 'decentbusking', kind: 'devert-paid-journal', schema: '1' },
+        tags: { app: 'decentbusking', kind: paidAdVersion === 1 ? 'devert-paid-journal'
+          : `devert-paid-${paidAdAddress.toLowerCase()}`, schema: '1' },
         serialize: value => value, deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
       paidAdRuntime = createDevertQueueRuntime({ readState: readDevertQueue, store, contract: queueContract,
         isCampaignRemoved: campaignId => devertRemovals.isRemoved(campaignId),

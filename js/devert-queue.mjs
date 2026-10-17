@@ -1,7 +1,7 @@
 import { ensureBaseNetwork, approvalNotice, waitForAllowance } from './base-chain.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
 
-export const DEVERT_QUEUE_ABI = [
+export const DEVERT_QUEUE_V1_ABI = [
   'function quote() view returns(uint256)',
   'function paused() view returns(bool)',
   'function paymentToken() view returns(address)',
@@ -23,21 +23,37 @@ export const DEVERT_QUEUE_ABI = [
   'event AdFulfilled(uint256 indexed requestId,bytes32 indexed playbackProof)',
   'event AdRefunded(uint256 indexed requestId,address indexed payer,uint256 amount)',
 ];
+export const DEVERT_QUEUE_ABI = [
+  ...DEVERT_QUEUE_V1_ABI.filter(entry => !entry.startsWith('function getRequest(') && !entry.startsWith('function requestAd(')),
+  'function queueVersion() view returns(uint256)',
+  'function quoteForTier(uint8 tier) view returns(uint256)',
+  'function headRequestIdForTier(uint8 tier) view returns(uint256)',
+  'function getRequest(uint256) view returns((uint256 campaignId,address payer,uint256 amount,uint8 status,string title,string audioURI,address advertiser,uint8 tier))',
+  'function requestAd(uint256 campaignId,uint8 tier,uint256 maxPrice) returns(uint256)',
+];
+export function devertQueueAbi(version) {
+  if (version === 1) return DEVERT_QUEUE_V1_ABI;
+  if (version === 2) return DEVERT_QUEUE_ABI;
+  throw new Error('Unsupported paid advert queue version');
+}
 export const DEVERT_QUEUE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
-export function quoteDevertRequest(count) {
+export function quoteDevertRequest(count, tier = 0) {
   if (!Number.isSafeInteger(count) || count < 0 || count > 128) throw new Error('Invalid paid advert queue count');
-  return 1_000_000n * 2n ** BigInt(Math.floor(count / 7));
+  if (tier !== 0 && tier !== 1) throw new Error('Invalid paid advert priority tier');
+  return 1_000_000n * 2n ** BigInt(Math.floor(count / 7)) * (tier === 1 ? 2n : 1n);
 }
 
-export async function purchaseDevertRequest({ signer, queue, usdc, campaignId, maxPriceUnits, onStep = () => {} }) {
+export async function purchaseDevertRequest({ signer, queue, usdc, campaignId, tier = 0, maxPriceUnits, onStep = () => {} }) {
   await ensureBaseNetwork(signer.provider);
+  if (tier !== 0 && tier !== 1) throw new Error('Choose queue bump or immediate playback');
+  if (Number(await queue.queueVersion()) !== 2) throw new Error('Two-tier advert checkout requires the replacement queue contract');
   if (!/^\d+$/.test(String(campaignId)) || typeof maxPriceUnits !== 'bigint' || maxPriceUnits <= 0n) throw new Error('Choose an active advert and refresh its queue price');
   if (String(usdc.target).toLowerCase() !== DEVERT_QUEUE_USDC.toLowerCase() ||
       String(await queue.paymentToken()).toLowerCase() !== DEVERT_QUEUE_USDC.toLowerCase() ||
       Number(await usdc.decimals()) !== 6) throw new Error('Native Base USDC required');
   const address = await signer.getAddress();
-  const price = BigInt(await queue.quote());
+  const price = BigInt(await queue.quoteForTier(tier));
   if (price > maxPriceUnits) throw new Error('Paid advert queue price increased; refresh before paying');
   if (await usdc.balanceOf(address) < price) throw new Error(`You need ${formatUsdcUnits(price)} USDC on Base`);
   if (await usdc.allowance(address, queue.target) < price) {
@@ -46,9 +62,9 @@ export async function purchaseDevertRequest({ signer, queue, usdc, campaignId, m
     await waitForAllowance(usdc, address, queue.target, price);
   }
   onStep('Checking the paid advert request…');
-  await queue.requestAd.staticCall(BigInt(campaignId), maxPriceUnits);
+  await queue.requestAd.staticCall(BigInt(campaignId), tier, maxPriceUnits);
   onStep('Confirm your paid advert request in the wallet…');
-  const transaction = await queue.requestAd(BigInt(campaignId), maxPriceUnits);
+  const transaction = await queue.requestAd(BigInt(campaignId), tier, maxPriceUnits);
   onStep(`Request pending: ${transaction.hash}`);
   const receipt = await transaction.wait(2);
   if (receipt?.status !== 1) throw new Error(`Paid advert request failed: ${transaction.hash}`);
