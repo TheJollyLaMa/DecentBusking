@@ -52,11 +52,15 @@ non-advert funding and final fund-beneficiary payouts. It loads on demand from
 - Fork rehearsal passed against deployed USDC, campaign source and settlement router.
 - The deployed v0.1 single-tier contract passed controlled mainnet acceptance,
   but its priority timing did not match the clarified two-tier policy below.
-- Public checkout was disabled on 2026-10-17 with
-  `DEVERT_QUEUE_PAYMENTS_ENABLED=false`. Regular campaigns and radio continue.
+- Public checkout was initially disabled on 2026-10-17 with
+  `DEVERT_QUEUE_PAYMENTS_ENABLED=false`. Regular campaigns and radio continued.
 - Replacement v0.2 supports separate normal-break bumps and double-price
-  immediate requests. It is deployed **read-only**, pending separately approved
-  live acceptance of both tiers. Do not enable checkout against v0.1.
+  immediate requests. The owner subsequently authorized public rollout with
+  `DEVERT_QUEUE_PAYMENTS_ENABLED=true`, explicitly waiving the two controlled
+  live acceptance purchases. Automated checkout, scheduling, playback and
+  recovery checks passed; the new two-tier contract's live purchase-to-settlement
+  acceptance is **not verified**. No acceptance purchases were made for this rollout.
+  Do not enable checkout against v0.1.
 
 ### Historical v0.1 live acceptance - 2026-10-17
 
@@ -196,6 +200,9 @@ the queue's read-only campaign source.
    redeploy, and confirm checkout readiness and no replay of the settled request.
    The earlier $1 v0.1 live test is historical evidence, not acceptance of the
    new two-tier scheduling contract. Additional live spending requires approval.
+   For the 2026-10-17 public rollout, the owner explicitly waived the controlled
+   live purchases; retain this acceptance gap in the rollout record rather than
+   marking those tests passed.
 
 The public endpoint is `GET /api/devert/queue`. Snapshots use a fixed Base block
 with at least two confirmations, verify price/count/token, and detect reorgs.
