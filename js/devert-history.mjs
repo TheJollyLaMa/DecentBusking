@@ -1,4 +1,4 @@
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 
 export function advertFundingHistory(state) {
   if (!state?.ready || state.lastError) throw new Error(state?.lastError || 'Advert funding history is still indexing');

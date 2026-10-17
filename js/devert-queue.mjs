@@ -1,5 +1,5 @@
 import { ensureBaseNetwork, approvalNotice, waitForAllowance } from './base-chain.mjs';
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 
 export const DEVERT_QUEUE_V1_ABI = [

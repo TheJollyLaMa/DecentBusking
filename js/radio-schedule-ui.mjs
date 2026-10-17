@@ -1,5 +1,7 @@
 import { isAdminWallet } from './admin-access.mjs';
-import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261016-schedule-cancel';
+import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261017-mercury-release';
+import { utcToNewYorkInput, newYorkInputToUtc, radioCalendarOccurrences, buildRadioCalendar, googleRadioCalendarUrl } from './radio-calendar.mjs';
+export { utcToNewYorkInput, newYorkInputToUtc };
 const TIME_ZONE = 'America/New_York';
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -12,42 +14,6 @@ export function buildRadioScheduleAuthorizationMessage({ address, origin, issued
     `Events: ${JSON.stringify(events)}`,
     `Weekly Schedule: ${JSON.stringify(weeklySchedule)}`,
   ].join('\n');
-}
-
-function zonedParts(epoch) {
-  return Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-    timeZone: TIME_ZONE,
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-    second: '2-digit', hourCycle: 'h23',
-  }).formatToParts(new Date(epoch)).filter(part => part.type !== 'literal').map(part => [part.type, Number(part.value)]));
-}
-
-export function utcToNewYorkInput(value) {
-  const parts = zonedParts(Date.parse(value));
-  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}T${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
-}
-
-export function newYorkInputToUtc(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value || '');
-  if (!match) throw new Error('Choose a valid New York date and time');
-  const [year, month, day, hour, minute] = match.slice(1).map(Number);
-  const target = Date.UTC(year, month - 1, day, hour, minute);
-  const date = new Date(target);
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || hour > 23 || minute > 59) {
-    throw new Error('Choose a valid New York date and time');
-  }
-  let epoch = target;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const parts = zonedParts(epoch);
-    const displayed = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
-    const next = epoch + target - displayed;
-    if (next === epoch) {
-      if (parts.year !== year || parts.month !== month || parts.day !== day || parts.hour !== hour || parts.minute !== minute) break;
-      return new Date(epoch).toISOString();
-    }
-    epoch = next;
-  }
-  throw new Error('That local time does not exist because of a daylight-saving change');
 }
 
 function element(tag, className, text) {
@@ -101,23 +67,63 @@ export function scheduledLiveOccurrences(payload, now = Date.now()) {
   return events;
 }
 
+function reminderControl(event, status) {
+  const details = element('details', 'radio-reminder');
+  details.dataset.eventId = event.id;
+  details.append(element('summary', '', '🔔 Set reminder'));
+  const choices = element('div', 'radio-reminder-choices');
+  choices.append(element('span', '', `${formatEventTime(event.startUtc, TIME_ZONE)} · 15 minutes before`));
+  const google = element('a', '', 'Google Calendar');
+  google.href = googleRadioCalendarUrl(event);
+  google.target = '_blank';
+  google.rel = 'noopener noreferrer';
+  choices.append(google);
+  const download = element('button', 'payroll-btn payroll-btn-secondary', 'Apple / Outlook (.ics)');
+  download.type = 'button';
+  download.addEventListener('click', () => {
+    try {
+      const blob = new Blob([buildRadioCalendar([event])], { type: 'text/calendar;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = element('a');
+      link.href = url;
+      link.download = 'decentbusking-radio-reminder.ics';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      status.textContent = 'Calendar event downloaded. Open it and save it in your synced calendar. A 15-minute reminder is included; your calendar app controls notifications.';
+    } catch (error) {
+      console.warn('[radio-calendar] Event download failed:', error.message);
+      status.textContent = `Could not create reminder: ${error.message}`;
+    }
+  });
+  choices.append(download, element('small', '', 'Save to a calendar synced across your devices. In Google Calendar, choose a 15-minute notification before saving. Individual copies do not receive schedule updates.'));
+  details.append(choices);
+  return details;
+}
+
 function renderSchedule(payload, onCancel) {
   const weekly = document.getElementById('radio-schedule-weekly');
   const events = document.getElementById('radio-schedule-events');
   const status = document.getElementById('radio-schedule-status');
   if (!weekly || !events || !status) return;
 
+  const openReminders = new Set([...weekly.querySelectorAll('.radio-reminder[open]'), ...events.querySelectorAll('.radio-reminder[open]')]
+    .map(details => details.dataset.eventId));
+  const now = Date.now();
+  const occurrences = radioCalendarOccurrences(payload, { now, days: 8, pastDays: 0 });
   weekly.replaceChildren();
   for (const show of payload.schedule || []) {
     if (show.type === 'normal_rotation') continue;
     const row = element('li', 'radio-schedule-row');
     row.append(element('strong', 'radio-schedule-name', show.label),
       element('span', 'radio-schedule-time', `${formatWeeklySlot(show)} (${payload.timeZone || TIME_ZONE})`));
+    const next = occurrences.find(event => event.id.startsWith(`${show.id}:`) && event.status !== 'cancelled' && Date.parse(event.startUtc) > now);
+    if (next && (show.type !== 'live_performance' || payload.ready !== false)) row.append(reminderControl(next, status));
     weekly.append(row);
   }
 
   events.replaceChildren();
-  const now = Date.now();
   const upcoming = scheduledLiveOccurrences(payload, now).filter(event => Date.parse(event.endUtc) > now ||
     (event.status === 'cancelled' && Date.parse(event.endUtc) > now - 7 * 86400_000))
     .sort((first, second) => Date.parse(first.startUtc) - Date.parse(second.startUtc));
@@ -136,9 +142,13 @@ function renderSchedule(payload, onCancel) {
       button.addEventListener('click', () => onCancel(event, button));
       row.append(button);
     }
+    if (!cancelled && !active && payload.ready !== false) row.append(reminderControl(event, status));
     events.append(row);
   }
   if (!upcoming.length) events.append(element('li', 'radio-schedule-empty', 'No additional live events are scheduled.'));
+  for (const details of [...weekly.querySelectorAll('.radio-reminder'), ...events.querySelectorAll('.radio-reminder')]) {
+    details.open = openReminders.has(details.dataset.eventId);
+  }
   status.textContent = payload.ready === false
     ? 'Recurring programming is available. The live-event calendar is temporarily unavailable.'
     : 'All times are America/New_York. Live events temporarily take priority over the weekly shows.';
@@ -148,6 +158,25 @@ export function initRadioScheduleBoard() {
   const dialog = document.getElementById('radio-schedule-dialog');
   const status = document.getElementById('radio-schedule-status');
   if (!dialog || !status) return;
+  const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+  const subscribe = document.getElementById('radio-calendar-subscribe');
+  const feed = document.getElementById('radio-calendar-feed');
+  if (service && subscribe && feed) {
+    const feedUrl = `${service}/api/radio/calendar.ics`;
+    subscribe.href = feedUrl.replace(/^https?:/, 'webcal:');
+    feed.value = feedUrl;
+  }
+  document.getElementById('radio-calendar-copy')?.addEventListener('click', async () => {
+    try {
+      if (!feed?.value) throw new Error('Calendar service is not configured');
+      await navigator.clipboard.writeText(feed.value);
+      status.textContent = 'Calendar URL copied. Add it as a subscribed calendar (Google: Other calendars → From URL; Apple/Outlook: Subscribe from web). Refresh timing and alerts are controlled by your calendar app.';
+    } catch (error) {
+      console.warn('[radio-calendar] Could not copy subscription URL:', error.message);
+      status.textContent = `Could not copy calendar URL: ${error.message}. Select and copy the URL below.`;
+      feed?.select();
+    }
+  });
   let currentPayload;
   const cancel = async (event, button) => {
     if (!isAdminWallet() || !window._wallet?.signer) { status.textContent = 'Connect the owner wallet to cancel events.'; return; }
@@ -183,6 +212,9 @@ export function initRadioScheduleBoard() {
       if (!response.ok) throw new Error(payload.error || `Schedule unavailable (${response.status})`);
       currentPayload = payload;
       renderSchedule(payload, cancel);
+      if (subscribe) {
+        subscribe.hidden = !service || payload.ready === false;
+      }
     } catch (error) {
       status.textContent = `${error.message}. Try refreshing the schedule.`;
     }

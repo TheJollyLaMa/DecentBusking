@@ -1,5 +1,5 @@
 // Public totals from the Left Ankh and connected-wallet history from the Right Ankh.
-import { formatUsdcUnits as usdc } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits as usdc } from './usdc-format.mjs?v=20261017-mercury-release';
 
 let dialog;
 let weekSelect;

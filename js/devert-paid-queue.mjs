@@ -1,6 +1,6 @@
-import { devertQueueAbi, DEVERT_QUEUE_USDC, purchaseDevertRequest, quoteDevertRequest } from './devert-queue.mjs?v=20261017-priority-celebrations';
+import { devertQueueAbi, DEVERT_QUEUE_USDC, purchaseDevertRequest, quoteDevertRequest } from './devert-queue.mjs?v=20261017-mercury-release';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 
 export function validateDevertPaidSnapshot(state, configuredAddress) {
   if (state?.configured === false) return state;

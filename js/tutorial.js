@@ -6,39 +6,77 @@ const TUTORIAL_BODY_CLASS = 'decentbusking-tutorial-open';
 
 const TUTORIAL_STEPS = [
   {
-    title: 'Welcome to DecentBusking',
-    body: 'This walkthrough can be skipped at any time. It will point out the radio, submissions, rewards, ads, and DJuke flows that make the project work.',
+    title: 'Follow the white rabbit.',
+    prop: '🎺', propName: 'trumpet',
+    body: 'I’m Mercury, your messenger around this digital town square. My rabbit knows the shortcuts. Follow those ears: we’ll open the real drawers, find the music, and uncover a few things hiding in plain sight. Just looking—no votes, uploads, wallet requests, or payments on this tour.',
     target: null,
   },
   {
     title: '24/7 Community Radio',
-    body: 'The heartbeat of DecentBusking is the community radio: audio uploaded by listeners and creators feeds the live JukeLoop rotation around the clock.',
+    prop: '📻', propName: 'radio',
+    body: 'Start with the sound. This is our shared, around-the-clock radio, playing community recordings. Press play yourself when you’re ready; I won’t change your listening. The footer tells you who’s on, and when the next advert is coming.',
     target: '#now-playing-label',
   },
   {
-    title: 'Submitting Songs',
-    body: 'Artists submit through Discord in #DecentJukebox, then the on-site briefcase opens the mint / review workflow that admins use for batch uploads and minting.',
-    target: '#guitar-case-btn',
+    title: 'Your sound belongs here.',
+    prop: '🎤', propName: 'microphone',
+    body: 'The briefcase is your creator entrance. Drop audio or MP4 video, add a cover or its IPFS CID, and credit your collaborators. The format is detected for you. DJuke earning shares can be split between wallets; submission still goes through owner review. An advert? Mark it DVert here, then book airtime separately.',
+    target: '#mint-modal-inner',
+    surface: 'briefcase',
   },
   {
-    title: 'Voting &amp; Live Rotation',
-    body: 'Use the 👍 / 👎 buttons in the Now Playing banner. Those votes shape the live rotation and feed the weekly Top 10 chart.',
+    title: 'A small thumb. A real say.',
+    prop: '🎧', propName: 'headphones',
+    body: 'The thumbs are your voice in the radio. Music votes feed the weekly chart; the number beside them is the live net total. During an advert, you’re rating that advert’s play—not putting it in the music Top 10. I won’t cast a vote for you.',
     target: '#radio-voting',
   },
   {
-    title: 'Community Rewards',
-    body: 'Weekly playback pools and the Top 10 leaderboard help reward artists. Those pools are funded by sponsors and advertiser campaigns.',
-    target: '#top-ten-tab',
+    title: 'Watch the chart come alive.',
+    prop: '🥁', propName: 'drum',
+    body: 'Here’s the weekly Top 10. Friday Hype plays the opening chart from its lowest place up to #1, while the live ranks keep responding to votes. The little “i” explains the show and rewards. During Hype, + buttons save songs to your personal playlist; saving is not buying.',
+    target: '#top-ten-panel',
+    surface: 'chart',
   },
   {
     title: 'DVert Advertising',
-    body: 'Open DVert to upload an ad for review and fund a weekly /wk campaign. That buys a spot in VertLoop and the main radio rotation (1 ad every 10 songs).',
-    target: '#devert-tab',
+    prop: '📣', propName: 'megaphone',
+    body: 'This is the advertiser’s corner. Approved adverts can have their own funded campaigns, separate from music submissions. The panel shows campaign details and funding history; its “i” explains the rules. We’re only opening the drawer, not buying airtime or switching the audio.',
+    target: '#devert-panel',
+    surface: 'adverts',
   },
   {
     title: 'DJuke Jukebox',
-    body: 'Open DJuke to queue any community track on demand with micro-payments and support artists directly. On NFT cards, click Preview for a free 30-second taste or Listen to play the whole song.',
-    target: '#djuke-tab',
+    prop: '🎹', propName: 'keys',
+    body: 'Want a particular song? DJuke puts paid requests in the queue without cutting off the current recording or protected shows. The price is shown before you pay, and the earnings podium follows confirmed artist and collaborator payouts. In the archive, use Preview for a free 30-second taste or Listen to play the whole song under its displayed terms.',
+    target: '#djuke-panel',
+    surface: 'jukebox',
+  },
+  {
+    title: 'A rabbit hole full of records.',
+    prop: '💿', propName: 'record',
+    body: 'This slim side tab hides the music archive. Search for an artist, explore their recordings, and look for Preview, Listen, NFT details, and playlist controls on the cards. You don’t need to buy an NFT just to explore. The rabbit has a good nose for overlooked doors.',
+    target: '#dnft-list',
+    surface: 'archive',
+  },
+  {
+    title: 'A coin is also a doorway.',
+    prop: '🎷', propName: 'saxophone',
+    body: 'The whole right-hand ankh coin opens this menu—not just the little symbol. Public Schedule is where you find community shows and reminder options for your calendar. Profile is your personal corner; connect a wallet yourself when you need wallet-backed features. You can come here without buying anything.',
+    target: 'decent-header >>> app-title >>> right-ankh >>> .dropdown-menu',
+    surface: 'menu',
+  },
+  {
+    title: 'The other coin has a story, too.',
+    prop: '🎸', propName: 'guitar',
+    body: 'The left ankh opens another set of doors. Playback Tally is the public station-wide listening history, not just your own plays. About is where the bigger community story and this tour live. You may also see owner-only tools when the owner wallet is connected; newcomers can leave those alone.',
+    target: 'decent-header >>> app-title >>> .ankh-left .dropdown-menu',
+    surface: 'left-menu',
+  },
+  {
+    title: 'One more hidden constellation.',
+    prop: '🎼', propName: 'sheet music',
+    body: 'The fund pills below the title open the community money story: funding, changing estimates, and confirmed payouts are different things. And those little “i” buttons in the music drawers? Tiny doors to the deeper explanations. Explore at your own pace. I’m Mercury; the rabbit and I are always one click away.',
+    target: '#artist-filter-bar',
   },
 ];
 
@@ -57,6 +95,20 @@ let _backdrop = null;
 let _currentStep = 0;
 let _currentTarget = null;
 let _autoLaunchTimer = null;
+let _rabbit = null;
+let _spotlight = null;
+let _returnFocus = null;
+let _surfaceCleanup = null;
+let _savedDrawers = [];
+let _savedMint = null;
+let _savedScroll = null;
+let _layoutFrame = null;
+let _notice = null;
+let _savedMenus = [];
+let _propEl = null;
+
+const DRAWERS = ['top-ten-tab', 'devert-tab', 'djuke-tab', 'dnft-archive-toggle'];
+const SURFACES = { chart: 'top-ten-tab', adverts: 'devert-tab', jukebox: 'djuke-tab', archive: 'dnft-archive-toggle' };
 
 function _storage() {
   try {
@@ -88,17 +140,13 @@ function _ensureStyles() {
   style.id = TUTORIAL_STYLE_ID;
   style.textContent = `
     .${TUTORIAL_HIGHLIGHT_CLASS} {
-      position: relative !important;
-      z-index: 100002 !important;
-      box-shadow: 0 0 0 3px rgba(145, 222, 211, .95), 0 0 0 7px rgba(9, 12, 18, .9) !important;
-      border-radius: 14px !important;
+      scroll-margin: 90px;
     }
     .decentbusking-tutorial-overlay {
       position: fixed;
       inset: 0;
       z-index: 100001;
-      display: grid;
-      place-items: end center;
+      display: block;
       padding: 18px;
       box-sizing: border-box;
     }
@@ -106,24 +154,29 @@ function _ensureStyles() {
     .decentbusking-tutorial-backdrop {
       position: absolute;
       inset: 0;
-      background: rgba(3, 5, 12, .78);
-      backdrop-filter: blur(6px);
+      background: rgba(3, 5, 12, .12);
     }
     .decentbusking-tutorial-card {
-      position: relative;
-      z-index: 1;
-      width: min(760px, 100%);
-      max-width: 760px;
-      padding: 18px 18px 16px;
+      position: absolute;
+      z-index: 3;
+      width: min(390px, calc(100% - 32px));
+      box-sizing: border-box;
+      max-height: calc(100dvh - 32px);
+      overflow: auto;
+      padding: 22px 20px 16px;
       color: #f4f1ff;
-      background: linear-gradient(145deg, rgba(16, 20, 34, .99), rgba(28, 22, 42, .98));
-      border: 1px solid rgba(172, 164, 228, .38);
+      background: linear-gradient(145deg, rgba(15, 35, 38, .99), rgba(23, 24, 40, .99));
+      border: 1px solid rgba(172, 228, 214, .48);
       border-radius: 18px;
       box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
       font-family: 'Segoe UI', system-ui, sans-serif;
+      transition: left .65s ease, top .65s ease;
     }
     .decentbusking-tutorial-kicker {
-      margin: 0 0 6px;
+      margin: 0 34px 12px 72px;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
       color: #91ddd3;
       font-size: .72rem;
       font-weight: 700;
@@ -133,7 +186,7 @@ function _ensureStyles() {
     .decentbusking-tutorial-card h2 {
       margin: 0;
       color: #fff2e4;
-      font-size: clamp(1.3rem, 3vw, 1.95rem);
+      font-size: clamp(1.2rem, 3vw, 1.65rem);
       line-height: 1.1;
     }
     .decentbusking-tutorial-step {
@@ -146,18 +199,18 @@ function _ensureStyles() {
     .decentbusking-tutorial-body {
       margin: 12px 0 0;
       color: #dde0ea;
-      font-size: .98rem;
+      font-size: .92rem;
       line-height: 1.55;
     }
     .decentbusking-tutorial-actions {
       display: flex;
       gap: 10px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       justify-content: flex-end;
       margin-top: 16px;
     }
     .decentbusking-tutorial-actions button {
-      padding: 9px 14px;
+      padding: 9px 12px;
       color: #fff4eb;
       background: rgba(255, 255, 255, .08);
       border: 1px solid rgba(255, 255, 255, .14);
@@ -176,8 +229,8 @@ function _ensureStyles() {
     }
     .decentbusking-tutorial-footer {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
+      align-items: flex-start;
+      flex-direction: column;
       gap: 12px;
       margin-top: 14px;
       color: #aeb3c8;
@@ -200,11 +253,91 @@ function _ensureStyles() {
       cursor: pointer;
     }
     .decentbusking-tutorial-launch:hover { background: rgba(145, 221, 211, .18); }
+    .decentbusking-tutorial-launch:focus-visible,
+    .decentbusking-tutorial-actions button:focus-visible { outline: 2px solid #fff5d9; outline-offset: 3px; }
+    #rabbit-tour-launch {
+      position: fixed; right: 18px; bottom: 122px; z-index: 2100;
+      display: flex; align-items: center; gap: 8px; padding: 8px 13px 8px 5px;
+      color: #e7fff5; background: linear-gradient(140deg, #1c3438, #171b29);
+      border: 1px solid #8dbbb2; border-radius: 28px; box-shadow: 0 5px 24px #0007;
+      cursor: pointer; font: 600 12px/1.25 system-ui, sans-serif;
+    }
+    #rabbit-tour-launch .rabbit-launch-label { max-width: 110px; text-align: left; }
+    #rabbit-tour-launch small { display: block; color: #a3bdbd; font-size: 10px; font-weight: 400; margin-top: 3px; }
+    .${TUTORIAL_BODY_CLASS} #rabbit-tour-launch { visibility: hidden; }
+    .tutorial-notice {
+      position: fixed; z-index: 100003; bottom: 190px; right: 18px; width: min(300px, calc(100vw - 60px));
+      padding: 12px; border: 1px solid #91ddd3; border-radius: 12px; color: #fff2dc; background: #17262f;
+      font: 14px/1.4 system-ui, sans-serif;
+    }
+    .tutorial-rabbit { position: fixed; z-index: 2; width: 72px; height: 82px; pointer-events: none; transition: left .65s ease, top .65s ease; }
+    .rabbit-burrow { position: relative; display: block; width: 64px; height: 72px; }
+    .rabbit-burrow::before {
+      content: ''; position: absolute; bottom: 0; left: 4px; width: 58px; height: 17px;
+      border-radius: 50%; background: radial-gradient(ellipse, #020609 35%, #122b2d 70%, #78c5b1 77%, transparent 82%);
+      box-shadow: 0 3px 9px #0009; transform: rotate(-7deg);
+    }
+    .rabbit-window { position: absolute; inset: 0 0 8px; overflow: hidden; }
+    .rabbit-ears { position: absolute; bottom: 0; left: 7px; font-size: 47px; line-height: 1.2; filter: drop-shadow(0 0 5px #e1fff74d); animation: rabbit-peek 6.5s ease-in-out infinite; }
+    #rabbit-tour-launch .rabbit-burrow { width: 46px; height: 46px; }
+    #rabbit-tour-launch .rabbit-burrow::before { width: 42px; left: 0; height: 12px; }
+    #rabbit-tour-launch .rabbit-ears { font-size: 34px; left: 2px; }
+    .tutorial-mercury { position: absolute; top: 14px; left: 13px; width: 68px; height: 64px; pointer-events: none; }
+    .tutorial-mercury .mercury-symbol { position: absolute; left: 12px; top: -6px; font: 58px/1 Georgia, serif; color: #fff0cc; text-shadow: 0 0 10px #e4bc7c70; }
+    .tutorial-mercury .mercury-money { position: absolute; bottom: 0; left: 0; font-size: 40px; transform: rotate(-12deg); }
+    .tutorial-mercury .mercury-prop { position: absolute; top: 18px; left: 40px; font-size: 28px; line-height: 1; transform: rotate(12deg); filter: drop-shadow(0 2px 3px #0008); }
+    .mercury-note { position: absolute; left: 28px; top: 24px; color: #c5f3dd; font: 700 15px/1 Georgia, serif; opacity: .65; transform: translate(var(--note-x), var(--note-y)); }
+    .mercury-note:nth-of-type(1) { --note-x: -28px; --note-y: -21px; --note-delay: .1s; }
+    .mercury-note:nth-of-type(2) { --note-x: 30px; --note-y: -23px; --note-delay: .5s; }
+    .mercury-note:nth-of-type(3) { --note-x: 31px; --note-y: 26px; --note-delay: .9s; }
+    .is-arriving .mercury-note { animation: mercury-notes 2.4s var(--note-delay) ease-out both; }
+    .mercury-sound, .mercury-sound::before, .mercury-sound::after {
+      position: absolute; width: 9px; height: 16px; border-left: 1.5px solid #a6dcca; border-radius: 50%; box-sizing: border-box;
+    }
+    .mercury-sound { left: 1px; top: 28px; opacity: .65; }
+    .mercury-sound::before { content: ''; left: -5px; top: -4px; width: 13px; height: 24px; }
+    .mercury-sound::after { content: ''; left: -10px; top: -8px; width: 17px; height: 32px; }
+    .is-arriving .mercury-sound { animation: mercury-sound 1.3s ease-out 3; }
+    .tutorial-mercury.is-arriving { animation: mercury-arrive .75s ease-out both; }
+    .tutorial-spotlight {
+      position: fixed; z-index: 1; pointer-events: none; border: 2px solid #b9e9d9;
+      border-radius: 16px; box-sizing: border-box; box-shadow: 0 0 0 200vmax #030810a6, 0 0 22px #91ddd340;
+      transition: left .45s ease, top .45s ease, width .45s ease, height .45s ease;
+    }
+    .tutorial-spotlight[hidden], .tutorial-rabbit[hidden] { display: none; }
+    .decentbusking-tutorial-progress { letter-spacing: .16em; color: #8fc9b9; font-size: .8rem; }
+    @keyframes rabbit-peek {
+      0%, 34%, 100% { transform: translateY(0) rotate(-5deg); }
+      43%, 58% { transform: translateY(57px) rotate(8deg); }
+      68%, 78% { transform: translateY(-5px) rotate(5deg); }
+    }
+    @keyframes mercury-arrive {
+      from { transform: translate(-45px, 12px) rotate(-14deg); opacity: .2; }
+      70% { transform: translate(4px, -4px) rotate(5deg); opacity: 1; }
+      to { transform: none; opacity: 1; }
+    }
+    @keyframes mercury-notes {
+      from { opacity: 0; transform: translate(10px, 5px) scale(.5) rotate(-12deg); }
+      20% { opacity: 1; }
+      to { opacity: .65; transform: translate(var(--note-x), var(--note-y)) scale(1); }
+    }
+    @keyframes mercury-sound {
+      from { opacity: .2; transform: scale(.8); }
+      45% { opacity: .9; }
+      to { opacity: .65; transform: scale(1); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .rabbit-ears, .tutorial-mercury.is-arriving, .is-arriving .mercury-note, .is-arriving .mercury-sound { animation: none; }
+      .tutorial-rabbit, .tutorial-spotlight, .decentbusking-tutorial-card { transition: none; }
+    }
     @media (max-width: 640px) {
       .decentbusking-tutorial-card { padding: 16px 14px 14px; }
-      .decentbusking-tutorial-footer { align-items: flex-start; flex-direction: column; }
-      .decentbusking-tutorial-actions { justify-content: stretch; }
-      .decentbusking-tutorial-actions button { flex: 1 1 140px; }
+      .decentbusking-tutorial-body { font-size: .84rem; line-height: 1.45; margin-top: 9px; }
+      .decentbusking-tutorial-actions { margin-top: 4px; gap: 7px; }
+      .decentbusking-tutorial-step { margin-top: 7px; font-size: .7rem; }
+      .decentbusking-tutorial-kicker { font-size: .65rem; min-height: 48px; margin-bottom: 6px; }
+      #rabbit-tour-launch { right: 10px; bottom: 150px; padding-right: 9px; }
+      #rabbit-tour-launch .rabbit-launch-label { max-width: 88px; font-size: 11px; }
     }
   `;
   document.head.appendChild(style);
@@ -222,6 +355,37 @@ function _button(label, onClick, attrs = {}) {
   return button;
 }
 
+function _burrow() {
+  const burrow = document.createElement('span');
+  burrow.className = 'rabbit-burrow';
+  burrow.setAttribute('aria-hidden', 'true');
+  const windowEl = document.createElement('span');
+  windowEl.className = 'rabbit-window';
+  const ears = document.createElement('span');
+  ears.className = 'rabbit-ears';
+  ears.textContent = '🐇';
+  windowEl.append(ears);
+  burrow.append(windowEl);
+  return burrow;
+}
+
+function _ensureLauncher() {
+  if (document.getElementById('rabbit-tour-launch')) return;
+  const launcher = _button('', startTutorial, {
+    id: 'rabbit-tour-launch',
+    'aria-label': 'Follow the white rabbit: take Mercury’s guided tour',
+    'aria-haspopup': 'dialog',
+  });
+  const label = document.createElement('span');
+  label.className = 'rabbit-launch-label';
+  label.textContent = 'Follow the white rabbit';
+  const hint = document.createElement('small');
+  hint.textContent = 'A tour with Mercury';
+  label.append(hint);
+  launcher.append(_burrow(), label);
+  document.body.appendChild(launcher);
+}
+
 function _ensureOverlay() {
   if (_overlay || typeof document === 'undefined') return _overlay;
   _ensureStyles();
@@ -235,17 +399,51 @@ function _ensureOverlay() {
   _backdrop = document.createElement('div');
   _backdrop.className = 'decentbusking-tutorial-backdrop';
   _backdrop.addEventListener('click', skipTutorial);
+  _overlay.addEventListener('click', event => event.stopPropagation());
+  _overlay.addEventListener('pointerdown', event => event.stopPropagation());
+
+  _spotlight = document.createElement('div');
+  _spotlight.className = 'tutorial-spotlight';
+  _spotlight.setAttribute('aria-hidden', 'true');
+  _rabbit = document.createElement('div');
+  _rabbit.className = 'tutorial-rabbit';
+  _rabbit.setAttribute('aria-hidden', 'true');
+  _rabbit.append(_burrow());
 
   _panel = document.createElement('section');
   _panel.className = 'decentbusking-tutorial-card';
   _panel.setAttribute('role', 'dialog');
   _panel.setAttribute('aria-modal', 'true');
   _panel.setAttribute('aria-labelledby', 'decentbusking-tutorial-title');
+  _panel.setAttribute('aria-describedby', 'decentbusking-tutorial-body');
   _panel.tabIndex = -1;
 
   const kicker = document.createElement('p');
   kicker.className = 'decentbusking-tutorial-kicker';
-  kicker.textContent = 'Interactive walkthrough';
+  kicker.textContent = 'Mercury · your winged messenger';
+
+  const mercury = document.createElement('span');
+  mercury.className = 'tutorial-mercury';
+  mercury.setAttribute('aria-hidden', 'true');
+  const money = document.createElement('span');
+  money.className = 'mercury-money';
+  money.textContent = '💸';
+  const symbol = document.createElement('span');
+  symbol.className = 'mercury-symbol';
+  symbol.textContent = '☿';
+  _propEl = document.createElement('span');
+  _propEl.className = 'mercury-prop';
+  const sound = document.createElement('span');
+  sound.className = 'mercury-sound';
+  const notes = document.createElement('span');
+  notes.className = 'mercury-notes';
+  ['♪', '♫', '♪'].forEach(glyph => {
+    const note = document.createElement('span');
+    note.className = 'mercury-note';
+    note.textContent = glyph;
+    notes.append(note);
+  });
+  mercury.append(money, symbol, _propEl, sound, notes);
 
   _stepLabelEl = document.createElement('p');
   _stepLabelEl.className = 'decentbusking-tutorial-step';
@@ -255,6 +453,8 @@ function _ensureOverlay() {
 
   _bodyEl = document.createElement('p');
   _bodyEl.className = 'decentbusking-tutorial-body';
+  _bodyEl.id = 'decentbusking-tutorial-body';
+  _bodyEl.setAttribute('aria-live', 'polite');
 
   const footer = document.createElement('div');
   footer.className = 'decentbusking-tutorial-footer';
@@ -266,7 +466,7 @@ function _ensureOverlay() {
   buttonRow.className = 'decentbusking-tutorial-actions';
 
   _backButton = _button('Back', previousTutorialStep);
-  _skipButton = _button('Skip Tutorial', skipTutorial);
+  _skipButton = _button('Leave tour', skipTutorial);
   _nextButton = _button('Next', nextTutorialStep, { 'data-tutorial-primary': '1' });
   _closeButton = _button('✕', skipTutorial, { 'aria-label': 'Close tutorial' });
   _closeButton.style.position = 'absolute';
@@ -280,8 +480,8 @@ function _ensureOverlay() {
   buttonRow.append(_backButton, _skipButton, _nextButton);
   footer.append(_progressEl, buttonRow);
 
-  _panel.append(kicker, _closeButton, _stepLabelEl, _titleEl, _bodyEl, footer);
-  _overlay.append(_backdrop, _panel);
+  _panel.append(mercury, kicker, _closeButton, _stepLabelEl, _titleEl, _bodyEl, footer);
+  _overlay.append(_backdrop, _spotlight, _rabbit, _panel);
   document.body?.appendChild(_overlay);
   return _overlay;
 }
@@ -298,7 +498,7 @@ function _highlightTarget(target) {
   if (target.classList?.add) target.classList.add(TUTORIAL_HIGHLIGHT_CLASS);
   if (typeof target.scrollIntoView === 'function') {
     try {
-      target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+      target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
     } catch {
       /* ignore scroll errors */
     }
@@ -307,7 +507,106 @@ function _highlightTarget(target) {
 
 function _resolveTarget(selector) {
   if (!selector || typeof document?.querySelector !== 'function') return null;
-  return document.querySelector(selector);
+  let root = document;
+  const parts = selector.split(' >>> ');
+  for (let i = 0; i < parts.length; i++) {
+    const match = root?.querySelector(parts[i]);
+    if (i === parts.length - 1) return match;
+    root = match?.shadowRoot;
+  }
+  return null;
+}
+
+function _closeSurface() {
+  _surfaceCleanup?.();
+  _surfaceCleanup = null;
+}
+
+function _explainBlockedTour(message, root = document.body) {
+  _notice?.remove();
+  _notice = document.createElement('p');
+  _notice.className = 'tutorial-notice';
+  _notice.setAttribute('role', 'status');
+  _notice.textContent = message;
+  root.appendChild(_notice);
+}
+
+function _openSurface(surface) {
+  _closeSurface();
+  const toggle = SURFACES[surface] ? document.getElementById(SURFACES[surface]) : null;
+  if (toggle) {
+    if (toggle.getAttribute('aria-expanded') !== 'true') toggle.click();
+    _surfaceCleanup = () => {
+      if (toggle.getAttribute('aria-expanded') === 'true') toggle.click();
+    };
+  } else if (surface === 'briefcase') {
+    const modal = document.getElementById('mint-modal');
+    if (!modal) return;
+    if (_savedMint?.visible) modal.classList.remove('hidden');
+    else document.getElementById('guitar-case-btn')?.click();
+    _surfaceCleanup = () => {
+      if (_savedMint?.visible) modal.classList.add('hidden');
+      else document.getElementById('mint-cancel-btn')?.click();
+    };
+  } else if (surface === 'menu' || surface === 'left-menu') {
+    const prefix = surface === 'menu' ? 'decent-header >>> app-title >>> right-ankh >>> ' : 'decent-header >>> app-title >>> .ankh-left ';
+    const menu = _resolveTarget(`${prefix}.dropdown-menu`);
+    const coin = _resolveTarget(`${prefix}.ankh-coin`);
+    if (!menu || !coin) return;
+    const display = menu.style.display;
+    if (window.getComputedStyle(menu).display === 'none') coin.click();
+    _surfaceCleanup = () => { menu.style.display = display; };
+  }
+}
+
+function _positionScene() {
+  if (!_overlay || _overlay.hidden || !window.innerWidth) return;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const bounds = _currentTarget?.getBoundingClientRect();
+  const visible = bounds && bounds.width > 0 && bounds.height > 0;
+  const mobile = width <= 640;
+  const cardHeight = _panel.getBoundingClientRect().height;
+  const cardWidth = _panel.getBoundingClientRect().width;
+  let left = (width - cardWidth) / 2;
+  let top = (height - cardHeight) / 2;
+  if (visible) {
+    const targetTop = Math.max(12, Math.min(height - 60, bounds.top));
+    const targetLeft = Math.max(10, Math.min(width - 60, bounds.left));
+    const targetWidth = Math.max(40, Math.min(width - targetLeft - 10, bounds.width));
+    // Large forms/drawers get a window into their top, leaving room for narration.
+    const mobileWindow = Math.max(40, Math.min(160, height - cardHeight - targetTop - 110));
+    const targetHeight = Math.min(bounds.height, mobile ? mobileWindow : height * .65, height - targetTop - 12);
+    Object.assign(_spotlight.style, {
+      left: `${targetLeft - 4}px`, top: `${targetTop - 4}px`,
+      width: `${targetWidth + 8}px`, height: `${targetHeight + 8}px`,
+    });
+    const below = targetTop + targetHeight + 90;
+    if (mobile) {
+      top = bounds.top > height / 2 ? 16 : Math.min(height - cardHeight - 16, below);
+    } else {
+      const onLeft = bounds.left + bounds.width / 2 < width / 2;
+      left = onLeft ? width - cardWidth - 28 : 28;
+      top = bounds.top > height * .6 ? Math.max(20, bounds.top - cardHeight - 90) : Math.max(100, (height - cardHeight) / 2);
+    }
+    Object.assign(_rabbit.style, {
+      left: `${Math.max(8, Math.min(width - 78, targetLeft + targetWidth - 60))}px`,
+      top: `${Math.max(4, Math.min(height - 88, targetTop + targetHeight - 15))}px`,
+    });
+  } else {
+    Object.assign(_rabbit.style, { left: `${Math.max(8, left - 75)}px`, top: `${Math.max(8, top - 70)}px` });
+  }
+  _spotlight.hidden = !visible;
+  _rabbit.hidden = false;
+  Object.assign(_panel.style, { left: `${Math.max(16, left)}px`, top: `${Math.max(16, Math.min(height - cardHeight - 16, top))}px` });
+}
+
+function _schedulePosition() {
+  if (_overlay?.hidden !== false || _layoutFrame !== null) return;
+  _layoutFrame = window.requestAnimationFrame(() => {
+    _layoutFrame = null;
+    _positionScene();
+  });
 }
 
 function _syncButtonsIn(root = document) {
@@ -320,13 +619,23 @@ function _syncButtonsIn(root = document) {
 
 function _renderStep() {
   const step = TUTORIAL_STEPS[_currentStep] || TUTORIAL_STEPS[0];
+  _openSurface(step.surface);
   _titleEl.textContent = step.title;
-  _bodyEl.innerHTML = step.body;
-  _stepLabelEl.textContent = `Step ${_currentStep + 1} of ${TUTORIAL_STEPS.length}`;
-  _progressEl.textContent = `${_currentStep + 1}/${TUTORIAL_STEPS.length}`;
+  _bodyEl.textContent = step.body;
+  _propEl.textContent = step.prop;
+  _stepLabelEl.textContent = `Rabbit hole ${_currentStep + 1} / ${TUTORIAL_STEPS.length} · ${step.propName}`;
+  _progressEl.textContent = TUTORIAL_STEPS.map((_, i) => i <= _currentStep ? '●' : '○').join(' ');
+  _progressEl.setAttribute('aria-label', `Stop ${_currentStep + 1} of ${TUTORIAL_STEPS.length}`);
   _backButton.disabled = _currentStep === 0;
-  _nextButton.textContent = _currentStep === TUTORIAL_STEPS.length - 1 ? 'Finish' : 'Next';
-  _highlightTarget(_resolveTarget(step.target));
+  _nextButton.textContent = _currentStep === TUTORIAL_STEPS.length - 1 ? 'Go explore' : 'Follow →';
+  const target = _resolveTarget(step.target) || document.getElementById(SURFACES[step.surface]) || (step.surface === 'briefcase' ? document.getElementById('guitar-case-btn') : null);
+  _highlightTarget(target);
+  _panel.querySelector?.('.tutorial-mercury')?.classList.remove('is-arriving');
+  _positionScene();
+  if (window.requestAnimationFrame) {
+    window.requestAnimationFrame(() => _panel.querySelector('.tutorial-mercury')?.classList.add('is-arriving'));
+  }
+  _panel.focus();
 }
 
 function _cancelAutoLaunch() {
@@ -348,13 +657,25 @@ function _handleKeydown(event) {
   if (!_overlay || _overlay.hidden || event.defaultPrevented) return;
   if (event.key === 'Escape') {
     event.preventDefault();
+    event.stopImmediatePropagation();
     skipTutorial();
-  } else if (event.key === 'ArrowRight' || event.key === ' ') {
+  } else if (event.key === 'Tab') {
+    const buttons = [_closeButton, _backButton, _skipButton, _nextButton].filter(button => !button.disabled);
+    const index = buttons.indexOf(document.activeElement);
+    const next = event.shiftKey ? (index <= 0 ? buttons.length - 1 : index - 1) : (index + 1) % buttons.length;
     event.preventDefault();
+    event.stopImmediatePropagation();
+    buttons[next].focus();
+  } else if (event.key === 'ArrowRight' || (event.key === ' ' && document.activeElement === _panel)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
     nextTutorialStep();
   } else if (event.key === 'ArrowLeft') {
     event.preventDefault();
+    event.stopImmediatePropagation();
     previousTutorialStep();
+  } else {
+    event.stopImmediatePropagation();
   }
 }
 
@@ -362,7 +683,12 @@ export function initTutorial() {
   if (_initialized || typeof document === 'undefined') return;
   _initialized = true;
   _ensureOverlay();
-  document.addEventListener('keydown', _handleKeydown);
+  _ensureLauncher();
+  document.addEventListener('keydown', _handleKeydown, true);
+  window.addEventListener?.('resize', _schedulePosition);
+  document.addEventListener('scroll', _schedulePosition, true);
+  _overlay.addEventListener('transitionend', _schedulePosition);
+  document.addEventListener('transitionend', _schedulePosition);
   document.addEventListener('dbusk:tutorial:start', () => startTutorial({ source: 'event' }));
   _syncButtonsIn();
   _autoLaunch();
@@ -371,6 +697,36 @@ export function initTutorial() {
 export function startTutorial() {
   _ensureOverlay();
   _cancelAutoLaunch();
+  if (_overlay.hidden === false) return;
+  if (document.getElementById('mint-submit-btn')?.disabled) {
+    _explainBlockedTour('Mercury: let’s finish your current submission first. Your upload stays right where it is.', document.getElementById('mint-modal-inner') || document.body);
+    return;
+  }
+  if (document.querySelector('dialog[open]')) {
+    const dialog = document.querySelector('dialog[open]');
+    _explainBlockedTour('Mercury: close this window, then follow the white rabbit to start the tour.', dialog);
+    dialog.focus();
+    return;
+  }
+  if (document.getElementById('devert-audio-mode')?.getAttribute('aria-pressed') === 'true') {
+    _explainBlockedTour('Mercury: return from VertLoop to the main radio first, so our tour won’t interrupt your listening.');
+    return;
+  }
+  _notice?.remove();
+  _notice = null;
+  _returnFocus = document.activeElement;
+  while (_returnFocus?.shadowRoot?.activeElement) _returnFocus = _returnFocus.shadowRoot.activeElement;
+  _savedScroll = { x: window.scrollX || 0, y: window.scrollY || 0 };
+  _savedMenus = [
+    'decent-header >>> app-title >>> .ankh-left .dropdown-menu',
+    'decent-header >>> app-title >>> right-ankh >>> .dropdown-menu',
+  ].map(selector => _resolveTarget(selector)).filter(Boolean).map(element => ({ element, display: element.style.display }));
+  _savedMenus.forEach(({ element }) => { element.style.display = 'none'; });
+  _savedDrawers = DRAWERS.filter(id => document.getElementById(id)?.getAttribute('aria-expanded') === 'true');
+  _savedDrawers.forEach(id => document.getElementById(id).click());
+  const mint = document.getElementById('mint-modal');
+  _savedMint = mint ? { element: mint, visible: !mint.classList.contains('hidden') } : null;
+  if (_savedMint?.visible) mint.classList.add('hidden');
   _currentStep = 0;
   _overlay.hidden = false;
   _overlay.setAttribute('aria-hidden', 'false');
@@ -398,12 +754,27 @@ export function nextTutorialStep() {
 
 export function completeTutorial() {
   _cancelAutoLaunch();
+  _closeSurface();
   _clearHighlight();
   if (_overlay) {
     _overlay.hidden = true;
     _overlay.setAttribute('aria-hidden', 'true');
   }
   document.body?.classList?.remove(TUTORIAL_BODY_CLASS);
+  _savedDrawers.forEach(id => {
+    const toggle = document.getElementById(id);
+    if (toggle?.getAttribute('aria-expanded') !== 'true') toggle?.click();
+  });
+  _savedDrawers = [];
+  _savedMenus.forEach(({ element, display }) => { element.style.display = display; });
+  _savedMenus = [];
+  if (_savedMint?.visible) _savedMint.element.classList.remove('hidden');
+  _savedMint = null;
+  if (_savedScroll) window.scrollTo?.(_savedScroll.x, _savedScroll.y);
+  _savedScroll = null;
+  if (_returnFocus?.isConnected && _returnFocus.getClientRects?.().length !== 0) _returnFocus.focus();
+  else document.getElementById('rabbit-tour-launch')?.focus();
+  _returnFocus = null;
   _setSeen(true);
   _syncButtonsIn();
 }

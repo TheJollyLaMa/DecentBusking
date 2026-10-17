@@ -1,10 +1,10 @@
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 import { lookupEnsName } from './ens-client.mjs?v=20261016-ens-worker';
-import { renderWalletAddress } from './fund-display.mjs';
+import { renderWalletAddress } from './fund-display.mjs?v=20261017-mercury-release';
 export { USDC_BROWSER_ABI };
 
 export function quoteDjuke(pendingCount) {

@@ -5,7 +5,7 @@
 
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-paid-sponsors';
-import { formatUsdcUnits as _formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits as _formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 
 const POLL_MS = 8_000;
 const FADE_IN_MS = 600;
@@ -153,6 +153,12 @@ let _pollTimer = null;
 let _listenerId = null;
 let _voteButtons = [];
 let _voteStatusEl;
+let _voteNetEl;
+let _voteNet = null;
+let _voteNetPlayId = null;
+let _voteNetRequest = 0;
+let _voteNetRendered = null;
+let _voteNetRenderedPlayId = null;
 let _votePending = false;
 let _votingPlayId = null;
 const _votedPlays = new Map();
@@ -239,15 +245,21 @@ export function getRadioStateSnapshot() {
   return _cloneRadioState(_radioState);
 }
 
-export function formatMainRadioAdCountdown(countdown, { disconnected = false } = {}) {
+export function formatMainRadioAdCountdown(countdown, { disconnected = false, compact = false } = {}) {
   if (disconnected) return 'Main radio ad: disconnected';
   if (!countdown) return 'Main radio ad: scheduling unavailable';
   if (countdown.status === 'countdown' && Number.isSafeInteger(countdown.remainingSongs)) {
     const songs = countdown.remainingSongs;
+    if (compact) {
+      const afterCurrent = Math.max(0, songs - (countdown.includesCurrentSong ? 1 : 0));
+      if (afterCurrent === 0) return 'next ad after this song';
+      if (afterCurrent === 1) return 'next ad after next song';
+      return `next ad after ${afterCurrent} more songs`;
+    }
     return `Main radio ad: Next advert after ${songs} more song${songs === 1 ? '' : 's'}${countdown.includesCurrentSong ? ' (current song counted)' : ' (current song not counted)'}`;
   }
-  if (countdown.status === 'up_next') return 'Main radio ad: Advert up next';
-  if (countdown.status === 'playing') return 'Main radio ad: Advert playing now';
+  if (countdown.status === 'up_next') return compact ? 'next ad after this song' : 'Main radio ad: Advert up next';
+  if (countdown.status === 'playing') return compact ? 'ad playing now' : 'Main radio ad: Advert playing now';
   if (countdown.status === 'paused') return `Main radio ad: Deferred during ${countdown.activeShow?.label || countdown.reason || 'this show'}`;
   if (countdown.status === 'none') return 'Main radio ad: No eligible campaign available';
   if (countdown.status === 'unavailable' && countdown.reason === 'disconnected') return 'Main radio ad: disconnected';
@@ -259,7 +271,7 @@ export function formatMainRadioAdCountdown(countdown, { disconnected = false } =
 function _renderMainRadioAdCountdown() {
   if (!_adCountdownEl) return;
   const disconnected = _radioState?.mainRadioAdCountdown?.reason === 'disconnected';
-  const text = formatMainRadioAdCountdown(_radioState?.mainRadioAdCountdown, { disconnected });
+  const text = formatMainRadioAdCountdown(_radioState?.mainRadioAdCountdown, { disconnected, compact: true });
   if (_adCountdownEl.textContent !== text) _adCountdownEl.textContent = text;
 }
 
@@ -376,7 +388,90 @@ function _restoreVotes() {
   } catch {}
 }
 
+async function _refreshVoteNet() {
+  if (!_voteNetEl) return;
+  const request = ++_voteNetRequest;
+  const playId = _radio?.playId;
+  if (_voteNetPlayId !== playId) _voteNet = null;
+  _voteNetPlayId = playId;
+  if (!playId || !_radioReachable) {
+    _voteNet = null;
+    _renderVoting();
+    return;
+  }
+  if (_radio.isDevert) {
+    const tally = _radio.adVotes;
+    _voteNet = Number.isSafeInteger(tally?.up) && tally.up >= 0 &&
+      Number.isSafeInteger(tally?.down) && tally.down >= 0 && tally.net === tally.up - tally.down ? tally.net : null;
+    _renderVoting();
+    return;
+  }
+  const trackId = _radio.trackId;
+  _renderVoting();
+  try {
+    const url = new URL(_radioUrl());
+    url.pathname = '/api/radio/history';
+    url.search = '?weeks=1&calendar=new-york';
+    const response = await fetch(url.href, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const history = await response.json();
+    const report = history.weeks?.find(entry => entry.current);
+    if (!Array.isArray(report?.tracks) || !trackId) throw new Error('Weekly vote totals unavailable');
+    const track = report.tracks.find(entry => entry.trackId === trackId);
+    const net = track ? track.votes : 0;
+    if (!Number.isSafeInteger(net)) throw new Error('Invalid net vote total');
+    if (request === _voteNetRequest && _radio?.playId === playId) _voteNet = net;
+  } catch (error) {
+    if (request === _voteNetRequest && _radio?.playId === playId) {
+      _voteNet = null;
+      console.warn('[radio] Could not refresh net votes:', error.message);
+    }
+  }
+  _renderVoting();
+}
+
+function _renderVoteNetValue(net, playId) {
+  const number = _voteNetEl.querySelector?.('[data-vote-number]') || _voteNetEl;
+  const effects = _voteNetEl.querySelector?.('[data-vote-effects]');
+  const changed = net !== _voteNetRendered || playId !== _voteNetRenderedPlayId;
+  if (!changed) return;
+  const previous = _voteNetRendered;
+  const samePlay = playId === _voteNetRenderedPlayId;
+  number.textContent = net === null ? '—' : net > 0 ? `+${net}` : String(net);
+  effects?.replaceChildren();
+  const trend = samePlay && net !== null && previous !== null ? Math.sign(net - previous) : 0;
+  if (_voteNetEl.dataset) _voteNetEl.dataset.trend = trend > 0 ? 'up' : trend < 0 ? 'down' : '';
+  if (trend && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    if (effects) {
+      const symbols = trend > 0 ? ['♪', '♫', '🎵', '♪'] : ['🕳️'];
+      symbols.forEach((symbol, index) => {
+        const particle = effects.ownerDocument.createElement('span');
+        particle.textContent = symbol;
+        particle.style.setProperty('--note-x', `${(index - 1.5) * 20}px`);
+        particle.style.setProperty('--note-delay', `${index * 70}ms`);
+        effects.appendChild(particle);
+      });
+    }
+    number.getAnimations?.().forEach(animation => animation.cancel());
+    number.animate?.(trend > 0
+      ? [{ transform: 'translateY(0)' }, { transform: 'translateY(-10px) scale(1.18)' }, { transform: 'translateY(0)' }]
+      : [{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(15px) scale(.45)', opacity: 0, offset: .55 },
+        { transform: 'translateY(-5px) scale(.8)', opacity: 0, offset: .56 }, { transform: 'translateY(0)', opacity: 1 }],
+    { duration: trend > 0 ? 850 : 1100, easing: 'ease-out' });
+  }
+  _voteNetRendered = net;
+  _voteNetRenderedPlayId = playId;
+}
+
 function _renderVoting() {
+  if (_voteNetEl) {
+    const available = _mode === 'radio' && _devertListenMode === 'radio' && _radioReachable &&
+      _voteNetPlayId === _radio?.playId && Number.isSafeInteger(_voteNet);
+    _renderVoteNetValue(available ? _voteNet : null, _radio?.playId);
+    const scope = _radio?.isDevert ? 'this advert play' : 'this week';
+    _voteNetEl.setAttribute('aria-label', available ? `${_voteNet} net votes ${scope}` : 'Net votes unavailable');
+    _voteNetEl.title = available ? `Net votes ${scope} (upvotes minus downvotes)` : 'Live net votes unavailable';
+  }
   if (!_voteButtons.length) return;
   const playId = _radio?.playId || null;
   const active = _mode === 'radio' && _devertListenMode === 'radio' && _radioReachable && playId && _radio?.ipfsCid;
@@ -404,6 +499,14 @@ async function _castRadioVote(vote) {
     try { localStorage.setItem(`decentbusking:votes:v1:${_radioUrl()}`, JSON.stringify([..._votedPlays])); } catch {}
     if (_radio?.playId === playId && _voteStatusEl) _voteStatusEl.textContent = 'Vote recorded';
     document.dispatchEvent(new CustomEvent('dbusk-radio-vote-recorded', { detail: { playId, vote: result.vote } }));
+    if (_radio?.playId === playId) {
+      if (_radio.isDevert) {
+        // Advert totals arrive with the radio snapshot, not the weekly music chart.
+        await _poll();
+      } else {
+        await _refreshVoteNet();
+      }
+    }
   } catch (error) {
     if (_radio?.playId === playId && _voteStatusEl) _voteStatusEl.textContent = error.message;
   } finally {
@@ -439,6 +542,7 @@ export function initRadioSync() {
   _initAudioControls();
   _voteButtons = [...document.querySelectorAll('[data-radio-vote]')];
   _voteStatusEl = document.getElementById('radio-vote-status');
+  _voteNetEl = document.getElementById('radio-vote-net');
   _restoreVotes();
   _voteButtons.forEach((button) => button.addEventListener('click', () => _castRadioVote(Number(button.dataset.radioVote))));
   _renderVoting();
@@ -574,6 +678,7 @@ async function _poll() {
   }
   _renderVoting();
   _pollTimer = setTimeout(_poll, _handoffActive() ? HANDOFF_POLL_MS : POLL_MS);
+  void _refreshVoteNet();
   _pollTimer?.unref?.();
 }
 

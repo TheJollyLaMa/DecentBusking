@@ -93,7 +93,7 @@ export function isCreatorWatchlisted(nft) {
 }
 
 export function creatorWatchlistButtonState(nft, { loading = false, resolving = false, saving = false, unavailable = false } = {}) {
-  if (unavailable) return { label: '👀 Unavailable', title: 'No verified NFT is available for this song yet', pressed: false, disabled: true, mode: 'unavailable' };
+  if (unavailable) return { label: '👀 Unavailable', title: 'Could not verify the NFT for this playback', pressed: false, disabled: true, mode: 'unavailable' };
   const address = _currentAddress();
   if (!address) return { label: '👀 Connect', title: 'Connect your wallet to save this NFT', pressed: false, disabled: false, mode: 'connect' };
   if (loading) return { label: '👀 Loading', title: 'Loading your watchlist…', pressed: false, disabled: true, mode: 'loading' };

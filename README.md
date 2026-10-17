@@ -48,6 +48,37 @@ the matching worker update; older workers show unavailable rather than zero.
 
 **First visit?** Follow the [newcomer walkthrough](docs/NEWCOMERS.md) for a click-by-click listener and artist route with screenshots.
 
+The on-site **Follow the white rabbit** launcher stays visible above the radio,
+with a replay entry in About. Mercury narrates from his flying-money ride while
+the rabbit mascot peeks in and out of holes beside highlighted controls. This
+read-only guided tour opens real drawers and ankh menus; it never triggers wallet,
+vote, upload, purchase, or audio actions. Exit restores existing drawers and visible
+briefcase drafts. Active submissions, open dialogs, and VertLoop listening defer
+the tour with an explanation. Keyboard navigation, focus return, narrow screens,
+and reduced-motion preferences are supported.
+
+The subheader's **Search Artist or Song** field searches the indexed music
+catalog by artist or title. It shares its query with archive search; typing in
+the subheader clears any archive artist selection so a new search covers all
+artists. The archive retains its separate artist dropdown and result counts.
+The footer shows live net votes beside the thumbs: songs use the current New York
+weekly chart total; adverts use votes for the current advert play. Totals refresh
+with the radio poll and after a confirmed vote. Unavailable totals show a dash,
+not a guessed zero.
+The tilted block-style counter celebrates actual increases with floating music
+notes and sinks toward a hole on decreases. Initial loads and track changes do
+not trigger vote celebrations; reduced-motion preferences disable the effects.
+Header menu coins accept clicks across their full coin area and support Enter
+and Space. The warm orange-white neon title flickers briefly every 30 seconds;
+the end symbols carry a travelling electric pulse. Both remain steady with
+reduced motion enabled.
+
+The footer uses a compact advert countdown: “next ad after this song”, “next ad
+after next song”, or “next ad after N more songs”, without changing scheduling.
+Footer NFT verification matches the exact IPFS media identity even when radio
+playback uses a relay or preloaded blob URL. Lookup failures report verification
+unavailability rather than implying the song has not been minted.
+
 Open the [DecentBusking town square](https://thejollylama.github.io/DecentBusking/) and explore the 3D music timeline. Select a track in the archive to click **Preview** for a free 30-second taste or **Listen** to play the whole song, inspect its NFT details, and tip the artist. Connect MetaMask on Base when you want to send a tip.
 
 The site radio streams and preloads recordings through the worker's public `GET /api/radio/media?cid=…` endpoint, which only serves recordings known to the radio playlist. The worker uses its dedicated IPFS gateway (or the original Discord upload) without sharing gateway credentials with browsers, and forwards HTTP ranges for seeking. The configured public gateway remains a browser fallback. Deploy both the worker and site when updating this route.
@@ -62,6 +93,24 @@ Friday's **Top 10 Hype Hour** (8-9 p.m. America/New_York by default) plays a che
 
 Open the community radio schedule with the owner wallet connected and choose **Cancel event** on the dated occurrence. Enter a public reason, confirm, and sign the calendar update. The occurrence remains visible with a red **Canceled** stamp for seven days; future recurring Fridays are unchanged. The shared worker calendar persists the cancellation across restarts, and open calendars refresh every 15 seconds. Cancellation does not approve, refund, or settle performer payments.
 
+Listeners can choose **Set reminder** for the next weekly show or a scheduled
+live event. Apple/Outlook `.ics` downloads include a 15-minute display alarm.
+Google Calendar opens a prefilled event; select a 15-minute notification before
+saving (Google's event-template URL does not set notification preferences).
+Save into an account synced across devices; imported individual events do not
+receive later schedule updates.
+
+**Sync the community radio calendar** exposes the public
+`GET /api/radio/calendar.ics` subscription for Google, Apple and Outlook.
+The feed includes weekly shows and live bookings for the next 90 days plus
+seven days of recent occurrences. It uses stable occurrence UIDs, UTC timestamps
+calculated from New York wall-clock times (including DST), cancellation status
+and 15-minute alarms. Calendar clients control refresh frequency and whether
+subscription alarms are enabled; updates are not instant. During calendar
+restore the endpoint returns 503 rather than an incomplete feed that could
+remove subscribers' events. No wallet, notification permission or personal
+calendar credentials are needed by DecentBusking.
+
 Cancelled live slots leave automated radio running. After Friday Hype, or when starting in a cancelled live slot, the radio tries an eligible advert before returning to music, subject to existing campaign capacity, availability, and paid-request priority. Never-played campaigns get preference in ordinary main-radio advert selection; paid priority boosts remain ahead of that preference.
 
 **DVert campaigns cost $5 USDC for one week.** Optional priority payments do not buy or extend a campaign. A **queue bump** starts at $1 USDC, doubling every seven pending requests, and moves an active approved advert to the next normal advert break. **Play after this song** costs **2x that queue price** for an extra break. Immediate requests take priority over bumps, FIFO is preserved within each tier, and both defer during protected shows. Payments remain reserved until naturally completed playback; removed unplayed requests have payer-claimed full refunds. The replacement two-tier contract is deployed and source verified, but public checkout stays disabled pending separately approved live acceptance of both tiers. See the [paid advert queue policy and deployment checklist](docs/DVERT-PAID-QUEUE.md).
@@ -71,6 +120,38 @@ Cancelled live slots leave automated radio running. After Friday Hype, or when s
 **New here? Start with one song.** Post audio or MP4 in [#DecentJukebox](https://discord.gg/SCtcBggHPa), or click the guitar case on the site. Discord attachments can be up to 10 MB. The site accepts files up to 50 MB, or an existing IPFS file CID for larger media. You do not need a Pinata account.
 
 After a Discord upload is pinned, the bot replies with a **Request NFT** button. Click it to provide your Base artist wallet and optional artwork; submitting the private form automatically adds the request to the owner mint queue. For the site guitar case, connect your artist wallet, enter the track details, and submit. Neither flow mints automatically; the owner reviews and approves requests.
+
+The site's creator briefcase is a three-part flow: drop audio/MP4 video (or paste
+a pinned file CID), add title/artist and optional artwork, then review earning
+wallets. Local media is detected from its content and previewed without
+autoplay; there is no manual format selector or MP3 fallback for unknown files.
+Pinned media uses `GET /api/ipfs/media-type?cid=...`, which normalizes the CID
+and reads bounded 64 KiB header/tail samples rather than downloading the whole
+file. Detection failures are shown explicitly. Artwork accepts an image upload
+or a file CID independently of the main media source.
+
+Check **This is a DVert advertisement** for ad submissions. Approval marks the
+NFT and recording as an advert, excluded from ordinary music rotation, music
+Top 10 and DJuke song registration. Advertisers still book and fund airtime
+through DVert separately; this checkbox does not create a paid campaign.
+
+For songs, add up to nine collaborator wallets alongside the artist. Adding or
+removing a collaborator defaults the shares to an even split (10000 basis
+points, with deterministic rounding); each share can be edited to two decimal
+places and the total must be exactly 100%. Duplicate/zero wallets and zero
+shares are rejected. These are **DJuke creator-earnings shares only**, not
+ownership of a wallet or multiple NFT recipients. The artist still receives
+the NFT, ERC-2981 royalties and weekly radio prizes; direct tips still go to
+the specified tip wallet. Shares are signed by the submitter, checked server
+side, checkpointed with the request, shown during owner approval and included
+in minted metadata. DJuke registration and its manifest use the approved
+shares; existing registered/requested on-chain splits are never silently
+rewritten. A conflicting registration logs an explicit admin-review warning.
+Resubmitting the same recording with changed shares or advert classification
+requires owner review instead of silently returning the old settings.
+
+Deploy the updated worker before publishing the redesigned briefcase: it needs
+the media-detection endpoint and signature support for creator splits.
 
 Artwork is optional. Attach PNG, JPEG, WebP, or GIF up to 10 MB, enter an IPFS image CID for a larger image, or leave it blank to use your Discord profile image. The owner reviews the request and mints approved NFTs directly to the artist wallet.
 

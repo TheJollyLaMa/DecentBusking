@@ -1,7 +1,7 @@
-import { BASE_USDC_ADDRESS } from './settlement-funds.mjs?v=20261015-usdc-cents';
+import { BASE_USDC_ADDRESS } from './settlement-funds.mjs?v=20261017-mercury-release';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { previewTopTenSongPayroll } from './top-ten-prizes.mjs';
-import { formatUsdcUnits as formatUsdc } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits as formatUsdc } from './usdc-format.mjs?v=20261017-mercury-release';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE, overlappingUtcWeeks } from './payroll-week.mjs';
 
 const WALLET = /^0x[0-9a-fA-F]{40}$/;

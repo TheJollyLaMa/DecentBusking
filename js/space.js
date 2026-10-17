@@ -22,9 +22,9 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261017-sidepanel-live';
+import { renderNFTCard } from './nft-card.js?v=20261017-mercury-release';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { setNowPlaying } from './stage.js?v=20261017-sidepanel-live';
+import { setNowPlaying } from './stage.js?v=20261017-mercury-release';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft } from './nft-loader.js?v=20261012-paging';
 
@@ -269,7 +269,9 @@ function _audioUrlMatches(detail, nft, exact = false) {
     const identity = (value) => String(value || '').replace(/^ipfs:\/\/(?:ipfs\/)?/, '/ipfs/')
       .match(/\/ipfs\/([^?#]+)/)?.[1] || String(value || '');
     const media = [nft?.audioUrl, nft?.videoUrl, nft?.animation_url].filter(Boolean);
-    const expected = identity(detail?.audioUrl) || String(detail?.ipfsCid || '');
+    const audioUrl = String(detail?.audioUrl || '');
+    const transportUrl = audioUrl.startsWith('blob:') || /\/api\/radio\/media(?:\?|$)/.test(audioUrl);
+    const expected = transportUrl ? String(detail?.ipfsCid || '') : identity(audioUrl) || String(detail?.ipfsCid || '');
     return !!expected && media.some(value => identity(value) === expected);
   }
   const cid = String(detail?.ipfsCid || '').trim().toLowerCase();
@@ -852,8 +854,6 @@ function _updateVisibility() {
   if (count) count.textContent = `${matched} of ${_allNFTs.length} tracks`;
   const badge = document.getElementById('dnft-list-count-badge');
   if (badge) badge.textContent = String(matched);
-  const summary = document.getElementById('artist-filter-count');
-  if (summary) summary.textContent = `${matched} track${matched === 1 ? '' : 's'}`;
 }
 
 function _artistKey(nft) {
@@ -874,7 +874,7 @@ function _refreshArtistFilters() {
   const artists = new Map(_catalogArtists.map(artist => [artist.value, artist.label]));
   for (const { nft } of _allNFTs) artists.set(_artistKey(nft), _artistLabel(nft));
   const entries = [...artists].sort((first, second) => first[1].localeCompare(second[1]));
-  for (const id of ['scene-artist-filter', 'archive-artist-filter']) {
+  for (const id of ['archive-artist-filter']) {
     const select = document.getElementById(id);
     if (!select) continue;
     select.replaceChildren(new Option('All artists', ''), ...entries.map(([value, label]) => new Option(label, value)));
@@ -883,7 +883,7 @@ function _refreshArtistFilters() {
 }
 
 function _bindArtistFilters() {
-  for (const id of ['scene-artist-filter', 'archive-artist-filter']) {
+  for (const id of ['archive-artist-filter']) {
     document.getElementById(id)?.addEventListener('change', (event) => {
       _activeArtist = event.target.value;
       _refreshArtistFilters();
@@ -891,12 +891,22 @@ function _bindArtistFilters() {
       _loadNFTs(true);
     });
   }
-  document.getElementById('archive-search')?.addEventListener('input', event => {
-    _archiveQuery = event.target.value;
-    clearTimeout(_archiveTimer);
-    _archiveRequest?.abort();
-    _archiveTimer = setTimeout(() => _loadNFTs(true), 250);
-  });
+  for (const id of ['scene-music-search', 'archive-search']) {
+    document.getElementById(id)?.addEventListener('input', event => {
+      _archiveQuery = event.target.value;
+      for (const other of ['scene-music-search', 'archive-search']) {
+        const input = document.getElementById(other);
+        if (input && input !== event.target) input.value = _archiveQuery;
+      }
+      if (id === 'scene-music-search') {
+        _activeArtist = '';
+        _refreshArtistFilters();
+      }
+      clearTimeout(_archiveTimer);
+      _archiveRequest?.abort();
+      _archiveTimer = setTimeout(() => _loadNFTs(true), 250);
+    });
+  }
   const header = document.querySelector('decent-header');
   if (header && typeof ResizeObserver !== 'undefined') {
     customElements.whenDefined('decent-header').then(() => {

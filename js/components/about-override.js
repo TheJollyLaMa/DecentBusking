@@ -1,14 +1,14 @@
 // js/components/about-override.js — DecentBusking
 
 import { announcePaymentCelebration } from '../payment-celebration.mjs';
-import { formatUsdcUnits } from '../usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from '../usdc-format.mjs?v=20261017-mercury-release';
 //
 // Intercepts the CDN DecentHead 'about-modal' custom element definition and
 // replaces it with a DecentBusking-specific version.
 //
-import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261013-walkthrough';
+import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261017-mercury-release';
 import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
-import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261015-usdc-cents';
+import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261017-mercury-release';
 
 // The CDN's AboutModal.js hard-codes a filter for listings whose note field
 // contains "decenthead", which causes BigNuten / DecentHead Supporter NFTs to
@@ -930,7 +930,10 @@ class DecentBuskingAboutModal extends HTMLElement {
 
     this.shadowRoot.getElementById('close-about').addEventListener('click', () => this.close());
     this.shadowRoot.querySelectorAll('[data-tutorial-launch]').forEach((button) => {
-      button.addEventListener('click', () => startTutorial());
+      button.addEventListener('click', () => {
+        this.close();
+        startTutorial();
+      });
     });
     syncTutorialLaunchButtons(this.shadowRoot);
     this._loadCommunityFunds();

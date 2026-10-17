@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261017-gentle-wave" />
+  <link rel="stylesheet" href="css/styles.css?v=20261017-mercury-release" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -237,12 +237,10 @@
     <button id="devert-instructions-close" type="button" autofocus>Close instructions</button>
   </dialog>
 
-  <div id="artist-filter-bar" role="group" aria-label="Filter NFTs by artist">
+  <div id="artist-filter-bar" role="group" aria-label="Search music by artist or song">
     <button id="dbusk-top10-button" class="fund-header-pill fund-header-left" type="button" disabled>🏆 Top10 fund: Loading…</button>
     <div class="artist-filter-core">
-      <label for="scene-artist-filter">Artist</label>
-      <select id="scene-artist-filter"><option value="">All artists</option></select>
-      <span id="artist-filter-count" aria-live="polite"></span>
+      <input id="scene-music-search" type="search" placeholder="Search Artist or Song" aria-label="Search Artist or Song" />
     </div>
     <button id="dbusk-playback-button" class="fund-header-pill fund-header-right" type="button" disabled>🎧 Playback fund: Loading…</button>
   </div>
@@ -366,54 +364,54 @@
 
   <!-- Mint modal -->
   <div id="mint-modal" class="hidden">
-    <div id="mint-modal-inner">
+    <div id="mint-modal-inner" role="dialog" aria-modal="true" aria-labelledby="mint-heading">
       <div class="mint-modal-heading">
-        <h2>Submit Your Busk</h2>
+        <div><span class="mint-eyebrow">THE CREATOR BRIEFCASE</span><h2 id="mint-heading">Bring your sound.</h2></div>
         <button id="submission-policy-open" class="submission-policy-icon" type="button" aria-label="Upload rights and public storage policy" aria-haspopup="dialog" title="Upload rights and public storage"><img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/info.svg" width="20" height="20" alt="" /></button>
       </div>
+      <p class="mint-intro">A song, a film, a little magic. Drop it in, give it a face, and credit your people.</p>
+      <ol class="mint-flow" aria-label="Submission flow"><li>01 · Your media</li><li>02 · The story</li><li>03 · Your people</li></ol>
       <form id="mint-form">
-        <label for="mint-title">Track Title</label>
-        <input id="mint-title" type="text" placeholder="What are you playing?" maxlength="120" required />
-
-        <label for="mint-artist">Artist Name</label>
-        <input id="mint-artist" type="text" maxlength="80" placeholder="Artist or band" />
-
+        <section class="mint-step" aria-labelledby="mint-media-heading">
+        <h3 id="mint-media-heading"><span aria-hidden="true">♫</span> Drop your busk</h3>
         <fieldset class="mint-source-controls">
-          <legend>Media Source</legend>
-          <label><input id="mint-source-file" type="radio" name="mint-source" value="file" checked /> Upload file</label>
-          <label><input id="mint-source-cid" type="radio" name="mint-source" value="cid" /> IPFS CID</label>
+          <legend class="sr-only">Media source</legend>
+          <label><input id="mint-source-file" type="radio" name="mint-source" value="file" checked /> From your device</label>
+          <label><input id="mint-source-cid" type="radio" name="mint-source" value="cid" /> Already on IPFS</label>
         </fieldset>
-
         <div id="mint-file-section">
-          <label id="mint-file-label" for="mint-file">Audio or MP4 <span class="hint">(up to 50 MB)</span></label>
-          <input id="mint-file" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,.weba,.mp4,audio/*,video/mp4" required />
+          <label id="mint-file-label" class="mint-dropzone" for="mint-file" data-drop-input="mint-file"><span class="mint-drop-icon" aria-hidden="true">🎧 🎬</span><strong>Drop audio or video here</strong><span>or tap to browse · up to 50 MB</span><small>MP3 · WAV · M4A · OGG / Opus · FLAC · AAC · WebM audio · MP4 video</small>
+            <input id="mint-file" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,.weba,.mp4,audio/*,video/mp4" required />
+          </label>
         </div>
-
         <div id="mint-cid-section" hidden>
-          <label for="mint-cid-input">IPFS File CID</label>
+          <label for="mint-cid-input">Your pinned audio / video CID</label>
           <input id="mint-cid-input" type="text" placeholder="bafy... or ipfs://..." />
+          <p class="mint-help">Use a file CID, not a folder. We’ll detect the format for you.</p>
         </div>
-
-        <label for="mint-media-type">Media Format</label>
-        <select id="mint-media-type">
-          <option value="audio/mpeg">MP3</option>
-          <option value="video/mp4">MP4 Video</option>
-          <option value="audio/mp4">M4A</option>
-          <option value="audio/wav">WAV</option>
-          <option value="audio/ogg">OGG / Opus</option>
-          <option value="audio/flac">FLAC</option>
-          <option value="audio/aac">AAC</option>
-          <option value="audio/webm">WebM Audio</option>
-        </select>
-
-        <label for="mint-image">NFT Artwork <span class="hint">(optional image)</span></label>
-        <input id="mint-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
-
-
-        <label for="mint-parent">Covers / References Token ID <span class="hint">(optional — remix or cover of another busk)</span></label>
+        <p id="mint-media-detected" class="mint-detected" role="status" aria-live="polite">Format is detected automatically.</p>
+        <div id="mint-media-preview" hidden></div>
+        <label class="mint-ad-choice"><input id="mint-devert" type="checkbox" /><span><strong>This is a DVert advertisement</strong><small>Separate from music rotation and the music Top 10. After approval, use DVert to book a campaign. This submission does not buy airtime.</small></span></label>
+        </section>
+        <section class="mint-step" aria-labelledby="mint-story-heading">
+        <h3 id="mint-story-heading"><span aria-hidden="true">✦</span> Give it a name &amp; a face</h3>
+        <div class="mint-two-col">
+          <div><label for="mint-title">Title</label><input id="mint-title" type="text" placeholder="What are you sharing?" maxlength="120" required /></div>
+          <div><label for="mint-artist">Artist / creator</label><input id="mint-artist" type="text" maxlength="80" placeholder="You, your band, your studio" /></div>
+        </div>
+        <fieldset class="mint-source-controls">
+          <legend>Cover art <span class="hint">· optional</span></legend>
+          <label><input type="radio" name="mint-art-source" value="file" checked /> Image file</label>
+          <label><input id="mint-art-source-cid" type="radio" name="mint-art-source" value="cid" /> IPFS CID</label>
+        </fieldset>
+        <div id="mint-art-file-section">
+          <label class="mint-dropzone mint-art-drop" for="mint-image" data-drop-input="mint-image"><img id="mint-art-preview" alt="Selected cover art" hidden /><span aria-hidden="true">🖼️</span><strong>Drop a cover image, or tap to browse</strong><small>PNG · JPEG · WebP · GIF · up to 10 MB</small><input id="mint-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label>
+        </div>
+        <div id="mint-art-cid-section" hidden><label for="mint-artwork-cid">Image / GIF file CID</label><input id="mint-artwork-cid" type="text" placeholder="bafy... or ipfs://..." /></div>
+        <p id="mint-art-name" class="mint-help" role="status">No cover yet? It can be chosen during owner approval.</p>
+        <details class="mint-extras"><summary>A cover, remix or reference?</summary>
+        <label for="mint-parent">Original busk token ID <span class="hint">· optional</span></label>
         <input id="mint-parent" type="number" placeholder="Parent token ID" min="0" />
-
-        <!-- Parent NFT preview — shown when a valid parent token ID is entered -->
         <div id="mint-parent-preview" class="hidden">
           <div id="mint-parent-preview-inner">
             <span id="mint-parent-preview-label">🎵 Referencing:</span>
@@ -421,15 +419,20 @@
             <span id="mint-parent-preview-artist"></span>
           </div>
         </div>
-
-
-        <label for="mint-recipient">Artist Wallet <span class="hint">(receives the NFT and ERC-2981 royalties)</span></label>
+        </details>
+        </section>
+        <section class="mint-step" aria-labelledby="mint-people-heading">
+        <h3 id="mint-people-heading"><span aria-hidden="true">🤝</span> Credit your people</h3>
+        <label for="mint-recipient">Artist wallet <span class="hint">· receives the NFT</span></label>
         <input id="mint-recipient" type="text" placeholder="0x… · defaults to the connected wallet" />
-
-        <label for="mint-tip-wallet">Your Tip Wallet Address <span class="hint">(where listeners send tips)</span></label>
-        <input id="mint-tip-wallet" type="text" placeholder="0x… · defaults to the artist wallet" />
-
-        <div id="mint-status"></div>
+        <p class="mint-help">For music, DJuke creator earnings split between the artist and collaborators below. Adding a person starts an even split; you can edit every percentage. DVert adverts do not use DJuke earning splits.</p>
+        <div id="mint-splits" aria-label="DJuke creator earning shares"></div>
+        <div class="mint-split-tools"><button id="mint-add-owner" type="button">＋ Add collaborator</button><button id="mint-even-split" type="button">Split evenly</button><output id="mint-split-total" aria-live="polite">100% total</output></div>
+        <p class="mint-help">These shares divide the creator’s DJuke payout only—not the whole payment or wallet ownership. NFT ownership, resale royalties and weekly radio prizes stay with the artist wallet.</p>
+        <details class="mint-extras"><summary>Send direct tips to a different wallet</summary><label for="mint-tip-wallet">Tip wallet</label><input id="mint-tip-wallet" type="text" placeholder="0x… · defaults to the artist wallet" /><p class="mint-help">Direct tips are not split by this form.</p></details>
+        </section>
+        <p class="mint-review-note">Review → sign with your wallet → owner approval. Nothing is minted or charged by this button. Your files are public on IPFS.</p>
+        <div id="mint-status" role="status" aria-live="polite"></div>
         <div class="mint-form-actions">
           <button type="submit" id="mint-submit-btn">Submit for Approval</button>
           <button type="button" id="mint-cancel-btn">Cancel</button>
@@ -500,6 +503,7 @@
           <div id="radio-voting" role="group" aria-label="Vote on the current radio play">
             <button id="radio-vote-up" type="button" data-radio-vote="1" aria-label="Thumbs up current radio play" aria-pressed="false" title="Like this listen? Vote thumbs up to boost the song in the JukeLoop rotation. One vote per play." disabled>👍</button>
             <button id="radio-vote-down" type="button" data-radio-vote="-1" aria-label="Thumbs down current radio play" aria-pressed="false" title="Not enjoying this listen? Vote thumbs down to lower the song in the JukeLoop rotation. One vote per play." disabled>👎</button>
+            <span id="radio-vote-net" role="status" aria-live="polite" aria-atomic="true" aria-label="Net votes unavailable" title="Live weekly net votes"><span data-vote-number>—</span><span data-vote-effects aria-hidden="true"></span></span>
             <span id="radio-vote-status" role="status" aria-live="polite"></span>
           </div>
         </div>
@@ -545,6 +549,15 @@
     <p class="radio-schedule-note">Weekly shows and upcoming live performances · America/New_York</p>
     <p id="radio-schedule-status" role="status" aria-live="polite">Loading programming schedule…</p>
     <button id="radio-schedule-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh schedule</button>
+    <details class="radio-calendar-subscription">
+      <summary>📅 Sync the community radio calendar</summary>
+      <p>Subscribe once in a calendar account synced across your devices. Includes the next 90 days, schedule changes and cancellations, with 15-minute reminders. Your calendar app controls refresh timing and may require enabling alerts for subscribed calendars.</p>
+      <a id="radio-calendar-subscribe" hidden>Subscribe in your calendar app</a>
+      <label for="radio-calendar-feed">Subscription URL (Google / Apple / Outlook)</label>
+      <input id="radio-calendar-feed" type="url" readonly aria-label="Community radio calendar subscription URL" />
+      <button id="radio-calendar-copy" type="button" class="payroll-btn payroll-btn-secondary">Copy calendar URL</button>
+      <p>Google Calendar: Other calendars → From URL. Apple / Outlook: Add calendar → Subscribe from web. Subscription updates are not instant; check this schedule for last-minute changes.</p>
+    </details>
     <section aria-labelledby="radio-schedule-weekly-title">
       <h3 id="radio-schedule-weekly-title">Weekly Programming</h3>
       <ul id="radio-schedule-weekly" class="radio-schedule-list"></ul>
@@ -786,13 +799,13 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js?v=20261015-usdc-cents"></script>
+  <script type="module" src="js/components/about-override.js?v=20261017-mercury-release"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
-  <script type="module" src="js/components/header-right-ankh-override.js?v=20261011-creator-menu"></script>
+  <script type="module" src="js/components/header-right-ankh-override.js?v=20261017-mercury-release"></script>
 
   <!-- Load DecentHead components without its legacy IPFS status widget -->
-  <script type="module" src="js/components/header.js?v=20261011-creator-menu"></script>
+  <script type="module" src="js/components/header.js?v=20261017-mercury-release"></script>
 
   <!-- Inject 💸 Payroll link into left ankh header dropdown -->
   <script type="module" src="js/components/header-payroll-inject.js?v=20261006-owner-payroll"></script>
@@ -801,33 +814,33 @@
   <script type="module" src="js/components/header-admin-inject.js?v=20261014-mint-badge"></script>
 
   <!-- Override .title-main color to DecentBusking orange inside AppTitle shadow root -->
-  <script type="module" src="js/components/header-title-color-override.js?v=20261002-header-refresh-5"></script>
+  <script type="module" src="js/components/header-title-color-override.js?v=20261017-mercury-release"></script>
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261017-sidepanel-live"></script>
+  <script type="module" src="js/main.js?v=20261017-mercury-release"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261017-sidepanel-live"></script>
+  <script type="module" src="js/admin.js?v=20261017-mercury-release"></script>
 
-  <script type="module" src="js/payroll.js?v=20261015-usdc-cents"></script>
-  <script type="module" src="js/radio-history.js?v=20261015-usdc-cents"></script>
-  <script type="module" src="js/radio-schedule-ui.mjs?v=20261016-schedule-cancel"></script>
-  <script type="module" src="js/fund-header.mjs?v=20261015-usdc-cents"></script>
-  <script type="module" src="js/top-ten-board.mjs?v=20261017-sidepanel-live"></script>
-  <script type="module" src="js/djuke.mjs?v=20261017-platinum-earners"></script>
-  <script type="module" src="js/devert-tab.mjs?v=20261017-sidepanel-live"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261017-sidepanel-live"></script>
+  <script type="module" src="js/payroll.js?v=20261017-mercury-release"></script>
+  <script type="module" src="js/radio-history.js?v=20261017-mercury-release"></script>
+  <script type="module" src="js/radio-schedule-ui.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/fund-header.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/top-ten-board.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/djuke.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/devert-tab.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261017-mercury-release"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
-  <script type="module" src="js/listens.mjs?v=20261017-sidepanel-live"></script>
+  <script type="module" src="js/listens.mjs?v=20261017-mercury-release"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261018-shared-provider"></script>
-  <script type="module" src="js/devert-paid-queue.mjs?v=20261017-devert-machine"></script>
-  <script type="module" src="js/devert-history.mjs?v=20261017-funding-history"></script>
-  <script type="module" src="js/panel-equalizers.mjs?v=20261017-sidepanel-live"></script>
-  <script type="module" src="js/top-ten-live-meter.mjs?v=20261017-gentle-wave"></script>
+  <script type="module" src="js/devert-paid-queue.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/devert-history.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/panel-equalizers.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/top-ten-live-meter.mjs?v=20261017-mercury-release"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261015-usdc-cents';
+    import { initPayroll } from './js/payroll.js?v=20261017-mercury-release';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

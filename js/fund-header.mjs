@@ -1,10 +1,10 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261015-usdc-cents';
+import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261017-mercury-release';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
-import { previewPlaybackPayroll } from './radio-payroll.mjs?v=20261015-usdc-cents';
+import { previewPlaybackPayroll } from './radio-payroll.mjs?v=20261017-mercury-release';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';

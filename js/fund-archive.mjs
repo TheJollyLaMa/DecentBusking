@@ -1,6 +1,6 @@
 import { id } from '../discord-bot/node_modules/ethers/lib.esm/index.js';
 import { payrollPeriodFromKey } from './payroll-week.mjs';
-import { BASE_USDC_ADDRESS } from './settlement-funds.mjs?v=20261015-usdc-cents';
+import { BASE_USDC_ADDRESS } from './settlement-funds.mjs?v=20261017-mercury-release';
 
 function normalize(value) {
   return String(value || '').toLowerCase();

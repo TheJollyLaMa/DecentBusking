@@ -1,11 +1,11 @@
-import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261017-sidepanel-live';
+import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261017-mercury-release';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
-import { submitMediaForApproval } from './mint-submission.js?v=20261018-shared-provider';
+import { submitMediaForApproval } from './mint-submission.js?v=20261017-mercury-release';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { planDevertQueues, quoteDevertCampaign, DEVERT_SONGS_PER_MAIN_AD } from './devert-scheduler.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { activeDevertCampaign, removeDevertCampaign } from './devert-campaigns.mjs';
 
 const MAX_DEVERT_MEDIA_BYTES = 250 * 1024 * 1024;

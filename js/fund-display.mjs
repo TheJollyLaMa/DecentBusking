@@ -1,6 +1,6 @@
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
 import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs';
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 export { formatUsdcUnits };
 const USDC_ICON = '<img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">';
 const WALLET_ICON = 'img/Ens_Eth_Breathe.png';

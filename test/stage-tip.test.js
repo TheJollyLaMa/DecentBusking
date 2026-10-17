@@ -74,6 +74,26 @@ function setup({ resolve = async () => null, receipt = async () => ({ status: 1 
   };
 }
 
+test('footer NFT lookup failures report verification errors and recover on retry', async () => {
+  const status = element();
+  const button = element();
+  const warnings = [];
+  let fail = true;
+  const context = vm.createContext({
+    console: { warn: (...args) => warnings.push(args) },
+    document: { getElementById: id => id === 'now-playing-watchlist-status' ? status : button },
+    resolveNowPlayingNFT: async () => { if (fail) throw new Error('Catalog unavailable'); return { tokenId: 80 }; },
+    applyCreatorWatchlistButton: (_button, nft, flags) => ({ mode: flags.resolving ? 'pending' : nft ? 'saved' : 'unavailable' }),
+  });
+  vm.runInContext(`${source}\n_watchlistTrack = {title:'Minted song'};`, context);
+  await vm.runInContext('_resolveWatchlistTrack(_watchlistTrack)', context);
+  assert.equal(status.textContent, 'NFT verification unavailable: Catalog unavailable');
+  assert.equal(warnings.length, 1);
+  fail = false;
+  await vm.runInContext('_resolveWatchlistTrack(_watchlistTrack)', context);
+  assert.equal(status.textContent, 'Saved to your watchlist.');
+});
+
 test('hat shows the playing artist/song and first 6 + four ENS icons + last 4 of its wallet', async () => {
   const { elements, play, transfers, celebrations } = setup();
   play(songA);

@@ -1,7 +1,7 @@
 // On-chain creator earnings from DecentBusking contracts on Base. Every figure
 // is read from a contract view or an emitted event, and carries a Basescan proof link.
 
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 
 export const BASESCAN = 'https://basescan.org';
 export const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';

@@ -261,7 +261,7 @@ test('artist filtering hides other artists in both the 3D scene and archive', as
     nftArtistKey,
     document: {
       querySelector: (selector) => rows[selector.match(/data-token-id="(\d+)"/)?.[1]],
-      getElementById: (id) => id === 'artist-filter-count' ? summary : null,
+      getElementById: (id) => id === 'dnft-list-count' ? summary : null,
     },
   });
 
@@ -310,7 +310,7 @@ test('artist filtering hides other artists in both the 3D scene and archive', as
   assert.equal(entries[1].mesh.visible, false);
   assert.equal(rows[1].hidden, false);
   assert.equal(rows[2].hidden, true);
-  assert.equal(summary.textContent, '1 track');
+  assert.equal(summary.textContent, '1 of 2 tracks');
   assert.match(context._artistLabel(first), /^Alice/);
   vm.runInContext("_activeArtist = ''; _updateVisibility();", context);
   assert.equal(rows[2].hidden, false);

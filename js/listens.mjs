@@ -1,11 +1,11 @@
 // On-demand personal listens: 30-second preview, then 0.25 USDC per song via DJuke.
 // Fails open to free playback whenever payments are not live, matching today's behavior.
-import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261017-sidepanel-live';
-import { setNowPlaying } from './stage.js?v=20261017-sidepanel-live';
+import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261017-mercury-release';
+import { setNowPlaying } from './stage.js?v=20261017-mercury-release';
 import { supportsDjukeAlbumsAndGas } from './djuke-version.mjs';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 
 export const LISTEN_PRICE_UNITS = 250000n;
 export const PREVIEW_SECONDS = 30;

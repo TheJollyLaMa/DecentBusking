@@ -2,9 +2,9 @@
 // Initialises the header, footer, stage interactions, and the 3-D space field.
 
 import { initWallet } from './wallet.js';
-import { initStage } from './stage.js?v=20261017-sidepanel-live';
-import { initSpace } from './space.js?v=20261017-sidepanel-live';
-import { initTutorial } from './tutorial.js?v=20261013-walkthrough';
+import { initStage } from './stage.js?v=20261017-mercury-release';
+import { initSpace } from './space.js?v=20261017-mercury-release';
+import { initTutorial } from './tutorial.js?v=20261017-mercury-release';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.
 
