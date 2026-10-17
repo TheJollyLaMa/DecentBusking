@@ -111,7 +111,7 @@ async function panelFixture({ wallet = null } = {}) {
     .replace(/^import .*;\n/gm, '').replace(/export /g, '');
   vm.runInContext(`${source}\ninitDevertTab();`, context);
   const settle = () => new Promise(resolve => setImmediate(resolve));
-  return { element, document, timers, requests, listenModes, settle, focus: () => focused,
+  return { element, document, timers, requests, listenModes, settle, context, focus: () => focused,
     read: callback => { read = callback; }, readAds: callback => { readAds = callback; },
     setRadioState: (state) => { radioSnapshot = state; document.dispatchEvent({ type: 'dbusk-radio-state', detail: state }); },
     click: id => element(id).listeners.get('click')({ stopPropagation() {} }) };
@@ -220,6 +220,24 @@ test('instructions modal restores focus and Escape does not close its underlying
   await ui.click('devert-instructions-close');
   assert.equal(ui.element('devert-instructions').open, false);
   assert.equal(ui.focus(), 'devert-info');
+});
+
+test('DVert uses the header wallet and resyncs campaign checkout when its network changes', async () => {
+  const ui = await panelFixture({ wallet: { address: advertiser, signer: {}, chainId: 8453 } });
+  await ui.click('devert-tab');
+  await ui.settle();
+  assert.equal(ui.element('devert-purchase').disabled, false);
+  ui.context.window._wallet.chainId = 1;
+  ui.document.dispatchEvent({ type: 'wallet-chain-changed' });
+  assert.equal(ui.element('devert-purchase').disabled, true);
+  assert.equal(ui.element('devert-minimum-offer').textContent, 'Switch to Base');
+  ui.context.window._wallet.chainId = 8453;
+  ui.document.dispatchEvent({ type: 'wallet-chain-changed' });
+  assert.equal(ui.element('devert-purchase').disabled, false);
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8');
+  assert.doesNotMatch(html, /id="devert-connect-wallet"/);
+  assert.doesNotMatch(source, /walletButton|_wallet\?\.connect/);
 });
 
 test('machine layout orders LCD, paid queue, search and controls with secondary sections collapsed', () => {
