@@ -138,8 +138,12 @@ address, so request #0 from the new deployment cannot reuse the old journal.
 
 Removal is cross-system: the durable campaign-removal ledger is updated first,
 then the queue contract is reconciled. Failure is reported rather than showing
-a completed refund. Periodic reconciliation retries even during protected
-shows. Payers must wait for confirmed on-chain removal to claim.
+a completed refund. The worker blocks new starts for the campaign and defers
+on-chain removal while its paid request is playing or has finished but is not
+yet settled. Interrupted playback returns to the queue; naturally completed
+playback is settled before removal can make an unplayed request refundable.
+Periodic reconciliation retries even during protected shows. Payers must wait
+for confirmed on-chain removal to claim.
 
 There is no automatic timeout refund for a stalled worker: paid plays survive
 campaign expiry by agreement. Admin must remove a campaign to authorize

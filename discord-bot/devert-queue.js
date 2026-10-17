@@ -2,13 +2,14 @@ import { Contract, id, isAddress } from 'ethers';
 import { devertQueueAbi, DEVERT_QUEUE_USDC, quoteDevertRequest } from '../js/devert-queue.mjs';
 import { createDjukePlaybackJournal, createDjukeRuntime } from './djuke.js';
 
-export function createDevertQueueCatalogSync({ contract, removals, readCampaigns, resolveApprovedMedia }) {
+export function createDevertQueueCatalogSync({ contract, removals, readCampaigns, resolveApprovedMedia, beforeRemove = async () => {} }) {
   const confirmedRemovals = new Set();
   const confirmedApprovals = new Set();
   let task;
   const reconcile = async () => {
     for (const { campaignId } of removals.list()) {
       if (confirmedRemovals.has(campaignId)) continue;
+      await beforeRemove(campaignId);
       if (!await contract.removedCampaigns(BigInt(campaignId))) {
         const tx = await contract.removeCampaign(BigInt(campaignId));
         if ((await tx.wait(2))?.status !== 1) throw new Error(`Paid advert removal failed: ${tx.hash}`);
@@ -134,24 +135,27 @@ export function createDevertQueueReader({ provider, contractAddress, contract, p
 
 export function createDevertQueueRuntime({ readState, store, contract, isCampaignRemoved = () => false, resolveCampaignMedia, log = console }) {
   let tracks = new Map();
+  const removingCampaigns = new Set();
   const readPlayable = async () => {
-    let state = await readState();
-    if (state.paused) throw Object.assign(new Error('Paid advert queue is paused'), { code: 'DEVERT_QUEUE_PAUSED' });
-    for (const campaignId of new Set(state.requests.filter(request => isCampaignRemoved(request.campaignId)).map(request => request.campaignId))) {
-      const tx = await contract.removeCampaign(BigInt(campaignId));
-      if ((await tx.wait(2))?.status !== 1) throw new Error(`Paid advert removal did not confirm: ${tx.hash}`);
-    }
-    if (state.requests.some(request => isCampaignRemoved(request.campaignId))) {
-      // A later confirmed snapshot must prove removal before the journal can skip these payments.
-      throw new Error('Paid advert removal confirmed; awaiting the refreshed queue');
-    }
+    const state = await readState();
     tracks = new Map(state.requests.map(request => [request.trackId, paidAdvertTrack(request, resolveCampaignMedia)]));
     return state;
   };
-  const runtime = createDjukeRuntime({ readState: readPlayable, journal: createDjukePlaybackJournal(store),
+  const journal = createDjukePlaybackJournal(store);
+  const runtime = createDjukeRuntime({ readState: readPlayable, journal,
     getTrack: trackId => tracks.get(trackId), minAudibleMs: 1000, log,
+    preserveMissingRequest: async (record, state) => {
+      if (!['playing', 'played'].includes(record.state)) return false;
+      if (state.recentRefunds?.some(request => request.requestId === record.requestId)) return true;
+      if (!/^\d+$/.test(record.chainRequestId || '')) return false;
+      const request = await contract.getRequest(BigInt(record.chainRequestId));
+      return Number(request.status) === 0 && await contract.removedCampaigns(request.campaignId);
+    },
+    canPlayRequest: (request, state) => !state.paused && !removingCampaigns.has(String(request.campaignId)) &&
+      !isCampaignRemoved(request.campaignId),
     selectRequest: (state, pending, { allowBump = false } = {}) => {
-      const eligible = state.requests.filter(request => pending.some(record => record.requestId === request.requestId));
+      const eligible = state.requests.filter(request => !removingCampaigns.has(String(request.campaignId)) &&
+        !isCampaignRemoved(request.campaignId) && pending.some(record => record.requestId === request.requestId));
       const request = eligible.find(request => (request.tier ?? 1) === 1) ||
         (allowBump ? eligible.find(request => request.tier === 0) : null);
       return request ? pending.find(record => record.requestId === request.requestId) : null;
@@ -161,29 +165,46 @@ export function createDevertQueueRuntime({ readState, store, contract, isCampaig
       if ((await tx.wait(2))?.status !== 1) throw new Error(`Paid advert settlement did not confirm: ${tx.hash}`);
       return tx.hash;
     } });
+  let claimSerial = Promise.resolve();
   return {
-    async nextPaid(options) {
-      try {
-        const selection = await runtime.nextPaid(options);
-        if (selection) {
-          selection.record.kind = 'devert';
-          selection.record.tier = selection.track.paidTier;
+    nextPaid(options) {
+      const run = claimSerial.then(async () => {
+        try {
+          const selection = await runtime.nextPaid(options);
+          if (selection) {
+            selection.record.kind = 'devert';
+            selection.record.tier = selection.track.paidTier;
+          }
+          return selection;
+        } catch (error) {
+          if (error.code === 'DEVERT_QUEUE_PAUSED') return null;
+          throw error;
         }
-        return selection;
-      } catch (error) {
-        if (error.code === 'DEVERT_QUEUE_PAUSED') return null;
-        throw error;
-      }
+      });
+      claimSerial = run.catch(() => {});
+      return run;
     },
     complete(record, play) {
       if (play?.finished !== true) return runtime.fail(record, new Error('Advert did not finish naturally; payment remains queued'));
       return runtime.complete(record, play);
     },
     fail: runtime.fail,
+    async prepareCampaignRemoval(campaignId) {
+      const id = String(campaignId);
+      removingCampaigns.add(id);
+      await claimSerial;
+      const state = await runtime.reconcile();
+      const refunds = new Map((state.recentRefunds || []).map(request => [request.requestId, request.campaignId]));
+      const active = runtime.getJournalState().find(record =>
+        (String(record.campaignId) === id || refunds.get(record.requestId) === id) &&
+        (record.state === 'playing' || record.state === 'played'));
+      if (active) throw new Error(`Campaign removal deferred until paid request ${active.requestId} finishes or settles`);
+    },
     async canPlay(record) {
       const request = await contract.getRequest(BigInt(record.chainRequestId));
       if (record.tier === 0 && await contract.headRequestIdForTier(1) < await contract.nextRequestId()) return false;
-      return Number(request.status) === 0 && !isCampaignRemoved(request.campaignId.toString()) &&
+      return Number(request.status) === 0 && !removingCampaigns.has(request.campaignId.toString()) &&
+        !isCampaignRemoved(request.campaignId.toString()) &&
         !await contract.paused() && !await contract.removedCampaigns(request.campaignId);
     },
   };

@@ -311,13 +311,15 @@ test('paid ad runtime checkpoints natural playback before settling, retries fail
 test('paid advert runtime defers while paused and reconciles removed requests before playing', async () => {
   const { createDevertQueueRuntime, combinePaidQueues } = await import('../discord-bot/devert-queue.js');
   let paused = true;
+  let removals = 0;
   const runtime = createDevertQueueRuntime({ readState: async () => ({ paused, requests: [request()] }),
     store: { restore: async () => null, save: async () => 'ipfs://state' },
-    contract: { removeCampaign: async () => ({ hash: '0xremoved', wait: async () => ({ status: 1 }) }) },
+    contract: { removeCampaign: async () => { removals++; return { hash: '0xremoved', wait: async () => ({ status: 1 }) }; } },
     isCampaignRemoved: () => true });
   assert.equal(await runtime.nextPaid(), null);
   paused = false;
-  await assert.rejects(runtime.nextPaid(), /awaiting the refreshed queue/);
+  assert.equal(await runtime.nextPaid(), null);
+  assert.equal(removals, 0);
   const calls = [];
   const combined = combinePaidQueues({ adverts: { nextPaid: async () => ({ record: { kind: 'devert' } }), complete: async () => calls.push('ad-complete') },
     songs: { nextPaid: async () => { calls.push('song'); return {}; } } });
@@ -325,6 +327,121 @@ test('paid advert runtime defers while paused and reconciles removed requests be
   assert.deepEqual(calls, []);
   await combined.complete({ kind: 'devert' }, {});
   assert.deepEqual(calls, ['ad-complete']);
+});
+
+test('campaign removal waits for active paid playback and settles completed playback before enabling refunds', async () => {
+  const { createDevertQueueCatalogSync, createDevertQueueRuntime } = await import('../discord-bot/devert-queue.js');
+  const removals = { list: () => [{ campaignId: '9' }] };
+
+  {
+    let removed = false;
+    const requests = [request()];
+    const calls = [];
+    const runtime = createDevertQueueRuntime({
+      readState: async () => ({ paused: false, requests, recentRefunds: [] }),
+      store: { restore: async () => null, save: async () => 'ipfs://journal' },
+      contract: { fulfill: async () => { throw new Error('Unexpected settlement'); } },
+    });
+    const sync = createDevertQueueCatalogSync({
+      contract: {
+        removedCampaigns: async () => removed,
+        removeCampaign: async () => {
+          calls.push('remove');
+          removed = true;
+          return { hash: '0xremoved', wait: async () => ({ status: 1 }) };
+        },
+      },
+      removals, readCampaigns: async () => ({ campaigns: [] }),
+      resolveApprovedMedia: () => null,
+      beforeRemove: campaignId => runtime.prepareCampaignRemoval(campaignId),
+    });
+    const selection = await runtime.nextPaid();
+    await assert.rejects(sync(), /deferred until paid request .* finishes or settles/);
+    assert.deepEqual(calls, []);
+    await runtime.fail(selection.record, new Error('Removal requested'));
+    await sync();
+    assert.deepEqual(calls, ['remove']);
+    assert.equal(removed, true);
+  }
+
+  {
+    let removed = false;
+    let requests = [request()];
+    const calls = [];
+    const runtime = createDevertQueueRuntime({
+      readState: async () => ({ paused: false, requests, recentRefunds: [] }),
+      store: { restore: async () => null, save: async () => 'ipfs://journal' },
+      contract: { fulfill: async () => {
+        calls.push('settle');
+        requests = [];
+        return { hash: '0xpaid', wait: async () => ({ status: 1 }) };
+      } },
+    });
+    const sync = createDevertQueueCatalogSync({
+      contract: {
+        removedCampaigns: async () => removed,
+        removeCampaign: async () => {
+          calls.push('remove');
+          removed = true;
+          return { hash: '0xremoved', wait: async () => ({ status: 1 }) };
+        },
+      },
+      removals, readCampaigns: async () => ({ campaigns: [] }),
+      resolveApprovedMedia: () => null,
+      beforeRemove: campaignId => runtime.prepareCampaignRemoval(campaignId),
+    });
+    const selection = await runtime.nextPaid();
+    await runtime.complete(selection.record, { playId: 'natural', audibleMs: 5000, finished: true });
+    await new Promise(resolve => setImmediate(resolve));
+    await sync();
+    assert.deepEqual(calls, ['settle', 'remove']);
+    assert.equal(removed, true);
+  }
+});
+
+test('played paid requests remain checkpointed when removal has made them refundable', async () => {
+  const { createDevertQueueRuntime } = await import('../discord-bot/devert-queue.js');
+  const refundable = request();
+  let saved;
+  let settlements = 0;
+  const runtime = createDevertQueueRuntime({
+    readState: async () => ({ paused: false, requests: [], recentRefunds: [refundable] }),
+    store: {
+      restore: async () => ({ schemaVersion: 1, records: [{
+        ...refundable, state: 'played', playId: 'already-played', attempts: 1,
+      }] }),
+      save: async state => { saved = structuredClone(state); return 'ipfs://journal'; },
+    },
+    contract: {
+      getRequest: async () => ({ status: 0, campaignId: BigInt(refundable.campaignId) }),
+      removedCampaigns: async () => true,
+      fulfill: async () => { settlements++; },
+    },
+  });
+  assert.equal(await runtime.nextPaid(), null);
+  assert.equal(settlements, 0);
+  assert.equal(saved.records[0].state, 'played');
+});
+
+test('removed unplayed requests leave the pending paid queue journal', async () => {
+  const { createDevertQueueRuntime } = await import('../discord-bot/devert-queue.js');
+  const refundable = request();
+  let saved;
+  const runtime = createDevertQueueRuntime({
+    readState: async () => ({ paused: false, requests: [], recentRefunds: [refundable] }),
+    store: {
+      restore: async () => ({ schemaVersion: 1, records: [{
+        ...refundable, state: 'pending', attempts: 0,
+      }] }),
+      save: async state => { saved = structuredClone(state); return 'ipfs://journal'; },
+    },
+    contract: {
+      getRequest: async () => ({ status: 0, campaignId: BigInt(refundable.campaignId) }),
+      removedCampaigns: async () => true,
+    },
+  });
+  assert.equal(await runtime.nextPaid(), null);
+  assert.equal(saved.records[0].state, 'fulfilled');
 });
 
 test('checkout snapshot rejects a different contract or a manipulated quote and allows disabled configuration', async () => {

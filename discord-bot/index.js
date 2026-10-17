@@ -1037,6 +1037,7 @@ async function main() {
       }
       syncPaidAdRemovals = createDevertQueueCatalogSync({
         contract: queueContract, removals: devertRemovals, readCampaigns: readDevertState,
+        beforeRemove: campaignId => paidAdRuntime?.prepareCampaignRemoval(campaignId),
         resolveApprovedMedia: (campaign, cid) => resolveApprovedDevertCampaignMedia(campaign, cid, {
           playlist: getPlaylist(), nfts: _nftCatalog || [],
         }),
@@ -1055,11 +1056,18 @@ async function main() {
         tags: { app: 'decentbusking', kind: paidAdVersion === 1 ? 'devert-paid-journal'
           : `devert-paid-${paidAdAddress.toLowerCase()}`, schema: '1' },
         serialize: value => value, deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
-      paidAdRuntime = createDevertQueueRuntime({ readState: readDevertQueue, store, contract: queueContract,
+      const paidAdRuntimeBase = createDevertQueueRuntime({ readState: readConfirmedQueue, store, contract: queueContract,
         isCampaignRemoved: campaignId => devertRemovals.isRemoved(campaignId),
         resolveCampaignMedia: (campaign, cid) => resolveDevertCampaignMedia(campaign, cid, {
           playlist: getPlaylist(), nfts: _nftCatalog || [],
         }) });
+      paidAdRuntime = {
+        ...paidAdRuntimeBase,
+        async nextPaid(options) {
+          approvedAdCampaignIds = await syncPaidAdRemovals();
+          return paidAdRuntimeBase.nextPaid(options);
+        },
+      };
     } else console.warn('[devert-queue] Read-only: scheduler, durable mirror, Pinata and campaign removal state are required.');
   }
   _radioPaidQueues = (_djukeRuntime || paidAdRuntime)
@@ -1210,9 +1218,9 @@ async function main() {
     getDevertQueue: readDevertQueue,
     removeDevertCampaign: devertRemovals ? async payload => {
       const removal = await devertRemovals.remove(payload);
-      if (syncPaidAdRemovals) await syncPaidAdRemovals();
       await getActiveJukeLoopSession()?.removeDevertCampaign(payload.campaignId);
       _devertLoopWorker?.removeCampaign(payload.campaignId);
+      if (syncPaidAdRemovals) await syncPaidAdRemovals();
       return removal;
     } : undefined,
     getFunds: async () => fundLedger.getCurrentState(),

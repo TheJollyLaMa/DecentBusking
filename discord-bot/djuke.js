@@ -139,7 +139,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
       await commit(next);
       initialized = true;
     }),
-    synchronize: requests => run(async () => {
+    synchronize: (requests, { preserveMissing = () => false } = {}) => run(async () => {
       requireReady();
       const next = copy(records);
       const seen = new Set();
@@ -156,15 +156,23 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
           payer: request.payer,
           amountUnits: request.amountUnits,
           ...(request.tier !== undefined ? { tier: request.tier } : {}),
+          ...(request.campaignId !== undefined ? { campaignId: String(request.campaignId) } : {}),
         };
         if (!existing) next.push({ requestId: request.requestId, ...fields, state: 'pending', attempts: 0 });
-        else if (existing.state !== 'fulfilled' && (existing.trackId !== request.trackId || existing.revision !== request.revision)) {
+        else if (existing.state !== 'fulfilled') {
+          const recordingChanged = existing.trackId !== request.trackId || existing.revision !== request.revision;
           Object.assign(existing, fields);
-          existing.state = 'pending';
-          delete existing.playId;
+          if (recordingChanged) {
+            existing.state = 'pending';
+            delete existing.playId;
+          }
         }
       }
-      for (const record of next) if (record.state !== 'fulfilled' && !seen.has(record.requestId)) record.state = 'fulfilled';
+      for (const record of next) {
+        if (record.state !== 'fulfilled' && !seen.has(record.requestId) && !await preserveMissing(record)) {
+          record.state = 'fulfilled';
+        }
+      }
       if (JSON.stringify(next) !== JSON.stringify(records)) await commit(next);
     }),
     peek: () => { requireReady(); const record = records.find(entry => entry.state !== 'fulfilled'); return record ? copy(record) : null; },
@@ -301,6 +309,7 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
 }
 
 export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVerifiedRequests, selectRequest,
+  preserveMissingRequest = () => false, canPlayRequest = () => true,
   minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
   let initialized = null;
   let settling = Promise.resolve();
@@ -311,7 +320,14 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   async function settle(state) {
     for (const record of journal.getState().filter(entry => entry.state === 'played')) {
       const request = state.requests.find(entry => entry.requestId === record.requestId);
-      if (!request) { await journal.confirmFulfilled(record.requestId); continue; }
+      if (!request) {
+        if (await preserveMissingRequest(record, state)) {
+          log.warn(`[djuke] Played request ${record.requestId} is missing from the queue but remains refundable; preserving its checkpoint.`);
+          return;
+        }
+        await journal.confirmFulfilled(record.requestId);
+        continue;
+      }
       try {
         await fulfill({ chainRequestId: request.chainRequestId, songId: record.songId, revision: record.revision, playId: record.playId });
         await journal.confirmFulfilled(record.requestId);
@@ -321,18 +337,23 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       }
     }
   }
-  async function claim(options) {
+  async function reconcile() {
     await ready();
     const state = await readState();
     if (onVerifiedRequests) Promise.resolve().then(() => onVerifiedRequests(state))
       .catch(error => log.warn(`[djuke] Confirmed-request hook deferred: ${error.message}`));
-    await journal.synchronize(state.requests);
+    await journal.synchronize(state.requests, { preserveMissing: record => preserveMissingRequest(record, state) });
     await settleSerial(state);
+    return state;
+  }
+  async function claim(options) {
+    const state = await reconcile();
     const head = selectRequest
       ? selectRequest(state, journal.getState().filter(record => record.state === 'pending'), options)
       : journal.peekPending();
     if (!head) return null;
     const request = state.requests.find(entry => entry.requestId === head.requestId);
+    if (!request || !await canPlayRequest(request, state)) return null;
     const track = request?.playable ? getTrack(request.trackId) : null;
     if (!track) throw new Error(`Paid DJuke request ${head.requestId} is not playable`);
     const record = await journal.reserveNext(head.requestId);
@@ -368,5 +389,7 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       readState().then(settleSerial).catch(error => log.warn(`[djuke] Fulfillment deferred: ${error.message}`));
     },
     fail: (record, error) => journal.fail(record.requestId, error?.message || String(error)),
+    reconcile,
+    getJournalState: () => journal.getState(),
   };
 }
