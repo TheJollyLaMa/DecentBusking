@@ -28,6 +28,9 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(html, /Play After This Song \(extra break\)<\/td><td>2× the current queue bump price/);
   assert.match(html, /id="devert-paid-immediate-button"/);
   assert.match(html, /Optional priority payments do not purchase or extend that campaign/);
+  assert.match(html, /decent\.config\.js\?v=20261017-devert-v02/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-paid-queue.mjs'), 'utf8'),
+    /devert-queue\.mjs\?v=20261017-two-tier-priority/);
   assert.match(html, /Campaign Instructions: Submit, Receive &amp; Run/);
   assert.doesNotMatch(html, /<details class="devert-workflow-details">/);
   assert.doesNotMatch(html, /id="devert-offer"/);
