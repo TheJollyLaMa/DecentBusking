@@ -792,6 +792,73 @@ test('radio state is public and readable from any dapp origin', async () => {
   });
 });
 
+test('radio media streams ranges without exposing the private gateway URL', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const cid = 'bafybeih6bvh4bgb2g5gsqxbsv6fuzbhve7m2zby654jyhrqmii5ftki3l4';
+  const requests = [];
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: ['https://busking.example'],
+    ownerWallet: '0x1111111111111111111111111111111111111111',
+    getRadioMediaUrl: async value => value === cid ? 'https://private.example/ipfs/song?token=private' : null,
+    fetchImpl: async (url, options) => {
+      requests.push({ url, range: options.headers.range });
+      return new Response(new Uint8Array([1, 2, 3]), {
+        status: 206,
+        headers: {
+          'content-type': 'audio/mpeg',
+          'content-range': 'bytes 4-6/100',
+          'content-length': '3',
+          'accept-ranges': 'bytes',
+        },
+      });
+    },
+  });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/radio/media?cid=${cid}`, { headers: { range: 'bytes=4-6' } });
+    assert.equal(response.status, 206);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.equal(response.headers.get('content-range'), 'bytes 4-6/100');
+    assert.equal(response.headers.get('accept-ranges'), 'bytes');
+    assert.equal(response.headers.get('content-type'), 'audio/mpeg');
+    assert.equal(response.headers.get('location'), null);
+    assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [1, 2, 3]);
+    assert.equal(requests[0].range, 'bytes=4-6');
+    assert.equal(requests.length, 1);
+
+    const unknown = await fetch(`${base}/api/radio/media?cid=bafyunknownrecording123456789`);
+    assert.equal(unknown.status, 404);
+    assert.equal(requests.length, 1, 'unknown recordings never reach the gateway');
+    const invalid = await fetch(`${base}/api/radio/media?cid=https://other.example`);
+    assert.equal(invalid.status, 400);
+    assert.equal(requests.length, 1);
+  });
+});
+
+test('radio media preserves unsatisfiable range responses and reports upstream failures', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  let upstreamStatus = 416;
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: [],
+    ownerWallet: '0x1111111111111111111111111111111111111111',
+    getRadioMediaUrl: async () => 'https://private.example/audio',
+    fetchImpl: async () => new Response(null, {
+      status: upstreamStatus,
+      headers: { 'content-range': 'bytes */100' },
+    }),
+  });
+  await withServer(handler, async base => {
+    const url = `${base}/api/radio/media?cid=bafyrecording1234567890`;
+    const range = await fetch(url, { headers: { range: 'bytes=1000-' } });
+    assert.equal(range.status, 416);
+    assert.equal(range.headers.get('content-range'), 'bytes */100');
+    await range.arrayBuffer();
+    upstreamStatus = 429;
+    const failed = await fetch(url);
+    assert.equal(failed.status, 502);
+    assert.deepEqual(await failed.json(), { error: 'Radio media gateway is unavailable' });
+  });
+});
+
 test('radio votes need no wallet but require an allowed origin', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const ballots = [];

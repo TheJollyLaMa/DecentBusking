@@ -16,6 +16,8 @@ Read the [Decent Busking whitepaper](WHITEPAPER.md) for the vision, current arch
 
 Open the [DecentBusking town square](https://thejollylama.github.io/DecentBusking/) and explore the 3D music timeline. Select a track in the archive to click **Preview** for a free 30-second taste or **Listen** to play the whole song, inspect its NFT details, and tip the artist. Connect MetaMask on Base when you want to send a tip.
 
+The site radio streams and preloads recordings through the worker's public `GET /api/radio/media?cid=…` endpoint, which only serves recordings known to the radio playlist. The worker uses its dedicated IPFS gateway (or the original Discord upload) without sharing gateway credentials with browsers, and forwards HTTP ranges for seeking. The configured public gateway remains a browser fallback. Deploy both the worker and site when updating this route.
+
 Join [DecentBusking on Discord](https://discord.gg/SCtcBggHPa), head to **#DecentJukebox**, and tune in to the **JukeLoop** voice channel. The radio rotates community uploads; listeners can react 👍 or 👎. The bot tracks cumulative votes and plays, and the ratings influence future rotation.
 
 Open the **Top 10** pull-tab on the upper-left to see this New York week's most-voted songs and their current USDC prize estimates. Each song holds its own prize place, even when one artist has several winning songs. First place receives half the weekly pot, each subsequent place receives half the remaining pot, and the last payable place receives the remainder. Every payable prize must exceed $0.10; a smaller pot supports fewer payable places. Estimates change with votes and confirmed funding, then freeze at Monday midnight in America/New_York. Payments still require owner approval.

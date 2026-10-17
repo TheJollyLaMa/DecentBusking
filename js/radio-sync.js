@@ -12,6 +12,7 @@ const FADE_IN_MS = 600;
 const PREVIEW_MS = 30_000;
 const DRIFT_TOLERANCE_S = 8;
 const LOAD_TIMEOUT_MS = 20_000;
+const GATEWAY_RETRY_TIMEOUT_MS = 5_000;
 // After a song ends, poll quickly so the next one starts right after the JukeLoop changeover gap.
 const HANDOFF_POLL_MS = 750;
 const HANDOFF_WINDOW_MS = 30_000;
@@ -671,6 +672,7 @@ function _syncRadio(message) {
     title: _radio.title,
     artist: _radio.uploader,
     url: _gatewayUrl(_radio.ipfsCid),
+    fallbackUrls: _gatewayUrls(_radio.ipfsCid).slice(1),
     mime: _mediaTypeForTrack(_radio),
     offset: continuing ? () => 0 : _radioPositionS,
     preloadCid: _radio.ipfsCid,
@@ -725,6 +727,7 @@ function _startNextTakeover() {
     title: track.title,
     artist: track.uploader,
     url: _gatewayUrl(track.ipfsCid),
+    fallbackUrls: _gatewayUrls(track.ipfsCid).slice(1),
     mime: _mediaTypeForTrack(track),
     nowPlaying: {
       source: 'takeover',
@@ -784,13 +787,27 @@ function _onEnded(event) {
 
 // ── Audio element control ─────────────────────────────────────────────────
 
-function _gatewayUrl(cid) {
-  const cfg = window.DecentConfig || {};
-  const gateway = (cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/').replace(/\/?$/, '/');
-  return `${gateway}${cid}`;
+function _buildIpfsGatewayUrl(gateway, cid) {
+  const [rawBase, ...queryParts] = String(gateway).split('?');
+  const base = rawBase.replace(/\/+$/, '');
+  const ipfsBase = /\/ipfs$/i.test(base) ? base : `${base}/ipfs`;
+  return `${ipfsBase}/${cid}${queryParts.length ? `?${queryParts.join('?')}` : ''}`;
 }
 
-async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = () => 0, nowPlaying = null, preloadCid = null }) {
+function _gatewayUrls(cid) {
+  const cfg = window.DecentConfig || {};
+  const worker = (cfg.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+  return [...new Set([
+    ...(worker ? [`${worker}/api/radio/media?cid=${encodeURIComponent(cid)}`] : []),
+    _buildIpfsGatewayUrl(cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/', cid),
+  ])];
+}
+
+function _gatewayUrl(cid) {
+  return _gatewayUrls(cid)[0];
+}
+
+async function _switchTo({ title, artist, url, fallbackUrls = [], mime = _mimeType(url), offset = () => 0, nowPlaying = null, preloadCid = null }) {
   const token = ++_switchToken;
   const switchStartedAt = performance.now();
   _setTrack(title, artist);
@@ -800,7 +817,6 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
     return;
   }
   const mediaUrl = preloaded?.blobUrl || url;
-  const at = offset();
   let canSeekImmediately = false;
 
   _broadcastNowPlayingStopped('switching');
@@ -818,31 +834,46 @@ async function _switchTo({ title, artist, url, mime = _mimeType(url), offset = (
   _renderVideo();
   _applyRadioVolume();
   if (_audio) _audio.crossOrigin = 'anonymous';
-  _audio.removeAttribute('src');
-  _audio.querySelectorAll('source').forEach((source) => source.remove());
-  const source = document.createElement('source');
-  source.src = mediaUrl;
-  if (mime) source.type = mime;
-  _audio.appendChild(source);
   _audio.preload = 'auto';
-  const metadataReady = _waitForMetadata();
-  _audio.load();
   _releaseActiveBlob(preloaded?.blobUrl || null);
 
-  const loaded = await metadataReady;
+  const candidates = [...new Set([mediaUrl, ...(preloaded ? [url] : []), ...fallbackUrls].filter(Boolean))];
+  let activeUrl = mediaUrl;
+  let loaded = false;
+  for (const candidate of candidates) {
+    if (token !== _switchToken) return;
+    activeUrl = candidate;
+    _audio.removeAttribute('src');
+    _audio.querySelectorAll('source').forEach((source) => source.remove());
+    const source = document.createElement('source');
+    source.src = candidate;
+    if (mime) source.type = mime;
+    _audio.appendChild(source);
+    const metadataReady = _waitForMetadata(candidate === url ? LOAD_TIMEOUT_MS : GATEWAY_RETRY_TIMEOUT_MS);
+    _audio.load();
+    loaded = await metadataReady;
+    if (loaded) break;
+  }
   if (token !== _switchToken) return;
   if (!loaded) {
+    if (_mode === 'radio' && _radio?.playId === nowPlaying?.playId) _loadedPlayId = null;
     _setActivity('⚠️ Couldn’t load this track from IPFS — waiting for the next one');
     return;
   }
+  const at = offset();
+  const broadcastUrl = activeUrl === mediaUrl ? (nowPlaying?.audioUrl || activeUrl) : activeUrl;
   if (at > 0) canSeekImmediately = _seekTo(at);
-  _broadcastNowPlaying(nowPlaying || {
+  _broadcastNowPlaying(nowPlaying ? {
+    ...nowPlaying,
+    audioUrl: broadcastUrl,
+    videoUrl: mime === 'video/mp4' && activeUrl !== mediaUrl ? activeUrl : (nowPlaying.videoUrl || ''),
+  } : {
     source: _mode,
     title,
     artist,
-    audioUrl: url,
+    audioUrl: broadcastUrl,
     mediaType: mime || _mimeType(url),
-    videoUrl: nowPlaying?.videoUrl || (mime === 'video/mp4' ? url : ''),
+    videoUrl: mime === 'video/mp4' ? broadcastUrl : '',
     nft: nowPlaying?.nft ?? null,
   });
 
@@ -931,7 +962,7 @@ function _seekTo(seconds) {
   return false;
 }
 
-function _waitForMetadata() {
+function _waitForMetadata(timeoutMs = LOAD_TIMEOUT_MS) {
   const player = _audio;
   return new Promise((resolve) => {
     const finish = (ok) => {
@@ -942,7 +973,7 @@ function _waitForMetadata() {
     };
     const onLoaded = () => finish(true);
     const onError = () => finish(false);
-    const timer = setTimeout(() => finish(false), LOAD_TIMEOUT_MS);
+    const timer = setTimeout(() => finish(false), timeoutMs);
     timer.unref?.();
     player.addEventListener('loadedmetadata', onLoaded);
     player.addEventListener('error', onError, true);

@@ -1,4 +1,6 @@
 import { Contract, Interface, JsonRpcProvider, verifyMessage } from 'ethers';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
 import { buildFundWeeklyArchive } from '../js/fund-archive.mjs';
@@ -204,6 +206,7 @@ export function createWorkerRequestHandler({
   onReviewedAlbumImport,
   creatorProfiles,
   getRadioState,
+  getRadioMediaUrl,
   getRadioSchedule,
   saveRadioSchedule,
   getDjukeState,
@@ -285,7 +288,7 @@ export function createWorkerRequestHandler({
         response.writeHead(uploadRoute ? 204 : (corsOrigin ? 204 : 403), {
           ...(uploadRoute || corsOrigin ? { 'access-control-allow-origin': corsOrigin || origin || '*', vary: 'origin' } : {}),
           'access-control-allow-methods': 'GET, POST, OPTIONS',
-          'access-control-allow-headers': 'content-type',
+          'access-control-allow-headers': 'content-type, range',
         });
         response.end();
         return;
@@ -325,6 +328,61 @@ export function createWorkerRequestHandler({
           return;
         }
         sendJson(response, 200, await getRadioState(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/radio/media') {
+        const cid = requestUrl.searchParams.get('cid') || '';
+        if (!/^[a-zA-Z0-9]{20,120}$/.test(cid)) {
+          sendJson(response, 400, { error: 'Invalid radio media CID' }, '*');
+          return;
+        }
+        if (!getRadioMediaUrl) {
+          sendJson(response, 503, { error: 'Radio media is not configured' }, '*');
+          return;
+        }
+        const url = await getRadioMediaUrl(cid);
+        if (!url) {
+          sendJson(response, 404, { error: 'Radio recording is unavailable' }, '*');
+          return;
+        }
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        response.once('close', abort);
+        const timeout = setTimeout(abort, 30_000);
+        try {
+          const upstream = await fetchImpl(url, {
+            headers: request.headers.range ? { range: request.headers.range } : {},
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          if (![200, 206, 416].includes(upstream.status)) {
+            await upstream.body?.cancel();
+            console.warn(`[radio] Media gateway returned HTTP ${upstream.status}`);
+            sendJson(response, 502, { error: 'Radio media gateway is unavailable' }, '*');
+            return;
+          }
+          const headers = {
+            'access-control-allow-origin': '*',
+            'access-control-expose-headers': 'content-length, content-range, accept-ranges',
+            'cache-control': 'public, max-age=300',
+          };
+          for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+            const value = upstream.headers.get(name);
+            if (value) headers[name] = value;
+          }
+          response.writeHead(upstream.status, headers);
+          if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), response);
+          else response.end();
+        } catch (error) {
+          if (!response.destroyed) {
+            console.warn('[radio] Media stream failed:', error.name);
+            if (response.headersSent) response.destroy();
+            else sendJson(response, 502, { error: 'Radio media stream failed' }, '*');
+          }
+        } finally {
+          clearTimeout(timeout);
+          response.off('close', abort);
+        }
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/radio/schedule') {

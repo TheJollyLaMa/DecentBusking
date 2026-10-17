@@ -112,6 +112,7 @@ import {
   getAttachmentTitle,
   synchronizeDiscordRating,
   setDedicatedIpfsGateways,
+  resolveStreamableIpfsUrl,
 } from './jukeloop.js';
 import {
   upsertLivePerformanceEvent,
@@ -1125,6 +1126,16 @@ async function main() {
           ready: paymentLedgerReady,
         },
       };
+    },
+    getRadioMediaUrl: async cid => {
+      const session = getActiveJukeLoopSession();
+      if (!session) return null;
+      const track = [session._currentTrack, getJukeLoopUpNext(), ...getPlaylist()]
+        .find(entry => entry?.ipfsCid === cid);
+      if (!track) return null;
+      const gateway = await discoverDedicatedGateway(config) || config.ipfsGateway;
+      return await resolveStreamableIpfsUrl(gateway, cid) ||
+        (track.messageId ? session._getFreshUrl({ ...track, ipfsCid: null }) : null);
     },
     getDevertState: readDevertState,
     removeDevertCampaign: devertRemovals ? async payload => {
