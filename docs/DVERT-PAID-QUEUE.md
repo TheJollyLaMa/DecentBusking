@@ -14,6 +14,8 @@ addresses, and campaign IDs. The first button uses the next normal ad break;
 the second costs twice as much for after-song priority. Detailed terms stay
 in the information dialog; ordinary rotation, wallet ads, campaign tools and
 the price model are collapsed until requested.
+Wallet connection uses the page header, not a second connect control in DVert.
+Campaign and priority checkout follow that shared wallet and its network changes.
 
 The orangutan/TV icon toggles the live 24/7 VertLoop audio/video feed, hushing
 main radio only for this listener. Its hover/focus help explains the switch.

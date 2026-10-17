@@ -1118,8 +1118,8 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 @media (prefers-reduced-motion: reduce) {
   #devert-panel.is-open .devert-queue-actions button::after { animation: none; }
 }
-#devert-panel #devert-paid-queue-button { --devert-button-glow: #8bec6955; color: #142a16; background: linear-gradient(180deg, #efffe1 0%, #bdff8e 44%, #77db4e 49%, #a7f477 100%); border-color: #c4ffa4; }
-#devert-panel #devert-paid-immediate-button { --devert-button-glow: #43e6cf55; color: #0b302c; background: linear-gradient(180deg, #d7fff6 0%, #89f7de 44%, #30cdb2 49%, #68edd3 100%); border-color: #a7fff0; }
+#devert-panel #devert-paid-queue-button { --devert-button-glow: #69a98322; color: #10271b; background: linear-gradient(180deg, #b6d6ba 0%, #85b590 44%, #58976b 49%, #79ac84 100%); border-color: #a1c5a7; }
+#devert-panel #devert-paid-immediate-button { --devert-button-glow: #4e9f9722; color: #092b29; background: linear-gradient(180deg, #afd4ce 0%, #79b5ac 44%, #46948b 49%, #6aa99f 100%); border-color: #98c6bf; }
 #devert-panel .devert-queue-actions button:disabled { opacity: .85; cursor: not-allowed; }
 #devert-panel .devert-queue-actions button:enabled:hover { filter: brightness(1.12); }
 #devert-panel .devert-queue-actions button:enabled:active { box-shadow: inset 0 2px 4px #0005, 0 0 7px var(--devert-button-glow); }

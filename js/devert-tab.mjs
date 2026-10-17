@@ -205,7 +205,6 @@ export function initDevertTab() {
   const adMediaQueueButton = document.getElementById('devert-ad-queue');
   const adMediaStatus = document.getElementById('devert-ad-queue-status');
   const minimumOffer = document.getElementById('devert-minimum-offer');
-  const walletButton = document.getElementById('devert-connect-wallet');
   const audioModeButton = document.getElementById('devert-audio-mode');
   const previewPlayer = document.getElementById('devert-ad-preview');
   const adVoteButtons = [document.getElementById('devert-vote-up'), document.getElementById('devert-vote-down')];
@@ -394,14 +393,13 @@ export function initDevertTab() {
     const totalUnits = 5_000_000n * BigInt(weeks);
     const campaignTotal = document.getElementById('devert-campaign-total');
     purchaseForm.hidden = !verifiedContract;
-    walletButton.hidden = !verifiedContract || !!wallet?.address;
     purchaseButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || purchaseBusy;
     adMediaQueueButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || adMediaBusy || !adMediaFile.files?.[0];
     if (campaignTotal) campaignTotal.textContent = `Total: ${weeks} × 5.00 USDC = ${formatUsdc(totalUnits.toString())} + worker-gas ETH`;
     if (!address) minimumOffer.textContent = 'Campaigns unavailable';
     else if (confirmedContract && snapshot.paused) minimumOffer.textContent = 'Campaign purchases paused';
     else if (!verifiedContract) minimumOffer.textContent = 'Connecting…';
-    else if (!wallet?.address) minimumOffer.textContent = 'Connect your wallet to submit an ad';
+    else if (!wallet?.address) minimumOffer.textContent = 'Connect in the page header to submit an ad';
     else if (wallet.chainId !== 8453) minimumOffer.textContent = 'Switch to Base';
     else minimumOffer.textContent = '';
   }
@@ -776,9 +774,9 @@ export function initDevertTab() {
   adVoteButtons[1]?.addEventListener('click', () => voteOnAd(-1));
   adMediaFile?.addEventListener('change', syncCheckout);
   adMediaQueueButton?.addEventListener('click', queueAdMedia);
-  walletButton?.addEventListener('click', () => window._wallet?.connect?.());
   document.addEventListener('wallet-connected', syncCheckout);
   document.addEventListener('wallet-connected', refresh);
+  document.addEventListener('wallet-chain-changed', syncCheckout);
   document.addEventListener('wallet-disconnected', () => {
     currentAds = [];
     adLibraryStatus = 'Connect your wallet to browse ads.';
