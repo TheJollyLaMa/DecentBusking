@@ -71,6 +71,28 @@ test('DJuke song manifest registers each radio song once with its artist wallet'
     audioURI: 'ipfs://bafy-a', recipients: [wallet], sharesBps: [10000] }]);
 });
 
+test('DJuke collaborator shares reach both the manifest and actual registration calldata', async () => {
+  const { buildDjukeSongManifest } = await import('../discord-bot/djuke-songs.js');
+  const { createDjukeSongRegistrar, DJUKE_ABI } = await import('../discord-bot/djuke.js');
+  const { Interface } = createRequire(path.join(__dirname, '../discord-bot/package.json'))('ethers');
+  const wallet = `0x${'1'.repeat(40)}`;
+  const other = `0x${'2'.repeat(40)}`;
+  const track = { trackId: 'collab', title: 'Collaboration', source: 'site', mintStatus: 'minted',
+    ipfsCid: 'recording', mintRecipient: wallet, creatorSplits: [{ wallet, shareBps: 6500 }, { wallet: other, shareBps: 3500 }] };
+  const song = buildDjukeSongManifest([track]).songs[0];
+  assert.deepEqual(song.recipients, [wallet, other]);
+  assert.deepEqual(song.sharesBps, [6500, 3500]);
+  const contract = { interface: new Interface(DJUKE_ABI), getSong: async () => ({ audioURI: '' }),
+    multicall: async calls => {
+      const args = contract.interface.decodeFunctionData('registerSong', calls[0]);
+      assert.deepEqual([...args[2]], [wallet, other]);
+      assert.deepEqual([...args[3]], [6500n, 3500n]);
+      return { hash: 'registration', wait: async () => ({ status: 1 }) };
+    } };
+  assert.equal(await createDjukeSongRegistrar({ contract, getPlaylist: () => [track], log: { log() {}, warn() {} } })(), 1);
+  assert.equal(buildDjukeSongManifest([{ ...track, isDevertAd: true }]).songs.length, 0);
+});
+
 test('registrar catches up all eligible songs in batches, then picks up only new uploads', async () => {
   const { createDjukeSongRegistrar, DJUKE_ABI } = await import('../discord-bot/djuke.js');
   const { Interface } = createRequire(path.join(__dirname, '../discord-bot/package.json'))('ethers');

@@ -1159,6 +1159,7 @@ async function main() {
         tipWallet: track.tipWallet || track.mintRecipient,
         parentTokenId: track.parentTokenId || 0,
         isDevertAd: track.isDevertAd === true,
+        ...(track.creatorSplits ? { creatorSplits: track.creatorSplits } : {}),
         requestedAt: track.mintRequestedAt,
         requestType: 'mint',
       }));

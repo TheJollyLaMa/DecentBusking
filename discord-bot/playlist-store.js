@@ -159,14 +159,20 @@ export function addTrack(track) {
   return true;
 }
 
-export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId, isDevertAd = false }) {
+export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId, isDevertAd = false, creatorSplits }) {
   const trackId = `site:${address.toLowerCase()}:${ipfsCid}`;
   const existing = _playlist.find(track => track.trackId === trackId);
-  if (existing) return existing;
+  if (existing) {
+    if ((existing.isDevertAd === true) !== (isDevertAd === true) ||
+      (creatorSplits && JSON.stringify(existing.creatorSplits || [{ wallet: existing.mintRecipient, shareBps: 10000 }]) !== JSON.stringify(creatorSplits))) {
+      throw new Error('This recording was already submitted with a different advert classification or DJuke split. Contact the owner to review it; existing payout settings were not changed.');
+    }
+    return existing;
+  }
   const videoUrl = mediaType === 'video/mp4' ? `ipfs://${ipfsCid}` : '';
   addTrack({ attachmentId: trackId, source: 'site', uploaderId: `wallet:${address.toLowerCase()}`,
     uploader: artist, title, ipfsCid, mediaType, filename, pinStatus: 'pinned', artworkCid, videoUrl,
-    tipWallet: tipWallet || recipient, parentTokenId, isDevertAd,
+    tipWallet: tipWallet || recipient, parentTokenId, isDevertAd, ...(creatorSplits ? { creatorSplits } : {}),
     mintStatus: 'requested', mintRecipient: recipient, mintRequestedAt: new Date().toISOString() });
   return _playlist.find(track => track.trackId === trackId);
 }

@@ -125,6 +125,33 @@ test('AdLoop state endpoint exposes live now-playing state without requiring a m
   });
 });
 
+test('public calendar subscription serves real events and alarms, fails closed during calendar restore', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const { defaultRadioSchedule } = await import('../js/radio-schedule.mjs');
+  let ready = true;
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+    now: () => Date.parse('2026-10-30T12:00:00Z'),
+    getRadioSchedule: () => ({ ready, schedule: defaultRadioSchedule(), events: [] }) });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/radio/calendar.ics`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /text\/calendar/);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.match(response.headers.get('cache-control'), /max-age=300/);
+    const calendar = await response.text();
+    assert.match(calendar, /BEGIN:VCALENDAR/);
+    assert.match(calendar, /Friday Top 10 Hype Hour/);
+    assert.match(calendar, /TRIGGER:-PT15M/);
+    ready = false;
+    const unavailable = await fetch(`${base}/api/radio/calendar.ics`);
+    assert.equal(unavailable.status, 503);
+    assert.match((await unavailable.json()).error, /temporarily unavailable/);
+  });
+  await withServer(createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address }), async base => {
+    assert.equal((await fetch(`${base}/api/radio/calendar.ics`)).status, 404);
+  });
+});
+
 test('public radio schedule is readable and schedule edits require an origin-bound owner signature', async () => {
   const { buildRadioScheduleAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const { buildRadioScheduleAuthorizationMessage: buildBrowserAuthorizationMessage } = await import('../js/radio-schedule-ui.mjs');
@@ -523,6 +550,29 @@ test('artist MP4 uploads use separate authorization and cannot access owner uplo
   });
 });
 
+test('CID format detection reads a bounded prefix, normalizes CIDs and cancels the stream', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const cid = 'bafybeifynaihnl2t37s3nfez3k5vbwwziaqyvayadqwt4bou3yv6jstxye';
+  let canceled = false;
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+    fetchImpl: async (url, options) => {
+      assert.equal(url, `https://gateway.pinata.cloud/ipfs/${cid}`);
+      assert.equal(options.headers.Range, 'bytes=0-65535');
+      return new Response(new ReadableStream({ start(controller) {
+        const bytes = new Uint8Array(100000);
+        bytes.set(Buffer.from('RIFF1234WAVE'));
+        controller.enqueue(bytes);
+      }, cancel() { canceled = true; } }), { headers: { 'content-type': 'application/octet-stream' } });
+    } });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/ipfs/media-type?cid=${cid}`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { cid, mediaType: 'audio/wav', filename: 'track.wav' });
+    assert.equal(canceled, true);
+    assert.equal((await fetch(`${base}/api/ipfs/media-type?cid=bad`)).status, 400);
+  });
+});
+
 test('signed CID submissions validate the artist, media, expiry, origin, and replay protection', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const mediaModule = pathToFileURL(path.join(__dirname, '../discord-bot/media.js')).href;
@@ -536,7 +586,8 @@ test('signed CID submissions validate the artist, media, expiry, origin, and rep
   const payload = { address: artist.address, origin, issuedAt, title: 'Performance', artist: 'Artist',
     ipfsCid: 'bafybeifynaihnl2t37s3nfez3k5vbwwziaqyvayadqwt4bou3yv6jstxye',
     mediaType: 'video/mp4', filename: 'performance.mp4', recipient: artist.address,
-    artworkCid: '', tipWallet: artist.address, parentTokenId: 7, isDevertAd: true };
+    artworkCid: '', tipWallet: artist.address, parentTokenId: 7, isDevertAd: true,
+    creatorSplits: [{ wallet: artist.address, shareBps: 6000 }, { wallet: other.address, shareBps: 4000 }] };
   assert.equal(browser.buildSubmissionAuthorizationMessage(payload), buildSubmissionAuthorizationMessage(payload));
   const submissions = [];
   const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: other.address,
@@ -555,6 +606,7 @@ test('signed CID submissions validate the artist, media, expiry, origin, and rep
     assert.equal(submissions[0].mediaType, 'video/mp4');
     assert.equal(submissions[0].parentTokenId, 7);
     assert.equal(submissions[0].isDevertAd, true);
+    assert.deepEqual(submissions[0].creatorSplits, payload.creatorSplits);
     assert.equal((await post(payload)).status, 400);
     for (const invalid of [
       { ...payload, recipient: Wallet.createRandom().address },
@@ -563,6 +615,8 @@ test('signed CID submissions validate the artist, media, expiry, origin, and rep
       { ...payload, filename: 'movie.mp3' },
       { ...payload, issuedAt: '2026-10-01T00:00:00Z' },
       { ...payload, parentTokenId: -1 },
+      { ...payload, creatorSplits: [{ wallet: artist.address, shareBps: 9000 }] },
+      { ...payload, creatorSplits: [{ wallet: other.address, shareBps: 10000 }] },
     ]) assert.equal((await post(invalid)).status, 400);
     assert.equal((await post({ ...payload, title: 'Forged' }, origin, other)).status, 400);
     assert.equal((await post(payload, 'https://other.example')).status, 400);

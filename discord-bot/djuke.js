@@ -1,5 +1,6 @@
 import { Contract, JsonRpcProvider, id, isAddress } from 'ethers';
 import { quoteDjuke } from '../js/djuke.mjs';
+import { validateCreatorSplits } from '../js/submission-media.mjs';
 
 export const DJUKE_ABI = [
   'function headRequestId() view returns (uint256)',
@@ -55,7 +56,16 @@ export function createDjukeSongRegistrar({ contract, getPlaylist, batchSize = 25
         try {
           const song = await readSongWithRetry(contract, entry.songId, undefined, readRetryAttempts, readRetryDelayMs);
           if (!song.audioURI) missing.push(entry);
-          else if (song.audioURI === `ipfs://${entry.track.ipfsCid}`) known.add(entry.songId);
+          else if (song.audioURI === `ipfs://${entry.track.ipfsCid}`) {
+            if (entry.track.creatorSplits) {
+              const splits = validateCreatorSplits(entry.track.creatorSplits, entry.track.mintRecipient);
+              if (song.recipients?.length !== splits.length || splits.some((split, index) =>
+                song.recipients[index]?.toLowerCase() !== split.wallet.toLowerCase() || Number(song.sharesBps?.[index]) !== split.shareBps)) {
+                log.warn(`[djuke] ${entry.track.trackId} has different registered creator splits; admin review needed. Existing requests retain their on-chain splits.`);
+              }
+            }
+            known.add(entry.songId);
+          }
           else { known.add(entry.songId); log.warn(`[djuke] ${entry.track.trackId} is registered with different audio; admin review needed`); }
         } catch {
           lookupErrors++;
@@ -66,8 +76,11 @@ export function createDjukeSongRegistrar({ contract, getPlaylist, batchSize = 25
     let registered = 0;
     for (let start = 0; start < missing.length; start += batchSize) {
       const batch = missing.slice(start, start + batchSize);
-      const calls = batch.map(({ songId, track }) => contract.interface.encodeFunctionData('registerSong',
-        [songId, `ipfs://${track.ipfsCid}`, [track.mintRecipient], [10000]]));
+      const calls = batch.map(({ songId, track }) => {
+        const splits = validateCreatorSplits(track.creatorSplits, track.mintRecipient);
+        return contract.interface.encodeFunctionData('registerSong',
+          [songId, `ipfs://${track.ipfsCid}`, splits.map(entry => entry.wallet), splits.map(entry => entry.shareBps)]);
+      });
       const transaction = await contract.multicall(calls);
       if ((await transaction.wait())?.status !== 1) throw new Error(`DJuke song registration failed: ${transaction.hash}`);
       for (const { songId } of batch) known.add(songId);
