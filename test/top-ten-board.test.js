@@ -149,7 +149,7 @@ test('pullout leaderboard exposes public weekly ranking and a distinct current-p
   const html = require('node:fs').readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /id="top-ten-tab"/);
   assert.match(html, /id="top-ten-panel"/);
-  assert.match(html, /weekly net votes/i);
+  assert.doesNotMatch(html, /Weekly net votes · upvotes minus downvotes/);
   assert.doesNotMatch(html, /current song stays highlighted/i);
   assert.match(html, /aria-expanded="false"/);
   const board = require('node:fs').readFileSync(path.join(__dirname, '../js/top-ten-board.mjs'), 'utf8');
