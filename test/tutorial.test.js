@@ -30,6 +30,7 @@ function makeNode(tag) {
     classList: makeClassList(),
     isConnected: true,
     append(...nodes) { this.children.push(...nodes); },
+    replaceChildren(...nodes) { this.children = nodes; this.textContent = ''; },
     appendChild(node) { this.children.push(node); return node; },
     setAttribute(name, value) {
       this.attributes[name] = String(value);
@@ -145,7 +146,7 @@ test('tutorial walkthrough auto-launches once and marks visitors seen', () => {
   vm.runInContext('initTutorial();', context);
 
   assert.equal(timerQueue.length, 1);
-  assert.equal(launchButton.textContent, 'Start Tutorial');
+  assert.equal(launchButton.children[1].textContent, 'Follow the white rabbit');
 
   timerQueue[0]();
   assert.equal(vm.runInContext('_overlay.hidden', context), false);
@@ -160,7 +161,8 @@ test('tutorial walkthrough auto-launches once and marks visitors seen', () => {
   vm.runInContext('skipTutorial();', context);
   assert.equal(vm.runInContext('_overlay.hidden', context), true);
   assert.equal(storage.getItem('decentbusking:tutorial:seen:v1'), '1');
-  assert.equal(launchButton.textContent, 'Replay Tutorial');
+  assert.equal(launchButton.children[1].textContent, 'Follow the white rabbit');
+  assert.equal(document.getElementById('rabbit-tour-launch').hidden, false);
 });
 
 test('tutorial launch buttons can be relabeled inside arbitrary roots', () => {
@@ -170,8 +172,24 @@ test('tutorial launch buttons can be relabeled inside arbitrary roots', () => {
   const root = { querySelectorAll: (selector) => (selector === '[data-tutorial-launch]' ? [button] : []) };
   context.root = root;
   vm.runInContext('syncTutorialLaunchButtons(root);', context);
-  assert.equal(button.textContent, 'Replay Tutorial');
-  assert.equal(button.getAttribute('aria-label'), 'Replay Tutorial for the DecentBusking walkthrough');
+  assert.equal(button.children[1].textContent, 'Follow the white rabbit');
+  assert.equal(button.getAttribute('aria-label'), 'Follow the white rabbit: explore DecentBusking');
+  assert.equal(button.classList.contains('rabbit-tour-launch'), true);
+});
+
+test('only finishing the entire tour hides the landing launcher while About retains the same rabbit button', () => {
+  const { context, storage, document, launchButton } = createTutorialContext();
+  vm.runInContext('initTutorial(); startTutorial(); completeTutorial();', context);
+  assert.equal(storage.getItem('decentbusking:tutorial:completed:v1'), null);
+  assert.equal(document.getElementById('rabbit-tour-launch').hidden, false);
+  vm.runInContext('skipTutorial(); startTutorial();', context);
+  for (let i = 0; i < 11; i++) vm.runInContext('nextTutorialStep();', context);
+  assert.equal(storage.getItem('decentbusking:tutorial:completed:v1'), '1');
+  assert.equal(document.getElementById('rabbit-tour-launch').hidden, true);
+  assert.equal(launchButton.hidden, false);
+  assert.equal(launchButton.children[1].textContent, 'Follow the white rabbit');
+  vm.runInContext('startTutorial(); skipTutorial();', context);
+  assert.equal(document.getElementById('rabbit-tour-launch').hidden, true);
 });
 
 test('about modal exposes a tutorial launch button', () => {
@@ -182,11 +200,11 @@ test('about modal exposes a tutorial launch button', () => {
 
 test('tutorial copy now mentions NFT card Preview and Listen actions', () => {
   const { context } = createTutorialContext();
-  assert.match(vm.runInContext('TUTORIAL_STEPS[6].body', context), /Preview for a free 30-second taste/);
+  assert.match(vm.runInContext('TUTORIAL_STEPS[6].body', context), /Preview for a free 30-second sample/);
   assert.match(vm.runInContext('TUTORIAL_STEPS[6].body', context), /Listen to play the whole song/);
 });
 
-test('Mercury narrates while the rabbit opens real surfaces, with no transactional or playback clicks', () => {
+test('Mercury accompanies the rabbit through real surfaces, with no transactional or playback clicks', () => {
   const { context, clicks, targets, rightMenu, leftMenu, document } = createTutorialContext();
   vm.runInContext('initTutorial(); startTutorial();', context);
   assert.ok(document.getElementById('rabbit-tour-launch'));
@@ -211,7 +229,7 @@ test('Mercury narrates while the rabbit opens real surfaces, with no transaction
   assert.match(document.head.children[0].textContent, /rabbit-peek 6.5s/);
   assert.match(vm.runInContext('_panel.children[0].children[0].textContent', context), /💸/);
   assert.equal(vm.runInContext('_panel.children[0].children[1].textContent', context), '☿');
-  assert.match(vm.runInContext('_panel.children[1].textContent', context), /Mercury/);
+  assert.equal(vm.runInContext('_panel.children[1].textContent', context), 'Follow the white rabbit');
 });
 
 test('Mercury keeps his symbol and flying-money ride but changes musical gear at every stop', () => {
@@ -276,7 +294,7 @@ test('pending uploads, open dialogs and VertLoop defer the tour explicitly witho
   vm.runInContext('startTutorial();', context);
   assert.equal(vm.runInContext('_overlay.hidden', context), true);
   assert.equal(targets['#mint-status'].textContent, 'Uploading…');
-  assert.match(vm.runInContext('_notice.textContent', context), /finish your current submission/);
+  assert.match(vm.runInContext('_notice.textContent', context), /Finish your current submission/);
   targets['#mint-submit-btn'].disabled = false;
   const dialog = makeNode('dialog');
   targets['dialog[open]'] = dialog;
@@ -315,7 +333,7 @@ test('keyboard focus cycles in the tour and Escape exits before underlying drawe
   assert.equal(context.event.stopped, true);
 });
 
-test('narration and spotlight fit a narrow viewport without covering the highlighted drawer header', () => {
+test('tour text and spotlight fit a narrow viewport without covering the highlighted drawer header', () => {
   const { context, targets } = createTutorialContext();
   vm.runInContext('initTutorial(); startTutorial();', context);
   vm.runInContext('window.innerWidth = 360; window.innerHeight = 640; _panel.bounds = { width: 328, height: 340 };', context);
@@ -328,4 +346,14 @@ test('narration and spotlight fit a narrow viewport without covering the highlig
   assert.ok(panelLeft >= 0 && panelLeft + 328 <= 360);
   assert.ok(panelTop >= 0 && panelTop + 340 <= 640);
   assert.ok(spotTop + spotHeight <= panelTop);
+});
+
+test('tour uses factual rabbit-themed copy and a smaller money icon without a Mercury narrator', () => {
+  const { context, document } = createTutorialContext();
+  vm.runInContext('initTutorial(); startTutorial();', context);
+  const copy = vm.runInContext('TUTORIAL_STEPS.map(step => step.title + " " + step.body).join(" ")', context);
+  assert.doesNotMatch(copy, /Mercury|messenger|narrator|I’m|I won’t|not just the little symbol/);
+  assert.match(vm.runInContext('TUTORIAL_STEPS[8].body', context), /right ankh menu.*Profile and Public Schedule/);
+  assert.match(document.head.children[0].textContent, /\.mercury-money \{[^}]*font-size: 22px/);
+  assert.equal(document.getElementById('rabbit-tour-launch').getAttribute('aria-label'), 'Follow the white rabbit: explore DecentBusking');
 });

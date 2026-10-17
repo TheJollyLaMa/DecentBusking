@@ -6,7 +6,7 @@ import { formatUsdcUnits } from '../usdc-format.mjs?v=20261017-mercury-release';
 // Intercepts the CDN DecentHead 'about-modal' custom element definition and
 // replaces it with a DecentBusking-specific version.
 //
-import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261017-mercury-release';
+import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261017-rabbit-copy';
 import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
 import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261017-mercury-release';
 
@@ -586,7 +586,7 @@ class DecentBuskingAboutModal extends HTMLElement {
         .about-kicker { margin: 0 0 5px; color: #91ddd3; font-size: .72rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
         .about-hero h2 { margin: 0; color: #fff2e4; font-size: clamp(1.55rem, 4vw, 2.25rem); line-height: 1.08; }
         .about-hero-copy { margin: 7px 0 0; color: #c4c7d8; font-size: .92rem; line-height: 1.45; }
-        .about-status-row { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 11px; }
+        .about-status-row { display: flex; align-items: center; justify-content: center; gap: 7px; flex-wrap: wrap; margin-top: 11px; }
         .about-status { padding: 5px 9px; border: 1px solid rgba(124,222,207,.25); border-radius: 999px; color: #a4e5d9; background: rgba(72,166,154,.1); font-size: .7rem; font-weight: 650; }
         .about-tutorial-btn { padding: 5px 10px; border: 1px solid rgba(145,221,211,.34); border-radius: 999px; color: #d7fff5; background: rgba(145,221,211,.1); font-size: .72rem; font-weight: 700; cursor: pointer; }
         .about-tutorial-btn:hover { background: rgba(145,221,211,.18); }
@@ -651,8 +651,8 @@ class DecentBuskingAboutModal extends HTMLElement {
         .about-kicker { margin: 0 0 5px; color: #91ddd3; font-size: .7rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
         .about-hero h1 { margin: 0; color: #fff0e3; font: 700 clamp(1.65rem, 4vw, 2.35rem)/1.05 'Segoe UI',system-ui,sans-serif; }
         .about-hero-copy { margin: 7px 0 0; color: #c9cad8; font-size: .92rem; line-height: 1.45; }
-        .about-status-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
-        .about-status { padding: 5px 9px; color: #a6e8dd; background: rgba(87,195,179,.09); border: 1px solid rgba(105,221,204,.22); border-radius: 999px; font-size: .68rem; font-weight: 700; }
+        .about-status-row { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+        .about-status { display: inline-flex; align-items: center; justify-content: center; padding: 5px 9px; color: #a6e8dd; background: rgba(87,195,179,.09); border: 1px solid rgba(105,221,204,.22); border-radius: 999px; font-size: .68rem; font-weight: 700; line-height: 1.3; text-align: center; }
         .about-tutorial-btn { padding: 5px 10px; border: 1px solid rgba(145,221,211,.34); border-radius: 999px; color: #d7fff5; background: rgba(145,221,211,.1); font-size: .72rem; font-weight: 700; cursor: pointer; }
         .about-tutorial-btn:hover { background: rgba(145,221,211,.18); }
         .about-section { margin: 21px 0; color: #e2e2ec; line-height: 1.58; }

@@ -48,9 +48,13 @@ the matching worker update; older workers show unavailable rather than zero.
 
 **First visit?** Follow the [newcomer walkthrough](docs/NEWCOMERS.md) for a click-by-click listener and artist route with screenshots.
 
-The on-site **Follow the white rabbit** launcher stays visible above the radio,
-with a replay entry in About. Mercury narrates from his flying-money ride while
-the rabbit mascot peeks in and out of holes beside highlighted controls. This
+The on-site **Follow the white rabbit** launcher appears above the radio until
+the visitor finishes every stop. Completion is remembered in that browser;
+leaving early does not hide the launcher. The identical rabbit button remains
+available in the DBusker About modal for replay. The Mercury symbol follows the white rabbit with
+musical accessories and a small flying-money icon, while the rabbit mascot peeks
+in and out of holes beside highlighted controls. Factual text explains each stop;
+Mercury is a visual companion, not a narrator. This
 read-only guided tour opens real drawers and ankh menus; it never triggers wallet,
 vote, upload, purchase, or audio actions. Exit restores existing drawers and visible
 briefcase drafts. Active submissions, open dialogs, and VertLoop listening defer

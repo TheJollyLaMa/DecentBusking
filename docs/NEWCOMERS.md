@@ -4,10 +4,11 @@ Start here: [open DecentBusking](https://thejollylama.github.io/DecentBusking/).
 
 ## Follow The White Rabbit
 
-Look for **Follow the white rabbit** above the radio on the right. Mercury, our
-winged messenger (the large **☿** symbol riding flying money), changes musical
-instruments or accessories at every stop and narrates a guided visit while a white rabbit
-peeks out of little rabbit holes beside each stop. The tour opens the actual
+Look for **Follow the white rabbit** above the radio on the right. The large
+**☿** Mercury symbol follows the rabbit with a small flying-money icon and
+different musical accessories at every stop. Mercury is a visual companion,
+not a narrator. A white rabbit peeks out of little rabbit holes beside each
+stop, with factual text explaining the controls. The tour opens the actual
 briefcase, Top 10, DVert, DJuke, archive, and both ankh menus, explaining what each
 is for without voting, submitting, connecting a wallet, paying, or starting audio.
 
@@ -16,7 +17,9 @@ between stops; Escape exits, and Tab stays within the tour controls. On exit,
 previously open drawers and any visible briefcase draft are restored. Finish any
 pending submission, close other dialogs, and return from VertLoop to main radio
 before starting. Reduced-motion settings keep the rabbit and Mercury still.
-You can also replay the tour from **About**.
+After completing every stop, the landing-page button is hidden in that browser.
+Leaving early does not count as completion. Click **DBusker** to open **About**
+and use the identical **Follow the white rabbit** button to replay the tour.
 Music notes and little sound-wave rings accompany Mercury's arrivals. These are
 visual effects, not extra audio over the radio.
 

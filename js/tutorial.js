@@ -1,4 +1,5 @@
 const TUTORIAL_STORAGE_KEY = 'decentbusking:tutorial:seen:v1';
+const TUTORIAL_COMPLETED_KEY = 'decentbusking:tutorial:completed:v1';
 const TUTORIAL_STYLE_ID = 'decentbusking-tutorial-style';
 const TUTORIAL_OVERLAY_ID = 'decentbusking-tutorial-overlay';
 const TUTORIAL_HIGHLIGHT_CLASS = 'decentbusking-tutorial-highlight';
@@ -8,74 +9,74 @@ const TUTORIAL_STEPS = [
   {
     title: 'Follow the white rabbit.',
     prop: '🎺', propName: 'trumpet',
-    body: 'I’m Mercury, your messenger around this digital town square. My rabbit knows the shortcuts. Follow those ears: we’ll open the real drawers, find the music, and uncover a few things hiding in plain sight. Just looking—no votes, uploads, wallet requests, or payments on this tour.',
+    body: 'Follow the white rabbit around DecentBusking. Explore the radio, music archive, creator submissions, and community features. This tour opens panels and menus without casting votes, uploading files, requesting wallet access, or making payments.',
     target: null,
   },
   {
     title: '24/7 Community Radio',
     prop: '📻', propName: 'radio',
-    body: 'Start with the sound. This is our shared, around-the-clock radio, playing community recordings. Press play yourself when you’re ready; I won’t change your listening. The footer tells you who’s on, and when the next advert is coming.',
+    body: 'Community recordings play around the clock on JukeLoop radio. Use the footer controls to listen, adjust the volume, and see the current song and artist. The footer also shows when the next advert is due. The tour does not change your audio.',
     target: '#now-playing-label',
   },
   {
-    title: 'Your sound belongs here.',
+    title: 'Submit your music',
     prop: '🎤', propName: 'microphone',
-    body: 'The briefcase is your creator entrance. Drop audio or MP4 video, add a cover or its IPFS CID, and credit your collaborators. The format is detected for you. DJuke earning shares can be split between wallets; submission still goes through owner review. An advert? Mark it DVert here, then book airtime separately.',
+    body: 'Open the briefcase to submit audio or MP4 video for owner review. Drop a file or enter its IPFS CID; the format is detected automatically. Add optional cover art and collaborator wallets with DJuke earning percentages. For advertisements, select DVert and book airtime separately.',
     target: '#mint-modal-inner',
     surface: 'briefcase',
   },
   {
-    title: 'A small thumb. A real say.',
+    title: 'Vote on the current play',
     prop: '🎧', propName: 'headphones',
-    body: 'The thumbs are your voice in the radio. Music votes feed the weekly chart; the number beside them is the live net total. During an advert, you’re rating that advert’s play—not putting it in the music Top 10. I won’t cast a vote for you.',
+    body: 'Use thumbs up or thumbs down to rate the current radio play. Music votes contribute to the weekly Top 10, and the number beside the buttons shows the live net total. Advert votes apply to that advert’s current play and do not enter the music chart.',
     target: '#radio-voting',
   },
   {
-    title: 'Watch the chart come alive.',
+    title: 'Weekly Top 10',
     prop: '🥁', propName: 'drum',
-    body: 'Here’s the weekly Top 10. Friday Hype plays the opening chart from its lowest place up to #1, while the live ranks keep responding to votes. The little “i” explains the show and rewards. During Hype, + buttons save songs to your personal playlist; saving is not buying.',
+    body: 'The Top 10 ranks songs by weekly net votes. Friday Hype plays the opening chart from its lowest place up to #1 while live rankings continue to update. Open the information button for show and reward details. During Hype, use + to save a song to your personal playlist without purchasing a play.',
     target: '#top-ten-panel',
     surface: 'chart',
   },
   {
     title: 'DVert Advertising',
     prop: '📣', propName: 'megaphone',
-    body: 'This is the advertiser’s corner. Approved adverts can have their own funded campaigns, separate from music submissions. The panel shows campaign details and funding history; its “i” explains the rules. We’re only opening the drawer, not buying airtime or switching the audio.',
+    body: 'DVert manages approved adverts, weekly campaigns, and optional paid queue requests. View current prices, campaign details, and funding history here. The information button explains scheduling and payment terms. Opening this panel does not purchase airtime or switch your audio.',
     target: '#devert-panel',
     surface: 'adverts',
   },
   {
     title: 'DJuke Jukebox',
     prop: '🎹', propName: 'keys',
-    body: 'Want a particular song? DJuke puts paid requests in the queue without cutting off the current recording or protected shows. The price is shown before you pay, and the earnings podium follows confirmed artist and collaborator payouts. In the archive, use Preview for a free 30-second taste or Listen to play the whole song under its displayed terms.',
+    body: 'Search for a song in DJuke to request a paid radio play. Requests wait for the current recording and protected shows to finish. Review the displayed price before paying. The earnings podium shows confirmed artist and collaborator payouts. Archive cards offer Preview for a free 30-second sample or Listen to play the whole song under its displayed terms.',
     target: '#djuke-panel',
     surface: 'jukebox',
   },
   {
-    title: 'A rabbit hole full of records.',
+    title: 'Explore the music archive',
     prop: '💿', propName: 'record',
-    body: 'This slim side tab hides the music archive. Search for an artist, explore their recordings, and look for Preview, Listen, NFT details, and playlist controls on the cards. You don’t need to buy an NFT just to explore. The rabbit has a good nose for overlooked doors.',
+    body: 'Open Archive to browse community recordings and filter by artist. Song cards include Preview, Listen, NFT details, and playlist controls. You can browse the archive without purchasing an NFT.',
     target: '#dnft-list',
     surface: 'archive',
   },
   {
-    title: 'A coin is also a doorway.',
+    title: 'Profile and public schedule',
     prop: '🎷', propName: 'saxophone',
-    body: 'The whole right-hand ankh coin opens this menu—not just the little symbol. Public Schedule is where you find community shows and reminder options for your calendar. Profile is your personal corner; connect a wallet yourself when you need wallet-backed features. You can come here without buying anything.',
+    body: 'Open the right ankh menu to access Profile and Public Schedule. The schedule lists community shows and includes calendar reminders. Profile contains your personal collections and activity. Connect a wallet to use wallet-backed profile features.',
     target: 'decent-header >>> app-title >>> right-ankh >>> .dropdown-menu',
     surface: 'menu',
   },
   {
-    title: 'The other coin has a story, too.',
+    title: 'Playback history and About',
     prop: '🎸', propName: 'guitar',
-    body: 'The left ankh opens another set of doors. Playback Tally is the public station-wide listening history, not just your own plays. About is where the bigger community story and this tour live. You may also see owner-only tools when the owner wallet is connected; newcomers can leave those alone.',
+    body: 'Open the left ankh menu for Playback Tally and About. Playback Tally shows station-wide listening history. About explains the project and includes a link to replay this tour. Administrative tools appear for the owner wallet.',
     target: 'decent-header >>> app-title >>> .ankh-left .dropdown-menu',
     surface: 'left-menu',
   },
   {
-    title: 'One more hidden constellation.',
+    title: 'Community funds',
     prop: '🎼', propName: 'sheet music',
-    body: 'The fund pills below the title open the community money story: funding, changing estimates, and confirmed payouts are different things. And those little “i” buttons in the music drawers? Tiny doors to the deeper explanations. Explore at your own pace. I’m Mercury; the rabbit and I are always one click away.',
+    body: 'Select a fund balance below the header to view funding sources and payout details. Estimated awards can change; only confirmed payouts represent completed payments. Information buttons in the panels provide further details. Use Follow the white rabbit whenever you want to revisit the tour.',
     target: '#artist-filter-bar',
   },
 ];
@@ -255,16 +256,18 @@ function _ensureStyles() {
     .decentbusking-tutorial-launch:hover { background: rgba(145, 221, 211, .18); }
     .decentbusking-tutorial-launch:focus-visible,
     .decentbusking-tutorial-actions button:focus-visible { outline: 2px solid #fff5d9; outline-offset: 3px; }
-    #rabbit-tour-launch {
+    .rabbit-tour-launch {
       position: fixed; right: 18px; bottom: 122px; z-index: 2100;
       display: flex; align-items: center; gap: 8px; padding: 8px 13px 8px 5px;
       color: #e7fff5; background: linear-gradient(140deg, #1c3438, #171b29);
       border: 1px solid #8dbbb2; border-radius: 28px; box-shadow: 0 5px 24px #0007;
       cursor: pointer; font: 600 12px/1.25 system-ui, sans-serif;
     }
-    #rabbit-tour-launch .rabbit-launch-label { max-width: 110px; text-align: left; }
-    #rabbit-tour-launch small { display: block; color: #a3bdbd; font-size: 10px; font-weight: 400; margin-top: 3px; }
-    .${TUTORIAL_BODY_CLASS} #rabbit-tour-launch { visibility: hidden; }
+    .rabbit-tour-launch .rabbit-launch-label { max-width: 110px; text-align: left; }
+    .rabbit-tour-launch[hidden] { display: none; }
+    .rabbit-tour-launch.about-tutorial-btn { position: relative; inset: auto; }
+    .rabbit-tour-launch small { display: block; color: #a3bdbd; font-size: 10px; font-weight: 400; margin-top: 3px; }
+    .${TUTORIAL_BODY_CLASS} .rabbit-tour-launch { visibility: hidden; }
     .tutorial-notice {
       position: fixed; z-index: 100003; bottom: 190px; right: 18px; width: min(300px, calc(100vw - 60px));
       padding: 12px; border: 1px solid #91ddd3; border-radius: 12px; color: #fff2dc; background: #17262f;
@@ -279,12 +282,12 @@ function _ensureStyles() {
     }
     .rabbit-window { position: absolute; inset: 0 0 8px; overflow: hidden; }
     .rabbit-ears { position: absolute; bottom: 0; left: 7px; font-size: 47px; line-height: 1.2; filter: drop-shadow(0 0 5px #e1fff74d); animation: rabbit-peek 6.5s ease-in-out infinite; }
-    #rabbit-tour-launch .rabbit-burrow { width: 46px; height: 46px; }
-    #rabbit-tour-launch .rabbit-burrow::before { width: 42px; left: 0; height: 12px; }
-    #rabbit-tour-launch .rabbit-ears { font-size: 34px; left: 2px; }
+    .rabbit-tour-launch .rabbit-burrow { width: 46px; height: 46px; }
+    .rabbit-tour-launch .rabbit-burrow::before { width: 42px; left: 0; height: 12px; }
+    .rabbit-tour-launch .rabbit-ears { font-size: 34px; left: 2px; }
     .tutorial-mercury { position: absolute; top: 14px; left: 13px; width: 68px; height: 64px; pointer-events: none; }
     .tutorial-mercury .mercury-symbol { position: absolute; left: 12px; top: -6px; font: 58px/1 Georgia, serif; color: #fff0cc; text-shadow: 0 0 10px #e4bc7c70; }
-    .tutorial-mercury .mercury-money { position: absolute; bottom: 0; left: 0; font-size: 40px; transform: rotate(-12deg); }
+    .tutorial-mercury .mercury-money { position: absolute; bottom: 0; left: 14px; font-size: 22px; transform: rotate(-12deg); }
     .tutorial-mercury .mercury-prop { position: absolute; top: 18px; left: 40px; font-size: 28px; line-height: 1; transform: rotate(12deg); filter: drop-shadow(0 2px 3px #0008); }
     .mercury-note { position: absolute; left: 28px; top: 24px; color: #c5f3dd; font: 700 15px/1 Georgia, serif; opacity: .65; transform: translate(var(--note-x), var(--note-y)); }
     .mercury-note:nth-of-type(1) { --note-x: -28px; --note-y: -21px; --note-delay: .1s; }
@@ -336,8 +339,8 @@ function _ensureStyles() {
       .decentbusking-tutorial-actions { margin-top: 4px; gap: 7px; }
       .decentbusking-tutorial-step { margin-top: 7px; font-size: .7rem; }
       .decentbusking-tutorial-kicker { font-size: .65rem; min-height: 48px; margin-bottom: 6px; }
-      #rabbit-tour-launch { right: 10px; bottom: 150px; padding-right: 9px; }
-      #rabbit-tour-launch .rabbit-launch-label { max-width: 88px; font-size: 11px; }
+      .rabbit-tour-launch { right: 10px; bottom: 150px; padding-right: 9px; }
+      .rabbit-tour-launch .rabbit-launch-label { max-width: 88px; font-size: 11px; }
     }
   `;
   document.head.appendChild(style);
@@ -373,17 +376,32 @@ function _ensureLauncher() {
   if (document.getElementById('rabbit-tour-launch')) return;
   const launcher = _button('', startTutorial, {
     id: 'rabbit-tour-launch',
-    'aria-label': 'Follow the white rabbit: take Mercury’s guided tour',
+    'aria-label': 'Follow the white rabbit: explore DecentBusking',
     'aria-haspopup': 'dialog',
   });
+  _decorateLauncher(launcher);
+  document.body.appendChild(launcher);
+  _syncLandingLauncher();
+}
+
+function _decorateLauncher(launcher) {
+  if (launcher.dataset.rabbitStyled) return;
+  launcher.dataset.rabbitStyled = '1';
+  launcher.classList.add('rabbit-tour-launch');
+  launcher.setAttribute('aria-label', 'Follow the white rabbit: explore DecentBusking');
+  launcher.setAttribute('aria-haspopup', 'dialog');
   const label = document.createElement('span');
   label.className = 'rabbit-launch-label';
   label.textContent = 'Follow the white rabbit';
   const hint = document.createElement('small');
-  hint.textContent = 'A tour with Mercury';
+  hint.textContent = 'Explore DecentBusking';
   label.append(hint);
-  launcher.append(_burrow(), label);
-  document.body.appendChild(launcher);
+  launcher.replaceChildren(_burrow(), label);
+}
+
+function _syncLandingLauncher() {
+  const launcher = document.getElementById('rabbit-tour-launch');
+  if (launcher) launcher.hidden = _storage()?.getItem(TUTORIAL_COMPLETED_KEY) === '1';
 }
 
 function _ensureOverlay() {
@@ -420,7 +438,7 @@ function _ensureOverlay() {
 
   const kicker = document.createElement('p');
   kicker.className = 'decentbusking-tutorial-kicker';
-  kicker.textContent = 'Mercury · your winged messenger';
+  kicker.textContent = 'Follow the white rabbit';
 
   const mercury = document.createElement('span');
   mercury.className = 'tutorial-mercury';
@@ -574,7 +592,7 @@ function _positionScene() {
     const targetTop = Math.max(12, Math.min(height - 60, bounds.top));
     const targetLeft = Math.max(10, Math.min(width - 60, bounds.left));
     const targetWidth = Math.max(40, Math.min(width - targetLeft - 10, bounds.width));
-    // Large forms/drawers get a window into their top, leaving room for narration.
+    // Large forms/drawers get a window into their top, leaving room for the tour text.
     const mobileWindow = Math.max(40, Math.min(160, height - cardHeight - targetTop - 110));
     const targetHeight = Math.min(bounds.height, mobile ? mobileWindow : height * .65, height - targetTop - 12);
     Object.assign(_spotlight.style, {
@@ -610,11 +628,14 @@ function _schedulePosition() {
 }
 
 function _syncButtonsIn(root = document) {
-  const label = _isSeen() ? 'Replay Tutorial' : 'Start Tutorial';
+  _ensureStyles();
+  if (root !== document && root.appendChild && !root.querySelector?.(`#${TUTORIAL_STYLE_ID}`)) {
+    root.appendChild(document.getElementById(TUTORIAL_STYLE_ID).cloneNode(true));
+  }
   root?.querySelectorAll?.('[data-tutorial-launch]')?.forEach?.((button) => {
-    button.textContent = label;
-    button.setAttribute('aria-label', `${label} for the DecentBusking walkthrough`);
+    _decorateLauncher(button);
   });
+  _syncLandingLauncher();
 }
 
 function _renderStep() {
@@ -699,17 +720,17 @@ export function startTutorial() {
   _cancelAutoLaunch();
   if (_overlay.hidden === false) return;
   if (document.getElementById('mint-submit-btn')?.disabled) {
-    _explainBlockedTour('Mercury: let’s finish your current submission first. Your upload stays right where it is.', document.getElementById('mint-modal-inner') || document.body);
+    _explainBlockedTour('Finish your current submission before starting the tour. Your upload will remain open.', document.getElementById('mint-modal-inner') || document.body);
     return;
   }
   if (document.querySelector('dialog[open]')) {
     const dialog = document.querySelector('dialog[open]');
-    _explainBlockedTour('Mercury: close this window, then follow the white rabbit to start the tour.', dialog);
+    _explainBlockedTour('Please close this window before starting the tour.', dialog);
     dialog.focus();
     return;
   }
   if (document.getElementById('devert-audio-mode')?.getAttribute('aria-pressed') === 'true') {
-    _explainBlockedTour('Mercury: return from VertLoop to the main radio first, so our tour won’t interrupt your listening.');
+    _explainBlockedTour('Return from VertLoop to the main radio before starting the tour to avoid interrupting your listening.');
     return;
   }
   _notice?.remove();
@@ -753,6 +774,16 @@ export function nextTutorialStep() {
 }
 
 export function completeTutorial() {
+  if (_overlay?.hidden !== false || _currentStep !== TUTORIAL_STEPS.length - 1) return;
+  try {
+    _storage()?.setItem(TUTORIAL_COMPLETED_KEY, '1');
+  } catch (error) {
+    console.warn('[tutorial] Could not remember tour completion:', error);
+  }
+  _endTutorial();
+}
+
+function _endTutorial() {
   _cancelAutoLaunch();
   _closeSurface();
   _clearHighlight();
@@ -772,15 +803,20 @@ export function completeTutorial() {
   _savedMint = null;
   if (_savedScroll) window.scrollTo?.(_savedScroll.x, _savedScroll.y);
   _savedScroll = null;
-  if (_returnFocus?.isConnected && _returnFocus.getClientRects?.().length !== 0) _returnFocus.focus();
-  else document.getElementById('rabbit-tour-launch')?.focus();
+  _syncLandingLauncher();
+  if (_returnFocus?.isConnected && !_returnFocus.hidden && _returnFocus.getClientRects?.().length !== 0) _returnFocus.focus();
+  else {
+    const launcher = document.getElementById('rabbit-tour-launch');
+    if (launcher && !launcher.hidden) launcher.focus();
+    else document.getElementById('guitar-case-btn')?.focus();
+  }
   _returnFocus = null;
   _setSeen(true);
   _syncButtonsIn();
 }
 
 export function skipTutorial() {
-  completeTutorial();
+  _endTutorial();
 }
 
 export function markTutorialSeen() {
