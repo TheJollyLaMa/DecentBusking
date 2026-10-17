@@ -366,6 +366,130 @@ test('radio sync resumes a reloaded listener at the live offset instead of the t
   assert.equal(Math.round(started[0].offset()), 102);
 });
 
+test('radio gateway URLs normalize the configured base and prefer worker media when configured', () => {
+  const context = vm.createContext({
+    performance,
+    setTimeout,
+    clearTimeout,
+    console,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } },
+  });
+  vm.runInContext(`${radioSyncSource()}\nglobalThis.gatewayUrls = _gatewayUrls('bafy-song');`, context);
+  assert.deepEqual(Array.from(context.gatewayUrls), [
+    'https://gateway.example/ipfs/bafy-song',
+  ]);
+
+  vm.runInContext("window.DecentConfig.ipfsGateway = 'https://gateway.example'; gatewayUrls = _gatewayUrls('bafy-song');", context);
+  assert.equal(context.gatewayUrls[0], 'https://gateway.example/ipfs/bafy-song');
+  vm.runInContext("window.DecentConfig.ipfsUploadServiceUrl = 'https://worker.example/'; gatewayUrls = _gatewayUrls('bafy-song');", context);
+  assert.deepEqual(Array.from(context.gatewayUrls), [
+    'https://worker.example/api/radio/media?cid=bafy-song',
+    'https://gateway.example/ipfs/bafy-song',
+  ]);
+});
+
+test('radio retries alternate IPFS gateways when the configured gateway fails', async () => {
+  const source = radioSyncSource();
+  const sources = [];
+  const events = [];
+  const document = new EventTarget();
+  document.addEventListener('dbusk-now-playing', (event) => events.push(event.detail));
+  const audio = new EventTarget();
+  Object.assign(audio, {
+    duration: 180,
+    paused: true,
+    seeking: false,
+    readyState: 1,
+    volume: 0,
+    seekable: { length: 1, start: () => 0, end: () => 180 },
+    pause() { this.paused = true; },
+    removeAttribute() {},
+    querySelectorAll: () => [],
+    appendChild(sourceNode) { sources.push(sourceNode.src); },
+    load() {
+      const eventName = sources.at(-1).startsWith('https://primary.example/')
+        ? 'error'
+        : 'loadedmetadata';
+      setTimeout(() => {
+        this.readyState = 4;
+        this.dispatchEvent(new Event(eventName));
+      }, 0);
+    },
+    async play() { this.paused = false; },
+  });
+  const context = vm.createContext({ performance, setTimeout, clearTimeout, console, audio, document, CustomEvent });
+  document.createElement = () => ({});
+  vm.runInContext(`${source}
+    _audio = audio; _audioPlayer = audio; _mode = 'radio'; _loadedPlayId = 'play-1';
+    _radio = { playId: 'play-1', receivedAt: performance.now(), positionMs: 0 };
+    globalThis.switchTrack = _switchTo;`, context);
+
+  await context.switchTrack({
+    title: 'Signal Fire',
+    artist: 'Synth Artist',
+    url: 'https://primary.example/ipfs/bafy-fire',
+    fallbackUrls: ['https://dweb.link/ipfs/bafy-fire'],
+    mime: 'audio/mpeg',
+    nowPlaying: {
+      source: 'radio',
+      playId: 'play-1',
+      audioUrl: 'https://primary.example/ipfs/bafy-fire',
+      ipfsCid: 'bafy-fire',
+    },
+  });
+
+  assert.deepEqual(sources, [
+    'https://primary.example/ipfs/bafy-fire',
+    'https://dweb.link/ipfs/bafy-fire',
+  ]);
+  assert.equal(events[0].audioUrl, 'https://dweb.link/ipfs/bafy-fire');
+  assert.equal(audio.paused, false);
+});
+
+test('failed radio gateway attempts clear the loaded play so the same track can retry', async () => {
+  const source = radioSyncSource();
+  const audio = new EventTarget();
+  Object.assign(audio, {
+    paused: true,
+    volume: 0,
+    pause() { this.paused = true; },
+    removeAttribute() {},
+    querySelectorAll: () => [],
+    appendChild() {},
+    load() { setTimeout(() => this.dispatchEvent(new Event('error')), 0); },
+  });
+  const activity = {
+    hidden: true,
+    textContent: '',
+    classList: { remove() {}, add() {} },
+  };
+  const context = vm.createContext({
+    performance,
+    setTimeout,
+    clearTimeout,
+    console,
+    audio,
+    activity,
+    document: { createElement: () => ({}) },
+  });
+  vm.runInContext(`${source}
+    _audio = audio; _audioPlayer = audio; _mode = 'radio'; _loadedPlayId = 'play-1';
+    _radio = { playId: 'play-1' }; _activityEl = activity;
+    globalThis.switchTrack = _switchTo;`, context);
+
+  await context.switchTrack({
+    title: 'Unavailable',
+    artist: 'Synth Artist',
+    url: 'https://primary.example/ipfs/bafy-fire',
+    fallbackUrls: ['https://dweb.link/ipfs/bafy-fire'],
+    mime: 'audio/mpeg',
+    nowPlaying: { playId: 'play-1' },
+  });
+
+  assert.equal(vm.runInContext('_loadedPlayId', context), null);
+  assert.match(activity.textContent, /Couldn’t load this track from IPFS/);
+});
+
 test('switchTo broadcasts now-playing after the site audio begins and stops on pause', async () => {
   const source = radioSyncSource();
   const events = [];
