@@ -28,6 +28,10 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(html, /Play After This Song \(extra break\)<\/td><td>2× the current queue bump price/);
   assert.match(html, /id="devert-paid-immediate-button"/);
   assert.match(html, /Optional priority payments do not purchase or extend that campaign/);
+  const instructions = html.match(/<dialog id="devert-instructions"[\s\S]*?<\/dialog>/)[0];
+  assert.match(instructions, /An advert campaign costs \$5 USDC for one week of ordinary rotation/);
+  assert.match(instructions, /removal makes unplayed requests fully refundable/);
+  assert.equal(html.split('An advert campaign costs $5 USDC').length - 1, 1);
   assert.match(html, /decent\.config\.js\?v=20261017-devert-v02/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-paid-queue.mjs'), 'utf8'),
     /devert-queue\.mjs\?v=20261017-two-tier-priority/);
