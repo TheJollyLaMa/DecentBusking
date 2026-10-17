@@ -928,6 +928,10 @@ body.top-ten-festival-open.top-ten-open #top-ten-tab { z-index: 202; }
 .top-ten-prize { min-width: 72px; text-align: right; color: #cbe6ff; font-size: .72rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .top-ten-prize .usdc-icon { width: 12px; height: 12px; }
 .top-ten-prize .usdc-amount-text { color: transparent; background-image: linear-gradient(110deg, #8dc8ff, #f5f7ff, #a6d8ff, #e2e7ee); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; text-shadow: 0 0 12px #9ccfff45; animation: usdc-sponsor-shimmer 9s linear infinite; }
+.top-ten-prize.is-wallet-unlinked { color: #858b98; cursor: help; text-decoration: underline dotted; text-decoration-color: #858b98; text-underline-offset: 3px; }
+.top-ten-prize.is-wallet-unlinked .usdc-amount-text { color: #858b98; background: none; -webkit-text-fill-color: #858b98; text-shadow: none; animation: none; }
+.top-ten-prize.is-wallet-unlinked .usdc-icon { filter: grayscale(1); opacity: .55; }
+.top-ten-prize.is-wallet-unlinked:focus-visible { outline: 2px solid #aab1bf; outline-offset: 3px; }
 .top-ten-song.is-now-playing { background: rgba(0, 212, 170, .11); box-shadow: inset 2px 0 var(--teal); }
 .top-ten-song.is-rank-climbing { position: relative; z-index: 2; overflow: hidden; animation: top-ten-rank-glow 1800ms ease-out; }
 .top-ten-song.is-rank-climbing::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(105deg, transparent 20%, #eff5b83d 48%, #8be8bd24 58%, transparent 80%); animation: top-ten-rank-shimmer 1600ms ease-in-out both; }

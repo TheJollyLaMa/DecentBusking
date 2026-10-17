@@ -75,6 +75,37 @@ test('song prizes grow with funding, move with votes, and freeze at New York Mon
   assert.equal(scheduler.getState().funds.top10.availableUnits, '24500000');
 });
 
+test('walletless playback and Top 10 shares are forfeited at close and left available for next week', async () => {
+  const { createWeeklyPayflow } = await import(url);
+  const value = await fixture();
+  const wallet = `0x${'2'.repeat(40)}`;
+  const tracks = [
+    { trackId: 'linked', title: 'Linked', artist: 'Artist', wallet, plays: 1, votes: 9 },
+    { trackId: 'unlinked', title: 'Unlinked', artist: 'No wallet', wallet: null, plays: 1, votes: 8 },
+  ];
+  const reports = [
+    { week: 'NY-2026-10-12', startAt: '2026-10-12T04:00:00.000Z', current: false, tracks },
+    { week: 'NY-2026-10-19', startAt: '2026-10-19T04:00:00.000Z', current: true, tracks: structuredClone(tracks) },
+  ];
+  value.options.router.fundBalances = async () => 10000000n;
+  const scheduler = createWeeklyPayflow({ ...value.options, now: () => Date.parse('2026-10-19T00:00:05-04:00'),
+    getReports: async () => reports, getClosingBalance: async () => 10000000n });
+  await scheduler.initialize();
+  const state = scheduler.getState();
+  const playback = state.allocations.find(record => record.allocation.category === 'playback').allocation;
+  const topTen = state.allocations.find(record => record.allocation.category === 'top10').allocation;
+  assert.equal(playback.allocatedUnits, '5000000');
+  assert.equal(playback.remainderUnits, '5000000');
+  assert.deepEqual(playback.entries.map(entry => entry.wallet), [wallet]);
+  assert.equal(topTen.allocatedUnits, '5000000');
+  assert.equal(topTen.remainderUnits, '5000000');
+  assert.deepEqual(topTen.entries.map(entry => entry.trackId), ['linked']);
+  assert.equal(state.funds.playback.reservedUnits, '5000000');
+  assert.equal(state.funds.playback.budgetUnits, '5000000');
+  assert.equal(state.funds.top10.reservedUnits, '5000000');
+  assert.equal(state.funds.top10.budgetUnits, '5000000');
+});
+
 test('both fund modals roll live song estimates into frozen archives and confirmed payouts without spending next week deposits', async context => {
   const { createServer } = require('node:http');
   const { id } = require('../discord-bot/node_modules/ethers');

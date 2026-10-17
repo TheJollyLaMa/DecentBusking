@@ -1,6 +1,6 @@
 import { renderUsdcAmount } from './fund-display.mjs?v=20261017-mercury-release';
 import { weekNumberFromKey } from './payroll-week.mjs';
-import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
+import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
 import { addChartSongToPlaylist } from './top-ten-playlist.mjs?v=20261017-mercury-release';
 import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261016-hype-bunny';
 
@@ -46,6 +46,10 @@ function el(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+function hasPayoutWallet(wallet) {
+  return /^0x(?!0{40}$)[0-9a-fA-F]{40}$/i.test(wallet || '');
 }
 
 export function chartFlightFrames(from, to, lift = 18) {
@@ -287,7 +291,13 @@ export function initTopTenBoard() {
         if (track.prizeUnits > 0n) prize.innerHTML = renderUsdcAmount(track.prizeUnits);
         else prize.textContent = '—';
         prize.title = track.prizeUnits === 0n ? 'No payable prize at this rank; prizes must exceed $0.10' : 'Estimated prize if this song holds its rank at Monday midnight, America/New_York';
-        if (!/^0x(?!0{40}$)[0-9a-fA-F]{40}$/i.test(track.wallet || '')) prize.title += ' · Artist payout wallet must be linked before closeout';
+      }
+      if (!hasPayoutWallet(track.wallet) && !track.outsideTopTen) {
+        const warning = "No artist wallet is registered. This prize will be forfeited at Monday midnight, America/New_York, and roll into next week's Top 10 fund without being redistributed. Musician: register your wallet ASAP.";
+        prize.classList.add('is-wallet-unlinked');
+        prize.title = warning;
+        prize.setAttribute('aria-label', `${prize.textContent || 'Estimated prize unavailable'}. ${warning}`);
+        prize.tabIndex = 0;
       }
       const add = el('button', 'top-ten-playlist-add', playlistSaved.has(track.trackId) ? '\u2713' : '+');
       add.type = 'button';

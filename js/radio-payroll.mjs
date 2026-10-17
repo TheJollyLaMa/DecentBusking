@@ -6,10 +6,20 @@ import { payrollPeriodFromKey, PAYROLL_TIME_ZONE, overlappingUtcWeeks } from './
 
 const WALLET = /^0x[0-9a-fA-F]{40}$/;
 
+function hasPayoutWallet(wallet) {
+  return WALLET.test(wallet || '') && !/^0x0{40}$/i.test(wallet);
+}
+
+export function playbackArtistKey(track) {
+  if (hasPayoutWallet(track?.wallet)) return track.wallet.toLowerCase();
+  const artist = String(track?.artist || '').trim().toLowerCase();
+  return `unlinked:${artist ? `artist:${artist}` : `track:${String(track?.trackId || '').toLowerCase()}`}`;
+}
+
 function eligibleArtists(tracks) {
   const artists = new Map();
   for (const track of tracks) {
-    if (!WALLET.test(track.wallet || '') || /^0x0{40}$/i.test(track.wallet) || !Number.isSafeInteger(track.plays) || track.plays <= 0) continue;
+    if (!hasPayoutWallet(track.wallet) || !Number.isSafeInteger(track.plays) || track.plays <= 0) continue;
     const key = track.wallet.toLowerCase();
     const artist = artists.get(key) || { wallet: track.wallet, artist: track.artist, plays: 0, tracks: 0 };
     artist.plays += track.plays;
@@ -29,7 +39,19 @@ function checkBudget(budgetUnits, minimumUnits) {
 export function previewPlaybackPayroll({ tracks, budgetUnits, minimumUnits = 0n }) {
   checkBudget(budgetUnits, minimumUnits);
   const artists = eligibleArtists(tracks);
-  const totalPlays = artists.reduce((total, artist) => total + BigInt(artist.plays), 0n);
+  const unlinkedArtists = new Map();
+  for (const track of tracks) {
+    if (hasPayoutWallet(track.wallet) || !Number.isSafeInteger(track.plays) || track.plays <= 0) continue;
+    const artist = String(track.artist || '');
+    const key = playbackArtistKey(track);
+    const entry = unlinkedArtists.get(key) || { wallet: '', artist, plays: 0, tracks: 0, shareKey: key };
+    entry.plays += track.plays;
+    if (!Number.isSafeInteger(entry.plays)) throw new Error('Playback total exceeds safe accounting precision');
+    entry.tracks++;
+    unlinkedArtists.set(key, entry);
+  }
+  const totalPlays = tracks.reduce((total, track) =>
+    total + (Number.isSafeInteger(track.plays) && track.plays > 0 ? BigInt(track.plays) : 0n), 0n);
   let allocated = 0n;
   const entries = artists.map(artist => {
     const amountUnits = totalPlays ? budgetUnits * BigInt(artist.plays) / totalPlays : 0n;
@@ -37,7 +59,14 @@ export function previewPlaybackPayroll({ tracks, budgetUnits, minimumUnits = 0n 
     if (payable) allocated += amountUnits;
     return { ...artist, amountUnits, payable };
   });
-  return { entries, totalPlays, allocatedUnits: allocated, remainderUnits: budgetUnits - allocated };
+  const forfeitedEntries = [...unlinkedArtists.values()].map(artist => ({
+    ...artist,
+    amountUnits: totalPlays ? budgetUnits * BigInt(artist.plays) / totalPlays : 0n,
+    payable: false,
+  }));
+  const forfeitedUnits = forfeitedEntries.reduce((total, artist) => total + artist.amountUnits, 0n);
+  entries.push(...forfeitedEntries);
+  return { entries, totalPlays, forfeitedUnits, allocatedUnits: allocated, remainderUnits: budgetUnits - allocated };
 }
 
 function voteRankedArtists(tracks) {
@@ -169,7 +198,7 @@ export function finalizeRadioAllocation({ report, category, budgetUnits, minimum
   const entries = plan.entries.filter(entry => entry.payable);
   if (!entries.length) throw new Error('No payouts meet the minimum threshold');
   const songPrizes = category === 'top10' && topTenScheduleVersion >= 3;
-  if (songPrizes && entries.some(entry => !WALLET.test(entry.wallet || '') || /^0x0{40}$/i.test(entry.wallet))) throw new Error('Link the artist wallet for every winning song before finalizing Top 10');
+  if (songPrizes && entries.some(entry => !hasPayoutWallet(entry.wallet))) throw new Error('Link the artist wallet for every winning song before finalizing Top 10');
   return { schemaVersion: songPrizes ? 5 : category === 'top10' ? 4 : period ? 3 : 2, ...(period ? { timeZone: PAYROLL_TIME_ZONE, startAt: period.startAt, endAt: period.endAt, partial: Boolean(report.partial) } : {}),
     ranking: category === 'playback' ? 'qualified-plays' : songPrizes ? 'song-votes-halving' : `${normalizeTopTenRanking(ranking)}-halving`, station: 'decentbusking', chainId: 8453, category, week: report.week,
     routerAddress, assetAddress, fundSlug, budgetUnits: budgetUnits.toString(), minimumUnits: minimumUnits.toString(),

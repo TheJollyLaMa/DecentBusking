@@ -59,7 +59,7 @@ test('song settlement pays each winning song once and rejects an overlapping art
 
 test('playback preview groups artists, caps its budget, and retains dust and rounding', async () => {
   const { previewPlaybackPayroll } = await import(url);
-  const result = previewPlaybackPayroll({ tracks: [track(1, 1), track(1, 1), track(2, 1), track(3, 1), { plays: 999 }],
+  const result = previewPlaybackPayroll({ tracks: [track(1, 1), track(1, 1), track(2, 1), track(3, 1), { plays: Number.NaN }],
     budgetUnits: 3000000n, minimumUnits: 1000000n });
   assert.equal(result.entries.length, 3);
   assert.equal(result.totalPlays, 4n);
@@ -70,7 +70,45 @@ test('playback preview groups artists, caps its budget, and retains dust and rou
   const empty = previewPlaybackPayroll({ tracks: [], budgetUnits: 1000000n });
   assert.equal(empty.remainderUnits, 1000000n);
   const zeroAddress = previewPlaybackPayroll({ tracks: [track(0, 10)], budgetUnits: 1000000n });
-  assert.equal(zeroAddress.entries.length, 0);
+  assert.equal(zeroAddress.entries.length, 1);
+  assert.equal(zeroAddress.entries[0].payable, false);
+  assert.equal(zeroAddress.forfeitedUnits, 1000000n);
+});
+
+test('walletless playback shares use the full play denominator and remain unallocated', async () => {
+  const { previewPlaybackPayroll } = await import(url);
+  const result = previewPlaybackPayroll({ tracks: [track(1, 1), { plays: 1, artist: 'No wallet' }],
+    budgetUnits: 10000000n, minimumUnits: 10000n });
+  assert.equal(result.totalPlays, 2n);
+  assert.equal(result.entries.find(entry => entry.wallet === track(1, 1).wallet).amountUnits, 5000000n);
+  assert.equal(result.entries.find(entry => !entry.wallet).amountUnits, 5000000n);
+  assert.equal(result.entries.find(entry => !entry.wallet).payable, false);
+  assert.equal(result.forfeitedUnits, 5000000n);
+  assert.equal(result.allocatedUnits, 5000000n);
+  assert.equal(result.remainderUnits, 5000000n);
+});
+
+test('walletless Top 10 winners forfeit their rank prize without redistribution or blocking closeout', async () => {
+  const { previewTopTenSongPayroll } = await import('../js/top-ten-prizes.mjs');
+  const { finalizeRadioAllocation } = await import(url);
+  const wallet = track(1, 1).wallet;
+  const tracks = [
+    { trackId: 'first', title: 'First', wallet, votes: 9, plays: 1 },
+    { trackId: 'unlinked', title: 'Unlinked', votes: 8, plays: 1 },
+    { trackId: 'third', title: 'Third', wallet: track(2, 1).wallet, votes: 7, plays: 1 },
+  ];
+  const plan = previewTopTenSongPayroll({ tracks, budgetUnits: 8000000n });
+  assert.deepEqual(plan.entries.map(entry => [entry.trackId, entry.amountUnits, entry.payable]), [
+    ['first', 4000000n, true], ['unlinked', 2000000n, false], ['third', 2000000n, true],
+  ]);
+  assert.equal(plan.allocatedUnits, 6000000n);
+  assert.equal(plan.forfeitedUnits, 2000000n);
+  const allocation = finalizeRadioAllocation({ report: { week: 'NY-2026-10-12', current: false, tracks },
+    category: 'top10', budgetUnits: 8000000n, minimumUnits: 10000n, topTenScheduleVersion: 3,
+    fundSlug: 'dbusk-top10', routerAddress: track(3, 1).wallet,
+    assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-19T04:00:00Z') });
+  assert.deepEqual(allocation.entries.map(entry => [entry.trackId, entry.amountUnits]), [['first', '4000000'], ['third', '2000000']]);
+  assert.equal(allocation.remainderUnits, '2000000');
 });
 
 test('Top 10 preview ranks unique artists by votes and splits only its capped prize budget', async () => {

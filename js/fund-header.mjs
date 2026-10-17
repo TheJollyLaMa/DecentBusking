@@ -3,8 +3,8 @@ import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider
 import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261017-fund-panel';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
-import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
-import { previewPlaybackPayroll } from './radio-payroll.mjs?v=20261017-mercury-release';
+import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
+import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261017-wallet-forfeiture';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -56,16 +56,16 @@ export function fundPendingRows({ fundSlug, report, budgetUnits, minimumUnits = 
     return rankTopTenSongs(tracks).map(track => ({ ...track, amountUnits: String(amounts.get(track.trackId) ?? 0n) }));
   }
   const plan = previewPlaybackPayroll({ tracks, budgetUnits: BigInt(budgetUnits), minimumUnits: BigInt(minimumUnits) });
-  const artists = new Map(plan.entries.map(entry => [entry.wallet.toLowerCase(), entry]));
+  const artists = new Map(plan.entries.map(entry => [entry.shareKey || playbackArtistKey(entry), entry]));
   const progress = new Map();
   return tracks.filter(track => Number.isSafeInteger(track.plays) && track.plays > 0)
     .slice().sort((first, second) => second.plays - first.plays || String(first.trackId).localeCompare(String(second.trackId)))
     .map((track, index) => {
-      const key = String(track.wallet || '').toLowerCase();
+      const key = playbackArtistKey(track);
       const artist = artists.get(key);
       const prior = progress.get(key) || { plays: 0n, units: 0n };
       const plays = prior.plays + BigInt(track.plays);
-      const units = artist?.payable ? artist.amountUnits * plays / BigInt(artist.plays) : 0n;
+      const units = artist && (artist.payable || !artist.wallet) ? artist.amountUnits * plays / BigInt(artist.plays) : 0n;
       progress.set(key, { plays, units });
       return { ...track, rank: index + 1, amountUnits: String(units - prior.units) };
     });

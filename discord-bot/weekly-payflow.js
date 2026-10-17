@@ -140,14 +140,16 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
       const budget = available * BigInt(shareBps) / 10000n;
       const preview = category === 'playback' ? previewPlaybackPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits })
         : previewTopTenSongPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits });
-      const average = preview.entries.length ? budget / BigInt(preview.entries.length) : 0n;
+      const payableCount = preview.entries.filter(entry => entry.payable).length;
+      const average = payableCount ? budget / BigInt(payableCount) : 0n;
       const warning = !(fund.exists ?? fund[2]) ? 'Fund has not been created' : !approved ? 'USDC not approved' : balance < reserved
         ? 'Balance is below unpaid scheduled allocations; add funds before paying' : available === 0n ? 'No unreserved USDC for this week'
-        : preview.entries.length && average < significantUnits ? 'Average estimated share is below the significant-share warning threshold' : '';
+        : payableCount && average < significantUnits ? 'Average estimated share is below the significant-share warning threshold' : '';
       funds[category] = { slug, exists: Boolean(fund.exists ?? fund[2]), active: Boolean(fund.active ?? fund[1]),
         balanceUnits: balance.toString(), reservedUnits: reserved.toString(), availableUnits: available.toString(), budgetUnits: budget.toString(),
-        recipientCount: preview.entries.length,
-        allocatedUnits: preview.allocatedUnits.toString(), remainderUnits: preview.remainderUnits.toString(), warning,
+        recipientCount: payableCount,
+        allocatedUnits: preview.allocatedUnits.toString(), remainderUnits: preview.remainderUnits.toString(),
+        forfeitedUnits: preview.forfeitedUnits.toString(), warning,
         estimatedShares: preview.entries.map(entry => ({ ...entry, amountUnits: entry.amountUnits.toString() })) };
     }
     lastCheckedAt = new Date(now()).toISOString();
@@ -169,12 +171,13 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
       allocations: allocations.filter(record => record.published) };
     if (!wallet) return result;
     const key = wallet.toLowerCase();
-    const totalPlays = (funds.playback?.estimatedShares || []).reduce((sum, entry) => sum + BigInt(entry.plays), 0n);
+    const totalPlays = (latestReports.find(report => report.current)?.tracks || []).reduce((sum, track) =>
+      sum + (Number.isSafeInteger(track.plays) && track.plays > 0 ? BigInt(track.plays) : 0n), 0n);
     const songs = (latestReports.find(report => report.current)?.tracks || []).filter(track => track.wallet?.toLowerCase() === key)
       .map(track => ({ title: track.title, plays: track.plays, votes: track.votes,
         estimatedPlaybackUnits: (totalPlays ? BigInt(funds.playback.budgetUnits) * BigInt(track.plays) / totalPlays : 0n).toString() }));
     return { ...result, funds: Object.fromEntries(Object.entries(funds).map(([category, fund]) => [category,
-      { ...fund, estimatedShares: fund.estimatedShares.filter(entry => entry.wallet.toLowerCase() === key) }])), currentSongs: songs };
+      { ...fund, estimatedShares: fund.estimatedShares.filter(entry => entry.wallet?.toLowerCase() === key) }])), currentSongs: songs };
   }
   return { initialize, tick, getState };
 }
