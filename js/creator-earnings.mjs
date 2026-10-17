@@ -164,6 +164,7 @@ export function createEarningsLedger({
   provider,
   restore = async () => null,
   save = async () => '',
+  schedule,
   startBlock = ROUTER_START_BLOCK,
   chunkSize = 2000,
   contracts = DJUKE_EARNING_CONTRACTS,
@@ -182,6 +183,7 @@ export function createEarningsLedger({
   let songPlaysThrough = null;
   let lastCheckedAt = null;
   let lastError = '';
+  let backupPending = false;
   let task = Promise.resolve();
 
   const run = operation => {
@@ -295,6 +297,7 @@ export function createEarningsLedger({
     return run(async () => {
       try {
         const head = await provider.getBlockNumber();
+        const previousCursor = scannedThrough;
         if (scannedFrom === null) scannedFrom = Number.isSafeInteger(startBlock) && startBlock >= 0 ? startBlock : ROUTER_START_BLOCK;
         if (scannedThrough === null) scannedThrough = scannedFrom - 1;
         let changed = false;
@@ -312,7 +315,11 @@ export function createEarningsLedger({
           songPlaysThrough = to;
         }
         lastCheckedAt = new Date(now()).toISOString();
-        if (changed || !items.length) await save(snapshot());
+        if (changed || previousCursor === null) backupPending = true;
+        if (backupPending) {
+          await save(snapshot());
+          backupPending = false;
+        } else if (scannedThrough !== previousCursor && schedule) schedule(snapshot());
         lastError = '';
       } catch (error) {
         lastError = error.message;

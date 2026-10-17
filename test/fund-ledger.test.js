@@ -85,6 +85,32 @@ function makeRouter(logs, balances) {
   };
 }
 
+test('fund refresh skips unchanged checks, schedules event-free cursor progress and saves new funds immediately', async () => {
+  const { createFundLedger } = await import(url);
+  let head = 10;
+  const logs = [];
+  const provider = makeProvider({ head, logs, txFrom: new Map() });
+  provider.getBlockNumber = async () => head;
+  const saves = [];
+  const scheduled = [];
+  const ledger = createFundLedger({ provider, router: makeRouter(logs, new Map()), startBlock: 10,
+    config: { routerAddress, radioFunds: { topTen: funds.top10 }, assets: { USDC: { address: usdc } } },
+    save: async value => { saves.push(structuredClone(value)); return 'ipfs://saved'; },
+    schedule: value => scheduled.push(structuredClone(value)) });
+  await ledger.initialize();
+  await ledger.refresh();
+  assert.equal(saves.length, 1);
+  assert.equal(scheduled.length, 0);
+  head++;
+  await ledger.refresh();
+  assert.equal(saves.length, 1);
+  assert.equal(scheduled[0].scannedThrough, 11);
+  logs.push(makeLog(funds.top10, `0x${'1'.repeat(40)}`, 100n, `0x${'a'.repeat(64)}`, ++head, 0));
+  await ledger.refresh();
+  assert.equal(saves.length, 2);
+  assert.equal(saves[1].sources.length, 1);
+});
+
 test('fund ledger classifies advert, djuke, and sponsor sources', async () => {
   const { createFundLedger } = await import(url);
   const logs = [

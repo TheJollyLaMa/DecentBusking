@@ -30,6 +30,7 @@ export function createFundLedger({
   readDjukeState,
   restore = async () => null,
   save = null,
+  schedule,
   startBlock = 0,
   chunkSize = 2000,
   now = () => Date.now(),
@@ -231,6 +232,7 @@ export function createFundLedger({
       try {
         lastError = '';
         const head = await provider.getBlockNumber();
+        const previousCursor = scannedThrough;
         const snapshots = {
           devert: readDevertState ? await readDevertState().catch(() => null) : null,
           djuke: readDjukeState ? await readDjukeState().catch(() => null) : null,
@@ -244,8 +246,12 @@ export function createFundLedger({
           if (await scanRange(from, to, snapshots)) changed = true;
           scannedThrough = to;
         }
-        backupPending = true;
         lastCheckedAt = new Date(now()).toISOString();
+        if (changed || previousCursor === null) backupPending = true;
+        else if (scannedThrough !== previousCursor) {
+          if (schedule && !backupPending) schedule(snapshot());
+          else backupPending = true;
+        }
         await persistIfNeeded();
       } catch (error) {
         lastError = error.message;

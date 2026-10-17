@@ -5,6 +5,29 @@ const ethers = require('../discord-bot/node_modules/ethers');
 const load = () => import('../js/creator-earnings.mjs');
 const WALLET = '0x807061DF657A7697c04045dA7d16D941861cAABc';
 
+test('an empty earnings index does not upload on unchanged polling and retries failed initial persistence', async () => {
+  const { createEarningsLedger } = await load();
+  let head = 10;
+  let fail = true;
+  let saves = 0;
+  const scheduled = [];
+  const ledger = createEarningsLedger({ ethers, startBlock: 10, contracts: [],
+    provider: { getBlockNumber: async () => head, getLogs: async () => [] },
+    save: async () => { saves++; if (fail) throw new Error('IPFS offline'); },
+    schedule: value => scheduled.push(value) });
+  await assert.rejects(ledger.initialize(), /IPFS offline/);
+  fail = false;
+  await ledger.refresh();
+  assert.equal(saves, 2);
+  await ledger.refresh();
+  assert.equal(saves, 2);
+  assert.equal(scheduled.length, 0);
+  head++;
+  await ledger.refresh();
+  assert.equal(saves, 2);
+  assert.equal(scheduled[0].scannedThrough, 11);
+});
+
 test('top jukebox earners aggregate only fulfilled song-play payouts, rank exact totals and recover after scan failure', async () => {
   const { createEarningsLedger, ROUTER_ADDRESS, DJUKE_EARNING_CONTRACTS } = await load();
   const contract = DJUKE_EARNING_CONTRACTS[0].address;

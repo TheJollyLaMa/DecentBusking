@@ -621,7 +621,12 @@ async function main() {
   const artworkUpdateStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-artwork-updates.json', tags: { app: 'decentbusking', kind: 'artwork-updates', schema: '1' },
-    serialize: value => value, deserialize: value => Array.isArray(value) ? value : [] }) : null;
+    serialize: value => ({ schemaVersion: 1, requests: value }),
+    deserialize: value => {
+      if (Array.isArray(value)) return value;
+      if (value?.schemaVersion === 1 && Array.isArray(value.requests)) return value.requests;
+      throw new Error('Invalid artwork update checkpoint');
+    } }) : null;
   const artworkUpdateQueue = createArtworkUpdateQueue({
     restore: artworkUpdateStore ? artworkUpdateStore.restore : async () => [],
     save: artworkUpdateStore ? artworkUpdateStore.save : async () => {},
@@ -905,6 +910,7 @@ async function main() {
     readDjukeState: () => readDjukeState?.(),
     restore: fundStore ? fundStore.restore : undefined,
     save: fundStore ? fundStore.save : undefined,
+    schedule: fundStore ? fundStore.schedule : undefined,
     // The settlement router has no events before its deployment block, so never scan from genesis.
     startBlock: Math.max(ROUTER_START_BLOCK, Number(process.env.PAYROLL_START_BLOCK || 0)),
     chunkSize: Number(process.env.FUND_SCAN_CHUNK_SIZE || 10000),
@@ -936,6 +942,7 @@ async function main() {
     provider: getRpcRouter().provider('logs', 'earnings-index'),
     restore: earningsStore ? earningsStore.restore : async () => null,
     save: earningsStore ? earningsStore.save : async () => '',
+    schedule: earningsStore ? earningsStore.schedule : undefined,
     startBlock: process.env.ROUTER_START_BLOCK ? Number(process.env.ROUTER_START_BLOCK) : undefined,
     chunkSize: Number(process.env.EARNINGS_SCAN_CHUNK_SIZE || 2000),
   });
@@ -1369,7 +1376,7 @@ async function main() {
     restoredPlaylist = recovery.playlist;
     if (recovery.recovered) console.log(`[playlist-recovery] Restored approved 2026-10-15 22:33:36 baseline; checkpoint ${recovery.uri}.`);
     loadPlaylist(restoredPlaylist);
-    configureRemotePersistence(stateStore.save);
+    configureRemotePersistence(stateStore.save, { schedule: stateStore.schedule, flush: stateStore.flush });
     const payrollRecoveryCids = restoredPlaylist.some(track => track.playlistBaselineCid)
       ? [] : (process.env.JUKELOOP_PAYROLL_RECOVERY_CID || PAYROLL_RECOVERY_CIDS.join(','))
         .split(',').map(cid => cid.trim()).filter(Boolean);
@@ -1571,9 +1578,16 @@ async function main() {
 
   const shutdown = async (signal) => {
     console.log(`[jukebox-bot] ${signal} received; flushing IPFS state checkpoint.`);
-    await Promise.all([waitForRemotePersistence(), Promise.race([flushRpcUsage(), new Promise(resolve => setTimeout(resolve, 5000))])]);
+    let exitCode = 0;
+    try {
+      await Promise.all([waitForRemotePersistence(), fundStore?.flush(), earningsStore?.flush(),
+        Promise.race([flushRpcUsage(), new Promise(resolve => setTimeout(resolve, 5000))])]);
+    } catch (error) {
+      exitCode = 1;
+      console.error('[jukebox-bot] Shutdown checkpoint failed:', error.message);
+    }
     client.destroy();
-    process.exit(0);
+    process.exit(exitCode);
   };
   process.once('SIGTERM', () => shutdown('SIGTERM'));
   process.once('SIGINT', () => shutdown('SIGINT'));
