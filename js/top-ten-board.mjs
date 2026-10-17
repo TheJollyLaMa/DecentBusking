@@ -2,7 +2,7 @@ import { renderUsdcAmount } from './fund-display.mjs?v=20261015-usdc-cents';
 import { weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
 import { addChartSongToPlaylist } from './top-ten-playlist.mjs';
-import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261016-top10-hype-8';
+import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261016-hype-bunny';
 
 export { rankTopTenSongs };
 
@@ -91,33 +91,61 @@ export function initTopTenBoard() {
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const flightLayer = el('div', 'top-ten-flight-layer');
   flightLayer.setAttribute('aria-hidden', 'true');
-  const visitors = ['\u{1F4B8}', '\u{1F41D}', '\u{1F41D}'].map((symbol, index) => {
+  const chartHole = el('span', 'top-ten-chart-hole', '🕳️');
+  const spyPeek = el('span', 'top-ten-spy-peek');
+  spyPeek.append(el('span', 'top-ten-spy', '🕵️'));
+  chartHole.append(spyPeek);
+  flightLayer.append(chartHole);
+  const festivalVisitors = ['🐇', '🦊', '🐀', '💸'];
+  const visitors = ['\u{1F4B8}', '\u{1F41D}', '\u{1F41D}', ''].map((symbol, index) => {
     const node = el('span', `top-ten-visitor top-ten-visitor-${index}`, symbol);
     flightLayer.append(node);
-    return { node, index, step: index * 5, position: null, animation: null };
+    return { node, index, step: index * 5, visits: 0, position: null, animation: null };
   });
   panel.append(flightLayer);
-  const canFly = () => isOpen() && !festival && !reducedMotion.matches && !document.hidden;
+  const canFly = () => isOpen() && !reducedMotion.matches && !document.hidden;
   const fly = visitor => {
-    if (!canFly() || visitor.animation) return;
+    if (!canFly() || (!festival && visitor.index === 3) || visitor.animation) return;
     const bounds = panel.getBoundingClientRect();
     const viewport = content.getBoundingClientRect();
+    const hole = { x: viewport.left - bounds.left + viewport.width / 2,
+      y: viewport.bottom - bounds.top - 15 };
+    chartHole.style.left = `${hole.x}px`;
+    chartHole.style.top = `${hole.y}px`;
     const targets = [...content.querySelectorAll('.top-ten-song-title, .top-ten-net-votes, .top-ten-prize')]
       .map(node => node.getBoundingClientRect())
       .filter(rect => rect.top >= viewport.top && rect.bottom <= viewport.bottom && rect.width > 0)
       .map(rect => ({ x: Math.max(14, Math.min(bounds.width - 14, rect.left + rect.width / 2 - bounds.left)),
         y: Math.max(viewport.top - bounds.top + 10, Math.min(viewport.bottom - bounds.top - 10, rect.top - bounds.top - 5)) }));
     if (!targets.length) return;
-    const target = targets[visitor.step % targets.length];
+    const entering = !!festival && visitor.visits === 0;
+    const returning = !!festival && visitor.visits === 4;
+    const target = returning ? hole : targets[visitor.step % targets.length];
     visitor.step += visitor.index === 1 ? 2 : visitor.index === 2 ? 5 : 1;
-    const from = visitor.position || targets[(visitor.step + visitor.index * 3) % targets.length];
+    const previous = visitor.position || targets[(visitor.step + visitor.index * 3) % targets.length];
+    const from = entering ? hole : {
+      x: Math.max(viewport.left - bounds.left + 10, Math.min(viewport.right - bounds.left - 10, previous.x)),
+      y: Math.max(viewport.top - bounds.top + 10, Math.min(viewport.bottom - bounds.top - 10, previous.y)),
+    };
     visitor.node.style.visibility = 'visible';
-    const animation = visitor.node.animate(chartFlightFrames(from, target, 12 + visitor.index * 5), {
+    const frames = chartFlightFrames(from, target, 12 + visitor.index * 5);
+    if (entering) {
+      frames[0].opacity = 0;
+      frames[0].transform += ' scale(.1)';
+      frames[1].opacity = 1;
+    }
+    if (returning) {
+      frames[2].opacity = 1;
+      frames[3].opacity = 0;
+      frames[3].transform += ' scale(.1)';
+    }
+    const animation = visitor.node.animate(frames, {
       duration: 5200 + visitor.index * 1100, easing: 'ease-in-out', fill: 'forwards',
     });
     visitor.animation = animation;
     animation.finished.then(() => {
       visitor.position = target;
+      visitor.visits = returning ? 0 : visitor.visits + 1;
       visitor.animation = null;
       visitor.node.style.transform = chartFlightFrames(target, target)[0].transform;
       animation.cancel();
@@ -128,10 +156,12 @@ export function initTopTenBoard() {
     festival?.resume();
     if (reducedMotion.matches) for (const animation of rankAnimations) animation.cancel();
     for (const visitor of visitors) {
-      if (canFly()) fly(visitor);
+      visitor.node.textContent = festival ? festivalVisitors[visitor.index] : ['\u{1F4B8}', '\u{1F41D}', '\u{1F41D}', ''][visitor.index];
+      if (canFly() && (festival || visitor.index < 3)) fly(visitor);
       else {
         visitor.animation?.cancel();
         visitor.animation = null;
+        visitor.visits = 0;
         visitor.node.style.visibility = 'hidden';
       }
     }

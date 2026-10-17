@@ -53,6 +53,7 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
   doc.body.append(ids['top-ten-tab'], panel);
   doc.getElementById = id => ids[id] || null;
   doc.createElement = () => new Node();
+  doc.createElementNS = () => new Node();
   doc.hidden = false;
   doc.activeElement = null;
   global.document = doc;

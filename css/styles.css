@@ -695,6 +695,21 @@ body.devert-open #top-ten-tab, body.devert-open #djuke-tab, body.devert-open #de
 .top-ten-flight-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
 .top-ten-visitor { position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; font-size: 16px; line-height: 1; opacity: .7; filter: drop-shadow(0 0 5px #ddd99a55); }
 .top-ten-visitor-0 { font-size: 18px; opacity: .75; }
+.top-ten-chart-hole { display: none; position: absolute; transform: translate(-50%, -50%); font-size: 30px; line-height: 1; filter: drop-shadow(0 0 7px #91e2ce66); }
+.is-hype-festival .top-ten-chart-hole { display: block; }
+.top-ten-spy-peek { position: absolute; bottom: 12px; left: 50%; width: 30px; height: 32px; overflow: hidden; transform: translateX(-50%); }
+.top-ten-spy { display: block; font-size: 27px; transform: translateY(110%); animation: top-ten-spy-peek 23s ease-in-out infinite; }
+.hype-rabbit-hole .top-ten-spy { animation-duration: 29s; animation-delay: -9s; }
+@keyframes top-ten-spy-peek {
+  0%, 72%, 94%, 100% { transform: translateY(110%); }
+  78%, 82% { transform: translateY(5%) rotate(-10deg); }
+  86%, 89% { transform: translateY(5%) rotate(12deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .top-ten-spy-peek { display: none; }
+}
+body:not(.top-ten-open) .top-ten-spy { animation-play-state: paused; }
+.is-hype-festival #top-ten-content { padding-bottom: 34px; box-sizing: border-box; }
 @keyframes top-ten-charge { 0%, 100% { background-color: rgba(8, 10, 16, .96); } 50% { background-color: rgba(8, 18, 19, .81); } }
 @keyframes top-ten-charge-rise { from { transform: translateY(100%); } to { transform: translateY(-100%); } }
 @media (prefers-reduced-motion: reduce) {
@@ -724,10 +739,53 @@ body.devert-open #top-ten-tab, body.devert-open #djuke-tab, body.devert-open #de
 .hype-celestial-mercury { left: 72%; animation-delay: -1s; }
 .hype-trophy { right: 1%; top: 7px; font-size: 28px; animation: hype-rock 2s ease-in-out infinite alternate; }
 .hype-stage .hype-rabbit-hole { left: 3%; bottom: 42px; font-size: 30px; opacity: .8; }
+.hype-stage .hype-runaway { left: 3%; bottom: 48px; z-index: 1; width: 38px; height: 44px; overflow: hidden; animation: hype-bunny-run 14s linear infinite; }
+.hype-runaway-bunny { display: block; font-size: 30px; transform: translateY(110%); animation: hype-bunny-hop 14s linear infinite; }
+.hype-stage .hype-runaway-fox { animation-name: hype-fox-run; animation-delay: -4s; }
+.hype-runaway-fox .hype-runaway-bunny { animation-delay: -4s; }
+.hype-stage .hype-runaway-rat { animation-name: hype-rat-run; animation-delay: -8s; }
+.hype-runaway-rat .hype-runaway-bunny { animation-delay: -8s; }
+.hype-stage .hype-runaway-bird { animation-name: hype-bird-fly; animation-delay: -11s; }
+.hype-runaway-bird .hype-runaway-bunny { animation-delay: -11s; }
+@keyframes hype-fox-run {
+  0%, 24% { left: 3%; opacity: 0; transform: translate(0, 0); }
+  25%, 38% { left: 3%; opacity: 1; transform: translate(0, 0); }
+  54% { left: -15%; opacity: 1; transform: translate(0, -28px); }
+  55%, 100% { left: -15%; opacity: 0; transform: translate(0, -28px); }
+}
+@keyframes hype-rat-run {
+  0%, 24% { left: 3%; opacity: 0; transform: translateY(0); }
+  25%, 38% { left: 3%; opacity: 1; transform: translateY(0); }
+  66% { left: 105%; opacity: 1; transform: translateY(120px); }
+  67%, 100% { left: 105%; opacity: 0; transform: translateY(120px); }
+}
+@keyframes hype-bird-fly {
+  0%, 24% { left: 3%; opacity: 0; transform: translateY(0); }
+  25%, 38% { left: 3%; opacity: 1; transform: translateY(0); }
+  66% { left: 45%; opacity: 0; transform: translateY(-65vh); }
+  67%, 100% { left: 45%; opacity: 0; transform: translateY(-65vh); }
+}
+@keyframes hype-bunny-run {
+  0%, 24% { left: 3%; opacity: 0; }
+  25%, 38% { left: 3%; opacity: 1; }
+  66% { left: 105%; opacity: 1; }
+  67%, 100% { left: 105%; opacity: 0; }
+}
+@keyframes hype-bunny-hop {
+  0%, 24%, 100% { transform: translateY(110%) scaleX(-1); }
+  30%, 38%, 44%, 50%, 56%, 62%, 66% { transform: translateY(0) rotate(5deg) scaleX(-1); }
+  41%, 47%, 53%, 59%, 65% { transform: translateY(-12px) rotate(-8deg) scaleX(-1); }
+}
 .hype-stage .hype-spark { left: calc(5% + var(--i) * 10%); bottom: 3px; font-size: 14px; color: #ffe1a2; opacity: 0; animation: hype-float 4.8s linear infinite; animation-delay: calc(var(--i) * -.73s); }
 .hype-equalizer { position: absolute; bottom: 0; left: 5%; right: 5%; height: 34px; display: flex; align-items: end; gap: 4px; }
 .hype-equalizer i { flex: 1; height: 100%; border-radius: 3px 3px 0 0; background: linear-gradient(#f5cd87, #54cbb3); box-shadow: 0 0 8px #54cbb355; transform-origin: bottom; transform: scaleY(.04); opacity: .55; will-change: transform; }
 .hype-equalizer.is-live i { opacity: .9; }
+.hype-wave { display: none; position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.hype-wave path { fill: none; stroke: #a8edce; stroke-width: 2; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 4px #54cbb3); }
+.hype-equalizer.is-wave .hype-wave { display: block; }
+.hype-equalizer.is-wave i { visibility: hidden; }
+.hype-meter-toggle { padding: 4px 9px; border: 1px solid #91e2ce66; border-radius: 12px; background: #142d2c; color: #adf4d9; font: inherit; cursor: pointer; }
+.hype-meter-toggle:hover { background: #24534b; }
 .hype-progress { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 10px 0 6px; font-size: .66rem; letter-spacing: .05em; color: #ffe1a2; }
 .hype-on-air { display: inline-flex; align-items: center; gap: 5px; color: #a8edce; font-size: .57rem; font-weight: 800; }
 .hype-on-air::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #8aebba; box-shadow: 0 0 9px #8aebba; }
@@ -736,14 +794,57 @@ body.devert-open #top-ten-tab, body.devert-open #djuke-tab, body.devert-open #de
 .hype-warning { margin: 6px 0 0; font-size: .66rem; line-height: 1.4; color: #ffd39b; }
 .top-ten-opening-rank { color: #e7c591; font-size: .65rem; }
 #top-ten-panel.is-hype-festival { border-color: #c3a36899; background: linear-gradient(175deg, #191b28fa, #0d171cfa); }
-body.top-ten-festival-open { --top-ten-drawer-width: min(650px, calc(100vw - 44px)); }
+body.top-ten-festival-open { --top-ten-drawer-width: min(980px, calc(100vw - 44px)); }
+#top-ten-panel.is-hype-festival {
+  top: max(8px, env(safe-area-inset-top));
+  bottom: max(8px, env(safe-area-inset-bottom));
+  z-index: 201;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  gap: 8px 18px;
+}
+body.top-ten-festival-open.top-ten-open #top-ten-tab { z-index: 202; }
+.is-hype-festival .top-ten-panel-heading { grid-column: 1 / -1; }
+.is-hype-festival .hype-festival { grid-column: 1; grid-row: 2 / -1; align-self: center; }
+.is-hype-festival .top-ten-chart-note { grid-column: 2; grid-row: 2; }
+.is-hype-festival #top-ten-status { grid-column: 2; grid-row: 3; }
+.is-hype-festival .top-ten-playlist-status { grid-column: 2; grid-row: 4; }
+.is-hype-festival #top-ten-content { grid-column: 2; grid-row: 5; min-width: 0; }
+@media (min-width: 601px) and (min-height: 761px) {
+  .is-hype-festival .hype-festival {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .is-hype-festival .hype-stage { flex: 1; min-height: 240px; margin-top: 18px; }
+  .is-hype-festival .hype-band { top: 28%; height: 90px; }
+  .is-hype-festival .hype-bandmate { font-size: 48px; }
+  .is-hype-festival .hype-instrument { font-size: 34px; }
+  .is-hype-festival .hype-equalizer {
+    height: 40%;
+    gap: 5px;
+    padding: 0 5px;
+    border-bottom: 1px solid #ffe1a277;
+    background: radial-gradient(ellipse at bottom, #54cbb320, transparent 75%);
+  }
+  .is-hype-festival .hype-equalizer i {
+    border-radius: 4px 4px 0 0;
+    background: linear-gradient(#f7a7db, #ffe1a2 30%, #7ce9c4 65%, #32a9be);
+    box-shadow: 0 0 14px #54cbb355;
+    -webkit-mask-image: repeating-linear-gradient(to top, #000 0 7px, transparent 7px 10px);
+    mask-image: repeating-linear-gradient(to top, #000 0 7px, transparent 7px 10px);
+  }
+  .is-hype-festival .hype-stage .hype-rabbit-hole { bottom: 44%; }
+  .is-hype-festival .hype-stage .hype-runaway { bottom: calc(44% + 6px); }
+}
 .top-ten-playlist-status:empty { display: none; }
 .top-ten-playlist-status { margin: 0; color: var(--teal); font-size: .72rem; line-height: 1.4; }
 .top-ten-song-title-line { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .top-ten-playlist-add { flex: 0 0 18px; width: 18px; height: 18px; padding: 0; border: 1px solid #8fe0c866; border-radius: 50%; background: #142d2c; color: #adf4d9; font-size: .8rem; line-height: 1; cursor: pointer; }
 .top-ten-playlist-add:hover { background: #24534b; }
 .top-ten-playlist-add:disabled { opacity: .5; cursor: wait; }
-.is-hype-festival .top-ten-flight-layer { display: none; }
 .hype-festival.is-headliner { border-color: #ffe1a2; box-shadow: inset 0 0 24px #eebc4a25, 0 0 15px #eebc4a20; }
 .hype-festival.is-paused *, .hype-festival.is-paused .hype-stage > span { animation-play-state: paused; }
 @keyframes hype-rock { from { transform: rotate(-11deg) translateY(0); } to { transform: rotate(9deg) translateY(-5px); } }
@@ -752,10 +853,9 @@ body.top-ten-festival-open { --top-ten-drawer-width: min(650px, calc(100vw - 44p
 @media (prefers-reduced-motion: reduce) {
   .hype-festival *, .hype-festival .hype-stage > span { animation: none; }
   .hype-stage .hype-spark { display: none; }
+  .hype-stage .hype-runaway { display: none; }
 }
 @media (max-height: 760px), (max-width: 600px) {
-  #top-ten-panel.is-hype-festival { overflow-y: auto; }
-  .is-hype-festival #top-ten-content { flex: 1 0 150px; }
   .hype-festival { padding: 8px; }
   .hype-eyebrow { font-size: .46rem; }
   .hype-title { margin: 3px 0; }
@@ -770,6 +870,8 @@ body.top-ten-festival-open { --top-ten-drawer-width: min(650px, calc(100vw - 44p
   .hype-instrument { right: -10px; bottom: -4px; font-size: 19px; }
   .hype-planet, .hype-celestial, .hype-trophy { top: 0; font-size: 19px; }
   .hype-stage .hype-rabbit-hole { bottom: 22px; font-size: 20px; }
+  .hype-stage .hype-runaway { bottom: 26px; width: 28px; height: 32px; }
+  .hype-runaway-bunny { font-size: 22px; }
   .hype-equalizer { height: 18px; }
   .hype-progress { padding: 5px 0 0; font-size: .58rem; }
 }
@@ -833,6 +935,14 @@ body.top-ten-festival-open { --top-ten-drawer-width: min(650px, calc(100vw - 44p
 @media (max-width: 600px) {
   :root { --top-ten-drawer-width: min(320px, calc(100vw - 44px)); --left-tab-top: 168px; }
   #top-ten-panel { bottom: max(160px, calc(var(--radio-footer-height, 150px) + 28px)); padding: 12px 10px; }
+  #top-ten-panel.is-hype-festival {
+    display: flex;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+  .is-hype-festival .hype-festival { align-self: stretch; }
+  .is-hype-festival #top-ten-content { flex: 1 0 min(320px, 45dvh); }
+  .is-hype-festival .top-ten-song { box-sizing: border-box; min-height: 60px; }
 }
 
 :root { --djuke-width: min(360px, calc(100vw - 44px)); }

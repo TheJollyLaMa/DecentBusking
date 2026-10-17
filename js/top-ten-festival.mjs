@@ -63,7 +63,18 @@ export function mountTopTenFestival(panel, { readSpectrum = null } = {}) {
     musician.append(element('span', 'hype-performer', symbol), element('span', 'hype-instrument', instrument));
     band.append(musician);
   }
-  stage.append(element('span', 'hype-rabbit-hole', '🕳️'), band);
+  const runaway = element('span', 'hype-runaway');
+  runaway.append(element('span', 'hype-runaway-bunny', '🐇'));
+  const stageHole = element('span', 'hype-rabbit-hole', '🕳️');
+  const spyPeek = element('span', 'top-ten-spy-peek');
+  spyPeek.append(element('span', 'top-ten-spy', '🕵️'));
+  stageHole.append(spyPeek);
+  stage.append(stageHole, runaway, band);
+  for (const [animal, symbol] of [['fox', '🦊'], ['rat', '🐀'], ['bird', '💸']]) {
+    const visitor = element('span', `hype-runaway hype-runaway-${animal}`);
+    visitor.append(element('span', 'hype-runaway-bunny', symbol));
+    stage.append(visitor);
+  }
   for (let index = 0; index < 9; index++) {
     const particle = element('span', 'hype-spark', ['\u266A', '\u{1F4B8}', '\u2726', '\u{1FA99}', '\u266B'][index % 5]);
     particle.style.setProperty('--i', index);
@@ -81,8 +92,40 @@ export function mountTopTenFestival(panel, { readSpectrum = null } = {}) {
   let spectrum = null;
   let levels = [];
   let frame = 0;
+  let waveMode = false;
+  const wave = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  wave.setAttribute('class', 'hype-wave');
+  wave.setAttribute('viewBox', '0 0 240 100');
+  wave.setAttribute('preserveAspectRatio', 'none');
+  const wavePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  wave.append(wavePath);
+  equalizer.append(wave);
+  const meterToggle = element('button', 'hype-meter-toggle', 'Wave');
+  meterToggle.type = 'button';
+  meterToggle.setAttribute('aria-label', 'Show smooth wave instead of equalizer bars');
+  meterToggle.setAttribute('aria-pressed', 'false');
   const reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
-  const paint = values => { values.forEach((value, index) => { bars[index].style.transform = `scaleY(${value.toFixed(3)})`; }); };
+  const paint = values => {
+    values.forEach((value, index) => { bars[index].style.transform = `scaleY(${value.toFixed(3)})`; });
+    const points = values.map((value, index) => ({ x: index * 240 / (values.length - 1), y: 96 - value * 90 }));
+    let path = `M ${points[0].x} ${points[0].y}`;
+    for (let index = 1; index < points.length; index++) {
+      const previous = points[index - 1];
+      const current = points[index];
+      const middle = (previous.x + current.x) / 2;
+      path += ` C ${middle} ${previous.y}, ${middle} ${current.y}, ${current.x} ${current.y}`;
+    }
+    wavePath.setAttribute('d', path);
+  };
+  const toggleMeter = () => {
+    waveMode = !waveMode;
+    equalizer.classList.toggle('is-wave', waveMode);
+    meterToggle.textContent = waveMode ? 'Bars' : 'Wave';
+    meterToggle.setAttribute('aria-pressed', String(waveMode));
+    meterToggle.setAttribute('aria-label', waveMode ? 'Show equalizer bars instead of smooth wave' : 'Show smooth wave instead of equalizer bars');
+    paint(levels.length ? levels : bars.map(() => EQ_REST));
+  };
+  meterToggle.addEventListener('click', toggleMeter);
   const tick = () => {
     frame = 0;
     if (document.hidden || reducedMotion?.matches || !panel.classList.contains('is-open')) {
@@ -105,7 +148,7 @@ export function mountTopTenFestival(panel, { readSpectrum = null } = {}) {
   position.setAttribute('role', 'status');
   position.setAttribute('aria-live', 'polite');
   const live = element('span', 'hype-on-air', 'ON AIR');
-  progress.append(live, position);
+  progress.append(live, position, meterToggle);
   const note = element('p', 'hype-chart-explainer', 'Opening chart sets the play order. Your votes move the live ranks below.');
   const warning = element('p', 'hype-warning');
   banner.append(info, infoText, eyebrow, title, subtitle, stage, progress, note, warning);
@@ -133,6 +176,7 @@ export function mountTopTenFestival(panel, { readSpectrum = null } = {}) {
       frame = 0;
       document.removeEventListener('visibilitychange', visibility);
       banner.removeEventListener('keydown', infoKey);
+      meterToggle.removeEventListener('click', toggleMeter);
       panel.classList.remove('is-hype-festival');
       document.body.classList.remove('top-ten-festival-open');
       banner.remove();
