@@ -12,8 +12,10 @@ test('paid advert pricing doubles per seven pending requests and rejects invalid
   const { quoteDevertRequest } = await import('../js/devert-queue.mjs');
   for (const [count, price] of [[0, 1000000n], [6, 1000000n], [7, 2000000n], [14, 4000000n], [128, 262144000000n]]) {
     assert.equal(quoteDevertRequest(count), price);
+    assert.equal(quoteDevertRequest(count, 1), price * 2n);
   }
   for (const count of [-1, 0.1, 129, NaN]) assert.throws(() => quoteDevertRequest(count), /count/);
+  for (const tier of [-1, 2, '1']) assert.throws(() => quoteDevertRequest(0, tier), /tier/);
 });
 
 test('paid advert snapshot verifies Base confirmation, count, price and immutable media; removed requests remain refundable', async () => {
@@ -21,7 +23,7 @@ test('paid advert snapshot verifies Base confirmation, count, price and immutabl
   const { DEVERT_QUEUE_USDC } = await import('../js/devert-queue.mjs');
   const tags = [];
   const raw = { campaignId: 9n, payer: buyer, amount: 1000000n, status: 0n,
-    title: 'Approved advert', audioURI: 'ipfs://approved-ad', advertiser };
+    title: 'Approved advert', audioURI: 'ipfs://approved-ad', advertiser, tier: 0n };
   let removed = false;
   let count = 1n;
   let reorg = false;
@@ -31,14 +33,18 @@ test('paid advert snapshot verifies Base confirmation, count, price and immutabl
   const contract = { headRequestId: async () => removed ? 1n : 0n, nextRequestId: async () => 1n,
     pendingCount: async () => count, quote: async () => 1000000n, paused: async () => false,
     paymentToken: async () => DEVERT_QUEUE_USDC, removedCampaigns: async () => removed,
+    queueVersion: async () => 2n, headRequestIdForTier: async tier => !removed && tier === 0 ? 0n : 1n,
+    quoteForTier: async tier => tier === 1 ? 2000000n : 1000000n,
     approvedCampaigns: async (_, options) => { tags.push(options.blockTag); return true; },
     getRequest: async (_, options) => { tags.push(options.blockTag); return raw; } };
-  const read = createDevertQueueReader({ provider, contract, contractAddress: queueAddress, paymentsEnabled: true,
+  const read = createDevertQueueReader({ provider, contract, contractAddress: queueAddress, paymentsEnabled: true, version: 2,
     getApprovedCampaignIds: () => ['9'] });
   const state = await read();
   assert.equal(state.blockNumber, 19);
   assert.equal(state.requests[0].audioURI, 'ipfs://approved-ad');
   assert.equal(state.paymentsEnabled, true);
+  assert.equal(state.requests[0].tier, 0);
+  assert.equal(state.immediatePriceUnits, '2000000');
   assert.deepEqual(state.approvedCampaignIds, ['9']);
   assert.ok(tags.every(tag => tag === 19));
   removed = true; count = 0n;
@@ -50,6 +56,10 @@ test('paid advert snapshot verifies Base confirmation, count, price and immutabl
   await assert.rejects(read(), /Invalid paid advert queue snapshot/);
   count = 1n; reorg = true; blockReads = 0;
   await assert.rejects(read(), /changed during verification/);
+  reorg = false;
+  const legacy = await createDevertQueueReader({ provider, contract, contractAddress: queueAddress, paymentsEnabled: true })();
+  assert.equal(legacy.paymentsEnabled, false);
+  assert.equal(legacy.requests[0].tier, 1);
 });
 
 test('paid advert checkout reserves exact Base USDC, simulates before send and requires a request receipt', async () => {
@@ -62,18 +72,26 @@ test('paid advert checkout reserves exact Base USDC, simulates before send and r
       calls.push(['approve', value]); allowance = value;
       return { wait: async () => ({ status: 1 }) };
     } };
-  const queue = { target: queueAddress, paymentToken: async () => DEVERT_QUEUE_USDC, quote: async () => 1000000n,
-    requestAd: Object.assign(async (campaign, maxPrice) => {
-      calls.push(['send', campaign, maxPrice]);
+  const queue = { target: queueAddress, paymentToken: async () => DEVERT_QUEUE_USDC,
+    queueVersion: async () => 2n, quoteForTier: async tier => tier === 1 ? 2000000n : 1000000n,
+    requestAd: Object.assign(async (campaign, tier, maxPrice) => {
+      calls.push(['send', campaign, tier, maxPrice]);
       return { hash: '0xtx', wait: async () => ({ status: 1, logs: [{ address: queueAddress }] }) };
     }, { staticCall: async (...args) => calls.push(['simulate', ...args]) }),
     interface: { parseLog: () => ({ name: 'AdRequested', args: { requestId: 8n } }) } };
   const result = await purchaseDevertRequest({ signer, queue, usdc, campaignId: '9', maxPriceUnits: 1000000n });
   assert.deepEqual(calls.map(call => call[0]), ['approve', 'simulate', 'send']);
   assert.equal(calls[0][1], 1000000n);
+  assert.deepEqual(calls[2], ['send', 9n, 0, 1000000n]);
   assert.equal(result.requestId, '8');
-  queue.quote = async () => 2000000n;
+  calls.length = 0;
+  await purchaseDevertRequest({ signer, queue, usdc, campaignId: '9', tier: 1, maxPriceUnits: 2000000n });
+  assert.equal(calls[0][1], 2000000n);
+  assert.deepEqual(calls[2], ['send', 9n, 1, 2000000n]);
+  queue.quoteForTier = async () => 2000000n;
   await assert.rejects(purchaseDevertRequest({ signer, queue, usdc, campaignId: '9', maxPriceUnits: 1000000n }), /increased/);
+  queue.queueVersion = async () => 1n;
+  await assert.rejects(purchaseDevertRequest({ signer, queue, usdc, campaignId: '9', maxPriceUnits: 2000000n }), /replacement/);
   signer.provider.getNetwork = async () => ({ chainId: 1n });
   await assert.rejects(purchaseDevertRequest({ signer, queue, usdc, campaignId: '9', maxPriceUnits: 2000000n }), /Base/);
 });
@@ -145,10 +163,13 @@ test('paid advert runtime defers while paused and reconciles removed requests be
 test('checkout snapshot rejects a different contract or a manipulated quote and allows disabled configuration', async () => {
   const { validateDevertPaidSnapshot } = await import('../js/devert-paid-queue.mjs');
   assert.deepEqual(validateDevertPaidSnapshot({ configured: false }), { configured: false });
-  const state = { chainId: 8453, contractAddress: queueAddress, requests: [], recentRefunds: [], pendingCount: 0, priceUnits: '1000000' };
+  const state = { version: 2, chainId: 8453, contractAddress: queueAddress, requests: [], recentRefunds: [], pendingCount: 0,
+    priceUnits: '1000000', immediatePriceUnits: '2000000' };
   assert.equal(validateDevertPaidSnapshot(state, queueAddress), state);
   assert.throws(() => validateDevertPaidSnapshot(state, buyer), /configuration/);
   assert.throws(() => validateDevertPaidSnapshot({ ...state, priceUnits: '1' }, queueAddress), /configuration/);
+  assert.throws(() => validateDevertPaidSnapshot({ ...state, immediatePriceUnits: '1000000' }, queueAddress), /tier quote/);
+  assert.throws(() => validateDevertPaidSnapshot({ ...state, version: 1, paymentsEnabled: true }, queueAddress), /Legacy/);
 });
 
 test('catalog approval requires advert metadata, matching recording and advertiser; failures retry without skipping removal', async () => {
@@ -241,6 +262,51 @@ test('paid advert API distinguishes disabled checkout, confirmed state and expli
     const response = await fetch(url);
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { configured: false, paymentsEnabled: false, requests: [], recentRefunds: [] });
+  });
+
+  test('two-tier runtime keeps bumps for normal slots, prioritizes immediate FIFO and restores both tiers without replay', async () => {
+    const { createDevertQueueRuntime } = await import('../discord-bot/devert-queue.js');
+    let requests = [{ ...request(0), tier: 0 }, { ...request(1), tier: 1 },
+      { ...request(2), tier: 0 }, { ...request(3), tier: 1 }];
+    let saved;
+    const fulfilled = [];
+    const store = { restore: async () => saved, save: async state => { saved = structuredClone(state); return 'ipfs://journal'; } };
+    const contract = {
+      fulfill: async id => {
+        fulfilled.push(Number(id));
+        requests = requests.filter(row => row.chainRequestId !== String(id));
+        return { hash: '0xpaid', wait: async () => ({ status: 1 }) };
+      },
+      getRequest: async id => ({ campaignId: 9n, status: 0n, tier: requests.find(row => row.chainRequestId === String(id)).tier }),
+      headRequestIdForTier: async tier => BigInt(requests.find(row => row.tier === tier)?.chainRequestId ?? 4),
+      nextRequestId: async () => 4n, paused: async () => false, removedCampaigns: async () => false,
+    };
+    const make = () => createDevertQueueRuntime({ readState: async () => ({ paused: false, requests }), store, contract });
+    let runtime = make();
+    let paid = await runtime.nextPaid({ allowBump: true });
+    assert.equal(paid.record.chainRequestId, '1');
+    await runtime.complete(paid.record, { playId: 'immediate-1', audibleMs: 5000, finished: true });
+    await new Promise(resolve => setImmediate(resolve));
+    runtime = make();
+    paid = await runtime.nextPaid({ allowBump: true });
+    assert.equal(paid.record.chainRequestId, '3');
+    await runtime.complete(paid.record, { playId: 'immediate-3', audibleMs: 5000, finished: true });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(await runtime.nextPaid(), null, 'bumps cannot create extra breaks');
+    paid = await runtime.nextPaid({ allowBump: true });
+    assert.equal(paid.record.chainRequestId, '0');
+    assert.equal(paid.record.tier, 0);
+    assert.equal(await runtime.canPlay(paid.record), true);
+    requests.push({ ...request(4), tier: 1 });
+    contract.nextRequestId = async () => 5n;
+    assert.equal(await runtime.canPlay(paid.record), false, 'new immediate request preempts a bump before it starts');
+    requests.pop();
+    await runtime.complete(paid.record, { playId: 'bump-0', audibleMs: 5000, finished: true });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(fulfilled, [1, 3, 0]);
+    assert.equal(await runtime.nextPaid(), null);
+    paid = await runtime.nextPaid({ allowBump: true });
+    assert.equal(paid.record.chainRequestId, '2');
   });
   const snapshot = { chainId: 8453, requests: [request()], approvedCampaignIds: ['9'], paymentsEnabled: true };
   await serve(async () => snapshot, async url => {

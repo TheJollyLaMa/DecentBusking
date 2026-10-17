@@ -1,5 +1,5 @@
 import { Contract, id, isAddress } from 'ethers';
-import { DEVERT_QUEUE_ABI, DEVERT_QUEUE_USDC, quoteDevertRequest } from '../js/devert-queue.mjs';
+import { devertQueueAbi, DEVERT_QUEUE_USDC, quoteDevertRequest } from '../js/devert-queue.mjs';
 import { createDjukePlaybackJournal, createDjukeRuntime } from './djuke.js';
 
 export function createDevertQueueCatalogSync({ contract, removals, readCampaigns, resolveApprovedMedia }) {
@@ -43,13 +43,15 @@ export function paidAdvertTrack(request, resolveCampaignMedia = () => null) {
   return { trackId: `devert-paid:${request.chainRequestId}`, campaignId: request.campaignId,
     title: request.title, ipfsCid: cid, uploader: 'DeVert advertiser', advertiser: request.advertiser,
     filename: media?.filename || 'paid-ad.mp3', mediaType,
-    videoUrl: media?.videoUrl || (mediaType === 'video/mp4' ? request.audioURI : ''), isDevertAd: true };
+    videoUrl: media?.videoUrl || (mediaType === 'video/mp4' ? request.audioURI : ''), isDevertAd: true,
+    paidTier: request.tier ?? 1 };
 }
 
 export function createDevertQueueReader({ provider, contractAddress, contract, paymentsEnabled = false,
-  getApprovedCampaignIds = () => [], cacheMs = 0 }) {
+  getApprovedCampaignIds = () => [], cacheMs = 0, version = 1 }) {
   if (!isAddress(contractAddress) || /^0x0{40}$/i.test(contractAddress)) throw new Error('Invalid paid advert queue address');
-  const queue = contract || new Contract(contractAddress, DEVERT_QUEUE_ABI, provider);
+  const abi = devertQueueAbi(version);
+  const queue = contract || new Contract(contractAddress, abi, provider);
   let task;
   let cached;
   let cachedAt = 0;
@@ -59,6 +61,7 @@ export function createDevertQueueReader({ provider, contractAddress, contract, p
     const before = await provider.getBlock(blockNumber);
     if (blockNumber < 0 || !before?.hash) throw new Error('Paid advert confirmation block unavailable');
     const options = { blockTag: blockNumber };
+    if (version === 2 && Number(await queue.queueVersion(options)) !== 2) throw new Error('Paid advert queue version mismatch');
     const [headValue, nextValue, countValue, price, paused, token] = await Promise.all([
       queue.headRequestId(options), queue.nextRequestId(options), queue.pendingCount(options),
       queue.quote(options), queue.paused(options), queue.paymentToken(options),
@@ -84,12 +87,14 @@ export function createDevertQueueReader({ provider, contractAddress, contract, p
     }
     for (const { n, raw } of rows) {
       const campaignId = raw.campaignId.toString();
+      const tier = version === 1 ? 1 : Number(raw.tier);
       if (!isAddress(raw.payer) || !isAddress(raw.advertiser) || BigInt(raw.amount) <= 0n ||
-          !raw.title || !raw.audioURI?.startsWith('ipfs://') || ![0, 1, 2].includes(Number(raw.status))) throw new Error('Invalid paid advert request');
+          !raw.title || !raw.audioURI?.startsWith('ipfs://') || ![0, 1, 2].includes(Number(raw.status)) ||
+          ![0, 1].includes(tier)) throw new Error('Invalid paid advert request');
       const request = { requestId: `8453:${contractAddress.toLowerCase()}:${n}`, chainRequestId: String(n),
         campaignId, payer: raw.payer, amountUnits: raw.amount.toString(), title: raw.title,
         audioURI: raw.audioURI, advertiser: raw.advertiser, songId: id(`devert-paid:${n}`),
-        revision: '0', trackId: `devert-paid:${n}`, playable: true };
+        revision: '0', trackId: `devert-paid:${n}`, playable: true, tier };
       if (Number(raw.status) === 0) {
         if (removed.get(campaignId)) recentRefunds.push(request);
         else if (n >= head) requests.push(request);
@@ -104,8 +109,21 @@ export function createDevertQueueReader({ provider, contractAddress, contract, p
       approvedCampaignIds.push(...approved.filter(campaignId => campaignId !== null));
     }
     if (requests.length !== pendingCount || (await provider.getBlock(blockNumber))?.hash !== before.hash) throw new Error('Paid advert queue changed during verification');
-    return { chainId: 8453, contractAddress, blockNumber, blockHash: before.hash, requests, recentRefunds, approvedCampaignIds,
-      pendingCount, priceUnits: price.toString(), paused, paymentsEnabled: paymentsEnabled && !paused && next - head < 128 };
+    if (version === 2) {
+      for (const tier of [0, 1]) {
+        const [tierHead, tierPrice] = await Promise.all([
+          queue.headRequestIdForTier(tier, options), queue.quoteForTier(tier, options),
+        ]);
+        const expectedHead = requests.find(request => request.tier === tier)?.chainRequestId ?? String(next);
+        if (String(tierHead) !== expectedHead || BigInt(tierPrice) !== quoteDevertRequest(pendingCount, tier)) {
+          throw new Error('Paid advert tier head or quote mismatch');
+        }
+      }
+      if ((await provider.getBlock(blockNumber))?.hash !== before.hash) throw new Error('Paid advert queue changed during verification');
+    }
+    return { chainId: 8453, contractAddress, version, blockNumber, blockHash: before.hash, requests, recentRefunds, approvedCampaignIds,
+      pendingCount, priceUnits: price.toString(), immediatePriceUnits: version === 2 ? (BigInt(price) * 2n).toString() : null,
+      paused, paymentsEnabled: version === 2 && paymentsEnabled && !paused && next - head < 128 };
   };
   return () => {
     if (cached && Date.now() - cachedAt < cacheMs) return Promise.resolve(structuredClone(cached));
@@ -132,16 +150,25 @@ export function createDevertQueueRuntime({ readState, store, contract, isCampaig
   };
   const runtime = createDjukeRuntime({ readState: readPlayable, journal: createDjukePlaybackJournal(store),
     getTrack: trackId => tracks.get(trackId), minAudibleMs: 1000, log,
+    selectRequest: (state, pending, { allowBump = false } = {}) => {
+      const eligible = state.requests.filter(request => pending.some(record => record.requestId === request.requestId));
+      const request = eligible.find(request => (request.tier ?? 1) === 1) ||
+        (allowBump ? eligible.find(request => request.tier === 0) : null);
+      return request ? pending.find(record => record.requestId === request.requestId) : null;
+    },
     fulfill: async ({ chainRequestId, playId }) => {
       const tx = await contract.fulfill(BigInt(chainRequestId), id(playId));
       if ((await tx.wait(2))?.status !== 1) throw new Error(`Paid advert settlement did not confirm: ${tx.hash}`);
       return tx.hash;
     } });
   return {
-    async nextPaid() {
+    async nextPaid(options) {
       try {
-        const selection = await runtime.nextPaid();
-        if (selection) selection.record.kind = 'devert';
+        const selection = await runtime.nextPaid(options);
+        if (selection) {
+          selection.record.kind = 'devert';
+          selection.record.tier = selection.track.paidTier;
+        }
         return selection;
       } catch (error) {
         if (error.code === 'DEVERT_QUEUE_PAUSED') return null;
@@ -155,6 +182,7 @@ export function createDevertQueueRuntime({ readState, store, contract, isCampaig
     fail: runtime.fail,
     async canPlay(record) {
       const request = await contract.getRequest(BigInt(record.chainRequestId));
+      if (record.tier === 0 && await contract.headRequestIdForTier(1) < await contract.nextRequestId()) return false;
       return Number(request.status) === 0 && !isCampaignRemoved(request.campaignId.toString()) &&
         !await contract.paused() && !await contract.removedCampaigns(request.campaignId);
     },
@@ -163,14 +191,14 @@ export function createDevertQueueRuntime({ readState, store, contract, isCampaig
 
 export function combinePaidQueues({ songs, adverts, log = console }) {
   return {
-    async nextPaid() {
+    async nextPaid({ allowBump = false, includeSongs = true } = {}) {
       if (adverts) {
         try {
-          const ad = await adverts.nextPaid();
+          const ad = await adverts.nextPaid({ allowBump });
           if (ad) return ad;
         } catch (error) { log.warn('[devert-queue] Paid advert selection deferred:', error.message); }
       }
-      return songs ? songs.nextPaid() : null;
+      return includeSongs && songs ? songs.nextPaid() : null;
     },
     complete(record, play) { return (record.kind === 'devert' ? adverts : songs).complete(record, play); },
     fail(record, error) { return (record.kind === 'devert' ? adverts : songs).fail(record, error); },

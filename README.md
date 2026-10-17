@@ -30,7 +30,7 @@ Open the community radio schedule with the owner wallet connected and choose **C
 
 Cancelled live slots leave automated radio running. After Friday Hype, or when starting in a cancelled live slot, the radio tries an eligible advert before returning to music, subject to existing campaign capacity, availability, and paid-request priority. Never-played campaigns get preference in ordinary main-radio advert selection; paid priority boosts remain ahead of that preference.
 
-The separate **DVert Paid Advert Queue** adds FIFO paid requests without replacing ordinary campaign rotation. It starts at $1 USDC, doubles every seven pending requests, reserves payment until completed playback, and supports payer-claimed refunds for removed unplayed requests. Its contract is deployed; public checkout stays disabled until live acceptance checks pass. See the [paid advert queue policy and deployment checklist](docs/DVERT-PAID-QUEUE.md).
+**DVert campaigns cost $5 USDC for one week.** Optional priority payments do not buy or extend a campaign. A **queue bump** starts at $1 USDC, doubling every seven pending requests, and moves an active approved advert to the next normal advert break. **Play after this song** costs **2x that queue price** for an extra break. Immediate requests take priority over bumps, FIFO is preserved within each tier, and both defer during protected shows. Payments remain reserved until naturally completed playback; removed unplayed requests have payer-claimed full refunds. The replacement two-tier contract is deployed and source verified, but public checkout stays disabled pending separately approved live acceptance of both tiers. See the [paid advert queue policy and deployment checklist](docs/DVERT-PAID-QUEUE.md).
 
 ## Bring A Track
 

@@ -1,5 +1,5 @@
 import { Contract, Interface, id } from 'ethers';
-import { DEVERT_QUEUE_ABI } from '../js/devert-queue.mjs';
+import { DEVERT_QUEUE_ABI, devertQueueAbi } from '../js/devert-queue.mjs';
 import { configuredSettlementFunds } from '../js/settlement-funds.mjs';
 import { normalizeKnownAddress } from '../js/known-addresses.mjs';
 
@@ -51,7 +51,11 @@ export function createFundLedger({
   const txCache = new Map();
   const receiptCache = new Map();
   const paidAdAddress = normalizeAddress(config.devertQueueContractAddress);
-  const paidAdQueue = paidAdAddress ? new Contract(paidAdAddress, DEVERT_QUEUE_ABI, provider) : null;
+  const paidAdQueues = new Map();
+  const legacyAdAddress = '0x9ebf98367319e6c8b15b5517d808ccfeb3ddda61';
+  paidAdQueues.set(legacyAdAddress, new Contract(legacyAdAddress, devertQueueAbi(1), provider));
+  if (paidAdAddress) paidAdQueues.set(paidAdAddress,
+    new Contract(paidAdAddress, devertQueueAbi(config.devertQueueVersion ?? 1), provider));
 
   const run = operation => {
     const result = task.then(operation);
@@ -91,14 +95,15 @@ export function createFundLedger({
     const funder = normalizeAddress(entry.funder);
     const txHash = normalizeAddress(entry.txHash);
     const amount = toBigIntString(entry.amountUnits);
-    if (paidAdQueue && funder === paidAdAddress) {
+    const paidAdQueue = paidAdQueues.get(funder);
+    if (paidAdQueue) {
       let receipt = receiptCache.get(txHash);
       if (!receipt) {
         receipt = await provider.getTransactionReceipt(txHash);
         if (receipt?.status !== 1) throw new Error(`Paid advert settlement receipt unavailable: ${txHash}`);
         receiptCache.set(txHash, receipt);
       }
-      const fulfilled = receipt.logs.find(logEntry => normalizeAddress(logEntry.address) === paidAdAddress &&
+      const fulfilled = receipt.logs.find(logEntry => normalizeAddress(logEntry.address) === funder &&
         logEntry.topics[0] === PAID_AD_TOPIC && Number(logEntry.index ?? logEntry.logIndex) > entry.logIndex);
       if (!fulfilled) throw new Error(`Paid advert settlement event unavailable: ${txHash}:${entry.logIndex}`);
       const { args } = paidAdvertInterface.parseLog(fulfilled);
@@ -106,7 +111,8 @@ export function createFundLedger({
       return { ...entry, slug: fund.slug, label: fund.label, description: fund.description,
         kind: 'advert', paidAdvert: true, requestId: args.requestId.toString(),
         campaignId: request.campaignId.toString(), title: request.title,
-        payer: request.payer, advertiser: request.advertiser };
+        payer: request.payer, advertiser: request.advertiser,
+        ...(request.tier !== undefined ? { priorityTier: Number(request.tier) } : {}) };
     }
     const devertContract = normalizeKnownAddress(config.devertContractAddress || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9');
     const djukeContract = normalizeKnownAddress(config.djukeContractAddress || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9');

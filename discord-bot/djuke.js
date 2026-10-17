@@ -142,6 +142,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
           trackId: request.trackId,
           payer: request.payer,
           amountUnits: request.amountUnits,
+          ...(request.tier !== undefined ? { tier: request.tier } : {}),
         };
         if (!existing) next.push({ requestId: request.requestId, ...fields, state: 'pending', attempts: 0 });
         else if (existing.state !== 'fulfilled' && (existing.trackId !== request.trackId || existing.revision !== request.revision)) {
@@ -171,10 +172,10 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
       await commit(next);
       return copy(record);
     }),
-    reserveNext: () => run(async () => {
+    reserveNext: requestId => run(async () => {
       requireReady();
       const next = copy(records);
-      const record = next.find(entry => entry.state === 'pending');
+      const record = next.find(entry => entry.state === 'pending' && (requestId === undefined || entry.requestId === requestId));
       if (!record) return null;
       record.state = 'playing';
       record.attempts++;
@@ -286,7 +287,8 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
   return read;
 }
 
-export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVerifiedRequests, minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
+export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVerifiedRequests, selectRequest,
+  minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
   let initialized = null;
   let settling = Promise.resolve();
   let claimSerial = Promise.resolve();
@@ -306,24 +308,26 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       }
     }
   }
-  async function claim() {
+  async function claim(options) {
     await ready();
     const state = await readState();
     if (onVerifiedRequests) Promise.resolve().then(() => onVerifiedRequests(state))
       .catch(error => log.warn(`[djuke] Confirmed-request hook deferred: ${error.message}`));
     await journal.synchronize(state.requests);
     await settleSerial(state);
-    const head = journal.peekPending();
+    const head = selectRequest
+      ? selectRequest(state, journal.getState().filter(record => record.state === 'pending'), options)
+      : journal.peekPending();
     if (!head) return null;
     const request = state.requests.find(entry => entry.requestId === head.requestId);
     const track = request?.playable ? getTrack(request.trackId) : null;
     if (!track) throw new Error(`Paid DJuke request ${head.requestId} is not playable`);
-    const record = await journal.reserveNext();
+    const record = await journal.reserveNext(head.requestId);
     return record ? { record, track } : null;
   }
-  async function nextPaid() {
+  async function nextPaid(options) {
     await abandonedClaim;
-    const pending = claim();
+    const pending = claim(options);
     let timer;
     const timedOut = Symbol('timeout');
     let result;
@@ -339,8 +343,8 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     throw new Error('DJuke queue check timed out');
   }
   return {
-    nextPaid() {
-      const run = claimSerial.then(nextPaid);
+    nextPaid(options) {
+      const run = claimSerial.then(() => nextPaid(options));
       claimSerial = run.catch(() => {});
       return run;
     },

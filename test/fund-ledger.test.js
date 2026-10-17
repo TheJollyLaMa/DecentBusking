@@ -33,14 +33,15 @@ function makeProvider({ head, logs, txFrom }) {
   };
 }
 
-test('paid advert settlements identify request, payer and campaign rather than generic sponsor deposits', async () => {
+for (const version of [1, 2, 'legacy']) {
+test(`paid advert ${version} settlements identify request, payer and campaign rather than generic sponsor deposits`, async () => {
   const { createFundLedger } = await import(url);
-  const { DEVERT_QUEUE_ABI } = await import('../js/devert-queue.mjs');
-  const queue = `0x${'3'.repeat(40)}`;
+  const { devertQueueAbi } = await import('../js/devert-queue.mjs');
+  const queue = version === 'legacy' ? '0x9ebf98367319e6c8b15b5517d808ccfeb3ddda61' : `0x${'3'.repeat(40)}`;
   const payer = `0x${'1'.repeat(40)}`;
   const advertiser = `0x${'2'.repeat(40)}`;
   const txHash = `0x${'a'.repeat(64)}`;
-  const paidInterface = new Interface(DEVERT_QUEUE_ABI);
+  const paidInterface = new Interface(devertQueueAbi(version === 'legacy' ? 1 : version));
   const logs = [makeLog(funds.top10, queue, 450000n, txHash, 10, 1)];
   const provider = makeProvider({ head: 10, logs, txFrom: new Map() });
   provider.getTransactionReceipt = async () => {
@@ -50,10 +51,13 @@ test('paid advert settlements identify request, payer and campaign rather than g
   provider.call = async transaction => {
     assert.equal(transaction.to.toLowerCase(), queue);
     assert.equal(paidInterface.decodeFunctionData('getRequest', transaction.data)[0], 8n);
-    return paidInterface.encodeFunctionResult('getRequest', [[9n, payer, 1000000n, 1, 'Paid advert', 'ipfs://ad', advertiser]]);
+    const request = [9n, payer, 1000000n, 1, 'Paid advert', 'ipfs://ad', advertiser];
+    if (version === 2) request.push(1);
+    return paidInterface.encodeFunctionResult('getRequest', [request]);
   };
   const ledger = createFundLedger({ provider, router: makeRouter(logs, new Map()), startBlock: 10,
-    config: { routerAddress, devertQueueContractAddress: queue, radioFunds: { topTen: funds.top10 },
+    config: { routerAddress, devertQueueContractAddress: version === 'legacy' ? `0x${'4'.repeat(40)}` : queue,
+      devertQueueVersion: version === 'legacy' ? 2 : version, radioFunds: { topTen: funds.top10 },
       assets: { USDC: { address: usdc } } } });
   await ledger.initialize();
   const source = (await ledger.getCurrentState()).funds[funds.top10].sources[0];
@@ -63,7 +67,9 @@ test('paid advert settlements identify request, payer and campaign rather than g
   assert.equal(source.advertiser, advertiser);
   assert.equal(source.requestId, '8');
   assert.equal(source.campaignId, '9');
+  if (version === 2) assert.equal(source.priorityTier, 1);
 });
+}
 
 function makeRouter(logs, balances) {
   const queryRanges = [];
