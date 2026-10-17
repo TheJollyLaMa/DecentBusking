@@ -903,7 +903,11 @@ export class JukeLoopSession {
       this._preparedNext = null;
       const previousShowKey = this._activeShowKey;
       this._activeShowKey = showKey;
+      if (show.type === 'normal_rotation' && show.cancelledOccurrenceId) {
+        this._musicSinceAd = Math.max(this._musicSinceAd, DEVERT_SONGS_PER_MAIN_AD);
+      }
       if (previousShowKey === 'weekly_top10:friday-top10-hype' && show.id !== 'friday-top10-hype') {
+        if (show.type === 'normal_rotation') this._musicSinceAd = Math.max(this._musicSinceAd, DEVERT_SONGS_PER_MAIN_AD);
         this.textChannel.send({ content: '🎉 **Friday Top 10 hype hour has ended at the scheduled handoff.** Any remaining opening-chart songs will not overrun the next show.',
           allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications,
         }).catch(error => console.warn('[top10-hype] Closing announcement failed:', error.message));

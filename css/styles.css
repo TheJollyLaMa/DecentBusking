@@ -695,6 +695,9 @@ body.devert-open #top-ten-tab, body.devert-open #djuke-tab, body.devert-open #de
 .top-ten-flight-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
 .top-ten-visitor { position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; font-size: 16px; line-height: 1; opacity: .7; filter: drop-shadow(0 0 5px #ddd99a55); }
 .top-ten-visitor-0 { font-size: 18px; opacity: .75; }
+.radio-schedule-row.is-cancelled { position: relative; padding-right: 110px; opacity: .85; }
+.radio-schedule-cancelled-stamp { position: absolute; right: 12px; top: 12px; padding: 4px 8px; border: 3px double #ef6262; border-radius: 4px; color: #ff7979; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; transform: rotate(-12deg); box-shadow: inset 0 0 0 1px #ef626255; }
+.radio-schedule-cancel-reason { color: #f3aaaa; font-size: .8rem; }
 .top-ten-chart-hole { display: none; position: absolute; transform: translate(-50%, -50%); font-size: 30px; line-height: 1; filter: drop-shadow(0 0 7px #91e2ce66); }
 .is-hype-festival .top-ten-chart-hole { display: block; }
 .top-ten-spy-peek { position: absolute; bottom: 12px; left: 50%; width: 30px; height: 32px; overflow: hidden; transform: translateX(-50%); }

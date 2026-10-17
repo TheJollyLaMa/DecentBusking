@@ -1030,7 +1030,7 @@ async function main() {
       timeZone: PAYROLL_TIME_ZONE,
       schedule: defaultRadioSchedule(liveWeeklySchedule),
       weeklySchedule: liveWeeklySchedule,
-      events: livePerformanceEvents.filter(event => Date.parse(event.endUtc) > Date.now()),
+      events: livePerformanceEvents.filter(event => Date.parse(event.endUtc) > Date.now() - 7 * 86400_000),
       ready: liveScheduleReady,
     }),
     saveRadioSchedule: async ({ events, weeklySchedule }) => {
@@ -1252,6 +1252,17 @@ async function main() {
       const restoredSchedule = await liveScheduleStore.restore() || { events: [], weeklySchedule: {} };
       livePerformanceEvents = restoredSchedule.events || [];
       liveWeeklySchedule = restoredSchedule.weeklySchedule || {};
+      // Owner-authorized cancellation of the mock show; never affects future Friday occurrences.
+      const mockShowId = 'friday-live-performance:2026-10-16';
+      if (Date.now() < Date.parse('2026-10-17T02:00:00Z') &&
+          !livePerformanceEvents.some(event => event.id === mockShowId && event.status === 'cancelled')) {
+        livePerformanceEvents = [...livePerformanceEvents.filter(event => event.id !== mockShowId), {
+          id: mockShowId, type: 'live_performance', title: 'Friday Live Performance Block',
+          startUtc: '2026-10-17T01:00:00.000Z', endUtc: '2026-10-17T02:00:00.000Z', priority: 200,
+          status: 'cancelled', cancellationReason: 'This week was a mock-up and building session. No live performance tonight; regular radio continues.',
+        }];
+        await liveScheduleStore.save({ events: livePerformanceEvents, weeklySchedule: liveWeeklySchedule });
+      }
       liveScheduleReady = true;
       console.log(`[radio-schedule] Restored ${livePerformanceEvents.length} live event(s).`);
     } catch (error) {

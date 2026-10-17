@@ -8,6 +8,14 @@ const campaign = (campaignId, offerUnits = '1000000', overrides = {}) => ({
   mainRadioPlays: 0, devertPlays: 0, djukeBoosts: 0, ...overrides,
 });
 
+test('unheard adverts precede ordinary repeat plays without overtaking paid boosts', async () => {
+  const { planDevertQueues } = await import('../js/devert-scheduler.mjs');
+  const campaigns = [campaign('repeat', '9000000', { mainRadioPlays: 12 }),
+    campaign('new'), campaign('boosted', '1000000', { djukeBoosts: 1, mainRadioPlays: 5 })];
+  assert.deepEqual(planDevertQueues({ campaigns, completedSongPlays: 30, now: 1000 })
+    .mainRadio.map(ad => ad.campaignId), ['boosted', 'new', 'repeat']);
+});
+
 test('DeVert weekly minimum is one USDC and the queue price doubles every seven campaigns', async () => {
   const { quoteDevertCampaign } = await import('../js/devert-scheduler.mjs');
   assert.equal(quoteDevertCampaign({ campaigns: [], mainRadioSlots: 2 }).minimumOfferUnits, 1000000n);

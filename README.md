@@ -22,6 +22,12 @@ Open the **Top 10** pull-tab on the upper-left to see this New York week's most-
 
 Friday's **Top 10 Hype Hour** (8-9 p.m. America/New_York by default) plays a checkpointed opening chart from its lowest place toward opening #1. Votes keep changing the live chart, not that show's play order. The festival sidepanel pops out when the hour starts (it can be minimized while the countdown keeps playing), the radio player shows **Listening to Top 10 Friday Night Hype**, the panel's **i** button explains the program, labels opening and live ranks separately, and offers **+** buttons to save verified songs to your personal playlist (your wallet-backed profile watchlist). During Hype only, the expanded panel can cover the header/footer: desktop places the scrollable chart beside the festival poster, while mobile stacks them with room for at least four to five songs on typical phone screens. Outside Hype, the regular drawer size and header/footer clearance are unchanged. Signing a watchlist save is not a purchase. Early finishes use labelled encores of the same opening selection; the scheduled handoff still takes priority at 9 p.m., even if the countdown is unfinished.
 
+### Cancelling a live slot
+
+Open the community radio schedule with the owner wallet connected and choose **Cancel event** on the dated occurrence. Enter a public reason, confirm, and sign the calendar update. The occurrence remains visible with a red **Canceled** stamp for seven days; future recurring Fridays are unchanged. The shared worker calendar persists the cancellation across restarts, and open calendars refresh every 15 seconds. Cancellation does not approve, refund, or settle performer payments.
+
+Cancelled live slots leave automated radio running. After Friday Hype, or when starting in a cancelled live slot, the radio tries an eligible advert before returning to music, subject to existing campaign capacity, availability, and paid-request priority. Never-played campaigns get preference in ordinary main-radio advert selection; paid priority boosts remain ahead of that preference. This is not a standalone paid advert request queue.
+
 ## Bring A Track
 
 **New here? Start with one song.** Post audio or MP4 in [#DecentJukebox](https://discord.gg/SCtcBggHPa), or click the guitar case on the site. Discord attachments can be up to 10 MB. The site accepts files up to 50 MB, or an existing IPFS file CID for larger media. You do not need a Pinata account.
