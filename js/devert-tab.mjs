@@ -421,8 +421,8 @@ export function initDevertTab() {
     }
     priceDisplay.textContent = formatUsdc(minimumOfferUnits.toString()).replace(' USDC', '');
     queueStatus.textContent = campaigns.length
-      ? `${campaigns.length} queued · next position ${campaigns.length + 1}`
-      : 'No ads queued · next position 1';
+      ? `${campaigns.length} active campaigns · ordinary rotation (not the paid request queue)`
+      : 'No active campaigns in ordinary rotation';
   }
 
   function selectAdForCampaign(ad) {

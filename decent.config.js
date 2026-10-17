@@ -39,6 +39,7 @@ window.DecentConfig = {
   djukeContractAddress: "0x5d07489163feBCdB39C9F579CCC36dff5A067FF9",
   djukeContractVersion: "0.3",
   devertContractAddress: "0x135Cbc573F87637158eb3186C87c584fb0B34CD9",
+  devertQueueContractAddress: "0x9ebf98367319E6c8b15b5517d808CCfEb3dddA61",
   ensRpcUrl: "https://ethereum-rpc.publicnode.com",
   adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",
   marketUrl: "https://thejollylama.github.io/DecentMarket/",

@@ -82,6 +82,14 @@ export function resolveDevertCampaignMedia(campaign, cid, { playlist = [], nfts 
     videoUrl: videoUrl || (mediaType === 'video/mp4' ? `ipfs://${cid}` : '') };
 }
 
+function isDevertAdvertMetadata(metadata) {
+  return metadata.isDevertAd === true || /^DecentAdvert(?:isement)?(?:\b|[0-9_-])/i.test(String(metadata.name || ''));
+}
+
+export function resolveApprovedDevertCampaignMedia(campaign, cid, { playlist = [], nfts = [] } = {}) {
+  return resolveDevertCampaignMedia(campaign, cid, { playlist, nfts: nfts.filter(isDevertAdvertMetadata) });
+}
+
 export async function readOwnedDevertAds({ collections, address, fetchImpl = fetch, retry = {}, pauseMs = 0,
   ownershipConcurrency = 32, metadataConcurrency = 8, ownershipReader, metadataReader = fetchMintMetadata,
   onProgress, log = console } = {}) {
@@ -125,7 +133,7 @@ export async function readOwnedDevertAds({ collections, address, fetchImpl = fet
           try {
             const uri = await withRetry(() => collection.contract.uri(tokenId), retry);
             const metadata = await metadataReader(uri, fetchImpl, { attempts: 1 });
-            const isAd = metadata.isDevertAd === true || /^DecentAdvert(?:isement)?(?:\b|[0-9_-])/i.test(String(metadata.name || ''));
+            const isAd = isDevertAdvertMetadata(metadata);
             if (!isAd) return;
             const mediaUri = metadata.videoUrl || metadata.audioUrl || metadata.animation_url || '';
             const ipfsCid = audioCidFromMetadata({ ...metadata, audioUrl: mediaUri });

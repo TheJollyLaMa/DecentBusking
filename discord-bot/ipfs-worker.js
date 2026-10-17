@@ -212,6 +212,7 @@ export function createWorkerRequestHandler({
   getDjukeState,
   getDjukeGasQuote,
   getDevertState,
+  getDevertQueue,
   removeDevertCampaign,
   getDevertAds,
   getDevertLoopState,
@@ -432,6 +433,14 @@ export function createWorkerRequestHandler({
           before: params.get('before') || '',
           after: params.get('after') || '',
         }), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/devert/queue') {
+        if (!getDevertQueue) {
+          sendJson(response, 200, { configured: false, paymentsEnabled: false, requests: [], recentRefunds: [] }, '*');
+          return;
+        }
+        sendJson(response, 200, { configured: true, ...await getDevertQueue() }, '*');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/devert') {
