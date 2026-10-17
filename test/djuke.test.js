@@ -18,7 +18,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /djuke\.mjs\?v=20261017-single-init/);
-  assert.match(html, /devert-paid-queue\.mjs\?v=20261017-shared-usdc/);
+  assert.match(html, /devert-paid-queue\.mjs\?v=20261017-devert-machine/);
 });
 
 test('DJuke starts at 0.25 USDC and doubles after each eight pending requests', async () => {

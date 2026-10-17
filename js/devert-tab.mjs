@@ -189,7 +189,6 @@ export function initDevertTab() {
   const refreshButton = document.getElementById('devert-refresh');
   const searchInput = document.getElementById('devert-search');
   const searchResults = document.getElementById('devert-search-results');
-  const searchState = document.getElementById('devert-search-state');
   const priceDisplay = document.getElementById('devert-price');
   const publicQueue = document.getElementById('devert-queue');
   const queueStatus = document.getElementById('devert-queue-status');
@@ -241,7 +240,10 @@ export function initDevertTab() {
     const canSwitch = canSetDevertListenMode();
     const reconnecting = adLoopState?.voiceConnected === false && adLoopState?.ready !== false;
     audioModeButton.setAttribute('aria-pressed', String(adsOnly));
-    audioModeButton.textContent = adsOnly ? 'Return to Main Radio' : 'Listen to VertLoop';
+    audioModeButton.setAttribute('aria-label', adsOnly ? 'Return to Main Radio' : 'Listen to VertLoop');
+    audioModeButton.title = adsOnly ? 'Return to Main Radio' : 'Listen to VertLoop · 24/7 audio & video adverts';
+    document.getElementById('devert-live-player').hidden = !adsOnly && !listenStatus.textContent;
+    document.getElementById('devert-live-votes').hidden = !adsOnly;
     audioModeButton.disabled = !canSwitch || audioModeBusy || (!adsOnly && (reconnecting || adLoopState?.ready !== true));
     const playId = normalizeAdLoopNowPlaying(adLoopState)?.playId;
     previewPlayer.hidden = !adsOnly || !playId;
@@ -593,6 +595,7 @@ export function initDevertTab() {
     panel.setAttribute('aria-hidden', 'true');
     panel.inert = true;
     document.body.classList.remove('devert-open');
+    listenStatus.textContent = '';
     syncListenControls();
   }
 
@@ -607,7 +610,7 @@ export function initDevertTab() {
         stopAdLoopPlayback();
         previewPlayer.dataset.listenMode = 'radio';
         setDevertListenMode('radio');
-        listenStatus.textContent = 'Main radio';
+        listenStatus.textContent = '';
       } else {
         if (adLoopState?.ready !== true) return;
         if (!setDevertListenMode('ads-only')) { listenStatus.textContent = 'Finish archive playback or the current new-song preview first.'; return; }
