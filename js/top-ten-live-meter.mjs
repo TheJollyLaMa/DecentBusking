@@ -1,5 +1,26 @@
 import { spectrumBars } from './top-ten-festival.mjs?v=20261016-hype-bunny';
 
+export function gentleWavePath(data) {
+  const points = Array.from({ length: 33 }, (_, index) => {
+    const center = Math.round(index * (data.length - 1) / 32);
+    let sum = 0;
+    let count = 0;
+    for (let sample = Math.max(0, center - 4); sample <= Math.min(data.length - 1, center + 4); sample++) {
+      sum += data[sample] - 128;
+      count++;
+    }
+    return { x: index * 8, y: 50 + (count ? sum / count : 0) * .14 };
+  });
+  let path = `M 0 ${points[0].y.toFixed(2)}`;
+  for (let index = 1; index < points.length; index++) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const middle = (previous.x + current.x) / 2;
+    path += ` C ${middle} ${previous.y.toFixed(2)}, ${middle} ${current.y.toFixed(2)}, ${current.x} ${current.y.toFixed(2)}`;
+  }
+  return `${path} L 256 100 L 0 100 Z`;
+}
+
 export function mountTopTenLiveMeter({ panel, content, button, readSpectrum, readWaveform }) {
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
   const frequencies = new Uint8Array(128);
@@ -14,19 +35,20 @@ export function mountTopTenLiveMeter({ panel, content, button, readSpectrum, rea
   const position = () => {
     if (!row || !meter) return;
     const bounds = panel.getBoundingClientRect();
-    const song = row.getBoundingClientRect();
+    const first = content.querySelector('.top-ten-song');
+    if (!first) return;
+    const song = first.getBoundingClientRect();
     const viewport = content.getBoundingClientRect();
-    const visible = song.bottom > viewport.top && song.top < viewport.bottom;
-    meter.hidden = !visible;
+    meter.hidden = false;
     meter.style.left = `${song.left - bounds.left}px`;
     meter.style.width = `${song.width}px`;
     meter.style.top = '0px';
-    meter.style.height = `${Math.max(0, song.top - bounds.top)}px`;
+    meter.style.height = `${Math.max(0, Math.max(song.top, viewport.top) - bounds.top)}px`;
   };
   const reset = () => {
     levels = [];
     bars.forEach(bar => { bar.style.transform = 'scaleY(.04)'; });
-    path?.setAttribute('d', 'M 0 50 L 256 50');
+    path?.setAttribute('d', gentleWavePath(new Uint8Array(256).fill(128)));
     meter?.classList.remove('is-live');
   };
   const tick = () => {
@@ -37,8 +59,7 @@ export function mountTopTenLiveMeter({ panel, content, button, readSpectrum, rea
     meter.classList.toggle('is-live', live);
     if (wave) {
       if (!live) waveform.fill(128);
-      path.setAttribute('d', [...waveform].map((value, index) =>
-        `${index ? 'L' : 'M'} ${index} ${(50 + (value - 128) * .36).toFixed(2)}`).join(' '));
+      path.setAttribute('d', gentleWavePath(waveform));
     } else {
       if (!live) frequencies.fill(0);
       levels = spectrumBars(frequencies, bars.length, levels);

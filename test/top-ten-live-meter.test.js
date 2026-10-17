@@ -36,7 +36,9 @@ test('live row meter switches real frequency/time data, follows replacement rows
   panel.setAttribute('aria-hidden', 'false');
   const content = new Node();
   let row = new Node();
-  content.querySelector = () => row;
+  const firstRow = new Node();
+  row.getBoundingClientRect = () => ({ top: 300, bottom: 400, left: 0, width: 300 });
+  content.querySelector = selector => selector === '.top-ten-song' ? firstRow : row;
   const button = new Node();
   let live = true;
   let frequencyReads = 0;
@@ -48,14 +50,14 @@ test('live row meter switches real frequency/time data, follows replacement rows
   tick();
   assert.equal(frequencyReads, 1);
   const oldMeter = panel.children[0];
-  assert.equal(oldMeter.style.height, '100px', 'meter rises from the row top to the panel header');
+  assert.equal(oldMeter.style.height, '100px', 'meter stays above the first row even when the playing song is lower');
   assert.equal(oldMeter.style.top, '0px');
   assert.equal(oldMeter.children[0].style.transform, 'scaleY(1)');
   button.dispatchEvent(new Event('click'));
   tick();
   assert.equal(button.getAttribute('aria-pressed'), 'true');
   assert.equal(waveReads, 1);
-  assert.match(oldMeter.children.at(-1).children[0].getAttribute('d'), /^M 0 73.04 L 1 73.04/);
+  assert.match(oldMeter.children.at(-1).children[0].getAttribute('d'), /^M 0 58.96 C 4 58.96/);
   const previous = row;
   row = new Node();
   notify();
@@ -63,7 +65,7 @@ test('live row meter switches real frequency/time data, follows replacement rows
   assert.equal(panel.children[0].classList.contains('is-wave'), true, 'mode survives chart refresh');
   live = false;
   tick();
-  assert.match(panel.children[0].children.at(-1).children[0].getAttribute('d'), /^M 0 50.00 L 1 50.00/);
+  assert.match(panel.children[0].children.at(-1).children[0].getAttribute('d'), /^M 0 50.00 C 4 50.00/);
   panel.setAttribute('aria-hidden', 'true');
   notify();
   assert.equal(frames.size, 0);
@@ -74,6 +76,17 @@ test('live row meter switches real frequency/time data, follows replacement rows
   assert.equal(frames.size, 0);
   row = null;
   notify();
-  assert.equal(frames.size, 0, 'no meter during an advert or without a live song');
+  assert.equal(frames.size, 0, 'no meter without a live song or advert');
   dispose();
+});
+
+test('filled waveform reduces amplitude and rounds peaks with averaged cubic curves', async () => {
+  const { gentleWavePath } = await import('../js/top-ten-live-meter.mjs');
+  const path = gentleWavePath(new Uint8Array(256).fill(255));
+  assert.match(path, /^M 0 67.78 C /);
+  assert.match(path, / L 256 100 L 0 100 Z$/);
+  assert.equal((path.match(/ C /g) || []).length, 32);
+  const noisy = Uint8Array.from({ length: 256 }, (_, index) => index % 2 ? 255 : 0);
+  const start = Number(gentleWavePath(noisy).match(/^M 0 ([\d.]+)/)[1]);
+  assert.ok(Math.abs(start - 50) < 4, 'averaging suppresses harsh sample-to-sample spikes');
 });

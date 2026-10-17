@@ -33,11 +33,13 @@ estimates and closeout, Friday Hype's opening chart, and playlist saves.
 Voting with the radio thumbs-up/down buttons keeps the chart open. Confirmed
 votes refresh its counts and rankings immediately; other listeners' votes are
 picked up by the existing 15-second refresh while the panel is open.
-The currently playing row anchors a dim live meter at its top edge, rising
-behind the panel's title and subtitle without covering their controls.
+While a song or advert plays, a dim live meter stays above the first visible
+chart row, rising behind the panel's title and subtitle without covering their
+controls, even when the playing song is ranked farther down the chart.
 The upper-left meter button switches between frequency bars and the actual
-time-domain waveform, using the radio's shared analyser. The meter follows the
-live row as ranks change, rests without playback, and stops for reduced motion.
+time-domain waveform, using the radio's shared analyser. The filled waveform
+uses reduced amplitude, averaged samples and rounded curves for a gentler look.
+The meter rests without playback and stops for reduced motion.
 While a main-radio advert plays, an unranked **Advert · Live Now** row shows its
 per-play net votes and uses the same live bar/wave meter. The vote tooltip gives
 up/down counts. It disappears on song handoff, has no playlist-save control,

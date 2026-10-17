@@ -889,7 +889,7 @@ body.top-ten-festival-open.top-ten-open #top-ten-tab { z-index: 202; }
 #top-ten-panel > .top-ten-live-meter[hidden] { display: none; }
 .top-ten-live-meter i { flex: 1; height: 100%; transform: scaleY(.04); transform-origin: bottom; background: linear-gradient(0deg, #38bca5, #c8edb8); }
 .top-ten-live-meter svg { display: none; position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.top-ten-live-meter path { fill: none; stroke: #bcebd3; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.top-ten-live-meter path { fill: #58c8ae; fill-opacity: .65; stroke: #bcebd3; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .top-ten-live-meter.is-wave i { display: none; }
 .top-ten-live-meter.is-wave svg { display: block; }
 .top-ten-panel-heading p { margin: 4px 0 0; color: var(--text-dim); font-size: .72rem; }
