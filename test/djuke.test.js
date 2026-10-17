@@ -1,6 +1,26 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+test('DVert shares the USDC ABI without importing and initializing the DJuke drawer', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '../js/devert-paid-queue.mjs'), 'utf8');
+  assert.match(source, /import \{ USDC_BROWSER_ABI \} from '\.\/usdc-abi\.mjs'/);
+  assert.doesNotMatch(source, /from ['"]\.\/djuke\.mjs/);
+  const { USDC_BROWSER_ABI } = await import('../js/usdc-abi.mjs');
+  const djuke = await import('../js/djuke.mjs');
+  assert.equal(djuke.USDC_BROWSER_ABI, USDC_BROWSER_ABI);
+  assert.deepEqual(USDC_BROWSER_ABI, [
+    'function decimals() view returns (uint8)',
+    'function balanceOf(address) view returns (uint256)',
+    'function allowance(address, address) view returns (uint256)',
+    'function approve(address, uint256) returns (bool)',
+  ]);
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /djuke\.mjs\?v=20261017-single-init/);
+  assert.match(html, /devert-paid-queue\.mjs\?v=20261017-shared-usdc/);
+});
+
 test('DJuke starts at 0.25 USDC and doubles after each eight pending requests', async () => {
   const { quoteDjuke } = await import('../js/djuke.mjs');
   for (const [pending, expected] of [[0, 250000n], [7, 250000n], [8, 500000n],
