@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261016-schedule-cancel" />
+  <link rel="stylesheet" href="css/styles.css?v=20261017-devert-info-style" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -171,7 +171,35 @@
 
   <dialog id="devert-instructions" aria-labelledby="devert-instructions-title">
     <h3 id="devert-instructions-title">Campaign Instructions: Submit, Receive &amp; Run</h3>
-    <p>An advert campaign costs $5 USDC for one week of ordinary rotation. Optional priority payments do not purchase or extend that campaign: a queue bump plays at the next normal advert break; pay 2× the queue price for an extra break after the current song. Immediate requests take priority, with FIFO within each tier and no interruptions to protected shows. Payment is reserved until playback, then split 45% Top 10 / 45% playback / 8% pinners / 2% repo development. Paid plays remain valid after campaign expiry; removal makes unplayed requests fully refundable.</p>
+    <div class="devert-info-guide">
+      <section class="devert-info-card devert-info-campaign">
+        <h4><span aria-hidden="true">📣</span> Your week on the air</h4>
+        <p>An advert campaign costs <strong>$5 USDC</strong> for <strong>one week</strong> of ordinary rotation.</p>
+      </section>
+      <section class="devert-info-card devert-info-priority">
+        <h4><span aria-hidden="true">⚡</span> Want to hear it sooner?</h4>
+        <p>Optional priority payments do not purchase or extend that campaign:</p>
+        <dl class="devert-info-options">
+          <div><dt>Queue bump</dt><dd>A queue bump plays at the <strong>next normal advert break</strong>.</dd></div>
+          <div><dt>After this song <span class="devert-info-badge">2×</span></dt><dd>Pay <strong>2× the queue price</strong> for an extra break after the current song.</dd></div>
+        </dl>
+        <p class="devert-info-note">Immediate requests take priority, with <strong>FIFO within each tier</strong> and no interruptions to protected shows.</p>
+      </section>
+      <section class="devert-info-card devert-info-funding">
+        <h4><span aria-hidden="true">💸</span> Every play gives back</h4>
+        <p>Payment is <strong>reserved until playback</strong>, then split:</p>
+        <ul class="devert-info-split" aria-label="Payment distribution">
+          <li><strong>45%</strong><span>Top 10</span></li>
+          <li><strong>45%</strong><span>Playback</span></li>
+          <li><strong>8%</strong><span>Pinners</span></li>
+          <li><strong>2%</strong><span>Repo development</span></li>
+        </ul>
+      </section>
+      <section class="devert-info-card devert-info-protection">
+        <h4><span aria-hidden="true">🛡️</span> Your paid play is protected</h4>
+        <p>Paid plays remain valid after campaign expiry; removal makes unplayed requests <strong>fully refundable</strong>.</p>
+      </section>
+    </div>
     <ol class="devert-workflow" aria-label="Ad campaign workflow">
       <li><strong>1 · Submit</strong><span>Upload your audio or MP4 ad for review</span></li>
       <li><strong>2 · Receive</strong><span>Approved NFT sent to your wallet</span></li>
