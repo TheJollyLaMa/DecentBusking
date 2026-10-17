@@ -12,8 +12,8 @@ import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261016-artwork-backoff';
 import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artwork-update.mjs';
 import { isAdminWallet } from './admin-access.mjs';
-import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261010-public-calendar';
-import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides } from './radio-schedule.mjs';
+import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261016-schedule-cancel';
+import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261016-schedule-cancel';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 
 const ROLE_GRANT_ABI = [
@@ -352,6 +352,7 @@ function _renderRadioScheduleEvents() {
     return;
   }
   _radioScheduleEventsEl.innerHTML = events.map(event => {
+    if (event.status === 'cancelled') return `<li class="admin-schedule-event"><div><strong>${_esc(event.title)} · Canceled</strong><span>${_esc(event.cancellationReason)}</span></div></li>`;
     const active = Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc);
     const date = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
     return `<li class="admin-schedule-event"><div><strong>${_esc(event.title)}</strong><span>${date(event.startUtc)} – ${date(event.endUtc)} ET${active ? ' · LIVE NOW' : ''}</span></div><div class="admin-schedule-actions"><button class="admin-btn admin-btn-secondary" type="button" data-radio-event-edit="${_esc(event.id)}" aria-label="Edit ${_esc(event.title)}">Edit</button><button class="admin-btn admin-btn-secondary" type="button" data-radio-event-cancel="${_esc(event.id)}" aria-label="Cancel ${_esc(event.title)}">Cancel</button></div></li>`;
@@ -416,8 +417,11 @@ async function _saveRadioWeeklySchedule(event) {
 async function _cancelRadioScheduleEvent(eventId) {
   if (!_radioSchedule?.ready || !_adminSigner || !_adminAddress) return;
   try {
-    const nextEvents = (_radioSchedule.events || []).filter(event => event.id !== eventId);
-    if (nextEvents.length === (_radioSchedule.events || []).length) throw new Error('Event is no longer in the shared calendar');
+    const event = (_radioSchedule.events || []).find(event => event.id === eventId);
+    if (!event) throw new Error('Event is no longer in the shared calendar');
+    const reason = window.prompt('Public cancellation reason:');
+    if (reason === null || !window.confirm('Cancel this occurrence? The cancellation stays public. No performer payments are changed.')) return;
+    const nextEvents = cancelLivePerformanceEvent(_radioSchedule.events || [], event, reason);
     await _saveRadioSchedule(nextEvents, _radioSchedule.weeklySchedule || {});
     _resetRadioScheduleForm();
   } catch (error) {

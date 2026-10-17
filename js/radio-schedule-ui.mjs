@@ -1,3 +1,5 @@
+import { isAdminWallet } from './admin-access.mjs';
+import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261016-schedule-cancel';
 const TIME_ZONE = 'America/New_York';
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -78,7 +80,28 @@ function formatEventTime(value, timeZone) {
   }).format(new Date(value));
 }
 
-function renderSchedule(payload) {
+export function scheduledLiveOccurrences(payload, now = Date.now()) {
+  const events = [...(payload.events || [])];
+  const local = utcToNewYorkInput(new Date(now).toISOString()).slice(0, 10);
+  for (let day = 0; day < 8; day++) {
+    const date = new Date(`${local}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + day);
+    const key = date.toISOString().slice(0, 10);
+    for (const show of payload.schedule || []) {
+      if (show.type !== 'live_performance' || show.weekday !== date.getUTCDay()) continue;
+      const id = `${show.id}:${key}`;
+      if (events.some(event => event.id === id)) continue;
+      const startUtc = newYorkInputToUtc(`${key}T${String(show.startHourLocal).padStart(2, '0')}:00`);
+      const endDate = new Date(date);
+      if (show.endHourLocal === 24) endDate.setUTCDate(endDate.getUTCDate() + 1);
+      const endUtc = newYorkInputToUtc(`${endDate.toISOString().slice(0, 10)}T${String(show.endHourLocal % 24).padStart(2, '0')}:00`);
+      if (Date.parse(endUtc) > now) events.push({ id, title: show.label, startUtc, endUtc, priority: show.priority });
+    }
+  }
+  return events;
+}
+
+function renderSchedule(payload, onCancel) {
   const weekly = document.getElementById('radio-schedule-weekly');
   const events = document.getElementById('radio-schedule-events');
   const status = document.getElementById('radio-schedule-status');
@@ -95,14 +118,24 @@ function renderSchedule(payload) {
 
   events.replaceChildren();
   const now = Date.now();
-  const upcoming = (payload.events || []).filter(event => Date.parse(event.endUtc) > now)
+  const upcoming = scheduledLiveOccurrences(payload, now).filter(event => Date.parse(event.endUtc) > now ||
+    (event.status === 'cancelled' && Date.parse(event.endUtc) > now - 7 * 86400_000))
     .sort((first, second) => Date.parse(first.startUtc) - Date.parse(second.startUtc));
   for (const event of upcoming) {
-    const active = Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc);
-    const row = element('li', `radio-schedule-row${active ? ' is-active' : ''}`);
+    const cancelled = event.status === 'cancelled';
+    const active = !cancelled && Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc);
+    const row = element('li', `radio-schedule-row${active ? ' is-active' : ''}${cancelled ? ' is-cancelled' : ''}`);
     row.append(element('strong', 'radio-schedule-name', event.title),
       element('span', 'radio-schedule-time', `${formatEventTime(event.startUtc, payload.timeZone || TIME_ZONE)} - ${formatEventTime(event.endUtc, payload.timeZone || TIME_ZONE)}`));
     if (active) row.append(element('span', 'radio-schedule-live', 'LIVE NOW'));
+    if (cancelled) row.append(element('span', 'radio-schedule-cancelled-stamp', 'Canceled'),
+      element('span', 'radio-schedule-cancel-reason', event.cancellationReason));
+    else if (isAdminWallet() && payload.ready !== false) {
+      const button = element('button', 'admin-btn admin-btn-secondary', 'Cancel event');
+      button.type = 'button';
+      button.addEventListener('click', () => onCancel(event, button));
+      row.append(button);
+    }
     events.append(row);
   }
   if (!upcoming.length) events.append(element('li', 'radio-schedule-empty', 'No additional live events are scheduled.'));
@@ -115,6 +148,31 @@ export function initRadioScheduleBoard() {
   const dialog = document.getElementById('radio-schedule-dialog');
   const status = document.getElementById('radio-schedule-status');
   if (!dialog || !status) return;
+  let currentPayload;
+  const cancel = async (event, button) => {
+    if (!isAdminWallet() || !window._wallet?.signer) { status.textContent = 'Connect the owner wallet to cancel events.'; return; }
+    const reason = window.prompt('Public cancellation reason (shown on the community schedule):');
+    if (reason === null) return;
+    if (!window.confirm(`Cancel only "${event.title}" on ${formatEventTime(event.startUtc, TIME_ZONE)}? Regular radio will replace this occurrence. This does not settle any performer payment.`)) return;
+    button.disabled = true;
+    try {
+      const signer = window._wallet.signer;
+      const address = window._wallet.address;
+      const authorization = { address, origin: window.location.origin, issuedAt: new Date().toISOString(),
+        events: cancelLivePerformanceEvent(currentPayload.events || [], event, reason),
+        weeklySchedule: currentPayload.weeklySchedule || {} };
+      status.textContent = 'Sign the occurrence cancellation with the owner wallet…';
+      const signature = await signer.signMessage(buildRadioScheduleAuthorizationMessage(authorization));
+      if (window._wallet?.signer !== signer || window._wallet?.address !== address) throw new Error('Wallet changed; cancellation not submitted');
+      const service = window.DecentConfig.ipfsUploadServiceUrl.replace(/\/$/, '');
+      const response = await fetch(`${service}/api/radio/schedule`, { method: 'POST',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...authorization, signature }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || `Cancellation failed (${response.status})`);
+      document.dispatchEvent(new CustomEvent('radio-schedule-updated'));
+    } catch (error) { status.textContent = `Cancellation failed: ${error.message}`; }
+    finally { button.disabled = false; }
+  };
   const refresh = async () => {
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service) { status.textContent = 'Radio schedule service is not configured.'; return; }
@@ -123,7 +181,8 @@ export function initRadioScheduleBoard() {
       const response = await fetch(`${service}/api/radio/schedule`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || `Schedule unavailable (${response.status})`);
-      renderSchedule(payload);
+      currentPayload = payload;
+      renderSchedule(payload, cancel);
     } catch (error) {
       status.textContent = `${error.message}. Try refreshing the schedule.`;
     }
@@ -135,6 +194,9 @@ export function initRadioScheduleBoard() {
   document.getElementById('radio-schedule-close')?.addEventListener('click', () => dialog.close());
   document.getElementById('radio-schedule-refresh')?.addEventListener('click', refresh);
   document.addEventListener('radio-schedule-updated', refresh);
+  document.addEventListener('wallet-connected', () => { if (dialog.open) refresh(); });
+  document.addEventListener('wallet-disconnected', () => { if (dialog.open) refresh(); });
+  setInterval(() => { if (dialog.open) refresh(); }, 15000);
 }
 
 if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', initRadioScheduleBoard, { once: true });

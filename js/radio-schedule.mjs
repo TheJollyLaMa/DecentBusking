@@ -25,7 +25,19 @@ function normalizeLivePerformanceEvent(event) {
   if (end - start > MAX_LIVE_EVENT_DURATION_MS) throw new Error('Live performance events cannot exceed four hours');
   const priority = Number(event.priority ?? 200);
   if (!Number.isFinite(priority)) throw new Error('Invalid live performance event priority');
-  return { id, type: 'live_performance', title, startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(), priority };
+  const cancellation = {};
+  if (event.status === 'cancelled') {
+    const reason = String(event.cancellationReason || '').trim();
+    if (!reason || reason.length > 500) throw new Error('Cancellation requires a public reason (up to 500 characters)');
+    cancellation.status = 'cancelled';
+    cancellation.cancellationReason = reason;
+  } else if (event.status && event.status !== 'scheduled') throw new Error('Invalid event status');
+  return { id, type: 'live_performance', title, startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(), priority, ...cancellation };
+}
+
+export function cancelLivePerformanceEvent(events, event, reason) {
+  const cancelled = normalizeLivePerformanceEvent({ ...event, status: 'cancelled', cancellationReason: reason });
+  return [...events.filter(item => item.id !== cancelled.id), cancelled];
 }
 
 export function upsertLivePerformanceEvent(events, event, { now = Date.now() } = {}) {
@@ -52,7 +64,7 @@ export function validateLivePerformanceSchedule(events, { now = Date.now() } = {
     const start = Date.parse(event.startUtc);
     const end = Date.parse(event.endUtc);
     if (start > now + MAX_LIVE_EVENT_HORIZON_MS) throw new Error('Live performance start must be within 60 days');
-    return end > now;
+    return end > now - 7 * 24 * 60 * 60 * 1000;
   }).sort((first, second) => Date.parse(first.startUtc) - Date.parse(second.startUtc));
 }
 
@@ -192,7 +204,7 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
     .filter(event => {
       const start = Date.parse(event.startUtc || event.start || '1970-01-01T00:00:00Z');
       const end = Date.parse(event.endUtc || event.end || '1970-01-01T00:00:00Z');
-      return Number.isFinite(start) && Number.isFinite(end) && now >= start && now < end;
+      return event.status !== 'cancelled' && Number.isFinite(start) && Number.isFinite(end) && now >= start && now < end;
     })
     .sort((first, second) => Number(second.priority || 0) - Number(first.priority || 0))[0];
 
@@ -206,7 +218,9 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
     };
   }
 
-  const liveShow = (schedule || []).find(show => show.type === 'live_performance' && isShowActive(show, now));
+  const liveShow = (schedule || []).find(show => show.type === 'live_performance' && isShowActive(show, now) &&
+    !live.some(event => event.status === 'cancelled' && (event.id === `${show.id}:${localDateAndHour(now, show.timeZone || PAYROLL_TIME_ZONE).date}` ||
+      (Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc)))));
   if (liveShow) {
     const localDate = localDateAndHour(now, liveShow.timeZone || PAYROLL_TIME_ZONE).date;
     return {
@@ -234,7 +248,8 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
   }
 
   const fallback = (schedule || []).find(show => show.type === 'normal_rotation') || { id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation', priority: 10 };
-  return { ...fallback, type: 'normal_rotation' };
+  const cancelled = live.find(event => event.status === 'cancelled' && Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc));
+  return { ...fallback, type: 'normal_rotation', ...(cancelled ? { cancelledOccurrenceId: cancelled.id } : {}) };
 }
 
 function chooseAdCampaigns(adCampaigns, showType, count = 1) {

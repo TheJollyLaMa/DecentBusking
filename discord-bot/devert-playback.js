@@ -381,7 +381,9 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       }
       const limit = Number.isSafeInteger(count) && count > 0 ? count : 1;
       const campaigns = plan.mainRadio.filter(item => !item.removed && !excluded.has(item.campaignId))
-        .sort((first, second) => (voteScores.get(second.campaignId) || 0) - (voteScores.get(first.campaignId) || 0))
+        .sort((first, second) => Number(second.djukeBoosts || 0) - Number(first.djukeBoosts || 0) ||
+          Number((second.mainRadioPlays || 0) === 0) - Number((first.mainRadioPlays || 0) === 0) ||
+          (voteScores.get(second.campaignId) || 0) - (voteScores.get(first.campaignId) || 0))
         .slice(0, limit);
       if (limit === 1) {
         const [campaign] = campaigns;

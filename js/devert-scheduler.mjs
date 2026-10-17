@@ -33,6 +33,8 @@ function validateCampaign(campaign) {
 function comparePriority(first, second) {
   const boostDifference = (second.djukeBoosts || 0) - (first.djukeBoosts || 0);
   if (boostDifference) return boostDifference;
+  const unheardDifference = Number((second.mainRadioPlays || 0) === 0) - Number((first.mainRadioPlays || 0) === 0);
+  if (unheardDifference) return unheardDifference;
   const playDifference = (first.mainRadioPlays || 0) - (second.mainRadioPlays || 0);
   if (playDifference) return playDifference;
   const offerDifference = BigInt(second.offerUnits) - BigInt(first.offerUnits);
