@@ -5,6 +5,36 @@ const { pathToFileURL } = require('node:url');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'ipfs-state.js')).href;
 
+test('paid journal storage requires local mirroring before publication and rejects CID mismatches', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  assert.throws(() => createPinataStateStore({ pinataJwt: 'test', requireLocalMirror: true }), /local mirror is required/);
+  for (const result of ['offline', 'mismatch', 'match']) {
+    const events = [];
+    const store = createPinataStateStore({ pinataJwt: 'test', requireLocalMirror: true,
+      serialize: value => value,
+      beforeUpload: async () => {
+        events.push('mirror');
+        if (result === 'offline') throw new Error('Mirror offline');
+        return result === 'match' ? 'confirmed-cid' : 'different-cid';
+      },
+      fetchImpl: async (url, options = {}) => {
+        if (options.method === 'POST') {
+          events.push('publish');
+          return new Response(JSON.stringify({ data: { cid: 'confirmed-cid' } }));
+        }
+        return new Response(JSON.stringify({ data: { files: [] } }));
+      } });
+    if (result === 'match') {
+      assert.equal(await store.save({ schemaVersion: 1, records: [] }), 'ipfs://confirmed-cid');
+      assert.deepEqual(events, ['mirror', 'publish']);
+    } else {
+      await assert.rejects(store.save({ schemaVersion: 1, records: [] }), result === 'offline' ? /Mirror offline/ : /CIDs do not match/);
+      assert.deepEqual(events, result === 'offline' ? ['mirror'] : ['mirror', 'publish']);
+      assert.equal(store.getLatestSnapshotUri(), '');
+    }
+  }
+});
+
 test('production advert cadence store is isolated from playlist snapshots on restore and prune', async () => {
   const fs = require('node:fs');
   const vm = require('node:vm');

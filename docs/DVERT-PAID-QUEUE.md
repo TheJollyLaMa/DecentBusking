@@ -47,6 +47,15 @@ prevent duplicate/out-of-order settlement. Failed fetches, interruption,
 reverted settlement, or worker restart do not release the payment. A lost
 playback checkpoint can result in replay, not a second charge.
 
+The paid-ad journal explicitly requires local mirroring before publishing each
+checkpoint. If the mirror is offline, fails to pin, or returns a different CID,
+the journal save fails and the paid request does not advance. Other existing
+checkpoint stores retain their normal best-effort community mirror behavior.
+Run `node checkpoint-mirror-client.js --watch` from `discord-bot` on the operator
+Mac, with IPFS Desktop running and the same `CHECKPOINT_MIRROR_SECRET` as Render.
+The helper accepts playlist checkpoints and validated paid-playback journals.
+It must remain running for paid-ad playback and settlement.
+
 Removal is cross-system: the durable campaign-removal ledger is updated first,
 then the queue contract is reconciled. Failure is reported rather than showing
 a completed refund. Periodic reconciliation retries even during protected

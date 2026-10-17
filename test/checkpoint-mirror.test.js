@@ -38,10 +38,15 @@ test('checkpoint mirror times out and rejects oversized jobs without publication
   assert.equal(bridge.status().pending, 0);
 });
 
-test('Mac client pins only verified checkpoint bytes before sending an acknowledgment', async () => {
+for (const snapshot of [
+  { schemaVersion: 1, playlist: [] },
+  { schemaVersion: 1, records: [] },
+  { schemaVersion: 1, records: [{ requestId: '8453:queue:0', state: 'playing' }] },
+]) {
+test(`Mac client pins verified ${snapshot.playlist ? 'playlist' : 'journal'} bytes before acknowledgment (${snapshot.records?.length || 0} records)`, async () => {
   const { createLocalCheckpointMirrorClient } = await import('../discord-bot/checkpoint-mirror-client.js');
   const { checkpointContentCid } = await import('../discord-bot/checkpoint-mirror.js');
-  const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, playlist: [] }));
+  const bytes = Buffer.from(JSON.stringify(snapshot));
   const cid = await checkpointContentCid(bytes);
   let pinned = false;
   let acknowledged = false;
@@ -61,4 +66,21 @@ test('Mac client pins only verified checkpoint bytes before sending an acknowled
   assert.equal((await poll()).cid, cid);
   assert.equal(acknowledged, true);
   assert.throws(() => createLocalCheckpointMirrorClient({ serviceUrl: 'http://untrusted.example', secret }), /HTTPS/);
+});
+}
+
+test('Mac client rejects unsupported or invalid playback journals before importing bytes', async () => {
+  const { createLocalCheckpointMirrorClient } = await import('../discord-bot/checkpoint-mirror-client.js');
+  const { checkpointContentCid } = await import('../discord-bot/checkpoint-mirror.js');
+  for (const snapshot of [{ schemaVersion: 2, records: [] }, { schemaVersion: 1, records: [{}] },
+    { schemaVersion: 1, records: [{ requestId: 'request', state: 'unknown' }] }, { schemaVersion: 1, other: [] }]) {
+    const bytes = Buffer.from(JSON.stringify(snapshot));
+    const cid = await checkpointContentCid(bytes);
+    const poll = createLocalCheckpointMirrorClient({ serviceUrl: 'https://worker.example', secret,
+      fetchImpl: async url => {
+        assert.ok(url.endsWith('/claim'), 'invalid checkpoints must not reach Kubo or acknowledgment');
+        return new Response(JSON.stringify({ job: { jobId: 'invalid', expectedCid: cid, contentBase64: bytes.toString('base64') } }));
+      } });
+    await assert.rejects(poll(), /Only playlist checkpoints and valid playback journals/);
+  }
 });

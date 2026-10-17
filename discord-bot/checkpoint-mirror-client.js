@@ -34,7 +34,12 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
     const expectedCid = CID.parse(job.expectedCid).toV1().toString();
     if (await checkpointContentCid(bytes) !== expectedCid) throw new Error('Checkpoint payload CID mismatch');
     const snapshot = JSON.parse(bytes.toString('utf8'));
-    if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.playlist)) throw new Error('Only playlist checkpoints may be mirrored');
+    const playbackJournal = Array.isArray(snapshot.records) && snapshot.records.every(record =>
+      record && typeof record.requestId === 'string' && record.requestId.length > 0 &&
+      ['pending', 'playing', 'played', 'fulfilled'].includes(record.state));
+    if (snapshot.schemaVersion !== 1 || (!Array.isArray(snapshot.playlist) && !playbackJournal)) {
+      throw new Error('Only playlist checkpoints and valid playback journals may be mirrored');
+    }
     const form = new FormData();
     form.append('file', new Blob([bytes], { type: 'application/json' }), 'decentbusking-jukeloop-state.json');
     const response = await fetchImpl(`${api}/api/v0/add?cid-version=1&raw-leaves=true&chunker=size-262144&pin=false`,
