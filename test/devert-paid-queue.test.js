@@ -8,6 +8,115 @@ const request = (n = 0) => ({ requestId: `8453:${queueAddress}:${n}`, chainReque
   campaignId: '9', payer: buyer, amountUnits: '1000000', title: 'Approved advert', audioURI: 'ipfs://approved-ad',
   advertiser, songId: `0x${'4'.repeat(64)}`, revision: '0', trackId: `devert-paid:${n}`, playable: true });
 
+test('public advert search matches titles, creators, addresses and campaign IDs without changing the catalog', async () => {
+  const { filterDevertCampaigns } = await import('../js/devert-paid-queue.mjs');
+  const catalog = [{ campaignId: '12', title: 'Moon Festival', advertiser, artist: 'Luna' },
+    { campaignId: '34', title: 'Jazz Night', advertiser: buyer }];
+  for (const query of ['  MOON ', 'luna', advertiser, '12']) {
+    assert.deepEqual(filterDevertCampaigns(catalog, query), [catalog[0]]);
+  }
+  assert.deepEqual(filterDevertCampaigns(catalog, ''), catalog);
+  assert.deepEqual(filterDevertCampaigns(catalog, 'not found'), []);
+  assert.equal(catalog.length, 2);
+});
+
+test('compact paid panel keeps tier order, filters eligible adverts, handles failure, and needs no refund elements', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const helpers = await import('../js/devert-paid-queue.mjs');
+  const { quoteDevertRequest } = await import('../js/devert-queue.mjs');
+  const { formatUsdcUnits } = await import('../js/usdc-format.mjs');
+  const ids = ['devert-paid-queue-button', 'devert-paid-immediate-button', 'devert-paid-price',
+    'devert-paid-immediate-price', 'devert-paid-campaign', 'devert-search', 'devert-search-state',
+    'devert-paid-count', 'devert-paid-requests', 'devert-paid-status', 'devert-paid-receipt', 'devert-paid-refresh'];
+  const makeElement = () => ({
+    children: [], textContent: '', value: '', listeners: {},
+    append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; },
+    addEventListener(event, callback) { this.listeners[event] = callback; },
+  });
+  const nodes = Object.fromEntries(ids.map(id => [id, makeElement()]));
+  const select = nodes['devert-paid-campaign'];
+  let chosen = '';
+  Object.defineProperty(select, 'value', {
+    get() { return this.children.some(child => child.value === chosen) ? chosen : this.children[0]?.value || ''; },
+    set(value) { chosen = value; },
+  });
+  const listeners = {};
+  const document = {
+    getElementById: id => nodes[id] || null, createElement: makeElement,
+    addEventListener(event, callback) { listeners[event] = callback; },
+  };
+  const state = { configured: true, version: 2, chainId: 8453, contractAddress: queueAddress,
+    paymentsEnabled: false, paused: false, pendingCount: 2, priceUnits: '1000000',
+    immediatePriceUnits: '2000000', approvedCampaignIds: ['1', '2'], recentRefunds: [],
+    requests: [{ ...request(0), tier: 0 }, { ...request(1), tier: 1, amountUnits: '2000000' }] };
+  const catalog = { chainId: 8453, campaigns: [
+    { campaignId: '1', title: 'Moon Festival', advertiser, artist: 'Luna',
+      startedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString() },
+    { campaignId: '2', title: 'Expired', advertiser, startedAt: new Date(0).toISOString(), expiresAt: new Date(1).toISOString() },
+  ] };
+  let offline = false;
+  const purchases = [];
+  const context = vm.createContext({
+    ...helpers, quoteDevertRequest, formatUsdcUnits, document, AbortSignal,
+    devertQueueAbi: () => [], DEVERT_QUEUE_USDC: buyer, USDC_BROWSER_ABI: [],
+    ethers: { Contract: class {} },
+    purchaseDevertRequest: async options => {
+      purchases.push(options);
+      return { requestId: '5', txHash: `0x${'a'.repeat(64)}` };
+    },
+    window: { DecentConfig: { devertQueueContractAddress: queueAddress, ipfsUploadServiceUrl: 'https://service.example' } },
+    setInterval() {},
+    fetch: async url => {
+      if (offline) throw new Error('service offline');
+      return { ok: true, json: async () => url.endsWith('/queue') ? state : catalog };
+    },
+  });
+  const source = fs.readFileSync(path.join(__dirname, '../js/devert-paid-queue.mjs'), 'utf8')
+    .replace(/^import .*;\n/gm, '').replace(/export /g, '');
+  vm.runInContext(`${source}\ninitDevertPaidQueue();`, context);
+  listeners['left-drawer-open']({ detail: 'devert' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(nodes['devert-paid-price'].textContent, '1.00');
+  assert.equal(nodes['devert-paid-immediate-price'].textContent, '2.00');
+  assert.equal(nodes['devert-paid-count'].textContent, '2');
+  assert.match(nodes['devert-paid-requests'].children[0].children[1].textContent, /After this song/);
+  assert.match(nodes['devert-paid-requests'].children[1].children[1].textContent, /Next ad break/);
+  assert.equal(select.children.length, 1);
+  assert.equal(select.value, '1');
+  assert.equal(nodes['devert-paid-queue-button'].disabled, true);
+  assert.equal(nodes['devert-paid-immediate-button'].disabled, true);
+  const search = nodes['devert-search'];
+  search.value = 'not found';
+  search.listeners.input();
+  assert.equal(select.disabled, true);
+  assert.equal(select.value, '');
+  assert.equal(nodes['devert-search-state'].textContent, '0 matching adverts');
+  search.value = 'LUNA';
+  search.listeners.input();
+  assert.equal(select.disabled, false);
+  assert.equal(select.value, '1');
+  state.paymentsEnabled = true;
+  context.window._wallet = { address: buyer, signer: {}, chainId: 8453 };
+  await nodes['devert-paid-refresh'].listeners.click();
+  assert.equal(nodes['devert-paid-queue-button'].disabled, false);
+  await nodes['devert-paid-queue-button'].listeners.click();
+  await nodes['devert-paid-refresh'].listeners.click();
+  await nodes['devert-paid-immediate-button'].listeners.click();
+  assert.deepEqual(purchases.map(item => [item.campaignId, item.tier, item.maxPriceUnits]),
+    [['1', 0, 1000000n], ['1', 1, 2000000n]]);
+  assert.match(nodes['devert-paid-receipt'].textContent, /Request #5 queued/);
+  offline = true;
+  await nodes['devert-paid-refresh'].listeners.click();
+  assert.equal(nodes['devert-paid-price'].textContent, 'Unavailable');
+  assert.equal(nodes['devert-paid-count'].textContent, '—');
+  assert.equal(nodes['devert-paid-requests'].children.length, 0);
+  assert.equal(select.disabled, true);
+  assert.equal(nodes['devert-paid-status'].textContent, 'service offline');
+});
+
 test('paid advert pricing doubles per seven pending requests and rejects invalid counts', async () => {
   const { quoteDevertRequest } = await import('../js/devert-queue.mjs');
   for (const [count, price] of [[0, 1000000n], [6, 1000000n], [7, 2000000n], [14, 4000000n], [128, 262144000000n]]) {
@@ -94,6 +203,64 @@ test('paid advert checkout reserves exact Base USDC, simulates before send and r
   await assert.rejects(purchaseDevertRequest({ signer, queue, usdc, campaignId: '9', maxPriceUnits: 2000000n }), /replacement/);
   signer.provider.getNetwork = async () => ({ chainId: 1n });
   await assert.rejects(purchaseDevertRequest({ signer, queue, usdc, campaignId: '9', maxPriceUnits: 2000000n }), /Base/);
+});
+
+test('both DVert priority payments celebrate only decoded confirmed requests, never approvals or failures', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const base = await import('../js/base-chain.mjs');
+  const { formatUsdcUnits } = await import('../js/usdc-format.mjs');
+  const { DEVERT_QUEUE_USDC } = await import('../js/devert-queue.mjs');
+  const celebrations = [];
+  const context = vm.createContext({
+    ...base, formatUsdcUnits, announcePaymentCelebration: detail => celebrations.push(detail),
+  });
+  const source = fs.readFileSync(path.join(__dirname, '../js/devert-queue.mjs'), 'utf8')
+    .replace(/^import .*;\n/gm, '').replace(/export /g, '');
+  vm.runInContext(source, context);
+  const signer = { provider: { getNetwork: async () => ({ chainId: 8453n }) }, getAddress: async () => buyer };
+  let allowance = 0n;
+  const usdc = { target: DEVERT_QUEUE_USDC, decimals: async () => 6, balanceOf: async () => 4000000n,
+    allowance: async () => allowance, approve: async (_, amount) => {
+      allowance = amount;
+      assert.equal(celebrations.length, 0);
+      return { wait: async () => ({ status: 1 }) };
+    } };
+  let confirm;
+  let receipt = { status: 1, logs: [{ address: queueAddress }] };
+  const hashes = [`0x${'a'.repeat(64)}`, `0x${'b'.repeat(64)}`];
+  const queue = { target: queueAddress, paymentToken: async () => DEVERT_QUEUE_USDC,
+    queueVersion: async () => 2n, quoteForTier: async tier => tier ? 2000000n : 1000000n,
+    requestAd: Object.assign(async (_, tier) => ({
+      hash: hashes[tier], wait: () => new Promise(resolve => { confirm = () => resolve(receipt); }),
+    }), { staticCall: async () => {} }),
+    interface: { parseLog: () => ({ name: 'AdRequested', args: { requestId: 12n } }) } };
+  for (const tier of [0, 1]) {
+    celebrations.length = 0;
+    const pending = context.purchaseDevertRequest({ signer, queue, usdc, campaignId: '9', tier, maxPriceUnits: 4000000n });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(celebrations.length, 0, 'pending payments and approvals must not celebrate');
+    confirm();
+    await pending;
+    assert.equal(celebrations.length, 1);
+    assert.equal(celebrations[0].chainId, 8453);
+    assert.equal(celebrations[0].txHash, hashes[tier]);
+    assert.equal(celebrations[0].amountText, tier ? '2.00' : '1.00');
+    assert.equal(celebrations[0].assetText, 'USDC');
+    assert.match(celebrations[0].summary, tier ? /after-song priority/ : /queue bump/);
+    assert.match(celebrations[0].txLabel, /request #12 confirmed/);
+  }
+  for (const failed of [{ status: 0, logs: [] }, { status: 1, logs: [] }]) {
+    celebrations.length = 0;
+    receipt = failed;
+    const pending = context.purchaseDevertRequest({ signer, queue, usdc, campaignId: '9', maxPriceUnits: 1000000n });
+    const rejected = assert.rejects(pending, /failed|reconciliation/);
+    await new Promise(resolve => setImmediate(resolve));
+    confirm();
+    await rejected;
+    assert.equal(celebrations.length, 0);
+  }
 });
 
 test('removal refund requires the paying wallet, removed campaign and confirmed receipt', async () => {

@@ -5,6 +5,33 @@ song payments. Campaigns remain **$5 USDC for one week** of ordinary rotation.
 Priority payments are optional extras for an existing active approved campaign;
 they never purchase, renew or extend the campaign itself.
 
+## Panel controls
+
+DVert follows the DJuke machine layout: a two-price LCD, paid queue, advert
+search/selection, and **Queue Ad** / **After This Song** buttons. Search matches
+active approved campaign titles, creator names when available, advertiser
+addresses, and campaign IDs. The first button uses the next normal ad break;
+the second costs twice as much for after-song priority. Detailed terms stay
+in the information dialog; ordinary rotation, wallet ads, campaign tools and
+the price model are collapsed until requested.
+
+The orangutan/TV icon toggles the live 24/7 VertLoop audio/video feed, hushing
+main radio only for this listener. Its hover/focus help explains the switch.
+Clicking again or closing DVert returns to main radio. Video and voting
+controls appear only while listening to VertLoop.
+
+Refund claim controls are intentionally absent from this simplified panel.
+Removal refund eligibility, contract claims and the exported
+`claimDevertRefund` helper remain unchanged for later recovery tooling.
+Payment receipts still identify the request and transaction.
+
+The green and teal priority buttons have a staggered shimmer (disabled for
+reduced-motion preferences). Both tiers use the shared payment celebrations
+after the Base transaction confirms and its request event is decoded, with the
+actual USDC charge and a transaction link. Token approvals, pending payments
+and failed/reconciliation-needed receipts do not trigger a celebration.
+Weekly campaign purchases already use the same celebration system.
+
 ## Deployment status
 
 - Replacement Base v0.2 queue: [`0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb`](https://basescan.org/address/0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb#code), source verified.

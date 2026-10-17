@@ -18,8 +18,8 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(html, /My Ads/);
   assert.match(html, /id="devert-campaigns" aria-label="My DeVert advertisements"/);
   assert.match(html, /id="devert-search-results"/);
-  assert.match(html, /Queue bump price/);
-  assert.match(html, /id="devert-paid-price"[^>]*>Not live<\/strong>/);
+  assert.match(html, /Next Ad Break/);
+  assert.match(html, /id="devert-paid-price"[^>]*>—<\/strong>/);
   assert.match(html, /id="devert-price" hidden/);
   assert.match(html, /id="devert-audio-uri"[^>]*readonly/);
   assert.match(html, /id="devert-weeks"[^>]*value="1"/);
@@ -37,7 +37,7 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.match(instructions, /aria-label="Payment distribution"/);
   assert.match(html, /decent\.config\.js\?v=20261017-devert-v02/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-paid-queue.mjs'), 'utf8'),
-    /devert-queue\.mjs\?v=20261017-two-tier-priority/);
+    /devert-queue\.mjs\?v=20261017-priority-celebrations/);
   assert.match(html, /Campaign Instructions: Submit, Receive &amp; Run/);
   assert.doesNotMatch(html, /<details class="devert-workflow-details">/);
   assert.doesNotMatch(html, /id="devert-offer"/);

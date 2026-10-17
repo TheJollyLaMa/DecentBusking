@@ -1,5 +1,6 @@
 import { ensureBaseNetwork, approvalNotice, waitForAllowance } from './base-chain.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { announcePaymentCelebration } from './payment-celebration.mjs';
 
 export const DEVERT_QUEUE_V1_ABI = [
   'function quote() view returns(uint256)',
@@ -71,6 +72,14 @@ export async function purchaseDevertRequest({ signer, queue, usdc, campaignId, t
   const event = receipt.logs.filter(log => log.address.toLowerCase() === queue.target.toLowerCase())
     .map(log => queue.interface.parseLog(log)).find(log => log?.name === 'AdRequested');
   if (!event) throw new Error(`Payment confirmed but request receipt needs reconciliation: ${transaction.hash}`);
+  announcePaymentCelebration({
+    chainId: 8453,
+    txHash: transaction.hash,
+    amountText: formatUsdcUnits(price),
+    assetText: 'USDC',
+    summary: tier === 1 ? 'DVert after-song priority confirmed' : 'DVert queue bump confirmed',
+    txLabel: `DVert request #${event.args.requestId} confirmed`,
+  });
   return { txHash: transaction.hash, requestId: event.args.requestId.toString(), priceUnits: price };
 }
 
