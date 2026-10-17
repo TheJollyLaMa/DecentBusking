@@ -224,6 +224,7 @@ export function createWorkerRequestHandler({
   getPaymentLedger,
   getFunds,
   getEarnings,
+  getDjukeTopEarners,
   ensResolver,
   reconcilePayment,
   onRadioVote,
@@ -412,6 +413,18 @@ export function createWorkerRequestHandler({
         consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
         await saveRadioSchedule({ events, weeklySchedule });
         sendJson(response, 200, await getRadioSchedule(), corsOrigin);
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/djuke/earners') {
+        if (!getDjukeTopEarners) {
+          sendJson(response, 503, { error: 'DJuke earnings index is not configured' }, '*');
+          return;
+        }
+        try {
+          sendJson(response, 200, await getDjukeTopEarners(), '*', 'public, max-age=30');
+        } catch (error) {
+          sendJson(response, 503, { error: error.message }, '*');
+        }
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/djuke') {

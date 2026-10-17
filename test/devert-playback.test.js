@@ -357,6 +357,11 @@ test('main-radio listener votes are durable and reorder only seated campaigns', 
   assert.equal((await runtime.recordMainRadioAdVote(voteB)).duplicate, false);
   assert.equal((await runtime.recordMainRadioAdVote(voteB)).duplicate, true);
   assert.equal(fixture.state.adVotes.length, 2);
+  assert.deepEqual(runtime.getMainRadioAdVoteSummary(voteA.radioPlayId), { up: 0, down: 1, net: -1 });
+  assert.deepEqual(runtime.getMainRadioAdVoteSummary(voteB.radioPlayId), { up: 1, down: 0, net: 1 });
+  assert.deepEqual(runtime.getMainRadioAdVoteSummary('new-play'), { up: 0, down: 0, net: 0 });
+  const restored = await makeRuntime(fixture);
+  assert.deepEqual(restored.getMainRadioAdVoteSummary(voteA.radioPlayId), { up: 0, down: 1, net: -1 });
   assert.equal((await runtime.nextMainRadioAd()).track.trackId, 'devert:2');
   assert.ok(fixture.state.adVotes.every(entry => entry.campaignId !== '3'));
 });

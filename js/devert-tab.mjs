@@ -1,4 +1,4 @@
-import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261016-ipfs-gateway-failover';
+import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261017-sidepanel-live';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { submitMediaForApproval } from './mint-submission.js?v=20261018-shared-provider';

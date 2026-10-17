@@ -22,9 +22,9 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261016-radio-preload';
+import { renderNFTCard } from './nft-card.js?v=20261017-sidepanel-live';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { setNowPlaying } from './stage.js?v=20261016-radio-preload';
+import { setNowPlaying } from './stage.js?v=20261017-sidepanel-live';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft } from './nft-loader.js?v=20261012-paging';
 
@@ -1216,6 +1216,15 @@ export function readNowPlayingSpectrum(out) {
   if (!_ensureNowPlayingAnalyser(media) || !_nowPlayingAnalyser) return false;
   if (_nowPlayingAudioContext?.state === 'suspended') return false;
   _nowPlayingAnalyser.getByteFrequencyData(out);
+  return true;
+}
+
+export function readNowPlayingWaveform(out) {
+  const media = _activeMediaElement();
+  if (!out || !media || media.paused || media.ended) return false;
+  if (!_ensureNowPlayingAnalyser(media) || !_nowPlayingAnalyser) return false;
+  if (_nowPlayingAudioContext?.state === 'suspended') return false;
+  _nowPlayingAnalyser.getByteTimeDomainData(out);
   return true;
 }
 

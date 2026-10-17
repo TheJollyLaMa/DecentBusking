@@ -1168,9 +1168,13 @@ async function main() {
     getRadioState: async () => {
       const jukeLoopSession = getActiveJukeLoopSession();
       const mainRadioAdCountdown = jukeLoopSession ? await jukeLoopSession.getMainRadioAdCountdown() : null;
+      const nowPlaying = getJukeLoopNowPlaying();
+      const adVotes = nowPlaying?.isDevert
+        ? _devertPlaybackRuntime?.getMainRadioAdVoteSummary(nowPlaying.playId) ?? null : null;
       return {
         ...buildRadioState({
-          nowPlaying: getJukeLoopNowPlaying(),
+          nowPlaying,
+          adVotes,
           upNext: getJukeLoopUpNext(),
           playlist: getPlaylist(),
           mainRadioAdCountdown,
@@ -1211,6 +1215,7 @@ async function main() {
       return { ...state, entries: state.entries.map(entry => (entry.songId && titles.get(entry.songId)
         ? { ...entry, trackTitle: titles.get(entry.songId) } : entry)) };
     },
+    getDjukeTopEarners: () => earningsLedger.getDjukeTopEarners(),
     ensResolver: createEnsResolver(),
     getDevertAds: async ({ address }) => {
       if (!playlistReady) throw new Error('Advert library is restoring; retry shortly');

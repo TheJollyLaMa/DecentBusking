@@ -313,6 +313,7 @@ export function createEarningsLedger({
         }
         lastCheckedAt = new Date(now()).toISOString();
         if (changed || !items.length) await save(snapshot());
+        lastError = '';
       } catch (error) {
         lastError = error.message;
         throw error;
@@ -352,7 +353,24 @@ export function createEarningsLedger({
     return { ready: Boolean(lastCheckedAt), through: scannedThrough, lastCheckedAt, entries: filtered };
   }
 
-  return { initialize, refresh, getState, getAddressState };
+  function getDjukeTopEarners() {
+    if (!lastCheckedAt || lastError || songPlaysThrough === null || songPlaysThrough < scannedThrough) {
+      throw new Error('DJuke earnings are still indexing; retry shortly');
+    }
+    const totals = new Map();
+    for (const item of items) {
+      if (item.kind !== EARNINGS_KIND.songPlay || item.requestId == null || item.asset !== 'USDC') continue;
+      const address = String(item.artist).toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(address) || !/^\d+$/.test(item.units)) throw new Error('Invalid indexed DJuke payout');
+      totals.set(address, (totals.get(address) || 0n) + BigInt(item.units));
+    }
+    const earners = [...totals].filter(([, units]) => units > 0n)
+      .sort(([a, unitsA], [b, unitsB]) => unitsA === unitsB ? a.localeCompare(b) : unitsA > unitsB ? -1 : 1)
+      .slice(0, 3).map(([address, units]) => ({ address, totalUnits: units.toString() }));
+    return { chainId: 8453, asset: 'USDC', period: 'all-time', through: scannedThrough, lastCheckedAt, earners };
+  }
+
+  return { initialize, refresh, getState, getAddressState, getDjukeTopEarners };
 }
 
 async function getLogsAdaptive(provider, filter, fromBlock, toBlock, budget) {

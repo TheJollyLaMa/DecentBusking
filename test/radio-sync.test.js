@@ -643,6 +643,27 @@ test('site votes post only the current play and anonymous browser ID, with no wa
     fetchImpl: async () => new Response(JSON.stringify({ error: 'This play has ended' }), { status: 400 }) }), /ended/);
 });
 
+test('confirmed radio votes notify the chart, but failed votes do not', async () => {
+  const events = [];
+  const context = vm.createContext({ AbortSignal, console, CustomEvent,
+    document: { dispatchEvent: event => events.push(event) },
+    localStorage: { getItem: () => 'anonymous-browser-123', setItem() {} },
+    window: { DecentConfig: { radioUrl: 'https://worker.example/api/radio' } },
+  });
+  vm.runInContext(radioSyncSource(), context);
+  vm.runInContext(`_mode = 'radio'; _radio = { playId: 'play-1' };
+    _anonymousListenerId = () => 'anonymous-browser-123';
+    sendRadioVote = async ({playId, vote}) => ({playId, vote});
+    _renderVoting = () => {};`, context);
+  await vm.runInContext('_castRadioVote(1)', context);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, 'dbusk-radio-vote-recorded');
+  assert.equal(events[0].detail.vote, 1);
+  vm.runInContext(`_radio = { playId: 'play-2' }; sendRadioVote = async () => { throw new Error('offline'); };`, context);
+  await vm.runInContext('_castRadioVote(-1)', context);
+  assert.equal(events.length, 1);
+});
+
 test('DeVert main-radio ads allow live-program votes while non-radio previews remain disabled', () => {
   const source = radioSyncSource();
   const button = { dataset: { radioVote: '1' }, disabled: false, setAttribute() {} };

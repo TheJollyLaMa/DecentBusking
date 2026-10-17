@@ -34,6 +34,14 @@ actual USDC charge and a transaction link. Token approvals, pending payments
 and failed/reconciliation-needed receipts do not trigger a celebration.
 Weekly campaign purchases already use the same celebration system.
 
+**Ad Funding History** is a collapsed, public, read-only ledger view. It groups
+confirmed advert fund deposits by transaction, shows exact indexed allocations
+and their fund IDs, and links to the transaction event logs and Base settlement
+router. Campaign purchases and paid-play settlements are labeled separately;
+missing historical advert titles are not guessed. Totals exclude queue escrow,
+non-advert funding and final fund-beneficiary payouts. It loads on demand from
+`/api/funds`, with ten transactions per page and explicit indexing/error states.
+
 ## Deployment status
 
 - Replacement Base v0.2 queue: [`0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb`](https://basescan.org/address/0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb#code), source verified.

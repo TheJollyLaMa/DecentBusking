@@ -210,7 +210,7 @@ export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch, 
 
 /** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
 export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Date.now(), recentLimit = 10, mainRadioAdCountdown = null,
-  activeShow = null, topTenHype = null }) {
+  activeShow = null, topTenHype = null, adVotes = null }) {
   const mediaTypeForTrack = (track) => (track.videoUrl || track.mediaType === 'video/mp4')
     ? 'video/mp4'
     : mediaTypeFor(track.filename, track.mediaType) || '';
@@ -246,6 +246,7 @@ export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Dat
             ...(videoUrl ? { videoUrl } : {}),
             ipfsCid: nowPlaying.ipfsCid || null,
             isDevert: nowPlaying.isDevert === true,
+            ...(nowPlaying.isDevert ? { adVotes } : {}),
             ...(nowPlaying.hype ? { hype: { ...nowPlaying.hype } } : {}),
             ...(sponsor ? { sponsor } : {}),
             startedAt: nowPlaying.startedAt,

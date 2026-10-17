@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261017-devert-jade" />
+  <link rel="stylesheet" href="css/styles.css?v=20261017-djuke-platinum" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -26,13 +26,22 @@
   </button>
   <aside id="top-ten-panel" aria-label="Public Top 10 Songs" aria-hidden="true">
     <div class="top-ten-panel-heading">
-      <div><h2>Top 10 Songs</h2><p id="top-ten-week">Weekly vote chart</p></div>
+      <button id="top-ten-meter-toggle" type="button" aria-label="Show live song waveform" title="Show live song waveform" aria-pressed="false">∿</button>
+      <div><div class="top-ten-title"><h2>Weekly Top 10</h2><button id="top-ten-info" type="button" aria-label="About Top 10" aria-haspopup="dialog" aria-controls="top-ten-instructions">i</button></div><p id="top-ten-week">Weekly vote chart</p></div>
       <button id="top-ten-panel-close" type="button" aria-label="Fold away Top 10 Songs">‹</button>
     </div>
     <p class="top-ten-chart-note">Weekly net votes · upvotes minus downvotes</p>
     <p id="top-ten-status" role="status" aria-live="polite">Open the tab to load this week’s votes.</p>
     <div id="top-ten-content"></div>
   </aside>
+  <dialog id="top-ten-instructions" aria-labelledby="top-ten-instructions-title">
+    <h3 id="top-ten-instructions-title">🏆 The community makes the chart</h3>
+    <section><h4>👍 Every vote moves the music</h4><p>Songs rank by this week’s <strong>net votes: upvotes minus downvotes</strong>. Use the radio’s thumbs while a song plays. The chart updates live; each song holds its own place, even when one artist has several hits.</p></section>
+    <section><h4>💸 A weekly prize ladder</h4><p>First place receives half the available weekly Top 10 pot. Each next place receives half the remainder, and the final payable place gets the rest. Every payable prize must exceed <strong>$0.10 USDC</strong>; a smaller pot supports fewer prizes.</p><p>Shown prizes are estimates, not guaranteed payments. Rankings and estimates freeze at <strong>Monday midnight in America/New_York</strong>. Artist payout wallets must be linked, and payments require owner approval.</p></section>
+    <section><h4>🎉 Friday Top 10 Hype</h4><p>When the scheduled Hype hour begins, its playlist snapshots the opening Top 10 and counts up from #10 toward #1. Votes keep moving the live chart while those songs play. The festival panel opens for the show; you can still minimize it.</p></section>
+    <section><h4>➕ Keep a favorite</h4><p>The <strong>+</strong> beside a song saves it to your personal playlist in your profile watchlist. It does not pay to queue a radio play or cast a vote.</p></section>
+    <button id="top-ten-instructions-close" type="button">Back to the chart</button>
+  </dialog>
 
   <button id="djuke-tab" type="button" aria-controls="djuke-panel" aria-expanded="false" aria-label="Open DJuke" title="Open DJuke">
     <span class="djuke-tab-mark" aria-hidden="true"><span class="djuke-note djuke-note-left">🎶</span><span class="djuke-note djuke-note-right">🎶</span><span class="djuke-tab-slot">⚸🎰🧞‍♂️</span><span class="djuke-tab-coin">🪙</span></span>
@@ -40,11 +49,17 @@
   </button>
   <aside id="djuke-panel" aria-label="DJuke jukebox" aria-hidden="true" inert>
     <div class="djuke-heading">
-      <div class="djuke-brand"><img src="img/hat.svg" alt="" width="36" height="36"><h2>DJuke</h2></div>
+      <div class="djuke-brand">
+        <span class="djuke-tab-mark djuke-header-machine" aria-hidden="true"><span class="djuke-note djuke-note-left">🎶</span><span class="djuke-note djuke-note-right">🎶</span><span class="djuke-tab-slot">⚸🎰🧞‍♂️</span><span class="djuke-tab-coin">🪙</span></span>
+        <h2>DJuke</h2><button id="djuke-info" type="button" aria-label="About DJuke" aria-haspopup="dialog" aria-controls="djuke-instructions">i</button>
+      </div>
       <button id="djuke-close" type="button" aria-label="Close DJuke" title="Close DJuke"><span data-djuke-icon="X" aria-hidden="true">×</span></button>
     </div>
     <div class="djuke-body">
-      <div class="djuke-price-display"><span>Next Play</span><strong id="djuke-price">—</strong><span>USDC · Base</span></div>
+      <div class="djuke-price-display">
+        <div class="djuke-lcd-equalizer" aria-hidden="true" data-panel-equalizer><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <span>Next Play</span><strong id="djuke-price">—</strong><span>USDC · Base</span>
+      </div>
       <div class="djuke-queue-heading"><h3>Paid Queue <span id="djuke-count">—</span></h3><button id="djuke-refresh" type="button" aria-label="Refresh DJuke queue" title="Refresh queue"><span data-djuke-icon="RefreshCw" aria-hidden="true">↻</span></button></div>
       <ol id="djuke-queue" aria-label="Pending paid requests"></ol>
       <p id="djuke-queue-state" role="status" aria-live="polite">Queue unavailable</p>
@@ -53,8 +68,12 @@
       <p id="djuke-search-state" role="status" aria-live="polite"></p>
       <select id="djuke-song" disabled><option value="">Song catalog unavailable</option></select>
       <button id="djuke-pay" type="button" disabled title="DJuke payment contract is not deployed">Queue Song</button>
-      <p class="worker-gas-notice">Operator reminder: top up the worker with ETH on Base for playback fulfillment before accepting paid requests. Worker: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Worker balance is monitored.</p>
-      <p id="djuke-payment-state" role="status" aria-live="polite">Payments not live</p>
+      <section class="djuke-earners" aria-labelledby="djuke-earners-title">
+        <div class="djuke-queue-heading"><h3 id="djuke-earners-title">Top Jukebox Earners</h3><span>All time · USDC</span></div>
+        <ol id="djuke-earners" aria-label="Top three artist and collaborator wallets by confirmed DJuke payouts"></ol>
+        <p id="djuke-earners-state" role="status" aria-live="polite">Loading earnings…</p>
+      </section>
+      <p id="djuke-payment-state" role="status" aria-live="polite"></p>
       <p id="djuke-gas-status" role="status" aria-live="polite"></p>
       <details class="djuke-tiers" open>
         <summary>Price Model</summary>
@@ -64,12 +83,20 @@
     </div>
     <div class="djuke-speaker" aria-hidden="true"></div>
   </aside>
+  <dialog id="djuke-instructions" aria-labelledby="djuke-instructions-title">
+    <h3 id="djuke-instructions-title">🎰 Your quarter. Their encore.</h3>
+    <section><h4>🎶 Pick it. Queue it. Hear it.</h4><p>Search for a song, select it, then press <strong>Queue Song</strong>. Connect your wallet in the page header. Paid requests play in order without interrupting the current recording or protected shows.</p></section>
+    <section><h4>🪙 A quarter to start</h4><p>The next play starts at <strong>0.25 USDC on Base</strong> and doubles every eight pending requests. The LCD shows the current queue price. Any required worker-gas ETH contribution is shown before payment.</p></section>
+    <section><h4>✨ Music pays people</h4><p><strong>90%</strong> goes to the artist and collaborators, <strong>8%</strong> to IPFS pinning rewards, and <strong>2%</strong> to repo development. Confirmed payments trigger our celebration animations.</p></section>
+    <section><h4>🏆 The jukebox podium</h4><p>The top three ranks show all-time confirmed DJuke song-play payouts to artist and collaborator wallets. They exclude listener spending, album purchases, pending credits and platform funds. Select a name or wallet to view its on-chain history.</p><p>The dim LCD equalizer follows the live music spectrum and rests when playback stops. It stays still with reduced motion enabled.</p></section>
+    <button id="djuke-instructions-close" type="button">Back to the music</button>
+  </dialog>
 
   <button id="devert-tab" type="button" aria-controls="devert-panel" aria-expanded="false" aria-label="Open DVert advertising" title="Open DVert advertising">
     <span class="devert-tab-art" data-devert-ticket aria-hidden="true"><span class="devert-cash first">💸</span><span class="devert-cash second">💸</span><span class="devert-symbol">⚸</span><span class="devert-scroll">📜</span><span class="devert-slot">🎰</span><span class="devert-genie">🧞‍♂️</span><span class="devert-speaker first">🔊</span><span class="devert-speaker second">🔊</span></span><span>DVert</span>
   </button>
   <aside id="devert-panel" aria-label="DVert advertising" aria-hidden="true" inert>
-    <div class="devert-heading"><div class="devert-brand"><h2>DVert</h2><button id="devert-info" type="button" aria-label="DVert campaign instructions" aria-haspopup="dialog" aria-controls="devert-instructions">i</button></div><button id="devert-close" type="button" aria-label="Close DVert" title="Close DVert">✕</button></div>
+    <div class="devert-heading"><div class="devert-brand"><span class="devert-tab-art devert-header-machine" aria-hidden="true"><span class="devert-cash first">💸</span><span class="devert-cash second">💸</span><span class="devert-symbol">⚸</span><span class="devert-scroll">📜</span><span class="devert-slot">🎰</span><span class="devert-genie">🧞‍♂️</span><span class="devert-speaker first">🔊</span><span class="devert-speaker second">🔊</span></span><h2>DVert</h2><button id="devert-info" type="button" aria-label="DVert campaign instructions" aria-haspopup="dialog" aria-controls="devert-instructions">i</button></div><button id="devert-close" type="button" aria-label="Close DVert" title="Close DVert">✕</button></div>
     <div class="devert-body">
       <div class="devert-live-control">
         <div class="devert-live-help" tabindex="0" aria-describedby="devert-live-tooltip">
@@ -90,6 +117,7 @@
 
       <section class="devert-public-queue" aria-labelledby="devert-paid-title">
         <div class="devert-price-display" aria-label="Advert priority prices in USDC on Base">
+          <div class="djuke-lcd-equalizer" aria-hidden="true" data-panel-equalizer><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
           <div title="Queue bump: first available normal advert break. No extra break."><span>Next Ad Break</span><strong id="devert-paid-price" aria-live="polite">—</strong></div>
           <div title="Immediate priority: an extra break after the current song. Double the queue price; protected shows finish first."><span>After This Song · 2×</span><strong id="devert-paid-immediate-price" aria-live="polite">—</strong></div>
           <span class="devert-display-currency">USDC · Base</span>
@@ -160,6 +188,13 @@
             <tr><td>24/7 VertLoop</td><td>Included (continuous)</td></tr>
           </tbody>
         </table>
+      </details>
+      <details id="devert-history" class="devert-disclosure">
+        <summary>Ad Funding History</summary>
+        <div class="devert-campaign-heading"><strong id="devert-history-total"></strong><button id="devert-history-refresh" type="button" aria-label="Refresh advert funding history" title="Refresh funding history">↻</button></div>
+        <p id="devert-history-status" role="status" aria-live="polite">Open to view confirmed advert funding and destinations.</p>
+        <ol id="devert-history-list" aria-label="Confirmed advert funding transactions"></ol>
+        <button id="devert-history-more" type="button" hidden>Show more transactions</button>
       </details>
     </div>
   </aside>
@@ -771,24 +806,27 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261016-artwork-backoff"></script>
+  <script type="module" src="js/main.js?v=20261017-sidepanel-live"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261016-schedule-cancel"></script>
+  <script type="module" src="js/admin.js?v=20261017-sidepanel-live"></script>
 
   <script type="module" src="js/payroll.js?v=20261015-usdc-cents"></script>
   <script type="module" src="js/radio-history.js?v=20261015-usdc-cents"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261016-schedule-cancel"></script>
   <script type="module" src="js/fund-header.mjs?v=20261015-usdc-cents"></script>
-  <script type="module" src="js/top-ten-board.mjs?v=20261016-hype-bunny"></script>
-  <script type="module" src="js/djuke.mjs?v=20261017-single-init"></script>
-  <script type="module" src="js/devert-tab.mjs?v=20261017-header-wallet"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261016-radio-preload"></script>
+  <script type="module" src="js/top-ten-board.mjs?v=20261017-sidepanel-live"></script>
+  <script type="module" src="js/djuke.mjs?v=20261017-platinum-earners"></script>
+  <script type="module" src="js/devert-tab.mjs?v=20261017-sidepanel-live"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261017-sidepanel-live"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
-  <script type="module" src="js/listens.mjs?v=20261016-radio-preload"></script>
+  <script type="module" src="js/listens.mjs?v=20261017-sidepanel-live"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261018-shared-provider"></script>
   <script type="module" src="js/devert-paid-queue.mjs?v=20261017-devert-machine"></script>
+  <script type="module" src="js/devert-history.mjs?v=20261017-funding-history"></script>
+  <script type="module" src="js/panel-equalizers.mjs?v=20261017-sidepanel-live"></script>
+  <script type="module" src="js/top-ten-live-meter.mjs?v=20261017-sidepanel-live"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js?v=20261015-usdc-cents';
     document.addEventListener('DOMContentLoaded', initPayroll);

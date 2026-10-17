@@ -403,6 +403,7 @@ async function _castRadioVote(vote) {
     while (_votedPlays.size > 100) _votedPlays.delete(_votedPlays.keys().next().value);
     try { localStorage.setItem(`decentbusking:votes:v1:${_radioUrl()}`, JSON.stringify([..._votedPlays])); } catch {}
     if (_radio?.playId === playId && _voteStatusEl) _voteStatusEl.textContent = 'Vote recorded';
+    document.dispatchEvent(new CustomEvent('dbusk-radio-vote-recorded', { detail: { playId, vote: result.vote } }));
   } catch (error) {
     if (_radio?.playId === playId && _voteStatusEl) _voteStatusEl.textContent = error.message;
   } finally {

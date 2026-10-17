@@ -12,6 +12,38 @@ Read the [Decent Busking whitepaper](WHITEPAPER.md) for the vision, current arch
 
 ## Come Listen
 
+The **DJuke** drawer uses a chrome/platinum jukebox with an animated quarter,
+music notes and a dim LCD equalizer driven by the shared live music spectrum.
+DVert uses the same meter behind its prices and animates its tab icons in the
+header. Meters rest without playback and stop when hidden or reduced motion is
+enabled; no independent media sources or simulated music loops are created.
+Its **i** button explains queue pricing, payment splits and worker-gas charges.
+Connect through the page header; a disconnected **Queue Song** click shows the
+wallet reminder without starting a transaction.
+
+**Top Jukebox Earners** ranks the top three artist/collaborator wallets by
+all-time confirmed DJuke song-play payouts, with ENS or decorated wallet links
+to Basescan. It reuses the checkpointed earnings index at
+`GET /api/djuke/earners`, excluding album purchases, withdrawals, listener spending
+and platform payouts. Unavailable/incomplete indexing is reported explicitly,
+not shown as zero earnings. Deploy both the worker and site for this feature.
+All DJuke decorative animations respect reduced-motion preferences.
+The **Top 10** title also has an **i** dialog explaining net votes, weekly prize
+estimates and closeout, Friday Hype's opening chart, and playlist saves.
+Voting with the radio thumbs-up/down buttons keeps the chart open. Confirmed
+votes refresh its counts and rankings immediately; other listeners' votes are
+picked up by the existing 15-second refresh while the panel is open.
+The currently playing row anchors a dim live meter at its top edge, rising
+behind the panel's title and subtitle without covering their controls.
+The upper-left meter button switches between frequency bars and the actual
+time-domain waveform, using the radio's shared analyser. The meter follows the
+live row as ranks change, rests without playback, and stops for reduced motion.
+While a main-radio advert plays, an unranked **Advert · Live Now** row shows its
+per-play net votes and uses the same live bar/wave meter. The vote tooltip gives
+up/down counts. It disappears on song handoff, has no playlist-save control,
+and never participates in music rankings or prize calculations. Counts require
+the matching worker update; older workers show unavailable rather than zero.
+
 **First visit?** Follow the [newcomer walkthrough](docs/NEWCOMERS.md) for a click-by-click listener and artist route with screenshots.
 
 Open the [DecentBusking town square](https://thejollylama.github.io/DecentBusking/) and explore the 3D music timeline. Select a track in the archive to click **Preview** for a free 30-second taste or **Listen** to play the whole song, inspect its NFT details, and tip the artist. Connect MetaMask on Base when you want to send a tip.

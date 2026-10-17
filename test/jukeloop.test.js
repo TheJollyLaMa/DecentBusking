@@ -512,11 +512,13 @@ test('radio state keeps video MIME for main-radio ads even when the filename loo
       isDevert: true,
     },
     playlist: [],
+    adVotes: { up: 4, down: 2, net: 2 },
     now: 100_000,
   });
 
   assert.equal(state.nowPlaying.mediaType, 'video/mp4');
   assert.equal(state.nowPlaying.videoUrl, 'ipfs://bafy-video');
+  assert.deepEqual(state.nowPlaying.adVotes, { up: 4, down: 2, net: 2 });
 });
 
 test('radio state omits sponsor metadata for regular rotation', async () => {

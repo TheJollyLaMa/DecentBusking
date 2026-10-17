@@ -3,6 +3,8 @@ import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllow
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
+import { lookupEnsName } from './ens-client.mjs?v=20261016-ens-worker';
+import { renderWalletAddress } from './fund-display.mjs';
 export { USDC_BROWSER_ABI };
 
 export function quoteDjuke(pendingCount) {
@@ -143,6 +145,12 @@ export function initDjuke() {
   const tiers = document.getElementById('djuke-price-tiers');
   const pay = document.getElementById('djuke-pay');
   const gasStatus = document.getElementById('djuke-gas-status');
+  const instructions = document.getElementById('djuke-instructions');
+  const info = document.getElementById('djuke-info');
+  const earners = document.getElementById('djuke-earners');
+  const earnerStatus = document.getElementById('djuke-earners-state');
+  let earnersGeneration = 0;
+  let walletPromptShown = false;
   let gasQuote = null;
   let gasGeneration = 0;
   let timer;
@@ -162,8 +170,9 @@ export function initDjuke() {
   const syncPayButton = () => {
     const ready = paymentsLive() && !!window._wallet?.address && window._wallet?.chainId === 8453 && !!selectedSongId() && !busy &&
       (!supportsDjukeAlbumsAndGas(window.DecentConfig?.djukeContractVersion) || !!gasQuote && gasQuote.deadline > Date.now() / 1000);
-    pay.disabled = !ready;
-    pay.title = paymentsLive() ? 'Pay to queue the selected song' : 'DJuke payments are not live yet';
+    pay.disabled = busy || (!!window._wallet?.address && !ready);
+    pay.title = !window._wallet?.address ? 'Queue Song'
+      : paymentsLive() ? 'Pay to queue the selected song' : 'DJuke payments are not live yet';
   };
   let gasQuoteKey = '';
   const currentGasKey = () => `${window._wallet?.address?.toLowerCase() || ''}|${selectedSongId()}|${live?.priceUnits || ''}`;
@@ -278,16 +287,62 @@ export function initDjuke() {
   };
   const updateWallet = () => {
     const address = window._wallet?.address;
-    if (!busy) {
-      paymentStatus.textContent = !paymentsLive() ? 'Payments not live'
-        : !address ? 'Connect your wallet in the header to queue a song'
-        : window._wallet?.chainId !== 8453 ? 'Switch your wallet to Base' : 'Pick a song, then queue it';
+    if (!busy && walletPromptShown && address) {
+      paymentStatus.textContent = '';
+      walletPromptShown = false;
     }
     syncPayButton();
   };
+  async function refreshEarners() {
+    const check = ++earnersGeneration;
+    const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+    try {
+      if (!service) throw new Error('DJuke earnings service is not configured');
+      const response = await fetch(`${service}/api/djuke/earners`, { signal: AbortSignal.timeout(12000) });
+      if (!response.ok) throw new Error(response.status === 404 || response.status === 503
+        ? 'Earnings index unavailable; retry shortly.' : `Earnings unavailable (${response.status})`);
+      const result = await response.json();
+      if (result.chainId !== 8453 || result.asset !== 'USDC' || result.period !== 'all-time' ||
+          !Array.isArray(result.earners) || result.earners.length > 3 ||
+          result.earners.some(entry => !/^0x[0-9a-f]{40}$/i.test(entry.address) || !/^\d+$/.test(entry.totalUnits))) {
+        throw new Error('Invalid DJuke earnings response');
+      }
+      if (check !== earnersGeneration || !isOpen()) return;
+      earners.replaceChildren();
+      result.earners.forEach((entry, index) => {
+        const item = node('li');
+        const link = node('a');
+        link.href = `https://basescan.org/address/${entry.address}#tokentxns`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.title = entry.address;
+        link.setAttribute('aria-label', `View payouts for ${entry.address}`);
+        link.innerHTML = renderWalletAddress(entry.address);
+        item.append(node('span', ['🥇', '🥈', '🥉'][index]), link,
+          node('strong', formatDjukeUsdc(BigInt(entry.totalUnits))));
+        earners.append(item);
+        lookupEnsName(entry.address).then(name => {
+          if (name && check === earnersGeneration && isOpen()) {
+            link.textContent = name;
+            link.setAttribute('aria-label', `View payouts for ${name}`);
+          }
+        }).catch(error => {
+          if (check === earnersGeneration && isOpen()) {
+            link.title = `${entry.address} · ENS unavailable: ${error.message}`;
+          }
+        });
+      });
+      earnerStatus.textContent = result.earners.length ? '' : 'No confirmed song-play payouts yet.';
+    } catch (error) {
+      if (check !== earnersGeneration || !isOpen()) return;
+      earners.replaceChildren();
+      earnerStatus.textContent = `Earnings unavailable: ${error.message}`;
+    }
+  }
   async function refresh() {
     clearTimeout(timer);
     if (!isOpen()) return;
+    refreshEarners();
     const requestGeneration = ++generation;
     status.textContent = 'Loading queue…';
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
@@ -355,6 +410,11 @@ export function initDjuke() {
       'Replacement confirmed. Your place in line and payment are unchanged.');
   }
   pay.addEventListener('click', () => {
+    if (!window._wallet?.address) {
+      walletPromptShown = true;
+      paymentStatus.textContent = 'Connect your wallet in the header to queue a song';
+      return;
+    }
     const songId = selectedSongId();
     if (!paymentsLive() || !songId || !live?.priceUnits) return;
     if (supportsDjukeAlbumsAndGas(window.DecentConfig?.djukeContractVersion) && (!gasQuote || gasQuote.deadline <= Date.now() / 1000)) {
@@ -368,6 +428,8 @@ export function initDjuke() {
   select.addEventListener('change', () => { renderSongs(); refreshGasQuote(); });
   search?.addEventListener('input', () => { renderSongs(); refreshGasQuote(); });
   const close = () => {
+    if (instructions.open) instructions.close();
+    earnersGeneration++;
     clearTimeout(timer);
     generation++;
     toggle.setAttribute('aria-expanded', 'false');
@@ -390,20 +452,32 @@ export function initDjuke() {
     updateWallet();
     refresh();
   });
+  info.addEventListener('click', () => instructions.showModal());
+  instructions.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      instructions.close();
+    }
+  });
+  document.getElementById('djuke-instructions-close').addEventListener('click', () => instructions.close());
+  instructions.addEventListener('close', () => { if (isOpen()) info.focus(); });
   document.getElementById('djuke-close').addEventListener('click', () => { close(); toggle.focus(); });
   document.getElementById('djuke-refresh').addEventListener('click', refresh);
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && isOpen()) { close(); toggle.focus(); }
+    if (event.key === 'Escape' && isOpen() && !instructions.open) { close(); toggle.focus(); }
   });
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'djuke' && isOpen()) close(); });
   document.addEventListener('click', event => {
     const path = event.composedPath();
-    if (isOpen() && !path.includes(panel) && !path.includes(toggle)) close();
+    if (isOpen() && !path.includes(panel) && !path.includes(toggle) && !path.includes(instructions)) close();
   });
   document.addEventListener('wallet-connected', updateWallet);
   document.addEventListener('wallet-disconnected', updateWallet);
+  document.addEventListener('wallet-chain-changed', updateWallet);
   document.addEventListener('wallet-connected', refreshGasQuote);
   document.addEventListener('wallet-disconnected', refreshGasQuote);
+  document.addEventListener('wallet-chain-changed', refreshGasQuote);
   renderTiers(null);
   import('https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm').then(icons => {
     for (const element of document.querySelectorAll('[data-djuke-icon]')) {

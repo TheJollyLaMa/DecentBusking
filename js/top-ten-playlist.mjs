@@ -1,7 +1,7 @@
 export async function addChartSongToPlaylist(track, {
   wallet = window._wallet,
   resolveNFT = async detail => {
-    const { resolveNowPlayingNFT } = await import('./space.js?v=20261016-artwork-backoff');
+    const { resolveNowPlayingNFT } = await import('./space.js?v=20261017-sidepanel-live');
     return resolveNowPlayingNFT(detail, { requireMediaMatch: true });
   },
   save = async nft => {

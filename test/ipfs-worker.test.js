@@ -17,6 +17,26 @@ async function withServer(handler, callback) {
   }
 }
 
+test('DJuke top earners endpoint returns indexed payouts or an explicit unavailable response', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const data = { chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address: Wallet.createRandom().address, totalUnits: '225000' }] };
+  for (const [getDjukeTopEarners, expected] of [
+    [async () => data, 200],
+    [undefined, 503],
+    [async () => { throw new Error('DJuke earnings are still indexing; retry shortly'); }, 503],
+  ]) {
+    const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address, getDjukeTopEarners });
+    await withServer(handler, async base => {
+      const response = await fetch(`${base}/api/djuke/earners`);
+      assert.equal(response.status, expected);
+      assert.equal(response.headers.get('access-control-allow-origin'), '*');
+      const result = await response.json();
+      if (expected === 200) assert.deepEqual(result, data);
+      else assert.match(result.error, /index/);
+    });
+  }
+});
+
 test('checkpoint mirror routes reject unauthenticated requests and do not expose jobs publicly', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const { createCheckpointMirror } = await import('../discord-bot/checkpoint-mirror.js');
