@@ -1,8 +1,8 @@
 # DVert paid advert requests
 
 This is separate from campaign purchases, ordinary advert rotation, and DJuke
-song payments. The implementation is not enabled on mainnet until a new queue
-contract is deployed, verified, funded with worker gas, and explicitly configured.
+song payments. The Base deployment uses its own verified queue contract without
+changing the existing campaign contract.
 
 ## Deployment status
 
@@ -11,7 +11,29 @@ contract is deployed, verified, funded with worker gas, and explicitly configure
 - Admin: `0x807061DF657A7697c04045dA7d16D941861cAABc`.
 - Fulfiller: `0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F`.
 - Fork rehearsal passed against deployed USDC, campaign source and settlement router.
-- Public checkout remains disabled pending controlled live acceptance.
+- Controlled mainnet acceptance passed. Public checkout is enabled with
+  `DEVERT_QUEUE_PAYMENTS_ENABLED=true`.
+
+### Live acceptance - 2026-10-17
+
+One authorized $1 USDC request purchased campaign #2 as request #0:
+
+- [Purchase transaction](https://basescan.org/tx/0xd85a0f75fac058a88506aa421aeeb70ce4b2d11810fae7a501942c19eef32cf0), block 52722687.
+- The current song finished before the paid advert started. The worker recorded
+  26,189 ms of naturally completed audible playback, then regular music resumed.
+- [Automatic settlement](https://basescan.org/tx/0xd3bb497a52c16d3854710e453ffe5f62c4e8a5229cc06b04a6129adf74e936cd), block 52722839.
+- The receipt and all four public fund ledgers confirmed exactly 0.45 USDC to
+  playback, 0.45 to Top 10, 0.08 to pinners, and 0.02 to repo development.
+- The fulfilled playback journal was verified in both Pinata and the operator's
+  recursive local IPFS pins at
+  `bafkreicg644a6ume35sonabso6h3bnxomfbdsibc7dishn5oo2qa4adsue`.
+  Its play ID hashes to the settlement's unique playback proof.
+- The request is fulfilled and the pending queue is empty. No manual fulfillment
+  or second paid request was used.
+
+Refunds passed unit tests and a Base-fork rehearsal using the deployed USDC,
+campaign source and router. No live campaign was removed for refund testing;
+that would require separately authorized disposable campaign funding.
 
 ## Agreed policy
 
@@ -101,10 +123,14 @@ the queue's read-only campaign source.
 6. Website: set `devertQueueContractAddress` in the public configuration.
    No key belongs in the website. The new address is included in the worker's
    read-only RPC allow-list from its environment configuration.
-7. Confirm catalog approval and removal reconciliation; verify a controlled
-   paid request, protected-show deferral, natural completion, 45/45/8/2 funding,
-   restart recovery and a removed-request refund. Then enable
-   `DEVERT_QUEUE_PAYMENTS_ENABLED=true`.
+7. Confirm catalog approval and removal reconciliation. Verify a controlled
+   live paid request, natural completion, 45/45/8/2 funding, durable mirrored
+   playback evidence and an empty queue after settlement. Protected-show
+   deferral, interruption/restart recovery and removal refunds must also pass
+   the automated unit/fork checks. A live removal/refund rehearsal requires
+   separate authorization for a disposable campaign; do not remove a real
+   campaign for testing. Then enable `DEVERT_QUEUE_PAYMENTS_ENABLED=true`,
+   redeploy, and confirm checkout readiness and no replay of the settled request.
 
 The public endpoint is `GET /api/devert/queue`. Snapshots use a fixed Base block
 with at least two confirmations, verify price/count/token, and detect reorgs.
