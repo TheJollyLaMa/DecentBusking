@@ -34,6 +34,7 @@ test('festival distinguishes opening ranks, headliner and encores and cleans up 
     hidden: false,
     body: node(),
     createElement: node,
+    createElementNS: () => node(),
     addEventListener: (name, handler) => listeners.set(name, handler),
     removeEventListener: (name, handler) => { if (listeners.get(name) === handler) listeners.delete(name); },
   };
@@ -54,9 +55,27 @@ test('festival distinguishes opening ranks, headliner and encores and cleans up 
   }
   assert.doesNotMatch(symbols, /🐸|🐈|🪐/u);
   assert.equal(nodes.filter(entry => entry.className === 'hype-bandmate').length, 4);
+  const runaway = nodes.find(entry => entry.className === 'hype-runaway');
+  assert.equal(runaway.children[0].className, 'hype-runaway-bunny');
+  assert.equal(runaway.children[0].textContent, '🐇');
+  const stageHole = nodes.find(entry => entry.className === 'hype-rabbit-hole');
+  assert.equal(stageHole.children[0].className, 'top-ten-spy-peek');
+  assert.equal(stageHole.children[0].children[0].textContent, '🕵️');
+  for (const [animal, symbol] of [['fox', '🦊'], ['rat', '🐀'], ['bird', '💸']]) {
+    assert.equal(nodes.find(entry => entry.className === `hype-runaway hype-runaway-${animal}`).children[0].textContent, symbol);
+  }
   assert.equal(nodes.some(entry => /hype-crowd|hype-fan/.test(entry.className)), false, 'crowd row removed so the equalizer stays visible');
   assert.equal(nodes.find(entry => entry.className === 'hype-title-top').textContent, 'Top 10');
   assert.equal(nodes.find(entry => entry.className === 'hype-title-show').textContent, 'Friday Night Hype');
+  const meterToggle = nodes.find(entry => entry.className === 'hype-meter-toggle');
+  const equalizer = nodes.find(entry => entry.className === 'hype-equalizer');
+  meterToggle.listeners.get('click')();
+  assert.equal(equalizer.classList.contains('is-wave'), true);
+  assert.equal(meterToggle.textContent, 'Bars');
+  assert.equal(meterToggle['aria-pressed'], 'true');
+  meterToggle.listeners.get('click')();
+  assert.equal(equalizer.classList.contains('is-wave'), false);
+  assert.equal(meterToggle.textContent, 'Wave');
   const info = nodes.find(entry => entry.className === 'hype-info-button');
   const popover = nodes.find(entry => entry.className === 'hype-info-popover');
   assert.equal(banner.children[0], info, 'info button leads the banner (upper-left)');
@@ -117,7 +136,7 @@ test('equalizer bars are driven by the real audio spectrum, not a canned loop', 
   };
   const frames = [];
   const saved = { document: global.document, raf: global.requestAnimationFrame, caf: global.cancelAnimationFrame };
-  global.document = { hidden: false, body: node(), createElement: node, addEventListener() {}, removeEventListener() {} };
+  global.document = { hidden: false, body: node(), createElement: node, createElementNS: () => node(), addEventListener() {}, removeEventListener() {} };
   global.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
   global.cancelAnimationFrame = () => {};
   t.after(() => { global.document = saved.document; global.requestAnimationFrame = saved.raf; global.cancelAnimationFrame = saved.caf; });
@@ -127,7 +146,7 @@ test('equalizer bars are driven by the real audio spectrum, not a canned loop', 
   let playing = true;
   const festival = mountTopTenFestival(panel, { readSpectrum(out) { if (!playing) return false; out.fill(0); out.fill(255, 1, 5); return true; } });
   const equalizer = nodes.find(entry => entry.className === 'hype-equalizer');
-  const bars = equalizer.children;
+  const bars = equalizer.children.slice(0, 24);
   frames.shift()();
   assert.equal(bars[0].style.transform, 'scaleY(1.000)');
   assert.equal(bars.at(-1).style.transform, 'scaleY(0.040)');
