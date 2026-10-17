@@ -80,6 +80,7 @@ export function createPinataStateStore({
   archiveGroupId,
   now = () => Date.now(),
   beforeUpload,
+  requireLocalMirror = false,
   log = console,
   serialize = playlist => ({ schemaVersion: 1, savedAt: new Date().toISOString(), playlist }),
   deserialize = snapshot => {
@@ -88,6 +89,7 @@ export function createPinataStateStore({
   },
 } = {}) {
   if (!pinataJwt) throw new Error('PINATA_JWT is required for playlist checkpoints');
+  if (requireLocalMirror && typeof beforeUpload !== 'function') throw new Error('A local mirror is required for this checkpoint');
   if (retainSnapshots !== Infinity && (!Number.isSafeInteger(retainSnapshots) || retainSnapshots < 1)) {
     throw new Error('Checkpoint retention must keep at least one snapshot');
   }
@@ -251,10 +253,13 @@ export function createPinataStateStore({
   async function saveSnapshot(playlist) {
     const snapshot = serialize(playlist);
     const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
+    const mirroredCid = requireLocalMirror ? await beforeUpload(bytes) : null;
+    if (requireLocalMirror && (typeof mirroredCid !== 'string' || !mirroredCid)) throw new Error('Local checkpoint mirror did not confirm a CID');
     const cid = await upload(bytes, name, tags, groupId);
+    if (requireLocalMirror && mirroredCid !== cid) throw new Error('Local and shared checkpoint CIDs do not match');
     latestSnapshotUri = `ipfs://${cid}`;
     latestSnapshotSavedAt = snapshot.savedAt || new Date(now()).toISOString();
-    if (beforeUpload) Promise.resolve().then(() => beforeUpload(bytes, cid))
+    if (beforeUpload && !requireLocalMirror) Promise.resolve().then(() => beforeUpload(bytes, cid))
       .then(mirroredCid => {
         if (mirroredCid && mirroredCid !== cid) console.warn(`[ipfs-state] Local mirror CID ${mirroredCid} differs from shared Pinata CID ${cid}`);
       })

@@ -1041,6 +1041,7 @@ async function main() {
       const store = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
         uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
         name: 'decentbusking-devert-paid-journal.json',
+        requireLocalMirror: true,
         tags: { app: 'decentbusking', kind: 'devert-paid-journal', schema: '1' },
         serialize: value => value, deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
       paidAdRuntime = createDevertQueueRuntime({ readState: readDevertQueue, store, contract: queueContract,
