@@ -2,6 +2,8 @@ import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
+export { USDC_BROWSER_ABI };
 
 export function quoteDjuke(pendingCount) {
   if (!Number.isSafeInteger(pendingCount) || pendingCount < 0) throw new RangeError('Invalid pending queue count');
@@ -64,13 +66,6 @@ export const DJUKE_BROWSER_ABI = [
   'function gasQuoteNonces(address) view returns(uint256)',
   'function requestPlayWithGas(bytes32,uint256,uint256,uint256,bytes) payable returns(uint256)',
 ];
-export const USDC_BROWSER_ABI = [
-  'function decimals() view returns (uint8)',
-  'function balanceOf(address) view returns (uint256)',
-  'function allowance(address, address) view returns (uint256)',
-  'function approve(address, uint256) returns (bool)',
-];
-
 export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUnits, gasQuote = null, onStep = () => {} }) {
   await ensureBaseNetwork(signer.provider);
   if (usdc.target.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase() || Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');

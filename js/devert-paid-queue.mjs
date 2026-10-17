@@ -1,5 +1,5 @@
 import { devertQueueAbi, DEVERT_QUEUE_USDC, purchaseDevertRequest, claimDevertRefund, quoteDevertRequest } from './devert-queue.mjs?v=20261017-two-tier-priority';
-import { USDC_BROWSER_ABI } from './djuke.mjs';
+import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
 
 export function validateDevertPaidSnapshot(state, configuredAddress) {
