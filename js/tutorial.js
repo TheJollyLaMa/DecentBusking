@@ -107,6 +107,11 @@ let _layoutFrame = null;
 let _notice = null;
 let _savedMenus = [];
 let _propEl = null;
+let _homeHole = null;
+let _rabbitAtHome = true;
+let _featurePosition = null;
+let _journeyTimer = null;
+let _journeyBusy = false;
 
 const DRAWERS = ['top-ten-tab', 'devert-tab', 'djuke-tab', 'dnft-archive-toggle'];
 const SURFACES = { chart: 'top-ten-tab', adverts: 'devert-tab', jukebox: 'djuke-tab', archive: 'dnft-archive-toggle' };
@@ -178,6 +183,8 @@ function _ensureStyles() {
       min-height: 44px;
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
+      gap: 5px 10px;
       color: #91ddd3;
       font-size: .72rem;
       font-weight: 700;
@@ -191,11 +198,10 @@ function _ensureStyles() {
       line-height: 1.1;
     }
     .decentbusking-tutorial-step {
-      margin: 10px 0 0;
+      white-space: nowrap;
       color: #d5d7e4;
-      font-size: .82rem;
-      letter-spacing: .08em;
-      text-transform: uppercase;
+      font-size: .72rem;
+      letter-spacing: 0;
     }
     .decentbusking-tutorial-body {
       margin: 12px 0 0;
@@ -273,7 +279,29 @@ function _ensureStyles() {
       padding: 12px; border: 1px solid #91ddd3; border-radius: 12px; color: #fff2dc; background: #17262f;
       font: 14px/1.4 system-ui, sans-serif;
     }
-    .tutorial-rabbit { position: fixed; z-index: 2; width: 72px; height: 82px; pointer-events: none; transition: left .65s ease, top .65s ease; }
+    .tutorial-rabbit { position: fixed; z-index: 4; width: 72px; height: 82px; pointer-events: none; }
+    .tutorial-home-hole { position: relative; display: flex; justify-content: center; height: 72px; margin: 8px auto; pointer-events: none; }
+    .tutorial-home-hole > .rabbit-burrow .rabbit-window { display: none; }
+    .tutorial-rabbit.at-home .rabbit-burrow::before { visibility: hidden; }
+    .tutorial-rabbit.at-home { width: 64px; }
+    .tutorial-rabbit .rabbit-ears { animation: rabbit-feature-idle 5s ease-in-out infinite; }
+    .tutorial-rabbit[data-phase="diving"] .rabbit-ears { animation: rabbit-dive .35s ease-in both; }
+    .tutorial-rabbit[data-phase="emerging"] .rabbit-ears { animation: rabbit-emerge .6s ease-out both; }
+    .tutorial-rabbit:not(.at-home) {
+      border-radius: 50%;
+      background: radial-gradient(ellipse, #e4fff32e 0%, #b6f3db12 45%, transparent 72%);
+      filter: drop-shadow(0 0 8px #a9e6d185);
+    }
+    .tutorial-magic { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+    .tutorial-magic::before, .tutorial-magic::after {
+      position: absolute; content: '✦'; color: #d0ffeb; font: 18px/1 Georgia, serif; text-shadow: 0 0 8px #b2ffe1;
+    }
+    .tutorial-magic::before { top: 8px; left: 3px; }
+    .tutorial-magic::after { bottom: 12px; right: 2px; color: #e6c9ff; }
+    .tutorial-rabbit[data-phase="emerging"] .tutorial-magic,
+    .tutorial-spotlight.is-magical .tutorial-magic { animation: rabbit-magic 2.2s ease-out both; }
+    .tutorial-spotlight .tutorial-magic::before { left: 12px; top: 10px; }
+    .tutorial-spotlight .tutorial-magic::after { right: 12px; bottom: 10px; }
     .rabbit-burrow { position: relative; display: block; width: 64px; height: 72px; }
     .rabbit-burrow::before {
       content: ''; position: absolute; bottom: 0; left: 4px; width: 58px; height: 17px;
@@ -314,6 +342,27 @@ function _ensureStyles() {
       43%, 58% { transform: translateY(57px) rotate(8deg); }
       68%, 78% { transform: translateY(-5px) rotate(5deg); }
     }
+    @keyframes rabbit-dive {
+      0% { transform: translateY(0) rotate(0); }
+      25% { transform: translateY(-9px) rotate(-8deg); }
+      100% { transform: translateY(64px) rotate(12deg); }
+    }
+    @keyframes rabbit-emerge {
+      0% { transform: translateY(64px) rotate(-12deg); }
+      60% { transform: translateY(-12px) rotate(8deg); }
+      80% { transform: translateY(3px) rotate(-5deg); }
+      100% { transform: none; }
+    }
+    @keyframes rabbit-feature-idle {
+      0%, 65%, 100% { transform: none; }
+      74% { transform: translateY(-7px) rotate(-7deg); }
+      83% { transform: translateY(0) rotate(5deg); }
+    }
+    @keyframes rabbit-magic {
+      0% { opacity: 0; transform: scale(.8) translateY(8px); }
+      25%, 50% { opacity: 1; }
+      100% { opacity: 0; transform: scale(1.12) translateY(-10px); }
+    }
     @keyframes mercury-arrive {
       from { transform: translate(-45px, 12px) rotate(-14deg); opacity: .2; }
       70% { transform: translate(4px, -4px) rotate(5deg); opacity: 1; }
@@ -330,15 +379,20 @@ function _ensureStyles() {
       to { opacity: .65; transform: scale(1); }
     }
     @media (prefers-reduced-motion: reduce) {
-      .rabbit-ears, .tutorial-mercury.is-arriving, .is-arriving .mercury-note, .is-arriving .mercury-sound { animation: none; }
+      .rabbit-ears, .tutorial-rabbit .rabbit-ears, .tutorial-rabbit[data-phase] .rabbit-ears,
+      .tutorial-rabbit[data-phase] .tutorial-magic, .tutorial-spotlight.is-magical .tutorial-magic,
+      .tutorial-mercury.is-arriving, .is-arriving .mercury-note, .is-arriving .mercury-sound { animation: none; }
       .tutorial-rabbit, .tutorial-spotlight, .decentbusking-tutorial-card { transition: none; }
     }
     @media (max-width: 640px) {
       .decentbusking-tutorial-card { padding: 16px 14px 14px; }
       .decentbusking-tutorial-body { font-size: .84rem; line-height: 1.45; margin-top: 9px; }
       .decentbusking-tutorial-actions { margin-top: 4px; gap: 7px; }
-      .decentbusking-tutorial-step { margin-top: 7px; font-size: .7rem; }
-      .decentbusking-tutorial-kicker { font-size: .65rem; min-height: 48px; margin-bottom: 6px; }
+      .decentbusking-tutorial-step { font-size: .7rem; }
+      .decentbusking-tutorial-kicker { font-size: .65rem; min-height: 40px; margin-bottom: 6px; }
+      .decentbusking-tutorial-progress { display: none; }
+      .tutorial-home-hole { height: 48px; }
+      .tutorial-home-hole > .rabbit-burrow, .tutorial-rabbit.at-home { transform: scale(.667); transform-origin: top center; }
       .rabbit-tour-launch { right: 10px; bottom: 150px; padding-right: 9px; }
       .rabbit-tour-launch .rabbit-launch-label { max-width: 88px; font-size: 11px; }
     }
@@ -423,10 +477,15 @@ function _ensureOverlay() {
   _spotlight = document.createElement('div');
   _spotlight.className = 'tutorial-spotlight';
   _spotlight.setAttribute('aria-hidden', 'true');
+  const featureMagic = document.createElement('span');
+  featureMagic.className = 'tutorial-magic';
+  _spotlight.append(featureMagic);
   _rabbit = document.createElement('div');
   _rabbit.className = 'tutorial-rabbit';
   _rabbit.setAttribute('aria-hidden', 'true');
-  _rabbit.append(_burrow());
+  const rabbitMagic = document.createElement('span');
+  rabbitMagic.className = 'tutorial-magic';
+  _rabbit.append(_burrow(), rabbitMagic);
 
   _panel = document.createElement('section');
   _panel.className = 'decentbusking-tutorial-card';
@@ -438,7 +497,11 @@ function _ensureOverlay() {
 
   const kicker = document.createElement('p');
   kicker.className = 'decentbusking-tutorial-kicker';
-  kicker.textContent = 'Follow the white rabbit';
+  const themeTitle = document.createElement('span');
+  themeTitle.textContent = 'Follow the White Rabbit';
+  _stepLabelEl = document.createElement('span');
+  _stepLabelEl.className = 'decentbusking-tutorial-step';
+  kicker.append(themeTitle, _stepLabelEl);
 
   const mercury = document.createElement('span');
   mercury.className = 'tutorial-mercury';
@@ -463,8 +526,10 @@ function _ensureOverlay() {
   });
   mercury.append(money, symbol, _propEl, sound, notes);
 
-  _stepLabelEl = document.createElement('p');
-  _stepLabelEl.className = 'decentbusking-tutorial-step';
+  _homeHole = document.createElement('div');
+  _homeHole.className = 'tutorial-home-hole';
+  _homeHole.setAttribute('aria-hidden', 'true');
+  _homeHole.append(_burrow());
 
   _titleEl = document.createElement('h2');
   _titleEl.id = 'decentbusking-tutorial-title';
@@ -498,7 +563,7 @@ function _ensureOverlay() {
   buttonRow.append(_backButton, _skipButton, _nextButton);
   footer.append(_progressEl, buttonRow);
 
-  _panel.append(mercury, kicker, _closeButton, _stepLabelEl, _titleEl, _bodyEl, footer);
+  _panel.append(mercury, kicker, _closeButton, _titleEl, _homeHole, _bodyEl, footer);
   _overlay.append(_backdrop, _spotlight, _rabbit, _panel);
   document.body?.appendChild(_overlay);
   return _overlay;
@@ -607,16 +672,106 @@ function _positionScene() {
       left = onLeft ? width - cardWidth - 28 : 28;
       top = bounds.top > height * .6 ? Math.max(20, bounds.top - cardHeight - 90) : Math.max(100, (height - cardHeight) / 2);
     }
-    Object.assign(_rabbit.style, {
+    _featurePosition = {
       left: `${Math.max(8, Math.min(width - 78, targetLeft + targetWidth - 60))}px`,
-      top: `${Math.max(4, Math.min(height - 88, targetTop + targetHeight - 15))}px`,
-    });
+      top: `${Math.max(4, Math.min(height - 88, mobile && bounds.top <= height / 2 && targetTop >= 85 ? targetTop - 80 : targetTop + targetHeight - 15))}px`,
+    };
   } else {
-    Object.assign(_rabbit.style, { left: `${Math.max(8, left - 75)}px`, top: `${Math.max(8, top - 70)}px` });
+    _featurePosition = null;
   }
   _spotlight.hidden = !visible;
   _rabbit.hidden = false;
   Object.assign(_panel.style, { left: `${Math.max(16, left)}px`, top: `${Math.max(16, Math.min(height - cardHeight - 16, top))}px` });
+  _positionRabbit();
+}
+
+function _positionRabbit() {
+  _rabbit.classList.remove('at-home');
+  if (_rabbitAtHome || !_featurePosition) {
+    _rabbit.classList.add('at-home');
+    if (_rabbit.parentNode !== _homeHole) _homeHole.append(_rabbit);
+    Object.assign(_rabbit.style, { position: 'absolute', left: 'calc(50% - 32px)', top: '0px' });
+  } else {
+    if (_rabbit.parentNode !== _overlay) _overlay.append(_rabbit);
+    Object.assign(_rabbit.style, { position: 'fixed', ..._featurePosition });
+  }
+}
+
+function _reducedMotion() {
+  return !window.matchMedia || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function _cancelJourney() {
+  if (_journeyTimer !== null) clearTimeout(_journeyTimer);
+  _journeyTimer = null;
+  _journeyBusy = false;
+  _rabbit.dataset.phase = 'resting';
+  _spotlight.classList.remove('is-magical');
+}
+
+function _afterJourney(delay, callback) {
+  _journeyTimer = setTimeout(() => {
+    _journeyTimer = null;
+    if (_overlay.hidden) return;
+    callback();
+  }, delay);
+}
+
+function _arriveAtFeature() {
+  _rabbitAtHome = !_featurePosition;
+  _positionRabbit();
+  _rabbit.dataset.phase = 'emerging';
+  _spotlight.classList.add('is-magical');
+  _afterJourney(650, () => {
+    _rabbit.dataset.phase = 'resting';
+    _journeyBusy = false;
+    _backButton.disabled = _currentStep === 0;
+    _nextButton.disabled = false;
+  });
+}
+
+function _departCard() {
+  _rabbitAtHome = true;
+  _positionScene();
+  if (_reducedMotion() || !_currentTarget) {
+    _rabbitAtHome = !_featurePosition;
+    _positionRabbit();
+    _journeyBusy = false;
+    _backButton.disabled = _currentStep === 0;
+    _nextButton.disabled = false;
+    return;
+  }
+  _journeyBusy = true;
+  _backButton.disabled = true;
+  _nextButton.disabled = true;
+  // Wait for the card and drawer to settle before diving through the home hole.
+  _afterJourney(700, () => {
+    _rabbit.dataset.phase = 'diving';
+    _afterJourney(350, _arriveAtFeature);
+  });
+}
+
+function _changeStep(index) {
+  if (_journeyBusy) return;
+  const showNext = () => {
+    _currentStep = index;
+    _renderStep();
+  };
+  if (_reducedMotion() || _rabbitAtHome) {
+    showNext();
+    return;
+  }
+  _journeyBusy = true;
+  _backButton.disabled = true;
+  _nextButton.disabled = true;
+  _spotlight.classList.remove('is-magical');
+  _rabbit.dataset.phase = 'diving';
+  _afterJourney(350, () => {
+    _rabbitAtHome = true;
+    _positionRabbit();
+    _rabbit.dataset.phase = 'emerging';
+    _afterJourney(650, showNext);
+  });
 }
 
 function _schedulePosition() {
@@ -644,7 +799,8 @@ function _renderStep() {
   _titleEl.textContent = step.title;
   _bodyEl.textContent = step.body;
   _propEl.textContent = step.prop;
-  _stepLabelEl.textContent = `Rabbit hole ${_currentStep + 1} / ${TUTORIAL_STEPS.length} · ${step.propName}`;
+  _stepLabelEl.textContent = `${_currentStep + 1} / ${TUTORIAL_STEPS.length}`;
+  _stepLabelEl.setAttribute('aria-label', `Card ${_currentStep + 1} of ${TUTORIAL_STEPS.length}`);
   _progressEl.textContent = TUTORIAL_STEPS.map((_, i) => i <= _currentStep ? '●' : '○').join(' ');
   _progressEl.setAttribute('aria-label', `Stop ${_currentStep + 1} of ${TUTORIAL_STEPS.length}`);
   _backButton.disabled = _currentStep === 0;
@@ -657,6 +813,7 @@ function _renderStep() {
     window.requestAnimationFrame(() => _panel.querySelector('.tutorial-mercury')?.classList.add('is-arriving'));
   }
   _panel.focus();
+  _departCard();
 }
 
 function _cancelAutoLaunch() {
@@ -759,18 +916,17 @@ export function startTutorial() {
 
 export function previousTutorialStep() {
   if (!_overlay || _overlay.hidden) return;
-  _currentStep = Math.max(0, _currentStep - 1);
-  _renderStep();
+  _changeStep(Math.max(0, _currentStep - 1));
 }
 
 export function nextTutorialStep() {
   if (!_overlay || _overlay.hidden) return;
+  if (_journeyBusy) return;
   if (_currentStep >= TUTORIAL_STEPS.length - 1) {
     completeTutorial();
     return;
   }
-  _currentStep += 1;
-  _renderStep();
+  _changeStep(_currentStep + 1);
 }
 
 export function completeTutorial() {
@@ -785,6 +941,7 @@ export function completeTutorial() {
 
 function _endTutorial() {
   _cancelAutoLaunch();
+  _cancelJourney();
   _closeSurface();
   _clearHighlight();
   if (_overlay) {

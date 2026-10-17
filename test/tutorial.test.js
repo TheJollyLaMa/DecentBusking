@@ -229,7 +229,7 @@ test('Mercury accompanies the rabbit through real surfaces, with no transactiona
   assert.match(document.head.children[0].textContent, /rabbit-peek 6.5s/);
   assert.match(vm.runInContext('_panel.children[0].children[0].textContent', context), /💸/);
   assert.equal(vm.runInContext('_panel.children[0].children[1].textContent', context), '☿');
-  assert.equal(vm.runInContext('_panel.children[1].textContent', context), 'Follow the white rabbit');
+  assert.equal(vm.runInContext('_panel.children[1].children[0].textContent', context), 'Follow the White Rabbit');
 });
 
 test('Mercury keeps his symbol and flying-money ride but changes musical gear at every stop', () => {
@@ -244,13 +244,77 @@ test('Mercury keeps his symbol and flying-money ride but changes musical gear at
     props.add(prop);
     assert.equal(vm.runInContext('_panel.children[0].children[1].textContent', context), '☿');
     assert.equal(vm.runInContext('_panel.children[0].children[0].textContent', context), '💸');
-    assert.match(vm.runInContext('_stepLabelEl.textContent', context), / · /);
+    assert.equal(vm.runInContext('_stepLabelEl.textContent', context), `${index + 1} / ${count}`);
     vm.runInContext('nextTutorialStep();', context);
   }
   vm.runInContext('startTutorial();', context);
   assert.equal(vm.runInContext('_propEl.textContent', context), '🎺');
   vm.runInContext('nextTutorialStep(); previousTutorialStep();', context);
   assert.equal(vm.runInContext('_propEl.textContent', context), '🎺');
+});
+
+test('rabbit dives from the centered card hole, emerges at the feature, and returns before changing cards', () => {
+  const { context, targets, timerQueue } = createTutorialContext();
+  vm.runInContext(`
+    window.innerWidth = 1440; window.innerHeight = 1000;
+    window.matchMedia = () => ({ matches: false });
+    initTutorial();
+    _panel.bounds = { left: 500, top: 250, width: 390, height: 420 };
+  `, context);
+  targets['#now-playing-label'].bounds = { left: 600, top: 850, width: 140, height: 30 };
+  targets['#mint-modal-inner'].bounds = { left: 400, top: 100, width: 640, height: 700 };
+  const tick = () => {
+    const index = timerQueue.findIndex(fn => fn !== null);
+    assert.notEqual(index, -1);
+    const fn = timerQueue[index];
+    timerQueue[index] = null;
+    fn();
+  };
+  vm.runInContext('startTutorial(); nextTutorialStep();', context);
+  assert.equal(vm.runInContext('_rabbitAtHome', context), true);
+  assert.equal(vm.runInContext('_stepLabelEl.textContent', context), '2 / 11');
+  assert.equal(vm.runInContext('_journeyBusy', context), true);
+  vm.runInContext('nextTutorialStep();', context);
+  assert.equal(vm.runInContext('_currentStep', context), 1);
+  tick();
+  assert.equal(vm.runInContext('_rabbit.dataset.phase', context), 'diving');
+  tick();
+  assert.equal(vm.runInContext('_rabbitAtHome', context), false);
+  assert.equal(vm.runInContext('_rabbit.dataset.phase', context), 'emerging');
+  assert.equal(vm.runInContext('_spotlight.classList.contains("is-magical")', context), true);
+  tick();
+  assert.equal(vm.runInContext('_journeyBusy', context), false);
+  vm.runInContext('nextTutorialStep();', context);
+  assert.equal(vm.runInContext('_rabbit.dataset.phase', context), 'diving');
+  assert.equal(vm.runInContext('_currentStep', context), 1);
+  tick();
+  assert.equal(vm.runInContext('_rabbitAtHome', context), true);
+  assert.equal(vm.runInContext('_rabbit.dataset.phase', context), 'emerging');
+  tick();
+  assert.equal(vm.runInContext('_currentStep', context), 2);
+  assert.equal(vm.runInContext('_rabbitAtHome', context), true);
+  tick();
+  assert.equal(vm.runInContext('_rabbit.dataset.phase', context), 'diving');
+  vm.runInContext('skipTutorial();', context);
+  assert.equal(vm.runInContext('_journeyBusy', context), false);
+  assert.equal(timerQueue.filter(Boolean).length, 0);
+  vm.runInContext('startTutorial();', context);
+  assert.equal(vm.runInContext('_currentStep', context), 0);
+  assert.equal(vm.runInContext('_rabbitAtHome', context), true);
+});
+
+test('reduced motion changes stops directly with no rabbit journey timers or instrument captions', () => {
+  const { context, timerQueue } = createTutorialContext();
+  vm.runInContext(`
+    window.matchMedia = () => ({ matches: true });
+    initTutorial(); startTutorial(); nextTutorialStep(); nextTutorialStep();
+  `, context);
+  assert.equal(vm.runInContext('_currentStep', context), 2);
+  assert.equal(vm.runInContext('_journeyBusy', context), false);
+  assert.equal(timerQueue.filter(Boolean).length, 0);
+  assert.equal(vm.runInContext('_stepLabelEl.textContent', context), '3 / 11');
+  assert.equal(vm.runInContext('_panel.children[1].children[1] === _stepLabelEl', context), true);
+  assert.doesNotMatch(vm.runInContext('_stepLabelEl.textContent', context), /Rabbit hole|microphone/);
 });
 
 test('Mercury emits decorative notes and sound waves without creating an audio player', () => {

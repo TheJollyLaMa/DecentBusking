@@ -17,6 +17,11 @@ between stops; Escape exits, and Tab stays within the tour controls. On exit,
 previously open drawers and any visible briefcase draft are restored. Finish any
 pending submission, close other dialogs, and return from VertLoop to main radio
 before starting. Reduced-motion settings keep the rabbit and Mercury still.
+The card count sits beside **Follow the White Rabbit**. A centered hole in the
+card is the rabbit's home: it dives down, emerges beside the highlighted feature
+with a short hop and sparkles, and returns home before the next card appears.
+Navigation pauses briefly during the trip; **Leave tour** and Escape remain
+available. Reduced motion skips the trip and decorative effects.
 After completing every stop, the landing-page button is hidden in that browser.
 Leaving early does not count as completion. Click **DBusker** to open **About**
 and use the identical **Follow the white rabbit** button to replay the tour.
