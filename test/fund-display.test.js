@@ -150,6 +150,17 @@ test('fund disclosure markup includes proof links and campaign references', asyn
   assert.match(renderFundsSection([], 'Community Funds'), /Community Funds/);
 });
 
+test('paid advert funding shows settlement and identifies the paying wallet', async () => {
+  const { renderFundSourcesTable } = await import(url);
+  const html = renderFundSourcesTable({ sources: [{
+    kind: 'advert', paidAdvert: true, amountUnits: '450000', requestId: '8', campaignId: '9',
+    payer: `0x${'1'.repeat(40)}`, advertiser: `0x${'2'.repeat(40)}`,
+  }] });
+  assert.match(html, /Paid advert playback/);
+  assert.match(html, /Paid request #8/);
+  assert.match(html, new RegExp(`payer 0x${'1'.repeat(40)}`));
+});
+
 test('weekly payout archive markup renders details rows and running totals', async () => {
   const { renderFundWeeklyArchive, renderWalletAddress } = await import(url);
   const html = renderFundWeeklyArchive({

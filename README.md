@@ -28,7 +28,9 @@ Friday's **Top 10 Hype Hour** (8-9 p.m. America/New_York by default) plays a che
 
 Open the community radio schedule with the owner wallet connected and choose **Cancel event** on the dated occurrence. Enter a public reason, confirm, and sign the calendar update. The occurrence remains visible with a red **Canceled** stamp for seven days; future recurring Fridays are unchanged. The shared worker calendar persists the cancellation across restarts, and open calendars refresh every 15 seconds. Cancellation does not approve, refund, or settle performer payments.
 
-Cancelled live slots leave automated radio running. After Friday Hype, or when starting in a cancelled live slot, the radio tries an eligible advert before returning to music, subject to existing campaign capacity, availability, and paid-request priority. Never-played campaigns get preference in ordinary main-radio advert selection; paid priority boosts remain ahead of that preference. This is not a standalone paid advert request queue.
+Cancelled live slots leave automated radio running. After Friday Hype, or when starting in a cancelled live slot, the radio tries an eligible advert before returning to music, subject to existing campaign capacity, availability, and paid-request priority. Never-played campaigns get preference in ordinary main-radio advert selection; paid priority boosts remain ahead of that preference.
+
+The separate **DVert Paid Advert Queue** adds FIFO paid requests without replacing ordinary campaign rotation. It starts at $1 USDC, doubles every seven pending requests, reserves payment until completed playback, and supports payer-claimed refunds for removed unplayed requests. Its contract is deployed; public checkout stays disabled until live acceptance checks pass. See the [paid advert queue policy and deployment checklist](docs/DVERT-PAID-QUEUE.md).
 
 ## Bring A Track
 

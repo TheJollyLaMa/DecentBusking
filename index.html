@@ -84,9 +84,31 @@
         <p id="devert-listen-status" role="status" aria-live="polite"></p>
       </fieldset>
 
-      <div class="devert-price-display"><span>Current Queue Price</span><strong id="devert-price" aria-live="polite">Loading…</strong><span>USDC · Priority Queue Bump</span></div>
+      <section class="devert-public-queue" aria-labelledby="devert-paid-title">
+        <h3 id="devert-paid-title">Paid Advert Queue</h3>
+        <p>FIFO requests play after the current track, except during protected shows. Payment is reserved until playback, then split 45% Top 10 / 45% playback / 8% pinners / 2% repo development. Paid plays remain valid after campaign expiry; removal makes unplayed requests fully refundable.</p>
+        <label for="devert-paid-campaign">Choose an active approved advert</label>
+        <select id="devert-paid-campaign"></select>
+        <div class="devert-price-display">
+          <span>Current request price</span><strong id="devert-paid-price" aria-live="polite">Not live</strong>
+          <button id="devert-paid-queue-button" type="button" disabled>Pay to queue ad</button>
+          <span>$1 USDC base · doubles every 7 pending requests</span>
+        </div>
+        <button id="devert-paid-refresh" type="button">Refresh paid queue</button>
+        <ol id="devert-paid-requests" aria-label="Paid advert requests"></ol>
+        <p id="devert-paid-status" role="status" aria-live="polite">Paid advert requests are not enabled yet.</p>
+        <p id="devert-paid-receipt" role="status" aria-live="polite"></p>
+        <ul id="devert-paid-refunds" aria-label="Recent removal refunds"></ul>
+        <details>
+          <summary>Claim a removed advert request refund</summary>
+          <p>Use your payment receipt's request ID, including older requests not shown above. Only the paying wallet can claim. Campaign expiry alone does not create a refund.</p>
+          <label>Request ID<input id="devert-paid-refund-id" type="text" inputmode="numeric" placeholder="Request ID from receipt" /></label>
+          <button id="devert-paid-refund" type="button" disabled>Claim full refund</button>
+        </details>
+      </section>
+      <strong id="devert-price" hidden></strong>
       <section class="devert-public-queue" aria-labelledby="devert-queue-title">
-        <div class="devert-campaign-heading"><h3 id="devert-queue-title">Current Ad Queue</h3><button id="devert-queue-refresh" type="button" aria-label="Refresh public ad queue">↻</button></div>
+        <div class="devert-campaign-heading"><h3 id="devert-queue-title">Ordinary Campaign Rotation</h3><button id="devert-queue-refresh" type="button" aria-label="Refresh public ad queue">↻</button></div>
         <ol id="devert-queue" aria-label="Public ad priority queue"></ol>
         <p id="devert-queue-status" role="status" aria-live="polite">Loading public queue…</p>
       </section>
@@ -133,10 +155,10 @@
           <tbody id="devert-price-tiers">
             <tr class="is-current"><td>Weekly Ad Campaign</td><td>5.00 USDC / wk</td></tr>
             <tr><td>Main Radio Rotation</td><td>1 ad every 10 songs</td></tr>
-            <tr><td>Priority Queue Bump</td><td>$1.00 · positions 1–7</td></tr>
-            <tr><td>Priority Queue Bump</td><td>$2.00 · positions 8–14</td></tr>
-            <tr><td>Priority Queue Bump</td><td>$4.00 · positions 15–21</td></tr>
-            <tr><td>Priority Queue Bump</td><td>Doubling each block of 7 positions</td></tr>
+            <tr><td>Paid Advert Request</td><td>$1.00 · positions 1–7</td></tr>
+            <tr><td>Paid Advert Request</td><td>$2.00 · positions 8–14</td></tr>
+            <tr><td>Paid Advert Request</td><td>$4.00 · positions 15–21</td></tr>
+            <tr><td>Paid Advert Request</td><td>Doubling each block of 7 pending requests</td></tr>
             <tr><td>24/7 VertLoop</td><td>Included (continuous)</td></tr>
           </tbody>
         </table>
@@ -740,6 +762,7 @@
   <script type="module" src="js/listens.mjs?v=20261016-radio-preload"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261018-shared-provider"></script>
+  <script type="module" src="js/devert-paid-queue.mjs?v=20261017-paid-ad-queue"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js?v=20261015-usdc-cents';
     document.addEventListener('DOMContentLoaded', initPayroll);

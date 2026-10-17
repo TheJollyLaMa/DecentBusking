@@ -33,6 +33,38 @@ function makeProvider({ head, logs, txFrom }) {
   };
 }
 
+test('paid advert settlements identify request, payer and campaign rather than generic sponsor deposits', async () => {
+  const { createFundLedger } = await import(url);
+  const { DEVERT_QUEUE_ABI } = await import('../js/devert-queue.mjs');
+  const queue = `0x${'3'.repeat(40)}`;
+  const payer = `0x${'1'.repeat(40)}`;
+  const advertiser = `0x${'2'.repeat(40)}`;
+  const txHash = `0x${'a'.repeat(64)}`;
+  const paidInterface = new Interface(DEVERT_QUEUE_ABI);
+  const logs = [makeLog(funds.top10, queue, 450000n, txHash, 10, 1)];
+  const provider = makeProvider({ head: 10, logs, txFrom: new Map() });
+  provider.getTransactionReceipt = async () => {
+    const encoded = paidInterface.encodeEventLog('AdFulfilled', [8n, id('radio-play')]);
+    return { status: 1, logs: [{ address: queue, index: 5, ...encoded }] };
+  };
+  provider.call = async transaction => {
+    assert.equal(transaction.to.toLowerCase(), queue);
+    assert.equal(paidInterface.decodeFunctionData('getRequest', transaction.data)[0], 8n);
+    return paidInterface.encodeFunctionResult('getRequest', [[9n, payer, 1000000n, 1, 'Paid advert', 'ipfs://ad', advertiser]]);
+  };
+  const ledger = createFundLedger({ provider, router: makeRouter(logs, new Map()), startBlock: 10,
+    config: { routerAddress, devertQueueContractAddress: queue, radioFunds: { topTen: funds.top10 },
+      assets: { USDC: { address: usdc } } } });
+  await ledger.initialize();
+  const source = (await ledger.getCurrentState()).funds[funds.top10].sources[0];
+  assert.equal(source.kind, 'advert');
+  assert.equal(source.paidAdvert, true);
+  assert.equal(source.payer, payer);
+  assert.equal(source.advertiser, advertiser);
+  assert.equal(source.requestId, '8');
+  assert.equal(source.campaignId, '9');
+});
+
 function makeRouter(logs, balances) {
   const queryRanges = [];
   return {

@@ -144,12 +144,13 @@ function renderSourceRow(source) {
   const extra = source.kind === 'advert'
     ? [source.campaignId ? `<a href="#devert-campaign-${escapeHtml(String(source.campaignId))}" target="_blank" rel="noopener">Campaign #${escapeHtml(String(source.campaignId))}</a>` : '',
       source.title ? `<span>${escapeHtml(source.title)}</span>` : '',
-      source.advertiserHtml || source.advertiser ? `<span>${escapeHtml(source.advertiserLabel || source.advertiser || '')}</span>` : '']
+      source.advertiserHtml || source.advertiser ? `<span>${escapeHtml(source.advertiserLabel || source.advertiser || '')}</span>` : '',
+      source.paidAdvert ? `<span>Paid request #${escapeHtml(String(source.requestId))} · payer ${escapeHtml(source.payer || '')}</span>` : '']
       .filter(Boolean).join(' · ')
     : source.kind === 'djuke'
       ? source.payerHtml || source.payerLabel || source.payer ? `<span>${escapeHtml(source.payerLabel || source.payer || '')}</span>` : ''
       : '';
-  return `<tr class="fund-source-row fund-source-${escapeHtml(source.kind || 'sponsor')}"><td>${wallet}</td><td>${escapeHtml(sourceKindLabel(source.kind))}</td><td class="radio-history-number">${amount}</td><td>${tx}${extra ? ` · ${extra}` : ''}</td></tr>`;
+  return `<tr class="fund-source-row fund-source-${escapeHtml(source.kind || 'sponsor')}"><td>${wallet}</td><td>${escapeHtml(source.paidAdvert ? 'Paid advert playback' : sourceKindLabel(source.kind))}</td><td class="radio-history-number">${amount}</td><td>${tx}${extra ? ` · ${extra}` : ''}</td></tr>`;
 }
 
 export function renderFundSourcesTable(fund) {

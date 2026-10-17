@@ -801,6 +801,44 @@ test('paid DJuke requests still let the queued main-radio ad play next', async (
       },
     },
   });
+
+  test('paid adverts create an extra break without consuming ordinary ads and settle only their own queue', async t => {
+    const { createJukeLoopSession } = await import('../discord-bot/jukeloop.js');
+    t.mock.method(Date, 'now', () => Date.parse('2026-10-17T12:00:00Z'));
+    const completed = [];
+    const selection = { record: { requestId: 'paid-ad-1', kind: 'devert', payer: `0x${'1'.repeat(40)}`, amountUnits: '1000000' },
+      track: { trackId: 'devert-paid:1', campaignId: '9', title: 'Paid advert', advertiser: `0x${'2'.repeat(40)}`, isDevertAd: true } };
+    const session = createJukeLoopSession('paid-ad-extra', {
+      voiceChannel: { guild: { id: 'paid-ad-extra' } }, textChannel: { send: async () => ({}) }, client: {},
+      audioPlayer: { on() {}, play() {}, stop() {}, state: { status: 'idle' } },
+      djuke: { nextPaid: async () => selection, fail: async () => {},
+        complete: async (...args) => completed.push(args) },
+      devertPlayback: { isCampaignRemoved: () => false, nextMainRadioAd: async () => { throw new Error('Ordinary ad rotation should not be consumed'); } },
+    });
+    t.after(() => session.destroy());
+    session._musicSinceAd = 0;
+    const ordinary = { campaignId: 'ordinary' };
+    session._preparedDevertAd = ordinary;
+    session._getFreshUrl = async () => 'https://example.test/ad.mp3';
+    session._createStream = () => { const stream = new PassThrough(); stream.write(Buffer.from([0]));
+      return { stream, ffmpegProcess: { exitCode: 0, kill() {} } }; };
+    session._announcePrepared = async () => {};
+    const prepared = await session._prepareNextPlayback();
+    assert.equal(prepared.paid.record.kind, 'devert');
+    assert.equal(prepared.devertAd.paidRequest, true);
+    assert.equal(prepared.queueIndex, null);
+    session._startPrepared(prepared);
+    assert.equal(session._nowPlaying.isDevert, true);
+    assert.equal(session._nowPlaying.sponsor.kind, 'devert');
+    assert.equal(session._preparedDevertAd, ordinary);
+    session._completedPlay = { trackId: selection.track.trackId, playId: 'paid-ad-play', audibleMs: 20000, finished: true };
+    await session._collectReactions();
+    assert.equal(completed.length, 1);
+    assert.equal(completed[0][0].kind, 'devert');
+    assert.equal(completed[0][1].finished, true);
+    session.livePerformanceEvents = [{ id: 'live', title: 'Live', startUtc: '2026-10-17T11:59:00Z', endUtc: '2026-10-17T13:00:00Z' }];
+    assert.equal(await session._prepareNextPlayback(), undefined);
+  });
   session._musicSinceAd = 10;
   session._getFreshUrl = async () => 'https://example.test/audio.mp3';
   session._createStream = () => {
