@@ -124,6 +124,43 @@ test('known contracts render as explorer badges instead of raw addresses', async
   const html = renderWalletButton(wallet, { role: 'advert' });
   assert.match(html, /📜 DeVert v0\.1/);
   assert.match(html, /basescan\.org\/address\/0x135Cbc573F87637158eb3186C87c584fb0B34CD9#code/);
+  const queue = await resolveWalletLabel('0xe54609f022a8d760417e7cc0eea6360b6e1d11bb', null, {});
+  const queueHtml = renderWalletButton(queue, { role: 'advert' });
+  assert.match(queueHtml, /📜 DVert paid queue v0\.2/);
+  assert.match(queueHtml, /basescan\.org\/address\/0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb#code/);
+  assert.doesNotMatch(queueHtml, /data-creator/);
+});
+
+test('fund wallet labels use the contributor whitelist without replacing ENS or labeling unknown wallets', async t => {
+  const { resolveWalletLabel, renderWalletButton } = await import(url);
+  const accounts = JSON.parse(fs.readFileSync(path.join(__dirname, '../contributor-accounts.json'), 'utf8'));
+  const contributor = accounts.contributors.find(account => account.github === 'withinthevacuum');
+  const originalWindow = globalThis.window;
+  globalThis.window = { location: { href: 'https://site.example/DecentBusking/' } };
+  t.after(() => {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  });
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async request => {
+    requests++;
+    assert.match(request.pathname, /\/contributor-accounts\.json$/);
+    return { ok: true, json: async () => accounts };
+  });
+  const provider = { lookupAddress: async () => null };
+  const label = await resolveWalletLabel(contributor.walletAddress.toLowerCase(), provider);
+  assert.equal(label.label, 'withinthevacuum');
+  assert.match(renderWalletButton(label), /withinthevacuum/);
+  assert.match(renderWalletButton(label), /data-creator="0x405bb3cdf23833bb27bad6629b7cd4f01688235f"/);
+  assert.match(renderWalletButton(label), /title="0x405bb3cdf23833bb27bad6629b7cd4f01688235f"/);
+  const unknown = await resolveWalletLabel(`0x${'a'.repeat(40)}`, provider);
+  assert.equal(unknown.label, '0xaaaa…aaaa');
+  assert.equal(requests, 1, 'the maintainer whitelist is shared across wallet lookups');
+  const ens = await resolveWalletLabel(contributor.walletAddress, {
+    lookupAddress: async () => 'verified.eth', resolveName: async () => contributor.walletAddress,
+    getResolver: async () => null,
+  });
+  assert.equal(ens.label, 'verified.eth', 'verified ENS still takes precedence');
 });
 
 test('fund disclosure markup includes proof links and campaign references', async () => {

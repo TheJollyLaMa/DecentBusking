@@ -1,9 +1,31 @@
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
-import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs';
+import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261019-fund-wallet-labels';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 export { formatUsdcUnits };
 const USDC_ICON = '<img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">';
 const WALLET_ICON = 'img/Ens_Eth_Breathe.png';
+let contributorLabels;
+
+async function registeredContributorLabel(address) {
+  if (!globalThis.window?.location) return '';
+  contributorLabels ||= fetch(new URL('../contributor-accounts.json', import.meta.url), {
+    cache: 'no-store', signal: AbortSignal.timeout(12000),
+  })
+    .then(async response => {
+      if (!response.ok) throw new Error(`Contributor whitelist unavailable (${response.status})`);
+      const accounts = await response.json();
+      if (!Array.isArray(accounts.contributors)) throw new Error('Invalid contributor whitelist');
+      return new Map(accounts.contributors
+        .filter(account => /^0x[0-9a-f]{40}$/i.test(account.walletAddress || '') &&
+          typeof (account.displayName || account.github) === 'string')
+        .map(account => [normalizeAddress(account.walletAddress), account.displayName || account.github]));
+    }).catch(error => {
+      contributorLabels = null;
+      console.warn('[funds] Could not load contributor names:', error.message);
+      return new Map();
+    });
+  return (await contributorLabels).get(normalizeAddress(address)) || '';
+}
 
 export function renderUsdcAmount(units, { className = '' } = {}) {
   const classes = ['usdc-amount', className].filter(Boolean).join(' ');
@@ -99,7 +121,7 @@ export async function resolveWalletLabel(address, provider, sponsorAliases = {},
   }
   return {
     address,
-    label: primary || aliases[0] || shortAddress(address),
+    label: primary || aliases[0] || await registeredContributorLabel(address) || shortAddress(address),
     aliases,
     avatarURI,
   };
