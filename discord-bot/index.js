@@ -664,6 +664,7 @@ async function main() {
   setInterval(initializeCreators, 30000).unref();
 
   let client;
+  let discordOfflineReason = 'Main radio is offline';
   let playlistReady = false;
   let playlistStateStore = null;
   let queueReviewedAlbumImport = null;
@@ -1049,7 +1050,7 @@ async function main() {
         if (!canFulfill) return { ready: false, reason: 'Paid advert worker is not configured' };
         if (!checkpointMirror.status().available) return { ready: false, reason: 'Local checkpoint mirror is offline' };
         const session = getActiveJukeLoopSession();
-        if (!session) return { ready: false, reason: 'Main radio is offline' };
+        if (!session) return { ready: false, reason: discordOfflineReason };
         return session.getPlaybackStatus();
       },
       getApprovedCampaignIds: () => approvedAdCampaignIds, cacheMs: 5000 });
@@ -1226,7 +1227,7 @@ async function main() {
       return {
         ...buildRadioState({
           nowPlaying,
-          playback: jukeLoopSession?.getPlaybackStatus() || { status: 'offline', ready: false, reason: 'Main radio is offline' },
+          playback: jukeLoopSession?.getPlaybackStatus() || { status: 'offline', ready: false, reason: discordOfflineReason },
           adVotes,
           upNext: getJukeLoopUpNext(),
           playlist: getPlaylist(),
@@ -1619,7 +1620,9 @@ async function main() {
     }
   });
 
-  await loginDiscordClient(client, config.discordToken);
+  await loginDiscordClient(client, config.discordToken, {
+    onUnavailable: reason => { discordOfflineReason = reason; },
+  });
 
   const shutdown = async (signal) => {
     console.log(`[jukebox-bot] ${signal} received; flushing IPFS state checkpoint.`);

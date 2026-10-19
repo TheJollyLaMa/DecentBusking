@@ -124,6 +124,9 @@ Discord gateway login logs connection stages and rate-limit delays without
 tokens or payloads. If the client does not become ready within two minutes,
 startup fails explicitly so the service supervisor can restart it instead of
 leaving an indefinitely healthy-looking web process with no Discord bot.
+An explicit gateway HTTP 429 cooldown extends that deadline: the worker respects
+Discord's `Retry-After` instead of repeatedly restarting, and reports the retry
+time in radio status and paid-checkout availability.
 
 Advert cadence and queued-ad state use the separate
 `decentbusking-main-radio-ad-state.json` checkpoint (`main-radio-ad-state` tags).

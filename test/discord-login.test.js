@@ -42,3 +42,23 @@ test('Discord startup fails explicitly on a stuck login so the service can resta
   await assert.rejects(loginDiscordClient(bot, 'token', { timeoutMs: 5, log: { log() {} } }), /did not become ready/);
   assert.equal(bot.listenerCount('clientReady'), 0);
 });
+
+test('Discord startup honors an explicit HTTP 429 cooldown instead of repeatedly restarting', async () => {
+  const { loginDiscordClient } = await import('../discord-bot/discord-login.js');
+  const bot = client();
+  const reasons = [];
+  bot.login = async () => {
+    bot.rest.emit('response', { path: '/gateway/bot' },
+      { status: 429, headers: new Map([['retry-after', '0.1']]) });
+  };
+  const pending = loginDiscordClient(bot, 'token', {
+    timeoutMs: 5,
+    log: { log() {}, warn() {} },
+    onUnavailable: reason => reasons.push(reason),
+  });
+  const outcome = pending.then(() => 'ready', () => 'timeout');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.match(reasons[0], /Discord connection rate limited; retry after/);
+  bot.emit('clientReady', bot);
+  assert.equal(await outcome, 'ready');
+});

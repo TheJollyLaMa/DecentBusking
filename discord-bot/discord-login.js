@@ -1,7 +1,13 @@
 import { Events } from 'discord.js';
 
-export async function loginDiscordClient(client, token, { timeoutMs = 120000, log = console } = {}) {
+export async function loginDiscordClient(client, token, { timeoutMs = 120000, log = console, onUnavailable } = {}) {
   let timer;
+  let rejectTimeout;
+  const deadline = new Promise((_, reject) => { rejectTimeout = reject; });
+  const armTimeout = delay => {
+    clearTimeout(timer);
+    timer = setTimeout(() => rejectTimeout(new Error(`Discord login did not become ready within its startup deadline`)), delay);
+  };
   let ready;
   const connected = new Promise(resolve => { ready = resolve; });
   client.once(Events.ClientReady, ready);
@@ -17,7 +23,16 @@ export async function loginDiscordClient(client, token, { timeoutMs = 120000, lo
   const rateLimited = data => log.warn(`[discord] REST rate limited: global=${data.global}, retry after ${data.timeToReset}ms`);
   const response = (request, result) => {
     if (request.path === '/gateway/bot') {
-      log.log(`[discord] Gateway discovery HTTP ${result.status}; retry-after=${result.headers.get('retry-after') || 'none'}`);
+      const retryAfter = result.headers.get('retry-after');
+      log.log(`[discord] Gateway discovery HTTP ${result.status}; retry-after=${retryAfter || 'none'}`);
+      const retryAfterMs = Number(retryAfter) * 1000;
+      if (result.status === 429 && Number.isFinite(retryAfterMs) && retryAfterMs > 0 &&
+          retryAfterMs + timeoutMs <= 2147483647) {
+        const reason = `Discord connection rate limited; retry after ${new Date(Date.now() + retryAfterMs).toISOString()}`;
+        log.warn(`[discord] ${reason}. Respecting Discord's cooldown without restarting.`);
+        onUnavailable?.(reason);
+        armTimeout(retryAfterMs + timeoutMs);
+      }
     }
   };
   client.on(Events.Debug, debug);
@@ -26,12 +41,11 @@ export async function loginDiscordClient(client, token, { timeoutMs = 120000, lo
   client.rest.on('rateLimited', rateLimited);
   client.rest.on('response', response);
   log.log('[discord] Starting gateway login; waiting for client readiness.');
+  armTimeout(timeoutMs);
   try {
     await Promise.race([
       Promise.all([client.login(token), connected]),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Discord login did not become ready within ${timeoutMs}ms`)), timeoutMs);
-      }),
+      deadline,
     ]);
     log.log('[discord] Gateway login ready.');
   } finally {
