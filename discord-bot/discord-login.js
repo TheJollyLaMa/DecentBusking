@@ -15,10 +15,16 @@ export async function loginDiscordClient(client, token, { timeoutMs = 120000, lo
   const shardError = (error, shardId) => log.error(`[discord] Shard ${shardId} error: ${error.message}`);
   const shardDisconnect = (event, shardId) => log.warn(`[discord] Shard ${shardId} disconnected (code ${event.code})`);
   const rateLimited = data => log.warn(`[discord] REST rate limited: global=${data.global}, retry after ${data.timeToReset}ms`);
+  const response = (request, result) => {
+    if (request.path === '/gateway/bot') {
+      log.log(`[discord] Gateway discovery HTTP ${result.status}; retry-after=${result.headers.get('retry-after') || 'none'}`);
+    }
+  };
   client.on(Events.Debug, debug);
   client.on(Events.ShardError, shardError);
   client.on(Events.ShardDisconnect, shardDisconnect);
   client.rest.on('rateLimited', rateLimited);
+  client.rest.on('response', response);
   log.log('[discord] Starting gateway login; waiting for client readiness.');
   try {
     await Promise.race([
@@ -32,6 +38,7 @@ export async function loginDiscordClient(client, token, { timeoutMs = 120000, lo
     clearTimeout(timer);
     client.removeListener(Events.ClientReady, ready);
     client.removeListener(Events.Debug, debug);
+    client.rest.removeListener('response', response);
     // Keep error/rate-limit diagnostics after startup, without logging payloads or tokens.
   }
 }

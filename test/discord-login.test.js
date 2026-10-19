@@ -16,6 +16,8 @@ test('Discord login waits for client readiness, not merely a resolved login call
     bot.emit('debug', 'Provided token: sensitive');
     bot.emit('debug', '[WS => Shard 0] Connecting to gateway\nsensitive payload');
     bot.rest.emit('rateLimited', { global: true, timeToReset: 5000 });
+    bot.rest.emit('response', { path: '/gateway/bot', options: { token: 'sensitive' } },
+      { status: 429, headers: new Map([['retry-after', '5']]) });
   };
   let done = false;
   const pending = loginDiscordClient(bot, 'sensitive', {
@@ -28,6 +30,7 @@ test('Discord login waits for client readiness, not merely a resolved login call
   assert.equal(done, true);
   assert.match(logs.join('\n'), /Connecting to gateway/);
   assert.match(logs.join('\n'), /retry after 5000ms/);
+  assert.match(logs.join('\n'), /Gateway discovery HTTP 429; retry-after=5/);
   assert.doesNotMatch(logs.join('\n'), /sensitive/);
   assert.equal(bot.listenerCount('debug'), 0);
 });
