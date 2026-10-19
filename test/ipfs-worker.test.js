@@ -920,6 +920,7 @@ test('radio media preserves unsatisfiable range responses and reports upstream f
       headers: { 'content-range': 'bytes */100' },
     }),
   });
+
   await withServer(handler, async base => {
     const url = `${base}/api/radio/media?cid=bafyrecording1234567890`;
     const range = await fetch(url, { headers: { range: 'bytes=1000-' } });
@@ -931,6 +932,41 @@ test('radio media preserves unsatisfiable range responses and reports upstream f
     assert.equal(failed.status, 502);
     assert.deepEqual(await failed.json(), { error: 'Radio media gateway is unavailable' });
   });
+});
+
+test('a truncated upstream radio stream cannot crash the worker or prevent the next request', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const http = require('node:http');
+  const upstream = http.createServer((request, response) => {
+    response.writeHead(200, { 'content-type': 'audio/mpeg', 'content-length': '1000' });
+    response.write(Buffer.alloc(10));
+    setTimeout(() => response.destroy(), 10);
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    const handler = createWorkerRequestHandler({
+      allowedOrigins: [],
+      ownerWallet: '0x1111111111111111111111111111111111111111',
+      getRadioState: async () => ({ playback: { status: 'playing' } }),
+      getRadioMediaUrl: async () => `http://127.0.0.1:${upstream.address().port}/truncated`,
+    });
+    await withServer(handler, async base => {
+      await assert.rejects(async () => {
+        const response = await fetch(`${base}/api/radio/media?cid=bafyrecording1234567890`);
+        await response.arrayBuffer();
+      });
+      const healthy = await fetch(`${base}/api/radio`);
+      assert.equal(healthy.status, 200);
+      assert.deepEqual(await healthy.json(), { playback: { status: 'playing' } });
+    });
+    assert.ok(warnings.some(message => message.includes('Upstream media stream failed')), 'upstream errors must be reported even after the listener disconnects');
+  } finally {
+    console.warn = originalWarn;
+    await new Promise(resolve => upstream.close(resolve));
+  }
 });
 
 test('radio votes need no wallet but require an allowed origin', async () => {

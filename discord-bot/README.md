@@ -112,6 +112,9 @@ gateway failures, voice disconnects and text delivery therefore do not pause the
 website broadcast clock. This is not a duration-only timer: paid completion still
 requires the existing natural media completion and minimum playback checks.
 These are broadcast-play checks, not proof that an individual browser listened.
+The browser media proxy retains its own upstream stream-error listener, including
+after a listener disconnects, so a truncated gateway response is logged without
+becoming an unhandled stream error that terminates the worker.
 
 Once Discord becomes ready, the existing broadcast attaches its text channel
 and posts the current recording, then continues scrolling songs and adverts.

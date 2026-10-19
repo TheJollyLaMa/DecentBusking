@@ -415,8 +415,11 @@ export function createWorkerRequestHandler({
             if (value) headers[name] = value;
           }
           response.writeHead(upstream.status, headers);
-          if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), response);
-          else response.end();
+          if (upstream.body) {
+            const media = Readable.fromWeb(upstream.body);
+            media.on('error', error => console.warn('[radio] Upstream media stream failed:', error.message));
+            await pipeline(media, response);
+          } else response.end();
         } catch (error) {
           if (!response.destroyed) {
             console.warn('[radio] Media stream failed:', error.name);
