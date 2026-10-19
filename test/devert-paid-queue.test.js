@@ -8,6 +8,30 @@ const request = (n = 0) => ({ requestId: `8453:${queueAddress}:${n}`, chainReque
   campaignId: '9', payer: buyer, amountUnits: '1000000', title: 'Approved advert', audioURI: 'ipfs://approved-ad',
   advertiser, songId: `0x${'4'.repeat(64)}`, revision: '0', trackId: `devert-paid:${n}`, playable: true });
 
+test('a hung paid queue cannot stop music, overlap reservations, or leak a late paid selection', async () => {
+  const { combinePaidQueues } = await import('../discord-bot/devert-queue.js');
+  let resolveAd;
+  let adCalls = 0;
+  let songCalls = 0;
+  const released = [];
+  const warnings = [];
+  const record = { requestId: 'late-paid-ad', kind: 'devert' };
+  const adverts = {
+    nextPaid: () => { adCalls++; return new Promise(resolve => { resolveAd = resolve; }); },
+    fail: async selected => released.push(selected.requestId),
+  };
+  const queues = combinePaidQueues({ adverts, songs: { nextPaid: async () => { songCalls++; return null; } },
+    timeoutMs: 5, log: { warn: message => warnings.push(message) } });
+  assert.equal(await queues.nextPaid(), null);
+  assert.equal(await queues.nextPaid(), null);
+  assert.equal(adCalls, 1, 'do not start another reservation while the old one is unresolved');
+  assert.equal(songCalls, 2);
+  assert.match(warnings[0], /timed out; music rotation continues/);
+  resolveAd({ record, track: {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(released, ['late-paid-ad']);
+});
+
 test('public advert search matches titles, creators, addresses and campaign IDs without changing the catalog', async () => {
   const { filterDevertCampaigns } = await import('../js/devert-paid-queue.mjs');
   const catalog = [{ campaignId: '12', title: 'Moon Festival', advertiser, artist: 'Luna' },

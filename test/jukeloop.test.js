@@ -8,6 +8,125 @@ const { PassThrough } = require('node:stream');
 const { pathToFileURL } = require('node:url');
 const vm = require('node:vm');
 
+test('failed media preparation cannot wait on a stuck Discord skip notice', async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const streams = [];
+  const processes = [];
+  const sent = [];
+  let resolveNotice;
+  const notice = new Promise(resolve => { resolveNotice = resolve; });
+  const player = new EventEmitter();
+  player.state = { status: 'idle' };
+  player.stop = () => {};
+  player.play = () => { player.state.status = 'playing'; };
+  const session = new JukeLoopSession({
+    voiceChannel: { guild: { id: 'stuck-discord-notice' } }, client: {}, audioPlayer: player,
+    audioReadyTimeoutMs: 10,
+    textChannel: { send: payload => { sent.push(payload); return notice; } },
+    createStream: () => {
+      const stream = new PassThrough();
+      const process = new EventEmitter();
+      process.killed = false;
+      process.kill = () => { process.killed = true; };
+      streams.push(stream);
+      processes.push(process);
+      if (streams.length > 1) stream.write(Buffer.from('ready audio'));
+      return { stream, ffmpegProcess: process };
+    },
+  });
+  const keepAlive = setTimeout(() => {}, 1000);
+  t.after(() => {
+    clearTimeout(keepAlive);
+    resolveNotice(null);
+    session.destroy();
+    streams.forEach(stream => stream.destroy());
+  });
+  session._getFreshUrl = async track => `https://media.example/${track.trackId}`;
+  session._queue = [{ trackId: 'broken', title: 'Broken stream' }, { trackId: 'working', title: 'Working stream' }];
+  await session._playNext();
+  assert.equal(session._nowPlaying.trackId, 'working', 'music starts without waiting for Discord');
+  assert.equal(processes[0].killed, true, 'timed-out FFmpeg is terminated');
+  assert.equal(streams[0].destroyed, true);
+  assert.match(sent[0].content, /Skipping.*Broken stream.*Timed out/);
+});
+
+test('missing media skips ahead even when Discord never acknowledges the warning', async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const stream = new PassThrough();
+  stream.write(Buffer.from('audio'));
+  const process = new EventEmitter();
+  process.kill = () => {};
+  const session = new JukeLoopSession({
+    voiceChannel: { guild: { id: 'missing-media-notice' } }, client: {},
+    textChannel: { send: () => new Promise(() => {}) },
+    createStream: () => ({ stream, ffmpegProcess: process }),
+  });
+  t.after(() => { session.destroy(); stream.destroy(); });
+  session._queue = [{ trackId: 'missing', title: 'Missing' }, { trackId: 'available', title: 'Available' }];
+  session._getFreshUrl = async track => track.trackId === 'missing' ? null : 'https://media.example/available';
+  const prepared = await session._prepareNextPlayback();
+  assert.equal(prepared.track.trackId, 'available');
+  session._disposePrepared(prepared);
+});
+
+test('idle watchdog restarts stalled sessions once, never interrupts music or protected live shows, and reports readiness honestly', async t => {
+  const { JukeLoopSession, PLAYBACK_RECOVERY_TIMEOUT_MS } = await import('../discord-bot/jukeloop.js');
+  const player = new EventEmitter();
+  player.state = { status: 'idle' };
+  player.stop = () => {};
+  let restarts = 0;
+  const session = new JukeLoopSession({
+    voiceChannel: { guild: { id: 'watchdog' } }, client: {}, audioPlayer: player,
+    textChannel: { send: async () => null }, onTerminalDisconnect: () => { restarts++; },
+  });
+  t.after(() => session.destroy());
+  session._started = true;
+  session.getShowState = () => ({ activeShow: { type: 'normal_rotation' } });
+  session._prepareTask = new Promise(() => {});
+  session._checkPlaybackHealth(1000);
+  assert.equal(session.getPlaybackStatus(1001).ready, false, 'a registered session is not proof of playback');
+  session._checkPlaybackHealth(1000 + PLAYBACK_RECOVERY_TIMEOUT_MS - 1);
+  assert.equal(restarts, 0);
+  player.state.status = 'playing';
+  session._nowPlaying = { audible: true };
+  session._checkPlaybackHealth(1000 + PLAYBACK_RECOVERY_TIMEOUT_MS);
+  assert.equal(session.getPlaybackStatus().ready, true);
+  assert.equal(restarts, 0);
+  player.state.status = 'idle';
+  session.getShowState = () => ({ activeShow: { type: 'live_performance', label: 'Live set' } });
+  session._checkPlaybackHealth(500000);
+  assert.equal(session.getPlaybackStatus().status, 'paused');
+  assert.equal(restarts, 0);
+  session.getShowState = () => ({ activeShow: { type: 'normal_rotation' } });
+  session._checkPlaybackHealth(600000);
+  session._checkPlaybackHealth(600000 + PLAYBACK_RECOVERY_TIMEOUT_MS);
+  session._checkPlaybackHealth(900000);
+  assert.equal(restarts, 1);
+  assert.equal(session._destroyed, true);
+});
+
+test('radio startup does not wait for a Discord announcement or historical backfill', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../discord-bot/index.js'), 'utf8');
+  const start = source.indexOf('async function startJukeLoop(client, config)');
+  const end = source.indexOf('// ── /jukeloop command handler', start);
+  const events = [];
+  const channel = { guild: { id: 'startup' }, send: () => new Promise(() => {}) };
+  const config = { jukeLoopVoiceChannelId: 'voice', jukeLoopTextChannelId: 'text', jukeboxChannelId: 'uploads' };
+  const client = { channels: { fetch: async () => channel }, user: { id: 'bot' } };
+  const session = { connect: async () => events.push('connect'), start: async () => events.push('play') };
+  const context = vm.createContext({
+    console, config, client, clearScheduledJukeLoopRestart() {}, discoverDedicatedGateway: async () => {},
+    backfillFromChannel: () => { events.push('backfill'); return new Promise(() => {}); },
+    createJukeLoopSession: () => session, defaultRadioSchedule: () => [],
+    livePerformanceEvents: [], liveWeeklySchedule: {}, _radioPaidQueues: null, _devertPlaybackRuntime: null,
+    _jukeLoopRestartAttempts: new Map(), MessageFlags: { SuppressNotifications: 4096 },
+    scheduleJukeLoopRestart: () => assert.fail('startup must not fail'),
+  });
+  vm.runInContext(source.slice(start, end), context);
+  assert.equal(await context.startJukeLoop(client, config), true);
+  assert.deepEqual(events, ['connect', 'play', 'backfill']);
+});
+
 test('playlist counters schedule routine writes while pin/mint changes and persistence barriers remain durable', async t => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-playlist-checkpoint-'));
   process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');

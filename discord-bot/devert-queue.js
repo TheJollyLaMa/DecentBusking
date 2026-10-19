@@ -216,16 +216,42 @@ export function createDevertQueueRuntime({ readState, store, contract, isCampaig
   };
 }
 
-export function combinePaidQueues({ songs, adverts, log = console }) {
+export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 10000 }) {
+  const selecting = new Set();
+  const select = async (runtime, options, label) => {
+    if (!runtime || selecting.has(runtime)) return null;
+    selecting.add(runtime);
+    let timedOut = false;
+    let timer;
+    const pending = Promise.resolve().then(() => runtime.nextPaid(options));
+    pending.then(async selection => {
+      if (timedOut && selection) {
+        await runtime.fail(selection.record, new Error('Queue selection completed after the radio moved on'));
+      }
+    }).catch(error => {
+      if (timedOut) log.warn(`[${label}] Late queue selection/release failed: ${error.message}`);
+    }).finally(() => selecting.delete(runtime));
+    try {
+      return await Promise.race([pending, new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          reject(new Error('Queue selection timed out; music rotation continues'));
+        }, timeoutMs);
+      })]);
+    } catch (error) {
+      log.warn(`[${label}] Paid selection deferred: ${error.message}`);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   return {
     async nextPaid({ allowBump = false, includeSongs = true } = {}) {
       if (adverts) {
-        try {
-          const ad = await adverts.nextPaid({ allowBump });
-          if (ad) return ad;
-        } catch (error) { log.warn('[devert-queue] Paid advert selection deferred:', error.message); }
+        const ad = await select(adverts, { allowBump }, 'devert-queue');
+        if (ad) return ad;
       }
-      return includeSongs && songs ? songs.nextPaid() : null;
+      return includeSongs ? select(songs, undefined, 'djuke') : null;
     },
     complete(record, play) { return (record.kind === 'devert' ? adverts : songs).complete(record, play); },
     fail(record, error) { return (record.kind === 'devert' ? adverts : songs).fail(record, error); },

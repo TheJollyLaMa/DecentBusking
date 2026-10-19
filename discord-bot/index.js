@@ -1047,8 +1047,9 @@ async function main() {
       getPlaybackStatus: () => {
         if (!canFulfill) return { ready: false, reason: 'Paid advert worker is not configured' };
         if (!checkpointMirror.status().available) return { ready: false, reason: 'Local checkpoint mirror is offline' };
-        if (!getActiveJukeLoopSession()) return { ready: false, reason: 'Main radio is offline' };
-        return { ready: true, reason: null };
+        const session = getActiveJukeLoopSession();
+        if (!session) return { ready: false, reason: 'Main radio is offline' };
+        return session.getPlaybackStatus();
       },
       getApprovedCampaignIds: () => approvedAdCampaignIds, cacheMs: 5000 });
     if (canFulfill) {
@@ -1224,6 +1225,7 @@ async function main() {
       return {
         ...buildRadioState({
           nowPlaying,
+          playback: jukeLoopSession?.getPlaybackStatus() || { status: 'offline', ready: false, reason: 'Main radio is offline' },
           adVotes,
           upNext: getJukeLoopUpNext(),
           playlist: getPlaylist(),
@@ -1537,14 +1539,13 @@ async function main() {
     console.log(`[jukebox-bot] Logged in as ${readyClient.user.tag}`);
     console.log(`[jukebox-bot] Watching channel ID: ${config.jukeboxChannelId}`);
 
-    // Register global slash commands
+    // Command registration must not gate voice startup when Discord REST is delayed.
     const rest = new REST({ version: '10' }).setToken(config.discordToken);
-    try {
-      await rest.put(Routes.applicationCommands(readyClient.user.id), { body: SLASH_COMMANDS });
+    rest.put(Routes.applicationCommands(readyClient.user.id), { body: SLASH_COMMANDS }).then(() => {
       console.log('[jukebox-bot] Slash commands registered globally.');
-    } catch (err) {
+    }).catch(err => {
       console.error('[jukebox-bot] Failed to register slash commands:', err.message);
-    }
+    });
 
     // ── JukeLoop startup ───────────────────────────────────────────────────────
     if (config.jukeLoopVoiceChannelId && config.jukeLoopTextChannelId) {
@@ -2134,19 +2135,6 @@ async function startJukeLoop(client, config) {
 
     await discoverDedicatedGateway(config);
 
-    // Backfill all historic uploads from #DecentJukebox
-    if (jukeboxCh) {
-      await backfillFromChannel(jukeboxCh);
-      runIpfsBackfill(client, config);
-    } else {
-      console.warn('[jukeloop] Could not access #DecentJukebox for backfill:', config.jukeboxChannelId);
-    }
-
-    const recoveredRatings = await reconcileJukeLoopHistory(textChannel, client.user.id);
-    if (recoveredRatings > 0) {
-      console.log(`[jukeloop] Reconciled ${recoveredRatings} historical playback announcement(s).`);
-    }
-
     const session = createJukeLoopSession(guildId, {
       voiceChannel,
       textChannel,
@@ -2159,18 +2147,31 @@ async function startJukeLoop(client, config) {
       mainRadioAdStateStore: config.jukeLoopMainRadioAdStore,
       topTenHypeStore: config.topTenHypeStore,
       onTerminalDisconnect: () => {
-        scheduleJukeLoopRestart(client, config, 'Voice reconnect timed out');
+        scheduleJukeLoopRestart(client, config, 'Radio voice connection or playback stalled');
       },
     });
 
     await session.connect();
     console.log(`[jukeloop] Connected to voice channel ${voiceChannel.name} (${voiceChannel.id}), starting playback…`);
-    await textChannel
+    textChannel
       .send({ content: '📻 **JukeLoop is live!** The community radio is starting up — tracks from #DecentJukebox are on the way.',
         flags: MessageFlags.SuppressNotifications,
       })
-      .catch(() => {});
+      .catch(error => console.warn('[jukeloop] Startup announcement deferred:', error.message));
     await session.start();
+    // The durable playlist is already restored; history repair can run without holding audio.
+    (async () => {
+      if (jukeboxCh) {
+        await backfillFromChannel(jukeboxCh);
+        runIpfsBackfill(client, config);
+      } else {
+        console.warn('[jukeloop] Could not access #DecentJukebox for backfill:', config.jukeboxChannelId);
+      }
+      const recoveredRatings = await reconcileJukeLoopHistory(textChannel, client.user.id);
+      if (recoveredRatings > 0) {
+        console.log(`[jukeloop] Reconciled ${recoveredRatings} historical playback announcement(s).`);
+      }
+    })().catch(error => console.warn('[jukeloop] Startup history reconciliation deferred:', error.message));
     _jukeLoopRestartAttempts.delete(config.jukeLoopVoiceChannelId);
     return true;
   } catch (err) {

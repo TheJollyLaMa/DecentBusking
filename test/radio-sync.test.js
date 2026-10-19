@@ -114,6 +114,27 @@ test('between-track messages use the song ticker and clear the bottom activity',
   assert.equal(artist.textContent, 'Artist');
 });
 
+test('radio does not describe an offline, stalled or protected stream as an ordinary song changeover', () => {
+  const title = { textContent: '' };
+  const artist = { textContent: '' };
+  const activity = { hidden: false, textContent: '', classList: { remove() {}, add() {} } };
+  const context = vm.createContext({ console, title, artist, activity });
+  vm.runInContext(`${radioSyncSource()}
+    _audio = { paused: true }; _radio = null;
+    _titleEl = title; _artistEl = artist; _activityEl = activity;
+    _renderVoting = () => {}; _renderSponsorTag = () => {};
+    _broadcastNowPlayingStopped = () => {};
+    _radioState = { playback: { status: 'offline', reason: 'Main radio is offline' } };
+    _syncRadio();
+  `, context);
+  assert.match(title.textContent, /reconnecting/);
+  assert.doesNotMatch(title.textContent, /between tracks/);
+  vm.runInContext(`_radioState.playback = { status: 'preparing', idleMs: 31000 }; _syncRadio();`, context);
+  assert.match(title.textContent, /recovery will retry automatically/);
+  vm.runInContext(`_radioState.playback = { status: 'paused', reason: 'Live set' }; _syncRadio();`, context);
+  assert.match(title.textContent, /Radio paused · Live set/);
+});
+
 
 test('radio stays silent until a delayed initial seek completes', async () => {
   const source = radioSyncSource();

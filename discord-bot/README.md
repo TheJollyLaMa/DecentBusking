@@ -104,6 +104,23 @@ console logs report preload vs network startup timing. An advert that becomes
 due on the current song is selected while that song plays so it can be
 preloaded; if the song ends before counting (under 30 s audible), the advert
 is held for the next break and music plays instead.
+
+Playback must not wait for Discord text delivery: startup/skip notices, command
+registration and historical backfill do not gate the restored radio playlist.
+Failed FFmpeg preparation destroys its stream and terminates the failed process
+before moving to another recording. Paid-queue selection has a 10-second deadline;
+a still-pending lookup is not duplicated, and a late reservation is returned to
+its queue rather than charged for an unplayed recording.
+
+The session checks playback health every second. Two minutes without active audio
+triggers a logged session restart through the existing reconnect backoff. Playing
+recordings, scheduled live-performance blocks and genuinely empty playlists are
+not interrupted. `GET /api/radio` exposes `playback.status`, `ready`, `reason`
+and, while preparing, `idleMs`. The website distinguishes a short changeover from
+offline/recovering/paused playback and warns after 30 seconds of preparation.
+Paid advert checkout requires actual active playback and the local checkpoint
+mirror, not merely a registered session or a successful HTTP health check.
+
 Advert cadence and queued-ad state use the separate
 `decentbusking-main-radio-ad-state.json` checkpoint (`main-radio-ad-state` tags).
 They must not share the playlist's `decentbusking-jukeloop-state.json` namespace:

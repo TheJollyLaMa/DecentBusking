@@ -62,6 +62,7 @@ const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
 
 const FADE_IN_SECONDS = 0.6;
 const NEXT_TRACK_READY_TIMEOUT_MS = 20_000;
+export const PLAYBACK_RECOVERY_TIMEOUT_MS = 120_000;
 /** Silence between songs so website listeners can start the next track from 0:00 together. */
 export const CHANGEOVER_GAP_MS = 2_500;
 const DJUKE_PREFETCH_POLL_MS = 5_000;
@@ -209,7 +210,7 @@ export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch, 
 }
 
 /** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
-export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Date.now(), recentLimit = 10, mainRadioAdCountdown = null,
+export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Date.now(), recentLimit = 10, mainRadioAdCountdown = null, playback = null,
   activeShow = null, topTenHype = null, adVotes = null }) {
   const mediaTypeForTrack = (track) => (track.videoUrl || track.mediaType === 'video/mp4')
     ? 'video/mp4'
@@ -228,6 +229,7 @@ export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Dat
     }));
   return {
     serverTime: now,
+    playback,
     activeShow,
     topTenHype,
     nowPlaying: nowPlaying && nowPlaying.audible !== false
@@ -654,6 +656,8 @@ export function waitForAudioReady(stream, ffmpegProcess, timeoutMs = NEXT_TRACK_
     };
     const failed = error => {
       cleanup();
+      stream.destroy();
+      ffmpegProcess?.kill?.();
       reject(error);
     };
     const ended = () => failed(new Error('FFmpeg ended before producing audio'));
@@ -682,12 +686,14 @@ export class JukeLoopSession {
    */
     constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback,
       schedule, livePerformanceEvents, audioPlayer, createStream, mainRadioAdStateStore, restoreMainRadioAdState, saveMainRadioAdState,
-      topTenHype, topTenHypeStore }) {
+      topTenHype, topTenHypeStore, audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS }) {
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
     this.ipfsGateway  = ipfsGateway;
     this.onTerminalDisconnect = onTerminalDisconnect;
+    this._audioReadyTimeoutMs = audioReadyTimeoutMs;
+    this._playbackIdleSince = null;
     this.djuke        = djuke || null;
     this.devertPlayback = devertPlayback || null;
     this._topTenHype = topTenHype || createTopTenHype({ store: topTenHypeStore });
@@ -867,10 +873,52 @@ export class JukeLoopSession {
     this._started = true;
     await this._ensureMainRadioAdState();
     this._syncScheduledShow({ requestPlayback: false });
-    this._scheduleWatcher = setInterval(() => this._syncScheduledShow(), 1_000);
+    this._scheduleWatcher = setInterval(() => {
+      this._syncScheduledShow();
+      this._checkPlaybackHealth();
+    }, 1_000);
     this._scheduleWatcher.unref?.();
     this._refreshQueue();
     await this._playNext();
+  }
+
+  getPlaybackStatus(now = Date.now()) {
+    const show = this.getShowState().activeShow;
+    if (show.type === 'live_performance') return { status: 'paused', ready: false, reason: show.label || 'Live performance' };
+    const voice = this._voiceConnection?.getState();
+    if (this._destroyed || voice?.voiceConnected === false) {
+      return { status: 'recovering', ready: false, reason: 'Radio voice connection is recovering' };
+    }
+    if (this._nowPlaying?.audible && this.player.state.status === AudioPlayerStatus.Playing) {
+      return { status: 'playing', ready: true, reason: null };
+    }
+    if (!this._queue.length && !this._prepareTask && !this._transitionTask && !this._preparedNext &&
+        !this._nowPlaying && !this._currentPaid && !this._currentDevertAd) {
+      return { status: 'empty', ready: false, reason: 'No playable recordings are available' };
+    }
+    const idleMs = this._playbackIdleSince === null ? 0 : Math.max(0, now - this._playbackIdleSince);
+    return { status: idleMs >= PLAYBACK_RECOVERY_TIMEOUT_MS ? 'recovering' : 'preparing',
+      ready: false, reason: 'Radio is preparing the next recording', idleMs };
+  }
+
+  _checkPlaybackHealth(now = Date.now()) {
+    if (this._destroyed || !this._started) return;
+    const playback = this.getPlaybackStatus(now);
+    if (playback.ready || playback.status === 'paused' || playback.status === 'empty') {
+      this._playbackIdleSince = null;
+      return;
+    }
+    this._playbackIdleSince ??= now;
+    if (now - this._playbackIdleSince < PLAYBACK_RECOVERY_TIMEOUT_MS) return;
+    console.error(`[jukeloop] Playback stalled for ${PLAYBACK_RECOVERY_TIMEOUT_MS / 1000}s; restarting the radio session.`);
+    this.destroy();
+    Promise.resolve(this.onTerminalDisconnect?.())
+      .catch(error => console.error('[jukeloop] Playback recovery failed:', error.message));
+  }
+
+  _sendPlaybackNotice(content) {
+    this.textChannel.send({ content, flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
+      .catch(error => console.warn('[jukeloop] Playback notice deferred:', error.message));
   }
 
   setLivePerformanceEvents(events) {
@@ -994,8 +1042,7 @@ export class JukeLoopSession {
 
   async _skipHype(selection, reason, options) {
     await this._topTenHype.advance(selection, reason);
-    await this.textChannel.send({ content: `⚠️ Friday Top10 opening #${selection.openingRank}: **${selection.title}** skipped — ${reason}`,
-      allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications });
+    this._sendPlaybackNotice(`⚠️ Friday Top10 opening #${selection.openingRank}: **${selection.title}** skipped — ${reason}`);
     return this._prepareNextPlayback(null, { ...options, hypeAttempts: (options.hypeAttempts || 0) + 1 });
   }
 
@@ -1057,7 +1104,7 @@ export class JukeLoopSession {
           : 'No opening-chart recording could be played. The countdown will retry; skipped places are shown in the live panel.';
         if (this._hypeNotice !== notice) {
           this._hypeNotice = notice;
-          await this.textChannel.send({ content: `📊 ${notice}`, allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications });
+          this._sendPlaybackNotice(`📊 ${notice}`);
         }
         return null;
       }
@@ -1131,13 +1178,8 @@ export class JukeLoopSession {
 
     // Nothing to play → wait and retry
     if (!isHype && !paid && !devertAd && this._queue.length === 0) {
-      await this.textChannel
-        .send({
-          content: '📭 The JukeLoop playlist is empty.\n' +
-          'Post audio files (MP3, M4A, etc.) in <#' + this.textChannel.id + '> to add tracks!',
-          flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] },
-        })
-        .catch(() => {});
+      this._sendPlaybackNotice('📭 The JukeLoop playlist is empty.\n' +
+        'Post audio files (MP3, M4A, etc.) in <#' + this.textChannel.id + '> to add tracks!');
       return null;
     }
 
@@ -1145,6 +1187,10 @@ export class JukeLoopSession {
     const queueIndex = !hypeSelection && !paid && !devertAd ? this._queueIndex : null;
 
     const url = await this._getFreshUrl(track);
+    if (this._destroyed) {
+      if (paid && this.djuke) await this.djuke.fail(paid.record, new Error('Radio stopped during media lookup'));
+      return null;
+    }
     if (!url) {
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
       if (hypeSelection) return this._skipHype(hypeSelection, 'The recording could not be fetched.', options);
@@ -1156,13 +1202,9 @@ export class JukeLoopSession {
       const skipNoticeKey = paid ? `paid:${paid.record.requestId}` : null;
       if (!skipNoticeKey || !this._paidFetchNotices.has(skipNoticeKey)) {
         if (skipNoticeKey) this._paidFetchNotices.add(skipNoticeKey);
-        await this.textChannel
-          .send({ content: paid
+        this._sendPlaybackNotice(paid
             ? `⏳ Paid request **${track.title}** can't be fetched right now — it stays queued and will retry while the radio keeps playing.`
-            : `⚠️ Skipping **${track.title}** — the original upload could not be found.`,
-            flags: MessageFlags.SuppressNotifications,
-          })
-          .catch(() => {});
+            : `⚠️ Skipping **${track.title}** — the original upload could not be found.`);
       }
       if (paid && this.djuke) {
         // Keep the request queued, but let free rotation play instead of leaving the radio silent.
@@ -1186,7 +1228,7 @@ export class JukeLoopSession {
 
     try {
       const { stream, ffmpegProcess } = this._createStream(url, { ad: !!devertAd });
-      await waitForAudioReady(stream, ffmpegProcess);
+      await waitForAudioReady(stream, ffmpegProcess, this._audioReadyTimeoutMs);
       if (this._destroyed) {
         try { ffmpegProcess.kill(); } catch {}
         if (paid && this.djuke) await this.djuke.fail(paid.record, new Error('Radio stopped')).catch(() => {});
@@ -1202,9 +1244,7 @@ export class JukeLoopSession {
         this._preparedDevertAd = null;
         this._persistMainRadioAdState();
       }
-      await this.textChannel
-        .send({ content: `⚠️ Skipping **${track.title}**: ${err.message}`, flags: MessageFlags.SuppressNotifications })
-        .catch(() => {});
+      this._sendPlaybackNotice(`⚠️ Skipping **${track.title}**: ${err.message}`);
       if (paid && this.djuke) {
         await this.djuke.fail(paid.record, err).catch(() => {});
         throw err;

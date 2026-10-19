@@ -1,7 +1,7 @@
 export async function addChartSongToPlaylist(track, {
   wallet = window._wallet,
   resolveNFT = async detail => {
-    const { resolveNowPlayingNFT } = await import('./space.js?v=20261019-paid-ad-return');
+    const { resolveNowPlayingNFT } = await import('./space.js?v=20261019-radio-recovery');
     return resolveNowPlayingNFT(detail, { requireMediaMatch: true });
   },
   save = async nft => {

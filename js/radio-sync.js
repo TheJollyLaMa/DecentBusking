@@ -762,6 +762,24 @@ function _syncRadio(message) {
     _loadedPlayId = null;
     _broadcastNowPlayingStopped('radio-empty');
     _renderSponsorTag(null);
+    const playback = _radioState?.playback;
+    if (playback?.status === 'empty') {
+      _setTrack('📻 No playable recordings are available — waiting for radio uploads', '');
+      _setActivity('');
+      return;
+    }
+    if (playback && ['offline', 'recovering', 'paused'].includes(playback.status)) {
+      _setTrack(playback.status === 'paused'
+        ? `📻 Radio paused · ${playback.reason || 'scheduled live performance'}`
+        : '📻 Radio is reconnecting — playback is temporarily unavailable', '');
+      _setActivity(playback.reason || '');
+      return;
+    }
+    if (playback?.status === 'preparing' && playback.idleMs >= 30_000) {
+      _setTrack('📻 Preparing the next recording — radio recovery will retry automatically', '');
+      _setActivity('The radio is taking longer than expected to load the next track.');
+      return;
+    }
     _setTrack(message || (_radioHandoff && _upNext?.title
       ? `📻 Up next: ${_upNext.title}`
       : '🌙 The JukeLoop is between tracks — waiting for the next song'), '');
