@@ -22,7 +22,7 @@ function fixture() {
     state() { context.report = this.report; return vm.runInContext('_radioBatchState("playback", report)', context); } };
 }
 
-test('ready batches show exact remaining totals and require all recipients to be checked and approved', () => {
+test('ready batches require checked wallets, with missing approvals handled during Pay', () => {
   const value = fixture();
   assert.equal(value.state().tone, 'ready');
   assert.equal(value.state().ready, true);
@@ -32,8 +32,9 @@ test('ready batches show exact remaining totals and require all recipients to be
   assert.equal(value.state().checking, true);
   assert.equal(value.state().ready, false);
   value.context._radioRecipientStates.set('reference-1', { paid: false, approved: false });
-  assert.equal(value.state().label, '1 approval needed');
-  assert.match(value.state().reason, /verify their identities/);
+  assert.equal(value.state().label, 'Ready to pay');
+  assert.equal(value.state().ready, true);
+  assert.match(value.state().reason, /one-time approval/);
 });
 
 test('partial payment only offers remaining entries and a completed batch cannot pay again', () => {
@@ -92,11 +93,10 @@ test('technical details and previews start collapsed and category buttons retain
   }
 });
 
-test('periodic rendering preserves expanded recipient review and typed approval identities', () => {
+test('recipient reviews stay expanded without manual identity or approval controls', () => {
   assert.match(source, /recipients\.open = expanded\.has\(category\)/);
-  assert.match(source, /identity\.value = identities\.get\(entry\.workReferenceText\)/);
-  assert.match(source, /input\?\.focus\(\{ preventScroll: true \}\)/);
-  assert.match(source, /input\.setSelectionRange\(\.\.\.selection\)/);
+  assert.doesNotMatch(source, /Verified contributor identity|Approve Recipient|_approveRadioRecipient/);
+  assert.match(source, /wallet enabled during Pay/);
 });
 
 test('unchanged review polling leaves the existing DOM untouched', () => {

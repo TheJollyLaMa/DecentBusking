@@ -265,7 +265,8 @@ test('partial radio settlement resumes only unpaid recipients and preflight fail
     router: { target: allocation.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll', hasRole: async () => true,
       approvedAssets: async () => true, funds: async () => ({ exists: true, active: true }), contributors: async () => ({ approved: true }),
       completedWorkReferences: async key => paid.has(key), fundBalances: async () => 2000000n, payout } };
-  await assert.rejects(settleRadioAllocation({ ...options, router: { ...options.router, contributors: async () => ({ approved: false }) } }), /not approved/);
+  await assert.rejects(settleRadioAllocation({ ...options, router: { ...options.router, contributors: async () => ({ approved: false }),
+    CONTRIBUTOR_ADMIN_ROLE: async () => 'recipient-admin', hasRole: async role => role !== 'recipient-admin' } }), /CONTRIBUTOR_ADMIN_ROLE/);
   await assert.rejects(settleRadioAllocation({ ...options, router: { ...options.router, fundBalances: async () => 0n } }), /insufficient/);
   assert.equal(attempts, 0);
   await assert.rejects(settleRadioAllocation(options), /cancelled/);
@@ -276,4 +277,78 @@ test('partial radio settlement resumes only unpaid recipients and preflight fail
   assert.equal(resumed.skipped, 1);
   assert.equal(paid.size, 2);
   assert.equal(attempts, 3);
+});
+
+test('Pay enables earned wallets once, preserves identities, and safely resumes after rejected approval', async () => {
+  const { finalizeRadioAllocation, settleRadioAllocation } = await import(url);
+  const { id, ZeroHash } = require('../discord-bot/node_modules/ethers');
+  const owner = track(9, 1).wallet;
+  const allocation = finalizeRadioAllocation({
+    report: { week: 'NY-2026-10-12', current: false, tracks: [
+      { ...track(1, 3), trackId: 'a', title: 'A', votes: 9 },
+      { ...track(1, 2), trackId: 'b', title: 'B', votes: 8 },
+      { ...track(2, 1), trackId: 'c', title: 'C', votes: 7 },
+    ] },
+    category: 'top10', budgetUnits: 8000000n, minimumUnits: 10000n,
+    topTenScheduleVersion: 3, fundSlug: 'dbusk-top10', routerAddress: track(3, 1).wallet,
+    assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-19T05:00:00Z'),
+  });
+  const original = JSON.stringify(allocation);
+  const registeredHash = id('existing-other-app-identity');
+  const recipients = new Map([
+    [track(1, 1).wallet, { githubIdHash: ZeroHash, approved: false }],
+    [track(2, 1).wallet, { githubIdHash: registeredHash, approved: false }],
+  ]);
+  const approvals = [];
+  const paid = new Set();
+  const payouts = [];
+  let rejectSecond = true;
+  let insufficient = true;
+  let approvalStatus = 1;
+  const payout = async (...args) => {
+    payouts.push(args);
+    return { hash: `tx-${payouts.length}`, wait: async () => { paid.add(args[4]); return { status: 1 }; } };
+  };
+  payout.staticCall = async (...args) => assert.equal(recipients.get(args[2]).approved, true);
+  const router = {
+    target: allocation.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll',
+    CONTRIBUTOR_ADMIN_ROLE: async () => 'recipient-admin', hasRole: async () => true,
+    approvedAssets: async () => true, funds: async () => ({ exists: true, active: true }),
+    contributors: async wallet => recipients.get(wallet), completedWorkReferences: async key => paid.has(key),
+    fundBalances: async () => insufficient ? 0n : 8000000n, payout,
+    setContributorApproved: async (wallet, hash, approved) => {
+      if (wallet === track(2, 1).wallet && rejectSecond) throw new Error('Approval rejected');
+      approvals.push([wallet, hash, approved]);
+      return { wait: async () => {
+        if (approvalStatus === 1) recipients.set(wallet, { githubIdHash: hash, approved });
+        return { status: approvalStatus };
+      } };
+    },
+  };
+  const options = { allocation, metadataUri: 'ipfs://receipt', metadataHash: id(original),
+    owner, hashReference: id, router,
+    signer: { provider: { getNetwork: async () => ({ chainId: 8453 }) }, getAddress: async () => owner } };
+  await assert.rejects(settleRadioAllocation(options), /insufficient/);
+  assert.equal(approvals.length, 0);
+  insufficient = false;
+  approvalStatus = 0;
+  await assert.rejects(settleRadioAllocation(options), /approval did not confirm/);
+  assert.equal(payouts.length, 0);
+  assert.equal(recipients.get(track(1, 1).wallet).approved, false);
+  approvals.length = 0;
+  approvalStatus = 1;
+  await assert.rejects(settleRadioAllocation(options), /Approval rejected/);
+  assert.equal(approvals.length, 1);
+  assert.equal(payouts.length, 0);
+  rejectSecond = false;
+  assert.equal((await settleRadioAllocation(options)).confirmed.length, 3);
+  assert.deepEqual(approvals, [
+    [track(1, 1).wallet, id(`radio-artist:${track(1, 1).wallet}`), true],
+    [track(2, 1).wallet, registeredHash, true],
+  ]);
+  assert.equal(payouts[0][2], allocation.entries[0].wallet);
+  assert.equal(payouts[0][6], id(`radio-artist:${allocation.entries[0].wallet}`));
+  assert.equal(JSON.stringify(allocation), original);
+  assert.equal((await settleRadioAllocation(options)).skipped, 3);
+  assert.equal(approvals.length, 2);
 });

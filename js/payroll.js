@@ -21,7 +21,7 @@
  */
 
 import { isAdminWallet } from './admin-access.mjs';
-import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261019-confirmed-reports';
+import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261019-wallet-payroll';
 import { previewTopTenSongPayroll } from './top-ten-prizes.mjs';
 import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261017-mercury-release';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
@@ -1327,14 +1327,12 @@ function _radioBatchState(category, report) {
     label = 'Nothing to pay'; reason = 'This receipt has no payable entries. No wallet transaction is needed.';
   } else if (saved && !unpaid.length) {
     tone = 'paid'; label = 'Paid on Base'; reason = 'Every entry in this receipt has been paid. No further payment is needed.';
-  } else if (saved && approvals) {
-    tone = 'blocked'; label = `${approvals} approval${approvals === 1 ? '' : 's'} needed`;
-    reason = 'Open recipients below, verify their identities and approve the missing wallets before paying.';
   } else if (saved && !funded) {
     tone = 'blocked'; label = 'Check fund balance';
     reason = 'The active fund must have enough approved USDC for the unpaid total. Check Treasury & preparation details before funding or retrying.';
   } else if (saved) {
     tone = 'ready'; label = 'Ready to pay'; reason = 'Review recipients and export the backup, then confirm each unpaid entry in your wallet.';
+    if (approvals) reason += ' Pay also enables any new recipient wallets first; confirm the one-time approval transactions in your wallet. No identity entry is needed.';
   }
   return { saved, entries, unpaid, paid, approvals, remainingUnits, receiptMatches, label, reason, tone,
     checking: checked.length !== entries.length,
@@ -1373,9 +1371,6 @@ function _renderRadioReviews() {
   }, (_, value) => typeof value === 'bigint' ? value.toString() : value);
   if (target.dataset.renderKey === renderKey) return;
   const expanded = new Set([...target.querySelectorAll('details[data-payroll-category][open]')].map(node => node.dataset.payrollCategory));
-  const identities = new Map([...target.querySelectorAll('input[data-payroll-identity]')].map(node => [node.dataset.payrollIdentity, node.value]));
-  const focusedIdentity = document.activeElement?.dataset?.payrollIdentity;
-  const selection = focusedIdentity ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   const buttons = new Map(['playback', 'top10'].map(category => [category, document.getElementById(`radio-settle-${category}`)]));
   target.replaceChildren();
   _renderRadioOverview(report);
@@ -1428,7 +1423,7 @@ function _renderRadioReviews() {
     recipients.dataset.payrollCategory = category;
     recipients.open = expanded.has(category);
     const summary = document.createElement('summary');
-    summary.textContent = `Review ${saved.allocation.entries.length} ${category === 'playback' ? 'artist' : 'song'}${saved.allocation.entries.length === 1 ? '' : 's'}${batch.approvals ? ` · ${batch.approvals} need approval` : ''}`;
+    summary.textContent = `Review ${saved.allocation.entries.length} ${category === 'playback' ? 'artist' : 'song'}${saved.allocation.entries.length === 1 ? '' : 's'}`;
     recipients.append(summary); card.append(recipients);
     for (const entry of saved.allocation.entries) {
       const row = document.createElement('div'); row.className = 'radio-payroll-artist';
@@ -1439,28 +1434,12 @@ function _renderRadioReviews() {
       const amount = document.createElement('strong'); amount.className = 'payroll-recipient-amount'; amount.textContent = `${formatUsdcUnits(entry.amountUnits)} USDC`;
       const state = _radioRecipientStates.get(entry.workReferenceText);
       const paymentState = document.createElement('span'); paymentState.className = 'payroll-recipient-status';
-      paymentState.textContent = state?.paid ? 'Paid on Base' : state?.approved ? 'Approved · unpaid' : state ? 'Approval required' : 'Checking Base';
+      paymentState.textContent = state?.paid ? 'Paid on Base' : state?.approved ? 'Ready · unpaid' : state ? 'Unpaid · wallet enabled during Pay' : 'Checking Base';
       name.append(artist, wallet, paymentState);
       row.append(name, amount);
-      if (state && !state.paid && !state.approved) {
-        const approval = document.createElement('div'); approval.className = 'payroll-recipient-approval';
-        const identity = document.createElement('input'); identity.type = 'text'; identity.placeholder = 'Verified contributor identity';
-        identity.dataset.payrollIdentity = entry.workReferenceText;
-        identity.value = identities.get(entry.workReferenceText) || '';
-        identity.setAttribute('aria-label', `Contributor identity for ${entry.wallet}`);
-        const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'payroll-btn payroll-btn-secondary'; approve.textContent = 'Approve Recipient';
-        approve.disabled = _settling;
-        approve.addEventListener('click', () => _approveRadioRecipient(entry.wallet, identity.value));
-        approval.append(identity, approve); row.append(approval);
-      }
       recipients.append(row);
       _appendRadioWorkReference(recipients, entry.workReferenceText, category);
     }
-  }
-  if (focusedIdentity) {
-    const input = [...target.querySelectorAll('input[data-payroll-identity]')].find(node => node.dataset.payrollIdentity === focusedIdentity);
-    input?.focus({ preventScroll: true });
-    if (input && selection) input.setSelectionRange(...selection);
   }
   target.dataset.renderKey = renderKey;
 }
@@ -1505,30 +1484,6 @@ async function _finalizeRadioPayroll() {
   finally { _settling = false; _checkRadioRecipients(); }
 }
 
-async function _approveRadioRecipient(wallet, rawIdentity) {
-  const status = document.getElementById('radio-payroll-status');
-  if (_settling || !isAdminWallet()) return;
-  try {
-    const identity = rawIdentity.trim();
-    _settling = true;
-    const signer = await _getSigner(BASE_CHAIN_ID);
-    const owner = await signer.getAddress();
-    if (owner.toLowerCase() !== _ownerAddress.toLowerCase()) throw new Error('Connect the owner wallet');
-    const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
-    const current = await router.contributors(wallet);
-    if (current.approved ?? current[1]) { _setStatus(status, 'Recipient already approved; no transaction needed.'); return; }
-    if (!identity || identity.length > 100) throw new Error('Enter the verified contributor identity first');
-    const hash = String(current.githubIdHash ?? current[0]);
-    const desired = ethers.id(identity);
-    if (hash !== ethers.ZeroHash && hash.toLowerCase() !== desired.toLowerCase()) throw new Error('This wallet is already registered to a different identity; do not overwrite it');
-    if (!await router.hasRole(await router.CONTRIBUTOR_ADMIN_ROLE(), owner)) throw new Error('CONTRIBUTOR_ADMIN_ROLE is required');
-    _setStatus(status, 'Confirm the recipient approval transaction in your wallet');
-    if ((await (await router.setContributorApproved(wallet, desired, true)).wait())?.status !== 1) throw new Error('Recipient approval did not confirm');
-    _setStatus(status, 'Recipient approved on the shared router.');
-  } catch (error) { _setStatus(status, error.message, true); }
-  finally { _settling = false; _checkRadioRecipients(); }
-}
-
 async function _settleRadioPayroll(category) {
   const status = document.getElementById('radio-payroll-status');
   if (_settling || !isAdminWallet()) return;
@@ -1539,7 +1494,7 @@ async function _settleRadioPayroll(category) {
     validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress,
       assetAddress: _getAssetConfig('USDC').address, funds: _payrollAssetConfig.radioFunds, report });
     if (!report || !radioAllocationMatchesReport(report, saved.allocation)) throw new Error('Frozen receipt does not match the recovered weekly report; manual reconciliation is required');
-    if (!confirm(`Settle reviewed ${category} for ${saved.allocation.week}? Each unpaid recipient requires a Base transaction. Already-paid references are skipped.`)) return;
+    if (!confirm(`Settle reviewed ${category} for ${saved.allocation.week} to the wallets in this frozen receipt? New recipient wallets require a one-time approval transaction before payment. Each unpaid entry then requires a Base payout transaction. Already-paid references are skipped.`)) return;
     _settling = true;
     const signer = await _getSigner(BASE_CHAIN_ID);
     const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);

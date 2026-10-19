@@ -231,6 +231,7 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
   const fund = await router.funds(fundId);
   if (!(fund.exists ?? fund[2]) || !(fund.active ?? fund[1])) throw new Error('Create and activate this fund first');
   const unpaid = [];
+  const recipientsToApprove = new Map();
   let reviewedTotal = 0n;
   const identities = new Set();
   for (const entry of allocation.entries) {
@@ -249,12 +250,26 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
       }
     }
     const recipient = await router.contributors(entry.wallet);
-    if (!(recipient.approved ?? recipient[1])) throw new Error(`Recipient ${entry.wallet} is not approved on the shared router`);
+    if (!(recipient.approved ?? recipient[1])) recipientsToApprove.set(entry.wallet.toLowerCase(), entry.wallet);
     unpaid.push({ ...entry, workReference });
   }
   const total = unpaid.reduce((sum, entry) => sum + BigInt(entry.amountUnits), 0n);
   if (reviewedTotal !== BigInt(allocation.allocatedUnits) || total > reviewedTotal || reviewedTotal > BigInt(allocation.budgetUnits)) throw new Error('Allocation exceeds its reviewed budget or totals do not match');
   if (await router.fundBalances(fundId, allocation.assetAddress) < total) throw new Error('Fund has insufficient USDC for unpaid allocations');
+  if (recipientsToApprove.size) {
+    if (!await router.hasRole(await router.CONTRIBUTOR_ADMIN_ROLE(), owner)) throw new Error('CONTRIBUTOR_ADMIN_ROLE is required to enable payroll recipient wallets');
+    for (const wallet of recipientsToApprove.values()) {
+      const recipient = await router.contributors(wallet);
+      if (recipient.approved ?? recipient[1]) continue;
+      const existingHash = recipient.githubIdHash ?? recipient[0];
+      const identityHash = existingHash && !/^0x0{64}$/i.test(existingHash)
+        ? existingHash : hashReference(`radio-artist:${wallet.toLowerCase()}`);
+      onStep(`Confirm one-time payroll wallet approval for ${wallet}. This enables payment; it does not transfer USDC.`);
+      if ((await (await router.setContributorApproved(wallet, identityHash, true)).wait())?.status !== 1) throw new Error(`Payroll wallet approval did not confirm for ${wallet}`);
+      const updated = await router.contributors(wallet);
+      if (!(updated.approved ?? updated[1])) throw new Error(`Payroll wallet approval is not active for ${wallet}`);
+    }
+  }
   const confirmed = [];
   for (const entry of unpaid) {
     if (await router.completedWorkReferences(entry.workReference)) continue;
