@@ -10,8 +10,29 @@ import { readRawBody } from './alchemy-webhook.js';
 import { fetchMintMetadata } from './mint-sync.js';
 import { buildArtworkUpdateAuthorizationMessage, buildArtworkUpdateMetadata } from '../js/artwork-update.mjs';
 import { buildDevertRemovalMessage } from '../js/devert-campaigns.mjs';
+import { buildRadioCalendar, radioCalendarOccurrences } from '../js/radio-calendar.mjs';
+import { detectSubmissionMedia, mediaFilename, validateCreatorSplits } from '../js/submission-media.mjs';
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
+async function readMediaProbe(response) {
+  if (!response.ok || !response.body) throw new Error('Could not read the IPFS file to detect its format; try again');
+  const reader = response.body.getReader();
+  const bytes = new Uint8Array(65536);
+  let length = 0;
+  try {
+    while (length < bytes.length) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      const count = Math.min(chunk.value.length, bytes.length - length);
+      bytes.set(chunk.value.subarray(0, count), length);
+      length += count;
+    }
+  } finally {
+    await reader.cancel();
+  }
+  return bytes.subarray(0, length);
+}
+
 const SIGNED_UPLOAD_OVERHEAD_BYTES = 64 * 1024;
 const MAX_SIGNATURE_AGE_MS = 5 * 60 * 1000;
 const MAX_UPLOAD_SIGNATURE_AGE_MS = 15 * 60 * 1000;
@@ -224,6 +245,7 @@ export function createWorkerRequestHandler({
   getPaymentLedger,
   getFunds,
   getEarnings,
+  getDjukeTopEarners,
   ensResolver,
   reconcilePayment,
   onRadioVote,
@@ -317,6 +339,27 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, result, corsOrigin);
         return;
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/ipfs/media-type') {
+        const cid = normalizeMediaCid(requestUrl.searchParams.get('cid'));
+        const upstream = await fetchImpl(`https://gateway.pinata.cloud/ipfs/${cid}`, {
+          headers: { Range: 'bytes=0-65535' }, signal: AbortSignal.timeout(15000),
+        });
+        let bytes = await readMediaProbe(upstream);
+        const text = new TextDecoder('latin1').decode(bytes);
+        if (text.slice(4, 8) === 'ftyp' && !text.includes('vide') && !text.includes('soun')) {
+          const tailResponse = await fetchImpl(`https://gateway.pinata.cloud/ipfs/${cid}`, {
+            headers: { Range: 'bytes=-65536' }, signal: AbortSignal.timeout(15000),
+          });
+          const tail = await readMediaProbe(tailResponse);
+          const combined = new Uint8Array(bytes.length + tail.length);
+          combined.set(bytes);
+          combined.set(tail, bytes.length);
+          bytes = combined;
+        }
+        const mediaType = detectSubmissionMedia(bytes, { type: upstream.headers.get('content-type')?.split(';')[0] });
+        sendJson(response, 200, { cid, mediaType, filename: mediaFilename(mediaType) }, '*');
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/ipfs/artwork-cid') {
         const value = requestUrl.searchParams.get('cid') || '';
         if (!value || value.length > 160) throw new Error('Enter a valid image file CID');
@@ -386,6 +429,24 @@ export function createWorkerRequestHandler({
         }
         return;
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/radio/calendar.ics') {
+        if (!getRadioSchedule) {
+          sendJson(response, 404, { error: 'Radio schedule is not configured' }, '*');
+          return;
+        }
+        const schedule = await getRadioSchedule();
+        if (schedule.ready === false) {
+          sendJson(response, 503, { error: 'Radio calendar is temporarily unavailable; retain your existing subscription' }, '*');
+          return;
+        }
+        const generatedAt = now();
+        const calendar = buildRadioCalendar(radioCalendarOccurrences(schedule, { now: generatedAt }), { now: generatedAt });
+        response.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8',
+          'Content-Disposition': 'inline; filename="decentbusking-radio.ics"',
+          'Cache-Control': 'public, max-age=300', 'Access-Control-Allow-Origin': '*' });
+        response.end(calendar);
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/radio/schedule') {
         if (!getRadioSchedule) {
           sendJson(response, 404, { error: 'Radio schedule is not configured' }, '*');
@@ -412,6 +473,18 @@ export function createWorkerRequestHandler({
         consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
         await saveRadioSchedule({ events, weeklySchedule });
         sendJson(response, 200, await getRadioSchedule(), corsOrigin);
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/djuke/earners') {
+        if (!getDjukeTopEarners) {
+          sendJson(response, 503, { error: 'DJuke earnings index is not configured' }, '*');
+          return;
+        }
+        try {
+          sendJson(response, 200, await getDjukeTopEarners(), '*', 'public, max-age=30');
+        } catch (error) {
+          sendJson(response, 503, { error: error.message }, '*');
+        }
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/djuke') {
@@ -818,6 +891,7 @@ export function createWorkerRequestHandler({
         if ((tipWallet && !/^0x[0-9a-fA-F]{40}$/.test(tipWallet)) ||
           !Number.isSafeInteger(parentTokenId) || parentTokenId < 0 || typeof isDevertAd !== 'boolean') throw new Error('Invalid tip wallet or parent token');
         const ipfsCid = normalizeMediaCid(body.ipfsCid);
+        const creatorSplits = validateCreatorSplits(body.creatorSplits, recipient);
         if (artworkCid) normalizeMediaCid(artworkCid);
         const recovered = verifyMessage(buildSubmissionAuthorizationMessage({ ...body, origin }), signature).toLowerCase();
         if (recovered !== address.toLowerCase()) throw new Error('Submission signature does not match the artist wallet');
@@ -826,7 +900,7 @@ export function createWorkerRequestHandler({
         consumedSignatures.set(signature, now() + MAX_SIGNATURE_AGE_MS);
         try {
           const track = await onMediaSubmission({ address, title: title.trim(), artist: artist.trim(), ipfsCid,
-            mediaType, filename, recipient, artworkCid: artworkCid ? normalizeMediaCid(artworkCid) : '', tipWallet, parentTokenId, isDevertAd });
+            mediaType, filename, recipient, artworkCid: artworkCid ? normalizeMediaCid(artworkCid) : '', tipWallet, parentTokenId, isDevertAd, creatorSplits });
           sendJson(response, 200, { trackId: track.trackId, status: track.mintStatus }, corsOrigin);
         } catch (error) {
           consumedSignatures.delete(signature);

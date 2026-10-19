@@ -2,6 +2,32 @@
 
 Start here: [open DecentBusking](https://thejollylama.github.io/DecentBusking/). You can listen and explore without connecting a wallet. Take the listener route first; submit a song only when you are ready to share it publicly.
 
+## Follow The White Rabbit
+
+Look for **Follow the white rabbit** above the radio on the right. The large
+**☿** Mercury symbol follows the rabbit with a small flying-money icon and
+different musical accessories at every stop. Mercury is a visual companion,
+not a narrator. A white rabbit peeks out of little rabbit holes beside each
+stop, with factual text explaining the controls. The tour opens the actual
+briefcase, Top 10, DVert, DJuke, archive, and both ankh menus, explaining what each
+is for without voting, submitting, connecting a wallet, paying, or starting audio.
+
+Choose **Follow**, **Back**, or **Leave tour** at your own pace. Arrow keys move
+between stops; Escape exits, and Tab stays within the tour controls. On exit,
+previously open drawers and any visible briefcase draft are restored. Finish any
+pending submission, close other dialogs, and return from VertLoop to main radio
+before starting. Reduced-motion settings keep the rabbit and Mercury still.
+The card count sits beside **Follow the White Rabbit**. A centered hole in the
+card is the rabbit's home: it dives down, emerges beside the highlighted feature
+with a short hop and sparkles, and returns home before the next card appears.
+Navigation pauses briefly during the trip; **Leave tour** and Escape remain
+available. Reduced motion skips the trip and decorative effects.
+After completing every stop, the landing-page button is hidden in that browser.
+Leaving early does not count as completion. Click **DBusker** to open **About**
+and use the identical **Follow the white rabbit** button to replay the tour.
+Music notes and little sound-wave rings accompany Mercury's arrivals. These are
+visual effects, not extra audio over the radio.
+
 ## Three Names, One Community
 
 | Name | What you are looking at |
@@ -38,7 +64,7 @@ Votes influence the radio rotation. New Top 10 prize drafts use weekly net votes
 
 Select a music NFT in the **3D music space / archive**. Inspect its song details and artwork. Click **Preview** for a free 30-second taste or **Listen** to play the whole song. Selecting an archive recording is different from listening to the live radio: use **Radio** in the bottom bar to return to JukeLoop.
 
-Click **Archive** near the upper-right of the music space for the song list, or use the **Artist** selector below the header to focus on one artist. Wait for metadata to load if the archive is initially empty.
+Click **Archive** near the upper-right of the music space for the song list, or use **Search Artist or Song** below the header. Wait for metadata to load if the archive is initially empty.
 
 The **hat** opens the tip form. A tip is a real wallet payment, not a free interaction. Check the destination, token, amount, network, and wallet fees before confirming. You do not need to send a tip to keep exploring.
 
@@ -54,11 +80,11 @@ Choose one route. Do not submit the same song twice just because owner review ta
 
 ### Website Route
 
-1. Click the **guitar case** to open **Submit Your Busk**.
+1. Click the **briefcase** to open **Bring your sound**.
 2. Click the little **i** beside the heading and read **Your Music & Public Uploads** before choosing a file.
-3. Connect your artist wallet using the **wallet control at the top-right**, then return to the guitar-case form. Artist actions use Base.
-4. Enter the **Track Title** and **Artist Name**. Choose **Upload file** for audio or MP4 up to 50 MB, or **IPFS CID** for an already-pinned file. A CID is not a folder path or a gateway URL; select the correct media format in CID mode.
-5. Artwork is optional. Check **Artist Wallet**: that is where the approved NFT will go. The **Tip Wallet** can be different; check it too. Referencing another token does not grant permission to use someone else's song.
+3. Connect your artist wallet using the **wallet control at the top-right**, then return to the briefcase. Artist actions use Base.
+4. Enter the **Title** and **Artist / creator**. Drop supported audio or MP4 up to 50 MB, or choose **Already on IPFS** for an already-pinned file. A CID is not a folder path or a gateway URL; media format is detected automatically.
+5. Artwork is optional and accepts an image file or IPFS CID independently of the media source. Check the artist wallet: that is where the approved NFT will go. Collaborator percentages apply only to DJuke creator earnings, not joint NFT ownership, royalties, weekly prizes, or tips. The alternate tip wallet is under the extra options. Referencing another token does not grant permission to use someone else's song. Mark DVert submissions as adverts; airtime is booked separately through DVert.
 6. Click **Submit for Approval**. Wallet signatures authorize the upload/submission; read each prompt. This is not the owner's mint transaction.
 7. Look for **Queued for owner approval** and the IPFS CID. Keep the CID and wait for review rather than repeatedly submitting.
 

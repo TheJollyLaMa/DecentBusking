@@ -26,5 +26,5 @@ export async function ensureCheckpointGroups({ pinataJwt, fetchImpl = fetch,
     return result.data.id;
   }
   return { groupId: await ensure('DecentBusking - Live checkpoints'),
-    archiveGroupId: await ensure('DecentBusking - Weekly archives'), retainSnapshots: 5 };
+    archiveGroupId: await ensure('DecentBusking - Weekly archives'), retentionDays: 7 };
 }

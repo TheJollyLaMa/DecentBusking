@@ -50,7 +50,7 @@ import { nftCatalogPage } from '../js/nft-loader.js';
 import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
 import { createDevertQueueReader, createDevertQueueRuntime, createDevertQueueCatalogSync, combinePaidQueues } from './devert-queue.js';
-import { DEVERT_QUEUE_ABI } from '../js/devert-queue.mjs';
+import { devertQueueAbi } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
 import { startDevertLoopWorker } from './devert-loop.js';
@@ -622,7 +622,12 @@ async function main() {
   const artworkUpdateStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-artwork-updates.json', tags: { app: 'decentbusking', kind: 'artwork-updates', schema: '1' },
-    serialize: value => value, deserialize: value => Array.isArray(value) ? value : [] }) : null;
+    serialize: value => ({ schemaVersion: 1, requests: value }),
+    deserialize: value => {
+      if (Array.isArray(value)) return value;
+      if (value?.schemaVersion === 1 && Array.isArray(value.requests)) return value.requests;
+      throw new Error('Invalid artwork update checkpoint');
+    } }) : null;
   const artworkUpdateQueue = createArtworkUpdateQueue({
     restore: artworkUpdateStore ? artworkUpdateStore.restore : async () => [],
     save: artworkUpdateStore ? artworkUpdateStore.save : async () => {},
@@ -917,12 +922,14 @@ async function main() {
   const fundLedger = createFundLedger({
     provider: paymentProvider,
     router: payflowRouter,
-    config: { ...payrollAssets, devertQueueContractAddress: process.env.DEVERT_QUEUE_CONTRACT_ADDRESS },
+    config: { ...payrollAssets, devertQueueContractAddress: process.env.DEVERT_QUEUE_CONTRACT_ADDRESS,
+      devertQueueVersion: Number(process.env.DEVERT_QUEUE_VERSION || 1) },
     getWeeklyPayflow: () => payflow.getState(),
     readDevertState: () => readDevertState?.(),
     readDjukeState: () => readDjukeState?.(),
     restore: fundStore ? fundStore.restore : undefined,
     save: fundStore ? fundStore.save : undefined,
+    schedule: fundStore ? fundStore.schedule : undefined,
     // The settlement router has no events before its deployment block, so never scan from genesis.
     startBlock: Math.max(ROUTER_START_BLOCK, Number(process.env.PAYROLL_START_BLOCK || 0)),
     chunkSize: Number(process.env.FUND_SCAN_CHUNK_SIZE || 10000),
@@ -954,6 +961,7 @@ async function main() {
     provider: getRpcRouter().provider('logs', 'earnings-index'),
     restore: earningsStore ? earningsStore.restore : async () => null,
     save: earningsStore ? earningsStore.save : async () => '',
+    schedule: earningsStore ? earningsStore.schedule : undefined,
     startBlock: process.env.ROUTER_START_BLOCK ? Number(process.env.ROUTER_START_BLOCK) : undefined,
     chunkSize: Number(process.env.EARNINGS_SCAN_CHUNK_SIZE || 2000),
   });
@@ -1029,16 +1037,17 @@ async function main() {
   let paidAdRuntime;
   let syncPaidAdRemovals;
   const paidAdAddress = process.env.DEVERT_QUEUE_CONTRACT_ADDRESS;
+  const paidAdVersion = Number(process.env.DEVERT_QUEUE_VERSION || 1);
   if (paidAdAddress) {
     let approvedAdCampaignIds = [];
     const provider = getRpcRouter().provider('critical', 'devert-paid-queue');
     const canFulfill = !!(readDevertState && devertSchedulerPrivateKey && checkpointMirror && config.pinataJwt && devertRemovals);
-    readDevertQueue = createDevertQueueReader({ provider, contractAddress: paidAdAddress,
+    readDevertQueue = createDevertQueueReader({ provider, contractAddress: paidAdAddress, version: paidAdVersion,
       paymentsEnabled: canFulfill && process.env.DEVERT_QUEUE_PAYMENTS_ENABLED === 'true',
       getApprovedCampaignIds: () => approvedAdCampaignIds, cacheMs: 5000 });
     if (canFulfill) {
       const worker = new Wallet(devertSchedulerPrivateKey, provider);
-      const queueContract = new Contract(paidAdAddress, DEVERT_QUEUE_ABI, worker);
+      const queueContract = new Contract(paidAdAddress, devertQueueAbi(paidAdVersion), worker);
       if ((await queueContract.campaigns()).toLowerCase() !== process.env.DEVERT_CONTRACT_ADDRESS?.toLowerCase()) {
         throw new Error('Paid advert queue uses a different campaign contract');
       }
@@ -1057,11 +1066,14 @@ async function main() {
         approvedAdCampaignIds = await syncPaidAdRemovals();
         return readConfirmedQueue();
       };
+      setInterval(() => syncPaidAdRemovals().catch(error => console.warn('[devert-queue] Catalog reconciliation pending:', error.message)), 15000).unref();
       const store = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
         uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
-        name: 'decentbusking-devert-paid-journal.json',
+        name: paidAdVersion === 1 ? 'decentbusking-devert-paid-journal.json'
+          : `decentbusking-devert-paid-${paidAdAddress.toLowerCase()}-journal.json`,
         requireLocalMirror: true,
-        tags: { app: 'decentbusking', kind: 'devert-paid-journal', schema: '1' },
+        tags: { app: 'decentbusking', kind: paidAdVersion === 1 ? 'devert-paid-journal'
+          : `devert-paid-${paidAdAddress.toLowerCase()}`, schema: '1' },
         serialize: value => value, deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
       const paidAdRuntimeBase = createDevertQueueRuntime({ readState: readConfirmedQueue, store, contract: queueContract,
         isCampaignRemoved: campaignId => devertRemovals.isRemoved(campaignId),
@@ -1070,12 +1082,11 @@ async function main() {
         }) });
       paidAdRuntime = {
         ...paidAdRuntimeBase,
-        async nextPaid() {
+        async nextPaid(options) {
           approvedAdCampaignIds = await syncPaidAdRemovals();
-          return paidAdRuntimeBase.nextPaid();
+          return paidAdRuntimeBase.nextPaid(options);
         },
       };
-      setInterval(() => syncPaidAdRemovals().catch(error => console.warn('[devert-queue] Catalog reconciliation pending:', error.message)), 15000).unref();
     } else console.warn('[devert-queue] Read-only: scheduler, durable mirror, Pinata and campaign removal state are required.');
   }
   _radioPaidQueues = (_djukeRuntime || paidAdRuntime)
@@ -1182,6 +1193,7 @@ async function main() {
         tipWallet: track.tipWallet || track.mintRecipient,
         parentTokenId: track.parentTokenId || 0,
         isDevertAd: track.isDevertAd === true,
+        ...(track.creatorSplits ? { creatorSplits: track.creatorSplits } : {}),
         requestedAt: track.mintRequestedAt,
         requestType: 'mint',
       }));
@@ -1191,9 +1203,13 @@ async function main() {
     getRadioState: async () => {
       const jukeLoopSession = getActiveJukeLoopSession();
       const mainRadioAdCountdown = jukeLoopSession ? await jukeLoopSession.getMainRadioAdCountdown() : null;
+      const nowPlaying = getJukeLoopNowPlaying();
+      const adVotes = nowPlaying?.isDevert
+        ? _devertPlaybackRuntime?.getMainRadioAdVoteSummary(nowPlaying.playId) ?? null : null;
       return {
         ...buildRadioState({
-          nowPlaying: getJukeLoopNowPlaying(),
+          nowPlaying,
+          adVotes,
           upNext: getJukeLoopUpNext(),
           playlist: getPlaylist(),
           mainRadioAdCountdown,
@@ -1234,6 +1250,7 @@ async function main() {
       return { ...state, entries: state.entries.map(entry => (entry.songId && titles.get(entry.songId)
         ? { ...entry, trackTitle: titles.get(entry.songId) } : entry)) };
     },
+    getDjukeTopEarners: () => earningsLedger.getDjukeTopEarners(),
     ensResolver: createEnsResolver(),
     getDevertAds: async ({ address }) => {
       if (!playlistReady) throw new Error('Advert library is restoring; retry shortly');
@@ -1387,7 +1404,7 @@ async function main() {
     restoredPlaylist = recovery.playlist;
     if (recovery.recovered) console.log(`[playlist-recovery] Restored approved 2026-10-15 22:33:36 baseline; checkpoint ${recovery.uri}.`);
     loadPlaylist(restoredPlaylist);
-    configureRemotePersistence(stateStore.save);
+    configureRemotePersistence(stateStore.save, { schedule: stateStore.schedule, flush: stateStore.flush });
     const payrollRecoveryCids = restoredPlaylist.some(track => track.playlistBaselineCid)
       ? [] : (process.env.JUKELOOP_PAYROLL_RECOVERY_CID || PAYROLL_RECOVERY_CIDS.join(','))
         .split(',').map(cid => cid.trim()).filter(Boolean);
@@ -1589,9 +1606,16 @@ async function main() {
 
   const shutdown = async (signal) => {
     console.log(`[jukebox-bot] ${signal} received; flushing IPFS state checkpoint.`);
-    await Promise.all([waitForRemotePersistence(), Promise.race([flushRpcUsage(), new Promise(resolve => setTimeout(resolve, 5000))])]);
+    let exitCode = 0;
+    try {
+      await Promise.all([waitForRemotePersistence(), fundStore?.flush(), earningsStore?.flush(),
+        Promise.race([flushRpcUsage(), new Promise(resolve => setTimeout(resolve, 5000))])]);
+    } catch (error) {
+      exitCode = 1;
+      console.error('[jukebox-bot] Shutdown checkpoint failed:', error.message);
+    }
     client.destroy();
-    process.exit(0);
+    process.exit(exitCode);
   };
   process.once('SIGTERM', () => shutdown('SIGTERM'));
   process.once('SIGINT', () => shutdown('SIGINT'));

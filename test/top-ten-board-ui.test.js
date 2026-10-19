@@ -38,9 +38,12 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
     getBoundingClientRect() { return { top: 0, bottom: 60, left: 0, width: 400, height: 60 }; }
     focus() { document.activeElement = this; }
+    showModal() { this.open = true; }
+    close() { this.open = false; this.dispatchEvent(new Event('close')); }
     scrollIntoView() { this.scrolled = true; }
   }
-  const ids = Object.fromEntries(['top-ten-tab', 'top-ten-panel', 'top-ten-content', 'top-ten-status', 'top-ten-week', 'top-ten-panel-close']
+  const ids = Object.fromEntries(['top-ten-tab', 'top-ten-panel', 'top-ten-content', 'top-ten-status', 'top-ten-week', 'top-ten-panel-close',
+    'top-ten-info', 'top-ten-instructions', 'top-ten-instructions-close']
     .map(id => [id, new Node()]));
   const panel = ids['top-ten-panel'];
   const heading = new Node();
@@ -93,6 +96,17 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
   ids['top-ten-tab'].dispatchEvent(new Event('click'));
   await settle();
   assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'true');
+  ids['top-ten-info'].dispatchEvent(new Event('click'));
+  assert.equal(ids['top-ten-instructions'].open, true);
+  const modalEscape = new Event('keydown', { cancelable: true }); modalEscape.key = 'Escape';
+  ids['top-ten-instructions'].dispatchEvent(modalEscape);
+  assert.equal(modalEscape.defaultPrevented, true);
+  assert.equal(ids['top-ten-instructions'].open, false);
+  assert.equal(doc.activeElement, ids['top-ten-info']);
+  assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'true');
+  ids['top-ten-info'].dispatchEvent(new Event('click'));
+  ids['top-ten-instructions-close'].dispatchEvent(new Event('click'));
+  assert.equal(ids['top-ten-instructions'].open, false);
   const escape = new Event('keydown'); escape.key = 'Escape'; doc.dispatchEvent(escape);
   assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'false', 'Escape minimizes during Hype');
   ids['top-ten-tab'].dispatchEvent(new Event('click'));
@@ -122,6 +136,39 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
   radio = { serverTime: now, activeShow: { id: 'normal-rotation' } };
   publish();
   assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'true', 'preserve a panel the listener had already opened');
+  radio.nowPlaying = { trackId: 'devert:2', title: 'Live Advert', isDevert: true, adVotes: { up: 3, down: 1, net: 2 } };
+  publish();
+  const advert = panel.querySelector('.is-live-advert');
+  assert.ok(advert);
+  assert.equal(advert.querySelector('.top-ten-live-badge').textContent, 'ADVERT · LIVE NOW');
+  assert.equal(advert.querySelector('.top-ten-net-votes').textContent, '+2');
+  assert.equal(advert.querySelector('.top-ten-playlist-add'), null);
+  radio.nowPlaying.adVotes = { up: 3, down: 2, net: 1 };
+  doc.dispatchEvent(new CustomEvent('dbusk-radio-vote-recorded'));
+  await settle();
+  assert.equal(panel.querySelector('.is-live-advert').querySelector('.top-ten-net-votes').textContent, '+1');
+  radio.nowPlaying = { trackId: 'b', title: 'B' };
+  publish();
+  assert.equal(panel.querySelector('.is-live-advert'), null, 'advert row disappears immediately on song handoff');
+  for (const vote of [1, -1]) {
+    const click = new Event('click');
+    Object.defineProperty(click, 'target', { value: { closest: selector => selector === '[data-radio-vote]' ? {} : null } });
+    doc.dispatchEvent(click);
+    assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'true', 'voting does not fold the ordinary weekly chart');
+    tracks[1].votes += vote;
+    doc.dispatchEvent(new CustomEvent('dbusk-radio-vote-recorded', { detail: { playId: 'play-b', vote } }));
+    await settle();
+    const song = panel.querySelectorAll('.top-ten-song').find(node => node.dataset.trackId === 'b');
+    assert.equal(song.querySelector('.top-ten-net-votes').textContent, `+${tracks[1].votes}`, 'confirmed votes immediately refresh the chart');
+  }
+  doc.dispatchEvent(new Event('click'));
+  assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'false', 'unrelated outside clicks still close the ordinary chart');
+  tracks[1].votes++;
+  doc.dispatchEvent(new CustomEvent('dbusk-radio-vote-recorded'));
+  await settle();
+  assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'false', 'a vote confirmation does not reopen a closed panel');
+  ids['top-ten-tab'].dispatchEvent(new Event('click'));
+  await settle();
   radio = { serverTime: now, activeShow: { id: 'friday-top10-hype' }, topTenHype: { ...hype, endAt: new Date(now + 2000).toISOString() } };
   publish();
   const deadline = [...timers.values()].find(timer => timer.delay === 2000);

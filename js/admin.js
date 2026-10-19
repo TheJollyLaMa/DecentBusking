@@ -9,11 +9,11 @@
 import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolveBatchMintArtwork, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261011-batch-artwork-default';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { reportMintCompletion } from './mint-reconciliation.js';
-import { addNFTToSpace } from './space.js?v=20261016-artwork-backoff';
+import { addNFTToSpace } from './space.js?v=20261019-fund-tour';
 import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artwork-update.mjs';
 import { isAdminWallet } from './admin-access.mjs';
-import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261016-schedule-cancel';
-import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261016-schedule-cancel';
+import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261017-mercury-release';
+import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261017-mercury-release';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 
 const ROLE_GRANT_ABI = [
@@ -562,6 +562,7 @@ function _setRadioScheduleStatus(message, isError = false) {
           <span>${track.isDevertAd === true ? 'Ad' : 'Song'} · ${track.mediaType === 'video/mp4' ? 'Video' : 'Audio'}</span>
           <span>by ${_esc(track.uploader)} · ${_esc(track.requestedAt ? new Date(track.requestedAt).toLocaleString() : '')}</span>
           <span>${_esc(track.recipient)}</span>
+          ${track.creatorSplits ? `<span>DJuke creator shares: ${track.creatorSplits.map(entry => `${_esc(entry.wallet)} · ${_esc(entry.shareBps / 100)}%`).join(' / ')}</span>` : ''}
           <a href="${_esc(_gatewayUrl(track.ipfsCid))}" target="_blank" rel="noopener noreferrer">Open ${track.mediaType === 'video/mp4' ? 'video' : 'audio'}</a>
           ${batchMintEnabled ? '<span class="admin-artwork-status" role="status">Queued artwork will be used; requests without artwork will mint without an image.</span>' : `
             <label class="admin-artwork-label">${track.artworkCid ? 'Replace default artwork (up to 10 MB)' : 'Choose artwork (up to 10 MB)'}
@@ -687,6 +688,7 @@ function _setRadioScheduleStatus(message, isError = false) {
       ...(track.mediaType ? { mediaType: track.mediaType } : {}),
       ...(track.mediaType === 'video/mp4' ? { videoUrl: `ipfs://${track.ipfsCid}` } : {}),
       ...(track.isDevertAd === true ? { isDevertAd: true } : {}),
+      ...(track.creatorSplits ? { creatorSplits: track.creatorSplits } : {}),
       ...(image ? { image } : {}),
       artist: track.recipient,
       creator: track.recipient,

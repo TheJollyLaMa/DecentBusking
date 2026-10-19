@@ -250,7 +250,7 @@ test('radio sync renders the shared main-radio countdown in the footer and broad
   });
   vm.runInContext(`${source}\ndocument.readyState = 'complete';\ndocument.addEventListener('dbusk-radio-state', (event) => states.push(event.detail));\ninitRadioSync();`, context);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(element('radio-ad-countdown').textContent, 'Main radio ad: Next advert after 3 more songs (current song not counted)');
+  assert.equal(element('radio-ad-countdown').textContent, 'next ad after 3 more songs');
   assert.equal(states.at(-1).mainRadioAdCountdown.remainingSongs, 3);
 });
 
@@ -274,6 +274,22 @@ test('radio sync uses a friendly worker-gas message instead of surfacing raw bal
     'Ad reporting paused – worker gas low');
   assert.equal(vm.runInContext(`formatStatus({ status: 'unavailable', reason: 'something else' })`, context),
     'Main radio ad: unavailable (something else)');
+});
+
+test('compact footer countdown distinguishes this song, next song and longer waits', () => {
+  const context = vm.createContext({ console });
+  vm.runInContext(radioSyncSource(), context);
+  for (const [remainingSongs, includesCurrentSong, expected] of [
+    [0, false, 'next ad after this song'], [1, false, 'next ad after next song'],
+    [6, false, 'next ad after 6 more songs'], [1, true, 'next ad after this song'],
+    [2, true, 'next ad after next song'], [7, true, 'next ad after 6 more songs'],
+  ]) {
+    const actual = vm.runInContext(`formatMainRadioAdCountdown({status:'countdown', remainingSongs:${remainingSongs},
+      includesCurrentSong:${includesCurrentSong}}, {compact:true})`, context);
+    assert.equal(actual, expected);
+  }
+  assert.equal(vm.runInContext(`formatMainRadioAdCountdown({status:'up_next'}, {compact:true})`, context), 'next ad after this song');
+  assert.equal(vm.runInContext(`formatMainRadioAdCountdown({status:'playing'}, {compact:true})`, context), 'ad playing now');
 });
 
 test('radio sponsor tags format DJuke and DeVert labels with short addresses', () => {
@@ -641,6 +657,109 @@ test('site votes post only the current play and anonymous browser ID, with no wa
   assert.equal(result.vote, 1);
   await assert.rejects(context.sendRadioVote({ radioUrl: 'https://worker.example/api/radio',
     fetchImpl: async () => new Response(JSON.stringify({ error: 'This play has ended' }), { status: 400 }) }), /ended/);
+});
+
+test('confirmed radio votes notify the chart, but failed votes do not', async () => {
+  const events = [];
+  const context = vm.createContext({ AbortSignal, console, CustomEvent,
+    document: { dispatchEvent: event => events.push(event) },
+    localStorage: { getItem: () => 'anonymous-browser-123', setItem() {} },
+    window: { DecentConfig: { radioUrl: 'https://worker.example/api/radio' } },
+  });
+  vm.runInContext(radioSyncSource(), context);
+  vm.runInContext(`_mode = 'radio'; _radio = { playId: 'play-1' };
+    _anonymousListenerId = () => 'anonymous-browser-123';
+    sendRadioVote = async ({playId, vote}) => ({playId, vote});
+    _renderVoting = () => {};`, context);
+  await vm.runInContext('_castRadioVote(1)', context);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, 'dbusk-radio-vote-recorded');
+  assert.equal(events[0].detail.vote, 1);
+  vm.runInContext(`_radio = { playId: 'play-2' }; sendRadioVote = async () => { throw new Error('offline'); };`, context);
+  await vm.runInContext('_castRadioVote(-1)', context);
+  assert.equal(events.length, 1);
+});
+
+test('footer net votes refresh from weekly totals, handle errors and distinguish advert plays', async () => {
+  const counter = { textContent: '', setAttribute(name, value) { this[name] = value; } };
+  let votes = 3;
+  let fail = false;
+  let finish;
+  const context = vm.createContext({ URL, AbortSignal, console: { warn() {} }, counter,
+    window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example' } },
+    fetch: async url => {
+      assert.equal(url, 'https://worker.example/api/radio/history?weeks=1&calendar=new-york');
+      if (fail) throw new Error('offline');
+      return { ok: true, json: async () => ({ weeks: [{ current: true, tracks: [{ trackId: 'song', votes }] }] }) };
+    },
+  });
+  vm.runInContext(`${radioSyncSource()}\n_voteNetEl = counter; _mode = 'radio'; _radioReachable = true;
+    _radio = { playId: 'play-1', trackId: 'song' };`, context);
+  await vm.runInContext('_refreshVoteNet()', context);
+  assert.equal(counter.textContent, '+3');
+  assert.match(counter['aria-label'], /3 net votes this week/);
+  votes = -2;
+  await vm.runInContext('_refreshVoteNet()', context);
+  assert.equal(counter.textContent, '-2');
+  votes = 0;
+  await vm.runInContext('_refreshVoteNet()', context);
+  assert.equal(counter.textContent, '0');
+  fail = true;
+  await vm.runInContext('_refreshVoteNet()', context);
+  assert.equal(counter.textContent, '—', 'failed refresh does not present stale totals as live');
+  context.fetch = () => new Promise(resolve => { finish = resolve; });
+  const pending = vm.runInContext('_refreshVoteNet()', context);
+  vm.runInContext("_radio = { playId: 'ad-1', isDevert: true, adVotes: { up: 4, down: 1, net: 3 } };", context);
+  await vm.runInContext('_refreshVoteNet()', context);
+  finish({ ok: true, json: async () => ({ weeks: [{ current: true, tracks: [{ trackId: 'song', votes: 99 }] }] }) });
+  await pending;
+  assert.equal(counter.textContent, '+3', 'late song response cannot overwrite advert votes');
+  assert.match(counter['aria-label'], /this advert play/);
+  vm.runInContext("_mode = 'archive'; _renderVoting();", context);
+  assert.equal(counter.textContent, '—');
+});
+
+test('vote counter animates real changes only, with notes up, a hole down and reduced motion support', () => {
+  const animations = [];
+  const particles = [];
+  let reduced = false;
+  const number = { textContent: '', animate: (...args) => animations.push(args) };
+  const effects = { ownerDocument: { createElement: () => ({ style: { setProperty() {} } }) },
+    replaceChildren() { particles.length = 0; }, appendChild: node => particles.push(node) };
+  const counter = { dataset: {}, querySelector: selector => selector === '[data-vote-number]' ? number : effects };
+  const context = vm.createContext({ counter, window: { matchMedia: () => ({ matches: reduced }) } });
+  vm.runInContext(`${radioSyncSource()}\n_voteNetEl = counter; _renderVoteNetValue(2, 'play-1');`, context);
+  assert.equal(number.textContent, '+2');
+  assert.equal(animations.length, 0, 'initial total does not pretend to be a vote');
+  vm.runInContext("_renderVoteNetValue(3, 'play-1')", context);
+  assert.equal(counter.dataset.trend, 'up');
+  assert.equal(particles.length, 4);
+  assert.equal(animations.length, 1);
+  vm.runInContext("_renderVoteNetValue(3, 'play-1')", context);
+  assert.equal(animations.length, 1, 'unchanged polls do not replay the celebration');
+  vm.runInContext("_renderVoteNetValue(1, 'play-1')", context);
+  assert.equal(counter.dataset.trend, 'down');
+  assert.equal(particles.length, 1);
+  assert.equal(particles[0].textContent, '🕳️');
+  assert.equal(animations.length, 2);
+  vm.runInContext("_renderVoteNetValue(20, 'play-2')", context);
+  assert.equal(animations.length, 2, 'track changes are not vote gains');
+  reduced = true;
+  vm.runInContext("_renderVoteNetValue(21, 'play-2')", context);
+  assert.equal(number.textContent, '+21');
+  assert.equal(animations.length, 2);
+  assert.equal(particles.length, 0);
+});
+
+test('confirmed footer votes refresh the server total rather than guessing a local increment', async () => {
+  const context = vm.createContext({ AbortSignal, console, CustomEvent,
+    document: { dispatchEvent() {} }, localStorage: { setItem() {} } });
+  vm.runInContext(`${radioSyncSource()}\n_mode = 'radio'; _radio = { playId: 'song-play' };
+    _anonymousListenerId = () => 'listener'; _radioUrl = () => 'https://worker.example/api/radio';
+    sendRadioVote = async ({playId, vote}) => ({playId, vote});
+    globalThis.refreshes = 0; _refreshVoteNet = async () => { refreshes++; };`, context);
+  await vm.runInContext('_castRadioVote(-1)', context);
+  assert.equal(context.refreshes, 1);
 });
 
 test('DeVert main-radio ads allow live-program votes while non-radio previews remain disabled', () => {

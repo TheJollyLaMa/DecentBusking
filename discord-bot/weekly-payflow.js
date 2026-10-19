@@ -142,13 +142,14 @@ export function createWeeklyPayflow({ router, config, getReports, upload, restor
       const budget = available * BigInt(shareBps) / 10000n;
       const preview = category === 'playback' ? previewPlaybackPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits })
         : previewTopTenSongPayroll({ tracks: current?.tracks || [], budgetUnits: budget, minimumUnits });
-      const average = preview.entries.length ? budget / BigInt(preview.entries.length) : 0n;
+      const payableCount = preview.entries.filter(entry => entry.payable).length;
+      const average = payableCount ? budget / BigInt(payableCount) : 0n;
       const warning = !(fund.exists ?? fund[2]) ? 'Fund has not been created' : !approved ? 'USDC not approved' : balance < reserved
         ? 'Balance is below unpaid scheduled allocations; add funds before paying' : available === 0n ? 'No unreserved USDC for this week'
-        : preview.entries.length && average < significantUnits ? 'Average estimated share is below the significant-share warning threshold' : '';
+        : payableCount && average < significantUnits ? 'Average estimated share is below the significant-share warning threshold' : '';
       funds[category] = { slug, exists: Boolean(fund.exists ?? fund[2]), active: Boolean(fund.active ?? fund[1]),
         balanceUnits: balance.toString(), reservedUnits: reserved.toString(), availableUnits: available.toString(), budgetUnits: budget.toString(),
-        recipientCount: preview.entries.filter(entry => entry.payable).length,
+        recipientCount: payableCount,
         allocatedUnits: preview.allocatedUnits.toString(), remainderUnits: preview.remainderUnits.toString(),
         forfeitedUnits: preview.forfeitedUnits.toString(), warning,
         estimatedShares: preview.entries.map(entry => ({ ...entry, amountUnits: entry.amountUnits.toString() })) };

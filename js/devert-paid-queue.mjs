@@ -1,6 +1,6 @@
-import { DEVERT_QUEUE_ABI, DEVERT_QUEUE_USDC, purchaseDevertRequest, claimDevertRefund, quoteDevertRequest } from './devert-queue.mjs';
-import { USDC_BROWSER_ABI } from './djuke.mjs';
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { devertQueueAbi, DEVERT_QUEUE_USDC, purchaseDevertRequest, quoteDevertRequest } from './devert-queue.mjs?v=20261017-mercury-release';
+import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 
 export function validateDevertPaidSnapshot(state, configuredAddress) {
   if (state?.configured === false) return state;
@@ -10,20 +10,34 @@ export function validateDevertPaidSnapshot(state, configuredAddress) {
       !Array.isArray(state.approvedCampaignIds ?? []) ||
       state.requests.length !== state.pendingCount ||
       String(state.priceUnits) !== quoteDevertRequest(state.pendingCount).toString()) throw new Error('Paid advert queue configuration or quote does not match');
+  if (state.version !== 1 && state.version !== 2) throw new Error('Unsupported paid advert queue version');
+  if (state.version === 1 && state.paymentsEnabled) throw new Error('Legacy single-tier checkout must remain disabled');
+  if (state.version === 2 && (state.immediatePriceUnits !== quoteDevertRequest(state.pendingCount, 1).toString() ||
+      state.requests.some(request => request.tier !== 0 && request.tier !== 1))) throw new Error('Paid advert tier quote does not match');
   return state;
+}
+
+export function filterDevertCampaigns(campaigns, query) {
+  const term = query.trim().toLowerCase();
+  return campaigns.filter(campaign => !term ||
+    [campaign.title, campaign.advertiser, campaign.artist, campaign.campaignId]
+      .some(value => String(value || '').toLowerCase().includes(term)));
 }
 
 export function initDevertPaidQueue() {
   const button = document.getElementById('devert-paid-queue-button');
   if (!button) return;
   const price = document.getElementById('devert-paid-price');
+  const immediateButton = document.getElementById('devert-paid-immediate-button');
+  const immediatePrice = document.getElementById('devert-paid-immediate-price');
   const select = document.getElementById('devert-paid-campaign');
+  const search = document.getElementById('devert-search');
+  const searchStatus = document.getElementById('devert-search-state');
+  const count = document.getElementById('devert-paid-count');
   const list = document.getElementById('devert-paid-requests');
-  const refunds = document.getElementById('devert-paid-refunds');
   const status = document.getElementById('devert-paid-status');
   const receipt = document.getElementById('devert-paid-receipt');
-  const refundId = document.getElementById('devert-paid-refund-id');
-  const refundButton = document.getElementById('devert-paid-refund');
+  let activeCampaigns = [];
   let snapshot = null;
   let busy = false;
   let generation = 0;
@@ -45,8 +59,37 @@ export function initDevertPaidQueue() {
   };
   const controls = () => {
     const wallet = window._wallet;
-    button.disabled = busy || !snapshot?.paymentsEnabled || !wallet?.signer || wallet.chainId !== 8453 || !select.value;
-    refundButton.disabled = busy || !address() || !wallet?.signer || wallet.chainId !== 8453 || !/^\d+$/.test(refundId.value.trim());
+    button.disabled = busy || snapshot?.version !== 2 || !snapshot?.paymentsEnabled || !wallet?.signer || wallet.chainId !== 8453 || !select.value;
+    immediateButton.disabled = button.disabled;
+    const help = busy ? 'Payment in progress'
+      : !snapshot?.paymentsEnabled ? 'Priority checkout is not live yet'
+        : !wallet?.signer ? 'Connect your Base wallet to queue an advert'
+          : wallet.chainId !== 8453 ? 'Switch your wallet to Base'
+            : !select.value ? 'Choose an active advert first' : '';
+    button.title = help || 'Queue bump: next normal advert break. Does not buy or extend a campaign.';
+    immediateButton.title = help || 'Pay 2× for an extra break after this song. Protected shows finish first.';
+  };
+  const renderCampaigns = () => {
+    const previous = select.value;
+    const visible = filterDevertCampaigns(activeCampaigns, search.value);
+    select.replaceChildren();
+    for (const campaign of visible) {
+      const option = document.createElement('option');
+      option.value = campaign.campaignId;
+      option.textContent = campaign.title;
+      option.title = `Campaign #${campaign.campaignId} · ${campaign.advertiser}`;
+      select.append(option);
+    }
+    if (!visible.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = activeCampaigns.length ? 'No matching adverts' : 'No active approved adverts';
+      select.append(option);
+    } else if (visible.some(campaign => campaign.campaignId === previous)) select.value = previous;
+    select.disabled = !visible.length;
+    searchStatus.textContent = search.value.trim()
+      ? `${visible.length} matching advert${visible.length === 1 ? '' : 's'}` : '';
+    controls();
   };
   const refresh = async () => {
     if (busy) return;
@@ -65,10 +108,12 @@ export function initDevertPaidQueue() {
       if (request !== generation) return;
       if (state.configured === false) {
         price.textContent = 'Not live';
+        immediatePrice.textContent = 'Not live';
         status.textContent = 'Paid advert requests are not enabled yet. No payment will be requested.';
+        count.textContent = '—';
         list.replaceChildren();
-        select.replaceChildren();
-        refunds.replaceChildren();
+        activeCampaigns = [];
+        renderCampaigns();
         return;
       }
       const campaignResponse = await fetch(`${service}/api/devert`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
@@ -76,39 +121,43 @@ export function initDevertPaidQueue() {
       const campaigns = await campaignResponse.json();
       if (campaigns.chainId !== 8453 || !Array.isArray(campaigns.campaigns)) throw new Error('Invalid campaign catalog');
       if (request !== generation) return;
-      const previous = select.value;
-      select.replaceChildren();
-      for (const campaign of campaigns.campaigns) {
-        if (!state.approvedCampaignIds?.includes(campaign.campaignId) || campaigns.paused || campaign.removed ||
-            Date.parse(campaign.startedAt) > Date.now() || Date.parse(campaign.expiresAt) <= Date.now()) continue;
-        const option = document.createElement('option');
-        option.value = campaign.campaignId;
-        option.textContent = `#${campaign.campaignId} · ${campaign.title}`;
-        select.append(option);
-      }
-      if ([...select.options].some(option => option.value === previous)) select.value = previous;
+      activeCampaigns = campaigns.campaigns.filter(campaign =>
+        state.approvedCampaignIds?.includes(campaign.campaignId) && !campaigns.paused && !campaign.removed &&
+        Date.parse(campaign.startedAt) <= Date.now() && Date.parse(campaign.expiresAt) > Date.now());
+      renderCampaigns();
       list.replaceChildren();
-      for (const entry of state.requests) row(`#${entry.chainRequestId} · ${entry.title} · ${formatUsdcUnits(BigInt(entry.amountUnits))} USDC · payer ${entry.payer}`, list);
-      if (!state.requests.length) row('No paid advert requests. Ordinary adverts continue on rotation.', list);
-      refunds.replaceChildren();
-      for (const entry of state.recentRefunds.filter(entry => entry.payer.toLowerCase() === window._wallet?.address?.toLowerCase())) {
-        row(`Request #${entry.chainRequestId}: ${formatUsdcUnits(BigInt(entry.amountUnits))} USDC refund available. Enter its request ID below.`, refunds);
+      for (const entry of [...state.requests].sort((a, b) => b.tier - a.tier || Number(a.chainRequestId) - Number(b.chainRequestId))) {
+        const item = row('', list);
+        item.title = `Request #${entry.chainRequestId} · payer ${entry.payer}`;
+        const title = document.createElement('strong');
+        title.textContent = entry.title;
+        const detail = document.createElement('span');
+        detail.textContent = `${entry.tier === 0 ? 'Next ad break' : 'After this song'} · ${formatUsdcUnits(BigInt(entry.amountUnits))} USDC`;
+        item.append(title, detail);
       }
+      if (!state.requests.length) row('No paid requests', list);
       snapshot = state;
-      price.textContent = `${formatUsdcUnits(BigInt(state.priceUnits))} USDC`;
-      status.textContent = state.paused ? 'Paid advert queue is paused. Removal refunds remain available.'
-        : !state.paymentsEnabled ? 'Paid advert checkout is disabled; existing requests are shown read-only.'
-        : !select.options.length ? 'No active approved adverts are confirmed yet. Catalog approval may still be syncing.'
-        : `${state.pendingCount} pending · FIFO · after the current track · deferred during protected shows.`;
+      count.textContent = String(state.pendingCount);
+      price.textContent = formatUsdcUnits(BigInt(state.priceUnits));
+      immediatePrice.textContent = state.version === 2 ? formatUsdcUnits(BigInt(state.immediatePriceUnits)) : 'Not live';
+      status.textContent = state.paused ? 'Priority queue paused.'
+        : state.version !== 2 || !state.paymentsEnabled ? 'Priority checkout not live yet.'
+        : !activeCampaigns.length ? 'No active approved adverts yet.'
+        : !window._wallet?.signer ? 'Connect a Base wallet to queue an ad.' : '';
     } catch (error) {
       if (request === generation) {
         snapshot = null;
         price.textContent = 'Unavailable';
+        immediatePrice.textContent = 'Unavailable';
+        count.textContent = '—';
+        list.replaceChildren();
+        activeCampaigns = [];
+        renderCampaigns();
         status.textContent = error.message;
       }
     } finally { if (request === generation) controls(); }
   };
-  const transact = async refund => {
+  const transact = async (tier = 0) => {
     if (busy) return;
     busy = true;
     generation++;
@@ -123,28 +172,21 @@ export function initDevertPaidQueue() {
         }
         status.textContent = message;
       };
-      const queue = new ethers.Contract(address(), DEVERT_QUEUE_ABI, signer);
-      if (refund) {
-        const txHash = await claimDevertRefund({ signer, queue, requestId: refundId.value.trim(), onStep: check });
-        status.textContent = 'Full removal refund confirmed. ';
-        link(status, txHash, 'View refund');
-      } else {
-        if (!snapshot?.paymentsEnabled) throw new Error('Paid advert checkout is not enabled');
-        const usdc = new ethers.Contract(DEVERT_QUEUE_USDC, USDC_BROWSER_ABI, signer);
-        const result = await purchaseDevertRequest({ signer, queue, usdc, campaignId: select.value,
-          maxPriceUnits: BigInt(snapshot.priceUnits), onStep: check });
-        refundId.value = result.requestId;
-        receipt.textContent = `Paid advert request #${result.requestId} confirmed—not yet played. Keep this ID for refund recovery. `;
-        link(receipt, result.txHash, 'View payment receipt');
-        status.textContent = 'Payment confirmed. Refresh to see the updated queue.';
-      }
+      const queue = new ethers.Contract(address(), devertQueueAbi(snapshot?.version ?? 1), signer);
+      if (!snapshot?.paymentsEnabled) throw new Error('Paid advert checkout is not enabled');
+      const usdc = new ethers.Contract(DEVERT_QUEUE_USDC, USDC_BROWSER_ABI, signer);
+      const result = await purchaseDevertRequest({ signer, queue, usdc, campaignId: select.value,
+        tier, maxPriceUnits: BigInt(tier === 1 ? snapshot.immediatePriceUnits : snapshot.priceUnits), onStep: check });
+      receipt.textContent = `Request #${result.requestId} queued. `;
+      link(receipt, result.txHash, 'View payment receipt');
+      status.textContent = 'Payment confirmed. Refresh to see the updated queue.';
     } catch (error) { status.textContent = error.shortMessage || error.message; }
     finally { busy = false; snapshot = null; controls(); }
   };
-  button.addEventListener('click', () => transact(false));
-  refundButton.addEventListener('click', () => transact(true));
+  button.addEventListener('click', () => transact());
+  immediateButton.addEventListener('click', () => transact(1));
   select.addEventListener('change', controls);
-  refundId.addEventListener('input', controls);
+  search.addEventListener('input', renderCampaigns);
   document.getElementById('devert-paid-refresh').addEventListener('click', refresh);
   document.addEventListener('wallet-connected', refresh);
   document.addEventListener('wallet-disconnected', refresh);

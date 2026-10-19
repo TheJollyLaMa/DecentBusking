@@ -1,5 +1,6 @@
 import { Contract, JsonRpcProvider, id, isAddress } from 'ethers';
 import { quoteDjuke } from '../js/djuke.mjs';
+import { validateCreatorSplits } from '../js/submission-media.mjs';
 
 export const DJUKE_ABI = [
   'function headRequestId() view returns (uint256)',
@@ -55,7 +56,16 @@ export function createDjukeSongRegistrar({ contract, getPlaylist, batchSize = 25
         try {
           const song = await readSongWithRetry(contract, entry.songId, undefined, readRetryAttempts, readRetryDelayMs);
           if (!song.audioURI) missing.push(entry);
-          else if (song.audioURI === `ipfs://${entry.track.ipfsCid}`) known.add(entry.songId);
+          else if (song.audioURI === `ipfs://${entry.track.ipfsCid}`) {
+            if (entry.track.creatorSplits) {
+              const splits = validateCreatorSplits(entry.track.creatorSplits, entry.track.mintRecipient);
+              if (song.recipients?.length !== splits.length || splits.some((split, index) =>
+                song.recipients[index]?.toLowerCase() !== split.wallet.toLowerCase() || Number(song.sharesBps?.[index]) !== split.shareBps)) {
+                log.warn(`[djuke] ${entry.track.trackId} has different registered creator splits; admin review needed. Existing requests retain their on-chain splits.`);
+              }
+            }
+            known.add(entry.songId);
+          }
           else { known.add(entry.songId); log.warn(`[djuke] ${entry.track.trackId} is registered with different audio; admin review needed`); }
         } catch {
           lookupErrors++;
@@ -66,8 +76,11 @@ export function createDjukeSongRegistrar({ contract, getPlaylist, batchSize = 25
     let registered = 0;
     for (let start = 0; start < missing.length; start += batchSize) {
       const batch = missing.slice(start, start + batchSize);
-      const calls = batch.map(({ songId, track }) => contract.interface.encodeFunctionData('registerSong',
-        [songId, `ipfs://${track.ipfsCid}`, [track.mintRecipient], [10000]]));
+      const calls = batch.map(({ songId, track }) => {
+        const splits = validateCreatorSplits(track.creatorSplits, track.mintRecipient);
+        return contract.interface.encodeFunctionData('registerSong',
+          [songId, `ipfs://${track.ipfsCid}`, splits.map(entry => entry.wallet), splits.map(entry => entry.shareBps)]);
+      });
       const transaction = await contract.multicall(calls);
       if ((await transaction.wait())?.status !== 1) throw new Error(`DJuke song registration failed: ${transaction.hash}`);
       for (const { songId } of batch) known.add(songId);
@@ -142,6 +155,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
           trackId: request.trackId,
           payer: request.payer,
           amountUnits: request.amountUnits,
+          ...(request.tier !== undefined ? { tier: request.tier } : {}),
           ...(request.campaignId !== undefined ? { campaignId: String(request.campaignId) } : {}),
         };
         if (!existing) next.push({ requestId: request.requestId, ...fields, state: 'pending', attempts: 0 });
@@ -179,10 +193,10 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
       await commit(next);
       return copy(record);
     }),
-    reserveNext: () => run(async () => {
+    reserveNext: requestId => run(async () => {
       requireReady();
       const next = copy(records);
-      const record = next.find(entry => entry.state === 'pending');
+      const record = next.find(entry => entry.state === 'pending' && (requestId === undefined || entry.requestId === requestId));
       if (!record) return null;
       record.state = 'playing';
       record.attempts++;
@@ -294,8 +308,9 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
   return read;
 }
 
-export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVerifiedRequests,
-  preserveMissingRequest = () => false, canPlayRequest = () => true, minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
+export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVerifiedRequests, selectRequest,
+  preserveMissingRequest = () => false, canPlayRequest = () => true,
+  minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
   let initialized = null;
   let settling = Promise.resolve();
   let claimSerial = Promise.resolve();
@@ -331,20 +346,22 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     await settleSerial(state);
     return state;
   }
-  async function claim() {
+  async function claim(options) {
     const state = await reconcile();
-    const head = journal.peekPending();
+    const head = selectRequest
+      ? selectRequest(state, journal.getState().filter(record => record.state === 'pending'), options)
+      : journal.peekPending();
     if (!head) return null;
     const request = state.requests.find(entry => entry.requestId === head.requestId);
-    if (!request || !canPlayRequest(request, state)) return null;
+    if (!request || !await canPlayRequest(request, state)) return null;
     const track = request?.playable ? getTrack(request.trackId) : null;
     if (!track) throw new Error(`Paid DJuke request ${head.requestId} is not playable`);
-    const record = await journal.reserveNext();
+    const record = await journal.reserveNext(head.requestId);
     return record ? { record, track } : null;
   }
-  async function nextPaid() {
+  async function nextPaid(options) {
     await abandonedClaim;
-    const pending = claim();
+    const pending = claim(options);
     let timer;
     const timedOut = Symbol('timeout');
     let result;
@@ -360,8 +377,8 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     throw new Error('DJuke queue check timed out');
   }
   return {
-    nextPaid() {
-      const run = claimSerial.then(nextPaid);
+    nextPaid(options) {
+      const run = claimSerial.then(() => nextPaid(options));
       claimSerial = run.catch(() => {});
       return run;
     },

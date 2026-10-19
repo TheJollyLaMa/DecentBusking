@@ -1,12 +1,12 @@
 // js/stage.js — DecentBusking
 // Hat (tip) + Guitar Case (mint) interactions and the now-playing banner.
 
-import { openMintModal } from './mint.js?v=20261016-radio-preload';
-import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261016-ipfs-gateway-failover';
+import { openMintModal } from './mint.js?v=20261017-mercury-release';
+import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261017-mercury-release';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { resolveNowPlayingNFT } from './space.js?v=20261016-artwork-backoff';
+import { resolveNowPlayingNFT } from './space.js?v=20261019-fund-tour';
 import { nftArtistLabel } from './nft-loader.js?v=20261012-paging';
-import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, getCreatorWatchlistState, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
+import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, getCreatorWatchlistState, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261017-mercury-release';
 
 let _tipPlayingTrack = null;
 let _tipHistory = [];
@@ -20,6 +20,7 @@ let _watchlistTrack = null;
 let _watchlistResolvedNFT = null;
 let _watchlistLookupGeneration = 0;
 let _watchlistBusy = false;
+let _watchlistLookupError = '';
 const _tipHistoryLimit = 12;
 
 // ── Public API ────────────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ function _renderWatchlistState({ loading = false, resolving = false, saving = fa
       : state.mode === 'pending'
         ? 'Verifying the exact NFT…'
         : state.mode === 'unavailable'
-          ? 'No verified NFT is available for this song yet.'
+          ? _watchlistLookupError || 'Could not match this playback to a verified NFT.'
         : state.mode === 'loading'
           ? 'Loading your watchlist…'
           : state.mode === 'connect'
@@ -102,6 +103,7 @@ function _renderWatchlistState({ loading = false, resolving = false, saving = fa
 
 async function _resolveWatchlistTrack(detail) {
   const lookup = ++_watchlistLookupGeneration;
+  _watchlistLookupError = '';
   if (!detail) {
     _watchlistResolvedNFT = null;
     _renderWatchlistState();
@@ -118,8 +120,10 @@ async function _resolveWatchlistTrack(detail) {
     if (lookup !== _watchlistLookupGeneration) return;
     _watchlistResolvedNFT = nft;
     _renderWatchlistState({ resolving: false });
-  } catch {
+  } catch (error) {
     if (lookup !== _watchlistLookupGeneration) return;
+    console.warn('[stage] NFT verification failed:', error.message);
+    _watchlistLookupError = `NFT verification unavailable: ${error.message}`;
     _watchlistResolvedNFT = null;
     _renderWatchlistState({ resolving: false });
   }
@@ -211,7 +215,7 @@ function _bindWatchlistButton() {
     const nft = _watchlistResolvedNFT || _watchlistTrack?.nft;
     if (!nft) {
       _renderWatchlistState();
-      if (_watchlistStatus()) _watchlistStatus().textContent = 'No verified NFT is available for this song yet.';
+      if (_watchlistStatus()) _watchlistStatus().textContent = _watchlistLookupError || 'Could not match this playback to a verified NFT.';
       return;
     }
     _watchlistBusy = true;

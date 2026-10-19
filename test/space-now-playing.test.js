@@ -12,6 +12,51 @@ const spaceSource = fs.readFileSync(path.join(__dirname, '../js/space.js'), 'utf
 const loaderUrl = pathToFileURL(path.join(__dirname, '../js/nft-loader.js')).href;
 const gatewayUrl = pathToFileURL(path.join(__dirname, '../js/ipfs-gateway.js')).href;
 
+test('subheader searches artists or songs with a shared debounced archive query and no count label', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const bar = html.slice(html.indexOf('<div id="artist-filter-bar"'), html.indexOf('<dialog id="fund-breakdown-dialog"'));
+  assert.match(bar, /type="search" placeholder="Search Artist or Song" aria-label="Search Artist or Song"/);
+  assert.doesNotMatch(bar, /<label|<select|artist-filter-count/);
+  const nodes = Object.fromEntries(['scene-music-search', 'archive-search', 'archive-artist-filter'].map(id => [id, {
+    value: '', handlers: {}, addEventListener(type, handler) { this.handlers[type] = handler; },
+  }]));
+  let pending;
+  let canceled = 0;
+  const loads = [];
+  const context = vm.createContext({
+    document: { getElementById: id => nodes[id] || null, querySelector: () => null, addEventListener() {} },
+    setTimeout(callback, delay) { assert.equal(delay, 250); pending = callback; return 1; },
+    clearTimeout() { pending = null; },
+    loads, abort: () => { canceled++; },
+  });
+  vm.runInContext(`${spaceSource}
+    _refreshArtistFilters = () => {};
+    _updateVisibility = () => {};
+    _loadNFTs = () => loads.push({query: _archiveQuery, artist: _activeArtist});
+    _activeArtist = 'old-artist';
+    _archiveRequest = {abort};
+    _bindArtistFilters();`, context);
+  const search = nodes['scene-music-search'];
+  for (const query of ['Jose', 'Joseph Goats']) {
+    search.value = query;
+    search.handlers.input({ target: search });
+  }
+  assert.equal(loads.length, 0);
+  pending();
+  assert.equal(loads.length, 1);
+  assert.equal(loads[0].query, 'Joseph Goats');
+  assert.equal(loads[0].artist, '');
+  assert.equal(nodes['archive-search'].value, 'Joseph Goats');
+  assert.equal(canceled, 2);
+  nodes['archive-search'].value = 'song title';
+  nodes['archive-search'].handlers.input({ target: nodes['archive-search'] });
+  assert.equal(search.value, 'song title');
+  search.value = '';
+  search.handlers.input({ target: search });
+  pending();
+  assert.equal(loads.at(-1).query, '', 'clearing search restores the unfiltered catalog');
+});
+
 function makeThreeStubs() {
   class Vector3 {
     constructor(x = 0, y = 0, z = 0) { this.set(x, y, z); }
@@ -833,4 +878,19 @@ test('radio watchlist resolution requires an exact media match instead of title 
   assert.equal(result, null);
   assert.ok(queries[0].includes('Moonlit Signal'));
   assert.ok(queries[0].includes('Synth Artist') || queries[0] === 'Moonlit Signal');
+  const verified = { tokenId: 80, name: 'Minted song', audioUrl: 'ipfs://exact-cid' };
+  context.verified = verified;
+  vm.runInContext('_allNFTs = [{nft: verified}];', context);
+  for (const audioUrl of ['blob:http://localhost/preloaded',
+    'https://worker.example/api/radio/media?cid=exact-cid', 'https://gateway.example/ipfs/exact-cid']) {
+    const resolved = await vm.runInContext(`resolveNowPlayingNFT({title:'Minted song',
+      audioUrl:${JSON.stringify(audioUrl)},ipfsCid:'exact-cid'}, {requireMediaMatch:true})`, context);
+    assert.equal(resolved.tokenId, 80, 'transport URLs must not hide a verified exact CID match');
+  }
+  const mismatch = await vm.runInContext(`resolveNowPlayingNFT({title:'Minted song',
+    audioUrl:'https://gateway.example/ipfs/different-cid',ipfsCid:'exact-cid'}, {requireMediaMatch:true})`, context);
+  assert.equal(mismatch, null, 'a conflicting canonical media URL is not ignored');
+  const missing = await vm.runInContext(`resolveNowPlayingNFT({title:'Minted song',
+    audioUrl:'blob:http://localhost/preloaded'}, {requireMediaMatch:true})`, context);
+  assert.equal(missing, null, 'an opaque URL alone is not proof of NFT identity');
 });

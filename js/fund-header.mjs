@@ -1,10 +1,10 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261016-fund-panel';
+import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261017-fund-panel';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
-import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
-import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261015-usdc-cents';
+import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
+import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261019-confirmed-reports';
 import { initFundContributions } from './fund-contribution.mjs?v=20261019-fund-tour';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';

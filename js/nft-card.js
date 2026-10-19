@@ -2,10 +2,10 @@
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js?v=20261016-artwork-backoff';
+import { fetchNFTMetaById } from './space.js?v=20261019-fund-tour';
 import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
-import { returnToRadio } from './radio-sync.js?v=20261016-ipfs-gateway-failover';
-import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs';
+import { returnToRadio } from './radio-sync.js?v=20261017-mercury-release';
+import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261017-mercury-release';
 import { canEditArtwork } from './artwork-update.mjs';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 
@@ -156,7 +156,7 @@ export function renderNFTCard(nft) {
       if (result !== 'failed' && isVideo) panel.close();
       return;
     }
-    const { setNowPlaying } = await import('./stage.js?v=20261016-radio-preload');
+    const { setNowPlaying } = await import('./stage.js?v=20261017-mercury-release');
     setNowPlaying({ nft, title: nft.name || nft.title, artist: nft.artist || nft.creator,
       audioUrl: nft.videoUrl || nft.audioUrl || nft.animation_url, mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : '') });
     if (isVideo) panel.close();
@@ -164,10 +164,10 @@ export function renderNFTCard(nft) {
 
   content.querySelector('.nft-mute-btn')?.addEventListener('click', async (event) => {
     const muted = event.currentTarget.getAttribute('aria-pressed') !== 'true';
-    const { setArchiveMuted } = await import('./radio-sync.js?v=20261016-ipfs-gateway-failover');
+    const { setArchiveMuted } = await import('./radio-sync.js?v=20261017-mercury-release');
     setArchiveMuted(muted);
   });
-  import('./radio-sync.js?v=20261016-ipfs-gateway-failover')
+  import('./radio-sync.js?v=20261017-mercury-release')
     .then(({ archiveMuted }) => { if (_cardNft === nft) _renderMute(content, archiveMuted()); })
     .catch(() => {});
 
@@ -349,7 +349,7 @@ function _buildCardHTML(nft) {
 // ── Parent Track Playback ─────────────────────────────────────────────────
 async function _playParent(parentTokenId) {
   if (!parentTokenId) return;
-  const { setNowPlaying } = await import('./stage.js?v=20261016-radio-preload');
+  const { setNowPlaying } = await import('./stage.js?v=20261017-mercury-release');
   const meta = await fetchNFTMetaById(parentTokenId);
   if (!meta) return;
   const cfg = window.DecentConfig || {};

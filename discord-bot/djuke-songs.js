@@ -5,11 +5,13 @@ import { writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { djukeCatalog } from './djuke.js';
 import { createPinataStateStore } from './ipfs-state.js';
+import { validateCreatorSplits } from '../js/submission-media.mjs';
 
 export function buildDjukeSongManifest(playlist) {
   const songs = djukeCatalog(playlist).map(({ songId, track }) => ({
     songId, trackId: track.trackId, title: track.title, audioURI: `ipfs://${track.ipfsCid}`,
-    recipients: [track.mintRecipient], sharesBps: [10000],
+    recipients: validateCreatorSplits(track.creatorSplits, track.mintRecipient).map(entry => entry.wallet),
+    sharesBps: validateCreatorSplits(track.creatorSplits, track.mintRecipient).map(entry => entry.shareBps),
   }));
   if (new Set(songs.map(song => song.songId)).size !== songs.length) throw new Error('Duplicate DJuke song IDs');
   return { schemaVersion: 1, generatedAt: new Date().toISOString(), songs };

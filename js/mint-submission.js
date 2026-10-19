@@ -1,12 +1,13 @@
 export function buildSubmissionAuthorizationMessage(payload) {
   const { address, origin, issuedAt, title, artist, ipfsCid, mediaType, filename,
-    recipient, artworkCid = '', tipWallet = '', parentTokenId = 0, isDevertAd = false } = payload;
+    recipient, artworkCid = '', tipWallet = '', parentTokenId = 0, isDevertAd = false, creatorSplits } = payload;
   return [
     'DecentBusking media submission for owner approval',
     `Wallet: ${address.toLowerCase()}`,
     `Origin: ${origin}`,
     `Issued At: ${issuedAt}`,
-    JSON.stringify({ title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId, isDevertAd }),
+    JSON.stringify({ title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId, isDevertAd,
+      ...(creatorSplits !== undefined ? { creatorSplits } : {}) }),
   ].join('\n');
 }
 

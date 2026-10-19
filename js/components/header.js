@@ -1,4 +1,4 @@
-import './header-right-ankh-override.js?v=20261011-creator-menu';
+import './header-right-ankh-override.js?v=20261017-mercury-release';
 
 const DECENT_HEAD_BASE = 'https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@main/';
 const DBUSKER_AVATAR_URL = new URL('../../img/D_Busker.jpeg', import.meta.url).href;
@@ -195,6 +195,7 @@ const MOBILE_APP_TITLE_STYLE = `
       min-width: 0;
       max-width: 38px;
       height: 40px;
+      margin-top: 6px;
       align-items: center;
       justify-content: center;
       box-sizing: border-box;
@@ -202,6 +203,11 @@ const MOBILE_APP_TITLE_STYLE = `
     .ankh-left { grid-column: 1; grid-row: 2; }
     .ankh-right { grid-column: 3; grid-row: 2; }
     .ankh-right right-ankh { display: block; width: 38px; height: 38px; }
+    .ankh-left .ankh-wrapper, .ankh-left .ankh-container {
+      display: block;
+      width: 38px;
+      height: 38px;
+    }
     .ankh-left .ankh-coin {
       width: 38px;
       height: 38px;
@@ -352,6 +358,40 @@ const MOBILE_RIGHT_ANKH_STYLE = `
   }
 `;
 
+const COIN_HIT_AREA_STYLE = `
+  .ankh-wrapper { cursor: pointer; }
+  .ankh-coin {
+    display: inline-flex; align-items: center; justify-content: center;
+    box-sizing: border-box; position: relative; cursor: pointer; pointer-events: auto;
+    transition: box-shadow .3s, color .3s, border-color .3s;
+  }
+  .ankh-coin:hover { transform: none; }
+  .ankh-coin:focus-visible { outline: 2px solid #fff1d9; outline-offset: 4px; }
+  .sparkle, .ankh-coin::before, .ankh-coin::after { pointer-events: none; }
+`;
+
+function installCoinHitArea(root, label) {
+  const coin = root?.querySelector('.ankh-coin');
+  const wrapper = coin?.closest('.ankh-wrapper');
+  if (!coin || !wrapper) return;
+  injectStyle(root, 'decentbusking-coin-hit-area', COIN_HIT_AREA_STYLE);
+  coin.setAttribute('role', 'button');
+  coin.setAttribute('tabindex', '0');
+  coin.setAttribute('aria-haspopup', 'menu');
+  coin.setAttribute('aria-label', label);
+  coin.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      coin.click();
+    }
+  });
+  wrapper.addEventListener('click', event => {
+    if (event.target.closest('.ankh-coin, .dropdown-menu')) return;
+    event.stopPropagation();
+    coin.click();
+  });
+}
+
 function injectStyle(shadowRoot, id, textContent) {
   if (!shadowRoot || shadowRoot.querySelector(`#${id}`)) return;
   const style = document.createElement('style');
@@ -396,6 +436,8 @@ class DecentBuskingHeader extends HTMLElement {
     injectStyle(appTitle?.shadowRoot, 'decentbusking-mobile-title', MOBILE_APP_TITLE_STYLE);
     injectStyle(appTitle?.shadowRoot, 'decentbusking-brand-title', BRAND_TITLE_STYLE);
     injectStyle(appTitle?.shadowRoot?.querySelector('right-ankh')?.shadowRoot, 'decentbusking-mobile-right-ankh', MOBILE_RIGHT_ANKH_STYLE);
+    installCoinHitArea(appTitle?.shadowRoot, 'Left menu');
+    installCoinHitArea(appTitle?.shadowRoot?.querySelector('right-ankh')?.shadowRoot, 'Right menu');
     injectStyle(this.shadowRoot.querySelector('wallet-connect')?.shadowRoot, 'decentbusking-mobile-wallet', MOBILE_WALLET_STYLE);
     this._installBuskerAvatar(appTitle?.shadowRoot);
     this._installJamSubtitle(appTitle?.shadowRoot);

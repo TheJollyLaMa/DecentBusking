@@ -231,33 +231,103 @@ IPFS_UPLOAD_PROVIDER=local
 IPFS_API_URL=http://127.0.0.1:5001
 ```
 
-In Pinata mode, the playlist, ratings, IPFS CIDs, and mint queue are checkpointed as tagged JSON on IPFS. On startup the bot discovers and restores the newest snapshot through Pinata's Files API. The latest plus four backups per state type are retained, so Render's persistent disk is not required and `JUKELOOP_PLAYLIST_PATH` should be omitted on the free tier.
+In Pinata mode, the playlist, ratings, IPFS CIDs, and mint queue are checkpointed as tagged JSON on IPFS. On startup the bot discovers and restores the newest snapshot through Pinata's Files API. Render's persistent disk is not required; `JUKELOOP_PLAYLIST_PATH` should be omitted on the free tier.
 
 All worker checkpoint stores use the **DecentBusking - Live checkpoints** Pinata
-group (the dashboard's folder-like grouping). At the first save in each UTC
-Monday-based week, each state type also writes a complete snapshot in
-**DecentBusking - Weekly archives**. Archives contain `snapshot`, `week`, `kind`
-and `sourceSnapshotUri`; the `snapshot` field holds the original full serialized
-state, including cumulative ledger entries. It is not a replacement for the media
-files or NFT metadata, which are not pruned by checkpoint retention. To recover
-an archive manually, extract `snapshot` and validate it with the corresponding
-store's deserializer. Existing immutable CIDs cannot be overwritten in place:
-the living state is the newest complete snapshot, with five rolling copies.
-Weekly archives are retained independently; they do not preserve every
-intermediate checkpoint or guarantee that every old `previousSnapshotUri`
-remains pinned.
+group (the dashboard's folder-like grouping), with **seven New York calendar
+days: today plus the preceding six days**. Each state type retains its latest
+complete snapshot for each day, not its seven most recent writes. Today's copy
+advances as changes are saved; the last successfully saved state of a completed
+day is its recovery point. Each snapshot contains the full state, including
+cumulative counters and ledger entries still retained by that subsystem.
+Expiring a backup does not remove older cumulative entries from today's state.
+Operational journals keep their existing bounded working history. Their newly
+observed transitions are separately retained in daily event history and embedded
+in permanent weekly archives; a bounded journal is not the historical record.
 
-The worker provisions/reuses these two groups at startup; its server-only Pinata
-key needs group read/write plus file read/write/delete permissions. Group setup
-or archive failures are explicit errors; pruning does not proceed after an
-archive failure. Saves are serialized per store, and pruning uses paginated
-listings scoped to the live group, exact filename and state tags. Legacy
-ungrouped files are left untouched pending review, as are weekly archives.
+Unchanged logical state with no new events is not uploaded again within the same day. Routine
+playlist play/vote updates and unchanged-event ledger scan progress coalesce
+into at most one routine upload every five minutes per store, without delaying
+in-memory/UI updates. New submissions, media/mint changes, verified financial
+events, paid-playback journals, schedule edits and explicit persistence barriers
+remain immediate. Pending routine changes flush on graceful shutdown and at the
+New York day boundary. The boundary also starts a full current-day snapshot on
+quiet days, including across daylight-saving changes. An unexpected server loss
+can lose up to five minutes of routine changes; an upload outage can extend that
+window. Failed automatic saves log explicitly, remain pending and retry.
+Downtime is not backfilled with invented daily observations.
+
+IPFS CIDs are immutable, so replacing today's state uploads new bytes, then
+unpins superseded same-day copies after confirming the new checkpoint is listed.
+Daily snapshots carry `_checkpoint` metadata (`policy: daily-v1`, `day`,
+`timeZone`, `savedAt`, `historyStartedAt`, `events`) and matching Pinata keyvalues. Restores remove this
+metadata before validating the subsystem's original schema. Old formats remain
+readable. Required paid-ad local-mirror confirmation still precedes publication.
+
+### Permanent weekly history
+
+After each New York Monday-to-Sunday week closes, the next checkpoint maintenance
+pass writes a **self-contained weekly bundle per state type** in
+**DecentBusking - Weekly archives**. Its filename is
+`<state-name>.history-YYYY-MM-DD.json`, where the date is that week's Monday.
+Bundles contain `policy: weekly-history-v1`, `kind`, `week`, `timeZone`,
+`days` and `missingDays`. Each `days` entry embeds its day's entire serialized
+snapshot (including events), a SHA-256 digest and its source CID for provenance.
+These are embedded bytes, not merely links to soon-to-expire daily files.
+No new version is uploaded when the weekly content is unchanged.
+
+Before daily expiry, the worker reads the source snapshots, uploads the bundle,
+fetches it back, compares its content and confirms its exact-policy Pinata
+listing. If any step fails, daily pruning stops, the failure is logged/pending,
+and maintenance retries. Verified weekly bundles are **retained indefinitely**.
+A late day-close correction merges with the already archived days before
+replacing an earlier weekly bundle; earlier versions are unpinned only after
+the replacement is verified. Archive failures can temporarily increase the
+number of live recovery files. First/partial weeks and downtime list their
+unobserved dates in `missingDays`, rather than fabricating daily states.
+
+For historical investigation, select that Monday's `.history-...json` file for
+the relevant state type in Pinata. `days[].snapshot` answers what the retained
+state was that day; `days[].snapshot._checkpoint.events` contains the activity
+observed that day:
+
+- Playlist: accepted submissions, site votes, Discord vote-count changes
+  (including removals), and completed play observations with start/end times,
+  audible duration and whether they qualified for counters.
+- Financial ledgers: newly observed or changed payment, funding, payout and
+  earnings records, with transaction/log references and chain time when known.
+- Paid-playback journals: request/playback transitions and advert impressions;
+  the DeVert journal also preserves accepted advert votes.
+
+Each event has an ID, type and `observedAt`; `occurredAt` records the actual event
+time only when known. A Discord count change is an observation, not a claim to
+know an individual voter's identity or original click time. Historical reaction
+reconciliation is labelled separately from live voting. No IP addresses,
+credentials or additional voter identities are collected. Event capture begins
+at `historyStartedAt`; older lost events cannot be reconstructed. Routine
+events share the five-minute recovery window, not guaranteed lossless recording
+during a crash/outage. Financial journals still require immediate durable saves.
+
+Legacy weekly archives, ungrouped files and pre-policy checkpoints are untouched
+pending a reviewed cleanup, so the initial file count can exceed seven per state
+type. Media, NFT metadata, allocation receipts and explicit recovery baseline
+files are not deleted by this policy. Old intermediate `previousSnapshotUri`
+links can expire; cumulative entries and archived daily states remain.
+Local/community IPFS pins are independent and are not unpinned by Pinata cleanup.
+
+The worker provisions/reuses the live and weekly archive groups at startup; its server-only
+Pinata key needs group read/write plus file read/write/delete permissions.
+Saves are serialized per store. Pruning requires exact group, filename, app,
+kind, schema and daily-policy tags, and paginates the full listing. It removes
+at most ten files per pass; failures surface explicitly and can retry without
+re-uploading the confirmed state. A failed upload never triggers pruning.
 Run `cd discord-bot && node checkpoint-inventory.js` for a **read-only**,
 paginated cleanup inventory. It identifies only allowlisted, app-tagged JSON
-checkpoints, preserves five recent copies per type in its proposal, and never
-deletes or moves files. Review cumulative data, proof references and recovery
-baseline CIDs, and archive necessary legacy history before approving any cleanup.
+checkpoints, identifies the seven-day daily recovery window, and lists older
+and legacy files for review rather than deleting or moving them. If a type has
+no daily-policy snapshots yet, it proposes keeping its newest legacy checkpoint.
+Review cumulative data, proof references and recovery baseline CIDs before
+approving any cleanup.
 
 ### 5. Run the bot
 

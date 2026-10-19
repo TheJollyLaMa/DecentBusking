@@ -138,18 +138,31 @@ test('currently playing song stays highlighted when it is outside the ranked top
   assert.equal(rows.filter(row => row.rank).length, 10);
 });
 
-test('campaign ads are not inserted into the public song leaderboard', async () => {
-  const { topTenDisplayRows } = await import(url);
+test('playing adverts have an unranked per-play row without altering music prizes', async () => {
+  const { topTenDisplayRows, topTenPrizeRows } = await import(url);
   const songs = [{ trackId: 'song-1', title: 'Song', votes: 3, plays: 2 }];
-  const rows = topTenDisplayRows(songs, { trackId: 'devert:7', title: 'Ad', uploader: 'DeVert advertiser', isDevert: true });
-  assert.deepEqual(rows.map(row => row.trackId), ['song-1']);
+  const ad = { trackId: 'devert:7', title: 'Ad', uploader: 'DeVert advertiser', isDevert: true,
+    adVotes: { up: 5, down: 2, net: 3 } };
+  const rows = topTenPrizeRows(songs, ad, { budgetUnits: '1000000' });
+  assert.deepEqual(rows.map(row => row.trackId), ['devert:7', 'song-1']);
+  assert.equal(rows[0].votes, 3);
+  assert.equal(rows[0].rank, null);
+  assert.equal(rows[0].prizeUnits, null);
+  assert.equal(rows[0].nowPlaying, true);
+  assert.equal(rows[0].isAdvert, true);
+  assert.equal(rows[1].rank, 1);
+  assert.equal(rows[1].prizeUnits, 1000000n);
+  assert.equal(topTenDisplayRows(songs, { ...ad, adVotes: undefined })[0].votes, null);
+  assert.equal(topTenDisplayRows(songs, { ...ad, adVotes: { up: 0, down: 0, net: 0 } })[0].votes, 0);
+  assert.equal(topTenDisplayRows(songs, { ...ad, adVotes: { up: 1, down: 5, net: -4 } })[0].votes, -4);
+  assert.equal(topTenDisplayRows(songs, null).length, 1);
 });
 
 test('pullout leaderboard exposes public weekly ranking and a distinct current-playing state', () => {
   const html = require('node:fs').readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /id="top-ten-tab"/);
   assert.match(html, /id="top-ten-panel"/);
-  assert.match(html, /weekly net votes/i);
+  assert.doesNotMatch(html, /Weekly net votes · upvotes minus downvotes/);
   assert.doesNotMatch(html, /current song stays highlighted/i);
   assert.match(html, /aria-expanded="false"/);
   const board = require('node:fs').readFileSync(path.join(__dirname, '../js/top-ten-board.mjs'), 'utf8');

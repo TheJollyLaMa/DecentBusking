@@ -210,7 +210,7 @@ export async function resolveStreamableIpfsUrl(gateway, cid, fetchImpl = fetch, 
 
 /** Public radio snapshot; positionMs lets browsers sync without trusting their own clocks. */
 export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Date.now(), recentLimit = 10, mainRadioAdCountdown = null,
-  activeShow = null, topTenHype = null }) {
+  activeShow = null, topTenHype = null, adVotes = null }) {
   const mediaTypeForTrack = (track) => (track.videoUrl || track.mediaType === 'video/mp4')
     ? 'video/mp4'
     : mediaTypeFor(track.filename, track.mediaType) || '';
@@ -246,6 +246,7 @@ export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Dat
             ...(videoUrl ? { videoUrl } : {}),
             ipfsCid: nowPlaying.ipfsCid || null,
             isDevert: nowPlaying.isDevert === true,
+            ...(nowPlaying.isDevert ? { adVotes } : {}),
             ...(nowPlaying.hype ? { hype: { ...nowPlaying.hype } } : {}),
             ...(sponsor ? { sponsor } : {}),
             startedAt: nowPlaying.startedAt,
@@ -763,7 +764,8 @@ export class JukeLoopSession {
           firstWeekBonus: this._nowPlaying.firstWeekBonus,
           announcementId: this._announcementMsg?.id,
         };
-        if (this._currentDevertAd && !this._currentDevertAd.paidRequest) {
+        if (this._currentDevertAd && (!this._currentDevertAd.paidRequest ||
+            (this._currentPaid?.tier === 0 && this._completedPlay.finished))) {
           this._musicSinceAd = 0;
           this._musicPlayCount++;
           this._persistMainRadioAdState();
@@ -1057,10 +1059,13 @@ export class JukeLoopSession {
       if (!hypeSelection.track) return this._skipHype(hypeSelection, 'Recording is no longer eligible or available.', options);
     }
 
-    // Paid DJuke requests jump ahead without consuming the free rotation slot.
+    const musicSinceAd = Number.isFinite(projectedMusicSinceAd) ? projectedMusicSinceAd : this._musicSinceAd;
+    const normalSlotDue = allowAds && (musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD ||
+      (!!(this._preparedDevertAd || this._pendingDevertAds.length) && !this._breakAwaitingUnlock));
+    // Only immediate adverts and DJuke songs buy an extra break between ordinary slots.
     let paid = isHype ? null : forcedPaid;
     if (!paid && this.djuke && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
-      paid = await this.djuke.nextPaid();
+      paid = await this.djuke.nextPaid({ allowBump: normalSlotDue });
       if (this._destroyed && paid) {
         await this.djuke.fail(paid.record, new Error('Radio stopped')).catch(() => {});
         return null;
@@ -1068,9 +1073,22 @@ export class JukeLoopSession {
     }
 
     let devertAd = paid?.record.kind === 'devert'
-      ? { campaignId: paid.track.campaignId, mainRadio: false, paidRequest: true, track: paid.track } : null;
+      ? { campaignId: paid.track.campaignId, mainRadio: paid.record.tier === 0, paidRequest: true, track: paid.track } : null;
     let selectionDeferred = false;
-    const musicSinceAd = Number.isFinite(projectedMusicSinceAd) ? projectedMusicSinceAd : this._musicSinceAd;
+    if (devertAd?.mainRadio && !this._preparedDevertAd && !this._pendingDevertAds.length && this.devertPlayback) {
+      // Reserve the normal break so the bump replaces its first slot, not an additional break.
+      const ads = await this.devertPlayback.nextMainRadioAd({
+        excludeCampaignIds: this._getActiveFailedDevertCampaignIds(), count: 2,
+      }).catch(error => {
+        console.warn('[devert] Ordinary break companions deferred:', error.message);
+        return [];
+      });
+      const selectedAds = Array.isArray(ads) ? ads : ads ? [ads] : [];
+      [this._preparedDevertAd, ...this._pendingDevertAds] = selectedAds;
+      this._preparedDevertAd ||= null;
+      this._breakAwaitingUnlock = this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD;
+      await this._persistMainRadioAdState();
+    }
     if (!allowAds || isHype) {
       // Music only: keep any selected advert queued for its real slot.
     } else if (!paid && this._preparedDevertAd) {
@@ -1207,7 +1225,7 @@ export class JukeLoopSession {
       schedule: this.schedule,
       livePerformanceEvents: this.livePerformanceEvents,
     });
-    if (!this.djuke || !this._preparedNext || this._preparedNext.paid ||
+    if (!this.djuke || !this._preparedNext || (this._preparedNext.paid && this._preparedNext.paid.record.tier !== 0) ||
       activeShow.type === 'weekly_top10' || activeShow.type === 'live_performance' ||
       this.player.state.status !== AudioPlayerStatus.Playing) return;
     this._paidPollTimer = setTimeout(() => {
@@ -1218,28 +1236,44 @@ export class JukeLoopSession {
   }
 
   _checkPreparedPaidPriority() {
-    if (this._destroyed || this._prepareTask || !this._preparedNext || this._preparedNext.paid) return;
+    if (this._destroyed || this._prepareTask || !this._preparedNext ||
+        (this._preparedNext.paid && this._preparedNext.paid.record.tier !== 0)) return;
     const epoch = this._preparationEpoch;
     const task = (async () => {
       if (Date.now() < this._djukeCooldownUntil) {
         this._schedulePaidPriorityCheck();
         return this._preparedNext;
       }
-      const paid = await this.djuke.nextPaid();
+      const preparedBump = this._preparedNext.paid?.record.kind === 'devert' && this._preparedNext.paid.record.tier === 0;
+      const normalSlotDue = !!this._preparedNext.devertAd;
+      const paid = await this.djuke.nextPaid({ allowBump: normalSlotDue && !preparedBump, includeSongs: !preparedBump });
       if (!paid) {
         this._schedulePaidPriorityCheck();
         return this._preparedNext;
       }
+      if (this._destroyed || epoch !== this._preparationEpoch || !this._preparedNext) {
+        await this.djuke.fail(paid.record, new Error('Radio mode changed during priority selection'));
+        return null;
+      }
       const regular = this._preparedNext;
+      if (regular.paid) {
+        try {
+          await this.djuke.fail(regular.paid.record, new Error('Immediate advert took priority before playback'));
+        } catch (error) {
+          await this.djuke.fail(paid.record, error)
+            .catch(releaseError => console.warn('[jukeloop] Could not release immediate advert after failed preemption:', releaseError.message));
+          throw error;
+        }
+      }
       this._preparedNext = null;
-      this._disposePrepared(regular);
+      this._disposePrepared(regular.paid ? { ...regular, paid: null } : regular);
       const prepared = await this._prepareNextPlayback(paid);
       if (epoch !== this._preparationEpoch) {
         this._disposePrepared(prepared, 'Scheduled radio mode changed');
         return null;
       }
       this._preparedNext = prepared;
-      if (prepared && !prepared.paid) this._schedulePaidPriorityCheck();
+      if (prepared && (!prepared.paid || prepared.paid.record.tier === 0)) this._schedulePaidPriorityCheck();
       return prepared;
     })().catch(error => {
       console.warn('[jukeloop] DJuke priority check deferred:', error.message);
@@ -1256,7 +1290,7 @@ export class JukeLoopSession {
     const epoch = this._preparationEpoch;
     // If the playing song is music, it should count toward the advert cadence when it ends.
     const projectedMusicSinceAd = this._currentDevertAd
-      ? this._currentDevertAd.paidRequest ? this._musicSinceAd : 0
+      ? this._currentDevertAd.paidRequest && this._currentPaid?.tier !== 0 ? this._musicSinceAd : 0
       : this._musicSinceAd + 1;
     const task = this._prepareNextPlayback(null, { projectedMusicSinceAd })
       .then(prepared => {
@@ -1314,6 +1348,12 @@ export class JukeLoopSession {
       this._disposePrepared(prepared, 'Protected show began before paid advert playback');
       return false;
     }
+    if (prepared.paid?.record.kind === 'devert' && prepared.paid.record.tier === 0 &&
+        this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD && (this._breakAwaitingUnlock ||
+        !(this._preparedDevertAd || this._pendingDevertAds.length))) {
+      this._disposePrepared(prepared, 'Normal advert slot was not reached');
+      return false;
+    }
     if (prepared.devertAd && this.devertPlayback?.isCampaignRemoved?.(prepared.devertAd.campaignId)) {
       this._disposePrepared(prepared, 'Advert removed from playback');
       return false;
@@ -1365,7 +1405,12 @@ export class JukeLoopSession {
       startedAt: Date.now(),
       audible: false,
     };
-    if (prepared.devertAd && !prepared.devertAd.paidRequest) {
+    if (prepared.devertAd?.paidRequest && prepared.paid.record.tier === 0) {
+      if (this._preparedDevertAd) this._preparedDevertAd = null;
+      else this._pendingDevertAds.shift();
+      this._breakAwaitingUnlock = false;
+      this._persistMainRadioAdState();
+    } else if (prepared.devertAd && !prepared.devertAd.paidRequest) {
       this._preparedDevertAd = null;
       this._persistMainRadioAdState();
     }
@@ -1445,6 +1490,12 @@ export class JukeLoopSession {
           }
         }
         if (!prepared) prepared = await this._prepareNextPlayback();
+        if (prepared?.paid?.record.kind === 'devert' && prepared.paid.record.tier === 0 &&
+            this._breakAwaitingUnlock && this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD) {
+          await this.djuke.fail(prepared.paid.record, new Error('Normal advert slot not reached yet'));
+          this._disposePrepared({ ...prepared, paid: null });
+          prepared = await this._prepareNextPlayback(null, { allowAds: false });
+        }
         // An advert picked early stays queued if the song that should have unlocked it did not count.
         if (prepared?.devertAd && !prepared.paid && this._breakAwaitingUnlock &&
           this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD) {

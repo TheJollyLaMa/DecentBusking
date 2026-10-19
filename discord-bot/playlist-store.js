@@ -12,6 +12,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'node:crypto';
 import { currentPayrollPeriod, payrollPeriodFromKey, payrollPeriods } from '../js/payroll-week.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -58,6 +59,9 @@ export function getUtcWeekKey(date = new Date()) {
 /** @type {TrackEntry[]} */
 let _playlist = [];
 let _remoteSaver = null;
+let _remoteScheduler = null;
+let _remoteFlusher = null;
+let _pendingHistoryEvents = [];
 let _remoteSaveQueue = Promise.resolve();
 
 // ── Persistence ───────────────────────────────────────────────────────────────
@@ -74,6 +78,7 @@ function _normalizePlaylist(playlist) {
 
 /** Load the playlist from a restored snapshot or the local runtime cache. */
 export function loadPlaylist(restoredPlaylist = null) {
+  _pendingHistoryEvents = [];
   if (Array.isArray(restoredPlaylist)) {
     _playlist = _normalizePlaylist(restoredPlaylist);
     console.log(`[playlist-store] Restored ${_playlist.length} track(s) from IPFS`);
@@ -98,17 +103,21 @@ export function loadPlaylist(restoredPlaylist = null) {
 }
 
 /** Configure the durable snapshot writer used after every mutation. */
-export function configureRemotePersistence(saveSnapshot) {
+export function configureRemotePersistence(saveSnapshot, { schedule, flush } = {}) {
   _remoteSaver = saveSnapshot;
+  _remoteScheduler = schedule;
+  _remoteFlusher = flush;
   _remoteSaveQueue = Promise.resolve();
 }
 
 /** Wait until all queued remote snapshots have completed. */
 export function waitForRemotePersistence() {
-  return _remoteSaveQueue;
+  return _remoteSaveQueue.then(() => _remoteFlusher?.());
 }
 
-function _save() {
+function _save({ routine = false, events = [] } = {}) {
+  events = [..._pendingHistoryEvents, ...events];
+  _pendingHistoryEvents = [];
   for (const track of _playlist) track.payrollTrackingStartedAt ||= new Date().toISOString();
   try {
     writeFileSync(STORE_PATH, JSON.stringify(_playlist, null, 2), 'utf8');
@@ -117,9 +126,9 @@ function _save() {
   }
   if (_remoteSaver) {
     const snapshot = structuredClone(_playlist);
-    _remoteSaveQueue = _remoteSaveQueue
-      .then(() => _remoteSaver(snapshot))
-      .catch((err) => console.error('[playlist-store] Failed to checkpoint playlist to IPFS:', err.message));
+    _remoteSaveQueue = _remoteSaveQueue.catch(() => {})
+      .then(() => routine && _remoteScheduler ? _remoteScheduler(snapshot, { events }) : _remoteSaver(snapshot, { events }));
+    _remoteSaveQueue.catch(err => console.error('[playlist-store] Failed to checkpoint playlist to IPFS:', err.message));
   }
 }
 
@@ -155,18 +164,28 @@ export function addTrack(track) {
     plays:    0,
     addedAt:  new Date().toISOString(),
   });
-  _save();
+  const added = _playlist.at(-1);
+  _save({ events: [{ id: `submission:${trackId}`, type: 'submission', observedAt: added.addedAt,
+    occurredAt: added.addedAt, trackId, source: added.source || 'discord',
+    title: added.title || added.filename, ipfsCid: added.ipfsCid || null,
+    mediaType: added.mediaType || null, isDevertAd: added.isDevertAd === true }] });
   return true;
 }
 
-export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId, isDevertAd = false }) {
+export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, filename, recipient, artworkCid, tipWallet, parentTokenId, isDevertAd = false, creatorSplits }) {
   const trackId = `site:${address.toLowerCase()}:${ipfsCid}`;
   const existing = _playlist.find(track => track.trackId === trackId);
-  if (existing) return existing;
+  if (existing) {
+    if ((existing.isDevertAd === true) !== (isDevertAd === true) ||
+      (creatorSplits && JSON.stringify(existing.creatorSplits || [{ wallet: existing.mintRecipient, shareBps: 10000 }]) !== JSON.stringify(creatorSplits))) {
+      throw new Error('This recording was already submitted with a different advert classification or DJuke split. Contact the owner to review it; existing payout settings were not changed.');
+    }
+    return existing;
+  }
   const videoUrl = mediaType === 'video/mp4' ? `ipfs://${ipfsCid}` : '';
   addTrack({ attachmentId: trackId, source: 'site', uploaderId: `wallet:${address.toLowerCase()}`,
     uploader: artist, title, ipfsCid, mediaType, filename, pinStatus: 'pinned', artworkCid, videoUrl,
-    tipWallet: tipWallet || recipient, parentTokenId, isDevertAd,
+    tipWallet: tipWallet || recipient, parentTokenId, isDevertAd, ...(creatorSplits ? { creatorSplits } : {}),
     mintStatus: 'requested', mintRecipient: recipient, mintRequestedAt: new Date().toISOString() });
   return _playlist.find(track => track.trackId === trackId);
 }
@@ -428,7 +447,13 @@ export function applyRating(trackId, newLikes, newDislikes, messageId, { initial
   track.dislikes = Math.max(0, (track.dislikes || 0) + (legacy ? 0 : dislikes - (previous?.dislikes || 0)));
   if (messageId) track.discordRatings[messageId] = { likes, dislikes };
   if (messageId && !track.ratedMessageIds?.includes(messageId)) track.ratedMessageIds = [...(track.ratedMessageIds || []), messageId].slice(-500);
-  if (save) _save();
+  const changed = !legacy && (likes !== (previous?.likes || 0) || dislikes !== (previous?.dislikes || 0));
+  if (changed) _pendingHistoryEvents.push({
+    id: randomUUID(), type: weekly ? 'vote' : 'vote-reconciliation', source: 'discord', trackId, messageId: messageId || null,
+    observedAt: new Date(now).toISOString(), occurredAt: null, likes, dislikes,
+    likesDelta: likes - (previous?.likes || 0), dislikesDelta: dislikes - (previous?.dislikes || 0),
+  });
+  if (save) _save({ routine: true });
   return track;
 }
 
@@ -444,7 +469,8 @@ export function applySiteVote(trackId, vote, { now = Date.now() } = {}) {
   const payrollWeek = currentPayrollPeriod(now).week;
   track.payrollVotes ||= {};
   track.payrollVotes[payrollWeek] = (track.payrollVotes[payrollWeek] || 0) + vote;
-  _save();
+  _save({ routine: true, events: [{ id: randomUUID(), type: 'vote', source: 'site', trackId, vote,
+    observedAt: new Date(now).toISOString(), occurredAt: new Date(now).toISOString() }] });
   return track;
 }
 
@@ -486,16 +512,24 @@ export function reconcileRatings(events) {
     if (!alreadyRated && !playId && !legacyTotals && !track.audibleMessageIds?.includes(messageId)) track.plays = (track.plays || 0) + 1;
     if (!alreadyRated || before !== JSON.stringify([track.likes, track.dislikes, track.discordRatings?.[messageId]])) reconciled++;
   }
-  if (reconciled > 0) _save();
+  if (reconciled > 0) _save({ routine: true });
   return reconciled;
 }
 
 /** Count one completed, audible play in its UTC week; retries are idempotent by playId. */
 export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audibleMs, firstWeekBonus = false, announcementId } = {}) {
   if (!playId || !Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return { counted: false, reason: 'invalid-event' };
-  if (!Number.isFinite(audibleMs) || audibleMs < MIN_WEEKLY_PLAY_MS) return { counted: false, reason: 'under-30-seconds' };
+  if (!Number.isFinite(audibleMs) || audibleMs < 0) return { counted: false, reason: 'under-30-seconds' };
   const track = _playlist.find((entry) => entry.trackId === trackId);
   if (!track) return { counted: false, reason: 'track-not-found' };
+  const event = { id: `play:${playId}`, type: 'play', trackId, playId,
+    observedAt: new Date().toISOString(), occurredAt: new Date(endedAt).toISOString(),
+    startedAt: new Date(startedAt).toISOString(), endedAt: new Date(endedAt).toISOString(), audibleMs,
+    qualified: audibleMs >= MIN_WEEKLY_PLAY_MS, announcementId: announcementId || null };
+  if (audibleMs < MIN_WEEKLY_PLAY_MS) {
+    _save({ routine: true, events: [event] });
+    return { counted: false, reason: 'under-30-seconds' };
+  }
   const week = getUtcWeekKey(new Date(endedAt));
   track.weeklyPlayIds ||= {};
   track.weeklyPlayIds[week] ||= [];
@@ -514,7 +548,7 @@ export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audible
   if (firstWeekBonus) track.firstWeekBonusUsed = true;
   track.recordedPlayIds.push(playId);
   track.recordedPlayIds = track.recordedPlayIds.slice(-5000);
-  _save();
+  _save({ routine: true, events: [event] });
   return { counted: true, week, weeklyPlays: track.weeklyPlays[week] };
 }
 

@@ -1,5 +1,5 @@
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { formatUsdcUnits as formatUsdc } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits as formatUsdc } from './usdc-format.mjs?v=20261017-mercury-release';
 
 export function configuredSettlementFunds(config = {}) {
   return [

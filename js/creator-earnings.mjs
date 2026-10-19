@@ -1,7 +1,7 @@
 // On-chain creator earnings from DecentBusking contracts on Base. Every figure
 // is read from a contract view or an emitted event, and carries a Basescan proof link.
 
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 
 export const BASESCAN = 'https://basescan.org';
 export const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
@@ -164,6 +164,7 @@ export function createEarningsLedger({
   provider,
   restore = async () => null,
   save = async () => '',
+  schedule,
   startBlock = ROUTER_START_BLOCK,
   chunkSize = 2000,
   contracts = DJUKE_EARNING_CONTRACTS,
@@ -182,6 +183,7 @@ export function createEarningsLedger({
   let songPlaysThrough = null;
   let lastCheckedAt = null;
   let lastError = '';
+  let backupPending = false;
   let task = Promise.resolve();
 
   const run = operation => {
@@ -295,6 +297,7 @@ export function createEarningsLedger({
     return run(async () => {
       try {
         const head = await provider.getBlockNumber();
+        const previousCursor = scannedThrough;
         if (scannedFrom === null) scannedFrom = Number.isSafeInteger(startBlock) && startBlock >= 0 ? startBlock : ROUTER_START_BLOCK;
         if (scannedThrough === null) scannedThrough = scannedFrom - 1;
         let changed = false;
@@ -312,7 +315,12 @@ export function createEarningsLedger({
           songPlaysThrough = to;
         }
         lastCheckedAt = new Date(now()).toISOString();
-        if (changed || !items.length) await save(snapshot());
+        if (changed || previousCursor === null) backupPending = true;
+        if (backupPending) {
+          await save(snapshot());
+          backupPending = false;
+        } else if (scannedThrough !== previousCursor && schedule) schedule(snapshot());
+        lastError = '';
       } catch (error) {
         lastError = error.message;
         throw error;
@@ -352,7 +360,24 @@ export function createEarningsLedger({
     return { ready: Boolean(lastCheckedAt), through: scannedThrough, lastCheckedAt, entries: filtered };
   }
 
-  return { initialize, refresh, getState, getAddressState };
+  function getDjukeTopEarners() {
+    if (!lastCheckedAt || lastError || songPlaysThrough === null || songPlaysThrough < scannedThrough) {
+      throw new Error('DJuke earnings are still indexing; retry shortly');
+    }
+    const totals = new Map();
+    for (const item of items) {
+      if (item.kind !== EARNINGS_KIND.songPlay || item.requestId == null || item.asset !== 'USDC') continue;
+      const address = String(item.artist).toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(address) || !/^\d+$/.test(item.units)) throw new Error('Invalid indexed DJuke payout');
+      totals.set(address, (totals.get(address) || 0n) + BigInt(item.units));
+    }
+    const earners = [...totals].filter(([, units]) => units > 0n)
+      .sort(([a, unitsA], [b, unitsB]) => unitsA === unitsB ? a.localeCompare(b) : unitsA > unitsB ? -1 : 1)
+      .slice(0, 3).map(([address, units]) => ({ address, totalUnits: units.toString() }));
+    return { chainId: 8453, asset: 'USDC', period: 'all-time', through: scannedThrough, lastCheckedAt, earners };
+  }
+
+  return { initialize, refresh, getState, getAddressState, getDjukeTopEarners };
 }
 
 async function getLogsAdaptive(provider, filter, fromBlock, toBlock, budget) {

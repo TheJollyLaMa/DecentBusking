@@ -76,13 +76,15 @@ async function panelFixture({ wallet = null } = {}) {
     dispatchEvent(event) { for (const listener of documentListeners.get(event.type) || []) listener(event); },
   };
   const timers = [];
+  const listenModes = [];
   const requests = [];
   let read = async () => snapshot();
   let readAds = async () => ({ ads: [{ title: 'Ready ad', ipfsCid: 'ready', state: 'ready' }] });
   const context = vm.createContext({ ...scheduler, document, formatUsdcUnits,
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example',
       devertContractAddress: snapshot().contractAddress }, _wallet: wallet },
-    canSetDevertListenMode: () => true, setDevertListenMode: () => true, AbortSignal,
+    canSetDevertListenMode: () => true,
+    setDevertListenMode: mode => { listenModes.push(mode); return true; }, AbortSignal,
     getRadioStateSnapshot: () => radioSnapshot,
     formatMainRadioAdCountdown: (countdown, { disconnected } = {}) => {
       if (disconnected) return 'Main radio ad: disconnected';
@@ -97,7 +99,7 @@ async function panelFixture({ wallet = null } = {}) {
     },
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
-    clearTimeout() {}, clearInterval() {},
+    clearTimeout() {}, clearInterval() {}, setInterval() { return 1; },
     fetch: async url => {
       requests.push(url);
       const body = url.includes('/ads?') ? await readAds()
@@ -109,7 +111,7 @@ async function panelFixture({ wallet = null } = {}) {
     .replace(/^import .*;\n/gm, '').replace(/export /g, '');
   vm.runInContext(`${source}\ninitDevertTab();`, context);
   const settle = () => new Promise(resolve => setImmediate(resolve));
-  return { element, document, timers, requests, settle, focus: () => focused,
+  return { element, document, timers, requests, listenModes, settle, context, focus: () => focused,
     read: callback => { read = callback; }, readAds: callback => { readAds = callback; },
     setRadioState: (state) => { radioSnapshot = state; document.dispatchEvent({ type: 'dbusk-radio-state', detail: state }); },
     click: id => element(id).listeners.get('click')({ stopPropagation() {} }) };
@@ -220,15 +222,39 @@ test('instructions modal restores focus and Escape does not close its underlying
   assert.equal(ui.focus(), 'devert-info');
 });
 
-test('markup places live controls and public queue first with independent disclosures and a named native modal', () => {
+test('DVert uses the header wallet and resyncs campaign checkout when its network changes', async () => {
+  const ui = await panelFixture({ wallet: { address: advertiser, signer: {}, chainId: 8453 } });
+  await ui.click('devert-tab');
+  await ui.settle();
+  assert.equal(ui.element('devert-purchase').disabled, false);
+  ui.context.window._wallet.chainId = 1;
+  ui.document.dispatchEvent({ type: 'wallet-chain-changed' });
+  assert.equal(ui.element('devert-purchase').disabled, true);
+  assert.equal(ui.element('devert-minimum-offer').textContent, 'Switch to Base');
+  ui.context.window._wallet.chainId = 8453;
+  ui.document.dispatchEvent({ type: 'wallet-chain-changed' });
+  assert.equal(ui.element('devert-purchase').disabled, false);
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../js/devert-tab.mjs'), 'utf8');
+  assert.doesNotMatch(html, /id="devert-connect-wallet"/);
+  assert.doesNotMatch(source, /walletButton|_wallet\?\.connect/);
+});
+
+test('machine layout orders LCD, paid queue, search and controls with secondary sections collapsed', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const panel = html.slice(html.indexOf('<aside id="devert-panel"'), html.indexOf('<dialog id="devert-instructions"'));
   assert.doesNotMatch(panel, /Ad studio · Base|7 Days|Campaign Instructions/);
-  assert.ok(panel.indexOf('VertLoop Live') < panel.indexOf('Paid Advert Queue'));
-  assert.ok(panel.indexOf('Paid Advert Queue') < panel.indexOf('id="devert-queue"'));
-  assert.match(panel, /id="devert-paid-queue-button" type="button" disabled/);
-  assert.match(panel, /Ordinary Campaign Rotation/);
-  assert.ok(panel.indexOf('id="devert-queue"') < panel.indexOf('id="devert-search"'));
+  const ordered = ['devert-audio-mode', 'devert-paid-price', 'devert-paid-requests',
+    'devert-search', 'devert-paid-campaign', 'devert-paid-queue-button', 'devert-queue'];
+  for (let index = 1; index < ordered.length; index++) {
+    assert.ok(panel.indexOf(`id="${ordered[index - 1]}"`) < panel.indexOf(`id="${ordered[index]}"`));
+  }
+  assert.match(panel, /id="devert-paid-queue-button"[^>]*disabled>Queue Ad/);
+  assert.match(panel, /id="devert-paid-immediate-button"[^>]*disabled>After This Song/);
+  assert.match(panel, /On Rotation/);
+  assert.match(panel, /aria-describedby="devert-live-tooltip"/);
+  assert.match(panel, /id="devert-live-tooltip" role="tooltip"/);
+  assert.doesNotMatch(panel, /devert-paid-refund|Claim full refund|class="devert-tiers" open/);
   for (const id of ['devert-my-ads', 'devert-submit-ad', 'devert-run-campaign']) {
     assert.match(panel, new RegExp(`<details id="${id}" class="devert-disclosure">`));
   }
@@ -236,4 +262,31 @@ test('markup places live controls and public queue first with independent disclo
   assert.match(html, /aria-label="DVert campaign instructions" aria-haspopup="dialog"/);
   for (const step of ['Upload your audio or MP4 ad for review', 'Approved NFT sent to your wallet',
     'Select the minted NFT, choose weeks, and purchase the campaign']) assert.ok(html.includes(step));
+});
+
+test('live icon preserves its artwork, hushes radio, and returns on toggle or panel close', async () => {
+  const ui = await panelFixture();
+  const button = ui.element('devert-audio-mode');
+  button.textContent = 'icon artwork';
+  await ui.click('devert-tab');
+  await ui.settle();
+  assert.equal(ui.element('devert-live-player').hidden, true);
+  await ui.click('devert-audio-mode');
+  await ui.settle();
+  assert.equal(button.textContent, 'icon artwork');
+  assert.equal(button.getAttribute('aria-pressed'), 'true');
+  assert.equal(button.getAttribute('aria-label'), 'Return to Main Radio');
+  assert.equal(ui.element('devert-live-player').hidden, false);
+  assert.equal(ui.element('devert-live-votes').hidden, false);
+  assert.deepEqual(ui.listenModes, ['ads-only']);
+  await ui.click('devert-audio-mode');
+  assert.equal(button.getAttribute('aria-pressed'), 'false');
+  assert.equal(ui.element('devert-live-player').hidden, true);
+  assert.equal(ui.element('devert-live-votes').hidden, true);
+  await ui.click('devert-audio-mode');
+  await ui.settle();
+  await ui.click('devert-close');
+  assert.deepEqual(ui.listenModes, ['ads-only', 'radio', 'ads-only', 'radio']);
+  assert.equal(button.getAttribute('aria-label'), 'Listen to VertLoop');
+  assert.equal(ui.element('devert-live-player').hidden, true);
 });

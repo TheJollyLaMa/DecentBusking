@@ -1,20 +1,68 @@
 # DVert paid advert requests
 
 This is separate from campaign purchases, ordinary advert rotation, and DJuke
-song payments. The Base deployment uses its own verified queue contract without
-changing the existing campaign contract.
+song payments. Campaigns remain **$5 USDC for one week** of ordinary rotation.
+Priority payments are optional extras for an existing active approved campaign;
+they never purchase, renew or extend the campaign itself.
+
+## Panel controls
+
+DVert follows the DJuke machine layout: a two-price LCD, paid queue, advert
+search/selection, and **Queue Ad** / **After This Song** buttons. Search matches
+active approved campaign titles, creator names when available, advertiser
+addresses, and campaign IDs. The first button uses the next normal ad break;
+the second costs twice as much for after-song priority. Detailed terms stay
+in the information dialog; ordinary rotation, wallet ads, campaign tools and
+the price model are collapsed until requested.
+Wallet connection uses the page header, not a second connect control in DVert.
+Campaign and priority checkout follow that shared wallet and its network changes.
+
+The orangutan/TV icon toggles the live 24/7 VertLoop audio/video feed, hushing
+main radio only for this listener. Its hover/focus help explains the switch.
+Clicking again or closing DVert returns to main radio. Video and voting
+controls appear only while listening to VertLoop.
+
+Refund claim controls are intentionally absent from this simplified panel.
+Removal refund eligibility, contract claims and the exported
+`claimDevertRefund` helper remain unchanged for later recovery tooling.
+Payment receipts still identify the request and transaction.
+
+The green and teal priority buttons have a staggered shimmer (disabled for
+reduced-motion preferences). Both tiers use the shared payment celebrations
+after the Base transaction confirms and its request event is decoded, with the
+actual USDC charge and a transaction link. Token approvals, pending payments
+and failed/reconciliation-needed receipts do not trigger a celebration.
+Weekly campaign purchases already use the same celebration system.
+
+**Ad Funding History** is a collapsed, public, read-only ledger view. It groups
+confirmed advert fund deposits by transaction, shows exact indexed allocations
+and their fund IDs, and links to the transaction event logs and Base settlement
+router. Campaign purchases and paid-play settlements are labeled separately;
+missing historical advert titles are not guessed. Totals exclude queue escrow,
+non-advert funding and final fund-beneficiary payouts. It loads on demand from
+`/api/funds`, with ten transactions per page and explicit indexing/error states.
 
 ## Deployment status
 
-- Base queue: [`0x9ebf98367319E6c8b15b5517d808CCfEb3dddA61`](https://basescan.org/address/0x9ebf98367319E6c8b15b5517d808CCfEb3dddA61#code), source verified.
-- Deployment transaction: [`0x787351b818b6621bd1ced2606d825aab6b8d18fc40c6a455d370c14a5b0706bf`](https://basescan.org/tx/0x787351b818b6621bd1ced2606d825aab6b8d18fc40c6a455d370c14a5b0706bf), block 52722248.
+- Replacement Base v0.2 queue: [`0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb`](https://basescan.org/address/0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb#code), source verified.
+- Replacement deployment: [`0x48e8c5ce12cefc8a735e9af016d5475ac290db50e2924bba9d54fd9fc58b5240`](https://basescan.org/tx/0x48e8c5ce12cefc8a735e9af016d5475ac290db50e2924bba9d54fd9fc58b5240), block 52723789.
+- Legacy v0.1 queue: [`0x9ebf98367319E6c8b15b5517d808CCfEb3dddA61`](https://basescan.org/address/0x9ebf98367319E6c8b15b5517d808CCfEb3dddA61#code). Its pending count and USDC reserves were verified empty before replacement deployment.
 - Admin: `0x807061DF657A7697c04045dA7d16D941861cAABc`.
 - Fulfiller: `0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F`.
 - Fork rehearsal passed against deployed USDC, campaign source and settlement router.
-- Controlled mainnet acceptance passed. Public checkout is enabled with
-  `DEVERT_QUEUE_PAYMENTS_ENABLED=true`.
+- The deployed v0.1 single-tier contract passed controlled mainnet acceptance,
+  but its priority timing did not match the clarified two-tier policy below.
+- Public checkout was initially disabled on 2026-10-17 with
+  `DEVERT_QUEUE_PAYMENTS_ENABLED=false`. Regular campaigns and radio continued.
+- Replacement v0.2 supports separate normal-break bumps and double-price
+  immediate requests. The owner subsequently authorized public rollout with
+  `DEVERT_QUEUE_PAYMENTS_ENABLED=true`, explicitly waiving the two controlled
+  live acceptance purchases. Automated checkout, scheduling, playback and
+  recovery checks passed; the new two-tier contract's live purchase-to-settlement
+  acceptance is **not verified**. No acceptance purchases were made for this rollout.
+  Do not enable checkout against v0.1.
 
-### Live acceptance - 2026-10-17
+### Historical v0.1 live acceptance - 2026-10-17
 
 One authorized $1 USDC request purchased campaign #2 as request #0:
 
@@ -38,13 +86,21 @@ that would require separately authorized disposable campaign funding.
 ## Agreed policy
 
 - Native USDC on Base. Anyone may request an active, approved campaign.
-- Price: $1 times `2 ** floor(pendingCount / 7)`. At most 128 outstanding queue
-  positions. Checkout approves only the current exact price; the contract
-  enforces the payer's maximum price.
-- FIFO paid adverts take an extra break after the current recording, without
-  consuming an ordinary advert's reserved position. They never interrupt audio
-  or protected Top 10/live programming. A paid item already being prepared is
-  not preempted by a later purchase.
+- Base queue price: $1 times `2 ** floor(pendingCount / 7)`, counting both tiers.
+  A **queue bump** costs that quote and replaces the first available slot at a
+  normally scheduled main-radio advert break, without adding another break.
+  A displaced ordinary advert remains eligible for subsequent rotation.
+- **Play after this song** costs exactly **2x the current queue price** and buys
+  an extra break after the current recording. It preserves ordinary advert
+  reservations and does not reset the normal-break cadence.
+- Immediate requests take priority over bumps; each tier remains FIFO. A new
+  immediate request can preempt a bump being prepared, but never interrupt
+  audio already playing. Multiple immediate requests wait in FIFO order.
+  Both tiers defer throughout protected Top 10/live programming.
+- At most 128 outstanding queue positions; the ID scan window is also bounded
+  to 128, so an old pending bump can temporarily fill the window even if later
+  immediate requests settle. Checkout approves only the current exact tier
+  price; the contract enforces the payer's maximum price.
 - Purchased title, advertiser and media URI are immutable request snapshots.
   Campaign expiry does not invalidate a purchased play.
 - USDC remains reserved in the queue until the radio fulfiller reports a
@@ -77,14 +133,15 @@ Run `node checkpoint-mirror-client.js --watch` from `discord-bot` on the operato
 Mac, with IPFS Desktop running and the same `CHECKPOINT_MIRROR_SECRET` as Render.
 The helper accepts playlist checkpoints and validated paid-playback journals.
 It must remain running for paid-ad playback and settlement.
+The replacement journal's filename and metadata kind include its contract
+address, so request #0 from the new deployment cannot reuse the old journal.
 
 Removal is cross-system: the durable campaign-removal ledger is updated first,
 then the queue contract is reconciled. Failure is reported rather than showing
-a completed refund. Before mirroring removal on-chain, the worker blocks new
-plays for that campaign. If a request is currently playing, removal is deferred
-until playback is interrupted and requeued or naturally completes; naturally
-completed playback must settle before removal can make that request refundable.
-If settlement cannot be confirmed, reconciliation remains pending and retries.
+a completed refund. The worker blocks new starts for the campaign and defers
+on-chain removal while its paid request is playing or has finished but is not
+yet settled. Interrupted playback returns to the queue; naturally completed
+playback is settled before removal can make an unplayed request refundable.
 Periodic reconciliation retries even during protected shows. Payers must wait
 for confirmed on-chain removal to claim.
 
@@ -97,45 +154,59 @@ in this version; there is no extra ETH contribution charged to buyers.
 
 Contract sources and tests live in the sibling **DecentMarket** repository:
 
-- `contracts/DeVertQueue_v0.1.sol`
-- `test/DeVertQueue_v01.test.js`
+- `contracts/DeVertQueue_v0.2.sol` (v0.1 is retained unchanged for verification)
+- `test/DeVertQueue_v02.test.js`
 - `scripts/deploy_devert_queue.js`
 
 Do not modify or redeploy the existing campaign contract. Its deployed ABI is
 the queue's read-only campaign source.
 
-1. Run `npx hardhat test test/DeVertQueue_v01.test.js` in DecentMarket.
+1. Run `npx hardhat test test/DeVertQueue_v01.test.js test/DeVertQueue_v02.test.js` in DecentMarket.
 2. Rehearse against a Base fork and review roles, native USDC, campaign address,
    router, four active fund IDs, splits, approvals, refunds and settlement.
    Run `BASE_FORK_RPC=https://mainnet.base.org npx hardhat test test/DeVertQueue_base_fork.test.js`.
    The test mines a local block before contract calls to avoid historical-block
    execution limitations in the installed Hardhat/EDR runtime.
-3. Run the deploy script on Base **without** `CONFIRM_DEPLOY=yes` for dry-run
+3. Run the deploy script on Base with `DEVERT_QUEUE_VERSION=2` and **without**
+   `CONFIRM_DEPLOY=yes` for dry-run
    checks. Set `DBUSK_ADMIN` to the intended admin's public address; dry runs
    require no signing key. Only after separate approval, broadcast with that
    flag and a matching admin signer. Use a separate worker wallet in
    `DBUSK_FULFILLER`, with sufficient Base ETH.
+   Drain the v0.1 queue before switching contracts; do not migrate unpaid
+   promises or strand refunds. The script checks the legacy pending count and
+   reserved USDC and writes a separate `devert-queue-v02-base.json` record.
 4. Publish/verify the new source on Basescan/Sourcify using the recorded compiler
    settings and constructor arguments. Record its deployment address/block in
    contract documentation.
    Use `ETHERSCAN_API_KEY` for Etherscan V2; legacy explorer-specific keys use
    deprecated V1 endpoints.
-5. Worker: set `DEVERT_QUEUE_CONTRACT_ADDRESS` and keep
+5. Worker: set the replacement `DEVERT_QUEUE_CONTRACT_ADDRESS`,
+   `DEVERT_QUEUE_VERSION=2`, and keep
    `DEVERT_QUEUE_PAYMENTS_ENABLED=false` initially. The queue worker uses
    `DEVERT_SCHEDULER_PRIVATE_KEY` (or existing `DJUKE_FULFILLER_PRIVATE_KEY`),
    `PINATA_JWT`, and the checkpoint mirror. Missing durable storage leaves the
    queue read-only. The worker verifies its fulfiller role and campaign source.
+   Version 1 remains supported only for fulfilling already-purchased legacy
+   requests; it can never enable new public checkout. The fund ledger retains
+   the legacy contract so the first live acceptance settlement stays labelled
+   as an advert, not a generic sponsor.
 6. Website: set `devertQueueContractAddress` in the public configuration.
    No key belongs in the website. The new address is included in the worker's
    read-only RPC allow-list from its environment configuration.
 7. Confirm catalog approval and removal reconciliation. Verify a controlled
-   live paid request, natural completion, 45/45/8/2 funding, durable mirrored
+   live paid request in each tier, natural completion, 45/45/8/2 funding, durable mirrored
    playback evidence and an empty queue after settlement. Protected-show
    deferral, interruption/restart recovery and removal refunds must also pass
    the automated unit/fork checks. A live removal/refund rehearsal requires
    separate authorization for a disposable campaign; do not remove a real
    campaign for testing. Then enable `DEVERT_QUEUE_PAYMENTS_ENABLED=true`,
    redeploy, and confirm checkout readiness and no replay of the settled request.
+   The earlier $1 v0.1 live test is historical evidence, not acceptance of the
+   new two-tier scheduling contract. Additional live spending requires approval.
+   For the 2026-10-17 public rollout, the owner explicitly waived the controlled
+   live purchases; retain this acceptance gap in the rollout record rather than
+   marking those tests passed.
 
 The public endpoint is `GET /api/devert/queue`. Snapshots use a fixed Base block
 with at least two confirmations, verify price/count/token, and detect reorgs.

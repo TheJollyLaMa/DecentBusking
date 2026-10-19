@@ -1,11 +1,11 @@
-import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261016-ipfs-gateway-failover';
+import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261017-mercury-release';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
-import { submitMediaForApproval } from './mint-submission.js?v=20261018-shared-provider';
+import { submitMediaForApproval } from './mint-submission.js?v=20261017-mercury-release';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { planDevertQueues, quoteDevertCampaign, DEVERT_SONGS_PER_MAIN_AD } from './devert-scheduler.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { formatUsdcUnits } from './usdc-format.mjs?v=20261015-usdc-cents';
+import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { activeDevertCampaign, removeDevertCampaign } from './devert-campaigns.mjs';
 
 const MAX_DEVERT_MEDIA_BYTES = 250 * 1024 * 1024;
@@ -189,7 +189,6 @@ export function initDevertTab() {
   const refreshButton = document.getElementById('devert-refresh');
   const searchInput = document.getElementById('devert-search');
   const searchResults = document.getElementById('devert-search-results');
-  const searchState = document.getElementById('devert-search-state');
   const priceDisplay = document.getElementById('devert-price');
   const publicQueue = document.getElementById('devert-queue');
   const queueStatus = document.getElementById('devert-queue-status');
@@ -206,7 +205,6 @@ export function initDevertTab() {
   const adMediaQueueButton = document.getElementById('devert-ad-queue');
   const adMediaStatus = document.getElementById('devert-ad-queue-status');
   const minimumOffer = document.getElementById('devert-minimum-offer');
-  const walletButton = document.getElementById('devert-connect-wallet');
   const audioModeButton = document.getElementById('devert-audio-mode');
   const previewPlayer = document.getElementById('devert-ad-preview');
   const adVoteButtons = [document.getElementById('devert-vote-up'), document.getElementById('devert-vote-down')];
@@ -241,7 +239,10 @@ export function initDevertTab() {
     const canSwitch = canSetDevertListenMode();
     const reconnecting = adLoopState?.voiceConnected === false && adLoopState?.ready !== false;
     audioModeButton.setAttribute('aria-pressed', String(adsOnly));
-    audioModeButton.textContent = adsOnly ? 'Return to Main Radio' : 'Listen to VertLoop';
+    audioModeButton.setAttribute('aria-label', adsOnly ? 'Return to Main Radio' : 'Listen to VertLoop');
+    audioModeButton.title = adsOnly ? 'Return to Main Radio' : 'Listen to VertLoop · 24/7 audio & video adverts';
+    document.getElementById('devert-live-player').hidden = !adsOnly && !listenStatus.textContent;
+    document.getElementById('devert-live-votes').hidden = !adsOnly;
     audioModeButton.disabled = !canSwitch || audioModeBusy || (!adsOnly && (reconnecting || adLoopState?.ready !== true));
     const playId = normalizeAdLoopNowPlaying(adLoopState)?.playId;
     previewPlayer.hidden = !adsOnly || !playId;
@@ -392,14 +393,13 @@ export function initDevertTab() {
     const totalUnits = 5_000_000n * BigInt(weeks);
     const campaignTotal = document.getElementById('devert-campaign-total');
     purchaseForm.hidden = !verifiedContract;
-    walletButton.hidden = !verifiedContract || !!wallet?.address;
     purchaseButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || purchaseBusy;
     adMediaQueueButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || adMediaBusy || !adMediaFile.files?.[0];
     if (campaignTotal) campaignTotal.textContent = `Total: ${weeks} × 5.00 USDC = ${formatUsdc(totalUnits.toString())} + worker-gas ETH`;
     if (!address) minimumOffer.textContent = 'Campaigns unavailable';
     else if (confirmedContract && snapshot.paused) minimumOffer.textContent = 'Campaign purchases paused';
     else if (!verifiedContract) minimumOffer.textContent = 'Connecting…';
-    else if (!wallet?.address) minimumOffer.textContent = 'Connect your wallet to submit an ad';
+    else if (!wallet?.address) minimumOffer.textContent = 'Connect in the page header to submit an ad';
     else if (wallet.chainId !== 8453) minimumOffer.textContent = 'Switch to Base';
     else minimumOffer.textContent = '';
   }
@@ -593,6 +593,7 @@ export function initDevertTab() {
     panel.setAttribute('aria-hidden', 'true');
     panel.inert = true;
     document.body.classList.remove('devert-open');
+    listenStatus.textContent = '';
     syncListenControls();
   }
 
@@ -607,7 +608,7 @@ export function initDevertTab() {
         stopAdLoopPlayback();
         previewPlayer.dataset.listenMode = 'radio';
         setDevertListenMode('radio');
-        listenStatus.textContent = 'Main radio';
+        listenStatus.textContent = '';
       } else {
         if (adLoopState?.ready !== true) return;
         if (!setDevertListenMode('ads-only')) { listenStatus.textContent = 'Finish archive playback or the current new-song preview first.'; return; }
@@ -773,9 +774,9 @@ export function initDevertTab() {
   adVoteButtons[1]?.addEventListener('click', () => voteOnAd(-1));
   adMediaFile?.addEventListener('change', syncCheckout);
   adMediaQueueButton?.addEventListener('click', queueAdMedia);
-  walletButton?.addEventListener('click', () => window._wallet?.connect?.());
   document.addEventListener('wallet-connected', syncCheckout);
   document.addEventListener('wallet-connected', refresh);
+  document.addEventListener('wallet-chain-changed', syncCheckout);
   document.addEventListener('wallet-disconnected', () => {
     currentAds = [];
     adLibraryStatus = 'Connect your wallet to browse ads.';

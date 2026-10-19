@@ -33,12 +33,12 @@ function makeCampaignLog(campaignId, advertiser, index, address = devertContract
 
 test('paid advert settlements identify request, payer and campaign rather than generic sponsor deposits', async () => {
   const { createFundLedger } = await import(url);
-  const { DEVERT_QUEUE_ABI } = await import('../js/devert-queue.mjs');
+  const { devertQueueAbi } = await import('../js/devert-queue.mjs');
   const queue = `0x${'3'.repeat(40)}`;
   const payer = `0x${'1'.repeat(40)}`;
   const advertiser = `0x${'2'.repeat(40)}`;
   const txHash = `0x${'a'.repeat(64)}`;
-  const paidInterface = new Interface(DEVERT_QUEUE_ABI);
+  const paidInterface = new Interface(devertQueueAbi(1));
   const logs = [makeLog(funds.top10, queue, 450000n, txHash, 10, 1)];
   const provider = makeProvider({ head: 10, logs, txFrom: new Map() });
   provider.getTransactionReceipt = async () => {
@@ -140,6 +140,44 @@ function makeProvider({ head, logs, txFrom }) {
   };
 }
 
+for (const version of [1, 2, 'legacy']) {
+test(`paid advert ${version} settlements identify request, payer and campaign rather than generic sponsor deposits`, async () => {
+  const { createFundLedger } = await import(url);
+  const { devertQueueAbi } = await import('../js/devert-queue.mjs');
+  const queue = version === 'legacy' ? '0x9ebf98367319e6c8b15b5517d808ccfeb3ddda61' : `0x${'3'.repeat(40)}`;
+  const payer = `0x${'1'.repeat(40)}`;
+  const advertiser = `0x${'2'.repeat(40)}`;
+  const txHash = `0x${'a'.repeat(64)}`;
+  const paidInterface = new Interface(devertQueueAbi(version === 'legacy' ? 1 : version));
+  const logs = [makeLog(funds.top10, queue, 450000n, txHash, 10, 1)];
+  const provider = makeProvider({ head: 10, logs, txFrom: new Map() });
+  provider.getTransactionReceipt = async () => {
+    const encoded = paidInterface.encodeEventLog('AdFulfilled', [8n, id('radio-play')]);
+    return { status: 1, logs: [{ address: queue, index: 5, ...encoded }] };
+  };
+  provider.call = async transaction => {
+    assert.equal(transaction.to.toLowerCase(), queue);
+    assert.equal(paidInterface.decodeFunctionData('getRequest', transaction.data)[0], 8n);
+    const request = [9n, payer, 1000000n, 1, 'Paid advert', 'ipfs://ad', advertiser];
+    if (version === 2) request.push(1);
+    return paidInterface.encodeFunctionResult('getRequest', [request]);
+  };
+  const ledger = createFundLedger({ provider, router: makeRouter(logs, new Map()), startBlock: 10,
+    config: { routerAddress, devertQueueContractAddress: version === 'legacy' ? `0x${'4'.repeat(40)}` : queue,
+      devertQueueVersion: version === 'legacy' ? 2 : version, radioFunds: { topTen: funds.top10 },
+      assets: { USDC: { address: usdc } } } });
+  await ledger.initialize();
+  const source = (await ledger.getCurrentState()).funds[funds.top10].sources[0];
+  assert.equal(source.kind, 'advert');
+  assert.equal(source.paidAdvert, true);
+  assert.equal(source.payer, payer);
+  assert.equal(source.advertiser, advertiser);
+  assert.equal(source.requestId, '8');
+  assert.equal(source.campaignId, '9');
+  if (version === 2) assert.equal(source.priorityTier, 1);
+});
+}
+
 function makeRouter(logs, balances) {
   const queryRanges = [];
   return {
@@ -153,6 +191,32 @@ function makeRouter(logs, balances) {
     fundBalances: async (fundId) => balances.get(fundId.toLowerCase()) || 0n,
   };
 }
+
+test('fund refresh skips unchanged checks, schedules event-free cursor progress and saves new funds immediately', async () => {
+  const { createFundLedger } = await import(url);
+  let head = 10;
+  const logs = [];
+  const provider = makeProvider({ head, logs, txFrom: new Map() });
+  provider.getBlockNumber = async () => head;
+  const saves = [];
+  const scheduled = [];
+  const ledger = createFundLedger({ provider, router: makeRouter(logs, new Map()), startBlock: 10,
+    config: { routerAddress, radioFunds: { topTen: funds.top10 }, assets: { USDC: { address: usdc } } },
+    save: async value => { saves.push(structuredClone(value)); return 'ipfs://saved'; },
+    schedule: value => scheduled.push(structuredClone(value)) });
+  await ledger.initialize();
+  await ledger.refresh();
+  assert.equal(saves.length, 1);
+  assert.equal(scheduled.length, 0);
+  head++;
+  await ledger.refresh();
+  assert.equal(saves.length, 1);
+  assert.equal(scheduled[0].scannedThrough, 11);
+  logs.push(makeLog(funds.top10, `0x${'1'.repeat(40)}`, 100n, `0x${'a'.repeat(64)}`, ++head, 0));
+  await ledger.refresh();
+  assert.equal(saves.length, 2);
+  assert.equal(saves[1].sources.length, 1);
+});
 
 test('fund ledger classifies advert, djuke, and sponsor sources', async () => {
   const { createFundLedger } = await import(url);

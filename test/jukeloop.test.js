@@ -8,6 +8,56 @@ const { PassThrough } = require('node:stream');
 const { pathToFileURL } = require('node:url');
 const vm = require('node:vm');
 
+test('playlist counters schedule routine writes while pin/mint changes and persistence barriers remain durable', async t => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decent-playlist-checkpoint-'));
+  process.env.JUKELOOP_PLAYLIST_PATH = path.join(tempDir, 'playlist.json');
+  t.after(() => { delete process.env.JUKELOOP_PLAYLIST_PATH; fs.rmSync(tempDir, { recursive: true, force: true }); });
+  const storeUrl = pathToFileURL(path.join(__dirname, '../discord-bot/playlist-store.js'));
+  storeUrl.searchParams.set('test', 'routine-checkpoint');
+  const store = await import(storeUrl.href);
+  store.loadPlaylist([]);
+  const saved = [];
+  const history = [];
+  let pending;
+  store.configureRemotePersistence(async (state, { events }) => { saved.push(state); history.push(...events); pending = null; }, {
+    schedule: (state, { events }) => { pending = state; history.push(...events); },
+    flush: async () => { if (pending) { saved.push(pending); pending = null; } },
+  });
+  store.addTrack({ messageId: 'message', attachmentId: 'song', filename: 'song.mp3' });
+  await store.waitForRemotePersistence();
+  assert.equal(saved.length, 1);
+  assert.equal(history[0].type, 'submission');
+  for (let count = 0; count < 100; count++) store.applySiteVote('song', 1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(saved.length, 1);
+  assert.equal(pending[0].likes, 100);
+  assert.equal(history.filter(event => event.type === 'vote').length, 100);
+  assert.equal(new Set(history.map(event => event.id)).size, 101);
+  assert.ok(history.every(event => Number.isFinite(Date.parse(event.observedAt))));
+  await store.waitForRemotePersistence();
+  assert.equal(saved.length, 2);
+  assert.equal(saved[1][0].likes, 100);
+  store.updateTrackPin('song', { status: 'pinned', ipfsCid: 'bafyaudio' });
+  await store.waitForRemotePersistence();
+  assert.equal(saved.length, 3);
+  assert.equal(saved[2][0].ipfsCid, 'bafyaudio');
+  const now = Date.now();
+  const play = { playId: 'audible-play', startedAt: now - 60000, endedAt: now, audibleMs: 60000 };
+  assert.equal(store.recordAudiblePlay('song', play).counted, true);
+  assert.equal(store.recordAudiblePlay('song', play).reason, 'duplicate');
+  store.applyRating('song', 2, 0, 'announcement');
+  store.applyRating('song', 2, 0, 'announcement');
+  await store.waitForRemotePersistence();
+  assert.equal(history.filter(event => event.type === 'play').length, 1);
+  assert.equal(history.filter(event => event.source === 'discord' && event.type === 'vote').length, 1);
+  const playEvent = history.find(event => event.type === 'play');
+  assert.equal(playEvent.occurredAt, new Date(now).toISOString());
+  assert.equal(playEvent.audibleMs, 60000);
+  store.configureRemotePersistence(async () => { throw new Error('IPFS offline'); });
+  store.requestTrackMint('song', undefined, `0x${'1'.repeat(40)}`, 'bafyart');
+  await assert.rejects(store.waitForRemotePersistence(), /IPFS offline/);
+});
+
 test('main-radio removal discards prepared and persisted queued ads and blocks in-flight removed media', async () => {
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
   const session = Object.create(JukeLoopSession.prototype);
@@ -512,11 +562,13 @@ test('radio state keeps video MIME for main-radio ads even when the filename loo
       isDevert: true,
     },
     playlist: [],
+    adVotes: { up: 4, down: 2, net: 2 },
     now: 100_000,
   });
 
   assert.equal(state.nowPlaying.mediaType, 'video/mp4');
   assert.equal(state.nowPlaying.videoUrl, 'ipfs://bafy-video');
+  assert.deepEqual(state.nowPlaying.adVotes, { up: 4, down: 2, net: 2 });
 });
 
 test('radio state omits sponsor metadata for regular rotation', async () => {

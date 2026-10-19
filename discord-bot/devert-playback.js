@@ -391,6 +391,13 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       }
       return campaigns.map(campaign => ({ campaignId: campaign.campaignId, mainRadio: true, track: campaignTrack(campaign, 'main-radio') }));
     },
+    getMainRadioAdVoteSummary: radioPlayId => {
+      requireReady();
+      const votes = journal.adVotes.filter(entry => entry.radioPlayId === radioPlayId);
+      const up = votes.filter(entry => entry.vote === 1).length;
+      const down = votes.filter(entry => entry.vote === -1).length;
+      return { up, down, net: up - down };
+    },
     recordMainRadioAdVote: ({ campaignId, radioPlayId, voterId, vote }) => run(async () => {
       requireReady();
       if (!/^\d+$/.test(String(campaignId)) || typeof radioPlayId !== 'string' || !radioPlayId ||

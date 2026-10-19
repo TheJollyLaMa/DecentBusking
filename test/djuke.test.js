@@ -1,6 +1,26 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+test('DVert shares the USDC ABI without importing and initializing the DJuke drawer', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '../js/devert-paid-queue.mjs'), 'utf8');
+  assert.match(source, /import \{ USDC_BROWSER_ABI \} from '\.\/usdc-abi\.mjs'/);
+  assert.doesNotMatch(source, /from ['"]\.\/djuke\.mjs/);
+  const { USDC_BROWSER_ABI } = await import('../js/usdc-abi.mjs');
+  const djuke = await import('../js/djuke.mjs');
+  assert.equal(djuke.USDC_BROWSER_ABI, USDC_BROWSER_ABI);
+  assert.deepEqual(USDC_BROWSER_ABI, [
+    'function decimals() view returns (uint8)',
+    'function balanceOf(address) view returns (uint256)',
+    'function allowance(address, address) view returns (uint256)',
+    'function approve(address, uint256) returns (bool)',
+  ]);
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /djuke\.mjs\?v=20261017-mercury-release/);
+  assert.match(html, /devert-paid-queue\.mjs\?v=20261017-mercury-release/);
+});
+
 test('DJuke starts at 0.25 USDC and doubles after each eight pending requests', async () => {
   const { quoteDjuke } = await import('../js/djuke.mjs');
   for (const [pending, expected] of [[0, 250000n], [7, 250000n], [8, 500000n],
@@ -155,19 +175,20 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   const search = html.indexOf('id="djuke-search"');
   const select = html.indexOf('id="djuke-song"');
   const queue = html.indexOf('id="djuke-pay"');
-  const worker = html.indexOf('class="worker-gas-notice"');
-  assert.ok(search < select && select < queue && queue < worker);
+  const earners = html.indexOf('id="djuke-earners"');
+  assert.ok(search < select && select < queue && queue < earners);
 });
 
-test('worker funding remains available beside mint and paid queue controls', () => {
+test('DJuke replaces operator messaging with a podium, info dialog and decorative LCD equalizer', () => {
   const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
-  const djukePay = html.indexOf('id="djuke-pay"');
-  const workerNotice = html.indexOf('class="worker-gas-notice"');
-  assert.ok(djukePay < workerNotice);
-  const notice = html.slice(workerNotice, html.indexOf('id="djuke-payment-state"', workerNotice));
-  assert.match(notice, /ETH/);
-  assert.match(notice, /0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F/);
-  assert.match(notice, /Worker balance is monitored/);
+  const panel = html.match(/<aside id="djuke-panel"[\s\S]*?<\/aside>/)[0];
+  assert.doesNotMatch(panel, /Operator reminder|worker-gas-notice|img\/hat\.svg/);
+  assert.match(panel, /djuke-header-machine/);
+  assert.match(panel, /id="djuke-info".*aria-controls="djuke-instructions"/);
+  assert.match(panel, /class="djuke-lcd-equalizer" aria-hidden="true"/);
+  assert.match(panel, /id="djuke-earners"/);
+  assert.match(panel, /id="djuke-payment-state"[^>]*><\/p>/);
+  assert.match(html, /<dialog id="djuke-instructions"/);
   assert.match(html, /Mint gas comes from your wallet/);
   assert.doesNotMatch(html, /id="admin-reviewed-album-import"/);
   assert.match(html, /<details id="admin-radio-schedule"/);
@@ -181,6 +202,88 @@ test('DJuke search matches song titles and creators without selecting a song imp
   assert.deepEqual(filterDjukeSongs(tracks, 'heart jolly').map(track => track.trackId), ['a']);
   assert.deepEqual(filterDjukeSongs(tracks, '0xabc').map(track => track.trackId), ['a']);
   assert.deepEqual(filterDjukeSongs(tracks, 'missing'), []);
+});
+
+test('DJuke prompts only on a disconnected queue click, renders ENS payouts and preserves modal focus', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const helpers = await import('../js/djuke.mjs');
+  const versions = await import('../js/djuke-version.mjs');
+  const { renderWalletAddress } = await import('../js/fund-display.mjs');
+  const { formatUsdcUnits } = await import('../js/usdc-format.mjs');
+  const nodes = new Map();
+  let focused;
+  function element(id) {
+    if (nodes.has(id)) return nodes.get(id);
+    const item = { children: [], listeners: {}, attributes: {}, value: '', textContent: '', open: false,
+      classList: { add() {}, remove() {} },
+      setAttribute(name, value) { this.attributes[name] = value; },
+      getAttribute(name) { return this.attributes[name]; },
+      append(...children) { this.children.push(...children); },
+      replaceChildren(...children) { this.children = children; },
+      addEventListener(name, callback) { (this.listeners[name] ||= []).push(callback); },
+      focus() { focused = id; }, showModal() { this.open = true; },
+      close() { this.open = false; for (const callback of this.listeners.close || []) callback(); },
+    };
+    nodes.set(id, item);
+    return item;
+  }
+  const listeners = {};
+  const document = { body: element('body'), getElementById: element,
+    createElement: tag => element(`${tag}-${nodes.size}`), querySelectorAll: () => [],
+    addEventListener(name, callback) { (listeners[name] ||= []).push(callback); },
+    dispatchEvent(event) { for (const callback of listeners[event.type] || []) callback(event); },
+  };
+  const address = `0x${'1'.repeat(40)}`;
+  let earningsFail = false;
+  const context = vm.createContext({ ...helpers, ...versions, renderWalletAddress, formatUsdcUnits, document, AbortSignal,
+    window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example', djukeContractAddress: address } },
+    lookupEnsName: async () => 'musician.eth',
+    CustomEvent: class { constructor(type, { detail }) { this.type = type; this.detail = detail; } },
+    clearTimeout() {}, setTimeout() {},
+    fetch: async url => {
+      if (url.endsWith('/earners')) return { ok: !earningsFail, status: earningsFail ? 503 : 200,
+        json: async () => ({ chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address, totalUnits: '1125000' }] }) };
+      return { ok: true, json: async () => ({ contractAddress: address, paymentsEnabled: true, requests: [], tracks: [] }) };
+    },
+  });
+  const source = fs.readFileSync(path.join(__dirname, '../js/djuke.mjs'), 'utf8')
+    .replace(/^import .*;\n/gm, '').replace(/^export \{.*\};\n/gm, '').replace(/export /g, '');
+  vm.runInContext(`${source}\ninitDjuke();`, context);
+  const click = async id => {
+    for (const callback of element(id).listeners.click || []) await callback({ stopPropagation() {} });
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  await click('djuke-tab');
+  assert.equal(element('djuke-payment-state').textContent, '');
+  assert.equal(element('djuke-pay').disabled, false);
+  await click('djuke-pay');
+  assert.equal(element('djuke-payment-state').textContent, 'Connect your wallet in the header to queue a song');
+  const row = element('djuke-earners').children[0];
+  assert.equal(row.children[1].textContent, 'musician.eth');
+  assert.match(row.children[1].href, /^https:\/\/basescan.org\/address\/0x/);
+  assert.equal(row.children[2].textContent, '1.13');
+  context.window._wallet = { address, signer: {}, chainId: 8453 };
+  document.dispatchEvent({ type: 'wallet-connected' });
+  assert.equal(element('djuke-payment-state').textContent, '');
+  assert.equal(element('djuke-pay').disabled, true, 'a connected wallet still needs a selected song');
+  await click('djuke-info');
+  document.dispatchEvent({ type: 'keydown', key: 'Escape' });
+  assert.equal(element('djuke-tab').getAttribute('aria-expanded'), 'true');
+  await click('djuke-instructions-close');
+  assert.equal(focused, 'djuke-info');
+  await click('djuke-info');
+  let stopped = false;
+  element('djuke-instructions').listeners.keydown[0]({ key: 'Escape', preventDefault() {},
+    stopPropagation() { stopped = true; } });
+  assert.equal(stopped, true);
+  assert.equal(element('djuke-instructions').open, false);
+  assert.equal(element('djuke-tab').getAttribute('aria-expanded'), 'true');
+  earningsFail = true;
+  await click('djuke-refresh');
+  assert.equal(element('djuke-earners').children.length, 0);
+  assert.match(element('djuke-earners-state').textContent, /unavailable/);
 });
 
 test('v0.2 payment verifies a worker quote and sends exactly the doubled ETH contribution', async () => {

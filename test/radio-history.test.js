@@ -222,6 +222,6 @@ test('header registers the local Right Ankh before CDN imports without loading t
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/components/header-right-ankh-override.js'), 'utf8'), context);
   assert.equal(registered.get('right-ankh').name, 'CleanRightAnkh');
   const header = fs.readFileSync(path.join(__dirname, '../js/components/header.js'), 'utf8');
-  assert.match(header, /^import '\.\/header-right-ankh-override\.js\?v=20261011-creator-menu';/);
+  assert.match(header, /^import '\.\/header-right-ankh-override\.js\?v=20261017-mercury-release';/);
   assert.doesNotMatch(header, /import\([^\n]*RightAnkhDropdown/);
 });

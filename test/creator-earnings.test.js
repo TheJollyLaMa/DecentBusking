@@ -5,6 +5,64 @@ const ethers = require('../discord-bot/node_modules/ethers');
 const load = () => import('../js/creator-earnings.mjs');
 const WALLET = '0x807061DF657A7697c04045dA7d16D941861cAABc';
 
+test('an empty earnings index does not upload on unchanged polling and retries failed initial persistence', async () => {
+  const { createEarningsLedger } = await load();
+  let head = 10;
+  let fail = true;
+  let saves = 0;
+  const scheduled = [];
+  const ledger = createEarningsLedger({ ethers, startBlock: 10, contracts: [],
+    provider: { getBlockNumber: async () => head, getLogs: async () => [] },
+    save: async () => { saves++; if (fail) throw new Error('IPFS offline'); },
+    schedule: value => scheduled.push(value) });
+  await assert.rejects(ledger.initialize(), /IPFS offline/);
+  fail = false;
+  await ledger.refresh();
+  assert.equal(saves, 2);
+  await ledger.refresh();
+  assert.equal(saves, 2);
+  assert.equal(scheduled.length, 0);
+  head++;
+  await ledger.refresh();
+  assert.equal(saves, 2);
+  assert.equal(scheduled[0].scannedThrough, 11);
+});
+
+test('top jukebox earners aggregate only fulfilled song-play payouts, rank exact totals and recover after scan failure', async () => {
+  const { createEarningsLedger, ROUTER_ADDRESS, DJUKE_EARNING_CONTRACTS } = await load();
+  const contract = DJUKE_EARNING_CONTRACTS[0].address;
+  const wallets = ['1', '2', '3', '4'].map(digit => `0x${digit.repeat(40)}`);
+  const items = [
+    ...wallets.map((artist, index) => ({ kind: 'song-play', artist, contract, asset: 'USDC', requestId: String(index),
+      units: String([100, 500, 300, 200][index]), txHash: `0x${index}`, logIndex: 0, blockNumber: 5 })),
+    { kind: 'song-play', artist: wallets[0], contract, asset: 'USDC', requestId: '9', units: '1000', txHash: '0x9', logIndex: 0, blockNumber: 6 },
+    { kind: 'song-play', artist: wallets[3], contract, asset: 'USDC', units: '9999999', txHash: '0xa', logIndex: 0, blockNumber: 6 },
+    { kind: 'payroll', recipient: wallets[3], asset: 'USDC', units: '9999999', txHash: '0xb', logIndex: 0, blockNumber: 6 },
+    { kind: 'withdrawal', artist: wallets[3], contract, asset: 'USDC', units: '9999999', txHash: '0xc', logIndex: 0, blockNumber: 6 },
+  ];
+  let fail = false;
+  const ledger = createEarningsLedger({ ethers, provider: {
+    getBlockNumber: async () => { if (fail) throw new Error('RPC offline'); return 10; },
+    getLogs: async () => [],
+  }, restore: async () => ({ schemaVersion: 2, chainId: 8453, routerAddress: ROUTER_ADDRESS,
+    scannedFrom: 0, scannedThrough: 10, songPlaysThrough: 10, items, lastCheckedAt: new Date().toISOString() }),
+    save: async () => {} });
+  assert.throws(() => ledger.getDjukeTopEarners(), /indexing/);
+  await ledger.initialize();
+  const result = ledger.getDjukeTopEarners();
+  assert.equal(result.period, 'all-time');
+  assert.deepEqual(result.earners, [
+    { address: wallets[0], totalUnits: '1100' }, { address: wallets[1], totalUnits: '500' }, { address: wallets[2], totalUnits: '300' },
+  ]);
+  assert.equal(result.through, 10);
+  fail = true;
+  await assert.rejects(ledger.refresh(), /RPC offline/);
+  assert.throws(() => ledger.getDjukeTopEarners(), /indexing/);
+  fail = false;
+  await ledger.refresh();
+  assert.deepEqual(ledger.getDjukeTopEarners().earners, result.earners);
+});
+
 function memoryStorage() {
   const map = new Map();
   return { getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value) };
