@@ -99,6 +99,60 @@ test('periodic rendering preserves expanded recipient review and typed approval 
   assert.match(source, /input\.setSelectionRange\(\.\.\.selection\)/);
 });
 
+test('unchanged review polling leaves the existing DOM untouched', () => {
+  const target = { dataset: {}, querySelectorAll() { throw new Error('render required'); } };
+  const report = { week: 'NY-2026-10-12', tracks: [] };
+  const batch = { remainingUnits: 1n, ready: true };
+  target.dataset.renderKey = JSON.stringify({
+    report, positiveBudget: true, settling: false,
+    batches: [batch, batch], recipients: [],
+  }, (_, value) => typeof value === 'bigint' ? value.toString() : value);
+  const context = vm.createContext({
+    document: { getElementById: id => id === 'radio-reviewed-receipts' ? target : { value: id === 'radio-payroll-week' ? report.week : '1' } },
+    _radioReports: [report], _settling: false, _radioRecipientStates: new Map(),
+    _radioBatchState: () => batch,
+  });
+  const start = source.indexOf('function _renderRadioReviews()');
+  vm.runInContext(source.slice(start, source.indexOf('async function _finalizeRadioPayroll()', start)), context);
+  assert.doesNotThrow(() => vm.runInContext('_renderRadioReviews()', context));
+  batch.ready = false;
+  assert.throws(() => vm.runInContext('_renderRadioReviews()', context), /render required/);
+});
+
+test('recipient checks retain verified states until results arrive, and failures clear readiness', async () => {
+  let complete;
+  let fail = false;
+  const states = new Map([['ref', { paid: false, approved: true }]]);
+  const errors = [];
+  const context = vm.createContext({
+    _recipientCheckId: 0, _recipientCheckTask: null, _ownerAddress: 'owner', _radioRecipientStates: states,
+    _radioReviews: { playback: { allocation: { entries: [{ workReferenceText: 'ref', wallet: 'wallet' }] } } },
+    _renderRadioReviews() {}, isAdminWallet: () => true,
+    ethers: { id: value => value }, document: { getElementById: () => ({}) },
+    _setStatus: (_, text) => errors.push(text),
+    _readOnlyRouter: () => ({
+      completedWorkReferences: () => new Promise((resolve, reject) => { complete = () => fail ? reject(new Error('RPC offline')) : resolve(true); }),
+      contributors: async () => ({ approved: true }),
+    }),
+  });
+  const start = source.indexOf('async function _checkRadioRecipients()');
+  vm.runInContext(source.slice(start, source.indexOf('function _loadRadioReviews()', start)), context);
+  const pending = vm.runInContext('_checkRadioRecipients()', context);
+  const overlapping = vm.runInContext('_checkRadioRecipients()', context);
+  assert.equal(context._recipientCheckId, 1);
+  assert.equal(states.get('ref').approved, true);
+  complete();
+  await pending;
+  await overlapping;
+  assert.equal(vm.runInContext('_radioRecipientStates.get("ref").paid', context), true);
+  fail = true;
+  const failed = vm.runInContext('_checkRadioRecipients()', context);
+  complete();
+  await failed;
+  assert.equal(vm.runInContext('_radioRecipientStates.size', context), 0);
+  assert.match(errors[0], /Recipient checks failed: RPC offline/);
+});
+
 test('empty receipts have nothing payable, while legacy reviewed batches remain usable without the New York worker', () => {
   const value = fixture();
   value.context._radioReviews.playback.allocation.entries = [];
@@ -112,11 +166,37 @@ test('empty receipts have nothing payable, while legacy reviewed batches remain 
 
 test('history refresh and wallet disconnect rerender instead of deleting the live payment buttons', () => {
   for (const [start, end] of [
-    ['async function _refreshRadioPayroll()', 'async function _refreshWeeklyPayflow()'],
+    ['async function _refreshRadioPayroll(', 'async function _refreshWeeklyPayflow()'],
     ['function _onWalletDisconnected()', 'export async function loadPayrollQueue()'],
   ]) {
     const section = source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
     assert.match(section, /_renderRadioReviews\(\)/);
     assert.doesNotMatch(section, /getElementById\('radio-reviewed-receipts'\)\?\.replaceChildren\(\)/);
   }
+});
+
+test('background history refresh keeps the display while loading but blocks payments on failure', async () => {
+  let reject;
+  let renders = 0;
+  const statuses = [];
+  const context = vm.createContext({
+    Date, _weeklyHistoryRefreshedAt: 0, _radioRefreshId: 0,
+    _radioReports: [{ week: 'NY-2026-10-12' }], _radioBalances: { approved: true }, _radioReviews: { playback: {} },
+    document: { getElementById: () => ({ value: 'NY-2026-10-12' }) },
+    isAdminWallet: () => true, window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example' } },
+    fetch: () => new Promise((_, fail) => { reject = fail; }),
+    _renderRadioReviews: () => { renders++; },
+    _setStatus: (_, text) => statuses.push(text),
+  });
+  const start = source.indexOf('async function _refreshRadioPayroll(');
+  vm.runInContext(source.slice(start, source.indexOf('function _applyScheduledBudgets()', start)), context);
+  const pending = vm.runInContext('_refreshRadioPayroll({ background: true })', context);
+  assert.equal(renders, 0);
+  assert.equal(vm.runInContext('_radioReports.length', context), 1);
+  assert.equal(vm.runInContext('_radioBalances.approved', context), true);
+  reject(new Error('History offline'));
+  await pending;
+  assert.equal(vm.runInContext('_radioBalances', context), null);
+  assert.equal(renders, 1);
+  assert.match(statuses[0], /History offline.*Refresh before finalizing or settling/);
 });

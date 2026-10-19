@@ -3355,7 +3355,7 @@ decent-foot {
 
 #radio-footer {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 6px 20px;
   padding: 10px 120px;
@@ -3366,8 +3366,8 @@ decent-foot {
 }
 #footer-discord-link {
   position: fixed;
-  left: 50px;
-  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 102px);
+  left: 120px;
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 30px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3456,14 +3456,10 @@ decent-foot {
 #radio-footer #now-playing-artist { font-family: var(--font-display); font-weight: 700; color: var(--gold); font-size: .8rem; min-width: 0; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .radio-status-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px; }
 #radio-footer .radio-ad-countdown {
-  position: fixed;
-  bottom: max(12px, env(safe-area-inset-bottom));
-  left: 120px;
-  right: 120px;
   margin: 0;
   font-size: .68rem;
   color: var(--gold);
-  text-align: center;
+  max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3479,9 +3475,6 @@ decent-foot {
   animation: none;
 }
 #radio-footer #now-playing-watchlist-btn {
-  position: fixed;
-  right: 50px;
-  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 102px);
   white-space: nowrap;
   width: 36px;
   height: 36px;
@@ -3536,6 +3529,12 @@ decent-foot {
 #timeline-nav { bottom: calc(var(--radio-footer-height, 96px) + 12px); }
 #camera-tools { bottom: calc(var(--radio-footer-height, 96px) + 76px); }
 @keyframes radio-title-scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@media (min-width: 601px) {
+  #radio-footer { grid-template-columns: minmax(0, 1fr); padding-inline: 160px; }
+  #radio-footer #busker-info { justify-self: center; width: 100%; max-width: 680px; justify-content: stretch; }
+  .radio-track-row { grid-template-columns: max-content minmax(0, 1fr) max-content; }
+  #radio-footer .radio-ad-countdown { grid-column: 1 / -1; max-width: none; text-align: center; }
+}
 @media (max-width: 600px) {
   #camera-tools { display: none; }
   #timeline-nav { padding: 2px 8px; gap: 4px; border-radius: 18px; bottom: calc(var(--radio-footer-height, 96px) + 6px); }
@@ -3565,12 +3564,12 @@ decent-foot {
   #radio-voting button { width: 28px; height: 28px; font-size: 16px; }
   #radio-vote-net { min-width: 28px; padding: 2px 3px; font-size: .9rem; }
   #radio-vote-status { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); width: 180px; max-width: 180px; }
-  #radio-footer #now-playing-watchlist-btn { right: 18px; bottom: 68px; }
+  #radio-footer #now-playing-watchlist-btn { position: fixed; right: 18px; bottom: 68px; }
   #footer-discord-link { bottom: 68px; }
   .radio-title-window { width: 100%; height: 28px; }
   #radio-footer #now-playing-title { line-height: 28px; }
   #radio-footer #now-playing-artist { max-width: 100%; }
-  #radio-footer .radio-ad-countdown { left: 76px; right: 76px; bottom: 2px; font-size: .6rem; line-height: 12px; white-space: normal; }
+  #radio-footer .radio-ad-countdown { position: fixed; left: 76px; right: 76px; bottom: 2px; max-width: none; text-align: center; font-size: .6rem; line-height: 12px; white-space: normal; }
   .radio-audio-controls { grid-template-columns: repeat(2, 28px); }
   #radio-footer #radio-video-toggle, #radio-mute, #radio-volume-dial { width: 28px; height: 28px; }
   #radio-volume-dial::after { left: 10px; transform-origin: 2px 8px; }

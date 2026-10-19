@@ -63,6 +63,12 @@ Weekly close-balance checks require historical Base state. They use `PAYROLL_ARC
 
 ### Confirmed Weekly Discord Report
 
+The admin payroll workspace polls for updates without clearing the last verified
+recipient states during a check. Unchanged review cards retain their DOM instead
+of being rebuilt every poll; minute-by-minute history refreshes keep the current
+display while loading. Failed recipient or treasury checks still block payment
+and show an error rather than leaving stale readiness active.
+
 Newly prepared reports use a purple, emoji-rich festival-style embed celebrating
 paid artists and community support. The invitation welcomes newcomers to listen,
 vote, share music, and explore contributions or DVert advertising. The paid week,

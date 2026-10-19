@@ -86,6 +86,7 @@ let _routerCreateAllowed = false;
 let _radioReviews = {};
 let _radioRecipientStates = new Map();
 let _recipientCheckId = 0;
+let _recipientCheckTask = null;
 let _paymentSyncTask = null;
 let _weeklyPayflow = null;
 let _weeklyPayflowTask = null;
@@ -810,26 +811,28 @@ function _showSettleWorkflowHint(txHashes) {
   hintEl.style.display = 'block';
 }
 
-async function _refreshRadioPayroll() {
+async function _refreshRadioPayroll({ background = false } = {}) {
   _weeklyHistoryRefreshedAt = Date.now();
   const select = document.getElementById('radio-payroll-week');
   const status = document.getElementById('radio-payroll-status');
   if (!select || !isAdminWallet()) return;
   const selectedWeek = select.value;
   const refreshId = ++_radioRefreshId;
-  _radioReports = [];
-  _radioBalances = null;
-  _radioReviews = {};
-  _renderRadioReviews();
-  for (const id of ['radio-payroll-finalize', 'radio-settle-playback', 'radio-settle-top10']) {
-    const button = document.getElementById(id); if (button) button.disabled = true;
+  if (!background) {
+    _radioReports = [];
+    _radioBalances = null;
+    _radioReviews = {};
+    _renderRadioReviews();
+    for (const id of ['radio-payroll-finalize', 'radio-settle-playback', 'radio-settle-top10']) {
+      const button = document.getElementById(id); if (button) button.disabled = true;
+    }
+    document.getElementById('radio-playback-preview')?.replaceChildren();
+    document.getElementById('radio-prize-preview')?.replaceChildren();
+    for (const id of ['radio-playback-balance', 'radio-prize-balance', 'radio-gas-balance']) {
+      document.getElementById(id).textContent = 'Loading...';
+    }
+    _setStatus(status, 'Loading qualified weekly plays and Base treasury...');
   }
-  document.getElementById('radio-playback-preview')?.replaceChildren();
-  document.getElementById('radio-prize-preview')?.replaceChildren();
-  for (const id of ['radio-playback-balance', 'radio-prize-balance', 'radio-gas-balance']) {
-    document.getElementById(id).textContent = 'Loading...';
-  }
-  _setStatus(status, 'Loading qualified weekly plays and Base treasury...');
   try {
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service) throw new Error('Playback service is not configured');
@@ -877,7 +880,11 @@ async function _refreshRadioPayroll() {
     _loadRadioReviews();
     _previewRadioPayroll();
   } catch (error) {
-    if (refreshId === _radioRefreshId) _setStatus(status, `${error.message}. Refresh before finalizing or settling.`, true);
+    if (refreshId === _radioRefreshId) {
+      _radioBalances = null;
+      _renderRadioReviews();
+      _setStatus(status, `${error.message}. Refresh before finalizing or settling.`, true);
+    }
   }
 }
 
@@ -1221,19 +1228,32 @@ async function _syncPaymentLedger() {
 }
 
 async function _checkRadioRecipients() {
+  const entries = Object.values(_radioReviews).flatMap(saved => saved.allocation.entries);
+  const key = JSON.stringify([_ownerAddress, entries.map(entry => [entry.workReferenceText, entry.wallet])]);
+  if (_recipientCheckTask?.id === _recipientCheckId && _recipientCheckTask.key === key) return _recipientCheckTask.task;
   const check = ++_recipientCheckId;
-  _radioRecipientStates.clear();
   _renderRadioReviews();
-  try {
-    const router = _readOnlyRouter();
-    const states = await Promise.all(Object.values(_radioReviews).flatMap(saved => saved.allocation.entries).map(async entry => {
-      const [paid, recipient] = await Promise.all([router.completedWorkReferences(ethers.id(entry.workReferenceText)), router.contributors(entry.wallet)]);
-      return [entry.workReferenceText, { paid, approved: Boolean(recipient.approved ?? recipient[1]) }];
-    }));
-    if (check !== _recipientCheckId || !isAdminWallet()) return;
-    _radioRecipientStates = new Map(states);
-    _renderRadioReviews();
-  } catch (error) { _setStatus(document.getElementById('radio-payroll-status'), `Recipient checks failed: ${error.message}`, true); }
+  const task = (async () => {
+    try {
+      const router = _readOnlyRouter();
+      const states = await Promise.all(entries.map(async entry => {
+        const [paid, recipient] = await Promise.all([router.completedWorkReferences(ethers.id(entry.workReferenceText)), router.contributors(entry.wallet)]);
+        return [entry.workReferenceText, { paid, approved: Boolean(recipient.approved ?? recipient[1]) }];
+      }));
+      if (check !== _recipientCheckId || !isAdminWallet()) return;
+      _radioRecipientStates = new Map(states);
+      _renderRadioReviews();
+    } catch (error) {
+      if (check !== _recipientCheckId || !isAdminWallet()) return;
+      _radioRecipientStates.clear();
+      _renderRadioReviews();
+      _setStatus(document.getElementById('radio-payroll-status'), `Recipient checks failed: ${error.message}`, true);
+    }
+  })().finally(() => {
+    if (_recipientCheckTask?.id === check) _recipientCheckTask = null;
+  });
+  _recipientCheckTask = { id: check, key, task };
+  return task;
 }
 
 function _loadRadioReviews() {
@@ -1344,16 +1364,22 @@ function _renderRadioOverview(report) {
 function _renderRadioReviews() {
   const target = document.getElementById('radio-reviewed-receipts');
   if (!target) return;
+  const report = _radioReports.find(entry => entry.week === document.getElementById('radio-payroll-week').value);
+  const positiveBudget = ['radio-playback-budget', 'radio-prize-budget'].some(id => Number(document.getElementById(id)?.value) > 0);
+  const renderKey = JSON.stringify({
+    report, positiveBudget, settling: _settling,
+    batches: ['playback', 'top10'].map(category => _radioBatchState(category, report)),
+    recipients: [..._radioRecipientStates],
+  }, (_, value) => typeof value === 'bigint' ? value.toString() : value);
+  if (target.dataset.renderKey === renderKey) return;
   const expanded = new Set([...target.querySelectorAll('details[data-payroll-category][open]')].map(node => node.dataset.payrollCategory));
   const identities = new Map([...target.querySelectorAll('input[data-payroll-identity]')].map(node => [node.dataset.payrollIdentity, node.value]));
   const focusedIdentity = document.activeElement?.dataset?.payrollIdentity;
   const selection = focusedIdentity ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   const buttons = new Map(['playback', 'top10'].map(category => [category, document.getElementById(`radio-settle-${category}`)]));
   target.replaceChildren();
-  const report = _radioReports.find(entry => entry.week === document.getElementById('radio-payroll-week').value);
   _renderRadioOverview(report);
   const finalize = document.getElementById('radio-payroll-finalize');
-  const positiveBudget = ['radio-playback-budget', 'radio-prize-budget'].some(id => Number(document.getElementById(id)?.value) > 0);
   if (finalize) finalize.disabled = !report || report.current || !positiveBudget || _settling;
   if (finalize) {
     finalize.hidden = Boolean(report?.week.startsWith('NY-'));
@@ -1436,6 +1462,7 @@ function _renderRadioReviews() {
     input?.focus({ preventScroll: true });
     if (input && selection) input.setSelectionRange(...selection);
   }
+  target.dataset.renderKey = renderKey;
 }
 
 async function _finalizeRadioPayroll() {
@@ -1713,7 +1740,7 @@ export function initPayroll() {
     if (document.getElementById('radio-reviewed-receipts')?.contains(document.activeElement)) return;
     _syncPaymentLedger();
     _refreshWeeklyPayflow();
-    if (payrollOpen && Date.now() - _weeklyHistoryRefreshedAt > 60000) _refreshRadioPayroll();
+    if (payrollOpen && Date.now() - _weeklyHistoryRefreshedAt > 60000) _refreshRadioPayroll({ background: true });
     if (payrollOpen) _checkRadioRecipients();
   }, 5000);
   const settleBtn   = document.getElementById('payroll-settle-all-btn');

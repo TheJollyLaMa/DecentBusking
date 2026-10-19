@@ -53,9 +53,21 @@ test('mobile radio centers votes above audio and mirrors watchlist eyes opposite
   assert.match(css, /#radio-voting\s*\{[^}]*position: fixed; left: 50%; bottom: 72px/);
   assert.match(css, /#radio-voting button\s*\{ width: 28px; height: 28px; font-size: 16px/);
   assert.match(css, /\.radio-voting-controls\s*\{[^}]*grid-column: 1 \/ -1; grid-row: 2; justify-self: center/);
-  assert.match(css, /#now-playing-watchlist-btn\s*\{ right: 18px; bottom: 68px;/);
+  assert.match(css, /#now-playing-watchlist-btn\s*\{ position: fixed; right: 18px; bottom: 68px;/);
   assert.match(css, /\.radio-ad-countdown\s*\{[^}]*position: fixed;[^}]*text-align: center/);
   assert.doesNotMatch(css, /\.radio-audio-controls\s*\{[^}]*grid-template-columns: 36px;/);
+});
+
+test('desktop centers the player and keeps watchlist and ad status in normal flow', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../css/styles.css'), 'utf8');
+  const desktop = css.slice(css.indexOf('@media (min-width: 601px) {', css.indexOf('@keyframes radio-title-scroll')));
+  assert.match(desktop, /#busker-info\s*\{ justify-self: center; width: 100%; max-width: 680px/);
+  assert.match(desktop, /\.radio-ad-countdown\s*\{ grid-column: 1 \/ -1; max-width: none; text-align: center;/);
+  const watchlist = css.match(/#radio-footer #now-playing-watchlist-btn\s*\{([^}]+)\}/)[1];
+  const countdown = css.match(/#radio-footer \.radio-ad-countdown\s*\{([^}]+)\}/)[1];
+  assert.doesNotMatch(watchlist, /position: fixed/);
+  assert.doesNotMatch(countdown, /position: fixed/);
+  assert.match(css, /#footer-discord-link\s*\{[^}]*left: 120px;[^}]*bottom: calc\(max\(20px, env\(safe-area-inset-bottom\)\) \+ 30px\)/);
 });
 
 test('between-track messages use the song ticker and clear the bottom activity', () => {

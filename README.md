@@ -8,9 +8,10 @@ Between tracks, the radio's waiting or up-next message uses the song-title ticke
 On mobile, compact votes are centered between Discord and the watchlist eyes;
 compact audio controls sit between the hat and briefcase above the ad countdown.
 These shared rows keep the footer small. Watchlist eyes mirror the Discord icon
-on the opposite side of the screen and save verified NFTs to your
+on mobile only. Desktop keeps the radio player centered, Discord beside the hat,
+and the watchlist button immediately after the vote count. The eyes save verified NFTs to your
 watchlist; their accessible label describes the current save state. The next-ad
-countdown is centered at the bottom of the screen.
+countdown is centered at the bottom on mobile and stays in the player on desktop.
 
 Read the [Decent Busking whitepaper](WHITEPAPER.md) for the vision, current architecture, payment mechanics, artist-rights limits, and roadmap. Implemented features are separated from future plans.
 
