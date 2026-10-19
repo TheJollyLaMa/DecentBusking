@@ -3642,3 +3642,29 @@ decent-foot {
   margin-left: 0.15em;
 }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+#payroll-confirmations {
+  position: fixed;
+  z-index: 12000;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(65dvh, 640px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid #8c76c9;
+  border-radius: 12px;
+  background: #101a27;
+  color: #e4edf3;
+  box-shadow: 0 8px 32px #0009;
+  font-size: .85rem;
+  overflow-wrap: anywhere;
+}
+#payroll-confirmations[hidden] { display: none; }
+#payroll-confirmations > button { float: right; }
+#payroll-confirmations h3 { margin: 0 64px 12px 0; }
+#payroll-confirmations ol { padding-left: 20px; }
+#payroll-confirmations li { margin-bottom: 12px; }
+#payroll-confirmations a { color: #50e5c4; }
+#payroll-confirmations small { display: block; margin-top: 4px; }
+.payroll-confirmations-totals { font-weight: bold; }

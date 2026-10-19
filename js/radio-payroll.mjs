@@ -211,7 +211,7 @@ export function finalizeRadioAllocation({ report, category, budgetUnits, minimum
         ...(songPrizes ? { trackId: entry.trackId } : {}) }) })) };
 }
 
-export async function settleRadioAllocation({ allocation, metadataUri, metadataHash, report, router, signer, owner, hashReference, onStep = () => {}, onConfirmed = async () => {} }) {
+export async function settleRadioAllocation({ allocation, metadataUri, metadataHash, report, router, signer, owner, hashReference, onStep = () => {}, onConfirmed = async () => {}, onTransaction }) {
   if (!allocation || allocation.chainId !== 8453 || allocation.routerAddress?.toLowerCase() !== router.target.toLowerCase()) throw new Error('Finalized allocation does not match this Base router');
   if (!/^ipfs:\/\/[^/\s]+$/.test(metadataUri || '') || !/^0x[0-9a-fA-F]{64}$/.test(metadataHash || '')) throw new Error('An immutable IPFS allocation receipt is required');
   if (allocation.assetAddress?.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase()) throw new Error('Radio settlement supports native Base USDC only');
@@ -224,6 +224,19 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
   if (validated.week !== allocation.week) throw new Error('Invalid completed week');
   if (allocation.schemaVersion >= 5 && !radioAllocationMatchesReport(report || { week: allocation.week, current: false, tracks: allocation.entries }, allocation)) throw new Error('Song prizes do not match the frozen chart allocation; load the full closed-week report including forfeited positions');
   if (Number((await signer.provider.getNetwork()).chainId) !== 8453 || (await signer.getAddress()).toLowerCase() !== owner?.toLowerCase()) throw new Error('Connect the Base owner wallet');
+  const waitForTransaction = async (transaction, detail) => {
+    let receipt;
+    try {
+      receipt = await transaction.wait();
+    } catch (error) {
+      if (error.receipt?.status === 0) await onTransaction?.({ ...detail, kind: 'failed', txHash: transaction.hash, receipt: error.receipt });
+      throw error;
+    }
+    if (receipt?.status === 1 || receipt?.status === 0) {
+      await onTransaction?.({ ...detail, kind: receipt.status === 1 ? detail.kind : 'failed', txHash: transaction.hash, receipt });
+    }
+    return receipt;
+  };
   if (await router.paused()) throw new Error('Settlement router is paused');
   if (!await router.hasRole(await router.PAYROLL_ROLE(), owner)) throw new Error('PAYROLL_ROLE is required');
   if (!await router.approvedAssets(allocation.assetAddress)) throw new Error('USDC is not approved');
@@ -265,7 +278,9 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
       const identityHash = existingHash && !/^0x0{64}$/i.test(existingHash)
         ? existingHash : hashReference(`radio-artist:${wallet.toLowerCase()}`);
       onStep(`Confirm one-time payroll wallet approval for ${wallet}. This enables payment; it does not transfer USDC.`);
-      if ((await (await router.setContributorApproved(wallet, identityHash, true)).wait())?.status !== 1) throw new Error(`Payroll wallet approval did not confirm for ${wallet}`);
+      const transaction = await router.setContributorApproved(wallet, identityHash, true);
+      const receipt = await waitForTransaction(transaction, { kind: 'approval', wallet, amountUnits: '0', entries: 0 });
+      if (receipt?.status !== 1) throw new Error(`Payroll wallet approval did not confirm for ${wallet}`);
       const updated = await router.contributors(wallet);
       if (!(updated.approved ?? updated[1])) throw new Error(`Payroll wallet approval is not active for ${wallet}`);
     }
@@ -298,8 +313,9 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     await payout.staticCall(...args);
     onStep(`Confirm ${formatUsdc(amount)} USDC to ${wallet}${multiple ? ` for ${remaining.length} song prizes in one payment` : ''}`);
     const transaction = await payout(...args);
-    if ((await transaction.wait())?.status !== 1) throw new Error('Radio payout did not confirm; refresh before retrying');
-    announcePaymentCelebration({
+    const receipt = await waitForTransaction(transaction, { kind: 'payout', wallet, amountUnits: amount.toString(), entries: remaining.length });
+    if (receipt?.status !== 1) throw new Error('Radio payout did not confirm; refresh before retrying');
+    if (!onTransaction) announcePaymentCelebration({
       chainId: 8453,
       txHash: transaction.hash,
       amountText: formatUsdc(amount),

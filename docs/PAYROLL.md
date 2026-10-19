@@ -30,6 +30,22 @@ If a receipt is uncertain, recovery/deposit controls for that fund stay locked. 
 
 ### Weekly Artist Payments
 
+Clicking **Pay** proceeds directly to the wallet transaction prompts, without an
+additional browser confirmation dialog. Receipt validation and on-chain payment
+checks still run before transactions.
+
+The first confirmed payroll transaction opens one nonmodal confirmation panel.
+It stays open until closed and collects Playback and Top 10 transactions for the
+same week in this browser session, including resumed attempts. Each row links to
+BaseScan; combined wallet payments show their song count. Totals show confirmed
+USDC by category and overall, plus actual ETH fees for wallet approvals, payouts
+and any reverted transactions observed by the flow. Gas includes receipt execution
+fees and Base L1 data fees (and operator fees when provided); unavailable receipt
+fees are explicitly marked incomplete, never estimated as zero. Stopped attempts
+keep their confirmed results and costs. This session summary is not durable payment
+history: reloading starts a new summary; the on-chain ledger remains authoritative.
+Other site payment celebrations are unchanged.
+
 1. Deposit native USDC into the relevant Playback or Top 10 allocation. The schedule closes Sunday/Monday at 00:00 New York time. It does not create or fund allocations for you.
 2. The running worker checks every 15 seconds and publishes eligible closed-week allocation JSON plus a retained IPFS schedule checkpoint. Default `radioPayflow` uses 100% of unreserved money, a 0.01 USDC minimum and a 1 USDC significant-share warning. Current/boundary balances cap budgets; deposits after close do not fund the previous period. Existing unpaid receipts reserve money in service accounting, not contract-enforced escrow. Older eligible weeks are handled first on catch-up. If RPC historical state or IPFS is unavailable, preparation stops and the dashboard reports it. Sleeping/stopped service execution is delayed until it resumes.
 3. Export the receipt backup. It contains the IPFS URI and metadata hash and can be imported on another browser after validation. Keep using the same receipt when resuming a partial settlement.

@@ -400,6 +400,7 @@ test('Pay enables earned wallets once, preserves identities, and safely resumes 
   let rejectSecond = true;
   let insufficient = true;
   let approvalStatus = 1;
+  const transactionResults = [];
   const payout = async (...args) => {
     payouts.push(args);
     return { hash: `tx-${payouts.length}`, wait: async () => { paid.add(args[4]); return { status: 1 }; } };
@@ -426,6 +427,7 @@ test('Pay enables earned wallets once, preserves identities, and safely resumes 
     },
   };
   const options = { allocation, metadataUri: 'ipfs://receipt', metadataHash: id(original),
+    onTransaction: transaction => transactionResults.push(transaction),
     owner, hashReference: id, router,
     signer: { provider: { getNetwork: async () => ({ chainId: 8453 }) }, getAddress: async () => owner } };
   await assert.rejects(settleRadioAllocation(options), /insufficient/);
@@ -435,6 +437,9 @@ test('Pay enables earned wallets once, preserves identities, and safely resumes 
   await assert.rejects(settleRadioAllocation(options), /approval did not confirm/);
   assert.equal(payouts.length, 0);
   assert.equal(recipients.get(track(1, 1).wallet).approved, false);
+  assert.equal(transactionResults[0].kind, 'failed');
+  assert.equal(transactionResults[0].receipt.status, 0);
+  transactionResults.length = 0;
   approvals.length = 0;
   approvalStatus = 1;
   await assert.rejects(settleRadioAllocation(options), /Approval rejected/);
@@ -449,7 +454,12 @@ test('Pay enables earned wallets once, preserves identities, and safely resumes 
   assert.equal(payouts[0][2], allocation.entries[0].wallet);
   assert.deepEqual(payouts[0][6], [id(`radio-artist:${allocation.entries[0].wallet}`), id(`radio-artist:${allocation.entries[0].wallet}`)]);
   assert.equal(payouts.length, 2);
+  assert.deepEqual(transactionResults.map(transaction => transaction.kind), ['approval', 'approval', 'payout', 'payout']);
+  assert.deepEqual(transactionResults.filter(transaction => transaction.kind === 'payout').map(transaction => transaction.entries), [2, 1]);
+  assert.equal(transactionResults.filter(transaction => transaction.kind === 'payout')
+    .reduce((total, transaction) => total + BigInt(transaction.amountUnits), 0n), BigInt(allocation.allocatedUnits));
   assert.equal(JSON.stringify(allocation), original);
   assert.equal((await settleRadioAllocation(options)).skipped, 3);
   assert.equal(approvals.length, 2);
+  assert.equal(transactionResults.length, 4);
 });

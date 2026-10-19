@@ -5,6 +5,15 @@ const vm = require('node:vm');
 const source = fs.readFileSync('js/payroll.js', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 
+test('Pay proceeds to the wallet without an extra browser confirmation', () => {
+  const start = source.indexOf('async function _settleRadioPayroll(');
+  const handler = source.slice(start, source.indexOf('async function _importRadioReceipt(', start));
+  assert.doesNotMatch(handler, /\bconfirm\(/);
+  assert.match(handler, /validateRadioReceipt\(/);
+  assert.match(handler, /radioAllocationMatchesReport\(/);
+  assert.match(handler, /await settleRadioAllocation\(/);
+});
+
 function fixture() {
   const entry = (number, amount = '1000000') => ({ workReferenceText: `reference-${number}`, amountUnits: amount });
   const allocation = { entries: [entry(1), entry(2, '2000000')], allocatedUnits: '3000000' };

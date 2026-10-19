@@ -21,11 +21,12 @@
  */
 
 import { isAdminWallet } from './admin-access.mjs';
-import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261019-wallet-batches';
+import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261019-payroll-confirmations';
 import { previewTopTenSongPayroll } from './top-ten-prizes.mjs';
 import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261017-mercury-release';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
+import { recordPayrollConfirmation, setPayrollConfirmationStatus } from './payroll-confirmations.mjs';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 
@@ -1488,6 +1489,7 @@ async function _finalizeRadioPayroll() {
 async function _settleRadioPayroll(category) {
   const status = document.getElementById('radio-payroll-status');
   if (_settling || !isAdminWallet()) return;
+  const week = _radioReviews[category]?.allocation.week;
   try {
     const saved = _radioReviews[category];
     if (!saved || ethers.id(JSON.stringify(saved.allocation)) !== saved.metadataHash) throw new Error('The frozen receipt is missing or changed; do not pay');
@@ -1495,15 +1497,20 @@ async function _settleRadioPayroll(category) {
     validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress,
       assetAddress: _getAssetConfig('USDC').address, funds: _payrollAssetConfig.radioFunds, report });
     if (!report || !radioAllocationMatchesReport(report, saved.allocation)) throw new Error('Frozen receipt does not match the recovered weekly report; manual reconciliation is required');
-    if (!confirm(`Settle reviewed ${category} for ${saved.allocation.week} to the wallets in this frozen receipt? New recipient wallets require a one-time approval transaction before payment. Unpaid prizes are grouped into one Base payment per wallet, preserving each song's amount and reference. Already-paid references are skipped.`)) return;
     _settling = true;
+    setPayrollConfirmationStatus(week, category, 'In progress');
     const signer = await _getSigner(BASE_CHAIN_ID);
     const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
     const result = await settleRadioAllocation({ ...saved, report, router, signer, owner: _ownerAddress, hashReference: ethers.id,
+      onTransaction: transaction => recordPayrollConfirmation({ ...transaction, week, category, provider: signer.provider }),
       onStep: message => _setStatus(status, message), onConfirmed: entry => { _queuePaymentProof(entry.txHash); _checkRadioRecipients(); } });
+    setPayrollConfirmationStatus(week, category, 'Complete');
     await _refreshRadioPayroll();
     _setStatus(status, `${new Set(result.confirmed.map(entry => entry.txHash)).size} wallet payments confirmed covering ${result.confirmed.length} entries; ${result.skipped} already-paid references skipped. Frozen IPFS receipt retained.`);
-  } catch (error) { _setStatus(status, `${error.message}. Retry only the same reviewed receipt; on-chain paid references are protected.`, true); }
+  } catch (error) {
+    if (week) setPayrollConfirmationStatus(week, category, `Stopped: ${error.message}. Confirmed transactions remain paid; retry the same receipt.`);
+    _setStatus(status, `${error.message}. Retry only the same reviewed receipt; on-chain paid references are protected.`, true);
+  }
   finally { _settling = false; await _checkRadioRecipients(); _syncPaymentLedger(); }
 }
 
