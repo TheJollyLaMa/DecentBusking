@@ -48,17 +48,34 @@ export function buildWeeklyPayrollReport({ playback, top10, report, siteUrl }) {
   }
   const playbackTotal = BigInt(playback.allocation.allocatedUnits);
   const prizeTotal = BigInt(top10.allocation.allocatedUnits);
+  const proofUrl = payrollTutorialUrl(siteUrl, report.week);
+  const listeningUrl = new URL(proofUrl);
+  listeningUrl.search = '';
   const embed = {
-    title: `Weekly Radio Payroll Paid - ${report.week}`,
+    color: 0xb44aff,
+    title: `⚸🎰 PAYDAY IN THE DECENT UNIVERSE 🎰💸`,
+    url: proofUrl,
     description: [
-      'All payable entries in both reviewed allocations are verified on Base (2+ confirmations).',
-      `**${dollars(playbackTotal + prizeTotal)} USDC paid**: Playback ${dollars(playbackTotal)}; Top 10 prizes ${dollars(prizeTotal)}.`,
-      'Week closed Monday 00:00 America/New_York. Amounts displayed rounded to cents.',
-      `[Payment proofs & fund walkthrough](${payrollTutorialUrl(siteUrl, report.week)})`,
+      '🎙️ 🎸 ⚸ **MAKE MUSIC · FIND YOUR PEOPLE · KEEP IT DECENT** 🔊 🎶',
+      '',
+      '🎉 Congratulations to this week’s paid artists—and thank you to everyone who listened, voted, shared music, or helped fill the funds!',
+      `💸 **${dollars(playbackTotal + prizeTotal)} USDC paid**: Playback ${dollars(playbackTotal)}; Top 10 prizes ${dollars(prizeTotal)}.`,
+      `🗓️ **Paid week: ${report.week}** · Closed Monday 00:00 America/New_York.`,
+      '🔗 All payable entries in both reviewed allocations are verified on Base (2+ confirmations). Amounts displayed rounded to cents.',
+      '',
+      `🐇 [Payment proofs & fund walkthrough](${proofUrl})`,
     ].join('\n'),
     fields: [
-      { name: 'Top 10 chart - song prizes (USDC)', value: chartLines.join('\n') || 'No positive-vote songs.' },
-      { name: 'Top Playback payees - artist totals (USDC)', value: artistLines.join('\n') },
+      { name: '🏆🌟 TOP 10 SPOTLIGHT · Song prizes (USDC)', value: chartLines.join('\n') || 'No positive-vote songs.' },
+      { name: '🎧💚 PLAYBACK LOVE · Top artist totals (USDC)', value: artistLines.join('\n') },
+      { name: '🎰🧞‍♂️ THE NEXT CHAPTER IS PLAYING—COME ON IN!',
+        value: [
+          'New here? Welcome to the listening room. Bring a friend, discover an artist, and cast your thumbs-up/down votes for this week’s music.',
+          '🎸 Make music? Come meet the community and share your sounds in Discord.',
+          '🌱 Want to grow the weekly funds? Follow the bunny to explore contributions and DVert advertising.',
+          `📻 [Enter DecentBusking & tune in](${listeningUrl.href}) · 🐇 [Explore the funds](${proofUrl})`,
+          '🎶 More ears. More discoveries. More reasons to make something beautiful together. 🎶',
+        ].join('\n') },
     ],
     footer: { text: markerFor(report.week) },
   };

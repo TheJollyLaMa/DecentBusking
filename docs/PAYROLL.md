@@ -63,6 +63,13 @@ Weekly close-balance checks require historical Base state. They use `PAYROLL_ARC
 
 ### Confirmed Weekly Discord Report
 
+Newly prepared reports use a purple, emoji-rich festival-style embed celebrating
+paid artists and community support. The invitation welcomes newcomers to listen,
+vote, share music, and explore contributions or DVert advertising. The paid week,
+verified totals, chart, artist payments, and proof links remain explicit; no
+everyone/role mentions are enabled. Already prepared checkpoint payloads retain
+their saved appearance so retries do not rewrite an announcement.
+
 The bot checks every 15 seconds for a completed New York week with both published Playback and song-based Top 10 allocations. After **every payable entry in both allocations** has a matching, independently verified Base payment in the payment ledger (two confirmations), it posts one combined report to `JUKEBOX_CHANNEL_ID` (`#decentjukebox`). Clicking Pay, accepting a wallet prompt, recipient approvals, and partial batches do not trigger a paid report. Allocation and payment backups must be healthy before posting. Weeks without both published allocations, including unfunded categories, do not trigger a combined completion report.
 
 The report lists up to ten chart songs in chart order with each song's actual prize payout; chart positions without a payable prize are labelled `$0.00 (not payable)`. Playback is a separate list of the ten highest-paid artist wallets, sorted by total weekly Playback USDC, not individual songs or prize income. Additional Playback recipients are summarized in one count and total. Category totals include all paid entries. Display amounts are rounded to cents; the linked public payment ledger retains exact token units and transaction proofs. Forfeited/unallocated amounts are not described as payments. Reports require closed-week history matching the frozen receipts; legacy artist-ranked Top 10 receipts are not relabelled as song charts. Receipt restore/import, settlement and reporting use the full closed-week chart when validating song prizes with forfeited positions: payable rows alone cannot reconstruct those ranks or amounts. This does not rewrite the frozen receipts or their payment references.

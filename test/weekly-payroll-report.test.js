@@ -113,6 +113,31 @@ test('forfeited chart positions stay visible as unpaid and are never counted in 
   assert.doesNotMatch(embed.description, /\$2000\.00 USDC paid/);
 });
 
+test('festival-style payroll celebrates verified payouts and invites newcomers without pings', async () => {
+  const value = await fixture();
+  await value.create().tick();
+  const payload = value.posts[0];
+  const embed = payload.embeds[0];
+  assert.equal(embed.color, 0xb44aff);
+  assert.match(embed.title, /⚸🎰 PAYDAY/);
+  assert.doesNotMatch(JSON.stringify(embed), /🌈|🎪/);
+  assert.match(embed.description, /Congratulations/);
+  assert.match(embed.description, /Paid week: NY-2026-10-12/);
+  assert.match(embed.description, /2\+ confirmations/);
+  assert.equal(embed.url, 'https://example.org/DecentBusking/?tutorial=payroll&week=NY-2026-10-12');
+  const invitation = embed.fields[2];
+  assert.match(invitation.value, /Bring a friend/);
+  assert.match(invitation.value, /this week’s music/);
+  assert.match(invitation.value, /\[Enter DecentBusking & tune in\]\(https:\/\/example.org\/DecentBusking\/\)/);
+  assert.match(invitation.value, /DVert advertising/);
+  assert.deepEqual(payload.allowedMentions, { parse: [] });
+  assert.equal(embed.footer.text, 'decentbusking-payroll-paid:NY-2026-10-12');
+  assert.ok(embed.title.length <= 256);
+  assert.ok(embed.description.length <= 4096);
+  assert.ok(embed.fields.every(field => field.name.length <= 256 && field.value.length <= 1024));
+  assert.ok(JSON.stringify(embed).length <= 5500);
+});
+
 test('report ranks by amount, sums case-insensitive artist wallets, and breaks ties deterministically', async () => {
   const value = await fixture();
   const playback = structuredClone(value.allocations[0]);
