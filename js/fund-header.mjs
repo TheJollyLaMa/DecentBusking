@@ -231,7 +231,7 @@ export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanc
 }
 
 export function fundButtonHtml(fund, balanceUnits, now = Date.now()) {
-  return `${escapeHtml(fundTitle(fund, now))}: ${usdcAmountHtml(balanceUnits)}`;
+  return `${escapeHtml(fund.emoji)}<span class="fund-header-label"> Week ${fundWeekNumber(now)} ${escapeHtml(fund.label)}:</span> ${usdcAmountHtml(balanceUnits)}`;
 }
 
 function dialogElements() {

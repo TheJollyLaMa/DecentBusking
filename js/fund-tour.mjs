@@ -1,4 +1,4 @@
-import { initFundHeader, openFundPanel } from './fund-header.mjs?v=20261019-fund-tour';
+import { initFundHeader, openFundPanel } from './fund-header.mjs?v=20261019-mobile-funds';
 import { payrollPeriodFromKey } from './payroll-week.mjs';
 
 export function payrollTourWeek(search) {

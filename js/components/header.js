@@ -9,7 +9,7 @@ const JAM_SUBTITLE_PARTS = [
   { text: ' ' },
   { text: '♀︎', className: 'jam-icon jam-venus' },
   { text: '🎸', className: 'jam-icon jam-guitar' },
-  { text: ' The Web3 Digital Town Square ' },
+  { text: ' Another Decent Frankenstein ', className: 'jam-tagline' },
   { text: '🔊', className: 'jam-icon jam-speaker' },
   { text: ' ' },
   { text: '🎶', className: 'jam-icon jam-note jam-note-one' },
@@ -179,6 +179,7 @@ const MOBILE_APP_TITLE_STYLE = `
   @media (max-width: 600px) {
     #header-center { width: 100%; height: 100%; }
     #app-title-wrapper {
+      position: relative;
       display: grid;
       grid-template-columns: 38px minmax(0, 1fr) 38px;
       grid-template-rows: 44px 42px 18px;
@@ -190,18 +191,21 @@ const MOBILE_APP_TITLE_STYLE = `
       box-sizing: border-box;
     }
     .ankh-left, .ankh-right {
+      position: absolute;
+      top: 7px;
+      z-index: 1004;
       display: flex;
       width: 38px;
       min-width: 0;
       max-width: 38px;
       height: 40px;
-      margin-top: 6px;
+      margin-top: 0;
       align-items: center;
       justify-content: center;
       box-sizing: border-box;
     }
-    .ankh-left { grid-column: 1; grid-row: 2; }
-    .ankh-right { grid-column: 3; grid-row: 2; }
+    .ankh-left { left: 56px; }
+    .ankh-right { right: 56px; }
     .ankh-right right-ankh { display: block; width: 38px; height: 38px; }
     .ankh-left .ankh-wrapper, .ankh-left .ankh-container {
       display: block;
@@ -245,17 +249,23 @@ const MOBILE_APP_TITLE_STYLE = `
     .title-main { margin: 0; white-space: nowrap; }
     .peacock-icon { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 44px; height: 44px; margin: 0 -8px; line-height: 1; }
     .dbusker-avatar { width: 44px; height: 44px; border: 1px solid rgba(255,213,165,.9); border-radius: 50%; object-fit: cover; box-shadow: 0 1px 7px rgba(255,132,54,.42); }
-    #app-subtitle {
-      grid-column: 2;
-      grid-row: 3;
-      max-width: 100%;
-      margin-top: 0;
-      overflow: hidden;
-      font-size: 10px;
-      line-height: 1.2;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    #app-title-wrapper #app-subtitle {
+      display: none;
     }
+    #app-title-wrapper .mobile-jam-icons {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      align-items: center;
+      gap: 1px;
+      font-size: 9px;
+      line-height: 1;
+      pointer-events: none;
+    }
+    #app-title > .title-symbol { position: relative; }
+    .mobile-jam-left { right: 100%; }
+    .mobile-jam-right { left: 100%; }
   }
 `;
 
@@ -284,6 +294,7 @@ const BRAND_TITLE_STYLE = `
   .peacock-icon img.dbusker-avatar { display: block; width: 62px; height: 62px; border: 2px solid #ffd1a6; border-radius: 50%; object-fit: cover; box-shadow: 0 2px 9px rgba(0,0,0,.65), 0 0 8px rgba(255,143,70,.38); animation: header-energy-pulse 4.2s ease-in-out infinite; }
   #app-subtitle { display: flex; align-items: center; justify-content: center; gap: .2em; white-space: nowrap; }
   .jam-icon { display: inline-block; flex: 0 0 auto; line-height: 1; transform-origin: 50% 80%; }
+  .mobile-jam-icons { display: none; }
   .jam-mic { animation: jam-mic-bob 1.7s ease-in-out infinite; }
   .jam-mark { animation: jam-mark-spin 5s ease-in-out infinite; }
   .jam-venus { color: #ffc078; text-shadow: 0 0 6px rgba(255,151,86,.4); }
@@ -465,7 +476,7 @@ class DecentBuskingHeader extends HTMLElement {
   _installJamSubtitle(shadowRoot) {
     const subtitle = shadowRoot?.querySelector('#app-subtitle');
     if (!subtitle) return;
-    subtitle.setAttribute('aria-label', window.DECENT_CONFIG?.subtitle || 'The Web3 Digital Town Square');
+    subtitle.setAttribute('aria-label', 'Another Decent Frankenstein');
     subtitle.replaceChildren(...JAM_SUBTITLE_PARTS.map((part) => {
       if (!part.className) return document.createTextNode(part.text);
       const icon = document.createElement('span');
@@ -474,6 +485,20 @@ class DecentBuskingHeader extends HTMLElement {
       icon.setAttribute('aria-hidden', 'true');
       return icon;
     }));
+    const wrapper = shadowRoot.querySelector('#app-title-wrapper');
+    if (!wrapper) return;
+    wrapper.querySelectorAll('.mobile-jam-icons').forEach(group => group.remove());
+    for (const [side, selector] of [
+      ['left', '.jam-mic, .jam-mark, .jam-venus, .jam-guitar'],
+      ['right', '.jam-speaker, .jam-note'],
+    ]) {
+      const group = document.createElement('span');
+      group.className = `mobile-jam-icons mobile-jam-${side}`;
+      group.setAttribute('aria-hidden', 'true');
+      group.append(...[...subtitle.querySelectorAll(selector)].map(icon => icon.cloneNode(true)));
+      const symbols = shadowRoot.querySelectorAll('#app-title > .title-symbol');
+      symbols[side === 'left' ? 0 : symbols.length - 1]?.appendChild(group);
+    }
   }
 
   _installIpfsStatus() {

@@ -46,6 +46,41 @@ test('radio artist joins the top badge and NFT status shares the countdown row',
   }
 });
 
+test('mobile radio centers votes above audio and mirrors watchlist eyes opposite Discord', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../css/styles.css'), 'utf8');
+  assert.match(css, /\.radio-title-window\s*\{[^}]*grid-column: 1 \/ -1; grid-row: 1/);
+  assert.match(css, /\.radio-media-controls\s*\{[^}]*position: fixed; left: 50%; bottom: 26px; transform: translateX\(-50%\)/);
+  assert.match(css, /#radio-voting\s*\{[^}]*position: fixed; left: 50%; bottom: 72px/);
+  assert.match(css, /#radio-voting button\s*\{ width: 28px; height: 28px; font-size: 16px/);
+  assert.match(css, /\.radio-voting-controls\s*\{[^}]*grid-column: 1 \/ -1; grid-row: 2; justify-self: center/);
+  assert.match(css, /#now-playing-watchlist-btn\s*\{ right: 18px; bottom: 68px;/);
+  assert.match(css, /\.radio-ad-countdown\s*\{[^}]*position: fixed;[^}]*text-align: center/);
+  assert.doesNotMatch(css, /\.radio-audio-controls\s*\{[^}]*grid-template-columns: 36px;/);
+});
+
+test('between-track messages use the song ticker and clear the bottom activity', () => {
+  const title = { textContent: '' };
+  const artist = { textContent: 'Previous artist' };
+  const activity = { hidden: false, textContent: 'Previous status', classList: { remove() {}, add() {} } };
+  const context = vm.createContext({ console, performance, title, artist, activity });
+  vm.runInContext(`${radioSyncSource()}
+    _audio = { paused: true }; _radio = null;
+    _titleEl = title; _artistEl = artist; _activityEl = activity;
+    _renderVoting = () => {}; _renderSponsorTag = () => {};
+    _broadcastNowPlayingStopped = () => {};
+    _syncRadio();
+  `, context);
+  assert.equal(title.textContent, '🌙 The JukeLoop is between tracks — waiting for the next song');
+  assert.equal(artist.textContent, '');
+  assert.equal(activity.textContent, '');
+  assert.equal(activity.hidden, true);
+  vm.runInContext(`_radioHandoff = {}; _upNext = { title: 'Next song' }; _syncRadio();`, context);
+  assert.equal(title.textContent, '📻 Up next: Next song');
+  vm.runInContext(`_setTrack('Now playing', 'Artist');`, context);
+  assert.equal(title.textContent, 'Now playing');
+  assert.equal(artist.textContent, 'Artist');
+});
+
 
 test('radio stays silent until a delayed initial seek completes', async () => {
   const source = radioSyncSource();
@@ -454,8 +489,9 @@ test('radio retries alternate IPFS gateways when the configured gateway fails', 
     pause() { this.paused = true; },
     removeAttribute() {},
     querySelectorAll: () => [],
-    appendChild(sourceNode) { sources.push(sourceNode.src); },
+    appendChild() {},
     load() {
+      sources.push(this.src);
       const eventName = sources.at(-1).startsWith('https://primary.example/')
         ? 'error'
         : 'loadedmetadata';
@@ -471,6 +507,7 @@ test('radio retries alternate IPFS gateways when the configured gateway fails', 
   vm.runInContext(`${source}
     _audio = audio; _audioPlayer = audio; _mode = 'radio'; _loadedPlayId = 'play-1';
     _radio = { playId: 'play-1', receivedAt: performance.now(), positionMs: 0 };
+    _radioLoadFailure = { playId: 'play-1', attempts: 1, retryAt: 0 };
     globalThis.switchTrack = _switchTo;`, context);
 
   await context.switchTrack({
@@ -493,9 +530,10 @@ test('radio retries alternate IPFS gateways when the configured gateway fails', 
   ]);
   assert.equal(events[0].audioUrl, 'https://dweb.link/ipfs/bafy-fire');
   assert.equal(audio.paused, false);
+  assert.equal(vm.runInContext('_radioLoadFailure', context), null);
 });
 
-test('failed radio gateway attempts clear the loaded play so the same track can retry', async () => {
+test('failed radio gateway attempts schedule a bounded retry for the same play', async () => {
   const source = radioSyncSource();
   const audio = new EventTarget();
   Object.assign(audio, {
@@ -536,7 +574,121 @@ test('failed radio gateway attempts clear the loaded play so the same track can 
   });
 
   assert.equal(vm.runInContext('_loadedPlayId', context), null);
-  assert.match(activity.textContent, /Couldn’t load this track from IPFS/);
+  assert.match(activity.textContent, /media gateways — retrying shortly/);
+  assert.equal(vm.runInContext('_radioLoadFailure.attempts', context), 1);
+});
+
+test('metadata distinguishes explicit decoder failures from HTTP errors and timeouts', async () => {
+  const player = new EventTarget();
+  const context = vm.createContext({ player, performance, setTimeout, clearTimeout, console });
+  vm.runInContext(`${radioSyncSource()}\n_audio = player; globalThis.wait = _waitForMetadata;`, context);
+  for (const [error, reason] of [
+    [{ code: 4, message: 'PipelineStatus::DEMUXER_ERROR_NO_SUPPORTED_STREAMS' }, 'unsupported'],
+    [{ code: 3, message: 'decode failed' }, 'unsupported'],
+    [{ code: 4, message: 'HTTP response code failure' }, 'network'],
+    [{ code: 2, message: 'network error' }, 'network'],
+    [null, 'network'],
+  ]) {
+    const pending = context.wait(100);
+    player.error = error;
+    player.dispatchEvent(new Event('error'));
+    assert.equal((await pending).reason, reason);
+  }
+  const timeout = context.wait(5);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal((await timeout).reason, 'timeout');
+});
+
+test('decoder failures skip alternate copies and stop automatic retries for this play', async () => {
+  const audio = new EventTarget();
+  let loads = 0;
+  Object.assign(audio, {
+    paused: true, volume: 0, pause() {}, removeAttribute() {}, querySelectorAll: () => [],
+    load() {
+      loads++;
+      this.error = { code: 4, message: 'DEMUXER_ERROR_NO_SUPPORTED_STREAMS' };
+      setTimeout(() => this.dispatchEvent(new Event('error')), 0);
+    },
+  });
+  const activity = { hidden: true, textContent: '', classList: { add() {}, remove() {} } };
+  const context = vm.createContext({ audio, activity, performance, setTimeout, clearTimeout, console, window: {} });
+  vm.runInContext(`${radioSyncSource()}
+    _audio = audio; _audioPlayer = audio; _activityEl = activity;
+    _radio = { playId: 'bad-play' }; _loadedPlayId = 'bad-play';
+    _renderVoting = () => {};
+  `, context);
+  await vm.runInContext(`_switchTo({ title: 'AAC recording', url: 'https://worker.example/audio',
+    fallbackUrls: ['https://gateway.example/audio'], nowPlaying: { playId: 'bad-play' } })`, context);
+  assert.equal(loads, 1);
+  assert.equal(activity.textContent, '');
+  assert.equal(activity.hidden, true);
+  vm.runInContext('for (let i = 0; i < 10; i++) _syncRadio();', context);
+  assert.equal(loads, 1);
+  assert.equal(vm.runInContext('_blocked', context), false);
+  vm.runInContext(`globalThis.started = []; _switchTo = options => started.push(options);
+    _radio = { playId: 'next-play', title: 'Next', ipfsCid: 'bafy-next', receivedAt: performance.now(), positionMs: 0 };
+    _syncRadio();`, context);
+  assert.equal(context.started.length, 1);
+  assert.equal(vm.runInContext('_radioLoadFailure', context), null);
+});
+
+test('network retries wait 15 then 30 seconds and stop after three failed attempts', () => {
+  let time = 0;
+  const activity = { hidden: true, textContent: '', classList: { add() {}, remove() {} } };
+  const context = vm.createContext({ performance: { now: () => time }, activity, console, window: {} });
+  vm.runInContext(`${radioSyncSource()}
+    _audio = { paused: true }; _activityEl = activity;
+    _radio = { playId: 'play', title: 'Song', ipfsCid: 'bafy-song' };
+    _renderVoting = () => {}; _renderSponsorTag = () => {};
+    globalThis.started = []; _switchTo = options => started.push(options);
+    _reportLoadFailure('network', { playId: 'play' });
+    _syncRadio();
+  `, context);
+  assert.equal(context.started.length, 0);
+  time = 14_999;
+  vm.runInContext('_syncRadio();', context);
+  assert.equal(context.started.length, 0);
+  time = 15_000;
+  vm.runInContext('_syncRadio();', context);
+  assert.equal(context.started.length, 1);
+  vm.runInContext(`_reportLoadFailure('network', { playId: 'play' });`, context);
+  time = 44_999;
+  vm.runInContext('_syncRadio();', context);
+  assert.equal(context.started.length, 1);
+  time = 45_000;
+  vm.runInContext(`_syncRadio(); _reportLoadFailure('network', { playId: 'play' });`, context);
+  assert.equal(context.started.length, 2);
+  time = 1_000_000;
+  vm.runInContext('_syncRadio();', context);
+  assert.equal(context.started.length, 2);
+  assert.match(activity.textContent, /after several attempts/);
+});
+
+test('play rejection is not mistaken for autoplay blocking and preserves the retry limit', async () => {
+  for (const name of ['NotSupportedError', 'NetworkError']) {
+    const audio = new EventTarget();
+    Object.assign(audio, {
+      paused: true, volume: 0, pause() {}, removeAttribute() {}, querySelectorAll: () => [],
+      load() { setTimeout(() => this.dispatchEvent(new Event('loadedmetadata')), 0); },
+      async play() { throw Object.assign(new Error('play failed'), { name }); },
+    });
+    const activity = { hidden: true, textContent: '', classList: { add() {}, remove() {} } };
+    const context = vm.createContext({ audio, activity, performance, console, setTimeout, clearTimeout });
+    vm.runInContext(`${radioSyncSource()}
+      _audio = audio; _audioPlayer = audio; _activityEl = activity;
+      _radio = { playId: 'play' }; _loadedPlayId = 'play';
+      _radioLoadFailure = { playId: 'play', attempts: 2, retryAt: 0 };
+    `, context);
+    await vm.runInContext(`_switchTo({ title: 'Song', url: 'https://worker.example/song', nowPlaying: { playId: 'play' } })`, context);
+    assert.equal(vm.runInContext('_blocked', context), false);
+    assert.equal(vm.runInContext('_radioLoadFailure.retryAt', context), Infinity);
+    if (name === 'NotSupportedError') {
+      assert.equal(activity.textContent, '');
+      assert.equal(activity.hidden, true);
+    } else {
+      assert.match(activity.textContent, /after several attempts/);
+    }
+  }
 });
 
 test('switchTo broadcasts now-playing after the site audio begins and stops on pause', async () => {
@@ -1071,8 +1223,8 @@ test('radio switchTo plays a ready preload from memory and releases the previous
   const sources = [];
   Object.assign(player, { volume: 0, muted: false, duration: 180, currentTime: 0, paused: true, readyState: 4, seeking: false,
     seekable: { length: 1, start: () => 0, end: () => 180 }, pause() { this.paused = true; }, removeAttribute() {},
-    querySelectorAll: () => [], appendChild(node) { sources.push(node.src); },
-    load() { setTimeout(() => this.dispatchEvent(new Event('loadedmetadata')), 0); }, async play() { this.paused = false; } });
+    querySelectorAll: () => [], appendChild() {},
+    load() { sources.push(this.src); setTimeout(() => this.dispatchEvent(new Event('loadedmetadata')), 0); }, async play() { this.paused = false; } });
   context.player = player;
   context.document = { createElement: () => ({}) };
   vm.runInContext(`_audio = player; _audioPlayer = player; _mode = 'radio'; _activeBlobUrl = 'blob:old-song';

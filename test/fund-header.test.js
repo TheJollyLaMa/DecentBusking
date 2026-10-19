@@ -120,6 +120,7 @@ test('fund header labels use the week number and a USDC icon', async () => {
   assert.match(html, /Week 0 Top10 fund:/);
   assert.match(html, /\$12\.25/);
   assert.match(html, /class="usdc-icon"/);
+  assert.match(html, /🏆<span class="fund-header-label"> Week 0 Top10 fund:<\/span>/);
 });
 
 test('fund snapshots refresh budgets and reservations and reject the previous week at turnover', async () => {

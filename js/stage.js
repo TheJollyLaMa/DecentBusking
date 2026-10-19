@@ -1,10 +1,10 @@
 // js/stage.js — DecentBusking
 // Hat (tip) + Guitar Case (mint) interactions and the now-playing banner.
 
-import { openMintModal } from './mint.js?v=20261017-mercury-release';
-import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261017-mercury-release';
+import { openMintModal } from './mint.js?v=20261019-radio-ticker';
+import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261019-radio-ticker';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { resolveNowPlayingNFT } from './space.js?v=20261019-fund-tour';
+import { resolveNowPlayingNFT } from './space.js?v=20261019-radio-ticker';
 import { nftArtistLabel } from './nft-loader.js?v=20261012-paging';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, getCreatorWatchlistState, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261017-mercury-release';
 
@@ -78,14 +78,19 @@ function _renderWatchlistState({ loading = false, resolving = false, saving = fa
   const button = _watchlistButton();
   const status = _watchlistStatus();
   if (!button) return;
+  button.classList.remove('hidden');
+  button.textContent = '👀';
   if (!_watchlistTrack) {
-    button.classList.add('hidden');
+    button.disabled = true;
+    button.title = 'Play a verified NFT to save it to your watchlist';
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-pressed', 'false');
     if (status) status.textContent = '';
     return;
   }
-  button.classList.remove('hidden');
   const nft = _watchlistResolvedNFT || _watchlistTrack?.nft || null;
   const state = applyCreatorWatchlistButton(button, nft, { loading, resolving, saving, unavailable: !!_watchlistTrack && !nft && !loading && !resolving });
+  button.textContent = '👀';
   if (status) {
     status.textContent = state.mode === 'saved'
       ? 'Saved to your watchlist.'
@@ -95,9 +100,7 @@ function _renderWatchlistState({ loading = false, resolving = false, saving = fa
           ? _watchlistLookupError || 'Could not match this playback to a verified NFT.'
         : state.mode === 'loading'
           ? 'Loading your watchlist…'
-          : state.mode === 'connect'
-            ? 'Connect your wallet to save this NFT.'
-            : '';
+          : '';
   }
 }
 

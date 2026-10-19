@@ -1,4 +1,4 @@
-import { fetchNFTMetaById } from './space.js?v=20261019-fund-tour';
+import { fetchNFTMetaById } from './space.js?v=20261019-radio-ticker';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { submitMediaForApproval } from './mint-submission.js?v=20261017-mercury-release';
 import { detectSubmissionMedia, mediaFilename, evenCreatorSplits, validateCreatorSplits } from './submission-media.mjs';

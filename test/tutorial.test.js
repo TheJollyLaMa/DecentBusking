@@ -141,7 +141,7 @@ function createTutorialContext() {
   return { context, storage, timerQueue, launchButton, targets, document, clicks, rightMenu, leftMenu };
 }
 
-test('tutorial walkthrough auto-launches once and marks visitors seen', () => {
+test('tutorial walkthrough auto-launches on an introductory visit and marks visitors seen', () => {
   const { context, storage, timerQueue, launchButton, targets, document } = createTutorialContext();
   vm.runInContext('initTutorial();', context);
 
@@ -163,6 +163,52 @@ test('tutorial walkthrough auto-launches once and marks visitors seen', () => {
   assert.equal(storage.getItem('decentbusking:tutorial:seen:v1'), '1');
   assert.equal(launchButton.children[1].textContent, 'Follow the white rabbit');
   assert.equal(document.getElementById('rabbit-tour-launch').hidden, false);
+});
+
+test('tutorial auto-opens on exactly the first three visits, then remains available from About', () => {
+  for (const previousVisits of [0, 1, 2, 3, 10]) {
+    const { context, storage, timerQueue, document, launchButton } = createTutorialContext();
+    storage.setItem('decentbusking:tutorial:visits:v1', String(previousVisits));
+    storage.setItem('decentbusking:tutorial:seen:v1', '1');
+    vm.runInContext('initTutorial();', context);
+    assert.equal(storage.getItem('decentbusking:tutorial:visits:v1'), String(previousVisits + 1));
+    assert.equal(timerQueue.length, previousVisits < 3 ? 1 : 0);
+    assert.equal(document.getElementById('rabbit-tour-launch').hidden, previousVisits >= 3);
+    if (previousVisits < 3) {
+      timerQueue[0]();
+      assert.equal(vm.runInContext('_overlay.hidden', context), false);
+    } else {
+      vm.runInContext('startTutorial();', context);
+      assert.equal(vm.runInContext('_overlay.hidden', context), false);
+    }
+    assert.equal(launchButton.hidden, false);
+    vm.runInContext('initTutorial();', context);
+    assert.equal(storage.getItem('decentbusking:tutorial:visits:v1'), String(previousVisits + 1));
+  }
+});
+
+test('completed visitors skip automatic openings and the landing launcher even during introductory visits', () => {
+  const { context, storage, timerQueue, document } = createTutorialContext();
+  storage.setItem('decentbusking:tutorial:completed:v1', '1');
+  vm.runInContext('initTutorial();', context);
+  assert.equal(timerQueue.length, 0);
+  assert.equal(document.getElementById('rabbit-tour-launch').hidden, true);
+  vm.runInContext('startTutorial();', context);
+  assert.equal(vm.runInContext('_overlay.hidden', context), false);
+});
+
+test('landing launcher belongs to the main scene and Discord remains an accessible icon link', () => {
+  assert.match(tutorialSource, /\(document\.querySelector\('main'\) \|\| document\.body\)\.appendChild\(launcher\)/);
+  assert.match(tutorialSource, /#rabbit-tour-launch\s*\{[^}]*left: 50%;[^}]*top: calc/);
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const link = html.match(/<a id="footer-discord-link"[^>]*>[\s\S]*?<\/a>/)[0];
+  assert.match(link, /aria-label="Join DecentBusking on Discord"/);
+  assert.match(link, /<img[^>]*discord\.svg/);
+  assert.doesNotMatch(link, />💬 Discord</);
+  const stage = html.match(/<div id="center-stage">[\s\S]*?<\/div>/)[0];
+  assert.match(stage, /id="hat-btn"[\s\S]*id="footer-discord-link"/);
+  const footer = html.match(/<footer id="radio-footer">[\s\S]*?<\/footer>/)[0];
+  assert.doesNotMatch(footer, /footer-discord-link/);
 });
 
 test('tutorial launch buttons can be relabeled inside arbitrary roots', () => {
@@ -249,6 +295,8 @@ test('Mercury keeps his symbol and flying-money ride but changes musical gear at
   }
   vm.runInContext('startTutorial();', context);
   assert.equal(vm.runInContext('_propEl.textContent', context), '🎺');
+  assert.equal(vm.runInContext('_propEl.attributes["data-instrument"]', context), 'trumpet');
+  assert.match(tutorialSource, /\.mercury-prop\[data-instrument="trumpet"\]\s*\{\s*transform: scaleX\(-1\)/);
   vm.runInContext('nextTutorialStep(); previousTutorialStep();', context);
   assert.equal(vm.runInContext('_propEl.textContent', context), '🎺');
 });
@@ -376,27 +424,42 @@ test('pending uploads, open dialogs and VertLoop defer the tour explicitly witho
   assert.ok(document.body);
 });
 
-test('keyboard focus cycles in the tour and Escape exits before underlying drawer handlers run', () => {
+test('tutorial permits keyboard exploration and Escape cannot dismiss it', () => {
   const { context, document } = createTutorialContext();
   vm.runInContext('initTutorial(); startTutorial();', context);
   const event = key => ({ key, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } });
   context.event = event('Tab');
   vm.runInContext('_handleKeydown(event);', context);
-  assert.equal(vm.runInContext('document.activeElement === _closeButton', context), true);
-  context.event.shiftKey = true;
-  vm.runInContext('_handleKeydown(event);', context);
-  assert.equal(vm.runInContext('document.activeElement === _nextButton', context), true);
+  assert.equal(context.event.prevented, undefined);
+  vm.runInContext('_panel.focus();', context);
   context.event = event('ArrowRight');
   vm.runInContext('_handleKeydown(event);', context);
   assert.equal(vm.runInContext('_currentStep', context), 1);
   assert.equal(context.event.stopped, true);
   context.event = event('Escape');
   vm.runInContext('_handleKeydown(event);', context);
-  assert.equal(vm.runInContext('_overlay.hidden', context), true);
-  assert.equal(document.body.classList.contains('decentbusking-tutorial-open'), false);
+  assert.equal(vm.runInContext('_overlay.hidden', context), false);
+  assert.equal(document.body.classList.contains('decentbusking-tutorial-open'), true);
   assert.equal(context.event.stopped, true);
+  vm.runInContext('targets["#radio-voting"].focus();', context);
+  context.event = event('ArrowRight');
+  vm.runInContext('_handleKeydown(event);', context);
+  assert.equal(context.event.prevented, undefined);
+  assert.equal(vm.runInContext('_currentStep', context), 1);
 });
 
+test('outside clicks leave the tutorial open; only explicit close and leave controls dismiss it', () => {
+  const { context, document } = createTutorialContext();
+  vm.runInContext('initTutorial(); startTutorial(); _backdrop.click(); targets["#radio-voting"].click();', context);
+  assert.equal(vm.runInContext('_overlay.hidden', context), false);
+  assert.equal(vm.runInContext('_panel.getAttribute("aria-modal")', context), 'false');
+  assert.match(document.head.children[0].textContent, /\.decentbusking-tutorial-overlay\s*\{[^}]*pointer-events: none/);
+  assert.match(document.head.children[0].textContent, /\.decentbusking-tutorial-card\s*\{[^}]*pointer-events: auto/);
+  vm.runInContext('_closeButton.click();', context);
+  assert.equal(vm.runInContext('_overlay.hidden', context), true);
+  vm.runInContext('startTutorial(); _skipButton.click();', context);
+  assert.equal(vm.runInContext('_overlay.hidden', context), true);
+});
 test('tour text and spotlight fit a narrow viewport without covering the highlighted drawer header', () => {
   const { context, targets } = createTutorialContext();
   vm.runInContext('initTutorial(); startTutorial();', context);

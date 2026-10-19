@@ -1,5 +1,7 @@
 const TUTORIAL_STORAGE_KEY = 'decentbusking:tutorial:seen:v1';
 const TUTORIAL_COMPLETED_KEY = 'decentbusking:tutorial:completed:v1';
+const TUTORIAL_VISITS_KEY = 'decentbusking:tutorial:visits:v1';
+const TUTORIAL_INTRO_VISITS = 3;
 const TUTORIAL_STYLE_ID = 'decentbusking-tutorial-style';
 const TUTORIAL_OVERLAY_ID = 'decentbusking-tutorial-overlay';
 const TUTORIAL_HIGHLIGHT_CLASS = 'decentbusking-tutorial-highlight';
@@ -96,6 +98,7 @@ let _backdrop = null;
 let _currentStep = 0;
 let _currentTarget = null;
 let _autoLaunchTimer = null;
+let _visitNumber = 0;
 let _rabbit = null;
 let _spotlight = null;
 let _returnFocus = null;
@@ -155,6 +158,7 @@ function _ensureStyles() {
       display: block;
       padding: 18px;
       box-sizing: border-box;
+      pointer-events: none;
     }
     .decentbusking-tutorial-overlay[hidden] { display: none; }
     .decentbusking-tutorial-backdrop {
@@ -163,6 +167,7 @@ function _ensureStyles() {
       background: rgba(3, 5, 12, .12);
     }
     .decentbusking-tutorial-card {
+      pointer-events: auto;
       position: absolute;
       z-index: 3;
       width: min(390px, calc(100% - 32px));
@@ -269,6 +274,16 @@ function _ensureStyles() {
       border: 1px solid #8dbbb2; border-radius: 28px; box-shadow: 0 5px 24px #0007;
       cursor: pointer; font: 600 12px/1.25 system-ui, sans-serif;
     }
+    #rabbit-tour-launch {
+      pointer-events: auto;
+      position: fixed;
+      left: 50%;
+      top: calc(var(--header-height, 112px) + 50px + (100dvh - var(--header-height, 112px) - 50px - var(--radio-footer-height, 96px)) / 2);
+      right: auto;
+      bottom: auto;
+      transform: translate(-50%, -50%);
+      max-width: calc(100vw - 32px);
+    }
     .rabbit-tour-launch .rabbit-launch-label { max-width: 110px; text-align: left; }
     .rabbit-tour-launch[hidden] { display: none; }
     .rabbit-tour-launch.about-tutorial-btn { position: relative; inset: auto; }
@@ -317,6 +332,7 @@ function _ensureStyles() {
     .tutorial-mercury .mercury-symbol { position: absolute; left: 12px; top: -6px; font: 58px/1 Georgia, serif; color: #fff0cc; text-shadow: 0 0 10px #e4bc7c70; }
     .tutorial-mercury .mercury-money { position: absolute; bottom: 0; left: 14px; font-size: 22px; transform: rotate(-12deg); }
     .tutorial-mercury .mercury-prop { position: absolute; top: 18px; left: 40px; font-size: 28px; line-height: 1; transform: rotate(12deg); filter: drop-shadow(0 2px 3px #0008); }
+    .tutorial-mercury .mercury-prop[data-instrument="trumpet"] { transform: scaleX(-1) rotate(12deg); }
     .mercury-note { position: absolute; left: 28px; top: 24px; color: #c5f3dd; font: 700 15px/1 Georgia, serif; opacity: .65; transform: translate(var(--note-x), var(--note-y)); }
     .mercury-note:nth-of-type(1) { --note-x: -28px; --note-y: -21px; --note-delay: .1s; }
     .mercury-note:nth-of-type(2) { --note-x: 30px; --note-y: -23px; --note-delay: .5s; }
@@ -434,7 +450,7 @@ function _ensureLauncher() {
     'aria-haspopup': 'dialog',
   });
   _decorateLauncher(launcher);
-  document.body.appendChild(launcher);
+  (document.querySelector('main') || document.body).appendChild(launcher);
   _syncLandingLauncher();
 }
 
@@ -455,7 +471,7 @@ function _decorateLauncher(launcher) {
 
 function _syncLandingLauncher() {
   const launcher = document.getElementById('rabbit-tour-launch');
-  if (launcher) launcher.hidden = _storage()?.getItem(TUTORIAL_COMPLETED_KEY) === '1';
+  if (launcher) launcher.hidden = _storage()?.getItem(TUTORIAL_COMPLETED_KEY) === '1' || _visitNumber > TUTORIAL_INTRO_VISITS;
 }
 
 function _ensureOverlay() {
@@ -470,7 +486,6 @@ function _ensureOverlay() {
 
   _backdrop = document.createElement('div');
   _backdrop.className = 'decentbusking-tutorial-backdrop';
-  _backdrop.addEventListener('click', skipTutorial);
   _overlay.addEventListener('click', event => event.stopPropagation());
   _overlay.addEventListener('pointerdown', event => event.stopPropagation());
 
@@ -490,7 +505,7 @@ function _ensureOverlay() {
   _panel = document.createElement('section');
   _panel.className = 'decentbusking-tutorial-card';
   _panel.setAttribute('role', 'dialog');
-  _panel.setAttribute('aria-modal', 'true');
+  _panel.setAttribute('aria-modal', 'false');
   _panel.setAttribute('aria-labelledby', 'decentbusking-tutorial-title');
   _panel.setAttribute('aria-describedby', 'decentbusking-tutorial-body');
   _panel.tabIndex = -1;
@@ -799,6 +814,7 @@ function _renderStep() {
   _titleEl.textContent = step.title;
   _bodyEl.textContent = step.body;
   _propEl.textContent = step.prop;
+  _propEl.setAttribute('data-instrument', step.propName);
   _stepLabelEl.textContent = `${_currentStep + 1} / ${TUTORIAL_STEPS.length}`;
   _stepLabelEl.setAttribute('aria-label', `Card ${_currentStep + 1} of ${TUTORIAL_STEPS.length}`);
   _progressEl.textContent = TUTORIAL_STEPS.map((_, i) => i <= _currentStep ? '●' : '○').join(' ');
@@ -825,10 +841,11 @@ function _cancelAutoLaunch() {
 
 function _autoLaunch() {
   if (window.location?.search && new URLSearchParams(window.location.search).get('tutorial') === 'payroll') return;
-  if (_autoLaunchTimer || _isSeen() || _overlay?.hidden === false) return;
+  if (_autoLaunchTimer || _visitNumber > TUTORIAL_INTRO_VISITS ||
+    _storage()?.getItem(TUTORIAL_COMPLETED_KEY) === '1' || _overlay?.hidden === false) return;
   _autoLaunchTimer = setTimeout(() => {
     _autoLaunchTimer = null;
-    if (!_isSeen()) startTutorial({ source: 'auto' });
+    startTutorial({ source: 'auto' });
   }, 500);
 }
 
@@ -837,15 +854,10 @@ function _handleKeydown(event) {
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopImmediatePropagation();
-    skipTutorial();
-  } else if (event.key === 'Tab') {
-    const buttons = [_closeButton, _backButton, _skipButton, _nextButton].filter(button => !button.disabled);
-    const index = buttons.indexOf(document.activeElement);
-    const next = event.shiftKey ? (index <= 0 ? buttons.length - 1 : index - 1) : (index + 1) % buttons.length;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    buttons[next].focus();
-  } else if (event.key === 'ArrowRight' || (event.key === ' ' && document.activeElement === _panel)) {
+    return;
+  }
+  if (document.activeElement !== _panel) return;
+  if (event.key === 'ArrowRight' || event.key === ' ') {
     event.preventDefault();
     event.stopImmediatePropagation();
     nextTutorialStep();
@@ -853,14 +865,20 @@ function _handleKeydown(event) {
     event.preventDefault();
     event.stopImmediatePropagation();
     previousTutorialStep();
-  } else {
-    event.stopImmediatePropagation();
   }
 }
 
 export function initTutorial() {
   if (_initialized || typeof document === 'undefined') return;
   _initialized = true;
+  try {
+    const visits = Number(_storage()?.getItem(TUTORIAL_VISITS_KEY) || '0');
+    _visitNumber = (Number.isSafeInteger(visits) && visits >= 0 ? visits : 0) + 1;
+    _storage()?.setItem(TUTORIAL_VISITS_KEY, String(_visitNumber));
+  } catch (error) {
+    console.warn('[tutorial] Could not remember tutorial visits:', error);
+    _visitNumber = 1;
+  }
   _ensureOverlay();
   _ensureLauncher();
   document.addEventListener('keydown', _handleKeydown, true);

@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261019-radio-label" />
+  <link rel="stylesheet" href="css/styles.css?v=20261019-radio-ticker" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -238,11 +238,11 @@
   </dialog>
 
   <div id="artist-filter-bar" role="group" aria-label="Search music by artist or song">
-    <button id="dbusk-top10-button" class="fund-header-pill fund-header-left" type="button" disabled>🏆 Top10 fund: Loading…</button>
+    <button id="dbusk-top10-button" class="fund-header-pill fund-header-left" type="button" aria-label="Top10 fund: Loading" disabled>🏆<span class="fund-header-label"> Top10 fund:</span> Loading…</button>
     <div class="artist-filter-core">
       <input id="scene-music-search" type="search" placeholder="Search Artist or Song" aria-label="Search Artist or Song" />
     </div>
-    <button id="dbusk-playback-button" class="fund-header-pill fund-header-right" type="button" disabled>🎧 Playback fund: Loading…</button>
+    <button id="dbusk-playback-button" class="fund-header-pill fund-header-right" type="button" aria-label="Playback fund: Loading" disabled>🎧<span class="fund-header-label"> Playback fund:</span> Loading…</button>
   </div>
 
   <dialog id="fund-breakdown-dialog" aria-labelledby="fund-breakdown-title">
@@ -296,6 +296,7 @@
   </main>
   <div id="center-stage">
     <button id="hat-btn" title="Tip the busker 🎩" aria-label="Tip the busker">🎩</button>
+    <a id="footer-discord-link" href="https://discord.gg/SCtcBggHPa" target="_blank" rel="noopener noreferrer" aria-label="Join DecentBusking on Discord" title="Join us on Discord"><img src="https://cdn.jsdelivr.net/npm/simple-icons@v13/icons/discord.svg" width="24" height="24" alt="" /></a>
     <button id="guitar-case-btn" title="Mint your busk 💼" aria-label="Mint your busk">💼</button>
   </div>
 
@@ -515,7 +516,6 @@
   <!-- FOOTER: DecentFoot web component -->
   <decent-foot>
     <footer id="radio-footer">
-      <a id="footer-discord-link" href="https://discord.gg/SCtcBggHPa" target="_blank" rel="noopener noreferrer">💬 Discord</a>
       <div id="busker-info">
         <div class="now-playing-badge-row">
           <span id="now-playing-label">📻 Live on JukeLoop</span>
@@ -850,13 +850,13 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js?v=20261019-fund-tour"></script>
+  <script type="module" src="js/components/about-override.js?v=20261019-intro-visits"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
   <script type="module" src="js/components/header-right-ankh-override.js?v=20261017-mercury-release"></script>
 
   <!-- Load DecentHead components without its legacy IPFS status widget -->
-  <script type="module" src="js/components/header.js?v=20261017-mercury-release"></script>
+  <script type="module" src="js/components/header.js?v=20261019-header-tagline"></script>
 
   <!-- Inject 💸 Payroll link into left ankh header dropdown -->
   <script type="module" src="js/components/header-payroll-inject.js?v=20261006-owner-payroll"></script>
@@ -869,30 +869,30 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261019-fund-tour"></script>
+  <script type="module" src="js/main.js?v=20261019-radio-ticker"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261017-mercury-release"></script>
+  <script type="module" src="js/admin.js?v=20261019-radio-ticker"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
   <script type="module" src="js/payroll.js?v=20261019-payroll-workspace"></script>
   <script type="module" src="js/radio-history.js?v=20261017-mercury-release"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261017-mercury-release"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261019-fund-tour">
-  <script type="module" src="js/fund-header.mjs?v=20261019-fund-tour"></script>
-  <script type="module" src="js/fund-tour.mjs?v=20261019-fund-tour"></script>
-  <script type="module" src="js/top-ten-board.mjs?v=20261019-fund-tour"></script>
+  <script type="module" src="js/fund-header.mjs?v=20261019-mobile-funds"></script>
+  <script type="module" src="js/fund-tour.mjs?v=20261019-mobile-funds"></script>
+  <script type="module" src="js/top-ten-board.mjs?v=20261019-radio-ticker"></script>
   <script type="module" src="js/djuke.mjs?v=20261017-mercury-release"></script>
-  <script type="module" src="js/devert-tab.mjs?v=20261017-mercury-release"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/devert-tab.mjs?v=20261019-radio-ticker"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261019-radio-ticker"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
-  <script type="module" src="js/listens.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/listens.mjs?v=20261019-radio-ticker"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261018-shared-provider"></script>
   <script type="module" src="js/devert-paid-queue.mjs?v=20261017-mercury-release"></script>
   <script type="module" src="js/devert-history.mjs?v=20261017-mercury-release"></script>
-  <script type="module" src="js/panel-equalizers.mjs?v=20261017-mercury-release"></script>
-  <script type="module" src="js/top-ten-live-meter.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/panel-equalizers.mjs?v=20261019-radio-ticker"></script>
+  <script type="module" src="js/top-ten-live-meter.mjs?v=20261019-radio-ticker"></script>
   <script type="module">
     import { initPayroll } from './js/payroll.js?v=20261019-payroll-workspace';
     document.addEventListener('DOMContentLoaded', initPayroll);

@@ -13,6 +13,8 @@ const PREVIEW_MS = 30_000;
 const DRIFT_TOLERANCE_S = 8;
 const LOAD_TIMEOUT_MS = 20_000;
 const GATEWAY_RETRY_TIMEOUT_MS = 5_000;
+const RADIO_LOAD_MAX_ATTEMPTS = 3;
+const RADIO_LOAD_RETRY_MS = 15_000;
 // After a song ends, poll quickly so the next one starts right after the JukeLoop changeover gap.
 const HANDOFF_POLL_MS = 750;
 const HANDOFF_WINDOW_MS = 30_000;
@@ -142,6 +144,7 @@ let _radio = null;
 let _activeShowId = null;
 let _radioReachable = true;
 let _loadedPlayId = null;
+let _radioLoadFailure = null;
 let _seen = null;
 let _seenSince = 0;
 const _takeoverQueue = [];
@@ -745,13 +748,16 @@ function _syncRadio(message) {
     if (!_audio.paused) return;
     _loadedPlayId = null;
     _broadcastNowPlayingStopped('radio-empty');
-    _setTrack('—', '');
     _renderSponsorTag(null);
-    _setActivity(message || (_radioHandoff && _upNext?.title
+    _setTrack(message || (_radioHandoff && _upNext?.title
       ? `📻 Up next: ${_upNext.title}`
-      : '🌙 The JukeLoop is between tracks — waiting for the next song'));
+      : '🌙 The JukeLoop is between tracks — waiting for the next song'), '');
+    _setActivity('');
     return;
   }
+
+  if (_radioLoadFailure?.playId !== _radio.playId) _radioLoadFailure = null;
+  if (_radioLoadFailure && performance.now() < _radioLoadFailure.retryAt) return;
 
   if (_radio.playId === _loadedPlayId) {
     return;
@@ -951,19 +957,24 @@ async function _switchTo({ title, artist, url, fallbackUrls = [], mime = _mimeTy
     activeUrl = candidate;
     _audio.removeAttribute('src');
     _audio.querySelectorAll('source').forEach((source) => source.remove());
-    const source = document.createElement('source');
-    source.src = candidate;
-    if (mime) source.type = mime;
-    _audio.appendChild(source);
+    // A direct src exposes MediaError on the player; child <source> errors can hide decoder failures.
+    _audio.src = candidate;
     const metadataReady = _waitForMetadata(candidate === url ? LOAD_TIMEOUT_MS : GATEWAY_RETRY_TIMEOUT_MS);
     _audio.load();
-    loaded = await metadataReady;
+    const result = await metadataReady;
+    loaded = result.loaded;
+    if (!loaded && token === _switchToken) {
+      console.warn('[radio] Media load failed:', { url: candidate, mime, ...result });
+      if (result.reason === 'unsupported') {
+        _reportLoadFailure('unsupported', nowPlaying);
+        return;
+      }
+    }
     if (loaded) break;
   }
   if (token !== _switchToken) return;
   if (!loaded) {
-    if (_mode === 'radio' && _radio?.playId === nowPlaying?.playId) _loadedPlayId = null;
-    _setActivity('⚠️ Couldn’t load this track from IPFS — waiting for the next one');
+    _reportLoadFailure('network', nowPlaying);
     return;
   }
   const at = offset();
@@ -995,13 +1006,20 @@ async function _switchTo({ title, artist, url, fallbackUrls = [], mime = _mimeTy
     }
     _blocked = false;
     _playBtn?.classList.add('hidden');
-  } catch {
+  } catch (error) {
+    if (token !== _switchToken) return;
+    if (error?.name !== 'NotAllowedError') {
+      console.warn('[radio] Playback failed:', error);
+      _reportLoadFailure(error?.name === 'NotSupportedError' ? 'unsupported' : 'network', nowPlaying);
+      return;
+    }
     _blocked = true;
     _playBtn?.classList.remove('hidden');
     _maybePreload();
     return;
   }
   if (token !== _switchToken) return;
+  if (_mode === 'radio' && _radio?.playId === nowPlaying?.playId) _radioLoadFailure = null;
   _recordTransition({
     source: nowPlaying?.source || _mode,
     title,
@@ -1068,18 +1086,56 @@ function _seekTo(seconds) {
   return false;
 }
 
+function _reportLoadFailure(reason, nowPlaying) {
+  _blocked = false;
+  _playBtn?.classList.add('hidden');
+  _broadcastNowPlayingStopped('load-failed');
+  const isLive = _mode === 'radio' && _radio?.playId && _radio.playId === nowPlaying?.playId;
+  if (reason === 'unsupported') {
+    if (isLive) {
+      _loadedPlayId = null;
+      _radioLoadFailure = { playId: _radio.playId, retryAt: Infinity, attempts: 1 };
+      _discardPreload();
+    }
+    console.warn('[radio] This browser cannot decode the recording.', { playId: nowPlaying?.playId });
+    _setActivity('');
+    return;
+  }
+  if (isLive) {
+    _loadedPlayId = null;
+    const attempts = (_radioLoadFailure?.playId === _radio.playId ? _radioLoadFailure.attempts : 0) + 1;
+    const retrying = attempts < RADIO_LOAD_MAX_ATTEMPTS;
+    _radioLoadFailure = {
+      playId: _radio.playId, attempts,
+      retryAt: retrying ? performance.now() + RADIO_LOAD_RETRY_MS * attempts : Infinity,
+    };
+    _discardPreload();
+    _setActivity(retrying
+      ? '⚠️ Audio could not be loaded from the media gateways — retrying shortly.'
+      : '⚠️ Audio is still unavailable after several attempts — waiting for the next song.');
+    return;
+  }
+  _setActivity('⚠️ Audio could not be loaded from the media gateways — try this recording again shortly.');
+}
+
 function _waitForMetadata(timeoutMs = LOAD_TIMEOUT_MS) {
   const player = _audio;
   return new Promise((resolve) => {
-    const finish = (ok) => {
+    const finish = (result) => {
       clearTimeout(timer);
       player.removeEventListener('loadedmetadata', onLoaded);
       player.removeEventListener('error', onError, true);
-      resolve(ok);
+      resolve(result);
     };
-    const onLoaded = () => finish(true);
-    const onError = () => finish(false);
-    const timer = setTimeout(() => finish(false), timeoutMs);
+    const onLoaded = () => finish({ loaded: true });
+    const onError = () => {
+      const error = player.error;
+      // Code 4 can also mean an HTTP error; only call it unsupported with explicit decoder evidence.
+      const unsupported = error?.code === 3 ||
+        /DEMUXER_ERROR_NO_SUPPORTED_STREAMS|DECODER_ERROR_NOT_SUPPORTED|unsupported codec/i.test(error?.message || '');
+      finish({ loaded: false, reason: unsupported ? 'unsupported' : 'network', code: error?.code, message: error?.message });
+    };
+    const timer = setTimeout(() => finish({ loaded: false, reason: 'timeout' }), timeoutMs);
     timer.unref?.();
     player.addEventListener('loadedmetadata', onLoaded);
     player.addEventListener('error', onError, true);
@@ -1103,7 +1159,8 @@ function _maybePreload() {
     return;
   }
   // A live item this browser has not started yet (still finishing the previous song) is needed first.
-  const pendingLive = _radio?.ipfsCid && _radio.playId !== _loadedPlayId ? _radio : null;
+  const pendingLive = _radio?.ipfsCid && _radio.playId !== _loadedPlayId &&
+    _radioLoadFailure?.playId !== _radio.playId ? _radio : null;
   const target = pendingLive || _upNext;
   const cid = target?.ipfsCid || null;
   if (_preload && _preload.cid !== cid) _discardPreload();

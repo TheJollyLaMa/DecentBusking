@@ -92,6 +92,39 @@ test('footer NFT lookup failures report verification errors and recover on retry
   fail = false;
   await vm.runInContext('_resolveWatchlistTrack(_watchlistTrack)', context);
   assert.equal(status.textContent, 'Saved to your watchlist.');
+  assert.equal(button.textContent, '👀');
+  assert.equal(button.classList.contains('hidden'), false);
+});
+
+test('watchlist eyes remain visible but disabled when no song is playing', () => {
+  const button = element();
+  const status = element();
+  const context = vm.createContext({
+    document: { getElementById: id => id === 'now-playing-watchlist-status' ? status : button },
+  });
+  vm.runInContext(`${source}\n_renderWatchlistState();`, context);
+  assert.equal(button.textContent, '👀');
+  assert.equal(button.classList.contains('hidden'), false);
+  assert.equal(button.disabled, true);
+  assert.match(button.getAttribute('aria-label'), /Play a verified NFT/);
+});
+
+test('wallet connection guidance stays on the eyes button rather than cluttering the footer', () => {
+  const button = element();
+  const status = element();
+  const context = vm.createContext({
+    document: { getElementById: id => id === 'now-playing-watchlist-status' ? status : button },
+    applyCreatorWatchlistButton: (target) => {
+      target.setAttribute('aria-label', 'Connect your wallet to save this NFT');
+      target.title = 'Connect your wallet to save this NFT';
+      return { mode: 'connect' };
+    },
+  });
+  vm.runInContext(`${source}\n_watchlistTrack = { nft: { tokenId: 80 } }; _renderWatchlistState();`, context);
+  assert.equal(status.textContent, '');
+  assert.equal(button.textContent, '👀');
+  assert.match(button.getAttribute('aria-label'), /Connect your wallet/);
+  assert.match(button.title, /Connect your wallet/);
 });
 
 test('hat shows the playing artist/song and first 6 + four ENS icons + last 4 of its wallet', async () => {

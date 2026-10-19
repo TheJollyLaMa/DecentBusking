@@ -4,6 +4,14 @@
 
 DecentBusking is a community listening room, a 3D timeline of music NFTs, and a Discord radio built around the people who make the music. Listen, explore the archive, tip a performer, or bring a track into JukeLoop.
 
+Between tracks, the radio's waiting or up-next message uses the song-title ticker.
+On mobile, compact votes are centered between Discord and the watchlist eyes;
+compact audio controls sit between the hat and briefcase above the ad countdown.
+These shared rows keep the footer small. Watchlist eyes mirror the Discord icon
+on the opposite side of the screen and save verified NFTs to your
+watchlist; their accessible label describes the current save state. The next-ad
+countdown is centered at the bottom of the screen.
+
 Read the [Decent Busking whitepaper](WHITEPAPER.md) for the vision, current architecture, payment mechanics, artist-rights limits, and roadmap. Implemented features are separated from future plans.
 
 <p align="center">
@@ -48,16 +56,22 @@ the matching worker update; older workers show unavailable rather than zero.
 
 **First visit?** Follow the [newcomer walkthrough](docs/NEWCOMERS.md) for a click-by-click listener and artist route with screenshots.
 
-The on-site **Follow the white rabbit** launcher appears above the radio until
-the visitor finishes every stop. Completion is remembered in that browser;
-leaving early does not hide the launcher. The identical rabbit button remains
+The on-site **Follow the white rabbit** launcher appears front and center in the
+main scene on mobile and desktop for the first three visits per browser. The tour
+automatically opens on each of those visits unless already completed. Completing
+every stop retires the launcher early; after the third visit it is available only
+in About. Visit counts and completion are remembered in that browser.
+The identical rabbit button remains
 available in the DBusker About modal for replay. The Mercury symbol follows the white rabbit with
 musical accessories and a small flying-money icon, while the rabbit mascot peeks
 in and out of holes beside highlighted controls. Factual text explains each stop;
 Mercury is a visual companion, not a narrator. This
 read-only guided tour opens real drawers and ankh menus; it never triggers wallet,
 vote, upload, purchase, or audio actions. Exit restores existing drawers and visible
-briefcase drafts. Active submissions, open dialogs, and VertLoop listening defer
+briefcase drafts. The tutorial stays open while visitors click or keyboard-navigate
+the highlighted site features on mobile and desktop. Outside clicks and Escape do
+not dismiss it; use **Close tutorial** (X) or **Leave tour** to exit early.
+Active submissions, open dialogs, and VertLoop listening defer
 the tour with an explanation. Keyboard navigation, focus return, narrow screens,
 and reduced-motion preferences are supported.
 
@@ -86,6 +100,22 @@ unavailability rather than implying the song has not been minted.
 Open the [DecentBusking town square](https://thejollylama.github.io/DecentBusking/) and explore the 3D music timeline. Select a track in the archive to click **Preview** for a free 30-second taste or **Listen** to play the whole song, inspect its NFT details, and tip the artist. Connect MetaMask on Base when you want to send a tip.
 
 The site radio streams and preloads recordings through the worker's public `GET /api/radio/media?cid=…` endpoint, which only serves recordings known to the radio playlist. The worker uses its dedicated IPFS gateway (or the original Discord upload) without sharing gateway credentials with browsers, and forwards HTTP ranges for seeking. The configured public gateway remains a browser fallback. Deploy both the worker and site when updating this route.
+
+The site distinguishes explicit decoder failures from gateway/network failures.
+Unsupported recordings are not automatically retried during the same radio play;
+decoder diagnostics stay in the console rather than displaying a listener warning,
+and the player attempts the next song normally. Temporary media-load failures try the fallback gateway, then
+retry the play after at least 15 and 30 seconds (three attempts total).
+Load diagnostics include the URL and browser media error in the console. This
+does not transcode recordings: the worker currently serves their original codec,
+which some embedded browsers cannot decode even when the file is available.
+
+On mobile (up to 600px), camera buttons are hidden; use the 3D scene's touch
+gestures to orbit, pinch to zoom, and pan with two fingers. Timeline navigation
+remains available, and desktop camera buttons are unchanged.
+The mobile timeline uses a single row, side tabs are shortened, and drawers
+keep only a small clearance above the measured footer. Empty footer action and
+watchlist-status rows do not reserve space.
 
 Join [DecentBusking on Discord](https://discord.gg/SCtcBggHPa), head to **#DecentJukebox**, and tune in to the **JukeLoop** voice channel. The radio rotates community uploads; listeners can react 👍 or 👎. The bot tracks cumulative votes and plays, and the ratings influence future rotation.
 

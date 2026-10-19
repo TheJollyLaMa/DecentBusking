@@ -6,7 +6,7 @@ import { formatUsdcUnits } from '../usdc-format.mjs?v=20261017-mercury-release';
 // Intercepts the CDN DecentHead 'about-modal' custom element definition and
 // replaces it with a DecentBusking-specific version.
 //
-import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261019-fund-tour';
+import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261019-intro-visits';
 import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
 import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261017-fund-panel';
 
