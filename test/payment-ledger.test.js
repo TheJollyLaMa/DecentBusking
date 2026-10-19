@@ -50,6 +50,34 @@ test('restored records are compared with real transaction events, not trusted as
   assert.equal(ledger.getState().entries[0].verification, 'proof-mismatch');
 });
 
+test('one wallet batch transaction retains every song payment proof in the ledger', async () => {
+  const { createPaymentLedger, PAYMENT_EVENT_ABI } = await import(url);
+  const address = `0x${'1'.repeat(40)}`;
+  const txHash = `0x${'2'.repeat(64)}`;
+  const blockHash = `0x${'3'.repeat(64)}`;
+  const iface = new Interface(PAYMENT_EVENT_ABI);
+  const logs = [1000000n, 500000n].map((amount, index) => ({
+    ...iface.encodeEventLog(iface.getEvent('PayrollPaid'), [id('dbusk-top10'), address, address, amount,
+      id(`song-${index}`), id('TheJollyLaMa/DecentBusking'), id('artist'), 'ipfs://receipt', id('metadata')]),
+    address, index,
+  }));
+  const provider = {
+    getNetwork: async () => ({ chainId: 8453 }), getBlockNumber: async () => 12,
+    getTransactionReceipt: async () => ({ hash: txHash, status: 1, blockNumber: 10, blockHash, logs }),
+    getBlock: async () => ({ hash: blockHash, timestamp: 1791200000 }), getLogs: async () => [],
+  };
+  const ledger = createPaymentLedger({ provider, routerAddress: address, startBlock: 10, save: async () => 'ipfs://ledger' });
+  await ledger.initialize();
+  const result = await ledger.reconcile(txHash);
+  assert.equal(result.entries.length, 2);
+  assert.deepEqual(result.entries.map(entry => entry.amountUnits), ['1000000', '500000']);
+  assert.equal(new Set(result.entries.map(entry => entry.txHash)).size, 1);
+  assert.equal(new Set(result.entries.map(entry => entry.workReference)).size, 2);
+  await ledger.reconcile(txHash);
+  assert.equal(ledger.getState().entries.length, 2);
+  assert.ok(ledger.getState().entries.every(entry => entry.verification === 'verified'));
+});
+
 test('repository ledger settlement requires exact fund, asset, recipient, amount and work proof', async () => {
   const { verifyRepositoryPayment, PAYMENT_EVENT_ABI } = await import(url);
   const address = `0x${'1'.repeat(40)}`;

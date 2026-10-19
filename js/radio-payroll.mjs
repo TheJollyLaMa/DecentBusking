@@ -271,26 +271,48 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     }
   }
   const confirmed = [];
+  const walletBatches = new Map();
   for (const entry of unpaid) {
-    if (await router.completedWorkReferences(entry.workReference)) continue;
-    const args = [fundId, allocation.assetAddress, entry.wallet, BigInt(entry.amountUnits), entry.workReference,
-      hashReference('TheJollyLaMa/DecentBusking'), hashReference(`radio-artist:${entry.wallet.toLowerCase()}`), metadataUri, metadataHash];
-    await router.payout.staticCall(...args);
-    onStep(`Confirm ${formatUsdc(entry.amountUnits)} USDC to ${entry.wallet}`);
-    const transaction = await router.payout(...args);
+    const key = entry.wallet.toLowerCase();
+    if (!walletBatches.has(key)) walletBatches.set(key, []);
+    walletBatches.get(key).push(entry);
+  }
+  for (const batch of walletBatches.values()) {
+    const remaining = [];
+    for (const entry of batch) {
+      if (!await router.completedWorkReferences(entry.workReference)) remaining.push(entry);
+    }
+    if (!remaining.length) continue;
+    const wallet = remaining[0].wallet;
+    const amount = remaining.reduce((sum, entry) => sum + BigInt(entry.amountUnits), 0n);
+    const repositoryHash = hashReference('TheJollyLaMa/DecentBusking');
+    const contributorHash = hashReference(`radio-artist:${wallet.toLowerCase()}`);
+    const multiple = remaining.length > 1;
+    const args = multiple
+      ? [fundId, allocation.assetAddress, wallet, remaining.map(entry => BigInt(entry.amountUnits)),
+        remaining.map(entry => entry.workReference), remaining.map(() => repositoryHash),
+        remaining.map(() => contributorHash), remaining.map(() => metadataUri), remaining.map(() => metadataHash)]
+      : [fundId, allocation.assetAddress, wallet, amount, remaining[0].workReference,
+        repositoryHash, contributorHash, metadataUri, metadataHash];
+    const payout = multiple ? router.payoutBatch : router.payout;
+    await payout.staticCall(...args);
+    onStep(`Confirm ${formatUsdc(amount)} USDC to ${wallet}${multiple ? ` for ${remaining.length} song prizes in one payment` : ''}`);
+    const transaction = await payout(...args);
     if ((await transaction.wait())?.status !== 1) throw new Error('Radio payout did not confirm; refresh before retrying');
-    confirmed.push({ wallet: entry.wallet, txHash: transaction.hash });
     announcePaymentCelebration({
       chainId: 8453,
       txHash: transaction.hash,
-      amountText: formatUsdc(BigInt(entry.amountUnits)),
+      amountText: formatUsdc(amount),
       assetText: 'USDC',
       summary: `${allocation.category === 'playback' ? 'Playback' : 'Top 10'} payout confirmed`,
-      txLabel: `Paid ${entry.wallet.slice(0, 6)}…`,
+      txLabel: `Paid ${wallet.slice(0, 6)}…`,
     });
-    await onConfirmed({ ...entry, txHash: transaction.hash });
+    for (const entry of remaining) {
+      confirmed.push({ wallet: entry.wallet, txHash: transaction.hash });
+      await onConfirmed({ ...entry, txHash: transaction.hash });
+    }
   }
-  return { confirmed, skipped: allocation.entries.length - unpaid.length };
+  return { confirmed, skipped: allocation.entries.length - confirmed.length };
 }
 
 export function validateRadioReceipt(allocation, { routerAddress, assetAddress, funds, report }) {

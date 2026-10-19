@@ -26,7 +26,7 @@ test('song-ranked receipts freeze separate prizes for songs by the same artist a
   assert.equal(radioAllocationMatchesReport({ ...report, tracks: [...report.tracks].map(song => ({ ...song, votes: song.trackId === 'song-b' ? 99 : song.votes })) }, allocation), false);
 });
 
-test('song settlement pays each winning song once and rejects an overlapping artist-based payout', async () => {
+test('song settlement batches songs by artist without merging payment references', async () => {
   const { finalizeRadioAllocation, settleRadioAllocation, radioWorkReferenceText } = await import(url);
   const { id } = require('../discord-bot/node_modules/ethers');
   const owner = track(9, 1).wallet;
@@ -36,25 +36,120 @@ test('song settlement pays each winning song once and rejects an overlapping art
   fundSlug: 'dbusk-top10', routerAddress: track(3, 1).wallet, assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-13T12:00:00Z') });
   const paid = new Set();
   const sent = [];
-  const payout = async (...args) => {
+  const payoutBatch = async (...args) => {
     sent.push(args);
-    return { hash: `tx-${sent.length}`, wait: async () => { paid.add(args[4]); return { status: 1 }; } };
+    return { hash: `tx-${sent.length}`, wait: async () => { args[4].forEach(reference => paid.add(reference)); return { status: 1 }; } };
   };
-  payout.staticCall = async () => {};
+  payoutBatch.staticCall = async () => {};
   const options = { allocation, metadataUri: 'ipfs://song-receipt', metadataHash: `0x${'1'.repeat(64)}`, owner, hashReference: id,
     signer: { provider: { getNetwork: async () => ({ chainId: 8453 }) }, getAddress: async () => owner },
     router: { target: allocation.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll', hasRole: async () => true,
       approvedAssets: async () => true, funds: async () => ({ exists: true, active: true }), contributors: async () => ({ approved: true }),
-      completedWorkReferences: async reference => paid.has(reference), fundBalances: async () => 12250000n, payout } };
+      completedWorkReferences: async reference => paid.has(reference), fundBalances: async () => 12250000n, payoutBatch } };
   assert.equal((await settleRadioAllocation(options)).confirmed.length, 2);
-  assert.equal(sent.reduce((sum, args) => sum + args[3], 0n), 12250000n);
-  assert.notEqual(sent[0][4], sent[1][4]);
+  assert.equal(sent[0][3].reduce((sum, amount) => sum + amount, 0n), 12250000n);
+  assert.notEqual(sent[0][4][0], sent[0][4][1]);
   assert.equal((await settleRadioAllocation(options)).skipped, 2);
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 1);
+  paid.clear();
+  paid.add(id(allocation.entries[0].workReferenceText));
+  const singles = [];
+  const payout = async (...args) => {
+    singles.push(args);
+    return { hash: 'single-tx', wait: async () => { paid.add(args[4]); return { status: 1 }; } };
+  };
+  payout.staticCall = async () => {};
+  options.router.payout = payout;
+  const resumed = await settleRadioAllocation(options);
+  assert.equal(resumed.skipped, 1);
+  assert.equal(resumed.confirmed.length, 1);
+  assert.equal(singles.length, 1);
+  assert.equal(singles[0][3], BigInt(allocation.entries[1].amountUnits));
+  assert.equal(singles[0][4], id(allocation.entries[1].workReferenceText));
+  assert.equal(sent.length, 1);
   paid.clear();
   paid.add(id(radioWorkReferenceText({ week: allocation.week, category: 'top10', wallet: track(1, 1).wallet })));
   await assert.rejects(settleRadioAllocation(options), /artist-based prize was already paid/);
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 1);
+});
+
+test('seven prizes use three wallet payments, ten artists use ten, and interrupted batches resume exactly', async () => {
+  const { finalizeRadioAllocation, settleRadioAllocation } = await import(url);
+  const { id } = require('../discord-bot/node_modules/ethers');
+  for (const artists of [['a', 'a', 2, 3, 'a', 2, 3], [1, 2, 3, 4, 5, 6, 7, 8, 9, 'a']]) {
+    const owner = track(9, 1).wallet;
+    const report = { week: 'NY-2026-10-12', current: false, tracks: artists.map((artist, index) => ({
+      ...track(artist, 1), trackId: `song-${index}`, title: `Song ${index}`, votes: 20 - index,
+    })) };
+    // Include address-case variations without creating a second recipient.
+    report.tracks[1].wallet = `0x${report.tracks[1].wallet.slice(2).toUpperCase()}`;
+    const allocation = finalizeRadioAllocation({
+      report, category: 'top10', budgetUnits: 1000000000n, minimumUnits: 10000n,
+      topTenScheduleVersion: 3, fundSlug: 'dbusk-top10', routerAddress: track('b', 1).wallet,
+      assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', now: Date.parse('2026-10-19T05:00:00Z'),
+    });
+    assert.equal(allocation.entries.length, artists.length);
+    const original = JSON.stringify(allocation);
+    const paid = new Set();
+    const sent = [];
+    const callbacks = [];
+    let rejection = 'simulation';
+    const send = multiple => {
+      const operation = async (...args) => {
+        if (sent.length === 1 && rejection === 'wallet') throw new Error('Wallet rejected');
+        const references = multiple ? args[4] : [args[4]];
+        const amounts = multiple ? args[3] : [args[3]];
+        for (let index = 0; index < references.length; index++) {
+          const entry = allocation.entries.find(entry => id(entry.workReferenceText) === references[index]);
+          assert.ok(entry);
+          assert.equal(entry.wallet.toLowerCase(), args[2].toLowerCase());
+          assert.equal(BigInt(entry.amountUnits), amounts[index]);
+          assert.equal(paid.has(references[index]), false);
+          assert.equal(multiple ? args[5][index] : args[5], id('TheJollyLaMa/DecentBusking'));
+          assert.equal(multiple ? args[6][index] : args[6], id(`radio-artist:${entry.wallet.toLowerCase()}`));
+          assert.equal(multiple ? args[7][index] : args[7], 'ipfs://receipt');
+          assert.equal(multiple ? args[8][index] : args[8], id(original));
+        }
+        sent.push({ wallet: args[2], references, amounts, multiple });
+        return { hash: `tx-${sent.length}`, wait: async () => {
+          references.forEach(reference => paid.add(reference));
+          return { status: 1 };
+        } };
+      };
+      operation.staticCall = async () => {
+        if (sent.length === 1 && rejection === 'simulation') throw new Error('Simulation failed');
+      };
+      return operation;
+    };
+    const options = { allocation, report, metadataUri: 'ipfs://receipt', metadataHash: id(original),
+      owner, hashReference: id, onConfirmed: entry => callbacks.push(entry),
+      signer: { provider: { getNetwork: async () => ({ chainId: 8453 }) }, getAddress: async () => owner },
+      router: {
+        target: allocation.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll',
+        hasRole: async () => true, approvedAssets: async () => true,
+        funds: async () => ({ exists: true, active: true }), contributors: async () => ({ approved: true }),
+        completedWorkReferences: async reference => paid.has(reference), fundBalances: async () => 1000000000n,
+        payout: send(false), payoutBatch: send(true),
+      },
+    };
+    await assert.rejects(settleRadioAllocation(options), /Simulation failed/);
+    assert.equal(sent.length, 1);
+    rejection = 'wallet';
+    await assert.rejects(settleRadioAllocation(options), /Wallet rejected/);
+    assert.equal(sent.length, 1);
+    rejection = null;
+    const result = await settleRadioAllocation(options);
+    const wallets = new Set(artists);
+    assert.equal(sent.length, wallets.size);
+    assert.equal(result.skipped, sent[0].references.length);
+    assert.equal(callbacks.length, artists.length);
+    assert.equal(new Set(callbacks.map(entry => entry.workReferenceText)).size, artists.length);
+    assert.equal(sent.flatMap(payment => payment.amounts).reduce((sum, amount) => sum + amount, 0n), BigInt(allocation.allocatedUnits));
+    assert.equal(sent.filter(payment => payment.multiple).length, artists.length === 7 ? 3 : 0);
+    assert.equal((await settleRadioAllocation(options)).skipped, artists.length);
+    assert.equal(sent.length, wallets.size);
+    assert.equal(JSON.stringify(allocation), original);
+  }
 });
 
 test('playback preview groups artists, caps its budget, and retains dust and rounding', async () => {
@@ -310,12 +405,17 @@ test('Pay enables earned wallets once, preserves identities, and safely resumes 
     return { hash: `tx-${payouts.length}`, wait: async () => { paid.add(args[4]); return { status: 1 }; } };
   };
   payout.staticCall = async (...args) => assert.equal(recipients.get(args[2]).approved, true);
+  const payoutBatch = async (...args) => {
+    payouts.push(args);
+    return { hash: `tx-${payouts.length}`, wait: async () => { args[4].forEach(reference => paid.add(reference)); return { status: 1 }; } };
+  };
+  payoutBatch.staticCall = payout.staticCall;
   const router = {
     target: allocation.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll',
     CONTRIBUTOR_ADMIN_ROLE: async () => 'recipient-admin', hasRole: async () => true,
     approvedAssets: async () => true, funds: async () => ({ exists: true, active: true }),
     contributors: async wallet => recipients.get(wallet), completedWorkReferences: async key => paid.has(key),
-    fundBalances: async () => insufficient ? 0n : 8000000n, payout,
+    fundBalances: async () => insufficient ? 0n : 8000000n, payout, payoutBatch,
     setContributorApproved: async (wallet, hash, approved) => {
       if (wallet === track(2, 1).wallet && rejectSecond) throw new Error('Approval rejected');
       approvals.push([wallet, hash, approved]);
@@ -347,7 +447,8 @@ test('Pay enables earned wallets once, preserves identities, and safely resumes 
     [track(2, 1).wallet, registeredHash, true],
   ]);
   assert.equal(payouts[0][2], allocation.entries[0].wallet);
-  assert.equal(payouts[0][6], id(`radio-artist:${allocation.entries[0].wallet}`));
+  assert.deepEqual(payouts[0][6], [id(`radio-artist:${allocation.entries[0].wallet}`), id(`radio-artist:${allocation.entries[0].wallet}`)]);
+  assert.equal(payouts.length, 2);
   assert.equal(JSON.stringify(allocation), original);
   assert.equal((await settleRadioAllocation(options)).skipped, 3);
   assert.equal(approvals.length, 2);

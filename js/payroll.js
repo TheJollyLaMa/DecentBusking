@@ -21,7 +21,7 @@
  */
 
 import { isAdminWallet } from './admin-access.mjs';
-import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261019-wallet-payroll';
+import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261019-wallet-batches';
 import { previewTopTenSongPayroll } from './top-ten-prizes.mjs';
 import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261017-mercury-release';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
@@ -1300,6 +1300,7 @@ function _radioBatchState(category, report) {
   const checked = entries.filter(entry => _radioRecipientStates.has(entry.workReferenceText));
   const unpaid = entries.filter(entry => !_radioRecipientStates.get(entry.workReferenceText)?.paid);
   const paid = entries.length - unpaid.length;
+  const walletPayments = new Set(unpaid.map(entry => entry.wallet?.toLowerCase())).size;
   const approvals = unpaid.filter(entry => _radioRecipientStates.has(entry.workReferenceText) &&
     !_radioRecipientStates.get(entry.workReferenceText).approved).length;
   const remainingUnits = unpaid.reduce((sum, entry) => sum + BigInt(entry.amountUnits), 0n);
@@ -1331,10 +1332,10 @@ function _radioBatchState(category, report) {
     tone = 'blocked'; label = 'Check fund balance';
     reason = 'The active fund must have enough approved USDC for the unpaid total. Check Treasury & preparation details before funding or retrying.';
   } else if (saved) {
-    tone = 'ready'; label = 'Ready to pay'; reason = 'Review recipients and export the backup, then confirm each unpaid entry in your wallet.';
+    tone = 'ready'; label = 'Ready to pay'; reason = 'Review recipients and export the backup, then confirm one payment per recipient wallet. Multiple song prizes for the same wallet are paid together.';
     if (approvals) reason += ' Pay also enables any new recipient wallets first; confirm the one-time approval transactions in your wallet. No identity entry is needed.';
   }
-  return { saved, entries, unpaid, paid, approvals, remainingUnits, receiptMatches, label, reason, tone,
+  return { saved, entries, unpaid, paid, walletPayments, approvals, remainingUnits, receiptMatches, label, reason, tone,
     checking: checked.length !== entries.length,
     ready: tone === 'ready' && !_settling };
 }
@@ -1393,14 +1394,14 @@ function _renderRadioReviews() {
     total.textContent = saved ? `${formatUsdcUnits(batch.remainingUnits)} USDC` : 'Not prepared';
     const caption = document.createElement('p'); caption.className = 'payroll-batch-caption';
     caption.textContent = batch.checking ? 'Verifying payment progress on Base'
-      : saved ? `${paid} paid · ${unpaid.length} remaining · ${formatUsdcUnits(saved.allocation.allocatedUnits)} USDC total` : 'No payable receipt loaded';
+      : saved ? `${paid} ${category === 'top10' ? 'prizes' : 'entries'} paid · ${unpaid.length} remaining · ${batch.walletPayments} wallet payments remaining · ${formatUsdcUnits(saved.allocation.allocatedUnits)} USDC total` : 'No payable receipt loaded';
     const guidance = document.createElement('p'); guidance.className = 'payroll-batch-guidance'; guidance.textContent = reason;
     card.append(header, total, caption, guidance);
     if (button) {
       button.hidden = false;
       button.disabled = !batch.ready;
       button.textContent = tone === 'paid' ? 'All payments complete'
-        : `Pay${paid ? ' remaining' : ''} ${unpaid.length || ''} ${category === 'playback' ? 'artist' : 'prize'}${unpaid.length === 1 ? '' : 's'}`.replace(/\s+/g, ' ');
+        : `Pay${paid ? ' remaining' : ''} ${batch.walletPayments || ''} artist${batch.walletPayments === 1 ? '' : 's'}`.replace(/\s+/g, ' ');
       button.setAttribute('aria-describedby', `payroll-${category}-guidance`);
       guidance.id = `payroll-${category}-guidance`;
       card.append(button);
@@ -1494,14 +1495,14 @@ async function _settleRadioPayroll(category) {
     validateRadioReceipt(saved.allocation, { routerAddress: _payrollAssetConfig.routerAddress,
       assetAddress: _getAssetConfig('USDC').address, funds: _payrollAssetConfig.radioFunds, report });
     if (!report || !radioAllocationMatchesReport(report, saved.allocation)) throw new Error('Frozen receipt does not match the recovered weekly report; manual reconciliation is required');
-    if (!confirm(`Settle reviewed ${category} for ${saved.allocation.week} to the wallets in this frozen receipt? New recipient wallets require a one-time approval transaction before payment. Each unpaid entry then requires a Base payout transaction. Already-paid references are skipped.`)) return;
+    if (!confirm(`Settle reviewed ${category} for ${saved.allocation.week} to the wallets in this frozen receipt? New recipient wallets require a one-time approval transaction before payment. Unpaid prizes are grouped into one Base payment per wallet, preserving each song's amount and reference. Already-paid references are skipped.`)) return;
     _settling = true;
     const signer = await _getSigner(BASE_CHAIN_ID);
     const router = new ethers.Contract(_payrollAssetConfig.routerAddress, ROUTER_ABI, signer);
     const result = await settleRadioAllocation({ ...saved, report, router, signer, owner: _ownerAddress, hashReference: ethers.id,
       onStep: message => _setStatus(status, message), onConfirmed: entry => { _queuePaymentProof(entry.txHash); _checkRadioRecipients(); } });
     await _refreshRadioPayroll();
-    _setStatus(status, `${result.confirmed.length} payouts confirmed; ${result.skipped} already-paid references skipped. Frozen IPFS receipt retained.`);
+    _setStatus(status, `${new Set(result.confirmed.map(entry => entry.txHash)).size} wallet payments confirmed covering ${result.confirmed.length} entries; ${result.skipped} already-paid references skipped. Frozen IPFS receipt retained.`);
   } catch (error) { _setStatus(status, `${error.message}. Retry only the same reviewed receipt; on-chain paid references are protected.`, true); }
   finally { _settling = false; await _checkRadioRecipients(); _syncPaymentLedger(); }
 }

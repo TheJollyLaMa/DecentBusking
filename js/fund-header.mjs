@@ -4,7 +4,7 @@ import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary,
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
-import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261019-wallet-payroll';
+import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261019-wallet-batches';
 import { initFundContributions } from './fund-contribution.mjs?v=20261019-fund-tour';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';

@@ -49,6 +49,22 @@ test('partial payment only offers remaining entries and a completed batch cannot
   assert.equal(value.state().ready, false);
 });
 
+test('Top 10 Pay counts distinct unpaid wallets rather than song prizes', () => {
+  const value = fixture();
+  const entries = value.context._radioReviews.playback.allocation.entries;
+  entries[0].wallet = '0xAbC';
+  entries[1].wallet = '0xabc';
+  assert.equal(value.state().walletPayments, 1);
+  entries[1].wallet = '0xdef';
+  assert.equal(value.state().walletPayments, 2);
+  value.context._radioRecipientStates.set('reference-1', { paid: true, approved: true });
+  assert.equal(value.state().walletPayments, 1);
+  value.context._radioRecipientStates.set('reference-2', { paid: true, approved: true });
+  assert.equal(value.state().walletPayments, 0);
+  assert.match(source, /batch\.walletPayments \|\| ''/);
+  assert.match(source, /wallet payments remaining/);
+});
+
 test('missing receipts, open weeks and excluded rollout weeks never appear as payable zero-dollar batches', () => {
   const value = fixture();
   value.context._radioReviews = {};
