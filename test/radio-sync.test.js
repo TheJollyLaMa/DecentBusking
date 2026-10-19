@@ -13,6 +13,21 @@ function radioSyncSource() {
   return `${formatter}\n${source}`;
 }
 
+test('radio footer places Saved after votes and video before audio mute without changing control IDs', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const footer = html.slice(html.indexOf('<footer id="radio-footer">'), html.indexOf('</decent-foot>'));
+  const media = footer.slice(footer.indexOf('class="radio-media-controls"'), footer.indexOf('class="radio-title-window"'));
+  const votes = footer.slice(footer.indexOf('class="radio-voting-controls"'), footer.indexOf('id="now-playing-artist"'));
+  assert.ok(media.indexOf('id="radio-video-toggle"') < media.indexOf('id="radio-mute"'));
+  assert.match(media, /id="radio-video-toggle"/);
+  assert.match(media, /id="radio-mute"/);
+  assert.match(votes, /id="now-playing-watchlist-btn"/);
+  assert.ok(votes.indexOf('id="radio-vote-net"') < votes.indexOf('id="now-playing-watchlist-btn"'));
+  for (const id of ['radio-video-toggle', 'radio-mute', 'now-playing-watchlist-btn']) {
+    assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1);
+  }
+});
+
 
 test('radio stays silent until a delayed initial seek completes', async () => {
   const source = radioSyncSource();

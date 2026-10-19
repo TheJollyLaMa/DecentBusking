@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261017-wallet-forfeiture" />
+  <link rel="stylesheet" href="css/styles.css?v=20261019-radio-controls" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -522,6 +522,10 @@
           <button id="now-playing-sponsor" class="hidden nft-creator-profile" type="button" hidden></button>
         </div>
         <div class="radio-track-row">
+          <div class="radio-media-controls">
+            <button id="radio-video-toggle" type="button" class="hidden" title="Hide video" aria-label="Hide video" aria-pressed="true">
+              <img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/video.svg" width="18" height="18" alt="" />
+            </button>
           <div class="radio-audio-controls" role="group" aria-label="DBusk radio sound">
             <button id="radio-mute" type="button" aria-label="Mute DBusk radio" aria-pressed="false" title="Mute DBusk radio">
               <img data-volume-on src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/volume-2.svg" alt="" width="20" height="20" />
@@ -531,21 +535,21 @@
               <input id="radio-volume" type="range" min="0" max="100" step="1" value="100" aria-label="DBusk radio volume" aria-valuetext="100%" />
             </div>
           </div>
+          </div>
           <div class="radio-title-window"><span id="now-playing-title">—</span></div>
+          <div class="radio-voting-controls">
           <div id="radio-voting" role="group" aria-label="Vote on the current radio play">
             <button id="radio-vote-up" type="button" data-radio-vote="1" aria-label="Thumbs up current radio play" aria-pressed="false" title="Like this listen? Vote thumbs up to boost the song in the JukeLoop rotation. One vote per play." disabled>👍</button>
             <button id="radio-vote-down" type="button" data-radio-vote="-1" aria-label="Thumbs down current radio play" aria-pressed="false" title="Not enjoying this listen? Vote thumbs down to lower the song in the JukeLoop rotation. One vote per play." disabled>👎</button>
             <span id="radio-vote-net" role="status" aria-live="polite" aria-atomic="true" aria-label="Net votes unavailable" title="Live weekly net votes"><span data-vote-number>—</span><span data-vote-effects aria-hidden="true"></span></span>
             <span id="radio-vote-status" role="status" aria-live="polite"></span>
           </div>
+          <button id="now-playing-watchlist-btn" type="button" class="hidden" title="Save to watchlist" aria-label="Save to watchlist" aria-pressed="false">👀</button>
+          </div>
         </div>
         <span id="now-playing-artist"></span>
         <p id="radio-ad-countdown" class="radio-ad-countdown" role="status" aria-live="polite">Main radio ad: scheduling unavailable</p>
         <div class="now-playing-actions">
-          <button id="radio-video-toggle" type="button" class="hidden" title="Hide video" aria-label="Hide video" aria-pressed="true">
-            <img src="https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/video.svg" width="18" height="18" alt="" />
-          </button>
-          <button id="now-playing-watchlist-btn" type="button" class="hidden" title="Save to watchlist" aria-label="Save to watchlist" aria-pressed="false">👀</button>
           <button id="now-playing-play-btn" class="hidden" title="Tune in" aria-label="Tune in">▶ Tune in</button>
           <button id="now-playing-radio-btn" class="hidden" title="Return to radio" aria-label="Return to radio">📻 Radio</button>
           <span id="now-playing-watchlist-status" role="status" aria-live="polite"></span>

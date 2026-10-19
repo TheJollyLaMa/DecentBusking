@@ -3398,7 +3398,8 @@ decent-foot {
   cursor: pointer;
 }
 #radio-footer #now-playing-sponsor.hidden[hidden] { display: none; }
-.radio-track-row { display: grid; grid-template-columns: 76px minmax(0, 320px) max-content; gap: 8px; align-items: start; min-width: 0; }
+.radio-track-row { display: grid; grid-template-columns: max-content minmax(0, 320px) max-content; gap: 8px; align-items: start; min-width: 0; }
+.radio-media-controls, .radio-voting-controls { display: flex; align-items: flex-start; gap: 4px; }
 .radio-audio-controls { display: grid; grid-template-columns: repeat(2, 36px); gap: 4px; }
 #radio-mute { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--panel-border); border-radius: 4px; background: #10121a; cursor: pointer; }
 #radio-mute img { filter: invert(1); }
@@ -3442,6 +3443,7 @@ decent-foot {
   animation: none;
 }
 #radio-footer #now-playing-watchlist-btn {
+  white-space: nowrap;
   min-height: 28px;
   padding: 2px 8px;
   margin: 0;
@@ -3498,9 +3500,9 @@ decent-foot {
   #radio-footer { grid-template-columns: minmax(0, 1fr); gap: 6px 10px; padding: 10px 88px 10px 76px; }
   #radio-footer #busker-info { grid-column: 1; grid-row: 2; justify-content: stretch; }
   #radio-footer #now-playing-sponsor { max-width: 100%; }
-  .radio-track-row { grid-template-columns: 36px minmax(0, 1fr) max-content; }
+  .radio-track-row { grid-template-columns: max-content minmax(0, 1fr); }
   .radio-audio-controls { grid-template-columns: 36px; }
-  #radio-voting { grid-column: 3; grid-row: 1; }
+  .radio-voting-controls { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
   #footer-discord-link { grid-column: 1; font-size: .75rem; }
   .radio-title-window { width: 100%; }
   #radio-footer #now-playing-artist { max-width: 100%; }
