@@ -1,6 +1,19 @@
 import { Events } from 'discord.js';
 
-export async function loginDiscordClient(client, token, { timeoutMs = 120000, log = console, onUnavailable } = {}) {
+export async function loginDiscordClient(client, token, { timeoutMs = 120000, log = console, onUnavailable,
+  notBefore = process.env.DISCORD_LOGIN_NOT_BEFORE } = {}) {
+  if (notBefore) {
+    const timestamp = Date.parse(notBefore);
+    if (!Number.isFinite(timestamp)) throw new Error('DISCORD_LOGIN_NOT_BEFORE must be a valid timestamp');
+    const delay = timestamp - Date.now();
+    if (delay > 2147483647) throw new Error('DISCORD_LOGIN_NOT_BEFORE exceeds the supported cooldown duration');
+    if (delay > 0) {
+      const reason = `Discord connection cooldown; retry after ${new Date(timestamp).toISOString()}`;
+      log.warn(`[discord] ${reason}. Website playback is independent.`);
+      onUnavailable?.(reason);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
   let timer;
   let rejectTimeout;
   const deadline = new Promise((_, reject) => { rejectTimeout = reject; });

@@ -62,3 +62,21 @@ test('Discord startup honors an explicit HTTP 429 cooldown instead of repeatedly
   bot.emit('clientReady', bot);
   assert.equal(await outcome, 'ready');
 });
+
+test('a preserved cooldown prevents any gateway request until the recorded retry time', async () => {
+  const { loginDiscordClient } = await import('../discord-bot/discord-login.js');
+  const bot = client();
+  let attempts = 0;
+  const reasons = [];
+  bot.login = async () => { attempts++; bot.emit('clientReady', bot); };
+  const pending = loginDiscordClient(bot, 'token', {
+    notBefore: new Date(Date.now() + 80).toISOString(), timeoutMs: 10,
+    log: { log() {}, warn() {} }, onUnavailable: reason => reasons.push(reason),
+  });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(attempts, 0);
+  assert.match(reasons[0], /cooldown/);
+  await pending;
+  assert.equal(attempts, 1);
+  await assert.rejects(loginDiscordClient(bot, 'token', { notBefore: 'invalid' }), /valid timestamp/);
+});

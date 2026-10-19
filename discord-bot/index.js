@@ -116,6 +116,7 @@ import {
   getAttachmentTitle,
   synchronizeDiscordRating,
   setDedicatedIpfsGateways,
+  buildIpfsGatewayUrl,
   resolveStreamableIpfsUrl,
 } from './jukeloop.js';
 import {
@@ -310,22 +311,22 @@ function runIpfsBackfill(client, config) {
 }
 
 function clearScheduledJukeLoopRestart(config) {
-  const key = config.jukeLoopVoiceChannelId;
+  const key = config.jukeLoopTextChannelId || config.jukeLoopVoiceChannelId;
   const timer = _jukeLoopRestartTimers.get(key);
   if (timer) clearTimeout(timer);
   _jukeLoopRestartTimers.delete(key);
 }
 
 function scheduleJukeLoopRestart(client, config, reason) {
-  const key = config.jukeLoopVoiceChannelId;
+  const key = config.jukeLoopTextChannelId || config.jukeLoopVoiceChannelId;
   if (!key || _jukeLoopRestartTimers.has(key)) return;
   const attempt = (_jukeLoopRestartAttempts.get(key) || 0) + 1;
   _jukeLoopRestartAttempts.set(key, attempt);
   const delayMs = getVoiceRetryDelay(attempt);
-  console.warn(`[jukeloop] ${reason}; retrying voice connection in ${Math.round(delayMs / 1000)}s.`);
+  console.warn(`[jukeloop] ${reason}; retrying radio in ${Math.round(delayMs / 1000)}s.`);
   const timer = setTimeout(() => {
     _jukeLoopRestartTimers.delete(key);
-    startJukeLoop(client, config).catch((error) =>
+    startWebsiteRadio(client, config).catch((error) =>
       console.error('[jukeloop] Scheduled restart failed:', error.message),
     );
   }, delayMs);
@@ -1240,6 +1241,7 @@ async function main() {
           lastCheckedAt: paymentLedger.getState().lastCheckedAt,
           ready: paymentLedgerReady,
         },
+        discord: { ready: client?.isReady() === true, reason: client?.isReady() ? null : discordOfflineReason },
       };
     },
     getRadioMediaUrl: async cid => {
@@ -1541,7 +1543,7 @@ async function main() {
     console.log(`[jukebox-bot] Logged in as ${readyClient.user.tag}`);
     console.log(`[jukebox-bot] Watching channel ID: ${config.jukeboxChannelId}`);
 
-    // Command registration must not gate voice startup when Discord REST is delayed.
+    // Discord outputs must never gate the website broadcast.
     const rest = new REST({ version: '10' }).setToken(config.discordToken);
     rest.put(Routes.applicationCommands(readyClient.user.id), { body: SLASH_COMMANDS }).then(() => {
       console.log('[jukebox-bot] Slash commands registered globally.');
@@ -1550,11 +1552,11 @@ async function main() {
     });
 
     // ── JukeLoop startup ───────────────────────────────────────────────────────
-    if (config.jukeLoopVoiceChannelId && config.jukeLoopTextChannelId) {
-      await startJukeLoop(readyClient, config);
+    if (config.jukeLoopTextChannelId) {
+      void startJukeLoop(readyClient, config);
     } else {
       console.log(
-        '[jukeloop] JUKE_LOOP_VOICE_CHANNEL_ID or JUKE_LOOP_TEXT_CHANNEL_ID not set — ' +
+        '[jukeloop] JUKE_LOOP_TEXT_CHANNEL_ID not set — ' +
         'JukeLoop disabled.',
       );
     }
@@ -1620,8 +1622,13 @@ async function main() {
     }
   });
 
-  await loginDiscordClient(client, config.discordToken, {
+  if (config.jukeLoopTextChannelId) void startWebsiteRadio(client, config);
+  void loginDiscordClient(client, config.discordToken, {
     onUnavailable: reason => { discordOfflineReason = reason; },
+  }).catch(error => {
+    discordOfflineReason = `Discord unavailable: ${error.message}`;
+    console.error('[discord] Website radio continues without Discord:', error.message);
+    client.destroy();
   });
 
   const shutdown = async (signal) => {
@@ -1635,6 +1642,7 @@ async function main() {
       console.error('[jukebox-bot] Shutdown checkpoint failed:', error.message);
     }
     client.destroy();
+    getActiveJukeLoopSession()?.destroy();
     process.exit(exitCode);
   };
   process.once('SIGTERM', () => shutdown('SIGTERM'));
@@ -2112,36 +2120,19 @@ async function announceCompletedMint(client, config, track) {
 // ── JukeLoop startup helper ───────────────────────────────────────────────────
 
 /**
- * Resolve JukeLoop channels, backfill historic tracks, and start the session.
+ * Start the website broadcast before attaching any Discord outputs.
  *
  * @param {import('discord.js').Client} client
  * @param {ReturnType<typeof loadConfig>} config
  */
-async function startJukeLoop(client, config) {
+async function startWebsiteRadio(client, config) {
   clearScheduledJukeLoopRestart(config);
-  let guildId = null;
+  const existing = getActiveJukeLoopSession();
+  if (existing && !existing._destroyed) return existing;
   try {
-    const voiceChannel = await client.channels.fetch(config.jukeLoopVoiceChannelId).catch(() => null);
-    const textChannel  = await client.channels.fetch(config.jukeLoopTextChannelId).catch(() => null);
-    const jukeboxCh    = await client.channels.fetch(config.jukeboxChannelId).catch(() => null);
-
-    if (!voiceChannel) {
-      console.error('[jukeloop] Could not find voice channel:', config.jukeLoopVoiceChannelId);
-      scheduleJukeLoopRestart(client, config, 'Voice channel lookup failed');
-      return false;
-    }
-    if (!textChannel) {
-      console.error('[jukeloop] Could not find text channel:', config.jukeLoopTextChannelId);
-      scheduleJukeLoopRestart(client, config, 'Text channel lookup failed');
-      return false;
-    }
-    guildId = voiceChannel.guild.id;
-
     await discoverDedicatedGateway(config);
-
-    const session = createJukeLoopSession(guildId, {
-      voiceChannel,
-      textChannel,
+    const session = createJukeLoopSession('website-radio', {
+      websitePlayback: true,
       client,
       ipfsGateway: config.ipfsGateway,
       djuke: _radioPaidQueues,
@@ -2150,40 +2141,61 @@ async function startJukeLoop(client, config) {
       devertPlayback: _devertPlaybackRuntime,
       mainRadioAdStateStore: config.jukeLoopMainRadioAdStore,
       topTenHypeStore: config.topTenHypeStore,
-      onTerminalDisconnect: () => {
-        scheduleJukeLoopRestart(client, config, 'Radio voice connection or playback stalled');
-      },
+      onTerminalDisconnect: () => scheduleJukeLoopRestart(client, config, 'Website playback stalled'),
     });
-
-    await session.connect();
-    console.log(`[jukeloop] Connected to voice channel ${voiceChannel.name} (${voiceChannel.id}), starting playback…`);
-    textChannel
-      .send({ content: '📻 **JukeLoop is live!** The community radio is starting up — tracks from #DecentJukebox are on the way.',
-        flags: MessageFlags.SuppressNotifications,
-      })
-      .catch(error => console.warn('[jukeloop] Startup announcement deferred:', error.message));
     await session.start();
-    // The durable playlist is already restored; history repair can run without holding audio.
-    (async () => {
-      if (jukeboxCh) {
-        await backfillFromChannel(jukeboxCh);
-        runIpfsBackfill(client, config);
-      } else {
-        console.warn('[jukeloop] Could not access #DecentJukebox for backfill:', config.jukeboxChannelId);
-      }
-      const recoveredRatings = await reconcileJukeLoopHistory(textChannel, client.user.id);
-      if (recoveredRatings > 0) {
-        console.log(`[jukeloop] Reconciled ${recoveredRatings} historical playback announcement(s).`);
-      }
-    })().catch(error => console.warn('[jukeloop] Startup history reconciliation deferred:', error.message));
-    _jukeLoopRestartAttempts.delete(config.jukeLoopVoiceChannelId);
-    return true;
-  } catch (err) {
-    console.error('[jukeloop] Failed to start JukeLoop:', err.message);
-    if (guildId) getJukeLoopSession(guildId)?.destroy();
-    scheduleJukeLoopRestart(client, config, `Voice startup failed: ${err.message}`);
-    return false;
+    _jukeLoopRestartAttempts.delete(config.jukeLoopTextChannelId);
+    console.log('[jukeloop] Website broadcast started independently of Discord.');
+    if (client.isReady()) void startJukeLoop(client, config);
+    return session;
+  } catch (error) {
+    getJukeLoopSession('website-radio')?.destroy();
+    console.error('[jukeloop] Website startup failed:', error.message);
+    scheduleJukeLoopRestart(client, config, 'Website startup failed');
+    return null;
   }
+}
+
+async function startJukeLoop(client, config) {
+  const broadcast = getActiveJukeLoopSession();
+  if (broadcast?.websitePlayback) {
+    if (broadcast._discordOutputsAttached) return true;
+    broadcast._discordOutputsAttached = true;
+    try {
+      const textChannel = await client.channels.fetch(config.jukeLoopTextChannelId);
+      if (broadcast._destroyed || getActiveJukeLoopSession() !== broadcast) return false;
+      if (!textChannel?.isTextBased()) throw new Error('Radio announcement channel is not a text channel');
+      broadcast.textChannel = textChannel;
+      if (broadcast._nowPlaying && !broadcast._nowPlaying.hype) {
+        const track = broadcast._currentTrack;
+        void broadcast._announcePrepared({
+          track, devertAd: broadcast._currentDevertAd, paid: broadcast._currentPaid,
+          url: track.ipfsCid ? buildIpfsGatewayUrl(config.ipfsGateway, track.ipfsCid) : '',
+        }, broadcast._nowPlaying.playId)
+          .catch(error => console.warn('[jukeloop] Current-track announcement deferred:', error.message));
+      }
+      if (config.jukeLoopVoiceChannelId && config.jukeLoopVoiceEnabled && !broadcast._voiceConnection) {
+        const voiceChannel = await client.channels.fetch(config.jukeLoopVoiceChannelId);
+        if (broadcast._destroyed || getActiveJukeLoopSession() !== broadcast) return false;
+        if (!voiceChannel) throw new Error('Optional radio voice channel was not found');
+        broadcast.voiceChannel = voiceChannel;
+        void broadcast.connect().catch(error => console.warn('[jukeloop] Optional voice unavailable:', error.message));
+      }
+      (async () => {
+        const jukeboxCh = await client.channels.fetch(config.jukeboxChannelId);
+        if (jukeboxCh) await backfillFromChannel(jukeboxCh);
+        await runIpfsBackfill(client, config);
+        const count = await reconcileJukeLoopHistory(textChannel, client.user.id);
+        console.log(`[jukeloop] Reconciled ${count} historical playback announcement(s).`);
+      })().catch(error => console.warn('[jukeloop] Startup history reconciliation deferred:', error.message));
+      console.log('[jukeloop] Discord outputs attached; website playback was not restarted.');
+    } catch (error) {
+      broadcast._discordOutputsAttached = false;
+      console.warn('[jukeloop] Discord outputs unavailable; website playback continues:', error.message);
+    }
+    return true;
+  }
+  return false;
 }
 
 // ── /jukeloop command handler ─────────────────────────────────────────────────
@@ -2270,12 +2282,13 @@ async function handleJukeLoopCommand(interaction, config, { reconcileMint }) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
       clearScheduledJukeLoopRestart(config);
-      _jukeLoopRestartAttempts.delete(config.jukeLoopVoiceChannelId);
-      const restarted = await startJukeLoop(interaction.client, config);
+      _jukeLoopRestartAttempts.delete(config.jukeLoopTextChannelId);
+      getActiveJukeLoopSession()?.destroy();
+      const restarted = await startWebsiteRadio(interaction.client, config);
       await interaction.editReply(
         restarted
-          ? '✅ JukeLoop reconnected and restarted.'
-          : '❌ JukeLoop could not reconnect. Check the configured voice/text channels and Render logs.',
+          ? '✅ Website radio restarted. Discord outputs reconnect independently.'
+          : '❌ Website radio could not restart. Check the Render playback logs.',
       );
     } catch (err) {
       await interaction.editReply(`❌ JukeLoop restart failed: ${err.message}`);

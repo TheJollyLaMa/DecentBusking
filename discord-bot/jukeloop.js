@@ -6,8 +6,8 @@
 //  1. On startup `backfillFromChannel()` is called to harvest all historic
 //     audio attachments from #DecentJukebox and register them in the
 //     playlist-store.  Only tracks not already stored are added.
-//  2. A `JukeLoopSession` joins the configured JukeLoop voice channel and
-//     starts playing tracks in a weighted-random order that loops forever.
+//  2. A `JukeLoopSession` broadcasts tracks in weighted-random order forever.
+//     Discord voice can subscribe without controlling website playback.
 //  3. For each track, the bot posts a "Now Playing" announcement in the
 //     JukeLoop text channel and pre-adds 👍 / 👎 reaction buttons.
 //  4. When the *next* track starts, the bot fetches the previous announcement
@@ -29,6 +29,7 @@ import {
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
+  NoSubscriberBehavior,
   VoiceConnectionStatus,
   entersState,
   StreamType,
@@ -601,6 +602,7 @@ export function createJukeLoopSession(guildId, opts) {
   const existing = _sessions.get(guildId);
   if (existing) existing.destroy();
   const session = new JukeLoopSession(opts);
+  session._sessionKey = guildId;
   _sessions.set(guildId, session);
   return session;
 }
@@ -686,7 +688,9 @@ export class JukeLoopSession {
    */
     constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback,
       schedule, livePerformanceEvents, audioPlayer, createStream, mainRadioAdStateStore, restoreMainRadioAdState, saveMainRadioAdState,
-      topTenHype, topTenHypeStore, audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS }) {
+      topTenHype, topTenHypeStore, audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS, websitePlayback = false }) {
+    this.websitePlayback = websitePlayback;
+    this._discordOutputsAttached = false;
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
@@ -736,7 +740,9 @@ export class JukeLoopSession {
     this._breakAwaitingUnlock = false;
     this.connection   = null;
     this._voiceConnection = null;
-    this.player       = audioPlayer || createAudioPlayer();
+    this.player       = audioPlayer || createAudioPlayer(websitePlayback
+      ? { behaviors: { noSubscriber: NoSubscriberBehavior.Play } }
+      : {});
 
     /** Shuffled queue for the current loop pass */
     this._queue      = [];
@@ -886,7 +892,7 @@ export class JukeLoopSession {
     const show = this.getShowState().activeShow;
     if (show.type === 'live_performance') return { status: 'paused', ready: false, reason: show.label || 'Live performance' };
     const voice = this._voiceConnection?.getState();
-    if (this._destroyed || voice?.voiceConnected === false) {
+    if (this._destroyed || (!this.websitePlayback && voice?.voiceConnected === false)) {
       return { status: 'recovering', ready: false, reason: 'Radio voice connection is recovering' };
     }
     if (this._nowPlaying?.audible && this.player.state.status === AudioPlayerStatus.Playing) {
@@ -917,6 +923,7 @@ export class JukeLoopSession {
   }
 
   _sendPlaybackNotice(content) {
+    if (!this.textChannel || this.client?.isReady?.() === false) return;
     this.textChannel.send({ content, flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
       .catch(error => console.warn('[jukeloop] Playback notice deferred:', error.message));
   }
@@ -947,13 +954,9 @@ export class JukeLoopSession {
       this._liveEventId = eventId;
       if (event) {
         if (this.player.state.status !== AudioPlayerStatus.Idle) this.player.stop(true);
-        this.textChannel.send({ content: `🔴 **Live performance block: ${event.title}** starts now.`,
-          allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications,
-        }).catch(() => {});
+        this._sendPlaybackNotice(`🔴 **Live performance block: ${event.title}** starts now.`);
       } else if (previousEventId) {
-        this.textChannel.send({ content: '📻 **Live performance block ended.** JukeLoop is resuming.',
-          flags: MessageFlags.SuppressNotifications,
-        }).catch(() => {});
+        this._sendPlaybackNotice('📻 **Live performance block ended.** JukeLoop is resuming.');
       }
     }
 
@@ -968,9 +971,7 @@ export class JukeLoopSession {
       }
       if (previousShowKey === 'weekly_top10:friday-top10-hype' && show.id !== 'friday-top10-hype') {
         if (show.type === 'normal_rotation') this._musicSinceAd = Math.max(this._musicSinceAd, DEVERT_SONGS_PER_MAIN_AD);
-        this.textChannel.send({ content: '🎉 **Friday Top 10 hype hour has ended at the scheduled handoff.** Any remaining opening-chart songs will not overrun the next show.',
-          allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications,
-        }).catch(error => console.warn('[top10-hype] Closing announcement failed:', error.message));
+        this._sendPlaybackNotice('🎉 **Friday Top 10 hype hour has ended at the scheduled handoff.** Any remaining opening-chart songs will not overrun the next show.');
       }
       if (show.instanceId && show.id === 'friday-top10-hype') {
         this._ensureTopTenHype(show).catch(error => console.error('[top10-hype] Opening chart blocked:', error.message));
@@ -979,13 +980,13 @@ export class JukeLoopSession {
         const message = show.window === 'final-payroll-hour'
           ? `📊 **${show.label}** is live. Vote through the New York payroll cutoff at midnight for this week's chart.`
           : `📊 **${show.label}** is live. React 👍 or 👎 to vote in this week's chart.`;
-        this.textChannel.send({ content: message, allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications }).catch(() => {});
+        this._sendPlaybackNotice(message);
       } else if (previousShowKey?.startsWith('weekly_top10:') && previousShowKey !== 'weekly_top10:friday-top10-hype' && show.type === 'normal_rotation') {
         const finalListenEnded = previousShowKey === 'weekly_top10:weekly-top10-final-listen';
         const message = finalListenEnded
           ? '📊 The weekly Top 10 final listen has ended at the payroll cutoff. Normal rotation resumes.'
           : '📊 The Top 10 hype hour has ended. Normal rotation resumes.';
-        this.textChannel.send({ content: message, allowedMentions: { parse: [] }, flags: MessageFlags.SuppressNotifications }).catch(() => {});
+        this._sendPlaybackNotice(message);
       }
       const enteringOrLeavingTopTen = previousShowKey &&
         (previousShowKey.startsWith('weekly_top10:') || show.type === 'weekly_top10');
@@ -1059,7 +1060,7 @@ export class JukeLoopSession {
       if (ipfsUrl) return ipfsUrl;
       console.warn(`[jukeloop] No IPFS gateway could stream "${track.title}"; using the Discord upload.`);
     }
-    if (!track.channelId || !track.messageId) return null;
+    if (!track.channelId || !track.messageId || this.client?.isReady?.() === false) return null;
 
     try {
       const channel = await this.client.channels.fetch(track.channelId).catch(() => null);
@@ -1179,7 +1180,7 @@ export class JukeLoopSession {
     // Nothing to play → wait and retry
     if (!isHype && !paid && !devertAd && this._queue.length === 0) {
       this._sendPlaybackNotice('📭 The JukeLoop playlist is empty.\n' +
-        'Post audio files (MP3, M4A, etc.) in <#' + this.textChannel.id + '> to add tracks!');
+        (this.textChannel ? 'Post audio files (MP3, M4A, etc.) in <#' + this.textChannel.id + '> to add tracks!' : 'Waiting for playable recordings.'));
       return null;
     }
 
@@ -1362,6 +1363,7 @@ export class JukeLoopSession {
   }
 
   async _announcePrepared(prepared, playId) {
+    if (!this.textChannel || this.client?.isReady?.() === false) return;
     const { track, devertAd, url } = prepared;
     const announcementContext = {
       playId,
@@ -1377,7 +1379,10 @@ export class JukeLoopSession {
       : buildNowPlayingMessage(track, announcementContext);
     const msg = await this.textChannel
       .send({ content: message, flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
-      .catch(() => null);
+      .catch(error => {
+        console.warn('[jukeloop] Now-playing announcement failed:', error.message);
+        return null;
+      });
     if (!msg || devertAd || this._nowPlaying?.playId !== playId) return;
     await msg.react('👍').catch(() => {});
     await msg.react('👎').catch(() => {});
@@ -1824,7 +1829,8 @@ export class JukeLoopSession {
       this.djuke.fail(this._currentPaid, new Error('Radio stopped')).catch(() => {});
       this._currentPaid = null;
     }
-    if (_sessions.get(this.voiceChannel.guild.id) === this) _sessions.delete(this.voiceChannel.guild.id);
+    const sessionKey = this._sessionKey ?? this.voiceChannel?.guild.id;
+    if (_sessions.get(sessionKey) === this) _sessions.delete(sessionKey);
     if (this._ffmpeg) {
       try { this._ffmpeg.kill(); } catch {}
       this._ffmpeg = null;

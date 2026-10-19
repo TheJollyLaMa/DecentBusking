@@ -4,6 +4,7 @@ import { AudioPlayerStatus, createAudioPlayer, createAudioResource, entersState,
   joinVoiceChannel, StreamType, VoiceConnectionStatus } from '@discordjs/voice';
 import { resolveStreamableIpfsUrl } from './jukeloop.js';
 import { createVoiceConnectionSupervisor } from './voice-connection.js';
+import { loginDiscordClient } from './discord-login.js';
 import { DEVERT_MAX_AD_SECONDS } from '../js/devert-scheduler.mjs';
 
 const MIN_AUDIBLE_MS = 30_000;
@@ -209,7 +210,7 @@ export async function startDevertLoopWorker({ token, voiceChannelId, textChannel
     controller.submitVote({ messageId: reaction.message.id, voterId: `discord:${user.id}`.replace(':', '_'), vote })
       .catch(error => log.warn('[devert-loop] Vote rejected:', error.message));
   });
-  try { await client.login(token); await ready; }
+  try { await Promise.all([loginDiscordClient(client, token, { log }), ready]); }
   catch (error) { controller?.stop(); voice?.stop(); client.destroy(); throw readyError || error; }
   return {
     getState: () => {

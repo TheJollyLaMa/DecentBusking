@@ -22,6 +22,7 @@ import 'dotenv/config';
  * @property {string}      blockExplorerUrl        - Base block explorer root URL
  * @property {string|null} jukeLoopVoiceChannelId  - JukeLoop voice channel ID (JUKE_LOOP_VOICE_CHANNEL_ID) — optional
  * @property {string|null} jukeLoopTextChannelId   - JukeLoop announcement text channel ID (JUKE_LOOP_TEXT_CHANNEL_ID) — optional
+ * @property {boolean}     jukeLoopVoiceEnabled    - Attach optional Discord voice output (JUKE_LOOP_VOICE_ENABLED)
  * @property {boolean}     disableMintFlow         - Skip IPFS pinning and mint embed (DISABLE_MINT_FLOW) — optional, default false
  */
 
@@ -75,6 +76,7 @@ export function loadConfig() {
     blockExplorerUrl:       (process.env.BLOCK_EXPLORER_URL || 'https://basescan.org').replace(/\/$/, ''),
     jukeLoopVoiceChannelId: process.env.JUKE_LOOP_VOICE_CHANNEL_ID || null,
     jukeLoopTextChannelId:  process.env.JUKE_LOOP_TEXT_CHANNEL_ID  || null,
+    jukeLoopVoiceEnabled:   process.env.JUKE_LOOP_VOICE_ENABLED !== 'false',
     disableMintFlow:        process.env.DISABLE_MINT_FLOW === 'true',
   };
 }

@@ -105,15 +105,28 @@ due on the current song is selected while that song plays so it can be
 preloaded; if the song ends before counting (under 30 s audible), the advert
 is held for the next break and music plays instead.
 
-Playback must not wait for Discord text delivery: startup/skip notices, command
-registration and historical backfill do not gate the restored radio playlist.
+Website radio starts from the restored playlist before Discord gateway login.
+Its real audio player consumes decoded media in real time with
+`NoSubscriberBehavior.Play`, even with no Discord voice subscriber. Discord
+gateway failures, voice disconnects and text delivery therefore do not pause the
+website broadcast clock. This is not a duration-only timer: paid completion still
+requires the existing natural media completion and minimum playback checks.
+These are broadcast-play checks, not proof that an individual browser listened.
+
+Once Discord becomes ready, the existing broadcast attaches its text channel
+and posts the current recording, then continues scrolling songs and adverts.
+Announcements missed while disconnected are not replayed as a stale backlog.
+Command registration and historical backfill do not gate website playback.
+Discord voice remains an optional output: set `JUKE_LOOP_VOICE_ENABLED=false`
+to omit it while retaining text posts. `JUKE_LOOP_TEXT_CHANNEL_ID` enables the
+radio; a voice channel ID is no longer required.
 Failed FFmpeg preparation destroys its stream and terminates the failed process
 before moving to another recording. Paid-queue selection has a 10-second deadline;
 a still-pending lookup is not duplicated, and a late reservation is returned to
 its queue rather than charged for an unplayed recording.
 
 The session checks playback health every second. Two minutes without active audio
-triggers a logged session restart through the existing reconnect backoff. Playing
+triggers a logged website session restart through the existing backoff. Playing
 recordings, scheduled live-performance blocks and genuinely empty playlists are
 not interrupted. `GET /api/radio` exposes `playback.status`, `ready`, `reason`
 and, while preparing, `idleMs`. The website distinguishes a short changeover from
@@ -122,11 +135,29 @@ Paid advert checkout requires actual active playback and the local checkpoint
 mirror, not merely a registered session or a successful HTTP health check.
 Discord gateway login logs connection stages and rate-limit delays without
 tokens or payloads. If the client does not become ready within two minutes,
-startup fails explicitly so the service supervisor can restart it instead of
-leaving an indefinitely healthy-looking web process with no Discord bot.
+the connection failure is logged explicitly while website playback continues.
 An explicit gateway HTTP 429 cooldown extends that deadline: the worker respects
-Discord's `Retry-After` instead of repeatedly restarting, and reports the retry
-time in radio status and paid-checkout availability.
+Discord's `Retry-After` instead of repeatedly restarting.
+`GET /api/radio` reports Discord separately as `discord.ready` / `discord.reason`;
+paid-checkout readiness follows actual broadcast playback and checkpoint safety,
+not Discord connectivity.
+
+Before a deployment during a known Discord cooldown, preserve the retry timestamp
+using `DISCORD_LOGIN_NOT_BEFORE` (an ISO timestamp in UTC). Both bot logins defer
+all gateway discovery until that time without delaying website radio startup.
+Do not rotate IPs, change endpoints or restart repeatedly to evade a restriction.
+An expired timestamp has no effect and can be removed during routine maintenance.
+
+For hosting-side escalation, provide Render support with the service ID, region,
+gateway route (`GET /api/v10/gateway/bot`), HTTP status, `Retry-After` and UTC
+timestamps from the safe logs. Never include bot tokens. Render documents
+[shared regional outbound IPs](https://render.com/docs/outbound-ip-addresses);
+Discord documents [IP-based invalid-request restrictions](https://docs.discord.com/developers/topics/rate-limits).
+A successful local request with the same bot credentials supports a network-side
+diagnosis, but does not prove another tenant caused the restriction. A standard
+paid service upgrade alone does not establish exclusive egress:
+[dedicated outbound IPs](https://render.com/docs/dedicated-ips) require a Pro
+workspace and an additional fee. Obtain approval before any paid hosting change.
 
 Advert cadence and queued-ad state use the separate
 `decentbusking-main-radio-ad-state.json` checkpoint (`main-radio-ad-state` tags).

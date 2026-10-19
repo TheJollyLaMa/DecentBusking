@@ -105,26 +105,113 @@ test('idle watchdog restarts stalled sessions once, never interrupts music or pr
   assert.equal(session._destroyed, true);
 });
 
-test('radio startup does not wait for a Discord announcement or historical backfill', async () => {
+test('Discord attachment never restarts the website broadcast or waits for announcements or backfill', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../discord-bot/index.js'), 'utf8');
   const start = source.indexOf('async function startJukeLoop(client, config)');
   const end = source.indexOf('// ── /jukeloop command handler', start);
   const events = [];
-  const channel = { guild: { id: 'startup' }, send: () => new Promise(() => {}) };
-  const config = { jukeLoopVoiceChannelId: 'voice', jukeLoopTextChannelId: 'text', jukeboxChannelId: 'uploads' };
+  const channel = { guild: { id: 'startup' }, isTextBased: () => true, send: () => new Promise(() => {}) };
+  const config = { jukeLoopVoiceChannelId: 'voice', jukeLoopTextChannelId: 'text', jukeboxChannelId: 'uploads', jukeLoopVoiceEnabled: true };
   const client = { channels: { fetch: async () => channel }, user: { id: 'bot' } };
-  const session = { connect: async () => events.push('connect'), start: async () => events.push('play') };
+  const session = {
+    websitePlayback: true, _nowPlaying: { playId: 'current' }, _currentTrack: { ipfsCid: 'recording' },
+    _announcePrepared: () => { events.push('announce'); return new Promise(() => {}); },
+    connect: () => { events.push('connect'); return new Promise(() => {}); },
+  };
   const context = vm.createContext({
     console, config, client, clearScheduledJukeLoopRestart() {}, discoverDedicatedGateway: async () => {},
     backfillFromChannel: () => { events.push('backfill'); return new Promise(() => {}); },
-    createJukeLoopSession: () => session, defaultRadioSchedule: () => [],
+    getActiveJukeLoopSession: () => session,
+    buildIpfsGatewayUrl: () => 'https://media.example/recording',
+    createJukeLoopSession: () => assert.fail('must not replace the website session'), defaultRadioSchedule: () => [],
     livePerformanceEvents: [], liveWeeklySchedule: {}, _radioPaidQueues: null, _devertPlaybackRuntime: null,
     _jukeLoopRestartAttempts: new Map(), MessageFlags: { SuppressNotifications: 4096 },
     scheduleJukeLoopRestart: () => assert.fail('startup must not fail'),
   });
   vm.runInContext(source.slice(start, end), context);
   assert.equal(await context.startJukeLoop(client, config), true);
-  assert.deepEqual(events, ['connect', 'play', 'backfill']);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(events, ['announce', 'connect', 'backfill']);
+  assert.equal(session.textChannel, channel);
+  assert.equal(await context.startJukeLoop(client, config), true);
+  assert.deepEqual(events, ['announce', 'connect', 'backfill'], 'concurrent readiness and startup cannot duplicate outputs');
+});
+
+test('website radio starts without Discord readiness, channel lookup, text or voice', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../discord-bot/index.js'), 'utf8');
+  const start = source.indexOf('async function startWebsiteRadio(client, config)');
+  const end = source.indexOf('async function startJukeLoop(client, config)', start);
+  let options;
+  let plays = 0;
+  const session = { start: async () => { plays++; } };
+  const context = vm.createContext({
+    console, clearScheduledJukeLoopRestart() {}, getActiveJukeLoopSession: () => null,
+    discoverDedicatedGateway: async () => {}, createJukeLoopSession: (key, opts) => {
+      assert.equal(key, 'website-radio'); options = opts; return session;
+    }, defaultRadioSchedule: () => [], livePerformanceEvents: [], liveWeeklySchedule: {},
+    _radioPaidQueues: {}, _devertPlaybackRuntime: {}, _jukeLoopRestartAttempts: new Map(),
+    scheduleJukeLoopRestart: () => assert.fail('must not restart'),
+  });
+  vm.runInContext(source.slice(start, end), context);
+  assert.equal(await context.startWebsiteRadio({ isReady: () => false }, { jukeLoopTextChannelId: 'text' }), session);
+  assert.equal(plays, 1);
+  assert.equal(options.websitePlayback, true);
+  assert.equal(options.voiceChannel, undefined);
+  assert.equal(options.textChannel, undefined);
+  assert.ok(options.djuke);
+  assert.ok(options.devertPlayback);
+});
+
+test('real audio frames advance from an ad back to music without a Discord voice subscriber', async t => {
+  const { JukeLoopSession, createJukeLoopSession, getActiveJukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const { spawn } = require('node:child_process');
+  const voice = require('../discord-bot/node_modules/@discordjs/voice');
+  const session = createJukeLoopSession('headless-audio-test', {
+    websitePlayback: true, client: { isReady: () => false },
+  });
+  assert.ok(session instanceof JukeLoopSession);
+  const completed = [];
+  session.djuke = { complete: async (record, play) => { completed.push({ record, play }); } };
+  session._primeNext = () => {};
+  session._prepareNextPlayback = async () => null;
+  session._voiceConnection = { getState: () => ({ voiceConnected: false }), stop() {} };
+  const child = spawn('ffmpeg', ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.5',
+    '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  t.after(() => { session.destroy(); child.kill(); });
+  const resource = voice.createAudioResource(child.stdout, { inputType: voice.StreamType.Raw });
+  const idle = new Promise((resolve, reject) => {
+    session.player.once(voice.AudioPlayerStatus.Idle, resolve);
+    session.player.once('error', reject);
+    child.once('error', reject);
+  });
+  const paid = { kind: 'devert', tier: 1, requestId: 'test', payer: '0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f', amountUnits: '2000000' };
+  const track = { trackId: 'devert:99', title: 'Real decoded advert', campaignId: '99', ipfsCid: 'test' };
+  session._startPrepared({ track, resource, ffmpegProcess: child, queueIndex: null,
+    paid: { record: paid }, devertAd: { campaignId: '99', track, paidRequest: true } });
+  await voice.entersState(session.player, voice.AudioPlayerStatus.Playing, 5000);
+  assert.equal(session.getPlaybackStatus().ready, true, 'voice disconnection must not mark the website offline');
+  assert.equal(completed.length, 0, 'starting or announcing an ad never settles payment');
+  const musicStream = new PassThrough();
+  musicStream.end(Buffer.alloc(48000 * 2 * 2));
+  session._preparedNext = {
+    track: { trackId: 'music-after-ad', title: 'Music returns', ipfsCid: 'music' },
+    resource: voice.createAudioResource(musicStream, { inputType: voice.StreamType.Raw }),
+    ffmpegProcess: { exitCode: 0, kill() { musicStream.destroy(); } }, queueIndex: null,
+  };
+  await Promise.race([idle, new Promise((_, reject) => {
+    const timer = setTimeout(() => reject(new Error('Audio did not naturally finish')), 5000);
+    timer.unref();
+  })]);
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].record, paid);
+  assert.equal(completed[0].play.finished, true);
+  assert.ok(completed[0].play.audibleMs >= 400, 'PCM must be consumed in real time, not drained immediately');
+  assert.equal(session._nowPlaying, null);
+  await voice.entersState(session.player, voice.AudioPlayerStatus.Playing, 5000);
+  assert.equal(session._nowPlaying.trackId, 'music-after-ad');
+  assert.equal(session.getPlaybackStatus().ready, true);
+  session.destroy();
+  assert.notEqual(getActiveJukeLoopSession(), session, 'headless sessions unregister without a voice guild');
 });
 
 test('playlist counters schedule routine writes while pin/mint changes and persistence barriers remain durable', async t => {
