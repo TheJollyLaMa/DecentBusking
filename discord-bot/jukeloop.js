@@ -279,7 +279,7 @@ export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Dat
   };
 }
 
-export async function buildMainRadioAdCountdown({ session, now = Date.now(), songsPerMainAd = DEVERT_SONGS_PER_MAIN_AD } = {}) {
+export async function buildMainRadioAdCountdown({ session, now = Date.now(), songsPerMainAd = DEVERT_SONGS_PER_MAIN_AD, paidQueue = null } = {}) {
   if (!session) {
     return { status: 'unavailable', reason: 'radio session unavailable', updatedAt: now, includesCurrentSong: false };
   }
@@ -297,6 +297,12 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
       window: activeShow.window || '',
     },
     includesCurrentSong: false,
+    ...(paidQueue ? { paidQueue: paidQueue.unavailable ? { unavailable: true, reason: paidQueue.reason } : {
+      pendingCount: paidQueue.pendingCount,
+      immediateCount: paidQueue.requests.filter(request => request.tier === 1).length,
+      playbackReady: !paidQueue.paused && paidQueue.playbackReady,
+      reason: paidQueue.paused ? 'Priority queue paused' : paidQueue.playbackReason,
+    } } : {}),
     ...(session._lastMainRadioAdSkip ? { lastSkip: { ...session._lastMainRadioAdSkip } } : {}),
   };
   // Skips recorded during this call must be reported, not the snapshot taken above.
@@ -1639,9 +1645,9 @@ export class JukeLoopSession {
       .catch((err) => console.warn('[jukeloop] DJuke release failed:', err.message));
   }
 
-  async getMainRadioAdCountdown(now = Date.now()) {
+  async getMainRadioAdCountdown(now = Date.now(), paidQueue = null) {
     await this._ensureMainRadioAdState();
-    return buildMainRadioAdCountdown({ session: this, now });
+    return buildMainRadioAdCountdown({ session: this, now, paidQueue });
   }
 
   async removeDevertCampaign(campaignId) {

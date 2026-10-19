@@ -227,7 +227,9 @@ function _cloneRadioState(state) {
   const countdown = state.mainRadioAdCountdown;
   return {
     ...state,
-    mainRadioAdCountdown: countdown ? { ...countdown, activeShow: countdown.activeShow ? { ...countdown.activeShow } : countdown.activeShow } : null,
+    mainRadioAdCountdown: countdown ? { ...countdown,
+      paidQueue: countdown.paidQueue ? { ...countdown.paidQueue } : countdown.paidQueue,
+      activeShow: countdown.activeShow ? { ...countdown.activeShow } : countdown.activeShow } : null,
   };
 }
 
@@ -251,6 +253,17 @@ export function getRadioStateSnapshot() {
 export function formatMainRadioAdCountdown(countdown, { disconnected = false, compact = false } = {}) {
   if (disconnected) return 'Main radio ad: disconnected';
   if (!countdown) return 'Main radio ad: scheduling unavailable';
+  const paid = countdown.paidQueue;
+  const protectedShow = ['weekly_top10', 'live_performance'].includes(countdown.activeShow?.type);
+  if (countdown.status !== 'playing' && paid?.pendingCount > 0) {
+    const queued = `${paid.pendingCount} paid ad${paid.pendingCount === 1 ? '' : 's'} queued`;
+    if (protectedShow) return `${queued} · deferred during ${countdown.activeShow.label || 'this show'}`;
+    if (paid.playbackReady === false) return `${queued} · delayed: ${paid.reason || 'paid playback unavailable'}`;
+    if (paid.immediateCount > 0) return `${queued} · next ad after this song`;
+    const timing = formatMainRadioAdCountdown({ ...countdown, paidQueue: null }, { compact });
+    return `${queued} · ${timing}`;
+  }
+  if (paid?.unavailable && countdown.status !== 'playing') return `Paid ad queue unavailable · ${paid.reason}`;
   if (countdown.status === 'countdown' && Number.isSafeInteger(countdown.remainingSongs)) {
     const songs = countdown.remainingSongs;
     if (compact) {

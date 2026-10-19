@@ -13,6 +13,27 @@ function radioSyncSource() {
   return `${formatter}\n${source}`;
 }
 
+test('next-ad notices identify paid priority, ordinary bumps, protected shows and playback outages', async () => {
+  const { buildMainRadioAdCountdown } = await import('../discord-bot/jukeloop.js');
+  const context = vm.createContext({ console });
+  vm.runInContext(radioSyncSource(), context);
+  const paidQueue = { pendingCount: 1, playbackReady: true, paused: false,
+    requests: [{ tier: 1 }], playbackReason: null };
+  const countdown = await buildMainRadioAdCountdown({
+    session: { _musicSinceAd: 2, devertPlayback: {} }, paidQueue,
+  });
+  assert.equal(countdown.paidQueue.pendingCount, 1);
+  assert.equal(countdown.paidQueue.immediateCount, 1);
+  const format = value => context.formatMainRadioAdCountdown(value, { compact: true });
+  assert.equal(format(countdown), '1 paid ad queued · next ad after this song');
+  assert.match(format({ ...countdown, paidQueue: { ...countdown.paidQueue, immediateCount: 0 } }), /1 paid ad queued · next ad after 8 more songs/);
+  assert.match(format({ ...countdown, activeShow: { type: 'weekly_top10', label: 'Top 10' } }), /deferred during Top 10/);
+  assert.match(format({ ...countdown, paidQueue: { ...countdown.paidQueue, playbackReady: false,
+    reason: 'Local checkpoint mirror is offline' } }), /paid ad queued · delayed: Local checkpoint mirror is offline/);
+  assert.equal(format({ ...countdown, status: 'playing' }), 'ad playing now');
+  assert.match(format({ ...countdown, paidQueue: { unavailable: true, reason: 'Could not verify' } }), /Paid ad queue unavailable/);
+});
+
 test('radio footer places Saved after votes and video before audio mute without changing control IDs', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const footer = html.slice(html.indexOf('<footer id="radio-footer">'), html.indexOf('</decent-foot>'));

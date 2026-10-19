@@ -22,9 +22,9 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261019-radio-ticker';
+import { renderNFTCard } from './nft-card.js?v=20261019-paid-ad-return';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { setNowPlaying } from './stage.js?v=20261019-radio-ticker';
+import { setNowPlaying } from './stage.js?v=20261019-paid-ad-return';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft } from './nft-loader.js?v=20261012-paging';
 
@@ -61,6 +61,7 @@ let _pendingNowPlaying = null;
 let _nowPlayingMedia = null;
 let _nowPlayingAudioContext = null;
 let _nowPlayingMediaSource = null;
+const _nowPlayingMediaSources = new WeakMap();
 let _nowPlayingChannelSplitter = null;
 let _nowPlayingLeftAnalyser = null;
 let _nowPlayingRightAnalyser = null;
@@ -148,7 +149,6 @@ function _applyNowPlaying(detail) {
   }
   _nowPlayingKey = key;
   _nowPlayingMesh = entry.mesh;
-  _nowPlayingMedia = _activeMediaElement();
   _pendingNowPlaying = null;
   entry.mesh.userData.pinnedVisible = true;
   entry.mesh.userData.nowPlayingHueSeed = Math.random();
@@ -1154,8 +1154,9 @@ function _prefersReducedMotion() {
 }
 
 function _releaseNowPlayingAnalyser() {
-  if (_nowPlayingMediaSource?.disconnect) {
-    try { _nowPlayingMediaSource.disconnect(); } catch {}
+  if (_nowPlayingMediaSource) {
+    if (_nowPlayingAnalyser) _nowPlayingMediaSource.disconnect(_nowPlayingAnalyser);
+    if (_nowPlayingChannelSplitter) _nowPlayingMediaSource.disconnect(_nowPlayingChannelSplitter);
   }
   if (_nowPlayingChannelSplitter?.disconnect) {
     try { _nowPlayingChannelSplitter.disconnect(); } catch {}
@@ -1191,14 +1192,19 @@ function _ensureNowPlayingAnalyser(media) {
   try {
     _nowPlayingAudioContext ||= new AudioContextCtor();
     if (_nowPlayingAudioContext.state === 'suspended') _nowPlayingAudioContext.resume?.().catch?.(() => {});
-    _nowPlayingMediaSource = _nowPlayingAudioContext.createMediaElementSource(media);
+    // A media element can only acquire one source; keep its speaker connection alive.
+    _nowPlayingMediaSource = _nowPlayingMediaSources.get(media);
+    if (!_nowPlayingMediaSource) {
+      _nowPlayingMediaSource = _nowPlayingAudioContext.createMediaElementSource(media);
+      _nowPlayingMediaSource.connect(_nowPlayingAudioContext.destination);
+      _nowPlayingMediaSources.set(media, _nowPlayingMediaSource);
+    }
     _nowPlayingAnalyser = _nowPlayingAudioContext.createAnalyser();
     _nowPlayingAnalyser.fftSize = 256;
     _nowPlayingAnalyser.smoothingTimeConstant = 0.25;
     _nowPlayingAudioData = new Uint8Array(_nowPlayingAnalyser.fftSize);
     _nowPlayingFrequencyData = new Uint8Array(_nowPlayingAnalyser.frequencyBinCount);
     _nowPlayingMediaSource.connect(_nowPlayingAnalyser);
-    _nowPlayingMediaSource.connect(_nowPlayingAudioContext.destination);
     if (typeof _nowPlayingAudioContext.createChannelSplitter === 'function') {
       _nowPlayingChannelSplitter = _nowPlayingAudioContext.createChannelSplitter(2);
       _nowPlayingLeftAnalyser = _nowPlayingAudioContext.createAnalyser();

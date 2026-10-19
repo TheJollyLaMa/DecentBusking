@@ -1044,6 +1044,12 @@ async function main() {
     const canFulfill = !!(readDevertState && devertSchedulerPrivateKey && checkpointMirror && config.pinataJwt && devertRemovals);
     readDevertQueue = createDevertQueueReader({ provider, contractAddress: paidAdAddress, version: paidAdVersion,
       paymentsEnabled: canFulfill && process.env.DEVERT_QUEUE_PAYMENTS_ENABLED === 'true',
+      getPlaybackStatus: () => {
+        if (!canFulfill) return { ready: false, reason: 'Paid advert worker is not configured' };
+        if (!checkpointMirror.status().available) return { ready: false, reason: 'Local checkpoint mirror is offline' };
+        if (!getActiveJukeLoopSession()) return { ready: false, reason: 'Main radio is offline' };
+        return { ready: true, reason: null };
+      },
       getApprovedCampaignIds: () => approvedAdCampaignIds, cacheMs: 5000 });
     if (canFulfill) {
       const worker = new Wallet(devertSchedulerPrivateKey, provider);
@@ -1202,7 +1208,16 @@ async function main() {
     },
     getRadioState: async () => {
       const jukeLoopSession = getActiveJukeLoopSession();
-      const mainRadioAdCountdown = jukeLoopSession ? await jukeLoopSession.getMainRadioAdCountdown() : null;
+      let paidQueue = null;
+      if (readDevertQueue) {
+        try {
+          paidQueue = await readDevertQueue();
+        } catch (error) {
+          console.warn('[devert-queue] Radio queue status unavailable:', error.message);
+          paidQueue = { unavailable: true, reason: 'Paid advert queue could not be verified' };
+        }
+      }
+      const mainRadioAdCountdown = jukeLoopSession ? await jukeLoopSession.getMainRadioAdCountdown(Date.now(), paidQueue) : null;
       const nowPlaying = getJukeLoopNowPlaying();
       const adVotes = nowPlaying?.isDevert
         ? _devertPlaybackRuntime?.getMainRadioAdVoteSummary(nowPlaying.playId) ?? null : null;

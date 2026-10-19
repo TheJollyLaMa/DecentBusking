@@ -59,9 +59,10 @@ export function initDevertPaidQueue() {
   };
   const controls = () => {
     const wallet = window._wallet;
-    button.disabled = busy || snapshot?.version !== 2 || !snapshot?.paymentsEnabled || !wallet?.signer || wallet.chainId !== 8453 || !select.value;
+    button.disabled = busy || snapshot?.version !== 2 || !snapshot?.paymentsEnabled || snapshot.playbackReady === false || !wallet?.signer || wallet.chainId !== 8453 || !select.value;
     immediateButton.disabled = button.disabled;
     const help = busy ? 'Payment in progress'
+      : snapshot?.playbackReady === false ? snapshot.playbackReason || 'Paid playback unavailable'
       : !snapshot?.paymentsEnabled ? 'Priority checkout is not live yet'
         : !wallet?.signer ? 'Connect your Base wallet to queue an advert'
           : wallet.chainId !== 8453 ? 'Switch your wallet to Base'
@@ -140,7 +141,9 @@ export function initDevertPaidQueue() {
       count.textContent = String(state.pendingCount);
       price.textContent = formatUsdcUnits(BigInt(state.priceUnits));
       immediatePrice.textContent = state.version === 2 ? formatUsdcUnits(BigInt(state.immediatePriceUnits)) : 'Not live';
-      status.textContent = state.paused ? 'Priority queue paused.'
+      status.textContent = state.playbackReady === false
+        ? `${state.playbackReason || 'Paid playback unavailable'}. Existing payments remain queued; checkout is temporarily disabled.`
+        : state.paused ? 'Priority queue paused.'
         : state.version !== 2 || !state.paymentsEnabled ? 'Priority checkout not live yet.'
         : !activeCampaigns.length ? 'No active approved adverts yet.'
         : !window._wallet?.signer ? 'Connect a Base wallet to queue an ad.' : '';
@@ -177,11 +180,15 @@ export function initDevertPaidQueue() {
       const usdc = new ethers.Contract(DEVERT_QUEUE_USDC, USDC_BROWSER_ABI, signer);
       const result = await purchaseDevertRequest({ signer, queue, usdc, campaignId: select.value,
         tier, maxPriceUnits: BigInt(tier === 1 ? snapshot.immediatePriceUnits : snapshot.priceUnits), onStep: check });
-      receipt.textContent = `Request #${result.requestId} queued. `;
+      receipt.textContent = `Request #${result.requestId} queued${tier === 1 ? ' for after-song priority' : ' for the next normal ad break'}. Funds are distributed automatically after completed playback. `;
       link(receipt, result.txHash, 'View payment receipt');
-      status.textContent = 'Payment confirmed. Refresh to see the updated queue.';
-    } catch (error) { status.textContent = error.shortMessage || error.message; }
-    finally { busy = false; snapshot = null; controls(); }
+      busy = false;
+      await refresh();
+    } catch (error) {
+      snapshot = null;
+      status.textContent = error.shortMessage || error.message;
+    }
+    finally { busy = false; controls(); }
   };
   button.addEventListener('click', () => transact());
   immediateButton.addEventListener('click', () => transact(1));

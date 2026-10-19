@@ -49,7 +49,7 @@ export function paidAdvertTrack(request, resolveCampaignMedia = () => null) {
 }
 
 export function createDevertQueueReader({ provider, contractAddress, contract, paymentsEnabled = false,
-  getApprovedCampaignIds = () => [], cacheMs = 0, version = 1 }) {
+  getApprovedCampaignIds = () => [], getPlaybackStatus = () => ({ ready: true, reason: null }), cacheMs = 0, version = 1 }) {
   if (!isAddress(contractAddress) || /^0x0{40}$/i.test(contractAddress)) throw new Error('Invalid paid advert queue address');
   const abi = devertQueueAbi(version);
   const queue = contract || new Contract(contractAddress, abi, provider);
@@ -126,10 +126,16 @@ export function createDevertQueueReader({ provider, contractAddress, contract, p
       pendingCount, priceUnits: price.toString(), immediatePriceUnits: version === 2 ? (BigInt(price) * 2n).toString() : null,
       paused, paymentsEnabled: version === 2 && paymentsEnabled && !paused && next - head < 128 };
   };
-  return () => {
-    if (cached && Date.now() - cachedAt < cacheMs) return Promise.resolve(structuredClone(cached));
-    task ||= read().then(state => { cached = state; cachedAt = Date.now(); return state; }).finally(() => { task = null; });
-    return task;
+  return async () => {
+    let state;
+    if (cached && Date.now() - cachedAt < cacheMs) state = structuredClone(cached);
+    else {
+      task ||= read().then(state => { cached = state; cachedAt = Date.now(); return state; }).finally(() => { task = null; });
+      state = await task;
+    }
+    const playback = getPlaybackStatus();
+    return { ...state, playbackReady: playback.ready, playbackReason: playback.reason,
+      paymentsEnabled: state.paymentsEnabled && playback.ready };
   };
 }
 

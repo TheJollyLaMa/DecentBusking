@@ -12,6 +12,53 @@ const spaceSource = fs.readFileSync(path.join(__dirname, '../js/space.js'), 'utf
 const loaderUrl = pathToFileURL(path.join(__dirname, '../js/nft-loader.js')).href;
 const gatewayUrl = pathToFileURL(path.join(__dirname, '../js/ipfs-gateway.js')).href;
 
+test('audio stays connected to speakers across repeated audio/video advert handoffs', () => {
+  const audio = { paused: false, ended: false };
+  const video = { paused: false, ended: false };
+  const stage = { hidden: true };
+  const sources = new Map();
+  let context;
+  class AudioContext {
+    constructor() { this.destination = {}; this.state = 'running'; context = this; }
+    createMediaElementSource(media) {
+      assert.equal(sources.has(media), false, 'each element gets only one Web Audio source');
+      const source = {
+        connections: new Set(),
+        connect(node) { this.connections.add(node); },
+        disconnect(node) {
+          assert.ok(node, 'never disconnect the speaker path');
+          assert.ok(this.connections.delete(node));
+        },
+      };
+      sources.set(media, source);
+      return source;
+    }
+    createAnalyser() {
+      return { fftSize: 256, frequencyBinCount: 128, disconnect() {},
+        getByteFrequencyData(out) { out.fill(42); }, getByteTimeDomainData(out) { out.fill(128); } };
+    }
+    createChannelSplitter() { return { connect() {}, disconnect() {} }; }
+  }
+  const scope = vm.createContext({
+    console, AudioContext,
+    document: {
+      hidden: false, addEventListener() {},
+      getElementById: id => ({ 'audio-player': audio, 'radio-video-player': video, 'radio-video-stage': stage })[id],
+    },
+  });
+  vm.runInContext(spaceSource, scope);
+  const out = new Uint8Array(128);
+  for (const hidden of [true, false, true, false, true]) {
+    stage.hidden = hidden;
+    assert.equal(scope.readNowPlayingSpectrum(out), true);
+    assert.equal(out[0], 42);
+    assert.equal(scope.readNowPlayingWaveform(out), true);
+    assert.equal(out[0], 128);
+    for (const source of sources.values()) assert.ok(source.connections.has(context.destination));
+  }
+  assert.equal(sources.size, 2);
+});
+
 test('subheader searches artists or songs with a shared debounced archive query and no count label', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const bar = html.slice(html.indexOf('<div id="artist-filter-bar"'), html.indexOf('<dialog id="fund-breakdown-dialog"'));

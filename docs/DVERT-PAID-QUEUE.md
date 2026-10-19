@@ -26,6 +26,20 @@ Refund claim controls are intentionally absent from this simplified panel.
 Removal refund eligibility, contract claims and the exported
 `claimDevertRefund` helper remain unchanged for later recovery tooling.
 Payment receipts still identify the request and transaction.
+Confirmed purchases refresh the panel automatically. The shared next-ad notice
+identifies paid queued adverts, after-song priority, protected-show deferrals,
+and playback delays. The radio audio graph is reused across audio/video advert
+handoffs, so regular radio resumes without a page refresh.
+
+Checkout is temporarily disabled when the main radio or required local checkpoint
+mirror is offline. Existing on-chain requests remain queued and retry automatically
+when service returns; they must not be purchased a second time. Run the configured
+local mirror with `cd discord-bot && npm run checkpoint-mirror -- --watch`, keeping
+local Kubo running. A disconnected mirror deliberately blocks playback rather than
+bypassing the durable payment journal. For a $2 completed paid play, the existing
+router distributes $0.90 to Top 10, $0.90 to playback, $0.16 to pinners, and $0.04
+to repo development. Those are confirmed fund deposits only after settlement,
+not at checkout.
 
 The green and teal priority buttons have a staggered shimmer (disabled for
 reduced-motion preferences). Both tiers use the shared payment celebrations
@@ -58,9 +72,27 @@ non-advert funding and final fund-beneficiary payouts. It loads on demand from
   immediate requests. The owner subsequently authorized public rollout with
   `DEVERT_QUEUE_PAYMENTS_ENABLED=true`, explicitly waiving the two controlled
   live acceptance purchases. Automated checkout, scheduling, playback and
-  recovery checks passed; the new two-tier contract's live purchase-to-settlement
-  acceptance is **not verified**. No acceptance purchases were made for this rollout.
+  recovery checks passed. No acceptance purchases were made for that rollout.
+  A subsequent real $2 immediate request completed the live playback-to-settlement
+  path on 2026-10-19 after the offline local mirror was restored (details below).
   Do not enable checkout against v0.1.
+
+### v0.2 paid-request recovery - 2026-10-19
+
+Request #0 for campaign #2 was confirmed on-chain as a $2 immediate-tier request,
+but could not reserve playback while the required local checkpoint client was
+offline. Restoring that client allowed the existing scheduler to pick it up
+without a second purchase or manual fulfillment.
+
+- Worker playback began at 13:43:19 UTC; regular music resumed at 13:43:55 UTC.
+- [Automatic settlement](https://basescan.org/tx/0x1ee0c8c9921ba8582dc0ffe5d5b5b1799e941792bcef0db073fed433e16676df), block 52814043.
+- All four public fund ledgers confirmed $0.90 playback, $0.90 Top 10,
+  $0.16 pinners and $0.04 repo development, attributed to request #0.
+- The on-chain pending queue was verified empty afterward.
+
+This verifies recovery and settlement on the existing live worker. The new
+checkout availability gate, paid countdown notices and browser audio handoff fix
+still require deploying the updated worker and static site together.
 
 ### Historical v0.1 live acceptance - 2026-10-17
 

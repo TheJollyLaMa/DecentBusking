@@ -108,6 +108,15 @@ test('compact paid panel keeps tier order, filters eligible adverts, handles fai
   assert.deepEqual(purchases.map(item => [item.campaignId, item.tier, item.maxPriceUnits]),
     [['1', 0, 1000000n], ['1', 1, 2000000n]]);
   assert.match(nodes['devert-paid-receipt'].textContent, /Request #5 queued/);
+  assert.match(nodes['devert-paid-receipt'].textContent, /distributed automatically after completed playback/);
+  assert.equal(nodes['devert-paid-immediate-button'].disabled, false, 'confirmed checkout refreshes without a manual reload');
+  state.playbackReady = false;
+  state.playbackReason = 'Local checkpoint mirror is offline';
+  state.paymentsEnabled = false;
+  await nodes['devert-paid-refresh'].listeners.click();
+  assert.equal(nodes['devert-paid-immediate-button'].disabled, true);
+  assert.match(nodes['devert-paid-status'].textContent, /Local checkpoint mirror is offline/);
+  assert.match(nodes['devert-paid-status'].textContent, /Existing payments remain queued/);
   offline = true;
   await nodes['devert-paid-refresh'].listeners.click();
   assert.equal(nodes['devert-paid-price'].textContent, 'Unavailable');
@@ -169,6 +178,16 @@ test('paid advert snapshot verifies Base confirmation, count, price and immutabl
   const legacy = await createDevertQueueReader({ provider, contract, contractAddress: queueAddress, paymentsEnabled: true })();
   assert.equal(legacy.paymentsEnabled, false);
   assert.equal(legacy.requests[0].tier, 1);
+  let ready = false;
+  const cached = createDevertQueueReader({ provider, contract, contractAddress: queueAddress, version: 2,
+    paymentsEnabled: true, cacheMs: 60_000,
+    getPlaybackStatus: () => ({ ready, reason: ready ? null : 'Local checkpoint mirror is offline' }) });
+  const offline = await cached();
+  assert.equal(offline.paymentsEnabled, false);
+  assert.equal(offline.playbackReady, false);
+  assert.equal(offline.requests.length, 1, 'pending funds remain visible during an outage');
+  ready = true;
+  assert.equal((await cached()).paymentsEnabled, true, 'availability is checked even for cached chain data');
 });
 
 test('paid advert checkout reserves exact Base USDC, simulates before send and requires a request receipt', async () => {

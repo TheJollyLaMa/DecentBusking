@@ -133,7 +133,7 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
   const button = document.getElementById('top-ten-meter-toggle');
   if (!panel || !content || !button) return;
   try {
-    const { readNowPlayingSpectrum, readNowPlayingWaveform } = await import('./space.js?v=20261019-radio-ticker');
+    const { readNowPlayingSpectrum, readNowPlayingWaveform } = await import('./space.js?v=20261019-paid-ad-return');
     mountTopTenLiveMeter({ panel, content, button, readSpectrum: readNowPlayingSpectrum, readWaveform: readNowPlayingWaveform });
   } catch (error) {
     button.disabled = true;
