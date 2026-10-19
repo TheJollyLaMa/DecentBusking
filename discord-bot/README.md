@@ -120,6 +120,10 @@ and, while preparing, `idleMs`. The website distinguishes a short changeover fro
 offline/recovering/paused playback and warns after 30 seconds of preparation.
 Paid advert checkout requires actual active playback and the local checkpoint
 mirror, not merely a registered session or a successful HTTP health check.
+Discord gateway login logs connection stages and rate-limit delays without
+tokens or payloads. If the client does not become ready within two minutes,
+startup fails explicitly so the service supervisor can restart it instead of
+leaving an indefinitely healthy-looking web process with no Discord bot.
 
 Advert cadence and queued-ad state use the separate
 `decentbusking-main-radio-ad-state.json` checkpoint (`main-radio-ad-state` tags).

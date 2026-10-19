@@ -1,0 +1,41 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
+
+function client() {
+  const value = new EventEmitter();
+  value.rest = new EventEmitter();
+  return value;
+}
+
+test('Discord login waits for client readiness, not merely a resolved login call, and never logs token debug output', async () => {
+  const { loginDiscordClient } = await import('../discord-bot/discord-login.js');
+  const bot = client();
+  const logs = [];
+  bot.login = async () => {
+    bot.emit('debug', 'Provided token: sensitive');
+    bot.emit('debug', '[WS => Shard 0] Connecting to gateway\nsensitive payload');
+    bot.rest.emit('rateLimited', { global: true, timeToReset: 5000 });
+  };
+  let done = false;
+  const pending = loginDiscordClient(bot, 'sensitive', {
+    log: { log: text => logs.push(text), warn: text => logs.push(text), error: text => logs.push(text) },
+  }).then(() => { done = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(done, false);
+  bot.emit('clientReady', bot);
+  await pending;
+  assert.equal(done, true);
+  assert.match(logs.join('\n'), /Connecting to gateway/);
+  assert.match(logs.join('\n'), /retry after 5000ms/);
+  assert.doesNotMatch(logs.join('\n'), /sensitive/);
+  assert.equal(bot.listenerCount('debug'), 0);
+});
+
+test('Discord startup fails explicitly on a stuck login so the service can restart', async () => {
+  const { loginDiscordClient } = await import('../discord-bot/discord-login.js');
+  const bot = client();
+  bot.login = () => new Promise(() => {});
+  await assert.rejects(loginDiscordClient(bot, 'token', { timeoutMs: 5, log: { log() {} } }), /did not become ready/);
+  assert.equal(bot.listenerCount('clientReady'), 0);
+});

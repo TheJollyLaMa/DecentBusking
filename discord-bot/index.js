@@ -54,6 +54,7 @@ import { devertQueueAbi } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
 import { startDevertLoopWorker } from './devert-loop.js';
+import { loginDiscordClient } from './discord-login.js';
 import { DEFAULT_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
 import { createPinataStateStore, recoverVerifiedPlaylistBaseline } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
@@ -1618,7 +1619,7 @@ async function main() {
     }
   });
 
-  await client.login(config.discordToken);
+  await loginDiscordClient(client, config.discordToken);
 
   const shutdown = async (signal) => {
     console.log(`[jukebox-bot] ${signal} received; flushing IPFS state checkpoint.`);
