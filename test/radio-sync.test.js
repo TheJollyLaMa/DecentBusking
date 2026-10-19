@@ -33,6 +33,10 @@ test('radio artist joins the top badge and NFT status shares the countdown row',
   const badge = html.slice(html.indexOf('class="now-playing-badge-row"'), html.indexOf('class="radio-track-row"'));
   assert.ok(badge.indexOf('id="now-playing-label"') < badge.indexOf('id="now-playing-artist"'));
   assert.match(badge, /id="now-playing-artist"/);
+  const css = fs.readFileSync(path.join(__dirname, '../css/styles.css'), 'utf8');
+  assert.match(css, /\.now-playing-badge-row\s*\{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(css, /#now-playing-label\s*\{[^}]*text-align: left/);
+  assert.match(css, /\.now-playing-badge-row > #now-playing-artist\s*\{[^}]*justify-self: center/);
   const status = html.slice(html.indexOf('class="radio-status-row"'), html.indexOf('class="now-playing-actions"'));
   assert.match(status, /id="radio-ad-countdown"/);
   assert.match(status, /id="now-playing-watchlist-status"/);

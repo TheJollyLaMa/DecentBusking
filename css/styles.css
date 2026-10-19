@@ -3373,15 +3373,16 @@ decent-foot {
   pointer-events: auto;
 }
 #radio-footer .now-playing-badge-row {
-  display: inline-flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
-#radio-footer #now-playing-label { font-size: .65rem; letter-spacing: 0; white-space: nowrap; }
+#radio-footer #now-playing-label { font-size: .65rem; letter-spacing: 0; text-align: left; }
+#radio-footer .now-playing-badge-row > #now-playing-artist { justify-self: center; max-width: 100%; text-align: center; }
 #radio-footer #now-playing-sponsor {
+  justify-self: end;
   display: inline-flex;
   align-items: center;
   min-width: 0;
