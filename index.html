@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261019-radio-controls" />
+  <link rel="stylesheet" href="css/styles.css?v=20261019-radio-status" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -519,6 +519,7 @@
       <div id="busker-info">
         <div class="now-playing-badge-row">
           <span id="now-playing-label">📻 Live on JukeLoop</span>
+          <span id="now-playing-artist"></span>
           <button id="now-playing-sponsor" class="hidden nft-creator-profile" type="button" hidden></button>
         </div>
         <div class="radio-track-row">
@@ -547,12 +548,13 @@
           <button id="now-playing-watchlist-btn" type="button" class="hidden" title="Save to watchlist" aria-label="Save to watchlist" aria-pressed="false">👀</button>
           </div>
         </div>
-        <span id="now-playing-artist"></span>
-        <p id="radio-ad-countdown" class="radio-ad-countdown" role="status" aria-live="polite">Main radio ad: scheduling unavailable</p>
+        <div class="radio-status-row">
+          <p id="radio-ad-countdown" class="radio-ad-countdown" role="status" aria-live="polite">Main radio ad: scheduling unavailable</p>
+          <span id="now-playing-watchlist-status" role="status" aria-live="polite"></span>
+        </div>
         <div class="now-playing-actions">
           <button id="now-playing-play-btn" class="hidden" title="Tune in" aria-label="Tune in">▶ Tune in</button>
           <button id="now-playing-radio-btn" class="hidden" title="Return to radio" aria-label="Return to radio">📻 Radio</button>
-          <span id="now-playing-watchlist-status" role="status" aria-live="polite"></span>
         </div>
       </div>
       <span id="radio-activity" role="status" aria-live="polite" hidden></span>

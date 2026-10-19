@@ -17,13 +17,27 @@ test('radio footer places Saved after votes and video before audio mute without 
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const footer = html.slice(html.indexOf('<footer id="radio-footer">'), html.indexOf('</decent-foot>'));
   const media = footer.slice(footer.indexOf('class="radio-media-controls"'), footer.indexOf('class="radio-title-window"'));
-  const votes = footer.slice(footer.indexOf('class="radio-voting-controls"'), footer.indexOf('id="now-playing-artist"'));
+  const votes = footer.slice(footer.indexOf('class="radio-voting-controls"'), footer.indexOf('class="radio-status-row"'));
   assert.ok(media.indexOf('id="radio-video-toggle"') < media.indexOf('id="radio-mute"'));
   assert.match(media, /id="radio-video-toggle"/);
   assert.match(media, /id="radio-mute"/);
   assert.match(votes, /id="now-playing-watchlist-btn"/);
   assert.ok(votes.indexOf('id="radio-vote-net"') < votes.indexOf('id="now-playing-watchlist-btn"'));
   for (const id of ['radio-video-toggle', 'radio-mute', 'now-playing-watchlist-btn']) {
+    assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1);
+  }
+});
+
+test('radio artist joins the top badge and NFT status shares the countdown row', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const badge = html.slice(html.indexOf('class="now-playing-badge-row"'), html.indexOf('class="radio-track-row"'));
+  assert.ok(badge.indexOf('id="now-playing-label"') < badge.indexOf('id="now-playing-artist"'));
+  assert.match(badge, /id="now-playing-artist"/);
+  const status = html.slice(html.indexOf('class="radio-status-row"'), html.indexOf('class="now-playing-actions"'));
+  assert.match(status, /id="radio-ad-countdown"/);
+  assert.match(status, /id="now-playing-watchlist-status"/);
+  assert.ok(status.indexOf('id="radio-ad-countdown"') < status.indexOf('id="now-playing-watchlist-status"'));
+  for (const id of ['now-playing-artist', 'now-playing-watchlist-status']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1);
   }
 });

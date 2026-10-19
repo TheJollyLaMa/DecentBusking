@@ -3375,6 +3375,7 @@ decent-foot {
 #radio-footer .now-playing-badge-row {
   display: inline-flex;
   flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -3423,8 +3424,10 @@ decent-foot {
   animation: radio-title-scroll 18s linear infinite;
 }
 .radio-title-window:hover #now-playing-title { animation-play-state: paused; }
-#radio-footer #now-playing-artist { font-size: .75rem; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#radio-footer #now-playing-artist { font-family: var(--font-display); font-weight: 700; color: var(--gold); font-size: .8rem; min-width: 0; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.radio-status-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px; }
 #radio-footer .radio-ad-countdown {
+  margin: 0;
   font-size: .68rem;
   color: var(--gold);
   max-width: 320px;
@@ -3455,7 +3458,7 @@ decent-foot {
 }
 #radio-footer #now-playing-watchlist-btn[aria-pressed="true"] { border-color: var(--teal); background: #17372e; }
 #radio-footer #now-playing-watchlist-btn:disabled { opacity: .55; cursor: default; }
-#radio-footer #now-playing-watchlist-status { grid-column: 1 / -1; font-size: .64rem; color: var(--text-dim); overflow-wrap: anywhere; }
+#radio-footer #now-playing-watchlist-status { font-size: .64rem; color: var(--text-dim); overflow-wrap: anywhere; text-align: right; }
 #radio-voting { display: grid; grid-template-columns: repeat(2, 36px) minmax(32px, auto); gap: 4px; align-content: center; }
 #radio-vote-net {
   position: relative; isolation: isolate; align-self: center; text-align: center;
