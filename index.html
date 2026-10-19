@@ -84,9 +84,31 @@
         <p id="devert-listen-status" role="status" aria-live="polite"></p>
       </fieldset>
 
-      <div class="devert-price-display"><span>Current Queue Price</span><strong id="devert-price" aria-live="polite">Loading…</strong><span>USDC · Priority Queue Bump</span></div>
+      <section class="devert-public-queue" aria-labelledby="devert-paid-title">
+        <h3 id="devert-paid-title">Paid Advert Queue</h3>
+        <p>FIFO requests play after the current track, except during protected shows. Payment is reserved until playback, then split 45% Top 10 / 45% playback / 8% pinners / 2% repo development. Paid plays remain valid after campaign expiry; removal makes unplayed requests fully refundable.</p>
+        <label for="devert-paid-campaign">Choose an active approved advert</label>
+        <select id="devert-paid-campaign"></select>
+        <div class="devert-price-display">
+          <span>Current request price</span><strong id="devert-paid-price" aria-live="polite">Not live</strong>
+          <button id="devert-paid-queue-button" type="button" disabled>Pay to queue ad</button>
+          <span>$1 USDC base · doubles every 7 pending requests</span>
+        </div>
+        <button id="devert-paid-refresh" type="button">Refresh paid queue</button>
+        <ol id="devert-paid-requests" aria-label="Paid advert requests"></ol>
+        <p id="devert-paid-status" role="status" aria-live="polite">Paid advert requests are not enabled yet.</p>
+        <p id="devert-paid-receipt" role="status" aria-live="polite"></p>
+        <ul id="devert-paid-refunds" aria-label="Recent removal refunds"></ul>
+        <details>
+          <summary>Claim a removed advert request refund</summary>
+          <p>Use your payment receipt's request ID, including older requests not shown above. Only the paying wallet can claim. Campaign expiry alone does not create a refund.</p>
+          <label>Request ID<input id="devert-paid-refund-id" type="text" inputmode="numeric" placeholder="Request ID from receipt" /></label>
+          <button id="devert-paid-refund" type="button" disabled>Claim full refund</button>
+        </details>
+      </section>
+      <strong id="devert-price" hidden></strong>
       <section class="devert-public-queue" aria-labelledby="devert-queue-title">
-        <div class="devert-campaign-heading"><h3 id="devert-queue-title">Current Ad Queue</h3><button id="devert-queue-refresh" type="button" aria-label="Refresh public ad queue">↻</button></div>
+        <div class="devert-campaign-heading"><h3 id="devert-queue-title">Ordinary Campaign Rotation</h3><button id="devert-queue-refresh" type="button" aria-label="Refresh public ad queue">↻</button></div>
         <ol id="devert-queue" aria-label="Public ad priority queue"></ol>
         <p id="devert-queue-status" role="status" aria-live="polite">Loading public queue…</p>
       </section>
@@ -133,10 +155,10 @@
           <tbody id="devert-price-tiers">
             <tr class="is-current"><td>Weekly Ad Campaign</td><td>5.00 USDC / wk</td></tr>
             <tr><td>Main Radio Rotation</td><td>1 ad every 10 songs</td></tr>
-            <tr><td>Priority Queue Bump</td><td>$1.00 · positions 1–7</td></tr>
-            <tr><td>Priority Queue Bump</td><td>$2.00 · positions 8–14</td></tr>
-            <tr><td>Priority Queue Bump</td><td>$4.00 · positions 15–21</td></tr>
-            <tr><td>Priority Queue Bump</td><td>Doubling each block of 7 positions</td></tr>
+            <tr><td>Paid Advert Request</td><td>$1.00 · positions 1–7</td></tr>
+            <tr><td>Paid Advert Request</td><td>$2.00 · positions 8–14</td></tr>
+            <tr><td>Paid Advert Request</td><td>$4.00 · positions 15–21</td></tr>
+            <tr><td>Paid Advert Request</td><td>Doubling each block of 7 pending requests</td></tr>
             <tr><td>24/7 VertLoop</td><td>Included (continuous)</td></tr>
           </tbody>
         </table>
@@ -147,6 +169,7 @@
 
   <dialog id="devert-instructions" aria-labelledby="devert-instructions-title">
     <h3 id="devert-instructions-title">Campaign Instructions: Submit, Receive &amp; Run</h3>
+    <p>An advert campaign costs $5 USDC for one week of ordinary rotation. Optional priority payments do not purchase or extend that campaign: a queue bump plays at the next normal advert break; pay 2× the queue price for an extra break after the current song. Immediate requests take priority, with FIFO within each tier and no interruptions to protected shows. Payment is reserved until playback, then split 45% Top 10 / 45% playback / 8% pinners / 2% repo development. Paid plays remain valid after campaign expiry; removal makes unplayed requests fully refundable.</p>
     <ol class="devert-workflow" aria-label="Ad campaign workflow">
       <li><strong>1 · Submit</strong><span>Upload your audio or MP4 ad for review</span></li>
       <li><strong>2 · Receive</strong><span>Approved NFT sent to your wallet</span></li>
@@ -168,13 +191,45 @@
   <dialog id="fund-breakdown-dialog" aria-labelledby="fund-breakdown-title">
     <div class="fund-breakdown-shell">
       <div class="fund-breakdown-heading">
-        <h3 id="fund-breakdown-title">Fund breakdown</h3>
+        <div class="fund-breakdown-titlebar">
+          <h3 id="fund-breakdown-title">Fund breakdown</h3>
+          <details class="fund-payment-info">
+            <summary aria-label="About pending fund payments">i</summary>
+            <p class="fund-pending-notice">Payments are marked Pending because rankings and estimated amounts change with votes, plays, and funding throughout the week. They freeze at Sunday/Monday midnight in New York (America/New_York). Frozen allocations still await payment; only confirmed transactions are recorded on-chain.</p>
+          </details>
+        </div>
         <button id="fund-breakdown-close" type="button" aria-label="Close fund breakdown">×</button>
       </div>
-      <p class="fund-pending-notice">Payments are marked Pending because rankings and estimated amounts change with votes, plays, and funding throughout the week. They freeze at Sunday/Monday midnight in New York (America/New_York). Frozen allocations still await payment; only confirmed transactions are recorded on-chain.</p>
       <p id="fund-breakdown-summary"></p>
       <p id="fund-breakdown-note" role="status" aria-live="polite"></p>
+      <button id="fund-tour-replay" type="button">🐇 How to read and grow these funds</button>
+      <a id="fund-proof-ledger" target="_blank" rel="noopener" hidden>Raw verified payment ledger</a>
+      <a href="?tutorial=payroll">Share this sponsor walkthrough</a>
       <div id="fund-breakdown-body"></div>
+      <section id="fund-contribution" aria-labelledby="fund-contribution-heading">
+        <h4 id="fund-contribution-heading">Grow the weekly artist pot</h4>
+        <p>Add $5, $10, $1,000 or your own amount in Base USDC. Invite a sponsor to do the same, or purchase an advertising campaign in DVert to support weekly payouts.</p>
+        <form id="fund-contribution-form">
+          <label>Choose the fund
+            <select id="fund-contribution-slug">
+              <option value="dbusk-playback">Playback artist payments</option>
+              <option value="dbusk-top10">Top 10 song prizes</option>
+            </select>
+          </label>
+          <div class="fund-contribution-presets" aria-label="Suggested contribution amounts">
+            <button type="button" data-contribution-amount="5">$5</button>
+            <button type="button" data-contribution-amount="10">$10</button>
+            <button type="button" data-contribution-amount="1000">$1,000</button>
+          </div>
+          <label>Amount (USDC)
+            <input id="fund-contribution-amount" type="text" inputmode="decimal" value="5" required autocomplete="off">
+          </label>
+          <p>Base network · native USDC · ETH for gas. Your wallet reviews every transaction. An approval alone is not a contribution. Contributions are not ad purchases and cannot be withdrawn by contributors. Funds remain owner-managed; funding does not guarantee any artist a payout.</p>
+          <button type="submit">Open MetaMask / wallet to contribute</button>
+          <button id="fund-contribution-check" type="button">Check unresolved contribution</button>
+          <p id="fund-contribution-status" role="status" aria-live="polite"></p>
+        </form>
+      </section>
     </div>
   </dialog>
 
@@ -566,7 +621,7 @@
         <button id="payroll-close-btn" aria-label="Close payroll panel">✕</button>
       </div>
       <p class="payroll-description">
-        Base treasury and owner-reviewed USDC allocation drafts.
+        Review a completed week. Confirm artist payments with your Base wallet.
       </p>
 
       <!-- Wallet connection status — populated by the global wallet module -->
@@ -629,45 +684,58 @@
         </details>
       </details>
 
-      <section class="payroll-section" aria-labelledby="weekly-payroll-title">
-        <h3 id="weekly-payroll-title">Weekly Artist Payments</h3>
-        <p id="radio-weekly-schedule-status" class="payroll-status" role="status">Monday 00:00 America/New_York. Preparing weekly shares does not send payments.</p>
-        <div id="radio-funding-dashboard"></div>
-        <h4 id="playback-payroll-title">Playback Payroll</h4>
-        <div class="radio-payroll-controls">
-          <label>New York week<select id="radio-payroll-week"></select></label>
-          <label>Playback budget (USDC)<input id="radio-playback-budget" type="number" min="0" step="0.01" value="0" /></label>
-          <label>Minimum payout (USDC)<input id="radio-minimum-payout" type="number" min="0" step="0.01" value="0.01" /></label>
+      <section id="weekly-artist-payroll" class="payroll-section" aria-labelledby="weekly-payroll-title">
+        <div class="payroll-workspace-heading">
+          <div><p class="payroll-eyebrow">ARTIST PAYROLL · BASE USDC</p><h3 id="weekly-payroll-title">Close the week. Pay the artists.</h3></div>
+          <button id="radio-payroll-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh status</button>
         </div>
-        <div class="radio-payroll-actions">
-          <button id="radio-payroll-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Treasury &amp; Plays</button>
+        <ol class="payroll-step-guide" aria-label="Payroll workflow">
+          <li><span>1</span> Choose a closed week</li>
+          <li><span>2</span> Review &amp; back up receipts</li>
+          <li><span>3</span> Confirm wallet payments</li>
+        </ol>
+        <div class="payroll-week-picker radio-payroll-controls">
+          <label>Payroll week · New York time<select id="radio-payroll-week"></select></label>
+          <p>One payment per unpaid entry. Resume the same receipts after any interruption.</p>
         </div>
-        <p id="radio-payroll-status" class="payroll-status" role="status">Current shares are estimates. Published closed-week receipts require owner-authorized payments.</p>
-        <dl class="payroll-allocation"><dt>Base gas balance</dt><dd id="radio-gas-balance">Not loaded</dd><dt>Playback fund USDC</dt><dd id="radio-playback-balance">Not loaded</dd></dl>
-        <div id="radio-playback-preview" class="radio-payroll-preview"></div>
-        <details class="payroll-secondary-flow">
-          <summary id="top-ten-payroll-title">Top 10 Vote Prizes</summary>
+        <div id="radio-payroll-overview" class="payroll-overview" aria-live="polite"></div>
+        <p id="radio-payroll-status" class="payroll-status payroll-main-status" role="status">Refresh to load the closed week's receipts and payment readiness.</p>
+        <div id="radio-reviewed-receipts" class="payroll-batch-grid"></div>
+        <p class="payroll-payment-note">Pay opens your wallet for each unpaid entry. Approval is separate from payment. Already-paid references are skipped on Base.</p>
+        <details id="payroll-estimates" class="payroll-secondary-flow">
+          <summary>Estimates &amp; allocation settings <span>Not payment receipts</span></summary>
+          <p id="radio-estimate-status" class="payroll-description"></p>
+          <h4 id="playback-payroll-title">Playback Payroll</h4>
+          <div class="radio-payroll-controls">
+            <label>Playback budget (USDC)<input id="radio-playback-budget" type="number" min="0" step="0.01" value="0" /></label>
+            <label>Minimum payout (USDC)<input id="radio-minimum-payout" type="number" min="0" step="0.01" value="0.01" /></label>
+          </div>
+          <div id="radio-playback-preview" class="radio-payroll-preview"></div>
+          <h4 id="top-ten-payroll-title">Top 10 Vote Prizes</h4>
           <div class="radio-payroll-controls"><label>Prize budget (USDC)<input id="radio-prize-budget" type="number" min="0" step="0.01" value="0" /></label></div>
-          <p id="radio-vote-policy" class="payroll-description">Weekly net votes (upvotes minus downvotes). Equal prize shares; one place per artist wallet.</p>
-          <dl class="payroll-allocation"><dt>Prize fund USDC</dt><dd id="radio-prize-balance">Not loaded</dd></dl>
+          <p id="radio-vote-policy" class="payroll-description">Song-ranked prizes use weekly net votes and the frozen prize schedule.</p>
           <div id="radio-prize-preview" class="radio-payroll-preview"></div>
+          <button id="radio-payroll-finalize" class="payroll-btn payroll-btn-secondary" type="button" disabled>Save Allocation &amp; Review Recipients</button>
         </details>
-        <h4 id="radio-review-title">Reviewed Receipts &amp; Work References</h4>
-        <button id="radio-payroll-finalize" class="payroll-btn payroll-btn-secondary" type="button" disabled>Save Allocation &amp; Review Recipients</button>
-        <div id="radio-reviewed-receipts"></div>
-        <div class="radio-payroll-actions">
+        <details class="payroll-secondary-flow">
+          <summary>Treasury &amp; preparation details</summary>
+          <p id="radio-weekly-schedule-status" class="payroll-status" role="status">Monday 00:00 America/New_York. Preparing weekly shares does not send payments.</p>
+          <dl class="payroll-allocation"><dt>Base gas balance</dt><dd id="radio-gas-balance">Not loaded</dd><dt>Playback fund USDC</dt><dd id="radio-playback-balance">Not loaded</dd><dt>Prize fund USDC</dt><dd id="radio-prize-balance">Not loaded</dd></dl>
+          <div id="radio-funding-dashboard"></div>
+        </details>
+        <details class="payroll-recovery payroll-secondary-flow"><summary>Restore an allocation backup</summary><p>Use the original receipt when resuming a partial payment. Never create a replacement to bypass a failed check.</p><div class="radio-payroll-controls"><label>Allocation receipt<input id="radio-receipt-import" type="file" accept="application/json,.json" /></label></div></details>
+        <div id="radio-payroll-actions-storage" hidden>
           <button id="radio-settle-playback" class="payroll-btn payroll-btn-primary" type="button" disabled>Pay Playback Batch</button>
           <button id="radio-settle-top10" class="payroll-btn payroll-btn-primary" type="button" disabled>Pay Top 10 Batch</button>
         </div>
-        <details class="payroll-recovery"><summary>Restore Allocation Backup</summary><div class="radio-payroll-controls"><label>Allocation receipt<input id="radio-receipt-import" type="file" accept="application/json,.json" /></label></div></details>
       </section>
-      <section class="payroll-section" aria-labelledby="payment-ledger-title">
-        <h3 id="payment-ledger-title">Payment History &amp; Proofs</h3>
+      <details class="payroll-section payroll-secondary-flow" aria-labelledby="payment-ledger-title">
+        <summary id="payment-ledger-title">Payment History &amp; Proofs</summary>
         <button id="payroll-ledger-refresh" class="payroll-btn payroll-btn-secondary" type="button">Refresh Payment Proofs</button>
         <p id="payroll-ledger-status" class="payroll-status" role="status">Payment proofs not loaded.</p>
         <a id="payroll-ledger-backup" class="payroll-link" target="_blank" rel="noopener noreferrer" hidden>Open IPFS Payment Snapshot</a>
         <div id="payroll-ledger-entries"></div>
-      </section>
+      </details>
 
       <!-- Payroll queue table -->
       <div id="payroll-queue-section" style="display:none;">
@@ -704,7 +772,7 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js?v=20261015-usdc-cents"></script>
+  <script type="module" src="js/components/about-override.js?v=20261019-fund-tour"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
   <script type="module" src="js/components/header-right-ankh-override.js?v=20261011-creator-menu"></script>
@@ -723,25 +791,29 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261016-artwork-backoff"></script>
+  <script type="module" src="js/main.js?v=20261019-fund-tour"></script>
 
   <!-- Admin role-grant panel -->
   <script type="module" src="js/admin.js?v=20261016-schedule-cancel"></script>
 
-  <script type="module" src="js/payroll.js?v=20261015-usdc-cents"></script>
+  <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
+  <script type="module" src="js/payroll.js?v=20261019-payroll-workspace"></script>
   <script type="module" src="js/radio-history.js?v=20261015-usdc-cents"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261016-schedule-cancel"></script>
-  <script type="module" src="js/fund-header.mjs?v=20261015-usdc-cents"></script>
+  <link rel="stylesheet" href="css/fund-tour.css?v=20261019-fund-tour">
+  <script type="module" src="js/fund-header.mjs?v=20261019-fund-tour"></script>
+  <script type="module" src="js/fund-tour.mjs?v=20261019-fund-tour"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261016-hype-bunny"></script>
   <script type="module" src="js/djuke.mjs?v=20261015-usdc-cents"></script>
   <script type="module" src="js/devert-tab.mjs?v=20261016-radio-preload"></script>
+  <script type="module" src="js/devert-paid-queue.mjs?v=20261017-paid-ad-queue"></script>
   <script type="module" src="js/creator-profile.mjs?v=20261016-radio-preload"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
   <script type="module" src="js/listens.mjs?v=20261016-radio-preload"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261018-shared-provider"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261015-usdc-cents';
+    import { initPayroll } from './js/payroll.js?v=20261019-payroll-workspace';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
 

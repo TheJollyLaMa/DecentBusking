@@ -33,6 +33,10 @@ export function topTenPrizeRows(tracks, nowPlaying, { budgetUnits = null, minimu
     prizeUnits: song.outsideTopTen || !prizes ? null : prizes.get(song.trackId) ?? 0n }));
 }
 
+function hasPayoutWallet(wallet) {
+  return /^0x(?!0{40}$)[0-9a-fA-F]{40}$/i.test(wallet || '');
+}
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -271,7 +275,13 @@ export function initTopTenBoard() {
         if (track.prizeUnits > 0n) prize.innerHTML = renderUsdcAmount(track.prizeUnits);
         else prize.textContent = '—';
         prize.title = track.prizeUnits === 0n ? 'No payable prize at this rank; prizes must exceed $0.10' : 'Estimated prize if this song holds its rank at Monday midnight, America/New_York';
-        if (!/^0x(?!0{40}$)[0-9a-fA-F]{40}$/i.test(track.wallet || '')) prize.title += ' · Artist payout wallet must be linked before closeout';
+      }
+      if (!hasPayoutWallet(track.wallet) && !track.outsideTopTen) {
+        const warning = "No artist wallet is registered. This prize will be forfeited at Monday midnight, America/New_York, and roll into next week's Top 10 fund without being redistributed. Musician: register your wallet ASAP.";
+        prize.classList.add('is-wallet-unlinked');
+        prize.title = warning;
+        prize.setAttribute('aria-label', `${prize.textContent || 'Estimated prize unavailable'}. ${warning}`);
+        prize.tabIndex = 0;
       }
       const add = el('button', 'top-ten-playlist-add', playlistSaved.has(track.trackId) ? '\u2713' : '+');
       add.type = 'button';

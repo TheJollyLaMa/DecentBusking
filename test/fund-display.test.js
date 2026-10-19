@@ -27,23 +27,22 @@ test('pending fund tables show song estimates without pretending to be on-chain 
   assert.doesNotMatch(archive, /fund-pending-row/);
 });
 
-test('fund summary features the balance and distinguishes incoming and outgoing totals', async () => {
+test('fund summary features only the prize pool and preserves unavailable-budget warnings', async () => {
   const { renderFundSummary } = await import(url);
   const details = { balanceUnits: 17500000n, reservedUnits: 5000000n, budgetUnits: 12500000n, inflowUnits: 20000000n, outflowUnits: 2500000n, netUnits: 17500000n };
   const html = renderFundSummary(details);
   assert.match(html, /This week's prize pool/);
   assert.match(html, /fund-prize-amount[\s\S]*?\$12\.50/);
-  assert.match(html, /fund-amount-in[\s\S]*?\$20\.00/);
-  assert.match(html, /fund-amount-out[\s\S]*?\$2\.50/);
-  assert.match(html, /subject to approved allocation/);
+  assert.doesNotMatch(html, /fund-flow|Total balance|Reserved for older weeks|Total in|Total out|Net|Unreserved|subject to approved allocation|fund-prize-caption/);
   assert.equal((html.match(/class="fund-prize-dollar"/g) || []).length, 6);
   assert.equal((html.match(/&#128184;/g) || []).length, 3);
   assert.match(html, /aria-hidden="true"/);
-  assert.match(html, /Total balance[\s\S]*?\$17\.50/);
-  assert.match(html, /Reserved for older weeks[\s\S]*?\$5\.00/);
   const indexing = renderFundSummary({ ...details, budgetUnits: null }, { indexing: true });
   assert.match(indexing, /Current fund balance/);
+  assert.match(indexing, /\$17\.50/);
+  assert.match(indexing, /History is still indexing/);
   assert.doesNotMatch(indexing, /This week's prize pool/);
+  assert.match(renderFundSummary({ balanceUnits: 0n, budgetUnits: 0n }), /This week's prize pool/);
 });
 
 test('pending payments preview four rows and put the remainder in a closed dropdown', async () => {
@@ -62,6 +61,9 @@ test('pending payments preview four rows and put the remainder in a closed dropd
   assert.match(html, /Payments are marked Pending because/);
   assert.match(html, /Sunday\/Monday midnight in New York/);
   assert.match(html, /Frozen allocations still await payment/);
+  assert.match(html, /<details class="fund-payment-info">\s*<summary aria-label="About pending fund payments">i<\/summary>\s*<p class="fund-pending-notice">/);
+  assert.equal((html.match(/class="fund-pending-notice"/g) || []).length, 1);
+  assert.doesNotMatch(html, /<details class="fund-payment-info" open/);
 });
 
 test('archive markup distinguishes scheduled and paid amounts and surfaces unmatched payments', async () => {
@@ -148,6 +150,32 @@ test('fund disclosure markup includes proof links and campaign references', asyn
   assert.match(markup, /Campaign #7/);
   assert.match(markup, /nft-creator-profile/);
   assert.match(renderFundsSection([], 'Community Funds'), /Community Funds/);
+});
+
+test('advert funding source keeps the purchaser separate from the DeVert contract badge', async () => {
+  const { renderFundSourcesTable } = await import(url);
+  const html = renderFundSourcesTable({ sources: [{
+    kind: 'advert',
+    amountUnits: '4500000',
+    walletHtml: '<a>DeVert v0.1</a>',
+    advertiser: `0x${'1'.repeat(40)}`,
+    advertiserHtml: '<button data-creator="buyer">buyer.eth</button>',
+  }] });
+  assert.match(html, /DeVert v0\.1/);
+  assert.match(html, /<button data-creator="buyer">buyer\.eth<\/button>/);
+  assert.doesNotMatch(html, /&lt;button/);
+  assert.match(renderFundSourcesTable({ sources: [{ kind: 'advert', amountUnits: '1' }] }), /Purchaser unavailable/);
+});
+
+test('paid advert funding shows settlement and identifies the paying wallet', async () => {
+  const { renderFundSourcesTable } = await import(url);
+  const html = renderFundSourcesTable({ sources: [{
+    kind: 'advert', paidAdvert: true, amountUnits: '450000', requestId: '8', campaignId: '9',
+    payer: `0x${'1'.repeat(40)}`, advertiser: `0x${'2'.repeat(40)}`,
+  }] });
+  assert.match(html, /Paid advert playback/);
+  assert.match(html, /Paid request #8/);
+  assert.match(html, new RegExp(`payer 0x${'1'.repeat(40)}`));
 });
 
 test('weekly payout archive markup renders details rows and running totals', async () => {

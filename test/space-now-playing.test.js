@@ -742,6 +742,7 @@ test('shared NFT links load the exact target without autoplaying audio', async (
     nftArtistKey: (value) => String(value.artist || value.creator || value.uploader || 'Unknown artist').trim().toLowerCase(),
     configuredNftCollections,
     parseNftIdentitySearch,
+    URLSearchParams,
     isMusicNft,
     setTimeout,
     clearTimeout,
@@ -771,6 +772,12 @@ test('shared NFT links load the exact target without autoplaying audio', async (
   assert.equal(vm.runInContext('_allNFTs[0].mesh.userData.pinnedVisible', context), true);
   assert.equal(vm.runInContext('_nowPlayingKey', context), null);
   assert.equal(vm.runInContext('_nowPlayingMesh', context), null);
+  panel.open = false;
+  content.innerHTML = '';
+  context.window.location.search = '?tutorial=payroll&week=NY-2026-10-12';
+  await vm.runInContext('_focusSharedNFTFromLocation();', context);
+  assert.equal(panel.open, false);
+  assert.equal(content.innerHTML, '');
 });
 
 test('radio watchlist resolution requires an exact media match instead of title guessing', async () => {

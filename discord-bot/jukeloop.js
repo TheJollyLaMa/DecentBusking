@@ -759,19 +759,20 @@ export class JukeLoopSession {
           startedAt: this._nowPlaying.startedAt,
           endedAt,
           audibleMs: Math.max(0, endedAt - this._nowPlaying.startedAt),
+          finished: this._ffmpeg?.exitCode === 0,
           firstWeekBonus: this._nowPlaying.firstWeekBonus,
           announcementId: this._announcementMsg?.id,
         };
-        if (this._currentDevertAd) {
+        if (this._currentDevertAd && !this._currentDevertAd.paidRequest) {
           this._musicSinceAd = 0;
           this._musicPlayCount++;
           this._persistMainRadioAdState();
-        } else if (this._completedPlay.audibleMs >= 30_000) {
+        } else if (!this._currentDevertAd && this._completedPlay.audibleMs >= 30_000) {
           this._musicSinceAd++;
           this._musicPlayCount++;
           this._persistMainRadioAdState();
         }
-        if (this.devertPlayback) {
+        if (this.devertPlayback && this._currentPaid?.kind !== 'devert') {
           const durableRecord = this._currentDevertAd
             ? this.devertPlayback.recordCampaignImpression({ campaignId: this._currentDevertAd.campaignId,
                 radioPlayId: this._nowPlaying.playId, mainRadio: this._currentDevertAd.mainRadio,
@@ -800,12 +801,13 @@ export class JukeLoopSession {
 
     this.player.on('error', (err) => {
       console.error('[jukeloop] Audio player error:', err.message);
+      const paidAdvert = this._currentPaid?.kind === 'devert';
       if (this._nowPlaying?.hype) {
         this._topTenHype.recordFailure(this._nowPlaying.trackId, `Audio playback failed: ${err.message}`)
           .catch(error => console.error('[top10-hype] Failed to checkpoint audio failure:', error.message));
       }
       if (this._currentDevertAd) {
-        this._recordMainRadioAdFailure(this._currentDevertAd.campaignId, 'audio player error');
+        if (!paidAdvert) this._recordMainRadioAdFailure(this._currentDevertAd.campaignId, 'audio player error');
         this._currentDevertAd = null;
         this._nowPlaying = null;
         this._completedPlay = null;
@@ -813,9 +815,11 @@ export class JukeLoopSession {
         this._announcementMsg = null;
         this._announcementContext = null;
       }
-      this._pendingDevertAds = [];
-      this._preparedDevertAd = null;
-      this._persistMainRadioAdState();
+      if (!paidAdvert) {
+        this._pendingDevertAds = [];
+        this._preparedDevertAd = null;
+        this._persistMainRadioAdState();
+      }
       if (this._ffmpeg) {
         try { this._ffmpeg.kill(); } catch {}
         this._ffmpeg = null;
@@ -1063,7 +1067,8 @@ export class JukeLoopSession {
       }
     }
 
-    let devertAd = null;
+    let devertAd = paid?.record.kind === 'devert'
+      ? { campaignId: paid.track.campaignId, mainRadio: false, paidRequest: true, track: paid.track } : null;
     let selectionDeferred = false;
     const musicSinceAd = Number.isFinite(projectedMusicSinceAd) ? projectedMusicSinceAd : this._musicSinceAd;
     if (!allowAds || isHype) {
@@ -1119,7 +1124,7 @@ export class JukeLoopSession {
     if (!url) {
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
       if (hypeSelection) return this._skipHype(hypeSelection, 'The recording could not be fetched.', options);
-      if (devertAd) {
+      if (devertAd && !devertAd.paidRequest) {
         this._recordMainRadioAdFailure(devertAd.campaignId, 'ad file could not be fetched');
         this._preparedDevertAd = null;
         this._persistMainRadioAdState();
@@ -1168,7 +1173,7 @@ export class JukeLoopSession {
     } catch (err) {
       console.error('[jukeloop] Failed to prepare track:', err.message);
       if (hypeSelection) return this._skipHype(hypeSelection, err.message, options);
-      if (devertAd) {
+      if (devertAd && !devertAd.paidRequest) {
         this._recordMainRadioAdFailure(devertAd.campaignId, err.message || 'ad playback failed');
         this._preparedDevertAd = null;
         this._persistMainRadioAdState();
@@ -1250,7 +1255,9 @@ export class JukeLoopSession {
     if (this._destroyed || this._preparedNext || this._prepareTask) return;
     const epoch = this._preparationEpoch;
     // If the playing song is music, it should count toward the advert cadence when it ends.
-    const projectedMusicSinceAd = this._currentDevertAd ? 0 : this._musicSinceAd + 1;
+    const projectedMusicSinceAd = this._currentDevertAd
+      ? this._currentDevertAd.paidRequest ? this._musicSinceAd : 0
+      : this._musicSinceAd + 1;
     const task = this._prepareNextPlayback(null, { projectedMusicSinceAd })
       .then(prepared => {
         if (this._destroyed || epoch !== this._preparationEpoch) {
@@ -1302,6 +1309,11 @@ export class JukeLoopSession {
 
   _startPrepared(prepared) {
     if (!prepared || this._destroyed) return false;
+    if (prepared.paid?.record.kind === 'devert' &&
+        ['weekly_top10', 'live_performance'].includes(this.getShowState().activeShow.type)) {
+      this._disposePrepared(prepared, 'Protected show began before paid advert playback');
+      return false;
+    }
     if (prepared.devertAd && this.devertPlayback?.isCampaignRemoved?.(prepared.devertAd.campaignId)) {
       this._disposePrepared(prepared, 'Advert removed from playback');
       return false;
@@ -1312,7 +1324,7 @@ export class JukeLoopSession {
     this._ffmpeg = prepared.ffmpegProcess;
     this._currentPaid = prepared.paid?.record || null;
     this._currentDevertAd = prepared.devertAd;
-    if (prepared.devertAd) this._breakAwaitingUnlock = false;
+    if (prepared.devertAd && !prepared.devertAd.paidRequest) this._breakAwaitingUnlock = false;
     this._currentTrack = prepared.track;
     this._announcementMsg = null;
     this._announcementContext = null;
@@ -1336,10 +1348,11 @@ export class JukeLoopSession {
       ...(prepared.hype ? { hype: { openingRank: prepared.hype.openingRank, encore: prepared.hype.encore } } : {}),
       ...(prepared.paid ? {
         sponsor: {
-          kind: 'djuke',
+          kind: prepared.paid.record.kind === 'devert' ? 'devert' : 'djuke',
           wallet: checksumAddress(prepared.paid.record.payer),
           amountUnits: prepared.paid.record.amountUnits,
           requestId: prepared.paid.record.requestId,
+          ...(prepared.devertAd ? { campaignId: prepared.devertAd.campaignId } : {}),
         },
       } : prepared.devertAd ? {
         sponsor: {
@@ -1352,7 +1365,7 @@ export class JukeLoopSession {
       startedAt: Date.now(),
       audible: false,
     };
-    if (prepared.devertAd) {
+    if (prepared.devertAd && !prepared.devertAd.paidRequest) {
       this._preparedDevertAd = null;
       this._persistMainRadioAdState();
     }
@@ -1438,7 +1451,7 @@ export class JukeLoopSession {
           this._disposePrepared(prepared, 'Advert slot not reached yet');
           prepared = await this._prepareNextPlayback(null, { allowAds: false });
         }
-        if (prepared?.devertAd && this.devertPlayback?.canPlayCampaign &&
+        if (prepared?.devertAd && !prepared.devertAd.paidRequest && this.devertPlayback?.canPlayCampaign &&
           !await this.devertPlayback.canPlayCampaign(prepared.devertAd.campaignId)) {
           this._disposePrepared(prepared, 'Campaign expired or removed before playback');
           this._preparedDevertAd = null;
@@ -1460,13 +1473,19 @@ export class JukeLoopSession {
         }
         if (prepared) {
           const show = this.getShowState().activeShow;
-          if (show.type === 'live_performance' || (prepared.hype
+          if (show.type === 'live_performance' || (prepared.paid && show.type === 'weekly_top10') || (prepared.hype
             ? show.instanceId !== prepared.hype.instanceId
             : show.id === 'friday-top10-hype')) {
             this._disposePrepared(prepared, 'Scheduled handoff reached');
             prepared = null;
             retryDelay = 1_000;
           }
+        }
+        if (prepared?.paid?.record.kind === 'devert' && this.djuke?.canPlay &&
+            !await this.djuke.canPlay(prepared.paid.record)) {
+          this._disposePrepared(prepared, 'Paid advert removed or paused before playback');
+          prepared = null;
+          retryDelay = 1_000;
         }
         if (prepared) {
           if (prepared.hype) {
@@ -1515,6 +1534,10 @@ export class JukeLoopSession {
     this._currentTrack    = null;
     this._announcementContext = null;
 
+    if (paidRecord?.kind === 'devert' && this.djuke) {
+      await this.djuke.complete(paidRecord, completedPlay?.trackId === trackRef?.trackId ? completedPlay : null);
+      return;
+    }
     if (completedPlay?.trackId?.startsWith('devert:')) return;
 
     if (trackRef && completedPlay?.trackId === trackRef.trackId) {

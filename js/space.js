@@ -218,6 +218,8 @@ async function _focusSharedNFTFromLocation() {
   const token = ++_sharedFocusLookupToken;
   const search = window.location?.search || '';
   if (!search) return;
+  const params = new URLSearchParams(search);
+  if (!['chainId', 'contract', 'tokenId'].some(key => params.has(key))) return;
 
   let identity;
   try {

@@ -1,10 +1,11 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261015-usdc-cents';
+import { escapeHtml, formatUsdcUnits, renderFundPendingTable, renderFundSummary, renderFundWeeklyArchive, renderUsdcAmount, renderWalletButton, resolveWalletLabel } from './fund-display.mjs?v=20261016-fund-panel';
 import { normalizeKnownAddress } from './known-addresses.mjs';
 import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs';
-import { previewPlaybackPayroll } from './radio-payroll.mjs?v=20261015-usdc-cents';
+import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261015-usdc-cents';
+import { initFundContributions } from './fund-contribution.mjs?v=20261019-fund-tour';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -26,6 +27,14 @@ export function usdcAmountHtml(balanceUnits) {
 }
 
 const balanceCache = new Map();
+let headerInitialization;
+let openPanel;
+
+export async function openFundPanel(slug) {
+  await initFundHeader();
+  if (!openPanel) throw new Error('Fund panels are not available');
+  return openPanel(slug);
+}
 
 function ethersLib() {
   return window.ethers;
@@ -56,16 +65,16 @@ export function fundPendingRows({ fundSlug, report, budgetUnits, minimumUnits = 
     return rankTopTenSongs(tracks).map(track => ({ ...track, amountUnits: String(amounts.get(track.trackId) ?? 0n) }));
   }
   const plan = previewPlaybackPayroll({ tracks, budgetUnits: BigInt(budgetUnits), minimumUnits: BigInt(minimumUnits) });
-  const artists = new Map(plan.entries.map(entry => [entry.wallet.toLowerCase(), entry]));
+  const artists = new Map(plan.entries.map(entry => [entry.shareKey || playbackArtistKey(entry), entry]));
   const progress = new Map();
   return tracks.filter(track => Number.isSafeInteger(track.plays) && track.plays > 0)
     .slice().sort((first, second) => second.plays - first.plays || String(first.trackId).localeCompare(String(second.trackId)))
     .map((track, index) => {
-      const key = String(track.wallet || '').toLowerCase();
+      const key = playbackArtistKey(track);
       const artist = artists.get(key);
       const prior = progress.get(key) || { plays: 0n, units: 0n };
       const plays = prior.plays + BigInt(track.plays);
-      const units = artist?.payable ? artist.amountUnits * plays / BigInt(artist.plays) : 0n;
+      const units = artist && (artist.payable || !artist.wallet) ? artist.amountUnits * plays / BigInt(artist.plays) : 0n;
       progress.set(key, { plays, units });
       return { ...track, rank: index + 1, amountUnits: String(units - prior.units) };
     });
@@ -94,7 +103,6 @@ function sourceHintMap(fundState = {}) {
 
 async function resolveWallet(address, provider, sponsorAliases, cache) {
   if (!address) return { address: '', label: '' };
-  if (!provider) return { address, label: address, aliases: [] };
   return resolveWalletLabel(address, provider, sponsorAliases, cache);
 }
 
@@ -116,7 +124,7 @@ async function inflowRow(source, { ensProvider, sponsorAliases, cache }) {
   const kind = source.kind || (funder === devertContract ? 'advert' : funder === djukeContract ? 'djuke' : 'sponsor');
   const advertiser = source.advertiser ? await resolveWallet(source.advertiser, ensProvider, sponsorAliases, cache) : null;
   const extra = kind === 'advert'
-    ? [source.campaignId ? `Campaign #${escapeHtml(String(source.campaignId))}` : '', source.title ? escapeHtml(source.title) : '', advertiser?.label ? `via ${advertiser.label}` : '']
+    ? [source.campaignId ? `Campaign #${source.campaignId}` : '', source.title || '']
       .filter(Boolean).join(' · ')
     : kind === 'djuke'
       ? source.requestId ? `DJuke request #${escapeHtml(String(source.requestId))}` : 'DJuke purchase'
@@ -130,7 +138,9 @@ async function inflowRow(source, { ensProvider, sponsorAliases, cache }) {
     amountUnits: String(source.amountUnits || '0'),
     timestamp,
     dateText: formatDateTime(timestamp),
-    sourceHtml: renderWalletButton(wallet, { role: kind }),
+    sourceHtml: renderWalletButton(wallet, { role: kind }) + (kind === 'advert'
+      ? `<div class="fund-breakdown-extra">${advertiser ? `Purchased by ${renderWalletButton(advertiser, { role: 'advertiser' })}` : 'Purchaser unavailable'}</div>`
+      : ''),
     sourceLabel: wallet.label || wallet.address,
     extra,
     txHash,
@@ -247,9 +257,12 @@ function renderBreakdown(details, fund, fundState) {
   else {
     const template = document.createElement('template');
     template.innerHTML = summaryHtml;
-    for (const selector of ['.fund-prize-label', '.fund-prize-amount', '.fund-prize-caption', '.fund-balance-totals', '.fund-flow-totals:not(.fund-balance-totals)']) {
+    for (const selector of ['.fund-prize-label', '.fund-prize-amount']) {
       summary.querySelector(selector).innerHTML = template.content.querySelector(selector).innerHTML;
     }
+    summary.querySelector('.fund-prize-caption')?.remove();
+    const caption = template.content.querySelector('.fund-prize-caption');
+    if (caption) summary.querySelector('.fund-prize').append(caption);
   }
   note.textContent = fundState?.ready === false
     ? `History indexing${fundState?.lastError ? ` paused: ${fundState.lastError}` : '…'}`
@@ -307,15 +320,23 @@ export async function loadFundState({ serviceUrl = globalThis.window?.DecentConf
 }
 
 export function fundStateFor(state, fundSlug, fallbackBalanceUnits = '0') {
-  const fund = state?.funds?.[fundSlug] || { balanceUnits: fallbackBalanceUnits };
+  const fund = state?.funds?.[fundSlug] || {};
   const category = fundSlug === 'dbusk-top10' ? 'top10' : 'playback';
   const weekly = state?.weekly?.funds?.[category];
-  const budgetUnits = /^\d+$/.test(String(weekly?.budgetUnits ?? '')) ? weekly.budgetUnits : null;
-  return { ...fund, ready: state?.ready ?? false, balanceUnits: weekly?.balanceUnits ?? fund.balanceUnits,
+  const balanceUnits = fund.balanceUnits ?? weekly?.balanceUnits ?? fallbackBalanceUnits;
+  const reservedUnits = weekly?.reservedUnits ?? fund.reservedUnits ?? null;
+  let budgetUnits = /^\d+$/.test(String(weekly?.budgetUnits ?? '')) ? weekly.budgetUnits : null;
+  const shareBps = state?.weekly?.fundShareBps;
+  if (budgetUnits != null && /^\d+$/.test(String(balanceUnits)) && /^\d+$/.test(String(reservedUnits)) &&
+    Number.isInteger(shareBps) && shareBps > 0 && shareBps <= 10000) {
+    const available = BigInt(balanceUnits) > BigInt(reservedUnits) ? BigInt(balanceUnits) - BigInt(reservedUnits) : 0n;
+    budgetUnits = String(available * BigInt(shareBps) / 10000n);
+  }
+  return { ...fund, ready: state?.ready ?? false, balanceUnits,
     budgetUnits,
     currentWeek: state?.currentReport?.week || state?.weekly?.currentPeriod?.week || '',
     pendingRows: fundPendingRows({ fundSlug, report: state?.currentReport, budgetUnits, minimumUnits: state?.weekly?.minimumPayoutUnits }),
-    reservedUnits: weekly?.reservedUnits ?? fund.reservedUnits ?? null };
+    reservedUnits };
 }
 
 async function loadBalance(fundSlug, state) {
@@ -329,11 +350,23 @@ async function loadBalance(fundSlug, state) {
   return { balanceUnits };
 }
 
-export async function initFundHeader() {
+export function initFundHeader() {
+  headerInitialization ||= initializeFundHeader();
+  return headerInitialization;
+}
+
+async function initializeFundHeader() {
   const bar = document.getElementById('artist-filter-bar');
   if (!bar || bar.dataset.fundHeaderReady === '1') return;
   bar.dataset.fundHeaderReady = '1';
   const { dialog, close } = dialogElements();
+  initFundContributions();
+  const proofLink = document.getElementById('fund-proof-ledger');
+  const serviceUrl = window.DecentConfig?.ipfsUploadServiceUrl;
+  if (proofLink && serviceUrl) {
+    proofLink.href = `${serviceUrl.replace(/\/$/, '')}/api/payroll/ledger`;
+    proofLink.hidden = false;
+  }
   let state = null;
   let activeFund = null;
   let pending = null;
@@ -366,22 +399,30 @@ export async function initFundHeader() {
     })().finally(() => { pending = null; });
     return pending;
   };
-  for (const fund of FUNDS) {
+  openPanel = async slug => {
+    const fund = FUNDS.find(value => value.slug === slug);
+    if (!fund || !dialog) throw new Error('Choose an available radio fund');
+    if (opening) throw new Error('Fund details are already opening. Try again shortly');
+    opening = true;
+    activeFund = fund;
     const button = document.getElementById(`${fund.slug}-button`);
-    if (!button) continue;
-    button.addEventListener('click', async () => {
-      if (opening || !dialog) return;
-      opening = true;
-      activeFund = fund;
-      button.disabled = true;
-      try {
-        await refresh();
-        await renderActive();
-        if (activeFund === fund && !dialog.open) dialog.showModal();
-      } catch {
+    if (button) button.disabled = true;
+    try {
+      await refresh();
+      await renderActive();
+      const selection = document.getElementById('fund-contribution-slug');
+      if (selection) selection.value = slug;
+      if (activeFund === fund && !dialog.open) dialog.showModal();
+    } finally { opening = false; if (button) button.disabled = false; }
+  };
+  for (const fund of FUNDS) {
+    document.getElementById(`${fund.slug}-button`)?.addEventListener('click', () => {
+      openPanel(fund.slug).catch(error => {
+        console.warn('[fund-panel]', error);
         const { note } = dialogElements();
-        if (note) note.textContent = 'Unable to refresh fund details. Try again shortly.';
-      } finally { opening = false; button.disabled = false; }
+        if (note) note.textContent = `Unable to refresh fund details: ${error.message}. Try again shortly.`;
+        if (dialog && !dialog.open) dialog.showModal();
+      });
     });
   }
   close?.addEventListener('click', () => dialog?.close());
@@ -392,6 +433,13 @@ export async function initFundHeader() {
   await refresh();
   setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 15000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh().catch(() => {}); });
+  document.addEventListener('fund-contribution-confirmed', () => {
+    refresh().catch(error => {
+      console.warn('[fund-panel]', error);
+      const { note } = dialogElements();
+      if (note) note.textContent = `Contribution confirmed, but fund refresh failed: ${error.message}`;
+    });
+  });
 }
 
 if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', () => { initFundHeader().catch(() => {}); }, { once: true });

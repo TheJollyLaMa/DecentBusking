@@ -59,18 +59,80 @@ test('song settlement pays each winning song once and rejects an overlapping art
 
 test('playback preview groups artists, caps its budget, and retains dust and rounding', async () => {
   const { previewPlaybackPayroll } = await import(url);
-  const result = previewPlaybackPayroll({ tracks: [track(1, 1), track(1, 1), track(2, 1), track(3, 1), { plays: 999 }],
-    budgetUnits: 3000000n, minimumUnits: 1000000n });
-  assert.equal(result.entries.length, 3);
-  assert.equal(result.totalPlays, 4n);
-  assert.equal(result.allocatedUnits, 1500000n);
-  assert.equal(result.remainderUnits, 1500000n);
-  assert.equal(result.entries[0].amountUnits, 1500000n);
-  assert.equal(result.entries[1].payable, false);
+  const result = previewPlaybackPayroll({ tracks: [track(1, 1), track(1, 1), track(2, 1), track(3, 1), { plays: 4 }],
+    budgetUnits: 8000000n, minimumUnits: 1000000n });
+  assert.equal(result.entries.length, 4);
+  assert.equal(result.totalPlays, 8n);
+  assert.equal(result.forfeitedUnits, 4000000n);
+  assert.equal(result.allocatedUnits, 4000000n);
+  assert.equal(result.remainderUnits, 4000000n);
+  assert.equal(result.entries[0].amountUnits, 2000000n);
+  assert.equal(result.entries[3].wallet, '');
+  assert.equal(result.entries[3].payable, false);
+  assert.equal(result.entries[3].amountUnits, 4000000n);
   const empty = previewPlaybackPayroll({ tracks: [], budgetUnits: 1000000n });
   assert.equal(empty.remainderUnits, 1000000n);
   const zeroAddress = previewPlaybackPayroll({ tracks: [track(0, 10)], budgetUnits: 1000000n });
-  assert.equal(zeroAddress.entries.length, 0);
+  assert.equal(zeroAddress.entries.length, 1);
+  assert.equal(zeroAddress.entries[0].payable, false);
+  assert.equal(zeroAddress.forfeitedUnits, 1000000n);
+});
+
+test('walletless Top 10 winners forfeit their original prize without increasing other prizes', async () => {
+  const { previewTopTenSongPayroll } = await import('../js/top-ten-prizes.mjs');
+  const result = previewTopTenSongPayroll({ tracks: [
+    { ...track(1, 3), trackId: 'first', votes: 9 },
+    { trackId: 'unlinked', title: 'Unlinked', plays: 2, votes: 8 },
+    { ...track(2, 1), trackId: 'third', votes: 7 },
+  ], budgetUnits: 8000000n });
+  assert.deepEqual(result.entries.map(entry => [entry.trackId, entry.amountUnits, entry.payable]), [
+    ['first', 4000000n, true], ['unlinked', 2000000n, false], ['third', 2000000n, true],
+  ]);
+  assert.equal(result.allocatedUnits, 6000000n);
+  assert.equal(result.forfeitedUnits, 2000000n);
+  assert.equal(result.remainderUnits, 2000000n);
+});
+
+test('frozen song receipts with forfeited ranks validate and settle only against the full closed-week chart', async () => {
+  const { finalizeRadioAllocation, validateRadioReceipt, settleRadioAllocation } = await import(url);
+  const { id } = require('../discord-bot/node_modules/ethers');
+  const config = { routerAddress: track(3, 1).wallet, assetAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    funds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' } };
+  const report = { week: 'NY-2026-10-12', current: false, tracks: [
+    { ...track(1, 3), trackId: 'first', title: 'First', votes: 9 },
+    { trackId: 'unlinked', title: 'Unlinked', plays: 2, votes: 8 },
+    { ...track(2, 1), trackId: 'third', title: 'Third', votes: 7 },
+  ] };
+  const allocation = finalizeRadioAllocation({ ...config, report, category: 'top10', fundSlug: 'dbusk-top10',
+    budgetUnits: 8000000n, minimumUnits: 10000n, topTenScheduleVersion: 3, now: Date.parse('2026-10-19T05:00:00Z') });
+  const original = JSON.stringify(allocation);
+  assert.deepEqual(allocation.entries.map(entry => [entry.rank, entry.amountUnits]), [[1, '4000000'], [3, '2000000']]);
+  assert.throws(() => validateRadioReceipt(allocation, config), /full closed-week report/);
+  assert.equal(validateRadioReceipt(allocation, { ...config, report }), allocation);
+  const changed = structuredClone(allocation);
+  changed.entries[0].amountUnits = '5000000';
+  changed.allocatedUnits = '7000000';
+  changed.remainderUnits = '1000000';
+  assert.throws(() => validateRadioReceipt(changed, { ...config, report }), /frozen chart/);
+  assert.throws(() => validateRadioReceipt(allocation, { ...config, report: { ...report, current: true } }), /frozen chart/);
+  const paid = new Set();
+  const sent = [];
+  const payout = async (...args) => {
+    sent.push(args);
+    return { hash: `tx-${sent.length}`, wait: async () => { paid.add(args[4]); return { status: 1 }; } };
+  };
+  payout.staticCall = async () => {};
+  const options = { allocation, report, metadataUri: 'ipfs://frozen', metadataHash: id(original), owner: config.routerAddress,
+    hashReference: id, signer: { provider: { getNetwork: async () => ({ chainId: 8453 }) }, getAddress: async () => config.routerAddress },
+    router: { target: config.routerAddress, paused: async () => false, PAYROLL_ROLE: async () => 'payroll',
+      hasRole: async () => true, approvedAssets: async () => true, funds: async () => ({ exists: true, active: true }),
+      contributors: async () => ({ approved: true }), completedWorkReferences: async reference => paid.has(reference),
+      fundBalances: async () => 8000000n, payout } };
+  await assert.rejects(settleRadioAllocation({ ...options, report: undefined }), /full closed-week report/);
+  assert.equal((await settleRadioAllocation(options)).confirmed.length, 2);
+  assert.equal(sent.reduce((sum, args) => sum + args[3], 0n), 6000000n);
+  assert.equal((await settleRadioAllocation(options)).skipped, 2);
+  assert.equal(JSON.stringify(allocation), original);
 });
 
 test('Top 10 preview ranks unique artists by votes and splits only its capped prize budget', async () => {

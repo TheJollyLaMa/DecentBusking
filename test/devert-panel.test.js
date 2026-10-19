@@ -121,7 +121,7 @@ test('public queue loads without a wallet, refreshes tiers, and clears stale quo
   assert.equal(ui.element('devert-price').textContent, 'Loading…');
   await ui.settle();
   assert.equal(ui.element('devert-price').textContent, '1.00');
-  assert.match(ui.element('devert-queue-status').textContent, /No ads queued/);
+  assert.match(ui.element('devert-queue-status').textContent, /No active campaigns in ordinary rotation/);
   assert.equal(ui.requests.some(url => url.includes('/ads?')), false);
   assert.equal(ui.timers.at(-1).delay, 30_000);
   ui.read(async () => snapshot(Array.from({ length: 7 }, (_, i) => campaign(i))));
@@ -224,8 +224,10 @@ test('markup places live controls and public queue first with independent disclo
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const panel = html.slice(html.indexOf('<aside id="devert-panel"'), html.indexOf('<dialog id="devert-instructions"'));
   assert.doesNotMatch(panel, /Ad studio · Base|7 Days|Campaign Instructions/);
-  assert.ok(panel.indexOf('VertLoop Live') < panel.indexOf('Current Queue Price'));
-  assert.ok(panel.indexOf('Current Queue Price') < panel.indexOf('id="devert-queue"'));
+  assert.ok(panel.indexOf('VertLoop Live') < panel.indexOf('Paid Advert Queue'));
+  assert.ok(panel.indexOf('Paid Advert Queue') < panel.indexOf('id="devert-queue"'));
+  assert.match(panel, /id="devert-paid-queue-button" type="button" disabled/);
+  assert.match(panel, /Ordinary Campaign Rotation/);
   assert.ok(panel.indexOf('id="devert-queue"') < panel.indexOf('id="devert-search"'));
   for (const id of ['devert-my-ads', 'devert-submit-ad', 'devert-run-campaign']) {
     assert.match(panel, new RegExp(`<details id="${id}" class="devert-disclosure">`));

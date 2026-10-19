@@ -6,10 +6,20 @@ import { payrollPeriodFromKey, PAYROLL_TIME_ZONE, overlappingUtcWeeks } from './
 
 const WALLET = /^0x[0-9a-fA-F]{40}$/;
 
+function hasPayoutWallet(wallet) {
+  return WALLET.test(wallet || '') && !/^0x0{40}$/i.test(wallet);
+}
+
+export function playbackArtistKey(track) {
+  if (hasPayoutWallet(track?.wallet)) return track.wallet.toLowerCase();
+  const artist = String(track?.artist || '').trim().toLowerCase();
+  return `unlinked:${artist ? `artist:${artist}` : `track:${String(track?.trackId || '').toLowerCase()}`}`;
+}
+
 function eligibleArtists(tracks) {
   const artists = new Map();
   for (const track of tracks) {
-    if (!WALLET.test(track.wallet || '') || /^0x0{40}$/i.test(track.wallet) || !Number.isSafeInteger(track.plays) || track.plays <= 0) continue;
+    if (!hasPayoutWallet(track.wallet) || !Number.isSafeInteger(track.plays) || track.plays <= 0) continue;
     const key = track.wallet.toLowerCase();
     const artist = artists.get(key) || { wallet: track.wallet, artist: track.artist, plays: 0, tracks: 0 };
     artist.plays += track.plays;
@@ -29,7 +39,19 @@ function checkBudget(budgetUnits, minimumUnits) {
 export function previewPlaybackPayroll({ tracks, budgetUnits, minimumUnits = 0n }) {
   checkBudget(budgetUnits, minimumUnits);
   const artists = eligibleArtists(tracks);
-  const totalPlays = artists.reduce((total, artist) => total + BigInt(artist.plays), 0n);
+  const unlinkedArtists = new Map();
+  for (const track of tracks) {
+    if (hasPayoutWallet(track.wallet) || !Number.isSafeInteger(track.plays) || track.plays <= 0) continue;
+    const artist = String(track.artist || '');
+    const key = playbackArtistKey(track);
+    const entry = unlinkedArtists.get(key) || { wallet: '', artist, plays: 0, tracks: 0, shareKey: key };
+    entry.plays += track.plays;
+    if (!Number.isSafeInteger(entry.plays)) throw new Error('Playback total exceeds safe accounting precision');
+    entry.tracks++;
+    unlinkedArtists.set(key, entry);
+  }
+  const totalPlays = tracks.reduce((total, track) =>
+    total + (Number.isSafeInteger(track.plays) && track.plays > 0 ? BigInt(track.plays) : 0n), 0n);
   let allocated = 0n;
   const entries = artists.map(artist => {
     const amountUnits = totalPlays ? budgetUnits * BigInt(artist.plays) / totalPlays : 0n;
@@ -37,7 +59,14 @@ export function previewPlaybackPayroll({ tracks, budgetUnits, minimumUnits = 0n 
     if (payable) allocated += amountUnits;
     return { ...artist, amountUnits, payable };
   });
-  return { entries, totalPlays, allocatedUnits: allocated, remainderUnits: budgetUnits - allocated };
+  const forfeitedEntries = [...unlinkedArtists.values()].map(artist => ({
+    ...artist,
+    amountUnits: totalPlays ? budgetUnits * BigInt(artist.plays) / totalPlays : 0n,
+    payable: false,
+  }));
+  const forfeitedUnits = forfeitedEntries.reduce((total, artist) => total + artist.amountUnits, 0n);
+  entries.push(...forfeitedEntries);
+  return { entries, totalPlays, forfeitedUnits, allocatedUnits: allocated, remainderUnits: budgetUnits - allocated };
 }
 
 function voteRankedArtists(tracks) {
@@ -169,7 +198,7 @@ export function finalizeRadioAllocation({ report, category, budgetUnits, minimum
   const entries = plan.entries.filter(entry => entry.payable);
   if (!entries.length) throw new Error('No payouts meet the minimum threshold');
   const songPrizes = category === 'top10' && topTenScheduleVersion >= 3;
-  if (songPrizes && entries.some(entry => !WALLET.test(entry.wallet || '') || /^0x0{40}$/i.test(entry.wallet))) throw new Error('Link the artist wallet for every winning song before finalizing Top 10');
+  if (songPrizes && entries.some(entry => !hasPayoutWallet(entry.wallet))) throw new Error('Link the artist wallet for every winning song before finalizing Top 10');
   return { schemaVersion: songPrizes ? 5 : category === 'top10' ? 4 : period ? 3 : 2, ...(period ? { timeZone: PAYROLL_TIME_ZONE, startAt: period.startAt, endAt: period.endAt, partial: Boolean(report.partial) } : {}),
     ranking: category === 'playback' ? 'qualified-plays' : songPrizes ? 'song-votes-halving' : `${normalizeTopTenRanking(ranking)}-halving`, station: 'decentbusking', chainId: 8453, category, week: report.week,
     routerAddress, assetAddress, fundSlug, budgetUnits: budgetUnits.toString(), minimumUnits: minimumUnits.toString(),
@@ -182,7 +211,7 @@ export function finalizeRadioAllocation({ report, category, budgetUnits, minimum
         ...(songPrizes ? { trackId: entry.trackId } : {}) }) })) };
 }
 
-export async function settleRadioAllocation({ allocation, metadataUri, metadataHash, router, signer, owner, hashReference, onStep = () => {}, onConfirmed = async () => {} }) {
+export async function settleRadioAllocation({ allocation, metadataUri, metadataHash, report, router, signer, owner, hashReference, onStep = () => {}, onConfirmed = async () => {} }) {
   if (!allocation || allocation.chainId !== 8453 || allocation.routerAddress?.toLowerCase() !== router.target.toLowerCase()) throw new Error('Finalized allocation does not match this Base router');
   if (!/^ipfs:\/\/[^/\s]+$/.test(metadataUri || '') || !/^0x[0-9a-fA-F]{64}$/.test(metadataHash || '')) throw new Error('An immutable IPFS allocation receipt is required');
   if (allocation.assetAddress?.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase()) throw new Error('Radio settlement supports native Base USDC only');
@@ -193,7 +222,7 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
     topTenScheduleVersion: allocation.schemaVersion >= 5 ? 3 : allocation.schemaVersion < 4 ? 1 : 2,
     fundSlug: allocation.fundSlug, routerAddress: allocation.routerAddress, assetAddress: allocation.assetAddress });
   if (validated.week !== allocation.week) throw new Error('Invalid completed week');
-  if (allocation.schemaVersion >= 5 && !radioAllocationMatchesReport({ week: allocation.week, current: false, tracks: allocation.entries }, allocation)) throw new Error('Song prizes do not match the frozen chart allocation');
+  if (allocation.schemaVersion >= 5 && !radioAllocationMatchesReport(report || { week: allocation.week, current: false, tracks: allocation.entries }, allocation)) throw new Error('Song prizes do not match the frozen chart allocation; load the full closed-week report including forfeited positions');
   if (Number((await signer.provider.getNetwork()).chainId) !== 8453 || (await signer.getAddress()).toLowerCase() !== owner?.toLowerCase()) throw new Error('Connect the Base owner wallet');
   if (await router.paused()) throw new Error('Settlement router is paused');
   if (!await router.hasRole(await router.PAYROLL_ROLE(), owner)) throw new Error('PAYROLL_ROLE is required');
@@ -249,7 +278,7 @@ export async function settleRadioAllocation({ allocation, metadataUri, metadataH
   return { confirmed, skipped: allocation.entries.length - unpaid.length };
 }
 
-export function validateRadioReceipt(allocation, { routerAddress, assetAddress, funds }) {
+export function validateRadioReceipt(allocation, { routerAddress, assetAddress, funds, report }) {
   if (!allocation || ![1, 2, 3, 4, 5].includes(allocation.schemaVersion) || allocation.chainId !== 8453 ||
       !['playback', 'top10'].includes(allocation.category) || allocation.station !== 'decentbusking' ||
       allocation.routerAddress?.toLowerCase() !== routerAddress.toLowerCase() || allocation.assetAddress?.toLowerCase() !== assetAddress.toLowerCase() ||
@@ -265,7 +294,7 @@ export function validateRadioReceipt(allocation, { routerAddress, assetAddress, 
     ranking: allocation.schemaVersion === 1 ? 'plays' : allocation.ranking,
     topTenScheduleVersion: allocation.schemaVersion >= 5 ? 3 : allocation.schemaVersion < 4 ? 1 : 2,
     fundSlug: allocation.fundSlug, routerAddress, assetAddress });
-  if (allocation.schemaVersion >= 5 && !radioAllocationMatchesReport({ week: allocation.week, current: false, tracks: allocation.entries }, allocation)) throw new Error('Song prizes do not match the frozen chart allocation');
+  if (allocation.schemaVersion >= 5 && !radioAllocationMatchesReport(report || { week: allocation.week, current: false, tracks: allocation.entries }, allocation)) throw new Error('Song prizes do not match the frozen chart allocation; load the full closed-week report including forfeited positions');
   const identities = new Set();
   let total = 0n;
   for (const entry of allocation.entries) {

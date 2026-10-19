@@ -39,15 +39,18 @@ import { createRpcProxy } from './rpc-proxy.js';
 import { createAlchemyWebhook } from './alchemy-webhook.js';
 import { createFundLedger } from './fund-ledger.js';
 import { createWeeklyPayflow, findBlockAtOrBefore, readClosingFundBalance } from './weekly-payflow.js';
+import { createWeeklyPayrollReporter } from './weekly-payroll-report.js';
 import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
 
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
-import { syncMintedTracksFromChain, createVerifiedMintQueueReader, discoverPinataMetadataGateway, readOwnedDevertAds, resolveDevertCampaignMedia } from './mint-sync.js';
+import { syncMintedTracksFromChain, createVerifiedMintQueueReader, discoverPinataMetadataGateway, readOwnedDevertAds, resolveDevertCampaignMedia, resolveApprovedDevertCampaignMedia } from './mint-sync.js';
 import { nftCatalogPage } from '../js/nft-loader.js';
 import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
+import { createDevertQueueReader, createDevertQueueRuntime, createDevertQueueCatalogSync, combinePaidQueues } from './devert-queue.js';
+import { DEVERT_QUEUE_ABI } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
 import { startDevertLoopWorker } from './devert-loop.js';
@@ -125,6 +128,7 @@ import {
 const _jukeLoopRestartTimers = new Map();
 const _jukeLoopRestartAttempts = new Map();
 let _djukeRuntime = null;
+let _radioPaidQueues = null;
 let _devertPlaybackRuntime = null;
 let _devertPlaybackInitialization = null;
 let _devertLoopWorker = null;
@@ -888,6 +892,24 @@ async function main() {
   };
   setInterval(budgetPaced(refreshPayflow), 15_000).unref();
 
+  const payrollReportStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage,
+    pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
+    gateway: config.ipfsGateway, name: 'decentbusking-weekly-payroll-reports.json',
+    tags: { app: 'decentbusking', kind: 'weekly-payroll-reports', schema: '1' },
+    serialize: value => value, deserialize: value => value }) : null;
+  const payrollReporter = createWeeklyPayrollReporter({
+    config: payrollAssets, channelId: config.jukeboxChannelId,
+    siteUrl: config.siteUrl,
+    getWeeklyPayflow: () => payflow.getState(),
+    getPaymentLedger: () => ({ ...paymentLedger.getState(), ready: paymentLedgerReady }),
+    getReports: () => getWeeklyPlayHistory({ weeks: 52, calendar: 'new-york' }),
+    getChannel: () => client.channels.fetch(config.jukeboxChannelId),
+    restore: payrollReportStore?.restore, save: payrollReportStore?.save,
+  });
+  const refreshPayrollReports = () => payrollReporter.tick()
+    .catch(error => console.warn('[weekly-payroll-report]', error.message));
+  setInterval(refreshPayrollReports, 15_000).unref();
+
   const fundStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-fund-ledger.json', tags: { app: 'decentbusking', kind: 'fund-ledger', schema: '1' },
@@ -895,7 +917,7 @@ async function main() {
   const fundLedger = createFundLedger({
     provider: paymentProvider,
     router: payflowRouter,
-    config: payrollAssets,
+    config: { ...payrollAssets, devertQueueContractAddress: process.env.DEVERT_QUEUE_CONTRACT_ADDRESS },
     getWeeklyPayflow: () => payflow.getState(),
     readDevertState: () => readDevertState?.(),
     readDjukeState: () => readDjukeState?.(),
@@ -1003,6 +1025,62 @@ async function main() {
     console.warn('[djuke] Queue is read-only: DJUKE_FULFILLER_PRIVATE_KEY, CHECKPOINT_MIRROR_SECRET and PINATA_JWT are all required for paid playback.');
   }
 
+  let readDevertQueue;
+  let paidAdRuntime;
+  let syncPaidAdRemovals;
+  const paidAdAddress = process.env.DEVERT_QUEUE_CONTRACT_ADDRESS;
+  if (paidAdAddress) {
+    let approvedAdCampaignIds = [];
+    const provider = getRpcRouter().provider('critical', 'devert-paid-queue');
+    const canFulfill = !!(readDevertState && devertSchedulerPrivateKey && checkpointMirror && config.pinataJwt && devertRemovals);
+    readDevertQueue = createDevertQueueReader({ provider, contractAddress: paidAdAddress,
+      paymentsEnabled: canFulfill && process.env.DEVERT_QUEUE_PAYMENTS_ENABLED === 'true',
+      getApprovedCampaignIds: () => approvedAdCampaignIds, cacheMs: 5000 });
+    if (canFulfill) {
+      const worker = new Wallet(devertSchedulerPrivateKey, provider);
+      const queueContract = new Contract(paidAdAddress, DEVERT_QUEUE_ABI, worker);
+      if ((await queueContract.campaigns()).toLowerCase() !== process.env.DEVERT_CONTRACT_ADDRESS?.toLowerCase()) {
+        throw new Error('Paid advert queue uses a different campaign contract');
+      }
+      if (!await queueContract.hasRole(await queueContract.FULFILLER_ROLE(), worker.address)) {
+        throw new Error('Paid advert worker does not have the queue fulfiller role');
+      }
+      syncPaidAdRemovals = createDevertQueueCatalogSync({
+        contract: queueContract, removals: devertRemovals, readCampaigns: readDevertState,
+        beforeRemove: campaignId => paidAdRuntime?.prepareCampaignRemoval(campaignId),
+        resolveApprovedMedia: (campaign, cid) => resolveApprovedDevertCampaignMedia(campaign, cid, {
+          playlist: getPlaylist(), nfts: _nftCatalog || [],
+        }),
+      });
+      const readConfirmedQueue = readDevertQueue;
+      readDevertQueue = async () => {
+        approvedAdCampaignIds = await syncPaidAdRemovals();
+        return readConfirmedQueue();
+      };
+      const store = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
+        uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+        name: 'decentbusking-devert-paid-journal.json',
+        requireLocalMirror: true,
+        tags: { app: 'decentbusking', kind: 'devert-paid-journal', schema: '1' },
+        serialize: value => value, deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
+      const paidAdRuntimeBase = createDevertQueueRuntime({ readState: readConfirmedQueue, store, contract: queueContract,
+        isCampaignRemoved: campaignId => devertRemovals.isRemoved(campaignId),
+        resolveCampaignMedia: (campaign, cid) => resolveDevertCampaignMedia(campaign, cid, {
+          playlist: getPlaylist(), nfts: _nftCatalog || [],
+        }) });
+      paidAdRuntime = {
+        ...paidAdRuntimeBase,
+        async nextPaid() {
+          approvedAdCampaignIds = await syncPaidAdRemovals();
+          return paidAdRuntimeBase.nextPaid();
+        },
+      };
+      setInterval(() => syncPaidAdRemovals().catch(error => console.warn('[devert-queue] Catalog reconciliation pending:', error.message)), 15000).unref();
+    } else console.warn('[devert-queue] Read-only: scheduler, durable mirror, Pinata and campaign removal state are required.');
+  }
+  _radioPaidQueues = (_djukeRuntime || paidAdRuntime)
+    ? combinePaidQueues({ songs: _djukeRuntime, adverts: paidAdRuntime }) : null;
+
   console.log(`[rpc] Base tiers: ${getRpcRouter().health().tiers.paid} paid, ${getRpcRouter().health().tiers.public} public; consumers: ${getRpcRouter().describe()}`);
   const alchemyWebhook = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY ? createAlchemyWebhook({
     signingKey: process.env.ALCHEMY_WEBHOOK_SIGNING_KEY,
@@ -1011,6 +1089,7 @@ async function main() {
         refresh: [comparePayments, refreshPayflow, refreshFundLedger, refreshEarningsLedger] },
       { label: 'devert', addresses: [process.env.DEVERT_CONTRACT_ADDRESS], refresh: [syncDevertDjukeBoosts, refreshFundLedger] },
       { label: 'djuke', addresses: [djukeAddress], refresh: [syncDevertDjukeBoosts, refreshFundLedger] },
+      { label: 'devert-paid-queue', addresses: [paidAdAddress], refresh: [refreshFundLedger] },
       { label: 'nft', addresses: config.nftContractAddresses || [config.nftContractAddress], refresh: [() => syncMintedTracks(config)] },
     ],
   }) : null;
@@ -1082,6 +1161,7 @@ async function main() {
         ...(config.nftContractAddresses || [config.nftContractAddress]),
         process.env.DJUKE_CONTRACT_ADDRESS || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9',
         process.env.DEVERT_CONTRACT_ADDRESS || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9',
+        process.env.DEVERT_QUEUE_CONTRACT_ADDRESS,
         payrollAssets.routerAddress,
         ...Object.values(payrollAssets.assets || {}).map(asset => asset?.address),
       ],
@@ -1138,10 +1218,12 @@ async function main() {
         (track.messageId ? session._getFreshUrl({ ...track, ipfsCid: null }) : null);
     },
     getDevertState: readDevertState,
+    getDevertQueue: readDevertQueue,
     removeDevertCampaign: devertRemovals ? async payload => {
       const removal = await devertRemovals.remove(payload);
       await getActiveJukeLoopSession()?.removeDevertCampaign(payload.campaignId);
       _devertLoopWorker?.removeCampaign(payload.campaignId);
+      if (syncPaidAdRemovals) await syncPaidAdRemovals();
       return removal;
     } : undefined,
     getFunds: async () => fundLedger.getCurrentState(),
@@ -1225,6 +1307,7 @@ async function main() {
     getRadioHistory: async ({ weeks, wallet, includeAllTime, calendar }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime, calendar }),
     getWeeklyPayflow: ({ wallet }) => payflow.getState({ wallet }),
     getPaymentLedger: () => ({ ...paymentLedger.getState(), ready: paymentLedgerReady,
+      payrollAnnouncements: payrollReporter.getState(),
       repositorySync: process.env.PAYROLL_GITHUB_TOKEN ? repositorySyncError || 'automatic dispatch configured' : 'manual GitHub ledger workflow; PAYROLL_GITHUB_TOKEN not configured' }),
     reconcilePayment: async txHash => {
       if (!paymentLedgerReady) throw new Error('Payment ledger is restoring; retry shortly');
@@ -2030,7 +2113,7 @@ async function startJukeLoop(client, config) {
       textChannel,
       client,
       ipfsGateway: config.ipfsGateway,
-      djuke: _djukeRuntime,
+      djuke: _radioPaidQueues,
       livePerformanceEvents,
       schedule: defaultRadioSchedule(liveWeeklySchedule),
       devertPlayback: _devertPlaybackRuntime,

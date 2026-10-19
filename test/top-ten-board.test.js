@@ -31,7 +31,8 @@ test('chart flights connect continuously between title, vote and prize visits wi
 
 test('song prizes follow chart rank, split the remaining pot, and conserve every USDC unit', async () => {
   const { previewTopTenSongPayroll } = await import('../js/top-ten-prizes.mjs');
-  const tracks = Array.from({ length: 10 }, (_value, index) => ({ trackId: `song-${index}`, title: `Song ${index}`, votes: 20 - index, plays: 1 }));
+  const wallet = `0x${'1'.repeat(40)}`;
+  const tracks = Array.from({ length: 10 }, (_value, index) => ({ trackId: `song-${index}`, title: `Song ${index}`, votes: 20 - index, plays: 1, wallet }));
   const small = previewTopTenSongPayroll({ tracks, budgetUnits: 12250000n });
   assert.deepEqual(small.entries.map(entry => entry.amountUnits), [6125000n, 3062500n, 1531250n, 765625n, 382812n, 191406n, 191407n]);
   assert.equal(small.allocatedUnits, 12250000n);
@@ -82,6 +83,18 @@ test('chart prize rows update after deposits and vote changes without awarding t
   assert.equal(changed[0].prizeUnits, 6125000n);
   assert.equal(changed[1].prizeUnits, 3062500n);
   assert.equal(topTenPrizeRows(tracks, null)[0].prizeUnits, null);
+});
+
+test('Top 10 prize amounts warn and grey out when a ranked artist has no payout wallet', () => {
+  const fs = require('node:fs');
+  const board = fs.readFileSync(path.join(__dirname, '../js/top-ten-board.mjs'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '../css/styles.css'), 'utf8');
+  assert.match(board, /prize\.classList\.add\('is-wallet-unlinked'\)/);
+  assert.match(board, /forfeited at Monday midnight, America\/New_York/);
+  assert.match(board, /roll into next week's Top 10 fund without being redistributed/);
+  assert.match(board, /register your wallet ASAP/);
+  assert.match(board, /prize\.tabIndex = 0/);
+  assert.match(styles, /\.top-ten-prize\.is-wallet-unlinked \.usdc-amount-text/);
 });
 
 test('public song leaderboard ranks weekly net votes and highlights the live track', async () => {

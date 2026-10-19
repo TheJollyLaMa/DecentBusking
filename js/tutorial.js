@@ -337,6 +337,7 @@ function _cancelAutoLaunch() {
 }
 
 function _autoLaunch() {
+  if (window.location?.search && new URLSearchParams(window.location.search).get('tutorial') === 'payroll') return;
   if (_autoLaunchTimer || _isSeen() || _overlay?.hidden === false) return;
   _autoLaunchTimer = setTimeout(() => {
     _autoLaunchTimer = null;
