@@ -691,6 +691,7 @@ export class JukeLoopSession {
       topTenHype, topTenHypeStore, audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS, websitePlayback = false }) {
     this.websitePlayback = websitePlayback;
     this._discordOutputsAttached = false;
+    this._discordOutputsBlocked = false;
     this.voiceChannel = voiceChannel;
     this.textChannel  = textChannel;
     this.client       = client;
@@ -925,7 +926,18 @@ export class JukeLoopSession {
   _sendPlaybackNotice(content) {
     if (!this.textChannel || this.client?.isReady?.() === false) return;
     this.textChannel.send({ content, flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
-      .catch(error => console.warn('[jukeloop] Playback notice deferred:', error.message));
+      .catch(error => this._reportDiscordOutputFailure(error));
+  }
+
+  _reportDiscordOutputFailure(error) {
+    if (error.status === 403 || [50001, 50013].includes(error.code)) {
+      this._discordOutputsBlocked = true;
+      this._discordOutputsAttached = false;
+      this.textChannel = null;
+      console.error('[jukeloop] Discord text output paused: missing access/permissions. Website broadcast continues; fix permissions and restart JukeLoop.');
+    } else {
+      console.warn('[jukeloop] Discord text delivery failed; inspect Discord REST diagnostics.');
+    }
   }
 
   setLivePerformanceEvents(events) {
@@ -1380,7 +1392,7 @@ export class JukeLoopSession {
     const msg = await this.textChannel
       .send({ content: message, flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
       .catch(error => {
-        console.warn('[jukeloop] Now-playing announcement failed:', error.message);
+        this._reportDiscordOutputFailure(error);
         return null;
       });
     if (!msg || devertAd || this._nowPlaying?.playId !== playId) return;

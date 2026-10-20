@@ -145,11 +145,61 @@ Discord's `Retry-After` instead of repeatedly restarting.
 paid-checkout readiness follows actual broadcast playback and checkpoint safety,
 not Discord connectivity.
 
-Before a deployment during a known Discord cooldown, preserve the retry timestamp
-using `DISCORD_LOGIN_NOT_BEFORE` (an ISO timestamp in UTC). Both bot logins defer
-all gateway discovery until that time without delaying website radio startup.
+Both bots now have a connection supervisor. Transient startup failures retry with
+fresh clients after 30 seconds, then 60 seconds, doubling to a 15-minute ceiling.
+An invalidated session is cleaned up and reconnected without replacing the website
+broadcast; ordinary gateway reconnects remain managed by discord.js. Invalid
+credentials, forbidden startup access and invalid/disallowed gateway intents stop
+automatic retries and report `blocked` for operator attention. Fix credentials or
+permissions before restarting. Graceful shutdown cancels pending login/backoff
+and releases the current connections. Background jobs are installed once, not
+once per reconnect. Transient text-channel attachment failures retry once per
+minute; forbidden access stops that retry until an operator fixes permissions and
+restarts JukeLoop.
+
+Gateway and global HTTP 429 cooldowns are saved to the separate
+`decentbusking-discord-cooldowns.json` Pinata checkpoint (`discord-cooldowns` tags).
+Only the newest checkpoint is restored. If restore fails, Discord connections
+wait and retry storage restoration; website radio continues. If saving fails,
+the current process still respects the deadline, reports `persistence: failed`,
+and retries checkpointing each minute. Do not redeploy during a failed save:
+first preserve the logged deadline with `DISCORD_LOGIN_NOT_BEFORE` (UTC ISO time).
+This setting also supports restrictions discovered before automatic persistence
+was installed. An unscoped gateway restriction conservatively delays both bot
+logins because it may be IP-based; a token-global restriction delays only that bot.
 Do not rotate IPs, change endpoints or restart repeatedly to evade a restriction.
 An expired timestamp has no effect and can be removed during routine maintenance.
+
+#### Diagnosing Discord in place
+
+Read `GET /api/radio` and inspect `discord.diagnostics` before restarting:
+
+* `bots.dbusker` and `bots["devert-loop"]` show connection phase, `retryAt`,
+  cumulative failed attempts, HTTP totals and recent lifecycle/error events.
+* `invalidLast10Minutes` counts observed 401/403 and non-shared 429 responses in
+  a rolling window with one-second resolution. It is not Discord's authoritative
+  IP-wide count and cannot identify another host sharing the egress IP.
+* Error routes replace IDs, webhook tokens, reaction text and all unknown path
+  components with `:id`. Query strings, bodies, usernames, authorization headers,
+  arbitrary error messages and tokens are never copied into diagnostics.
+* Rate-limit events include scope, global flag, retry deadline, limit/remaining
+  and reset timing. Gateway restrictions retain a sanitized last incident across
+  restarts, including JSON vs HTML response format and a validated Cloudflare ray
+  ID when supplied, to correlate with support. These clues are not proof of an IP
+  ban.
+* Request counters start fresh per worker process. Recent events are capped at 30
+  per bot, error-route groups at 64, and repeated error logs at once per route,
+  method and status per minute. A changed summary is logged every minute; it flags
+  100 observed invalid requests within ten minutes as an early diagnostic warning,
+  not a new Discord limit or an automatic traffic cutoff.
+* Telemetry observes existing requests only; it does not probe Discord during a
+  cooldown. Slash-command registration uses the same monitored REST client.
+
+Interpret `401` as authentication trouble, `403` as access/permission trouble,
+and a scoped `429` as a reported rate limit. Shared-resource 429s are excluded
+from invalid-request counts per Discord's documentation. For an unscoped gateway
+429, retain the retry deadline and incident metadata; do not assume voice caused
+it or that the bot's login-session quota was exhausted.
 
 For hosting-side escalation, provide Render support with the service ID, region,
 gateway route (`GET /api/v10/gateway/bot`), HTTP status, `Retry-After` and UTC

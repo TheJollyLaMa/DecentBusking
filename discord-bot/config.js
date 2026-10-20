@@ -24,6 +24,7 @@ import 'dotenv/config';
  * @property {string|null} jukeLoopTextChannelId   - JukeLoop announcement text channel ID (JUKE_LOOP_TEXT_CHANNEL_ID) — optional
  * @property {boolean}     jukeLoopVoiceEnabled    - Attach optional Discord voice output (JUKE_LOOP_VOICE_ENABLED)
  * @property {boolean}     disableMintFlow         - Skip IPFS pinning and mint embed (DISABLE_MINT_FLOW) — optional, default false
+ * @property {() => import('discord.js').Client|undefined} [getDiscordClient] - Current client after recovery replaces a connection
  */
 
 /**

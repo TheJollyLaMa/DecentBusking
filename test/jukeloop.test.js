@@ -152,6 +152,26 @@ test('website radio starts without Discord readiness, channel lookup, text or vo
     _radioPaidQueues: {}, _devertPlaybackRuntime: {}, _jukeLoopRestartAttempts: new Map(),
     scheduleJukeLoopRestart: () => assert.fail('must not restart'),
   });
+
+  test('lost Discord send permissions pause text output instead of repeatedly issuing forbidden requests', async t => {
+    const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+    let requests = 0;
+    const session = new JukeLoopSession({
+      websitePlayback: true, client: { isReady: () => true },
+      textChannel: { send: async () => {
+        requests++;
+        throw Object.assign(new Error('Missing Permissions'), { status: 403, code: 50013 });
+      } },
+    });
+    t.after(() => session.destroy());
+    session._sendPlaybackNotice('test');
+    await new Promise(resolve => setImmediate(resolve));
+    session._sendPlaybackNotice('next');
+    assert.equal(requests, 1);
+    assert.equal(session._discordOutputsBlocked, true);
+    assert.equal(session.textChannel, null);
+    assert.equal(session._destroyed, false, 'website playback must remain independent');
+  });
   vm.runInContext(source.slice(start, end), context);
   assert.equal(await context.startWebsiteRadio({ isReady: () => false }, { jukeLoopTextChannelId: 'text' }), session);
   assert.equal(plays, 1);

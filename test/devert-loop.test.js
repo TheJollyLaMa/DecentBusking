@@ -38,6 +38,7 @@ test('VertLoop uses a separate voice registry without replacing DBusker connecti
       };
     },
     createAudioPlayer, loginDiscordClient: (client, token) => client.login(token),
+    watchDiscordSession: () => ({ closed: new Promise(() => {}), dispose() {} }),
     createDevertLoopController: () => ({ start: async () => {}, stop() {}, getState: () => ({ ready: true }) }),
     console });
   const source = fs.readFileSync(require('node:path').join(__dirname, '../discord-bot/devert-loop.js'), 'utf8');

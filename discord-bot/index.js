@@ -22,7 +22,6 @@ import {
   Client,
   GatewayIntentBits,
   Events,
-  REST,
   Routes,
   SlashCommandBuilder,
   EmbedBuilder,
@@ -54,7 +53,8 @@ import { devertQueueAbi } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
 import { startDevertLoopWorker } from './devert-loop.js';
-import { loginDiscordClient } from './discord-login.js';
+import { loginDiscordClient, recoverDiscordConnection, watchDiscordSession } from './discord-login.js';
+import { createDiscordDiagnostics } from './discord-diagnostics.js';
 import { DEFAULT_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
 import { createPinataStateStore, recoverVerifiedPlaylistBaseline } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
@@ -546,6 +546,15 @@ const SLASH_COMMANDS = [
 async function main() {
   const config = loadConfig();
   config.checkpointStorage = config.pinataJwt ? await ensureCheckpointGroups({ pinataJwt: config.pinataJwt }) : {};
+  const discordAbort = new AbortController();
+  const discordCooldownStore = config.pinataJwt ? createPinataStateStore({
+    ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+    filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+    name: 'decentbusking-discord-cooldowns.json',
+    tags: { app: 'decentbusking', kind: 'discord-cooldowns', schema: '1' },
+    restoreLatestOnly: true, serialize: value => value, deserialize: value => value,
+  }) : null;
+  const discordDiagnostics = createDiscordDiagnostics({ store: discordCooldownStore });
   const checkpointMirror = process.env.CHECKPOINT_MIRROR_SECRET
     ? createCheckpointMirror({ secret: process.env.CHECKPOINT_MIRROR_SECRET }) : null;
   const devertSchedulerPrivateKey = resolveDevertSchedulerPrivateKey();
@@ -605,16 +614,22 @@ async function main() {
     if (missingDevertLoopSettings.length) {
       console.warn(`[devert-loop] Not started; missing environment variables: ${missingDevertLoopSettings.join(', ')}`);
     } else {
-      startDevertLoopWorker({ token: process.env.DVERT_LOOP_DISCORD_TOKEN,
-        voiceChannelId: process.env.VERTLOOP_VOICE_CHANNEL_ID, textChannelId: process.env.VERT_LOOP_CHANNEL_ID,
-        playback: _devertPlaybackRuntime,
-        onAdMessage: process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true' ? async message => {
-          if (message.channelId === config.jukeboxChannelId && /^!devert-ad\b/i.test(message.content)) {
-            await handleDevertLoopSubmission(message, config, creatorProfiles);
-          }
-        } : undefined })
-        .then(worker => { _devertLoopWorker = worker; })
-        .catch(error => console.warn('[devert-loop] AdLoop worker unavailable:', error.shortMessage || error.message));
+      void recoverDiscordConnection({
+        diagnostics: discordDiagnostics, name: 'devert-loop', signal: discordAbort.signal,
+        onConnected: worker => { _devertLoopWorker = worker; },
+        connect: () => startDevertLoopWorker({
+          token: process.env.DVERT_LOOP_DISCORD_TOKEN,
+          diagnostics: discordDiagnostics.bot('devert-loop'), signal: discordAbort.signal,
+          voiceChannelId: process.env.VERTLOOP_VOICE_CHANNEL_ID, textChannelId: process.env.VERT_LOOP_CHANNEL_ID,
+          playback: _devertPlaybackRuntime,
+          onAdMessage: process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true' ? async message => {
+            if (message.channelId === config.jukeboxChannelId && /^!devert-ad\b/i.test(message.content)) {
+              await handleDevertLoopSubmission(message, config, creatorProfiles);
+            }
+          } : undefined,
+        }),
+      })
+        .catch(() => console.error('[devert-loop] Discord recovery supervisor failed; inspect diagnostics.'));
     }
   }
   const creatorStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
@@ -665,6 +680,7 @@ async function main() {
   setInterval(initializeCreators, 30000).unref();
 
   let client;
+  config.getDiscordClient = () => client;
   let discordOfflineReason = 'Main radio is offline';
   let playlistReady = false;
   let playlistStateStore = null;
@@ -1241,7 +1257,8 @@ async function main() {
           lastCheckedAt: paymentLedger.getState().lastCheckedAt,
           ready: paymentLedgerReady,
         },
-        discord: { ready: client?.isReady() === true, reason: client?.isReady() ? null : discordOfflineReason },
+        discord: { ready: client?.isReady() === true, reason: client?.isReady() ? null : discordOfflineReason,
+          diagnostics: discordDiagnostics.report() },
       };
     },
     getRadioMediaUrl: async cid => {
@@ -1512,136 +1529,190 @@ async function main() {
   refreshPayflow();
   syncMintedTracks(config);
 
-  client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.GuildVoiceStates,
-      GatewayIntentBits.MessageContent,
-      GatewayIntentBits.GuildMessageReactions,
-    ],
-    partials: [Partials.Message, Partials.Channel, Partials.Reaction],
-  });
+  async function connectMainDiscord() {
+    client = new Client({
+      intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions,
+      ],
+      partials: [Partials.Message, Partials.Channel, Partials.Reaction],
+    });
+    const connectionClient = client;
+    const detachDiagnostics = discordDiagnostics.bot('dbusker').attach(connectionClient);
+    const sessionWatch = watchDiscordSession(connectionClient);
+    const broadcast = getActiveJukeLoopSession();
+    if (broadcast) {
+      broadcast.client = connectionClient;
+      broadcast.textChannel = null;
+      broadcast._discordOutputsAttached = false;
+      broadcast._discordOutputsBlocked = false;
+    }
 
-  const reactionUpdates = new Map();
-  const handleReaction = change => (reaction, user) => {
-    const emoji = reaction.emoji.name?.startsWith('👍') ? '👍' : reaction.emoji.name?.startsWith('👎') ? '👎' : null;
-    if (user.bot || !emoji || ![config.jukeLoopTextChannelId, config.jukeboxChannelId].includes(reaction.message.channelId)) return;
-    const receivedAt = Date.now();
-    const key = reaction.message.id;
-    const pending = (reactionUpdates.get(key) || Promise.resolve()).then(async () => {
-      const message = await reaction.message.fetch();
-      synchronizeDiscordRating(message, client.user.id, { change, emoji, now: receivedAt });
-    }).catch(error => console.warn('[ratings] Could not synchronize Discord reaction:', error.message));
-    reactionUpdates.set(key, pending);
-    pending.finally(() => { if (reactionUpdates.get(key) === pending) reactionUpdates.delete(key); });
-  };
-  client.on(Events.MessageReactionAdd, handleReaction(1));
-  client.on(Events.MessageReactionRemove, handleReaction(-1));
+    const reactionUpdates = new Map();
+    const handleReaction = change => (reaction, user) => {
+      const emoji = reaction.emoji.name?.startsWith('👍') ? '👍' : reaction.emoji.name?.startsWith('👎') ? '👎' : null;
+      if (user.bot || !emoji || ![config.jukeLoopTextChannelId, config.jukeboxChannelId].includes(reaction.message.channelId)) return;
+      const receivedAt = Date.now();
+      const key = reaction.message.id;
+      const pending = (reactionUpdates.get(key) || Promise.resolve()).then(async () => {
+        const message = await reaction.message.fetch();
+        synchronizeDiscordRating(message, client.user.id, { change, emoji, now: receivedAt });
+      }).catch(error => console.warn('[ratings] Could not synchronize Discord reaction:', error.message));
+      reactionUpdates.set(key, pending);
+      pending.finally(() => { if (reactionUpdates.get(key) === pending) reactionUpdates.delete(key); });
+    };
+    client.on(Events.MessageReactionAdd, handleReaction(1));
+    client.on(Events.MessageReactionRemove, handleReaction(-1));
 
-  client.once(Events.ClientReady, async (readyClient) => {
-    console.log(`[jukebox-bot] Logged in as ${readyClient.user.tag}`);
-    console.log(`[jukebox-bot] Watching channel ID: ${config.jukeboxChannelId}`);
+    client.once(Events.ClientReady, async (readyClient) => {
+      if (discordAbort.signal.aborted || client !== readyClient) return;
+      console.log(`[jukebox-bot] Logged in as ${readyClient.user.tag}`);
+      console.log(`[jukebox-bot] Watching channel ID: ${config.jukeboxChannelId}`);
 
-    // Discord outputs must never gate the website broadcast.
-    const rest = new REST({ version: '10' }).setToken(config.discordToken);
-    rest.put(Routes.applicationCommands(readyClient.user.id), { body: SLASH_COMMANDS }).then(() => {
-      console.log('[jukebox-bot] Slash commands registered globally.');
-    }).catch(err => {
-      console.error('[jukebox-bot] Failed to register slash commands:', err.message);
+      // Discord outputs must never gate the website broadcast.
+      readyClient.rest.put(Routes.applicationCommands(readyClient.user.id), { body: SLASH_COMMANDS }).then(() => {
+        console.log('[jukebox-bot] Slash commands registered globally.');
+      }).catch(err => {
+        console.error('[jukebox-bot] Failed to register slash commands:', err.message);
+      });
+
+      // ── JukeLoop startup ───────────────────────────────────────────────────────
+      if (config.jukeLoopTextChannelId) {
+        void startJukeLoop(readyClient, config);
+      } else {
+        console.log(
+          '[jukeloop] JUKE_LOOP_TEXT_CHANNEL_ID not set — ' +
+          'JukeLoop disabled.',
+        );
+      }
+      runWeeklyPlayReport(readyClient, config).catch((err) => console.error('[weekly-play-report] Failed:', err.message));
     });
 
-    // ── JukeLoop startup ───────────────────────────────────────────────────────
-    if (config.jukeLoopTextChannelId) {
-      void startJukeLoop(readyClient, config);
-    } else {
-      console.log(
-        '[jukeloop] JUKE_LOOP_TEXT_CHANNEL_ID not set — ' +
-        'JukeLoop disabled.',
-      );
-    }
-    setInterval(() => runIpfsBackfill(readyClient, config), IPFS_BACKFILL_INTERVAL_MS);
-    runWeeklyPlayReport(readyClient, config).catch((err) => console.error('[weekly-play-report] Failed:', err.message));
-    setInterval(() => runWeeklyPlayReport(readyClient, config).catch((err) => console.error('[weekly-play-report] Failed:', err.message)), WEEKLY_REPORT_CHECK_INTERVAL_MS);
-  });
-
-  client.on(Events.MessageCreate, async (message) => {
-    // Ignore bots and messages outside the configured channel
-    if (message.author.bot) return;
-    const devertCommand = message.channelId === config.jukeboxChannelId && /^!devert-ad\b/i.test(message.content || '');
-    if (devertCommand && process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true') return;
-    if (devertCommand || shouldHandleDevertLoopSubmission(message, {
-      jukeboxChannelId: config.jukeboxChannelId,
-      vertLoopChannelId: process.env.VERT_LOOP_CHANNEL_ID,
-      adIntakeEnabled: process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true',
-    })) {
-      await handleDevertLoopSubmission(message, config, creatorProfiles);
-      return;
-    }
-    const intakeChannels = new Set([config.jukeboxChannelId, config.jukeLoopTextChannelId, process.env.VERT_LOOP_CHANNEL_ID].filter(Boolean));
-    if (!intakeChannels.has(message.channelId)) return;
-
-    const audioAttachments = [...message.attachments.values()].filter(isAudioAttachment);
-    if (!audioAttachments.length) return;
-    for (const attachment of audioAttachments) {
-      await submissionIntake.prompt(message, attachment, message.channelId === process.env.VERT_LOOP_CHANNEL_ID ? 'advert' : 'song');
-    }
-  });
-
-  // ── Slash command interactions ───────────────────────────────────────────────
-  client.on(Events.InteractionCreate, async (interaction) => {
-    try {
-      if (await submissionIntake.handleInteraction(interaction)) return;
-      if (await handleMintRequestInteraction(interaction)) return;
-    } catch (error) {
-      console.error('[mint-request] Interaction failed:', error.message);
-      if (interaction.isRepliable?.() && !interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: 'Could not open the NFT request. Please retry.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    client.on(Events.MessageCreate, async (message) => {
+      // Ignore bots and messages outside the configured channel
+      if (message.author.bot) return;
+      const devertCommand = message.channelId === config.jukeboxChannelId && /^!devert-ad\b/i.test(message.content || '');
+      if (devertCommand && process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true') return;
+      if (devertCommand || shouldHandleDevertLoopSubmission(message, {
+        jukeboxChannelId: config.jukeboxChannelId,
+        vertLoopChannelId: process.env.VERT_LOOP_CHANNEL_ID,
+        adIntakeEnabled: process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true',
+      })) {
+        await handleDevertLoopSubmission(message, config, creatorProfiles);
+        return;
       }
-      return;
-    }
-    if (!interaction.isChatInputCommand()) return;
+      const intakeChannels = new Set([config.jukeboxChannelId, config.jukeLoopTextChannelId, process.env.VERT_LOOP_CHANNEL_ID].filter(Boolean));
+      if (!intakeChannels.has(message.channelId)) return;
 
-    if (interaction.commandName === 'creator-link') {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const audioAttachments = [...message.attachments.values()].filter(isAudioAttachment);
+      if (!audioAttachments.length) return;
+      for (const attachment of audioAttachments) {
+        await submissionIntake.prompt(message, attachment, message.channelId === process.env.VERT_LOOP_CHANNEL_ID ? 'advert' : 'song');
+      }
+    });
+
+    // ── Slash command interactions ───────────────────────────────────────────────
+    client.on(Events.InteractionCreate, async (interaction) => {
       try {
-        if (!creatorProfiles) throw new Error('Creator profiles are not configured');
-        const user = await interaction.user.fetch();
-        await creatorProfiles.confirmDiscord(interaction.options.getString('code', true), user);
-        await interaction.editReply('Discord identity verified. Refresh your Profile to see the link.');
-      } catch (error) { await interaction.editReply(error.message); }
-      return;
-    }
+        if (await submissionIntake.handleInteraction(interaction)) return;
+        if (await handleMintRequestInteraction(interaction)) return;
+      } catch (error) {
+        console.error('[mint-request] Interaction failed:', error.message);
+        if (interaction.isRepliable?.() && !interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'Could not open the NFT request. Please retry.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+        return;
+      }
+      if (!interaction.isChatInputCommand()) return;
 
-    if (interaction.commandName === 'radio') {
-      await handleRadioCommand(interaction, config);
-    } else if (interaction.commandName === 'jukebox') {
-      await handleJukeboxCommand(interaction, config);
-    } else if (interaction.commandName === 'jukeloop') {
-      await handleJukeLoopCommand(interaction, config, { reconcileMint });
-    }
-  });
+      if (interaction.commandName === 'creator-link') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        try {
+          if (!creatorProfiles) throw new Error('Creator profiles are not configured');
+          const user = await interaction.user.fetch();
+          await creatorProfiles.confirmDiscord(interaction.options.getString('code', true), user);
+          await interaction.editReply('Discord identity verified. Refresh your Profile to see the link.');
+        } catch (error) { await interaction.editReply(error.message); }
+        return;
+      }
 
-  if (config.jukeLoopTextChannelId) void startWebsiteRadio(client, config);
-  void loginDiscordClient(client, config.discordToken, {
+      if (interaction.commandName === 'radio') {
+        await handleRadioCommand(interaction, config);
+      } else if (interaction.commandName === 'jukebox') {
+        await handleJukeboxCommand(interaction, config);
+      } else if (interaction.commandName === 'jukeloop') {
+        await handleJukeLoopCommand(interaction, config, { reconcileMint });
+      }
+    });
+
+    try {
+      await loginDiscordClient(connectionClient, config.discordToken, {
+        signal: discordAbort.signal, notBefore: null,
+        onUnavailable: reason => { discordOfflineReason = reason; },
+      });
+      return { closed: sessionWatch.closed, stop: async () => {
+        const currentBroadcast = getActiveJukeLoopSession();
+        if (currentBroadcast?.client === connectionClient) {
+          currentBroadcast._voiceConnection?.stop();
+          currentBroadcast._voiceConnection = null;
+          currentBroadcast.connection = null;
+          currentBroadcast.textChannel = null;
+          currentBroadcast._discordOutputsAttached = false;
+        }
+        await connectionClient.destroy();
+        sessionWatch.dispose();
+        detachDiagnostics();
+      } };
+    } catch (error) {
+      await connectionClient.destroy();
+      sessionWatch.dispose();
+      detachDiagnostics();
+      throw error;
+    }
+  }
+
+  let mainDiscordConnection;
+  void recoverDiscordConnection({
+    connect: connectMainDiscord, diagnostics: discordDiagnostics, name: 'dbusker', signal: discordAbort.signal,
     onUnavailable: reason => { discordOfflineReason = reason; },
-  }).catch(error => {
-    discordOfflineReason = `Discord unavailable: ${error.message}`;
-    console.error('[discord] Website radio continues without Discord:', error.message);
-    client.destroy();
-  });
+    onConnected: connection => { mainDiscordConnection = connection; },
+  })
+    .catch(() => console.error('[discord] Recovery supervisor failed; inspect diagnostics.'));
+  if (config.jukeLoopTextChannelId) void startWebsiteRadio(client, config);
+  setInterval(() => discordDiagnostics.maintenance(), 60_000).unref();
+  setInterval(() => {
+    if (client?.isReady()) runIpfsBackfill(client, config);
+  }, IPFS_BACKFILL_INTERVAL_MS).unref();
+  setInterval(() => {
+    if (client?.isReady()) runWeeklyPlayReport(client, config)
+      .catch(err => console.error('[weekly-play-report] Failed:', err.message));
+  }, WEEKLY_REPORT_CHECK_INTERVAL_MS).unref();
+  setInterval(() => {
+    const broadcast = getActiveJukeLoopSession();
+    if (client?.isReady() && broadcast?.websitePlayback &&
+        !broadcast._discordOutputsAttached && !broadcast._discordOutputsBlocked) {
+      void startJukeLoop(client, config);
+    }
+  }, 60_000).unref();
 
   const shutdown = async (signal) => {
     console.log(`[jukebox-bot] ${signal} received; flushing IPFS state checkpoint.`);
     let exitCode = 0;
+    discordAbort.abort();
     try {
       await Promise.all([waitForRemotePersistence(), fundStore?.flush(), earningsStore?.flush(),
-        Promise.race([flushRpcUsage(), new Promise(resolve => setTimeout(resolve, 5000))])]);
+        Promise.race([flushRpcUsage(), new Promise(resolve => setTimeout(resolve, 5000))]),
+        discordDiagnostics.flush()]);
     } catch (error) {
       exitCode = 1;
       console.error('[jukebox-bot] Shutdown checkpoint failed:', error.message);
     }
-    client.destroy();
+    await mainDiscordConnection?.stop();
+    _devertLoopWorker?.stop();
+    await client?.destroy();
     getActiveJukeLoopSession()?.destroy();
     process.exit(exitCode);
   };
@@ -2133,7 +2204,7 @@ async function startWebsiteRadio(client, config) {
     await discoverDedicatedGateway(config);
     const session = createJukeLoopSession('website-radio', {
       websitePlayback: true,
-      client,
+      client: config.getDiscordClient?.() || client,
       ipfsGateway: config.ipfsGateway,
       djuke: _radioPaidQueues,
       livePerformanceEvents,
@@ -2141,12 +2212,13 @@ async function startWebsiteRadio(client, config) {
       devertPlayback: _devertPlaybackRuntime,
       mainRadioAdStateStore: config.jukeLoopMainRadioAdStore,
       topTenHypeStore: config.topTenHypeStore,
-      onTerminalDisconnect: () => scheduleJukeLoopRestart(client, config, 'Website playback stalled'),
+      onTerminalDisconnect: () => scheduleJukeLoopRestart(session.client, config, 'Website playback stalled'),
     });
     await session.start();
+    session.client = config.getDiscordClient?.() || client;
     _jukeLoopRestartAttempts.delete(config.jukeLoopTextChannelId);
     console.log('[jukeloop] Website broadcast started independently of Discord.');
-    if (client.isReady()) void startJukeLoop(client, config);
+    if (session.client?.isReady()) void startJukeLoop(session.client, config);
     return session;
   } catch (error) {
     getJukeLoopSession('website-radio')?.destroy();
@@ -2165,6 +2237,10 @@ async function startJukeLoop(client, config) {
       const textChannel = await client.channels.fetch(config.jukeLoopTextChannelId);
       if (broadcast._destroyed || getActiveJukeLoopSession() !== broadcast) return false;
       if (!textChannel?.isTextBased()) throw new Error('Radio announcement channel is not a text channel');
+      const permissions = textChannel.permissionsFor?.(client.user);
+      if (permissions && !permissions.has(['ViewChannel', 'SendMessages'])) {
+        throw Object.assign(new Error('Radio text channel requires ViewChannel and SendMessages permissions'), { code: 50013 });
+      }
       broadcast.textChannel = textChannel;
       if (broadcast._nowPlaying && !broadcast._nowPlaying.hype) {
         const track = broadcast._currentTrack;
@@ -2191,6 +2267,7 @@ async function startJukeLoop(client, config) {
       console.log('[jukeloop] Discord outputs attached; website playback was not restarted.');
     } catch (error) {
       broadcast._discordOutputsAttached = false;
+      broadcast._discordOutputsBlocked = error.status === 403 || [50001, 50013].includes(error.code);
       console.warn('[jukeloop] Discord outputs unavailable; website playback continues:', error.message);
     }
     return true;
