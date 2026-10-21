@@ -282,3 +282,8 @@ Optional push updates: create an Alchemy **Custom Webhook** on Base Mainnet that
 - [DecentMarket](https://thejollylama.github.io/DecentMarket/)
 - [DecentBusking issues](https://github.com/TheJollyLaMa/DecentBusking/issues)
 - [DecentMarket v0.3 contract plans](https://github.com/TheJollyLaMa/DecentMarket/issues/47)
+
+## License
+
+Code: [Apache-2.0](LICENSE) · Art and docs: [CC BY 4.0](LICENSES/CC-BY-4.0.txt) · Please keep the [NOTICE](NOTICE) and give The Jolly LaMa / A Decent Agency a head nod when you reuse this work.
+Support the work with a [Supporter DNFT](https://thejollylama.github.io/DecentMarket/).
