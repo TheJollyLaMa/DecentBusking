@@ -198,7 +198,11 @@ async function action(name, b) {
 async function guarded(fn) {
  if (busy) return;
  busy = true;
- try { await fn(); section.querySelector('[data-live-status]').textContent = 'Saved / confirmed. Refresh to reconcile on-chain evidence.'; }
+ try {
+  const result = await fn();
+  section.querySelector('[data-live-status]').textContent = typeof result === 'string'
+   ? result : 'Action completed. Refresh to verify the latest booking state.';
+ }
  catch (error) { section.querySelector('[data-live-status]').textContent = `${error.shortMessage || error.message}. Refresh/reconcile before retrying; submitted transactions may still be pending.`; }
  finally { busy = false; }
 }
@@ -230,7 +234,11 @@ function mount() {
  <button type="submit">📝 Save invitation draft (no payment)</button></form></details>
  <button type="button" data-live-refresh>🔄 Refresh bookings</button><p class="live-performance-acceptance" role="alert" aria-live="assertive" data-live-acceptance-notice hidden></p><p role="status" data-live-status></p><div data-live-list></div></div>`;
  parent.append(section);
- section.querySelector('[data-live-refresh]').onclick = () => guarded(async () => { state = await api(); render(); });
+ section.querySelector('[data-live-refresh]').onclick = () => guarded(async () => {
+  state = await api();
+  render();
+  return `Bookings refreshed from the service. ${state.bookings.length} booking${state.bookings.length === 1 ? '' : 's'} found.`;
+ });
  section.querySelector('form').onsubmit = event => { event.preventDefault(); guarded(async () => {
    const f = Object.fromEntries(new FormData(section.querySelector('form')));
    if (!state) state = await api();
@@ -254,6 +262,7 @@ function mount() {
    delete booking.killFeePercent;
    const id = `${eventId}:${crypto.randomUUID()}`;
    await command({ action:'create', id, booking });
+   return `Invitation draft saved for ${booking.displayName || booking.wallet}. It is not funded or listed on the community calendar yet.`;
  }); };
  section.onclick = event => { const button = event.target.closest('[data-live-action]'); if (!button) return; const id = button.closest('[data-live-actions]').dataset.liveActions; guarded(() => action(button.dataset.liveAction,state.bookings.find(b=>b.id===id))); };
  window.ethereum?.on?.('accountsChanged', () => { accountRevision++; });
