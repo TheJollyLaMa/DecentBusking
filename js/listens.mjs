@@ -1,7 +1,7 @@
 // On-demand personal listens: 30-second preview, then 0.25 USDC per song via DJuke.
 // Fails open to free playback whenever payments are not live, matching today's behavior.
-import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261022-playlist-show';
-import { setNowPlaying } from './stage.js?v=20261019-radio-recovery';
+import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261022-playlist-lane';
+import { setNowPlaying } from './stage.js?v=20261022-playlist-lane';
 import { supportsDjukeAlbumsAndGas } from './djuke-version.mjs';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
@@ -10,7 +10,7 @@ import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 export const LISTEN_PRICE_UNITS = 250000n;
 export const PREVIEW_SECONDS = 30;
 export const MAX_PLAYLIST = 50;
-export const MAX_NAMED_PLAYLIST = 10;
+export const MAX_NAMED_PLAYLIST = 24;
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const LISTEN_ABI = ['function purchaseListens(bytes32[] songIds, uint256 maxTotal) returns (uint256)',
   'function quoteListens(bytes32[] songIds) view returns(uint256)'];
@@ -83,14 +83,14 @@ export function createListenPlaylist(storage = globalThis.localStorage, key = 'd
       const items = read();
       if (items.some(entry => entry.songId === item.songId)) return false;
       if (items.length >= MAX_PLAYLIST) throw new Error(`Listen carts hold up to ${MAX_PLAYLIST} songs`);
-      write([...items, { songId: item.songId, title: item.title, artist: item.artist, audioUrl: item.audioUrl, mediaType: item.mediaType || '' }]);
+      write([...items, { songId: item.songId, title: item.title, artist: item.artist, audioUrl: item.audioUrl, mediaType: item.mediaType || '', ...(item.listenPriceUnits !== undefined ? { listenPriceUnits: String(item.listenPriceUnits) } : {}) }]);
       return true;
     },
     remove(songId) { write(read().filter(item => item.songId !== songId)); },
     replace(next) {
       if (!Array.isArray(next) || next.length > MAX_PLAYLIST || next.some(item => !/^0x[0-9a-fA-F]{64}$/.test(item?.songId || '') || !item.audioUrl) ||
-          new Set(next.map(item => item.songId.toLowerCase())).size !== next.length) throw new Error('Playlist must contain 1–10 unique songs');
-      write(next.map(item => ({ songId: item.songId.toLowerCase(), title: item.title, artist: item.artist, audioUrl: item.audioUrl, mediaType: item.mediaType || '' })));
+          new Set(next.map(item => item.songId.toLowerCase())).size !== next.length) throw new Error('Listen carts hold up to 50 unique songs');
+      write(next.map(item => ({ songId: item.songId.toLowerCase(), title: item.title, artist: item.artist, audioUrl: item.audioUrl, mediaType: item.mediaType || '', ...(item.listenPriceUnits !== undefined ? { listenPriceUnits: String(item.listenPriceUnits) } : {}) })));
     },
     clear() { write([]); },
   };
@@ -232,6 +232,7 @@ export function initListens() {
     playlistTotal.textContent = items.length ? supportsDjukeAlbumsAndGas(cfg.djukeContractVersion)
       ? `${items.length} songs - creator prices quoted before payment`
       : `${items.length} song${items.length === 1 ? '' : 's'} \u00b7 ${formatUsdc(LISTEN_PRICE_UNITS * BigInt(items.length))} USDC` : 'Empty \u2014 add songs from any DNFT card';
+    playlistBuy.hidden = !items.length;
     playlistBuy.disabled = !items.length || busy;
     document.dispatchEvent(new CustomEvent('djuke-playlist-draft-changed', { detail: { items } }));
   }
@@ -243,9 +244,10 @@ export function initListens() {
     const live = await getLive().catch(() => null);
     const songId = song.songId || live?.songIdForCid(audioCid(song.audioUrl));
     if (!songId) { status('Personal playlists open when DJuke payments are live.'); return; }
-    if (playlist.list().length >= MAX_NAMED_PLAYLIST && !playlist.list().some(item => item.songId === songId)) { status('Named playlists hold up to 10 songs. The existing listen cart was not changed.'); return; }
-    status(playlist.add({ ...song, songId }) ? 'Added to your playlist draft. Name and save it from DJuke or your profile.' : 'Already in your playlist draft.');
-    renderPlaylist();
+    try {
+      status(playlist.add({ ...song, songId }) ? 'Added to your listen cart. Named saves support up to 24 songs; listen carts support 50.' : 'Already in your listen cart.');
+      renderPlaylist();
+    } catch (error) { status(error.message); }
   }
 
   document.getElementById('listen-gate-pay').addEventListener('click', async () => {

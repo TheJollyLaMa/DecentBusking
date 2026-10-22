@@ -47,10 +47,10 @@ export function normalizeNamedPlaylist(input = {}) {
   const revision = Number(input.revision);
   const songIds = input.songIds;
   if (!/^[a-f0-9]{32}$/.test(id) || !/^0x[0-9a-f]{40}$/.test(maker) || !name || name.length > 60 ||
-      !Number.isSafeInteger(revision) || revision < 1 || !Array.isArray(songIds) || songIds.length < 1 || songIds.length > 10 ||
+      !Number.isSafeInteger(revision) || revision < 1 || !Array.isArray(songIds) || songIds.length < 1 || songIds.length > 24 ||
       songIds.some(songId => !/^0x[0-9a-f]{64}$/i.test(songId)) ||
       new Set(songIds.map(songId => songId.toLowerCase())).size !== songIds.length) {
-    throw new Error('Playlist needs a valid maker, ID, 1–60 character name, revision and 1–10 unique songs');
+    throw new Error('Playlist needs a valid maker, ID, 1–60 character name, revision and 1–24 unique songs');
   }
   return { id, maker, name, revision, songIds: songIds.map(songId => songId.toLowerCase()) };
 }

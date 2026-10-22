@@ -1,6 +1,7 @@
-import { createListenPlaylist } from './listens.mjs?v=20261019-radio-recovery';
+import { appendPlaylistSong, openPlaylistSelector } from './playlist-selector.mjs?v=20261022-playlist-lane';
+import { createListenPlaylist } from './listens.mjs?v=20261022-playlist-lane';
 import { createNamedPlaylistClient, DJUKE_PLAYLIST_MAX_PER_PROFILE, getPlaylistBatchAbi,
-  matchesPlaylistRevision, quoteNamedPlaylist, supportsDJukePlaylistBatch, supportsDJukePlaylistRadio } from './djuke-playlists.mjs?v=20261022-v04-radio';
+  matchesPlaylistRevision, quoteNamedPlaylist, supportsDJukePlaylistBatch, supportsDJukePlaylistRadio } from './djuke-playlists.mjs?v=20261022-playlist-lane';
 import { ensureBaseNetwork, approvalNotice, waitForAllowance } from './base-chain.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
@@ -28,15 +29,16 @@ function safeButton(label, handler, disabled = false, title = '') {
   button.type = 'button';
   button.textContent = label;
   button.disabled = disabled;
-  if (title) button.title = title;
+  if (title) { button.title = title; button.setAttribute('aria-label', title); }
   button.addEventListener('click', handler);
   return button;
 }
 
 export async function purchaseRadioNamedPlaylist({ playlist, signer, config = window.DecentConfig || {}, onStep = () => {}, fetchImpl = fetch }) {
   if (!supportsDJukePlaylistRadio(config)) throw new Error('Radio playlist checkout is unavailable');
-  await ensureBaseNetwork(signer.provider);
   const songIds = playlist.songIds;
+  quoteNamedPlaylist(songIds.length, 'radio');
+  await ensureBaseNetwork(signer.provider);
   const listener = await signer.getAddress();
   const quoteUrl = new URL(`${String(config.ipfsUploadServiceUrl || '').replace(/\/$/, '')}/api/djuke/playlist-gas-quote`);
   quoteUrl.searchParams.set('listener', listener);
@@ -77,11 +79,13 @@ export async function purchaseRadioNamedPlaylist({ playlist, signer, config = wi
 export async function purchasePrivateNamedPlaylist({ playlist, signer, config = window.DecentConfig || {}, onStep = () => {} }) {
   if (!supportsDJukePlaylistBatch(config)) throw new Error('Private named-playlist checkout is unavailable until a compatible DJuke batch contract is configured');
   await ensureBaseNetwork(signer.provider);
-  const quote = quoteNamedPlaylist(playlist.songIds.length, 'private');
+  quoteNamedPlaylist(playlist.songIds.length, 'private');
   const address = await signer.getAddress();
   const djuke = new ethers.Contract(config.djukePlaylistBatchAddress, PLAYLIST_BATCH_ABI, signer);
   const usdc = new ethers.Contract(BASE_USDC, USDC_ABI, signer);
   if (Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');
+  const chainQuote = await djuke.quotePlaylist(playlist.songIds, false);
+  const quote = { totalUnits: BigInt(chainQuote.total ?? chainQuote[2]) };
   if (await usdc.balanceOf(address) < quote.totalUnits) throw new Error(`You need ${formatUsdcUnits(quote.totalUnits)} USDC on Base`);
   if (await usdc.allowance(address, djuke.target) < quote.totalUnits) {
     onStep(approvalNotice(formatUsdcUnits(quote.totalUnits)));
@@ -89,7 +93,7 @@ export async function purchasePrivateNamedPlaylist({ playlist, signer, config = 
     if ((await approval.wait())?.status !== 1) throw new Error('USDC approval did not confirm');
     await waitForAllowance(usdc, address, djuke.target, quote.totalUnits);
   }
-  onStep(`Private playlist · ${playlist.songIds.length} × 0.25 USDC · ${formatUsdcUnits(quote.totalUnits)} USDC total`);
+  onStep(`Private playlist · ${playlist.songIds.length} songs at creator listen prices · ${formatUsdcUnits(quote.totalUnits)} USDC total`);
   await djuke.purchasePlaylistPrivate.staticCall(playlist.songIds, quote.totalUnits);
   onStep('Confirm private playlist purchase in your wallet');
   const transaction = await djuke.purchasePlaylistPrivate(playlist.songIds, quote.totalUnits);
@@ -103,6 +107,7 @@ export async function purchasePrivateNamedPlaylist({ playlist, signer, config = 
 export function initDjukePlaylists() {
   const config = () => window.DecentConfig || {};
   const client = createNamedPlaylistClient();
+  let quoteProvider;
   const draft = createListenPlaylist();
   const nameInput = document.getElementById('djuke-playlist-name');
   const draftList = document.getElementById('djuke-playlist');
@@ -131,7 +136,7 @@ export function initDjukePlaylists() {
 
   let workerRadioReady = false;
   const batchCapability = () => supportsDJukePlaylistBatch(config());
-  const radioCapability = () => supportsDJukePlaylistRadio({ ...config(), djukePlaylistRadioReady: workerRadioReady });
+  const radioCapability = () => supportsDJukePlaylistRadio({ ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady });
   async function refreshPlaylistReadiness() {
     const service = String(config().ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service || config().djukePlaylistBatchVersion !== '0.4') { workerRadioReady = false; updateGate(); return; }
@@ -142,16 +147,20 @@ export function initDjukePlaylists() {
         status.contractAddress?.toLowerCase() === config().djukePlaylistBatchAddress?.toLowerCase();
     } catch { workerRadioReady = false; }
     updateGate();
+    if (currentProfile) renderProfile();
   }
   function updateGate() {
     const enabled = batchCapability();
-    if (addSelected) addSelected.disabled = !songSelect?.value || draft.list().length >= 10 || busy;
+    if (addSelected) addSelected.disabled = !songSelect?.value || draft.list().length >= 24 || busy;
     const exactRevision = matchesPlaylistRevision(selectedRevision, draft.list().map(item => item.songId));
-    privateButton.disabled = !enabled || !exactRevision || busy;
-    privateButton.title = enabled ? (exactRevision ? 'Buy exactly the selected immutable revision at 0.25 USDC per song; radio queue is untouched' : 'Load or save the exact named revision before private checkout') : 'Requires a compatible DJuke v0.4 playlist deployment';
-    radioButton.disabled = !radioCapability() || !draft.list().length || busy;
-    radioButton.title = radioCapability() ? 'Flat 0.25 USDC per song plus one $5 playlist fund fee' : 'Requires a compatible DJuke v0.4 deployment and a ready signed gas-quote service';
-    saveButton.disabled = busy || !draft.list().length || !nameInput.value.trim();
+    privateButton.hidden = !enabled;
+    radioButton.hidden = !radioCapability();
+    document.getElementById('djuke-playlist-buy').hidden = !draft.list().length;
+    privateButton.disabled = !enabled || !exactRevision || draft.list().length > 24 || busy;
+    privateButton.title = enabled ? (exactRevision ? 'Buy the selected immutable revision at each creator listen price; radio queue is untouched' : 'Load or save the exact named revision before private checkout') : 'Requires a compatible DJuke v0.4 playlist deployment';
+    radioButton.disabled = !radioCapability() || !exactRevision || !draft.list().length || draft.list().length > 24 || busy;
+    radioButton.title = radioCapability() ? 'Radio tiers: $0.25 / $0.50 / $1 per eight songs, plus $3 per 12 songs; paid requests cut in' : 'Requires a compatible DJuke v0.4 deployment and a ready signed gas-quote service';
+    saveButton.disabled = busy || draft.list().length > 24 || !draft.list().length || !nameInput.value.trim();
   }
   function renderDraft() {
     const items = draft.list();
@@ -166,16 +175,24 @@ export function initDjukePlaylists() {
       row.append(safeButton('×', () => {
         const next = items.filter((_, i) => i !== index);
         draft.replace(next);
-        event('djuke-playlist-draft-changed', { items: next });
+        event('djuke-set-playlist-draft', { items: next });
         renderDraft();
       }, busy, `Remove ${item.title || 'song'}`));
       draftList.append(row);
     });
     const count = items.length;
-    if (draftCount) draftCount.textContent = `${count}/10`;
-    if (draftTotal) draftTotal.textContent = count
-      ? `${count} songs · private ${formatUsdcUnits(quoteNamedPlaylist(count, 'private').totalUnits)} USDC · radio ${formatUsdcUnits(quoteNamedPlaylist(count, 'radio').totalUnits)} USDC including one $5 fund fee (2.25 playback / 2.25 Top 10 / 0.40 pinners / 0.10 repo dev); worker quote and wallet gas shown before any radio confirmation`
+    if (draftCount) draftCount.textContent = `${count}/24`;
+    if (draftTotal) draftTotal.textContent = count > 24 ? 'Legacy listen cart: up to 50 songs. Named save and checkout require 1–24 songs.' : count
+      ? `${count} song${count === 1 ? '' : 's'} · estimated private ${formatUsdcUnits(quoteNamedPlaylist(count, 'private', items.map(item => item.listenPriceUnits)).totalUnits)} USDC · radio ${formatUsdcUnits(quoteNamedPlaylist(count, 'radio').totalUnits)} USDC including $3 per 12 songs platform fee (25% each: Playback / Top10 / Pinners / Repo). Paid requests cut in before playlist songs; worker quote and wallet gas shown before any radio confirmation`
       : 'Empty — add songs from a music card';
+    if (count && count <= 24 && batchCapability() && globalThis.ethers && (window._wallet?.signer || config().rpcUrl)) {
+      const ids = items.map(item => item.songId);
+      const contract = new ethers.Contract(config().djukePlaylistBatchAddress, PLAYLIST_BATCH_ABI, window._wallet?.signer || (quoteProvider ||= new ethers.JsonRpcProvider(config().rpcUrl)));
+      Promise.all([contract.quotePlaylist(ids, false), contract.quotePlaylist(ids, true)]).then(([privateQuote, radioQuote]) => {
+        if (!matchesPlaylistRevision({ songIds: ids }, draft.list().map(item => item.songId))) return;
+        draftTotal.textContent = `${count} song${count === 1 ? '' : 's'} · estimated private ${formatUsdcUnits(privateQuote[2])} USDC · radio ${formatUsdcUnits(radioQuote[2])} USDC. Platform fee: 25% each Playback / Top10 / Pinners / Repo. Paid requests cut in.`;
+      }).catch(() => {});
+    }
     updateGate();
   }
   function reorder(from, to) {
@@ -183,7 +200,7 @@ export function initDjukePlaylists() {
     const [item] = items.splice(from, 1);
     items.splice(to, 0, item);
     draft.replace(items);
-    event('djuke-playlist-draft-changed', { items });
+    event('djuke-set-playlist-draft', { items });
     renderDraft();
   }
   async function refreshProfile(address = window._wallet?.address || profileAddress) {
@@ -216,16 +233,23 @@ export function initDjukePlaylists() {
         await run(async () => { await client.saveCopy(playlist); await refreshProfile(profileAddress); profileStatus.textContent = 'Saved immutable playlist copy; attribution preserved.'; });
       }, busy, 'Pin this immutable revision to your profile'));
     }
-    row.append(safeButton('Listen privately', async () => {
+    const privateAction = safeButton('Listen privately', async () => {
       await run(async () => {
         const tracks = await resolveTrackItems(playlist.songIds);
         await purchasePrivateNamedPlaylist({ playlist, signer: window._wallet.signer, onStep: text => { profileStatus.textContent = text; } });
         event('djuke-private-playlist-purchased', { items: tracks });
       });
-    }, !batchCapability() || busy, 'Flat-rate checkout is disabled until a compatible DJuke deployment is configured'));
-    row.append(safeButton('Buy radio playback', async () => {
-      profileStatus.textContent = 'Radio batch checkout needs the separately configured worker-signed gas quote service.';
-    }, !radioCapability() || busy, 'Radio checkout requires the compatible batch deployment and signed gas quote service'));
+    }, !batchCapability() || busy, 'Creator-priced checkout requires a compatible DJuke deployment');
+    privateAction.hidden = !batchCapability();
+    row.append(privateAction);
+    const radioAction = safeButton('Buy radio playback', async () => {
+      await run(async () => {
+        if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
+        await purchaseRadioNamedPlaylist({ playlist, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { profileStatus.textContent = text; } });
+      });
+    }, !radioCapability() || busy, 'Radio checkout requires the compatible batch deployment and signed gas quote service');
+    radioAction.hidden = !radioCapability();
+    row.append(radioAction);
     profileItems.append(row);
   }
   function renderProfile() {
@@ -248,7 +272,7 @@ export function initDjukePlaylists() {
     return songIds.map(songId => {
       const track = tracks.get(songId.toLowerCase());
       if (!track?.ipfsCid) throw new Error('A saved playlist song is no longer available; no partial playback was started');
-      return { songId, title: track.title || 'Untitled song', artist: track.artist || track.uploader || '', audioUrl: `ipfs://${track.ipfsCid}`, mediaType: track.mediaType || '' };
+      return { songId, title: track.title || 'Untitled song', artist: track.artist || track.uploader || '', audioUrl: `ipfs://${track.ipfsCid}`, listenPriceUnits: track.listenPriceUnits, mediaType: track.mediaType || '' };
     });
   }
   async function run(operation) {
@@ -256,7 +280,10 @@ export function initDjukePlaylists() {
     busy = true;
     updateGate();
     try { await operation(); }
-    catch (error) { (profileStatus || state).textContent = error.shortMessage || error.reason || error.message; }
+    catch (error) {
+      state.textContent = error.shortMessage || error.reason || error.message;
+      if (profileStatus) profileStatus.textContent = state.textContent;
+    }
     finally { busy = false; updateGate(); }
   }
   async function saveDraft() {
@@ -266,7 +293,7 @@ export function initDjukePlaylists() {
       const name = nameInput.value.trim();
       if (!name || name.length > 60) throw new Error('Playlist name must be 1–60 characters');
       const items = draft.list();
-      if (!items.length || items.length > 10) throw new Error('Choose 1–10 songs');
+      if (!items.length || items.length > 24) throw new Error('Choose 1–24 songs');
       const own = currentProfile?.madePlaylists?.find(item => item.id === selectedRevision?.id && item.maker.toLowerCase() === wallet.address.toLowerCase());
       const playlist = {
         id: own?.id || makePlaylistId(), maker: wallet.address.toLowerCase(), name,
@@ -312,6 +339,52 @@ export function initDjukePlaylists() {
     }).catch(error => { (profileStatus || state).textContent = error.message; });
   }
 
+  document.addEventListener('dbusk-playlist-add', async input => {
+    input.preventDefault();
+    input.stopImmediatePropagation();
+    const { anchor, status: report = () => {} } = input.detail;
+    let ownLibrary = profileAddress.toLowerCase() === window._wallet?.address?.toLowerCase() ? currentProfile : null;
+    if (!ownLibrary && window._wallet?.address) {
+      try { ownLibrary = await client.profile(window._wallet.address); }
+      catch (error) { report(error.message); }
+    }
+    openPlaylistSelector({ anchor, playlists: [...(ownLibrary?.madePlaylists || []), ...(ownLibrary?.playlists || [])], status: report,
+      choose: async (playlist, newName) => {
+        if (busy) throw new Error('Wait for the current playlist operation.');
+        const chart = input.detail.track;
+        const nft = input.detail.nft || { title: chart.title, artist: chart.artist || chart.uploader, audioUrl: `ipfs://${chart.ipfsCid}` };
+        const audioUrl = nft.videoUrl || nft.audioUrl || nft.animation_url || '';
+        const service = String(config().ipfsUploadServiceUrl || '').replace(/\/$/, '');
+        const response = await fetch(`${service}/api/djuke`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Verified catalog unavailable.');
+        const catalog = await response.json();
+        const track = catalog.tracks?.find(track => audioUrl === `ipfs://${track.ipfsCid}` || audioUrl.includes(track.ipfsCid));
+        if (!track?.songId) throw new Error('Song is not available in the verified DJuke catalog.');
+        const item = { songId: track.songId, title: nft.name || nft.title || track.title, artist: nft.artist || track.artist || track.uploader || '', audioUrl: `ipfs://${track.ipfsCid}`, listenPriceUnits: track.listenPriceUnits, mediaType: nft.mediaType || '' };
+        const base = playlist ? await resolveTrackItems(playlist.songIds) : newName ? [] : draft.list();
+        const items = appendPlaylistSong(base, item);
+        if (playlist || newName) {
+          const wallet = window._wallet;
+          if (!wallet?.address || !wallet?.signer) throw new Error('Connect your wallet to save this playlist.');
+          const own = playlist?.maker.toLowerCase() === wallet.address.toLowerCase();
+          if (!own && ((ownLibrary?.madePlaylists?.length || 0) + (ownLibrary?.playlists?.length || 0)) >= DJUKE_PLAYLIST_MAX_PER_PROFILE) throw new Error('Your profile playlist library is full.');
+          const revision = { id: own ? playlist.id : makePlaylistId(), maker: wallet.address.toLowerCase(), name: newName || playlist.name, revision: own ? playlist.revision + 1 : 1, songIds: items.map(song => song.songId) };
+          busy = true; updateGate();
+          try {
+            const saved = await client.saveOriginal(revision);
+            selectedRevision = saved.playlist;
+            nameInput.value = revision.name;
+            await refreshProfile(wallet.address);
+          } finally { busy = false; updateGate(); }
+        }
+        draft.replace(items);
+        event('djuke-set-playlist-draft', { items });
+        renderDraft();
+        state.textContent = playlist || newName ? 'Saved a new immutable revision and loaded it into the draft.' : 'Added to the current draft. Name and save it when ready.';
+        report(state.textContent);
+      } });
+  }, { capture: true });
+
   saveButton.addEventListener('click', saveDraft);
   nameInput.addEventListener('input', updateGate);
   songSelect?.addEventListener('change', updateGate);
@@ -322,9 +395,10 @@ export function initDjukePlaylists() {
       const snapshot = response.ok ? await response.json() : null;
       const track = snapshot?.tracks?.find(item => item.trackId === songSelect.value);
       if (!track?.songId || !track?.ipfsCid) throw new Error('Selected song is not available in the verified DJuke catalog');
-      const item = { songId: track.songId, title: track.title || 'Untitled song', artist: track.artist || track.uploader || '', audioUrl: `ipfs://${track.ipfsCid}`, mediaType: track.mediaType || '' };
+      const item = { songId: track.songId, title: track.title || 'Untitled song', artist: track.artist || track.uploader || '', audioUrl: `ipfs://${track.ipfsCid}`, listenPriceUnits: track.listenPriceUnits, mediaType: track.mediaType || '' };
+      if (draft.list().length >= 24) throw new Error('Named playlists hold up to 24 songs.');
       if (!draft.add(item)) { state.textContent = 'That song is already in the draft.'; return; }
-      event('djuke-playlist-draft-changed', { items: draft.list() });
+      event('djuke-set-playlist-draft', { items: draft.list() });
       renderDraft();
       state.textContent = `Added ${item.title} to the ordered playlist draft.`;
     } catch (error) { state.textContent = error.message; }
@@ -360,7 +434,7 @@ export function initDjukePlaylists() {
     await run(async () => {
       if (!window._wallet?.signer) await window._wallet?.connect?.();
       if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
-      await purchaseRadioNamedPlaylist({ playlist: selected, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: workerRadioReady }, onStep: text => { state.textContent = text; } });
+      await purchaseRadioNamedPlaylist({ playlist: selected, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { state.textContent = text; } });
     });
   });
   const initialItems = draft.list();

@@ -1,4 +1,4 @@
-// js/admin.js — DecentBusking
+// js/admin.js?v=20261022-playlist-lane — DecentBusking
 //
 // Admin panel: lets the DEFAULT_ADMIN_ROLE holder grant MINTER_ROLE or
 // DEFAULT_ADMIN_ROLE to a specified wallet address via the DecentNFT contract.
@@ -10,7 +10,7 @@ import { renderPlaylistShowPreview } from './admin-radio-playlists.mjs';
 import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolveBatchMintArtwork, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261011-batch-artwork-default';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { reportMintCompletion } from './mint-reconciliation.js';
-import { addNFTToSpace } from './space.js?v=20261019-radio-recovery';
+import { addNFTToSpace } from './space.js?v=20261022-playlist-lane';
 import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artwork-update.mjs';
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261022-playlist-show';

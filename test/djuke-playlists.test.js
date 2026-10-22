@@ -5,16 +5,16 @@ const { Wallet, verifyMessage } = createRequire(require('node:path').join(__dirn
 
 const song = index => `0x${index.toString(16).padStart(64, '0')}`;
 
-test('named playlist model enforces the 1–10 cap, unique tracks and explicit flat pricing', async () => {
+test('named playlist model enforces the 1–24 cap, unique tracks and tiered lane pricing', async () => {
   const { normalizeNamedPlaylist } = await import('../js/creator-profile-data.mjs');
   const { quoteNamedPlaylist, matchesPlaylistRevision } = await import('../js/djuke-playlists.mjs');
   const maker = Wallet.createRandom().address;
   assert.equal(normalizeNamedPlaylist({ id: 'a'.repeat(32), maker, name: ' Night drive ', revision: 1, songIds: [song(1)] }).name, 'Night drive');
-  assert.throws(() => normalizeNamedPlaylist({ id: 'a'.repeat(32), maker, name: 'Mix', revision: 1, songIds: Array.from({ length: 11 }, (_, i) => song(i)) }), /1–10/);
+  assert.throws(() => normalizeNamedPlaylist({ id: 'a'.repeat(32), maker, name: 'Mix', revision: 1, songIds: Array.from({ length: 25 }, (_, i) => song(i)) }), /1–24/);
   assert.throws(() => normalizeNamedPlaylist({ id: 'a'.repeat(32), maker, name: 'Mix', revision: 1, songIds: [song(1), song(1)] }), /unique/);
   assert.deepEqual(quoteNamedPlaylist(10, 'private'), { songCount: 10, subtotalUnits: 2500000n, feeUnits: 0n, totalUnits: 2500000n });
-  assert.deepEqual(quoteNamedPlaylist(10, 'radio'), { songCount: 10, subtotalUnits: 2500000n, feeUnits: 5000000n, totalUnits: 7500000n });
-  assert.throws(() => quoteNamedPlaylist(11, 'radio'), /1–10/);
+  assert.deepEqual(quoteNamedPlaylist(10, 'radio'), { songCount: 10, subtotalUnits: 3000000n, feeUnits: 3000000n, totalUnits: 6000000n });
+  assert.throws(() => quoteNamedPlaylist(25, 'radio'), /1–24/);
   const revision = { songIds: [song(1), song(2)] };
   assert.equal(matchesPlaylistRevision(revision, [song(1), song(2)]), true);
   assert.equal(matchesPlaylistRevision(revision, [song(2), song(1)]), false);
@@ -148,8 +148,8 @@ test('profile limits original and saved playlists to 20 combined and rejects exp
   stale.expiresAt = new Date(Date.now() - 1000).toISOString();
   await assert.rejects(store.savePlaylist(stale, origin), /expired/);
   const malformed = await create(23);
-  malformed.playlist = { ...malformed.playlist, songIds: Array.from({ length: 11 }, (_, i) => song(i + 1)) };
-  await assert.rejects(store.savePlaylist(malformed, origin), /1–10/);
+  malformed.playlist = { ...malformed.playlist, songIds: Array.from({ length: 25 }, (_, i) => song(i + 1)) };
+  await assert.rejects(store.savePlaylist(malformed, origin), /1–24/);
 });
 
 test('worker exposes public name search and only accepts signed playlist mutations from allowed origins', async () => {
@@ -178,4 +178,15 @@ test('worker exposes public name search and only accepts signed playlist mutatio
     assert.equal(discovery.status, 200);
     assert.equal((await discovery.json()).playlists[0].id, playlist.id);
   } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('playlist quote mirror covers every radio tier and 12-song platform fee boundary', async () => {
+  const { quoteNamedPlaylist } = await import('../js/djuke-playlists.mjs');
+  for (const [count, subtotal, fee] of [[1, 250000n, 3000000n], [8, 2000000n, 3000000n],
+    [9, 2500000n, 3000000n], [12, 4000000n, 3000000n], [13, 4500000n, 6000000n],
+    [16, 6000000n, 6000000n], [17, 7000000n, 6000000n], [24, 14000000n, 6000000n]]) {
+    assert.deepEqual(quoteNamedPlaylist(count, 'radio'), { songCount: count, subtotalUnits: subtotal, feeUnits: fee, totalUnits: subtotal + fee });
+  }
+  assert.equal(quoteNamedPlaylist(3, 'private', [100000n, 500000n]).totalUnits, 850000n);
+  for (const count of [0, 25, 1.5]) assert.throws(() => quoteNamedPlaylist(count), /1–24/);
 });

@@ -8,6 +8,11 @@ export const DJUKE_ABI = [
   'function getRequest(uint256 requestId) view returns ((bytes32 songId,address payer,uint256 amount,bool fulfilled,uint256 revision,address[] recipients,uint16[] sharesBps))',
   'function getSong(bytes32 songId) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
   'function fulfill(uint256 requestId, bytes32 expectedSongId, uint256 expectedRevision, bytes32 playbackProof)',
+  'function playlistPendingCount() view returns (uint256)',
+  'function playlistHeadId() view returns (uint256)',
+  'function playlistNextId() view returns (uint256)',
+  'function getPlaylistItem(uint256 laneId) view returns (uint256 batchId,bytes32 songId,address payer,uint256 amount,uint8 status)',
+  'function fulfillPlaylistSong(uint256 laneId,bytes32 expectedSongId,uint256 expectedRevision,bytes32 playbackProof)',
   'function refundUndeliveredPlaylist(uint256 batchId)',
   'function registerSong(bytes32 songId, string audioURI, address[] recipients, uint16[] sharesBps)',
   'function multicall(bytes[] data) returns (bytes[] results)',
@@ -36,8 +41,10 @@ async function readSongWithRetry(contract, songId, options, attempts, retryDelay
 }
 
 export function createDjukeFulfiller(contract) {
-  return async ({ chainRequestId, songId, revision, playId }) => {
-    const transaction = await contract.fulfill(BigInt(chainRequestId), songId, BigInt(revision), id(playId));
+  return async ({ chainRequestId, playlistLaneId, songId, revision, playId }) => {
+    const transaction = playlistLaneId !== undefined
+      ? await contract.fulfillPlaylistSong(BigInt(playlistLaneId), songId, BigInt(revision), id(playId))
+      : await contract.fulfill(BigInt(chainRequestId), songId, BigInt(revision), id(playId));
     const receipt = await transaction.wait();
     if (receipt?.status !== 1) throw new Error(`DJuke fulfillment failed: ${transaction.hash}`);
     return transaction.hash;
@@ -158,6 +165,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
           amountUnits: request.amountUnits,
           ...(request.tier !== undefined ? { tier: request.tier } : {}),
           ...(request.campaignId !== undefined ? { campaignId: String(request.campaignId) } : {}),
+          ...(request.playlistLaneId !== undefined ? { playlistLaneId: String(request.playlistLaneId) } : {}),
           ...(request.playlistBatchId !== undefined ? { playlistBatchId: String(request.playlistBatchId) } : {}),
         };
         if (!existing) next.push({ requestId: request.requestId, ...fields, state: 'pending', attempts: 0 });
@@ -231,7 +239,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
 }
 
 export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, provider, contract, confirmations = 2,
-  paymentsEnabled = false, songCacheMs = 300000, concurrency = 5, readRetryAttempts = 3,
+  playlistLaneEnabled = false, paymentsEnabled = false, songCacheMs = 300000, concurrency = 5, readRetryAttempts = 3,
   readRetryDelayMs = 200, now = () => Date.now(), log = console }) {
   if (!isAddress(contractAddress) || /^0x0{40}$/i.test(contractAddress)) throw new Error('Invalid DJuke contract address');
   if (!Number.isSafeInteger(confirmations) || confirmations < 2) throw new Error('DJuke needs at least two confirmations');
@@ -296,11 +304,33 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
         artist: mapped ? track.uploader || track.mintRecipient : '',
         payer: request.payer, amountUnits: request.amount.toString(), playable: !!mapped });
     }
+    const mainPending = requests.length;
+    let playlistPending = 0;
+    if (playlistLaneEnabled) {
+      const [laneHead, laneNext, lanePending] = await Promise.all([jukebox.playlistHeadId(options), jukebox.playlistNextId(options), jukebox.playlistPendingCount(options)]);
+      playlistPending = Number(lanePending);
+      const start = Number(laneHead), end = Number(laneNext);
+      if (![start, end, playlistPending].every(value => Number.isSafeInteger(value) && value >= 0) || end < start || playlistPending > end - start) throw new Error('DJuke playlist lane needs a bounded complete snapshot');
+      for (let laneId = start; laneId < Math.min(end, start + 1); laneId++) {
+        const item = await jukebox.getPlaylistItem(laneId, options);
+        if (Number(item.status) !== 0) continue;
+        if (!isAddress(item.payer) || item.amount <= 0n) throw new Error('Invalid pending DJuke playlist item');
+        const song = await getSong(item.songId);
+        const track = catalog.get(item.songId);
+        const mapped = track && song.audioURI === `ipfs://${track.ipfsCid}`;
+        requests.push({ requestId: `8453:${contractAddress.toLowerCase()}:playlist:${laneId}`,
+          playlistLaneId: String(laneId), playlistBatchId: String(item.batchId), songId: item.songId,
+          revision: '0', trackId: mapped ? track.trackId : `djuke:${item.songId}`,
+          title: mapped ? track.title : 'Playlist recording awaiting catalog recovery',
+          artist: mapped ? track.uploader || track.mintRecipient : '', payer: item.payer,
+          amountUnits: item.amount.toString(), playable: !!mapped });
+      }
+    }
     const { tracks, lookupErrors: catalogReadErrors } = await registeredSongs(entries, options);
     if ((await rpc.getBlock(blockNumber))?.hash !== before.hash) throw new Error('DJuke snapshot changed during verification');
-    const quote = quoteDjuke(requests.length);
+    const quote = quoteDjuke(mainPending + playlistPending);
     return { chainId: 8453, contractAddress, usdcAddress: BASE_USDC, blockNumber, blockHash: before.hash,
-      requests, tracks, catalogReadErrors, priceUnits: quote.priceUnits.toString(), paymentsEnabled };
+      requests, mainPending, playlistPending, tracks, catalogReadErrors, priceUnits: quote.priceUnits.toString(), paymentsEnabled };
   }
   const read = () => {
     if (!task) task = readSnapshot().finally(() => { task = null; });
@@ -330,8 +360,9 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
         await journal.confirmFulfilled(record.requestId);
         continue;
       }
+      if (request.playlistLaneId !== undefined && state.requests.some(entry => entry.playlistLaneId === undefined)) continue;
       try {
-        await fulfill({ chainRequestId: request.chainRequestId, songId: record.songId, revision: record.revision, playId: record.playId });
+        await fulfill({ playlistLaneId: request.playlistLaneId, chainRequestId: request.chainRequestId, songId: record.songId, revision: record.revision, playId: record.playId });
         await journal.confirmFulfilled(record.requestId);
       } catch (error) {
         if (/Paid recording changed/.test(error.shortMessage || error.message)) await journal.resetPlayed(record.requestId);
@@ -350,9 +381,12 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   }
   async function claim(options) {
     const state = await reconcile();
-    const head = selectRequest
-      ? selectRequest(state, journal.getState().filter(record => record.state === 'pending'), options)
-      : journal.peekPending();
+    const pending = journal.getState().filter(record => record.state === 'pending');
+    const main = state.requests.filter(request => request.playlistLaneId === undefined);
+    const eligible = main.length ? main : state.requests.slice(0, 1);
+    const candidates = pending.filter(record => eligible.some(request => request.requestId === record.requestId));
+    const head = selectRequest ? selectRequest(state, candidates, options)
+      : candidates.sort((a, b) => eligible.findIndex(request => request.requestId === a.requestId) - eligible.findIndex(request => request.requestId === b.requestId))[0];
     if (!head) return null;
     const request = state.requests.find(entry => entry.requestId === head.requestId);
     if (!request || !await canPlayRequest(request, state)) return null;

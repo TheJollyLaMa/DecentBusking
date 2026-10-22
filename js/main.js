@@ -1,9 +1,9 @@
-// js/main.js — DecentBusking boot loader
+// js/main.js?v=20261022-playlist-lane — DecentBusking boot loader
 // Initialises the header, footer, stage interactions, and the 3-D space field.
 
 import { initWallet } from './wallet.js';
-import { initStage } from './stage.js?v=20261019-radio-recovery';
-import { initSpace } from './space.js?v=20261019-radio-recovery';
+import { initStage } from './stage.js?v=20261022-playlist-lane';
+import { initSpace } from './space.js?v=20261022-playlist-lane';
 import { initTutorial } from './tutorial.js?v=20261019-intro-visits';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.

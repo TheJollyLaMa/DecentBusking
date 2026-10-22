@@ -1,7 +1,8 @@
-import { renderUsdcAmount } from './fund-display.mjs?v=20261017-mercury-release';
+import { getCreatorWatchlistState } from './watchlist.mjs?v=20261022-playlist-lane';
+import { renderUsdcAmount } from './fund-display.mjs?v=20261022-playlist-lane';
 import { weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
-import { addChartSongToPlaylist } from './top-ten-playlist.mjs?v=20261019-radio-recovery';
+import { saveChartSongToWatchlist } from './top-ten-playlist.mjs?v=20261022-playlist-lane';
 import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261016-hype-bunny';
 
 export { rankTopTenSongs };
@@ -11,7 +12,7 @@ let spectrumReader = null;
 let spectrumReaderLoad = null;
 function readRadioSpectrum(out) {
   if (spectrumReader) return spectrumReader(out);
-  spectrumReaderLoad ||= import('./space.js?v=20261019-radio-recovery')
+  spectrumReaderLoad ||= import('./space.js?v=20261022-playlist-lane')
     .then(module => { spectrumReader = typeof module.readNowPlayingSpectrum === 'function' ? module.readNowPlayingSpectrum : () => false; })
     .catch(error => console.warn('[top-ten] Live equalizer unavailable:', error.message));
   return false;
@@ -299,21 +300,24 @@ export function initTopTenBoard() {
         prize.setAttribute('aria-label', `${prize.textContent || 'Estimated prize unavailable'}. ${warning}`);
         prize.tabIndex = 0;
       }
-      const add = el('button', 'top-ten-playlist-add', playlistSaved.has(track.trackId) ? '\u2713' : '+');
+      const add = el('button', 'top-ten-playlist-add', '+');
       add.type = 'button';
       add.dataset.trackId = track.trackId;
-      add.title = `Add ${track.title || 'song'} to your named DJuke playlist draft`;
+      add.title = `Add ${track.title || 'song'} to a playlist`;
       add.setAttribute('aria-label', add.title);
+      add.setAttribute('aria-haspopup', 'dialog');
       add.disabled = playlistPending.has(track.trackId);
       add.addEventListener('click', async () => {
         playlistPending.add(track.trackId);
         add.disabled = true;
         playlistStatus.textContent = `Adding ${track.title} to your DJuke playlist draft\u2026`;
         try {
-          await addChartSongToPlaylist({ ...track, ipfsCid: track.ipfsCid || (track.nowPlaying ? nowPlaying?.ipfsCid : '') });
-          playlistSaved.add(track.trackId);
-          add.textContent = '\u2713';
-          playlistStatus.textContent = `${track.title} is in your DJuke playlist draft. Save it to your profile to publish the revision.`;
+          const request = new CustomEvent('dbusk-playlist-add', { cancelable: true, detail: {
+            track: { ...track, ipfsCid: track.ipfsCid || (track.nowPlaying ? nowPlaying?.ipfsCid : '') },
+            anchor: add, status: text => { playlistStatus.textContent = text; },
+          } });
+          if (document.dispatchEvent(request)) throw new Error('Playlist selector is unavailable.');
+          playlistStatus.textContent = 'Choose a playlist to add this song.';
         } catch (error) {
           playlistStatus.textContent = error.message;
         } finally {
@@ -321,7 +325,25 @@ export function initTopTenBoard() {
           add.disabled = false;
         }
       });
-      if (!track.isAdvert) titleLine.append(add);
+      const watched = getCreatorWatchlistState().watchlist.some(entry => track.ipfsCid && entry.audioUrl?.includes(track.ipfsCid));
+      const eyes = el('button', 'top-ten-watchlist-add', watched || playlistSaved.has(track.trackId) ? '✓' : '👀');
+      eyes.type = 'button';
+      eyes.title = `Save ${track.title || 'song'} and artist to your profile watchlist`;
+      eyes.setAttribute('aria-label', eyes.title);
+      eyes.setAttribute('aria-pressed', String(watched || playlistSaved.has(track.trackId)));
+      eyes.addEventListener('click', async () => {
+        eyes.disabled = true;
+        try {
+          await saveChartSongToWatchlist({ ...track, ipfsCid: track.ipfsCid || (track.nowPlaying ? nowPlaying?.ipfsCid : '') });
+          playlistSaved.add(track.trackId);
+          eyes.textContent = '✓';
+          eyes.setAttribute('aria-pressed', 'true');
+          eyes.title = 'Saved to your profile watchlist';
+          playlistStatus.textContent = `${track.title} saved to your profile watchlist.`;
+        } catch (error) { playlistStatus.textContent = error.message; }
+        finally { eyes.disabled = false; }
+      });
+      if (!track.isAdvert) titleLine.append(add, eyes);
       item.append(rank, details, score, prize);
       list.append(item);
     }
