@@ -1,3 +1,4 @@
+import { renderLivePerformances } from './live-performance-profile.mjs';
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
@@ -609,6 +610,9 @@ export function initCreatorProfile() {
   const earningsTotal = dialog.querySelector('[data-earnings-total]');
   const earningsStatus = dialog.querySelector('[data-earnings-status]');
   const earningsList = dialog.querySelector('[data-earnings-list]');
+  const livePerformances = document.createElement('section');
+  livePerformances.className = 'creator-live-performances';
+  earningsList?.parentElement?.append(livePerformances);
   const link = (href, text) => Object.assign(document.createElement('a'), { href, textContent: text, target: '_blank', rel: 'noopener noreferrer' });
   const renderEarnings = (entries, note) => {
     if (!earningsList) return;
@@ -660,6 +664,18 @@ export function initCreatorProfile() {
       if (check !== revision) return;
       const merged = mergeLedgerReceipts(result.viewEntries, result.logs.entries);
       renderEarnings([...merged.viewEntries, ...result.logs.entries], [merged.note, result.note].filter(Boolean).join(' '));
+      const liveTarget = document.createElement('div');
+      let liveReceipt;
+      try {
+        await renderLivePerformances({ container: liveTarget, wallet: address,
+          serviceUrl: window.DecentConfig?.ipfsUploadServiceUrl || '', ethers: window.ethers,
+          onReceipt: entry => { liveReceipt = entry; } });
+        if (check === revision) {
+          livePerformances.replaceChildren(liveTarget);
+          if (liveReceipt) renderEarnings([...merged.viewEntries, ...result.logs.entries, liveReceipt], [merged.note, result.note].filter(Boolean).join(' '));
+        }
+      } catch { if (check === revision) livePerformances.textContent = 'Live performance bookings temporarily unavailable.'; }
+
     } finally { publicProvider.destroy(); }
   };
   const open = async detail => {

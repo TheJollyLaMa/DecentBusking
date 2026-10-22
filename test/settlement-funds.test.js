@@ -46,12 +46,12 @@ test('fund preflight rejects wrong owners, chains, roles, addresses, and URI wit
 test('fund selector uses only this app configured radio and repository allocations', async () => {
   const { configuredSettlementFunds, validateSettlementFundSlug, resolveSettlementFundSlug } = await import(url);
   assert.deepEqual(configuredSettlementFunds({ radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' }, fundSlug: 'dbusk-repo-dev' })
-    .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev']);
+    .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-live-performers']);
   assert.deepEqual(configuredSettlementFunds({ radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' }, fundSlug: 'dbusk-repo-dev', pinnerFundSlug: 'dbusk-pinners' })
-    .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners']);
+    .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners', 'dbusk-live-performers']);
   assert.deepEqual(configuredSettlementFunds(payrollAssets).map(fund => fund.slug),
-    ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners']);
-  assert.equal(configuredSettlementFunds({ fundSlug: 'wrong#slug' }).length, 0);
+    ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners', 'dbusk-live-performers']);
+  assert.equal(configuredSettlementFunds({ fundSlug: 'wrong#slug' }).length, 1);
   assert.equal(resolveSettlementFundSlug('__custom_fund__', 'dmtv-referrals', { fundSlug: 'dbusk-repo-dev' }), 'dmtv-referrals');
   assert.equal(resolveSettlementFundSlug('dmtv-referrals', '', {}, ['dmtv-referrals']), 'dmtv-referrals');
   assert.throws(() => validateSettlementFundSlug('DMTV Referrals'), /Fund slug must be/);
@@ -74,7 +74,7 @@ test('custom fund slugs allow purpose names while rejecting malformed and config
   for (const slug of ['jukebox-sponsors', 'dmtv-referrals', 'community-grants', 'art-sales']) {
     assert.equal(resolveSettlementFundSlug('__custom_fund__', slug, config), slug);
   }
-  for (const slug of ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev']) {
+  for (const slug of ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-live-performers']) {
     assert.throws(() => resolveSettlementFundSlug('__custom_fund__', slug, config), /configured fund/);
   }
   assert.equal(resolveSettlementFundSlug('__custom_fund__', 'UPPER', config), 'upper');

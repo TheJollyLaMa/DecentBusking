@@ -330,3 +330,7 @@ Optional push updates: create an Alchemy **Custom Webhook** on Base Mainnet that
 
 Code: [Apache-2.0](LICENSE) · Art and docs: [CC BY 4.0](LICENSES/CC-BY-4.0.txt) · Please keep the [NOTICE](NOTICE) and give The Jolly LaMa / A Decent Agency a head nod when you reuse this work.
 Support the work with a [Supporter DNFT](https://thejollylama.github.io/DecentMarket/).
+
+### Scheduled live performances
+
+The dedicated admin Live Performance panel, public Live Performers fund and performer cards share dated booking IDs. Tomorrow’s Phase 0 uses **earmarked, NOT escrowed** router funds; Phase 1 stays disabled without an explicitly configured escrow. See [operator runbook and DRAFT v1 terms](docs/LIVE_PERFORMANCE_RUNBOOK.md) before any owner signing. No deployment or financial operation is implied by these docs.
