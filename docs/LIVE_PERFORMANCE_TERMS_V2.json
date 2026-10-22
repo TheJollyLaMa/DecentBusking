@@ -1,0 +1,18 @@
+{
+  "title": "DecentBusking Live Performance Agreement v2",
+  "version": "2",
+  "scope": "Applies only to a dated booking that identifies this exact agreement URI and content hash. The booking records the performer wallet, date, time, and fee.",
+  "terms": [
+    "Slot: 20 minutes at the date and time shown in the booking on the DecentBusking Discord stage or voice stream (JukeLoop). Soundcheck is at least 15 minutes before the booked start.",
+    "Performance and payout: The maximum fee is $20 USDC on Base (chain 8453). At least 15 completed whole minutes of live music within the 20-minute slot earns the full $20. Below 15 minutes, the payout is $20 multiplied by verified live-music minutes divided by 15, capped at $20. Zero live-music minutes, including a performer no-show, earns $0 if the steward records the decision and public report within the review window. If no decision is recorded by the deadline, the escrow's automatic full-fee claim rule applies.",
+    "Minute calculation: Payout is determined only by completed, verified live-music minutes under the formula above. Platform, Discord, network, streaming, or bot outages do not add minutes or create a separate full-fee exception. No outage-based override applies to this v2 agreement.",
+    "Content: The performer will perform original or properly licensed work; hate speech, harassment, and illegal content are not permitted. Discord Terms of Service apply. Explicit content must be identified before the show.",
+    "Recording and rights: The performer retains ownership of their work and grants DecentBusking non-exclusive permission to stream the set live, archive it, and share short promotional clips. The performer may opt out of recording by notifying the steward before the show. Dispute review uses the recording where available and permitted.",
+    "Payment: The booking fee is locked per booking in LivePerformanceEscrow on Base. The steward reviews the completed show within 24 hours after the booked end time and records a public report and payout decision under the minute-based formula. If no decision is made within the review window, the full fee becomes claimable by the performer automatically and the steward can no longer reject. The performer must claim within three days after the review window ends; after that, unclaimed funds may be returned to the funder by anyone. The steward can pause the escrow in an emergency; a pause also pauses claims and refunds.",
+    "Performer cancellation: If the performer cancels before the booked start, the booking fee is fully refunded with no penalty. The performer should provide at least 24 hours' notice.",
+    "Steward cancellation: Cancellation more than eight hours before the booked start fully refunds the fee to the funder. Cancellation within eight hours of the booked start allocates 50% of the fee to the performer and refunds the remainder to the funder, subject to the escrow's confirmed cancellation flow.",
+    "Rescheduling: A booking is for one date only. Rescheduling requires cancellation under these terms and a new booking for the replacement date.",
+    "Disputes: Raise concerns in the DecentBusking Discord within seven days. Review uses the archived recording where available and permitted.",
+    "Tips and taxes: Listener tips and DJuke play earnings are separate from the booking fee and belong to the performer. The performer is responsible for applicable taxes."
+  ]
+}

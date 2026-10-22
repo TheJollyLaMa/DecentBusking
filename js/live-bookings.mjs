@@ -5,7 +5,7 @@ export const LIVE_PERFORMANCE_AIRTIME_MINUTES = 20;
 export const LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES = 15;
 export const LIVE_PERFORMANCE_FEE_UNITS = '20000000';
 export const LIVE_NOTICE = 'Escrow keeps the booking fee locked until review; payout follows the agreed terms. Community-fund money is only earmarked, not escrowed, and may be recovered by the steward.';
-export const DRAFT_TERMS = 'Offer v2 is a draft until its exact agreement is pinned and approved. The proposed set is 20 minutes of airtime for $20 USDC; 15 live-music minutes earns the full fee, shorter sets are prorated, and no live set earns $0. Platform outages and other exceptions must be written in the pinned agreement.';
+export const DRAFT_TERMS = 'Offer v2 is a draft until its exact agreement is pinned and approved. The proposed set is 20 minutes of airtime for $20 USDC; 15 live-music minutes earns the full fee, shorter sets are prorated, and no live set earns $0. Payout is based only on verified live-music minutes; outages do not create a separate full-fee exception.';
 export const LIVE_ESCROW_ABI = [
  'function createBooking(bytes32 bookingId,address performer,uint256 amount,uint64 showStart,uint64 showEnd,uint64 claimDeadline,bytes32 termsHash,string termsUri,uint32 reviewWindow,uint32 cancellationWindow,uint16 killFeeBps)',
  'function approve(bytes32 bookingId,uint16 payoutBps,string reportUri)',
