@@ -72,3 +72,11 @@ test('all local consumers share one space, stage and radio module instance', () 
     assert.equal(values.size, 1, `${name} must not load duplicate stateful modules`);
   }
 });
+
+test('DecentHead CDN imports are pinned to an immutable commit, never a moving branch', () => {
+  for (const file of ['js/components/header.js', 'js/components/header-right-ankh-override.js']) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.doesNotMatch(source, /DecentHead@(main|master|latest)\b/, `${file} must not track a moving DecentHead branch`);
+    assert.match(source, /DecentHead@[0-9a-f]{40}\//, `${file} must pin DecentHead to a full commit SHA`);
+  }
+});
