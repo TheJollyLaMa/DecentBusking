@@ -1,3 +1,4 @@
+import { liveBookingRows } from './live-bookings.mjs';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
 import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261019-fund-wallet-labels';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
@@ -177,7 +178,7 @@ export function renderFundSourcesTable(fund) {
 export function renderFundDisclosure(fund) {
   const reserved = fund.reservedUnits != null ? `<span>reserved ${renderUsdcAmount(fund.reservedUnits)} · </span>` : '';
   const avail = `<span>available ${renderUsdcAmount(fund.availableUnits)}</span>`;
-  return `<details class="fund-disclosure"><summary><strong>${escapeHtml(fund.label)}</strong> · ${renderUsdcAmount(fund.balanceUnits)} · ${reserved}${avail}</summary><div class="fund-disclosure-body">${fund.description ? `<p class="fund-description">${escapeHtml(fund.description)}</p>` : ''}${renderFundSourcesTable(fund)}</div></details>`;
+  return `<details class="fund-disclosure"><summary><strong>${escapeHtml(fund.label)}</strong> · ${renderUsdcAmount(fund.balanceUnits)} · ${reserved}${avail}</summary><div class="fund-disclosure-body">${fund.description ? `<p class="fund-description">${escapeHtml(fund.description)}</p>` : ''}${renderFundSourcesTable(fund)}${fund.slug === 'dbusk-live-performers' ? '<p>Earmarked, NOT escrowed. Admin can recoverFund.</p>' + (fund.escrowTotals ? `<p>Configured escrow: locked ${renderUsdcAmount(fund.escrowTotals.lockedUnits)} · paid ${renderUsdcAmount(fund.escrowTotals.paidUnits)} · refunded ${renderUsdcAmount(fund.escrowTotals.refundedUnits)}</p>` : '') + liveBookingRows(fund.bookings || [], { walletRenderer: b => renderWalletButton(b.walletDisplay || { address: b.wallet, label: b.ens || b.wallet }) + ' ' + renderWalletButton({ address: b.wallet, label: b.wallet }) }) : ''}</div></details>`;
 }
 
 export function renderFundPendingTable(rows, { fundSlug, week = '' } = {}) {

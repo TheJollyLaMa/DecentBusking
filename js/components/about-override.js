@@ -8,7 +8,7 @@ import { formatUsdcUnits } from '../usdc-format.mjs?v=20261017-mercury-release';
 //
 import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261019-intro-visits';
 import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
-import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261019-fund-wallet-labels';
+import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261022-live-booking';
 
 // The CDN's AboutModal.js hard-codes a filter for listings whose note field
 // contains "decenthead", which causes BigNuten / DecentHead Supporter NFTs to
@@ -94,7 +94,12 @@ class DecentBuskingAboutModal extends HTMLElement {
         payerLabel: source.kind === 'djuke' ? wallet.label : '',
       });
     }
-    return { ...fund, sources };
+    const bookings = [];
+    for (const booking of fund.bookings || []) {
+      const walletDisplay = await resolveWalletLabel(booking.wallet, provider, sponsorAliases, aliasCache);
+      bookings.push({ ...booking, walletDisplay });
+    }
+    return { ...fund, sources, bookings };
   }
 
   async _loadCommunityFunds() {
@@ -112,7 +117,7 @@ class DecentBuskingAboutModal extends HTMLElement {
       const provider = workerEnsProvider;
       const aliasCache = new Map();
       const funds = [];
-      for (const slug of ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners']) {
+      for (const slug of ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners', 'dbusk-live-performers']) {
         const fund = state.funds?.[slug];
         if (!fund) continue;
         funds.push(await this._prepareFund(fund, state.sponsorAliases || {}, provider, aliasCache));

@@ -1,4 +1,5 @@
 import { createRadioAnnouncements, deserializeAnnouncements } from './radio-announcements.js';
+import { createLiveBookings } from './live-bookings.js';
 // discord-bot/index.js
 // DecentBusking Discord Bot — entry point
 //
@@ -1132,6 +1133,8 @@ async function main() {
   const alchemyWebhook = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY ? createAlchemyWebhook({
     signingKey: process.env.ALCHEMY_WEBHOOK_SIGNING_KEY,
     routes: [
+      { label: 'live-performance-escrow', addresses: [process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS],
+        refresh: [() => liveBookings.getState()] },
       { label: 'router', addresses: [payrollAssets.routerAddress],
         refresh: [comparePayments, refreshPayflow, refreshFundLedger, refreshEarningsLedger] },
       { label: 'devert', addresses: [process.env.DEVERT_CONTRACT_ADDRESS], refresh: [syncDevertDjukeBoosts, refreshFundLedger] },
@@ -1156,8 +1159,29 @@ async function main() {
     listenUrl: config.siteUrl,
     getSchedule: () => ({ ready: liveScheduleReady, schedule: defaultRadioSchedule(liveWeeklySchedule), events: livePerformanceEvents }),
   });
+  const liveBookingStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage,
+    pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
+    gateway: config.ipfsGateway, name: 'decentbusking-live-bookings.json',
+    tags: { app: 'decentbusking', kind: 'live-bookings', schema: '1' },
+    serialize: value => value, deserialize: value => value,
+    beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined }) : null;
+  const liveBookings = createLiveBookings({ provider: paymentProvider, ownerWallet: config.mintOwnerWallet,
+    escrowAddress: process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS || '',
+    escrowStartBlock: Number(process.env.LIVE_PERFORMANCE_ESCROW_START_BLOCK || 0), ensResolver: createEnsResolver(),
+    restore: liveBookingStore ? liveBookingStore.restore : undefined, save: liveBookingStore ? liveBookingStore.save : undefined,
+    getSchedule: () => ({ events: livePerformanceEvents, weeklySchedule: liveWeeklySchedule, ready: liveScheduleReady }),
+    saveSchedule: async ({ events, weeklySchedule }) => {
+      if (!liveScheduleReady || !liveScheduleStore) throw new Error('Durable schedule unavailable');
+      const uri = await liveScheduleStore.save({ events, weeklySchedule });
+      if (!/^ipfs:\/\//.test(uri || '')) throw new Error('Live schedule checkpoint did not confirm');
+      livePerformanceEvents = events;
+      liveWeeklySchedule = weeklySchedule;
+      updateJukeLoopRadioSchedule({ events, schedule: defaultRadioSchedule(weeklySchedule) });
+    },
+  });
   const requestHandler = createWorkerRequestHandler({
     radioAnnouncements,
+    liveBookings,
     alchemyWebhook,
     checkpointMirror,
     creatorProfiles,
@@ -1223,6 +1247,7 @@ async function main() {
     rpcProxy: createRpcProxy({
       request: (method, params) => getRpcRouter().request('fallback', method, params),
       allowedContracts: [
+        process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS,
         ...(config.nftContractAddresses || [config.nftContractAddress]),
         process.env.DJUKE_CONTRACT_ADDRESS || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9',
         process.env.DEVERT_CONTRACT_ADDRESS || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9',

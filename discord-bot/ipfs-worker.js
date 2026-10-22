@@ -1,3 +1,4 @@
+import { liveAuthorization } from '../js/live-bookings.mjs';
 import { Contract, Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -245,6 +246,7 @@ export function createWorkerRequestHandler({
   getWeeklyPayflow,
   getPaymentLedger,
   getFunds,
+  liveBookings,
   getEarnings,
   getDjukeTopEarners,
   ensResolver,
@@ -591,9 +593,39 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, await getPaymentLedger(), '*');
         return;
       }
+      if (requestUrl.pathname === '/api/live-bookings' && ['GET', 'POST'].includes(request.method)) {
+        if (!liveBookings) { sendJson(response, 503, { error: 'Live bookings are not configured' }, '*'); return; }
+        if (request.method === 'GET') { sendJson(response, 200, await liveBookings.getState(), '*', 'no-store'); return; }
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        const body = await readJson(request);
+        if (typeof body.signature !== 'string' || !Number.isFinite(Date.parse(body.issuedAt)) ||
+            Math.abs(now() - Date.parse(body.issuedAt)) > MAX_SIGNATURE_AGE_MS || !body.command ||
+            String(body.address || '').toLowerCase() !== expectedOwner) throw new Error('Invalid owner booking authorization');
+        const message = liveAuthorization({ ...body, origin });
+        if (verifyMessage(message, body.signature).toLowerCase() !== expectedOwner) throw new Error('Only the owner wallet may manage live bookings');
+        if (hasConsumedSignature(body.signature)) throw new Error('Booking authorization already used; refresh before retry');
+        consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
+        sendJson(response, 200, await liveBookings.execute(body.command), corsOrigin);
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/api/funds') {
         if (!getFunds) throw new Error('Fund balances are not configured');
-        sendJson(response, 200, await getFunds(), '*', 'public, max-age=60, stale-while-revalidate=30');
+        const funds = await getFunds();
+        if (liveBookings && funds.funds?.['dbusk-live-performers']) {
+          try {
+            const live = await liveBookings.getState();
+            funds.funds['dbusk-live-performers'] = { ...funds.funds['dbusk-live-performers'], bookings: live.bookings,
+              escrowAddress: live.escrowAddress, description: live.notice,
+              escrowTotals: live.escrowConfigured ? live.bookings.filter(b => b.mode === 'phase1').reduce((totals, b) => {
+                totals.paidUnits = (BigInt(totals.paidUnits) + BigInt(b.paidUnits || 0)).toString();
+                totals.refundedUnits = (BigInt(totals.refundedUnits) + BigInt(b.refundUnits || 0)).toString();
+                const locked = b.status === 'funded' ? b.amountUnits : b.status === 'approved' ? b.approvedUnits : '0';
+                totals.lockedUnits = (BigInt(totals.lockedUnits) + BigInt(locked || 0)).toString();
+                return totals;
+              }, { lockedUnits: '0', paidUnits: '0', refundedUnits: '0' }) : null };
+          } catch (error) { funds.funds['dbusk-live-performers'].bookingError = error.message; }
+        }
+        sendJson(response, 200, funds, '*', 'public, max-age=60, stale-while-revalidate=30');
         return;
       }
       if (request.method === 'GET' && /^\/api\/funds\/[^/]+\/weeks$/.test(requestUrl.pathname)) {

@@ -14,6 +14,7 @@ export const DJUKE_EARNING_CONTRACTS = [
 ];
 
 export const FUND_LABELS = {
+  'dbusk-live-performers': 'Live performances',
   'dbusk-repo-dev': 'Repo dev payroll',
   'dbusk-pinners': 'Pinner rewards',
   'dbusk-playback': 'Playback rewards',

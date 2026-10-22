@@ -1,0 +1,9 @@
+.live-performance-admin { border-top: 1px solid currentColor; margin-top: 1rem; padding-top: 1rem; }
+.live-performance-admin form { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .7rem; }
+.live-performance-admin label { display: flex; flex-direction: column; gap: .25rem; }
+.live-performance-admin input, .live-performance-admin select { width: 100%; min-width: 0; box-sizing: border-box; padding: .5rem; }
+.live-performance-admin button { margin: .3rem; padding: .45rem; }
+.live-booking { padding: .75rem 0; border-bottom: 1px solid #8886; overflow-wrap: anywhere; }
+.live-booking p { margin: .4rem 0; }
+.live-status { border: 1px solid currentColor; border-radius: 1rem; padding: .1rem .4rem; }
+.creator-live-performances { width: 100%; }
