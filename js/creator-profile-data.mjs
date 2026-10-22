@@ -40,6 +40,38 @@ export function buildCreatorWatchlistAuthorizationMessage({ address, origin, act
     `Entry: ${JSON.stringify(normalizeCreatorWatchlistEntry(entry))}`].join('\n');
 }
 
+export function normalizeNamedPlaylist(input = {}) {
+  const id = String(input.id || '').toLowerCase();
+  const maker = String(input.maker || '').toLowerCase();
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  const revision = Number(input.revision);
+  const songIds = input.songIds;
+  if (!/^[a-f0-9]{32}$/.test(id) || !/^0x[0-9a-f]{40}$/.test(maker) || !name || name.length > 60 ||
+      !Number.isSafeInteger(revision) || revision < 1 || !Array.isArray(songIds) || songIds.length < 1 || songIds.length > 10 ||
+      songIds.some(songId => !/^0x[0-9a-f]{64}$/i.test(songId)) ||
+      new Set(songIds.map(songId => songId.toLowerCase())).size !== songIds.length) {
+    throw new Error('Playlist needs a valid maker, ID, 1–60 character name, revision and 1–10 unique songs');
+  }
+  return { id, maker, name, revision, songIds: songIds.map(songId => songId.toLowerCase()) };
+}
+
+export function buildCreatorPlaylistAuthorizationMessage({ address, origin, action, nonce, expiresAt, playlist }) {
+  const normalized = normalizeNamedPlaylist(playlist);
+  return ['DecentBusking named DJuke playlist', `Wallet: ${address.toLowerCase()}`, `Origin: ${origin}`,
+    `Action: ${action}`, `Nonce: ${nonce}`, `Expires At: ${expiresAt}`,
+    `Playlist: ${JSON.stringify(normalized)}`].join('\n');
+}
+
+export function buildCreatorPlaylistCopyAuthorizationMessage({ address, origin, action, nonce, expiresAt, playlistId, revision }) {
+  const reference = { id: String(playlistId || '').toLowerCase(), revision: Number(revision) };
+  if (!/^[a-f0-9]{32}$/.test(reference.id) || !Number.isSafeInteger(reference.revision) || reference.revision < 1) {
+    throw new Error('Invalid saved playlist revision');
+  }
+  return ['DecentBusking saved DJuke playlist copy', `Wallet: ${address.toLowerCase()}`, `Origin: ${origin}`,
+    `Action: ${action}`, `Nonce: ${nonce}`, `Expires At: ${expiresAt}`,
+    `Playlist: ${JSON.stringify(reference)}`].join('\n');
+}
+
 export function creatorImageURL(value, gateway = 'https://gateway.pinata.cloud/ipfs/') {
   if (typeof value !== 'string') return '';
   if (/^ipfs:\/\/[a-zA-Z0-9]+(?:\/[^\s]*)?$/.test(value)) return `${gateway.replace(/\/$/, '')}/${value.slice(7)}`;

@@ -5,13 +5,13 @@ export async function addChartSongToPlaylist(track, {
     return resolveNowPlayingNFT(detail, { requireMediaMatch: true });
   },
   save = async nft => {
-    const { saveCreatorWatchlist, isCreatorWatchlisted } = await import('./watchlist.mjs?v=20261017-mercury-release');
-    if (!isCreatorWatchlisted(nft)) await saveCreatorWatchlist(nft);
+    const event = new CustomEvent('dbusk-playlist-add', { cancelable: true, detail: { nft } });
+    if (document.dispatchEvent(event)) throw new Error('DJuke playlist controls are unavailable');
   },
 } = {}) {
   if (!track.ipfsCid) throw new Error('This song does not have verified media for your playlist yet.');
   if (!wallet?.address || !wallet?.signer) await wallet?.connect?.();
-  if (!wallet?.address || !wallet?.signer) throw new Error('Connect your wallet to add songs to your personal playlist.');
+  if (!wallet?.address || !wallet?.signer) throw new Error('Connect your wallet to add songs to your named playlist draft.');
   const nft = await resolveNFT({
     title: track.title,
     artist: track.artist || track.uploader,

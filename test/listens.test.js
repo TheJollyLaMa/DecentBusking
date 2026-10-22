@@ -126,7 +126,7 @@ test('purchased playlists play straight through without preview gates', async ()
   assert.equal(plays[1].onEnded(), false);
 });
 
-test('playlist storage dedupes, caps size and survives broken storage', async () => {
+test('legacy private-listen cart keeps its 50-song capacity and survives broken storage', async () => {
   const api = await load();
   const values = new Map();
   const playlist = api.createListenPlaylist({ getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) });

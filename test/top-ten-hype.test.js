@@ -97,7 +97,7 @@ test('no durable store, failed restore, and unconfirmed saves never create a suc
   await assert.rejects(missing.ensure(context.ensure), /durable/);
   const failed = context.createTopTenHype({ store: { restore: async () => { throw new Error('restore failed'); } } });
   await assert.rejects(failed.ensure(context.ensure), /restore failed/);
-  const unconfirmed = context.createTopTenHype({ store: { restore: async () => null, save: async () => null } });
+  const unconfirmed = context.createTopTenHype({ store: { restore: async () => null, save: async () => null }, now: () => opening });
   await assert.rejects(unconfirmed.ensure(context.ensure), /did not confirm/);
 });
 
