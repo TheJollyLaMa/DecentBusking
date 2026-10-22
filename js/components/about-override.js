@@ -94,7 +94,12 @@ class DecentBuskingAboutModal extends HTMLElement {
         payerLabel: source.kind === 'djuke' ? wallet.label : '',
       });
     }
-    return { ...fund, sources };
+    const bookings = [];
+    for (const booking of fund.bookings || []) {
+      const walletDisplay = await resolveWalletLabel(booking.wallet, provider, { sponsorAliases, aliasCache });
+      bookings.push({ ...booking, walletDisplay });
+    }
+    return { ...fund, sources, bookings };
   }
 
   async _loadCommunityFunds() {
