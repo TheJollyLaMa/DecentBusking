@@ -1,9 +1,56 @@
-.live-performance-admin { border-top: 1px solid currentColor; margin-top: 1rem; padding-top: 1rem; }
-.live-performance-admin form { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .7rem; }
-.live-performance-admin label { display: flex; flex-direction: column; gap: .25rem; }
-.live-performance-admin input, .live-performance-admin select { width: 100%; min-width: 0; box-sizing: border-box; padding: .5rem; }
-.live-performance-admin button { margin: .3rem; padding: .45rem; }
-.live-booking { padding: .75rem 0; border-bottom: 1px solid #8886; overflow-wrap: anywhere; }
-.live-booking p { margin: .4rem 0; }
+.live-performance-admin { border: 1px solid #91e2ce66; border-radius: 12px; margin-top: 1rem; background: #101a18; overflow: hidden; }
+.live-performance-admin > summary { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; padding: 1rem; cursor: pointer; color: #a8edce; font-weight: 800; }
+.live-performance-admin > summary span { font-size: 1.1rem; }
+.live-performance-admin > summary small { color: #c7c3b8; font-weight: 400; }
+.live-performance-admin-content { display: grid; gap: 1rem; padding: 0 1rem 1rem; }
+.live-performance-admin-content > p { margin: 0; }
+.live-performance-admin form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; align-items: end; margin-top: .8rem; }
+.live-performance-admin label { display: flex; flex-direction: column; gap: .35rem; line-height: 1.4; }
+.live-performance-admin input, .live-performance-admin select { width: 100%; min-width: 0; box-sizing: border-box; padding: .65rem; border: 1px solid #64796f; border-radius: 6px; background: #151712; color: #f6efdd; font: inherit; }
+.live-performance-admin input[type="checkbox"] { width: auto; padding: 0; }
+.live-performance-admin button { margin: .25rem; padding: .55rem .75rem; border-radius: 6px; }
+.live-performance-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.live-performance-flow li, .live-performance-offer { padding: .8rem; border: 1px solid #ffffff20; border-radius: 8px; background: #ffffff08; line-height: 1.5; }
+.live-performance-offer { display: grid; gap: .4rem; border-color: #f5cf6644; }
+.live-performance-draft-note, .live-performance-form-note { color: #d0c9b8; font-size: .9rem; line-height: 1.5; }
+.live-performance-form-note { grid-column: 1 / -1; }
+.live-performance-approval { grid-column: 1 / -1; flex-direction: row !important; align-items: flex-start; }
+.live-create-details, .live-advanced-terms, .live-booking-group, .live-booking-actions, .live-booking-technical { border: 1px solid #ffffff24; border-radius: 8px; }
+.live-create-details > summary, .live-advanced-terms > summary, .live-booking-group > summary, .live-booking-actions > summary, .live-booking-technical > summary { padding: .75rem; cursor: pointer; color: #a8edce; font-weight: 700; }
+.live-create-details { padding: .3rem .75rem .75rem; }
+.live-create-details > summary { margin: 0 -.75rem; }
+.live-advanced-terms { grid-column: 1 / -1; padding: .25rem .65rem .65rem; }
+.live-performance-acceptance { padding: .85rem; border: 2px solid #f5cf66; border-radius: 8px; color: #fff3c4; font-weight: 700; line-height: 1.5; }
+.live-booking { display: grid; gap: .35rem; padding: .9rem; border-bottom: 1px solid #8886; overflow-wrap: anywhere; }
+.live-booking header { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
+.live-booking p { margin: .15rem 0; line-height: 1.5; }
+.live-booking a, .live-booking-invite a { color: #91e2ce; }
+.live-booking > a { width: fit-content; }
+.live-booking-technical { padding: .25rem .65rem; font-size: .88rem; }
+.live-booking-technical > summary { padding: .4rem 0; }
+.live-booking-technical p { overflow-wrap: anywhere; }
+.live-booking-group { padding: .2rem .65rem .65rem; }
+.live-booking-group > summary { margin: 0 -.65rem; }
+.live-booking-actions { margin: .35rem 0 .75rem; padding: .15rem .65rem .65rem; }
+.live-booking-actions > div { display: flex; flex-wrap: wrap; gap: .35rem; }
+.live-booking-actions button { margin: 0; }
+.live-booking-empty { padding: .5rem .75rem; color: #c7c3b8; }
+.live-booking-invite { display: grid; gap: .5rem; border-top: 1px solid #8886; margin-top: .5rem; padding-top: .5rem; overflow-wrap: anywhere; }
+.live-booking-invite p { margin: .2rem 0; }
+.live-booking-invite a { display: block; overflow-wrap: anywhere; }
+.live-booking-invite code { display: block; overflow-wrap: anywhere; }
+.live-booking-invite label { display: flex; align-items: flex-start; gap: .4rem; margin: .5rem 0; }
+.live-booking-invite button { justify-self: start; padding: .45rem .7rem; }
 .live-status { border: 1px solid currentColor; border-radius: 1rem; padding: .1rem .4rem; }
 .creator-live-performances { width: 100%; }
+.radio-schedule-archive { margin-top: 1rem; border: 1px solid #ffffff24; border-radius: 8px; }
+.radio-schedule-archive > summary { padding: .75rem; cursor: pointer; color: #a8edce; font-weight: 700; }
+.radio-schedule-archive > p { padding: 0 .75rem; color: #c7c3b8; }
+.radio-schedule-archive .radio-schedule-list { padding: 0 1rem 1rem; }
+.radio-schedule-archive-status { color: #c7c3b8; font-size: .85rem; }
+@media (max-width: 600px) {
+ .live-performance-admin-content { padding-right: .7rem; padding-left: .7rem; }
+ .live-performance-admin form { grid-template-columns: 1fr; }
+ .live-performance-flow { grid-template-columns: 1fr; }
+ .live-performance-approval { grid-column: auto; }
+}

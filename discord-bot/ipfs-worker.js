@@ -615,6 +615,19 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, await getPaymentLedger(), '*');
         return;
       }
+      if (requestUrl.pathname === '/api/live-bookings/acknowledge' && request.method === 'POST') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!liveBookings) { sendJson(response, 503, { error: 'Live bookings are not configured' }, '*'); return; }
+        const body = await readJson(request);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') || typeof body.id !== 'string' ||
+            typeof body.signature !== 'string' || body.signature.length > 1000) {
+          throw new Error('Invalid performer acknowledgement');
+        }
+        sendJson(response, 200, await liveBookings.acknowledgePerformer({
+          id: body.id, address: body.address, signature: body.signature,
+        }), corsOrigin, 'no-store');
+        return;
+      }
       if (requestUrl.pathname === '/api/live-bookings' && ['GET', 'POST'].includes(request.method)) {
         if (!liveBookings) { sendJson(response, 503, { error: 'Live bookings are not configured' }, '*'); return; }
         if (request.method === 'GET') { sendJson(response, 200, await liveBookings.getState(), '*', 'no-store'); return; }

@@ -68,6 +68,80 @@ test('performer acknowledgement must be signed by performer, not owner/outsider'
  await assert.rejects(f.exec({action:'acknowledge',id:b.id,stewardApproved:true,performerSignature:await outsider.signMessage(f.shared.liveAcknowledgement(b))}),/mismatch/);
  await assert.rejects(f.exec({action:'acknowledge',id:b.id,stewardApproved:false,performerSignature:await performer.signMessage(f.shared.liveAcknowledgement(b))}),/Steward/);
 });
+test('performer can accept only the invited wallet’s steward-approved immutable draft',async()=>{
+ const f=await fixture({escrowAddress:'0x'+'ef'.repeat(20),escrowStartBlock:100});
+ const draft=await f.create({...input(),mode:'phase1',stewardApproved:true},'live:jose:approved');
+ const booking=draft.bookings[0];
+ const signature=await performer.signMessage(f.shared.liveAcknowledgement(booking));
+ await assert.rejects(f.service.acknowledgePerformer({id:booking.id,address:outsider.address,signature}),/invited performer wallet/);
+ await assert.rejects(f.service.acknowledgePerformer({id:booking.id,address:performer.address,signature:await outsider.signMessage(f.shared.liveAcknowledgement(booking))}),/mismatch/);
+ const accepted=await f.service.acknowledgePerformer({id:booking.id,address:performer.address,signature});
+ assert.equal(accepted.bookings[0].acknowledged,true);
+ assert.equal(accepted.bookings[0].acknowledgedAt,new Date(when).toISOString());
+ assert.match(accepted.bookings[0].termsStatus,/awaiting escrow funding/);
+ assert.equal(accepted.bookings[0].status,'draft');
+ assert.equal(accepted.bookings[0].transactions.funding,undefined);
+ assert.deepEqual(await f.service.acknowledgePerformer({id:booking.id,address:performer.address,signature}),accepted);
+});
+test('performer acceptance is unavailable until the steward explicitly approves the draft',async()=>{
+ const f=await fixture({escrowAddress:'0x'+'ef'.repeat(20),escrowStartBlock:100});
+ const draft=await f.create({...input(),mode:'phase1'});
+ const b=draft.bookings[0];
+ await assert.rejects(f.service.acknowledgePerformer({id:b.id,address:performer.address,
+   signature:await performer.signMessage(f.shared.liveAcknowledgement(b))}),/steward has not approved/);
+});
+test('community schedule invite is scoped to the exact wallet and event occurrence',async()=>{
+ const {performerBookingForOccurrence}=await import('../js/radio-schedule-ui.mjs');
+ const booking={eventId:'friday-live-performance:2026-10-23',wallet:performer.address,mode:'phase1',status:'draft',cancelled:false};
+ const bookings=[booking,{...booking,eventId:'friday-live-performance:2026-10-30'},
+  {...booking,mode:'phase0'},{...booking,status:'funded'},{...booking,cancelled:true}];
+ assert.equal(performerBookingForOccurrence(bookings,booking.eventId,performer.address.toUpperCase()),booking);
+ assert.equal(performerBookingForOccurrence(bookings,booking.eventId,outsider.address),null);
+ assert.equal(performerBookingForOccurrence(bookings,`${booking.eventId}-other`,performer.address),null);
+ assert.equal(performerBookingForOccurrence(bookings,booking.eventId,''),null);
+ assert.equal(performerBookingForOccurrence(null,booking.eventId,performer.address),null);
+});
+test('20-minute live offer requires the agreed fee and slot and signs its human-readable payout rule',async()=>{
+ const f=await fixture({escrowAddress:'0x'+'ef'.repeat(20),escrowStartBlock:100});
+ const offer={...input(),mode:'phase1',startUtc:'2026-10-24T01:00:00Z',endUtc:'2026-10-24T01:20:00Z',
+   amountUnits:'20000000',airtimeMinutes:20,fullPayoutLiveMinutes:15,termsVersion:'LIVE PERFORMANCE v2'};
+ const result=await f.create(offer,'live:jose:offer-v2');
+ const booking=result.bookings[0];
+ assert.equal(booking.airtimeMinutes,20);
+ assert.equal(booking.fullPayoutLiveMinutes,15);
+ assert.match(f.shared.liveAcknowledgement(booking),/full fee at 15 live-music minutes; below that, fee × verified live minutes ÷ 15/);
+ const mismatchedSlot=await fixture();
+ await assert.rejects(mismatchedSlot.create({...offer,endUtc:'2026-10-24T01:21:00Z'}),/current live-performance offer/);
+ const mismatchedFee=await fixture();
+ await assert.rejects(mismatchedFee.create({...offer,amountUnits:'21000000'}),/current live-performance offer/);
+ const {livePerformancePayoutBps}=f.shared;
+ assert.equal(livePerformancePayoutBps(0),0);
+ assert.equal(livePerformancePayoutBps(7),4666);
+ assert.equal(livePerformancePayoutBps(14),9333);
+ assert.equal(livePerformancePayoutBps(15),10000);
+ assert.equal(livePerformancePayoutBps(20),10000);
+ assert.throws(()=>livePerformancePayoutBps(-1),/non-negative/);
+});
+test('20-minute offer calculates prorated payout from verified live minutes server-side',async()=>{
+ const f=await fixture();
+ const draft=await f.create({...input(),mode:'phase0',startUtc:'2026-10-24T01:00:00Z',endUtc:'2026-10-24T01:20:00Z',
+   amountUnits:'20000000',airtimeMinutes:20,fullPayoutLiveMinutes:15,termsVersion:'LIVE PERFORMANCE v2'},'live:jose:prorated');
+ const booking=draft.bookings[0];
+ await f.ack();
+ f.funding();
+ await f.exec({action:'transaction',id:booking.id,txAction:'funding',txHash});
+ f.time(Date.parse(booking.endUtc)+1000);
+ const decision={action:'decision',id:booking.id,reason:'Seven verified live minutes',
+   reportUri:'ipfs://bafyreport',reportHash:idHash('report'),
+   remainderDisposition:'Return the unused amount to the funder'};
+ await assert.rejects(f.exec({...decision,liveMusicMinutes:21}),/verified live-music minutes/);
+ const result=await f.exec({...decision,liveMusicMinutes:7});
+ const updated=result.bookings[0];
+ assert.equal(updated.decision.liveMusicMinutes,7);
+ assert.equal(updated.decision.payoutBps,4666);
+ assert.equal(updated.approvedUnits,'9332000');
+ assert.equal(updated.remainderUnits,'10668000');
+});
 test('pending, reverted, insufficient confirmation, successful funding and payout evidence',async()=>{
  const f=await fixture(); await f.create(); await f.ack();
  const id=(await f.service.getState()).bookings[0].id;
@@ -172,13 +246,18 @@ test('worker API enforces owner signatures, origin, signed command integrity and
  const server=http.createServer(handler); await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const url=`http://127.0.0.1:${server.address().port}`;
  try {
-   const body={address:owner.address,origin:'https://decentbusking.org',issuedAt:new Date(when).toISOString(),command:{action:'create',revision:0,id:'new-booking',booking:input()}};
+   const body={address:owner.address,origin:'https://decentbusking.org',issuedAt:new Date(when).toISOString(),command:{action:'create',revision:0,id:'new-booking',booking:{...input(),stewardApproved:true}}};
    body.signature=await owner.signMessage(liveAuthorization(body));
    const post=b=>fetch(url+'/api/live-bookings',{method:'POST',headers:{'content-type':'application/json',origin:body.origin},body:JSON.stringify(b)});
    const bad={...body,address:outsider.address}; bad.signature=await outsider.signMessage(liveAuthorization(bad));
    assert.equal((await post(bad)).status,400);
    const good=await post(body); assert.equal(good.status,200,JSON.stringify(await good.clone().json()));
    assert.equal((await post(body)).status,400);
+   const draft=(await good.json()).bookings[0];
+   const performerBody={id:draft.id,address:performer.address,signature:await performer.signMessage((await import('../js/live-bookings.mjs')).liveAcknowledgement(draft))};
+   const accept=await fetch(url+'/api/live-bookings/acknowledge',{method:'POST',headers:{'content-type':'application/json',origin:body.origin},body:JSON.stringify(performerBody)});
+   assert.equal(accept.status,200,JSON.stringify(await accept.clone().json()));
+   assert.equal((await accept.json()).bookings[0].acknowledged,true);
    const funds=await (await fetch(url+'/api/funds')).json();
    assert.match(funds.funds[LIVE_FUND].description,/NOT escrowed/); assert.equal(funds.funds[LIVE_FUND].bookings.length,1);
  } finally {await new Promise(resolve=>server.close(resolve));}

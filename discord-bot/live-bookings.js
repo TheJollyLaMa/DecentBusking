@@ -1,5 +1,9 @@
 import { Contract, Interface, id, verifyMessage } from 'ethers';
-import { LIVE_FUND, LIVE_ROUTER, LIVE_USDC, LIVE_ESCROW_ABI, liveAcknowledgement, workReference } from '../js/live-bookings.mjs';
+import {
+  LIVE_FUND, LIVE_ROUTER, LIVE_USDC, LIVE_ESCROW_ABI,
+  LIVE_PERFORMANCE_AIRTIME_MINUTES, LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES, LIVE_PERFORMANCE_FEE_UNITS,
+  liveAcknowledgement, livePerformancePayoutBps, workReference,
+} from '../js/live-bookings.mjs';
 import { cancelLivePerformanceEvent, upsertLivePerformanceEvent } from '../js/radio-schedule.mjs';
 
 const routerInterface = new Interface([
@@ -190,6 +194,17 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
         if (next.bookings.some(item => item.eventId === eventId && !item.cancelled)) throw new Error('Occurrence already has a booking');
         const amount = required(input.amountUnits, 'USDC amount', 24);
         if (!/^[1-9][0-9]*$/.test(amount)) throw new Error('Amount must be positive USDC base units');
+        let airtimeMinutes;
+        let fullPayoutLiveMinutes;
+        if (input.airtimeMinutes !== undefined || input.fullPayoutLiveMinutes !== undefined) {
+          airtimeMinutes = integer(input.airtimeMinutes, 1, 240, 'airtime minutes');
+          fullPayoutLiveMinutes = integer(input.fullPayoutLiveMinutes, 1, airtimeMinutes, 'full-payout live minutes');
+          if (airtimeMinutes !== LIVE_PERFORMANCE_AIRTIME_MINUTES ||
+              fullPayoutLiveMinutes !== LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES ||
+              amount !== LIVE_PERFORMANCE_FEE_UNITS || end - start !== airtimeMinutes * 60_000) {
+            throw new Error('The current live-performance offer is $20 for a 20-minute slot with full payout at 15 live minutes');
+          }
+        }
         if (!hashPattern.test(input.termsHash || '') || /^0x0{64}$/.test(input.termsHash)) throw new Error('Immutable terms hash required');
         const mode = input.mode === 'phase1' ? 'phase1' : 'phase0';
         if (mode === 'phase1' && !escrowAddress) throw new Error('Escrow not deployed');
@@ -203,8 +218,11 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
           eventId, title: required(input.title, 'Show title', 80), startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(),
           amountUnits: amount, asset: 'USDC', chainId: 8453, mode, termsVersion: required(input.termsVersion, 'Terms version', 80),
           termsHash: input.termsHash, termsUri: uri(input.termsUri, 'Terms URI'), termsStatus: 'DRAFT pending steward approval',
+          stewardApproved: input.stewardApproved === true,
+          ...(airtimeMinutes ? { airtimeMinutes, fullPayoutLiveMinutes } : {}),
           reviewWindow, cancellationWindow, killFeeBps, claimDeadline: new Date(claimDeadline).toISOString(),
           status: 'draft', transactions: {}, createdAt: new Date(now()).toISOString() };
+        if (b.stewardApproved) b.termsStatus = 'Steward-approved; awaiting performer acknowledgement';
         next.bookings.push(b);
       } else {
         if (!b) throw new Error('Unknown booking');
@@ -213,7 +231,8 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
           const signature = required(command.performerSignature, 'Performer acknowledgement signature', 1000);
           if (lower(verifyMessage(liveAcknowledgement(b), signature)) !== b.wallet) throw new Error('Performer acknowledgement mismatch');
           if (command.stewardApproved !== true) throw new Error('Steward approval of precise terms required');
-          b.acknowledgements = { performerSignature: signature, owner: lower(ownerWallet), at: new Date(now()).toISOString() };
+          b.stewardApproved = true;
+          b.acknowledgements = { performerSignature: signature, performer: b.wallet, owner: lower(ownerWallet), at: new Date(now()).toISOString() };
           b.termsStatus = 'Acknowledged per-booking terms';
         } else if (action === 'transaction') {
           if (!['funding','payout','approve','claim','reject','cancel','recovery'].includes(command.txAction)) throw new Error('Invalid transaction action');
@@ -223,14 +242,18 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
         } else if (action === 'decision') {
           const cancellation = command.cancellation === true && b.cancelled;
           if (b.status !== 'funded' || !cancellation && (b.cancelled || now() < Date.parse(b.endUtc))) throw new Error('Review requires a funded completed show or cancelled booking');
-          const bps = integer(command.payoutBps, 0, 10000, 'payout basis points');
+          const liveMusicMinutes = b.airtimeMinutes && !cancellation
+            ? integer(command.liveMusicMinutes, 0, b.airtimeMinutes, 'verified live-music minutes') : null;
+          const bps = liveMusicMinutes === null
+            ? integer(command.payoutBps, 0, 10000, 'payout basis points')
+            : livePerformancePayoutBps(liveMusicMinutes, b.fullPayoutLiveMinutes);
           if (cancellation && (BigInt(b.amountUnits) * BigInt(bps) / 10000n).toString() !== b.cancellationFeeUnits) throw new Error('Cancellation decision must match agreed kill-fee consequence');
           b.reason = required(command.reason, 'Public decision reason');
           b.reportUri = uri(command.reportUri, 'Decision report');
           if (b.mode === 'phase0' && !hashPattern.test(command.reportHash || '')) throw new Error('Pinned report content hash required for Phase 0 payout metadata');
           b.reportHash = command.reportHash || '';
           b.remainderDisposition = required(command.remainderDisposition, 'Remainder disposition');
-          b.decision = { payoutBps: bps, at: new Date(now()).toISOString() };
+          b.decision = { payoutBps: bps, ...(liveMusicMinutes === null ? {} : { liveMusicMinutes }), at: new Date(now()).toISOString() };
           b.approvedUnits = (BigInt(b.amountUnits) * BigInt(bps) / 10000n).toString();
           b.remainderUnits = (BigInt(b.amountUnits) - BigInt(b.approvedUnits)).toString();
           b.financialStatus = b.mode === 'phase0' ? 'Decision recorded; router payment/recovery requires separate confirmed transaction' : 'Decision proposal; escrow approval/refund not yet confirmed';
@@ -250,10 +273,34 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
       return publicState();
     });
   }
+  async function acknowledgePerformer({ id: bookingId, address, signature }) {
+    return run(async () => {
+      await initialize();
+      const next = clone(state);
+      const b = next.bookings.find(item => item.id === bookingId);
+      if (!b) throw new Error('Unknown booking');
+      if (b.status !== 'draft' || b.cancelled) throw new Error('This booking invitation is no longer open');
+      if (lower(address) !== b.wallet) throw new Error('Connect the invited performer wallet');
+      if (b.acknowledgements) {
+        if (lower(verifyMessage(liveAcknowledgement(b), signature)) === b.wallet) return publicState();
+        throw new Error('This booking has already been acknowledged');
+      }
+      if (!b.stewardApproved) throw new Error('The steward has not approved these exact terms yet');
+      const performerSignature = required(signature, 'Performer acknowledgement signature', 1000);
+      if (lower(verifyMessage(liveAcknowledgement(b), performerSignature)) !== b.wallet) {
+        throw new Error('Performer acknowledgement mismatch');
+      }
+      b.acknowledgements = { performerSignature, performer: b.wallet, at: new Date(now()).toISOString() };
+      b.termsStatus = 'Performer accepted steward-approved terms; awaiting escrow funding';
+      await commit(next);
+      return publicState();
+    });
+  }
   function publicState() {
     return { ...clone(state), ready: true, escrowAddress, escrowConfigured: !!escrowAddress, notice: 'Earmarked, NOT escrowed. Phase 0 admin can recoverFund.',
-      bookings: state.bookings.map(({ acknowledgements, discordHandle, ...b }) => ({ ...clone(b), acknowledged: !!acknowledgements })) };
+      bookings: state.bookings.map(({ acknowledgements, discordHandle, ...b }) => ({ ...clone(b),
+        acknowledged: !!acknowledgements, acknowledgedAt: acknowledgements?.at || null })) };
   }
   async function getState() { return run(async () => { await initialize(); await indexEscrow(); return publicState(); }); }
-  return { execute, getState };
+  return { execute, getState, acknowledgePerformer };
 }

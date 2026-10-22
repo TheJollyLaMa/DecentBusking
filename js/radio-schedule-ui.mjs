@@ -1,6 +1,7 @@
 import { isAdminWallet } from './admin-access.mjs';
 import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261022-playlist-show';
 import { utcToNewYorkInput, newYorkInputToUtc, radioCalendarOccurrences, buildRadioCalendar, googleRadioCalendarUrl } from './radio-calendar.mjs';
+import { renderPerformerBookingInvite } from './live-performance-profile.mjs?v=20261022-live-offer-v2';
 export { utcToNewYorkInput, newYorkInputToUtc };
 const TIME_ZONE = 'America/New_York';
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -102,11 +103,31 @@ function reminderControl(event, status) {
   return details;
 }
 
-function renderSchedule(payload, onCancel) {
+export function performerBookingForOccurrence(bookings = [], eventId, wallet = '') {
+  if (!wallet) return null;
+  return (Array.isArray(bookings) ? bookings : []).find(booking => booking.eventId === eventId &&
+    String(booking.wallet || '').toLowerCase() === String(wallet).toLowerCase() &&
+    booking.mode === 'phase1' && booking.status === 'draft' && !booking.cancelled) || null;
+}
+
+export function partitionRadioScheduleEvents(events, now = Date.now()) {
+  const upcoming = [];
+  const archived = [];
+  for (const event of events) {
+    (Date.parse(event.endUtc) > now ? upcoming : archived).push(event);
+  }
+  upcoming.sort((first, second) => Date.parse(first.startUtc) - Date.parse(second.startUtc));
+  archived.sort((first, second) => Date.parse(second.startUtc) - Date.parse(first.startUtc));
+  return { upcoming, archived };
+}
+
+function renderSchedule(payload, onCancel, bookingState = null) {
   const weekly = document.getElementById('radio-schedule-weekly');
   const events = document.getElementById('radio-schedule-events');
+  const archive = document.getElementById('radio-schedule-archive');
+  const archiveTitle = document.getElementById('radio-schedule-archive-title');
   const status = document.getElementById('radio-schedule-status');
-  if (!weekly || !events || !status) return;
+  if (!weekly || !events || !archive || !archiveTitle || !status) return;
 
   const openReminders = new Set([...weekly.querySelectorAll('.radio-reminder[open]'), ...events.querySelectorAll('.radio-reminder[open]')]
     .map(details => details.dataset.eventId));
@@ -124,9 +145,7 @@ function renderSchedule(payload, onCancel) {
   }
 
   events.replaceChildren();
-  const upcoming = scheduledLiveOccurrences(payload, now).filter(event => Date.parse(event.endUtc) > now ||
-    (event.status === 'cancelled' && Date.parse(event.endUtc) > now - 7 * 86400_000))
-    .sort((first, second) => Date.parse(first.startUtc) - Date.parse(second.startUtc));
+  const { upcoming, archived } = partitionRadioScheduleEvents(scheduledLiveOccurrences(payload, now), now);
   for (const event of upcoming) {
     const cancelled = event.status === 'cancelled';
     const active = !cancelled && Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc);
@@ -137,6 +156,12 @@ function renderSchedule(payload, onCancel) {
       const definition = payload.playlistDefinitions?.find(item => item.id === event.playlistId);
       row.append(element('span', 'radio-schedule-time', `Playlist show · ${definition?.rule || 'No votes ever'} · Vote up OR down!`));
     }
+    const invitedWallet = window._wallet?.address || '';
+    const booking = performerBookingForOccurrence(bookingState?.bookings, event.id, invitedWallet);
+    if (!cancelled && booking) row.append(renderPerformerBookingInvite({
+      booking, wallet: invitedWallet, serviceUrl: window.DecentConfig?.ipfsUploadServiceUrl,
+      ethers: window.ethers,
+    }));
     if (active) row.append(element('span', 'radio-schedule-live', 'LIVE NOW'));
     if (cancelled) row.append(element('span', 'radio-schedule-cancelled-stamp', 'Canceled'),
       element('span', 'radio-schedule-cancel-reason', event.cancellationReason));
@@ -150,6 +175,22 @@ function renderSchedule(payload, onCancel) {
     events.append(row);
   }
   if (!upcoming.length) events.append(element('li', 'radio-schedule-empty', 'No additional events are scheduled.'));
+  archiveTitle.textContent = `🗃 Archived events (${archived.length})`;
+  archive.replaceChildren();
+  for (const event of archived) {
+    const cancelled = event.status === 'cancelled';
+    const row = element('li', `radio-schedule-row${cancelled ? ' is-cancelled' : ''}`);
+    row.append(element('strong', 'radio-schedule-name', event.title),
+      element('span', 'radio-schedule-time', `${formatEventTime(event.startUtc, payload.timeZone || TIME_ZONE)} - ${formatEventTime(event.endUtc, payload.timeZone || TIME_ZONE)}`),
+      element('span', cancelled ? 'radio-schedule-cancelled-stamp' : 'radio-schedule-archive-status', cancelled ? 'Canceled' : 'Completed'));
+    if (cancelled && event.cancellationReason) row.append(element('span', 'radio-schedule-cancel-reason', event.cancellationReason));
+    if (event.type === 'playlist_show') {
+      const definition = payload.playlistDefinitions?.find(item => item.id === event.playlistId);
+      row.append(element('span', 'radio-schedule-time', `Playlist show · ${definition?.rule || 'No votes ever'}`));
+    }
+    archive.append(row);
+  }
+  if (!archived.length) archive.append(element('li', 'radio-schedule-empty', 'No past events are archived yet.'));
   for (const details of [...weekly.querySelectorAll('.radio-reminder'), ...events.querySelectorAll('.radio-reminder')]) {
     details.open = openReminders.has(details.dataset.eventId);
   }
@@ -215,7 +256,19 @@ export function initRadioScheduleBoard() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || `Schedule unavailable (${response.status})`);
       currentPayload = payload;
-      renderSchedule(payload, cancel);
+      let bookingState = null;
+      let bookingError = '';
+      const walletAddress = window._wallet?.address || '';
+      if (walletAddress) {
+        try {
+          const bookingsResponse = await fetch(`${service}/api/live-bookings`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+          const bookingsPayload = await bookingsResponse.json();
+          if (!bookingsResponse.ok) throw new Error(bookingsPayload.error || `Booking invites unavailable (${bookingsResponse.status})`);
+          bookingState = bookingsPayload;
+        } catch (error) { bookingError = error.message; }
+      }
+      renderSchedule(payload, cancel, bookingState);
+      if (bookingError) status.textContent = `Schedule loaded, but wallet-specific booking invitations could not be checked: ${bookingError}`;
       if (subscribe) {
         subscribe.hidden = !service || payload.ready === false;
       }
@@ -232,6 +285,7 @@ export function initRadioScheduleBoard() {
   document.addEventListener('radio-schedule-updated', refresh);
   document.addEventListener('wallet-connected', () => { if (dialog.open) refresh(); });
   document.addEventListener('wallet-disconnected', () => { if (dialog.open) refresh(); });
+  document.addEventListener('live-booking-acknowledged', () => { if (dialog.open) refresh(); });
   setInterval(() => { if (dialog.open) refresh(); }, 15000);
 }
 

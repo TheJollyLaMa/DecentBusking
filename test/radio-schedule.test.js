@@ -74,6 +74,20 @@ test('schedule UI converts New York local inputs across DST and rejects skipped 
   assert.throws(() => newYorkInputToUtc('2026-03-08T02:30'), /daylight-saving/);
 });
 
+test('community schedule keeps every ended event in a descending archived list', async () => {
+  const { partitionRadioScheduleEvents } = await import('../js/radio-schedule-ui.mjs');
+  const now = Date.parse('2026-10-22T12:00:00Z');
+  const events = [
+    { id: 'future', startUtc: '2026-10-24T01:00:00Z', endUtc: '2026-10-24T01:20:00Z' },
+    { id: 'old', startUtc: '2026-10-01T01:00:00Z', endUtc: '2026-10-01T01:20:00Z' },
+    { id: 'just-ended', startUtc: '2026-10-22T11:40:00Z', endUtc: '2026-10-22T12:00:00Z' },
+    { id: 'canceled', status: 'cancelled', startUtc: '2026-10-20T01:00:00Z', endUtc: '2026-10-20T01:20:00Z' },
+  ];
+  const result = partitionRadioScheduleEvents(events, now);
+  assert.deepEqual(result.upcoming.map(event => event.id), ['future']);
+  assert.deepEqual(result.archived.map(event => event.id), ['just-ended', 'canceled', 'old']);
+});
+
 test('default Top 10 finale runs during the last New York payroll hour and ends at Monday midnight', async () => {
   const { resolveActiveShow, defaultRadioSchedule } = await import('../js/radio-schedule.mjs');
   const schedule = defaultRadioSchedule();
