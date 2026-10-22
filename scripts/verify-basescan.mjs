@@ -17,6 +17,7 @@ export const BASE_CONTRACTS = [
   { label: "DJuke v0.2", address: "0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59" },
   { label: "DeVert v0.1", address: "0x135Cbc573F87637158eb3186C87c584fb0B34CD9" },
   { label: "DecentEscrow v0.1", address: "0x31b07b83e99A9bdF379bf40225b8A80d3804C89d" },
+  { label: "LivePerformanceEscrow", address: "0x20C08F2e877389D68cFbcF49664211E8CE9554Ec" },
   { label: "DecentNFT v0.2", address: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B" },
   { label: "DecentNFT v0.3", address: "0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3" },
   { label: "BNUT", address: "0x25ACb773159Af5a5c672DEfe31C7Fff6a9A93736" },

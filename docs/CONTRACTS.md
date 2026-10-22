@@ -12,6 +12,7 @@ no private key).
 | DeVert v0.1 | `0x135Cbc573F87637158eb3186C87c584fb0B34CD9` | Advert campaign purchases (45/45/8/2) | `DecentMarket/contracts/DeVert_v0.1.sol` |
 | DecentNFT v0.3 | `0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3` | Song DNFT collection | `DecentMarket/contracts/DecentNFT_v0.3.sol` |
 | DecentNFT v0.2 | `0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B` | Legacy song DNFT collection | `DecentMarket/contracts/DecentNFT_v0.2.sol` |
+| LivePerformanceEscrow | `0x20C08F2e877389D68cFbcF49664211E8CE9554Ec` | Per-booking Friday Live escrow (Phase 1); no admin withdrawal, performer claim / funder refund only. Deployed 2026-10-22, block 52942855, Sourcify exact match | `DecentMarket/contracts/LivePerformanceEscrow.sol` |
 | DecentEscrow v0.1 | `0x31b07b83e99A9bdF379bf40225b8A80d3804C89d` | Supporter DNFT sales (no listings yet) | `DecentMarket/contracts/DecentEscrow_v001.sol` |
 | DJuke v0.2 (retired) | `0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59` | Superseded by v0.3 | `DecentMarket/contracts/DecentJukeBox_v0.2.sol` |
 | BNUT | `0x25ACb773159Af5a5c672DEfe31C7Fff6a9A93736` | Governance and bounty token | `BigNuten.sol` |
