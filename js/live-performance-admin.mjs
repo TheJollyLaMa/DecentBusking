@@ -228,7 +228,7 @@ function mount() {
  <label>Late-cancellation notice (hours)<input name="cancellationWindowHours" type="number" value="8" min="0" max="8760" step="1" required></label>
  <label>Late-cancellation fee (%)<input name="killFeePercent" type="number" value="50" min="0" max="100" step="1" required></label>
  <p class="live-performance-form-note">The performer’s claim deadline is set automatically to three days after the review window closes.</p>
- <details class="live-advanced-terms"><summary>📎 Pinned agreement details (advanced)</summary><p>Use the exact v2 agreement link and fingerprint after it is pinned. Do not reuse v1: it describes a 60-minute show.</p>
+ <details class="live-advanced-terms"><summary>📎 Pinned agreement details (advanced)</summary><p>Use the exact v2 agreement link and fingerprint after it is pinned. A CID alone is accepted and saved as an ipfs:// URI. Do not reuse v1: it describes a 60-minute show.</p>
  ${field('termsVersion','Agreement version','LIVE PERFORMANCE v2 — draft')}${field('termsUri','Pinned agreement IPFS link')}${field('termsHash','Agreement verification fingerprint')}</details>
  <label class="live-performance-approval"><input name="stewardApproved" type="checkbox"> I approve these exact pinned terms for this performer and date.</label>
  <button type="submit">📝 Save invitation draft (no payment)</button></form></details>
@@ -246,9 +246,11 @@ function mount() {
    const eventId = `friday-live-performance:${f.startLocal.slice(0,10)}`;
    const reviewWindow = Math.round(Number(f.reviewWindowHours) * 3600);
    const cancellationWindow = Math.round(Number(f.cancellationWindowHours) * 3600);
+   const termsUri = /^b[a-zA-Z0-9]{20,}$/.test(f.termsUri.trim()) ? `ipfs://${f.termsUri.trim()}` : f.termsUri.trim();
    const endUtc = new Date(Date.parse(startUtc) + Number(f.airtimeMinutes) * 60_000).toISOString();
    const booking = { ...f, eventId, airtimeMinutes:Number(f.airtimeMinutes),
    fullPayoutLiveMinutes:Number(f.fullPayoutLiveMinutes), stewardApproved:f.stewardApproved === 'on',
+   termsUri,
    startUtc, endUtc,
    claimDeadline:new Date(Date.parse(endUtc) + reviewWindow * 1000 + 3 * 86400_000).toISOString(),
    amountUnits:window.ethers.parseUnits(f.fee,6).toString(),

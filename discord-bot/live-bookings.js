@@ -172,7 +172,11 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
   async function execute(command) {
     return run(async () => {
       await initialize();
-      if (command.revision !== state.revision) throw new Error('Stale booking revision; refresh before retrying');
+      // Creating a booking is safe to rebase: this serialized handler rechecks the
+      // booking ID and dated occurrence against the latest state before saving.
+      if (command.revision !== state.revision && command.action !== 'create') {
+        throw new Error('Stale booking revision; refresh before retrying');
+      }
       const next = clone(state);
       const action = command.action;
       let b = next.bookings.find(item => item.id === command.id);

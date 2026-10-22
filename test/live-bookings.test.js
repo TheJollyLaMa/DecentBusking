@@ -54,6 +54,17 @@ test('ENS booking, immutable per-booking terms, duplicate occurrence and restart
  assert.deepEqual((await restored.getState()).bookings,(await f.service.getState()).bookings);
  await assert.rejects(f.service.execute({action:'cancel',id:result.bookings[0].id,revision:0,reason:'x',confirm:true}),/Stale/);
 });
+test('stale create rebases against current state while preserving duplicate occurrence protection',async()=>{
+ const f=await fixture();
+ await f.create();
+ const second={...input(),eventId:'friday-live-performance:2026-10-30',
+  startUtc:'2026-10-31T01:00:00Z',endUtc:'2026-10-31T01:20:00Z'};
+ const rebased=await f.service.execute({action:'create',id:'live:jose:2026-10-30',booking:second,revision:0});
+ assert.equal(rebased.bookings.length,2);
+ assert.equal(rebased.bookings[1].eventId,second.eventId);
+ await assert.rejects(f.service.execute({action:'create',id:'live:jose:duplicate',booking:second,revision:0}),/Occurrence already has a booking/);
+ await assert.rejects(f.service.execute({action:'cancel',id:rebased.bookings[1].id,revision:0,reason:'x',confirm:true}),/Stale/);
+});
 test('invalid ENS/slot/series/policy/terms and undeployed escrow fail closed',async()=>{
  const f=await fixture();
  for(const change of [{eventId:'friday-live-performance'},{eventId:'friday-live-performance:2026-10-24'},{amountUnits:'0'},
