@@ -1,6 +1,6 @@
-import './header-right-ankh-override.js?v=20261017-mercury-release';
+import './header-right-ankh-override.js?v=20261022-pin-decenthead';
 
-const DECENT_HEAD_BASE = 'https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@main/';
+const DECENT_HEAD_BASE = 'https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@7baa1c8c47ee33a2162b4dbd4570a14108a24d53/';
 const DBUSKER_AVATAR_URL = new URL('../../img/D_Busker.jpeg', import.meta.url).href;
 const IPFS_LOGO_URL = new URL('../../img/IPFS_Logo.png', import.meta.url).href;
 const JAM_SUBTITLE_PARTS = [

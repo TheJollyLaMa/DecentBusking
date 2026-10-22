@@ -12,7 +12,7 @@ class CleanRightAnkh extends HTMLElement {
   connectedCallback() {
     // Resolve the DecentHead CDN base path so the shared header.css
     // (which styles .ankh-wrapper, .ankh-coin and .sparkle) is loaded.
-    const cdnBase = 'https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@main/';
+    const cdnBase = 'https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@7baa1c8c47ee33a2162b4dbd4570a14108a24d53/';
 
     this.shadowRoot.innerHTML = `
       <link rel="stylesheet" href="${cdnBase}css/header.css" />
