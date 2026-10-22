@@ -30,6 +30,8 @@ Its **i** button explains queue pricing, payment splits and worker-gas charges.
 Connect through the page header; a disconnected **Queue Song** click shows the
 wallet reminder without starting a transaction.
 
+DJuke supports a profile-backed playlist draft and signed, immutable playlist library. Named playlists are 1–10 distinct songs at a flat 0.25 USDC/song; private playback never changes the existing creator-priced listen path. Radio checkout remains disabled until a compatible contract and batch-aware worker are separately reviewed and configured. See [playlist pricing, fees, signatures and rollout decisions](docs/DJUKE-PLAYLISTS.md).
+
 **Top Jukebox Earners** ranks the top three artist/collaborator wallets by
 all-time confirmed DJuke song-play payouts, with ENS or decorated wallet links
 to Basescan. It reuses the checkpointed earnings index at

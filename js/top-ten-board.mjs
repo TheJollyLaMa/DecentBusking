@@ -302,18 +302,18 @@ export function initTopTenBoard() {
       const add = el('button', 'top-ten-playlist-add', playlistSaved.has(track.trackId) ? '\u2713' : '+');
       add.type = 'button';
       add.dataset.trackId = track.trackId;
-      add.title = `Add ${track.title || 'song'} to your personal playlist (profile watchlist)`;
+      add.title = `Add ${track.title || 'song'} to your named DJuke playlist draft`;
       add.setAttribute('aria-label', add.title);
       add.disabled = playlistPending.has(track.trackId);
       add.addEventListener('click', async () => {
         playlistPending.add(track.trackId);
         add.disabled = true;
-        playlistStatus.textContent = `Adding ${track.title} to your personal playlist\u2026`;
+        playlistStatus.textContent = `Adding ${track.title} to your DJuke playlist draft\u2026`;
         try {
           await addChartSongToPlaylist({ ...track, ipfsCid: track.ipfsCid || (track.nowPlaying ? nowPlaying?.ipfsCid : '') });
           playlistSaved.add(track.trackId);
           add.textContent = '\u2713';
-          playlistStatus.textContent = `${track.title} is saved in your personal playlist (profile watchlist).`;
+          playlistStatus.textContent = `${track.title} is in your DJuke playlist draft. Save it to your profile to publish the revision.`;
         } catch (error) {
           playlistStatus.textContent = error.message;
         } finally {

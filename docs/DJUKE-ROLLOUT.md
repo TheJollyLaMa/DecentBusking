@@ -102,6 +102,12 @@ but live config still uses `0.2` and the existing address. Both versions use the
 EIP-712 signing-domain version **`0.2`**, bound to the actual verifying contract
 and Base chain ID 8453. Do not change the signing-domain version to `0.3`.
 
+### Named playlist candidate (issue #241)
+
+The profile library, signatures, flat private-listen pricing, and an undeployed DecentMarket v0.3 contract candidate are under review. The current live v0.2 address/configuration is unchanged. Both named private and radio checkout remain disabled until a separately approved compatible address/version is configured. Radio also requires a batch gas quote, durable batch receipt/audible-completion reconciliation, contiguous scheduling checks, and worker-triggered FIFO refund recovery; these runtime pieces are not currently wired. No radio batch is emulated as repeated single-song purchases.
+
+See [named playlist pricing, reserved-fee/refund decisions and rollout checklist](DJUKE-PLAYLISTS.md); radio scheduling must preserve the [DVert paid-queue break policy](DVERT-PAID-QUEUE.md).
+
 ### MetaMask trust warning
 
 Reported warning: **High-risk approval**, an address flagged by security

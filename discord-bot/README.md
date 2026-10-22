@@ -10,6 +10,8 @@ A Node.js Discord bot with three modes:
 
 The bot holds **no on-chain private key**. An authorized owner reviews the queue and confirms each mint in MetaMask. The NFT is minted directly to the artist wallet, which is also configured as the ERC-2981 royalty receiver.
 
+The website named-playlist library is separate from Discord `/radio` and `/jukebox`; saved copies pin a revision and attribution. Named radio checkout is not enabled until a compatible DJuke deployment and batch-aware worker are configured. See the [playlist rollout and settlement rules](../docs/DJUKE-PLAYLISTS.md).
+
 ---
 
 ## Quick Start

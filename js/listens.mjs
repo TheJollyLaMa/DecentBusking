@@ -10,6 +10,7 @@ import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 export const LISTEN_PRICE_UNITS = 250000n;
 export const PREVIEW_SECONDS = 30;
 export const MAX_PLAYLIST = 50;
+export const MAX_NAMED_PLAYLIST = 10;
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const LISTEN_ABI = ['function purchaseListens(bytes32[] songIds, uint256 maxTotal) returns (uint256)',
   'function quoteListens(bytes32[] songIds) view returns(uint256)'];
@@ -81,11 +82,16 @@ export function createListenPlaylist(storage = globalThis.localStorage, key = 'd
     add(item) {
       const items = read();
       if (items.some(entry => entry.songId === item.songId)) return false;
-      if (items.length >= MAX_PLAYLIST) throw new Error(`Playlists hold up to ${MAX_PLAYLIST} songs`);
+      if (items.length >= MAX_PLAYLIST) throw new Error(`Listen carts hold up to ${MAX_PLAYLIST} songs`);
       write([...items, { songId: item.songId, title: item.title, artist: item.artist, audioUrl: item.audioUrl, mediaType: item.mediaType || '' }]);
       return true;
     },
     remove(songId) { write(read().filter(item => item.songId !== songId)); },
+    replace(next) {
+      if (!Array.isArray(next) || next.length > MAX_PLAYLIST || next.some(item => !/^0x[0-9a-fA-F]{64}$/.test(item?.songId || '') || !item.audioUrl) ||
+          new Set(next.map(item => item.songId.toLowerCase())).size !== next.length) throw new Error('Playlist must contain 1–10 unique songs');
+      write(next.map(item => ({ songId: item.songId.toLowerCase(), title: item.title, artist: item.artist, audioUrl: item.audioUrl, mediaType: item.mediaType || '' })));
+    },
     clear() { write([]); },
   };
 }
@@ -219,10 +225,15 @@ export function initListens() {
       row.append(title, remove);
       playlistEl.append(row);
     }
+    const count = document.getElementById('djuke-playlist-draft-count');
+    if (count) count.textContent = `${items.length}/${MAX_PLAYLIST}`;
+    const namedSave = document.getElementById('djuke-playlist-save');
+    if (namedSave) namedSave.disabled = !items.length || items.length > MAX_NAMED_PLAYLIST || busy;
     playlistTotal.textContent = items.length ? supportsDjukeAlbumsAndGas(cfg.djukeContractVersion)
       ? `${items.length} songs - creator prices quoted before payment`
       : `${items.length} song${items.length === 1 ? '' : 's'} \u00b7 ${formatUsdc(LISTEN_PRICE_UNITS * BigInt(items.length))} USDC` : 'Empty \u2014 add songs from any DNFT card';
     playlistBuy.disabled = !items.length || busy;
+    document.dispatchEvent(new CustomEvent('djuke-playlist-draft-changed', { detail: { items } }));
   }
   async function addToPlaylist(song, status) {
     if (!playlistEl || !playlistTotal || !playlistBuy) {
@@ -232,7 +243,8 @@ export function initListens() {
     const live = await getLive().catch(() => null);
     const songId = song.songId || live?.songIdForCid(audioCid(song.audioUrl));
     if (!songId) { status('Personal playlists open when DJuke payments are live.'); return; }
-    status(playlist.add({ ...song, songId }) ? 'Added to your DJuke playlist.' : 'Already in your playlist.');
+    if (playlist.list().length >= MAX_NAMED_PLAYLIST && !playlist.list().some(item => item.songId === songId)) { status('Named playlists hold up to 10 songs. The existing listen cart was not changed.'); return; }
+    status(playlist.add({ ...song, songId }) ? 'Added to your playlist draft. Name and save it from DJuke or your profile.' : 'Already in your playlist draft.');
     renderPlaylist();
   }
 
@@ -309,6 +321,13 @@ export function initListens() {
   document.addEventListener('dbusk-playlist-add', event => {
     event.preventDefault();
     addToPlaylist(nftSong(event.detail.nft), event.detail.status || (() => {}));
+  });
+  document.addEventListener('djuke-set-playlist-draft', event => {
+    try { playlist.replace(event.detail?.items || []); renderPlaylist(); }
+    catch (error) { document.getElementById('djuke-playlist-state').textContent = error.message; }
+  });
+  document.addEventListener('djuke-private-playlist-purchased', event => {
+    if (Array.isArray(event.detail?.items)) controller.playPurchased(event.detail.items);
   });
   renderPlaylist();
 }

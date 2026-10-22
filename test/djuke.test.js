@@ -18,7 +18,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /djuke\.mjs\?v=20261017-mercury-release/);
-  assert.match(html, /devert-paid-queue\.mjs\?v=20261017-mercury-release/);
+  assert.match(html, /devert-paid-queue\.mjs\?v=20261019-radio-recovery/);
 });
 
 test('DJuke starts at 0.25 USDC and doubles after each eight pending requests', async () => {
@@ -147,7 +147,7 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   for (const id of ['djuke-tab', 'djuke-panel', 'djuke-queue', 'djuke-price-tiers', 'devert-tab', 'devert-panel']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
-  for (const id of ['djuke-connect', 'djuke-search-results', 'djuke-search-more', 'djuke-profile', 'djuke-playlist', 'community-pin-heading']) {
+  for (const id of ['djuke-connect', 'djuke-search-results', 'djuke-search-more', 'djuke-profile', 'community-pin-heading']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /class="djuke-tab-mark"/);
@@ -160,6 +160,9 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   assert.match(html, /class="devert-speaker second">🔊/);
   assert.doesNotMatch(html, />DeVert</);
   assert.match(html, /id="djuke-pay"[^>]*disabled/);
+  assert.match(html, /id="djuke-playlist" aria-label="Ordered playlist draft"/);
+  assert.match(html, /id="djuke-named-playlist-private"[^>]*disabled/);
+  assert.match(html, /id="djuke-named-playlist-radio"[^>]*disabled/);
   assert.match(html, /id="djuke-panel"[^>]*inert/);
   assert.match(html, /id="devert-panel"[^>]*inert/);
   assert.match(html, /<dt>IPFS pinning rewards<\/dt><dd>8%<\/dd>/);

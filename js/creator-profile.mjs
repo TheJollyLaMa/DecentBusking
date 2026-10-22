@@ -7,6 +7,7 @@ import { canEditArtwork } from './artwork-update.mjs';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs?v=20261017-mercury-release';
+import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261022-named-playlists';
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
   summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261017-mercury-release';
 
@@ -309,7 +310,7 @@ export function initCreatorProfile() {
   const watchlistSection = dialog.querySelector('[data-watchlist-section]');
   const watchlistCount = dialog.querySelector('[data-watchlist-count]');
   const watchlistStatus = dialog.querySelector('[data-watchlist-status]');
-  const watchlistItems = dialog.querySelector('[data-watchlist-items]');
+  const watchlistGroups = dialog.querySelector('[data-watchlist-groups]');
   const watchlistEmpty = dialog.querySelector('[data-watchlist-empty]');
   const myNftsSection = dialog.querySelector('[data-my-nfts-section]');
   const myNftsSearch = dialog.querySelector('[data-my-nfts-search]');
@@ -328,13 +329,13 @@ export function initCreatorProfile() {
     }
   };
   const renderWatchlist = () => {
-    if (!watchlistSection || !watchlistStatus || !watchlistItems) return;
+    if (!watchlistSection || !watchlistStatus || !watchlistGroups) return;
     const state = getCreatorWatchlistState();
     const items = editable() ? (profile.watchlist || state.watchlist || []) : [];
     watchlistSection.hidden = !editable();
     if (watchlistCount) watchlistCount.textContent = String(items.length);
     if (!editable()) return;
-    watchlistItems.replaceChildren();
+    watchlistGroups.replaceChildren();
     if (state.loading && !items.length) {
       watchlistStatus.textContent = 'Loading your watchlist…';
       watchlistEmpty.hidden = false;
@@ -355,25 +356,33 @@ export function initCreatorProfile() {
     }
     watchlistStatus.textContent = state.error || '';
     watchlistEmpty.hidden = true;
-    const sorted = [...items].sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
-    sorted.forEach((entry, index) => {
-      const title = entry.title || `Track #${entry.tokenId}`;
-      const li = buildNftListItem({
-        index,
-        title,
-        subtitle: displayArtist(entry.artist || entry.creator),
-        meta: `#${entry.tokenId}`,
-        artwork: creatorImageURL(entry.artworkURI || entry.image || '', config().ipfsGateway),
-        fallback: '👀',
-        onOpen: () => openNftCard(entry),
-        onRemove: () => run(async () => {
-          await removeCreatorWatchlist(entry);
-          profile.watchlist = getCreatorWatchlistState().watchlist;
-          renderWatchlist();
-          message('Removed from watchlist');
-        }),
+    groupWatchlistByArtist(items).forEach(({ artist, entries }) => {
+      const group = document.createElement('section');
+      group.className = 'watchlist-artist-group';
+      const heading = document.createElement('h4');
+      heading.textContent = artist;
+      const list = document.createElement('ol');
+      list.className = 'creator-nft-list';
+      entries.forEach((entry, index) => {
+        const title = entry.title || `Track #${entry.tokenId}`;
+        list.append(buildNftListItem({
+          index,
+          title,
+          subtitle: `#${entry.tokenId}`,
+          meta: 'NFT bookmark · not a playlist purchase',
+          artwork: creatorImageURL(entry.artworkURI || entry.image || '', config().ipfsGateway),
+          fallback: '👀',
+          onOpen: () => openNftCard(entry),
+          onRemove: () => run(async () => {
+            await removeCreatorWatchlist(entry);
+            profile.watchlist = getCreatorWatchlistState().watchlist;
+            renderWatchlist();
+            message('Removed from watchlist');
+          }),
+        }));
       });
-      watchlistItems.append(li);
+      group.append(heading, list);
+      watchlistGroups.append(group);
     });
   };
   const renderMyNFTs = async () => {
@@ -701,6 +710,7 @@ export function initCreatorProfile() {
       earningsStatus.textContent = 'Earnings could not be verified right now.';
     });
     await loadProfileData({ resolveEns: true });
+    document.dispatchEvent(new CustomEvent('creator-profile-playlists-refresh', { detail: { address, editable: viewingOwnProfile } }));
     if (detail?.albumId) albumForm.elements.namedItem('albumId').value = detail.albumId;
   };
   form.addEventListener('submit', event => {
