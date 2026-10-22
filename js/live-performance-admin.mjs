@@ -183,7 +183,7 @@ function mount() {
    const f = Object.fromEntries(new FormData(section.querySelector('form')));
    if (!state) state = await api();
    const booking = { ...f, startUtc:newYorkInputToUtc(f.startLocal), endUtc:newYorkInputToUtc(f.endLocal), claimDeadline:newYorkInputToUtc(f.claimDeadline), amountUnits:window.ethers.parseUnits(f.fee,6).toString() };
-   const id = `${f.eventId}:${window.ethers.id(`${f.performer}:${booking.startUtc}`).slice(2,14)}`;
+   const id = `${f.eventId}:${crypto.randomUUID()}`;
    await command({ action:'create', id, booking });
  }); };
  section.onclick = event => { const button = event.target.closest('[data-live-action]'); if (!button) return; const id = button.closest('[data-live-actions]').dataset.liveActions; guarded(() => action(button.dataset.liveAction,state.bookings.find(b=>b.id===id))); };
