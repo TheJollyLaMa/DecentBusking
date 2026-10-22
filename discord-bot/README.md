@@ -217,6 +217,63 @@ Advert cadence and queued-ad state use the separate
 They must not share the playlist's `decentbusking-jukeloop-state.json` namespace:
 the schemas differ and each store prunes its own snapshots.
 
+### One-off rule-based playlist shows
+
+`js/radio-playlists.mjs` contains reusable, allowlisted definitions and a selector
+boundary; the initial definition is `songs-awaiting-your-vote` (`no-votes-ever`).
+Calendar events use `type: "playlist_show"` and `playlistId`; they are not live
+performances. Schedule snapshot v3 reads v1/v2 calendars without changing existing
+live cancellations or weekly overrides. Owner authorization uses the existing
+signed calendar endpoint; there is no new payment or signing path.
+
+`discord-bot/playlist-show.js` persists up to 100 occurrence records (at most 10,000
+selected identities per occurrence) in the dedicated Pinata checkpoint
+`decentbusking-playlist-shows.json` (`kind=playlist-shows`). The existing checkpoint
+storage/mirror configuration is reused; no extra secret is required. The occurrence
+identity includes the event ID and start time. Editing a future start creates a new
+occurrence, while live preemption/restart resumes the saved order/cursor. Advancing
+before audio starts provides at-most-once selection across restart: a crash between
+checkpoint and sound can lose that slot, but cannot replay it. Missing/unconfirmed
+storage falls back to normal rotation with an exposed reason, never an unpersisted
+playlist. A late capture is flagged in `/api/radio.playlistShow.lateSnapshot`.
+
+Eligibility shares the normal-rotation music/approval predicate. Both `likes` and
+`dislikes` must be known nonnegative integer all-time human totals, with neither
+positive. Missing/null/incomplete totals are excluded and counted in the preview.
+Existing site/Discord vote accounting is reused (including subtraction of the bot's
+seeded reactions). A sticky `everHumanVoted` flag prevents removed reactions from
+requalifying a track; retained historical Discord/weekly vote evidence also excludes
+it. No votes are created by selection, playback, or fallback.
+
+The opening pool is shuffled once and stored, never refilled during that occurrence.
+Before actual audio starts, eligibility/votes are rechecked (including after media
+prefetch and checkpoint I/O); voted or missing songs are checkpointed as skips.
+Voting during playback does not cut the song off. Empty/exhausted/unavailable pools
+return to ordinary weighted rotation for the rest of the block. The site/Discord
+continue to identify the scheduled show and invite votes in either direction.
+
+Policy: finish the current song at ordinary start/end boundaries. Live and Top10
+preempt immediately; interrupted selections stay consumed rather than replaying.
+All paid DJuke requests, including paid advert bumps, stay queued for after this
+playlist occurrence, just as requests are deferred in protected programming; no
+request is fulfilled/charged by a playlist selection. Ordinary DeVert breaks retain
+their normal cadence and do not consume a playlist slot. Overlapping playlist
+bookings are rejected; preview warns about live/Top10 conflicts. Runtime progress,
+selected order, skipped reasons, unknown-count and fallback reason are visible at
+`GET /api/radio` under `playlistShow`; `GET /api/radio/schedule` includes current
+full-catalog definition previews. Durations are estimated only when every matching
+track has a known duration; unknown does not mean zero or a guaranteed full set.
+
+For scheduling tonight's 9–10pm ET one-off, follow
+[the operator runbook](../docs/DJUKE-ROLLOUT.md#tonights-songs-awaiting-your-vote-runbook).
+Wallet-curated sets, submission intake, playlist/fee binding and recurring curated
+sets remain out of scope (#240 stays open).
+
+Validation from the repository root: `node --test test/*.test.js` (CI's existing
+payroll smoke subset is `node --test test/payroll.test.js test/commentArt.test.js
+test/automation.test.js`). Focused tests:
+`node --test test/radio-playlists.test.js test/playlist-show-runtime.test.js test/radio-schedule.test.js`.
+
 ### Friday Top10 Hype
 
 The Friday Hype slot snapshots the current New York week's eligible chart at

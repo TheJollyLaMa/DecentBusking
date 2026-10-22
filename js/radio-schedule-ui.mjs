@@ -1,5 +1,5 @@
 import { isAdminWallet } from './admin-access.mjs';
-import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261017-mercury-release';
+import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261022-playlist-show';
 import { utcToNewYorkInput, newYorkInputToUtc, radioCalendarOccurrences, buildRadioCalendar, googleRadioCalendarUrl } from './radio-calendar.mjs';
 export { utcToNewYorkInput, newYorkInputToUtc };
 const TIME_ZONE = 'America/New_York';
@@ -133,6 +133,10 @@ function renderSchedule(payload, onCancel) {
     const row = element('li', `radio-schedule-row${active ? ' is-active' : ''}${cancelled ? ' is-cancelled' : ''}`);
     row.append(element('strong', 'radio-schedule-name', event.title),
       element('span', 'radio-schedule-time', `${formatEventTime(event.startUtc, payload.timeZone || TIME_ZONE)} - ${formatEventTime(event.endUtc, payload.timeZone || TIME_ZONE)}`));
+    if (event.type === 'playlist_show') {
+      const definition = payload.playlistDefinitions?.find(item => item.id === event.playlistId);
+      row.append(element('span', 'radio-schedule-time', `Playlist show · ${definition?.rule || 'No votes ever'} · Vote up OR down!`));
+    }
     if (active) row.append(element('span', 'radio-schedule-live', 'LIVE NOW'));
     if (cancelled) row.append(element('span', 'radio-schedule-cancelled-stamp', 'Canceled'),
       element('span', 'radio-schedule-cancel-reason', event.cancellationReason));
@@ -145,13 +149,13 @@ function renderSchedule(payload, onCancel) {
     if (!cancelled && !active && payload.ready !== false) row.append(reminderControl(event, status));
     events.append(row);
   }
-  if (!upcoming.length) events.append(element('li', 'radio-schedule-empty', 'No additional live events are scheduled.'));
+  if (!upcoming.length) events.append(element('li', 'radio-schedule-empty', 'No additional events are scheduled.'));
   for (const details of [...weekly.querySelectorAll('.radio-reminder'), ...events.querySelectorAll('.radio-reminder')]) {
     details.open = openReminders.has(details.dataset.eventId);
   }
   status.textContent = payload.ready === false
     ? 'Recurring programming is available. The live-event calendar is temporarily unavailable.'
-    : 'All times are America/New_York. Live events temporarily take priority over the weekly shows.';
+    : 'All times are America/New_York. Live and Top 10 shows take priority over playlist shows.';
 }
 
 export function initRadioScheduleBoard() {

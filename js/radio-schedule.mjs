@@ -1,3 +1,4 @@
+import { radioPlaylistDefinition } from './radio-playlists.mjs';
 import { currentPayrollPeriod, PAYROLL_TIME_ZONE } from './payroll-week.mjs';
 
 const USDC = 1_000_000n;
@@ -23,7 +24,10 @@ function normalizeLivePerformanceEvent(event) {
     throw new Error('Invalid live performance event');
   }
   if (end - start > MAX_LIVE_EVENT_DURATION_MS) throw new Error('Live performance events cannot exceed four hours');
-  const priority = Number(event.priority ?? 200);
+  const type = event.type || 'live_performance';
+  if (!['live_performance', 'playlist_show'].includes(type)) throw new Error('Invalid schedule event type');
+  const playlist = type === 'playlist_show' ? radioPlaylistDefinition(event.playlistId) : null;
+  const priority = playlist ? 50 : Number(event.priority ?? 200);
   if (!Number.isFinite(priority)) throw new Error('Invalid live performance event priority');
   const cancellation = {};
   if (event.status === 'cancelled') {
@@ -32,7 +36,7 @@ function normalizeLivePerformanceEvent(event) {
     cancellation.status = 'cancelled';
     cancellation.cancellationReason = reason;
   } else if (event.status && event.status !== 'scheduled') throw new Error('Invalid event status');
-  return { id, type: 'live_performance', title, startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(), priority, ...cancellation };
+  return { id, type, ...(playlist ? { playlistId: playlist.id } : {}), title, startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(), priority, ...cancellation };
 }
 
 export function cancelLivePerformanceEvent(events, event, reason) {
@@ -49,7 +53,7 @@ export function upsertLivePerformanceEvent(events, event, { now = Date.now() } =
   const next = current.filter(item => item.id !== normalized.id).map(normalizeLivePerformanceEvent);
   if (next.length >= MAX_LIVE_SCHEDULE_EVENTS) throw new Error('Live performance calendar is full');
   next.push(normalized);
-  return next.sort((first, second) => Date.parse(first.startUtc) - Date.parse(second.startUtc));
+  return validateLivePerformanceSchedule(next, { now });
 }
 
 export function removeLivePerformanceEvent(events, eventId) {
@@ -60,6 +64,11 @@ export function validateLivePerformanceSchedule(events, { now = Date.now() } = {
   if (!Array.isArray(events) || events.length > MAX_LIVE_SCHEDULE_EVENTS) throw new Error('Invalid live performance calendar');
   const normalized = events.map(normalizeLivePerformanceEvent);
   if (new Set(normalized.map(event => event.id)).size !== normalized.length) throw new Error('Duplicate live performance event ID');
+  const playlistEvents = normalized.filter(event => event.type === 'playlist_show' && event.status !== 'cancelled');
+  if (playlistEvents.some((event, index) => playlistEvents.slice(index + 1).some(other =>
+    Date.parse(event.startUtc) < Date.parse(other.endUtc) && Date.parse(other.startUtc) < Date.parse(event.endUtc)))) {
+    throw new Error('Playlist shows cannot overlap');
+  }
   return normalized.filter(event => {
     const start = Date.parse(event.startUtc);
     const end = Date.parse(event.endUtc);
@@ -91,7 +100,7 @@ export function validateWeeklyScheduleOverrides(overrides = {}) {
 export function serializeLiveSchedule(value, { savedAt = new Date().toISOString() } = {}) {
   const state = Array.isArray(value) ? { events: value, weeklySchedule: {} } : value || {};
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     savedAt,
     events: (Array.isArray(state.events) ? state.events : []).map(normalizeLivePerformanceEvent),
     weeklySchedule: validateWeeklyScheduleOverrides(state.weeklySchedule || {}),
@@ -99,7 +108,7 @@ export function serializeLiveSchedule(value, { savedAt = new Date().toISOString(
 }
 
 export function deserializeLiveSchedule(snapshot) {
-  if (![1, 2].includes(snapshot?.schemaVersion) || !Array.isArray(snapshot.events)) {
+  if (![1, 2, 3].includes(snapshot?.schemaVersion) || !Array.isArray(snapshot.events)) {
     throw new Error('Live schedule snapshot has an unsupported format');
   }
   const events = snapshot.events.map(normalizeLivePerformanceEvent);
@@ -204,7 +213,7 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
     .filter(event => {
       const start = Date.parse(event.startUtc || event.start || '1970-01-01T00:00:00Z');
       const end = Date.parse(event.endUtc || event.end || '1970-01-01T00:00:00Z');
-      return event.status !== 'cancelled' && Number.isFinite(start) && Number.isFinite(end) && now >= start && now < end;
+      return event.type !== 'playlist_show' && event.status !== 'cancelled' && Number.isFinite(start) && Number.isFinite(end) && now >= start && now < end;
     })
     .sort((first, second) => Number(second.priority || 0) - Number(first.priority || 0))[0];
 
@@ -219,7 +228,7 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
   }
 
   const liveShow = (schedule || []).find(show => show.type === 'live_performance' && isShowActive(show, now) &&
-    !live.some(event => event.status === 'cancelled' && (event.id === `${show.id}:${localDateAndHour(now, show.timeZone || PAYROLL_TIME_ZONE).date}` ||
+    !live.some(event => event.type !== 'playlist_show' && event.status === 'cancelled' && (event.id === `${show.id}:${localDateAndHour(now, show.timeZone || PAYROLL_TIME_ZONE).date}` ||
       (Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc)))));
   if (liveShow) {
     const localDate = localDateAndHour(now, liveShow.timeZone || PAYROLL_TIME_ZONE).date;
@@ -246,6 +255,13 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
     }
     return result;
   }
+
+  const playlistEvent = live.filter(event => event.type === 'playlist_show' && event.status !== 'cancelled' &&
+    Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc))
+    .sort((a, b) => Date.parse(a.startUtc) - Date.parse(b.startUtc) || a.id.localeCompare(b.id))[0];
+  if (playlistEvent) return { id: playlistEvent.id, instanceId: `${playlistEvent.id}:${playlistEvent.startUtc}`,
+    type: 'playlist_show', playlistId: playlistEvent.playlistId, label: playlistEvent.title, priority: 50,
+    startAt: playlistEvent.startUtc, endAt: playlistEvent.endUtc };
 
   const fallback = (schedule || []).find(show => show.type === 'normal_rotation') || { id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation', priority: 10 };
   const cancelled = live.find(event => event.status === 'cancelled' && Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc));
