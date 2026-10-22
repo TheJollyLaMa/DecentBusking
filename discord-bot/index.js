@@ -1,3 +1,4 @@
+import { createRadioAnnouncements, deserializeAnnouncements } from './radio-announcements.js';
 // discord-bot/index.js
 // DecentBusking Discord Bot — entry point
 //
@@ -1140,7 +1141,23 @@ async function main() {
     ],
   }) : null;
   if (alchemyWebhook) console.log(`[alchemy-webhook] Enabled; chain pollers relaxed to every ${WEBHOOK_SAFETY_POLL_MS / 1000}s as a safety net.`);
+  const announcementStore = config.pinataJwt ? createPinataStateStore({
+    ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+    filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+    name: 'decentbusking-radio-announcements.json', restoreLatestOnly: true,
+    tags: { app: 'decentbusking', kind: 'radio-announcements', schema: '1' },
+    serialize: value => value, deserialize: deserializeAnnouncements,
+    beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined,
+  }) : null;
+  const radioAnnouncements = createRadioAnnouncements({
+    store: announcementStore, getClient: () => config.getDiscordClient?.() || client,
+    ownerWallet: config.mintOwnerWallet, channelId: config.announceChannelId,
+    defaultMention: config.announceDefaultMention, voiceChannelId: config.jukeLoopVoiceChannelId,
+    listenUrl: config.siteUrl,
+    getSchedule: () => ({ ready: liveScheduleReady, schedule: defaultRadioSchedule(liveWeeklySchedule), events: livePerformanceEvents }),
+  });
   const requestHandler = createWorkerRequestHandler({
+    radioAnnouncements,
     alchemyWebhook,
     checkpointMirror,
     creatorProfiles,

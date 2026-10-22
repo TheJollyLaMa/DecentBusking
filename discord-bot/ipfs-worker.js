@@ -230,6 +230,7 @@ export function createWorkerRequestHandler({
   getRadioMediaUrl,
   getRadioSchedule,
   saveRadioSchedule,
+  radioAnnouncements,
   getDjukeState,
   getDjukeGasQuote,
   getDevertState,
@@ -448,6 +449,13 @@ export function createWorkerRequestHandler({
           'Content-Disposition': 'inline; filename="decentbusking-radio.ics"',
           'Cache-Control': 'public, max-age=300', 'Access-Control-Allow-Origin': '*' });
         response.end(calendar);
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname.startsWith('/api/radio/announcements/')) {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!radioAnnouncements) throw new Error('Radio announcements are not configured');
+        const action = requestUrl.pathname.slice('/api/radio/announcements/'.length);
+        sendJson(response, 200, await radioAnnouncements.handle(action, await readJson(request), origin), corsOrigin);
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/radio/schedule') {

@@ -75,6 +75,8 @@ export function loadConfig() {
     baseRpcUrl:             process.env.BASE_RPC_URL || 'https://mainnet.base.org',
     baseLogsRpcUrl:         process.env.BASE_LOGS_RPC_URL || process.env.BASE_RPC_URL || 'https://mainnet.base.org',
     blockExplorerUrl:       (process.env.BLOCK_EXPLORER_URL || 'https://basescan.org').replace(/\/$/, ''),
+    announceChannelId:     process.env.ANNOUNCE_CHANNEL_ID || '943117480883265539',
+    announceDefaultMention: process.env.ANNOUNCE_DEFAULT_MENTION || 'everyone',
     jukeLoopVoiceChannelId: process.env.JUKE_LOOP_VOICE_CHANNEL_ID || null,
     jukeLoopTextChannelId:  process.env.JUKE_LOOP_TEXT_CHANNEL_ID  || null,
     jukeLoopVoiceEnabled:   process.env.JUKE_LOOP_VOICE_ENABLED !== 'false',

@@ -15,6 +15,7 @@ import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artw
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261022-playlist-show';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261022-playlist-show';
+import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 
 const ROLE_GRANT_ABI = [
@@ -241,6 +242,7 @@ function _resetAdminWallet() {
   document.getElementById('admin-devert-campaigns')?.classList.add('hidden');
   document.getElementById('admin-devert-list')?.replaceChildren();
   _radioScheduleEventsEl?.replaceChildren();
+  _radioScheduleSection?.querySelector('[data-radio-announcements]')?.remove();
 }
 
 async function _loadDevertCampaigns() {
@@ -351,6 +353,20 @@ function _populateRadioWeeklyForm(schedule) {
 
 function _renderRadioScheduleEvents() {
   if (!_radioScheduleEventsEl) return;
+  const signer = _adminSigner;
+  const address = _adminAddress;
+  const checkId = _walletCheckId;
+  if (signer && address && _radioSchedule) renderAdminRadioAnnouncements({
+    anchor: _radioScheduleEventsEl, schedule: _radioSchedule,
+    isCurrent: () => checkId === _walletCheckId && signer === _adminSigner,
+    request: async (action, payload) => {
+      if (checkId !== _walletCheckId || signer !== _adminSigner) throw new Error('Wallet changed; reopen the admin calendar');
+      const result = await requestRadioAnnouncement({ serviceUrl: window.DecentConfig.ipfsUploadServiceUrl,
+        signer, address, action, payload, isCurrent: () => checkId === _walletCheckId && signer === _adminSigner });
+      if (checkId !== _walletCheckId || signer !== _adminSigner) throw new Error('Wallet changed; reopen the admin calendar');
+      return result;
+    },
+  });
   const now = Date.now();
   const events = (_radioSchedule?.events || []).filter(event => Date.parse(event.endUtc) > now)
     .sort((first, second) => Date.parse(first.startUtc) - Date.parse(second.startUtc));
