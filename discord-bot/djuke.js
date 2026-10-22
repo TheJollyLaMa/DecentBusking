@@ -8,6 +8,7 @@ export const DJUKE_ABI = [
   'function getRequest(uint256 requestId) view returns ((bytes32 songId,address payer,uint256 amount,bool fulfilled,uint256 revision,address[] recipients,uint16[] sharesBps))',
   'function getSong(bytes32 songId) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
   'function fulfill(uint256 requestId, bytes32 expectedSongId, uint256 expectedRevision, bytes32 playbackProof)',
+  'function refundUndeliveredPlaylist(uint256 batchId)',
   'function registerSong(bytes32 songId, string audioURI, address[] recipients, uint16[] sharesBps)',
   'function multicall(bytes[] data) returns (bytes[] results)',
 ];
@@ -157,6 +158,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
           amountUnits: request.amountUnits,
           ...(request.tier !== undefined ? { tier: request.tier } : {}),
           ...(request.campaignId !== undefined ? { campaignId: String(request.campaignId) } : {}),
+          ...(request.playlistBatchId !== undefined ? { playlistBatchId: String(request.playlistBatchId) } : {}),
         };
         if (!existing) next.push({ requestId: request.requestId, ...fields, state: 'pending', attempts: 0 });
         else if (existing.state !== 'fulfilled') {
@@ -308,7 +310,7 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
   return read;
 }
 
-export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVerifiedRequests, selectRequest,
+export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVerifiedRequests, selectRequest, refundPlaylistBatch,
   preserveMissingRequest = () => false, canPlayRequest = () => true,
   minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
   let initialized = null;
@@ -355,7 +357,13 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     const request = state.requests.find(entry => entry.requestId === head.requestId);
     if (!request || !await canPlayRequest(request, state)) return null;
     const track = request?.playable ? getTrack(request.trackId) : null;
-    if (!track) throw new Error(`Paid DJuke request ${head.requestId} is not playable`);
+    if (!track) {
+      if (request?.playlistBatchId && refundPlaylistBatch) {
+        await refundPlaylistBatch(request.playlistBatchId);
+        return null;
+      }
+      throw new Error(`Paid DJuke request ${head.requestId} is not playable`);
+    }
     const record = await journal.reserveNext(head.requestId);
     return record ? { record, track } : null;
   }
@@ -383,12 +391,19 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       return run;
     },
     async complete(record, play) {
-      if (!play || play.audibleMs < minAudibleMs) return journal.fail(record.requestId, 'Paid play was not audible long enough');
+      if (!play || play.audibleMs < minAudibleMs) {
+        await journal.fail(record.requestId, 'Paid play was not audible long enough');
+        if (record.playlistBatchId && refundPlaylistBatch) await refundPlaylistBatch(record.playlistBatchId);
+        return;
+      }
       await journal.complete(record.requestId, { playId: play.playId, audibleMs: play.audibleMs, finished: true,
         trackId: record.trackId, revision: record.revision });
       readState().then(settleSerial).catch(error => log.warn(`[djuke] Fulfillment deferred: ${error.message}`));
     },
-    fail: (record, error) => journal.fail(record.requestId, error?.message || String(error)),
+    async fail(record, error) {
+      await journal.fail(record.requestId, error?.message || String(error));
+      if (record.playlistBatchId && refundPlaylistBatch) await refundPlaylistBatch(record.playlistBatchId);
+    },
     reconcile,
     getJournalState: () => journal.getState(),
   };

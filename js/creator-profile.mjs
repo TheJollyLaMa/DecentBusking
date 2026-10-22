@@ -7,7 +7,7 @@ import { canEditArtwork } from './artwork-update.mjs';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs?v=20261017-mercury-release';
-import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261022-named-playlists';
+import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261022-v04-radio';
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
   summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261017-mercury-release';
 

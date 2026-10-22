@@ -49,11 +49,14 @@ test('playlist wallet signatures bind action, full revision, origin, nonce and e
 });
 
 test('playlist capability gate stays closed until a versioned compatible address is enabled', async () => {
-  const { supportsDJukePlaylistBatch } = await import('../js/djuke-playlists.mjs');
+  const { supportsDJukePlaylistBatch, supportsDJukePlaylistRadio } = await import('../js/djuke-playlists.mjs');
   assert.equal(supportsDJukePlaylistBatch({}), false);
-  assert.equal(supportsDJukePlaylistBatch({ djukePlaylistBatchVersion: '0.3', djukePlaylistBatchAddress: `0x${'1'.repeat(40)}` }), false);
-  assert.equal(supportsDJukePlaylistBatch({ djukePlaylistBatchVersion: '0.3', djukePlaylistBatchAddress: `0x${'1'.repeat(40)}`, djukePlaylistBatchEnabled: true }), true);
-  assert.equal(supportsDJukePlaylistBatch({ djukePlaylistBatchVersion: '0.2', djukePlaylistBatchAddress: `0x${'1'.repeat(40)}`, djukePlaylistBatchEnabled: true }), false);
+  assert.equal(supportsDJukePlaylistBatch({ djukePlaylistBatchVersion: '0.4', djukePlaylistBatchAddress: `0x${'1'.repeat(40)}` }), false);
+  const enabled = { djukePlaylistBatchVersion: '0.4', djukePlaylistBatchAddress: `0x${'1'.repeat(40)}`, djukePlaylistBatchEnabled: true };
+  assert.equal(supportsDJukePlaylistBatch(enabled), true);
+  assert.equal(supportsDJukePlaylistRadio(enabled), false);
+  assert.equal(supportsDJukePlaylistRadio({ ...enabled, djukePlaylistRadioReady: true }), true);
+  assert.equal(supportsDJukePlaylistBatch({ djukePlaylistBatchVersion: '0.3', djukePlaylistBatchAddress: `0x${'1'.repeat(40)}`, djukePlaylistBatchEnabled: true }), false);
 });
 
 test('watchlist presentation groups bookmarks by artist without converting them to playlists', async () => {

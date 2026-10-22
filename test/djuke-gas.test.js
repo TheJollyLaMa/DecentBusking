@@ -51,3 +51,26 @@ test('gas quotes stay within RPC rate limits: cached statics, shared in-flight q
   limited = 10;
   await assert.rejects(reader({ listener, songId }), /coalesce/);
 });
+
+test('playlist worker quote hashes ordered song IDs and recovers against the contract v0.2 domain', async () => {
+  const { createDjukePlaylistGasQuoteReader, PLAYLIST_GAS_QUOTE_TYPES } = await import('../discord-bot/djuke-gas.js');
+  const { AbiCoder, keccak256 } = require('node:module').createRequire(require('node:path').join(__dirname, '../discord-bot/package.json'))('ethers');
+  const signer = Wallet.createRandom(), listener = Wallet.createRandom().address, target = Wallet.createRandom().address;
+  const songIds = [`0x${'a'.repeat(64)}`, `0x${'b'.repeat(64)}`];
+  const contract = { target, interface: new Interface(['function fulfill(uint256,bytes32,uint256,bytes32)']),
+    gasWorker: async () => signer.address, maxGasContributionWei: async () => 1000000000000000n,
+    gasQuoteNonces: async () => 3n, quotePlaylist: async () => [500000n, 5000000n, 5500000n],
+    getSong: async () => ({ enabled: true }), nextRequestId: async () => 7n };
+  const provider = { getNetwork: async () => ({ chainId: 8453n }), getFeeData: async () => ({ maxFeePerGas: 1000000n, maxPriorityFeePerGas: 1n }) };
+  const reader = createDjukePlaylistGasQuoteReader({ provider, contract, signer, fulfillmentGasUnits: 100000n,
+    oracle: { getL1Fee: async () => 1000n }, now: () => 1000000 });
+  const quote = await reader({ listener, songIds });
+  assert.equal(quote.maxTotal, '5500000');
+  assert.equal(quote.nonce, '3');
+  assert.equal(quote.deadline, 1120);
+  assert.equal(quote.contributionWei, '400000004000');
+  assert.equal(quote.songIdsHash, keccak256(AbiCoder.defaultAbiCoder().encode(['bytes32[]'], [songIds])));
+  assert.equal(verifyTypedData({ name: 'DecentJukeBox', version: '0.2', chainId: 8453, verifyingContract: target },
+    PLAYLIST_GAS_QUOTE_TYPES, quote, quote.signature), signer.address);
+  await assert.rejects(reader({ listener, songIds: [songIds[0], songIds[0]] }), /Invalid playlist/);
+});

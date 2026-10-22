@@ -65,7 +65,8 @@ import { createCheckpointMirror } from './checkpoint-mirror.js';
 import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
 import { createCreatorProfiles } from './creator-profiles.js';
 import { createArtworkUpdateQueue } from './artwork-updates.js';
-import { createDjukeGasQuoteReader, DJUKE_GAS_ABI } from './djuke-gas.js';
+import { createDjukeGasQuoteReader, createDjukePlaylistGasQuoteReader, DJUKE_GAS_ABI, DJUKE_PLAYLIST_GAS_ABI } from './djuke-gas.js';
+import { createDjukePlaylistBatchReconciler, playlistBatchEventAbi } from './djuke-playlist-batches.js';
 import { createEnsResolver } from './ens-resolver.js';
 import { createDevertRemovals } from './devert-removals.js';
 import { ensureCheckpointGroups } from './checkpoint-groups.js';
@@ -1013,7 +1014,33 @@ async function main() {
   const getDjukeGasQuote = quoteSigner ? createDjukeGasQuoteReader({ provider: quoteSigner.provider, signer: quoteSigner,
     contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, 'function quote() view returns(uint256)'], quoteSigner),
     fulfillmentGasUnits: BigInt(process.env.DJUKE_FULFILLMENT_GAS_UNITS || '1000000') }) : null;
-  let readDjukeState = djukeAddress ? createDjukeQueueReader({
+  const playlistContractEnabled = process.env.DJUKE_PLAYLIST_BATCH_ENABLED === 'true' &&
+    process.env.DJUKE_PLAYLIST_BATCH_VERSION === '0.4' &&
+    process.env.DJUKE_PLAYLIST_BATCH_ADDRESS?.toLowerCase() === djukeAddress?.toLowerCase() && !!quoteSigner;
+  const playlistWorkerReady = false; // Keep signing and radio readiness closed until the complete v0.4 fork rehearsal passes.
+  const getDjukePlaylistGasQuote = playlistContractEnabled && playlistWorkerReady ? createDjukePlaylistGasQuoteReader({ provider: quoteSigner.provider,
+    signer: quoteSigner, contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, ...DJUKE_PLAYLIST_GAS_ABI], quoteSigner),
+    fulfillmentGasUnits: BigInt(process.env.DJUKE_FULFILLMENT_GAS_UNITS || '1000000') }) : null;
+  let playlistBatchJournal = null;
+  const playlistBatchStartBlock = Number(process.env.DJUKE_PLAYLIST_BATCH_START_BLOCK);
+  const playlistBatchWorkerEnabled = playlistContractEnabled && process.env.DJUKE_PLAYLIST_BATCH_ENABLED === 'true' &&
+    Number.isSafeInteger(playlistBatchStartBlock) && playlistBatchStartBlock >= 0 && !!checkpointMirror && !!config.pinataJwt;
+  if (playlistBatchWorkerEnabled) {
+    const batchStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
+      uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+      name: `decentbusking-djuke-${djukeAddress.toLowerCase()}-playlist-batches.json`, requireLocalMirror: true,
+      tags: { app: 'decentbusking', kind: `djuke-playlist-batches-${djukeAddress.toLowerCase()}`, schema: '1' },
+      serialize: value => value, deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
+    const eventContract = new Contract(djukeAddress, [...DJUKE_ABI, ...playlistBatchEventAbi()], getRpcRouter().provider('logs', 'djuke-playlist-events'));
+    playlistBatchJournal = createDjukePlaylistBatchReconciler({ provider: eventContract.runner.provider, contract: eventContract,
+      restore: batchStore.restore, save: batchStore.save, startBlock: playlistBatchStartBlock });
+    await initializeDevertPlaybackWithRetry({ initialize: () => playlistBatchJournal.initialize() });
+  }
+  const getDjukePlaylistReadiness = async () => ({ ready: false, version: '0.4',
+    configured: playlistContractEnabled, contractAddress: playlistContractEnabled ? djukeAddress : '',
+    batchEventsDurable: !!playlistBatchJournal,
+    reason: 'Radio readiness remains closed until end-to-end playlist fulfillment, worker gas quoting, and fork rehearsal pass' });
+  const readDjukeQueueState = djukeAddress ? createDjukeQueueReader({
     provider: getRpcRouter().provider('read', 'djuke-reader'), contractAddress: djukeAddress,
     paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
     getPlaylist: () => {
@@ -1021,6 +1048,17 @@ async function main() {
       return getPlaylist();
     },
   }) : undefined;
+  let readDjukeState = readDjukeQueueState;
+  if (readDjukeQueueState && playlistBatchJournal) {
+    readDjukeState = async () => {
+      const [state] = await Promise.all([readDjukeQueueState(), playlistBatchJournal.reconcile()]);
+      state.requests = state.requests.map(request => {
+        const batch = playlistBatchJournal.forRequest(request.chainRequestId);
+        return batch ? { ...request, playlistBatchId: batch.batchId } : request;
+      });
+      return state;
+    };
+  }
   const syncDevertDjukeBoosts = () => {
     if (!readDevertState || !readDjukeState || !_devertSchedulerContract || _devertBoostTask) return _devertBoostTask;
     _devertBoostTask = applyDevertDjukeBoosts({ contract: _devertSchedulerContract,
@@ -1051,6 +1089,27 @@ async function main() {
       readState: readDjukeState,
       journal: createDjukePlaybackJournal(journalStore),
       fulfill: createDjukeFulfiller(new Contract(djukeAddress, DJUKE_ABI, fulfiller)),
+      refundPlaylistBatch: playlistBatchJournal ? (() => {
+        const contract = new Contract(djukeAddress, [...DJUKE_ABI, ...playlistBatchEventAbi()], fulfiller);
+        const pending = new Map();
+        return batchId => {
+          const key = String(batchId);
+          if (!pending.has(key)) pending.set(key, (async () => {
+            const known = playlistBatchJournal.getState().find(batch => batch.batchId === key);
+            if (known?.status === 'refunded' || known?.status === 'settled') return;
+            try {
+              const transaction = await contract.refundUndeliveredPlaylist(key);
+              if ((await transaction.wait())?.status !== 1) throw new Error(`Playlist suffix refund failed: ${transaction.hash}`);
+            } catch (error) {
+              await playlistBatchJournal.reconcile();
+              const current = playlistBatchJournal.getState().find(batch => batch.batchId === key);
+              if (current?.status !== 'refunded') throw error;
+            }
+            await playlistBatchJournal.reconcile();
+          })().finally(() => pending.delete(key)));
+          return pending.get(key);
+        };
+      })() : undefined,
       onVerifiedRequests: async state => {
         if (!_devertSchedulerContract || !readDevertState) return;
         await applyDevertDjukeBoosts({ contract: _devertSchedulerContract, readCampaigns: readDevertState,
@@ -1186,6 +1245,8 @@ async function main() {
     checkpointMirror,
     creatorProfiles,
     getDjukeState: readDjukeState,
+    getDjukePlaylistGasQuote,
+    getDjukePlaylistReadiness,
     getNftCatalog: async options => {
       if (!playlistReady) throw new Error('Playlist is restoring; retry shortly');
       if (Date.now() - _nftCatalogCheckedAt >= 60000) syncMintedTracks(config);

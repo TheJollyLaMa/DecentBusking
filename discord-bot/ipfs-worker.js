@@ -234,6 +234,8 @@ export function createWorkerRequestHandler({
   radioAnnouncements,
   getDjukeState,
   getDjukeGasQuote,
+  getDjukePlaylistGasQuote,
+  getDjukePlaylistReadiness,
   getDevertState,
   getDevertQueue,
   removeDevertCampaign,
@@ -591,6 +593,16 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/api/pinners/manifest') {
         if (!getPinnerManifest) { sendJson(response, 404, { error: 'Pin manifest is not configured' }, '*'); return; }
         sendJson(response, 200, await getPinnerManifest(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/djuke/playlist-readiness') {
+        sendJson(response, 200, getDjukePlaylistReadiness ? await getDjukePlaylistReadiness() : { ready: false }, '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/djuke/playlist-gas-quote') {
+        if (!getDjukePlaylistGasQuote) throw new Error('DJuke v0.4 playlist gas funding is not configured');
+        const songIds = requestUrl.searchParams.getAll('songId');
+        sendJson(response, 200, await getDjukePlaylistGasQuote({ listener: requestUrl.searchParams.get('listener'), songIds }), '*');
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/djuke/gas-quote') {
