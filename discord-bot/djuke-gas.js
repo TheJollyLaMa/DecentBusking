@@ -1,10 +1,62 @@
-import { Contract, Transaction } from 'ethers';
+import { AbiCoder, Contract, Transaction, keccak256 } from 'ethers';
 import { DJUKE_SIGNING_DOMAIN_VERSION } from '../js/djuke-version.mjs';
 
 export const GAS_QUOTE_TYPES = { GasQuote: [
   { name: 'listener', type: 'address' }, { name: 'songId', type: 'bytes32' }, { name: 'maxPrice', type: 'uint256' },
   { name: 'fulfillmentCostWei', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' },
 ] };
+
+
+export const PLAYLIST_GAS_QUOTE_TYPES = { PlaylistGasQuote: [
+  { name: 'listener', type: 'address' }, { name: 'songIdsHash', type: 'bytes32' },
+  { name: 'maxTotal', type: 'uint256' }, { name: 'fulfillmentCostWei', type: 'uint256' },
+  { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' },
+] };
+
+export const DJUKE_PLAYLIST_GAS_ABI = [
+  'function quotePlaylist(bytes32[] songIds,bool radio) view returns(uint256 subtotal,uint256 fee,uint256 total)',
+  'function requestPlaylistWithGas(bytes32[] songIds,uint256 maxTotal,uint256 fulfillmentCostWei,uint256 deadline,bytes signature) payable returns(uint256)',
+];
+
+export function createDjukePlaylistGasQuoteReader({ provider, contract, signer, fulfillmentGasUnits = 1000000n,
+  oracle, now = () => Date.now(), feeCacheMs = 10000, retry = {} }) {
+  const gasLimit = BigInt(fulfillmentGasUnits);
+  if (gasLimit < 100000n || gasLimit > 2000000n) throw new Error('Invalid fulfillment gas budget');
+  const feeOracle = oracle || new Contract('0x420000000000000000000000000000000000000F', ['function getL1Fee(bytes) view returns(uint256)'], provider);
+  const call = task => withRpcRetry(task, retry);
+  const readFees = cached(() => call(() => provider.getFeeData()), feeCacheMs, now);
+  const coder = AbiCoder.defaultAbiCoder();
+  return async function getPlaylistQuote({ listener, songIds }) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(listener || '') || !Array.isArray(songIds) || songIds.length < 1 || songIds.length > 10 ||
+      songIds.some(song => !/^0x[0-9a-fA-F]{64}$/.test(song)) || new Set(songIds.map(song => song.toLowerCase())).size !== songIds.length) {
+      throw new Error('Invalid playlist gas quote identity');
+    }
+    const [network, worker, expectedWorker, cap, nonce, price, songs, fees, requestId] = await Promise.all([
+      call(() => provider.getNetwork()), signer.getAddress(), call(() => contract.gasWorker()),
+      call(() => contract.maxGasContributionWei()), call(() => contract.gasQuoteNonces(listener)),
+      call(() => contract.quotePlaylist(songIds, true)), Promise.all(songIds.map(song => call(() => contract.getSong(song)))),
+      readFees(), call(() => contract.nextRequestId()),
+    ]);
+    if (Number(network.chainId) !== 8453) throw new Error('Gas funding is Base-only');
+    if (worker.toLowerCase() !== expectedWorker.toLowerCase()) throw new Error('Gas quote signer does not match contract worker');
+    if (songs.some(song => !song.enabled)) throw new Error('Playlist contains an unavailable DJuke song');
+    const maxFeePerGas = fees.maxFeePerGas ?? fees.gasPrice;
+    if (!maxFeePerGas || maxFeePerGas <= 0n) throw new Error('Gas price unavailable');
+    const data = contract.interface.encodeFunctionData('fulfill', [requestId, songIds[0], 0, `0x${'ff'.repeat(32)}`]);
+    const transaction = Transaction.from({ type: 2, chainId: 8453, to: contract.target, gasLimit, nonce: SIZING_NONCE,
+      maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas ?? 0n, data });
+    const l1Fee = await call(() => feeOracle.getL1Fee(transaction.unsignedSerialized));
+    const fulfillmentCostWei = gasLimit * maxFeePerGas + l1Fee;
+    if (fulfillmentCostWei <= 0n || fulfillmentCostWei > BigInt(cap) / 2n) throw new Error('Estimated worker gas exceeds the contract cap');
+    const deadline = Math.floor(now() / 1000) + 120;
+    const quote = { listener, songIdsHash: keccak256(coder.encode(['bytes32[]'], [songIds])),
+      maxTotal: BigInt(price.total ?? price[2]).toString(), fulfillmentCostWei: fulfillmentCostWei.toString(), nonce: nonce.toString(), deadline };
+    const domain = { name: 'DecentJukeBox', version: DJUKE_SIGNING_DOMAIN_VERSION, chainId: 8453, verifyingContract: contract.target };
+    const signature = await signer.signTypedData(domain, PLAYLIST_GAS_QUOTE_TYPES, quote);
+    return { ...quote, signature, contractAddress: contract.target, worker,
+      contributionWei: (fulfillmentCostWei * 2n * BigInt(songIds.length)).toString(), chainId: 8453 };
+  };
+}
 
 export const DJUKE_GAS_ABI = [
   'function gasWorker() view returns(address)', 'function maxGasContributionWei() view returns(uint256)',

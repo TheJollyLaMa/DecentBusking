@@ -71,7 +71,7 @@ from the immutable event/request sequence, not browser-supplied `paid` flags.
 ## Rollout and safety
 
 Named private and radio checkout are capability-gated on an explicitly configured compatible
-DJuke v0.3 address/version; the current configuration remains disabled. The batch-aware gas-quote endpoint, event reconciliation, durable worker restart recovery, and automatic radio-failure refund invocation are not implemented in this change, so radio checkout must remain disabled even after a contract address is supplied until those pieces are independently completed and reviewed. There is
+DJuke v0.4 address/version; the current configuration remains disabled. The batch-aware gas-quote signer and durable batch-event/refund reconciler are implemented behind explicit v0.4 environment gates. The worker reports radio readiness false and does not expose playlist gas quotes until the end-to-end worker rehearsal and reviewed deployment are complete; radio checkout therefore remains disabled. There is
 no fallback to repeated tier-priced requests, private listens plus unpaid radio
 items, or creator-price overrides. Existing single-song checkout, creator-priced
 personal listens/albums, Watchlist, and DeVert behavior remain on their current
@@ -81,9 +81,7 @@ paths.
 Before enabling any feature, obtain separate steward approval, independently
 review the new module and DJuke deployment, verify all four router fund IDs and
 token decimals, publish matching compiler/optimizer settings and ABIs, test on a
-fork, configure the exact deployed version/address, implement worker batch event
-reconciliation and restart recovery, and validate one controlled private and
-radio batch plus full refund. Do not enable radio checkout until the worker has
+fork, configure the exact deployed version/address, verify the durable event reconciler and restart recovery, and validate one controlled private and radio batch plus full refund. Do not enable radio checkout until the worker has
 verified batch receipts, contiguous scheduling, durable audible-completion
 proofs, fee settlement, and the FIFO refund path. Rehearse migration with zero
 live writes; no existing queue or creator-set price is changed by this code.

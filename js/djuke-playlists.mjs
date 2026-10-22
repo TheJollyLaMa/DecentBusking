@@ -19,9 +19,13 @@ export function quoteNamedPlaylist(songCount, mode = 'private') {
 }
 
 export function supportsDJukePlaylistBatch(config = {}) {
-  return config.djukePlaylistBatchVersion === '0.3' &&
+  return config.djukePlaylistBatchVersion === '0.4' &&
     /^0x[0-9a-fA-F]{40}$/.test(config.djukePlaylistBatchAddress || '') &&
     config.djukePlaylistBatchEnabled === true;
+}
+
+export function supportsDJukePlaylistRadio(config = {}) {
+  return supportsDJukePlaylistBatch(config) && config.djukePlaylistRadioReady === true;
 }
 
 export function groupWatchlistByArtist(entries = []) {
