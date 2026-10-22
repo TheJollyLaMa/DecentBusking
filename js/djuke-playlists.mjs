@@ -1,20 +1,22 @@
-import { buildCreatorPlaylistAuthorizationMessage, buildCreatorPlaylistCopyAuthorizationMessage, normalizeNamedPlaylist } from './creator-profile-data.mjs';
+import { buildCreatorPlaylistAuthorizationMessage, buildCreatorPlaylistCopyAuthorizationMessage, normalizeNamedPlaylist } from './creator-profile-data.mjs?v=20261022-playlist-lane';
 
-export const DJUKE_PLAYLIST_MAX_SONGS = 10;
+export const DJUKE_PLAYLIST_MAX_SONGS = 24;
 export const DJUKE_PLAYLIST_MAX_PER_PROFILE = 20;
 export const DJUKE_PLAYLIST_BASE_RATE_UNITS = 250000n;
-export const DJUKE_PLAYLIST_RADIO_FEE_UNITS = 5000000n;
+export const DJUKE_PLAYLIST_RADIO_FEE_UNITS = 3000000n;
 
 export function matchesPlaylistRevision(playlist, songIds) {
   return Boolean(playlist && Array.isArray(songIds) && playlist.songIds.length === songIds.length &&
     playlist.songIds.every((songId, index) => String(songId).toLowerCase() === String(songIds[index]).toLowerCase()));
 }
 
-export function quoteNamedPlaylist(songCount, mode = 'private') {
-  if (!Number.isInteger(songCount) || songCount < 1 || songCount > DJUKE_PLAYLIST_MAX_SONGS) throw new Error('Choose 1–10 songs');
+export function quoteNamedPlaylist(songCount, mode = 'private', listenPrices = []) {
+  if (!Number.isInteger(songCount) || songCount < 1 || songCount > DJUKE_PLAYLIST_MAX_SONGS) throw new Error('Choose 1–24 songs');
   if (mode !== 'private' && mode !== 'radio') throw new Error('Unknown playlist playback mode');
-  const subtotal = BigInt(songCount) * DJUKE_PLAYLIST_BASE_RATE_UNITS;
-  const fee = mode === 'radio' ? DJUKE_PLAYLIST_RADIO_FEE_UNITS : 0n;
+  const subtotal = Array.from({ length: songCount }, (_, i) => mode === 'radio'
+    ? DJUKE_PLAYLIST_BASE_RATE_UNITS << BigInt(Math.floor(i / 8))
+    : BigInt(listenPrices[i] ?? DJUKE_PLAYLIST_BASE_RATE_UNITS)).reduce((a, b) => a + b, 0n);
+  const fee = mode === 'radio' ? DJUKE_PLAYLIST_RADIO_FEE_UNITS * BigInt(Math.ceil(songCount / 12)) : 0n;
   return { songCount, subtotalUnits: subtotal, feeUnits: fee, totalUnits: subtotal + fee };
 }
 

@@ -1,5 +1,5 @@
 import { liveBookingRows } from './live-bookings.mjs';
-import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261014-profile-card';
+import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261022-playlist-lane';
 import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261019-fund-wallet-labels';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 export { formatUsdcUnits };

@@ -4,7 +4,7 @@ import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 import { lookupEnsName } from './ens-client.mjs?v=20261016-ens-worker';
-import { renderWalletAddress } from './fund-display.mjs?v=20261017-mercury-release';
+import { renderWalletAddress } from './fund-display.mjs?v=20261022-playlist-lane';
 export { USDC_BROWSER_ABI };
 
 export function quoteDjuke(pendingCount) {

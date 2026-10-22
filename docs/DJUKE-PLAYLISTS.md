@@ -2,7 +2,7 @@
 
 Issue #241 adds a profile-backed playlist library. Names are 1–60 characters;
 playlist IDs are stable 128-bit hex IDs, names need not be globally unique, and
-results identify the maker and full ID. A playlist contains 1–10 distinct
+results identify the maker and full ID. A playlist contains 1–24 distinct
 registered DJuke song IDs in a user-reviewed order. Each profile may make and/or
 save at most 20 playlists. A maker may append an immutable revision; other
 wallets pin the exact revision and ordered song IDs, never a moving pointer.
@@ -15,63 +15,72 @@ expiry no more than five minutes away. The worker validates the allowed origin,
 wallet, signature, expiry, nonce, maker ownership, revision sequence, and profile
 cap before checkpointing. Discovery is public and read-only. Watchlist entries
 remain separate NFT bookmarks and are grouped by artist; adding to a playlist
-never silently changes Watchlist content. Top 10's plus action adds to the
-current wallet's playlist draft, not Watchlist.
+never silently changes Watchlist content. Top 10 has two distinct actions: **+**
+opens a compact selector for the current draft, saved named playlists, or an inline
+new-playlist name; **👀** saves the verified song/artist NFT to the watchlist.
+Music-card `dbusk-playlist-add` events use the same selector. Draft-only additions
+are local; a saved original appends a new immutable revision through the existing
+signed profile save API and loads it into the draft. A saved copy is never edited:
+adding creates a new original owned by the current wallet, retaining the old copy.
+These saves require wallet authorization, not a payment. The legacy personal-listen
+cart retains its 50-song cap; only named saves and named checkouts require 1–24.
 
 ## Prices and settlement
 
-Named playlist prices intentionally differ from creator-configured personal
-listen prices. Named private playback is exactly **0.25 USDC per enabled song**,
-with no queue-depth escalation and no $5 fee. Existing one-song and ordinary
-`purchaseListens`/album checkouts keep their creator-configured prices and are
-not rewritten. A private named playlist never creates radio requests.
+Private checkout sums each song's normal creator/album listen price (0.25 USDC
+default), with no platform fee and no radio request. Radio subtotal is the sum of
+`250000 << floor(i / 8)` USDC base units for zero-based playlist index i: songs
+1–8 cost $0.25 each, 9–16 $0.50 each, 17–24 $1 each. Radio platform fee is
+**$3 × ceil(n / 12)**, split equally 25/25/25/25 across Playback, Top10, Pinners,
+and Repo funds (rounding remainder to Repo). Examples: 8 songs $2 + $3; 12 songs
+$4 + $3; 24 songs $14 + $6 = **$20**. Pricing is independent of queue depth.
+The UI mirrors this formula for display and prefers on-chain `quotePlaylist`
+when a configured contract and provider are available; checkout always quotes
+on-chain (radio via the signed worker endpoint). Private creator prices may differ
+from the local default estimate.
 
-Radio checkout is **0.25 USDC × song count + $5 once per playlist** (10 tracks:
-2.50 private / 7.50 radio), independent of paid-queue depth. Every request binds
-the reviewed ordered IDs; the contract validates all songs before taking funds
-and appends the batch contiguously in one transaction. Song payments snapshot
-artist/collaborator recipients and settle only when the authorized worker
-submits the existing unique playback proof; production policy must only submit
-that proof after genuine audible completion. The additional $5 remains reserved until every item completes, then
-the platform-fund router receives exactly 2.25 playback, 2.25 Top 10, 0.40
-pinners, and 0.10 repository development (USDC). All amounts are 6-decimal
-base units. Song payments retain the existing 90% artist/collaborator, 8%
-pinners, and 2% repo-dev split; these are distinct from the $5 fund split.
+Each delivered radio song settles 90% directly to artists/collaborators, 8% to
+pinners, and 2% to Repo, separately from the platform fee. The entire platform fee
+is reserved until every song is delivered, then settled once to the four funds.
+`refundUndeliveredPlaylist(batchId)` refunds pending song amounts and the entire
+reserved fee; delivered songs retain their settlement. Refunded lane items advance
+the lane head rather than blocking later batches. Durable events track
+`PlaylistBatchRequested(..., firstLaneId)`, `PlaylistSongDelivered`,
+`PlaylistSongRefunded`, `PlaylistBatchFeeSettled`, and `PlaylistBatchFeeRefunded`.
+Lane journals use schema 2; old FIFO-batch schema 1 must not be silently replayed
+as lane IDs. UI/worker must use confirmed events, never transaction submission,
+for settled/refunded state.
 
-If a paid batch cannot be completed, the worker must invoke the contract's
-FIFO-head `refundUndeliveredPlaylist(batchId)` recovery path. That path returns
-only unresolved song payments and the entire still-reserved $5 fee; previously
-completed songs retain their normal settlement. It does not skip a paid item or
-settle a partial platform fee. Unavailable songs are rejected atomically at
-checkout; later transport/worker failures remain durable until successful
-retry or an auditable refund. Refund calls require the fulfiller role and the
-unresolved batch suffix to be the paid FIFO head. UI/worker must show pending,
-settled, or refunded from receipt/events, not from a submitted transaction.
-
-Worker gas is separate from the $5 fee. Radio checkout requires a worker-signed
-short-lived quote for the exact listener, ordered-song hash, maximum total, per-song
-gas contribution, nonce, and deadline. The contract requires exactly 2× the quote
-for each batch item and transfers the aggregate to the configured worker at checkout.
-That native-ETH transfer is immediate and is not held or refunded by the playlist
-contract, even if the worker later refunds undelivered USDC items; actual gas use may
-be lower. A front end must show the entire contribution before confirmation. The first
-USDC allowance can require a separate wallet approval. No gas amount is assumed to be
-covered by the platform fee.
+Worker gas remains separate: the EIP-712 `PlaylistGasQuote` uses domain
+DecentJukeBox / 0.2 and binds listener, ordered-song hash, max total, per-song
+fulfillment cost, nonce, and deadline. Checkout forwards exactly
+`fulfillmentCostWei * 2 * n` native ETH to the gas worker immediately. This is
+not refunded by a later USDC batch refund. The endpoint sizes a
+`fulfillPlaylistSong` transaction, returns on-chain subtotal/fee, and accepts
+1–24 distinct songs. The UI shows this full contribution before confirmation;
+initial USDC allowance may require a separate approval.
 
 ## Playback and scheduling
 
-The entire ordered playlist joins after the current paid FIFO queue and is
-contiguous relative to other paid songs. It does not interrupt current audio or
-preempt protected Top 10, live, or scheduled shows. Existing DVert break policy
-continues; it may run at its established break boundary without reordering paid
-song requests. The player starts only after a successful private receipt; radio
-success is reported only after a successful batch receipt. Playback order comes
-from the immutable event/request sequence, not browser-supplied `paid` flags.
+Radio playlists occupy a **separate playlist lane**, never the main paid FIFO.
+Normal paid requests always cut in before pending playlist songs. The worker reads
+main requests first and `playlistHeadId` / `playlistNextId` / `getPlaylistItem` at
+the same confirmed block. It claims only the playlist lane head when main pending
+is zero, and calls `fulfillPlaylistSong(laneId, expectedSongId, expectedRevision,
+playbackProof)` only after audible completion. Lane recordings are immutable
+(expected revision 0). If a main request arrives during playback, settlement waits
+until the main queue clears; proof is retained durably, not discarded or replayed.
+The contract independently enforces the same cut-in rule. Refund recovery calls
+`refundUndeliveredPlaylist(batchId)`, not a main-request refund. Main request IDs
+and playlist lane IDs have distinct durable journal identities. `pendingCount`
+remains main-only; main quote tiering uses main + playlist pending. This does not
+interrupt current audio or preempt protected Top 10, live, or scheduled shows;
+existing DVert break policy remains unchanged.
 
 ## Rollout and safety
 
 Named private and radio checkout are capability-gated on an explicitly configured compatible
-DJuke v0.4 address/version; the current configuration remains disabled. The batch-aware gas-quote signer and durable batch-event/refund reconciler are implemented behind explicit v0.4 environment gates. The worker reports radio readiness false and does not expose playlist gas quotes until the end-to-end worker rehearsal and reviewed deployment are complete; radio checkout therefore remains disabled. There is
+DJuke v0.4 address/version; the current configuration remains disabled. The batch-aware gas-quote signer and durable batch-event/refund reconciler are implemented behind explicit v0.4 environment gates. The worker reports radio readiness false and does not expose playlist gas quotes until the end-to-end worker rehearsal and reviewed deployment are complete; radio checkout therefore remains hidden. There is
 no fallback to repeated tier-priced requests, private listens plus unpaid radio
 items, or creator-price overrides. Existing single-song checkout, creator-priced
 personal listens/albums, Watchlist, and DeVert behavior remain on their current
@@ -82,6 +91,6 @@ Before enabling any feature, obtain separate steward approval, independently
 review the new module and DJuke deployment, verify all four router fund IDs and
 token decimals, publish matching compiler/optimizer settings and ABIs, test on a
 fork, configure the exact deployed version/address, verify the durable event reconciler and restart recovery, and validate one controlled private and radio batch plus full refund. Do not enable radio checkout until the worker has
-verified batch receipts, contiguous scheduling, durable audible-completion
-proofs, fee settlement, and the FIFO refund path. Rehearse migration with zero
+verified batch receipts, lane cut-in scheduling, durable audible-completion
+proofs, fee settlement, and the lane refund path. Rehearse migration with zero
 live writes; no existing queue or creator-set price is changed by this code.

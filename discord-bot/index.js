@@ -1029,7 +1029,7 @@ async function main() {
     const batchStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
       uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
       name: `decentbusking-djuke-${djukeAddress.toLowerCase()}-playlist-batches.json`, requireLocalMirror: true,
-      tags: { app: 'decentbusking', kind: `djuke-playlist-batches-${djukeAddress.toLowerCase()}`, schema: '1' },
+      tags: { app: 'decentbusking', kind: `djuke-playlist-batches-${djukeAddress.toLowerCase()}`, schema: '2' },
       serialize: value => value, deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
     const eventContract = new Contract(djukeAddress, [...DJUKE_ABI, ...playlistBatchEventAbi()], getRpcRouter().provider('logs', 'djuke-playlist-events'));
     playlistBatchJournal = createDjukePlaylistBatchReconciler({ provider: eventContract.runner.provider, contract: eventContract,
@@ -1038,10 +1038,13 @@ async function main() {
   }
   const getDjukePlaylistReadiness = async () => ({ ready: false, version: '0.4',
     configured: playlistContractEnabled, contractAddress: playlistContractEnabled ? djukeAddress : '',
-    batchEventsDurable: !!playlistBatchJournal,
+    batchEventsDurable: !!playlistBatchJournal, maxSongs: 24, laneModel: true,
+    radioPricing: { tierSize: 8, baseUsdc: 0.25, platformFeeUsdc: 3, feeBlockSize: 12, split: [25, 25, 25, 25] },
+    cutIn: 'Main paid requests always precede playlist lane songs',
     reason: 'Radio readiness remains closed until end-to-end playlist fulfillment, worker gas quoting, and fork rehearsal pass' });
   const readDjukeQueueState = djukeAddress ? createDjukeQueueReader({
     provider: getRpcRouter().provider('read', 'djuke-reader'), contractAddress: djukeAddress,
+    playlistLaneEnabled: playlistBatchWorkerEnabled,
     paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
     getPlaylist: () => {
       if (!playlistReady) throw new Error('DJuke catalog is restoring');
@@ -1052,12 +1055,9 @@ async function main() {
   if (readDjukeQueueState && playlistBatchJournal) {
     readDjukeState = async () => {
       const [state] = await Promise.all([readDjukeQueueState(), playlistBatchJournal.reconcile()]);
-      state.requests = state.requests.map(request => {
-        const batch = playlistBatchJournal.forRequest(request.chainRequestId);
-        return batch ? { ...request, playlistBatchId: batch.batchId } : request;
-      });
       return state;
     };
+    readDjukeState.invalidate = readDjukeQueueState.invalidate;
   }
   const syncDevertDjukeBoosts = () => {
     if (!readDevertState || !readDjukeState || !_devertSchedulerContract || _devertBoostTask) return _devertBoostTask;

@@ -57,15 +57,15 @@ test('playlist worker quote hashes ordered song IDs and recovers against the con
   const { AbiCoder, keccak256 } = require('node:module').createRequire(require('node:path').join(__dirname, '../discord-bot/package.json'))('ethers');
   const signer = Wallet.createRandom(), listener = Wallet.createRandom().address, target = Wallet.createRandom().address;
   const songIds = [`0x${'a'.repeat(64)}`, `0x${'b'.repeat(64)}`];
-  const contract = { target, interface: new Interface(['function fulfill(uint256,bytes32,uint256,bytes32)']),
+  const contract = { target, interface: new Interface(['function fulfillPlaylistSong(uint256,bytes32,uint256,bytes32)']),
     gasWorker: async () => signer.address, maxGasContributionWei: async () => 1000000000000000n,
-    gasQuoteNonces: async () => 3n, quotePlaylist: async () => [500000n, 5000000n, 5500000n],
-    getSong: async () => ({ enabled: true }), nextRequestId: async () => 7n };
+    gasQuoteNonces: async () => 3n, quotePlaylist: async () => [500000n, 3000000n, 3500000n],
+    getSong: async () => ({ enabled: true }), playlistNextId: async () => 7n };
   const provider = { getNetwork: async () => ({ chainId: 8453n }), getFeeData: async () => ({ maxFeePerGas: 1000000n, maxPriorityFeePerGas: 1n }) };
   const reader = createDjukePlaylistGasQuoteReader({ provider, contract, signer, fulfillmentGasUnits: 100000n,
     oracle: { getL1Fee: async () => 1000n }, now: () => 1000000 });
   const quote = await reader({ listener, songIds });
-  assert.equal(quote.maxTotal, '5500000');
+  assert.equal(quote.maxTotal, '3500000');
   assert.equal(quote.nonce, '3');
   assert.equal(quote.deadline, 1120);
   assert.equal(quote.contributionWei, '400000004000');

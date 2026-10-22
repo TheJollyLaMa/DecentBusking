@@ -86,6 +86,10 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
   assert.equal(ids['top-ten-panel-close'].getAttribute('aria-disabled'), null, 'Hype panel can be minimized');
   assert.equal(panel.querySelectorAll('.hype-festival').length, 1);
   assert.equal(panel.querySelectorAll('.top-ten-playlist-add').length, 2);
+  assert.equal(panel.querySelectorAll('.top-ten-watchlist-add').length, 2);
+  assert.equal(panel.querySelector('.top-ten-playlist-add').textContent, '+');
+  assert.equal(panel.querySelector('.top-ten-watchlist-add').textContent, '👀');
+  assert.match(panel.querySelector('.top-ten-watchlist-add').getAttribute('aria-label'), /watchlist/);
   doc.dispatchEvent(new Event('click'));
   assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'true', 'stray page clicks do not hide the Hype board');
   ids['top-ten-panel-close'].dispatchEvent(new Event('click'));
