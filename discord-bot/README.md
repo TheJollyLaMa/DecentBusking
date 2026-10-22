@@ -56,6 +56,8 @@ cp .env.example .env
 | `IPFS_GATEWAY`               | ❌        | IPFS HTTP gateway base URL (default: `https://dweb.link`). Radio playback falls back to `gateway.pinata.cloud`, then to the account's dedicated Pinata gateway (discovered via `PINATA_JWT`) when public gateways rate-limit. A paid request that still can't be fetched stays queued and retries every 60s while free rotation keeps playing. |
 | `FFMPEG_PATH`                | ❌        | Path to `ffmpeg` binary (default: `ffmpeg` from `PATH`) |
 | `JUKE_LOOP_VOICE_CHANNEL_ID` | ❌        | Numeric ID of the `JukeLoop` **voice** channel — enables 24/7 radio |
+| `ANNOUNCE_CHANNEL_ID`        | ❌        | Manual calendar announcement destination, default `943117480883265539` (#themessagebox); independent of playback/payroll channels |
+| `ANNOUNCE_DEFAULT_MENTION`   | ❌        | `everyone` (default), `none`, or comma-separated **mentionable guild role IDs**; use JukeboxHero's numeric role ID to change the default without code changes |
 | `JUKE_LOOP_TEXT_CHANNEL_ID`  | ❌        | Numeric ID of the `JukeLoop` **text** channel — where "Now Playing" posts go |
 | `DEVERT_CONTRACT_ADDRESS`    | DeVert    | Deployed DeVert campaign contract address; endpoint stays unavailable when unset |
 | `DEVERT_SCHEDULER_PRIVATE_KEY` | DeVert   | Optional override; defaults to the existing `DJUKE_FULFILLER_PRIVATE_KEY` |
@@ -380,6 +382,72 @@ clicks **Continue**. Larger media uploads use the DVert panel. The old
 need it. Ad submissions queue owner NFT review separately from campaign purchase.
 Existing DJuke v0.2 requests still boost only a payer's sole active campaign;
 multi-campaign targeting and a dedicated ad purchase UI are not implemented.
+
+### Manual calendar announcements
+
+**Operator workflow:** open the site's owner-only **Admin → Radio Programming**,
+refresh, check one dated occurrence, edit its reason, choose mention targets,
+**Preview announcement**, then **Confirm — send to Discord**. Options, preview,
+and send each require an off-chain owner-wallet signature (no transaction/gas).
+The server uses `MINT_OWNER_WALLET`, the same owner authorization as schedule
+updates; hiding UI is not the authorization boundary. Each signature binds origin,
+action, occurrence ID/start, SHA-256 of the full payload, nonce and short expiry.
+
+Configure `ANNOUNCE_CHANNEL_ID` (default #themessagebox `943117480883265539`),
+`SITE_URL`, and `JUKE_LOOP_VOICE_CHANNEL_ID` in the **same guild**. Promotion does
+not require joining voice or starting playback. The bot must have **View Channel,
+Send Messages, Embed Links, Read Message History** in the destination. It also
+needs **Mention Everyone** there when @everyone is selected; otherwise the preview
+fails clearly, and the operator can choose roles/none instead. Mention choices
+come from the destination guild's cached, mentionable, non-managed roles. Role
+IDs are checked again at send, and `allowedMentions` allows only selected roles
+and, only when selected, everyone; user mentions and reply pings are disabled.
+Free-text titles/reasons cannot smuggle mentions.
+
+`ANNOUNCE_DEFAULT_MENTION=everyone` deliberately defaults to a community ping.
+Set it to `none` for opt-in mentions, or to JukeboxHero's **numeric role ID**
+(for example `ANNOUNCE_DEFAULT_MENTION=123456789012345678`), or comma-separated
+role IDs for multiple defaults. The roles must belong to this guild, be
+mentionable and not managed by an integration. A bad configured default fails
+closed; correct the environment and restart the worker. Admins can override the
+default in each preview, including selecting everyone plus specific roles.
+
+A Pinata checkpoint journal, `decentbusking-radio-announcements.json`
+(`kind=radio-announcements`, schema 1), stores delivery receipts and pending
+attempts separately from the shared schedule. Startup restores **only the latest
+checkpoint**: falling back to an older journal could lose deduplication records.
+Unavailable/corrupt storage disables sends. Keep one active sending worker per
+journal/destination; this is not a distributed multi-writer lock. Do not delete
+or roll back this checkpoint when restarting/deploying.
+
+Every send checkpoints its pending marker **before** contacting Discord, then
+revalidates the current schedule and records the message link/time after success.
+Double-clicks, retries (even after restart), and a lost response reuse the same
+confirmation ID, including deliberate re-announcements. A *new* preview with
+**Intentionally re-announce** checked authorizes one additional post. Existing
+start-of-show messages and audio are unchanged; no scheduled reminders or Discord
+Scheduled Events are created.
+
+**Failures/recovery:** refresh and preview/reconfirm after a changed, canceled,
+ended, or removed occurrence. Fix channel/mention permissions or reconnect the bot
+and retry other failures. Definite Discord rejections are safe to retry. If an
+HTTP timeout/5xx or receipt-save failure leaves delivery uncertain, retries first
+search up to 2,000 recent channel messages for the bot's unique embed-footer
+marker and recover the receipt without posting again. If no receipt is found,
+sending stays blocked rather than guessing; never keep clicking re-announce to
+work around it. An operator must inspect Discord and the latest journal: recover
+the matching message ID/URL/time into the pending request and delivery receipt,
+or, **only after verifying no post exists and no send is in flight**, remove that
+pending request from a newly saved checkpoint using the same state store. Preserve
+all other receipts. Do not restore an older journal or remove an uncertain marker
+without checking Discord. Then refresh and explicitly preview/confirm again.
+
+Test without production Discord: use a staging guild/channel and
+`ANNOUNCE_DEFAULT_MENTION=none`, verify content/DST, role choices, permissions,
+retry/restart dedupe, explicit re-announcement and stale/canceled rejection.
+Only send a real community ping after operator approval. Run local tests from
+the repository root: `node --test test/*.test.js` (the payroll CI workflows also
+run their narrower `node --test test/payroll.test.js test/commentArt.test.js test/automation.test.js`).
 
 ### 4. Configure IPFS uploads
 

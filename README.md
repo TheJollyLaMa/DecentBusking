@@ -126,6 +126,31 @@ The **Top10 fund** and **Playback fund** buttons open the current prize pool, pe
 
 Friday's **Top 10 Hype Hour** (8-9 p.m. America/New_York by default) plays a checkpointed opening chart from its lowest place toward opening #1. Votes keep changing the live chart, not that show's play order. The festival sidepanel pops out when the hour starts (it can be minimized while the countdown keeps playing), the radio player shows **Listening to Top 10 Friday Night Hype**, the panel's **i** button explains the program, labels opening and live ranks separately, and offers **+** buttons to save verified songs to your personal playlist (your wallet-backed profile watchlist). During Hype only, the expanded panel can cover the header/footer: desktop places the scrollable chart beside the festival poster, while mobile stacks them with room for at least four to five songs on typical phone screens. Outside Hype, the regular drawer size and header/footer clearance are unchanged. Signing a watchlist save is not a purchase. Early finishes use labelled encores of the same opening selection; the scheduled handoff still takes priority at 9 p.m., even if the countdown is unfinished.
 
+### Announcing a radio hour to Discord (owner only)
+
+Open **Admin → Radio Programming**, refresh the shared calendar, and check one
+**dated occurrence** under **Promote a radio-hour occurrence**. This covers Top10,
+live blocks, other playlist hours, and one-off shows; selecting a recurring show
+never promotes its entire series. Checking/unchecking only selects — it never
+posts. Edit the reason to tune in, select mention targets, click **Preview
+announcement**, then **Confirm — send to Discord** and sign with the owner wallet.
+
+The preview names the server-configured destination (default **#themessagebox**,
+`943117480883265539`) and includes New York date/time, Discord-localized times,
+and website/voice listening links. **@everyone is selected by default**; uncheck
+it and select mentionable guild roles (such as JukeboxHero), or uncheck everything
+for no mentions. Operators can change the default with `ANNOUNCE_DEFAULT_MENTION`.
+After delivery the panel shows the Discord message link and last-announced time.
+Retries do not create a second post; a deliberate repeat requires checking
+**Intentionally re-announce** and making a new preview/confirmation.
+
+Schedule changes, cancellations, ended/removed occurrences, missing permissions,
+and storage/Discord failures are rejected visibly. Refresh and preview/reconfirm
+changed events. An uncertain delivery is reconciled rather than blindly resent;
+see [bot operator instructions](discord-bot/README.md#manual-calendar-announcements).
+Public calendars have no promotion controls. This does not change playback or
+start-of-show announcements, create Discord Scheduled Events, or send reminders.
+
 ### Cancelling a live slot
 
 Open the community radio schedule with the owner wallet connected and choose **Cancel event** on the dated occurrence. Enter a public reason, confirm, and sign the calendar update. The occurrence remains visible with a red **Canceled** stamp for seven days; future recurring Fridays are unchanged. The shared worker calendar persists the cancellation across restarts, and open calendars refresh every 15 seconds. Cancellation does not approve, refund, or settle performer payments.
