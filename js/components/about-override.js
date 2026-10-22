@@ -96,7 +96,7 @@ class DecentBuskingAboutModal extends HTMLElement {
     }
     const bookings = [];
     for (const booking of fund.bookings || []) {
-      const walletDisplay = await resolveWalletLabel(booking.wallet, provider, { sponsorAliases, aliasCache });
+      const walletDisplay = await resolveWalletLabel(booking.wallet, provider, sponsorAliases, aliasCache);
       bookings.push({ ...booking, walletDisplay });
     }
     return { ...fund, sources, bookings };
