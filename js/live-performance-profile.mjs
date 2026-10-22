@@ -129,6 +129,7 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
          if (!receipt) { button.textContent = `Claim still pending: ${previous}`; return; }
          localStorage.removeItem(`live-claim:${b.id}`);
          button.textContent = receipt.status === 1 ? 'Previous claim confirmed; refresh indexed receipt' : 'Previous claim reverted; refresh before retrying';
+         document.dispatchEvent(new CustomEvent('live-booking-claim-updated'));
          return;
        }
        const contract = new ethers.Contract(state.escrowAddress, LIVE_ESCROW_ABI, signer);
@@ -139,6 +140,7 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        button.textContent = 'Claim confirmed; refresh for indexed receipt';
        announcePaymentCelebration({ chainId:8453, txHash:tx.hash, amountText:String(Number(b.approvedUnits || b.amountUnits)/1e6), assetText:'USDC', summary:'Live performance claim confirmed', txLabel:'Claim confirmed' });
        localStorage.removeItem(`live-claim:${b.id}`);
+       document.dispatchEvent(new CustomEvent('live-booking-claim-updated'));
      } catch (error) { button.textContent = `${error.shortMessage || error.message}. Refresh to reconcile before retrying.`; }
    };
    article.append(button); container.append(article);

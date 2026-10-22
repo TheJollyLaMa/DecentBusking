@@ -1,7 +1,7 @@
 import { isAdminWallet } from './admin-access.mjs';
 import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261022-playlist-show';
 import { utcToNewYorkInput, newYorkInputToUtc, radioCalendarOccurrences, buildRadioCalendar, googleRadioCalendarUrl } from './radio-calendar.mjs';
-import { renderPerformerBookingInvite } from './live-performance-profile.mjs?v=20261022-live-offer-v2';
+import { renderPerformerBookingInvite } from './live-performance-profile.mjs?v=20261022-action-badges';
 export { utcToNewYorkInput, newYorkInputToUtc };
 const TIME_ZONE = 'America/New_York';
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -286,7 +286,7 @@ export function initRadioScheduleBoard() {
   document.addEventListener('wallet-connected', () => { if (dialog.open) refresh(); });
   document.addEventListener('wallet-disconnected', () => { if (dialog.open) refresh(); });
   document.addEventListener('live-booking-acknowledged', () => { if (dialog.open) refresh(); });
-  setInterval(() => { if (dialog.open) refresh(); }, 15000);
+  setInterval(() => { if (dialog.open) refresh(); }, 5 * 60 * 1000);
 }
 
 if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', initRadioScheduleBoard, { once: true });

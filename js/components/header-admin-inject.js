@@ -149,7 +149,7 @@ function _syncPolling() {
   void _refreshPendingCount();
   const owner = (window.DecentConfig?.adminWalletAddress || window.DecentConfig?.mintOwnerWallet || '').toLowerCase();
   if ((window._wallet.address || '').toLowerCase() === owner && window.DecentConfig?.ipfsUploadServiceUrl) {
-    _badgePollTimer = window.setInterval(() => { void _refreshPendingCount(); }, 60_000);
+    _badgePollTimer = window.setInterval(() => { void _refreshPendingCount(); }, 5 * 60 * 1000);
   } else {
     _applyCount(0);
   }

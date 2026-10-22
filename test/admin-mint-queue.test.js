@@ -69,7 +69,7 @@ test('Admin clearly exposes multi-select mint batches of up to 20 while marking 
   assert.match(admin, /track\.isDevertAd === true \? \{ isDevertAd: true \}/);
   assert.match(worker, /isDevertAd: track\.isDevertAd === true/);
   assert.match(config, /nftBatchMintEnabled:\s*true/);
-  assert.match(html, /header-admin-inject\.js\?v=20261014-mint-badge/);
+  assert.match(html, /header-admin-inject\.js\?v=20261022-action-badges/);
 });
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'admin-mint-queue.js')).href;

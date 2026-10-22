@@ -1,0 +1,121 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+
+const owner = '0x' + '11'.repeat(20);
+const performer = '0x' + '22'.repeat(20);
+const now = Date.parse('2026-10-22T20:00:00Z');
+const booking = {
+ id: 'live:invite', wallet: performer, mode: 'phase1', status: 'draft',
+ stewardApproved: true, acknowledged: false, scheduleStatus: 'synced',
+ startUtc: '2026-10-24T01:00:00Z', endUtc: '2026-10-24T01:20:00Z',
+ claimDeadline: '2026-10-28T01:20:00Z', reviewWindow: 86400, transactions: {},
+};
+const state = (...bookings) => ({ escrowAddress: '0x' + '33'.repeat(20), bookings });
+
+test('action badges are wallet-scoped and distinguish acceptance, calendar, and funding', async () => {
+ const { liveBookingActions } = await import('../js/live-booking-notifications.mjs');
+ const actions = (wallet, changes = {}) => liveBookingActions(state({ ...booking, ...changes }), wallet, owner, now);
+ assert.deepEqual(actions(''), { admin: [], schedule: [], profile: [] });
+ assert.deepEqual(actions('0x' + '44'.repeat(20)), { admin: [], schedule: [], profile: [] });
+ assert.equal(actions(performer.toUpperCase()).schedule.length, 1);
+ assert.equal(actions(performer, { stewardApproved: false }).schedule.length, 0);
+ assert.equal(actions(performer, { acknowledged: true }).schedule.length, 0);
+ assert.equal(actions(performer, { cancelled: true }).schedule.length, 0);
+ assert.equal(actions(performer, { mode: 'phase0' }).schedule.length, 0);
+ assert.equal(actions(owner).admin.length, 0);
+ assert.match(actions(owner, { scheduleStatus: undefined }).admin[0].label, /calendar/);
+ assert.match(actions(owner, { acknowledged: true }).admin[0].label, /fund booking/);
+ assert.match(actions(owner, { transactions: { funding: { status: 'pending' } } }).admin[0].label, /Reconcile/);
+});
+
+test('review and claim badges follow confirmed status and exact review/claim deadlines', async () => {
+ const { liveBookingActions } = await import('../js/live-booking-notifications.mjs');
+ const end = Date.parse(booking.endUtc);
+ const actions = (wallet, time, changes = {}) =>
+  liveBookingActions(state({ ...booking, status: 'funded', ...changes }), wallet, owner, time);
+ assert.equal(actions(owner, end - 1).admin.length, 0);
+ assert.match(actions(owner, end).admin[0].label, /Review performance/);
+ assert.match(actions(owner, end, { decision: { payoutBps: 10000 } }).admin[0].label, /Submit/);
+ assert.equal(actions(owner, end + 86400000).admin.length, 0);
+ assert.equal(actions(performer, end + 86400000 - 1).profile.length, 0);
+ assert.equal(actions(performer, end + 86400000).profile.length, 1);
+ assert.equal(actions(performer, end, { status: 'approved' }).profile.length, 1);
+ assert.equal(actions(performer, Date.parse(booking.claimDeadline) + 1).profile.length, 0);
+ for (const status of ['paid', 'refunded']) {
+  assert.equal(actions(performer, end + 86400000, { status }).profile.length, 0);
+  assert.equal(actions(owner, end, { status }).admin.length, 0);
+ }
+ assert.equal(liveBookingActions(state(booking), performer, owner, Date.parse(booking.startUtc)).schedule.length, 0);
+});
+
+test('cancellation reconciliation and independent booking counts are preserved', async () => {
+ const { liveBookingActions } = await import('../js/live-booking-notifications.mjs');
+ assert.match(liveBookingActions(state({ ...booking, cancelled: true, scheduleStatus: 'failed' }), owner, owner, now).admin[0].label, /cancellation/);
+ assert.match(liveBookingActions(state({ ...booking, cancelled: true, status: 'funded' }), owner, owner, now).admin[0].label, /cancellation payment/);
+ const invites = state(booking, { ...booking, id: 'live:second' });
+ assert.equal(liveBookingActions(invites, performer, owner, now).schedule.length, 2);
+});
+
+test('booking and mint notification timers use five-minute checks, with no fifteen-second admin poll', async () => {
+ const { LIVE_BOOKING_POLL_MS } = await import('../js/live-booking-notifications.mjs');
+ assert.equal(LIVE_BOOKING_POLL_MS, 300000);
+ const source = file => fs.readFileSync(new URL(`../${file}`, `file://${__filename}`), 'utf8');
+ assert.doesNotMatch(source('js/live-performance-admin.mjs'), /15_000|15000|setInterval/);
+ assert.match(source('js/radio-schedule-ui.mjs'), /setInterval\([^]*5 \* 60 \* 1000\)/);
+ assert.match(source('js/components/header-admin-inject.js'), /setInterval\([^]*5 \* 60 \* 1000\)/);
+});
+
+test('notification polling starts on connection, runs at five minutes, and ignores disconnected responses', async () => {
+ const { claimState } = await import('../js/live-bookings.mjs');
+ const listeners = new Map();
+ const timers = new Map();
+ const requests = [];
+ const updates = [];
+ const document = {
+  readyState: 'loading',
+  addEventListener(name, fn) {
+   if (!listeners.has(name)) listeners.set(name, []);
+   listeners.get(name).push(fn);
+  },
+  dispatchEvent(event) {
+   if (event.type === 'live-booking-state-updated') updates.push(event.detail.state);
+   for (const fn of listeners.get(event.type) || []) fn(event);
+  },
+  querySelector: () => null,
+  querySelectorAll: () => [],
+ };
+ const window = { _wallet: {}, DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example', adminWalletAddress: owner } };
+ const context = vm.createContext({
+  document, window, claimState, isAdminWallet: () => false,
+  queueMicrotask, console, AbortSignal,
+  MutationObserver: class { observe() {} },
+  CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
+  setInterval: (fn, ms) => { const id = timers.size + 1; timers.set(id, { fn, ms }); return id; },
+  clearInterval: id => timers.delete(id),
+  fetch: () => new Promise(resolve => requests.push(resolve)),
+ });
+ const source = fs.readFileSync(new URL('../js/live-booking-notifications.mjs', `file://${__filename}`), 'utf8')
+  .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+ vm.runInContext(source, context);
+ document.dispatchEvent({ type: 'DOMContentLoaded' });
+ assert.equal(requests.length, 0);
+ window._wallet = { address: owner };
+ document.dispatchEvent({ type: 'wallet-connected' });
+ assert.equal(requests.length, 1);
+ assert.equal(timers.size, 1);
+ assert.equal([...timers.values()][0].ms, 300000);
+ const result = state(booking);
+ requests[0]({ ok: true, json: async () => result });
+ await new Promise(resolve => setImmediate(resolve));
+ assert.equal(updates.length, 1);
+ [...timers.values()][0].fn();
+ assert.equal(requests.length, 2);
+ window._wallet = {};
+ document.dispatchEvent({ type: 'wallet-disconnected' });
+ assert.equal(timers.size, 0);
+ requests[1]({ ok: true, json: async () => result });
+ await new Promise(resolve => setImmediate(resolve));
+ assert.equal(updates.length, 1);
+});

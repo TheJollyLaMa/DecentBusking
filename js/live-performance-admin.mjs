@@ -3,8 +3,9 @@ import {
  LIVE_PERFORMANCE_AIRTIME_MINUTES, LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES, LIVE_PERFORMANCE_FEE_UNITS,
  liveAuthorization, liveAcknowledgement, liveBookingRows, livePerformancePayoutBps, bookingGroup, escapeLive, workReference,
 } from './live-bookings.mjs?v=20261022-live-offer-v2';
-import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261022-live-offer-v2';
+import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261022-action-badges';
 import { isAdminWallet } from './admin-access.mjs';
+import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261022-action-badges';
 
 const routerAbi = [
  'function funds(bytes32) view returns (string metadataUri,bool active,bool exists)',
@@ -24,6 +25,7 @@ async function api(body) {
  const response = await fetch(`${base()}/api/live-bookings`, body ? { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) } : { cache:'no-store' });
  const result = await response.json();
  if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+ publishLiveBookingState(result);
  return result;
 }
 async function wallet() {
@@ -270,13 +272,14 @@ function mount() {
  window.ethereum?.on?.('accountsChanged', () => { accountRevision++; });
  window.ethereum?.on?.('chainChanged', () => { accountRevision++; });
  guarded(async () => { state = await api(); render(); });
- window.setInterval(async () => {
+ document.addEventListener('live-booking-state-updated', event => {
    if (busy || !isAdminWallet(window._wallet?.address)) return;
-   try { state = await api(); render(); }
-   catch (error) {
-     const status = section.querySelector('[data-live-status]');
-     status.textContent = `Could not refresh performer acceptance status: ${error.message}`;
-   }
- }, 15_000);
+   state = event.detail.state;
+   render();
+ });
+ document.addEventListener('live-booking-notification-error', event => {
+   if (!isAdminWallet()) return;
+   section.querySelector('[data-live-status]').textContent = `Could not refresh performer acceptance status: ${event.detail.message}`;
+ });
 }
 if (typeof document !== 'undefined') { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount(); }
