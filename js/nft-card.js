@@ -4,7 +4,7 @@
 
 import { fetchNFTMetaById } from './space.js?v=20261019-radio-recovery';
 import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
-import { returnToRadio } from './radio-sync.js?v=20261019-radio-recovery';
+import { returnToRadio } from './radio-sync.js?v=20261022-playlist-show';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261017-mercury-release';
 import { canEditArtwork } from './artwork-update.mjs';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
@@ -164,10 +164,10 @@ export function renderNFTCard(nft) {
 
   content.querySelector('.nft-mute-btn')?.addEventListener('click', async (event) => {
     const muted = event.currentTarget.getAttribute('aria-pressed') !== 'true';
-    const { setArchiveMuted } = await import('./radio-sync.js?v=20261019-radio-recovery');
+    const { setArchiveMuted } = await import('./radio-sync.js?v=20261022-playlist-show');
     setArchiveMuted(muted);
   });
-  import('./radio-sync.js?v=20261019-radio-recovery')
+  import('./radio-sync.js?v=20261022-playlist-show')
     .then(({ archiveMuted }) => { if (_cardNft === nft) _renderMute(content, archiveMuted()); })
     .catch(() => {});
 

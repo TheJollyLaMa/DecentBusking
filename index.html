@@ -631,7 +631,7 @@
       <details id="admin-radio-schedule" class="hidden" aria-labelledby="admin-radio-schedule-title">
         <summary>📻 Radio Programming</summary>
         <div class="admin-section-header">
-          <div><h3 id="admin-radio-schedule-title">Radio Programming</h3><p>Customize Friday’s weekly show hours and schedule one-off performances.</p></div>
+          <div><h3 id="admin-radio-schedule-title">Radio Programming</h3><p>Customize Friday’s weekly show hours and schedule one-off performances or playlist shows.</p></div>
           <button id="admin-radio-schedule-refresh" class="admin-btn admin-btn-secondary" type="button" aria-label="Refresh radio schedule" title="Refresh schedule">↻</button>
         </div>
         <form id="admin-radio-weekly-form" class="admin-schedule-form admin-weekly-form">
@@ -643,6 +643,9 @@
         </form>
         <form id="admin-radio-schedule-form" class="admin-schedule-form">
           <input id="admin-radio-event-id" type="hidden" />
+          <label>Event type<select id="admin-radio-event-type"><option value="live_performance">Live performance</option><option value="playlist_show">Playlist show</option></select></label>
+          <label>Playlist definition<select id="admin-radio-event-playlist"><option value="songs-awaiting-your-vote">Songs Awaiting Your Vote — no votes ever</option></select></label>
+          <p id="admin-radio-playlist-preview" role="status"></p>
           <label>Performer or show<input id="admin-radio-event-title" type="text" maxlength="100" required /></label>
           <label>Starts (New York time)<input id="admin-radio-event-start" type="datetime-local" required /></label>
           <label>Ends (New York time)<input id="admin-radio-event-end" type="datetime-local" required /></label>
@@ -872,12 +875,12 @@
   <script type="module" src="js/main.js?v=20261019-radio-recovery"></script>
 
   <!-- Admin role-grant panel -->
-  <script type="module" src="js/admin.js?v=20261019-radio-recovery"></script>
+  <script type="module" src="js/admin.js?v=20261022-playlist-show"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
   <script type="module" src="js/payroll.js?v=20261019-payroll-confirmations"></script>
   <script type="module" src="js/radio-history.js?v=20261017-mercury-release"></script>
-  <script type="module" src="js/radio-schedule-ui.mjs?v=20261017-mercury-release"></script>
+  <script type="module" src="js/radio-schedule-ui.mjs?v=20261022-playlist-show"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261019-fund-tour">
   <script type="module" src="js/fund-header.mjs?v=20261019-fund-wallet-labels"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261019-fund-wallet-labels"></script>

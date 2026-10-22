@@ -6,14 +6,15 @@
 // The panel is opened by dispatching a custom "open-admin" DOM event (wired up
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
+import { renderPlaylistShowPreview } from './admin-radio-playlists.mjs';
 import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolveBatchMintArtwork, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261011-batch-artwork-default';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261019-radio-recovery';
 import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artwork-update.mjs';
 import { isAdminWallet } from './admin-access.mjs';
-import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261017-mercury-release';
-import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261017-mercury-release';
+import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261022-playlist-show';
+import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261022-playlist-show';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 
 const ROLE_GRANT_ABI = [
@@ -82,6 +83,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('admin-radio-event-reset')?.addEventListener('click', _resetRadioScheduleForm);
   _radioWeeklyForm?.addEventListener('submit', _saveRadioWeeklySchedule);
   _radioScheduleForm?.addEventListener('submit', _saveRadioScheduleEvent);
+  _radioScheduleForm?.addEventListener('input', () => renderPlaylistShowPreview(_radioSchedule));
+  document.getElementById('admin-radio-event-type')?.addEventListener('change', event => {
+    if (event.target.value === 'playlist_show') document.getElementById('admin-radio-event-title').value = 'Songs Awaiting Your Vote';
+    renderPlaylistShowPreview(_radioSchedule);
+  });
   _radioScheduleEventsEl?.addEventListener('click', event => {
     const edit = event.target.closest('[data-radio-event-edit]');
     const cancel = event.target.closest('[data-radio-event-cancel]');
@@ -297,7 +303,7 @@ function _setMintPendingCount(count) {
 async function _loadRadioSchedule() {
   if (!_adminSigner || !_adminAddress) return;
   const checkId = _walletCheckId;
-  _setRadioScheduleStatus('Loading the shared live-event calendar…');
+  _setRadioScheduleStatus('Loading the shared radio calendar…');
   try {
     const service = window.DecentConfig?.ipfsUploadServiceUrl;
     if (!service) throw new Error('The radio service is not configured');
@@ -306,6 +312,7 @@ async function _loadRadioSchedule() {
     if (!response.ok) throw new Error(payload.error || `Schedule unavailable (${response.status})`);
     if (checkId !== _walletCheckId) return;
     _radioSchedule = payload;
+    renderPlaylistShowPreview(payload);
     _populateRadioWeeklyForm(payload.schedule || defaultRadioSchedule(payload.weeklySchedule));
     _renderRadioScheduleEvents();
     _setRadioScheduleStatus(payload.ready ? 'Shared calendar loaded. Times below use America/New_York.' : 'Calendar is read-only until durable Pinata storage is available.', !payload.ready);
@@ -355,23 +362,27 @@ function _renderRadioScheduleEvents() {
     if (event.status === 'cancelled') return `<li class="admin-schedule-event"><div><strong>${_esc(event.title)} · Canceled</strong><span>${_esc(event.cancellationReason)}</span></div></li>`;
     const active = Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc);
     const date = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
-    return `<li class="admin-schedule-event"><div><strong>${_esc(event.title)}</strong><span>${date(event.startUtc)} – ${date(event.endUtc)} ET${active ? ' · LIVE NOW' : ''}</span></div><div class="admin-schedule-actions"><button class="admin-btn admin-btn-secondary" type="button" data-radio-event-edit="${_esc(event.id)}" aria-label="Edit ${_esc(event.title)}">Edit</button><button class="admin-btn admin-btn-secondary" type="button" data-radio-event-cancel="${_esc(event.id)}" aria-label="Cancel ${_esc(event.title)}">Cancel</button></div></li>`;
+    return `<li class="admin-schedule-event"><div><strong>${_esc(event.title)}${event.type === 'playlist_show' ? ' · Playlist show' : ''}</strong><span>${date(event.startUtc)} – ${date(event.endUtc)} ET${active ? ' · LIVE NOW' : ''}</span></div><div class="admin-schedule-actions"><button class="admin-btn admin-btn-secondary" type="button" data-radio-event-edit="${_esc(event.id)}" aria-label="Edit ${_esc(event.title)}">Edit</button><button class="admin-btn admin-btn-secondary" type="button" data-radio-event-cancel="${_esc(event.id)}" aria-label="Cancel ${_esc(event.title)}">Cancel</button></div></li>`;
   }).join('');
 }
 
 function _editRadioScheduleEvent(eventId) {
   const event = _radioSchedule?.events?.find(item => item.id === eventId);
   if (!event || !_radioSchedule?.ready) return;
+  document.getElementById('admin-radio-event-type').value = event.type || 'live_performance';
+  document.getElementById('admin-radio-event-playlist').value = event.playlistId || 'songs-awaiting-your-vote';
   document.getElementById('admin-radio-event-id').value = event.id;
   document.getElementById('admin-radio-event-title').value = event.title;
   document.getElementById('admin-radio-event-start').value = utcToNewYorkInput(event.startUtc);
   document.getElementById('admin-radio-event-end').value = utcToNewYorkInput(event.endUtc);
   document.getElementById('admin-radio-event-save').textContent = 'Save event';
+  renderPlaylistShowPreview(_radioSchedule);
   document.getElementById('admin-radio-event-title').focus();
 }
 
 function _resetRadioScheduleForm() {
   _radioScheduleForm?.reset();
+  renderPlaylistShowPreview(_radioSchedule);
   const id = document.getElementById('admin-radio-event-id');
   if (id) id.value = '';
   const saveButton = document.getElementById('admin-radio-event-save');
@@ -385,10 +396,15 @@ async function _saveRadioScheduleEvent(event) {
     const eventId = document.getElementById('admin-radio-event-id').value || crypto.randomUUID();
     const nextEvents = upsertLivePerformanceEvent(_radioSchedule.events || [], {
       id: eventId,
+      type: document.getElementById('admin-radio-event-type').value,
+      playlistId: document.getElementById('admin-radio-event-playlist').value,
       title: document.getElementById('admin-radio-event-title').value.trim(),
       startUtc: newYorkInputToUtc(document.getElementById('admin-radio-event-start').value),
       endUtc: newYorkInputToUtc(document.getElementById('admin-radio-event-end').value),
     });
+    renderPlaylistShowPreview(_radioSchedule);
+    const preview = document.getElementById('admin-radio-playlist-preview')?.textContent || '';
+    if (preview.includes('Overlaps:') && !window.confirm(`${preview}\nSchedule this playlist show anyway?`)) return;
     await _saveRadioSchedule(nextEvents, _radioSchedule.weeklySchedule || {});
     _resetRadioScheduleForm();
   } catch (error) {

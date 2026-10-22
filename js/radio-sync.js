@@ -744,6 +744,10 @@ function _radioPositionS() {
 }
 
 function _liveLabel() {
+  if (_radioState?.activeShow?.type === 'playlist_show') {
+    const fallback = _radio?.playlistShow?.fallback ? _radioState.playlistShow?.fallbackReason : null;
+    return `📻 ${_radioState.activeShow.label} · ${fallback ? `Normal rotation (${fallback}) · ` : ''}Vote up OR down!`;
+  }
   if (_activeShowId !== 'friday-top10-hype') return '📻 Live on JukeLoop';
   const hype = _radio?.hype;
   const place = hype?.encore ? ' · Encore' : Number.isInteger(hype?.openingRank) ? ` · #${hype.openingRank}` : '';

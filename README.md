@@ -152,6 +152,24 @@ Cancelled live slots leave automated radio running. After Friday Hype, or when s
 
 **DVert campaigns cost $5 USDC for one week.** Optional priority payments do not buy or extend a campaign. A **queue bump** starts at $1 USDC, doubling every seven pending requests, and moves an active approved advert to the next normal advert break. **Play after this song** costs **2x that queue price** for an extra break. Immediate requests take priority over bumps, FIFO is preserved within each tier, and both defer during protected shows. Payments remain reserved until naturally completed playback; removed unplayed requests have payer-claimed full refunds. Checkout pauses when the required local checkpoint mirror or main radio is offline; existing payments remain queued and retry when service returns. The next-ad notice identifies paid requests and any delay. The replacement two-tier contract is deployed and source verified; a real $2 immediate request was recovered, played and settled into all four funds on 2026-10-19. Deploy the updated worker and static site together for availability gating and paid notices. See the [paid advert queue policy and deployment checklist](docs/DVERT-PAID-QUEUE.md).
 
+### Songs Awaiting Your Vote — one-off playlist hours
+
+The owner can schedule **Songs Awaiting Your Vote** in **Admin → Radio Programming**:
+choose **Playlist show**, keep the reusable **Songs Awaiting Your Vote — no votes ever**
+definition, enter the title and New York start/end dates, review the rule/count/duration
+preview, then **Schedule event** and authorize the calendar update with the owner wallet.
+For tonight, **Thursday October 22, 2026**, use **2026-10-22 21:00 → 22:00**
+(America/New_York; stored as **2026-10-23 01:00Z → 02:00Z**). This is a one-off,
+not a change to Friday's weekly shows. See [tonight's runbook](docs/DJUKE-ROLLOUT.md#tonights-songs-awaiting-your-vote-runbook).
+
+Only eligible music with known all-time human **0 up AND 0 down** is selected,
+including site and Discord votes; 1 up/1 down, adverts and unapproved submissions
+are excluded. The full catalog is snapshotted and shuffled when the hour begins.
+Songs voted on before their turn are skipped; songs already playing finish.
+The order/progress survives restart. Empty/exhausted pools use normal rotation.
+Live/Top10 take precedence. Paid DJuke requests wait until the hour ends;
+ordinary DeVert breaks continue. Both the site and Discord invite **up OR down** votes.
+
 ## Bring A Track
 
 **New here? Start with one song.** Post audio or MP4 in [#DecentJukebox](https://discord.gg/SCtcBggHPa), or click the guitar case on the site. Discord attachments can be up to 10 MB. The site accepts files up to 50 MB, or an existing IPFS file CID for larger media. You do not need a Pinata account.

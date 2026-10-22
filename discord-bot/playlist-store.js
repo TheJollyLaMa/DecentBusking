@@ -13,6 +13,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'node:crypto';
+import { isEligibleRadioMusic } from '../js/radio-playlists.mjs';
 import { currentPayrollPeriod, payrollPeriodFromKey, payrollPeriods } from '../js/payroll-week.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -431,6 +432,7 @@ export function applyRating(trackId, newLikes, newDislikes, messageId, { initial
   if (!track) return null;
   const likes = Math.max(0, Number(newLikes) || 0);
   const dislikes = Math.max(0, Number(newDislikes) || 0);
+  if (likes > 0 || dislikes > 0 || track.likes > 0 || track.dislikes > 0) track.everHumanVoted = true;
   track.discordRatings ||= {};
   const previous = messageId && Object.hasOwn(track.discordRatings, messageId) ? track.discordRatings[messageId] : initialCounts;
   const legacy = messageId && track.ratedMessageIds?.includes(messageId) && !previous;
@@ -461,6 +463,7 @@ export function applySiteVote(trackId, vote, { now = Date.now() } = {}) {
   if (vote !== 1 && vote !== -1) throw new Error('Invalid vote');
   const track = _playlist.find((entry) => entry.trackId === trackId);
   if (!track) throw new Error('Track is no longer in the playlist');
+  track.everHumanVoted = true;
   if (vote === 1) track.likes += 1;
   else track.dislikes += 1;
   const week = getUtcWeekKey(new Date(now));
@@ -721,7 +724,7 @@ export function getWeight(track) {
  * @returns {TrackEntry[]}
  */
 export function getWeightedShuffledPlaylist(now = Date.now()) {
-  const eligible = _playlist.filter(track => !track.isDevertAd && (track.source !== 'site' || track.mintStatus === 'minted'));
+  const eligible = _playlist.filter(isEligibleRadioMusic);
   if (eligible.length === 0) return [];
 
   // Build mutable candidate array with weights

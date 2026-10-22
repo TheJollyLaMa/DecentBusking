@@ -1,5 +1,60 @@
 # DJuke and DNft rollout
 
+## Tonight's Songs Awaiting Your Vote runbook
+
+**Target: Thu October 22, 2026, 9–10pm America/New_York (EDT).** This is a
+one-off automated discovery hour, not a live performance, funded set or contract
+change. No deployment, signing, merging or fund movement is authorized by this
+implementation alone; the owner performs the operations below.
+
+1. **Before ~6pm ET:** review/merge the playlist-hour PR to `main`. Confirm Render's
+   worker auto-deploy reaches healthy for that commit and GitHub Pages publishes
+   the site from `main`. Do not schedule against an older worker/site pair.
+2. **Deploy checks:** on the configured `ipfsUploadServiceUrl`, request
+   `GET /api/radio` and `GET /api/radio/schedule`. Verify radio playback is healthy,
+   the calendar is `ready: true`, and `playlistDefinitions` contains
+   `songs-awaiting-your-vote` with its rule, `count`, `unknownCount`, matching IDs
+   and `estimatedDurationMs` (null means unknown). Pinata/checkpoint persistence
+   must be working. An empty eligible pool is valid but will use ordinary rotation.
+3. **Owner schedules the hour:** reload the site, connect the authorized owner
+   wallet, open **Admin → Radio Programming**, refresh, then choose **Event type:
+   Playlist show** and **Playlist definition: Songs Awaiting Your Vote — no votes
+   ever**. Title: **Songs Awaiting Your Vote**. Set **Starts (New York time)** to
+   **2026-10-22 21:00** and **Ends** to **2026-10-22 22:00**. Review the rule,
+   matching count, known/unknown duration and overlap warnings. Click **Schedule
+   event** and authorize the existing owner-wallet calendar message. Do not alter
+   the Friday weekly slots. This calendar authorization moves no funds.
+4. **Verify booking:** refresh the public schedule and admin calendar. The event
+   must be `type: playlist_show`, `playlistId: songs-awaiting-your-vote`, with UTC
+   **2026-10-23T01:00:00.000Z → 2026-10-23T02:00:00.000Z**. It must not appear
+   as a live-performer pause. If incorrect, edit before start or cancel with the
+   existing public-reason flow. Calendar inputs convert New York DST to UTC.
+5. **At 9pm:** the current song finishes (unless live/Top10 preempts). Verify
+   `/api/radio.activeShow.type = playlist_show`, correct title, and
+   `playlistShow.capturedAt`, ordered `tracks`, `cursor`, `skipped` and
+   `unknownCount`. The dedicated checkpoint must confirm before the first selected
+   song starts. Site/Discord should say **Songs Awaiting Your Vote** and invite
+   **up OR down** votes. Submit genuine listener votes through the normal controls;
+   never seed human-looking votes or vote merely to make the show look successful.
+6. **During the hour:** future snapshot tracks that receive votes are skipped;
+   votes on the currently playing song do not stop it. Restart should resume the
+   same order without replaying started tracks. Empty/exhausted pools or checkpoint
+   failures expose `playlistShow.fallbackReason` and use normal rotation (not dead
+   air, assuming normal radio has playable music). `lateSnapshot` identifies a
+   worker that first captured the pool after the start. Do not delete checkpoints
+   to fix a preview/count discrepancy: preview is live; the occurrence is frozen.
+7. **At 10pm:** the current song finishes, then weighted rotation resumes; the
+   snapshot does not drain beyond the hour. Live/Top10 take immediate priority if
+   booked at the handoff. Paid DJuke requests/paid advert bumps have waited in their
+   original queue; existing delivery/settlement resumes, with no playlist-related
+   charge or fulfillment. Ordinary DeVert breaks continue throughout at the usual
+   cadence and never consume a snapshot song. Slots interrupted by restart or a
+   protected show stay consumed (at-most-once), not replayed to make up airtime.
+
+Remaining #240 scope: wallet-curated DJ sets, submission intake and revisions,
+jukebox-fee payment binding, recurring curated sets and richer per-show outcome
+reporting. This one-off flow does not accept or redirect playlist payments.
+
 ## Hat tips
 
 The bottom-left hat captures the playing song when opened, not the last archive

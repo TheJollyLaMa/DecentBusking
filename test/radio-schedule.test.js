@@ -39,7 +39,7 @@ test('live performance calendar validates, upserts, cancels, and round-trips ver
     startUtc: new Date(UPCOMING).toISOString().replace('Z', '-04:00'),
     endUtc: new Date(UPCOMING + 60 * 60 * 1000).toISOString(),
   }, { now: SATURDAY }), /Invalid live performance event/);
-  assert.throws(() => deserializeLiveSchedule({ schemaVersion: 3, events: [] }), /unsupported/);
+  assert.throws(() => deserializeLiveSchedule({ schemaVersion: 99, events: [] }), /unsupported/);
 });
 
 test('weekly programming overrides allow safe custom slots while preserving the Sunday payroll finale', async () => {

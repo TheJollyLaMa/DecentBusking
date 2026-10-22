@@ -18,6 +18,7 @@
 // The bot does NOT hold an on-chain signing key. Artists queue mint requests;
 // an authorized owner reviews them and confirms transactions in the browser.
 
+import { RADIO_PLAYLISTS, previewRadioPlaylist } from '../js/radio-playlists.mjs';
 import {
   Client,
   GatewayIntentBits,
@@ -674,6 +675,14 @@ async function main() {
     serialize: value => value,
     deserialize: value => value,
   }) : null;
+  config.playlistShowStore = config.pinataJwt ? createPinataStateStore({
+    ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+    filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+    name: 'decentbusking-playlist-shows.json', restoreLatestOnly: true,
+    tags: { app: 'decentbusking', kind: 'playlist-shows', schema: '1' },
+    beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined,
+    serialize: value => value, deserialize: value => value,
+  }) : null;
   const creatorProfiles = creatorStore ? createCreatorProfiles({ restore: creatorStore.restore, save: creatorStore.save }) : null;
   const initializeCreators = () => creatorProfiles?.initialize().catch(error => console.warn('[creator-profiles]', error.message));
   initializeCreators();
@@ -1145,6 +1154,8 @@ async function main() {
     },
     getRadioSchedule: () => ({
       timeZone: PAYROLL_TIME_ZONE,
+      playlistDefinitions: RADIO_PLAYLISTS.map(definition => playlistReady
+        ? previewRadioPlaylist(definition.id, getPlaylist()) : { ...definition, count: null, unknownCount: null, estimatedDurationMs: null, tracks: [] }),
       schedule: defaultRadioSchedule(liveWeeklySchedule),
       weeklySchedule: liveWeeklySchedule,
       events: livePerformanceEvents.filter(event => Date.parse(event.endUtc) > Date.now() - 7 * 86400_000),
@@ -2212,6 +2223,7 @@ async function startWebsiteRadio(client, config) {
       devertPlayback: _devertPlaybackRuntime,
       mainRadioAdStateStore: config.jukeLoopMainRadioAdStore,
       topTenHypeStore: config.topTenHypeStore,
+      playlistShowStore: config.playlistShowStore,
       onTerminalDisconnect: () => scheduleJukeLoopRestart(session.client, config, 'Website playback stalled'),
     });
     await session.start();
@@ -2246,6 +2258,7 @@ async function startJukeLoop(client, config) {
         const track = broadcast._currentTrack;
         void broadcast._announcePrepared({
           track, devertAd: broadcast._currentDevertAd, paid: broadcast._currentPaid,
+          playlistShow: broadcast._nowPlaying.playlistShow,
           url: track.ipfsCid ? buildIpfsGatewayUrl(config.ipfsGateway, track.ipfsCid) : '',
         }, broadcast._nowPlaying.playId)
           .catch(error => console.warn('[jukeloop] Current-track announcement deferred:', error.message));
