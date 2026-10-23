@@ -37,8 +37,15 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
     const playbackJournal = Array.isArray(snapshot.records) && snapshot.records.every(record =>
       record && typeof record.requestId === 'string' && record.requestId.length > 0 &&
       ['pending', 'playing', 'played', 'fulfilled'].includes(record.state));
-    if (snapshot.schemaVersion !== 1 || (!Array.isArray(snapshot.playlist) && !playbackJournal)) {
-      throw new Error('Only playlist checkpoints and valid playback journals may be mirrored');
+    const batchJournal = snapshot.schemaVersion === 2 && Number.isSafeInteger(snapshot.nextBlock) &&
+      snapshot.nextBlock >= 0 && Array.isArray(snapshot.batches) && snapshot.batches.every(batch =>
+        batch && /^\d+$/.test(batch.batchId) && ['pending', 'settled', 'refunded'].includes(batch.status) &&
+        Array.isArray(batch.songIds) && batch.songIds.length >= 1 && batch.songIds.length <= 24 &&
+        batch.songIds.every(id => /^0x[0-9a-fA-F]{64}$/.test(id)) &&
+        Array.isArray(batch.laneIds) && batch.laneIds.length === batch.songIds.length &&
+        batch.laneIds.every(id => typeof id === 'string' && /^\d+$/.test(id)));
+    if (!(snapshot.schemaVersion === 1 && (Array.isArray(snapshot.playlist) || playbackJournal)) && !batchJournal) {
+      throw new Error('Only playlist checkpoints and valid playback or playlist-batch journals may be mirrored');
     }
     const form = new FormData();
     form.append('file', new Blob([bytes], { type: 'application/json' }), 'decentbusking-jukeloop-state.json');

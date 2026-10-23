@@ -132,3 +132,10 @@ remain on the fork. Neither command connects a Discord client, submits real Base
 transactions, changes production configuration, or proves real audio delivery.
 A controlled playback smoke test and steward approval are still required before
 production activation.
+
+Public DJuke catalog/queue reads never wait for mirrored batch-event writes.
+Only paid playback reconciliation requires those writes, and empty block scans
+advance the in-memory cursor without uploading another checkpoint. Failed event
+writes restore the prior cursor/state so the next attempt replays the events.
+The local checkpoint mirror client must include schema-2 playlist-batch journal
+support; older clients reject these jobs and cannot enable reliable paid playback.
