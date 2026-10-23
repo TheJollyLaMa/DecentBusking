@@ -3,6 +3,9 @@ import { pathToFileURL } from 'node:url';
 import { CID } from 'multiformats/cid';
 import { checkpointContentCid } from './checkpoint-mirror.js';
 import { ensureLocalRecursivePin } from './ipfs.js';
+import { validatePlaylistShowSnapshot } from './playlist-show.js';
+import { validateHypeSnapshot } from './top-ten-hype.js';
+import { deserializeAnnouncements } from './radio-announcements.js';
 
 export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiUrl = 'http://127.0.0.1:5001', fetchImpl = fetch }) {
   const remote = new URL(serviceUrl);
@@ -44,8 +47,26 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
         batch.songIds.every(id => /^0x[0-9a-fA-F]{64}$/.test(id)) &&
         Array.isArray(batch.laneIds) && batch.laneIds.length === batch.songIds.length &&
         batch.laneIds.every(id => typeof id === 'string' && /^\d+$/.test(id)));
-    if (!(snapshot.schemaVersion === 1 && (Array.isArray(snapshot.playlist) || playbackJournal)) && !batchJournal) {
-      throw new Error('Only playlist checkpoints and valid playback or playlist-batch journals may be mirrored');
+    let scheduledCheckpoint = false;
+    if (snapshot.schemaVersion === 1) {
+      if (Array.isArray(snapshot.occurrences)) {
+        validatePlaylistShowSnapshot(snapshot);
+        scheduledCheckpoint = true;
+      } else if ('instanceId' in snapshot) {
+        validateHypeSnapshot(snapshot);
+        scheduledCheckpoint = true;
+      } else if ('deliveries' in snapshot) {
+        deserializeAnnouncements(snapshot);
+        scheduledCheckpoint = true;
+      } else if (Array.isArray(snapshot.bookings)) {
+        scheduledCheckpoint = Number.isSafeInteger(snapshot.revision) && snapshot.revision >= 0 &&
+          (snapshot.escrowScannedThrough === null || (Number.isSafeInteger(snapshot.escrowScannedThrough) && snapshot.escrowScannedThrough >= 0)) &&
+          snapshot.bookings.every(booking => booking && typeof booking.id === 'string' &&
+            /^[a-z0-9:_-]{1,100}$/.test(booking.id) && /^0x[0-9a-fA-F]{40}$/.test(booking.wallet));
+      }
+    }
+    if (!(snapshot.schemaVersion === 1 && (Array.isArray(snapshot.playlist) || playbackJournal)) && !batchJournal && !scheduledCheckpoint) {
+      throw new Error('Only supported playlist, playback, playlist-batch or scheduled-production checkpoints may be mirrored');
     }
     const form = new FormData();
     form.append('file', new Blob([bytes], { type: 'application/json' }), 'decentbusking-jukeloop-state.json');

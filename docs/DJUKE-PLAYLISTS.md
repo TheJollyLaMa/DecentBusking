@@ -139,3 +139,8 @@ advance the in-memory cursor without uploading another checkpoint. Failed event
 writes restore the prior cursor/state so the next attempt replays the events.
 The local checkpoint mirror client must include schema-2 playlist-batch journal
 support; older clients reject these jobs and cannot enable reliable paid playback.
+The same authenticated queue also carries booking, scheduled-playlist, Friday
+Top 10 and radio-announcement checkpoints. The client validates these supported
+formats too, so an unrelated scheduled-production job cannot starve paid journals.
+All accepted jobs still require matching content CIDs and verified recursive
+local pins before acknowledgment.
