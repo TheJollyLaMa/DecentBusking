@@ -30,6 +30,7 @@ async function registeredContributorLabel(address) {
 
 export function renderUsdcAmount(units, { className = '' } = {}) {
   const classes = ['usdc-amount', className].filter(Boolean).join(' ');
+  if (units == null) return `<span class="${classes}"><span class="usdc-amount-text">Unavailable</span></span>`;
   return `<span class="${classes}"><span class="usdc-amount-text">$${escapeHtml(formatUsdcUnits(units))}</span> ${USDC_ICON}</span>`;
 }
 
@@ -168,6 +169,7 @@ function renderSourceRow(source) {
 }
 
 export function renderFundSourcesTable(fund) {
+  if (fund.sourcesAvailable === false) return '<p class="fund-source-empty">Funding history unavailable or still indexing.</p>';
   const sources = Array.isArray(fund.sources) ? fund.sources : [];
   if (!sources.length) {
     return '<p class="fund-source-empty">No on-chain funding sources found yet.</p>';

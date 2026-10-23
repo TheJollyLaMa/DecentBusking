@@ -1,6 +1,6 @@
 import { Contract, Interface, id } from 'ethers';
 import { DEVERT_QUEUE_ABI, devertQueueAbi } from '../js/devert-queue.mjs';
-import { configuredSettlementFunds } from '../js/settlement-funds.mjs';
+import { BASE_USDC_ADDRESS, configuredSettlementFunds } from '../js/settlement-funds.mjs';
 import { normalizeKnownAddress } from '../js/known-addresses.mjs';
 
 const FUND_EVENT_ABI = [
@@ -40,7 +40,14 @@ export function createFundLedger({
   now = () => Date.now(),
   log = console,
 }) {
+  if ((config.chainId != null && config.chainId !== 8453) ||
+      normalizeAddress(config.assets?.USDC?.address) !== normalizeAddress(BASE_USDC_ADDRESS) ||
+      (config.assets.USDC.decimals != null && config.assets.USDC.decimals !== 6)) {
+    throw new Error('Public fund evidence supports native Base USDC (6 decimals) only');
+  }
   const routerAddress = normalizeAddress(router?.target || router?.address || config.routerAddress);
+  const asset = { address: BASE_USDC_ADDRESS, symbol: 'USDC', decimals: 6 };
+  const evidence = { evidenceVersion: 1, network: { chainId: 8453, name: 'Base' }, asset, source: 'worker-rpc' };
   const funds = configuredSettlementFunds(config);
   const fundIds = new Map(funds.map(fund => [normalizeAddress(id(fund.slug)), fund]));
   let scannedFrom = null;
@@ -197,6 +204,7 @@ export function createFundLedger({
     for (const logEntry of logs) {
       const parsed = eventInterface.parseLog(logEntry);
       if (!parsed) continue;
+      if (normalizeAddress(parsed.args.asset) !== normalizeAddress(asset.address)) continue;
       const logIndex = Number(logEntry.index ?? logEntry.logIndex ?? 0);
       const key = `${logEntry.transactionHash}:${logIndex}`;
       if (parsed.name === 'PayrollPaid') {
@@ -221,6 +229,7 @@ export function createFundLedger({
       const tx = await getTransaction(logEntry.transactionHash);
       const next = await classifySource({
         fundId: parsed.args.fundId,
+        asset: parsed.args.asset,
         funder: parsed.args.funder || tx?.from || '',
         amountUnits: parsed.args.amount.toString(),
         txHash: logEntry.transactionHash,
@@ -304,6 +313,10 @@ export function createFundLedger({
       if (Array.isArray(saved.payouts)) payouts = saved.payouts;
       // Checkpoints from before payouts were indexed rescan once from the start to backfill them.
       else if (typeof provider.getLogs === 'function') scannedThrough = null;
+      // Older deposits omitted asset identity; rescan instead of treating them as USDC.
+      if (sources.some(source => !source.asset)) scannedThrough = null;
+      sources = sources.filter(source => normalizeAddress(source.asset) === normalizeAddress(asset.address));
+      payouts = payouts.filter(payout => normalizeAddress(payout.asset) === normalizeAddress(asset.address));
       if (scannedFrom != null && (!Number.isSafeInteger(scannedFrom) || scannedFrom < 0)) throw new Error('Invalid fund scan checkpoint');
       if (scannedThrough != null && (!Number.isSafeInteger(scannedThrough) || scannedThrough < scannedFrom - 1)) throw new Error('Invalid fund scan checkpoint');
     }
@@ -311,11 +324,24 @@ export function createFundLedger({
   }
 
   async function buildFundState() {
-    const weekly = getWeeklyPayflow ? await Promise.resolve().then(() => getWeeklyPayflow()).catch(() => null) : null;
-    const weeklyFunds = weekly?.funds || {};
+    let weeklyError = '';
+    const weekly = getWeeklyPayflow ? await Promise.resolve().then(() => getWeeklyPayflow()).catch(error => {
+      weeklyError = error.message || 'Weekly source unavailable';
+      return null;
+    }) : null;
+    const weeklyAvailable = Boolean(weekly && weekly.ready !== false && !weekly.lastError);
+    if (!weeklyAvailable && !weeklyError) weeklyError = weekly?.lastError || 'Weekly source unavailable or not configured';
+    const weeklyFunds = weeklyAvailable ? weekly.funds || {} : {};
     const bySlug = new Map();
     for (const fund of funds) {
-      const balanceUnits = await router.fundBalances(id(fund.slug), config.assets.USDC.address).then(value => value.toString()).catch(() => '0');
+      let balanceUnits = null;
+      let balanceError = '';
+      try {
+        const value = await router.fundBalances(id(fund.slug), asset.address);
+        if (value == null || !/^\d+$/.test(String(value))) throw new Error('Invalid fund balance response');
+        balanceUnits = String(value);
+      } catch (error) { balanceError = error.message || 'Fund balance unavailable'; }
+      const balanceCheckedAt = new Date(now()).toISOString();
       const reservedUnits = fund.slug === 'dbusk-playback'
         ? weeklyFunds.playback?.reservedUnits
         : fund.slug === 'dbusk-top10'
@@ -331,8 +357,15 @@ export function createFundLedger({
         label: fund.label,
         description: fund.description,
         balanceUnits,
+        balanceAvailable: balanceUnits != null,
+        balanceCheckedAt,
+        balanceError,
+        asset,
+        weeklyAvailable,
+        weeklyCheckedAt: weekly?.lastCheckedAt || null,
+        weeklyError,
         ...(reservedUnits != null ? { reservedUnits } : {}),
-        availableUnits: availableUnits ?? balanceUnits,
+        availableUnits: balanceUnits == null ? null : availableUnits ?? null,
       });
     }
     const grouped = new Map(funds.map(fund => [fund.slug, []]));
@@ -345,6 +378,7 @@ export function createFundLedger({
     const payoutsIndexed = typeof provider.getLogs === 'function';
     return {
       schemaVersion: 1,
+      ...evidence,
       chainId: 8453,
       routerAddress,
       lastCheckedAt,
@@ -361,13 +395,18 @@ export function createFundLedger({
           ...fund,
           ...bySlug.get(fund.slug),
           sources: sourceList,
+          sourcesAvailable: Boolean(lastCheckedAt) && !lastError,
+          payoutsAvailable: payoutsIndexed && Boolean(lastCheckedAt) && !lastError,
+          historyCheckedAt: lastCheckedAt,
+          historyError: lastError,
           ...(payoutsIndexed ? {
             payouts: paidBySlug.get(fund.slug) || [],
-            payoutUnits: (paidBySlug.get(fund.slug) || []).reduce((sum, payout) => sum + BigInt(payout.amountUnits || '0'), 0n).toString(),
+            payoutUnits: lastCheckedAt && !lastError
+              ? (paidBySlug.get(fund.slug) || []).reduce((sum, payout) => sum + BigInt(payout.amountUnits || '0'), 0n).toString() : null,
           } : {}),
-          advertUnits: totals.advert.toString(),
-          sponsorUnits: totals.sponsor.toString(),
-          djukeUnits: totals.djuke.toString(),
+          advertUnits: lastCheckedAt && !lastError ? totals.advert.toString() : null,
+          sponsorUnits: lastCheckedAt && !lastError ? totals.sponsor.toString() : null,
+          djukeUnits: lastCheckedAt && !lastError ? totals.djuke.toString() : null,
         }];
       })),
     };
@@ -376,6 +415,7 @@ export function createFundLedger({
   function getState() {
     return {
       ...snapshot(),
+      ...evidence,
       lastCheckedAt,
       lastError,
       backupPending,
@@ -385,12 +425,23 @@ export function createFundLedger({
         slug: fund.slug,
         label: fund.label,
         description: fund.description,
-        balanceUnits: '0',
-        availableUnits: '0',
+        asset,
+        balanceUnits: null,
+        availableUnits: null,
+        balanceAvailable: false,
+        balanceCheckedAt: null,
+        balanceError: 'Balance not read',
+        weeklyAvailable: false,
+        weeklyCheckedAt: null,
+        weeklyError: 'Weekly source not read',
+        sourcesAvailable: false,
+        payoutsAvailable: false,
+        historyCheckedAt: lastCheckedAt,
+        historyError: lastError || 'History not read',
         sources: [],
-        advertUnits: '0',
-        sponsorUnits: '0',
-        djukeUnits: '0',
+        advertUnits: null,
+        sponsorUnits: null,
+        djukeUnits: null,
       }])),
     };
   }

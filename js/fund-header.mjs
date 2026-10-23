@@ -190,7 +190,7 @@ async function decorateWeeklyArchive(archive, { ensProvider, sponsorAliases }) {
 }
 
 // History comes from the worker's fund ledger (/api/funds), which indexes deposits and payouts on the paid RPC tier.
-export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanceUnits = 0n, ensProvider = providerForEns(), sponsorAliases = {} }) {
+export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanceUnits = null, ensProvider = providerForEns(), sponsorAliases = {} }) {
   const pendingCache = new Map();
   const pendingRows = fundState?.pendingRows == null ? null : await Promise.all(fundState.pendingRows.map(async row => {
     const wallet = row.wallet ? await resolveWallet(row.wallet, ensProvider, sponsorAliases, pendingCache) : null;
@@ -198,8 +198,10 @@ export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanc
   }));
   const budget = { budgetUnits: fundState?.budgetUnits ?? null, reservedUnits: fundState?.reservedUnits ?? null,
     pendingRows, currentWeek: fundState?.currentWeek || '' };
-  const fallbackBalance = parseUnitsLike(fundState?.balanceUnits ?? fundBalanceUnits ?? 0n);
-  if (!fundState || !Array.isArray(fundState.sources) || !Array.isArray(fundState.payouts)) {
+  const rawBalance = fundState && Object.hasOwn(fundState, 'balanceUnits') ? fundState.balanceUnits : fundBalanceUnits;
+  const fallbackBalance = rawBalance == null ? null : parseUnitsLike(rawBalance);
+  if (!fundState || fundState.sourcesAvailable === false || fundState.payoutsAvailable === false ||
+      !Array.isArray(fundState.sources) || !Array.isArray(fundState.payouts)) {
     return { ...budget, historyAvailable: false, error: new Error('Fund history is still indexing'), rows: [], inflows: [], outflows: [], inflowUnits: 0n, outflowUnits: 0n, netUnits: 0n, balanceUnits: fallbackBalance, reconciles: false };
   }
   const cache = new Map();
@@ -212,7 +214,7 @@ export async function loadFundBreakdown({ fundSlug, fundState = null, fundBalanc
     const inflowUnits = inflows.reduce((sum, row) => sum + parseUnitsLike(row.amountUnits), 0n);
     const outflowUnits = outflows.reduce((sum, row) => sum + parseUnitsLike(row.amountUnits), 0n);
     const netUnits = inflowUnits - outflowUnits;
-    const balanceUnits = parseUnitsLike(fundState.balanceUnits ?? fundBalanceUnits ?? netUnits);
+    const balanceUnits = fallbackBalance;
     const service = (typeof window !== 'undefined' ? window.DecentConfig?.ipfsUploadServiceUrl : '')?.replace(/\/$/, '') || '';
     let weeklyArchive = null;
     let archiveError = '';
@@ -319,13 +321,14 @@ export async function loadFundState({ serviceUrl = globalThis.window?.DecentConf
   return { ...(state || {}), weekly: current ? weekly : null, currentReport };
 }
 
-export function fundStateFor(state, fundSlug, fallbackBalanceUnits = '0') {
+export function fundStateFor(state, fundSlug, fallbackBalanceUnits = null) {
   const fund = state?.funds?.[fundSlug] || {};
   const category = fundSlug === 'dbusk-top10' ? 'top10' : 'playback';
   const weekly = state?.weekly?.funds?.[category];
-  const balanceUnits = fund.balanceUnits ?? weekly?.balanceUnits ?? fallbackBalanceUnits;
+  const balanceUnits = Object.hasOwn(fund, 'balanceUnits') ? fund.balanceUnits : weekly?.balanceUnits ?? fallbackBalanceUnits;
   const reservedUnits = weekly?.reservedUnits ?? fund.reservedUnits ?? null;
   let budgetUnits = /^\d+$/.test(String(weekly?.budgetUnits ?? '')) ? weekly.budgetUnits : null;
+  if (balanceUnits == null || fund.balanceAvailable === false) budgetUnits = null;
   const shareBps = state?.weekly?.fundShareBps;
   if (budgetUnits != null && /^\d+$/.test(String(balanceUnits)) && /^\d+$/.test(String(reservedUnits)) &&
     Number.isInteger(shareBps) && shareBps > 0 && shareBps <= 10000) {
@@ -341,12 +344,12 @@ export function fundStateFor(state, fundSlug, fallbackBalanceUnits = '0') {
 
 async function loadBalance(fundSlug, state) {
   const fund = state?.funds?.[fundSlug];
-  if (fund?.balanceUnits != null) return fund;
+  if (fund && Object.hasOwn(fund, 'balanceUnits')) return fund;
   const ethers = ethersLib();
   const provider = providerForRead();
-  if (!ethers || !provider) return { balanceUnits: '0' };
+  if (!ethers || !provider) return { balanceUnits: null };
   const router = new ethers.Contract(ROUTER_ADDRESS, ['function fundBalances(bytes32,address) view returns(uint256)'], provider);
-  const balanceUnits = await router.fundBalances(ethers.id(fundSlug), USDC_ADDRESS).then(value => value.toString()).catch(() => '0');
+  const balanceUnits = await router.fundBalances(ethers.id(fundSlug), USDC_ADDRESS).then(value => value.toString()).catch(() => null);
   return { balanceUnits };
 }
 
@@ -384,15 +387,15 @@ async function initializeFundHeader() {
     pending = (async () => {
       state = await loadFundState();
       for (const fund of FUNDS) {
-        const fallback = balanceCache.has(fund.slug) ? balanceCache.get(fund.slug) : (await loadBalance(fund.slug, state)).balanceUnits;
+        const fallback = (await loadBalance(fund.slug, state)).balanceUnits;
         const fundState = fundStateFor(state, fund.slug, fallback);
-        balanceCache.set(fund.slug, fundState.balanceUnits ?? '0');
+        balanceCache.set(fund.slug, fundState.balanceUnits);
         const button = document.getElementById(`${fund.slug}-button`);
         if (!button) continue;
-        const amount = fundState.budgetUnits ?? fundState.balanceUnits ?? '0';
+        const amount = fundState.budgetUnits ?? fundState.balanceUnits;
         button.innerHTML = fundButtonHtml(fund, amount);
         button.title = fundState.budgetUnits != null ? 'Current weekly pot; older unpaid prizes are reserved separately' : 'Total balance; weekly budget unavailable';
-        button.setAttribute('aria-label', `${fundTitle(fund)}: $${formatUsdcUnits(amount)} USDC${fundState.budgetUnits == null ? ' balance; weekly budget unavailable' : ' weekly pot'}`);
+        button.setAttribute('aria-label', `${fundTitle(fund)}: ${amount == null ? 'balance unavailable' : `$${formatUsdcUnits(amount)} USDC${fundState.budgetUnits == null ? ' balance; weekly budget unavailable' : ' weekly pot'}`}`);
         button.disabled = false;
       }
       if (dialog?.open) await renderActive();
