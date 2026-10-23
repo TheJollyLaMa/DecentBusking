@@ -14,7 +14,7 @@ const booking = {
 };
 const state = (...bookings) => ({ escrowAddress: '0x' + '33'.repeat(20), bookings });
 
-test('action badges are wallet-scoped and distinguish acceptance, calendar, and funding', async () => {
+test('action badges mark wallet-scoped handoffs, not calendar housekeeping or pending confirmations', async () => {
  const { liveBookingActions } = await import('../js/live-booking-notifications.mjs');
  const actions = (wallet, changes = {}) => liveBookingActions(state({ ...booking, ...changes }), wallet, owner, now);
  assert.deepEqual(actions(''), { admin: [], schedule: [], profile: [] });
@@ -25,9 +25,14 @@ test('action badges are wallet-scoped and distinguish acceptance, calendar, and 
  assert.equal(actions(performer, { cancelled: true }).schedule.length, 0);
  assert.equal(actions(performer, { mode: 'phase0' }).schedule.length, 0);
  assert.equal(actions(owner).admin.length, 0);
- assert.match(actions(owner, { scheduleStatus: undefined }).admin[0].label, /calendar/);
+ assert.equal(actions(owner, { scheduleStatus: undefined }).admin.length, 0);
  assert.match(actions(owner, { acknowledged: true }).admin[0].label, /fund booking/);
- assert.match(actions(owner, { transactions: { funding: { status: 'pending' } } }).admin[0].label, /Reconcile/);
+ assert.equal(actions(owner, { acknowledged: true, transactions: { funding: { status: 'pending' } } }).admin.length, 0);
+ assert.equal(actions(owner, { status: 'funding pending', acknowledged: true }).admin.length, 0);
+ assert.equal(actions(owner, { status: 'failed' }).admin.length, 0);
+ assert.match(actions(owner, { status: 'failed', acknowledged: true }).admin[0].label, /fund booking/);
+ assert.equal(actions(owner, { acknowledged: true, mode: 'phase0' }).admin.length, 0);
+ assert.equal(liveBookingActions({ bookings: [{ ...booking, acknowledged: true }] }, owner, owner, now).admin.length, 0);
 });
 
 test('review and claim badges follow confirmed status and exact review/claim deadlines', async () => {
@@ -52,10 +57,27 @@ test('review and claim badges follow confirmed status and exact review/claim dea
 
 test('cancellation reconciliation and independent booking counts are preserved', async () => {
  const { liveBookingActions } = await import('../js/live-booking-notifications.mjs');
- assert.match(liveBookingActions(state({ ...booking, cancelled: true, scheduleStatus: 'failed' }), owner, owner, now).admin[0].label, /cancellation/);
+ assert.equal(liveBookingActions(state({ ...booking, cancelled: true, scheduleStatus: 'failed' }), owner, owner, now).admin.length, 0);
  assert.match(liveBookingActions(state({ ...booking, cancelled: true, status: 'funded' }), owner, owner, now).admin[0].label, /cancellation payment/);
  const invites = state(booking, { ...booking, id: 'live:second' });
  assert.equal(liveBookingActions(invites, performer, owner, now).schedule.length, 2);
+});
+
+test('waiting for the other party and pending review/claim confirmations never light action badges', async () => {
+ const { liveBookingActions } = await import('../js/live-booking-notifications.mjs');
+ const end = Date.parse(booking.endUtc);
+ for (const [status, txAction] of [['funded', 'approve'], ['approved', 'claim']]) {
+  const s = state({ ...booking, status, acknowledged: true, transactions: { [txAction]: { status: 'pending' } } });
+  assert.deepEqual(liveBookingActions(s, owner, owner, end), { admin: [], schedule: [], profile: [] });
+  assert.deepEqual(liveBookingActions(s, performer, owner, end), { admin: [], schedule: [], profile: [] });
+ }
+ const approved = state({ ...booking, status: 'approved', acknowledged: true });
+ assert.equal(liveBookingActions(approved, owner, owner, end).admin.length, 0);
+ const localPending = new Set([booking.id]);
+ assert.equal(liveBookingActions(state({ ...booking, acknowledged: true }), owner, owner, now, localPending).admin.length, 0);
+ assert.equal(liveBookingActions(approved, performer, owner, end, localPending).profile.length, 0);
+ const css = fs.readFileSync(new URL('../css/live-performance.css', `file://${__filename}`), 'utf8');
+ assert.match(css, /background: #00cfff; color: #001522/);
 });
 
 test('booking and mint notification timers use five-minute checks, with no fifteen-second admin poll', async () => {
@@ -88,7 +110,7 @@ test('notification polling starts on connection, runs at five minutes, and ignor
  };
  const window = { _wallet: {}, DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example', adminWalletAddress: owner } };
  const context = vm.createContext({
-  document, window, claimState, isAdminWallet: () => false,
+  document, window, claimState, isAdminWallet: () => false, localStorage: { getItem: () => null },
   queueMicrotask, console, AbortSignal,
   MutationObserver: class { observe() {} },
   CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },

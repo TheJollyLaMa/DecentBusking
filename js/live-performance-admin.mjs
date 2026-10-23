@@ -5,7 +5,7 @@ import {
 } from './live-bookings.mjs?v=20261022-live-offer-v2';
 import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261022-action-badges';
 import { isAdminWallet } from './admin-access.mjs';
-import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261022-action-badges';
+import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261023-neon-handoffs';
 
 const routerAbi = [
  'function funds(bytes32) view returns (string metadataUri,bool active,bool exists)',
@@ -59,12 +59,14 @@ async function transaction(b, action, send) {
  await w.check();
  const tx = await send(w);
  localStorage.setItem(`live-pending:${b.id}:${action}`, tx.hash);
+ document.dispatchEvent(new CustomEvent('live-booking-transaction-updated'));
  await command({ action:'transaction', id:b.id, txAction:action, txHash:tx.hash });
  section.querySelector('[data-live-status]').textContent = `Pending ${tx.hash}. If interrupted, use Reconcile transaction; do not send again.`;
  const receipt = await tx.wait(2);
  await w.check();
  await command({ action:'transaction', id:b.id, txAction:action, txHash:receipt.hash || tx.hash });
  localStorage.removeItem(`live-pending:${b.id}:${action}`);
+ document.dispatchEvent(new CustomEvent('live-booking-transaction-updated'));
 }
 function render() {
  const rows = section.querySelector('[data-live-list]');
