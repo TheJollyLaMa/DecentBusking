@@ -119,11 +119,12 @@ test('purchased playlists play straight through without preview gates', async ()
   const plays = [];
   const controller = api.createListenController({ getLive: async () => null, freePlay: () => {},
     play: song => plays.push(song), getSession: () => null, getMedia: () => null, onPreviewEnded: () => { throw new Error('No gate'); } });
-  controller.playPurchased([{ title: 'One' }, { title: 'Two' }]);
+  const songs = Array.from({ length: 12 }, (_, index) => ({ title: `Song ${index + 1}` }));
+  controller.playPurchased(songs);
   assert.equal(plays.length, 1);
-  assert.equal(plays[0].onEnded(), true);
-  assert.deepEqual(plays.map(song => song.title), ['One', 'Two']);
-  assert.equal(plays[1].onEnded(), false);
+  for (let index = 0; index < 11; index++) assert.equal(plays[index].onEnded(), true);
+  assert.deepEqual(plays.map(song => song.title), songs.map(song => song.title));
+  assert.equal(plays[11].onEnded(), false);
 });
 
 test('legacy private-listen cart keeps its 50-song capacity and survives broken storage', async () => {

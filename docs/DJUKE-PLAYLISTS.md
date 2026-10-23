@@ -27,6 +27,15 @@ cart retains its 50-song cap; only named saves and named checkouts require 1–2
 
 ## Prices and settlement
 
+The draft exposes exactly three actions: **Save to Profile** signs and stores a
+named revision without buying playback; **Personal Play** buys the current ordered
+draft in one creator-priced batch, then plays all songs consecutively locally;
+**Play Live** buys the draft for the shared radio playlist lane. Saving is optional
+for either playback purchase. Personal Play does not affect public radio and has
+no radio platform fee. Play Live preserves the tier prices and main paid-request
+priority below; it never interrupts a song already playing. Both purchases may
+need a separate USDC approval, and wallet gas is additional.
+
 Private checkout sums each song's normal creator/album listen price (0.25 USDC
 default), with no platform fee and no radio request. Radio subtotal is the sum of
 `250000 << floor(i / 8)` USDC base units for zero-based playlist index i: songs
