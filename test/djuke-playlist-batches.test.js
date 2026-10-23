@@ -146,7 +146,7 @@ test('played playlist proof waits for late main requests before lane settlement'
     fulfill: async value => calls.push(value), getTrack: trackId => ({ trackId }), minAudibleMs: 1 });
   const claim = await runtime.nextPaid();
   requests = [{ requestId: 'main:0', chainRequestId: '0', songId: `0x${'b'.repeat(64)}`, revision: '0', trackId: 'main', playable: true }, lane];
-  await runtime.complete(claim.record, { playId: 'proof', audibleMs: 2 });
+  await runtime.complete(claim.record, { playId: 'proof', audibleMs: 2, finished: true });
   await runtime.reconcile();
   assert.equal(calls.length, 0, 'late main request prevents playlist settlement');
   requests = [lane];

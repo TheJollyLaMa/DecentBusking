@@ -262,6 +262,7 @@ export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 1
     complete(record, play) { return (record.kind === 'devert' ? adverts : songs).complete(record, play); },
     fail(record, error) { return (record.kind === 'devert' ? adverts : songs).fail(record, error); },
     release(record, error) { return (record.kind === 'devert' ? adverts : songs).release(record, error); },
+    retryMedia(record, error) { return songs.retryMedia(record, error); },
     hasPendingPlaylist() { return songs?.hasPendingPlaylist?.() === true; },
     canPlay(record) { return (record.kind === 'devert' ? adverts : songs).canPlay(record); },
   };
