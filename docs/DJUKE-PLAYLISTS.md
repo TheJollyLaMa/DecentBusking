@@ -80,7 +80,7 @@ existing DVert break policy remains unchanged.
 ## Rollout and safety
 
 Named private and radio checkout are capability-gated on an explicitly configured compatible
-DJuke v0.4 address/version; the current configuration remains disabled. The batch-aware gas-quote signer and durable batch-event/refund reconciler are implemented behind explicit v0.4 environment gates. The worker reports radio readiness false and does not expose playlist gas quotes until the end-to-end worker rehearsal and reviewed deployment are complete; radio checkout therefore remains hidden. There is
+DJuke v0.4 address/version; the current configuration remains disabled. The batch-aware gas-quote signer and durable batch-event/refund reconciler are implemented behind explicit v0.4 environment gates. Readiness requires matching main/batch v0.4 configuration, an explicit nonnegative batch start block, durable batch events and audible-playback journals, verified Base/v0.4/gas-worker/fulfiller permissions, enabled payments, and an available local checkpoint mirror. Signing rejects requests until those checks pass. The browser also requires its own explicit radio-ready flag and matching worker readiness/address; radio checkout therefore remains hidden on the current deployment. There is
 no fallback to repeated tier-priced requests, private listens plus unpaid radio
 items, or creator-price overrides. Existing single-song checkout, creator-priced
 personal listens/albums, Watchlist, and DeVert behavior remain on their current
@@ -94,3 +94,41 @@ fork, configure the exact deployed version/address, verify the durable event rec
 verified batch receipts, lane cut-in scheduling, durable audible-completion
 proofs, fee settlement, and the lane refund path. Rehearse migration with zero
 live writes; no existing queue or creator-set price is changed by this code.
+
+## Rehearsing the worker before review
+
+From the matching DecentMarket review checkout, set `BUSKING_WORKTREE` to this
+DecentBusking checkout and run:
+
+```sh
+BUSKING_WORKTREE=/absolute/path/to/DecentBusking \
+  npx hardhat run scripts/rehearse_djuke_v04_worker.js
+```
+
+This deploys the real v0.4/module bytecode to an in-process Base-chain-ID fixture,
+with mock token/router/L1-fee oracle and Hardhat's synthetic gas schedule. It calls
+the actual HTTP request handler, quote signer, confirmed queue reader, playback
+journal, runtime, fulfiller, and batch-event reconciler. Assertions cover a
+12-song $7 checkout in order, direct collaborator payouts, all four funds,
+restart before playback completion, retained audible proof across a main-request
+cut-in and restart, a full $3.50 refund, and a $3.25 suffix-plus-fee refund after
+short playback (the delivered prefix remains paid).
+
+For the live-catalog migration and real USDC/router/L1 oracle on a local fork:
+
+```sh
+BASE_FORK_RPC=https://mainnet.base.org \
+BUSKING_WORKTREE=/absolute/path/to/DecentBusking \
+  npx hardhat run scripts/rehearse_djuke_v04_fork.js
+```
+
+The existing source preflight requires payments disabled unless
+`REHEARSE_WITH_PAYMENTS_ENABLED=1` explicitly permits a **read-only source
+snapshot** while payments are enabled. It still refuses a nonempty source
+queue. All deployments, approvals, payments, pauses, and refunds execute only on
+the in-process fork. The fork uses the upstream RPC's read-only fee recommendation
+instead of Hardhat's synthetic priority fee; contract state and L1-fee estimation
+remain on the fork. Neither command connects a Discord client, submits real Base
+transactions, changes production configuration, or proves real audio delivery.
+A controlled playback smoke test and steward approval are still required before
+production activation.

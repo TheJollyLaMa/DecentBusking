@@ -17,7 +17,19 @@ export const DJUKE_ABI = [
   'function registerSong(bytes32 songId, string audioURI, address[] recipients, uint16[] sharesBps)',
   'function multicall(bytes[] data) returns (bytes[] results)',
 ];
+export const DJUKE_PLAYLIST_WORKER_ABI = [
+  'function CONTRACT_VERSION() view returns(string)',
+  'function FULFILLER_ROLE() view returns(bytes32)',
+  'function hasRole(bytes32,address) view returns(bool)',
+];
 export const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+
+export async function verifyDjukePlaylistWorker({ provider, contract, workerAddress }) {
+  if (Number((await provider.getNetwork()).chainId) !== 8453) throw new Error('DJuke playlists are Base-only');
+  if (await contract.CONTRACT_VERSION() !== '0.4') throw new Error('DJuke playlist worker requires contract v0.4');
+  if ((await contract.gasWorker()).toLowerCase() !== workerAddress.toLowerCase()) throw new Error('DJuke playlist gas worker does not match');
+  if (!await contract.hasRole(await contract.FULFILLER_ROLE(), workerAddress)) throw new Error('DJuke playlist worker lacks the fulfiller role');
+}
 
 export function djukeCatalog(playlist) {
   return playlist.filter(track => !track.isDevertAd && track.ipfsCid && /^0x[0-9a-fA-F]{40}$/.test(track.mintRecipient || '') &&
