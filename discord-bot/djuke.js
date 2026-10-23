@@ -368,6 +368,7 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   let claimSerial = Promise.resolve();
   let pendingClaim = null;
   let restored = false;
+  let pendingPlaylistCount = 0;
   const ready = () => { initialized ||= journal.initialize().then(() => { restored = true; })
     .catch(error => { initialized = null; throw error; }); return initialized; };
   const settleSerial = state => { const run = settling.then(() => settle(state)); settling = run.catch(() => {}); return run; };
@@ -395,6 +396,7 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   async function reconcile() {
     await ready();
     const state = await readState();
+    pendingPlaylistCount = state.playlistPending ?? state.requests.filter(request => request.playlistLaneId !== undefined).length;
     if (onVerifiedRequests) Promise.resolve().then(() => onVerifiedRequests(state))
       .catch(error => log.warn(`[djuke] Confirmed-request hook deferred: ${error.message}`));
     await journal.synchronize(state.requests, { preserveMissing: record => preserveMissingRequest(record, state) });
@@ -465,7 +467,8 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       return journal.fail(record.requestId, error?.message || String(error));
     },
     hasPendingPlaylist() {
-      return restored && journal.getState().some(record => record.playlistBatchId !== undefined && record.state !== 'fulfilled');
+      return restored && (pendingPlaylistCount > 0 ||
+        journal.getState().some(record => record.playlistBatchId !== undefined && record.state !== 'fulfilled'));
     },
     async canPlay(record) {
       const state = await readState();
