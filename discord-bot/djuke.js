@@ -457,6 +457,9 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       await journal.fail(record.requestId, error?.message || String(error));
       if (record.playlistBatchId && refundPlaylistBatch) await refundPlaylistBatch(record.playlistBatchId);
     },
+    release(record, error) {
+      return journal.fail(record.requestId, error?.message || String(error));
+    },
     reconcile,
     getJournalState: () => journal.getState(),
   };

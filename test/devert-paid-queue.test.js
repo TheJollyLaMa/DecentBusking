@@ -18,7 +18,8 @@ test('a hung paid queue cannot stop music, overlap reservations, or leak a late 
   const record = { requestId: 'late-paid-ad', kind: 'devert' };
   const adverts = {
     nextPaid: () => { adCalls++; return new Promise(resolve => { resolveAd = resolve; }); },
-    fail: async selected => released.push(selected.requestId),
+    release: async selected => released.push(selected.requestId),
+    fail: async () => assert.fail('A late queue selection is not a playback failure'),
   };
   const queues = combinePaidQueues({ adverts, songs: { nextPaid: async () => { songCalls++; return null; } },
     timeoutMs: 5, log: { warn: message => warnings.push(message) } });
@@ -30,6 +31,41 @@ test('a hung paid queue cannot stop music, overlap reservations, or leak a late 
   resolveAd({ record, track: {} });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(released, ['late-paid-ad']);
+});
+
+test('a late playlist selection stays paid and queued instead of refunding the batch', async () => {
+  const { combinePaidQueues } = await import('../discord-bot/devert-queue.js');
+  const { createDjukeRuntime, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
+  let finishRead;
+  let firstRead = true;
+  let refunds = 0;
+  const journal = createDjukePlaybackJournal({ restore: async () => null, save: async () => 'ipfs://journal' });
+  const item = { requestId: 'playlist:1', playlistLaneId: '1', playlistBatchId: '0',
+    songId: `0x${'a'.repeat(64)}`, trackId: 'second-song', revision: '0', playable: true };
+  const runtime = createDjukeRuntime({ journal, timeoutMs: 1000,
+    readState: async () => {
+      if (firstRead) { firstRead = false; await new Promise(resolve => { finishRead = resolve; }); }
+      return { requests: [item] };
+    },
+    getTrack: trackId => ({ trackId }), fulfill: async () => assert.fail('No unheard song can settle'),
+    refundPlaylistBatch: async () => { refunds++; } });
+  const queues = combinePaidQueues({ songs: runtime, timeoutMs: 10, log: { warn() {} } });
+  assert.equal(await queues.nextPaid(), null);
+  finishRead();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(refunds, 0);
+  assert.equal(journal.getState()[0].state, 'pending');
+  assert.match(journal.getState()[0].lastError, /radio moved on/);
+  const retried = await queues.nextPaid();
+  assert.equal(retried.record.requestId, item.requestId);
+  assert.equal(retried.record.attempts, 2);
+  assert.equal(refunds, 0);
+  await queues.release(retried.record, new Error('Scheduled handoff'));
+  assert.equal(journal.getState()[0].state, 'pending');
+  assert.equal(refunds, 0);
+  const failed = await queues.nextPaid();
+  await queues.fail(failed.record, new Error('Recording unavailable'));
+  assert.equal(refunds, 1, 'real playback failures must retain the refund safety net');
 });
 
 test('public advert search matches titles, creators, addresses and campaign IDs without changing the catalog', async () => {

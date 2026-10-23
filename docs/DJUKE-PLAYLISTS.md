@@ -1,5 +1,11 @@
 # Named DJuke playlists — rollout decisions
 
+Queue-selection timeouts are scheduling deferrals, not playback failures. A
+reservation returned after radio has moved on is released back to pending without
+refunding or settling the batch. Actual unavailable/failed recordings still use
+the refund safety net. A successful purchase is not evidence that the entire
+playlist played; confirm delivery and refund events before reporting completion.
+
 ## Sponsored playback candidate (not activated)
 
 Production v0.4 still requires a separately disclosed listener ETH worker
