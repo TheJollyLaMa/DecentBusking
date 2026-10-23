@@ -45,6 +45,12 @@ for (const snapshot of [
   { schemaVersion: 2, nextBlock: 100, batches: [] },
   { schemaVersion: 2, nextBlock: 100, batches: [{ batchId: '0', status: 'pending',
     songIds: [`0x${'a'.repeat(64)}`], laneIds: ['0'] }] },
+  { schemaVersion: 1, revision: 0, bookings: [], escrowScannedThrough: null },
+  { schemaVersion: 1, revision: 1, bookings: [{ id: 'friday-live', wallet: `0x${'a'.repeat(40)}` }], escrowScannedThrough: 100 },
+  { schemaVersion: 1, occurrences: [] },
+  { schemaVersion: 1, deliveries: {}, requests: {} },
+  { schemaVersion: 1, instanceId: 'friday', week: 'NY-2026-10-23', startAt: '2026-10-23T23:00:00Z',
+    endAt: '2026-10-24T00:00:00Z', capturedAt: '2026-10-23T23:00:00Z', cursor: 0, tracks: [], skipped: [], lastStarted: null },
 ]) {
 test(`Mac client pins verified ${snapshot.playlist ? 'playlist' : 'journal'} bytes before acknowledgment (${snapshot.records?.length || 0} records)`, async () => {
   const { createLocalCheckpointMirrorClient } = await import('../discord-bot/checkpoint-mirror-client.js');
@@ -78,7 +84,12 @@ test('Mac client rejects unsupported or invalid playback journals before importi
   for (const snapshot of [{ schemaVersion: 2, records: [] }, { schemaVersion: 1, records: [{}] },
     { schemaVersion: 1, records: [{ requestId: 'request', state: 'unknown' }] }, { schemaVersion: 1, other: [] },
     { schemaVersion: 2, nextBlock: -1, batches: [] },
-    { schemaVersion: 2, nextBlock: 100, batches: [{}] }]) {
+    { schemaVersion: 2, nextBlock: 100, batches: [{}] },
+    { schemaVersion: 1, revision: -1, bookings: [], escrowScannedThrough: null },
+    { schemaVersion: 1, revision: 0, bookings: [{}], escrowScannedThrough: null },
+    { schemaVersion: 1, occurrences: [{}] },
+    { schemaVersion: 1, deliveries: {}, requests: { broken: {} } },
+    { schemaVersion: 1, instanceId: 'invalid' }]) {
     const bytes = Buffer.from(JSON.stringify(snapshot));
     const cid = await checkpointContentCid(bytes);
     const poll = createLocalCheckpointMirrorClient({ serviceUrl: 'https://worker.example', secret,
@@ -86,6 +97,6 @@ test('Mac client rejects unsupported or invalid playback journals before importi
         assert.ok(url.endsWith('/claim'), 'invalid checkpoints must not reach Kubo or acknowledgment');
         return new Response(JSON.stringify({ job: { jobId: 'invalid', expectedCid: cid, contentBase64: bytes.toString('base64') } }));
       } });
-    await assert.rejects(poll(), /Only playlist checkpoints and valid playback or playlist-batch journals/);
+    await assert.rejects(poll(), /Only supported|Invalid|Unknown radio playlist/);
   }
 });
