@@ -1,0 +1,28 @@
+name: Prepare Supporter DNFT
+# Standard Decent Supporter release (DecentHead product kit, docs/SUPPORTER-PRODUCTS.md).
+# Bump the DecentHead SHA in both places, and in the sibling supporter workflow, together.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to prepare
+        required: true
+permissions:
+  contents: write
+  issues: write
+concurrency:
+  group: supporter-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  prepare:
+    uses: TheJollyLaMa/DecentHead/.github/workflows/product-supporter-prepare.yml@3b2a72f7f8c49fb2af89ea7df2ead8e338e0e870
+    with:
+      tag: ${{ inputs.tag || github.event.release.tag_name }}
+      head_ref: 3b2a72f7f8c49fb2af89ea7df2ead8e338e0e870
+      product_name: "DecentBusking"
+      tagline: "The Web3 digital town square: mint audio NFTs, tip artists, fly through space"
+      ens_name: ${{ vars.SUPPORTER_ENS_NAME }}
+    secrets:
+      PINATA_JWT: ${{ secrets.PINATA_JWT }}
