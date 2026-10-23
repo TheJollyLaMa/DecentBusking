@@ -1567,6 +1567,7 @@ test('JukeLoop prepares the next paid request and starts it before prior-play bo
         assert.equal(record, firstPaid);
         await completionPending;
       },
+      release: async () => {},
       fail: async () => {},
     },
   });

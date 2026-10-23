@@ -1,10 +1,24 @@
 # Named DJuke playlists — rollout decisions
 
 Queue-selection timeouts are scheduling deferrals, not playback failures. A
-reservation returned after radio has moved on is released back to pending without
-refunding or settling the batch. Actual unavailable/failed recordings still use
+slow durable reservation remains in flight and is retained for the next selection
+instead of repeatedly releasing and recreating its checkpoint. Before playback,
+the worker revalidates its recording, pending status, and main-request priority.
+Unheard selections discarded for a scheduled handoff or priority change are
+released back to pending without refunding or settling the batch.
+Actual unavailable/failed recordings still use
 the refund safety net. A successful purchase is not evidence that the entire
 playlist played; confirm delivery and refund events before reporting completion.
+
+While a known paid playlist remains unfinished, ordinary rotation is held rather
+than starting an unrelated recording during checkpoint/settlement delays. Stale
+prefetched rotation is discarded at the handoff, and the worker retries after a
+second. Radio status explicitly reports that it is waiting for the paid playlist.
+This can introduce a bookkeeping gap; it is not a promise of gapless streaming.
+Main paid requests, eligible advert breaks, and protected scheduled/live shows
+retain their existing priority. Once the final paid delivery settles, ordinary
+rotation resumes. A controlled worker shutdown releases reservations without
+refunding the remaining batch; genuine recording failures still trigger refunds.
 
 The Playlists section of the connected wallet's own profile shows its five most recent Play Live receipts:
 verifying queue, queued, playing, completed, or refunded. Expand a receipt for

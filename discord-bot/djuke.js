@@ -366,8 +366,10 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   let initialized = null;
   let settling = Promise.resolve();
   let claimSerial = Promise.resolve();
-  let abandonedClaim = Promise.resolve();
-  const ready = () => { initialized ||= journal.initialize().catch(error => { initialized = null; throw error; }); return initialized; };
+  let pendingClaim = null;
+  let restored = false;
+  const ready = () => { initialized ||= journal.initialize().then(() => { restored = true; })
+    .catch(error => { initialized = null; throw error; }); return initialized; };
   const settleSerial = state => { const run = settling.then(() => settle(state)); settling = run.catch(() => {}); return run; };
   async function settle(state) {
     for (const record of journal.getState().filter(entry => entry.state === 'played')) {
@@ -422,21 +424,22 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     return record ? { record, track } : null;
   }
   async function nextPaid(options) {
-    await abandonedClaim;
-    const pending = claim(options);
+    pendingClaim ||= claim(options);
+    const pending = pendingClaim;
     let timer;
     const timedOut = Symbol('timeout');
     let result;
     try {
       result = await Promise.race([pending, new Promise(resolve => { timer = setTimeout(() => resolve(timedOut), timeoutMs); })]);
+    } catch (error) {
+      pendingClaim = null;
+      throw error;
     } finally {
       clearTimeout(timer);
     }
-    if (result !== timedOut) return result;
-    abandonedClaim = pending
-      .then(late => late && journal.fail(late.record.requestId, 'Claimed after radio moved on'))
-      .catch(() => {});
-    throw new Error('DJuke queue check timed out');
+    if (result === timedOut) throw new Error('DJuke queue check timed out; durable selection remains in progress');
+    pendingClaim = null;
+    return result;
   }
   return {
     nextPaid(options) {
@@ -460,6 +463,18 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     },
     release(record, error) {
       return journal.fail(record.requestId, error?.message || String(error));
+    },
+    hasPendingPlaylist() {
+      return restored && journal.getState().some(record => record.playlistBatchId !== undefined && record.state !== 'fulfilled');
+    },
+    async canPlay(record) {
+      const state = await readState();
+      const requests = state.requests;
+      const eligible = requests.some(request => request.playlistLaneId === undefined)
+        ? requests.filter(request => request.playlistLaneId === undefined) : requests.slice(0, 1);
+      const request = eligible.find(request => request.requestId === record.requestId);
+      return Boolean(request && request.playable && request.trackId === record.trackId &&
+        request.revision === record.revision && await canPlayRequest(request, state));
     },
     reconcile,
     getJournalState: () => journal.getState(),

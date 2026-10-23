@@ -910,6 +910,9 @@ export class JukeLoopSession {
     if (this._nowPlaying?.audible && this.player.state.status === AudioPlayerStatus.Playing) {
       return { status: 'playing', ready: true, reason: null };
     }
+    if (show.type === 'normal_rotation' && this.djuke?.hasPendingPlaylist?.()) {
+      return { status: 'preparing', ready: false, reason: 'Continuing the paid playlist; waiting for its durable checkpoint or settlement' };
+    }
     if (!this._queue.length && !this._prepareTask && !this._transitionTask && !this._preparedNext &&
         !this._nowPlaying && !this._currentPaid && !this._currentDevertAd) {
       return { status: 'empty', ready: false, reason: 'No playable recordings are available' };
@@ -1123,7 +1126,7 @@ export class JukeLoopSession {
     });
     if (activeShow.type === 'live_performance') return;
     if (activeShow.type === 'playlist_show' && forcedPaid && this.djuke) {
-      await this.djuke.fail(forcedPaid.record, new Error('Paid request deferred during playlist show'));
+      await this.djuke.release(forcedPaid.record, new Error('Paid request deferred during playlist show'));
       forcedPaid = null;
     }
     const isHype = !!activeShow.instanceId && activeShow.id === 'friday-top10-hype';
@@ -1152,7 +1155,7 @@ export class JukeLoopSession {
     if (!paid && this.djuke && activeShow.type !== 'playlist_show' && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
       paid = await this.djuke.nextPaid({ allowBump: normalSlotDue });
       if (this._destroyed && paid) {
-        await this.djuke.fail(paid.record, new Error('Radio stopped')).catch(() => {});
+        await this.djuke.release(paid.record, new Error('Radio stopped')).catch(() => {});
         return null;
       }
     }
@@ -1217,6 +1220,10 @@ export class JukeLoopSession {
       this._refreshQueue();
     }
 
+    if (!isHype && activeShow.type === 'normal_rotation' && !paid && !devertAd && this.djuke?.hasPendingPlaylist?.()) {
+      return null;
+    }
+
     // Nothing to play → wait and retry
     if (!isHype && !playlistSelection && !paid && !devertAd && this._queue.length === 0) {
       this._sendPlaybackNotice('📭 The JukeLoop playlist is empty.\n' +
@@ -1229,7 +1236,7 @@ export class JukeLoopSession {
 
     const url = await this._getFreshUrl(track);
     if (this._destroyed) {
-      if (paid && this.djuke) await this.djuke.fail(paid.record, new Error('Radio stopped during media lookup'));
+      if (paid && this.djuke) await this.djuke.release(paid.record, new Error('Radio stopped during media lookup'));
       return null;
     }
     if (!url) {
@@ -1267,7 +1274,7 @@ export class JukeLoopSession {
       livePerformanceEvents: this.livePerformanceEvents,
     });
     if (showAfterMediaLookup.type === 'live_performance') {
-      if (paid && this.djuke) await this.djuke.fail(paid.record, new Error('Live performance block began before playback')).catch(() => {});
+      if (paid && this.djuke) await this.djuke.release(paid.record, new Error('Live performance block began before playback')).catch(() => {});
       return null;
     }
 
@@ -1276,7 +1283,7 @@ export class JukeLoopSession {
       await waitForAudioReady(stream, ffmpegProcess, this._audioReadyTimeoutMs);
       if (this._destroyed) {
         try { ffmpegProcess.kill(); } catch {}
-        if (paid && this.djuke) await this.djuke.fail(paid.record, new Error('Radio stopped')).catch(() => {});
+        if (paid && this.djuke) await this.djuke.release(paid.record, new Error('Radio stopped')).catch(() => {});
         return null;
       }
       const resource = createAudioResource(stream, { inputType: StreamType.Raw });
@@ -1309,7 +1316,7 @@ export class JukeLoopSession {
     if (!prepared) return;
     try { prepared.ffmpegProcess?.kill(); } catch {}
     if (prepared.paid?.record && this.djuke) {
-      this.djuke.fail(prepared.paid.record, new Error(reason))
+      this.djuke.release(prepared.paid.record, new Error(reason))
         .catch(error => console.warn('[jukeloop] Could not release prepared DJuke request:', error.message));
     }
   }
@@ -1349,15 +1356,15 @@ export class JukeLoopSession {
         return this._preparedNext;
       }
       if (this._destroyed || epoch !== this._preparationEpoch || !this._preparedNext) {
-        await this.djuke.fail(paid.record, new Error('Radio mode changed during priority selection'));
+        await this.djuke.release(paid.record, new Error('Radio mode changed during priority selection'));
         return null;
       }
       const regular = this._preparedNext;
       if (regular.paid) {
         try {
-          await this.djuke.fail(regular.paid.record, new Error('Immediate advert took priority before playback'));
+          await this.djuke.release(regular.paid.record, new Error('Immediate advert took priority before playback'));
         } catch (error) {
-          await this.djuke.fail(paid.record, error)
+          await this.djuke.release(paid.record, error)
             .catch(releaseError => console.warn('[jukeloop] Could not release immediate advert after failed preemption:', releaseError.message));
           throw error;
         }
@@ -1583,6 +1590,11 @@ export class JukeLoopSession {
         if (this._prepareTask) await this._prepareTask;
         prepared = this._preparedNext;
         this._preparedNext = null;
+        if (prepared && !prepared.paid && !prepared.devertAd && !prepared.hype &&
+            this.getShowState().activeShow.type === 'normal_rotation' && this.djuke?.hasPendingPlaylist?.()) {
+          this._disposePrepared(prepared, 'Paid playlist continues');
+          prepared = null;
+        }
         // Prefetch may have run before the last song unlocked the next advert slot.
         if (prepared && !prepared.hype && !prepared.paid && !prepared.devertAd && this.devertPlayback &&
           this._musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD) {
@@ -1597,9 +1609,10 @@ export class JukeLoopSession {
           }
         }
         if (!prepared) prepared = await this._prepareNextPlayback();
+        if (!prepared && this.djuke?.hasPendingPlaylist?.()) retryDelay = 1_000;
         if (prepared?.paid?.record.kind === 'devert' && prepared.paid.record.tier === 0 &&
             this._breakAwaitingUnlock && this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD) {
-          await this.djuke.fail(prepared.paid.record, new Error('Normal advert slot not reached yet'));
+          await this.djuke.release(prepared.paid.record, new Error('Normal advert slot not reached yet'));
           this._disposePrepared({ ...prepared, paid: null });
           prepared = await this._prepareNextPlayback(null, { allowAds: false });
         }
@@ -1643,9 +1656,9 @@ export class JukeLoopSession {
             retryDelay = 1_000;
           }
         }
-        if (prepared?.paid?.record.kind === 'devert' && this.djuke?.canPlay &&
+        if (prepared?.paid && this.djuke?.canPlay &&
             !await this.djuke.canPlay(prepared.paid.record)) {
-          this._disposePrepared(prepared, 'Paid advert removed or paused before playback');
+          this._disposePrepared(prepared, 'Paid request changed or lost priority before playback');
           prepared = null;
           retryDelay = 1_000;
         }
@@ -1901,7 +1914,7 @@ export class JukeLoopSession {
     }
     this._nowPlaying = null;
     if (this._currentPaid && this.djuke) {
-      this.djuke.fail(this._currentPaid, new Error('Radio stopped')).catch(() => {});
+      this.djuke.release(this._currentPaid, new Error('Radio stopped')).catch(() => {});
       this._currentPaid = null;
     }
     const sessionKey = this._sessionKey ?? this.voiceChannel?.guild.id;
