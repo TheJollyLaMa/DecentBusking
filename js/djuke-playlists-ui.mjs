@@ -255,7 +255,7 @@ export function initDjukePlaylists() {
         if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
         const purchase = await purchaseRadioNamedPlaylist({ playlist, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { profileStatus.textContent = text; } });
         event('djuke-radio-playlist-purchased', { ...purchase, name: playlist.name, songIds: playlist.songIds });
-        profileStatus.textContent = 'Purchase confirmed. Open DJuke to follow your Play Live receipt for delivery or refund.';
+        profileStatus.textContent = 'Purchase confirmed. Your profile has your Play Live receipt for delivery or refund.';
       });
     }, !radioCapability() || busy, 'Radio checkout requires the compatible batch deployment and signed gas quote service');
     radioAction.hidden = !radioCapability();
@@ -445,7 +445,7 @@ export function initDjukePlaylists() {
       if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
       const purchase = await purchaseRadioNamedPlaylist({ playlist: selected, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { state.textContent = text; } });
       event('djuke-radio-playlist-purchased', { ...purchase, name: nameInput.value.trim() || 'Your playlist', songIds: selected.songIds });
-      state.textContent = 'Purchase confirmed. Follow your Play Live receipt above for delivery or refund; main paid requests can cut in.';
+      state.textContent = 'Purchase confirmed. Follow your Play Live receipt in your profile for delivery or refund; main paid requests can cut in.';
     });
   });
   const initialItems = draft.list();
