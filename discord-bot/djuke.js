@@ -341,7 +341,8 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
     }
     const { tracks, lookupErrors: catalogReadErrors } = await registeredSongs(entries, options);
     if ((await rpc.getBlock(blockNumber))?.hash !== before.hash) throw new Error('DJuke snapshot changed during verification');
-    const playlistBatches = getPlaylistBatches();
+    const playlistReceipts = getPlaylistBatches();
+    const playlistBatches = playlistReceipts.filter(batch => !['settled', 'refunded'].includes(batch.status));
     for (const request of requests) if (request.playlistBatchId !== undefined) {
       const batch = playlistBatches.find(batch => batch.batchId === request.playlistBatchId);
       if (batch) request.playlist = { batchId: batch.batchId, name: batch.name,
@@ -349,7 +350,7 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
     }
     const quote = quoteDjuke(mainPending + playlistPending);
     return { chainId: 8453, contractAddress, usdcAddress: BASE_USDC, blockNumber, blockHash: before.hash,
-      requests, mainPending, playlistPending, playlistBatches, tracks, catalogReadErrors, priceUnits: quote.priceUnits.toString(), paymentsEnabled };
+      requests, mainPending, playlistPending, playlistBatches, playlistReceipts, tracks, catalogReadErrors, priceUnits: quote.priceUnits.toString(), paymentsEnabled };
   }
   const read = () => {
     if (!task) task = readSnapshot().finally(() => { task = null; });

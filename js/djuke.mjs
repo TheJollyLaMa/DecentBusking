@@ -7,6 +7,29 @@ import { lookupEnsName } from './ens-client.mjs?v=20261016-ens-worker';
 import { renderWalletAddress } from './fund-display.mjs?v=20261022-live-offer-v2';
 export { USDC_BROWSER_ABI };
 
+export function playlistReceiptSummary(batch) {
+  const delivered = batch.songs.filter(song => song.status === 'delivered').length;
+  const total = batch.songs.length;
+  const state = batch.status === 'settled' ? 'completed' : batch.status === 'refunded' ? 'refunded'
+    : batch.status === 'confirming' ? 'confirming' : batch.playing ? 'playing' : 'queued';
+  const label = { completed: 'Completed', refunded: 'Refunded', confirming: 'Verifying queue',
+    playing: 'Playing', queued: 'Queued' }[state];
+  const paid = batch.subtotalUnits != null && batch.feeUnits != null
+    ? BigInt(batch.subtotalUnits) + BigInt(batch.feeUnits) : null;
+  const refunded = batch.refundedUnits == null ? null : BigInt(batch.refundedUnits);
+  return { state, label, delivered, total, progress: `${delivered} / ${total} songs delivered`,
+    payment: paid === null ? 'Payment details are being verified'
+      : `Paid ${formatDjukeUsdc(paid)} USDC${state === 'refunded'
+        ? refunded === null ? ' · Refund amount is being verified'
+          : ` · Refunded ${formatDjukeUsdc(refunded)} USDC · Settled ${formatDjukeUsdc(paid - refunded)} USDC` : ''}`,
+    note: state === 'refunded'
+      ? batch.workerGasSponsored ? 'Undelivered songs and unreleased fee returned to your wallet. Network gas is not refunded.'
+        : 'Undelivered songs and playlist fee returned to your wallet. Worker ETH and network gas are not refunded.'
+      : state === 'completed' ? 'Playback delivered and platform fee settled.'
+        : state === 'confirming' ? 'Purchase confirmed on Base. Waiting for the verified queue; playback is not complete.'
+          : 'Payment confirmed. Main paid requests may cut in; only delivered songs count toward completion.' };
+}
+
 export function quoteDjuke(pendingCount) {
   if (!Number.isSafeInteger(pendingCount) || pendingCount < 0) throw new RangeError('Invalid pending queue count');
   const tier = Math.floor(pendingCount / 8);
@@ -152,6 +175,12 @@ export function initDjuke() {
   const info = document.getElementById('djuke-info');
   const earners = document.getElementById('djuke-earners');
   const earnerStatus = document.getElementById('djuke-earners-state');
+  const receipts = document.getElementById('djuke-receipts');
+  const receiptList = document.getElementById('djuke-receipt-list');
+  const receiptStatus = document.getElementById('djuke-receipts-state');
+  let receiptSnapshot = [];
+  let receiptKey = '';
+  let provisionalReceipt = null;
   let earnersGeneration = 0;
   let walletPromptShown = false;
   let gasQuote = null;
@@ -297,7 +326,52 @@ export function initDjuke() {
     if (searchState) searchState.textContent = 'Song catalog unavailable; refresh to retry.';
     renderTiers(null);
     status.textContent = message;
+    if (receiptStatus && !receipts.hidden) receiptStatus.textContent = 'Receipt updates unavailable. Last verified receipts remain below; refresh to retry.';
     syncPayButton();
+  };
+  const renderReceipts = () => {
+    if (!receipts || !receiptList) return;
+    const wallet = window._wallet?.address?.toLowerCase();
+    const mine = receiptSnapshot.filter(batch => batch.payer?.toLowerCase() === wallet).slice(-5).reverse();
+    if (provisionalReceipt && !mine.some(batch => batch.transactionHash === provisionalReceipt.transactionHash) &&
+        provisionalReceipt.payer === wallet) mine.unshift(provisionalReceipt);
+    receipts.hidden = !wallet || !mine.length;
+    const key = JSON.stringify([wallet, mine]);
+    if (key === receiptKey) return;
+    receiptKey = key;
+    const expanded = new Set([...receiptList.querySelectorAll?.('details[open]') || []].map(item => item.dataset.transaction));
+    receiptList.replaceChildren();
+    for (const batch of mine.slice(0, 5)) {
+      const summary = playlistReceiptSummary(batch);
+      const item = node('details', undefined, 'djuke-receipt');
+      item.dataset.transaction = batch.transactionHash;
+      item.dataset.state = summary.state;
+      item.open = expanded.has(batch.transactionHash);
+      const heading = node('summary');
+      heading.append(node('span', batch.name, 'djuke-receipt-name'), node('span', summary.label, 'djuke-receipt-badge'));
+      const progress = node('div', undefined, 'djuke-receipt-progress');
+      progress.setAttribute('role', 'progressbar');
+      progress.setAttribute('aria-label', 'Songs delivered');
+      progress.setAttribute('aria-valuemin', '0');
+      progress.setAttribute('aria-valuemax', String(summary.total));
+      progress.setAttribute('aria-valuenow', String(summary.delivered));
+      const fill = node('span');
+      fill.style.width = `${summary.delivered / summary.total * 100}%`;
+      progress.append(fill);
+      const links = node('div', undefined, 'djuke-receipt-links');
+      for (const [label, hash] of [['Purchase', batch.transactionHash],
+        [summary.state === 'refunded' ? 'Refund on Base' : 'Settlement on Base', batch.resolutionTransactionHash]]) {
+        if (!/^0x[0-9a-f]{64}$/i.test(hash || '')) continue;
+        const link = node('a', label);
+        link.href = `https://basescan.org/tx/${hash}`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        links.append(link);
+      }
+      item.append(heading, progress, node('p', summary.progress, 'djuke-receipt-count'),
+        node('p', summary.payment), node('p', summary.note), links);
+      receiptList.append(item);
+    }
   };
   const updateWallet = () => {
     const address = window._wallet?.address;
@@ -305,6 +379,7 @@ export function initDjuke() {
       paymentStatus.textContent = '';
       walletPromptShown = false;
     }
+    renderReceipts();
     syncPayButton();
   };
   async function refreshEarners() {
@@ -368,6 +443,9 @@ export function initDjuke() {
       const snapshot = await response.json();
       const requests = readDjukeQueue(snapshot);
       if (requestGeneration !== generation || !isOpen()) return;
+      receiptSnapshot = snapshot.playlistReceipts || [];
+      if (receiptStatus) receiptStatus.textContent = '';
+      renderReceipts();
       const wallet = window._wallet?.address?.toLowerCase();
       queue.replaceChildren();
       requests.forEach((request, index) => {
@@ -498,6 +576,14 @@ export function initDjuke() {
   instructions.addEventListener('close', () => { if (isOpen()) info.focus(); });
   document.getElementById('djuke-close').addEventListener('click', () => { close(); toggle.focus(); });
   document.getElementById('djuke-refresh').addEventListener('click', refresh);
+  document.addEventListener('djuke-radio-playlist-purchased', event => {
+    const { txHash, totalUnits, name, songIds } = event.detail;
+    provisionalReceipt = { transactionHash: txHash, payer: window._wallet?.address?.toLowerCase(),
+      name, songs: songIds.map(songId => ({ songId, status: 'pending' })), status: 'confirming',
+      subtotalUnits: String(totalUnits), feeUnits: '0' };
+    renderReceipts();
+    refresh();
+  });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && isOpen() && !instructions.open) { close(); toggle.focus(); }
   });

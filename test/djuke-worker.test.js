@@ -214,13 +214,15 @@ test('public queue shows all twelve named songs while querying only the playable
   const read = createDjukeQueueReader({ provider: { getNetwork: async () => ({ chainId: 8453 }),
     getBlockNumber: async () => 100, getBlock: async () => ({ hash: 'canonical' }) }, contract,
     contractAddress: `0x${'1'.repeat(40)}`, playlistLaneEnabled: true, getPlaylist: () => tracks,
-    getPlaylistBatches: () => [batch] });
+    getPlaylistBatches: () => [batch, { ...batch, batchId: 'previous', status: 'refunded' }] });
   const snapshot = await read();
   assert.equal(itemReads, 1);
   assert.equal(snapshot.requests.length, 1);
   assert.equal(snapshot.playlistPending, 12);
   assert.equal(snapshot.playlistBatches[0].songs.length, 12);
   assert.equal(snapshot.playlistBatches[0].name, 'BoogieNight');
+  assert.equal(snapshot.playlistBatches.length, 1, 'resolved receipts never re-enter the paid queue');
+  assert.equal(snapshot.playlistReceipts.length, 2);
   assert.deepEqual(snapshot.requests[0].playlist, { batchId: '0', name: 'BoogieNight', songCount: 12, remaining: 12 });
   const journal = createDjukePlaybackJournal({ restore: async () => null, save: async () => 'ipfs://journal' });
   await journal.initialize();

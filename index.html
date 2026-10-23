@@ -62,6 +62,11 @@
       <div class="djuke-queue-heading"><h3>Paid Queue <span id="djuke-count">—</span></h3><button id="djuke-refresh" type="button" aria-label="Refresh DJuke queue" title="Refresh queue"><span data-djuke-icon="RefreshCw" aria-hidden="true">↻</span></button></div>
       <ol id="djuke-queue" aria-label="Pending paid requests"></ol>
       <p id="djuke-queue-state" role="status" aria-live="polite">Queue unavailable</p>
+      <section id="djuke-receipts" class="djuke-receipts" aria-labelledby="djuke-receipts-title" hidden>
+        <h3 id="djuke-receipts-title">Your Play Live receipts</h3>
+        <div id="djuke-receipt-list"></div>
+        <p id="djuke-receipts-state" role="status" aria-live="polite"></p>
+      </section>
       <label class="djuke-song-label" for="djuke-song">Song</label>
       <input id="djuke-search" type="search" aria-label="Search songs and creators" placeholder="Search songs or creators" />
       <p id="djuke-search-state" role="status" aria-live="polite"></p>
@@ -98,6 +103,7 @@
   </aside>
   <dialog id="djuke-instructions" aria-labelledby="djuke-instructions-title">
     <h3 id="djuke-instructions-title">🎰 Your quarter. Their encore.</h3>
+    <section><h4>Follow your Play Live receipt</h4><p>With your wallet connected, your latest receipts appear above the song picker. Expand one to see songs delivered, exact USDC paid or refunded, and Base transaction links. Purchase confirmed means queued, not finished. A failed playlist returns its undelivered song payments and unreleased fee; any worker ETH contribution and wallet network gas are not refunded.</p></section>
     <section><h4>🎶 Pick it. Queue it. Hear it.</h4><p>Search for a song, select it, then press <strong>Queue Song</strong>. Connect your wallet in the page header. Paid requests play in order without interrupting the current recording or protected shows.</p></section>
     <section><h4>🪙 A quarter to start</h4><p>The next play starts at <strong>0.25 USDC on Base</strong> and doubles every eight pending requests. The LCD shows the current queue price. Any required worker-gas ETH contribution is shown before payment.</p></section>
     <section><h4>✨ Music pays people</h4><p><strong>90%</strong> goes to the artist and collaborators, <strong>8%</strong> to IPFS pinning rewards, and <strong>2%</strong> to repo development. Confirmed payments trigger our celebration animations.</p></section>

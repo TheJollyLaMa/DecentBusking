@@ -1090,9 +1090,19 @@ async function main() {
     getPlaylistBatches: () => {
       if (!playlistBatchEventsReady) return [];
       const tracks = new Map(getPlaylist().map(track => [id(track.trackId).toLowerCase(), track]));
-      return playlistBatchJournal.getState().filter(batch => batch.status === 'pending').map(batch => {
+      const nowPlaying = getJukeLoopNowPlaying();
+      const batches = playlistBatchJournal.getState();
+      const recent = batches.filter(batch => batch.status !== 'pending').slice(-50);
+      return batches.filter(batch => batch.status === 'pending' || recent.includes(batch)).map(batch => {
         const saved = creatorProfilesReady ? creatorProfiles.findPlaylistRevision(batch.payer, batch.songIds) : null;
         return { batchId: batch.batchId, name: saved?.name || `Playlist #${batch.batchId}`,
+          payer: batch.payer, status: batch.status, transactionHash: batch.transactionHash,
+          resolutionTransactionHash: batch.resolutionTransactionHash,
+          subtotalUnits: batch.subtotalUnits, feeUnits: batch.feeUnits,
+          refundedUnits: batch.refundedSongUnits !== undefined && batch.refundedFeeUnits !== undefined
+            ? (BigInt(batch.refundedSongUnits) + BigInt(batch.refundedFeeUnits)).toString() : null,
+          playing: !!nowPlaying?.audible && nowPlaying.djukePlaylist?.batchId === batch.batchId,
+          workerGasSponsored: sponsoredDjuke,
           ...(saved ? { playlistId: saved.id, revision: saved.revision } : {}),
           songs: batch.songIds.map((songId, index) => {
             const laneId = batch.laneIds[index];

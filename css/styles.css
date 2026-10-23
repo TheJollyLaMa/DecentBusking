@@ -1047,6 +1047,24 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 .djuke-queue-heading { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
 .djuke-queue-heading h3 { margin: 0; font-size: .8rem; }
 #djuke-count { margin-left: 4px; color: #8cd5b3; font-variant-numeric: tabular-nums; }
+.djuke-receipts { margin: 12px 0 16px; }
+.djuke-receipts h3 { margin: 0 0 7px; font-size: .72rem; color: #a9cbd8; font-weight: 500; letter-spacing: .05em; }
+.djuke-receipt { border: 1px solid #3a657866; border-radius: 10px; background: linear-gradient(120deg, #122b32aa, #141e2caa); margin: 6px 0; padding: 9px 11px; font-size: .7rem; line-height: 1.5; overflow-wrap: anywhere; }
+.djuke-receipt summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.djuke-receipt summary::-webkit-details-marker { display: none; }
+.djuke-receipt-name { flex: 1; min-width: 0; color: #d4e7ee; }
+.djuke-receipt-badge { color: #90d9f2; font-size: .61rem; white-space: nowrap; letter-spacing: .04em; }
+.djuke-receipt summary::after { content: '+'; color: #8ab4c6; }
+.djuke-receipt[open] summary::after { content: '-'; }
+.djuke-receipt[data-state="completed"] .djuke-receipt-badge,
+.djuke-receipt[data-state="refunded"] .djuke-receipt-badge { color: #9edcc4; }
+.djuke-receipt p { margin: 6px 0; color: #b5c7d1; }
+.djuke-receipt-progress { height: 2px; margin-top: 10px; border-radius: 2px; background: #6b9ca333; overflow: hidden; }
+.djuke-receipt-progress span { display: block; height: 100%; background: #83d9ed; transition: width .6s ease; }
+.djuke-receipt-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.djuke-receipt-links a { color: #a5dff1; text-decoration-color: #a5dff155; text-underline-offset: 3px; }
+#djuke-receipts-state { font-size: .65rem; color: #bbccd5; }
+@media (prefers-reduced-motion: reduce) { .djuke-receipt-progress span { transition: none; } }
 #djuke-queue { padding: 0; margin: 8px 0; list-style: none; max-height: 190px; overflow-y: auto; }
 #djuke-queue li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 7px; padding: 8px 0; border-bottom: 1px solid #334039; }
 .djuke-request-number { color: #7ccbaf; font-size: .75rem; font-variant-numeric: tabular-nums; }

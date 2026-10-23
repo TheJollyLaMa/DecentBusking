@@ -6,6 +6,18 @@ refunding or settling the batch. Actual unavailable/failed recordings still use
 the refund safety net. A successful purchase is not evidence that the entire
 playlist played; confirm delivery and refund events before reporting completion.
 
+The DJuke drawer shows the connected wallet's five most recent Play Live receipts:
+verifying queue, queued, playing, completed, or refunded. Expand a receipt for
+delivered-song progress, paid/refunded/settled USDC and Base transaction links.
+Refund notices explicitly distinguish USDC returned from non-refundable worker
+ETH (v0.4) and network gas. Completion requires the terminal on-chain fee event,
+not a purchase confirmation or a missing queue entry. Failed refreshes retain the
+last verified receipt and show an unavailable notice rather than implying success.
+Public read-only snapshots include pending batches and the 50 most recent resolved
+batches. Legacy schema-2 checkpoints replay events once from the configured
+deployment block to recover exact amounts and resolution links; this adds no
+transactions or public-request checkpoint writes.
+
 ## Sponsored playback candidate (not activated)
 
 Production v0.4 still requires a separately disclosed listener ETH worker
