@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261022-playlist-lane" />
+  <link rel="stylesheet" href="css/styles.css?v=20261023-playlist-actions" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -74,10 +74,11 @@
         <input id="djuke-playlist-name" type="text" maxlength="60" placeholder="Name your playlist" />
         <ol id="djuke-playlist" aria-label="Ordered playlist draft"></ol>
         <p id="djuke-playlist-total" role="status">Empty — add songs from a music card</p>
-        <button id="djuke-playlist-save" type="button" disabled>Save to profile</button>
-        <button id="djuke-playlist-buy" type="button" hidden disabled>Listen with existing personal-listen prices</button>
-        <button id="djuke-named-playlist-private" type="button" hidden disabled title="Requires compatible DJuke playlist deployment">Named playlist private checkout · creator prices</button>
-        <button id="djuke-named-playlist-radio" type="button" hidden disabled title="Requires compatible DJuke playlist deployment and gas-quote service">Buy radio playback · $3 per 12 songs fee</button>
+        <div class="djuke-playlist-actions" role="group" aria-label="Playlist actions">
+          <button id="djuke-playlist-save" class="djuke-playlist-action" type="button" disabled><span class="djuke-action-icon" aria-hidden="true">✦</span><span><strong>Save to Profile</strong><small>Keep this mix · no playback purchase</small></span></button>
+          <button id="djuke-named-playlist-private" class="djuke-playlist-action" type="button" disabled><span class="djuke-action-icon" aria-hidden="true">♫</span><span><strong>Personal Play</strong><small>Creator prices · one batch · just for you</small></span></button>
+          <button id="djuke-named-playlist-radio" class="djuke-playlist-action" type="button" disabled><span class="djuke-action-icon" aria-hidden="true">◉</span><span><strong>Play Live</strong><small>Radio tiers + $3 / 12 songs · everyone hears</small></span></button>
+        </div>
         <p id="djuke-playlist-state" role="status" aria-live="polite"></p>
       </details>
       <section class="djuke-earners" aria-labelledby="djuke-earners-title">
@@ -910,8 +911,8 @@
   <script type="module" src="js/devert-tab.mjs?v=20261022-playlist-lane"></script>
   <script type="module" src="js/creator-profile.mjs?v=20261022-action-badges"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
-  <script type="module" src="js/listens.mjs?v=20261022-playlist-lane"></script>
-  <script type="module" src="js/djuke-playlists-ui.mjs?v=20261022-playlist-lane"></script>
+  <script type="module" src="js/listens.mjs?v=20261023-playlist-actions"></script>
+  <script type="module" src="js/djuke-playlists-ui.mjs?v=20261023-playlist-actions"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261018-shared-provider"></script>
   <script type="module" src="js/devert-paid-queue.mjs?v=20261019-radio-recovery"></script>

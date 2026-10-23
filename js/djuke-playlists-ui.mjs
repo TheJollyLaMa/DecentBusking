@@ -1,5 +1,5 @@
 import { appendPlaylistSong, openPlaylistSelector } from './playlist-selector.mjs?v=20261022-playlist-lane';
-import { createListenPlaylist } from './listens.mjs?v=20261022-playlist-lane';
+import { createListenPlaylist } from './listens.mjs?v=20261023-playlist-actions';
 import { createNamedPlaylistClient, DJUKE_PLAYLIST_MAX_PER_PROFILE, getPlaylistBatchAbi,
   matchesPlaylistRevision, quoteNamedPlaylist, supportsDJukePlaylistBatch, supportsDJukePlaylistRadio } from './djuke-playlists.mjs?v=20261022-playlist-lane';
 import { ensureBaseNetwork, approvalNotice, waitForAllowance } from './base-chain.mjs';
@@ -152,14 +152,11 @@ export function initDjukePlaylists() {
   function updateGate() {
     const enabled = batchCapability();
     if (addSelected) addSelected.disabled = !songSelect?.value || draft.list().length >= 24 || busy;
-    const exactRevision = matchesPlaylistRevision(selectedRevision, draft.list().map(item => item.songId));
-    privateButton.hidden = !enabled;
-    radioButton.hidden = !radioCapability();
-    document.getElementById('djuke-playlist-buy').hidden = !draft.list().length;
-    privateButton.disabled = !enabled || !exactRevision || draft.list().length > 24 || busy;
-    privateButton.title = enabled ? (exactRevision ? 'Buy the selected immutable revision at each creator listen price; radio queue is untouched' : 'Load or save the exact named revision before private checkout') : 'Requires a compatible DJuke v0.4 playlist deployment';
-    radioButton.disabled = !radioCapability() || !exactRevision || !draft.list().length || draft.list().length > 24 || busy;
-    radioButton.title = radioCapability() ? 'Radio tiers: $0.25 / $0.50 / $1 per eight songs, plus $3 per 12 songs; paid requests cut in' : 'Requires a compatible DJuke v0.4 deployment and a ready signed gas-quote service';
+    const validDraft = draft.list().length >= 1 && draft.list().length <= 24;
+    privateButton.disabled = !enabled || !validDraft || busy;
+    privateButton.title = enabled ? 'One batch payment at creator prices, then every song plays in order just for you; saving is optional' : 'Personal Play requires a compatible DJuke v0.4 playlist deployment';
+    radioButton.disabled = !radioCapability() || !validDraft || busy;
+    radioButton.title = radioCapability() ? 'Play Live: radio tiers plus $3 per started group of 12 songs, worker ETH and wallet gas; main paid requests can cut in between songs' : 'Play Live is waiting for the radio worker and signed gas quote service';
     saveButton.disabled = busy || draft.list().length > 24 || !draft.list().length || !nameInput.value.trim();
   }
   function renderDraft() {
@@ -183,15 +180,15 @@ export function initDjukePlaylists() {
     const count = items.length;
     if (draftCount) draftCount.textContent = `${count}/24`;
     if (draftTotal) draftTotal.textContent = count > 24 ? 'Legacy listen cart: up to 50 songs. Named save and checkout require 1–24 songs.' : count
-      ? `${count} song${count === 1 ? '' : 's'} · estimated private ${formatUsdcUnits(quoteNamedPlaylist(count, 'private', items.map(item => item.listenPriceUnits)).totalUnits)} USDC · radio ${formatUsdcUnits(quoteNamedPlaylist(count, 'radio').totalUnits)} USDC including $3 per 12 songs platform fee (25% each: Playback / Top10 / Pinners / Repo). Paid requests cut in before playlist songs; worker quote and wallet gas shown before any radio confirmation`
+      ? `${count} songs · Personal Play ≈ ${formatUsdcUnits(quoteNamedPlaylist(count, 'private', items.map(item => item.listenPriceUnits)).totalUnits)} USDC · Play Live ≈ ${formatUsdcUnits(quoteNamedPlaylist(count, 'radio').totalUnits)} USDC including the $3 / 12 songs fee. Live adds worker ETH; wallet gas is extra. Main paid requests can cut in.`
       : 'Empty — add songs from a music card';
     if (count && count <= 24 && batchCapability() && globalThis.ethers && (window._wallet?.signer || config().rpcUrl)) {
       const ids = items.map(item => item.songId);
       const contract = new ethers.Contract(config().djukePlaylistBatchAddress, PLAYLIST_BATCH_ABI, window._wallet?.signer || (quoteProvider ||= new ethers.JsonRpcProvider(config().rpcUrl)));
       Promise.all([contract.quotePlaylist(ids, false), contract.quotePlaylist(ids, true)]).then(([privateQuote, radioQuote]) => {
         if (!matchesPlaylistRevision({ songIds: ids }, draft.list().map(item => item.songId))) return;
-        draftTotal.textContent = `${count} song${count === 1 ? '' : 's'} · estimated private ${formatUsdcUnits(privateQuote[2])} USDC · radio ${formatUsdcUnits(radioQuote[2])} USDC. Platform fee: 25% each Playback / Top10 / Pinners / Repo. Paid requests cut in.`;
-      }).catch(() => {});
+        draftTotal.textContent = `${count} songs · Personal Play ${formatUsdcUnits(privateQuote[2])} USDC · Play Live ${formatUsdcUnits(radioQuote[2])} USDC including the $3 / 12 songs fee. Live adds worker ETH; wallet gas is extra. Main paid requests can cut in.`;
+      }).catch(error => { state.textContent = `Playlist price verification unavailable: ${error.message}`; });
     }
     updateGate();
   }
@@ -233,8 +230,9 @@ export function initDjukePlaylists() {
         await run(async () => { await client.saveCopy(playlist); await refreshProfile(profileAddress); profileStatus.textContent = 'Saved immutable playlist copy; attribution preserved.'; });
       }, busy, 'Pin this immutable revision to your profile'));
     }
-    const privateAction = safeButton('Listen privately', async () => {
+    const privateAction = safeButton('Personal Play', async () => {
       await run(async () => {
+        if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
         const tracks = await resolveTrackItems(playlist.songIds);
         await purchasePrivateNamedPlaylist({ playlist, signer: window._wallet.signer, onStep: text => { profileStatus.textContent = text; } });
         event('djuke-private-playlist-purchased', { items: tracks });
@@ -242,7 +240,7 @@ export function initDjukePlaylists() {
     }, !batchCapability() || busy, 'Creator-priced checkout requires a compatible DJuke deployment');
     privateAction.hidden = !batchCapability();
     row.append(privateAction);
-    const radioAction = safeButton('Buy radio playback', async () => {
+    const radioAction = safeButton('Play Live', async () => {
       await run(async () => {
         if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
         await purchaseRadioNamedPlaylist({ playlist, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { profileStatus.textContent = text; } });
@@ -418,23 +416,23 @@ export function initDjukePlaylists() {
   document.addEventListener('wallet-disconnected', () => { currentProfile = null; profileItems?.replaceChildren(); profileAddress = ''; renderDraft(); });
   document.addEventListener('djuke-playlist-batch-config-changed', updateGate);
   privateButton?.addEventListener('click', async () => {
-    const selected = selectedRevision;
-    if (!selected) { state.textContent = 'Save or load a named playlist before private checkout.'; return; }
-    const items = await resolveTrackItems(selected.songIds);
+    const selected = { songIds: draft.list().map(item => item.songId) };
     await run(async () => {
+      const items = await resolveTrackItems(selected.songIds);
       if (!window._wallet?.signer) await window._wallet?.connect?.();
       if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
       await purchasePrivateNamedPlaylist({ playlist: selected, signer: window._wallet.signer, onStep: text => { state.textContent = text; } });
       event('djuke-private-playlist-purchased', { items });
+      state.textContent = 'Personal Play purchased. Playing every song in order, just for you.';
     });
   });
   radioButton?.addEventListener('click', async () => {
-    const selected = selectedRevision;
-    if (!selected) { state.textContent = 'Save or load a named playlist before radio checkout.'; return; }
+    const selected = { songIds: draft.list().map(item => item.songId) };
     await run(async () => {
       if (!window._wallet?.signer) await window._wallet?.connect?.();
       if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
       await purchaseRadioNamedPlaylist({ playlist: selected, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { state.textContent = text; } });
+      state.textContent = 'Play Live confirmed. Your playlist is queued for everyone; main paid requests can cut in between songs.';
     });
   });
   const initialItems = draft.list();

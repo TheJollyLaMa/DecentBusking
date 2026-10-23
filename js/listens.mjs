@@ -210,8 +210,13 @@ export function initListens() {
   });
 
   function renderPlaylist() {
-    if (!playlistEl || !playlistTotal || !playlistBuy) return;
+    if (!playlistEl || !playlistTotal) return;
     const items = playlist.list();
+    if (document.getElementById('djuke-playlist-save')) {
+      document.dispatchEvent(new CustomEvent('djuke-playlist-draft-changed', { detail: { items } }));
+      return;
+    }
+    if (!playlistBuy) return;
     playlistEl.replaceChildren();
     for (const item of items) {
       const row = document.createElement('li');
@@ -237,7 +242,7 @@ export function initListens() {
     document.dispatchEvent(new CustomEvent('djuke-playlist-draft-changed', { detail: { items } }));
   }
   async function addToPlaylist(song, status) {
-    if (!playlistEl || !playlistTotal || !playlistBuy) {
+    if (!playlistEl || !playlistTotal) {
       status('Playlists are no longer shown in the DJuke panel.');
       return;
     }
