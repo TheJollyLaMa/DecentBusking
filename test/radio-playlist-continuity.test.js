@@ -5,7 +5,7 @@ const { PassThrough } = require('node:stream');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-test('all 12 paid songs beat ordinary rotation even when every checkpoint exceeds both selection deadlines', async t => {
+test('all 12 paid songs beat rotation with production head-only reads and checkpoints slower than both deadlines', async t => {
   const { createDjukeRuntime, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
   const { combinePaidQueues } = await import('../discord-bot/devert-queue.js');
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
@@ -18,7 +18,7 @@ test('all 12 paid songs beat ordinary rotation even when every checkpoint exceed
     save: async () => { await delay(12); return 'ipfs://durable'; } });
   let refunds = 0;
   const runtime = createDjukeRuntime({ journal, timeoutMs: 2, minAudibleMs: 1,
-    readState: async () => ({ requests: structuredClone(requests) }),
+    readState: async () => ({ requests: structuredClone(requests.slice(0, 1)), playlistPending: requests.length }),
     getTrack: trackId => ({ trackId, title: trackId }),
     fulfill: async ({ playlistLaneId }) => { requests = requests.filter(item => item.playlistLaneId !== playlistLaneId); },
     refundPlaylistBatch: async () => { refunds++; }, log: { warn() {} } });
@@ -79,6 +79,25 @@ test('stale prefetched rotation is discarded at a paid-playlist handoff instead 
   assert.equal(refreshed, true);
   assert.equal(session._nowPlaying, null);
   assert.match(session.getPlaybackStatus().reason, /paid playlist/);
+});
+
+test('remaining on-chain lanes keep the playlist hold after the only journaled head has fulfilled', async () => {
+  const { createDjukeRuntime, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
+  const items = [0, 1].map(i => ({ requestId: `lane:${i}`, playlistLaneId: String(i), playlistBatchId: '1',
+    songId: `0x${String(i + 1).padStart(64, '0')}`, trackId: `track-${i}`, revision: '0', playable: true }));
+  let requests = items;
+  const journal = createDjukePlaybackJournal({ restore: async () => null, save: async () => 'ipfs://durable' });
+  const runtime = createDjukeRuntime({ journal, minAudibleMs: 1,
+    readState: async () => ({ requests: requests.slice(0, 1), playlistPending: requests.length }),
+    getTrack: trackId => ({ trackId }),
+    fulfill: async () => { requests = requests.slice(1); } });
+  const first = await runtime.nextPaid();
+  await runtime.complete(first.record, { playId: 'first', audibleMs: 100, finished: true });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(journal.getState().length, 1, 'production only journals the exposed lane head');
+  assert.equal(journal.getState()[0].state, 'fulfilled');
+  assert.equal(runtime.hasPendingPlaylist(), true, 'remaining lane count holds rotation before the next head enters the journal');
+  assert.equal((await runtime.nextPaid()).record.requestId, items[1].requestId);
 });
 
 test('a prepared playlist reservation is revalidated against refunds, changed recordings and newer main requests', async () => {

@@ -11,8 +11,11 @@ the refund safety net. A successful purchase is not evidence that the entire
 playlist played; confirm delivery and refund events before reporting completion.
 
 While a known paid playlist remains unfinished, ordinary rotation is held rather
-than starting an unrelated recording during checkpoint/settlement delays. Stale
-prefetched rotation is discarded at the handoff, and the worker retries after a
+than starting an unrelated recording during checkpoint/settlement delays.
+The hold uses the verified on-chain remaining-lane count as well as active journal
+records: production reads only the lane head, so the journal may briefly contain
+only a fulfilled song while later paid songs still await their next snapshot.
+Stale prefetched rotation is discarded at the handoff, and the worker retries after a
 second. Radio status explicitly reports that it is waiting for the paid playlist.
 This can introduce a bookkeeping gap; it is not a promise of gapless streaming.
 Main paid requests, eligible advert breaks, and protected scheduled/live shows
