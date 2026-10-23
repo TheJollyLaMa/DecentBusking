@@ -1,5 +1,62 @@
 # Named DJuke playlists — rollout decisions
 
+Queue-selection timeouts are scheduling deferrals, not playback failures. A
+reservation returned after radio has moved on is released back to pending without
+refunding or settling the batch. Actual unavailable/failed recordings still use
+the refund safety net. A successful purchase is not evidence that the entire
+playlist played; confirm delivery and refund events before reporting completion.
+
+The DJuke drawer shows the connected wallet's five most recent Play Live receipts:
+verifying queue, queued, playing, completed, or refunded. Expand a receipt for
+delivered-song progress, paid/refunded/settled USDC and Base transaction links.
+Refund notices explicitly distinguish USDC returned from non-refundable worker
+ETH (v0.4) and network gas. Completion requires the terminal on-chain fee event,
+not a purchase confirmation or a missing queue entry. Failed refreshes retain the
+last verified receipt and show an unavailable notice rather than implying success.
+Public read-only snapshots include pending batches and the 50 most recent resolved
+batches. Legacy schema-2 checkpoints replay events once from the configured
+deployment block to recover exact amounts and resolution links; this adds no
+transactions or public-request checkpoint writes.
+
+## Sponsored playback candidate (not activated)
+
+Production v0.4 still requires a separately disclosed listener ETH worker
+contribution and releases its platform fee only on completion. Removing that
+charge requires the replacement v0.5 contract; it cannot be hidden in the UI or
+retroactively removed from existing purchases. Both versions retain ordinary
+wallet network gas, signed quotes, the same USDC tiers, and main-request cut-in.
+
+The v0.5 candidate signs zero worker contributions only after verifying its
+on-chain version and worker solvency. Each fourth delivered playlist song releases
+$1 **total**, split $0.25 to each of the four funds. Completion releases any
+remaining platform fee. Interruptions refund undelivered songs and only the
+unreleased platform fee. Existing v0.4 batches retain their original policy.
+
+Automated refills default to **disabled**. Reserve setup and treasury funding were
+explicitly deferred; no keys, transfers, contract deployment or production
+financial cutover are part of this activation. Before enabling v0.5, provision a
+dedicated Base ETH reserve, enable `WORKER_RESERVE_ENABLED=true`, configure
+`WORKER_RESERVE_PRIVATE_KEY`, and verify the funded worker and durable journal.
+The reserve must be distinct from the worker, use one writer/service, and never
+be used independently while its pending signed transfers are being recovered.
+Missing or unreadable durable checkpoints must be resolved before activation.
+
+Approved limits: refill below 0.001 ETH toward 0.003 ETH, at most 0.002 ETH per
+transfer and 0.006 ETH per UTC day. These are transfer-value caps; each transfer
+also has a separate maximum network fee of 0.00002 ETH. Failed transfers count
+conservatively toward the daily value cap. Pinata stores the exact signed raw
+transaction **before** broadcast; restart recovery rebroadcasts that transaction,
+not a new payment. This reserve journal is not part of the public mirror queue.
+All funding failures are explicit; low worker funds pause sponsored quotes.
+
+The public catalog never waits for reconciliation or checkpoint writes. Its
+read-only batch snapshot supplies the complete ordered queue; exact, uniquely
+matching saved revisions supply names, otherwise the label is `Playlist #id`.
+Radio takeover badges and bounded, slow 3D notes/balloons/genies appear only
+during audible playlist playback, pause for main-request cut-ins, and clear on
+normal rotation/archive mode. Particles require real spectrum energy and respect
+reduced motion; the text indicator remains available without animation.
+
 Issue #241 adds a profile-backed playlist library. Names are 1–60 characters;
 playlist IDs are stable 128-bit hex IDs, names need not be globally unique, and
 results identify the maker and full ID. A playlist contains 1–24 distinct

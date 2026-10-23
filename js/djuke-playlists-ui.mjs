@@ -53,8 +53,14 @@ export async function purchaseRadioNamedPlaylist({ playlist, signer, config = wi
   if (quote.contractAddress?.toLowerCase() !== config.djukePlaylistBatchAddress?.toLowerCase() ||
       quote.listener?.toLowerCase() !== listener.toLowerCase() || !Number.isInteger(quote.deadline) ||
       quote.deadline < nowSeconds || quote.deadline > nowSeconds + 300 ||
+      maxTotal !== quoteNamedPlaylist(songIds.length, 'radio').totalUnits ||
       contributionWei !== fulfillmentCostWei * 2n * BigInt(songIds.length)) throw new Error('Worker returned an invalid or expired playlist gas quote');
   const djuke = new ethers.Contract(config.djukePlaylistBatchAddress, PLAYLIST_BATCH_ABI, signer);
+  if (config.djukePlaylistBatchVersion === '0.5') {
+    if (contributionWei !== 0n || fulfillmentCostWei !== 0n || await djuke.CONTRACT_VERSION() !== '0.5') {
+      throw new Error('Platform-funded playlist checkout requires DJuke v0.5 and no worker ETH charge');
+    }
+  } else if (contributionWei <= 0n) throw new Error('Legacy playlist checkout requires its disclosed worker gas contribution');
   const usdc = new ethers.Contract(BASE_USDC, USDC_ABI, signer);
   if (Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');
   if (await usdc.balanceOf(listener) < maxTotal) throw new Error(`You need ${formatUsdcUnits(maxTotal)} USDC on Base`);
@@ -65,7 +71,8 @@ export async function purchaseRadioNamedPlaylist({ playlist, signer, config = wi
     if ((await approval.wait())?.status !== 1) throw new Error('USDC approval did not confirm');
     await waitForAllowance(usdc, listener, djuke.target, maxTotal);
   }
-  onStep(`${songIds.length} songs · ${formatUsdcUnits(maxTotal)} USDC · ${ethers.formatEther(contributionWei)} ETH worker gas`);
+  onStep(`${songIds.length} songs · ${formatUsdcUnits(maxTotal)} USDC · ${contributionWei === 0n
+    ? 'platform-funded worker execution; wallet network gas still applies' : `${ethers.formatEther(contributionWei)} ETH worker gas`}`);
   await djuke.requestPlaylistWithGas.staticCall(songIds, maxTotal, fulfillmentCostWei, quote.deadline, quote.signature, { value: contributionWei });
   onStep('Confirm radio playlist checkout in your wallet');
   const transaction = await djuke.requestPlaylistWithGas(songIds, maxTotal, fulfillmentCostWei, quote.deadline, quote.signature, { value: contributionWei });
@@ -137,13 +144,16 @@ export function initDjukePlaylists() {
   let workerRadioReady = false;
   const batchCapability = () => supportsDJukePlaylistBatch(config());
   const radioCapability = () => supportsDJukePlaylistRadio({ ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady });
+  const workerCostNotice = () => config().djukePlaylistBatchVersion === '0.5'
+    ? 'Worker execution is platform-funded; wallet network gas is extra.'
+    : 'Live adds worker ETH; wallet gas is extra.';
   async function refreshPlaylistReadiness() {
     const service = String(config().ipfsUploadServiceUrl || '').replace(/\/$/, '');
-    if (!service || config().djukePlaylistBatchVersion !== '0.4') { workerRadioReady = false; updateGate(); return; }
+    if (!service || !['0.4', '0.5'].includes(config().djukePlaylistBatchVersion)) { workerRadioReady = false; updateGate(); return; }
     try {
       const response = await fetch(`${service}/api/djuke/playlist-readiness`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
       const status = response.ok ? await response.json() : null;
-      workerRadioReady = status?.ready === true && status.version === '0.4' &&
+      workerRadioReady = status?.ready === true && status.version === config().djukePlaylistBatchVersion &&
         status.contractAddress?.toLowerCase() === config().djukePlaylistBatchAddress?.toLowerCase();
     } catch { workerRadioReady = false; }
     updateGate();
@@ -180,14 +190,14 @@ export function initDjukePlaylists() {
     const count = items.length;
     if (draftCount) draftCount.textContent = `${count}/24`;
     if (draftTotal) draftTotal.textContent = count > 24 ? 'Legacy listen cart: up to 50 songs. Named save and checkout require 1–24 songs.' : count
-      ? `${count} songs · Personal Play ≈ ${formatUsdcUnits(quoteNamedPlaylist(count, 'private', items.map(item => item.listenPriceUnits)).totalUnits)} USDC · Play Live ≈ ${formatUsdcUnits(quoteNamedPlaylist(count, 'radio').totalUnits)} USDC including the $3 / 12 songs fee. Live adds worker ETH; wallet gas is extra. Main paid requests can cut in.`
+      ? `${count} songs · Personal Play ≈ ${formatUsdcUnits(quoteNamedPlaylist(count, 'private', items.map(item => item.listenPriceUnits)).totalUnits)} USDC · Play Live ≈ ${formatUsdcUnits(quoteNamedPlaylist(count, 'radio').totalUnits)} USDC including the $3 / 12 songs fee. ${workerCostNotice()} Main paid requests can cut in.`
       : 'Empty — add songs from a music card';
     if (count && count <= 24 && batchCapability() && globalThis.ethers && (window._wallet?.signer || config().rpcUrl)) {
       const ids = items.map(item => item.songId);
       const contract = new ethers.Contract(config().djukePlaylistBatchAddress, PLAYLIST_BATCH_ABI, window._wallet?.signer || (quoteProvider ||= new ethers.JsonRpcProvider(config().rpcUrl)));
       Promise.all([contract.quotePlaylist(ids, false), contract.quotePlaylist(ids, true)]).then(([privateQuote, radioQuote]) => {
         if (!matchesPlaylistRevision({ songIds: ids }, draft.list().map(item => item.songId))) return;
-        draftTotal.textContent = `${count} songs · Personal Play ${formatUsdcUnits(privateQuote[2])} USDC · Play Live ${formatUsdcUnits(radioQuote[2])} USDC including the $3 / 12 songs fee. Live adds worker ETH; wallet gas is extra. Main paid requests can cut in.`;
+        draftTotal.textContent = `${count} songs · Personal Play ${formatUsdcUnits(privateQuote[2])} USDC · Play Live ${formatUsdcUnits(radioQuote[2])} USDC including the $3 / 12 songs fee. ${workerCostNotice()} Main paid requests can cut in.`;
       }).catch(error => { state.textContent = `Playlist price verification unavailable: ${error.message}`; });
     }
     updateGate();
@@ -243,7 +253,9 @@ export function initDjukePlaylists() {
     const radioAction = safeButton('Play Live', async () => {
       await run(async () => {
         if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
-        await purchaseRadioNamedPlaylist({ playlist, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { profileStatus.textContent = text; } });
+        const purchase = await purchaseRadioNamedPlaylist({ playlist, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { profileStatus.textContent = text; } });
+        event('djuke-radio-playlist-purchased', { ...purchase, name: playlist.name, songIds: playlist.songIds });
+        profileStatus.textContent = 'Purchase confirmed. Open DJuke to follow your Play Live receipt for delivery or refund.';
       });
     }, !radioCapability() || busy, 'Radio checkout requires the compatible batch deployment and signed gas quote service');
     radioAction.hidden = !radioCapability();
@@ -431,8 +443,9 @@ export function initDjukePlaylists() {
     await run(async () => {
       if (!window._wallet?.signer) await window._wallet?.connect?.();
       if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
-      await purchaseRadioNamedPlaylist({ playlist: selected, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { state.textContent = text; } });
-      state.textContent = 'Play Live confirmed. Your playlist is queued for everyone; main paid requests can cut in between songs.';
+      const purchase = await purchaseRadioNamedPlaylist({ playlist: selected, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { state.textContent = text; } });
+      event('djuke-radio-playlist-purchased', { ...purchase, name: nameInput.value.trim() || 'Your playlist', songIds: selected.songIds });
+      state.textContent = 'Purchase confirmed. Follow your Play Live receipt above for delivery or refund; main paid requests can cut in.';
     });
   });
   const initialItems = draft.list();

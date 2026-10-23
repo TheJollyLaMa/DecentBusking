@@ -195,6 +195,7 @@ export function createDevertQueueRuntime({ readState, store, contract, isCampaig
       return runtime.complete(record, play);
     },
     fail: runtime.fail,
+    release: runtime.release,
     async prepareCampaignRemoval(campaignId) {
       const id = String(campaignId);
       removingCampaigns.add(id);
@@ -226,7 +227,7 @@ export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 1
     const pending = Promise.resolve().then(() => runtime.nextPaid(options));
     pending.then(async selection => {
       if (timedOut && selection) {
-        await runtime.fail(selection.record, new Error('Queue selection completed after the radio moved on'));
+        await runtime.release(selection.record, new Error('Queue selection completed after the radio moved on'));
       }
     }).catch(error => {
       if (timedOut) log.warn(`[${label}] Late queue selection/release failed: ${error.message}`);
@@ -255,6 +256,7 @@ export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 1
     },
     complete(record, play) { return (record.kind === 'devert' ? adverts : songs).complete(record, play); },
     fail(record, error) { return (record.kind === 'devert' ? adverts : songs).fail(record, error); },
+    release(record, error) { return (record.kind === 'devert' ? adverts : songs).release(record, error); },
     canPlay(record) { return record.kind === 'devert' ? adverts.canPlay(record) : true; },
   };
 }

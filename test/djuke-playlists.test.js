@@ -99,6 +99,9 @@ test('profile playlist library preserves immutable saved revisions, maker author
   await assert.rejects(store.savePlaylistCopy(copy, origin), /already used/);
   const updated = { ...first, name: 'Revised name', revision: 2, songIds: [song(2), song(1)] };
   await store.savePlaylist(await issue(maker, { action: 'update-playlist', playlist: updated }), origin);
+  assert.equal(store.findPlaylistRevision(maker.address, first.songIds).name, first.name);
+  assert.equal(store.findPlaylistRevision(maker.address, updated.songIds).revision, 2);
+  assert.equal(store.findPlaylistRevision(otherMaker.address, first.songIds), null);
   const listenerProfile = store.get(listener.address);
   assert.equal(listenerProfile.playlists.length, 1);
   assert.equal(listenerProfile.playlists[0].revision, 1);

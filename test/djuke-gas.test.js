@@ -22,6 +22,33 @@ test('worker signs bounded Base gas quotes including L1 fee with doubled contrib
   provider.getNetwork = async () => ({ chainId: 1n });
   await assert.rejects(reader({ listener, songId: `0x${'a'.repeat(64)}` }), /Base-only/);
 });
+
+test('sponsored quotes require v0.5 and a funded worker and never charge listener ETH', async () => {
+  const { createDjukeGasQuoteReader, createDjukePlaylistGasQuoteReader } = await import('../discord-bot/djuke-gas.js');
+  const signer = Wallet.createRandom(), listener = Wallet.createRandom().address;
+  let version = '0.5', balance = 3_000_000_000_000_000n;
+  const contract = { target: Wallet.createRandom().address,
+    interface: new Interface(['function fulfill(uint256,bytes32,uint256,bytes32)', 'function fulfillPlaylistSong(uint256,bytes32,uint256,bytes32)']),
+    CONTRACT_VERSION: async () => version, gasWorker: async () => signer.address, maxGasContributionWei: async () => 10n ** 15n,
+    gasQuoteNonces: async () => 0n, quote: async () => 250000n, quotePlaylist: async () => [4000000n, 3000000n, 7000000n],
+    getSong: async () => ({ enabled: true }), nextRequestId: async () => 0n, playlistNextId: async () => 0n };
+  const provider = { getNetwork: async () => ({ chainId: 8453 }), getBalance: async () => balance,
+    getFeeData: async () => ({ maxFeePerGas: 1000000n, maxPriorityFeePerGas: 1n }) };
+  const options = { contract, provider, signer, sponsored: true, fulfillmentGasUnits: 100000n,
+    oracle: { getL1Fee: async () => 1000n } };
+  const single = createDjukeGasQuoteReader(options);
+  const playlist = createDjukePlaylistGasQuoteReader(options);
+  const songId = `0x${'a'.repeat(64)}`;
+  for (const quote of [await single({ listener, songId }), await playlist({ listener, songIds: [songId] })]) {
+    assert.equal(quote.fulfillmentCostWei, '0');
+    assert.equal(quote.contributionWei, '0');
+  }
+  balance = 0n;
+  await assert.rejects(single({ listener, songId }), /reserve is low/);
+  await assert.rejects(playlist({ listener, songIds: [songId] }), /reserve is low/);
+  balance = 3_000_000_000_000_000n; version = '0.4';
+  await assert.rejects(single({ listener, songId }), /v0.5/);
+});
 test('gas quotes stay within RPC rate limits: cached statics, shared in-flight quotes, no nonce lookup, retry on 429', async () => {
   const { createDjukeGasQuoteReader, isRpcRateLimit } = await import('../discord-bot/djuke-gas.js');
   const signer = Wallet.createRandom(), listener = Wallet.createRandom().address;

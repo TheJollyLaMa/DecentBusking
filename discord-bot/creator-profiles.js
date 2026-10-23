@@ -114,6 +114,17 @@ export function createCreatorProfiles({ restore, save, now = () => Date.now() })
       if (!/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('Invalid creator wallet');
       return structuredClone({ address: address.toLowerCase(), ...profileRecord(address.toLowerCase()) });
     },
+    findPlaylistRevision(address, songIds) {
+      requireReady();
+      const wallet = String(address).toLowerCase();
+      const candidates = [
+        ...Object.values(playlists).filter(record => record.maker === wallet).flatMap(record => record.revisions),
+        ...(profiles[wallet]?.playlists || []),
+      ].filter(playlist => playlist.songIds.length === songIds.length &&
+        playlist.songIds.every((id, index) => id.toLowerCase() === songIds[index].toLowerCase()));
+      const unique = [...new Map(candidates.map(item => [`${item.id}:${item.revision}`, item])).values()];
+      return unique.length === 1 ? structuredClone(unique[0]) : null;
+    },
     getByDiscordId(discordId) {
       requireReady();
       if (!/^\d{16,22}$/.test(discordId || '')) return null;

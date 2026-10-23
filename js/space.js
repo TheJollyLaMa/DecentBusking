@@ -27,6 +27,7 @@ import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider
 import { setNowPlaying } from './stage.js?v=20261022-playlist-lane';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft } from './nft-loader.js?v=20261012-paging';
+import { createRadioPlaylistEffects } from './radio-playlist-effects.mjs?v=20261023-radio-takeover';
 
 // ── Timeline constants ────────────────────────────────────────────────────
 const UNITS_PER_DAY   = 5;          // 3-D units per day on the Z-axis
@@ -40,6 +41,7 @@ const CAM_Z_OFFSET = 28;
 
 // ── Global state ──────────────────────────────────────────────────────────
 let _renderer, _scene, _camera, _controls;
+let _playlistEffects;
 let _nftMeshes = [];
 let _raycaster, _mouse;
 
@@ -100,6 +102,8 @@ let _sharedFocusLookupToken = 0;
 // ── Public API ────────────────────────────────────────────────────────────
 export function initSpace() {
   _buildScene();
+  _playlistEffects?.dispose();
+  _playlistEffects = createRadioPlaylistEffects({ scene: _scene, camera: _camera, readSpectrum: readNowPlayingSpectrum });
   _buildControls();
   if (_pendingNowPlaying) _applyNowPlaying(_pendingNowPlaying);
   _addTimelineLine();
@@ -1609,6 +1613,7 @@ function _applyNowPlayingNeighborDimming(mesh, pulse = 0, zoomBoost = 0) {
 // ── Animation Loop ─────────────────────────────────────────────────────────
 function _animate() {
   _animFrameId = requestAnimationFrame(_animate);
+  _playlistEffects?.update(performance.now());
 
   // Update live age for all meshes and billboard toward camera
   for (const mesh of _nftMeshes) {

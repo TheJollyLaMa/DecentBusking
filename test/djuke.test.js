@@ -17,7 +17,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261023-stable-song-menu/);
+  assert.match(html, /djuke\.mjs\?v=20261023-radio-takeover/);
   assert.match(html, /devert-paid-queue\.mjs\?v=20261019-radio-recovery/);
 });
 
@@ -28,6 +28,32 @@ test('DJuke starts at 0.25 USDC and doubles after each eight pending requests', 
     assert.equal(quoteDjuke(pending).priceUnits, expected);
   }
   assert.equal(quoteDjuke(7).priceUnits, 250000n);
+});
+
+test('playlist receipt distinguishes purchase, delivery and exact refund without hiding worker ETH', async () => {
+  const { playlistReceiptSummary } = await import('../js/djuke.mjs');
+  const batch = { status: 'refunded', songs: Array.from({ length: 12 }, (_, i) => ({
+    status: i === 0 ? 'delivered' : 'refunded' })), subtotalUnits: '4000000', feeUnits: '3000000',
+    refundedUnits: '6750000', workerGasSponsored: false };
+  const refund = playlistReceiptSummary(batch);
+  assert.equal(refund.label, 'Refunded');
+  assert.equal(refund.progress, '1 / 12 songs delivered');
+  assert.equal(refund.payment, 'Paid 7.00 USDC · Refunded 6.75 USDC · Settled 0.25 USDC');
+  assert.match(refund.note, /Worker ETH and network gas are not refunded/);
+  const queued = playlistReceiptSummary({ ...batch, status: 'pending' });
+  assert.equal(queued.label, 'Queued');
+  assert.doesNotMatch(queued.payment, /Refunded/);
+  assert.equal(playlistReceiptSummary({ ...batch, status: 'pending', playing: true }).label, 'Playing');
+  const completed = playlistReceiptSummary({ ...batch, status: 'settled', songs: batch.songs.map(() => ({ status: 'delivered' })) });
+  assert.equal(completed.label, 'Completed');
+  assert.equal(completed.progress, '12 / 12 songs delivered');
+  assert.match(completed.note, /platform fee settled/);
+  const confirming = playlistReceiptSummary({ ...batch, status: 'confirming' });
+  assert.equal(confirming.label, 'Verifying queue');
+  assert.match(confirming.note, /playback is not complete/);
+  assert.match(playlistReceiptSummary({ ...batch, refundedUnits: null }).payment, /Refund amount is being verified/);
+  assert.match(playlistReceiptSummary({ ...batch, subtotalUnits: undefined }).payment, /Payment details are being verified/);
+  assert.doesNotMatch(playlistReceiptSummary({ ...batch, workerGasSponsored: true }).note, /Worker ETH/);
 });
 
 test('DJuke keeps the 10 percent fund and 90 percent artist split exact', async () => {
@@ -343,5 +369,11 @@ test('v0.2 payment verifies a worker quote and sends exactly the doubled ETH con
     await payForDjukeSong({ ...fixture, gasQuote: quote });
     assert.deepEqual(fixture.calls, [['gas-request', 2000n]]);
     await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: { ...quote, contributionWei: '4000' } }), /Invalid worker gas quote/);
+    const sponsoredQuote = { ...quote, contributionWei: '0', fulfillmentCostWei: '0' };
+    fixture.djuke.CONTRACT_VERSION = async () => '0.4';
+    await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: sponsoredQuote }), /Invalid worker gas quote/);
+    fixture.djuke.CONTRACT_VERSION = async () => '0.5';
+    await payForDjukeSong({ ...fixture, gasQuote: sponsoredQuote });
+    assert.deepEqual(fixture.calls.at(-1), ['gas-request', 0n]);
   } finally { global.ethers = previous; }
 });

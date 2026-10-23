@@ -1,6 +1,14 @@
 import { AbiCoder, Contract, Transaction, keccak256 } from 'ethers';
 import { DJUKE_SIGNING_DOMAIN_VERSION } from '../js/djuke-version.mjs';
 
+async function requireSponsorBalance(provider, contract, worker, estimatedCost) {
+  if (await contract.CONTRACT_VERSION() !== '0.5') throw new Error('Platform funding requires DJuke v0.5');
+  const balance = await provider.getBalance(worker);
+  if (balance < 1_000_000_000_000_000n || balance < estimatedCost * 2n) {
+    throw new Error('Platform worker reserve is low; checkout is paused until replenished');
+  }
+}
+
 export const GAS_QUOTE_TYPES = { GasQuote: [
   { name: 'listener', type: 'address' }, { name: 'songId', type: 'bytes32' }, { name: 'maxPrice', type: 'uint256' },
   { name: 'fulfillmentCostWei', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' },
@@ -19,7 +27,7 @@ export const DJUKE_PLAYLIST_GAS_ABI = [
 ];
 
 export function createDjukePlaylistGasQuoteReader({ provider, contract, signer, fulfillmentGasUnits = 1000000n,
-  oracle, now = () => Date.now(), feeCacheMs = 10000, retry = {} }) {
+  oracle, now = () => Date.now(), feeCacheMs = 10000, retry = {}, sponsored = false }) {
   const gasLimit = BigInt(fulfillmentGasUnits);
   if (gasLimit < 100000n || gasLimit > 2000000n) throw new Error('Invalid fulfillment gas budget');
   const feeOracle = oracle || new Contract('0x420000000000000000000000000000000000000F', ['function getL1Fee(bytes) view returns(uint256)'], provider);
@@ -46,8 +54,12 @@ export function createDjukePlaylistGasQuoteReader({ provider, contract, signer, 
     const transaction = Transaction.from({ type: 2, chainId: 8453, to: contract.target, gasLimit, nonce: SIZING_NONCE,
       maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas ?? 0n, data });
     const l1Fee = await call(() => feeOracle.getL1Fee(transaction.unsignedSerialized));
-    const fulfillmentCostWei = gasLimit * maxFeePerGas + l1Fee;
+    let fulfillmentCostWei = gasLimit * maxFeePerGas + l1Fee;
     if (fulfillmentCostWei <= 0n || fulfillmentCostWei > BigInt(cap) / 2n) throw new Error('Estimated worker gas exceeds the contract cap');
+    if (sponsored) {
+      await requireSponsorBalance(provider, contract, worker, fulfillmentCostWei * BigInt(songIds.length));
+      fulfillmentCostWei = 0n;
+    }
     const deadline = Math.floor(now() / 1000) + 120;
     const quote = { listener, songIdsHash: keccak256(coder.encode(['bytes32[]'], [songIds])),
       maxTotal: BigInt(price.total ?? price[2]).toString(), fulfillmentCostWei: fulfillmentCostWei.toString(), nonce: nonce.toString(), deadline };
@@ -60,6 +72,7 @@ export function createDjukePlaylistGasQuoteReader({ provider, contract, signer, 
 }
 
 export const DJUKE_GAS_ABI = [
+  'function CONTRACT_VERSION() view returns(string)',
   'function gasWorker() view returns(address)', 'function maxGasContributionWei() view returns(uint256)',
   'function gasQuoteNonces(address) view returns(uint256)',
   'function requestPlayWithGas(bytes32,uint256,uint256,uint256,bytes) payable returns(uint256)',
@@ -96,7 +109,7 @@ function cached(load, ttlMs, now) {
 }
 
 export function createDjukeGasQuoteReader({ provider, contract, signer, fulfillmentGasUnits = 1000000n, oracle,
-  now = () => Date.now(), staticCacheMs = 300000, feeCacheMs = 10000, retry = {} }) {
+  now = () => Date.now(), staticCacheMs = 300000, feeCacheMs = 10000, retry = {}, sponsored = false }) {
   const gasLimit = BigInt(fulfillmentGasUnits);
   if (gasLimit < 100000n || gasLimit > 2000000n) throw new Error('Invalid fulfillment gas budget');
   const feeOracle = oracle || new Contract('0x420000000000000000000000000000000000000F', ['function getL1Fee(bytes) view returns(uint256)'], provider);
@@ -123,8 +136,12 @@ export function createDjukeGasQuoteReader({ provider, contract, signer, fulfillm
     const transaction = Transaction.from({ type: 2, chainId: 8453, to: contract.target, gasLimit, nonce: SIZING_NONCE,
       maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas ?? 0n, data });
     const l1Fee = await call(() => feeOracle.getL1Fee(transaction.unsignedSerialized));
-    const fulfillmentCostWei = gasLimit * maxFeePerGas + l1Fee;
+    let fulfillmentCostWei = gasLimit * maxFeePerGas + l1Fee;
     if (fulfillmentCostWei <= 0n || fulfillmentCostWei * 2n > cap) throw new Error('Estimated worker gas exceeds the contract cap');
+    if (sponsored) {
+      await requireSponsorBalance(provider, contract, worker, fulfillmentCostWei);
+      fulfillmentCostWei = 0n;
+    }
     const deadline = Math.floor(now() / 1000) + 120;
     const quote = { listener, songId, maxPrice: maxPrice.toString(), fulfillmentCostWei: fulfillmentCostWei.toString(),
       nonce: nonce.toString(), deadline };
@@ -133,10 +150,12 @@ export function createDjukeGasQuoteReader({ provider, contract, signer, fulfillm
     return { ...quote, signature, contractAddress: contract.target, worker, contributionWei: (fulfillmentCostWei * 2n).toString(),
       executionGasBudget: gasLimit.toString(), estimatedL1FeeWei: l1Fee.toString(), chainId: 8453 };
   }
+
   return ({ listener, songId }) => {
     if (!/^0x[0-9a-fA-F]{40}$/.test(listener || '') || !/^0x[0-9a-fA-F]{64}$/.test(songId || '')) {
       return Promise.reject(new Error('Invalid gas quote identity'));
     }
+
     const key = `${listener.toLowerCase()}:${songId.toLowerCase()}`;
     if (!inFlight.has(key)) inFlight.set(key, buildQuote({ listener, songId }).finally(() => inFlight.delete(key)));
     return inFlight.get(key);

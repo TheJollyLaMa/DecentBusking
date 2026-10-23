@@ -7,12 +7,13 @@ import { createWorkerRequestHandler } from '../discord-bot/ipfs-worker.js';
 
 // Called only by the contract repository's in-process Base-fork rehearsal.
 export async function rehearsePlaylistWorker({ provider, jukebox, worker, listener, token, router, fundIds, songs,
-  oracle, quoteProvider = provider, readFundBalance = id => router.fundBalances(id, token.target) }) {
+  oracle, sponsored = false, quoteProvider = provider, readFundBalance = id => router.fundBalances(id, token.target) }) {
   assert.equal(Number((await provider.getNetwork()).chainId), 8453);
   const mine = () => provider.send('hardhat_mine', ['0x2']);
   const listenerAddress = await listener.getAddress();
   const workerContract = jukebox.connect(worker);
-  await verifyDjukePlaylistWorker({ provider, contract: workerContract, workerAddress: await worker.getAddress() });
+  await verifyDjukePlaylistWorker({ provider, contract: workerContract, workerAddress: await worker.getAddress(),
+    version: sponsored ? '0.5' : '0.4' });
   const ids = songs.slice(0, 12).map(song => song.songId);
   assert.equal(ids.length, 12);
   const tracks = songs.map(song => ({ trackId: song.trackId, ipfsCid: song.audioURI.slice(7),
@@ -35,7 +36,7 @@ export async function rehearsePlaylistWorker({ provider, jukebox, worker, listen
       assert.equal((await (await workerContract.refundUndeliveredPlaylist(batchId)).wait()).status, 1);
     } });
   let runtime = createRuntime();
-  const getQuote = createDjukePlaylistGasQuoteReader({ provider: quoteProvider, contract: jukebox, signer: worker, oracle,
+  const getQuote = createDjukePlaylistGasQuoteReader({ provider: quoteProvider, contract: jukebox, signer: worker, oracle, sponsored,
     now: () => clock * 1000 });
   let clock = (await provider.getBlock('latest')).timestamp;
   const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: await worker.getAddress(),
@@ -86,6 +87,10 @@ export async function rehearsePlaylistWorker({ provider, jukebox, worker, listen
   assert.equal(purchaseResult.quote.feeUnits, '3000000');
   assert.equal(purchaseResult.quote.maxTotal, '7000000');
   assert.equal(BigInt(purchaseResult.quote.contributionWei), BigInt(purchaseResult.quote.fulfillmentCostWei) * 24n);
+  if (sponsored) {
+    assert.equal(purchaseResult.quote.fulfillmentCostWei, '0');
+    assert.equal(purchaseResult.quote.contributionWei, '0');
+  }
   const first = await runtime.nextPaid();
   assert.ok(first, 'worker must acquire the confirmed first playlist song');
   assert.equal(first.record.playlistLaneId, purchaseResult.firstLaneId);
@@ -102,6 +107,15 @@ export async function rehearsePlaylistWorker({ provider, jukebox, worker, listen
     await runtime.complete(selection.record, { playId: `fork-worker-playlist-${i}`, audibleMs: 180000 });
     await runtime.reconcile();
     await mine();
+    if (sponsored) {
+      const funds = await Promise.all(fundIds.slice(0, 2).map(readFundBalance));
+      assert.deepEqual(funds.map((value, index) => value - before[index]),
+        [BigInt(Math.floor((i + 1) / 4)) * 250000n, BigInt(Math.floor((i + 1) / 4)) * 250000n]);
+      if (i < 11) {
+        await batches.reconcile();
+        assert.equal(batches.getState().find(b => b.batchId === purchaseResult.batchId).status, 'pending');
+      }
+    }
   }
   await batches.reconcile();
   assert.equal(batches.getState().find(b => b.batchId === purchaseResult.batchId).status, 'settled');
@@ -116,7 +130,7 @@ export async function rehearsePlaylistWorker({ provider, jukebox, worker, listen
   const laneSong = await runtime.nextPaid();
   assert.ok(laneSong);
   const price = await jukebox.quote();
-  const cost = 1000000n;
+  const cost = sponsored ? 0n : 1000000n;
   const deadline = (await provider.getBlock('latest')).timestamp + 180;
   const singleQuote = { listener: listenerAddress, songId: ids[2], maxPrice: price, fulfillmentCostWei: cost,
     nonce: await jukebox.gasQuoteNonces(listenerAddress), deadline };
@@ -181,7 +195,7 @@ export async function rehearsePlaylistWorker({ provider, jukebox, worker, listen
   const prefixFundsAfter = await Promise.all(fundIds.map(readFundBalance));
   assert.deepEqual(prefixFundsAfter.map((value, i) => value - prefixFundsBefore[i]), [0n, 0n, 20000n, 5000n]);
   assert.equal((await readState()).requests.length, 0);
-  return { workerHttpGasQuote: true, twelveSongTotalUsdc: '7.00', orderedSongsSettled: 12,
+  return { workerHttpGasQuote: true, sponsored, twelveSongTotalUsdc: '7.00', orderedSongsSettled: 12,
     directArtistSettlement: true, fourFundSettlement: true, restartRecovery: true, mainRequestCutIn: true,
     fullRefundUsdc: '3.50', shortPlaybackSuffixRefundUsdc: '3.25', realBaseTransactions: 0 };
 }

@@ -9,9 +9,9 @@ test('playlist batch event journal reconciles ordered lane IDs and fee/refund ev
   let head = 30;
   const events = {
     PlaylistBatchRequested: [{ blockNumber: 11, transactionHash: '0xabc', args: { batchId: 4n, payer: Wallet.createRandom().address,
-      songIds: [`0x${'a'.repeat(64)}`, `0x${'b'.repeat(64)}`], firstLaneId: 7n } }],
-    PlaylistSongRefunded: [{ blockNumber: 12, transactionHash: '0xdef', args: { laneId: 8n, batchId: 4n, songId: `0x${'b'.repeat(64)}` } }],
-    PlaylistBatchFeeRefunded: [{ blockNumber: 13, transactionHash: '0xdef', args: { batchId: 4n } }],
+      songIds: [`0x${'a'.repeat(64)}`, `0x${'b'.repeat(64)}`], firstLaneId: 7n, subtotal: 500000n, platformFee: 3000000n } }],
+    PlaylistSongRefunded: [{ blockNumber: 12, transactionHash: '0xdef', args: { laneId: 8n, batchId: 4n, amount: 250000n } }],
+    PlaylistBatchFeeRefunded: [{ blockNumber: 13, transactionHash: '0xdef', args: { batchId: 4n, fee: 3000000n } }],
     PlaylistBatchFeeSettled: [], PlaylistSongDelivered: [],
   };
   const contract = { filters: Object.fromEntries(Object.keys(events).map(name => [name, () => name])),
@@ -26,6 +26,10 @@ test('playlist batch event journal reconciles ordered lane IDs and fee/refund ev
   assert.deepEqual(batches[0].laneIds, ['7', '8']);
   assert.deepEqual(batches[0].refundedLaneIds, ['8']);
   assert.equal(batches[0].status, 'refunded');
+  assert.equal(batches[0].subtotalUnits, '500000');
+  assert.equal(batches[0].refundedSongUnits, '250000');
+  assert.equal(batches[0].refundedFeeUnits, '3000000');
+  assert.equal(batches[0].resolutionTransactionHash, '0xdef');
   head = 32;
   const restarted = create();
   await restarted.initialize();
@@ -48,6 +52,42 @@ test('paid DJuke runtime refunds an undeliverable playlist head through the batc
   assert.equal(refunds, 1);
   assert.equal(journal.getState()[0].playlistBatchId, '4');
   assert.equal(journal.getState()[0].state, 'pending');
+});
+
+test('legacy batch checkpoints replay exact receipt amounts and links without double counting refunds', async () => {
+  const { createDjukePlaylistBatchReconciler } = await import('../discord-bot/djuke-playlist-batches.js');
+  const payer = Wallet.createRandom().address;
+  const ids = Array.from({ length: 12 }, (_, i) => `0x${String(i + 1).padStart(64, '0')}`);
+  let snapshot = { schemaVersion: 2, nextBlock: 100, batches: [{
+    batchId: '0', status: 'refunded', payer, songIds: ids,
+    laneIds: ids.map((_, i) => String(i)), transactionHash: '0xold',
+  }] };
+  const requested = { blockNumber: 11, index: 0, transactionHash: '0xpurchase',
+    args: { batchId: 0n, payer, songIds: ids, firstLaneId: 0n, subtotal: 4000000n, platformFee: 3000000n } };
+  const refunds = ids.slice(1).map((_, i) => ({ blockNumber: 13, index: i, transactionHash: '0xrefund',
+    args: { batchId: 0n, laneId: BigInt(i + 1), amount: i + 1 < 8 ? 250000n : 500000n } }));
+  const events = { PlaylistBatchRequested: [requested], PlaylistSongDelivered: [{
+    blockNumber: 12, transactionHash: '0xdelivered', args: { laneId: 0n } }],
+    PlaylistSongRefunded: [...refunds, refunds[0]],
+    PlaylistBatchFeeRefunded: [{ blockNumber: 13, index: 12, transactionHash: '0xrefund', args: { batchId: 0n, fee: 3000000n } }],
+    PlaylistBatchFeeSettled: [] };
+  const create = () => createDjukePlaylistBatchReconciler({ startBlock: 10,
+    provider: { getBlockNumber: async () => 30 },
+    contract: { filters: new Proxy({}, { get: (_, name) => () => name }),
+      queryFilter: async (name, from, to) => events[name].filter(event => event.blockNumber >= from && event.blockNumber <= to) },
+    restore: async () => snapshot, save: async next => { snapshot = structuredClone(next); return 'ipfs://receipts'; } });
+  const journal = create();
+  await journal.initialize();
+  const [batch] = await journal.reconcile();
+  assert.equal(batch.status, 'refunded');
+  assert.deepEqual(batch.deliveredLaneIds, ['0']);
+  assert.equal(batch.refundedLaneIds.length, 11);
+  assert.equal(BigInt(batch.refundedSongUnits) + BigInt(batch.refundedFeeUnits), 6750000n);
+  assert.equal(batch.transactionHash, '0xpurchase');
+  assert.equal(batch.resolutionTransactionHash, '0xrefund');
+  const restarted = create();
+  await restarted.initialize();
+  assert.deepEqual((await restarted.reconcile())[0], batch);
 });
 
 test('lane reader and runtime always play main paid requests before playlist head, including late cut-ins', async () => {
@@ -213,7 +253,7 @@ test('empty block scans avoid uploads and failed event writes replay safely', as
   const { createDjukePlaylistBatchReconciler } = await import('../discord-bot/djuke-playlist-batches.js');
   let head = 12, snapshot, saves = 0, fail = false;
   const event = { blockNumber: 13, args: { batchId: 0n, payer: Wallet.createRandom().address,
-    songIds: [`0x${'a'.repeat(64)}`], firstLaneId: 0n } };
+    songIds: [`0x${'a'.repeat(64)}`], firstLaneId: 0n, subtotal: 250000n, platformFee: 3000000n } };
   const contract = { filters: new Proxy({}, { get: (_, name) => () => name }),
     queryFilter: async (name, from, to) => name === 'PlaylistBatchRequested' && from <= 13 && to >= 13 ? [event] : [] };
   const create = () => createDjukePlaylistBatchReconciler({ provider: { getBlockNumber: async () => head }, contract,

@@ -255,6 +255,7 @@ export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Dat
             ...(nowPlaying.isDevert ? { adVotes } : {}),
             ...(nowPlaying.playlistShow ? { playlistShow: { ...nowPlaying.playlistShow } } : {}),
             ...(nowPlaying.hype ? { hype: { ...nowPlaying.hype } } : {}),
+            ...(nowPlaying.djukePlaylist ? { djukePlaylist: { ...nowPlaying.djukePlaylist } } : {}),
             ...(sponsor ? { sponsor } : {}),
             startedAt: nowPlaying.startedAt,
             positionMs: Math.max(0, now - nowPlaying.startedAt),
@@ -1486,6 +1487,7 @@ export class JukeLoopSession {
       ...(videoUrl ? { videoUrl } : {}),
       ipfsCid: prepared.track.ipfsCid || null,
       isDevert: !!prepared.devertAd,
+      ...(prepared.paid?.record.playlist ? { djukePlaylist: { ...prepared.paid.record.playlist } } : {}),
       ...((prepared.playlistShow || prepared.playlistShowContext) ? { playlistShow: {
         title: (prepared.playlistShow || prepared.playlistShowContext).title,
         instanceId: (prepared.playlistShow || prepared.playlistShowContext).instanceId,

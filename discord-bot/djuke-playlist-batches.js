@@ -1,12 +1,12 @@
 const BATCH_EVENTS = ['PlaylistBatchRequested', 'PlaylistBatchFeeSettled', 'PlaylistBatchFeeRefunded', 'PlaylistSongRefunded', 'PlaylistSongDelivered'];
 
-export function djukePlaylistReadiness({ configured, contractAddress, batchEventsDurable, workerReady, paymentsEnabled, mirrorAvailable }) {
+export function djukePlaylistReadiness({ configured, contractAddress, batchEventsDurable, workerReady, paymentsEnabled, mirrorAvailable, version = '0.4' }) {
   const reason = !configured ? 'DJuke v0.4 playlist checkout is not configured'
     : !batchEventsDurable ? 'Durable playlist event storage and an explicit start block are required'
     : !workerReady ? 'Playlist worker permissions and playback journals are not ready'
     : !paymentsEnabled ? 'DJuke payments are disabled'
     : !mirrorAvailable ? 'Local checkpoint mirror is offline' : '';
-  return { ready: !reason, version: '0.4', configured, contractAddress: configured ? contractAddress : '',
+  return { ready: !reason, version, configured, contractAddress: configured ? contractAddress : '',
     batchEventsDurable, maxSongs: 24, laneModel: true,
     radioPricing: { tierSize: 8, baseUsdc: 0.25, platformFeeUsdc: 3, feeBlockSize: 12, split: [25, 25, 25, 25] },
     cutIn: 'Main paid requests always precede playlist lane songs', reason };
@@ -34,7 +34,12 @@ export function createDjukePlaylistBatchReconciler({ provider, contract, restore
       for (const batch of batches.values()) if (batch.laneIds.includes(laneId)) {
         const field = name === 'PlaylistSongDelivered' ? 'deliveredLaneIds' : 'refundedLaneIds';
         batch[field] ||= [];
-        if (!batch[field].includes(laneId)) batch[field].push(laneId);
+        if (!batch[field].includes(laneId)) {
+          batch[field].push(laneId);
+          if (name === 'PlaylistSongRefunded') {
+            batch.refundedSongUnits = (BigInt(batch.refundedSongUnits || '0') + args.amount).toString();
+          }
+        }
       }
       return;
     }
@@ -45,12 +50,18 @@ export function createDjukePlaylistBatchReconciler({ provider, contract, restore
       const firstLaneId = BigInt(args.firstLaneId);
       batches.set(key, { batchId: key, payer: args.payer, songIds: ids, firstLaneId: firstLaneId.toString(),
         laneIds: ids.map((_, index) => (firstLaneId + BigInt(index)).toString()),
+        subtotalUnits: args.subtotal.toString(), feeUnits: (args.platformFee ?? args.fee).toString(),
+        refundedSongUnits: '0', refundedFeeUnits: '0',
         status: 'pending', blockNumber: Number(log.blockNumber), transactionHash: log.transactionHash });
     } else {
       const batch = batches.get(key);
       if (batch) {
         batch.status = name === 'PlaylistBatchFeeSettled' ? 'settled' : 'refunded';
-        if (name === 'PlaylistBatchFeeRefunded') batch.feeRefunded = true;
+        batch.resolutionTransactionHash = log.transactionHash;
+        if (name === 'PlaylistBatchFeeRefunded') {
+          batch.feeRefunded = true;
+          batch.refundedFeeUnits = args.fee.toString();
+        }
       }
     }
   }
@@ -60,6 +71,9 @@ export function createDjukePlaylistBatchReconciler({ provider, contract, restore
       throw new Error('Invalid DJuke playlist batch checkpoint');
     }
     nextBlock = snapshot?.nextBlock ?? startBlock;
+    if (snapshot?.batches.some(batch => batch.subtotalUnits === undefined ||
+        batch.feeUnits === undefined || batch.refundedSongUnits === undefined ||
+        (batch.status !== 'pending' && !batch.resolutionTransactionHash))) nextBlock = startBlock;
     batches = new Map((snapshot?.batches || []).map(batch => [String(batch.batchId), structuredClone(batch)]));
     await commit();
     initialized = true;

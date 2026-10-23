@@ -24,9 +24,9 @@ export const DJUKE_PLAYLIST_WORKER_ABI = [
 ];
 export const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
-export async function verifyDjukePlaylistWorker({ provider, contract, workerAddress }) {
+export async function verifyDjukePlaylistWorker({ provider, contract, workerAddress, version = '0.4' }) {
   if (Number((await provider.getNetwork()).chainId) !== 8453) throw new Error('DJuke playlists are Base-only');
-  if (await contract.CONTRACT_VERSION() !== '0.4') throw new Error('DJuke playlist worker requires contract v0.4');
+  if (!['0.4', '0.5'].includes(version) || await contract.CONTRACT_VERSION() !== version) throw new Error(`DJuke playlist worker requires contract v${version}`);
   if ((await contract.gasWorker()).toLowerCase() !== workerAddress.toLowerCase()) throw new Error('DJuke playlist gas worker does not match');
   if (!await contract.hasRole(await contract.FULFILLER_ROLE(), workerAddress)) throw new Error('DJuke playlist worker lacks the fulfiller role');
 }
@@ -179,6 +179,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
           ...(request.campaignId !== undefined ? { campaignId: String(request.campaignId) } : {}),
           ...(request.playlistLaneId !== undefined ? { playlistLaneId: String(request.playlistLaneId) } : {}),
           ...(request.playlistBatchId !== undefined ? { playlistBatchId: String(request.playlistBatchId) } : {}),
+          ...(request.playlist ? { playlist: structuredClone(request.playlist) } : {}),
         };
         if (!existing) next.push({ requestId: request.requestId, ...fields, state: 'pending', attempts: 0 });
         else if (existing.state !== 'fulfilled') {
@@ -252,7 +253,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
 
 export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, provider, contract, confirmations = 2,
   playlistLaneEnabled = false, paymentsEnabled = false, songCacheMs = 300000, concurrency = 5, readRetryAttempts = 3,
-  readRetryDelayMs = 200, now = () => Date.now(), log = console }) {
+  readRetryDelayMs = 200, now = () => Date.now(), log = console, getPlaylistBatches = () => [] }) {
   if (!isAddress(contractAddress) || /^0x0{40}$/i.test(contractAddress)) throw new Error('Invalid DJuke contract address');
   if (!Number.isSafeInteger(confirmations) || confirmations < 2) throw new Error('DJuke needs at least two confirmations');
   const rpc = provider || new JsonRpcProvider(rpcUrl);
@@ -340,9 +341,16 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
     }
     const { tracks, lookupErrors: catalogReadErrors } = await registeredSongs(entries, options);
     if ((await rpc.getBlock(blockNumber))?.hash !== before.hash) throw new Error('DJuke snapshot changed during verification');
+    const playlistReceipts = getPlaylistBatches();
+    const playlistBatches = playlistReceipts.filter(batch => !['settled', 'refunded'].includes(batch.status));
+    for (const request of requests) if (request.playlistBatchId !== undefined) {
+      const batch = playlistBatches.find(batch => batch.batchId === request.playlistBatchId);
+      if (batch) request.playlist = { batchId: batch.batchId, name: batch.name,
+        songCount: batch.songs.length, remaining: batch.songs.filter(song => song.status === 'pending').length };
+    }
     const quote = quoteDjuke(mainPending + playlistPending);
     return { chainId: 8453, contractAddress, usdcAddress: BASE_USDC, blockNumber, blockHash: before.hash,
-      requests, mainPending, playlistPending, tracks, catalogReadErrors, priceUnits: quote.priceUnits.toString(), paymentsEnabled };
+      requests, mainPending, playlistPending, playlistBatches, playlistReceipts, tracks, catalogReadErrors, priceUnits: quote.priceUnits.toString(), paymentsEnabled };
   }
   const read = () => {
     if (!task) task = readSnapshot().finally(() => { task = null; });
@@ -449,6 +457,9 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     async fail(record, error) {
       await journal.fail(record.requestId, error?.message || String(error));
       if (record.playlistBatchId && refundPlaylistBatch) await refundPlaylistBatch(record.playlistBatchId);
+    },
+    release(record, error) {
+      return journal.fail(record.requestId, error?.message || String(error));
     },
     reconcile,
     getJournalState: () => journal.getState(),

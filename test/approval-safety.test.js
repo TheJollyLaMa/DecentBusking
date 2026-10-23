@@ -41,7 +41,9 @@ test('every approval is skipped when the existing allowance already covers the p
 
 test('approval notice is calm, exact and does not duplicate the currency', async () => {
   const { approvalNotice } = await import('../js/base-chain.mjs');
-  assert.match(approvalNotice('5 USDC'), /^Approve exactly 5 USDC — nothing more\./);
-  assert.match(approvalNotice('1.50'), /^Approve exactly 1\.50 USDC/);
-  assert.match(approvalNotice('2'), /verified on Basescan/);
+  assert.match(approvalNotice('5 USDC'), /^Set a spending allowance of exactly 5 USDC/);
+  assert.match(approvalNotice('1.50'), /^Set a spending allowance of exactly 1\.50 USDC/);
+  assert.match(approvalNotice('5'), /separate purchase transaction/);
+  assert.doesNotMatch(approvalNotice('5'), /nothing more|All our contracts are verified/);
+  assert.match(approvalNotice('2'), /wallet network gas/);
 });
