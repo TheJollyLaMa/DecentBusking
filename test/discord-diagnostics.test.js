@@ -64,6 +64,8 @@ test('gateway restrictions retain scope, edge correlation and format, and persis
   await diagnostics.restore();
   const bot = client();
   diagnostics.bot('dbusker').attach(bot);
+  diagnostics.bot('dbusker').setState('connecting');
+  diagnostics.bot('devert-loop').setState('connecting');
   bot.rest.emit('response', { method: 'GET', path: '/gateway/bot' }, {
     status: 429, headers: new Headers({ 'retry-after': '66000', 'content-type': 'text/html',
       'cf-ray': 'abcdef0123456789-EWR' }),
@@ -71,6 +73,10 @@ test('gateway restrictions retain scope, edge correlation and format, and persis
   await diagnostics.flush();
   assert.equal(saved.networkCooldownUntil, 66_001_000);
   assert.equal(diagnostics.bot('devert-loop').notBefore(), 66_001_000);
+  for (const name of ['dbusker', 'devert-loop']) {
+    assert.equal(diagnostics.report().bots[name].phase, 'cooldown');
+    assert.equal(diagnostics.report().bots[name].retryAt, 66_001_000);
+  }
   const restarted = createDiscordDiagnostics({ store: { restore: async () => saved }, now: () => 2000, log: logger() });
   await restarted.restore();
   assert.equal(restarted.bot('dbusker').notBefore(), 66_001_000);
@@ -88,10 +94,12 @@ test('route-specific throttles do not block unrelated bot login, global throttle
   bot.rest.emit('response', { method: 'POST', route: '/channels/:id/messages' },
     { status: 429, headers: new Headers({ 'retry-after': '30', 'x-ratelimit-scope': 'shared' }) });
   assert.equal(diagnostics.bot('dbusker').notBefore(), 0);
+  diagnostics.bot('dbusker').setState('ready');
   bot.rest.emit('response', { method: 'GET', route: '/users/@me' },
     { status: 429, headers: new Headers({ 'retry-after': '30', 'x-ratelimit-global': 'true' }) });
   assert.equal(diagnostics.bot('dbusker').notBefore(), 31000);
   assert.equal(diagnostics.bot('devert-loop').notBefore(), 0);
+  assert.equal(diagnostics.report().bots.dbusker.phase, 'ready', 'a REST throttle must not mark an established gateway offline');
 });
 
 test('diagnostic memory and logs stay bounded during an error storm and summaries flag invalid-request spikes', async () => {

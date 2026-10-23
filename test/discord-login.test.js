@@ -43,6 +43,67 @@ test('Discord startup fails explicitly on a stuck login so the service can resta
   assert.equal(bot.listenerCount('clientReady'), 0);
 });
 
+test('real discord.js REST rejects gateway 429s to the supervisor without a hidden library retry', async () => {
+  const { DISCORD_REST_OPTIONS } = await import('../discord-bot/discord-login.js');
+  const { REST } = await import('../discord-bot/node_modules/discord.js/src/index.js');
+  const { createDiscordDiagnostics } = await import('../discord-bot/discord-diagnostics.js');
+  const log = { log() {}, warn() {}, error() {} };
+  const diagnostics = createDiscordDiagnostics({ log });
+  let requests = 0;
+  const bot = client();
+  bot.rest = new REST({ ...DISCORD_REST_OPTIONS, makeRequest: async () => {
+    requests++;
+    return new Response('rate limited', { status: 429, headers: { 'retry-after': '3600' } });
+  } }).setToken('test-token-never-sent');
+  const detach = diagnostics.bot('dbusker').attach(bot);
+  const before = Date.now();
+  await assert.rejects(bot.rest.get('/gateway/bot'), error => error.name.startsWith('RateLimitError'));
+  assert.equal(requests, 1);
+  assert.ok(diagnostics.bot('devert-loop').notBefore() >= before + 3600000);
+  assert.equal(DISCORD_REST_OPTIONS.rejectOnRateLimit({ route: '/channels/:id/messages' }), false);
+  detach();
+  bot.rest.clearHashSweeper();
+  bot.rest.clearHandlerSweeper();
+});
+
+test('concurrent bot logins are serialized and a first-bot restriction prevents the second gateway request', async () => {
+  const { recoverDiscordConnection } = await import('../discord-bot/discord-login.js');
+  const { createDiscordDiagnostics } = await import('../discord-bot/discord-diagnostics.js');
+  const log = { log() {}, warn() {}, error() {} };
+  const diagnostics = createDiscordDiagnostics({ log });
+  const first = new AbortController();
+  const second = new AbortController();
+  const bot = client();
+  diagnostics.bot('dbusker').attach(bot);
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  let firstRequests = 0;
+  let secondRequests = 0;
+  const a = recoverDiscordConnection({ diagnostics, name: 'dbusker', signal: first.signal, notBefore: null, log,
+    connect: async () => {
+      firstRequests++;
+      await held;
+      bot.rest.emit('response', { method: 'GET', path: '/gateway/bot' },
+        { status: 429, headers: new Headers({ 'retry-after': '3600' }) });
+      throw new Error('gateway rate limited');
+    },
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  const b = recoverDiscordConnection({ diagnostics, name: 'devert-loop', signal: second.signal, notBefore: null, log,
+    connect: async () => { secondRequests++; return {}; },
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(secondRequests, 0);
+  release();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(firstRequests, 1);
+  assert.equal(secondRequests, 0);
+  assert.equal(diagnostics.report().bots['devert-loop'].phase, 'cooldown');
+  first.abort();
+  second.abort();
+  await Promise.all([a, b]);
+});
+
 test('Discord startup honors an explicit HTTP 429 cooldown instead of repeatedly restarting', async () => {
   const { loginDiscordClient } = await import('../discord-bot/discord-login.js');
   const bot = client();
@@ -232,6 +293,7 @@ test('a preserved cooldown prevents any gateway request until the recorded retry
       const context = vm.createContext({
         Client: MockClient, client: undefined, Events, GatewayIntentBits: {}, Partials: {}, console: log,
         discordDiagnostics: diagnostics, discordAbort: controller, discordOfflineReason: '',
+        DISCORD_REST_OPTIONS: {},
         loginDiscordClient, watchDiscordSession, getActiveJukeLoopSession: () => broadcast,
         config: { discordToken: 'secret', jukeLoopTextChannelId: 'text' },
         Routes: { applicationCommands: () => '/applications/bot/commands' }, SLASH_COMMANDS: [],

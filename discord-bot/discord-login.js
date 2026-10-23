@@ -2,6 +2,10 @@ import { Events } from 'discord.js';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { discordFailure, discordRetryAt } from './discord-diagnostics.js';
 
+export const DISCORD_REST_OPTIONS = {
+  rejectOnRateLimit: data => data.route === '/gateway/bot',
+};
+
 export function watchDiscordSession(client) {
   let end;
   const closed = new Promise(resolve => { end = resolve; });
@@ -43,9 +47,14 @@ export async function recoverDiscordConnection({ connect, diagnostics, name, sig
           deadline = Math.max(configuredDeadline, telemetry.notBefore());
         }
         if (signal?.aborted) break;
-        telemetry.setState('connecting');
-        log.log(`[discord:${name}] Connecting; attempt=${attempts + 1}`);
-        const connection = await connect();
+        const connection = await diagnostics.withLogin(async () => {
+          // Another bot may have received a shared restriction while this login waited.
+          if (telemetry.notBefore() > Date.now() || signal?.aborted) return null;
+          telemetry.setState('connecting');
+          log.log(`[discord:${name}] Connecting; attempt=${attempts + 1}`);
+          return connect();
+        });
+        if (!connection) continue;
         if (signal?.aborted) {
           await connection?.stop();
           break;

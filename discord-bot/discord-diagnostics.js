@@ -55,6 +55,7 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
   let restored = false;
   let restoreTask;
   let saveTask = Promise.resolve();
+  let loginTask = Promise.resolve();
   let persistence = store ? 'restoring' : 'not-configured';
   let networkCooldownUntil = 0;
   let lastSummary = '';
@@ -112,13 +113,19 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
   });
   return {
     report,
+    withLogin(connect) {
+      const task = loginTask.then(connect);
+      loginTask = task.catch(() => {});
+      return task;
+    },
     maintenance() {
       if (persistence === 'failed') persist();
       const summary = Object.fromEntries([...bots].map(([name, bot]) => {
         prune(bot);
         const invalid = [...bot.invalidSeconds.values()].reduce((sum, count) => sum + count, 0);
         return [name, { phase: bot.phase, totals: { ...bot.totals }, invalidLast10Minutes: invalid,
-          invalidRequestWarning: invalid >= 100, retryAt: bot.retryAt }];
+          invalidRequestWarning: invalid >= 100, retryAt: bot.retryAt, cooldownUntil: bot.cooldownUntil,
+          lastRestriction: restriction(bot.lastRestriction) }];
       }));
       const text = JSON.stringify({ persistence, bots: summary });
       if (text !== lastSummary) {
@@ -222,6 +229,13 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
               bot.cooldownUntil = Math.max(bot.cooldownUntil, retryAt);
               // An unscoped gateway restriction may be IP-based: pause both bot logins conservatively.
               if (route === '/gateway/bot' && scope === 'unknown') networkCooldownUntil = Math.max(networkCooldownUntil, retryAt);
+              for (const connection of bots.values()) {
+                const deadline = Math.max(networkCooldownUntil, connection.cooldownUntil);
+                if (connection.phase !== 'ready' && deadline > now()) {
+                  connection.phase = 'cooldown';
+                  connection.retryAt = deadline;
+                }
+              }
               persist();
             }
           };

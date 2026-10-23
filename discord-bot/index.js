@@ -56,7 +56,7 @@ import { devertQueueAbi } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
 import { startDevertLoopWorker } from './devert-loop.js';
-import { loginDiscordClient, recoverDiscordConnection, watchDiscordSession } from './discord-login.js';
+import { DISCORD_REST_OPTIONS, loginDiscordClient, recoverDiscordConnection, watchDiscordSession } from './discord-login.js';
 import { createDiscordDiagnostics } from './discord-diagnostics.js';
 import { DEFAULT_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
 import { createPinataStateStore, recoverVerifiedPlaylistBaseline } from './ipfs-state.js';
@@ -1645,6 +1645,7 @@ async function main() {
 
   async function connectMainDiscord() {
     client = new Client({
+      rest: DISCORD_REST_OPTIONS,
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,

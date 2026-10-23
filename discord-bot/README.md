@@ -143,8 +143,11 @@ mirror, not merely a registered session or a successful HTTP health check.
 Discord gateway login logs connection stages and rate-limit delays without
 tokens or payloads. If the client does not become ready within two minutes,
 the connection failure is logged explicitly while website playback continues.
-An explicit gateway HTTP 429 cooldown extends that deadline: the worker respects
-Discord's `Retry-After` instead of repeatedly restarting.
+Both clients reject gateway-discovery HTTP 429s back to the recovery supervisor
+rather than leaving a second retry loop inside discord.js. The supervisor
+respects Discord's persisted `Retry-After` instead of repeatedly restarting.
+Initial logins are serialized: the second bot rechecks the shared persisted
+deadline after the first bot's attempt, before making its own request.
 `GET /api/radio` reports Discord separately as `discord.ready` / `discord.reason`;
 paid-checkout readiness follows actual broadcast playback and checkpoint safety,
 not Discord connectivity.
@@ -198,6 +201,9 @@ Read `GET /api/radio` and inspect `discord.diagnostics` before restarting:
   not a new Discord limit or an automatic traffic cutoff.
 * Telemetry observes existing requests only; it does not probe Discord during a
   cooldown. Slash-command registration uses the same monitored REST client.
+* A gateway restriction changes disconnected clients to `cooldown`, not a
+  misleading indefinite `connecting`. Summaries include the retained restriction
+  and cooldown deadline even when no further requests occur.
 
 Interpret `401` as authentication trouble, `403` as access/permission trouble,
 and a scoped `429` as a reported rate limit. Shared-resource 429s are excluded

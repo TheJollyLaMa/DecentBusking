@@ -4,7 +4,7 @@ import { AudioPlayerStatus, createAudioPlayer, createAudioResource, entersState,
   joinVoiceChannel, StreamType, VoiceConnectionStatus } from '@discordjs/voice';
 import { resolveStreamableIpfsUrl } from './jukeloop.js';
 import { createVoiceConnectionSupervisor } from './voice-connection.js';
-import { loginDiscordClient, watchDiscordSession } from './discord-login.js';
+import { DISCORD_REST_OPTIONS, loginDiscordClient, watchDiscordSession } from './discord-login.js';
 import { DEVERT_MAX_AD_SECONDS } from '../js/devert-scheduler.mjs';
 
 const MIN_AUDIBLE_MS = 30_000;
@@ -156,7 +156,7 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
 export async function startDevertLoopWorker({ token, voiceChannelId, textChannelId, playback, onAdMessage, log = console,
   diagnostics, signal }) {
   if (!token || !voiceChannelId || !playback) throw new Error('AdLoop requires a separate Discord token, voice channel, and DeVert scheduler');
-  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates,
+  const client = new Client({ rest: DISCORD_REST_OPTIONS, intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions,
     ...(onAdMessage ? [GatewayIntentBits.MessageContent] : [])] });
   const detachDiagnostics = diagnostics?.attach(client);
