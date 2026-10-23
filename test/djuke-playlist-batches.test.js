@@ -150,10 +150,10 @@ test('production playlist quote wiring stays closed before runtime restore and f
   const vm = require('node:vm');
   const { djukePlaylistReadiness } = await import('../discord-bot/djuke-playlist-batches.js');
   const source = fs.readFileSync(require('node:path').join(__dirname, '../discord-bot/index.js'), 'utf8');
-  assert.ok(source.indexOf('if (initializePlaylistWorker) await initializePlaylistWorker()') > source.lastIndexOf('playlistReady = true;'),
-    'runtime reconciliation must wait for catalog restoration rather than blocking startup forever');
-  assert.ok(source.indexOf('if (initializePlaylistWorker) await initializePlaylistWorker()') > source.indexOf('http.createServer(requestHandler).listen'),
-    'durable journal initialization must wait until the HTTP mirror heartbeat endpoint is available');
+  assert.ok(source.indexOf('if (initializePlaylistWorker) void initializePlaylistWorker()') > source.lastIndexOf('playlistReady = true;'),
+    'runtime initialization must start only after catalog restoration');
+  assert.ok(source.indexOf('if (initializePlaylistWorker) void initializePlaylistWorker()') > source.indexOf('http.createServer(requestHandler).listen'),
+    'durable journal initialization must start only after the HTTP mirror heartbeat endpoint is available');
   const code = source.slice(source.indexOf('  const djukeAddress ='), source.indexOf('  let readDjukeState ='));
   const address = `0x${'12'.repeat(20)}`;
   const enabled = { DJUKE_CONTRACT_ADDRESS: address, DJUKE_CONTRACT_VERSION: '0.4', DJUKE_FULFILLER_PRIVATE_KEY: 'local-fixture',

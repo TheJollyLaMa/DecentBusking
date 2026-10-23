@@ -1061,7 +1061,8 @@ async function main() {
   let readDjukeState = readDjukeQueueState;
   if (readDjukeQueueState && playlistBatchJournal) {
     readDjukeState = async () => {
-      const [state] = await Promise.all([readDjukeQueueState(), playlistBatchJournal.reconcile()]);
+      const state = await readDjukeQueueState();
+      if (playlistBatchEventsReady) await playlistBatchJournal.reconcile();
       return state;
     };
     readDjukeState.invalidate = readDjukeQueueState.invalidate;
@@ -1662,7 +1663,8 @@ async function main() {
     loadPlaylist();
     playlistReady = true;
   }
-  if (initializePlaylistWorker) await initializePlaylistWorker();
+  if (initializePlaylistWorker) void initializePlaylistWorker()
+    .catch(error => console.warn('[djuke] Playlist worker initialization pending:', error.message));
   refreshPayflow();
   syncMintedTracks(config);
 
