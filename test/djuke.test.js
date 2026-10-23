@@ -240,6 +240,8 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   };
   const address = `0x${'1'.repeat(40)}`;
   let earningsFail = false;
+  let catalogFail = false;
+  let tracks = [{ trackId: 'a', songId: `0x${'a'.repeat(64)}`, title: 'First song', artist: 'Musician' }];
   const context = vm.createContext({ ...helpers, ...versions, renderWalletAddress, formatUsdcUnits, document, AbortSignal,
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example', djukeContractAddress: address } },
     lookupEnsName: async () => 'musician.eth',
@@ -248,7 +250,8 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
     fetch: async url => {
       if (url.endsWith('/earners')) return { ok: !earningsFail, status: earningsFail ? 503 : 200,
         json: async () => ({ chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address, totalUnits: '1125000' }] }) };
-      return { ok: true, json: async () => ({ contractAddress: address, paymentsEnabled: true, requests: [], tracks: [] }) };
+      return { ok: !catalogFail, status: catalogFail ? 503 : 200,
+        json: async () => ({ contractAddress: address, paymentsEnabled: true, requests: [], tracks }) };
     },
   });
   const source = fs.readFileSync(path.join(__dirname, '../js/djuke.mjs'), 'utf8')
@@ -259,6 +262,34 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
     await new Promise(resolve => setImmediate(resolve));
   };
   await click('djuke-tab');
+  const select = element('djuke-song');
+  const originalOption = select.children[1];
+  select.value = 'a';
+  select.scrollTop = 80;
+  await click('djuke-refresh');
+  assert.equal(select.children[1], originalOption, 'unchanged polls must preserve native option nodes');
+  assert.equal(select.value, 'a');
+  assert.equal(select.scrollTop, 80);
+  document.activeElement = select;
+  tracks = [...tracks, { trackId: 'b', title: 'Second song' }];
+  await click('djuke-refresh');
+  assert.equal(select.children.length, 2, 'catalog changes wait until the picker loses focus');
+  document.activeElement = null;
+  for (const callback of select.listeners.blur || []) callback();
+  assert.equal(select.children.length, 3);
+  assert.equal(select.value, 'a');
+  assert.equal(select.scrollTop, 80);
+  const updatedOption = select.children[1];
+  catalogFail = true;
+  await click('djuke-refresh');
+  assert.equal(select.children[1], updatedOption, 'transient errors must not destroy the song menu');
+  assert.equal(select.disabled, true);
+  assert.match(element('djuke-queue-state').textContent, /Queue unavailable/);
+  catalogFail = false;
+  await click('djuke-refresh');
+  assert.equal(select.children[1], updatedOption);
+  assert.equal(select.disabled, false);
+  select.value = '';
   assert.equal(element('djuke-payment-state').textContent, '');
   assert.equal(element('djuke-pay').disabled, false);
   await click('djuke-pay');

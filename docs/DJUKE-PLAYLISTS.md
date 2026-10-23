@@ -144,3 +144,8 @@ Top 10 and radio-announcement checkpoints. The client validates these supported
 formats too, so an unrelated scheduled-production job cannot starve paid journals.
 All accepted jobs still require matching content CIDs and verified recursive
 local pins before acknowledgment.
+
+Queue polling preserves unchanged song option nodes, selection and menu scroll
+position. Changed catalogs wait until the song picker loses focus; explicit
+searches still update immediately. Transient read failures disable checkout and
+the picker without discarding its options or selection, and report the error.

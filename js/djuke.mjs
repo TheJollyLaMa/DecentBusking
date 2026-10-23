@@ -237,23 +237,33 @@ export function initDjuke() {
     summary.append(list, node('p', 'Worker ETH funds automated playback execution on Base so listeners do not face a surprise ETH prompt.'));
     gasStatus.replaceChildren(summary);
   };
-  const renderSongs = () => {
+  let songOptionsKey = '';
+  const renderSongs = ({ deferWhileFocused = false } = {}) => {
+    if (deferWhileFocused && document.activeElement === select) return;
     const previous = select.value;
     const liveTracks = Array.isArray(live?.tracks) ? live.tracks : [];
     const tracks = filterDjukeSongs(liveTracks, search?.value || '');
-    const placeholder = node('option', tracks.length ? 'Select one song' : 'No matching songs');
-    placeholder.value = '';
-    select.replaceChildren(placeholder);
     const previousTrack = liveTracks.find(track => track.trackId === previous);
     const options = previousTrack && !tracks.some(track => track.trackId === previousTrack.trackId)
       ? [...tracks, previousTrack] : tracks;
-    for (const track of options) {
-      const option = node('option', track.artist ? `${track.title} - ${track.artist}` : track.title);
-      option.value = track.trackId;
-      select.append(option);
+    const placeholderText = tracks.length ? 'Select one song' : 'No matching songs';
+    const optionData = options.map(track => [track.trackId, track.artist ? `${track.title} - ${track.artist}` : track.title]);
+    const key = JSON.stringify([placeholderText, optionData]);
+    if (key !== songOptionsKey) {
+      const scrollTop = select.scrollTop;
+      const placeholder = node('option', placeholderText);
+      placeholder.value = '';
+      select.replaceChildren(placeholder);
+      for (const [value, label] of optionData) {
+        const option = node('option', label);
+        option.value = value;
+        select.append(option);
+      }
+      select.value = options.some(track => track.trackId === previous) ? previous : '';
+      select.scrollTop = scrollTop;
+      songOptionsKey = key;
     }
     if (searchState) searchState.textContent = tracks.length ? `${tracks.length} matching songs` : 'No matching songs';
-    select.value = options.some(track => track.trackId === previous) ? previous : '';
     select.disabled = !options.length;
     syncPayButton();
   };
@@ -278,7 +288,7 @@ export function initDjuke() {
     queue.replaceChildren();
     price.textContent = '—';
     count.textContent = '—';
-    select.replaceChildren(node('option', 'Song catalog unavailable'));
+    if (!songOptionsKey) select.replaceChildren(node('option', 'Song catalog unavailable'));
     select.disabled = true;
     if (searchState) searchState.textContent = 'Song catalog unavailable; refresh to retry.';
     renderTiers(null);
@@ -344,7 +354,7 @@ export function initDjuke() {
     if (!isOpen()) return;
     refreshEarners();
     const requestGeneration = ++generation;
-    status.textContent = 'Loading queue…';
+    if (!live) status.textContent = 'Loading queue…';
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     try {
       if (!service) throw new Error('DJuke service is not configured');
@@ -375,7 +385,7 @@ export function initDjuke() {
       count.textContent = String(requests.length);
       renderTiers(requests.length);
       status.textContent = requests.length ? 'First paid · first played' : 'No paid requests';
-      renderSongs();
+      renderSongs({ deferWhileFocused: true });
       updateWallet();
       refreshGasQuote();
     } catch (error) {
@@ -426,6 +436,7 @@ export function initDjuke() {
     'Queued! Your song plays after the paid requests ahead of it.');
   });
   select.addEventListener('change', () => { renderSongs(); refreshGasQuote(); });
+  select.addEventListener('blur', () => { if (live) renderSongs(); });
   search?.addEventListener('input', () => { renderSongs(); refreshGasQuote(); });
   const close = () => {
     if (instructions.open) instructions.close();
