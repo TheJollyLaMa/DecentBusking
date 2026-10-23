@@ -3,19 +3,17 @@ import { isAdminWallet } from './admin-access.mjs';
 
 export const LIVE_BOOKING_POLL_MS = 5 * 60 * 1000;
 
-export function liveBookingActions(state, wallet, owner, now = Date.now()) {
+export function liveBookingActions(state, wallet, owner, now = Date.now(), pendingBookings = new Set()) {
  const actions = { admin: [], schedule: [], profile: [] };
  if (!wallet) return actions;
  for (const b of state.bookings || []) {
-  const pending = Object.values(b.transactions || {}).some(tx => tx.status === 'pending');
-  if (wallet.toLowerCase() === owner?.toLowerCase()) {
+  const pending = pendingBookings.has(b.id) || Object.values(b.transactions || {}).some(tx => tx.status === 'pending');
+  if (b.mode === 'phase1' && state.escrowAddress && !pending &&
+      wallet.toLowerCase() === owner?.toLowerCase()) {
    let label;
-   if (pending || ['funding pending', 'failed'].includes(b.status)) label = 'Reconcile booking transaction';
-   else if (b.cancelled && b.scheduleStatus !== 'synced') label = 'Sync calendar cancellation';
-   else if (b.cancelled && b.status === 'funded') label = 'Reconcile cancellation payment';
+   if (b.cancelled && b.status === 'funded') label = 'Reconcile cancellation payment';
    else if (!b.cancelled && !['paid', 'refunded'].includes(b.status)) {
-    if (b.scheduleStatus !== 'synced' && Date.parse(b.endUtc) > now) label = 'Add or retry calendar listing';
-    else if (b.status === 'draft' && b.acknowledged && Date.parse(b.startUtc) > now) label = 'Performer accepted: fund booking';
+    if (['draft', 'failed'].includes(b.status) && b.acknowledged && Date.parse(b.startUtc) > now) label = 'Performer accepted: fund booking';
     else if (b.status === 'funded' && now >= Date.parse(b.endUtc) &&
              now < Date.parse(b.endUtc) + b.reviewWindow * 1000) {
      label = b.decision ? 'Submit recorded payment decision' : 'Review performance and record live minutes';
@@ -24,7 +22,7 @@ export function liveBookingActions(state, wallet, owner, now = Date.now()) {
    if (label) actions.admin.push({ id: b.id, label });
   }
   if (b.wallet?.toLowerCase() !== wallet.toLowerCase() || b.mode !== 'phase1') continue;
-  if (!b.cancelled && b.status === 'draft' && b.stewardApproved && !b.acknowledged &&
+  if (!pending && !b.cancelled && b.status === 'draft' && b.stewardApproved && !b.acknowledged &&
       Date.parse(b.startUtc) > now) actions.schedule.push({ id: b.id, label: 'Review and accept performance invitation' });
   if (!pending && claimState(b, state.escrowAddress, wallet, now).enabled) {
    actions.profile.push({ id: b.id, label: 'Claim live-performance payment' });
@@ -41,11 +39,11 @@ const BADGE_STYLE = `
  .live-action-anchor { position: relative; }
  .live-action-badge { display: inline-flex; align-items: center; justify-content: center;
   min-width: 1rem; height: 1rem; padding: 0 .18rem; margin-left: .45rem; border-radius: 999px;
-  background: #d71932; color: #fff; border: 1px solid #ffb6bf; font: 700 .68rem/1 system-ui;
+  background: #00cfff; color: #001522; border: 1px solid #a6f4ff; font: 700 .68rem/1 system-ui;
   vertical-align: middle; pointer-events: none; }
  .live-action-badge[hidden] { display: none; }
  .live-action-anchor > .live-action-badge { position: absolute; bottom: -5px; right: -5px;
-  margin: 0; z-index: 3; box-shadow: 0 0 6px #d7193266; }
+  margin: 0; z-index: 3; box-shadow: 0 0 8px #00cfff99; }
 `;
 
 export function renderLiveActionBadge(target, count, label, anchor = false) {
@@ -71,8 +69,14 @@ function startNotifications() {
  let timer;
  let queued = false;
  const observed = new WeakSet();
- const actions = () => liveBookingActions(state, window._wallet?.address,
-  window.DecentConfig?.adminWalletAddress || '0x807061DF657A7697c04045dA7d16D941861cAABc');
+ const actions = () => {
+  const pending = new Set((state.bookings || []).filter(b =>
+   localStorage.getItem(`live-claim:${b.id}`) ||
+   ['funding', 'approve', 'reject', 'cancel', 'recovery', 'payout', 'claim'].some(action => localStorage.getItem(`live-pending:${b.id}:${action}`))
+  ).map(b => b.id));
+  return liveBookingActions(state, window._wallet?.address,
+   window.DecentConfig?.adminWalletAddress || '0x807061DF657A7697c04045dA7d16D941861cAABc', Date.now(), pending);
+ };
  const update = () => {
   queued = false;
   const counts = actions();
@@ -147,7 +151,8 @@ function startNotifications() {
  document.addEventListener('wallet-connected', reset);
  document.addEventListener('wallet-disconnected', reset);
  document.addEventListener('live-booking-acknowledged', refresh);
- document.addEventListener('live-booking-claim-updated', refresh);
+ document.addEventListener('live-booking-transaction-updated', scheduleUpdate);
+ document.addEventListener('live-booking-claim-updated', () => { scheduleUpdate(); void refresh(); });
  document.addEventListener('open-admin', () => {
   if (!isAdminWallet() || !actions().admin.length) return;
   queueMicrotask(() => {

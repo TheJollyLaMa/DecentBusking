@@ -50,7 +50,7 @@ import { backfillIpfsPins } from './ipfs-backfill.js';
 import { syncMintedTracksFromChain, createVerifiedMintQueueReader, discoverPinataMetadataGateway, readOwnedDevertAds, resolveDevertCampaignMedia, resolveApprovedDevertCampaignMedia } from './mint-sync.js';
 import { nftCatalogPage } from '../js/nft-loader.js';
 import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
-import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, DJUKE_ABI } from './djuke.js';
+import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, verifyDjukePlaylistWorker, DJUKE_ABI, DJUKE_PLAYLIST_WORKER_ABI } from './djuke.js';
 import { createDevertQueueReader, createDevertQueueRuntime, createDevertQueueCatalogSync, combinePaidQueues } from './devert-queue.js';
 import { devertQueueAbi } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
@@ -66,7 +66,7 @@ import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
 import { createCreatorProfiles } from './creator-profiles.js';
 import { createArtworkUpdateQueue } from './artwork-updates.js';
 import { createDjukeGasQuoteReader, createDjukePlaylistGasQuoteReader, DJUKE_GAS_ABI, DJUKE_PLAYLIST_GAS_ABI } from './djuke-gas.js';
-import { createDjukePlaylistBatchReconciler, playlistBatchEventAbi } from './djuke-playlist-batches.js';
+import { createDjukePlaylistBatchReconciler, djukePlaylistReadiness, playlistBatchEventAbi } from './djuke-playlist-batches.js';
 import { createEnsResolver } from './ens-resolver.js';
 import { createDevertRemovals } from './devert-removals.js';
 import { ensureCheckpointGroups } from './checkpoint-groups.js';
@@ -1015,14 +1015,18 @@ async function main() {
     contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, 'function quote() view returns(uint256)'], quoteSigner),
     fulfillmentGasUnits: BigInt(process.env.DJUKE_FULFILLMENT_GAS_UNITS || '1000000') }) : null;
   const playlistContractEnabled = process.env.DJUKE_PLAYLIST_BATCH_ENABLED === 'true' &&
+    process.env.DJUKE_CONTRACT_VERSION === '0.4' &&
     process.env.DJUKE_PLAYLIST_BATCH_VERSION === '0.4' &&
     process.env.DJUKE_PLAYLIST_BATCH_ADDRESS?.toLowerCase() === djukeAddress?.toLowerCase() && !!quoteSigner;
-  const playlistWorkerReady = false; // Keep signing and radio readiness closed until the complete v0.4 fork rehearsal passes.
-  const getDjukePlaylistGasQuote = playlistContractEnabled && playlistWorkerReady ? createDjukePlaylistGasQuoteReader({ provider: quoteSigner.provider,
+  let playlistWorkerReady = false;
+  let initializePlaylistWorker = null;
+  const readDjukePlaylistGasQuote = playlistContractEnabled ? createDjukePlaylistGasQuoteReader({ provider: quoteSigner.provider,
     signer: quoteSigner, contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, ...DJUKE_PLAYLIST_GAS_ABI], quoteSigner),
     fulfillmentGasUnits: BigInt(process.env.DJUKE_FULFILLMENT_GAS_UNITS || '1000000') }) : null;
   let playlistBatchJournal = null;
-  const playlistBatchStartBlock = Number(process.env.DJUKE_PLAYLIST_BATCH_START_BLOCK);
+  let playlistBatchEventsReady = false;
+  const playlistBatchStartBlock = /^\d+$/.test(process.env.DJUKE_PLAYLIST_BATCH_START_BLOCK || '')
+    ? Number(process.env.DJUKE_PLAYLIST_BATCH_START_BLOCK) : NaN;
   const playlistBatchWorkerEnabled = playlistContractEnabled && process.env.DJUKE_PLAYLIST_BATCH_ENABLED === 'true' &&
     Number.isSafeInteger(playlistBatchStartBlock) && playlistBatchStartBlock >= 0 && !!checkpointMirror && !!config.pinataJwt;
   if (playlistBatchWorkerEnabled) {
@@ -1034,14 +1038,17 @@ async function main() {
     const eventContract = new Contract(djukeAddress, [...DJUKE_ABI, ...playlistBatchEventAbi()], getRpcRouter().provider('logs', 'djuke-playlist-events'));
     playlistBatchJournal = createDjukePlaylistBatchReconciler({ provider: eventContract.runner.provider, contract: eventContract,
       restore: batchStore.restore, save: batchStore.save, startBlock: playlistBatchStartBlock });
-    await initializeDevertPlaybackWithRetry({ initialize: () => playlistBatchJournal.initialize() });
   }
-  const getDjukePlaylistReadiness = async () => ({ ready: false, version: '0.4',
-    configured: playlistContractEnabled, contractAddress: playlistContractEnabled ? djukeAddress : '',
-    batchEventsDurable: !!playlistBatchJournal, maxSongs: 24, laneModel: true,
-    radioPricing: { tierSize: 8, baseUsdc: 0.25, platformFeeUsdc: 3, feeBlockSize: 12, split: [25, 25, 25, 25] },
-    cutIn: 'Main paid requests always precede playlist lane songs',
-    reason: 'Radio readiness remains closed until end-to-end playlist fulfillment, worker gas quoting, and fork rehearsal pass' });
+  const getDjukePlaylistReadiness = async () => djukePlaylistReadiness({
+    configured: playlistContractEnabled, contractAddress: djukeAddress, batchEventsDurable: !!playlistBatchJournal && playlistBatchEventsReady,
+    workerReady: playlistWorkerReady, paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
+    mirrorAvailable: !!checkpointMirror?.status().available,
+  });
+  const getDjukePlaylistGasQuote = readDjukePlaylistGasQuote ? async input => {
+    const readiness = await getDjukePlaylistReadiness();
+    if (!readiness.ready) throw new Error(readiness.reason);
+    return readDjukePlaylistGasQuote(input);
+  } : null;
   const readDjukeQueueState = djukeAddress ? createDjukeQueueReader({
     provider: getRpcRouter().provider('read', 'djuke-reader'), contractAddress: djukeAddress,
     playlistLaneEnabled: playlistBatchWorkerEnabled,
@@ -1083,6 +1090,7 @@ async function main() {
     const fulfiller = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-fulfiller'));
     const journalStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-djuke-journal.json',
+      requireLocalMirror: playlistBatchWorkerEnabled,
       tags: { app: 'decentbusking', kind: 'djuke-journal', schema: '1' }, serialize: value => value,
       deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
     _djukeRuntime = createDjukeRuntime({
@@ -1117,6 +1125,20 @@ async function main() {
       },
       getTrack: trackId => getPlaylist().find(track => track.trackId === trackId) || null,
     });
+    if (playlistBatchWorkerEnabled) {
+      await verifyDjukePlaylistWorker({ provider: fulfiller.provider, workerAddress: fulfiller.address,
+        contract: new Contract(djukeAddress, [...DJUKE_GAS_ABI, ...DJUKE_PLAYLIST_WORKER_ABI], fulfiller) });
+      initializePlaylistWorker = async () => {
+        await initializeDevertPlaybackWithRetry({ initialize: async () => {
+          if (!playlistBatchEventsReady) {
+            await playlistBatchJournal.initialize();
+            playlistBatchEventsReady = true;
+          }
+          await _djukeRuntime.reconcile();
+        } });
+        playlistWorkerReady = true;
+      };
+    }
     console.log(`[djuke] Paid queue enabled; fulfiller ${fulfiller.address}.`);
   } else if (readDjukeState) {
     console.warn('[djuke] Queue is read-only: DJUKE_FULFILLER_PRIVATE_KEY, CHECKPOINT_MIRROR_SECRET and PINATA_JWT are all required for paid playback.');
@@ -1640,6 +1662,7 @@ async function main() {
     loadPlaylist();
     playlistReady = true;
   }
+  if (initializePlaylistWorker) await initializePlaylistWorker();
   refreshPayflow();
   syncMintedTracks(config);
 

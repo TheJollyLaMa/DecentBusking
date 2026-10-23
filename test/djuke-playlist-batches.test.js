@@ -114,3 +114,96 @@ test('played playlist proof waits for late main requests before lane settlement'
   assert.equal(calls[0].playlistLaneId, '0');
   assert.equal(calls[0].playId, 'proof');
 });
+test('playlist readiness requires explicit configuration, durable events, verified runtime, payments, and live mirror', async () => {
+  const { djukePlaylistReadiness } = await import('../discord-bot/djuke-playlist-batches.js');
+  const enabled = { configured: true, contractAddress: `0x${'12'.repeat(20)}`, batchEventsDurable: true,
+    workerReady: true, paymentsEnabled: true, mirrorAvailable: true };
+  assert.equal(djukePlaylistReadiness(enabled).ready, true);
+  assert.equal(djukePlaylistReadiness(enabled).reason, '');
+  for (const key of ['configured', 'batchEventsDurable', 'workerReady', 'paymentsEnabled', 'mirrorAvailable']) {
+    const closed = djukePlaylistReadiness({ ...enabled, [key]: false });
+    assert.equal(closed.ready, false, key);
+    assert.ok(closed.reason, key);
+  }
+  assert.equal(djukePlaylistReadiness({ ...enabled, configured: false }).contractAddress, '');
+});
+
+test('playlist worker verifies Base, on-chain v0.4, quote identity and fulfiller permissions', async () => {
+  const { verifyDjukePlaylistWorker } = await import('../discord-bot/djuke.js');
+  const workerAddress = `0x${'12'.repeat(20)}`;
+  const contract = { CONTRACT_VERSION: async () => '0.4', gasWorker: async () => workerAddress.toUpperCase(),
+    FULFILLER_ROLE: async () => 'fulfiller', hasRole: async (role, address) => role === 'fulfiller' && address === workerAddress };
+  const provider = { getNetwork: async () => ({ chainId: 8453n }) };
+  await verifyDjukePlaylistWorker({ provider, contract, workerAddress });
+  await assert.rejects(verifyDjukePlaylistWorker({ provider: { getNetwork: async () => ({ chainId: 1n }) },
+    contract, workerAddress }), /Base-only/);
+  await assert.rejects(verifyDjukePlaylistWorker({ provider,
+    contract: { ...contract, CONTRACT_VERSION: async () => '0.3' }, workerAddress }), /v0.4/);
+  await assert.rejects(verifyDjukePlaylistWorker({ provider,
+    contract: { ...contract, gasWorker: async () => `0x${'34'.repeat(20)}` }, workerAddress }), /does not match/);
+  await assert.rejects(verifyDjukePlaylistWorker({ provider,
+    contract: { ...contract, hasRole: async () => false }, workerAddress }), /fulfiller role/);
+});
+
+test('production playlist quote wiring stays closed before runtime restore and for missing rollout prerequisites', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const { djukePlaylistReadiness } = await import('../discord-bot/djuke-playlist-batches.js');
+  const source = fs.readFileSync(require('node:path').join(__dirname, '../discord-bot/index.js'), 'utf8');
+  assert.ok(source.indexOf('if (initializePlaylistWorker) await initializePlaylistWorker()') > source.lastIndexOf('playlistReady = true;'),
+    'runtime reconciliation must wait for catalog restoration rather than blocking startup forever');
+  assert.ok(source.indexOf('if (initializePlaylistWorker) await initializePlaylistWorker()') > source.indexOf('http.createServer(requestHandler).listen'),
+    'durable journal initialization must wait until the HTTP mirror heartbeat endpoint is available');
+  const code = source.slice(source.indexOf('  const djukeAddress ='), source.indexOf('  let readDjukeState ='));
+  const address = `0x${'12'.repeat(20)}`;
+  const enabled = { DJUKE_CONTRACT_ADDRESS: address, DJUKE_CONTRACT_VERSION: '0.4', DJUKE_FULFILLER_PRIVATE_KEY: 'local-fixture',
+    DJUKE_PLAYLIST_BATCH_ADDRESS: address, DJUKE_PLAYLIST_BATCH_VERSION: '0.4', DJUKE_PLAYLIST_BATCH_ENABLED: 'true',
+    DJUKE_PLAYLIST_BATCH_START_BLOCK: '10', DJUKE_PAYMENTS_ENABLED: 'true' };
+  async function wiring(overrides = {}) {
+    let signed = 0;
+    const context = vm.createContext({
+      process: { env: { ...enabled, ...overrides } }, config: { pinataJwt: 'local-fixture' },
+      checkpointMirror: { status: () => ({ available: true }) },
+      Wallet: class { constructor(_key, provider) { this.provider = provider; } },
+      Contract: class { constructor(_address, _abi, provider) { this.runner = { provider }; } },
+      supportsDjukeAlbumsAndGas: version => ['0.3', '0.4'].includes(version),
+      getRpcRouter: () => ({ provider: () => ({}) }),
+      createDjukeGasQuoteReader: () => async () => ({}),
+      createDjukePlaylistGasQuoteReader: () => async () => { signed++; return { signature: 'fixture' }; },
+      createPinataStateStore: () => ({ restore: async () => undefined, save: async () => 'ipfs://fixture' }),
+      createDjukePlaylistBatchReconciler: () => ({ initialize: async () => {} }),
+      initializeDevertPlaybackWithRetry: ({ initialize }) => initialize(),
+      playlistBatchEventAbi: () => [], createDjukeQueueReader: () => async () => ({}),
+      djukePlaylistReadiness, DJUKE_ABI: [], DJUKE_GAS_ABI: [], DJUKE_PLAYLIST_GAS_ABI: [],
+    });
+    const result = await vm.runInContext(`(async () => { ${code}
+      return { readiness: getDjukePlaylistReadiness, quote: getDjukePlaylistGasQuote,
+        eventsRestored: () => { playlistBatchEventsReady = true; },
+        runtimeRestored: () => { playlistBatchEventsReady = true; playlistWorkerReady = true; } }; })()`, context);
+    return { ...result, signed: () => signed };
+  }
+  const live = await wiring();
+  assert.equal((await live.readiness()).ready, false);
+  await assert.rejects(live.quote({}), /required/);
+  live.eventsRestored();
+  await assert.rejects(live.quote({}), /not ready/);
+  assert.equal(live.signed(), 0);
+  live.runtimeRestored();
+  assert.equal((await live.readiness()).ready, true);
+  assert.equal((await live.quote({})).signature, 'fixture');
+  assert.equal(live.signed(), 1);
+  for (const overrides of [{ DJUKE_PLAYLIST_BATCH_START_BLOCK: '' }, { DJUKE_PLAYLIST_BATCH_START_BLOCK: undefined },
+    { DJUKE_PLAYLIST_BATCH_START_BLOCK: '-1' }, { DJUKE_PAYMENTS_ENABLED: 'false' }]) {
+    const closed = await wiring(overrides);
+    closed.runtimeRestored();
+    assert.equal((await closed.readiness()).ready, false);
+    await assert.rejects(closed.quote({}));
+    assert.equal(closed.signed(), 0);
+  }
+  for (const overrides of [{ DJUKE_PLAYLIST_BATCH_ENABLED: 'false' }, { DJUKE_CONTRACT_VERSION: '0.3' },
+    { DJUKE_PLAYLIST_BATCH_ADDRESS: `0x${'34'.repeat(20)}` }]) {
+    const closed = await wiring(overrides);
+    assert.equal((await closed.readiness()).ready, false);
+    assert.equal(closed.quote, null);
+  }
+});

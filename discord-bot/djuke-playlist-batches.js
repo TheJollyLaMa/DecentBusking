@@ -1,5 +1,17 @@
 const BATCH_EVENTS = ['PlaylistBatchRequested', 'PlaylistBatchFeeSettled', 'PlaylistBatchFeeRefunded', 'PlaylistSongRefunded', 'PlaylistSongDelivered'];
 
+export function djukePlaylistReadiness({ configured, contractAddress, batchEventsDurable, workerReady, paymentsEnabled, mirrorAvailable }) {
+  const reason = !configured ? 'DJuke v0.4 playlist checkout is not configured'
+    : !batchEventsDurable ? 'Durable playlist event storage and an explicit start block are required'
+    : !workerReady ? 'Playlist worker permissions and playback journals are not ready'
+    : !paymentsEnabled ? 'DJuke payments are disabled'
+    : !mirrorAvailable ? 'Local checkpoint mirror is offline' : '';
+  return { ready: !reason, version: '0.4', configured, contractAddress: configured ? contractAddress : '',
+    batchEventsDurable, maxSongs: 24, laneModel: true,
+    radioPricing: { tierSize: 8, baseUsdc: 0.25, platformFeeUsdc: 3, feeBlockSize: 12, split: [25, 25, 25, 25] },
+    cutIn: 'Main paid requests always precede playlist lane songs', reason };
+}
+
 export function createDjukePlaylistBatchReconciler({ provider, contract, restore, save, startBlock, confirmations = 2,
   chunkSize = 2000 }) {
   if (!provider || !contract || typeof restore !== 'function' || typeof save !== 'function' || !Number.isSafeInteger(startBlock) || startBlock < 0) {
