@@ -60,6 +60,7 @@ export function filterDjukeSongs(tracks, query = '') {
 
 export const BASE_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export const DJUKE_BROWSER_ABI = [
+  'function CONTRACT_VERSION() view returns(string)',
   'function quote() view returns (uint256)',
   'function requestPlay(bytes32 songId, uint256 maxPrice) returns (uint256)',
   'function replaceRequest(uint256 requestId, bytes32 songId)',
@@ -82,7 +83,9 @@ export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUni
         Number(gasQuote.deadline) <= Math.floor(Date.now() / 1000) || BigInt(gasQuote.maxPrice) !== maxPriceUnits) throw new Error('Refresh the worker gas quote');
     const [worker, cap, nonce] = await Promise.all([djuke.gasWorker(), djuke.maxGasContributionWei(), djuke.gasQuoteNonces(address)]);
     const contribution = BigInt(gasQuote.contributionWei);
-    if (contribution <= 0n || contribution !== BigInt(gasQuote.fulfillmentCostWei) * 2n || contribution > cap ||
+    const sponsored = contribution === 0n && BigInt(gasQuote.fulfillmentCostWei) === 0n &&
+      await djuke.CONTRACT_VERSION() === '0.5';
+    if ((!sponsored && contribution <= 0n) || contribution !== BigInt(gasQuote.fulfillmentCostWei) * 2n || contribution > cap ||
         String(nonce) !== String(gasQuote.nonce)) throw new Error('Invalid worker gas quote');
     const types = { GasQuote: [{ name: 'listener', type: 'address' }, { name: 'songId', type: 'bytes32' },
       { name: 'maxPrice', type: 'uint256' }, { name: 'fulfillmentCostWei', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }] };
@@ -227,7 +230,8 @@ export function initDjuke() {
     const rows = [
       ['Artist / collaborators', `${formatDjukeUsdc(artistUnits)} USDC`],
       ['Platform funds', `${formatDjukeUsdc(fundUnits)} USDC (8% pinning, 2% dev fund)`],
-      ['Worker wallet ETH contribution', `~${formatDjukeEth(BigInt(gasQuote.contributionWei))} ETH`],
+      ['Worker execution', BigInt(gasQuote.contributionWei) === 0n ? 'Platform-funded · no listener surcharge'
+        : `~${formatDjukeEth(BigInt(gasQuote.contributionWei))} ETH contribution`],
     ];
     for (const [label, value] of rows) {
       const row = node('div', undefined, 'djuke-gas-summary-row');
@@ -367,6 +371,8 @@ export function initDjuke() {
       const wallet = window._wallet?.address?.toLowerCase();
       queue.replaceChildren();
       requests.forEach((request, index) => {
+        if (request.playlistLaneId !== undefined &&
+            snapshot.playlistBatches?.some(batch => batch.batchId === request.playlistBatchId)) return;
         const item = node('li');
         const details = node('span', undefined, 'djuke-request-details');
         details.append(node('strong', request.title), node('span', typeof request.artist === 'string' ? request.artist : ''));
@@ -379,12 +385,29 @@ export function initDjuke() {
         item.append(node('span', String(index + 1).padStart(2, '0'), 'djuke-request-number'), details);
         queue.append(item);
       });
-      const quote = quoteDjuke(requests.length);
+      for (const batch of snapshot.playlistBatches || []) {
+        const item = node('li', undefined, 'djuke-playlist-queue');
+        const remaining = batch.songs.filter(song => song.status === 'pending').length;
+        const details = node('div', undefined, 'djuke-request-details');
+        details.append(node('strong', `${batch.name} · ${remaining} of ${batch.songs.length} songs remaining`));
+        const songs = node('ol');
+        for (const song of batch.songs) {
+          const entry = node('li', `${song.title}${song.artist ? ` — ${song.artist}` : ''} · ${song.status}`);
+          entry.dataset.state = song.status;
+          songs.append(entry);
+        }
+        details.append(songs);
+        item.append(details);
+        queue.append(item);
+      }
+      const pendingCount = Number.isSafeInteger(snapshot.mainPending) && Number.isSafeInteger(snapshot.playlistPending)
+        ? snapshot.mainPending + snapshot.playlistPending : requests.length;
+      const quote = quoteDjuke(pendingCount);
       live = { ...snapshot, priceUnits: quote.priceUnits.toString() };
       price.textContent = formatDjukeUsdc(quote.priceUnits);
-      count.textContent = String(requests.length);
-      renderTiers(requests.length);
-      status.textContent = requests.length ? 'First paid · first played' : 'No paid requests';
+      count.textContent = String(pendingCount);
+      renderTiers(pendingCount);
+      status.textContent = pendingCount ? 'Main paid requests precede playlist songs' : 'No paid requests';
       renderSongs({ deferWhileFocused: true });
       updateWallet();
       refreshGasQuote();

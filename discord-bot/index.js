@@ -59,6 +59,7 @@ import { startDevertLoopWorker } from './devert-loop.js';
 import { DISCORD_REST_OPTIONS, loginDiscordClient, recoverDiscordConnection, watchDiscordSession } from './discord-login.js';
 import { createDiscordDiagnostics } from './discord-diagnostics.js';
 import { DEFAULT_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
+import { createWorkerReserve } from './worker-reserve.js';
 import { createPinataStateStore, recoverVerifiedPlaylistBaseline } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
@@ -687,7 +688,9 @@ async function main() {
     serialize: value => value, deserialize: value => value,
   }) : null;
   const creatorProfiles = creatorStore ? createCreatorProfiles({ restore: creatorStore.restore, save: creatorStore.save }) : null;
-  const initializeCreators = () => creatorProfiles?.initialize().catch(error => console.warn('[creator-profiles]', error.message));
+  let creatorProfilesReady = false;
+  const initializeCreators = () => creatorProfiles?.initialize().then(() => { creatorProfilesReady = true; })
+    .catch(error => console.warn('[creator-profiles]', error.message));
   initializeCreators();
   setInterval(initializeCreators, 30000).unref();
 
@@ -1008,19 +1011,48 @@ async function main() {
   setInterval(budgetPaced(refreshEarningsLedger), 60_000).unref();
   refreshEarningsLedger();
 
+  const reserveEnabled = process.env.WORKER_RESERVE_ENABLED === 'true';
+  if (reserveEnabled && (!process.env.WORKER_RESERVE_PRIVATE_KEY || !config.pinataJwt)) {
+    throw new Error('Approved reserve signer and durable reserve storage are required for worker top-ups');
+  }
+  const reserveProvider = getRpcRouter().provider('critical', 'worker-reserve');
+  const reserveSigner = reserveEnabled ? new Wallet(process.env.WORKER_RESERVE_PRIVATE_KEY, reserveProvider) : null;
+  const reserveStore = reserveEnabled ? createPinataStateStore({ ...config.checkpointStorage,
+    pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
+    gateway: config.ipfsGateway, name: `decentbusking-worker-reserve-${reserveSigner.address.toLowerCase()}.json`,
+    restoreLatestOnly: true, tags: { app: 'decentbusking', kind: `worker-reserve-${reserveSigner.address.toLowerCase()}`, schema: '1' },
+    serialize: value => value, deserialize: value => value }) : null;
+  const workerReserve = process.env.DJUKE_FULFILLER_PRIVATE_KEY ? createWorkerReserve({
+    provider: reserveProvider, signer: reserveSigner, enabled: reserveEnabled,
+    workerAddress: new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY).address,
+    restore: () => reserveStore.restore(), save: value => reserveStore.save(value),
+  }) : null;
+  const checkWorkerReserve = async () => {
+    if (!workerReserve) return;
+    try {
+      const result = await workerReserve.check();
+      if (result.low || result.pending || result.confirmed) console.log('[worker-reserve]', JSON.stringify(result));
+    } catch (error) { console.error('[worker-reserve] Refill unavailable:', error.message); }
+  };
+  setInterval(checkWorkerReserve, 300_000).unref();
   const djukeAddress = process.env.DJUKE_CONTRACT_ADDRESS;
-  const quoteSigner = supportsDjukeAlbumsAndGas(process.env.DJUKE_CONTRACT_VERSION) && process.env.DJUKE_FULFILLER_PRIVATE_KEY
+  const sponsoredDjuke = process.env.DJUKE_CONTRACT_VERSION === '0.5';
+  const sponsorshipConfigured = !sponsoredDjuke ||
+    (process.env.WORKER_RESERVE_ENABLED === 'true' && !!process.env.WORKER_RESERVE_PRIVATE_KEY);
+  const quoteSigner = sponsorshipConfigured && supportsDjukeAlbumsAndGas(process.env.DJUKE_CONTRACT_VERSION) && process.env.DJUKE_FULFILLER_PRIVATE_KEY
     ? new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-gas-quote')) : null;
   const getDjukeGasQuote = quoteSigner ? createDjukeGasQuoteReader({ provider: quoteSigner.provider, signer: quoteSigner,
+    sponsored: sponsoredDjuke,
     contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, 'function quote() view returns(uint256)'], quoteSigner),
     fulfillmentGasUnits: BigInt(process.env.DJUKE_FULFILLMENT_GAS_UNITS || '1000000') }) : null;
   const playlistContractEnabled = process.env.DJUKE_PLAYLIST_BATCH_ENABLED === 'true' &&
-    process.env.DJUKE_CONTRACT_VERSION === '0.4' &&
-    process.env.DJUKE_PLAYLIST_BATCH_VERSION === '0.4' &&
+    ['0.4', '0.5'].includes(process.env.DJUKE_CONTRACT_VERSION) &&
+    process.env.DJUKE_PLAYLIST_BATCH_VERSION === process.env.DJUKE_CONTRACT_VERSION &&
     process.env.DJUKE_PLAYLIST_BATCH_ADDRESS?.toLowerCase() === djukeAddress?.toLowerCase() && !!quoteSigner;
   let playlistWorkerReady = false;
   let initializePlaylistWorker = null;
   const readDjukePlaylistGasQuote = playlistContractEnabled ? createDjukePlaylistGasQuoteReader({ provider: quoteSigner.provider,
+    sponsored: sponsoredDjuke,
     signer: quoteSigner, contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, ...DJUKE_PLAYLIST_GAS_ABI], quoteSigner),
     fulfillmentGasUnits: BigInt(process.env.DJUKE_FULFILLMENT_GAS_UNITS || '1000000') }) : null;
   let playlistBatchJournal = null;
@@ -1040,8 +1072,11 @@ async function main() {
       restore: batchStore.restore, save: batchStore.save, startBlock: playlistBatchStartBlock });
   }
   const getDjukePlaylistReadiness = async () => djukePlaylistReadiness({
+    version: process.env.DJUKE_CONTRACT_VERSION,
     configured: playlistContractEnabled, contractAddress: djukeAddress, batchEventsDurable: !!playlistBatchJournal && playlistBatchEventsReady,
-    workerReady: playlistWorkerReady, paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
+    workerReady: playlistWorkerReady && (!sponsoredDjuke || (!!quoteSigner &&
+      await quoteSigner.provider.getBalance(quoteSigner.address) >= 1_000_000_000_000_000n)),
+    paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
     mirrorAvailable: !!checkpointMirror?.status().available,
   });
   const getDjukePlaylistGasQuote = readDjukePlaylistGasQuote ? async input => {
@@ -1052,6 +1087,22 @@ async function main() {
   const readDjukeQueueState = djukeAddress ? createDjukeQueueReader({
     provider: getRpcRouter().provider('read', 'djuke-reader'), contractAddress: djukeAddress,
     playlistLaneEnabled: playlistBatchWorkerEnabled,
+    getPlaylistBatches: () => {
+      if (!playlistBatchEventsReady) return [];
+      const tracks = new Map(getPlaylist().map(track => [id(track.trackId).toLowerCase(), track]));
+      return playlistBatchJournal.getState().filter(batch => batch.status === 'pending').map(batch => {
+        const saved = creatorProfilesReady ? creatorProfiles.findPlaylistRevision(batch.payer, batch.songIds) : null;
+        return { batchId: batch.batchId, name: saved?.name || `Playlist #${batch.batchId}`,
+          ...(saved ? { playlistId: saved.id, revision: saved.revision } : {}),
+          songs: batch.songIds.map((songId, index) => {
+            const laneId = batch.laneIds[index];
+            const track = tracks.get(songId.toLowerCase());
+            return { songId, laneId, title: track?.title || 'Recording awaiting catalog recovery',
+              artist: track?.uploader || '', status: batch.deliveredLaneIds?.includes(laneId) ? 'delivered'
+                : batch.refundedLaneIds?.includes(laneId) ? 'refunded' : 'pending' };
+          }) };
+      });
+    },
     paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
     getPlaylist: () => {
       if (!playlistReady) throw new Error('DJuke catalog is restoring');
@@ -1125,7 +1176,7 @@ async function main() {
       getTrack: trackId => getPlaylist().find(track => track.trackId === trackId) || null,
     });
     if (playlistBatchWorkerEnabled) {
-      await verifyDjukePlaylistWorker({ provider: fulfiller.provider, workerAddress: fulfiller.address,
+      await verifyDjukePlaylistWorker({ provider: fulfiller.provider, workerAddress: fulfiller.address, version: process.env.DJUKE_CONTRACT_VERSION,
         contract: new Contract(djukeAddress, [...DJUKE_GAS_ABI, ...DJUKE_PLAYLIST_WORKER_ABI], fulfiller) });
       initializePlaylistWorker = async () => {
         await initializeDevertPlaybackWithRetry({ initialize: async () => {

@@ -15,6 +15,42 @@ test('playlist draft exposes exactly Save to Profile, Personal Play and Play Liv
   assert.match(css, /djuke-live-beacon/);
 });
 
+test('radio checkout accepts zero worker ETH only for configured on-chain v0.5 before any approval', async () => {
+  const helpers = await import('../js/djuke-playlists.mjs');
+  const address = `0x${'1'.repeat(40)}`, listener = `0x${'2'.repeat(40)}`;
+  const config = { djukePlaylistBatchAddress: address, djukePlaylistBatchVersion: '0.5',
+    djukePlaylistBatchEnabled: true, djukePlaylistRadioReady: true, ipfsUploadServiceUrl: 'https://worker.example' };
+  let version = '0.5', contribution = '0', cost = '0', sent = 0;
+  const steps = [];
+  const request = async (...args) => { assert.equal(args.at(-1).value, 0n); sent++;
+    return { hash: '0xpreview', wait: async () => ({ status: 1 }) }; };
+  request.staticCall = async (...args) => assert.equal(args.at(-1).value, 0n);
+  const djuke = { target: address, CONTRACT_VERSION: async () => version, requestPlaylistWithGas: request };
+  const token = { decimals: async () => 6, balanceOf: async () => 100000000n,
+    allowance: async () => 100000000n, approve: async () => assert.fail('no unnecessary approval') };
+  const context = vm.createContext({ ...helpers, AbortSignal, URL, BASE_USDC: 'usdc', PLAYLIST_BATCH_ABI: [], USDC_ABI: [],
+    ensureBaseNetwork: async () => {}, formatUsdcUnits: String, announcePaymentCelebration() {},
+    ethers: { Contract: function(target) { return target === address ? djuke : token; } } });
+  const source = fs.readFileSync(path.join(__dirname, '../js/djuke-playlists-ui.mjs'), 'utf8');
+  vm.runInContext(source.slice(source.indexOf('export async function purchaseRadioNamedPlaylist'),
+    source.indexOf('export async function purchasePrivateNamedPlaylist')).replace('export ', ''), context);
+  const purchase = () => context.purchaseRadioNamedPlaylist({ config, playlist: { songIds: [`0x${'a'.repeat(64)}`] },
+    signer: { provider: { getBalance: async () => 100000n }, getAddress: async () => listener },
+    onStep: step => steps.push(step), fetchImpl: async () => ({ ok: true, json: async () => ({
+      contractAddress: address, listener, maxTotal: '3250000', fulfillmentCostWei: cost, contributionWei: contribution,
+      deadline: Math.floor(Date.now() / 1000) + 120, signature: '0xsigned' }) }) });
+  config.djukePlaylistBatchVersion = '0.4';
+  await assert.rejects(purchase(), /Legacy playlist checkout/);
+  config.djukePlaylistBatchVersion = '0.5'; version = '0.4';
+  await assert.rejects(purchase(), /requires DJuke v0.5/);
+  version = '0.5'; contribution = '2000'; cost = '1000';
+  await assert.rejects(purchase(), /no worker ETH charge/);
+  contribution = cost = '0';
+  await purchase();
+  assert.equal(sent, 1);
+  assert.ok(steps.some(step => step.includes('platform-funded worker execution; wallet network gas still applies')));
+});
+
 test('unsaved draft buys one personal batch then plays in order; Live and Save stay independent', async () => {
   const helpers = await import('../js/djuke-playlists.mjs');
   const address = `0x${'1'.repeat(40)}`;

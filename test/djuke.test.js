@@ -17,7 +17,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261023-stable-song-menu/);
+  assert.match(html, /djuke\.mjs\?v=20261023-radio-takeover/);
   assert.match(html, /devert-paid-queue\.mjs\?v=20261019-radio-recovery/);
 });
 
@@ -343,5 +343,11 @@ test('v0.2 payment verifies a worker quote and sends exactly the doubled ETH con
     await payForDjukeSong({ ...fixture, gasQuote: quote });
     assert.deepEqual(fixture.calls, [['gas-request', 2000n]]);
     await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: { ...quote, contributionWei: '4000' } }), /Invalid worker gas quote/);
+    const sponsoredQuote = { ...quote, contributionWei: '0', fulfillmentCostWei: '0' };
+    fixture.djuke.CONTRACT_VERSION = async () => '0.4';
+    await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: sponsoredQuote }), /Invalid worker gas quote/);
+    fixture.djuke.CONTRACT_VERSION = async () => '0.5';
+    await payForDjukeSong({ ...fixture, gasQuote: sponsoredQuote });
+    assert.deepEqual(fixture.calls.at(-1), ['gas-request', 0n]);
   } finally { global.ethers = previous; }
 });

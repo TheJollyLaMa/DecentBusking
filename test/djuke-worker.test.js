@@ -199,6 +199,35 @@ function memoryJournal(api) {
     save: async value => { snapshot = structuredClone(value); return 'ipfs://journal'; } });
 }
 
+test('public queue shows all twelve named songs while querying only the playable lane head', async () => {
+  const { createDjukeQueueReader, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
+  const wallet = `0x${'2'.repeat(40)}`;
+  const tracks = Array.from({ length: 12 }, (_, i) => ({ trackId: `named-${i}`, title: `Song ${i + 1}`,
+    ipfsCid: `cid-${i}`, mintRecipient: wallet }));
+  const batch = { batchId: '0', name: 'BoogieNight', songs: tracks.map((track, i) => ({
+    songId: id(track.trackId), laneId: String(i), title: track.title, status: 'pending' })) };
+  let itemReads = 0;
+  const contract = { headRequestId: async () => 0n, nextRequestId: async () => 0n,
+    playlistHeadId: async () => 0n, playlistNextId: async () => 12n, playlistPendingCount: async () => 12n,
+    getPlaylistItem: async () => { itemReads++; return { status: 0, payer: wallet, amount: 250000n, songId: id('named-0'), batchId: 0n }; },
+    getSong: async songId => ({ enabled: true, audioURI: `ipfs://${tracks.find(track => id(track.trackId) === songId).ipfsCid}` }) };
+  const read = createDjukeQueueReader({ provider: { getNetwork: async () => ({ chainId: 8453 }),
+    getBlockNumber: async () => 100, getBlock: async () => ({ hash: 'canonical' }) }, contract,
+    contractAddress: `0x${'1'.repeat(40)}`, playlistLaneEnabled: true, getPlaylist: () => tracks,
+    getPlaylistBatches: () => [batch] });
+  const snapshot = await read();
+  assert.equal(itemReads, 1);
+  assert.equal(snapshot.requests.length, 1);
+  assert.equal(snapshot.playlistPending, 12);
+  assert.equal(snapshot.playlistBatches[0].songs.length, 12);
+  assert.equal(snapshot.playlistBatches[0].name, 'BoogieNight');
+  assert.deepEqual(snapshot.requests[0].playlist, { batchId: '0', name: 'BoogieNight', songCount: 12, remaining: 12 });
+  const journal = createDjukePlaybackJournal({ restore: async () => null, save: async () => 'ipfs://journal' });
+  await journal.initialize();
+  await journal.synchronize(snapshot.requests);
+  assert.deepEqual((await journal.reserveNext()).playlist, snapshot.requests[0].playlist);
+});
+
 test('runtime plays paid requests first, retries short plays, and fulfills only audible completions', async () => {
   const api = await import('../discord-bot/djuke.js');
   const request = { requestId: 'r0', chainRequestId: '0', songId: id('song'), revision: '0', trackId: 'song', playable: true };

@@ -21,7 +21,7 @@ export function quoteNamedPlaylist(songCount, mode = 'private', listenPrices = [
 }
 
 export function supportsDJukePlaylistBatch(config = {}) {
-  return config.djukePlaylistBatchVersion === '0.4' &&
+  return ['0.4', '0.5'].includes(config.djukePlaylistBatchVersion) &&
     /^0x[0-9a-fA-F]{40}$/.test(config.djukePlaylistBatchAddress || '') &&
     config.djukePlaylistBatchEnabled === true;
 }
@@ -99,6 +99,7 @@ export function createNamedPlaylistClient({ fetchImpl = globalThis.fetch, origin
 
 export function getPlaylistBatchAbi() {
   return [
+    'function CONTRACT_VERSION() view returns (string)',
     'function quotePlaylist(bytes32[] songIds, bool radio) view returns (uint256 subtotal,uint256 fee,uint256 total)',
     'function purchasePlaylistPrivate(bytes32[] songIds,uint256 maxTotal) returns (uint256)',
     'function requestPlaylistWithGas(bytes32[] songIds,uint256 maxTotal,uint256 fulfillmentCostWei,uint256 deadline,bytes signature) payable returns (uint256)',
