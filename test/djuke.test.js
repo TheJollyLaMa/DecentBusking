@@ -17,7 +17,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261023-radio-takeover/);
+  assert.match(html, /djuke\.mjs\?v=20261023-profile-receipts/);
   assert.match(html, /devert-paid-queue\.mjs\?v=20261019-radio-recovery/);
 });
 
@@ -54,6 +54,21 @@ test('playlist receipt distinguishes purchase, delivery and exact refund without
   assert.match(playlistReceiptSummary({ ...batch, refundedUnits: null }).payment, /Refund amount is being verified/);
   assert.match(playlistReceiptSummary({ ...batch, subtotalUnits: undefined }).payment, /Payment details are being verified/);
   assert.doesNotMatch(playlistReceiptSummary({ ...batch, workerGasSponsored: true }).note, /Worker ETH/);
+});
+
+test('Play Live receipts belong to the profile, not the DJuke drawer', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const drawer = html.slice(html.indexOf('<aside id="djuke-panel"'), html.indexOf('</aside>', html.indexOf('<aside id="djuke-panel"')));
+  const profile = html.slice(html.indexOf('<dialog id="creator-profile"'));
+  assert.ok(drawer.length > 0);
+  assert.doesNotMatch(drawer, /id="djuke-receipts"|Your Play Live receipts/);
+  assert.match(profile, /id="djuke-receipts"/);
+  assert.equal((html.match(/id="djuke-receipts"/g) || []).length, 1);
+  assert.match(html, /open your profile for your latest Play Live receipts/);
+  const profileSource = fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8');
+  assert.match(profileSource, /creator-profile-view-changed/);
 });
 
 test('DJuke keeps the 10 percent fund and 90 percent artist split exact', async () => {
@@ -245,7 +260,7 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   let focused;
   function element(id) {
     if (nodes.has(id)) return nodes.get(id);
-    const item = { children: [], listeners: {}, attributes: {}, value: '', textContent: '', open: false,
+    const item = { children: [], listeners: {}, attributes: {}, dataset: {}, style: {}, value: '', textContent: '', open: false,
       classList: { add() {}, remove() {} },
       setAttribute(name, value) { this.attributes[name] = value; },
       getAttribute(name) { return this.attributes[name]; },
@@ -267,17 +282,21 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   const address = `0x${'1'.repeat(40)}`;
   let earningsFail = false;
   let catalogFail = false;
+  let playlistReceipts = [];
+  let queueReads = 0;
+  let scheduled;
   let tracks = [{ trackId: 'a', songId: `0x${'a'.repeat(64)}`, title: 'First song', artist: 'Musician' }];
   const context = vm.createContext({ ...helpers, ...versions, renderWalletAddress, formatUsdcUnits, document, AbortSignal,
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example', djukeContractAddress: address } },
     lookupEnsName: async () => 'musician.eth',
     CustomEvent: class { constructor(type, { detail }) { this.type = type; this.detail = detail; } },
-    clearTimeout() {}, setTimeout() {},
+    clearTimeout() { scheduled = null; }, setTimeout(callback) { scheduled = callback; },
     fetch: async url => {
       if (url.endsWith('/earners')) return { ok: !earningsFail, status: earningsFail ? 503 : 200,
         json: async () => ({ chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address, totalUnits: '1125000' }] }) };
+      queueReads++;
       return { ok: !catalogFail, status: catalogFail ? 503 : 200,
-        json: async () => ({ contractAddress: address, paymentsEnabled: true, requests: [], tracks }) };
+        json: async () => ({ contractAddress: address, paymentsEnabled: true, requests: [], tracks, playlistReceipts }) };
     },
   });
   const source = fs.readFileSync(path.join(__dirname, '../js/djuke.mjs'), 'utf8')
@@ -344,6 +363,29 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   await click('djuke-refresh');
   assert.equal(element('djuke-earners').children.length, 0);
   assert.match(element('djuke-earners-state').textContent, /unavailable/);
+  await click('djuke-close');
+  playlistReceipts = [{ payer: address, name: 'BoogieNight', status: 'refunded', songs: [{ status: 'refunded' }],
+    subtotalUnits: '250000', feeUnits: '3000000', refundedUnits: '3250000', transactionHash: `0x${'a'.repeat(64)}` }];
+  element('creator-profile').showModal();
+  document.dispatchEvent({ type: 'creator-profile-view-changed', detail: { address } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(element('djuke-tab').getAttribute('aria-expanded'), 'false');
+  assert.equal(element('djuke-receipts').hidden, false, 'own profile loads receipts without opening DJuke');
+  assert.equal(element('djuke-receipt-list').children.length, 1);
+  assert.equal(typeof scheduled, 'function', 'profile keeps receipt updates scheduled');
+  const beforePoll = queueReads;
+  await scheduled();
+  assert.ok(queueReads > beforePoll);
+  document.dispatchEvent({ type: 'creator-profile-view-changed', detail: { address: `0x${'2'.repeat(40)}` } });
+  assert.equal(element('djuke-receipts').hidden, true, 'other profiles never show the connected wallet receipts');
+  assert.equal(scheduled, null);
+  document.dispatchEvent({ type: 'creator-profile-view-changed', detail: { address } });
+  await new Promise(resolve => setImmediate(resolve));
+  context.window._wallet = null;
+  document.dispatchEvent({ type: 'wallet-disconnected' });
+  assert.equal(element('djuke-receipts').hidden, true);
+  element('creator-profile').close();
+  assert.equal(scheduled, null, 'closing the profile stops receipt polling when DJuke is closed');
 });
 
 test('v0.2 payment verifies a worker quote and sends exactly the doubled ETH contribution', async () => {

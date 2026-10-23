@@ -701,6 +701,7 @@ export function initCreatorProfile() {
     discordLinkExpiryAt = 0;
     const check = ++revision;
     if (!dialog.open) dialog.showModal();
+    document.dispatchEvent(new CustomEvent('creator-profile-view-changed', { detail: { address } }));
     display();
     message('Loading profile');
     if (check !== revision) return;

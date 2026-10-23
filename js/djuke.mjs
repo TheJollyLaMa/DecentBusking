@@ -178,6 +178,10 @@ export function initDjuke() {
   const receipts = document.getElementById('djuke-receipts');
   const receiptList = document.getElementById('djuke-receipt-list');
   const receiptStatus = document.getElementById('djuke-receipts-state');
+  const profileDialog = document.getElementById('creator-profile');
+  let profileAddress = '';
+  const ownProfileOpen = () => !!profileDialog?.open && !!window._wallet?.address &&
+    profileAddress.toLowerCase() === window._wallet.address.toLowerCase();
   let receiptSnapshot = [];
   let receiptKey = '';
   let provisionalReceipt = null;
@@ -335,7 +339,7 @@ export function initDjuke() {
     const mine = receiptSnapshot.filter(batch => batch.payer?.toLowerCase() === wallet).slice(-5).reverse();
     if (provisionalReceipt && !mine.some(batch => batch.transactionHash === provisionalReceipt.transactionHash) &&
         provisionalReceipt.payer === wallet) mine.unshift(provisionalReceipt);
-    receipts.hidden = !wallet || !mine.length;
+    receipts.hidden = !ownProfileOpen() || !mine.length;
     const key = JSON.stringify([wallet, mine]);
     if (key === receiptKey) return;
     receiptKey = key;
@@ -430,8 +434,8 @@ export function initDjuke() {
   }
   async function refresh() {
     clearTimeout(timer);
-    if (!isOpen()) return;
-    refreshEarners();
+    if (!isOpen() && !ownProfileOpen()) return;
+    if (isOpen()) refreshEarners();
     const requestGeneration = ++generation;
     if (!live) status.textContent = 'Loading queue…';
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
@@ -442,7 +446,7 @@ export function initDjuke() {
       if (!response.ok) throw new Error(`Queue unavailable (${response.status})`);
       const snapshot = await response.json();
       const requests = readDjukeQueue(snapshot);
-      if (requestGeneration !== generation || !isOpen()) return;
+      if (requestGeneration !== generation || (!isOpen() && !ownProfileOpen())) return;
       receiptSnapshot = snapshot.playlistReceipts || [];
       if (receiptStatus) receiptStatus.textContent = '';
       renderReceipts();
@@ -490,10 +494,10 @@ export function initDjuke() {
       updateWallet();
       refreshGasQuote();
     } catch (error) {
-      if (requestGeneration !== generation || !isOpen()) return;
+      if (requestGeneration !== generation || (!isOpen() && !ownProfileOpen())) return;
       unavailable(error.message);
     }
-    if (isOpen()) timer = setTimeout(refresh, 15000);
+    if (isOpen() || ownProfileOpen()) timer = setTimeout(refresh, 15000);
   }
   async function runPayment(action, success) {
     if (busy) return;
@@ -550,6 +554,7 @@ export function initDjuke() {
     panel.setAttribute('aria-hidden', 'true');
     panel.inert = true;
     document.body.classList.remove('djuke-open');
+    if (ownProfileOpen()) refresh();
   };
   toggle.addEventListener('click', event => {
     event.stopPropagation();
@@ -576,6 +581,17 @@ export function initDjuke() {
   instructions.addEventListener('close', () => { if (isOpen()) info.focus(); });
   document.getElementById('djuke-close').addEventListener('click', () => { close(); toggle.focus(); });
   document.getElementById('djuke-refresh').addEventListener('click', refresh);
+  document.addEventListener('creator-profile-view-changed', event => {
+    profileAddress = event.detail.address;
+    renderReceipts();
+    if (ownProfileOpen() || isOpen()) refresh();
+    else { clearTimeout(timer); generation++; }
+  });
+  profileDialog?.addEventListener('close', () => {
+    profileAddress = '';
+    renderReceipts();
+    if (!isOpen()) { clearTimeout(timer); generation++; }
+  });
   document.addEventListener('djuke-radio-playlist-purchased', event => {
     const { txHash, totalUnits, name, songIds } = event.detail;
     provisionalReceipt = { transactionHash: txHash, payer: window._wallet?.address?.toLowerCase(),
