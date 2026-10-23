@@ -1,10 +1,39 @@
 # Named DJuke playlists — rollout decisions
 
 Queue-selection timeouts are scheduling deferrals, not playback failures. A
-reservation returned after radio has moved on is released back to pending without
-refunding or settling the batch. Actual unavailable/failed recordings still use
+slow durable reservation remains in flight and is retained for the next selection
+instead of repeatedly releasing and recreating its checkpoint. Before playback,
+the worker revalidates its recording, pending status, and main-request priority.
+Unheard selections discarded for a scheduled handoff or priority change are
+released back to pending without refunding or settling the batch.
+Permanently unavailable recordings and exhausted media retries still use
 the refund safety net. A successful purchase is not evidence that the entire
 playlist played; confirm delivery and refund events before reporting completion.
+
+While a known paid playlist remains unfinished, ordinary rotation is held rather
+than starting an unrelated recording during checkpoint/settlement delays.
+The hold uses the verified on-chain remaining-lane count as well as active journal
+records: production reads only the lane head, so the journal may briefly contain
+only a fulfilled song while later paid songs still await their next snapshot.
+Stale prefetched rotation is discarded at the handoff, and the worker retries after a
+second. Radio status explicitly reports that it is waiting for the paid playlist.
+This can introduce a bookkeeping gap; it is not a promise of gapless streaming.
+Main paid requests, eligible advert breaks, and protected scheduled/live shows
+retain their existing priority. Once the final paid delivery settles, ordinary
+rotation resumes. A controlled worker shutdown releases reservations without
+refunding the remaining batch.
+
+Transient playlist media lookup errors, preparation timeouts, and interrupted or
+insufficiently audible playback receive **three retries after the initial attempt**
+before refunding the remaining batch (four failed media attempts total). Retry
+counters are per song and durably stored in the playback journal, so restarts do
+not reset the budget. Scheduling deferrals and slow checkpoint selection do not
+consume it. Preparation retries back off for 5, 10, then 20 seconds and keep
+ordinary rotation held; radio status explains the retry without requesting a new
+payment. A partial recording is not settled as delivered, even if it ran for more
+than 30 seconds. The fourth media failure invokes the existing version-specific
+suffix/fee refund; v0.4 refunds the full reserved platform fee, not worker ETH or
+wallet network gas. Refunds already completed are final and are not requeued.
 
 The Playlists section of the connected wallet's own profile shows its five most recent Play Live receipts:
 verifying queue, queued, playing, completed, or refunded. Expand a receipt for

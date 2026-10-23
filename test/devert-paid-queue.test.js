@@ -8,7 +8,7 @@ const request = (n = 0) => ({ requestId: `8453:${queueAddress}:${n}`, chainReque
   campaignId: '9', payer: buyer, amountUnits: '1000000', title: 'Approved advert', audioURI: 'ipfs://approved-ad',
   advertiser, songId: `0x${'4'.repeat(64)}`, revision: '0', trackId: `devert-paid:${n}`, playable: true });
 
-test('a hung paid queue cannot stop music, overlap reservations, or leak a late paid selection', async () => {
+test('a hung paid queue stays bounded without overlapping or discarding a late durable selection', async () => {
   const { combinePaidQueues } = await import('../discord-bot/devert-queue.js');
   let resolveAd;
   let adCalls = 0;
@@ -30,7 +30,9 @@ test('a hung paid queue cannot stop music, overlap reservations, or leak a late 
   assert.match(warnings[0], /timed out; music rotation continues/);
   resolveAd({ record, track: {} });
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(released, ['late-paid-ad']);
+  assert.deepEqual(released, []);
+  assert.equal((await queues.nextPaid()).record, record);
+  assert.equal(adCalls, 1, 'consume the prepared reservation instead of paying for another checkpoint');
 });
 
 test('a late playlist selection stays paid and queued instead of refunding the batch', async () => {
@@ -54,11 +56,10 @@ test('a late playlist selection stays paid and queued instead of refunding the b
   finishRead();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(refunds, 0);
-  assert.equal(journal.getState()[0].state, 'pending');
-  assert.match(journal.getState()[0].lastError, /radio moved on/);
+  assert.equal(journal.getState()[0].state, 'playing');
   const retried = await queues.nextPaid();
   assert.equal(retried.record.requestId, item.requestId);
-  assert.equal(retried.record.attempts, 2);
+  assert.equal(retried.record.attempts, 1);
   assert.equal(refunds, 0);
   await queues.release(retried.record, new Error('Scheduled handoff'));
   assert.equal(journal.getState()[0].state, 'pending');
