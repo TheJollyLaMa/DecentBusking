@@ -6,6 +6,18 @@ const { pathToFileURL } = require('node:url');
 
 const url = pathToFileURL(path.join(__dirname, '../js/fund-display.mjs')).href;
 
+test('unknown fund amounts and unavailable source history never render as zero or an empty verified history', async () => {
+  const { renderUsdcAmount, renderFundDisclosure, renderFundSourcesTable } = await import(url);
+  for (const value of [null, undefined]) {
+    assert.match(renderUsdcAmount(value), /Unavailable/);
+    assert.doesNotMatch(renderUsdcAmount(value), /\$0\.00/);
+  }
+  assert.match(renderUsdcAmount('0'), /\$0\.00/);
+  const fund = { label: 'Fund', balanceUnits: null, availableUnits: null, sourcesAvailable: false, sources: [] };
+  assert.doesNotMatch(renderFundDisclosure(fund), /\$0\.00/);
+  assert.match(renderFundSourcesTable(fund), /unavailable or still indexing/);
+});
+
 test('pending fund tables show song estimates without pretending to be on-chain transactions', async () => {
   const { renderFundPendingTable, renderFundWeeklyArchive } = await import(url);
   const rows = [{ rank: 1, trackId: 'song-1', title: '<Song>', artist: 'Artist', wallet: `0x${'1'.repeat(40)}`, votes: 17, plays: 3, amountUnits: '6125000', walletHtml: '<button>artist.eth</button>' }];

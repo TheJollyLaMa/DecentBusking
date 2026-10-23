@@ -339,9 +339,55 @@ server-side play. Already buffered client media cannot be remotely erased.
 The on-chain campaign and expiry stay unchanged, there is no refund or restart
 of that paid term, and the advert becomes reusable when the original term expires.
 Removed campaigns do not free on-chain seats for other campaigns.
-`GET /api/funds` exposes the four configured settlement funds, current balances,
+`GET /api/funds` exposes configured settlement funds (including Live Performers), current balances,
 and proof-of-funding sources. The source ledger scans the router incrementally
 from `PAYROLL_START_BLOCK` (or the stored cursor) and is cached for about 60s.
+The public evidence contract is additive to `schemaVersion: 1`, with
+`evidenceVersion: 1`, `source: "worker-rpc"`, `network: { chainId: 8453, name: "Base" }`,
+the existing top-level `chainId` and `routerAddress`, and top-level/per-fund
+`asset: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol: "USDC", decimals: 6 }`.
+This is worker-reported RPC/index evidence, not independent chain verification.
+The reader rejects unsupported chain/token/decimal configuration rather than
+labeling arbitrary assets USDC. Indexed sources and payouts only include this
+asset; new deposit records include `asset`. Legacy checkpoints with deposits
+missing asset identity rescan their stored range once to backfill it.
+
+Successful amounts remain exact unsigned decimal unit strings, including `"0"`
+for a successful zero read. **Unknown amounts are JSON `null`, never `"0"`**:
+
+- Per fund, `balanceUnits` is nullable. `balanceAvailable`, `balanceCheckedAt`
+  (the most recent read attempt, including a failed attempt), and `balanceError`
+  distinguish a successful zero from RPC failure. One failed fund read does not
+  discard healthy funds or change the separate history `ready`/`lastError`.
+- `availableUnits` is null after a balance failure. For Playback/Top10 it is also
+  null without a healthy weekly source; total balance is not a spendable-balance
+  fallback. `reservedUnits` remains optional and is omitted when unknown.
+  `weeklyAvailable`, `weeklyCheckedAt`, and `weeklyError` describe the weekly
+  source independently. These fields do not guarantee weekly reconciliation or
+  a common block/time between the balance and weekly snapshot.
+- `sourcesAvailable`, `payoutsAvailable`, `historyCheckedAt`, and `historyError`
+  describe the incremental history source. History can be unavailable even
+  with a healthy balance. Retained partial/stale event arrays must not be
+  presented as complete when unavailable; `advertUnits`, `sponsorUnits`,
+  `djukeUnits`, and (when present) `payoutUnits` are null until history is ready
+  and error-free. Empty arrays with availability false do not establish zero
+  activity. Legacy `queryFilter` providers still omit payouts, with
+  `payoutsAvailable: false`.
+
+**Compatibility/deployment ordering:** existing successful string fields,
+fund keys, event fields, routes, checkpoint schema and legacy history readiness
+remain supported. Failure values deliberately change from false zero to null;
+consumers requiring every amount to be a string must migrate first. In
+particular, Canopy's deployed `scripts/busking-public-source.js` currently
+rejects present null balance fields and can suppress the entire fund response.
+Before any upstream production deployment, update/test/deploy that adapter to
+accept nullable units, validate the explicit Base/router/USDC identity and
+`evidenceVersion`, respect each availability/error/timestamp, and withhold
+unknown amounts without hiding healthy event evidence. Test mixed healthy/
+failed funds, real zero, uninitialized/stale history and recovery. Then deploy
+this worker change, followed by synthetic/read-only integration checks.
+Keep Canopy's balance display gated until that separate adapter work is accepted.
+No independent receipt verification or weekly reconciliation is implied.
 Owner-maintained sponsor aliases live in `payroll-assets.json.sponsorAliases` and
 are only shown after a reverse lookup or verified forward resolution.
 

@@ -192,6 +192,124 @@ function makeRouter(logs, balances) {
   };
 }
 
+test('public balances distinguish RPC failure, real zero and recovery without losing history readiness', async () => {
+  const { createFundLedger } = await import(url);
+  const router = makeRouter([], new Map());
+  let failed = true;
+  router.fundBalances = async fundId => {
+    if (fundId === id(funds.top10) && failed) throw new Error('RPC unavailable');
+    return fundId === id(funds.top10) ? 9007199254740993123456n : 0n;
+  };
+  const checkedAt = '2026-10-23T12:00:00.000Z';
+  const ledger = createFundLedger({
+    provider: makeProvider({ head: 10, logs: [], txFrom: new Map() }), router, startBlock: 10,
+    config: { chainId: 8453, routerAddress, radioFunds: { topTen: funds.top10 }, assets: { USDC: { address: usdc } } },
+    now: () => Date.parse(checkedAt),
+    getWeeklyPayflow: () => ({ ready: true, funds: { top10: { reservedUnits: '7', availableUnits: '123' } } }),
+  });
+  const unread = ledger.getState();
+  assert.equal(unread.funds[funds.top10].balanceUnits, null);
+  assert.equal(unread.funds[funds.top10].advertUnits, null);
+  assert.equal(unread.funds[funds.top10].balanceCheckedAt, null);
+  const before = await ledger.getCurrentState();
+  assert.equal(before.ready, false);
+  assert.equal(before.funds[funds.top10].sourcesAvailable, false);
+  assert.equal(before.funds[funds.top10].sponsorUnits, null);
+  await ledger.initialize();
+  const state = await ledger.getCurrentState();
+  assert.equal(state.schemaVersion, 1);
+  assert.equal(state.evidenceVersion, 1);
+  assert.deepEqual(state.network, { chainId: 8453, name: 'Base' });
+  assert.deepEqual(state.asset, { address: usdc, symbol: 'USDC', decimals: 6 });
+  assert.equal(state.source, 'worker-rpc');
+  assert.equal(state.ready, true, 'history readiness is separate from balance availability');
+  const top = state.funds[funds.top10];
+  assert.equal(top.balanceUnits, null);
+  assert.equal(top.availableUnits, null, 'weekly data must not mask a failed live balance read');
+  assert.equal(top.balanceAvailable, false);
+  assert.equal(top.balanceError, 'RPC unavailable');
+  assert.equal(top.balanceCheckedAt, checkedAt);
+  assert.equal(top.sourcesAvailable, true);
+  assert.equal(top.payoutsAvailable, false, 'legacy queryFilter does not index payouts');
+  assert.equal(top.historyCheckedAt, checkedAt);
+  assert.equal(state.funds['dbusk-live-performers'].balanceUnits, '0');
+  assert.equal(state.funds['dbusk-live-performers'].balanceAvailable, true);
+  failed = false;
+  const recovered = (await ledger.getCurrentState()).funds[funds.top10];
+  assert.equal(recovered.balanceUnits, '9007199254740993123456');
+  assert.equal(recovered.balanceAvailable, true);
+  assert.equal(recovered.balanceError, '');
+});
+
+test('weekly failure does not substitute total balance for an unknown spendable balance', async () => {
+  const { createFundLedger } = await import(url);
+  const ledger = createFundLedger({
+    provider: makeProvider({ head: 10, logs: [], txFrom: new Map() }),
+    router: makeRouter([], new Map([[id(funds.top10), 123n]])), startBlock: 10,
+    config: { routerAddress, radioFunds: { topTen: funds.top10 }, assets: { USDC: { address: usdc } } },
+    getWeeklyPayflow: () => { throw new Error('Weekly RPC failure'); },
+  });
+  await ledger.initialize();
+  const fund = (await ledger.getCurrentState()).funds[funds.top10];
+  assert.equal(fund.balanceUnits, '123');
+  assert.equal(fund.availableUnits, null);
+  assert.equal(fund.weeklyAvailable, false);
+  assert.equal(fund.weeklyError, 'Weekly RPC failure');
+  assert.equal(fund.weeklyCheckedAt, null);
+  assert.equal(fund.reservedUnits, undefined);
+});
+
+test('history scan failure makes totals unavailable while independently healthy balances remain readable', async () => {
+  const { createFundLedger } = await import(url);
+  const provider = makeProvider({ head: 10, logs: [], txFrom: new Map() });
+  const ledger = createFundLedger({
+    provider, router: makeRouter([], new Map()), startBlock: 10,
+    config: { routerAddress, radioFunds: { topTen: funds.top10 }, assets: { USDC: { address: usdc } } },
+  });
+  await ledger.initialize();
+  provider.getBlockNumber = async () => { throw new Error('History RPC unavailable'); };
+  await assert.rejects(ledger.refresh(), /History RPC unavailable/);
+  const fund = (await ledger.getCurrentState()).funds[funds.top10];
+  assert.equal(fund.balanceUnits, '0');
+  assert.equal(fund.balanceAvailable, true);
+  assert.equal(fund.sourcesAvailable, false);
+  assert.equal(fund.sponsorUnits, null);
+  assert.equal(fund.historyError, 'History RPC unavailable');
+});
+
+test('public evidence filters other assets and backfills legacy deposits with missing asset identity', async () => {
+  const { createFundLedger } = await import(url);
+  const logs = [
+    makeLog(funds.top10, `0x${'1'.repeat(40)}`, 123n, `0x${'a'.repeat(64)}`, 10, 0),
+    makeLog(funds.top10, `0x${'1'.repeat(40)}`, 999n, `0x${'b'.repeat(64)}`, 10, 1),
+  ];
+  const foreign = iface.encodeEventLog('FundFunded', [id(funds.top10), `0x${'2'.repeat(40)}`, `0x${'1'.repeat(40)}`, 999n]);
+  Object.assign(logs[1], foreign);
+  const router = makeRouter(logs, new Map());
+  const ledger = createFundLedger({
+    provider: makeProvider({ head: 10, logs, txFrom: new Map() }), router,
+    config: { routerAddress, radioFunds: { topTen: funds.top10 }, assets: { USDC: { address: usdc } } },
+    restore: async () => ({ schemaVersion: 1, chainId: 8453, routerAddress,
+      scannedFrom: 10, scannedThrough: 10, lastCheckedAt: '2026-10-22T00:00:00Z',
+      sources: [{ slug: funds.top10, amountUnits: '999', txHash: logs[1].transactionHash }], payouts: [] }),
+  });
+  await ledger.initialize();
+  assert.deepEqual(router.queryRanges, [[10, 10]]);
+  const fund = (await ledger.getCurrentState()).funds[funds.top10];
+  assert.equal(fund.sources.length, 1);
+  assert.equal(fund.sources[0].asset, usdc);
+  assert.equal(fund.sponsorUnits, '123');
+});
+
+test('public evidence rejects unsupported asset metadata instead of labeling it Base USDC', async () => {
+  const { createFundLedger } = await import(url);
+  for (const config of [
+    { chainId: 1, assets: { USDC: { address: usdc } } },
+    { assets: { USDC: { address: `0x${'1'.repeat(40)}` } } },
+    { assets: { USDC: { address: usdc, decimals: 18 } } },
+  ]) assert.throws(() => createFundLedger({ provider: {}, router: {}, config }), /native Base USDC/);
+});
+
 test('fund refresh skips unchanged checks, schedules event-free cursor progress and saves new funds immediately', async () => {
   const { createFundLedger } = await import(url);
   let head = 10;

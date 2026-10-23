@@ -7,6 +7,25 @@ const ethers = require('../discord-bot/node_modules/ethers');
 const url = pathToFileURL(path.join(__dirname, '../js/fund-header.mjs')).href;
 const top10 = 'dbusk-top10';
 
+test('explicitly unavailable balances stay unknown instead of falling back to cached or weekly money', async () => {
+  const { fundStateFor, loadFundBreakdown, fundButtonHtml } = await import(url);
+  const state = { ready: true, funds: { [top10]: { balanceUnits: null, balanceAvailable: false, sources: [], payouts: [] } },
+    weekly: { funds: { top10: { balanceUnits: '42', budgetUnits: '40', reservedUnits: '2' } } } };
+  const fund = fundStateFor(state, top10, '99');
+  assert.equal(fund.balanceUnits, null);
+  assert.equal(fund.budgetUnits, null);
+  assert.equal(fund.pendingRows, null);
+  const details = await loadFundBreakdown({ fundSlug: top10, fundState: fund, fundBalanceUnits: 99n });
+  assert.equal(details.balanceUnits, null);
+  assert.equal(details.reconciles, false, 'empty history cannot verify an unknown balance as zero');
+  assert.match(fundButtonHtml({ emoji: '🏆', label: 'Top10' }, null), /Unavailable/);
+  assert.doesNotMatch(fundButtonHtml({ emoji: '🏆', label: 'Top10' }, null), /\$0\.00/);
+  const unavailableHistory = await loadFundBreakdown({ fundSlug: top10,
+    fundState: { balanceUnits: '0', sources: [], payouts: [], sourcesAvailable: false, payoutsAvailable: false } });
+  assert.equal(unavailableHistory.historyAvailable, false);
+  assert.equal(unavailableHistory.reconciles, false);
+});
+
 function fakeEnsProvider() {
   return {
     lookupAddress: async address => ({
