@@ -30,7 +30,7 @@ test('playlist batch event journal reconciles ordered lane IDs and fee/refund ev
   const restarted = create();
   await restarted.initialize();
   assert.equal((await restarted.reconcile())[0].transactionHash, '0xabc');
-  assert.equal(snapshot.nextBlock, 31);
+  assert.equal(snapshot.nextBlock, 29, 'empty ranges need not upload another checkpoint');
 });
 
 test('paid DJuke runtime refunds an undeliverable playlist head through the batch callback', async () => {
@@ -154,7 +154,7 @@ test('production playlist quote wiring stays closed before runtime restore and f
     'runtime initialization must start only after catalog restoration');
   assert.ok(source.indexOf('if (initializePlaylistWorker) void initializePlaylistWorker()') > source.indexOf('http.createServer(requestHandler).listen'),
     'durable journal initialization must start only after the HTTP mirror heartbeat endpoint is available');
-  const code = source.slice(source.indexOf('  const djukeAddress ='), source.indexOf('  let readDjukeState ='));
+  const code = source.slice(source.indexOf('  const djukeAddress ='), source.indexOf('  const syncDevertDjukeBoosts ='));
   const address = `0x${'12'.repeat(20)}`;
   const enabled = { DJUKE_CONTRACT_ADDRESS: address, DJUKE_CONTRACT_VERSION: '0.4', DJUKE_FULFILLER_PRIVATE_KEY: 'local-fixture',
     DJUKE_PLAYLIST_BATCH_ADDRESS: address, DJUKE_PLAYLIST_BATCH_VERSION: '0.4', DJUKE_PLAYLIST_BATCH_ENABLED: 'true',
@@ -176,6 +176,7 @@ test('production playlist quote wiring stays closed before runtime restore and f
       playlistBatchEventAbi: () => [], createDjukeQueueReader: () => async () => ({}),
       djukePlaylistReadiness, DJUKE_ABI: [], DJUKE_GAS_ABI: [], DJUKE_PLAYLIST_GAS_ABI: [],
     });
+
     const result = await vm.runInContext(`(async () => { ${code}
       return { readiness: getDjukePlaylistReadiness, quote: getDjukePlaylistGasQuote,
         eventsRestored: () => { playlistBatchEventsReady = true; },
@@ -206,4 +207,46 @@ test('production playlist quote wiring stays closed before runtime restore and f
     assert.equal((await closed.readiness()).ready, false);
     assert.equal(closed.quote, null);
   }
+});
+
+test('empty block scans avoid uploads and failed event writes replay safely', async () => {
+  const { createDjukePlaylistBatchReconciler } = await import('../discord-bot/djuke-playlist-batches.js');
+  let head = 12, snapshot, saves = 0, fail = false;
+  const event = { blockNumber: 13, args: { batchId: 0n, payer: Wallet.createRandom().address,
+    songIds: [`0x${'a'.repeat(64)}`], firstLaneId: 0n } };
+  const contract = { filters: new Proxy({}, { get: (_, name) => () => name }),
+    queryFilter: async (name, from, to) => name === 'PlaylistBatchRequested' && from <= 13 && to >= 13 ? [event] : [] };
+  const create = () => createDjukePlaylistBatchReconciler({ provider: { getBlockNumber: async () => head }, contract,
+    startBlock: 10, restore: async () => snapshot, save: async value => {
+      saves++;
+      if (fail) throw new Error('Mirror unavailable');
+      snapshot = structuredClone(value);
+      return 'ipfs://durable-batches';
+    } });
+  const journal = create();
+  await journal.initialize();
+  await journal.reconcile();
+  head = 14;
+  await journal.reconcile();
+  assert.equal(saves, 1);
+  head = 15; fail = true;
+  await assert.rejects(journal.reconcile(), /Mirror unavailable/);
+  assert.deepEqual(journal.getState(), []);
+  fail = false;
+  assert.equal((await journal.reconcile())[0].batchId, '0');
+  const restarted = create();
+  await restarted.initialize();
+  assert.equal((await restarted.reconcile()).length, 1);
+});
+
+test('public DJuke catalog reads never wait for batch checkpoint writes', async () => {
+  const fs = require('node:fs'), vm = require('node:vm');
+  const source = fs.readFileSync(require('node:path').join(__dirname, '../discord-bot/index.js'), 'utf8');
+  const code = source.slice(source.indexOf('  const djukeAddress ='), source.indexOf('  const syncDevertDjukeBoosts ='));
+  assert.match(code, /const readDjukeState = readDjukeQueueState;/);
+  assert.doesNotMatch(code, /await playlistBatchJournal\.reconcile/);
+  const read = vm.runInNewContext('const readDjukeState = readDjukeQueueState; readDjukeState', {
+    readDjukeQueueState: async () => ({ tracks: ['song'], requests: [] }),
+  });
+  assert.deepEqual((await read()).tracks, ['song']);
 });

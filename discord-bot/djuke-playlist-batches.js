@@ -78,9 +78,21 @@ export function createDjukePlaylistBatchReconciler({ provider, contract, restore
           const logs = await contract.queryFilter(filter, nextBlock, endBlock);
           for (const log of logs) events.push({ name, args: log.args, blockNumber: log.blockNumber, index: log.index ?? 0, transactionHash: log.transactionHash });
         }
-        events.sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index).forEach(apply);
-        nextBlock = endBlock + 1;
-        await commit();
+        if (!events.length) {
+          nextBlock = endBlock + 1;
+          continue;
+        }
+        const previousBatches = new Map([...batches].map(([key, value]) => [key, structuredClone(value)]));
+        const previousBlock = nextBlock;
+        try {
+          events.sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index).forEach(apply);
+          nextBlock = endBlock + 1;
+          await commit();
+        } catch (error) {
+          batches = previousBatches;
+          nextBlock = previousBlock;
+          throw error;
+        }
       }
       return [...batches.values()].map(batch => structuredClone(batch));
     }),

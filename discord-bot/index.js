@@ -1058,15 +1058,7 @@ async function main() {
       return getPlaylist();
     },
   }) : undefined;
-  let readDjukeState = readDjukeQueueState;
-  if (readDjukeQueueState && playlistBatchJournal) {
-    readDjukeState = async () => {
-      const state = await readDjukeQueueState();
-      if (playlistBatchEventsReady) await playlistBatchJournal.reconcile();
-      return state;
-    };
-    readDjukeState.invalidate = readDjukeQueueState.invalidate;
-  }
+  const readDjukeState = readDjukeQueueState;
   const syncDevertDjukeBoosts = () => {
     if (!readDevertState || !readDjukeState || !_devertSchedulerContract || _devertBoostTask) return _devertBoostTask;
     _devertBoostTask = applyDevertDjukeBoosts({ contract: _devertSchedulerContract,
@@ -1095,7 +1087,13 @@ async function main() {
       tags: { app: 'decentbusking', kind: 'djuke-journal', schema: '1' }, serialize: value => value,
       deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
     _djukeRuntime = createDjukeRuntime({
-      readState: readDjukeState,
+      readState: async () => {
+        if (playlistBatchJournal) {
+          if (!playlistBatchEventsReady) throw new Error('Playlist batch journal is restoring');
+          await playlistBatchJournal.reconcile();
+        }
+        return readDjukeState();
+      },
       journal: createDjukePlaybackJournal(journalStore),
       fulfill: createDjukeFulfiller(new Contract(djukeAddress, DJUKE_ABI, fulfiller)),
       refundPlaylistBatch: playlistBatchJournal ? (() => {

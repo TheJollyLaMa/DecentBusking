@@ -42,6 +42,9 @@ for (const snapshot of [
   { schemaVersion: 1, playlist: [] },
   { schemaVersion: 1, records: [] },
   { schemaVersion: 1, records: [{ requestId: '8453:queue:0', state: 'playing' }] },
+  { schemaVersion: 2, nextBlock: 100, batches: [] },
+  { schemaVersion: 2, nextBlock: 100, batches: [{ batchId: '0', status: 'pending',
+    songIds: [`0x${'a'.repeat(64)}`], laneIds: ['0'] }] },
 ]) {
 test(`Mac client pins verified ${snapshot.playlist ? 'playlist' : 'journal'} bytes before acknowledgment (${snapshot.records?.length || 0} records)`, async () => {
   const { createLocalCheckpointMirrorClient } = await import('../discord-bot/checkpoint-mirror-client.js');
@@ -73,7 +76,9 @@ test('Mac client rejects unsupported or invalid playback journals before importi
   const { createLocalCheckpointMirrorClient } = await import('../discord-bot/checkpoint-mirror-client.js');
   const { checkpointContentCid } = await import('../discord-bot/checkpoint-mirror.js');
   for (const snapshot of [{ schemaVersion: 2, records: [] }, { schemaVersion: 1, records: [{}] },
-    { schemaVersion: 1, records: [{ requestId: 'request', state: 'unknown' }] }, { schemaVersion: 1, other: [] }]) {
+    { schemaVersion: 1, records: [{ requestId: 'request', state: 'unknown' }] }, { schemaVersion: 1, other: [] },
+    { schemaVersion: 2, nextBlock: -1, batches: [] },
+    { schemaVersion: 2, nextBlock: 100, batches: [{}] }]) {
     const bytes = Buffer.from(JSON.stringify(snapshot));
     const cid = await checkpointContentCid(bytes);
     const poll = createLocalCheckpointMirrorClient({ serviceUrl: 'https://worker.example', secret,
@@ -81,6 +86,6 @@ test('Mac client rejects unsupported or invalid playback journals before importi
         assert.ok(url.endsWith('/claim'), 'invalid checkpoints must not reach Kubo or acknowledgment');
         return new Response(JSON.stringify({ job: { jobId: 'invalid', expectedCid: cid, contentBase64: bytes.toString('base64') } }));
       } });
-    await assert.rejects(poll(), /Only playlist checkpoints and valid playback journals/);
+    await assert.rejects(poll(), /Only playlist checkpoints and valid playback or playlist-batch journals/);
   }
 });
