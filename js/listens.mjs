@@ -6,6 +6,7 @@ import { supportsDjukeAlbumsAndGas } from './djuke-version.mjs';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
+import { createPersonalPlayRecovery, verifyPersonalPlaySession } from './personal-play-recovery.mjs?v=20261023-personal-recovery';
 
 export const LISTEN_PRICE_UNITS = 250000n;
 export const PREVIEW_SECONDS = 30;
@@ -29,7 +30,7 @@ export function audioCid(value) {
   return String(value || '').match(/^ipfs:\/\/(?:ipfs\/)?([^/?#]+)/)?.[1] || String(value || '').match(/\/ipfs\/([^/?#]+)/)?.[1] || '';
 }
 
-export async function purchaseListens({ signer, djuke, usdc, songIds, contractVersion = '0.1', onStep = () => {} }) {
+export async function purchaseListens({ signer, djuke, usdc, songIds, contractVersion = '0.1', onStep = () => {}, onSubmitted = () => {} }) {
   await ensureBaseNetwork(signer.provider);
   if (usdc.target.toLowerCase() !== BASE_USDC.toLowerCase() || Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');
   if (!Array.isArray(songIds) || !songIds.length || songIds.length > MAX_PLAYLIST || songIds.some(id => !/^0x[0-9a-fA-F]{64}$/.test(id))) {
@@ -56,6 +57,7 @@ export async function purchaseListens({ signer, djuke, usdc, songIds, contractVe
   );
   onStep('Confirm your listen purchase');
   const transaction = await djuke.purchaseListens(songIds, total);
+  await onSubmitted({ payer: address, contract: djuke.target, txHash: transaction.hash });
   onStep('Waiting for Base confirmation\u2026');
   if ((await transaction.wait())?.status !== 1) throw new Error('Listen purchase did not confirm');
   announcePaymentCelebration({
@@ -100,9 +102,20 @@ export function createListenController({ getLive, play, freePlay, getSession, ge
   previewSeconds = PREVIEW_SECONDS, pollMs = 500, newSessionId = () => crypto.randomUUID() }) {
   let watch = null;
   let previewSession = null;
+  let checkpoint = () => {};
+  let detachPurchased = () => {};
+  let purchasedGeneration = 0;
   const stopWatch = () => { clearInterval(watch); watch = null; };
-  function playFree(song) {
+  function stopPurchased() {
+    checkpoint();
+    checkpoint = () => {};
+    detachPurchased();
+    detachPurchased = () => {};
+    purchasedGeneration++;
     stopWatch();
+  }
+  function playFree(song) {
+    stopPurchased();
     previewSession = null;
     freePlay(song);
   }
@@ -111,7 +124,7 @@ export function createListenController({ getLive, play, freePlay, getSession, ge
     const songId = live?.songIdForCid(audioCid(song.audioUrl));
     if (!songId) { playFree(song); return 'free'; }
     const sessionId = newSessionId();
-    stopWatch();
+    stopPurchased();
     previewSession = sessionId;
     play({ ...song, sessionId });
     watch = setInterval(() => {
@@ -125,23 +138,61 @@ export function createListenController({ getLive, play, freePlay, getSession, ge
     }, pollMs);
     return 'preview';
   }
-  function playPurchased(items) {
-    stopWatch();
+  function playPurchased(items, { index = 0, position = 0, onProgress = () => {}, onComplete = () => {} } = {}) {
+    stopPurchased();
     previewSession = null;
-    const start = index => {
+    const generation = purchasedGeneration;
+    const start = (index, position = 0) => {
+      detachPurchased();
+      stopWatch();
       const sessionId = newSessionId();
-      play({ ...items[index], sessionId, onEnded: () => (index + 1 < items.length ? (start(index + 1), true) : false) });
+      onProgress({ index, position });
+      play({ ...items[index], sessionId, onEnded: () => {
+        if (generation !== purchasedGeneration) return false;
+        checkpoint = () => {};
+        detachPurchased();
+        stopWatch();
+        if (index + 1 < items.length) { start(index + 1); return true; }
+        onComplete();
+        return false;
+      } });
+      const media = getMedia();
+      let seekPending = position > 0;
+      const seek = () => {
+        if (!seekPending || getSession() !== sessionId || !media || media.readyState < 1) return;
+        media.currentTime = Number.isFinite(media.duration) ? Math.min(position, Math.max(0, media.duration - 0.1)) : position;
+        seekPending = false;
+      };
+      checkpoint = () => {
+        if (getSession() !== sessionId || seekPending || !media || media.readyState < 1 ||
+            !Number.isFinite(media.currentTime)) return;
+        onProgress({ index, position: media.currentTime });
+      };
+      media?.addEventListener?.('loadedmetadata', seek);
+      media?.addEventListener?.('pause', checkpoint);
+      media?.addEventListener?.('seeked', checkpoint);
+      const saveProgress = checkpoint;
+      detachPurchased = () => {
+        media?.removeEventListener?.('loadedmetadata', seek);
+        media?.removeEventListener?.('pause', saveProgress);
+        media?.removeEventListener?.('seeked', saveProgress);
+      };
+      seek();
+      watch = setInterval(() => {
+        if (getSession() !== sessionId) { stopPurchased(); return; }
+        checkpoint();
+      }, 1000);
     };
-    if (items.length) start(0);
+    if (items.length) start(index, position);
   }
   /** Cancels the current preview; returns true when a preview was still the active archive session. */
   function endPreview() {
     const active = previewSession !== null && getSession() === previewSession;
-    stopWatch();
+    if (previewSession !== null) stopWatch();
     previewSession = null;
     return active;
   }
-  return { playSong, playPurchased, playFree, endPreview, stop: stopWatch };
+  return { playSong, playPurchased, playFree, endPreview, checkpoint: () => checkpoint(), stop: stopPurchased };
 }
 
 function nftSong(nft) {
@@ -160,6 +211,13 @@ export function initListens() {
   const playlistTotal = document.getElementById('djuke-playlist-total');
   const playlistBuy = document.getElementById('djuke-playlist-buy');
   const playlist = createListenPlaylist();
+  const recovery = createPersonalPlayRecovery();
+  const recoverySection = document.getElementById('personal-play-recovery');
+  const recoveryItems = document.getElementById('personal-play-recovery-items');
+  const recoveryStatus = document.getElementById('personal-play-recovery-status');
+  let recoveryAddress = '';
+  let activePurchase = null;
+  let resuming = false;
   let cached = null;
   let pendingGate = null;
   let busy = false;
@@ -208,6 +266,118 @@ export function initListens() {
       if (!gate.open) gate.showModal();
     },
   });
+
+  function recoveryError(error) {
+    if (recoveryStatus) recoveryStatus.textContent = error.message;
+    const paymentStatus = document.getElementById('djuke-payment-state');
+    if (paymentStatus) paymentStatus.textContent = error.message;
+    console.warn('[listens] Personal Play recovery:', error.message);
+  }
+  function ownRecoveryProfile() {
+    return Boolean(recoveryAddress && recoveryAddress.toLowerCase() === window._wallet?.address?.toLowerCase());
+  }
+  function renderRecovery() {
+    if (!recoverySection || !recoveryItems) return;
+    recoverySection.hidden = !ownRecoveryProfile();
+    recoveryItems.replaceChildren();
+    if (recoverySection.hidden) return;
+    try {
+      const sessions = recovery.list(recoveryAddress).filter(session => ['pending', 'confirmed'].includes(session.status));
+      recoverySection.hidden = !sessions.length && !recoveryStatus?.textContent;
+      for (const session of sessions) {
+        const row = document.createElement('li');
+        const label = document.createElement('span');
+        label.textContent = `${session.name} · song ${session.index + 1}/${session.items.length} · ${Math.floor(session.position)}s`;
+        const button = document.createElement('button');
+        button.type = 'button';
+        const active = activePurchase?.txHash === session.txHash && archiveSessionId();
+        button.textContent = active ? 'Resume / retry · no payment' : 'Resume · no payment';
+        button.disabled = resuming;
+        button.addEventListener('click', async () => {
+          if (resuming) return;
+          resuming = true;
+          renderRecovery();
+          try {
+            const wallet = await ensureWallet();
+            if ((await wallet.signer.getAddress()).toLowerCase() !== session.payer.toLowerCase()) throw new Error('Connect the wallet that purchased this session.');
+            recoveryStatus.textContent = 'Verifying your existing purchase on Base; no payment required…';
+            controller.checkpoint();
+            const latest = recovery.list(session.payer).find(entry => entry.txHash === session.txHash);
+            if (!latest || !['pending', 'confirmed'].includes(latest.status)) throw new Error('This session is no longer available to resume.');
+            await verifyPersonalPlaySession(latest, wallet.signer.provider);
+            if (window._wallet?.address?.toLowerCase() !== latest.payer.toLowerCase()) throw new Error('Wallet changed during verification. Reopen your profile to resume.');
+            startRecovered(latest);
+          } catch (error) {
+            if (error.code === 'PERSONAL_PLAY_REVERTED') recovery.update(session.payer, session.txHash, { status: 'failed' });
+            recoveryError(error);
+          }
+          finally { resuming = false; renderRecovery(); }
+        });
+        const proof = document.createElement('a');
+        proof.href = `https://basescan.org/tx/${session.txHash}`;
+        proof.textContent = 'Purchase';
+        proof.target = '_blank';
+        proof.rel = 'noopener noreferrer';
+        row.append(label, button, proof);
+        recoveryItems.append(row);
+      }
+    } catch (error) { recoveryError(error); }
+  }
+  function startRecovered(session) {
+    recovery.update(session.payer, session.txHash, { status: 'confirmed' });
+    if (window._wallet?.address?.toLowerCase() !== session.payer.toLowerCase()) {
+      throw new Error('Purchase saved. Reconnect the purchasing wallet and resume in Profile → Playlists; do not pay again.');
+    }
+    controller.stop();
+    activePurchase = session;
+    let displayedIndex = session.index;
+    const persist = changes => {
+      try { recovery.update(session.payer, session.txHash, changes); return true; }
+      catch (error) { recoveryError(error); return false; }
+    };
+    controller.playPurchased(session.items, {
+      index: session.index, position: session.position,
+      onProgress: progress => {
+        persist(progress);
+        if (progress.index !== displayedIndex) { displayedIndex = progress.index; renderRecovery(); }
+      },
+      onComplete: () => {
+        const saved = persist({ status: 'completed' });
+        activePurchase = null;
+        if (saved && recoveryStatus) recoveryStatus.textContent = `Personal Play complete. All ${session.items.length} songs finished.`;
+        renderRecovery();
+      },
+    });
+    if (recoveryStatus) recoveryStatus.textContent = 'Personal Play restored. Progress is saved in this browser; no additional payment.';
+    renderRecovery();
+  }
+  document.addEventListener('creator-profile-view-changed', event => {
+    if (recoveryAddress.toLowerCase() !== event.detail?.address?.toLowerCase() && recoveryStatus) recoveryStatus.textContent = '';
+    recoveryAddress = event.detail?.address || '';
+    renderRecovery();
+  });
+  document.addEventListener('personal-play-recovery-changed', renderRecovery);
+  for (const eventName of ['wallet-connected', 'wallet-disconnected']) {
+    document.addEventListener(eventName, () => {
+      if (activePurchase && activePurchase.payer.toLowerCase() !== window._wallet?.address?.toLowerCase()) {
+        controller.stop();
+        activePurchase = null;
+        returnToRadio();
+      }
+      if (recoveryStatus) recoveryStatus.textContent = '';
+      renderRecovery();
+    });
+  }
+  window.addEventListener('pagehide', () => controller.checkpoint());
+  document.addEventListener('visibilitychange', () => controller.checkpoint());
+  async function purchaseRecoverableListens(items, onStep) {
+    const wallet = await ensureWallet();
+    const payer = await wallet.signer.getAddress();
+    recovery.check(payer, items.map(item => item.songId));
+    const purchase = await purchaseListens({ ...wallet, songIds: items.map(item => item.songId), onStep,
+      onSubmitted: submitted => recovery.save({ ...submitted, items, name: items.length === 1 ? items[0].title : 'Personal playlist' }) });
+    startRecovered(recovery.list(payer).find(session => session.txHash === purchase.txHash));
+  }
 
   function renderPlaylist() {
     if (!playlistEl || !playlistTotal) return;
@@ -278,9 +448,8 @@ export function initListens() {
     renderPlaylist();
     const status = document.getElementById('djuke-payment-state');
     try {
-      await purchaseListens({ ...(await ensureWallet()), songIds: items.map(item => item.songId), onStep: text => { status.textContent = text; } });
+      await purchaseRecoverableListens(items, text => { status.textContent = text; });
       status.textContent = 'Enjoy your playlist!';
-      controller.playPurchased(items);
     } catch (error) {
       status.textContent = error.shortMessage || error.reason || error.message;
     } finally { busy = false; renderPlaylist(); }
@@ -305,10 +474,9 @@ export function initListens() {
     renderPlaylist();
     try {
       status('Opening your wallet\u2026');
-      await purchaseListens({ ...(await ensureWallet()), songIds: [songId], onStep: status });
+      await purchaseRecoverableListens([{ ...song, songId }], status);
       if (gate.open) gate.close();
       pendingGate = null;
-      controller.playPurchased([{ ...song, songId }]);
       status('Enjoy the full track!');
       return 'purchased';
     } finally { busy = false; renderPlaylist(); }
@@ -334,7 +502,11 @@ export function initListens() {
     catch (error) { document.getElementById('djuke-playlist-state').textContent = error.message; }
   });
   document.addEventListener('djuke-private-playlist-purchased', event => {
-    if (Array.isArray(event.detail?.items)) controller.playPurchased(event.detail.items);
+    try {
+      const session = recovery.list(event.detail.payer).find(entry => entry.txHash === event.detail.txHash);
+      if (!session) throw new Error('Confirmed Personal Play purchase could not be restored. Do not purchase again; keep your receipt.');
+      startRecovered(session);
+    } catch (error) { recoveryError(error); }
   });
   renderPlaylist();
 }

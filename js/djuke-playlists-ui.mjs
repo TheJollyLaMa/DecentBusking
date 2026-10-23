@@ -1,5 +1,6 @@
 import { appendPlaylistSong, openPlaylistSelector } from './playlist-selector.mjs?v=20261022-playlist-lane';
-import { createListenPlaylist } from './listens.mjs?v=20261023-playlist-actions';
+import { createListenPlaylist } from './listens.mjs?v=20261023-personal-recovery';
+import { createPersonalPlayRecovery } from './personal-play-recovery.mjs?v=20261023-personal-recovery';
 import { createNamedPlaylistClient, DJUKE_PLAYLIST_MAX_PER_PROFILE, getPlaylistBatchAbi,
   matchesPlaylistRevision, quoteNamedPlaylist, supportsDJukePlaylistBatch, supportsDJukePlaylistRadio } from './djuke-playlists.mjs?v=20261022-playlist-lane';
 import { ensureBaseNetwork, approvalNotice, waitForAllowance } from './base-chain.mjs';
@@ -83,7 +84,7 @@ export async function purchaseRadioNamedPlaylist({ playlist, signer, config = wi
   return { txHash: transaction.hash, totalUnits: maxTotal, contributionWei };
 }
 
-export async function purchasePrivateNamedPlaylist({ playlist, signer, config = window.DecentConfig || {}, onStep = () => {} }) {
+export async function purchasePrivateNamedPlaylist({ playlist, signer, config = window.DecentConfig || {}, onStep = () => {}, onSubmitted = () => {} }) {
   if (!supportsDJukePlaylistBatch(config)) throw new Error('Private named-playlist checkout is unavailable until a compatible DJuke batch contract is configured');
   await ensureBaseNetwork(signer.provider);
   quoteNamedPlaylist(playlist.songIds.length, 'private');
@@ -104,6 +105,7 @@ export async function purchasePrivateNamedPlaylist({ playlist, signer, config = 
   await djuke.purchasePlaylistPrivate.staticCall(playlist.songIds, quote.totalUnits);
   onStep('Confirm private playlist purchase in your wallet');
   const transaction = await djuke.purchasePlaylistPrivate(playlist.songIds, quote.totalUnits);
+  await onSubmitted({ payer: address, contract: djuke.target, txHash: transaction.hash });
   onStep('Waiting for Base confirmation…');
   if ((await transaction.wait())?.status !== 1) throw new Error('Private playlist purchase did not confirm');
   announcePaymentCelebration({ chainId: 8453, txHash: transaction.hash, amountText: formatUsdcUnits(quote.totalUnits),
@@ -244,8 +246,7 @@ export function initDjukePlaylists() {
       await run(async () => {
         if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
         const tracks = await resolveTrackItems(playlist.songIds);
-        await purchasePrivateNamedPlaylist({ playlist, signer: window._wallet.signer, onStep: text => { profileStatus.textContent = text; } });
-        event('djuke-private-playlist-purchased', { items: tracks });
+        await purchasePersonal(playlist, tracks, text => { profileStatus.textContent = text; }, playlist.name);
       });
     }, !batchCapability() || busy, 'Creator-priced checkout requires a compatible DJuke deployment');
     privateAction.hidden = !batchCapability();
@@ -284,6 +285,18 @@ export function initDjukePlaylists() {
       if (!track?.ipfsCid) throw new Error('A saved playlist song is no longer available; no partial playback was started');
       return { songId, title: track.title || 'Untitled song', artist: track.artist || track.uploader || '', audioUrl: `ipfs://${track.ipfsCid}`, listenPriceUnits: track.listenPriceUnits, mediaType: track.mediaType || '' };
     });
+  }
+  async function purchasePersonal(playlist, items, onStep, name) {
+    const signer = window._wallet.signer;
+    const payer = await signer.getAddress();
+    const recovery = createPersonalPlayRecovery();
+    recovery.check(payer, playlist.songIds);
+    const purchase = await purchasePrivateNamedPlaylist({ playlist, signer, onStep,
+      onSubmitted: submitted => {
+        recovery.save({ ...submitted, items, name: name || 'Personal playlist' });
+        event('personal-play-recovery-changed', {});
+      } });
+    event('djuke-private-playlist-purchased', { items, payer, txHash: purchase.txHash });
   }
   async function run(operation) {
     if (busy) return;
@@ -433,9 +446,8 @@ export function initDjukePlaylists() {
       const items = await resolveTrackItems(selected.songIds);
       if (!window._wallet?.signer) await window._wallet?.connect?.();
       if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
-      await purchasePrivateNamedPlaylist({ playlist: selected, signer: window._wallet.signer, onStep: text => { state.textContent = text; } });
-      event('djuke-private-playlist-purchased', { items });
-      state.textContent = 'Personal Play purchased. Playing every song in order, just for you.';
+      await purchasePersonal(selected, items, text => { state.textContent = text; }, nameInput.value.trim());
+      state.textContent = 'Personal Play purchased. Your paid session is saved in Profile → Playlists for resume without another payment.';
     });
   });
   radioButton?.addEventListener('click', async () => {

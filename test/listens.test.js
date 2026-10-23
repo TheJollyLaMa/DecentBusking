@@ -96,6 +96,7 @@ test('a paid single-view play replaces the preview with an uninterrupted full li
   assert.equal(media.paused, undefined);
   assert.equal(plays.length, 2);
   assert.equal(controller.endPreview(), false, 'closing the card keeps a purchased listen playing');
+  controller.stop();
 });
 
 test('closing the single view ends only an active preview', async () => {
@@ -125,6 +126,55 @@ test('purchased playlists play straight through without preview gates', async ()
   for (let index = 0; index < 11; index++) assert.equal(plays[index].onEnded(), true);
   assert.deepEqual(plays.map(song => song.title), songs.map(song => song.title));
   assert.equal(plays[11].onEnded(), false);
+});
+
+test('paid playback checkpoints, restores the correct song and seek position, and completes only at the end', async () => {
+  const api = await load();
+  const listeners = new Map();
+  const media = { currentTime: 0, duration: 200, readyState: 0,
+    addEventListener(name, callback) { listeners.set(name, callback); },
+    removeEventListener(name, callback) { if (listeners.get(name) === callback) listeners.delete(name); } };
+  let session;
+  const plays = [], progress = [];
+  let completed = 0;
+  const controller = api.createListenController({ play: song => { session = song.sessionId; plays.push(song); },
+    getSession: () => session, getMedia: () => media });
+  const items = [{ title: 'First' }, { title: 'Second' }, { title: 'Third' }];
+  controller.playPurchased(items, { index: 1, position: 73.5,
+    onProgress: value => progress.push(value), onComplete: () => completed++ });
+  assert.equal(plays[0].title, 'Second');
+  controller.checkpoint();
+  assert.equal(progress.length, 1, 'loading does not overwrite the saved position with zero');
+  media.readyState = 1;
+  listeners.get('loadedmetadata')();
+  assert.equal(media.currentTime, 73.5);
+  media.currentTime = 91;
+  controller.checkpoint();
+  assert.equal(progress.at(-1).position, 91);
+  assert.equal(plays[0].onEnded(), true);
+  assert.equal(plays[1].title, 'Third');
+  assert.equal(progress.at(-1).index, 2);
+  assert.equal(progress.at(-1).position, 0);
+  assert.equal(completed, 0);
+  assert.equal(plays[1].onEnded(), false);
+  assert.equal(completed, 1);
+  assert.equal(listeners.size, 0);
+  controller.stop();
+});
+
+test('switching away retains paid progress and invalidates old continuation callbacks', async () => {
+  const api = await load();
+  let session;
+  const media = { currentTime: 52, readyState: 1 };
+  const plays = [], progress = [];
+  const controller = api.createListenController({ play: song => { session = song.sessionId; plays.push(song); },
+    getSession: () => session, getMedia: () => media, freePlay: () => {} });
+  controller.playPurchased([{ title: 'One' }, { title: 'Two' }], { onProgress: value => progress.push(value) });
+  controller.playFree({ title: 'Something else' });
+  assert.equal(progress.at(-1).position, 52);
+  assert.equal(plays[0].onEnded(), false);
+  assert.equal(plays.length, 1);
+  controller.stop();
 });
 
 test('legacy private-listen cart keeps its 50-song capacity and survives broken storage', async () => {

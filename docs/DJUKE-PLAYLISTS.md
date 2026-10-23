@@ -96,6 +96,33 @@ no radio platform fee. Play Live preserves the tier prices and main paid-request
 priority below; it never interrupts a song already playing. Both purchases may
 need a separate USDC approval, and wallet gas is additional.
 
+### Personal Play recovery
+
+New Personal Play purchases retain a wallet-scoped session in this browser's
+local storage: the submitted Base transaction hash, receiving contract, ordered
+recordings, current song, and playback position. The transaction is saved before
+waiting for its confirmation, so a refresh during confirmation can be recovered
+too. Storage is checked before checkout; an unfinished purchase of the same
+ordered songs blocks accidental duplicate payment.
+
+After a refresh or media interruption, open **Profile → Playlists → Your Personal
+Play sessions** and choose **Resume · no payment** (or **Resume / retry** during
+an active session). Resume verifies the original transaction on Base, including
+the purchasing wallet, destination, and successful receipt, without approval or
+another purchase. A pending transaction remains recoverable; a verified reverted
+transaction is marked failed. Playback resumes the current song near the last
+saved position and continues the remaining songs in order. Progress saves every
+second, on pause/seek, page hide, and visibility changes; loading must not overwrite
+a saved position with zero. A gateway/media failure does not complete the session.
+Completion is recorded only after the final song ends.
+
+Recovery requires the same browser/site storage and purchasing wallet. It is not
+cross-device, does not auto-start audio after refresh, and cannot recover older
+purchases made before sessions were stored or sessions erased by clearing site
+data. Session storage is not an on-chain playback entitlement. It does not change
+personal-listen settlement or create an automatic refund for media failures.
+The public radio keeps running for other listeners throughout personal playback.
+
 Private checkout sums each song's normal creator/album listen price (0.25 USDC
 default), with no platform fee and no radio request. Radio subtotal is the sum of
 `250000 << floor(i / 8)` USDC base units for zero-based playlist index i: songs

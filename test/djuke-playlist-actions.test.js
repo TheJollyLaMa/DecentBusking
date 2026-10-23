@@ -76,10 +76,15 @@ test('unsaved draft buys one personal batch then plays in order; Live and Save s
     dispatchEvent(event) { calls.push(event); for (const callback of listeners[event.type] || []) callback(event); },
   };
   let catalogFails = false;
+  let storageFails = false;
   const config = { djukePlaylistBatchVersion: '0.4', djukePlaylistBatchAddress: address,
     djukePlaylistBatchEnabled: true, djukePlaylistRadioReady: true, ipfsUploadServiceUrl: 'https://worker.example' };
   const context = vm.createContext({ ...helpers, document, AbortSignal,
-    window: { DecentConfig: config, _wallet: { address, signer: {} } },
+    window: { DecentConfig: config, _wallet: { address, signer: { getAddress: async () => address } } },
+    createPersonalPlayRecovery: () => ({
+      check() { if (storageFails) throw new Error('Recovery storage unavailable'); },
+      save: submitted => calls.push({ type: 'recovery', ...submitted }),
+    }),
     createListenPlaylist: () => ({ list: () => draftItems, replace: next => { draftItems = next; } }),
     createNamedPlaylistClient: () => ({
       profile: async () => ({ madePlaylists: [], playlists: [] }),
@@ -89,7 +94,11 @@ test('unsaved draft buys one personal batch then plays in order; Live and Save s
     safeButton: () => element(`button:${nodes.size}`),
     formatUsdcUnits: units => String(units),
     event: (type, detail) => document.dispatchEvent({ type, detail }),
-    purchasePrivateNamedPlaylist: async ({ playlist }) => { calls.push({ type: 'personal', playlist }); },
+    purchasePrivateNamedPlaylist: async ({ playlist, onSubmitted }) => {
+      calls.push({ type: 'personal', playlist });
+      await onSubmitted({ payer: address, contract: address, txHash: '0xtest' });
+      return { txHash: '0xtest' };
+    },
     purchaseRadioNamedPlaylist: async ({ playlist }) => { calls.push({ type: 'live', playlist }); },
     fetch: async url => {
       if (url.endsWith('playlist-readiness')) return { ok: true, json: async () => ({ ready: true, version: '0.4', contractAddress: address }) };
@@ -106,7 +115,7 @@ test('unsaved draft buys one personal batch then plays in order; Live and Save s
     const calls = [];
     const purchase = async (ids, maxTotal) => {
       calls.push({ type: 'purchase', ids, maxTotal });
-      return { hash: '0xtest', wait: async () => ({ status: 1 }) };
+      return { hash: '0xtest', wait: async () => { calls.push({ type: 'wait' }); return { status: 1 }; } };
     };
     purchase.staticCall = async (ids, maxTotal) => { calls.push({ type: 'simulate', ids, maxTotal }); };
     const djuke = { target: address, purchasePlaylistPrivate: purchase,
@@ -121,11 +130,14 @@ test('unsaved draft buys one personal batch then plays in order; Live and Save s
     const purchaseSource = source.slice(source.indexOf('export async function purchasePrivateNamedPlaylist'), source.indexOf('export function initDjukePlaylists'));
     vm.runInContext(purchaseSource.replace('export ', ''), context);
     await context.purchasePrivateNamedPlaylist({ playlist: { songIds }, signer: { provider: {}, getAddress: async () => address },
+      onSubmitted: submitted => { calls.push({ type: 'persist', submitted }); },
       config: { djukePlaylistBatchVersion: '0.4', djukePlaylistBatchAddress: address, djukePlaylistBatchEnabled: true } });
     assert.equal(calls.filter(call => call.type === 'purchase').length, 1);
     assert.deepEqual(calls.find(call => call.type === 'purchase').ids, songIds);
     assert.equal(calls.find(call => call.type === 'purchase').maxTotal, 950000n);
     assert.equal(calls.find(call => call.type === 'quote').radio, false);
+    assert.ok(calls.findIndex(call => call.type === 'persist') < calls.findIndex(call => call.type === 'wait'));
+    assert.equal(calls.find(call => call.type === 'persist').submitted.payer, address);
   });
   const source = fs.readFileSync(path.join(__dirname, '../js/djuke-playlists-ui.mjs'), 'utf8');
   const init = source.slice(source.indexOf('export function initDjukePlaylists()'), source.indexOf("\nif (typeof document"));
@@ -143,6 +155,9 @@ test('unsaved draft buys one personal batch then plays in order; Live and Save s
   const playback = calls.find(call => call.type === 'djuke-private-playlist-purchased');
   assert.deepEqual(Array.from(playback.detail.items, item => item.songId), ids);
   assert.ok(calls.indexOf(playback) > calls.findIndex(call => call.type === 'personal'));
+  assert.ok(calls.indexOf(playback) > calls.findIndex(call => call.type === 'recovery'));
+  assert.equal(playback.detail.payer, address);
+  assert.equal(playback.detail.txHash, '0xtest');
   assert.equal(calls.filter(call => call.type === 'personal').length, 1);
   assert.equal(calls.filter(call => call.type === 'save' || call.type === 'live').length, 0);
   await click('djuke-named-playlist-radio');
@@ -157,4 +172,9 @@ test('unsaved draft buys one personal batch then plays in order; Live and Save s
   assert.match(element('djuke-playlist-state').textContent, /Catalog timeout/);
   assert.equal(calls.filter(call => call.type === 'personal').length, 1, 'no purchase on catalog failure');
   assert.equal(element('djuke-named-playlist-private').disabled, false, 'failure releases busy gate');
+  catalogFails = false;
+  storageFails = true;
+  await click('djuke-named-playlist-private');
+  assert.match(element('djuke-playlist-state').textContent, /Recovery storage unavailable/);
+  assert.equal(calls.filter(call => call.type === 'personal').length, 1, 'storage must work before opening checkout');
 });
