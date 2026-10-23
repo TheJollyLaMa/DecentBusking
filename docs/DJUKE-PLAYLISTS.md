@@ -6,7 +6,7 @@ refunding or settling the batch. Actual unavailable/failed recordings still use
 the refund safety net. A successful purchase is not evidence that the entire
 playlist played; confirm delivery and refund events before reporting completion.
 
-The connected wallet's own profile shows its five most recent Play Live receipts:
+The Playlists section of the connected wallet's own profile shows its five most recent Play Live receipts:
 verifying queue, queued, playing, completed, or refunded. Expand a receipt for
 delivered-song progress, paid/refunded/settled USDC and Base transaction links.
 Refund notices explicitly distinguish USDC returned from non-refundable worker

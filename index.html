@@ -973,11 +973,6 @@
         <p data-profile-media-note></p>
       </div>
     </section>
-    <section id="djuke-receipts" class="djuke-receipts" aria-labelledby="djuke-receipts-title" hidden>
-      <h3 id="djuke-receipts-title">Your Play Live receipts</h3>
-      <div id="djuke-receipt-list"></div>
-      <p id="djuke-receipts-state" role="status" aria-live="polite"></p>
-    </section>
     <section class="creator-earnings" data-profile-earnings aria-labelledby="creator-earnings-title">
       <div class="creator-earnings-heading">
         <h3 id="creator-earnings-title">Total earnings</h3>
@@ -1033,6 +1028,11 @@
       <div class="creator-dropdown-body">
         <p class="creator-dropdown-status" data-playlists-status role="status" aria-live="polite">Connect a wallet to view saved playlists.</p>
         <ol data-profile-playlists class="creator-nft-list"></ol>
+        <section id="djuke-receipts" class="djuke-receipts" aria-labelledby="djuke-receipts-title" hidden>
+          <h3 id="djuke-receipts-title">Your Play Live receipts</h3>
+          <div id="djuke-receipt-list"></div>
+          <p id="djuke-receipts-state" role="status" aria-live="polite"></p>
+        </section>
         <label>Discover by playlist name<input data-playlist-search type="search" maxlength="60" placeholder="Search public playlists…" /></label>
         <button type="button" data-playlist-discover>Search</button>
         <ol data-playlist-results class="creator-nft-list"></ol>

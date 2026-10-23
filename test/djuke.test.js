@@ -65,6 +65,8 @@ test('Play Live receipts belong to the profile, not the DJuke drawer', () => {
   assert.ok(drawer.length > 0);
   assert.doesNotMatch(drawer, /id="djuke-receipts"|Your Play Live receipts/);
   assert.match(profile, /id="djuke-receipts"/);
+  const playlists = profile.slice(profile.indexOf('data-playlists-section'), profile.indexOf('</details>', profile.indexOf('data-playlists-section')));
+  assert.match(playlists, /id="djuke-receipts"/);
   assert.equal((html.match(/id="djuke-receipts"/g) || []).length, 1);
   assert.match(html, /open your profile for your latest Play Live receipts/);
   const profileSource = fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8');
