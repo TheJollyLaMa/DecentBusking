@@ -5,6 +5,21 @@ const ethers = require('../discord-bot/node_modules/ethers');
 const load = () => import('../js/creator-earnings.mjs');
 const WALLET = '0x807061DF657A7697c04045dA7d16D941861cAABc';
 
+test('v0.5 direct artist payouts remain visible alongside historical earnings', async () => {
+  const { DJUKE_EARNING_CONTRACTS, readContractEarnings } = await load();
+  const current = DJUKE_EARNING_CONTRACTS.find(source => source.label === 'DJuke v0.5');
+  assert.equal(current.address, '0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51');
+  assert.equal(current.startBlock, 52993982);
+  const entries = await readContractEarnings({ address: WALLET, provider: {},
+    ethers: { Contract: class {
+      constructor(address) { this.address = address; }
+      async artistLedger() { return { totalPaid: this.address === current.address ? 225000n : 450000n, payoutCount: 1n }; }
+      async artistCredits() { return 0n; }
+    } } });
+  assert.equal(entries.find(entry => entry.label === 'DJuke v0.5 song plays').units, 225000n);
+  assert.equal(entries.find(entry => entry.label === 'DJuke v0.3 song plays').units, 450000n);
+});
+
 test('an empty earnings index does not upload on unchanged polling and retries failed initial persistence', async () => {
   const { createEarningsLedger } = await load();
   let head = 10;

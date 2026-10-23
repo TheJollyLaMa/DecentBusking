@@ -9,7 +9,7 @@ import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs?v=20261022-playlist-lane';
 import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261022-playlist-lane';
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
-  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261017-mercury-release';
+  summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261023-djuke-v05';
 
 const WALLET_BREATHE_ICON = 'img/Ens_Eth_Breathe.png';
 

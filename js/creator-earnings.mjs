@@ -11,6 +11,7 @@ export const ART_ADDRESS = '0x44c4516768e47cd97cfF2561B81a74699F23f8Ec';
 
 export const DJUKE_EARNING_CONTRACTS = [
   { label: 'DJuke v0.3', address: '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9', startBlock: 52526453, ledger: true },
+  { label: 'DJuke v0.5', address: '0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51', startBlock: 52993982, ledger: true },
 ];
 
 export const FUND_LABELS = {
