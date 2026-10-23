@@ -104,7 +104,7 @@ export async function rehearsePlaylistWorker({ provider, jukebox, worker, listen
     const selection = i === 0 ? resumed : await runtime.nextPaid();
     assert.ok(selection, `playlist song ${i + 1} must be playable`);
     assert.equal(selection.record.songId, ids[i]);
-    await runtime.complete(selection.record, { playId: `fork-worker-playlist-${i}`, audibleMs: 180000 });
+    await runtime.complete(selection.record, { playId: `fork-worker-playlist-${i}`, audibleMs: 180000, finished: true });
     await runtime.reconcile();
     await mine();
     if (sponsored) {
@@ -141,14 +141,14 @@ export async function rehearsePlaylistWorker({ provider, jukebox, worker, listen
   ] }, singleQuote);
   await (await jukebox.connect(listener).requestPlayWithGas(ids[2], price, cost, deadline, signature, { value: cost * 2n })).wait();
   await mine();
-  await runtime.complete(laneSong.record, { playId: 'fork-worker-cut-in-lane', audibleMs: 180000 });
+  await runtime.complete(laneSong.record, { playId: 'fork-worker-cut-in-lane', audibleMs: 180000, finished: true });
   await runtime.reconcile();
   assert.equal(Number((await jukebox.getPlaylistItem(laneSong.record.playlistLaneId)).status), 0);
   runtime = createRuntime();
   const main = await runtime.nextPaid();
   assert.ok(main);
   assert.equal(main.record.playlistLaneId, undefined);
-  await runtime.complete(main.record, { playId: 'fork-worker-cut-in-main', audibleMs: 180000 });
+  await runtime.complete(main.record, { playId: 'fork-worker-cut-in-main', audibleMs: 180000, finished: true });
   await runtime.reconcile();
   await mine();
   await runtime.reconcile();
@@ -156,7 +156,7 @@ export async function rehearsePlaylistWorker({ provider, jukebox, worker, listen
   assert.equal(Number((await jukebox.getPlaylistItem(laneSong.record.playlistLaneId)).status), 1);
   const remaining = await runtime.nextPaid();
   assert.ok(remaining);
-  await runtime.complete(remaining.record, { playId: 'fork-worker-cut-in-last', audibleMs: 180000 });
+  await runtime.complete(remaining.record, { playId: 'fork-worker-cut-in-last', audibleMs: 180000, finished: true });
   await runtime.reconcile();
   await mine();
   await batches.reconcile();
@@ -178,12 +178,20 @@ export async function rehearsePlaylistWorker({ provider, jukebox, worker, listen
   const prefixPayerBefore = await token.balanceOf(listenerAddress);
   const prefixArtistBefore = await token.balanceOf(songs[0].recipients[0]);
   const prefixFundsBefore = await Promise.all(fundIds.map(readFundBalance));
-  await runtime.complete(prefix.record, { playId: 'fork-worker-delivered-prefix', audibleMs: 180000 });
+  await runtime.complete(prefix.record, { playId: 'fork-worker-delivered-prefix', audibleMs: 180000, finished: true });
   await runtime.reconcile();
   await mine();
-  const shortPlay = await runtime.nextPaid();
-  assert.ok(shortPlay);
-  await runtime.complete(shortPlay.record, { playId: 'fork-worker-too-short', audibleMs: 1000 });
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const shortPlay = await runtime.nextPaid();
+    assert.ok(shortPlay);
+    const outcome = await runtime.complete(shortPlay.record, { playId: `fork-worker-too-short-${attempt}`,
+      audibleMs: 1000, finished: false });
+    assert.equal(outcome.retrying, attempt < 4);
+    if (attempt < 4) {
+      assert.equal(await token.balanceOf(listenerAddress), prefixPayerBefore, 'retry must not refund or charge again');
+      runtime = createRuntime();
+    }
+  }
   await mine();
   await batches.reconcile();
   const refunded = batches.getState().find(b => b.batchId === suffix.batchId);
@@ -197,5 +205,5 @@ export async function rehearsePlaylistWorker({ provider, jukebox, worker, listen
   assert.equal((await readState()).requests.length, 0);
   return { workerHttpGasQuote: true, sponsored, twelveSongTotalUsdc: '7.00', orderedSongsSettled: 12,
     directArtistSettlement: true, fourFundSettlement: true, restartRecovery: true, mainRequestCutIn: true,
-    fullRefundUsdc: '3.50', shortPlaybackSuffixRefundUsdc: '3.25', realBaseTransactions: 0 };
+    fullRefundUsdc: '3.50', mediaRetriesAcrossRestarts: 3, shortPlaybackSuffixRefundUsdc: '3.25', realBaseTransactions: 0 };
 }

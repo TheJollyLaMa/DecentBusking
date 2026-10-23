@@ -44,8 +44,8 @@ test('sponsored quotes require v0.5 and a funded worker and never charge listene
     assert.equal(quote.contributionWei, '0');
   }
   balance = 0n;
-  await assert.rejects(single({ listener, songId }), /reserve is low/);
-  await assert.rejects(playlist({ listener, songIds: [songId] }), /reserve is low/);
+  await assert.rejects(single({ listener, songId }), /execution budget is low/);
+  await assert.rejects(playlist({ listener, songIds: [songId] }), /execution budget is low/);
   balance = 3_000_000_000_000_000n; version = '0.4';
   await assert.rejects(single({ listener, songId }), /v0.5/);
 });

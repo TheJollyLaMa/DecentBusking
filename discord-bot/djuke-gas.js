@@ -5,7 +5,7 @@ async function requireSponsorBalance(provider, contract, worker, estimatedCost) 
   if (await contract.CONTRACT_VERSION() !== '0.5') throw new Error('Platform funding requires DJuke v0.5');
   const balance = await provider.getBalance(worker);
   if (balance < 1_000_000_000_000_000n || balance < estimatedCost * 2n) {
-    throw new Error('Platform worker reserve is low; checkout is paused until replenished');
+    throw new Error('Playback execution budget is low; checkout is paused until the platform replenishes it');
   }
 }
 

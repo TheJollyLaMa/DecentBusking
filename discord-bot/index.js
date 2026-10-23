@@ -67,7 +67,7 @@ import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
 import { createCreatorProfiles } from './creator-profiles.js';
 import { createArtworkUpdateQueue } from './artwork-updates.js';
 import { createDjukeGasQuoteReader, createDjukePlaylistGasQuoteReader, DJUKE_GAS_ABI, DJUKE_PLAYLIST_GAS_ABI } from './djuke-gas.js';
-import { createDjukePlaylistBatchReconciler, djukePlaylistReadiness, playlistBatchEventAbi } from './djuke-playlist-batches.js';
+import { createDjukePlaylistBatchReconciler, djukePlaylistReadiness, playlistBatchEventAbi, legacyPlaylistReceipts } from './djuke-playlist-batches.js';
 import { createEnsResolver } from './ens-resolver.js';
 import { createDevertRemovals } from './devert-removals.js';
 import { ensureCheckpointGroups } from './checkpoint-groups.js';
@@ -1036,10 +1036,9 @@ async function main() {
   };
   setInterval(checkWorkerReserve, 300_000).unref();
   const djukeAddress = process.env.DJUKE_CONTRACT_ADDRESS;
+  const historicalPlaylistReceipts = legacyPlaylistReceipts(process.env.DJUKE_LEGACY_PLAYLIST_RECEIPTS, djukeAddress);
   const sponsoredDjuke = process.env.DJUKE_CONTRACT_VERSION === '0.5';
-  const sponsorshipConfigured = !sponsoredDjuke ||
-    (process.env.WORKER_RESERVE_ENABLED === 'true' && !!process.env.WORKER_RESERVE_PRIVATE_KEY);
-  const quoteSigner = sponsorshipConfigured && supportsDjukeAlbumsAndGas(process.env.DJUKE_CONTRACT_VERSION) && process.env.DJUKE_FULFILLER_PRIVATE_KEY
+  const quoteSigner = supportsDjukeAlbumsAndGas(process.env.DJUKE_CONTRACT_VERSION) && process.env.DJUKE_FULFILLER_PRIVATE_KEY
     ? new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-gas-quote')) : null;
   const getDjukeGasQuote = quoteSigner ? createDjukeGasQuoteReader({ provider: quoteSigner.provider, signer: quoteSigner,
     sponsored: sponsoredDjuke,
@@ -1093,9 +1092,9 @@ async function main() {
       const nowPlaying = getJukeLoopNowPlaying();
       const batches = playlistBatchJournal.getState();
       const recent = batches.filter(batch => batch.status !== 'pending').slice(-50);
-      return batches.filter(batch => batch.status === 'pending' || recent.includes(batch)).map(batch => {
+      return [...historicalPlaylistReceipts, ...batches.filter(batch => batch.status === 'pending' || recent.includes(batch)).map(batch => {
         const saved = creatorProfilesReady ? creatorProfiles.findPlaylistRevision(batch.payer, batch.songIds) : null;
-        return { batchId: batch.batchId, name: saved?.name || `Playlist #${batch.batchId}`,
+        return { batchId: batch.batchId, contractAddress: djukeAddress, name: saved?.name || `Playlist #${batch.batchId}`,
           payer: batch.payer, status: batch.status, transactionHash: batch.transactionHash,
           resolutionTransactionHash: batch.resolutionTransactionHash,
           subtotalUnits: batch.subtotalUnits, feeUnits: batch.feeUnits,
@@ -1111,7 +1110,7 @@ async function main() {
               artist: track?.uploader || '', status: batch.deliveredLaneIds?.includes(laneId) ? 'delivered'
                 : batch.refundedLaneIds?.includes(laneId) ? 'refunded' : 'pending' };
           }) };
-      });
+      })];
     },
     paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
     getPlaylist: () => {

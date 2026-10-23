@@ -50,12 +50,15 @@ batches. Legacy schema-2 checkpoints replay events once from the configured
 deployment block to recover exact amounts and resolution links; this adds no
 transactions or public-request checkpoint writes.
 
-## Sponsored playback candidate (not activated)
+## DJuke v0.5 deployment (2026-10-23)
 
-Production v0.4 still requires a separately disclosed listener ETH worker
-contribution and releases its platform fee only on completion. Removing that
-charge requires the replacement v0.5 contract; it cannot be hidden in the UI or
-retroactively removed from existing purchases. Both versions retain ordinary
+The drained v0.4 contract is paused for new requests. Replacement v0.5 is
+`0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51` (deployment block 52993982),
+with module `0x093d2dbCcBA612d2B2aD9B620cA4d0A03D98fE11`.
+The reviewed migration copies all 255 songs and verifies creator splits/listen
+prices; the deployment record lives in DecentMarket's
+`deployments/djuke-v05-base.json`. Old charges cannot be retroactively removed.
+Both versions retain ordinary
 wallet network gas, signed quotes, the same USDC tiers, and main-request cut-in.
 
 The v0.5 candidate signs zero worker contributions only after verifying its
@@ -64,16 +67,42 @@ $1 **total**, split $0.25 to each of the four funds. Completion releases any
 remaining platform fee. Interruptions refund undelivered songs and only the
 unreleased platform fee. Existing v0.4 batches retain their original policy.
 
-Automated refills default to **disabled**. Reserve setup and treasury funding were
-explicitly deferred; no keys, transfers, contract deployment or production
-financial cutover are part of this activation. Before enabling v0.5, provision a
-dedicated Base ETH reserve, enable `WORKER_RESERVE_ENABLED=true`, configure
-`WORKER_RESERVE_PRIVATE_KEY`, and verify the funded worker and durable journal.
-The reserve must be distinct from the worker, use one writer/service, and never
-be used independently while its pending signed transfers are being recovered.
-Missing or unreadable durable checkpoints must be resolved before activation.
+Listener-facing v0.5 purchases show only USDC and standard Base network gas:
+no worker-funding line, surcharge, or funding pitch in single-song, Personal Play,
+Play Live, approval, or information text. Both radio entry points reject nonzero
+native value/cost before payment and the replacement contracts reject it too.
+Funding details belong only in Admin. Legacy v0.4 checkout must continue disclosing
+its real charge until cutover, and historical receipts retain their original terms.
 
-Approved limits: refill below 0.001 ETH toward 0.003 ETH, at most 0.002 ETH per
+Launch funding is **manual top-ups with admin alerts**. Keep
+`WORKER_RESERVE_ENABLED` unset/false; no reserve key is required for sponsored
+quotes. No keys, transfers, contract deployment or production financial cutover
+are authorized by the funding policy. The connected admin sees worker funding
+warnings in Admin and the left ankh/Admin action count, without overwriting
+live-booking actions. The monitor reads the active contract's `gasWorker()` on
+Base every minute while the page is visible; it is not an offline Discord/email
+notification. An unavailable balance is an action, never a healthy result.
+Wallet disconnect/change invalidates in-flight reads.
+
+For v0.5, warn below **0.002 ETH**, suggest a **0.003 ETH** target, and pause
+sponsored quotes below **0.001 ETH** or when twice the estimated execution
+budget exceeds the balance. This is an early warning, not a promise of capacity
+for all outstanding purchases. Top up only the verified worker with ETH on Base.
+Before cutover, verify funded worker, fulfiller/registrar roles, matching
+frontend/backend addresses and versions, deployment-block event replay, and
+durable mirror/journals. Drain both old paid lanes and stop new v0.4 purchases
+before moving the worker; old purchases cannot be migrated by changing config.
+Mainnet deployment and production cutover were explicitly approved separately.
+
+At contract cutover, preserve the verified resolved v0.4 receipts in
+`DJUKE_LEGACY_PLAYLIST_RECEIPTS` from the deployment manifest. The worker validates
+the archive and prepends it to profile receipt history, never the active queue.
+Archived receipts retain their old contract, exact refund amounts and v0.4 terms;
+batch IDs are local to a contract and must not be treated as new v0.5 payments.
+
+The optional automatic reserve remains disabled and outside the selected launch
+policy. If separately approved later, it requires a distinct funded signer, one
+writer, and durable recovery before activation. Its limits are at most 0.002 ETH per
 transfer and 0.006 ETH per UTC day. These are transfer-value caps; each transfer
 also has a separate maximum network fee of 0.00002 ETH. Failed transfers count
 conservatively toward the daily value cap. Pinata stores the exact signed raw

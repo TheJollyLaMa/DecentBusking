@@ -141,3 +141,55 @@ test('notification polling starts on connection, runs at five minutes, and ignor
  await new Promise(resolve => setImmediate(resolve));
  assert.equal(updates.length, 1);
 });
+
+test('worker funding and booking badges aggregate only at admin anchors', async () => {
+ const { claimState } = await import('../js/live-bookings.mjs');
+ const listeners = new Map(), badges = new Map();
+ const target = () => ({
+  classList: { add() {} }, querySelector() { return this.badge; },
+  append(badge) { this.badge = badge; },
+ });
+ const ankh = target(), admin = target(), bookingPanel = target();
+ let isAdmin = true;
+ const document = {
+  readyState: 'loading',
+  addEventListener(name, fn) {
+   if (!listeners.has(name)) listeners.set(name, []);
+   listeners.get(name).push(fn);
+  },
+  dispatchEvent(event) { for (const fn of listeners.get(event.type) || []) fn(event); },
+  createElement: () => ({ dataset: {}, setAttribute() {} }),
+  head: { append() {} },
+  append() {},
+  querySelector: selector => badges.get(selector) || null,
+  querySelectorAll: () => [],
+ };
+ badges.set('.ankh-left', ankh);
+ badges.set('[data-admin-item]', admin);
+ badges.set('.live-performance-admin-summary', bookingPanel);
+ const context = vm.createContext({
+  document, window: { _wallet: { address: owner }, DecentConfig: { adminWalletAddress: owner } },
+  claimState, isAdminWallet: () => isAdmin, localStorage: { getItem: () => null },
+  queueMicrotask, console, MutationObserver: class { observe() {} },
+  setInterval() {}, clearInterval() {},
+  Date: class extends Date { static now() { return now; } },
+ });
+ const source = fs.readFileSync(new URL('../js/live-booking-notifications.mjs', `file://${__filename}`), 'utf8')
+  .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+ vm.runInContext(source, context);
+ document.dispatchEvent({ type: 'DOMContentLoaded' });
+ document.dispatchEvent({ type: 'live-booking-state-updated', detail: { state: state({ ...booking, acknowledged: true }) } });
+ document.dispatchEvent({ type: 'worker-gas-state-updated', detail: { action: { id: 'worker-gas', label: 'Top up' } } });
+ await new Promise(resolve => setImmediate(resolve));
+ assert.equal(ankh.badge.textContent, '2');
+ assert.equal(admin.badge.textContent, '2');
+ assert.equal(bookingPanel.badge.textContent, '1', 'worker funding is not a booking action');
+ document.dispatchEvent({ type: 'worker-gas-state-updated', detail: { action: null } });
+ await new Promise(resolve => setImmediate(resolve));
+ assert.equal(admin.badge.textContent, '1', 'funding recovery preserves the booking action');
+ isAdmin = false;
+ context.window._wallet = {};
+ document.dispatchEvent({ type: 'wallet-disconnected' });
+ await new Promise(resolve => setImmediate(resolve));
+ assert.equal(admin.badge.hidden, true);
+});
