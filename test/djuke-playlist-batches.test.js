@@ -3,6 +3,25 @@ const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const { Wallet } = createRequire(require('node:path').join(__dirname, '../discord-bot/package.json'))('ethers');
 
+test('contract cutover preserves exact resolved v0.4 receipts without admitting active legacy lanes', async () => {
+  const { legacyPlaylistReceipts } = await import('../discord-bot/djuke-playlist-batches.js');
+  const active = `0x${'1'.repeat(40)}`, old = `0x${'2'.repeat(40)}`;
+  const batch = { batchId: '0', contractAddress: old, payer: `0x${'3'.repeat(40)}`, name: 'BoogieNight',
+    status: 'refunded', workerGasSponsored: false, subtotalUnits: '4000000', feeUnits: '3000000',
+    refundedUnits: '6750000', transactionHash: `0x${'a'.repeat(64)}`, resolutionTransactionHash: `0x${'b'.repeat(64)}`,
+    songs: [{ songId: `0x${'c'.repeat(64)}`, status: 'delivered' }, { songId: `0x${'d'.repeat(64)}`, status: 'refunded' }] };
+  assert.deepEqual(legacyPlaylistReceipts(undefined, active), []);
+  const [restored] = legacyPlaylistReceipts(JSON.stringify([batch]), active);
+  assert.equal(restored.refundedUnits, '6750000');
+  assert.equal(restored.workerGasSponsored, false);
+  assert.equal(restored.playing, false);
+  for (const changes of [{ status: 'pending' }, { contractAddress: active }, { refundedUnits: '8000000' },
+    { workerGasSponsored: true }, { songs: [{ ...batch.songs[0], status: 'pending' }] }]) {
+    assert.throws(() => legacyPlaylistReceipts(JSON.stringify([{ ...batch, ...changes }]), active), /Legacy playlist/);
+  }
+  assert.throws(() => legacyPlaylistReceipts(JSON.stringify([batch, batch]), active), /Legacy playlist/);
+});
+
 test('playlist batch event journal reconciles ordered lane IDs and fee/refund events across restart', async () => {
   const { createDjukePlaylistBatchReconciler } = await import('../discord-bot/djuke-playlist-batches.js');
   let snapshot;
@@ -155,7 +174,7 @@ test('played playlist proof waits for late main requests before lane settlement'
   assert.equal(calls[0].playId, 'proof');
 });
 test('playlist readiness requires explicit configuration, durable events, verified runtime, payments, and live mirror', async () => {
-  const { djukePlaylistReadiness } = await import('../discord-bot/djuke-playlist-batches.js');
+  const { djukePlaylistReadiness, legacyPlaylistReceipts } = await import('../discord-bot/djuke-playlist-batches.js');
   const enabled = { configured: true, contractAddress: `0x${'12'.repeat(20)}`, batchEventsDurable: true,
     workerReady: true, paymentsEnabled: true, mirrorAvailable: true };
   assert.equal(djukePlaylistReadiness(enabled).ready, true);
@@ -188,7 +207,7 @@ test('playlist worker verifies Base, on-chain v0.4, quote identity and fulfiller
 test('production playlist quote wiring stays closed before runtime restore and for missing rollout prerequisites', async () => {
   const fs = require('node:fs');
   const vm = require('node:vm');
-  const { djukePlaylistReadiness } = await import('../discord-bot/djuke-playlist-batches.js');
+  const { djukePlaylistReadiness, legacyPlaylistReceipts } = await import('../discord-bot/djuke-playlist-batches.js');
   const source = fs.readFileSync(require('node:path').join(__dirname, '../discord-bot/index.js'), 'utf8');
   assert.ok(source.indexOf('if (initializePlaylistWorker) void initializePlaylistWorker()') > source.lastIndexOf('playlistReady = true;'),
     'runtime initialization must start only after catalog restoration');
@@ -204,17 +223,17 @@ test('production playlist quote wiring stays closed before runtime restore and f
     const context = vm.createContext({
       process: { env: { ...enabled, ...overrides } }, config: { pinataJwt: 'local-fixture' },
       checkpointMirror: { status: () => ({ available: true }) },
-      Wallet: class { constructor(_key, provider) { this.provider = provider; } },
+      Wallet: class { constructor(_key, provider) { this.provider = provider; this.address = address; } },
       Contract: class { constructor(_address, _abi, provider) { this.runner = { provider }; } },
-      supportsDjukeAlbumsAndGas: version => ['0.3', '0.4'].includes(version),
-      getRpcRouter: () => ({ provider: () => ({}) }),
+      supportsDjukeAlbumsAndGas: version => ['0.3', '0.4', '0.5'].includes(version),
+      getRpcRouter: () => ({ provider: () => ({ getBalance: async () => 3_000_000_000_000_000n }) }),
       createDjukeGasQuoteReader: () => async () => ({}),
       createDjukePlaylistGasQuoteReader: () => async () => { signed++; return { signature: 'fixture' }; },
       createPinataStateStore: () => ({ restore: async () => undefined, save: async () => 'ipfs://fixture' }),
       createDjukePlaylistBatchReconciler: () => ({ initialize: async () => {} }),
       initializeDevertPlaybackWithRetry: ({ initialize }) => initialize(),
       playlistBatchEventAbi: () => [], createDjukeQueueReader: () => async () => ({}),
-      djukePlaylistReadiness, DJUKE_ABI: [], DJUKE_GAS_ABI: [], DJUKE_PLAYLIST_GAS_ABI: [],
+      djukePlaylistReadiness, legacyPlaylistReceipts, DJUKE_ABI: [], DJUKE_GAS_ABI: [], DJUKE_PLAYLIST_GAS_ABI: [],
     });
 
     const result = await vm.runInContext(`(async () => { ${code}
@@ -233,6 +252,11 @@ test('production playlist quote wiring stays closed before runtime restore and f
   assert.equal((await live.readiness()).ready, true);
   assert.equal((await live.quote({})).signature, 'fixture');
   assert.equal(live.signed(), 1);
+  const manual = await wiring({ DJUKE_CONTRACT_VERSION: '0.5', DJUKE_PLAYLIST_BATCH_VERSION: '0.5',
+    WORKER_RESERVE_ENABLED: 'false' });
+  manual.runtimeRestored();
+  assert.equal((await manual.readiness()).ready, true, 'v0.5 manual funding does not require an automatic reserve key');
+  assert.equal((await manual.quote({})).signature, 'fixture');
   for (const overrides of [{ DJUKE_PLAYLIST_BATCH_START_BLOCK: '' }, { DJUKE_PLAYLIST_BATCH_START_BLOCK: undefined },
     { DJUKE_PLAYLIST_BATCH_START_BLOCK: '-1' }, { DJUKE_PAYMENTS_ENABLED: 'false' }]) {
     const closed = await wiring(overrides);

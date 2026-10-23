@@ -35,12 +35,12 @@ window.DecentConfig = {
   contractAddress: "0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3",
   additionalNftContractAddresses: ["0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B"],
   nftBatchMintEnabled: true,
-  // DJuke v0.4 rollout contract (side-by-side deployment for live playlist testing).
-  djukeContractAddress: "0xBBCb7F7369978cbdc32C6719B1d24B07f3d55619",
-  djukeContractVersion: "0.4",
+  // DJuke v0.5: USDC purchases plus standard Base network gas.
+  djukeContractAddress: "0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51",
+  djukeContractVersion: "0.5",
   djukePlaylistBatchEnabled: true,
-  djukePlaylistBatchVersion: "0.4",
-  djukePlaylistBatchAddress: "0xBBCb7F7369978cbdc32C6719B1d24B07f3d55619",
+  djukePlaylistBatchVersion: "0.5",
+  djukePlaylistBatchAddress: "0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51",
   djukePlaylistRadioReady: true,
   devertContractAddress: "0x135Cbc573F87637158eb3186C87c584fb0B34CD9",
   devertQueueContractAddress: "0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb",

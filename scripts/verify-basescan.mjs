@@ -13,7 +13,10 @@ const ETHERSCAN = `https://api.etherscan.io/v2/api?chainid=${CHAIN_ID}`;
 
 export const BASE_CONTRACTS = [
   { label: "ArtFi settlement router", address: "0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5" },
-  { label: "DJuke v0.3 (live)", address: "0x5d07489163feBCdB39C9F579CCC36dff5A067FF9" },
+  { label: "DJuke v0.5 (live)", address: "0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51" },
+  { label: "DJuke sponsored playlist module", address: "0x093d2dbCcBA612d2B2aD9B620cA4d0A03D98fE11" },
+  { label: "DJuke v0.4 (retired)", address: "0xBBCb7F7369978cbdc32C6719B1d24B07f3d55619" },
+  { label: "DJuke v0.3 (retired)", address: "0x5d07489163feBCdB39C9F579CCC36dff5A067FF9" },
   { label: "DJuke v0.2", address: "0x333Aa353d6fc70aE79Cf91CE090645CD740FEf59" },
   { label: "DeVert v0.1", address: "0x135Cbc573F87637158eb3186C87c584fb0B34CD9" },
   { label: "DecentEscrow v0.1", address: "0x31b07b83e99A9bdF379bf40225b8A80d3804C89d" },

@@ -17,7 +17,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261023-profile-receipts/);
+  assert.match(html, /djuke\.mjs\?v=20261023-usdc-only/);
   assert.match(html, /devert-paid-queue\.mjs\?v=20261019-radio-recovery/);
 });
 
@@ -213,8 +213,8 @@ test('DJuke drawer contains queue, pricing, and gated wallet controls', () => {
   assert.match(html, /<dt>Repo development fund<\/dt><dd>2%<\/dd>/);
   assert.match(config, /contractAddress: "0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3"/);
   assert.match(config, /additionalNftContractAddresses: \["0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B"\]/);
-  assert.match(config, /djukeContractAddress: "0xBBCb7F7369978cbdc32C6719B1d24B07f3d55619"/);
-  assert.match(config, /djukeContractVersion: "0.4"/);
+  assert.match(config, /djukeContractAddress: "0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51"/);
+  assert.match(config, /djukeContractVersion: "0.5"/);
   assert.match(config, /nftBatchMintEnabled: true/);
   for (const tab of ['top-ten', 'djuke', 'devert']) assert.match(html, new RegExp(`id="${tab}-tab"[^>]*aria-controls="${tab}-panel"`));
   assert.match(html, /class="djuke-tab-slot">⚸🎰🧞‍♂️/);
@@ -406,6 +406,7 @@ test('v0.2 payment verifies a worker quote and sends exactly the doubled ETH con
     fixture.djuke.gasWorker = async () => worker.address;
     fixture.djuke.maxGasContributionWei = async () => 10000n;
     fixture.djuke.gasQuoteNonces = async () => 0n;
+    fixture.djuke.CONTRACT_VERSION = async () => '0.2';
     fixture.djuke.requestPlayWithGas = async (...args) => {
       fixture.calls.push(['gas-request', args.at(-1).value]);
       return { hash: '0xgas', wait: async () => ({ status: 1 }) };
@@ -413,11 +414,12 @@ test('v0.2 payment verifies a worker quote and sends exactly the doubled ETH con
     fixture.djuke.requestPlayWithGas.staticCall = async () => {};
     await payForDjukeSong({ ...fixture, gasQuote: quote });
     assert.deepEqual(fixture.calls, [['gas-request', 2000n]]);
-    await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: { ...quote, contributionWei: '4000' } }), /Invalid worker gas quote/);
+    await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: { ...quote, contributionWei: '4000' } }), /Invalid DJuke payment quote/);
     const sponsoredQuote = { ...quote, contributionWei: '0', fulfillmentCostWei: '0' };
     fixture.djuke.CONTRACT_VERSION = async () => '0.4';
-    await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: sponsoredQuote }), /Invalid worker gas quote/);
+    await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: sponsoredQuote }), /Invalid DJuke payment quote/);
     fixture.djuke.CONTRACT_VERSION = async () => '0.5';
+    await assert.rejects(payForDjukeSong({ ...fixture, gasQuote: quote }), /USDC-only purchase quote/);
     await payForDjukeSong({ ...fixture, gasQuote: sponsoredQuote });
     assert.deepEqual(fixture.calls.at(-1), ['gas-request', 0n]);
   } finally { global.ethers = previous; }

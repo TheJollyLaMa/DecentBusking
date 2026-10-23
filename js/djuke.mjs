@@ -1,5 +1,5 @@
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
-import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
+import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs?v=20261023-usdc-only';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
@@ -103,21 +103,25 @@ export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUni
   if (gasQuote) {
     if (gasQuote.listener.toLowerCase() !== address.toLowerCase() || gasQuote.songId !== songId ||
         gasQuote.contractAddress.toLowerCase() !== djuke.target.toLowerCase() || gasQuote.chainId !== 8453 ||
-        Number(gasQuote.deadline) <= Math.floor(Date.now() / 1000) || BigInt(gasQuote.maxPrice) !== maxPriceUnits) throw new Error('Refresh the worker gas quote');
+        Number(gasQuote.deadline) <= Math.floor(Date.now() / 1000) || BigInt(gasQuote.maxPrice) !== maxPriceUnits) throw new Error('Refresh the DJuke payment quote');
     const [worker, cap, nonce] = await Promise.all([djuke.gasWorker(), djuke.maxGasContributionWei(), djuke.gasQuoteNonces(address)]);
     const contribution = BigInt(gasQuote.contributionWei);
+    const version = await djuke.CONTRACT_VERSION();
+    if (version === '0.5' && (contribution !== 0n || BigInt(gasQuote.fulfillmentCostWei) !== 0n)) {
+      throw new Error('DJuke v0.5 requires a verified USDC-only purchase quote');
+    }
     const sponsored = contribution === 0n && BigInt(gasQuote.fulfillmentCostWei) === 0n &&
-      await djuke.CONTRACT_VERSION() === '0.5';
+      version === '0.5';
     if ((!sponsored && contribution <= 0n) || contribution !== BigInt(gasQuote.fulfillmentCostWei) * 2n || contribution > cap ||
-        String(nonce) !== String(gasQuote.nonce)) throw new Error('Invalid worker gas quote');
+        String(nonce) !== String(gasQuote.nonce)) throw new Error('Invalid DJuke payment quote');
     const types = { GasQuote: [{ name: 'listener', type: 'address' }, { name: 'songId', type: 'bytes32' },
       { name: 'maxPrice', type: 'uint256' }, { name: 'fulfillmentCostWei', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }] };
     const recovered = ethers.verifyTypedData({ name: 'DecentJukeBox', version: DJUKE_SIGNING_DOMAIN_VERSION, chainId: 8453, verifyingContract: djuke.target }, types, gasQuote, gasQuote.signature);
-    if (recovered.toLowerCase() !== worker.toLowerCase()) throw new Error('Invalid worker gas signature');
-    if (await signer.provider.getBalance(address) < contribution) throw new Error('Insufficient Base ETH for worker gas contribution');
+    if (recovered.toLowerCase() !== worker.toLowerCase()) throw new Error('Invalid DJuke payment signature');
+    if (contribution > 0n && await signer.provider.getBalance(address) < contribution) throw new Error('Insufficient Base ETH for the legacy playback contribution');
   }
   if (await usdc.allowance(address, djuke.target) < price) {
-    onStep(approvalNotice(formatDjukeUsdc(price)));
+    onStep(approvalNotice(formatDjukeUsdc(price), { workerContribution: gasQuote !== null && BigInt(gasQuote.contributionWei) > 0n }));
     if ((await (await usdc.approve(djuke.target, price)).wait())?.status !== 1) throw new Error('USDC approval did not confirm');
     onStep('Confirming approval…');
     await waitForAllowance(usdc, address, djuke.target, price);
@@ -226,7 +230,8 @@ export function initDjuke() {
     syncPayButton();
     const songId = selectedSongId();
     if (!supportsDjukeAlbumsAndGas(window.DecentConfig?.djukeContractVersion) || !songId || !window._wallet?.address) return;
-    if (gasStatus) gasStatus.textContent = 'Estimating worker gas';
+    if (gasStatus) gasStatus.textContent = window.DecentConfig?.djukeContractVersion === '0.5'
+      ? 'Verifying payment availability' : 'Estimating worker gas';
     try {
       const response = await fetch(`${window.DecentConfig.ipfsUploadServiceUrl}/api/djuke/gas-quote?${new URLSearchParams({ listener: window._wallet.address, songId })}`, { signal: AbortSignal.timeout(15000) });
       const result = await response.json();
@@ -239,7 +244,7 @@ export function initDjuke() {
       gasQuoteKey = '';
       if (gasStatus) gasStatus.replaceChildren();
       if (gasStatus) gasStatus.textContent = /request limit|rate limit|too many/i.test(error.message)
-        ? 'Worker gas estimate is busy; retrying shortly' : error.message;
+        ? 'Payment verification is busy; retrying shortly' : error.message;
     }
     syncPayButton();
   };
@@ -263,15 +268,17 @@ export function initDjuke() {
     const rows = [
       ['Artist / collaborators', `${formatDjukeUsdc(artistUnits)} USDC`],
       ['Platform funds', `${formatDjukeUsdc(fundUnits)} USDC (8% pinning, 2% dev fund)`],
-      ['Worker execution', BigInt(gasQuote.contributionWei) === 0n ? 'Platform-funded · no listener surcharge'
-        : `~${formatDjukeEth(BigInt(gasQuote.contributionWei))} ETH contribution`],
+      ...(BigInt(gasQuote.contributionWei) > 0n
+        ? [['Worker execution', `~${formatDjukeEth(BigInt(gasQuote.contributionWei))} ETH contribution`]] : []),
     ];
     for (const [label, value] of rows) {
       const row = node('div', undefined, 'djuke-gas-summary-row');
       row.append(node('dt', label), node('dd', value));
       list.append(row);
     }
-    summary.append(list, node('p', 'Worker ETH funds automated playback execution on Base so listeners do not face a surprise ETH prompt.'));
+    summary.append(list, node('p', BigInt(gasQuote.contributionWei) === 0n
+      ? 'Only the USDC purchase and your normal Base network gas are payable by you.'
+      : 'The disclosed worker ETH contribution funds automated playback on Base. Wallet network gas is additional.'));
     gasStatus.replaceChildren(summary);
   };
   let songOptionsKey = '';

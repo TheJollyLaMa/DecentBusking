@@ -27,9 +27,10 @@ test('radio checkout accepts zero worker ETH only for configured on-chain v0.5 b
   request.staticCall = async (...args) => assert.equal(args.at(-1).value, 0n);
   const djuke = { target: address, CONTRACT_VERSION: async () => version, requestPlaylistWithGas: request };
   const token = { decimals: async () => 6, balanceOf: async () => 100000000n,
-    allowance: async () => 100000000n, approve: async () => assert.fail('no unnecessary approval') };
+    allowance: async () => 0n, approve: async () => ({ wait: async () => ({ status: 1 }) }) };
   const context = vm.createContext({ ...helpers, AbortSignal, URL, BASE_USDC: 'usdc', PLAYLIST_BATCH_ABI: [], USDC_ABI: [],
     ensureBaseNetwork: async () => {}, formatUsdcUnits: String, announcePaymentCelebration() {},
+    approvalNotice: (await import('../js/base-chain.mjs')).approvalNotice, waitForAllowance: async () => {},
     ethers: { Contract: function(target) { return target === address ? djuke : token; } } });
   const source = fs.readFileSync(path.join(__dirname, '../js/djuke-playlists-ui.mjs'), 'utf8');
   vm.runInContext(source.slice(source.indexOf('export async function purchaseRadioNamedPlaylist'),
@@ -42,13 +43,33 @@ test('radio checkout accepts zero worker ETH only for configured on-chain v0.5 b
   config.djukePlaylistBatchVersion = '0.4';
   await assert.rejects(purchase(), /Legacy playlist checkout/);
   config.djukePlaylistBatchVersion = '0.5'; version = '0.4';
-  await assert.rejects(purchase(), /requires DJuke v0.5/);
+  await assert.rejects(purchase(), /v0.5 requires a verified USDC-only/);
   version = '0.5'; contribution = '2000'; cost = '1000';
-  await assert.rejects(purchase(), /no worker ETH charge/);
+  await assert.rejects(purchase(), /v0.5 requires a verified USDC-only/);
   contribution = cost = '0';
   await purchase();
   assert.equal(sent, 1);
-  assert.ok(steps.some(step => step.includes('platform-funded worker execution; wallet network gas still applies')));
+  assert.ok(steps.some(step => step.includes('standard Base network gas only')));
+  assert.ok(steps.every(step => !/worker|sponsor|extra ETH/i.test(step)));
+  const approval = steps.find(step => step.includes('spending allowance'));
+  assert.doesNotMatch(approval, /worker ETH/);
+  assert.match(approval, /network gas/);
+});
+
+test('v0.5 radio tooltip and public information contain no worker funding pitch', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/djuke-playlists-ui.mjs'), 'utf8');
+  const radioButton = {}, privateButton = {}, saveButton = {};
+  const context = vm.createContext({ config: () => ({ djukePlaylistBatchVersion: '0.5' }),
+    batchCapability: () => true, radioCapability: () => true, addSelected: null,
+    draft: { list: () => [{}] }, busy: false, nameInput: { value: 'BoogieNight' },
+    radioButton, privateButton, saveButton });
+  vm.runInContext(source.slice(source.indexOf('const workerCostNotice'), source.indexOf('async function refreshPlaylistReadiness')) +
+    source.slice(source.indexOf('function updateGate()'), source.indexOf('function renderDraft()')) + '\nupdateGate();', context);
+  assert.match(radioButton.title, /Standard Base network gas/);
+  assert.doesNotMatch(radioButton.title, /worker|ETH|sponsor/i);
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const info = html.slice(html.indexOf('id="djuke-instructions"'), html.indexOf('id="djuke-instructions-close"'));
+  assert.doesNotMatch(info, /worker|ETH|sponsor/i);
 });
 
 test('unsaved draft buys one personal batch then plays in order; Live and Save stay independent', async () => {

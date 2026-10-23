@@ -1,14 +1,18 @@
 # DecentBusking contracts (Base mainnet, chain 8453)
 
-Every contract the site or worker asks a wallet to interact with. All sources are
-published and match the deployed bytecode exactly. All are verified on Basescan and Sourcify (2026-10-14). Re-check
+Every contract the site or worker asks a wallet to interact with. Legacy sources
+were verified on Basescan and Sourcify (2026-10-14). DJuke v0.5 was deployed
+2026-10-23; see its exact-source verification on Sourcify. Re-check
 with `node scripts/verify-basescan.mjs` (needs only a free Etherscan V2 API key;
 no private key).
 
 | Contract | Address | Role | Source |
 |---|---|---|---|
 | ArtFi settlement router | `0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5` | Fund accounting: repo-dev, pinner, Top 10 funds and payroll payouts | `ArtFi_2.1.sol` (ArtFi repo) |
-| DJuke v0.3 (live) | `0x5d07489163feBCdB39C9F579CCC36dff5A067FF9` | Paid song requests and listen purchases (90% artist, 8% pinners, 2% repo-dev) | `DecentJukeBox_v0.3.sol` (published on Basescan; not yet in DecentMarket repo) |
+| DJuke v0.5 (live) | `0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51` | USDC-only single/playlist purchases; standard Base network gas, no worker surcharge; 90/8/2 song settlement | `DecentMarket/contracts/DecentJukeBox_v0.5.sol` |
+| DJuke sponsored playlist module | `0x093d2dbCcBA612d2B2aD9B620cA4d0A03D98fE11` | Immutable v0.5 module; $1 fee release per fourth delivery, unreleased-fee refunds | `DecentMarket/contracts/DJukeSponsoredPlaylistModule.sol` |
+| DJuke v0.4 (retired, requests paused) | `0xBBCb7F7369978cbdc32C6719B1d24B07f3d55619` | Drained before v0.5 migration; historical receipts retain their original refund terms | `DecentMarket/contracts/DecentJukeBox_v0.4.sol` |
+| DJuke v0.3 (retired) | `0x5d07489163feBCdB39C9F579CCC36dff5A067FF9` | Legacy song requests and listen purchases | `DecentJukeBox_v0.3.sol` (published on Basescan) |
 | DeVert v0.1 | `0x135Cbc573F87637158eb3186C87c584fb0B34CD9` | Advert campaign purchases (45/45/8/2) | `DecentMarket/contracts/DeVert_v0.1.sol` |
 | DecentNFT v0.3 | `0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3` | Song DNFT collection | `DecentMarket/contracts/DecentNFT_v0.3.sol` |
 | DecentNFT v0.2 | `0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B` | Legacy song DNFT collection | `DecentMarket/contracts/DecentNFT_v0.2.sol` |

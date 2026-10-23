@@ -128,3 +128,28 @@ export function playlistBatchEventAbi() {
     'event PlaylistSongRefunded(uint256 indexed laneId,uint256 indexed batchId,uint256 amount)',
   ];
 }
+
+export function legacyPlaylistReceipts(json, activeContract) {
+  if (!json) return [];
+  const receipts = JSON.parse(json);
+  const address = value => /^0x[0-9a-fA-F]{40}$/.test(value || '');
+  const hash = value => /^0x[0-9a-fA-F]{64}$/.test(value || '');
+  const units = value => typeof value === 'string' && /^\d+$/.test(value);
+  const seen = new Set();
+  if (!Array.isArray(receipts) || receipts.length > 50) throw new Error('Invalid legacy playlist receipts');
+  return receipts.map(batch => {
+    const key = `${batch.contractAddress}:${batch.batchId}`.toLowerCase();
+    if (!address(batch.contractAddress) || batch.contractAddress.toLowerCase() === activeContract?.toLowerCase() ||
+        !address(batch.payer) || !/^\d+$/.test(batch.batchId) || seen.has(key) ||
+        !['settled', 'refunded'].includes(batch.status) || batch.workerGasSponsored !== false ||
+        !hash(batch.transactionHash) || !hash(batch.resolutionTransactionHash) ||
+        !units(batch.subtotalUnits) || !units(batch.feeUnits) || !units(batch.refundedUnits) ||
+        BigInt(batch.refundedUnits) > BigInt(batch.subtotalUnits) + BigInt(batch.feeUnits) ||
+        !Array.isArray(batch.songs) || batch.songs.length < 1 || batch.songs.length > 24 ||
+        batch.songs.some(song => !hash(song.songId) || !['delivered', 'refunded'].includes(song.status))) {
+      throw new Error('Legacy playlist receipts must be resolved, exact and from a different contract');
+    }
+    seen.add(key);
+    return { ...batch, playing: false };
+  });
+}
