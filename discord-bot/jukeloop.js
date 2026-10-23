@@ -911,7 +911,8 @@ export class JukeLoopSession {
       return { status: 'playing', ready: true, reason: null };
     }
     if (show.type === 'normal_rotation' && this.djuke?.hasPendingPlaylist?.()) {
-      return { status: 'preparing', ready: false, reason: 'Continuing the paid playlist; waiting for its durable checkpoint or settlement' };
+      return { status: 'preparing', ready: false,
+        reason: this._playlistRetryReason || 'Continuing the paid playlist; waiting for its durable checkpoint or settlement' };
     }
     if (!this._queue.length && !this._prepareTask && !this._transitionTask && !this._preparedNext &&
         !this._nowPlaying && !this._currentPaid && !this._currentDevertAd) {
@@ -1234,7 +1235,15 @@ export class JukeLoopSession {
     const track = hypeSelection ? hypeSelection.track : playlistSelection ? playlistSelection.track : paid ? paid.track : devertAd ? devertAd.track : this._queue[this._queueIndex];
     const queueIndex = !hypeSelection && !playlistSelection && !paid && !devertAd ? this._queueIndex : null;
 
-    const url = await this._getFreshUrl(track);
+    let url;
+    try { url = await this._getFreshUrl(track); }
+    catch (error) {
+      if (paid?.record.playlistBatchId !== undefined) {
+        await this._retryPlaylistMedia(paid.record, error);
+        return null;
+      }
+      throw error;
+    }
     if (this._destroyed) {
       if (paid && this.djuke) await this.djuke.release(paid.record, new Error('Radio stopped during media lookup'));
       return null;
@@ -1255,10 +1264,14 @@ export class JukeLoopSession {
       if (!skipNoticeKey || !this._paidFetchNotices.has(skipNoticeKey)) {
         if (skipNoticeKey) this._paidFetchNotices.add(skipNoticeKey);
         this._sendPlaybackNotice(paid
-            ? `⏳ Paid request **${track.title}** can't be fetched right now — it stays queued and will retry while the radio keeps playing.`
+            ? `⏳ Paid request **${track.title}** can't be fetched right now — it stays queued for retry.`
             : `⚠️ Skipping **${track.title}** — the original upload could not be found.`);
       }
       if (paid && this.djuke) {
+        if (paid.record.playlistBatchId !== undefined) {
+          await this._retryPlaylistMedia(paid.record, new Error('Paid recording could not be fetched'));
+          return null;
+        }
         // Keep the request queued, but let free rotation play instead of leaving the radio silent.
         this._djukeCooldownUntil = Date.now() + PAID_FETCH_RETRY_MS;
         await this.djuke.fail(paid.record, new Error('Paid recording could not be fetched')).catch(() => {});
@@ -1302,11 +1315,16 @@ export class JukeLoopSession {
         this._preparedDevertAd = null;
         this._persistMainRadioAdState();
       }
-      this._sendPlaybackNotice(`⚠️ Skipping **${track.title}**: ${err.message}`);
       if (paid && this.djuke) {
+        if (paid.record.playlistBatchId !== undefined) {
+          await this._retryPlaylistMedia(paid.record, err);
+          return null;
+        }
+        this._sendPlaybackNotice(`⚠️ Skipping **${track.title}**: ${err.message}`);
         await this.djuke.fail(paid.record, err).catch(() => {});
         throw err;
       }
+      this._sendPlaybackNotice(`⚠️ Skipping **${track.title}**: ${err.message}`);
       if (queueIndex !== null) this._queueIndex++;
       return this._prepareNextPlayback(null, options);
     }
@@ -1318,6 +1336,22 @@ export class JukeLoopSession {
     if (prepared.paid?.record && this.djuke) {
       this.djuke.release(prepared.paid.record, new Error(reason))
         .catch(error => console.warn('[jukeloop] Could not release prepared DJuke request:', error.message));
+    }
+
+  }
+
+  async _retryPlaylistMedia(record, error) {
+    const result = await this.djuke.retryMedia(record, error);
+    this._setPlaylistMediaRetry(result);
+  }
+
+  _setPlaylistMediaRetry(result) {
+    if (result.retrying) {
+      this._djukeCooldownUntil = Date.now() + 5000 * 2 ** (result.retryNumber - 1);
+      this._playlistRetryReason = `Paid playlist media retry ${result.retryNumber}/${result.maxRetries}; payment stays queued. No new payment required.`;
+      this._sendPlaybackNotice(`⏳ ${this._playlistRetryReason}`);
+    } else {
+      this._playlistRetryReason = '';
     }
   }
 
@@ -1472,6 +1506,7 @@ export class JukeLoopSession {
     }
     this._ffmpeg = prepared.ffmpegProcess;
     this._currentPaid = prepared.paid?.record || null;
+    if (this._currentPaid) this._playlistRetryReason = '';
     this._currentDevertAd = prepared.devertAd;
     if (prepared.devertAd && !prepared.devertAd.paidRequest) this._breakAwaitingUnlock = false;
     this._currentTrack = prepared.track;
@@ -1738,8 +1773,9 @@ export class JukeLoopSession {
     }
     if (paidRecord && this.djuke) {
       const play = trackRef && completedPlay?.trackId === trackRef.trackId ? completedPlay : null;
-      await this.djuke.complete(paidRecord, play)
+      const recovery = await this.djuke.complete(paidRecord, play)
         .catch((err) => console.warn('[jukeloop] DJuke completion pending:', err.message));
+      if (paidRecord.playlistBatchId !== undefined && recovery) this._setPlaylistMediaRetry(recovery);
     }
     if (!msgRef || !trackRef) return;
 
