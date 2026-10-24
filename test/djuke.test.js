@@ -18,7 +18,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /djuke\.mjs\?v=20261025-seamless-handoff/);
-  assert.match(html, /devert-site\.mjs\?v=20261024-widget/);
+  assert.match(html, /devert-site\.mjs\?v=20261025-seamless-handoff/);
   const adapter = fs.readFileSync(path.join(__dirname, '../js/devert-site.mjs'), 'utf8');
   assert.match(adapter, /devert-paid-queue\.mjs\?v=20261024-widget/);
 });
@@ -30,6 +30,20 @@ test('DJuke starts at 0.25 USDC and doubles after each eight pending requests', 
     assert.equal(quoteDjuke(pending).priceUnits, expected);
   }
   assert.equal(quoteDjuke(7).priceUnits, 250000n);
+});
+
+test('drawer and widget share one playlist position and remaining-count helper', async () => {
+  const { playlistBatchProgress } = await import('../js/djuke-playlist-progress.mjs');
+  const songs = Array.from({ length: 12 }, (_, i) => ({ status: i < 2 ? 'delivered' : i < 7 ? 'played' : i === 7 ? 'playing' : 'pending' }));
+  assert.deepEqual(playlistBatchProgress({ name: 'BoogieNight', songs }), { total: 12, delivered: 2, played: 5, remaining: 4, position: 8,
+    heading: 'BoogieNight · Song 8 of 12 · 4 remaining',
+    progress: '2 / 12 songs delivered · 5 played, settling · now playing song 8' });
+  assert.equal(playlistBatchProgress({ name: 'Mix', songs: [{ status: 'pending' }, { status: 'pending' }] }).heading,
+    'Mix · 2 of 2 songs remaining');
+  const fs = require('node:fs');
+  const widget = fs.readFileSync(require('node:path').join(__dirname, '../js/djuke-widget.mjs'), 'utf8');
+  assert.match(widget, /djuke-playlist-progress\.mjs/);
+  assert.doesNotMatch(widget, /radio-sync/);
 });
 
 test('playlist receipt distinguishes purchase, delivery and exact refund without hiding worker ETH', async () => {
@@ -269,6 +283,7 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   const { renderWalletAddress } = await import('../js/fund-display.mjs');
   const { formatUsdcUnits } = await import('../js/usdc-format.mjs');
   const { mountDjukeQueueFocus } = await import('../js/djuke-queue-focus.mjs');
+  const { playlistBatchProgress } = await import('../js/djuke-playlist-progress.mjs');
   const nodes = new Map();
   let focused;
   function element(id) {
@@ -300,7 +315,7 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   let queueReads = 0;
   let scheduled;
   let tracks = [{ trackId: 'a', songId: `0x${'a'.repeat(64)}`, title: 'First song', artist: 'Musician' }];
-  const context = vm.createContext({ ...helpers, ...versions, renderWalletAddress, formatUsdcUnits, mountDjukeQueueFocus,
+  const context = vm.createContext({ ...helpers, ...versions, renderWalletAddress, formatUsdcUnits, mountDjukeQueueFocus, playlistBatchProgress,
     getRadioStateSnapshot: () => null, document, AbortSignal,
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example', djukeContractAddress: address } },
     lookupEnsName: async () => 'musician.eth',

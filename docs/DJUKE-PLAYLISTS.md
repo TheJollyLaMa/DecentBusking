@@ -245,6 +245,11 @@ Fixes:
   durable played record are marked `played`. The queue card shows
   "Song N of M · R remaining", and receipts show played songs that are still
   settling.
+- The standalone DJuke widget (`widget-djuke.html`) uses the same
+  `js/djuke-playlist-progress.mjs` helper as the drawer for its queue and receipts.
+  The DBusk radio widget (`widget.html`) applies the same 0:00 handoff. The
+  standalone DVert controllers get playback from their host, and on the main site
+  they share the single versioned `radio-sync.js` instance.
 
 The Playlists section of the connected wallet's own profile shows its five most recent Play Live receipts:
 verifying queue, queued, playing, completed, or refunded. Expand a receipt for

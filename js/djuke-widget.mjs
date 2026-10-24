@@ -4,6 +4,7 @@ import { createNamedPlaylistClient, quoteNamedPlaylist } from './djuke-playlists
 import { createPersonalPlayRecovery, verifyPersonalPlaySession } from './personal-play-recovery.mjs';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs';
+import { playlistBatchProgress } from './djuke-playlist-progress.mjs';
 
 const mounts = new WeakMap();
 const ADDRESS = /^0x[0-9a-f]{40}$/i;
@@ -200,9 +201,8 @@ export function mount(element, options = {}) {
     $('receipts').replaceChildren();
     for (const receipt of (snapshot?.playlistReceipts || []).filter(item => item.payer?.toLowerCase() === wallet.address?.toLowerCase()).slice(-5).reverse()) {
       const item = node('article');
-      const delivered = receipt.songs.filter(song => song.status === 'delivered').length;
       item.append(node('h4', `${receipt.name} · ${receipt.status}`),
-        node('p', `${delivered}/${receipt.songs.length} delivered · purchase confirmation is not completion`));
+        node('p', `${playlistBatchProgress(receipt).progress} · purchase confirmation is not completion`));
       if (receipt.subtotalUnits != null && receipt.feeUnits != null) {
         item.append(node('p', `Paid ${formatUsdcUnits(BigInt(receipt.subtotalUnits) + BigInt(receipt.feeUnits))} USDC${
           receipt.refundedUnits != null ? ` · refunded ${formatUsdcUnits(BigInt(receipt.refundedUnits))} USDC` : ''}`));
@@ -290,7 +290,7 @@ export function mount(element, options = {}) {
         $('queue').append(row);
       }
       for (const batch of result.playlistBatches || []) {
-        const row = node('li', `${batch.name} · ${batch.status || 'queued'}`);
+        const row = node('li', playlistBatchProgress(batch).heading);
         const songs = node('ol');
         for (const song of batch.songs) songs.append(node('li', `${song.title} · ${song.status}`));
         row.append(songs); $('queue').append(row);

@@ -4,7 +4,7 @@
 // archive selections mute the radio until the listener returns to it.
 
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
-import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261022-playlist-lane';
+import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261025-seamless-handoff';
 import { formatUsdcUnits as _formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { sendRadioVote as sharedRadioVote, radioListenerId, radioMediaUrl, readRadioState, readRadioMediaBlob } from './radio-client.mjs';
 
