@@ -237,6 +237,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
         record.lastMediaError = record.lastError;
         record.lastMediaFailureAt = new Date(now()).toISOString();
         if (media) record.lastMedia = copy(media);
+        else delete record.lastMedia;
       }
     }),
     complete: (requestId, { playId, audibleMs, finished, trackId, revision }) => update(requestId, record => {
@@ -478,9 +479,10 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     },
     async complete(record, play) {
       if (record.playlistBatchId !== undefined && (!play || play.finished !== true || play.audibleMs < minAudibleMs)) {
-        const reason = play?.media?.reason || (!play ? 'audio_evidence_missing'
-          : play.finished !== true ? 'audio_stream_incomplete' : 'insufficient_audible_time');
-        return retryMedia(record, new Error(`Playlist recording did not finish audibly (${reason})`), play?.media);
+        const reason = !play ? 'audio_evidence_missing'
+          : play.finished !== true ? play.media?.reason || 'audio_stream_incomplete' : 'insufficient_audible_time';
+        return retryMedia(record, new Error(`Playlist recording did not finish audibly (${reason})`),
+          play?.media ? { ...play.media, reason } : null);
       }
       if (!play || play.audibleMs < minAudibleMs) {
         await journal.fail(record.requestId, 'Paid play was not audible long enough');
