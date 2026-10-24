@@ -329,3 +329,48 @@ test('public DJuke catalog reads never wait for batch checkpoint writes', async 
   });
   assert.deepEqual((await read()).tracks, ['song']);
 });
+
+test('clean audio evidence lets the next lane start while the previous checkpoint is still being stored', async () => {
+  const { createDjukePlaybackJournal, createDjukeRuntime } = await import('../discord-bot/djuke.js');
+  const lanes = ['0', '1'].map(laneId => ({ requestId: `lane:${laneId}`, playlistLaneId: laneId, playlistBatchId: '1',
+    songId: `0x${laneId.repeat(64)}`, revision: '0', trackId: `lane-${laneId}`, playable: true }));
+  let snapshot;
+  let release = null;
+  const journal = createDjukePlaybackJournal({ restore: async () => snapshot, save: async value => {
+    if (value.records?.some(record => record.state === 'played')) await new Promise(resolve => { release = resolve; });
+    snapshot = value;
+    return 'ipfs://journal';
+  } });
+  const fulfilled = [];
+  const runtime = createDjukeRuntime({ readState: async () => ({ requests: lanes }), journal,
+    fulfill: async value => fulfilled.push(value), getTrack: trackId => ({ trackId }), minAudibleMs: 1 });
+  const first = await runtime.nextPaid();
+  const second = await runtime.nextPaid();
+  assert.equal(second.record.requestId, 'lane:1', 'the next lane is prefetched while the first one plays');
+  assert.equal(await runtime.canPlay(second.record), false, 'never before the previous song has finished');
+  const completion = runtime.complete(first.record, { playId: 'proof-0', audibleMs: 2, finished: true });
+  for (let i = 0; i < 20 && !release; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(runtime.hasPlaybackEvidence(first.record), true);
+  assert.equal(await runtime.canPlay(second.record), true, 'the radio does not sit silent waiting for the checkpoint');
+  assert.equal(fulfilled.length, 0, 'settlement still waits for the durable played record');
+  release();
+  await completion;
+  assert.equal(runtime.hasPlaybackEvidence(first.record), false);
+  assert.equal(journal.getState().find(record => record.requestId === 'lane:0').state, 'played');
+});
+
+test('open playlist receipts show the live song and heard songs before delivery events arrive', async () => {
+  const { playlistLaneStatus } = await import('../discord-bot/djuke-playlist-batches.js');
+  const contractAddress = `0x${'A'.repeat(40)}`;
+  const batch = { batchId: '2', status: 'pending', laneIds: ['24', '25', '26', '27', '28'], deliveredLaneIds: ['24'] };
+  const id = lane => `8453:${contractAddress.toLowerCase()}:playlist:${lane}`;
+  const records = [{ requestId: id('25'), state: 'played', playId: 'p25' },
+    { requestId: id('26'), state: 'fulfilled', playId: 'p26' }, { requestId: id('27'), state: 'playing' }];
+  const nowPlaying = { audible: true, djukePlaylist: { batchId: '2', position: 5 } };
+  const status = (index, extra = {}) => playlistLaneStatus({ batch, index, contractAddress, nowPlaying, records, ...extra });
+  assert.deepEqual([0, 1, 2, 3, 4].map(index => status(index)), ['delivered', 'played', 'played', 'pending', 'playing']);
+  assert.equal(status(3, { hasPlaybackEvidence: record => record.requestId === id('27') }), 'played');
+  assert.equal(status(4, { nowPlaying: { ...nowPlaying, audible: false } }), 'pending');
+  assert.equal(playlistLaneStatus({ batch: { ...batch, status: 'settled' }, index: 1, contractAddress, nowPlaying, records }), 'pending',
+    'resolved receipts keep event-only statuses');
+});

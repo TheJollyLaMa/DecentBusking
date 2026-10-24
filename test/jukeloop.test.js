@@ -1868,3 +1868,53 @@ test('JukeLoop selects a due advert during the unlocking song and keeps it queue
     }
   });
 });
+
+test('JukeLoop keeps collecting a timed-out paid playlist selection while the current song plays', async (t) => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const player = new EventEmitter();
+  player.state = { status: 'playing' };
+  player.play = () => {};
+  player.stop = () => {};
+  const session = new JukeLoopSession({ audioPlayer: player, client: {}, schedule: [],
+    djuke: { hasPendingPlaylist: () => true, release: async () => {} } });
+  t.after(() => session.destroy());
+  const paid = { paid: { record: { requestId: 'lane:1' } }, track: { trackId: 'next' } };
+  const results = [null, paid];
+  let attempts = 0;
+  session._prepareNextPlayback = async () => results[attempts++];
+  session._schedulePaidPriorityCheck = () => {};
+  session._primeNext();
+  await session._prepareTask;
+  assert.equal(session._preparedNext, null);
+  assert.ok(session._primeRetryTimer, 'a null selection schedules another attempt instead of waiting for the song to end');
+  await new Promise(resolve => setTimeout(resolve, 1_100));
+  await session._prepareTask;
+  assert.equal(attempts, 2);
+  assert.equal(session._preparedNext, paid);
+  assert.equal(session._primeRetryTimer, null);
+});
+
+test('JukeLoop starts the next playlist song without waiting for a clean song\'s durable checkpoint', async (t) => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const player = new EventEmitter();
+  player.state = { status: 'idle' };
+  player.play = () => {};
+  player.stop = () => {};
+  for (const evidenced of [true, false]) {
+    let finish;
+    const checkpoint = new Promise(resolve => { finish = resolve; });
+    const session = new JukeLoopSession({ audioPlayer: player, client: {}, schedule: [],
+      djuke: { complete: () => checkpoint, hasPlaybackEvidence: () => evidenced } });
+    t.after(() => session.destroy());
+    const track = { trackId: 'lane-0', title: 'Lane 0' };
+    session._currentTrack = track;
+    session._currentPaid = { requestId: 'lane:0', playlistBatchId: '2', playlistLaneId: '24' };
+    session._completedPlay = { trackId: 'lane-0', playId: 'p0', audibleMs: 180_000, finished: true };
+    const collected = session._collectReactions();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(session._paidCompletionTask === null || session._paidCompletionTask === undefined, evidenced,
+      evidenced ? 'clean audio evidence does not hold the handoff' : 'an unproven completion still gates the next lane');
+    finish();
+    await collected;
+  }
+});

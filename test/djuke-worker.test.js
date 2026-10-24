@@ -224,7 +224,9 @@ test('public queue exposes a bounded paid playlist window for the radio prefetch
   assert.equal(snapshot.playlistBatches[0].name, 'BoogieNight');
   assert.equal(snapshot.playlistBatches.length, 1, 'resolved receipts never re-enter the paid queue');
   assert.equal(snapshot.playlistReceipts.length, 2);
-  assert.deepEqual(snapshot.requests[0].playlist, { batchId: '0', name: 'BoogieNight', songCount: 12, remaining: 12 });
+  assert.deepEqual(snapshot.requests[0].playlist, { batchId: '0', name: 'BoogieNight', songCount: 12, position: 1, remaining: 12 });
+  // The display position comes from the lane's place in the batch, not from lagging on-chain delivery events.
+  assert.deepEqual(snapshot.requests[7].playlist, { batchId: '0', name: 'BoogieNight', songCount: 12, position: 8, remaining: 5 });
   const journal = createDjukePlaybackJournal({ restore: async () => null, save: async () => 'ipfs://journal' });
   await journal.initialize();
   await journal.synchronize(snapshot.requests);

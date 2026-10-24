@@ -2,7 +2,7 @@
 // Hat (tip) + Guitar Case (mint) interactions and the now-playing banner.
 
 import { openMintModal } from './mint.js?v=20261022-playlist-lane';
-import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261022-playlist-lane';
+import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261025-seamless-handoff';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { resolveNowPlayingNFT } from './space.js?v=20261022-playlist-lane';
 import { nftArtistLabel } from './nft-loader.js?v=20261012-paging';

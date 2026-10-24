@@ -1,5 +1,22 @@
 const BATCH_EVENTS = ['PlaylistBatchRequested', 'PlaylistBatchFeeSettled', 'PlaylistBatchFeeRefunded', 'PlaylistSongRefunded', 'PlaylistSongDelivered'];
 
+/**
+ * Receipt status for one playlist song. On-chain delivery events trail settlement, so an open batch also shows the live
+ * lane as `playing` and lanes with clean audible evidence as `played`; resolved batches keep their event-only statuses.
+ */
+export function playlistLaneStatus({ batch, index, contractAddress, nowPlaying, records = [], hasPlaybackEvidence = () => false }) {
+  const laneId = batch.laneIds[index];
+  if (batch.deliveredLaneIds?.includes(laneId)) return 'delivered';
+  if (batch.refundedLaneIds?.includes(laneId)) return 'refunded';
+  if (batch.status !== 'pending') return 'pending';
+  const live = nowPlaying?.audible ? nowPlaying.djukePlaylist : null;
+  if (live?.batchId === batch.batchId && live.position === index + 1) return 'playing';
+  const requestId = `8453:${contractAddress.toLowerCase()}:playlist:${laneId}`;
+  const record = records.find(entry => entry.requestId === requestId);
+  if (record?.state === 'played' || record?.state === 'fulfilled' && record.playId) return 'played';
+  return record?.state === 'playing' && hasPlaybackEvidence(record) ? 'played' : 'pending';
+}
+
 export function playlistPlaybackFailure(batch, records, contractAddress) {
   const failures = records.filter(record => record.playlistBatchId === batch.batchId &&
     record.requestId.startsWith(`8453:${contractAddress.toLowerCase()}:playlist:`) &&

@@ -3,7 +3,11 @@ export function playlistTakeover(state) {
   if (!playlist || typeof playlist.name !== 'string' || !playlist.name.trim() || playlist.name.length > 60 ||
       !Number.isSafeInteger(playlist.songCount) || playlist.songCount < 1 || playlist.songCount > 24 ||
       !Number.isSafeInteger(playlist.remaining) || playlist.remaining < 1 || playlist.remaining > playlist.songCount) return null;
-  return { ...playlist, label: `${playlist.name} · Play Live · ${playlist.remaining} of ${playlist.songCount} songs remaining` };
+  // Older servers sent only a reservation-time remaining count; position is the live lane's place in the batch.
+  const hasPosition = Number.isSafeInteger(playlist.position) && playlist.position >= 1 && playlist.position <= playlist.songCount;
+  return { ...playlist, label: hasPosition
+    ? `${playlist.name} · Play Live · Song ${playlist.position} of ${playlist.songCount}`
+    : `${playlist.name} · Play Live · ${playlist.remaining} of ${playlist.songCount} songs remaining` };
 }
 
 export function createRadioPlaylistEffects({ scene, camera, readSpectrum, root = document, three = THREE }) {

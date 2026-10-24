@@ -1,6 +1,6 @@
 // On-demand personal listens: 30-second preview, then 0.25 USDC per song via DJuke.
 // Fails open to free playback whenever payments are not live, matching today's behavior.
-import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261022-playlist-lane';
+import { playArchiveTrack, archiveSessionId, archiveMedia, returnToRadio } from './radio-sync.js?v=20261025-seamless-handoff';
 import { setNowPlaying } from './stage.js?v=20261022-playlist-lane';
 import { supportsDjukeAlbumsAndGas } from './djuke-version.mjs';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs?v=20261023-usdc-only';

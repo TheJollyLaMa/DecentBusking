@@ -457,7 +457,7 @@ export function createPinataStateStore({
       historyStartedAt, events,
     } } : serialized;
     const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
-    const mirroredCid = requireLocalMirror ? await beforeUpload(bytes) : null;
+    const mirroredCid = requireLocalMirror ? await beforeUpload(bytes, { required: true, key: name }) : null;
     if (requireLocalMirror && (typeof mirroredCid !== 'string' || !mirroredCid)) throw new Error('Local checkpoint mirror did not confirm a CID');
     const cid = await upload(bytes, name, retentionDays ? { ...tags, checkpointPolicy: DAILY_POLICY,
       checkpointDay: day, checkpointTimeZone: CHECKPOINT_TIME_ZONE } : tags, groupId);
@@ -475,7 +475,7 @@ export function createPinataStateStore({
       latestRevision = revision;
     }
     retentionPending = true;
-    if (beforeUpload && !requireLocalMirror) Promise.resolve().then(() => beforeUpload(bytes, cid))
+    if (beforeUpload && !requireLocalMirror) Promise.resolve().then(() => beforeUpload(bytes, { required: false, key: name, cid }))
       .then(mirroredCid => {
         if (mirroredCid && mirroredCid !== cid) log.warn(`[ipfs-state] Local mirror CID ${mirroredCid} differs from shared Pinata CID ${cid}`);
       })

@@ -12,10 +12,11 @@ export async function checkpointContentCid(bytes) {
 }
 
 export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 2 * 1024 * 1024,
-  now = () => Date.now() }) {
+  now = () => Date.now(), maxRequiredJobs = 8, maxOptionalJobs = 16 }) {
   if (typeof secret !== 'string' || Buffer.byteLength(secret) < 32) throw new Error('Checkpoint mirror needs a dedicated secret of at least 32 bytes');
   const jobs = new Map();
   const availabilityWaiters = new Set();
+  const claimWaiters = new Set();
   let lastPoll = null;
   const authenticate = authorization => {
     const actual = Buffer.from(authorization || '');
@@ -23,6 +24,28 @@ export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new Error('Checkpoint mirror authorization failed');
   };
   const available = () => lastPoll !== null && now() - lastPoll <= 30000;
+  const markPolled = () => {
+    lastPoll = now();
+    for (const waiter of availabilityWaiters) { clearTimeout(waiter.timer); waiter.resolve(); }
+    availabilityWaiters.clear();
+  };
+  // Required journal checkpoints gate paid playback, so they are offered before best-effort mirrors.
+  const nextJob = () => {
+    let optional = null;
+    for (const job of jobs.values()) {
+      if (job.required) return job;
+      optional ||= job;
+    }
+    return optional;
+  };
+  const offer = job => {
+    job.claimed = true;
+    return { jobId: job.jobId, expectedCid: job.expectedCid, contentBase64: job.contentBase64 };
+  };
+  const wakeClaimers = () => {
+    for (const waiter of claimWaiters) waiter.wake();
+  };
+  const count = required => [...jobs.values()].filter(job => job.required === required).length;
   return {
     authorize: authenticate,
     requireAvailable() { if (!available()) throw new Error('Local checkpoint mirror is offline; no Pinata upload attempted'); },
@@ -36,14 +59,37 @@ export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 
         availabilityWaiters.add(waiter);
       });
     },
-    status() { return { available: available(), pending: jobs.size }; },
+    status() { return { available: available(), pending: jobs.size, required: count(true) }; },
     claim(authorization) {
       authenticate(authorization);
-      lastPoll = now();
-      for (const waiter of availabilityWaiters) { clearTimeout(waiter.timer); waiter.resolve(); }
-      availabilityWaiters.clear();
-      const job = jobs.values().next().value;
-      return job ? { jobId: job.jobId, expectedCid: job.expectedCid, contentBase64: job.contentBase64 } : null;
+      markPolled();
+      const job = nextJob();
+      return job ? offer(job) : null;
+    },
+    /** Long-poll claim: holds an idle request until a job arrives so required checkpoints are not delayed by the poll interval. */
+    claimWait(authorization, waitMs = 10000) {
+      let job;
+      try { job = this.claim(authorization); } catch (error) { return Promise.reject(error); }
+      if (job || !(waitMs > 0)) return Promise.resolve(job);
+      return new Promise(resolve => {
+        const waiter = {
+          wake: () => {
+            const next = nextJob();
+            if (!next) return;
+            clearTimeout(waiter.timer);
+            claimWaiters.delete(waiter);
+            markPolled();
+            resolve(offer(next));
+          },
+          timer: setTimeout(() => {
+            claimWaiters.delete(waiter);
+            markPolled();
+            resolve(null);
+          }, waitMs),
+        };
+        waiter.timer.unref?.();
+        claimWaiters.add(waiter);
+      });
     },
     acknowledge(authorization, { jobId, cid, recursivePinned }) {
       authenticate(authorization);
@@ -55,11 +101,22 @@ export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 
       job.resolve(job.expectedCid);
       return { ok: true };
     },
-    async mirror(bytes) {
+    async mirror(bytes, { key = '', required = false } = {}) {
       this.requireAvailable();
       if (!(bytes instanceof Uint8Array) || bytes.length < 1 || bytes.length > maxBytes) throw new Error('Checkpoint exceeds mirror size limit');
-      if (jobs.size >= 2) throw new Error('Checkpoint mirror queue is full');
+      if (!required && key) {
+        // Each best-effort checkpoint replaces the whole store, so only its newest unclaimed snapshot is worth mirroring.
+        for (const job of jobs.values()) {
+          if (!job.required && job.key === key && !job.claimed) {
+            clearTimeout(job.timer);
+            jobs.delete(job.jobId);
+            job.resolve(null);
+          }
+        }
+      }
+      if (count(required) >= (required ? maxRequiredJobs : maxOptionalJobs)) throw new Error('Checkpoint mirror queue is full');
       const expectedCid = await checkpointContentCid(bytes);
+      if (count(required) >= (required ? maxRequiredJobs : maxOptionalJobs)) throw new Error('Checkpoint mirror queue is full');
       const jobId = randomUUID();
       const snapshot = Buffer.from(bytes).toString('base64');
       return new Promise((resolve, reject) => {
@@ -67,7 +124,8 @@ export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 
           jobs.delete(jobId);
           reject(new Error('Local checkpoint mirror timed out; no Pinata upload attempted'));
         }, timeoutMs);
-        jobs.set(jobId, { jobId, expectedCid, contentBase64: snapshot, resolve, timer });
+        jobs.set(jobId, { jobId, key, required: required === true, claimed: false, expectedCid, contentBase64: snapshot, resolve, timer });
+        wakeClaimers();
       });
     },
   };

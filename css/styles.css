@@ -1083,6 +1083,7 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 #djuke-queue .djuke-playlist-queue ol { padding-left: 20px; max-height: 220px; overflow-y: auto; }
 #djuke-queue .djuke-playlist-queue ol li { display: list-item; font-size: .7rem; color: #d5e8ef; }
 #djuke-queue .djuke-playlist-queue [data-state="delivered"],
+#djuke-queue .djuke-playlist-queue [data-state="played"],
 #djuke-queue .djuke-playlist-queue [data-state="refunded"] { opacity: .5; }
 .djuke-playlist-songs { overscroll-behavior: contain; scrollbar-color: #438994 #101d22; }
 .djuke-queue-song-status { display: block; margin-top: 3px; font-size: .62rem; color: #a5b9c0; }

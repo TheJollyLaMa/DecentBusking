@@ -1260,6 +1260,24 @@ test('radio handoff survives the JukeLoop changeover gap and still starts the ne
   assert.equal(vm.runInContext('started[0].offset()', context), 0);
 });
 
+test('radio handoff outlasts a long paid-playlist selection gap so the next song still starts at 0:00', () => {
+  const source = radioSyncSource();
+  let now = 1_000;
+  const context = vm.createContext({ performance: { now: () => now }, setTimeout, clearTimeout, console,
+    window: { DecentConfig: { ipfsGateway: 'https://gateway.example/ipfs/' } } });
+  vm.runInContext(`${source}\n_audio = { paused: true }; _mode = 'radio'; _loadedPlayId = 'song-1';
+    globalThis.started = []; _switchTo = options => started.push(options); _poll = () => {};
+    _onEnded(); _radio = null;`, context);
+  now += 79_000;
+  assert.equal(vm.runInContext('_handoffActive()', context), true, 'keeps fast polling while the server is still between songs');
+  vm.runInContext(`_radio = { playId: 'song-2', title: 'Next', ipfsCid: 'bafy-2', receivedAt: performance.now(), positionMs: 900 };
+    _syncRadio();`, context);
+  assert.equal(vm.runInContext('started[0].offset()', context), 0);
+  vm.runInContext(`_loadedPlayId = 'song-2'; _onEnded(); _radio = { playId: 'song-3', receivedAt: performance.now(), positionMs: 0 };`, context);
+  now += 31_000;
+  assert.equal(vm.runInContext('_handoffActive()', context), false, 'a started next song still uses the short window');
+});
+
 test('radio still syncs to the live position when a continuous listener has fallen far behind', () => {
   const source = radioSyncSource();
   const context = vm.createContext({ performance, setTimeout, clearTimeout, console,

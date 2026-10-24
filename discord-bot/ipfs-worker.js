@@ -307,7 +307,9 @@ export function createWorkerRequestHandler({
         const authorization = String(request.headers.authorization || '');
         checkpointMirror.authorize(authorization);
         const result = requestUrl.pathname.endsWith('/claim')
-          ? { job: checkpointMirror.claim(authorization) }
+          ? { job: checkpointMirror.claimWait
+            ? await checkpointMirror.claimWait(authorization, requestUrl.searchParams.get('wait') === '0' ? 0 : 10000)
+            : checkpointMirror.claim(authorization) }
           : checkpointMirror.acknowledge(authorization, await readJson(request));
         sendJson(response, 200, result);
         return;

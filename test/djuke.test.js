@@ -17,7 +17,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261024-standalone-djuke/);
+  assert.match(html, /djuke\.mjs\?v=20261025-seamless-handoff/);
   assert.match(html, /devert-site\.mjs\?v=20261024-widget/);
   const adapter = fs.readFileSync(path.join(__dirname, '../js/devert-site.mjs'), 'utf8');
   assert.match(adapter, /devert-paid-queue\.mjs\?v=20261024-widget/);
@@ -46,6 +46,9 @@ test('playlist receipt distinguishes purchase, delivery and exact refund without
   assert.equal(queued.label, 'Queued');
   assert.doesNotMatch(queued.payment, /Refunded/);
   assert.equal(playlistReceiptSummary({ ...batch, status: 'pending', playing: true }).label, 'Playing');
+  const live = batch.songs.map((song, index) => ({ ...song, status: index < 7 ? 'played' : index === 7 ? 'playing' : 'pending' }));
+  assert.equal(playlistReceiptSummary({ ...batch, status: 'pending', playing: true, songs: live }).progress,
+    '0 / 12 songs delivered · 7 played, settling · now playing song 8');
   const completed = playlistReceiptSummary({ ...batch, status: 'settled', songs: batch.songs.map(() => ({ status: 'delivered' })) });
   assert.equal(completed.label, 'Completed');
   assert.equal(completed.progress, '12 / 12 songs delivered');

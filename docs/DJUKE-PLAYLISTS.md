@@ -199,6 +199,53 @@ This is server-player verification, not a production deployment or browser AAC
 compatibility test. The native browser handoff check uses WAV fixtures; an
 authorized production rollout and real listener verification remain separate gates.
 
+### October 25 monitored batch and seamless-transition fixes (#284)
+
+BoogieNight batch 2 on v0.5 (lanes 24–35) ran with the continuity changes above
+deployed. All twelve songs played and were delivered with no repeats, media
+failures or refunds; lane 30, the source that ended batch 1, played cleanly. It
+settled in `0x94b4b2e6e4ff585807c5ed0f5c13d6ad930184fe5087e68ab7313b6a2f2f9fa0`.
+Transitions were still not radio-like: about 8 s at best and up to 79 s at worst,
+with these causes:
+
+- Every journal commit waited for the local checkpoint mirror. Required DJuke
+  journals shared a two-job queue with best-effort radio, hype and show mirrors, so
+  `Checkpoint mirror queue is full` rejected required commits (31→32, 34→35),
+  disposed the prefetched song and forced a fresh selection. The local client also
+  polled only every 5 seconds.
+- A paid selection that took longer than its 10-second limit returned `null` to the
+  prefetcher, which did not try again before the current song ended (25→26 took
+  four timeouts).
+- The handoff waited for the finished song's durable `played` checkpoint before the
+  next lane could start, even after clean audio evidence existed.
+- After more than 30 seconds of silence the browser treated the next song as a
+  fresh join and started it at the live position, so listeners missed its first
+  10–20 seconds. The embeddable widget always started at the live position.
+- The queue card counted only on-chain `delivered` events, which arrive after
+  settlement, so it showed "6 of 12 remaining" while song 8 played. The radio badge
+  used a remaining count saved at reservation time.
+
+Fixes:
+
+- The mirror queue gives required journals their own capacity of 8, separate from
+  16 best-effort jobs, and offers them first. A newer best-effort snapshot of a
+  store replaces its unclaimed predecessor. Idle claims long-poll for up to
+  10 seconds, and the client claims again immediately after each job.
+- The prefetcher retries a `null` paid-playlist selection with 1–5 second backoff
+  while the current song plays.
+- Clean, finished audio from the previous lane is in-memory evidence that lets the
+  next lane pass `canPlay` while the `played` checkpoint is stored. Settlement and
+  refunds still require the durable record. Incomplete audio and media retries
+  still block the next lane. A crash before the checkpoint replays the lane.
+- A listener whose song ended keeps polling quickly for up to 5 minutes while the
+  server is between songs, then starts the next song from 0:00 if it is within
+  45 seconds of the start. The widget follows the same rule.
+- Each lane carries its `position` in the batch. The radio badge shows "Song N of
+  M". Open batches mark the live lane `playing`, and lanes with clean audio or a
+  durable played record are marked `played`. The queue card shows
+  "Song N of M · R remaining", and receipts show played songs that are still
+  settling.
+
 The Playlists section of the connected wallet's own profile shows its five most recent Play Live receipts:
 verifying queue, queued, playing, completed, or refunded. Expand a receipt for
 delivered-song progress, paid/refunded/settled USDC and Base transaction links.
