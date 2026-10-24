@@ -102,6 +102,87 @@ test('route-specific throttles do not block unrelated bot login, global throttle
   assert.equal(diagnostics.report().bots.dbusker.phase, 'ready', 'a REST throttle must not mark an established gateway offline');
 });
 
+test('message-route restrictions preserve both bots traffic context across restarts without extending login cooldowns', async () => {
+  const { createDiscordDiagnostics } = await import('../discord-bot/discord-diagnostics.js');
+  let saved;
+  const store = { restore: async () => saved, save: async value => {
+    saved = structuredClone(value); return 'ipfs://history';
+  } };
+  let now = 1000;
+  const diagnostics = createDiscordDiagnostics({ store, now: () => now, log: logger() });
+  await diagnostics.restore();
+  const main = client();
+  const loop = client();
+  diagnostics.bot('dbusker').attach(main);
+  diagnostics.bot('devert-loop').attach(loop);
+  for (let i = 0; i < 20; i++) {
+    loop.rest.emit('response', { method: 'GET', path: '/users/@me' }, { status: 200, headers: new Headers() });
+  }
+  for (let i = 0; i < 12; i++) {
+    now += 60_000;
+    main.rest.emit('response', { method: 'POST', path: '/channels/123456/messages?secret=token' }, {
+      status: 429, headers: new Headers({ 'retry-after': '36000', 'content-type': 'text/plain; charset=utf-8',
+        'cf-ray': 'abcdef0123456789-CMH' }),
+    });
+  }
+  await diagnostics.flush();
+  assert.equal(diagnostics.bot('dbusker').notBefore(), 0);
+  assert.equal(saved.networkCooldownUntil, 0);
+  assert.equal(saved.bots.dbusker.restrictions.length, 10);
+  const restarted = createDiscordDiagnostics({ store, now: () => now + 1000, log: logger() });
+  await restarted.restore();
+  const report = restarted.report();
+  const incident = report.bots.dbusker.restrictions.at(-1);
+  assert.equal(incident.route, '/channels/:id/messages');
+  assert.equal(incident.responseFormat, 'text');
+  assert.equal(incident.observation.startedAt, 1000);
+  assert.deepEqual(incident.observation.bots.dbusker.totals,
+    { requests: 12, errors: 12, invalid: 12, rateLimits: 12 });
+  assert.equal(incident.observation.bots['devert-loop'].totals.requests, 20);
+  assert.equal(incident.observation.bots['devert-loop'].totals.invalid, 0);
+  assert.equal(report.bots.dbusker.totals.requests, 0);
+  assert.equal(report.startedAt, now + 1000);
+  assert.doesNotMatch(JSON.stringify(saved) + JSON.stringify(report), /\/channels\/123456|secret|token/);
+  incident.observation.bots.dbusker.totals.requests = 999;
+  assert.equal(restarted.report().bots.dbusker.restrictions.at(-1).observation.bots.dbusker.totals.requests, 12);
+});
+
+test('route restriction sampling bounds checkpoint writes during a repeated throttle', async () => {
+  const { createDiscordDiagnostics } = await import('../discord-bot/discord-diagnostics.js');
+  let saves = 0;
+  const diagnostics = createDiscordDiagnostics({ now: () => 1000, log: logger(),
+    store: { restore: async () => null, save: async () => { saves++; return 'ipfs://history'; } } });
+  await diagnostics.restore();
+  const bot = client();
+  diagnostics.bot('dbusker').attach(bot);
+  for (let i = 0; i < 1000; i++) {
+    bot.rest.emit('response', { method: 'GET', path: '/channels/123/messages' },
+      { status: 429, headers: new Headers({ 'retry-after': '30' }) });
+  }
+  await diagnostics.flush();
+  assert.equal(saves, 1);
+  assert.equal(diagnostics.report().bots.dbusker.restrictions.length, 1);
+  assert.equal(diagnostics.report().bots.dbusker.totals.rateLimits, 1000);
+});
+
+test('restored incident observations retain only allowlisted fields and legacy checkpoints seed history', async () => {
+  const { createDiscordDiagnostics } = await import('../discord-bot/discord-diagnostics.js');
+  const diagnostics = createDiscordDiagnostics({ log: logger(), store: { restore: async () => ({
+    schemaVersion: 1, networkCooldownUntil: 0, bots: { dbusker: {
+      cooldownUntil: 0, lastRestriction: { route: '/gateway/bot', observation: {
+        startedAt: 1000, secret: 'private', bots: {
+          dbusker: { totals: { requests: 4, secret: 'private' }, invalidLast10Minutes: 0 },
+          private: { totals: { requests: 10 } },
+        },
+      } },
+    } },
+  }) } });
+  await diagnostics.restore();
+  assert.equal(diagnostics.report().bots.dbusker.restrictions.length, 1);
+  assert.equal(diagnostics.report().bots.dbusker.restrictions[0].observation.bots.dbusker.totals.requests, 4);
+  assert.doesNotMatch(JSON.stringify(diagnostics.report()), /secret|private/);
+});
+
 test('diagnostic memory and logs stay bounded during an error storm and summaries flag invalid-request spikes', async () => {
   const { createDiscordDiagnostics } = await import('../discord-bot/discord-diagnostics.js');
   const log = logger();
@@ -168,4 +249,91 @@ test('connection lifecycle and rate-limit waits remain observable after login', 
   assert.equal(diagnostics.report().bots.dbusker.phase, 'disconnected');
   bot.rest.emit('rateLimited', { route: '/webhooks/123/secret', global: false, timeToReset: 1000, url: 'secret' });
   assert.doesNotMatch(JSON.stringify(diagnostics.report()), /secret|123/);
+});
+
+test('successful routes, response bursts, rolling windows and network retries are attributed without extra requests', async () => {
+  const { createDiscordDiagnostics } = await import('../discord-bot/discord-diagnostics.js');
+  let now = 1_000_000;
+  const diagnostics = createDiscordDiagnostics({ now: () => now, log: logger() });
+  const bot = client();
+  diagnostics.bot('dbusker').attach(bot);
+  const emit = (count, method, status, retries = 0) => {
+    for (let i = 0; i < count; i++) {
+      bot.rest.emit('response', { method, path: '/channels/123456/messages?token=secret', retries },
+        { status, headers: new Headers() });
+    }
+  };
+  emit(10, 'GET', 200);
+  emit(10, 'POST', 200);
+  now += 59_000;
+  emit(10, 'GET', 200);
+  assert.deepEqual(diagnostics.report().bots.dbusker.traffic, {
+    requestsLastSecond: 10, requestsLastMinute: 30, requestsLast10Minutes: 30,
+    peakRequestsPerSecond: 20, peakRequestsPerMinute: 30,
+  });
+  now += 1000;
+  emit(1, 'GET', 503, 1);
+  const report = diagnostics.report().bots.dbusker;
+  assert.equal(report.traffic.requestsLastMinute, 11);
+  assert.equal(report.traffic.requestsLast10Minutes, 31);
+  assert.deepEqual(report.routes.map(({ method, route, status, count, retries }) => ({ method, route, status, count, retries })), [
+    { method: 'GET', route: '/channels/:id/messages', status: 200, count: 20, retries: 0 },
+    { method: 'POST', route: '/channels/:id/messages', status: 200, count: 10, retries: 0 },
+    { method: 'GET', route: '/channels/:id/messages', status: 503, count: 1, retries: 1 },
+  ]);
+  now += 600_000;
+  assert.deepEqual(diagnostics.report().bots.dbusker.traffic, {
+    requestsLastSecond: 0, requestsLastMinute: 0, requestsLast10Minutes: 0,
+    peakRequestsPerSecond: 20, peakRequestsPerMinute: 30,
+  });
+  assert.doesNotMatch(JSON.stringify(diagnostics.report()), /123456|secret|token/);
+});
+
+test('periodic traffic observations are bounded, durable, sampled and separate from current-process counters', async () => {
+  const { createDiscordDiagnostics } = await import('../discord-bot/discord-diagnostics.js');
+  let now = 1000;
+  let saved;
+  let saves = 0;
+  const store = { restore: async () => saved, save: async value => {
+    saves++;
+    saved = structuredClone(value);
+    return 'ipfs://traffic';
+  } };
+  const diagnostics = createDiscordDiagnostics({ store, now: () => now, log: logger() });
+  await diagnostics.restore();
+  const bot = client();
+  diagnostics.bot('dbusker').attach(bot);
+  const request = () => bot.rest.emit('response', { method: 'GET', path: '/gateway/bot' },
+    { status: 200, headers: new Headers() });
+  request();
+  diagnostics.maintenance();
+  await diagnostics.flush();
+  assert.equal(saves, 1);
+  request();
+  now += 60_000;
+  diagnostics.maintenance();
+  await diagnostics.flush();
+  assert.equal(saves, 1, 'routine checkpoints are at least five minutes apart');
+  for (let i = 0; i < 8; i++) {
+    now += 300_000;
+    request();
+    diagnostics.maintenance();
+    await diagnostics.flush();
+  }
+  assert.equal(saved.observations.length, 6);
+  assert.equal(saved.observations.at(-1).bots.dbusker.totals.requests, 10);
+  assert.equal(saved.observations.at(-1).bots.dbusker.routes[0].count, 10);
+  assert.equal(saved.observations.at(-1).bots.dbusker.traffic.peakRequestsPerSecond, 2);
+  const restarted = createDiscordDiagnostics({ store, now: () => now, log: logger() });
+  await restarted.restore();
+  const report = restarted.report();
+  assert.equal(report.observations.length, 6);
+  assert.equal(report.bots.dbusker.totals.requests, 0);
+  assert.equal(report.bots.dbusker.traffic.peakRequestsPerSecond, 0);
+  report.observations[0].bots.dbusker.routes[0].count = 999;
+  assert.notEqual(restarted.report().observations[0].bots.dbusker.routes[0].count, 999);
+  now += 300_000;
+  diagnostics.maintenance();
+  await diagnostics.flush();
+  assert.equal(saves, 9, 'idle traffic does not produce routine checkpoints');
 });

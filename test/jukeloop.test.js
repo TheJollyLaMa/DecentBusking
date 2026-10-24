@@ -695,7 +695,8 @@ test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages
     url: 'https://gateway.example/ipfs/bafy-audio',
   });
   assert.match(message, /All-time:\*\* 👍 12 · 👎 3 · ▶️ 8/);
-  assert.match(message, /React 👍 to boost it/);
+  assert.match(message, /Vote for this song on the site: \[Listen and vote on DecentBusking\]\(https:\/\/thejollylama.github.io\/DecentBusking\/\)/);
+  assert.doesNotMatch(message, /React 👍/);
   assert.match(message, /Track `attachment-1`/);
   assert.doesNotMatch(message, /\|\|/);
   assert.deepEqual(parseNowPlayingMessage(
@@ -710,6 +711,33 @@ test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages
   assert.equal(getVoiceRetryDelay(1), 15_000);
   assert.equal(getVoiceRetryDelay(2), 30_000);
   assert.equal(getVoiceRetryDelay(10), 5 * 60_000);
+});
+
+test('song announcements send one message with a site voting link and never seed reactions', async t => {
+  const { JukeLoopSession, buildNowPlayingMessage, buildSiteVotingLink } = await import('../discord-bot/jukeloop.js');
+  const originalSiteUrl = process.env.SITE_URL;
+  process.env.SITE_URL = 'https://radio.example.test/custom/';
+  t.after(() => {
+    if (originalSiteUrl === undefined) delete process.env.SITE_URL;
+    else process.env.SITE_URL = originalSiteUrl;
+  });
+  const sent = [];
+  const message = { id: 'announcement', react: () => assert.fail('must not seed Discord reactions') };
+  const session = new JukeLoopSession({
+    voiceChannel: { guild: { id: 'no-seed-reactions' } }, client: { isReady: () => true },
+    textChannel: { send: async payload => { sent.push(payload); return message; } },
+  });
+  t.after(() => session.destroy());
+  session._nowPlaying = { playId: 'current' };
+  session._queue = [{ trackId: 'track' }];
+  await session._announcePrepared({ track: { trackId: 'track', title: 'Song', uploader: 'Artist' } }, 'current');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].content, /Vote for this song on the site/);
+  assert.match(sent[0].content, /https:\/\/radio.example.test\/custom\//);
+  assert.equal(session._announcementMsg, message, 'legacy/manual reaction synchronization stays available');
+  assert.equal(buildSiteVotingLink(), '[Listen and vote on DecentBusking](https://radio.example.test/custom/)');
+  const finished = buildNowPlayingMessage({ title: 'Song' }, { votingOpen: false });
+  assert.match(finished, /This play has finished. Vote for the current song on the site/);
 });
 
 test('site MP4 submissions stay out of radio until owner-approved mint completion', async (t) => {
@@ -1675,7 +1703,8 @@ test('JukeLoop announces the Top 10 final voting hour and its close', async (t) 
   session._activeShowKey = 'normal_rotation:normal-rotation';
   session._syncScheduledShow();
   assert.match(notices[0].content, /Friday Top 10 Hype Hour/);
-  assert.match(notices[0].content, /React/);
+  assert.match(notices[0].content, /Vote for songs on the site: \[Listen and vote on DecentBusking\]/);
+  assert.doesNotMatch(notices[0].content, /React/);
   assert.equal(notices[0].flags, 4096);
   session.schedule = [{ id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation' }];
   session._syncScheduledShow();

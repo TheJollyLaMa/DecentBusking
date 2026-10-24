@@ -183,6 +183,13 @@ Read `GET /api/radio` and inspect `discord.diagnostics` before restarting:
 
 * `bots.dbusker` and `bots["devert-loop"]` show connection phase, `retryAt`,
   cumulative failed attempts, HTTP totals and recent lifecycle/error events.
+* `routes` counts successful and failed responses by sanitized route, method and
+  status, including responses to network retries. `retries` counts responses whose
+  discord.js network retry index is nonzero; rate-limit waits remain separate
+  lifecycle events. `traffic` reports response counts in the current second,
+  trailing minute and trailing ten minutes, plus process-lifetime peaks for a
+  second and a trailing minute. Windows use one-second buckets. These are observed
+  response rates, not outbound request-start timestamps or IP-wide traffic totals.
 * `invalidLast10Minutes` counts observed 401/403 and non-shared 429 responses in
   a rolling window with one-second resolution. It is not Discord's authoritative
   IP-wide count and cannot identify another host sharing the egress IP.
@@ -194,8 +201,25 @@ Read `GET /api/radio` and inspect `discord.diagnostics` before restarting:
   restarts, including JSON vs HTML response format and a validated Cloudflare ray
   ID when supplied, to correlate with support. These clues are not proof of an IP
   ban.
+* `startedAt` identifies the current diagnostic observation period. Each bot's
+  `restrictions` retains its ten most recent sampled HTTP 429 incidents across
+  restarts, including message-route restrictions, plain-text vs JSON/HTML response
+  format, and both bots' request/error totals and rolling invalid counts at the
+  incident, together with route counts and burst peaks. Bucket, limit, remaining
+  and reset timing survive checkpoint restoration too. Repeated incidents are
+  sampled once per route/method/status per minute;
+  login restrictions are always retained. These historical snapshots do not
+  repopulate current-process counters or change which restrictions delay login.
+  Older checkpoints seed history from their last saved login restriction, without
+  inventing missing traffic counts. Response bodies are never retained.
+* `observations` retains six traffic snapshots from five-minute checkpoints
+  whenever traffic has changed, preserving roughly the last half hour of active
+  observations across restarts. Each contains its own timestamp and observation
+  start time; gaps must not be interpreted as zero traffic. Routine checkpointing
+  does not run while idle. A sampled error log includes the immediate traffic
+  context; HTTP 429 incidents checkpoint immediately, without waiting five minutes.
 * Request counters start fresh per worker process. Recent events are capped at 30
-  per bot, error-route groups at 64, and repeated error logs at once per route,
+  per bot, route/status groups at 64 (oldest groups are evicted), and repeated error logs at once per route,
   method and status per minute. A changed summary is logged every minute; it flags
   100 observed invalid requests within ten minutes as an early diagnostic warning,
   not a new Discord limit or an automatic traffic cutoff.
@@ -730,7 +754,7 @@ Joins the JukeLoop voice channel
     ↓
 Builds a weighted-random playlist (higher-rated tracks play sooner/more often)
     ↓
-Plays each track, announces it in the JukeLoop text channel, adds 👍 / 👎 buttons
+Plays each track and announces it with a website link and reminder to vote there
     ↓
 When the next track starts, reads the reaction counts and updates ratings
     ↓
@@ -751,6 +775,12 @@ Ratings **accumulate** across plays and **persist to disk** (`jukeloop-playlist.
 The playlist is the single master tally. The local runtime file and tagged Pinata snapshots are copies of that ledger, not independent vote lists. Both Playback Tally panels read its counters; the personal panel filters by the artist wallet.
 
 Site votes, Now Playing reactions, and reactions on an original upload that identifies exactly one track update the same track totals. Discord reaction additions/removals are synchronized live; each message has a persisted count baseline, so rereading it adds only the difference. Thumb skin-tone variants count, and the bot's own seed reactions do not. Reactions remain available after a play finishes. Multi-track upload posts are not assigned a vote arbitrarily; listeners can react on each track's Now Playing message instead.
+
+New JukeLoop and AdLoop announcements do not seed thumb reactions: they link to
+`SITE_URL` and direct listeners to vote on the website. Posting an announcement now
+uses one REST request instead of a message plus two reaction requests, a two-thirds
+reduction for announcement creation, not for all bot traffic. Existing/manual
+Discord reactions still synchronize, and historical rating recovery is unchanged.
 
 On startup, JukeLoop scans up to 500 recent announcements and checkpoints recovered changes. For older messages, readable reactions and bot-published cumulative counters establish a one-time conservative minimum; those two representations are not added together. Reactions erased by older bot versions cannot be reconstructed. New announcements carry a Play ID, and completed audible plays retain their announcement ID, preventing recovery from adding the same play twice. Historical totals do not create qualified weekly playback credits.
 

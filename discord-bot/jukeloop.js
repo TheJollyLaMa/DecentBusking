@@ -9,7 +9,7 @@
 //  2. A `JukeLoopSession` broadcasts tracks in weighted-random order forever.
 //     Discord voice can subscribe without controlling website playback.
 //  3. For each track, the bot posts a "Now Playing" announcement in the
-//     JukeLoop text channel and pre-adds 👍 / 👎 reaction buttons.
+//     JukeLoop text channel with a link to listen and vote on the website.
 //  4. When the *next* track starts, the bot fetches the previous announcement
 //     message, reads the 👍 / 👎 counts, and passes the delta to the
 //     playlist-store so ratings accumulate over time.
@@ -432,12 +432,17 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
   };
 }
 
+export function buildSiteVotingLink() {
+  const siteUrl = (process.env.SITE_URL || 'https://thejollylama.github.io/DecentBusking').replace(/\/$/, '');
+  return `[Listen and vote on DecentBusking](${siteUrl}/)`;
+}
+
 export function buildNowPlayingMessage(track, { queueIndex, totalTracks, url, votingOpen = true, playId, paid = false, sponsor = null, hype = null, playlistShow = null }) {
   const listenLink = track.ipfsCid && /\/ipfs\//.test(url || '') ? `\n[Open IPFS audio](${url})` : '';
   const idLine = `\nTrack \`${track.trackId}\`` + (playId ? ` · Play \`${playId}\`` : '');
   const votingLine = votingOpen
-    ? 'React 👍 to boost it or 👎 to send it lower in the rotation.'
-    : 'This play has finished. Your 👍 / 👎 reactions still update the master tally.';
+    ? `Vote for this song on the site: ${buildSiteVotingLink()}`
+    : `This play has finished. Vote for the current song on the site: ${buildSiteVotingLink()}`;
   const sponsorLine = sponsor?.kind === 'djuke'
     ? `💸 **DJuke paid request** · bumped by \`${shortAddress(sponsor.wallet)}\` · ${formatUsdcUnits(sponsor.amountUnits)} USDC\n`
     : sponsor?.kind === 'devert'
@@ -1086,8 +1091,8 @@ export class JukeLoopSession {
       }
       if (show.type === 'weekly_top10' && !previousShowKey?.startsWith('weekly_top10:')) {
         const message = show.window === 'final-payroll-hour'
-          ? `📊 **${show.label}** is live. Vote through the New York payroll cutoff at midnight for this week's chart.`
-          : `📊 **${show.label}** is live. React 👍 or 👎 to vote in this week's chart.`;
+          ? `📊 **${show.label}** is live. Vote through the New York payroll cutoff at midnight for this week's chart: ${buildSiteVotingLink()}`
+          : `📊 **${show.label}** is live. Vote for songs on the site: ${buildSiteVotingLink()}`;
         this._sendPlaybackNotice(message);
       } else if (previousShowKey?.startsWith('weekly_top10:') && previousShowKey !== 'weekly_top10:friday-top10-hype' && show.type === 'normal_rotation') {
         const finalListenEnded = previousShowKey === 'weekly_top10:weekly-top10-final-listen';
@@ -1548,7 +1553,7 @@ export class JukeLoopSession {
       sponsor: this._nowPlaying?.sponsor || null,
     };
     const message = devertAd
-      ? `${prepared.playlistShowContext ? `📻 **${prepared.playlistShowContext.title}** · Vote up OR down on the songs!\n` : ''}📢 **Sponsored campaign:** ${track.title} · campaign #${devertAd.campaignId}`
+      ? `${prepared.playlistShowContext ? `📻 **${prepared.playlistShowContext.title}** · Vote up OR down on the songs!\n` : ''}📢 **Sponsored campaign:** ${track.title} · campaign #${devertAd.campaignId}\n${buildSiteVotingLink()}`
       : buildNowPlayingMessage(track, announcementContext);
     const msg = await this.textChannel
       .send({ content: message, flags: MessageFlags.SuppressNotifications, allowedMentions: { parse: [] } })
@@ -1557,8 +1562,6 @@ export class JukeLoopSession {
         return null;
       });
     if (!msg || devertAd || this._nowPlaying?.playId !== playId) return;
-    await msg.react('👍').catch(() => {});
-    await msg.react('👎').catch(() => {});
     if (this._nowPlaying?.playId === playId) {
       this._announcementMsg = msg;
       this._announcementContext = announcementContext;

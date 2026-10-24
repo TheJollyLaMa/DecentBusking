@@ -2,6 +2,9 @@ import { Events } from 'discord.js';
 
 const WINDOW_MS = 10 * 60_000;
 const MAX_EVENTS = 30;
+const MAX_RESTRICTIONS = 10;
+const SNAPSHOT_INTERVAL_MS = 5 * 60_000;
+const MAX_OBSERVATIONS = 6;
 const BOTS = ['dbusker', 'devert-loop'];
 const ROUTE_PARTS = new Set([
   'gateway', 'bot', 'channels', 'messages', 'reactions', 'users', '@me',
@@ -20,6 +23,30 @@ function number(value) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
+function trafficObservation(value) {
+  if (!value) return null;
+  return {
+    at: number(value.at), startedAt: number(value.startedAt),
+    bots: Object.fromEntries(BOTS.filter(name => value.bots?.[name]).map(name => {
+      const bot = value.bots[name];
+      return [name, {
+        totals: Object.fromEntries(['requests', 'errors', 'invalid', 'rateLimits']
+          .map(key => [key, number(bot.totals?.[key])])),
+        invalidLast10Minutes: number(bot.invalidLast10Minutes),
+        traffic: bot.traffic ? Object.fromEntries([
+          'requestsLastSecond', 'requestsLastMinute', 'requestsLast10Minutes',
+          'peakRequestsPerSecond', 'peakRequestsPerMinute',
+        ].map(key => [key, number(bot.traffic[key])])) : null,
+        routes: Array.isArray(bot.routes) ? bot.routes.slice(-64).map(route => ({
+          method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(route.method) ? route.method : 'OTHER',
+          route: discordRoute(route.route), status: number(route.status),
+          count: number(route.count), retries: number(route.retries),
+        })) : [],
+      }];
+    })),
+  };
+}
+
 function restriction(value) {
   if (!value) return null;
   return {
@@ -28,8 +55,11 @@ function restriction(value) {
     status: 429, retryAt: number(value.retryAt),
     scope: ['user', 'global', 'shared'].includes(value.scope) ? value.scope : 'unknown',
     global: value.global === true,
-    responseFormat: ['json', 'html'].includes(value.responseFormat) ? value.responseFormat : 'other',
+    responseFormat: ['json', 'html', 'text'].includes(value.responseFormat) ? value.responseFormat : 'other',
     edgeRequestId: /^[a-f0-9]{16,32}-[A-Z]{3}$/.test(value.edgeRequestId || '') ? value.edgeRequestId : null,
+    bucket: /^[a-f0-9]{8,64}$/.test(value.bucket || '') ? value.bucket : null,
+    remaining: number(value.remaining), limit: number(value.limit), resetAfterMs: number(value.resetAfterMs),
+    observation: trafficObservation(value.observation),
   };
 }
 
@@ -52,6 +82,7 @@ export function discordFailure(error) {
 
 export function createDiscordDiagnostics({ store, now = Date.now, log = console } = {}) {
   const bots = new Map();
+  const startedAt = now();
   let restored = false;
   let restoreTask;
   let saveTask = Promise.resolve();
@@ -59,12 +90,16 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
   let persistence = store ? 'restoring' : 'not-configured';
   let networkCooldownUntil = 0;
   let lastSummary = '';
+  let observations = [];
+  let lastSnapshotAt = -Infinity;
+  let trafficChanged = false;
   const get = name => {
     if (!BOTS.includes(name)) throw new Error('Unknown Discord diagnostic client');
     if (!bots.has(name)) bots.set(name, {
       phase: 'idle', retryAt: null, cooldownUntil: 0, failures: 0,
       totals: { requests: 0, errors: 0, invalid: 0, rateLimits: 0 },
-      invalidSeconds: new Map(), routes: new Map(), recent: [], lastRestriction: null,
+      invalidSeconds: new Map(), routes: new Map(), recent: [], lastRestriction: null, restrictions: [],
+      requestSeconds: new Map(), peakRequestsPerSecond: 0, peakRequestsPerMinute: 0,
     });
     return bots.get(name);
   };
@@ -76,12 +111,35 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
   const prune = bot => {
     const oldest = Math.floor((now() - WINDOW_MS) / 1000);
     for (const second of bot.invalidSeconds.keys()) if (second <= oldest) bot.invalidSeconds.delete(second);
+    for (const second of bot.requestSeconds.keys()) if (second <= oldest) bot.requestSeconds.delete(second);
   };
+  const traffic = bot => {
+    prune(bot);
+    const second = Math.floor(now() / 1000);
+    let minute = 0;
+    let tenMinutes = 0;
+    for (const [at, count] of bot.requestSeconds) {
+      tenMinutes += count;
+      if (at > second - 60) minute += count;
+    }
+    return { requestsLastSecond: bot.requestSeconds.get(second) || 0,
+      requestsLastMinute: minute, requestsLast10Minutes: tenMinutes,
+      peakRequestsPerSecond: bot.peakRequestsPerSecond, peakRequestsPerMinute: bot.peakRequestsPerMinute };
+  };
+  const observation = () => trafficObservation({
+    at: now(), startedAt, bots: Object.fromEntries([...bots].map(([name, bot]) => {
+      const currentTraffic = traffic(bot);
+      return [name, { totals: bot.totals, traffic: currentTraffic,
+        invalidLast10Minutes: [...bot.invalidSeconds.values()].reduce((sum, count) => sum + count, 0),
+        routes: [...bot.routes.values()] }];
+    })),
+  });
   const persist = () => {
     if (!store) return;
-    const value = { schemaVersion: 1, networkCooldownUntil,
+    const value = { schemaVersion: 1, networkCooldownUntil, observations: observations.slice(),
       bots: Object.fromEntries([...bots].map(([name, bot]) => [name, {
         cooldownUntil: bot.cooldownUntil, lastRestriction: bot.lastRestriction,
+        restrictions: bot.restrictions.slice(),
       }])) };
     saveTask = saveTask.catch(() => {}).then(async () => {
       try {
@@ -98,14 +156,17 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
     void saveTask.catch(() => {});
   };
   const report = () => ({
-    windowMs: WINDOW_MS, windowResolutionMs: 1000, persistence, networkCooldownUntil,
+    startedAt, windowMs: WINDOW_MS, windowResolutionMs: 1000, persistence, networkCooldownUntil,
+    observations: observations.map(trafficObservation),
     bots: Object.fromEntries([...bots].map(([name, bot]) => {
       prune(bot);
       return [name, {
         phase: bot.phase, retryAt: bot.retryAt, cooldownUntil: bot.cooldownUntil,
         failures: bot.failures, totals: { ...bot.totals },
+        traffic: traffic(bot),
         invalidLast10Minutes: [...bot.invalidSeconds.values()].reduce((sum, count) => sum + count, 0),
         lastRestriction: restriction(bot.lastRestriction),
+        restrictions: bot.restrictions.map(restriction),
         routes: [...bot.routes.values()].map(({ lastLogAt, ...route }) => ({ ...route })),
         recent: bot.recent.map(entry => ({ ...entry })),
       }];
@@ -119,13 +180,20 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
       return task;
     },
     maintenance() {
-      if (persistence === 'failed') persist();
+      if (restored && trafficChanged && now() - lastSnapshotAt >= SNAPSHOT_INTERVAL_MS) {
+        observations.push(observation());
+        if (observations.length > MAX_OBSERVATIONS) observations.shift();
+        lastSnapshotAt = now();
+        trafficChanged = false;
+        persist();
+      } else if (persistence === 'failed') persist();
       const summary = Object.fromEntries([...bots].map(([name, bot]) => {
         prune(bot);
         const invalid = [...bot.invalidSeconds.values()].reduce((sum, count) => sum + count, 0);
         return [name, { phase: bot.phase, totals: { ...bot.totals }, invalidLast10Minutes: invalid,
           invalidRequestWarning: invalid >= 100, retryAt: bot.retryAt, cooldownUntil: bot.cooldownUntil,
-          lastRestriction: restriction(bot.lastRestriction) }];
+          lastRestriction: restriction(bot.lastRestriction), traffic: traffic(bot),
+          routes: [...bot.routes.values()].map(({ lastLogAt, ...route }) => ({ ...route })) }];
       }));
       const text = JSON.stringify({ persistence, bots: summary });
       if (text !== lastSummary) {
@@ -144,12 +212,20 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
               throw new Error('Invalid Discord cooldown checkpoint');
             }
             networkCooldownUntil = Math.max(networkCooldownUntil, value.networkCooldownUntil);
+            if (value.observations !== undefined && !Array.isArray(value.observations)) {
+              throw new Error('Invalid Discord traffic observations');
+            }
+            observations = (value.observations || []).filter(Boolean).slice(-MAX_OBSERVATIONS).map(trafficObservation);
             for (const name of BOTS) {
               if (!value.bots[name]) continue;
               const deadline = value.bots[name].cooldownUntil;
               if (!Number.isSafeInteger(deadline) || deadline < 0) throw new Error('Invalid Discord cooldown deadline');
               get(name).cooldownUntil = Math.max(get(name).cooldownUntil, deadline);
               get(name).lastRestriction = restriction(value.bots[name].lastRestriction);
+              const history = value.bots[name].restrictions;
+              if (history !== undefined && !Array.isArray(history)) throw new Error('Invalid Discord restriction history');
+              get(name).restrictions = (history || [value.bots[name].lastRestriction])
+                .filter(Boolean).slice(-MAX_RESTRICTIONS).map(restriction);
             }
           }
           restored = true;
@@ -195,16 +271,27 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
             if (status >= 400) bot.totals.errors++;
             if (status === 429) bot.totals.rateLimits++;
             const invalid = status === 401 || status === 403 || (status === 429 && scope !== 'shared');
+            const second = Math.floor(now() / 1000);
+            prune(bot);
+            bot.requestSeconds.set(second, (bot.requestSeconds.get(second) || 0) + 1);
+            bot.peakRequestsPerSecond = Math.max(bot.peakRequestsPerSecond, bot.requestSeconds.get(second));
+            bot.peakRequestsPerMinute = Math.max(bot.peakRequestsPerMinute, traffic(bot).requestsLastMinute);
+            trafficChanged = true;
             if (invalid) {
               bot.totals.invalid++;
-              prune(bot);
-              const second = Math.floor(now() / 1000);
               bot.invalidSeconds.set(second, (bot.invalidSeconds.get(second) || 0) + 1);
             }
+            const key = `${method} ${route} ${status}`;
+            if (!bot.routes.has(key) && bot.routes.size >= 64) bot.routes.delete(bot.routes.keys().next().value);
+            const entry = bot.routes.get(key) || { method, route, status, count: 0, retries: 0, lastLogAt: -Infinity };
+            entry.count++;
+            if (number(request.retries) > 0) entry.retries++;
+            bot.routes.set(key, entry);
             if (status < 400) return;
             const metadata = { type: 'http-error', method, route, status, scope, global, retryAt: retryAt || null,
               responseFormat: result.headers.get('content-type')?.includes('application/json') ? 'json'
-                : result.headers.get('content-type')?.includes('text/html') ? 'html' : 'other',
+                : result.headers.get('content-type')?.includes('text/html') ? 'html'
+                  : result.headers.get('content-type')?.includes('text/plain') ? 'text' : 'other',
               edgeRequestId: /^[a-f0-9]{16,32}-[A-Z]{3}$/.test(result.headers.get('cf-ray') || '')
                 ? result.headers.get('cf-ray') : null,
               bucket: /^[a-f0-9]{8,64}$/.test(result.headers.get('x-ratelimit-bucket') || '')
@@ -214,18 +301,21 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
               resetAfterMs: number(result.headers.get('x-ratelimit-reset-after')) === null ? null
                 : Number(result.headers.get('x-ratelimit-reset-after')) * 1000 };
             event(name, metadata);
-            const key = `${method} ${route} ${status}`;
-            if (!bot.routes.has(key) && bot.routes.size >= 64) bot.routes.delete(bot.routes.keys().next().value);
-            const entry = bot.routes.get(key) || { method, route, status, count: 0, lastLogAt: -Infinity };
-            entry.count++;
-            bot.routes.set(key, entry);
-            if (now() - entry.lastLogAt >= 60_000) {
+            const shouldLog = now() - entry.lastLogAt >= 60_000;
+            if (shouldLog) {
               log.warn(`[discord:${name}] ${JSON.stringify({ ...metadata, count: entry.count,
-                invalidLast10Minutes: [...bot.invalidSeconds.values()].reduce((sum, count) => sum + count, 0) })}`);
+                invalidLast10Minutes: [...bot.invalidSeconds.values()].reduce((sum, count) => sum + count, 0),
+                observation: observation() })}`);
               entry.lastLogAt = now();
             }
-            if (retryAt > now() && (global || route === '/gateway/bot')) {
-              bot.lastRestriction = restriction({ at: now(), ...metadata });
+            const loginRestriction = retryAt > now() && (global || route === '/gateway/bot');
+            if (status === 429 && (shouldLog || loginRestriction)) {
+              const incident = restriction({ at: now(), ...metadata, observation: observation() });
+              bot.restrictions.push(incident);
+              if (bot.restrictions.length > MAX_RESTRICTIONS) bot.restrictions.shift();
+              if (loginRestriction) bot.lastRestriction = incident;
+            }
+            if (loginRestriction) {
               bot.cooldownUntil = Math.max(bot.cooldownUntil, retryAt);
               // An unscoped gateway restriction may be IP-based: pause both bot logins conservatively.
               if (route === '/gateway/bot' && scope === 'unknown') networkCooldownUntil = Math.max(networkCooldownUntil, retryAt);
@@ -236,8 +326,8 @@ export function createDiscordDiagnostics({ store, now = Date.now, log = console 
                   connection.retryAt = deadline;
                 }
               }
-              persist();
             }
+            if (status === 429 && (shouldLog || loginRestriction)) persist();
           };
           const rateLimited = data => {
             event(name, { type: 'rate-limit-wait', route: discordRoute(data.route),

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
 import { AudioPlayerStatus, createAudioPlayer, createAudioResource, entersState,
   joinVoiceChannel, StreamType, VoiceConnectionStatus } from '@discordjs/voice';
-import { resolveStreamableIpfsUrl } from './jukeloop.js';
+import { buildSiteVotingLink, resolveStreamableIpfsUrl } from './jukeloop.js';
 import { createVoiceConnectionSupervisor } from './voice-connection.js';
 import { DISCORD_REST_OPTIONS, loginDiscordClient, watchDiscordSession } from './discord-login.js';
 import { DEVERT_MAX_AD_SECONDS } from '../js/devert-scheduler.mjs';
@@ -122,12 +122,8 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
       scheduleNext(retryMs);
       return;
     }
-    announcement = await textChannel?.send({ content: `📢 **AdLoop:** ${ad.track.title}`, flags: MessageFlags.SuppressNotifications,
+    announcement = await textChannel?.send({ content: `📢 **AdLoop:** ${ad.track.title}\n${buildSiteVotingLink()}`, flags: MessageFlags.SuppressNotifications,
       allowedMentions: { parse: [] } }).catch(() => null);
-    if (announcement?.react) {
-      await announcement.react('👍').catch(() => {});
-      await announcement.react('👎').catch(() => {});
-    }
     log.log(`[devert-loop] Playing campaign ${ad.campaignId} in ${voiceChannel.name}.`);
   }
 
