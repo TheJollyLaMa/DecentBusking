@@ -116,6 +116,8 @@ export function createDjukeSongRegistrar({ contract, getPlaylist, batchSize = 25
   };
 }
 
+class DjukeCheckpointError extends Error {}
+
 export function createDjukePlaybackJournal({ restore, save, now = () => Date.now() }) {
   if (typeof restore !== 'function' || typeof save !== 'function') throw new Error('Durable DJuke checkpoint storage is required');
   let records = [];
@@ -130,8 +132,12 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
   async function commit(next) {
     const fulfilled = next.filter(entry => entry.state === 'fulfilled');
     const kept = next.filter(entry => entry.state !== 'fulfilled' || fulfilled.indexOf(entry) >= fulfilled.length - 100);
-    const uri = await save({ schemaVersion: 1, records: copy(kept) });
-    if (typeof uri !== 'string' || !uri.startsWith('ipfs://')) throw new Error('DJuke checkpoint was not durable');
+    try {
+      const uri = await save({ schemaVersion: 1, records: copy(kept) });
+      if (typeof uri !== 'string' || !uri.startsWith('ipfs://')) throw new Error('DJuke checkpoint was not durable');
+    } catch (error) {
+      throw new DjukeCheckpointError(error.message, { cause: error });
+    }
     records = kept;
   }
   const requireReady = () => { if (!initialized) throw new Error('DJuke journal is not restored'); };
@@ -332,19 +338,21 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
       playlistPending = Number(lanePending);
       const start = Number(laneHead), end = Number(laneNext);
       if (![start, end, playlistPending].every(value => Number.isSafeInteger(value) && value >= 0) || end < start || playlistPending > end - start) throw new Error('DJuke playlist lane needs a bounded complete snapshot');
-      for (let laneId = start; laneId < Math.min(end, start + 1); laneId++) {
+      // A bounded playback window lets the same radio prefetcher prepare paid songs.
+      for (let laneId = start; laneId < Math.min(end, start + 24); laneId++) {
         const item = await jukebox.getPlaylistItem(laneId, options);
         if (Number(item.status) !== 0) continue;
         if (!isAddress(item.payer) || item.amount <= 0n) throw new Error('Invalid pending DJuke playlist item');
         const song = await getSong(item.songId);
         const track = catalog.get(item.songId);
         const mapped = track && song.audioURI === `ipfs://${track.ipfsCid}`;
-        requests.push({ requestId: `8453:${contractAddress.toLowerCase()}:playlist:${laneId}`,
+        const request = { requestId: `8453:${contractAddress.toLowerCase()}:playlist:${laneId}`,
           playlistLaneId: String(laneId), playlistBatchId: String(item.batchId), songId: item.songId,
           revision: '0', trackId: mapped ? track.trackId : `djuke:${item.songId}`,
           title: mapped ? track.title : 'Playlist recording awaiting catalog recovery',
           artist: mapped ? track.uploader || track.mintRecipient : '', payer: item.payer,
-          amountUnits: item.amount.toString(), playable: !!mapped });
+          amountUnits: item.amount.toString(), playable: !!mapped };
+        requests.push(request);
       }
     }
     const { tracks, lookupErrors: catalogReadErrors } = await registeredSongs(entries, options);
@@ -372,14 +380,41 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   preserveMissingRequest = () => false, canPlayRequest = () => true,
   minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
   let initialized = null;
-  let settling = Promise.resolve();
+  let settling = null;
   let claimSerial = Promise.resolve();
   let pendingClaim = null;
   let restored = false;
   let pendingPlaylistCount = 0;
+  const pendingUpdates = new Map();
+  const retainUpdate = (record, update) => {
+    const existing = pendingUpdates.get(record.requestId);
+    if (existing) return existing.run();
+    const entry = {
+      task: null,
+      run() {
+        entry.task ||= Promise.resolve().then(update).then(result => {
+          pendingUpdates.delete(record.requestId);
+          return result;
+        }).catch(error => {
+          if (error instanceof DjukeCheckpointError) {
+            log.warn(`[djuke] Journal update retained for ${record.requestId}: ${error.message}`);
+          } else {
+            pendingUpdates.delete(record.requestId);
+          }
+          throw error;
+        }).finally(() => { entry.task = null; });
+        return entry.task;
+      },
+    };
+    pendingUpdates.set(record.requestId, entry);
+    return entry.run();
+  };
   const ready = () => { initialized ||= journal.initialize().then(() => { restored = true; })
     .catch(error => { initialized = null; throw error; }); return initialized; };
-  const settleSerial = state => { const run = settling.then(() => settle(state)); settling = run.catch(() => {}); return run; };
+  const settleSerial = state => {
+    settling ||= settle(state).finally(() => { settling = null; });
+    return settling;
+  };
   async function settle(state) {
     for (const record of journal.getState().filter(entry => entry.state === 'played')) {
       const request = state.requests.find(entry => entry.requestId === record.requestId);
@@ -403,21 +438,34 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       }
     }
   }
-  async function reconcile() {
+  async function reconcile({ waitForSettlement = true } = {}) {
     await ready();
+    for (const entry of pendingUpdates.values()) await entry.run();
     const state = await readState();
     pendingPlaylistCount = state.playlistPending ?? state.requests.filter(request => request.playlistLaneId !== undefined).length;
     if (onVerifiedRequests) Promise.resolve().then(() => onVerifiedRequests(state))
       .catch(error => log.warn(`[djuke] Confirmed-request hook deferred: ${error.message}`));
     await journal.synchronize(state.requests, { preserveMissing: record => preserveMissingRequest(record, state) });
-    await settleSerial(state);
+    const settlement = settleSerial(state);
+    if (waitForSettlement) await settlement;
+    else settlement.catch(error => log.warn(`[djuke] Fulfillment deferred: ${error.message}`));
     return state;
   }
+  async function refundSuffix(record, state) {
+    state ||= await readState();
+    if (state.requests.some(entry => entry.playlistLaneId !== undefined &&
+        BigInt(entry.playlistLaneId) < BigInt(record.playlistLaneId))) {
+      log.warn(`[djuke] Playlist ${record.playlistBatchId}: suffix refund deferred until earlier deliveries settle.`);
+      return;
+    }
+    log.warn(`[djuke] Playlist ${record.playlistBatchId}: refunding undelivered songs and refundable fee.`);
+    await refundPlaylistBatch(record.playlistBatchId);
+  }
   async function claim(options) {
-    const state = await reconcile();
+    const state = await reconcile({ waitForSettlement: false });
     const pending = journal.getState().filter(record => record.state === 'pending');
     const main = state.requests.filter(request => request.playlistLaneId === undefined);
-    const eligible = main.length ? main : state.requests.slice(0, 1);
+    const eligible = main.length ? main : state.requests;
     const candidates = pending.filter(record => eligible.some(request => request.requestId === record.requestId));
     const head = selectRequest ? selectRequest(state, candidates, options)
       : candidates.sort((a, b) => eligible.findIndex(request => request.requestId === a.requestId) - eligible.findIndex(request => request.requestId === b.requestId))[0];
@@ -426,13 +474,13 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     if (!request || !await canPlayRequest(request, state)) return null;
     if (request.playlistBatchId !== undefined && head.mediaFailures >= 4) {
       if (!refundPlaylistBatch) throw new Error('Playlist media retries exhausted but the refund handler is unavailable');
-      await refundPlaylistBatch(request.playlistBatchId);
+      await refundSuffix(request, state);
       return null;
     }
     const track = request?.playable ? getTrack(request.trackId) : null;
     if (!track) {
       if (request?.playlistBatchId && refundPlaylistBatch) {
-        await refundPlaylistBatch(request.playlistBatchId);
+        await refundSuffix(request, state);
         return null;
       }
       throw new Error(`Paid DJuke request ${head.requestId} is not playable`);
@@ -460,16 +508,15 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   }
   async function retryMedia(record, error, media = null) {
     if (record.playlistBatchId === undefined) throw new Error('Bounded media retries require a radio playlist request');
-    const updated = await journal.fail(record.requestId, error?.message || String(error),
-      { mediaFailure: true, media: media || { reason: 'media_preparation_failed' } });
+    const updated = await retainUpdate(record, () => journal.fail(record.requestId, error?.message || String(error),
+      { mediaFailure: true, media: media || { reason: 'media_preparation_failed' } }));
     const maxRetries = 3;
     if (updated.mediaFailures <= maxRetries) {
       log.warn(`[djuke] Playlist ${record.playlistBatchId} lane ${record.playlistLaneId}: media retry ${updated.mediaFailures}/${maxRetries}; payment stays queued (${updated.lastError}).`);
       return { retrying: true, retryNumber: updated.mediaFailures, maxRetries };
     }
     if (!refundPlaylistBatch) throw new Error('Playlist media retries exhausted but the refund handler is unavailable');
-    log.warn(`[djuke] Playlist ${record.playlistBatchId} lane ${record.playlistLaneId}: media retries exhausted; refunding undelivered songs and refundable fee.`);
-    await refundPlaylistBatch(record.playlistBatchId);
+    await refundSuffix(record);
     return { retrying: false, retryNumber: maxRetries, maxRetries };
   }
   return {
@@ -486,22 +533,22 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
           { ...play?.media, reason });
       }
       if (!play || play.audibleMs < minAudibleMs) {
-        await journal.fail(record.requestId, 'Paid play was not audible long enough');
-        if (record.playlistBatchId && refundPlaylistBatch) await refundPlaylistBatch(record.playlistBatchId);
+        await retainUpdate(record, () => journal.fail(record.requestId, 'Paid play was not audible long enough'));
+        if (record.playlistBatchId && refundPlaylistBatch) await refundSuffix(record);
         return;
       }
       const started = Date.now();
-      await journal.complete(record.requestId, { playId: play.playId, audibleMs: play.audibleMs, finished: true,
-        trackId: record.trackId, revision: record.revision });
+      await retainUpdate(record, () => journal.complete(record.requestId, { playId: play.playId,
+        audibleMs: play.audibleMs, finished: true, trackId: record.trackId, revision: record.revision }));
       log.info?.(`[djuke] Playback checkpoint confirmed ${record.requestId}; checkpointMs=${Date.now() - started}`);
       readState().then(settleSerial).catch(error => log.warn(`[djuke] Fulfillment deferred: ${error.message}`));
     },
     async fail(record, error) {
-      await journal.fail(record.requestId, error?.message || String(error));
-      if (record.playlistBatchId && refundPlaylistBatch) await refundPlaylistBatch(record.playlistBatchId);
+      await retainUpdate(record, () => journal.fail(record.requestId, error?.message || String(error)));
+      if (record.playlistBatchId && refundPlaylistBatch) await refundSuffix(record);
     },
     release(record, error) {
-      return journal.fail(record.requestId, error?.message || String(error));
+      return retainUpdate(record, () => journal.fail(record.requestId, error?.message || String(error)));
     },
     retryMedia,
     hasPendingPlaylist() {
@@ -509,11 +556,21 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
         journal.getState().some(record => record.playlistBatchId !== undefined && record.state !== 'fulfilled'));
     },
     async canPlay(record) {
+      await ready();
+      for (const entry of pendingUpdates.values()) await entry.run();
       const state = await readState();
       const requests = state.requests;
       const eligible = requests.some(request => request.playlistLaneId === undefined)
-        ? requests.filter(request => request.playlistLaneId === undefined) : requests.slice(0, 1);
+        ? requests.filter(request => request.playlistLaneId === undefined) : requests;
       const request = eligible.find(request => request.requestId === record.requestId);
+      if (request?.playlistLaneId !== undefined) {
+        const records = journal.getState();
+        if (!records.some(saved => saved.requestId === record.requestId && saved.state === 'playing')) return false;
+        const previous = requests.filter(entry => entry.playlistLaneId !== undefined &&
+          BigInt(entry.playlistLaneId) < BigInt(request.playlistLaneId));
+        if (previous.some(entry => !records.some(saved => saved.requestId === entry.requestId &&
+            ['played', 'fulfilled'].includes(saved.state)))) return false;
+      }
       return Boolean(request && request.playable && request.trackId === record.trackId &&
         request.revision === record.revision && await canPlayRequest(request, state));
     },

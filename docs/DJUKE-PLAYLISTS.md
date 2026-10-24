@@ -10,14 +10,59 @@ Permanently unavailable recordings and exhausted media retries still use
 the refund safety net. A successful purchase is not evidence that the entire
 playlist played; confirm delivery and refund events before reporting completion.
 
+Paid playlists use the public radio's existing player, next-resource prefetcher,
+changeover gap and priority checks, not a separate per-song payment/player loop.
+The confirmed queue snapshot includes up to 24 consecutive playlist lane slots
+(one maximum-sized playlist window). The next purchased song can be reserved
+and prepared while the current song plays. Preparing it does not create a purchase
+or settle its payment. It may start only after every preceding pending lane in the
+window has a durable `played` or `fulfilled` journal record. A new main paid request,
+refund, replacement or protected show still invalidates a prepared selection.
+
+Settlement is single-flight and runs independently of playback selection. A slow
+transaction no longer blocks preparation or the next song once clean playback
+evidence is durable. Contract fulfillment remains head-only and ordered. A suffix
+refund waits until preceding delivered songs have settled, so it cannot refund
+their already-heard playback. The same guard applies when the next recording is
+unplayable or missing locally, not just when media retries are exhausted.
+Completed but unsettled journal records are not
+replayed on restart.
+
+Before decoding a paid playlist recording, the worker downloads its entire source
+into a temporary local file. This avoids holding a backpressured HTTP connection
+open for the duration of a song (or while its decoder is prefetched), which exposed
+playback to gateway disconnects and repeated partial plays. Transfers have a
+90-second deadline, a 256 MiB limit, and checks for empty/partial HTTP responses and
+declared length mismatches. Failed downloads never start audio. Shutdown cancels
+downloads; decoder closure removes each temporary file. Clean decoder EOF and
+full PCM consumption are still required; buffering does not label damaged media
+as delivered.
+
+The standalone radio widget also preloads the published next source using the
+same bounded blob downloader as the main website (80 MiB browser limit). It
+finishes the current recording before handing off, consumes the prepared blob,
+and will not restart an ended play ID just because polling repeats that state.
+Preloads are cancelled on pause, station change, failure or destruction and are
+disabled on data-saver/2G connections. An unavailable preload is logged and the
+normal source remains available; it does not count as a paid delivery failure.
+
+Failed journal completion, release and media-failure writes are retained in the
+runtime and retried before queue selection and playback authorization. A transient
+mirror failure therefore cannot strand a `playing` reservation after its radio
+session loses the local reference, or replay an already-completed song merely
+because its checkpoint needs retrying. Validation failures are not retained as
+retryable writes. A process crash before evidence becomes durable still cannot
+prove delivery; the existing conservative restart behavior remains.
+
 While a known paid playlist remains unfinished, ordinary rotation is held rather
-than starting an unrelated recording during checkpoint/settlement delays.
-The hold uses the verified on-chain remaining-lane count as well as active journal
-records: production reads only the lane head, so the journal may briefly contain
-only a fulfilled song while later paid songs still await their next snapshot.
-Stale prefetched rotation is discarded at the handoff, and the worker retries after a
-second. Radio status explicitly reports that it is waiting for the paid playlist.
-This can introduce a bookkeeping gap; it is not a promise of gapless streaming.
+than starting unrelated music. The hold uses the verified remaining-lane count as
+well as the journal; stale prefetched rotation is discarded at the handoff.
+Status shows preparation/retry state and elapsed idle time, becoming recovering
+when the existing watchdog threshold is exceeded instead of claiming preparation
+indefinitely. The website distinguishes an incomplete-playback retry from preparing
+the next song, and explicitly labels a paid hold longer than 30 seconds as delayed.
+Slow durable storage or failed media can still introduce gaps;
+this is not a promise of gapless streaming under failures.
 Main paid requests, eligible advert breaks, and protected scheduled/live shows
 retain their existing priority. Once the final paid delivery settles, ordinary
 rotation resumes. A controlled worker shutdown releases reservations without
@@ -65,9 +110,20 @@ on-chain delivered/refunded amounts. An already-refunded purchase is final; the
 repair does not replay or recharge it.
 
 The regression in `test/playlist-audio-completion.test.js` drives twelve actual
-FFmpeg → PCM → Opus → player → Idle completions through the paid journal/runtime;
-it does not inject successful completion verdicts. By default it uses short local
-WAV fixtures served over HTTP. To repeat the incident-media check, download the
+HTTP download → local FFmpeg → PCM → Opus → player → Idle completions through the
+paid journal/runtime and the normal radio prefetcher. It blocks settlement until
+all twelve songs have played and fails the fifth song's first completion checkpoint.
+It checks twelve starts/deliveries exactly once and in order, one source download
+per song, no refund, and transitions below two seconds with the intentional
+2.5-second radio changeover sleep stubbed out. It does not inject successful audio
+completion verdicts or establish production latency under slow durable storage.
+Separate tests cover broken/oversized/timed-out downloads, retryable checkpoint
+failures, main-request priority and safe suffix refunds.
+A real player regression severs a preload's first HTTP transfer, verifies that no
+partial audio starts, retains one preparation failure and its retry backoff, then
+completes and settles the retried recording exactly once without a refund.
+By default the playback regression uses short local WAV fixtures served over HTTP.
+To repeat the incident-media check, download the
 public CID `bafybeicgdqwqww2frcnmvjmitt5zvqivtg3vemyekr7johxlkkdllea4di`
 and run:
 
@@ -81,9 +137,67 @@ and occupies the fifth slot. The October 24 check completed all twelve once, in
 order, without a refund: the incident recording decoded 32,149,248 PCM bytes
 (167,444 ms) and the player consumed 167,440 ms, within its 20 ms frame boundary.
 This verifies the actual recording/player lifecycle, not a new production payment.
-The historical worker did not capture decoder diagnostics, so this evidence cannot
-retroactively distinguish its gateway/decoder failure from an exit-notification
-race. The next authorized production test can distinguish them with the new logs.
+Successful local decoding does not identify the original gateway/network failure.
+The latest production diagnostics below distinguish incomplete source consumption
+from a successful EOF that only needs to wait for a decoder exit notification.
+
+### October 24 refunded-attempt assessment
+
+The latest BoogieNight attempt on v0.5
+(`0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51`, batch 1) reached the seventh
+song, but only its first six songs were delivered. The deployed worker remained
+at `abb78288f1cd8c1ff19f5163d1004f4b0c563f52`; the continuity changes above were
+not deployed during this attempt.
+
+- Lane 16, "Algorhythm", eventually completed cleanly at 12:42:24 UTC after
+  incomplete attempts. Its completion checkpoint took 7.8 seconds and settlement
+  another 16.2 seconds; the next song started 55.2 seconds after completion.
+- Lane 17, "JollyBlueShadows", completed cleanly at 12:45:52 UTC. Its checkpoint
+  took 3.1 seconds and settlement another 26.7 seconds; the next song started
+  85.2 seconds after completion.
+- Lane 18, "605 subterranean homesick blues", started at 12:47:18, 12:50:00,
+  12:52:42 and 12:55:25 UTC. Each attempt failed `audio_stream_incomplete`, with
+  network/decode warning categories, no source EOF and no decoder exit observed
+  at the verdict. Decoded durations were 127231, 123903, 125993 and 127231 ms.
+  The gaps before retries were approximately 35-38 seconds.
+- At 12:57:35 UTC the fourth failure exhausted the existing retry budget. Lane 18
+  and the five following songs were refunded, along with the unreleased 2 USDC
+  of the original 3 USDC platform fee.
+  Seven USDC Transfer logs in successful refund transaction
+  `0xd4ad5bde2d723528061421073b252f75d57a7ecaf59226f1fca7c1b8fc78410d`
+  total **4.50 USDC** returned to the payer: 2.50 USDC for six undelivered songs
+  plus the unreleased 2 USDC fee. The first four deliveries had already released
+  1 USDC to the funds, leaving 1.50 USDC in delivered-song payments and that
+  1 USDC fee retained. This is partial completion followed by a suffix refund,
+  not seven delivered songs or a new debit on every retry.
+
+The exact seventh source,
+`bafybeidvnpd2ossyprlglczisp7r2ynrrypkvcvh7keqw5sutw4jdld25i`, downloaded
+successfully afterward: 1,131,222 bytes, mono 48 kHz AAC, container duration
+127.722667 seconds. Local FFmpeg with `-xerror` decoded it without warnings or
+errors into exactly 24,514,304 stereo PCM bytes (127,679 ms). The container duration
+includes time not present in the decoded PCM, so the incident regression checks
+the independently measured byte count rather than assuming container duration.
+The production evidence supports a streaming-path failure; it does not
+identify the exact gateway/network mechanism or prove that a partially heard
+attempt was a clean delivery. Do not weaken EOF checks, increase the audible
+replay budget, or recharge/requeue this refunded purchase as a workaround.
+
+To include both actual incident recordings in the twelve-song regression, use
+`DJUKE_INCIDENT_MEDIA` for Algorhythm (fifth slot) and `DJUKE_REFUND_MEDIA` for
+the refunded seventh song (seventh slot). The other ten sources remain short
+WAV fixtures, and the player consumes both incident recordings in real time.
+The test still blocks settlement until all twelve complete, fails the fifth
+completion checkpoint once, and requires twelve ordered starts/deliveries, one
+download each, clean EOFs and no refund.
+The targeted rerun with the actual seventh source passed in 134 seconds: twelve
+ordered starts and deliveries, no repeats or refund, and its full 24,514,304 PCM
+bytes decoded with no warnings, 127,679 ms decoded versus 127,660 ms consumed
+(within one 20 ms frame). The real HTTP-severed-preload regression and 213 focused
+worker/player/receipt/browser tests also passed.
+This is server-player verification, not a production deployment or browser AAC
+compatibility test. The native browser handoff check uses WAV fixtures; an
+authorized production rollout and real listener verification remain separate gates.
 
 The Playlists section of the connected wallet's own profile shows its five most recent Play Live receipts:
 verifying queue, queued, playing, completed, or refunded. Expand a receipt for
