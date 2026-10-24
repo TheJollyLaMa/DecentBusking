@@ -53,7 +53,7 @@ function setup({ fetchImpl, head, storage = new Map(), options = {} } = {}) {
   });
   const all = () => {
     const visit = node => [node, ...node.children.flatMap(visit)];
-    return visit(element.shadowRoot);
+    return visit(element.shadowRoot || element);
   };
   const label = text => all().find(node => node.getAttribute('aria-label') === text);
   return {
@@ -91,6 +91,53 @@ test('real mount is inert, scoped, quiet, uses late shared head and destroys/rem
   const again = mount(h.element, { head, fetchImpl: async () => ({ ok: true, json: async () => ({ nowPlaying: null }) }) });
   again.destroy();
   assert.equal(unsubscribed, 2);
+});
+
+test('host renderer owns layout without a shadow or second engine and cleans up on remount', async t => {
+  let selectStation, updates = [], destroyed = 0;
+  const render = ({ element, document, controls, selectStation: select }) => {
+    selectStation = select;
+    const row = document.createElement('nav');
+    row.append(controls.play, controls.volume, controls.up, controls.down, controls.net);
+    element.replaceChildren(row, controls.now, controls.status, controls.audio);
+    return { update: state => updates.push(state), destroy: () => destroyed++ };
+  };
+  const h = setup({ options: { render, initialStation: 'wqxr' } });
+  t.after(() => h.controller.destroy());
+  assert.equal(h.element.shadowRoot, undefined);
+  assert.equal(h.element.children[0].tagName, 'nav');
+  assert.equal(h.audio().plays, undefined);
+  assert.equal(updates.at(-1).station.id, 'wqxr');
+  selectStation('missing', { play: true });
+  assert.equal(h.audio().plays, undefined);
+  selectStation('dbusk', { play: true });
+  await flush(); await flush();
+  assert.match(h.audio().src, /\/api\/radio\/media\?cid=/);
+  assert.equal(h.label('Upvote current track').disabled, false);
+  assert.match(updates.at(-1).now, /A song/);
+  const up = h.label('Upvote current track');
+  h.controller.destroy();
+  up.fire('click'); selectStation('dbusk', { play: true });
+  await flush();
+  assert.equal(h.posts(), 0);
+  assert.equal(destroyed, 1);
+  assert.equal(h.element.children.length, 0);
+  const again = mount(h.element, { render, initialStation: 'wqxr',
+    stations: [{ id: 'wqxr', url: 'https://example.com/live' }] });
+  again.destroy();
+  assert.equal(destroyed, 2);
+});
+
+test('default renderer exposes stable parts, theme tokens and reduced-motion-safe styles', t => {
+  const h = setup(); t.after(() => h.controller.destroy());
+  for (const part of ['panel', 'controls', 'play', 'station', 'volume', 'up', 'down', 'net', 'now', 'status', 'settings', 'session']) {
+    assert.ok(h.all().find(node => node.getAttribute('part') === part), part);
+  }
+  const css = h.all().find(node => node.tagName === 'style').textContent;
+  for (const token of ['color', 'background', 'border', 'accent', 'padding', 'gap', 'radius', 'max-width']) {
+    assert.ok(css.includes(`--dbusk-${token}`), token);
+  }
+  assert.match(css, /prefers-reduced-motion:no-preference/);
 });
 
 test('stream uses proxy and seeks, renders show/title/artist, votes share tallies and persistent duplicate rules', async t => {

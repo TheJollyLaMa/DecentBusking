@@ -7,14 +7,14 @@ const mounted = new WeakMap();
 const DEFAULT_WORKER = 'https://decentbusking.onrender.com';
 const CSS = `
 :host{display:block;color:var(--dbusk-color,#eee);font:13px/1.4 system-ui,sans-serif}
-.radio{background:var(--dbusk-background,#172321);border:1px solid var(--dbusk-border,#638579);border-radius:12px;padding:12px;max-width:560px;box-sizing:border-box}
-.radio[data-theme=light]{color:#172321;background:#f2f7f3}
-.controls,.settings{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.radio{background:var(--dbusk-background,#172321);border:var(--dbusk-border-width,1px) solid var(--dbusk-border,#638579);border-radius:var(--dbusk-radius,12px);padding:var(--dbusk-padding,12px);max-width:var(--dbusk-max-width,560px);box-sizing:border-box}
+.radio[data-theme=light]{color:var(--dbusk-color,#172321);background:var(--dbusk-background,#f2f7f3)}
+.controls,.settings{display:flex;align-items:center;flex-wrap:wrap;gap:var(--dbusk-gap,6px)}
 button,select,input{font:inherit;accent-color:var(--dbusk-accent,#8acdb3)}
 button,select{color:inherit;background:transparent;border:1px solid #78968a;border-radius:6px;padding:4px 7px}
 button:disabled{opacity:.5}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--dbusk-accent,#8acdb3);outline-offset:2px}
 input{width:70px}.brand{font-size:11px}.now{overflow:auto;white-space:nowrap;max-width:100%;scrollbar-width:thin;padding:6px 0}
-.status{font-size:11px;min-height:1.4em}.settings{font-size:11px;margin-top:6px}.radio[data-compact=true]{padding:6px}.radio[data-compact=true] .brand{display:none}
+.status{font-size:11px;min-height:1.4em}.settings{font-size:11px;margin-top:6px}.radio[data-compact=true]{padding:var(--dbusk-padding,6px)}.radio[data-compact=true] .brand{display:none}
 @media(prefers-reduced-motion:no-preference){.now:focus-within{scroll-behavior:smooth}}
 @media(prefers-color-scheme:light){.radio[data-theme=auto]{color:var(--dbusk-color,#172321);background:var(--dbusk-background,#f2f7f3)}}
 `;
@@ -25,7 +25,8 @@ export function mount(element, options = {}) {
   mounted.get(element)?.destroy();
   const document = element.ownerDocument;
   const window = document.defaultView;
-  const root = element.shadowRoot || element.attachShadow({ mode: 'open' });
+  const customRender = typeof options.render === 'function';
+  const root = customRender ? element : element.shadowRoot || element.attachShadow({ mode: 'open' });
   const node = (tag, text, attrs = {}) => {
     const value = document.createElement(tag);
     if (text) value.textContent = text;
@@ -33,6 +34,8 @@ export function mount(element, options = {}) {
     return value;
   };
   const style = node('style', CSS);
+  // A shadow root cannot be detached; bridge light-DOM adapters on a reused host.
+  if (customRender && element.shadowRoot) element.shadowRoot.replaceChildren(node('slot'));
   const panel = node('section', '', { class: 'radio', 'aria-label': 'DBusk radio' });
   panel.dataset.theme = ['dark', 'light', 'auto'].includes(options.theme) ? options.theme : 'auto';
   panel.dataset.compact = String(Boolean(options.compact));
@@ -66,7 +69,9 @@ export function mount(element, options = {}) {
   controls.append(play, stationInput, volume, up, down, netLabel);
   settings.append(theme, compact, session);
   panel.append(brand, controls, now, status, settings, audio);
-  root.replaceChildren(style, panel);
+  const parts = { panel, brand, controls, play, station: stationInput, volume, up, down, net: netLabel, now, status, settings, theme, compact, session, audio };
+  for (const [name, control] of Object.entries(parts)) control.setAttribute('part', name);
+  if (!customRender) root.replaceChildren(style, panel);
 
   const radioUrl = radioEndpoint(options.workerUrl || DEFAULT_WORKER);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
@@ -78,6 +83,7 @@ export function mount(element, options = {}) {
   let state = null, track = null, loaded = null, net = null, pending = false, optimistic = null;
   let generation = 0, timer = null, metadata = null, offWallet = null, head = null, polling = false;
   const requests = new Set(), cleanups = [];
+  let view = null;
   const on = (target, event, handler) => {
     target.addEventListener(event, handler);
     cleanups.push(() => target.removeEventListener(event, handler));
@@ -103,6 +109,7 @@ export function mount(element, options = {}) {
     }
     netLabel.textContent = net === null ? '—' : net > 0 ? `+${net}` : String(net);
     netLabel.setAttribute('aria-label', net === null ? 'Net votes unavailable' : `${net} net votes ${track?.isDevert ? 'this advert play' : 'this week'}`);
+    view?.update?.({ station, listening, now: now.textContent, status: status.textContent });
   }
   function clearAudio() {
     metadata = null;
@@ -251,10 +258,16 @@ export function mount(element, options = {}) {
     if (listening) tune();
     else { cancel(); clearAudio(); status.textContent = 'Radio paused'; render(); schedule(generation); }
   });
-  on(stationInput, 'change', () => {
-    station = stations.find(entry => entry.id === stationInput.value) || stations[0];
+  function selectStation(id, { play: start = false } = {}) {
+    if (destroyed) return;
+    const selected = stations.find(entry => entry.id === id);
+    if (!selected) return;
+    station = selected;
+    stationInput.value = station.id;
+    if (start) listening = true;
     tune();
-  });
+  }
+  on(stationInput, 'change', () => selectStation(stationInput.value));
   on(volume, 'input', () => { audio.volume = Math.max(0, Math.min(1, Number(volume.value))); });
   on(theme, 'change', () => { panel.dataset.theme = theme.value; });
   on(compact, 'click', () => {
@@ -291,11 +304,18 @@ export function mount(element, options = {}) {
       offWallet?.();
       for (const cleanup of cleanups) cleanup();
       clearAudio();
+      view?.destroy?.();
       root.replaceChildren();
       if (mounted.get(element) === controller) mounted.delete(element);
     },
   };
   mounted.set(element, controller);
+  try {
+    if (customRender) view = options.render({ element, document, controls: parts, stations: stations.map(entry => ({ ...entry })), selectStation });
+  } catch (error) {
+    controller.destroy();
+    throw error;
+  }
   tune();
   return controller;
 }
