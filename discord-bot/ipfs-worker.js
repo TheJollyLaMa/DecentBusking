@@ -1073,7 +1073,8 @@ export function createWorkerRequestHandler({
       });
       sendJson(response, 200, { url }, corsOrigin);
     } catch (error) {
-      sendJson(response, 400, { error: error.message }, corsOrigin);
+      sendJson(response, 400, { error: error.message },
+        requestUrl.pathname === '/api/radio/vote' ? radioCorsOrigin : corsOrigin);
     }
   };
 }

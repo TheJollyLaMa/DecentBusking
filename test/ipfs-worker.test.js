@@ -21,10 +21,14 @@ test('widget radio origins can preflight/vote without expanding authenticated AP
     const { createWorkerRequestHandler } = await import(moduleUrl);
     const origin = 'https://dbusk.decentagency.eth.limo';
     let recorded = null;
+    let rejectVote = false;
     const handler = createWorkerRequestHandler({
       allowedOrigins: ['https://busking.example'], radioAllowedOrigins: [origin],
       ownerWallet: Wallet.createRandom().address,
-      onRadioVote: async body => { recorded = body; return body; },
+      onRadioVote: async body => {
+        if (rejectVote) throw new Error('This radio play has ended');
+        recorded = body; return body;
+      },
     });
     await withServer(handler, async base => {
       const preflight = await fetch(`${base}/api/radio/vote`, { method: 'OPTIONS', headers: { origin } });
@@ -39,6 +43,12 @@ test('widget radio origins can preflight/vote without expanding authenticated AP
       assert.equal(vote.headers.get('access-control-allow-credentials'), null);
       assert.equal(preflight.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS');
       assert.equal(preflight.headers.get('access-control-allow-headers'), 'content-type, range');
+      rejectVote = true;
+      const failed = await fetch(`${base}/api/radio/vote`, { method: 'POST',
+        headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal(failed.status, 400);
+      assert.equal(failed.headers.get('access-control-allow-origin'), origin);
+      assert.match((await failed.json()).error, /radio play has ended/);
       recorded = null;
       for (const deniedOrigin of ['https://untrusted.example', 'null', '']) {
         const denied = await fetch(`${base}/api/radio/vote`, { method: 'POST',
