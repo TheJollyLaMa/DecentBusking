@@ -35,7 +35,7 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   assert.equal(html.split('An advert campaign costs').length - 1, 1);
   assert.equal((instructions.match(/<section class="devert-info-card /g) || []).length, 4);
   assert.match(instructions, /aria-label="Payment distribution"/);
-  assert.match(html, /decent\.config\.js\?v=20261017-devert-v02/);
+  assert.match(html, /decent\.config\.js\?v=[^"]+/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/devert-paid-queue.mjs'), 'utf8'),
     /devert-queue\.mjs\?v=20261017-mercury-release/);
   assert.match(html, /Campaign Instructions: Submit, Receive &amp; Run/);
@@ -56,9 +56,12 @@ test('DVert panel exposes local Main Radio and Ads Only controls with no paid pr
   const radioSyncTags = new Set(fs.readdirSync(path.join(__dirname, '../js'))
     .filter(name => /\.m?js$/.test(name))
     .flatMap(name => [...fs.readFileSync(path.join(__dirname, '../js', name), 'utf8').matchAll(/\.\/radio-sync\.js(\?v=[^'"]*)?['"]/g)].map(match => match[1] || '')));
-  assert.match(panel, /from '\.\/radio-sync\.js\?v=[^']+'/);
+  const bootstrap = fs.readFileSync(path.join(__dirname, '../js/devert-site.mjs'), 'utf8');
+  assert.match(bootstrap, /from '\.\/radio-sync\.js\?v=[^']+'/);
+  assert.match(html, /src="js\/devert-site\.mjs\?v=/);
+  assert.doesNotMatch(panel, /from '\.\/radio-sync\.js/);
   assert.equal(radioSyncTags.size, 1, `radio-sync.js imported with mixed cache tags: ${[...radioSyncTags].join(', ')}`);
-  assert.match(panel, /document\.addEventListener\('wallet-connected', refresh\)/);
+  assert.match(panel, /listen\(document, 'wallet-connected', refresh\)/);
   assert.match(panel, /adMediaStatus\.textContent = 'Submitted for review\.';\s*await refresh\(\)/);
   assert.match(panel, /scanPending \? 3_000 : 30_000/);
 });

@@ -1,6 +1,6 @@
 import { ensureBaseNetwork, approvalNotice, waitForAllowance } from './base-chain.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
-import { announcePaymentCelebration } from './payment-celebration.mjs';
+import { announcePaymentCelebration } from './devert-payment.mjs';
 
 export const DEVERT_QUEUE_V1_ABI = [
   'function quote() view returns(uint256)',
@@ -45,7 +45,7 @@ export function quoteDevertRequest(count, tier = 0) {
   return 1_000_000n * 2n ** BigInt(Math.floor(count / 7)) * (tier === 1 ? 2n : 1n);
 }
 
-export async function purchaseDevertRequest({ signer, queue, usdc, campaignId, tier = 0, maxPriceUnits, onStep = () => {} }) {
+export async function purchaseDevertRequest({ signer, queue, usdc, campaignId, tier = 0, maxPriceUnits, onStep = () => {}, onConfirmed = announcePaymentCelebration }) {
   await ensureBaseNetwork(signer.provider);
   if (tier !== 0 && tier !== 1) throw new Error('Choose queue bump or immediate playback');
   if (Number(await queue.queueVersion()) !== 2) throw new Error('Two-tier advert checkout requires the replacement queue contract');
@@ -72,7 +72,7 @@ export async function purchaseDevertRequest({ signer, queue, usdc, campaignId, t
   const event = receipt.logs.filter(log => log.address.toLowerCase() === queue.target.toLowerCase())
     .map(log => queue.interface.parseLog(log)).find(log => log?.name === 'AdRequested');
   if (!event) throw new Error(`Payment confirmed but request receipt needs reconciliation: ${transaction.hash}`);
-  announcePaymentCelebration({
+  onConfirmed({
     chainId: 8453,
     txHash: transaction.hash,
     amountText: formatUsdcUnits(price),

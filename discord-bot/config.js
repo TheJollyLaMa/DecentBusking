@@ -63,6 +63,14 @@ export function loadConfig() {
         catch { return null; }
       })(),
     ].filter(Boolean))],
+    // Public radio voting only; never expand signed/admin/upload origin permissions.
+    radioAllowedOrigins: [...new Set([
+      'https://thejollylama.github.io',
+      'https://a-decent-agency.github.io',
+      'https://decentcanopy.eth.limo',
+      'https://dbusk.decentagency.eth.limo',
+      ...(process.env.RADIO_ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean),
+    ])],
     mintOwnerWallet:        process.env.MINT_OWNER_WALLET || '',
     publicWorkerUrl:        (process.env.PUBLIC_WORKER_URL || '').replace(/\/$/, ''),
     nftContractAddress:     process.env.DECENT_NFT_CONTRACT_ADDRESS || '0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3',

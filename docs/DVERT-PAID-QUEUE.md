@@ -1,5 +1,28 @@
 # DVert paid advert requests
 
+## Standalone controller boundary
+
+The cloneable DVert product is maintained at
+<https://github.com/A-Decent-Agency/DVert> (display identity:
+`DVert.decentagency.eth`). This is not a new backend or contract deployment.
+Its source lock records an exact DecentBusking commit and per-file hashes.
+
+`devert-site.mjs` is the production site's sole DVert startup module. It passes
+the existing radio adapter to the same campaign, two-tier queue and history
+controllers. The controllers are import-safe: importing them does not initialize
+the site player, connect a wallet or mount a second header. Optional environment
+arguments scope DOM lookup, event listeners, timers, fetch, payment notifications
+and wallet signing to an embedding host. Without those arguments the existing
+site behavior, services, prices, settlement and refund eligibility are unchanged.
+Each initializer returns a cleanup controller; an embedding lifecycle must also
+abort its injected listeners/requests and clear its timers.
+
+The standalone wrapper consumes DecentHead's existing wallet session. Signer
+acquisition is an explicit checkout/submission/removal action, never a mount
+effect. Binary ad upload requires an explicit host capability: DecentHead's JSON
+backup `upload()` API must not receive a File or Blob. Missing capabilities and
+backend availability remain errors, not simulated successful purchases.
+
 This is separate from campaign purchases, ordinary advert rotation, and DJuke
 song payments. Campaigns remain **$5 USDC for one week** of ordinary rotation.
 Priority payments are optional extras for an existing active approved campaign;

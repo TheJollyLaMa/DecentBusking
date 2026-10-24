@@ -14,12 +14,12 @@ export function buildDevertRemovalMessage({ address, origin, issuedAt, campaignI
   ].join('\n');
 }
 
-export async function removeDevertCampaign({ service, signer, campaignId }) {
+export async function removeDevertCampaign({ service, signer, campaignId, fetchImpl = fetch }) {
   const address = await signer.getAddress();
   const authorization = { address, origin: window.location.origin, campaignId: String(campaignId),
     issuedAt: new Date().toISOString() };
   const signature = await signer.signMessage(buildDevertRemovalMessage(authorization));
-  const response = await fetch(`${service.replace(/\/$/, '')}/api/devert/remove`, {
+  const response = await fetchImpl(`${service.replace(/\/$/, '')}/api/devert/remove`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ ...authorization, signature }), signal: AbortSignal.timeout(30_000),
   });

@@ -1366,6 +1366,7 @@ async function main() {
       return albumImportTask;
     },
     allowedOrigins: config.allowedOrigins,
+    radioAllowedOrigins: config.radioAllowedOrigins,
     ownerWallet: config.mintOwnerWallet || '0x0000000000000000000000000000000000000000',
     pinataJwt: config.pinataJwt,
     pinataSignUrl: config.pinataSignUrl,

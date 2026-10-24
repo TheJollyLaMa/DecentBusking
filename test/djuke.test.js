@@ -17,8 +17,10 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261024-playback-proof/);
-  assert.match(html, /devert-paid-queue\.mjs\?v=20261019-radio-recovery/);
+  assert.match(html, /djuke\.mjs\?v=20261024-standalone-djuke/);
+  assert.match(html, /devert-site\.mjs\?v=20261024-widget/);
+  const adapter = fs.readFileSync(path.join(__dirname, '../js/devert-site.mjs'), 'utf8');
+  assert.match(adapter, /devert-paid-queue\.mjs\?v=20261024-widget/);
 });
 
 test('DJuke starts at 0.25 USDC and doubles after each eight pending requests', async () => {
