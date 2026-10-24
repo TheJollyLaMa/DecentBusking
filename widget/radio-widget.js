@@ -16,7 +16,7 @@ button:disabled{opacity:.5}button:focus-visible,select:focus-visible,input:focus
 input{width:70px}.brand{font-size:11px}.now{overflow:auto;white-space:nowrap;max-width:100%;scrollbar-width:thin;padding:6px 0}
 .status{font-size:11px;min-height:1.4em}.settings{font-size:11px;margin-top:6px}.radio[data-compact=true]{padding:6px}.radio[data-compact=true] .brand{display:none}
 @media(prefers-reduced-motion:no-preference){.now:focus-within{scroll-behavior:smooth}}
-@media(prefers-color-scheme:light){.radio[data-theme=auto]{color:#172321;background:var(--dbusk-background,#f2f7f3)}}
+@media(prefers-color-scheme:light){.radio[data-theme=auto]{color:var(--dbusk-color,#172321);background:var(--dbusk-background,#f2f7f3)}}
 `;
 
 /** Mount a radio without connecting a wallet or starting audio. */
@@ -223,7 +223,7 @@ export function mount(element, options = {}) {
     track = null;
     net = null;
     status.textContent = '';
-    if (station.id === 'dbusk') void poll(generation);
+    if (station.id === 'dbusk') { now.textContent = 'Tuning in to DBusk…'; void poll(generation); }
     else {
       now.textContent = `${station.label || station.id} · live stream`;
       if (listening) { audio.src = station.url; void startAudio(generation); }
