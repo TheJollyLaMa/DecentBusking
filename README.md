@@ -104,6 +104,9 @@ Open the [DecentBusking town square](https://thejollylama.github.io/DecentBuskin
 
 The site radio streams and preloads recordings through the worker's public `GET /api/radio/media?cid=…` endpoint, which only serves recordings known to the radio playlist. The worker uses its dedicated IPFS gateway (or the original Discord upload) without sharing gateway credentials with browsers, and forwards HTTP ranges for seeking. The configured public gateway remains a browser fallback. Deploy both the worker and site when updating this route.
 
+The portable radio scopes asynchronous `play()` results to each loaded recording.
+A delayed rejection from replaced media cannot pause or clear the next track.
+
 The site distinguishes explicit decoder failures from gateway/network failures.
 Unsupported recordings are not automatically retried during the same radio play;
 decoder diagnostics stay in the console rather than displaying a listener warning,

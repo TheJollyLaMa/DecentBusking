@@ -81,7 +81,7 @@ export function mount(element, options = {}) {
   const votes = readRadioVotes(storage, radioUrl);
   let destroyed = false, listening = false, reachable = false, playable = false;
   let state = null, track = null, loaded = null, net = null, pending = false, optimistic = null;
-  let generation = 0, timer = null, metadata = null, offWallet = null, head = null, polling = false;
+  let generation = 0, mediaGeneration = 0, timer = null, metadata = null, offWallet = null, head = null, polling = false;
   const requests = new Set(), cleanups = [];
   let view = null;
   const on = (target, event, handler) => {
@@ -112,6 +112,7 @@ export function mount(element, options = {}) {
     view?.update?.({ station, listening, now: now.textContent, status: status.textContent });
   }
   function clearAudio() {
+    mediaGeneration++;
     metadata = null;
     loaded = null;
     playable = false;
@@ -136,12 +137,15 @@ export function mount(element, options = {}) {
     render();
   }
   async function startAudio(current) {
+    const media = mediaGeneration;
     try {
       await audio.play();
-      if (destroyed || current !== generation) return;
+      if (destroyed || current !== generation || media !== mediaGeneration) return;
       playable = !audio.paused;
       render();
-    } catch (error) { failure(error, current); }
+    } catch (error) {
+      if (media === mediaGeneration) failure(error, current);
+    }
   }
   function schedule(current, delay = 8000) {
     clearTimeout(timer);

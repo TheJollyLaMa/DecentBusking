@@ -245,6 +245,33 @@ test('media errors and compact/theme controls stay local to each mount', async t
   assert.match(text(h), /Media unavailable/);
 });
 
+test('a replaced recording cannot stop the next track with a delayed play rejection', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = setup(); t.after(() => h.controller.destroy());
+  await flush();
+  let rejectPrevious;
+  const originalPlay = h.audio().play.bind(h.audio());
+  h.audio().play = () => {
+    h.audio().play = originalPlay;
+    return new Promise((_resolve, reject) => { rejectPrevious = reject; });
+  };
+  h.button().fire('click');
+  await flush(); await flush();
+  const next = snapshot();
+  next.nowPlaying = { ...next.nowPlaying, playId: 'play-2', title: 'Next recording' };
+  h.setCurrent(next);
+  t.mock.timers.tick(8000);
+  await flush(); await flush();
+  assert.equal(h.audio().paused, false);
+  assert.equal(h.button().getAttribute('aria-label'), 'Pause DBusk radio');
+  rejectPrevious(Object.assign(new Error('The old media was replaced'), { name: 'AbortError' }));
+  await flush();
+  assert.equal(h.audio().paused, false);
+  assert.equal(h.button().getAttribute('aria-label'), 'Pause DBusk radio');
+  assert.equal(h.label('Upvote current track').disabled, false);
+  assert.doesNotMatch(text(h), /Media unavailable/);
+});
+
 test('another mounted listener cannot repeat a persisted vote in the same origin', async t => {
   const storage = new Map();
   const first = setup({ storage }), second = setup({ storage });
