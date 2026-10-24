@@ -58,7 +58,7 @@ cp .env.example .env
 | `IPFS_GATEWAY`               | ❌        | IPFS HTTP gateway base URL (default: `https://dweb.link`). Radio playback falls back to `gateway.pinata.cloud`, then to the account's dedicated Pinata gateway (discovered via `PINATA_JWT`) when public gateways rate-limit. A paid request that still can't be fetched stays queued and retries every 60s while free rotation keeps playing. |
 | `FFMPEG_PATH`                | ❌        | Path to `ffmpeg` binary (default: `ffmpeg` from `PATH`) |
 | `JUKE_LOOP_VOICE_CHANNEL_ID` | ❌        | Numeric ID of the `JukeLoop` **voice** channel — enables 24/7 radio |
-| `ANNOUNCE_CHANNEL_ID`        | ❌        | Manual calendar announcement destination, default `943117480883265539` (#themessagebox); independent of playback/payroll channels |
+| `ANNOUNCE_CHANNEL_ID`        | ❌        | Calendar promotion and automatic reminder destination, default `943117480883265539` (#themessagebox); independent of playback/payroll channels |
 | `ANNOUNCE_DEFAULT_MENTION`   | ❌        | `everyone` (default), `none`, or comma-separated **mentionable guild role IDs**; use JukeboxHero's numeric role ID to change the default without code changes |
 | `JUKE_LOOP_TEXT_CHANNEL_ID`  | ❌        | Numeric ID of the `JukeLoop` **text** channel — where "Now Playing" posts go |
 | `DEVERT_CONTRACT_ADDRESS`    | DeVert    | Deployed DeVert campaign contract address; endpoint stays unavailable when unset |
@@ -251,10 +251,63 @@ Advert cadence and queued-ad state use the separate
 They must not share the playlist's `decentbusking-jukeloop-state.json` namespace:
 the schemas differ and each store prunes its own snapshots.
 
-### One-off rule-based playlist shows
+### Calendar programming and rule-based radio hours
+
+Open **Admin → Radio Programming** with the owner wallet. The weekly calendar
+shows the Friday Top 10 (8 PM), Friday live block (9 PM), and Sunday Finish Line
+(11 PM), all in **America/New_York**. Drag a preset to a time, or click a preset
+or time slot and fill out the form. Click a card to edit it; drag it to move it.
+Click/tap forms provide the same controls without dragging. Advanced controls
+and immediate manual promotion remain in a collapsed section.
+
+Each new radio hour lasts 60 minutes. **Part of the default program** repeats
+it weekly, beginning on the selected date; unchecked means it plays once.
+Weekly cards represent the series, so moving/removing one edits the series.
+The Sunday Finish Line stays tied to payroll cutoff; its reminder can be disabled.
+Overlapping playlist hours, default blocks, and dated performances are rejected
+before signing and at the authenticated server endpoint. Hours may cross midnight.
+Recurring hours retain New York wall-clock starts; in spring's missing 2 AM hour,
+the occurrence moves forward one hour (exposed as `timeAdjustment`), and in the
+repeated fall hour the first occurrence is used. Each radio hour still lasts 60
+actual minutes. A nonexistent **one-off** start is rejected instead of guessed.
+
+Built-in presets:
+
+- **Top 10 Hour**: up to ten tracks with votes/qualified plays this New York
+  payroll week, ranked by net score, then plays.
+- **0 Votes / Songs Awaiting Your Vote**: known all-time human upvotes and
+  downvotes both zero; shuffled.
+- **Rising Stars**: finite recorded net votes in both this and the preceding
+  payroll week, current score positive and greater than the prior score.
+  Ordered by improvement, then plays. This is week-over-week growth, not a
+  claim of daily steady growth: daily vote history is not available.
+
+Preset rules are maintained in code with the operator; there is no front-end
+rule builder. The three built-in presets are ready to schedule. The model
+retains support for named, allowlisted selectors/rankings and song limits for
+future code-managed presets. No executable code is accepted. Existing shows
+retain their embedded rule revision when a saved preset changes.
+The opening pool/order and cursor are durable; additions do not refill an
+already-opened show. Empty/exhausted pools and unavailable checkpoint storage
+fall back to normal rotation with an explicit public reason, rather than
+claiming to fill a whole hour with unavailable qualifying music.
+
+Schedule schema 3 is retained. `weeklySchedule` optionally includes `presets`,
+`programs`, and default-show `reminders`; old schedules remain readable. Deploy
+the worker and its shared model modules before releasing the new admin client.
+Do not roll back to a worker that discards these fields after saving new programs.
+Deploying this worker also enables the default reminders described below;
+review the next scheduled shows and permissions before production rollout.
+
+Reuse decision: this calendar adapts Busking's own `radioCalendarOccurrences`,
+`currentPayrollPeriod`, `createPlaylistShow`, and `createRadioAnnouncements`
+from main baseline `9482896`. The focused native calendar needs no new
+dependency; no external calendar code was copied. Receiving-app coverage:
+`radio-programming`, `radio-calendar`, `radio-schedule`, `radio-announcements`,
+`playlist-show-runtime`, and authenticated `ipfs-worker` tests.
 
 `js/radio-playlists.mjs` contains reusable, allowlisted definitions and a selector
-boundary; the initial definition is `songs-awaiting-your-vote` (`no-votes-ever`).
+boundary, including `songs-awaiting-your-vote` (`no-votes-ever`).
 Calendar events use `type: "playlist_show"` and `playlistId`; they are not live
 performances. Schedule snapshot v3 reads v1/v2 calendars without changing existing
 live cancellations or weekly overrides. Owner authorization uses the existing
@@ -461,10 +514,32 @@ need it. Ad submissions queue owner NFT review separately from campaign purchase
 Existing DJuke v0.2 requests still boost only a payer's sole active campaign;
 multi-campaign targeting and a dedicated ad purchase UI are not implemented.
 
+### Automatic five-minute reminders
+
+All calendar shows announce to **@everyone** five minutes before their start
+unless **Announce to @everyone** is unchecked. This includes the three built-in
+weekly blocks, recurring preset hours and dated events. An omitted `announce`
+flag on an older event means enabled. Automatic reminders always select
+@everyone; `ANNOUNCE_DEFAULT_MENTION` controls **manual promotion only**.
+
+One worker checks its local calendar every 15 seconds, with no Discord request
+unless a reminder is due. During a persisted Discord cooldown or reconnect it
+does not attempt delivery. There is no late catch-up after a show's start.
+Storage/permission/delivery errors are logged and surfaced at
+`/api/radio/schedule.reminders` and in the calendar; failures back off 60 seconds.
+Opt-out, cancellation, start time and schedule revision are rechecked after the
+pending checkpoint and before sending. The journal below stores independent
+`reminder:<occurrence-id>:<start-utc>` receipts, preventing repeated ticks/restarts
+from duplicating reminders without suppressing a separate manual promotion.
+Rescheduling to a different start permits one reminder for that new start.
+An uncertain delivery is reconciled, never blindly retried. A missed window
+does not imply a successful announcement.
+
 ### Manual calendar announcements
 
 **Operator workflow:** open the site's owner-only **Admin → Radio Programming**,
-refresh, check one dated occurrence, edit its reason, choose mention targets,
+expand **Advanced scheduling and announce-now controls**, refresh, check one
+dated occurrence, edit its reason, choose mention targets,
 **Preview announcement**, then **Confirm — send to Discord**. Options, preview,
 and send each require an off-chain owner-wallet signature (no transaction/gas).
 The server uses `MINT_OWNER_WALLET`, the same owner authorization as schedule
@@ -503,8 +578,8 @@ revalidates the current schedule and records the message link/time after success
 Double-clicks, retries (even after restart), and a lost response reuse the same
 confirmation ID, including deliberate re-announcements. A *new* preview with
 **Intentionally re-announce** checked authorizes one additional post. Existing
-start-of-show messages and audio are unchanged; no scheduled reminders or Discord
-Scheduled Events are created.
+start-of-show messages and audio are unchanged. Manual promotion is separate
+from the automatic reminder above; no Discord Scheduled Events are created.
 
 **Failures/recovery:** refresh and preview/reconfirm after a changed, canceled,
 ended, or removed occurrence. Fix channel/mention permissions or reconnect the bot

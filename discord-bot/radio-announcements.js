@@ -33,11 +33,16 @@ export function announcementMentions(selection, guild) {
 
 // One service/worker owns this journal. Every send is serialized and checkpointed before Discord sees it.
 export function createRadioAnnouncements({ store, getSchedule, getClient, ownerWallet, channelId = '943117480883265539',
-  defaultMention = 'everyone', voiceChannelId, listenUrl, now = () => Date.now() }) {
+  defaultMention = 'everyone', voiceChannelId, listenUrl, now = () => Date.now(),
+  canAnnounce = () => true, log = console }) {
   let state;
   let restoreError;
   let queue = Promise.resolve();
   const seen = new Map();
+  let reminderTask = null;
+  let reminderRetryAt = 0;
+  let reminderError = null;
+  let lastReminder = null;
   const ready = (async () => {
     try {
       if (!store) throw new Error('Durable announcement storage is unavailable');
@@ -49,8 +54,10 @@ export function createRadioAnnouncements({ store, getSchedule, getClient, ownerW
     if (typeof uri !== 'string' || !uri.startsWith('ipfs://')) throw new Error('Durable checkpoint did not confirm an IPFS receipt');
   };
   const lastDelivery = id => Object.hasOwn(state.deliveries, id) ? state.deliveries[id] : null;
+  const reminderId = (id, startUtc) => `reminder:${id}:${startUtc}`;
 
   async function destination() {
+    if (!canAnnounce()) throw new Error('Discord cooldown active; wait before announcing');
     const client = getClient();
     if (!client?.isReady()) throw new Error('Discord bot is reconnecting; retry shortly');
     const channel = await client.channels.fetch(channelId);
@@ -65,12 +72,14 @@ export function createRadioAnnouncements({ store, getSchedule, getClient, ownerW
     return { channel, permissions, voiceUrl: `https://discord.com/channels/${channel.guild.id}/${voiceId}` };
   }
 
-  async function draftFor(payload, dest) {
+  async function draftFor(payload, dest, automatic = false) {
     const schedule = await getSchedule();
     if (schedule.ready !== true) throw new Error('Shared calendar is restoring; refresh before announcing');
     const event = radioCalendarOccurrences(schedule, { now: now(), days: 90, pastDays: 0 }).find(item => item.id === payload.occurrenceId);
     if (!event || event.startUtc !== payload.startUtc) throw new Error('Occurrence changed or removed; refresh the calendar and preview again');
     if (event.status === 'cancelled' || Date.parse(event.endUtc) <= now()) throw new Error('Cannot announce a canceled or ended occurrence');
+    if (automatic && (event.announce === false || Date.parse(event.startUtc) <= now() ||
+      Date.parse(event.startUtc) - now() > 5 * 60_000)) throw new Error('Reminder is disabled or outside its five-minute window');
     const show = schedule.schedule?.find(item => item.id === event.showId);
     const revision = await announcementHash({ event, show: show || null });
     if (payload.revision && payload.revision !== revision) throw new Error('Stale preview: occurrence changed; refresh and reconfirm');
@@ -106,7 +115,7 @@ export function createRadioAnnouncements({ store, getSchedule, getClient, ownerW
 
   async function send(body, dest) {
     dest = await destination();
-    const id = body.payload.occurrenceId;
+    const id = body.automatic ? reminderId(body.payload.occurrenceId, body.payload.startUtc) : body.payload.occurrenceId;
     const previousRequest = state.requests[body.nonce];
     if (previousRequest && previousRequest.hash !== body.contentHash) throw new Error('Nonce already used for different content');
     let pending = previousRequest || Object.values(state.requests).find(item => item.occurrenceId === id && item.status === 'pending');
@@ -121,7 +130,7 @@ export function createRadioAnnouncements({ store, getSchedule, getClient, ownerW
       return { delivery: pending, duplicate: true };
     }
     if (Date.parse(body.expiresAt) <= now()) throw new Error('Announcement authorization expired; confirm again');
-    const built = await draftFor(body.payload, dest);
+    const built = await draftFor(body.payload, dest, body.automatic);
     if (await announcementHash(built.draft) !== body.contentHash) throw new Error('Stale preview or destination changed; refresh and reconfirm');
     if (lastDelivery(id) && !built.draft.reannounce) return { delivery: lastDelivery(id), duplicate: true };
     const request = { occurrenceId: id, nonce: body.nonce, hash: body.contentHash, status: 'pending',
@@ -132,8 +141,9 @@ export function createRadioAnnouncements({ store, getSchedule, getClient, ownerW
     try {
       if (Date.parse(body.expiresAt) <= now()) throw new Error('Announcement authorization expired during checkpoint; confirm again');
       dest = await destination();
-      const current = await draftFor(body.payload, dest);
+      const current = await draftFor(body.payload, dest, body.automatic);
       if (await announcementHash(current.draft) !== body.contentHash) throw new Error('Stale preview; refresh and reconfirm');
+      if (!canAnnounce()) throw new Error('Discord cooldown began before delivery; wait before announcing');
     } catch (error) {
       delete state.requests[body.nonce];
       await save();
@@ -160,7 +170,43 @@ export function createRadioAnnouncements({ store, getSchedule, getClient, ownerW
     return { delivery, duplicate: false };
   }
 
-  return { ready, async handle(action, body, origin) {
+  return { ready,
+    reminderStatus: () => ({ retryAt: reminderRetryAt || null, error: reminderError, lastDelivery: lastReminder }),
+    tick() {
+      if (reminderTask) return reminderTask;
+      reminderTask = (async () => {
+        await ready;
+        if (restoreError) throw new Error(`Announcements disabled: ${restoreError.message}`);
+        if (now() < reminderRetryAt || !canAnnounce() || !getClient()?.isReady()) return;
+        const schedule = await getSchedule();
+        if (schedule.ready !== true) return;
+        const due = radioCalendarOccurrences(schedule, { now: now(), days: 1, pastDays: 0 }).filter(event =>
+          event.status !== 'cancelled' && event.announce !== false &&
+          Date.parse(event.startUtc) > now() && Date.parse(event.startUtc) <= now() + 5 * 60_000 &&
+          !lastDelivery(reminderId(event.id, event.startUtc)));
+        for (const event of due) {
+          const operation = queue.then(async () => {
+            if (lastDelivery(reminderId(event.id, event.startUtc))) return;
+            const dest = await destination();
+            const built = await draftFor({ occurrenceId: event.id, startUtc: event.startUtc,
+              mentions: { everyone: true, roles: [] }, reason: `Starting soon! ${defaultAnnouncementReason(event)}` }, dest, true);
+            const result = await send({ automatic: true, payload: built.draft, nonce: built.draft.requestId,
+              contentHash: await announcementHash(built.draft), expiresAt: event.startUtc }, dest);
+            lastReminder = result.delivery;
+            reminderError = null;
+            reminderRetryAt = 0;
+          });
+          queue = operation.catch(() => {});
+          await operation;
+        }
+      })().catch(error => {
+        if (now() >= reminderRetryAt) log.error(`[radio-reminder] ${error.message}`);
+        reminderError = error.message;
+        reminderRetryAt = Math.max(reminderRetryAt, now() + 60_000);
+      }).finally(() => { reminderTask = null; });
+      return reminderTask;
+    },
+    async handle(action, body, origin) {
     await ready;
     const expires = Date.parse(body.expiresAt);
     if (!['options', 'preview', 'send'].includes(action) || !/^0x[\da-f]{40}$/i.test(body.address || '') ||
@@ -188,7 +234,7 @@ export function createRadioAnnouncements({ store, getSchedule, getClient, ownerW
         lastAnnouncement: lastDelivery(built.draft.occurrenceId) };
     }
     if (!body.payload.requestId) throw new Error('Preview and explicitly confirm before sending');
-    const result = queue.then(() => send({ ...body, nonce: body.payload.requestId }, dest));
+    const result = queue.then(() => send({ ...body, automatic: false, nonce: body.payload.requestId }, dest));
     queue = result.catch(() => {});
     return result;
   } };

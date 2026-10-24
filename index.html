@@ -7,6 +7,7 @@
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css?v=20261025-seamless-handoff" />
+  <link rel="stylesheet" href="css/radio-programming.css?v=20261024-programming-calendar" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -656,9 +657,12 @@
       <details id="admin-radio-schedule" class="hidden" aria-labelledby="admin-radio-schedule-title">
         <summary>📻 Radio Programming</summary>
         <div class="admin-section-header">
-          <div><h3 id="admin-radio-schedule-title">Radio Programming</h3><p>Customize Friday’s weekly show hours and schedule one-off performances or playlist shows.</p></div>
+          <div><h3 id="admin-radio-schedule-title">Radio Programming</h3><p>Build your week. Drop a radio hour onto the calendar, choose its rules, and let the station handle reminders.</p></div>
           <button id="admin-radio-schedule-refresh" class="admin-btn admin-btn-secondary" type="button" aria-label="Refresh radio schedule" title="Refresh schedule">↻</button>
         </div>
+        <div id="admin-programming-calendar"></div>
+        <details class="radio-calendar-advanced">
+        <summary>Advanced scheduling and announce-now controls</summary>
         <form id="admin-radio-weekly-form" class="admin-schedule-form admin-weekly-form">
           <label>Friday Top 10 starts (New York time)<select id="admin-radio-top10-start"></select></label>
           <label>Friday Top 10 ends (New York time)<select id="admin-radio-top10-end"></select></label>
@@ -678,6 +682,7 @@
         </form>
         <p id="admin-radio-schedule-status" class="admin-status" role="status"></p>
         <ul id="admin-radio-schedule-events" class="admin-schedule-events"></ul>
+        </details>
         </details>
       <details id="admin-mint-section" class="hidden" open>
         <summary>💼 NFT Requests <span id="admin-mint-pending-badge" hidden aria-hidden="true"></span></summary>
@@ -902,12 +907,12 @@
   <link rel="stylesheet" href="css/live-performance.css?v=20261023-neon-handoffs">
   <script type="module" src="js/live-booking-notifications.mjs?v=20261024-live-prototype"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261024-live-prototype"></script>
-  <script type="module" src="js/admin.js?v=20261024-live-prototype"></script>
+  <script type="module" src="js/admin.js?v=20261024-programming-calendar"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
   <script type="module" src="js/payroll.js?v=20261019-payroll-confirmations"></script>
   <script type="module" src="js/radio-history.js?v=20261017-mercury-release"></script>
-  <script type="module" src="js/radio-schedule-ui.mjs?v=20261024-live-prototype"></script>
+  <script type="module" src="js/radio-schedule-ui.mjs?v=20261024-programming-calendar"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261019-fund-tour">
   <script type="module" src="js/fund-header.mjs?v=20261024-djuke-labels"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261024-djuke-labels"></script>

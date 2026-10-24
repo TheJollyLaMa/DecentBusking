@@ -3,7 +3,7 @@ import { Contract, Interface, JsonRpcProvider, verifyMessage } from 'ethers';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
-import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides } from '../js/radio-schedule.mjs';
+import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides, validateRadioProgrammingConflicts } from '../js/radio-schedule.mjs';
 import { buildFundWeeklyArchive } from '../js/fund-archive.mjs';
 import { catalogPage } from '../js/nft-loader.js';
 import { uploadToIPFS } from './ipfs.js';
@@ -501,6 +501,7 @@ export function createWorkerRequestHandler({
         const message = buildRadioScheduleAuthorizationMessage({ address: body.address, origin, issuedAt: body.issuedAt, events, weeklySchedule });
         const recovered = verifyMessage(message, body.signature).toLowerCase();
         if (recovered !== body.address.toLowerCase() || recovered !== expectedOwner) throw new Error('Schedule authorization is not from the radio owner');
+        validateRadioProgrammingConflicts(events, weeklySchedule, { now: now() });
         consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
         await saveRadioSchedule({ events, weeklySchedule });
         sendJson(response, 200, await getRadioSchedule(), corsOrigin);

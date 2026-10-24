@@ -243,6 +243,45 @@ test('public radio schedule is readable and schedule edits require an origin-bou
   });
 });
 
+test('owner-signed calendar preserves custom presets/weekly rules and rejects conflicting radio hours', async () => {
+  const { buildRadioScheduleAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
+  const { validateRadioPreset } = await import('../js/radio-playlists.mjs');
+  const { validateWeeklyScheduleOverrides } = await import('../js/radio-schedule.mjs');
+  const owner = Wallet.createRandom();
+  const origin = 'https://busking.example';
+  const now = Date.parse('2026-10-22T12:00:00Z');
+  const preset = validateRadioPreset({ id: 'preset-quiet', title: 'Quiet discoveries', revision: 1,
+    selector: 'no-votes-ever', ranking: 'shuffle', limit: 20 });
+  const weeklySchedule = validateWeeklyScheduleOverrides({ presets: [preset], programs: [{
+    id: 'program-quiet', title: preset.title, weekday: 2, startMinuteLocal: 660,
+    startDateLocal: '2026-10-27', playlistId: preset.id, playlistDefinition: preset, announce: false,
+  }], reminders: { 'friday-top10-hype': false } });
+  const saved = [];
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: owner.address, now: () => now,
+    getRadioSchedule: () => ({ schedule: [], events: [], weeklySchedule, ready: true }),
+    saveRadioSchedule: async next => { saved.push(next); } });
+  await withServer(handler, async base => {
+    const submit = async (events, tamper = false) => {
+      const authorization = { address: owner.address, origin, issuedAt: new Date(now).toISOString(), events, weeklySchedule };
+      const signature = await owner.signMessage(buildRadioScheduleAuthorizationMessage(authorization));
+      const body = structuredClone({ ...authorization, signature });
+      if (tamper) body.weeklySchedule.programs[0].announce = true;
+      return fetch(`${base}/api/radio/schedule`, { method: 'POST', headers: { origin, 'content-type': 'application/json' },
+        body: JSON.stringify(body) });
+    };
+    assert.equal((await submit([], true)).status, 400);
+    assert.equal(saved.length, 0);
+    assert.equal((await submit([])).status, 200);
+    assert.deepEqual(saved, [{ events: [], weeklySchedule }]);
+    const conflict = [{ id: 'overlap', type: 'playlist_show', playlistId: 'top10-hour', title: 'Top 10',
+      startUtc: '2026-10-27T15:00:00.000Z', endUtc: '2026-10-27T16:00:00.000Z', priority: 50 }];
+    const response = await submit(conflict);
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /overlaps/);
+    assert.equal(saved.length, 1);
+  });
+});
+
 test('payment ledger is public but reconciliation requires an allowed origin and a valid hash', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const hashes = [];

@@ -1,6 +1,6 @@
 import { isAdminWallet } from './admin-access.mjs';
-import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261022-playlist-show';
-import { utcToNewYorkInput, newYorkInputToUtc, radioCalendarOccurrences, buildRadioCalendar, googleRadioCalendarUrl } from './radio-calendar.mjs';
+import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261024-programming-calendar';
+import { utcToNewYorkInput, newYorkInputToUtc, radioCalendarOccurrences, buildRadioCalendar, googleRadioCalendarUrl } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { renderPerformerBookingInvite } from './live-performance-profile.mjs?v=20261024-live-prototype';
 export { utcToNewYorkInput, newYorkInputToUtc };
 const TIME_ZONE = 'America/New_York';
@@ -33,6 +33,13 @@ function formatHour(hour) {
 
 export function formatWeeklySlot(show) {
   if (show.window === 'final-payroll-hour') return 'Sunday 11:00 PM - Monday 12:00 AM';
+  if (Number.isInteger(show.weekday) && Number.isInteger(show.startMinuteLocal) && Number.isInteger(show.endMinuteLocal)) {
+    const format = value => {
+      const hour = Math.floor(value % 1440 / 60);
+      return `${hour % 12 || 12}:${String(value % 60).padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`;
+    };
+    return `${WEEKDAYS[show.weekday]} ${format(show.startMinuteLocal)} - ${show.endMinuteLocal >= 1440 ? `${WEEKDAYS[(show.weekday + 1) % 7]} ` : ''}${format(show.endMinuteLocal)}`;
+  }
   if (Number.isInteger(show.weekday) && Number.isInteger(show.startHourLocal) && Number.isInteger(show.endHourLocal)) {
     const day = WEEKDAYS[show.weekday];
     return `${day} ${formatHour(show.startHourLocal)} - ${formatHour(show.endHourLocal)}`;

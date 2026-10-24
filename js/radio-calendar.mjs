@@ -46,18 +46,28 @@ export function radioCalendarOccurrences(payload, { now = Date.now(), days = 90,
     const key = date.toISOString().slice(0, 10);
     for (const show of payload.schedule || []) {
       if (show.type === 'normal_rotation') continue;
+      if (show.startDateLocal && key < show.startDateLocal) continue;
       const finale = show.window === 'final-payroll-hour';
       if ((finale ? 0 : show.weekday) !== date.getUTCDay()) continue;
       const id = `${show.id}:${key}`;
       if (events.has(id)) continue;
-      const startHour = finale ? 23 : show.startHourLocal;
-      const endHour = finale ? 24 : show.endHourLocal;
-      if (!Number.isInteger(startHour) || !Number.isInteger(endHour)) throw new Error('Invalid weekly calendar hours');
-      const endDate = new Date(date);
-      if (endHour === 24) endDate.setUTCDate(endDate.getUTCDate() + 1);
-      events.set(id, { id, showId: show.id, title: show.label,
-        startUtc: newYorkInputToUtc(`${key}T${String(startHour).padStart(2, '0')}:00`),
-        endUtc: newYorkInputToUtc(`${endDate.toISOString().slice(0, 10)}T${String(endHour % 24).padStart(2, '0')}:00`) });
+      const startMinute = finale ? 1380 : show.startMinuteLocal ?? show.startHourLocal * 60;
+      const endMinute = finale ? 1440 : show.endMinuteLocal ?? show.endHourLocal * 60;
+      if (!Number.isInteger(startMinute) || !Number.isInteger(endMinute)) throw new Error('Invalid weekly calendar hours');
+      const time = minute => `${String(Math.floor(minute / 60) % 24).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+      let startUtc;
+      let timeAdjustment;
+      try { startUtc = newYorkInputToUtc(`${key}T${time(startMinute)}`); }
+      catch (error) {
+        if (!error.message.includes('daylight-saving')) throw error;
+        startUtc = newYorkInputToUtc(`${key}T${time(startMinute + 60)}`);
+        timeAdjustment = 'Moved forward one hour for the New York daylight-saving change';
+      }
+      events.set(id, { id, showId: show.id, title: show.label, type: show.type,
+        ...(show.playlistId ? { playlistId: show.playlistId, playlistDefinition: show.playlistDefinition } : {}),
+        announce: show.announce !== false,
+        ...(timeAdjustment ? { timeAdjustment } : {}),
+        startUtc, endUtc: new Date(Date.parse(startUtc) + (endMinute - startMinute) * 60000).toISOString() });
     }
   }
   return [...events.values()]

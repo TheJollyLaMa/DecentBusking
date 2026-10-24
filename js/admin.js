@@ -13,8 +13,9 @@ import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261025-seamless-handoff';
 import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artwork-update.mjs';
 import { isAdminWallet } from './admin-access.mjs';
-import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261024-live-prototype';
-import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261022-playlist-show';
+import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261024-programming-calendar';
+import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261024-programming-calendar';
+import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261024-programming-calendar';
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 
@@ -46,6 +47,7 @@ let _mintQueueLoading = false;
 let _mintBusy = false;
 let _adminOpen = false;
 let _radioSchedule = null;
+let _programmingCalendar = null;
 let _walletCheckId = 0;
 const _artworkPreviewUrls = new Map();
 const _artworkPreviewGenerations = new Map();
@@ -239,6 +241,8 @@ function _resetAdminWallet() {
   _roleSection?.classList.add('hidden');
   _radioScheduleSection?.classList.add('hidden');
   _radioSchedule = null;
+  _programmingCalendar = null;
+  document.getElementById('admin-programming-calendar')?.replaceChildren();
   document.getElementById('admin-devert-campaigns')?.classList.add('hidden');
   document.getElementById('admin-devert-list')?.replaceChildren();
   _radioScheduleEventsEl?.replaceChildren();
@@ -352,6 +356,15 @@ function _populateRadioWeeklyForm(schedule) {
 }
 
 function _renderRadioScheduleEvents() {
+  const calendarRoot = document.getElementById('admin-programming-calendar');
+  if (calendarRoot && _radioSchedule) {
+    if (!_programmingCalendar) _programmingCalendar = mountRadioProgrammingCalendar(calendarRoot, {
+      getSchedule: () => _radioSchedule,
+      save: _saveRadioSchedule,
+      isCurrent: () => !!_adminSigner && !!_adminAddress,
+    });
+    else _programmingCalendar.refresh();
+  }
   if (!_radioScheduleEventsEl) return;
   const signer = _adminSigner;
   const address = _adminAddress;
@@ -433,6 +446,7 @@ async function _saveRadioWeeklySchedule(event) {
   if (!_radioSchedule?.ready || !_adminSigner || !_adminAddress) return;
   try {
     const weeklySchedule = validateWeeklyScheduleOverrides({
+      ..._radioSchedule.weeklySchedule,
       'friday-top10-hype': { weekday: 5,
         startHourLocal: Number(document.getElementById('admin-radio-top10-start').value),
         endHourLocal: Number(document.getElementById('admin-radio-top10-end').value) },
@@ -467,6 +481,7 @@ async function _saveRadioSchedule(events, weeklySchedule = _radioSchedule?.weekl
   const signer = _adminSigner;
   const address = _adminAddress;
   const checkId = _walletCheckId;
+  if (!signer || !address) throw new Error('Connect the owner wallet before saving the calendar');
   const issuedAt = new Date().toISOString();
   const authorization = { address, origin: window.location.origin, issuedAt, events,
     weeklySchedule: validateWeeklyScheduleOverrides(weeklySchedule) };
@@ -481,7 +496,7 @@ async function _saveRadioSchedule(events, weeklySchedule = _radioSchedule?.weekl
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error || `Schedule update failed (${response.status})`);
-  if (checkId !== _walletCheckId) return;
+  if (checkId !== _walletCheckId) throw new Error('Calendar saved, but wallet changed. Refresh with the owner wallet to view it.');
   _radioSchedule = payload;
   _populateRadioWeeklyForm(payload.schedule || defaultRadioSchedule(payload.weeklySchedule));
   _renderRadioScheduleEvents();

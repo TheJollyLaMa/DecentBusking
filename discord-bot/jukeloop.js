@@ -1842,8 +1842,9 @@ export class JukeLoopSession {
           }
           if (prepared?.playlistShow) {
             const selection = prepared.playlistShow;
-            const definition = radioPlaylistDefinition(selection.playlistId);
-            const reason = () => playlistTrackReason(getPlaylist().find(track => track.trackId === selection.trackId), definition);
+            const definition = radioPlaylistDefinition(selection.playlistId, selection.playlistDefinition);
+            const reason = () => playlistTrackReason(getPlaylist().find(track => track.trackId === selection.trackId),
+              definition, Date.parse(selection.capturedAt));
             const skipReason = reason();
             await this._playlistShow.advance(selection, skipReason);
             const afterCheckpoint = reason() || (this._destroyed || epoch !== this._preparationEpoch ||

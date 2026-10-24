@@ -1,4 +1,5 @@
-import { radioPlaylistDefinition } from './radio-playlists.mjs';
+import { radioPlaylistDefinition, validateRadioPreset } from './radio-playlists.mjs?v=20261024-programming-calendar';
+import { radioCalendarOccurrences } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { currentPayrollPeriod, PAYROLL_TIME_ZONE } from './payroll-week.mjs';
 
 const USDC = 1_000_000n;
@@ -13,6 +14,7 @@ const WEEKLY_SLOT_IDS = ['friday-top10-hype', 'friday-live-performance'];
 
 function normalizeLivePerformanceEvent(event) {
   if (!event || typeof event !== 'object') throw new Error('Invalid live performance event');
+  if (event.announce !== undefined && typeof event.announce !== 'boolean') throw new Error('Announcement preference must be true or false');
   const id = String(event.id || '').trim();
   const title = String(event.title || '').trim();
   const startUtc = String(event.startUtc || '');
@@ -26,7 +28,7 @@ function normalizeLivePerformanceEvent(event) {
   if (end - start > MAX_LIVE_EVENT_DURATION_MS) throw new Error('Live performance events cannot exceed four hours');
   const type = event.type || 'live_performance';
   if (!['live_performance', 'playlist_show'].includes(type)) throw new Error('Invalid schedule event type');
-  const playlist = type === 'playlist_show' ? radioPlaylistDefinition(event.playlistId) : null;
+  const playlist = type === 'playlist_show' ? radioPlaylistDefinition(event.playlistId, event.playlistDefinition) : null;
   const priority = playlist ? 50 : Number(event.priority ?? 200);
   if (!Number.isFinite(priority)) throw new Error('Invalid live performance event priority');
   const cancellation = {};
@@ -36,7 +38,10 @@ function normalizeLivePerformanceEvent(event) {
     cancellation.status = 'cancelled';
     cancellation.cancellationReason = reason;
   } else if (event.status && event.status !== 'scheduled') throw new Error('Invalid event status');
-  return { id, type, ...(playlist ? { playlistId: playlist.id } : {}), title, startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(), priority, ...cancellation };
+  return { id, type, ...(playlist ? { playlistId: playlist.id,
+    ...(event.playlistDefinition ? { playlistDefinition: playlist } : {}) } : {}),
+    ...(event.announce !== undefined ? { announce: event.announce !== false } : {}),
+    title, startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(), priority, ...cancellation };
 }
 
 export function cancelLivePerformanceEvent(events, event, reason) {
@@ -81,20 +86,87 @@ export function validateWeeklyScheduleOverrides(overrides = {}) {
   if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) throw new Error('Invalid weekly programming');
   const result = {};
   for (const [id, slot] of Object.entries(overrides)) {
+    if (id === 'presets') {
+      if (!Array.isArray(slot) || slot.length > 30) throw new Error('At most 30 custom presets are supported');
+      result.presets = slot.map(validateRadioPreset);
+      if (new Set(result.presets.map(item => item.id)).size !== slot.length ||
+        result.presets.some(item => ['songs-awaiting-your-vote', 'top10-hour', 'rising-stars'].includes(item.id))) {
+        throw new Error('Preset IDs must be unique and cannot replace built-in presets');
+      }
+      continue;
+    }
+    if (id === 'programs') {
+      if (!Array.isArray(slot) || slot.length > 30) throw new Error('At most 30 weekly programs are supported');
+      result.programs = slot.map(program => {
+        if (!program || typeof program !== 'object' ||
+          program.announce !== undefined && typeof program.announce !== 'boolean') throw new Error('Invalid weekly program announcement preference');
+        const definition = radioPlaylistDefinition(program.playlistId, program.playlistDefinition);
+        if (!/^[a-z0-9-]{1,100}$/.test(program.id || '') || !program.id.startsWith('program-') ||
+          typeof program.title !== 'string' || !program.title.trim() || program.title.length > 100 ||
+          !Number.isInteger(program.weekday) || program.weekday < 0 || program.weekday > 6 ||
+          !Number.isInteger(program.startMinuteLocal) || program.startMinuteLocal < 0 || program.startMinuteLocal > 1439) {
+          throw new Error('Invalid weekly radio hour');
+        }
+        if (program.startDateLocal !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(program.startDateLocal) ||
+          !Number.isFinite(Date.parse(`${program.startDateLocal}T12:00:00Z`)) ||
+          new Date(`${program.startDateLocal}T12:00:00Z`).toISOString().slice(0, 10) !== program.startDateLocal)) {
+          throw new Error('Invalid weekly program start date');
+        }
+        return { id: program.id, title: program.title.trim(), weekday: program.weekday,
+          startMinuteLocal: program.startMinuteLocal, playlistId: definition.id,
+          ...(program.startDateLocal ? { startDateLocal: program.startDateLocal } : {}),
+          ...(program.playlistDefinition ? { playlistDefinition: definition } : {}), announce: program.announce !== false };
+      });
+      if (new Set(result.programs.map(item => item.id)).size !== slot.length) throw new Error('Weekly radio hours cannot share an ID');
+      continue;
+    }
+    if (id === 'reminders') {
+      if (!slot || typeof slot !== 'object' || Array.isArray(slot) ||
+        Object.entries(slot).some(([key, value]) => ![...WEEKLY_SLOT_IDS, 'weekly-top10-final-listen'].includes(key) || typeof value !== 'boolean')) {
+        throw new Error('Invalid default reminder settings');
+      }
+      result.reminders = { ...slot };
+      continue;
+    }
     if (!WEEKLY_SLOT_IDS.includes(id) || !slot || typeof slot !== 'object' ||
-      slot.weekday !== 5 || !Number.isInteger(slot.startHourLocal) || slot.startHourLocal < 0 || slot.startHourLocal > 23 ||
+      !Number.isInteger(slot.weekday) || slot.weekday < 0 || slot.weekday > 6 ||
+      !Number.isInteger(slot.startHourLocal) || slot.startHourLocal < 0 || slot.startHourLocal > 23 ||
       !Number.isInteger(slot.endHourLocal) || slot.endHourLocal < 1 || slot.endHourLocal > 24 ||
       slot.endHourLocal <= slot.startHourLocal || slot.endHourLocal - slot.startHourLocal > 4) {
       throw new Error('Invalid weekly programming');
     }
-    result[id] = { weekday: 5, startHourLocal: slot.startHourLocal, endHourLocal: slot.endHourLocal };
+    result[id] = { weekday: slot.weekday, startHourLocal: slot.startHourLocal, endHourLocal: slot.endHourLocal };
   }
-  const hype = result['friday-top10-hype'];
-  const live = result['friday-live-performance'];
-  if (hype && live && hype.startHourLocal < live.endHourLocal && live.startHourLocal < hype.endHourLocal) {
+  const hype = result['friday-top10-hype'] || { weekday: 5, startHourLocal: 20, endHourLocal: 21 };
+  const live = result['friday-live-performance'] || { weekday: 5, startHourLocal: 21, endHourLocal: 22 };
+  if (hype.weekday === live.weekday && hype.startHourLocal < live.endHourLocal && live.startHourLocal < hype.endHourLocal) {
     throw new Error('Weekly programming slots cannot overlap');
   }
+  const slots = [
+    ...[hype, live, { weekday: 0, startHourLocal: 23, endHourLocal: 24 }].map(slot =>
+      ({ start: slot.weekday * 1440 + slot.startHourLocal * 60, end: slot.weekday * 1440 + slot.endHourLocal * 60 })),
+    ...(result.programs || []).map(program =>
+      ({ start: program.weekday * 1440 + program.startMinuteLocal, end: program.weekday * 1440 + program.startMinuteLocal + 60 })),
+  ];
+  if (slots.some((first, index) => slots.slice(index + 1).some(second =>
+    [-10080, 0, 10080].some(shift => first.start < second.end + shift && second.start + shift < first.end)))) {
+    throw new Error('Weekly radio hours cannot overlap other weekly programs or default Top 10/live blocks');
+  }
   return result;
+}
+
+export function validateRadioProgrammingConflicts(events, weeklySchedule, { now = Date.now() } = {}) {
+  const occurrences = radioCalendarOccurrences({ events, schedule: defaultRadioSchedule(weeklySchedule) },
+    { now, days: 61, pastDays: 1 }).filter(event => event.status !== 'cancelled' && Date.parse(event.endUtc) > now);
+  for (let index = 0; index < occurrences.length; index++) {
+    const first = occurrences[index];
+    for (const second of occurrences.slice(index + 1)) {
+      if (Date.parse(second.startUtc) >= Date.parse(first.endUtc)) break;
+      if (first.type === 'playlist_show' || second.type === 'playlist_show') {
+        throw new Error(`Radio hour overlaps another show: ${first.title} / ${second.title}`);
+      }
+    }
+  }
 }
 
 export function serializeLiveSchedule(value, { savedAt = new Date().toISOString() } = {}) {
@@ -135,16 +207,19 @@ function normalizeTrack(track) {
 
 export function defaultRadioSchedule(weeklySchedule = {}) {
   const overrides = validateWeeklyScheduleOverrides(weeklySchedule);
+  const day = id => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][overrides[id]?.weekday ?? 5];
   return [
     { id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation', priority: 10 },
-    { id: 'friday-top10-hype', type: 'weekly_top10', label: 'Friday Top 10 Hype Hour', priority: 90,
-      weekday: 5, startHourLocal: overrides['friday-top10-hype']?.startHourLocal ?? 20,
+    { id: 'friday-top10-hype', type: 'weekly_top10', label: `${day('friday-top10-hype')} Top 10 Hype Hour`, priority: 90,
+      weekday: overrides['friday-top10-hype']?.weekday ?? 5, startHourLocal: overrides['friday-top10-hype']?.startHourLocal ?? 20,
       endHourLocal: overrides['friday-top10-hype']?.endHourLocal ?? 21, timeZone: PAYROLL_TIME_ZONE },
-    { id: 'friday-live-performance', type: 'live_performance', label: 'Friday Live Performance Block', priority: 200,
-      weekday: 5, startHourLocal: overrides['friday-live-performance']?.startHourLocal ?? 21,
+    { id: 'friday-live-performance', type: 'live_performance', label: `${day('friday-live-performance')} Live Performance Block`, priority: 200,
+      weekday: overrides['friday-live-performance']?.weekday ?? 5, startHourLocal: overrides['friday-live-performance']?.startHourLocal ?? 21,
       endHourLocal: overrides['friday-live-performance']?.endHourLocal ?? 22, timeZone: PAYROLL_TIME_ZONE },
     { id: 'weekly-top10-final-listen', type: 'weekly_top10', label: 'Sunday Top 10 Final Listen', priority: 90, window: 'final-payroll-hour' },
-  ];
+    ...(overrides.programs || []).map(program => ({ ...program, label: program.title, type: 'playlist_show',
+      endMinuteLocal: program.startMinuteLocal + 60, timeZone: PAYROLL_TIME_ZONE, priority: 50 })),
+  ].map(show => ({ ...show, ...(overrides.reminders?.[show.id] !== undefined ? { announce: overrides.reminders[show.id] } : {}) }));
 }
 
 function compareByRotationScore(first, second) {
@@ -197,8 +272,8 @@ function isShowActive(show, now) {
     return now >= endAt - FINAL_SHOW_DURATION_MS && now < endAt;
   }
   if (show.timeZone && Number.isInteger(show.weekday)) {
-    const local = localDateAndHour(now, show.timeZone);
-    return local.weekday === Number(show.weekday) && local.hour >= Number(show.startHourLocal) && local.hour < Number(show.endHourLocal);
+    return radioCalendarOccurrences({ schedule: [show] }, { now, days: 0, pastDays: 1 })
+      .some(event => Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc));
   }
   if (show.type !== 'weekly_top10') return false;
   const date = new Date(now);
@@ -208,7 +283,8 @@ function isShowActive(show, now) {
 }
 
 export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSchedule(), livePerformanceEvents = [] } = {}) {
-  const live = Array.isArray(livePerformanceEvents) ? livePerformanceEvents : [];
+  const live = radioCalendarOccurrences({ schedule: (schedule || []).filter(show => show.type === 'playlist_show'),
+    events: Array.isArray(livePerformanceEvents) ? livePerformanceEvents : [] }, { now, days: 0, pastDays: 1 });
   const activeLive = live
     .filter(event => {
       const start = Date.parse(event.startUtc || event.start || '1970-01-01T00:00:00Z');
@@ -248,10 +324,11 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
     const result = { ...top10Show, type: 'weekly_top10' };
     if (top10Show.id === 'friday-top10-hype' && Number.isInteger(top10Show.startHourLocal) && Number.isInteger(top10Show.endHourLocal)) {
       const local = localDateAndHour(now, top10Show.timeZone || PAYROLL_TIME_ZONE);
-      const startAt = Math.floor(now / 3_600_000) * 3_600_000 - (local.hour - top10Show.startHourLocal) * 3_600_000;
+      const occurrence = radioCalendarOccurrences({ schedule: [top10Show] }, { now, days: 0, pastDays: 1 })
+        .find(event => Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc));
       result.instanceId = `${top10Show.id}:${local.date}:${top10Show.startHourLocal}`;
-      result.startAt = new Date(startAt).toISOString();
-      result.endAt = new Date(startAt + (top10Show.endHourLocal - top10Show.startHourLocal) * 3_600_000).toISOString();
+      result.startAt = occurrence.startUtc;
+      result.endAt = occurrence.endUtc;
     }
     return result;
   }
@@ -260,7 +337,8 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
     Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc))
     .sort((a, b) => Date.parse(a.startUtc) - Date.parse(b.startUtc) || a.id.localeCompare(b.id))[0];
   if (playlistEvent) return { id: playlistEvent.id, instanceId: `${playlistEvent.id}:${playlistEvent.startUtc}`,
-    type: 'playlist_show', playlistId: playlistEvent.playlistId, label: playlistEvent.title, priority: 50,
+    type: 'playlist_show', playlistId: playlistEvent.playlistId, playlistDefinition: playlistEvent.playlistDefinition,
+    label: playlistEvent.title, priority: 50,
     startAt: playlistEvent.startUtc, endAt: playlistEvent.endUtc };
 
   const fallback = (schedule || []).find(show => show.type === 'normal_rotation') || { id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation', priority: 10 };

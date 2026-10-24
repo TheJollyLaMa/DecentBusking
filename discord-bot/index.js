@@ -1299,8 +1299,10 @@ async function main() {
     ownerWallet: config.mintOwnerWallet, channelId: config.announceChannelId,
     defaultMention: config.announceDefaultMention, voiceChannelId: config.jukeLoopVoiceChannelId,
     listenUrl: config.siteUrl,
+    canAnnounce: () => discordDiagnostics.bot('dbusker').notBefore() <= Date.now(),
     getSchedule: () => ({ ready: liveScheduleReady, schedule: defaultRadioSchedule(liveWeeklySchedule), events: livePerformanceEvents }),
   });
+  setInterval(() => { void radioAnnouncements.tick(); }, 15_000).unref();
   const liveBookingStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage,
     pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
     gateway: config.ipfsGateway, name: 'decentbusking-live-bookings.json',
@@ -1339,12 +1341,14 @@ async function main() {
     },
     getRadioSchedule: () => ({
       timeZone: PAYROLL_TIME_ZONE,
-      playlistDefinitions: RADIO_PLAYLISTS.map(definition => playlistReady
-        ? previewRadioPlaylist(definition.id, getPlaylist()) : { ...definition, count: null, unknownCount: null, estimatedDurationMs: null, tracks: [] }),
+      playlistDefinitions: [...RADIO_PLAYLISTS, ...(liveWeeklySchedule.presets || [])].map(definition => playlistReady
+        ? previewRadioPlaylist(definition.id, getPlaylist(), { definition: RADIO_PLAYLISTS.includes(definition) ? undefined : definition })
+        : { ...definition, count: null, unknownCount: null, estimatedDurationMs: null, tracks: [] }),
       schedule: defaultRadioSchedule(liveWeeklySchedule),
       weeklySchedule: liveWeeklySchedule,
       events: livePerformanceEvents.filter(event => Date.parse(event.endUtc) > Date.now() - 7 * 86400_000),
       ready: liveScheduleReady,
+      reminders: radioAnnouncements.reminderStatus(),
     }),
     saveRadioSchedule: async ({ events, weeklySchedule }) => {
       if (!liveScheduleReady || !liveScheduleStore) throw new Error('Live calendar is unavailable for durable updates');

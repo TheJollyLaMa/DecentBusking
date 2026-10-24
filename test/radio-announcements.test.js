@@ -14,6 +14,9 @@ async function fixture({ defaultMention = 'everyone' } = {}) {
   let snapshot;
   let failSave = false;
   let failure;
+  let allowed = true;
+  let fetches = 0;
+  const errors = [];
   const posted = [];
   const permissions = new Set(Object.values(PermissionFlagsBits));
   const role = { id: '123456789012345678', name: 'JukeboxHero', mentionable: true };
@@ -30,7 +33,7 @@ async function fixture({ defaultMention = 'everyone' } = {}) {
     },
     messages: { fetch: async () => new Map(posted.map(message => [message.id, message])) },
   };
-  const client = { isReady: () => true, user: { id: 'bot' }, channels: { fetch: async () => channel } };
+  const client = { isReady: () => true, user: { id: 'bot' }, channels: { fetch: async () => { fetches++; return channel; } } };
   const schedule = { ready: true, schedule: defaultRadioSchedule(), events: [] };
   const store = { restore: async () => structuredClone(snapshot), save: async value => {
     if (failSave) throw new Error('storage down');
@@ -38,7 +41,8 @@ async function fixture({ defaultMention = 'everyone' } = {}) {
     return 'ipfs://announcement-checkpoint';
   } };
   const config = { store, getSchedule: () => schedule, getClient: () => client, ownerWallet: owner.address,
-    voiceChannelId: '222222222222222222', listenUrl: 'https://example.org/radio', now: () => time, defaultMention };
+    voiceChannelId: '222222222222222222', listenUrl: 'https://example.org/radio', now: () => time, defaultMention,
+    canAnnounce: () => allowed, log: { error: message => errors.push(message) } };
   let service = createRadioAnnouncements(config);
   let counter = 0;
   async function authorize(action, payload, wallet = owner, overrides = {}) {
@@ -55,6 +59,8 @@ async function fixture({ defaultMention = 'everyone' } = {}) {
     restart: () => { service = createRadioAnnouncements(config); },
     advance: delta => { time += delta; }, fail: error => { failure = error; }, failSave: value => { failSave = value; },
     get snapshot() { return snapshot; }, handle: (...args) => service.handle(...args),
+    tick: () => service.tick(), status: () => service.reminderStatus(), client, errors,
+    setTime: value => { time = value; }, allow: value => { allowed = value; }, fetches: () => fetches,
     preview: (value = {}) => call('preview', { ...input, ...value }),
   };
 }
@@ -76,6 +82,150 @@ test('owner-signed options and preview bind origin, action, occurrence, content,
   await assert.rejects(f.handle('preview', { ...body, payload: { ...body.payload, reason: 'tampered' } }, 'https://example.org'), /authorization/);
   await assert.rejects(f.call('preview', f.input, undefined, { expiresAt: '2026-10-22T11:00:00Z' }), /expired/);
   assert.equal(f.posted.length, 0);
+});
+
+test('automatic reminder opens exactly five minutes before, serializes concurrent ticks and survives restart', async () => {
+  const f = await fixture();
+  const start = Date.parse(f.input.startUtc);
+  f.setTime(start - 300001);
+  await f.tick();
+  assert.equal(f.fetches(), 0);
+  f.setTime(start - 300000);
+  await Promise.all([f.tick(), f.tick(), f.tick()]);
+  assert.equal(f.posted.length, 1);
+  assert.match(f.posted[0].content, /@everyone/);
+  assert.deepEqual(f.posted[0].allowedMentions.parse, ['everyone']);
+  assert.equal(f.snapshot.deliveries[`reminder:${f.input.occurrenceId}:${f.input.startUtc}`].status, 'sent');
+  f.restart();
+  await f.tick();
+  assert.equal(f.posted.length, 1);
+  assert.equal(f.status().error, null);
+});
+
+test('each built-in weekly show gets a reminder, including Sunday payroll finish line', async () => {
+  const f = await fixture();
+  for (const start of ['2026-10-24T00:00:00Z', '2026-10-24T01:00:00Z', '2026-10-26T03:00:00Z']) {
+    f.setTime(Date.parse(start) - 300000);
+    await f.tick();
+  }
+  assert.equal(f.posted.length, 3);
+  assert.match(f.posted[2].content, /Sunday Top 10/);
+});
+
+test('no late posts, opted-out/canceled reminders, or Discord requests during cooldown/reconnect', async () => {
+  const f = await fixture();
+  const start = Date.parse(f.input.startUtc);
+  f.setTime(start - 300000);
+  f.allow(false);
+  await f.tick();
+  f.allow(true);
+  f.client.isReady = () => false;
+  await f.tick();
+  f.client.isReady = () => true;
+  f.schedule.schedule[1].announce = false;
+  await f.tick();
+  f.schedule.schedule[1].announce = true;
+  f.schedule.events = [{ id: f.input.occurrenceId, title: 'Canceled', startUtc: f.input.startUtc,
+    endUtc: '2026-10-24T01:00:00Z', status: 'cancelled' }];
+  await f.tick();
+  f.schedule.events = [];
+  f.setTime(start);
+  await f.tick();
+  assert.equal(f.fetches(), 0);
+  assert.equal(f.posted.length, 0);
+});
+
+test('manual promotion does not suppress the independently deduplicated automatic reminder', async () => {
+  const f = await fixture();
+  const preview = await f.preview();
+  await f.call('send', preview.draft);
+  f.setTime(Date.parse(f.input.startUtc) - 300000);
+  await f.tick();
+  await f.tick();
+  assert.equal(f.posted.length, 2);
+  assert.ok(f.snapshot.deliveries[f.input.occurrenceId]);
+  assert.ok(f.snapshot.deliveries[`reminder:${f.input.occurrenceId}:${f.input.startUtc}`]);
+});
+
+test('automatic reminders expose storage errors, back off, and never send before a confirmed checkpoint', async () => {
+  const f = await fixture();
+  f.setTime(Date.parse(f.input.startUtc) - 300000);
+  f.failSave(true);
+  await f.tick();
+  assert.equal(f.posted.length, 0);
+  assert.match(f.status().error, /Checkpoint failed/);
+  const count = f.fetches();
+  await f.tick();
+  assert.equal(f.fetches(), count);
+  f.failSave(false);
+  f.advance(60000);
+  await f.tick();
+  assert.equal(f.posted.length, 1);
+  assert.equal(f.status().error, null);
+});
+
+test('opt-out or start reached during checkpoint prevents automatic delivery', async () => {
+  for (const change of ['opt-out', 'start', 'cooldown']) {
+    const f = await fixture();
+    f.setTime(Date.parse(f.input.startUtc) - 300000);
+    const original = f.config.store.save;
+    f.config.store.save = async value => {
+      const result = await original(value);
+      if (Object.keys(value.requests).length) {
+        if (change === 'opt-out') f.schedule.schedule[1].announce = false;
+        else if (change === 'cooldown') f.allow(false);
+        else f.advance(300000);
+      }
+      return result;
+    };
+    await f.tick();
+    assert.equal(f.posted.length, 0);
+    assert.match(f.status().error, /disabled|expired|cooldown/);
+  }
+});
+
+test('uncertain reminder delivery reconciles its footer after restart without a second send', async () => {
+  const f = await fixture();
+  f.setTime(Date.parse(f.input.startUtc) - 300000);
+  const original = f.channel.send;
+  f.channel.send = async content => { await original(content); throw new Error('response lost'); };
+  await f.tick();
+  assert.equal(f.posted.length, 1);
+  assert.match(f.status().error, /delivery failed/);
+  f.channel.send = original;
+  f.restart();
+  await f.tick();
+  assert.equal(f.posted.length, 1);
+  assert.equal(f.snapshot.deliveries[`reminder:${f.input.occurrenceId}:${f.input.startUtc}`].status, 'sent');
+});
+
+test('dated and recurring preset shows use the same automatic reminder path', async () => {
+  const f = await fixture();
+  const { defaultRadioSchedule } = await import('../js/radio-schedule.mjs');
+  f.schedule.schedule = defaultRadioSchedule({ programs: [{ id: 'program-test', title: 'Weekly Rising Stars',
+    playlistId: 'rising-stars', weekday: 4, startMinuteLocal: 600 }] });
+  f.schedule.events = [{ id: 'dated-test', title: 'Zero votes hour', type: 'playlist_show',
+    playlistId: 'songs-awaiting-your-vote', startUtc: '2026-10-22T15:00:00Z', endUtc: '2026-10-22T16:00:00Z' }];
+  f.setTime(Date.parse('2026-10-22T14:00:00Z') - 300000);
+  await f.tick();
+  f.setTime(Date.parse('2026-10-22T15:00:00Z') - 300000);
+  await f.tick();
+  assert.equal(f.posted.length, 2);
+  assert.ok(f.snapshot.deliveries['reminder:program-test:2026-10-22:2026-10-22T14:00:00.000Z']);
+  assert.ok(f.snapshot.deliveries['reminder:dated-test:2026-10-22T15:00:00Z']);
+});
+
+test('rescheduling an already-reminded occurrence earns one reminder for its new start, not repeated pings', async () => {
+  const f = await fixture();
+  f.setTime(Date.parse(f.input.startUtc) - 300000);
+  await f.tick();
+  f.schedule.schedule[1].startHourLocal = 22;
+  f.schedule.schedule[1].endHourLocal = 23;
+  f.advance(2 * 3600000);
+  await f.tick();
+  await f.tick();
+  assert.equal(f.posted.length, 2);
+  assert.equal(Object.keys(f.snapshot.deliveries).length, 2);
 });
 
 test('content includes concrete timezone, Discord times, reason, site and voice links; DST is correct', async () => {

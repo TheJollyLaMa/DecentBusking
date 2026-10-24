@@ -13,7 +13,7 @@ const START = Date.parse('2026-10-23T01:00:00Z');
 const event = { id: 'tonight', type: 'playlist_show', playlistId: 'songs-awaiting-your-vote', title: 'Songs Awaiting Your Vote',
   startUtc: new Date(START).toISOString(), endUtc: new Date(START + 3600_000).toISOString() };
 
-async function fixture(t, { count = 2, voted = false, store: customStore } = {}) {
+async function fixture(t, { count = 2, voted = false, store: customStore, showEvent = event } = {}) {
   let now = START;
   t.mock.method(Date, 'now', () => now);
   const { JukeLoopSession, buildRadioState, buildNowPlayingMessage, synchronizeDiscordRating } = await import('../discord-bot/jukeloop.js');
@@ -32,7 +32,7 @@ async function fixture(t, { count = 2, voted = false, store: customStore } = {})
   let paidCalls = 0;
   let adCalls = 0;
   const session = new JukeLoopSession({ voiceChannel: { guild: { id: 'playlist-runtime-test' } }, client: {},
-    livePerformanceEvents: [event], audioPlayer: player, playlistShowStore: store,
+    livePerformanceEvents: [showEvent], audioPlayer: player, playlistShowStore: store,
     createStream: () => { const stream = new PassThrough(); stream.write(Buffer.alloc(100));
       const ffmpegProcess = new EventEmitter(); ffmpegProcess.kill = () => stream.destroy(); return { stream, ffmpegProcess }; },
     djuke: { nextPaid: async () => { paidCalls++; return null; } },
@@ -45,6 +45,22 @@ async function fixture(t, { count = 2, voted = false, store: customStore } = {})
   return { session, tracks, player, heard, getPlaylist, applySiteVote, applyRating, buildRadioState, buildNowPlayingMessage, synchronizeDiscordRating,
     value: () => value, stops: () => stops, paidCalls: () => paidCalls, adCalls: () => adCalls, setNow: value => { now = value; } };
 }
+
+test('custom ranked rules reach actual audio playback and keep their opening order', async t => {
+  const { validateRadioPreset } = await import('../js/radio-playlists.mjs');
+  const definition = validateRadioPreset({ id: 'preset-growth', title: 'Our climbers', selector: 'weekly-growth',
+    ranking: 'weekly-growth', limit: 0, revision: 1 });
+  const f = await fixture(t, { showEvent: { ...event, playlistId: definition.id, playlistDefinition: definition } });
+  for (const [index, track] of f.getPlaylist().entries()) {
+    track.payrollVotes = { 'NY-2026-10-19': index + 3, 'NY-2026-10-12': 1 };
+  }
+  await f.session._playNext();
+  assert.deepEqual(f.heard, ['song-1']);
+  assert.equal(f.session._nowPlaying.playlistShow.fallback, false);
+  assert.equal(f.value().occurrences[0].playlistDefinition.id, definition.id);
+  await f.session._playNext();
+  assert.deepEqual(f.heard, ['song-1', 'song-0']);
+});
 
 test('actual playback commits progress before sound, restores opening order after restart, falls back after exhaustion, defers paid requests', async t => {
   const f = await fixture(t);

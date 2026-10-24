@@ -4,7 +4,7 @@ export function validatePlaylistShowSnapshot(value) {
   if (value?.schemaVersion !== 1 || !Array.isArray(value.occurrences) || value.occurrences.length > 100) throw new Error('Invalid playlist-show checkpoint');
   const ids = new Set();
   for (const state of value.occurrences) {
-    radioPlaylistDefinition(state.playlistId);
+    radioPlaylistDefinition(state.playlistId, state.playlistDefinition);
     if (typeof state.instanceId !== 'string' || !state.instanceId || ids.has(state.instanceId) ||
       !Number.isFinite(Date.parse(state.capturedAt)) || !Number.isFinite(Date.parse(state.startAt)) ||
       !(Date.parse(state.endAt) > Date.parse(state.startAt)) ||
@@ -48,10 +48,12 @@ export function createPlaylistShow({ store, now = () => Date.now(), random = Mat
           return;
         }
         if (pending?.instanceId !== show.instanceId) {
-          const preview = previewRadioPlaylist(show.playlistId, catalog);
+          const preview = previewRadioPlaylist(show.playlistId, catalog, { definition: show.playlistDefinition, now: now() });
           const tracks = [...preview.tracks];
           pendingShuffled = false;
           pending = { instanceId: show.instanceId, playlistId: show.playlistId, playlistRevision: preview.revision, capturedAt: new Date(now()).toISOString(),
+            ...(show.playlistDefinition ? { playlistDefinition: show.playlistDefinition } : {}),
+            shuffle: !preview.ranking || preview.ranking === 'shuffle',
             startAt: show.startAt, endAt: show.endAt, tracks, cursor: 0, skipped: [], unknownCount: preview.unknownCount };
         }
         if (!initialized) {
@@ -64,7 +66,7 @@ export function createPlaylistShow({ store, now = () => Date.now(), random = Mat
           if (error) await save(snapshot);
           return;
         }
-        if (!pendingShuffled) {
+        if (!pendingShuffled && pending.shuffle !== false) {
           for (let index = pending.tracks.length - 1; index > 0; index--) {
             const swap = Math.floor(random() * (index + 1));
             [pending.tracks[index], pending.tracks[swap]] = [pending.tracks[swap], pending.tracks[index]];
@@ -82,8 +84,9 @@ export function createPlaylistShow({ store, now = () => Date.now(), random = Mat
         const entry = state.tracks[state.cursor];
         const track = catalog.find(item => item.trackId === entry.trackId);
         const selection = { ...entry, instanceId: state.instanceId, cursor: state.cursor, totalTracks: state.tracks.length,
-          playlistId: state.playlistId, title: show.label, track };
-        const reason = playlistTrackReason(track, radioPlaylistDefinition(state.playlistId));
+          playlistId: state.playlistId, playlistDefinition: state.playlistDefinition, capturedAt: state.capturedAt,
+          title: show.label, track };
+        const reason = playlistTrackReason(track, radioPlaylistDefinition(state.playlistId, state.playlistDefinition), Date.parse(state.capturedAt));
         if (!reason) return selection;
         await api.advance(selection, reason);
         state = find(show.instanceId);
@@ -115,7 +118,8 @@ export function createPlaylistShow({ store, now = () => Date.now(), random = Mat
         state.cursor >= state.tracks.length ? 'Eligible pool exhausted' : null);
       return { ...(state ? structuredClone(state) : { instanceId: show.instanceId, tracks: [] }),
         lateSnapshot: state ? Date.parse(state.capturedAt) - Date.parse(state.startAt) > 15_000 : false,
-        status: fallbackReason ? 'normal_rotation' : 'ready', fallbackReason, invitation: radioPlaylistDefinition(show.playlistId).invitation };
+        status: fallbackReason ? 'normal_rotation' : 'ready', fallbackReason,
+        invitation: radioPlaylistDefinition(show.playlistId, show.playlistDefinition).invitation };
     },
   };
   return api;
