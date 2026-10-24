@@ -336,3 +336,95 @@ Support the work with a [Supporter DNFT](https://thejollylama.github.io/DecentMa
 ### Scheduled live performances
 
 The dedicated admin Live Performance panel, public Live Performers fund and performer cards share dated booking IDs. Tomorrow’s Phase 0 uses **earmarked, NOT escrowed** router funds; Phase 1 stays disabled without an explicitly configured escrow. See [operator runbook and DRAFT v1 terms](docs/LIVE_PERFORMANCE_RUNBOOK.md) before any owner signing. No deployment or financial operation is implied by these docs.
+# Embed the DBusk radio
+
+The portable [DBuskRadio](https://github.com/A-Decent-Agency/DBuskRadio) product
+displays **DBusk.decentagency.eth**. This repository remains its upstream radio
+protocol source. The website player retains its archive, fade, preload and
+Discord synchronization behavior; `js/radio-client.mjs` shares transport,
+listener identity and media URL construction with the scoped widget.
+
+Serve this checkout over HTTP and open `widget.html`, or mount it in a host:
+
+```html
+<div id="radio"></div>
+<script type="module">
+  import { mount } from './widget.js';
+  const radio = mount(document.querySelector('#radio'), {
+    workerUrl: 'https://decentbusking.onrender.com',
+    compact: true, theme: 'dark', volume: 0.08,
+    // Optional additional station; no station starts automatically.
+    stations: [{ id: 'wqxr', label: 'WQXR', url: 'https://stream.wqxr.org/wqxr-web' }],
+  });
+  window.addEventListener('pagehide', () => radio.destroy(), { once: true });
+</script>
+```
+
+`mount` is also exported from `widget/radio-widget.js`. Mount never connects a
+wallet, requests accounts, switches chains or starts audio. A host DecentHead
+session is reused (including late `decenthead:ready`); votes retain the current
+anonymous browser identity and the server's per-play duplicate rules, not
+unimplemented wallet-bound authentication. Destroy aborts requests, stops media,
+unsubscribes the wallet listener and removes scoped DOM. Remount is supported.
+Theme/compact controls remain local. The default shadow view exposes stable
+`::part()` names: `panel`, `brand`, `controls`, `play`, `station`, `volume`, `up`,
+`down`, `net`, `now`, `status`, `settings`, `theme`, `compact`, `session`, `audio`.
+Inherited tokens: `--dbusk-color`, `--dbusk-background`, `--dbusk-border`,
+`--dbusk-border-width`, `--dbusk-accent`, `--dbusk-padding`, `--dbusk-gap`,
+`--dbusk-radius`, `--dbusk-max-width`. Tokens override all theme modes.
+
+For complete host-owned markup, supply `render({ element, document, controls,
+stations, selectStation })`. This opts out of product chrome/styles and renders
+in the host's light DOM. Move the provided native control nodes into your own
+layout using `element.replaceChildren(...)`; do not clone them or replace their
+engine listeners. `controls` contains the same names as the parts above (the
+`panel` node is the default section). The engine retains playback, polling,
+seeking, votes/rollback/deduplication, identity and request ownership. Keep
+`controls.audio` mounted, preserve accessible labels/focus, and place omitted
+optional controls in a discoverable host disclosure if desired.
+
+The renderer may return `{ update(snapshot), destroy() }`. Each `update` receives
+`{ station, listening, now, status }`, after engine controls have been updated;
+decorate labels there without changing playback state. `selectStation(id,
+{ play: true })` switches and starts only following a host user gesture;
+without `play` it preserves paused/listening state. Invalid IDs and calls after
+destroy are ignored. `destroy` removes host-added listeners; the engine removes
+its own listeners/requests/media and empties the host. A reused shadow host
+bridges the light-DOM adapter through a slot. Example:
+
+```js
+mount(host, {
+  render({ element, document, controls }) {
+    const row = document.createElement('nav');
+    row.setAttribute('aria-label', 'Radio');
+    row.append(controls.play, controls.station, controls.volume);
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = 'Radio details and voting';
+    details.append(summary, controls.now, controls.up, controls.down,
+      controls.net, controls.status, controls.session);
+    element.replaceChildren(row, details, controls.audio);
+  },
+});
+```
+
+### Origin permissions and rollout
+
+Public radio/media/history reads already support cross-origin requests.
+`RADIO_ALLOWED_ORIGINS` adds **exact origins for `/api/radio/vote` only**;
+it does not grant signed upload, admin, schedule, or transaction permissions.
+Defaults cover `https://thejollylama.github.io` (Busking and Canopy),
+`https://a-decent-agency.github.io`, `https://decentcanopy.eth.limo`, and
+`https://dbusk.decentagency.eth.limo`. Add the actual IPFS subdomain gateway
+origin or custom ENS gateway hostname explicitly; do not wildcard gateways,
+authenticated APIs, or `null` origins. Local vote demos likewise need an
+explicit localhost origin in operator-controlled configuration. This is
+code-only preparation; no production configuration or worker restart is implied.
+
+Merge/review the upstream extraction and worker CORS change first, verify
+the worker deployment and exact origins separately, then freeze/sync the
+standalone product and pin its complete commit dependency closure in Canopy.
+PR commit pins are review-stage artifacts, not a version release. Real browser
+live audio/codec, CORS voting and next-track smoke tests remain deployment gates.
+No tags, releases, ENS/contenthash writes, IPFS credential pins or supporter
+mint/list/transfer actions are authorized by these source changes.

@@ -17,6 +17,58 @@ async function withServer(handler, callback) {
   }
 }
 
+test('widget radio origins can preflight/vote without expanding authenticated API permissions', async () => {
+    const { createWorkerRequestHandler } = await import(moduleUrl);
+    const origin = 'https://dbusk.decentagency.eth.limo';
+    let recorded = null;
+    let rejectVote = false;
+    const handler = createWorkerRequestHandler({
+      allowedOrigins: ['https://busking.example'], radioAllowedOrigins: [origin],
+      ownerWallet: Wallet.createRandom().address,
+      onRadioVote: async body => {
+        if (rejectVote) throw new Error('This radio play has ended');
+        recorded = body; return body;
+      },
+    });
+    await withServer(handler, async base => {
+      const preflight = await fetch(`${base}/api/radio/vote`, { method: 'OPTIONS', headers: { origin } });
+      assert.equal(preflight.status, 204);
+      assert.equal(preflight.headers.get('access-control-allow-origin'), origin);
+      const body = { playId: 'one', voterId: 'listener-0000000001', vote: 1 };
+      const vote = await fetch(`${base}/api/radio/vote`, { method: 'POST',
+        headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal(vote.status, 200);
+      assert.deepEqual(recorded, body);
+      assert.equal(vote.headers.get('access-control-allow-origin'), origin);
+      assert.equal(vote.headers.get('access-control-allow-credentials'), null);
+      assert.equal(preflight.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS');
+      assert.equal(preflight.headers.get('access-control-allow-headers'), 'content-type, range');
+      rejectVote = true;
+      const failed = await fetch(`${base}/api/radio/vote`, { method: 'POST',
+        headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal(failed.status, 400);
+      assert.equal(failed.headers.get('access-control-allow-origin'), origin);
+      assert.match((await failed.json()).error, /radio play has ended/);
+      recorded = null;
+      for (const deniedOrigin of ['https://untrusted.example', 'null', '']) {
+        const denied = await fetch(`${base}/api/radio/vote`, { method: 'POST',
+          headers: { origin: deniedOrigin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        assert.equal(denied.status, 400);
+        assert.match((await denied.json()).error, /Origin is not allowed/);
+        assert.equal(recorded, null);
+        assert.equal(denied.headers.get('access-control-allow-origin'), null);
+      }
+      for (const path of ['/api/radio/schedule', '/api/radio/announcements/send', '/api/admin/requests']) {
+        const denied = await fetch(`${base}${path}`, { method: 'OPTIONS', headers: { origin } });
+        assert.equal(denied.status, 403);
+        assert.equal(denied.headers.get('access-control-allow-origin'), null);
+      }
+      const deniedVote = await fetch(`${base}/api/radio/vote`, { method: 'OPTIONS',
+        headers: { origin: 'https://untrusted.example' } });
+      assert.equal(deniedVote.status, 403);
+    });
+});
+
 test('DJuke top earners endpoint returns indexed payouts or an explicit unavailable response', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const data = { chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address: Wallet.createRandom().address, totalUnits: '225000' }] };

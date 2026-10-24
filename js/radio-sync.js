@@ -6,6 +6,7 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261022-playlist-lane';
 import { formatUsdcUnits as _formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
+import { sendRadioVote as sharedRadioVote, radioListenerId, radioMediaUrl, readRadioState } from './radio-client.mjs';
 
 const POLL_MS = 8_000;
 const FADE_IN_MS = 600;
@@ -368,27 +369,14 @@ function _initAudioControls() {
 }
 
 export async function sendRadioVote({ radioUrl, playId, voterId, vote, fetchImpl = fetch }) {
-  const response = await fetchImpl(`${radioUrl}/vote`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ playId, voterId, vote }),
-    signal: AbortSignal.timeout(10000),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || `Voting failed (${response.status})`);
-  return result;
+  return sharedRadioVote({ radioUrl, playId, voterId, vote, fetchImpl });
 }
 
 function _anonymousListenerId() {
   if (_listenerId) return _listenerId;
-  try {
-    const saved = localStorage.getItem('decentbusking:listener:v1');
-    if (/^[a-zA-Z0-9_-]{16,128}$/.test(saved || '')) _listenerId = saved;
-  } catch {}
-  if (!_listenerId) {
-    _listenerId = crypto.randomUUID();
-    try { localStorage.setItem('decentbusking:listener:v1', _listenerId); } catch {}
-  }
+  let storage;
+  try { storage = localStorage; } catch {}
+  _listenerId = radioListenerId(storage);
   return _listenerId;
 }
 
@@ -671,9 +659,7 @@ function _radioUrl() {
 async function _poll() {
   clearTimeout(_pollTimer);
   try {
-    const response = await fetch(_radioUrl(), { cache: 'no-store' });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const state = await response.json();
+    const state = await readRadioState({ radioUrl: _radioUrl() });
     _radioReachable = true;
     _setRadioState(state);
     _activeShowId = state.activeShow?.id || null;
@@ -951,7 +937,7 @@ function _gatewayUrls(cid) {
   const cfg = window.DecentConfig || {};
   const worker = (cfg.ipfsUploadServiceUrl || '').replace(/\/$/, '');
   return [...new Set([
-    ...(worker ? [`${worker}/api/radio/media?cid=${encodeURIComponent(cid)}`] : []),
+    ...(worker ? [radioMediaUrl(`${worker}/api/radio`, cid, { validate: false })] : []),
     _buildIpfsGatewayUrl(cfg.ipfsGateway || 'https://gateway.pinata.cloud/ipfs/', cid),
   ])];
 }

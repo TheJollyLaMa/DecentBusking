@@ -218,6 +218,7 @@ export function createArtworkUpdateTransactionVerifier({ rpcUrl, contractAddress
 
 export function createWorkerRequestHandler({
   allowedOrigins,
+  radioAllowedOrigins = [],
   ownerWallet,
   pinataJwt,
   pinataSignUrl = 'https://uploads.pinata.cloud/v3/files/sign',
@@ -268,6 +269,7 @@ export function createWorkerRequestHandler({
   now = () => Date.now(),
 }) {
   const origins = new Set(allowedOrigins);
+  const radioOrigins = new Set([...allowedOrigins, ...radioAllowedOrigins]);
   const expectedOwner = ownerWallet.toLowerCase();
   const consumedSignatures = new Map();
   function hasConsumedSignature(signature) {
@@ -297,6 +299,7 @@ export function createWorkerRequestHandler({
     const requestUrl = new URL(request.url, 'http://localhost');
     const origin = String(request.headers.origin || '');
     const corsOrigin = origins.has(origin) ? origin : '';
+    const radioCorsOrigin = radioOrigins.has(origin) ? origin : '';
 
     try {
       if (request.method === 'POST' && ['/api/checkpoint-mirror/claim', '/api/checkpoint-mirror/ack'].includes(requestUrl.pathname)) {
@@ -313,8 +316,9 @@ export function createWorkerRequestHandler({
         requestUrl.pathname === '/api/ipfs/submission-upload-url' ||
         requestUrl.pathname === '/api/ipfs/upload-batch-urls';
       if (request.method === 'OPTIONS') {
-        response.writeHead(uploadRoute ? 204 : (corsOrigin ? 204 : 403), {
-          ...(uploadRoute || corsOrigin ? { 'access-control-allow-origin': corsOrigin || origin || '*', vary: 'origin' } : {}),
+        const preflightOrigin = requestUrl.pathname === '/api/radio/vote' ? radioCorsOrigin : corsOrigin;
+        response.writeHead(uploadRoute ? 204 : (preflightOrigin ? 204 : 403), {
+          ...(uploadRoute || preflightOrigin ? { 'access-control-allow-origin': preflightOrigin || origin || '*', vary: 'origin' } : {}),
           'access-control-allow-methods': 'GET, POST, OPTIONS',
           'access-control-allow-headers': 'content-type, range',
         });
@@ -784,10 +788,10 @@ export function createWorkerRequestHandler({
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/radio/vote') {
-        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!radioCorsOrigin) throw new Error('Origin is not allowed');
         if (!onRadioVote) throw new Error('Radio voting is not configured');
         const { playId, voterId, vote } = await readJson(request);
-        sendJson(response, 200, await onRadioVote({ playId, voterId, vote }), corsOrigin);
+        sendJson(response, 200, await onRadioVote({ playId, voterId, vote }), radioCorsOrigin);
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/mint-queue') {
@@ -1069,7 +1073,8 @@ export function createWorkerRequestHandler({
       });
       sendJson(response, 200, { url }, corsOrigin);
     } catch (error) {
-      sendJson(response, 400, { error: error.message }, corsOrigin);
+      sendJson(response, 400, { error: error.message },
+        requestUrl.pathname === '/api/radio/vote' ? radioCorsOrigin : corsOrigin);
     }
   };
 }
