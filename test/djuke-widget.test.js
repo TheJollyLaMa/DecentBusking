@@ -169,6 +169,8 @@ test('mounted single, named save, Personal Play recovery and Play Live use real 
     } else if (url.includes('/api/creator/profile')) body = { madePlaylists: [], playlists: [] };
     else if (url.endsWith('/api/djuke')) body = { ...snapshot,
       requests: [{ title: 'Unavailable request', playable: false, payer: address, chainRequestId: '7' }],
+      playlistBatches: [{ name: 'BoogieNight', status: 'pending', songs: Array.from({ length: 12 }, (_, i) => ({
+        title: `Song ${i + 1}`, status: i < 7 ? 'played' : i === 7 ? 'playing' : 'pending' })) }],
       playlistReceipts: [{ name: 'Real receipt shape', payer: address, status: 'refunded',
         songs: [{ status: 'refunded' }], subtotalUnits: '250000', feeUnits: '3000000', refundedUnits: '3250000',
         transactionHash: hash, resolutionTransactionHash: hash,
@@ -190,6 +192,8 @@ test('mounted single, named save, Personal Play recovery and Play Live use real 
   assert.deepEqual(calls, ['single']);
   $('queue').children[0].children[0].dispatchEvent(new Event('click')); await tick();
   assert.equal(calls.at(-1), 'replacement');
+  assert.ok($('queue').children.some(row => row.textContent === 'BoogieNight · Song 8 of 12 · 4 remaining'),
+    'the widget counts the live song, not lagging on-chain delivery events');
   assert.equal($('receipts').children.length, 1);
   assert.ok($('receipts').children[0].children.some(child => child.textContent.includes('refunded 3.25 USDC')));
   $('add').dispatchEvent(new Event('click')); await tick();

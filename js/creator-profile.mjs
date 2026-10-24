@@ -1,13 +1,13 @@
 import { renderLivePerformances } from './live-performance-profile.mjs?v=20261024-live-prototype';
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261022-playlist-lane';
+import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261025-seamless-handoff';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { canEditArtwork } from './artwork-update.mjs';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
-import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs?v=20261022-playlist-lane';
-import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261022-playlist-lane';
+import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs?v=20261025-seamless-handoff';
+import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261025-seamless-handoff';
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
   summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261023-djuke-v05';
 
@@ -321,7 +321,7 @@ export function initCreatorProfile() {
   let myNftsAbort = null;
   const openNftCard = async identity => {
     try {
-      const { openNFTByIdentity } = await import('./space.js?v=20261022-playlist-lane');
+      const { openNFTByIdentity } = await import('./space.js?v=20261025-seamless-handoff');
       dialog.querySelector('[data-profile-close]')?.click();
       if (!await openNFTByIdentity(identity)) throw new Error('Could not open this NFT in the space view');
     } catch (error) {

@@ -1,5 +1,5 @@
-import { appendPlaylistSong, openPlaylistSelector } from './playlist-selector.mjs?v=20261022-playlist-lane';
-import { createListenPlaylist } from './listens.mjs?v=20261023-usdc-only';
+import { appendPlaylistSong, openPlaylistSelector } from './playlist-selector.mjs?v=20261025-seamless-handoff';
+import { createListenPlaylist } from './listens.mjs?v=20261025-seamless-handoff';
 import { createPersonalPlayRecovery } from './personal-play-recovery.mjs?v=20261023-personal-recovery';
 import { createNamedPlaylistClient, DJUKE_PLAYLIST_MAX_PER_PROFILE, getPlaylistBatchAbi,
   matchesPlaylistRevision, quoteNamedPlaylist, supportsDJukePlaylistBatch, supportsDJukePlaylistRadio } from './djuke-playlists.mjs?v=20261024-standalone-djuke';

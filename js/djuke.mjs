@@ -7,11 +7,11 @@ import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 import { lookupEnsName } from './ens-client.mjs?v=20261016-ens-worker';
 import { renderWalletAddress } from './fund-display.mjs?v=20261024-djuke-labels';
+import { playlistBatchProgress } from './djuke-playlist-progress.mjs?v=20261025-seamless-handoff';
 export { USDC_BROWSER_ABI };
 
 export function playlistReceiptSummary(batch) {
-  const delivered = batch.songs.filter(song => song.status === 'delivered').length;
-  const total = batch.songs.length;
+  const { delivered, total, progress } = playlistBatchProgress(batch);
   const state = batch.status === 'settled' ? 'completed' : batch.status === 'refunded' ? 'refunded'
     : batch.status === 'confirming' ? 'confirming' : batch.playing ? 'playing' : 'queued';
   const label = { completed: 'Completed', refunded: 'Refunded', confirming: 'Verifying queue',
@@ -23,10 +23,6 @@ export function playlistReceiptSummary(batch) {
   const failedSong = failure && batch.songs.find(song => song.laneId === failure.laneId);
   const failureNote = failure && state !== 'completed'
     ? ` Song ${batch.songs.indexOf(failedSong) + 1 || '?'}${failedSong?.title ? ` (${failedSong.title})` : ''}: ${failure.reason.replace(/_/g, ' ')}. ${failure.attempts}/${failure.maxAttempts} attempts failed${failure.exhausted ? '; retries exhausted' : state === 'refunded' ? '; batch refunded' : '; retry pending'}.` : '';
-  const played = batch.songs.filter(song => song.status === 'played').length;
-  const playing = batch.songs.findIndex(song => song.status === 'playing');
-  const progress = `${delivered} / ${total} songs delivered${played ? ` · ${played} played, settling` : ''}${
-    playing >= 0 ? ` · now playing song ${playing + 1}` : ''}`;
   return { state, label, delivered, total, progress,
     payment: paid === null ? 'Payment details are being verified'
       : `Paid ${formatDjukeUsdc(paid)} USDC${state === 'refunded'
@@ -441,12 +437,8 @@ export function initDjuke() {
         });
         for (const batch of snapshot.playlistBatches || []) {
           const item = node('li', undefined, 'djuke-playlist-queue');
-          const remaining = batch.songs.filter(song => song.status === 'pending').length;
-          const current = batch.songs.findIndex(song => song.status === 'playing');
           const details = node('div', undefined, 'djuke-request-details');
-          details.append(node('strong', current >= 0
-            ? `${batch.name} · Song ${current + 1} of ${batch.songs.length} · ${remaining} remaining`
-            : `${batch.name} · ${remaining} of ${batch.songs.length} songs remaining`));
+          details.append(node('strong', playlistBatchProgress(batch).heading));
           const songs = node('ol');
           songs.className = 'djuke-playlist-songs';
           songs.dataset.batch = batch.batchId;

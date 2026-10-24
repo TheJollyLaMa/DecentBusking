@@ -1,4 +1,4 @@
-// js/space.js?v=20261022-playlist-lane — DecentBusking
+// js/space.js?v=20261025-seamless-handoff — DecentBusking
 // Three.js-powered NFT asteroid field.
 //
 // Behaviour:
@@ -22,9 +22,9 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261022-playlist-lane';
+import { renderNFTCard } from './nft-card.js?v=20261025-seamless-handoff';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { setNowPlaying } from './stage.js?v=20261022-playlist-lane';
+import { setNowPlaying } from './stage.js?v=20261025-seamless-handoff';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft } from './nft-loader.js?v=20261012-paging';
 import { createRadioPlaylistEffects } from './radio-playlist-effects.mjs?v=20261025-seamless-handoff';

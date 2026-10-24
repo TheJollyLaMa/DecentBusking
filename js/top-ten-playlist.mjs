@@ -1,7 +1,7 @@
 export async function addChartSongToPlaylist(track, {
   wallet = window._wallet,
   resolveNFT = async detail => {
-    const { resolveNowPlayingNFT } = await import('./space.js?v=20261022-playlist-lane');
+    const { resolveNowPlayingNFT } = await import('./space.js?v=20261025-seamless-handoff');
     return resolveNowPlayingNFT(detail, { requireMediaMatch: true });
   },
   save = async nft => {
@@ -26,10 +26,10 @@ export async function addChartSongToPlaylist(track, {
 export async function saveChartSongToWatchlist(track, {
   wallet = window._wallet,
   resolveNFT = async detail => {
-    const { resolveNowPlayingNFT } = await import('./space.js?v=20261022-playlist-lane');
+    const { resolveNowPlayingNFT } = await import('./space.js?v=20261025-seamless-handoff');
     return resolveNowPlayingNFT(detail, { requireMediaMatch: true });
   },
-  watchlist = async () => import('./watchlist.mjs?v=20261022-playlist-lane'),
+  watchlist = async () => import('./watchlist.mjs?v=20261025-seamless-handoff'),
 } = {}) {
   if (!track.ipfsCid) throw new Error('This song does not have verified media yet.');
   if (!wallet?.address || !wallet?.signer) await wallet?.connect?.();
