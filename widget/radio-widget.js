@@ -6,6 +6,9 @@ import {
 
 const mounted = new WeakMap();
 const DEFAULT_WORKER = 'https://decentbusking.onrender.com';
+// Mirrors js/radio-sync.js: after a song ends, wait up to five minutes for the next song and start it from 0:00.
+const HANDOFF_WINDOW_MS = 5 * 60_000;
+const CONTINUOUS_START_MAX_S = 45;
 const CSS = `
 :host{display:block;color:var(--dbusk-color,#eee);font:13px/1.4 system-ui,sans-serif}
 .radio{background:var(--dbusk-background,#172321);border:var(--dbusk-border-width,1px) solid var(--dbusk-border,#638579);border-radius:var(--dbusk-radius,12px);padding:var(--dbusk-padding,12px);max-width:var(--dbusk-max-width,560px);box-sizing:border-box}
@@ -84,7 +87,7 @@ export function mount(element, options = {}) {
   let destroyed = false, listening = false, reachable = false, playable = false;
   let state = null, track = null, loaded = null, net = null, pending = false, optimistic = null;
   let generation = 0, mediaGeneration = 0, timer = null, metadata = null, offWallet = null, head = null, polling = false;
-  let preload = null, activeBlob = null, endedPlayId = null;
+  let preload = null, activeBlob = null, endedPlayId = null, endedAt = 0;
   const objectUrls = window.URL || globalThis.URL;
   const requests = new Set(), cleanups = [];
   let view = null;
@@ -220,7 +223,11 @@ export function mount(element, options = {}) {
           activeBlob = entry?.blobUrl || null;
           if (entry) preload = null;
           loaded = id;
-          metadata = { current, id, position: Number(track.positionMs) / 1000 || 0, received: Date.now() };
+          const position = Number(track.positionMs) / 1000 || 0;
+          // A listener who heard the last song to its end starts the next one at 0:00, like the main site.
+          const continuing = endedPlayId !== null && Date.now() - endedAt <= HANDOFF_WINDOW_MS && position <= CONTINUOUS_START_MAX_S;
+          endedPlayId = null;
+          metadata = continuing ? null : { current, id, position, received: Date.now() };
           audio.src = activeBlob || media;
           void startAudio(current);
         } else if (audio.ended) status.textContent = 'Waiting for the next track';
@@ -243,7 +250,11 @@ export function mount(element, options = {}) {
       now.textContent = 'DBusk radio unavailable · retrying';
       status.textContent = 'Network/CORS or Discord cooldown · playback and voting unavailable';
     } finally {
-      if (!destroyed && current === generation) { polling = false; render(); schedule(current); }
+      if (!destroyed && current === generation) {
+        polling = false;
+        render();
+        schedule(current, listening && audio.ended && endedPlayId !== null && Date.now() - endedAt <= HANDOFF_WINDOW_MS ? 750 : 8000);
+      }
     }
   }
   async function vote(value) {
@@ -341,7 +352,8 @@ export function mount(element, options = {}) {
   });
   on(audio, 'ended', () => {
     playable = false;
-    endedPlayId = track?.playId;
+    endedPlayId = track?.playId ?? null;
+    endedAt = Date.now();
     if (station.id === 'dbusk') { status.textContent = 'Waiting for the next track'; schedule(generation, 750); render(); }
     else failure(new Error('Live stream ended'), generation);
   });

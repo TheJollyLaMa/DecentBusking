@@ -27,7 +27,7 @@ import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider
 import { setNowPlaying } from './stage.js?v=20261022-playlist-lane';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft } from './nft-loader.js?v=20261012-paging';
-import { createRadioPlaylistEffects } from './radio-playlist-effects.mjs?v=20261023-radio-takeover';
+import { createRadioPlaylistEffects } from './radio-playlist-effects.mjs?v=20261025-seamless-handoff';
 
 // ── Timeline constants ────────────────────────────────────────────────────
 const UNITS_PER_DAY   = 5;          // 3-D units per day on the Z-axis

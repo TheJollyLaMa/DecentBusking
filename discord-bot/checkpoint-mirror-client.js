@@ -86,9 +86,15 @@ async function main() {
     secret: process.env.CHECKPOINT_MIRROR_SECRET, ipfsApiUrl: process.env.IPFS_API_URL || 'http://127.0.0.1:5001' });
   if (!process.argv.includes('--watch')) { console.log(JSON.stringify(await poll())); return; }
   const run = async () => {
-    try { const result = await poll(); if (!result.idle) console.log(`[checkpoint-mirror] Verified local pin ${result.cid}`); }
-    catch (error) { console.error(`[checkpoint-mirror] ${error.message}`); }
-    setTimeout(run, 5000);
+    const started = Date.now();
+    let delay = 5000;
+    try {
+      const result = await poll();
+      if (!result.idle) console.log(`[checkpoint-mirror] Verified local pin ${result.cid}`);
+      // Drain queued checkpoints immediately; an idle long-poll already waited server-side.
+      delay = !result.idle || Date.now() - started >= 5000 ? 0 : 5000;
+    } catch (error) { console.error(`[checkpoint-mirror] ${error.message}`); }
+    setTimeout(run, delay);
   };
   await run();
 }

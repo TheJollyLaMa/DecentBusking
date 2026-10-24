@@ -361,8 +361,10 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
     const playlistBatches = playlistReceipts.filter(batch => !['settled', 'refunded'].includes(batch.status));
     for (const request of requests) if (request.playlistBatchId !== undefined) {
       const batch = playlistBatches.find(batch => batch.batchId === request.playlistBatchId);
-      if (batch) request.playlist = { batchId: batch.batchId, name: batch.name,
-        songCount: batch.songs.length, remaining: batch.songs.filter(song => song.status === 'pending').length };
+      // Lanes play in purchase order, so the lane index is the song position even while settlement lags.
+      const position = batch?.songs.findIndex(song => song.laneId === request.playlistLaneId) + 1;
+      if (batch && position > 0) request.playlist = { batchId: batch.batchId, name: batch.name,
+        songCount: batch.songs.length, position, remaining: batch.songs.length - position + 1 };
     }
     const quote = quoteDjuke(mainPending + playlistPending);
     return { chainId: 8453, contractAddress, usdcAddress: BASE_USDC, blockNumber, blockHash: before.hash,
@@ -386,6 +388,9 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   let restored = false;
   let pendingPlaylistCount = 0;
   const pendingUpdates = new Map();
+  // Clean audible completions whose durable checkpoint is still in flight. They unlock the next lane's
+  // playback but never settlement, which still requires the durable `played` record.
+  const evidenced = new Set();
   const retainUpdate = (record, update) => {
     const existing = pendingUpdates.get(record.requestId);
     if (existing) return existing.run();
@@ -394,12 +399,14 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       run() {
         entry.task ||= Promise.resolve().then(update).then(result => {
           pendingUpdates.delete(record.requestId);
+          evidenced.delete(record.requestId);
           return result;
         }).catch(error => {
           if (error instanceof DjukeCheckpointError) {
             log.warn(`[djuke] Journal update retained for ${record.requestId}: ${error.message}`);
           } else {
             pendingUpdates.delete(record.requestId);
+            evidenced.delete(record.requestId);
           }
           throw error;
         }).finally(() => { entry.task = null; });
@@ -538,6 +545,7 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
         return;
       }
       const started = Date.now();
+      if (record.playlistBatchId !== undefined) evidenced.add(record.requestId);
       await retainUpdate(record, () => journal.complete(record.requestId, { playId: play.playId,
         audibleMs: play.audibleMs, finished: true, trackId: record.trackId, revision: record.revision }));
       log.info?.(`[djuke] Playback checkpoint confirmed ${record.requestId}; checkpointMs=${Date.now() - started}`);
@@ -555,9 +563,10 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       return restored && (pendingPlaylistCount > 0 ||
         journal.getState().some(record => record.playlistBatchId !== undefined && record.state !== 'fulfilled'));
     },
+    hasPlaybackEvidence(record) { return evidenced.has(record?.requestId); },
     async canPlay(record) {
       await ready();
-      for (const entry of pendingUpdates.values()) await entry.run();
+      for (const [requestId, entry] of pendingUpdates) if (!evidenced.has(requestId)) await entry.run();
       const state = await readState();
       const requests = state.requests;
       const eligible = requests.some(request => request.playlistLaneId === undefined)
@@ -568,7 +577,7 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
         if (!records.some(saved => saved.requestId === record.requestId && saved.state === 'playing')) return false;
         const previous = requests.filter(entry => entry.playlistLaneId !== undefined &&
           BigInt(entry.playlistLaneId) < BigInt(request.playlistLaneId));
-        if (previous.some(entry => !records.some(saved => saved.requestId === entry.requestId &&
+        if (previous.some(entry => !evidenced.has(entry.requestId) && !records.some(saved => saved.requestId === entry.requestId &&
             ['played', 'fulfilled'].includes(saved.state)))) return false;
       }
       return Boolean(request && request.playable && request.trackId === record.trackId &&

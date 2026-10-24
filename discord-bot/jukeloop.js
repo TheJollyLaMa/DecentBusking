@@ -825,6 +825,8 @@ export class JukeLoopSession {
     this._preparedNext = null;
     this._prepareTask = null;
     this._paidPollTimer = null;
+    this._primeRetryTimer = null;
+    this._primeRetryMs = 0;
     this._transitionTask = null;
     this._preparationEpoch = 0;
     /** Earliest time the next item may start, and the item waiting out that changeover gap. */
@@ -1530,8 +1532,23 @@ export class JukeLoopSession {
     this._prepareTask = task;
   }
 
+  /** Keep looking for the next paid playlist song while the current one plays, so it is ready before this one ends. */
+  _schedulePrimeRetry() {
+    clearTimeout(this._primeRetryTimer);
+    this._primeRetryTimer = null;
+    if (this._destroyed || this.player.state.status !== AudioPlayerStatus.Playing) return;
+    this._primeRetryMs = Math.min(5_000, Math.max(1_000, this._primeRetryMs * 2));
+    this._primeRetryTimer = setTimeout(() => {
+      this._primeRetryTimer = null;
+      this._primeNext();
+    }, this._primeRetryMs);
+    this._primeRetryTimer.unref?.();
+  }
+
   _primeNext() {
     if (this._destroyed || this._preparedNext || this._prepareTask) return;
+    clearTimeout(this._primeRetryTimer);
+    this._primeRetryTimer = null;
     const epoch = this._preparationEpoch;
     // If the playing song is music, it should count toward the advert cadence when it ends.
     const projectedMusicSinceAd = this._currentDevertAd
@@ -1544,14 +1561,18 @@ export class JukeLoopSession {
           return null;
         }
         this._preparedNext = prepared;
-        this._schedulePaidPriorityCheck();
+        if (prepared) {
+          this._primeRetryMs = 0;
+          this._schedulePaidPriorityCheck();
+        } else if (this.djuke?.hasPendingPlaylist?.()) {
+          // A timed-out paid selection returns null while its durable reservation continues; collect it before this song ends.
+          this._schedulePrimeRetry();
+        }
         return prepared;
       })
       .catch(error => {
         console.warn('[jukeloop] Next track preparation deferred:', error.message);
-        if (!this._destroyed && this.player.state.status === AudioPlayerStatus.Playing) {
-          setTimeout(() => this._primeNext(), 1_000).unref?.();
-        }
+        this._schedulePrimeRetry();
         return null;
       })
       .finally(() => {
@@ -1799,11 +1820,15 @@ export class JukeLoopSession {
             retryDelay = 1_000;
           }
         }
+        const authorizationStarted = Date.now();
         if (prepared?.paid && this.djuke?.canPlay &&
             !await this.djuke.canPlay(prepared.paid.record)) {
           this._disposePrepared(prepared, 'Paid request changed or lost priority before playback');
           prepared = null;
           retryDelay = 1_000;
+        }
+        if (prepared?.paid && Date.now() - authorizationStarted >= 1_000) {
+          console.log(`[jukeloop] Paid playback authorization took ${Date.now() - authorizationStarted}ms`);
         }
         if (prepared) {
           if (prepared.hype) {
@@ -1906,7 +1931,10 @@ export class JukeLoopSession {
         await this.djuke.release(paidRecord, new Error(play.media.reason));
       } else {
         const completion = this.djuke.complete(paidRecord, play);
-        if (paidRecord.playlistBatchId !== undefined) this._paidCompletionTask = completion;
+        // Clean evidence lets the next lane start while this checkpoint finishes; retries/failures still block it.
+        if (paidRecord.playlistBatchId !== undefined && !this.djuke.hasPlaybackEvidence?.(paidRecord)) {
+          this._paidCompletionTask = completion;
+        }
         const recovery = await completion
           .finally(() => {
             if (this._paidCompletionTask === completion) this._paidCompletionTask = null;
@@ -2081,6 +2109,8 @@ export class JukeLoopSession {
     this._endingAudio?.completion.interrupt('radio_stopped');
     clearTimeout(this._paidPollTimer);
     this._paidPollTimer = null;
+    clearTimeout(this._primeRetryTimer);
+    this._primeRetryTimer = null;
     this._disposePrepared(this._preparedNext, 'Radio stopped');
     this._preparedNext = null;
     this._pendingDevertAds = [];

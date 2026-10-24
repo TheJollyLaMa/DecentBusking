@@ -1,4 +1,4 @@
-// js/radio-sync.js?v=20261022-playlist-lane — DecentBusking
+// js/radio-sync.js?v=20261025-seamless-handoff — DecentBusking
 // Mirrors the Discord JukeLoop voice channel in the Now Playing banner. New
 // Discord uploads briefly take over the site radio for their first play, and
 // archive selections mute the radio until the listener returns to it.
@@ -19,6 +19,8 @@ const RADIO_LOAD_RETRY_MS = 15_000;
 // After a song ends, poll quickly so the next one starts right after the JukeLoop changeover gap.
 const HANDOFF_POLL_MS = 750;
 const HANDOFF_WINDOW_MS = 30_000;
+// While the server is still between songs, a finished listener keeps waiting to start the next one from 0:00.
+const HANDOFF_IDLE_WINDOW_MS = 5 * 60_000;
 // Continuous listeners start each new song from 0:00 unless they have fallen this far behind.
 const CONTINUOUS_START_MAX_S = 45;
 // One upcoming file is buffered in memory; larger files stream normally.
@@ -685,8 +687,10 @@ async function _poll() {
 }
 
 function _handoffActive() {
-  if (_radioHandoff && (_mode !== 'radio' || performance.now() - _radioHandoff.endedAt > HANDOFF_WINDOW_MS)) {
-    _radioHandoff = null;
+  if (_radioHandoff) {
+    const waiting = !_radio || _radio.playId === _radioHandoff.previousPlayId;
+    const window = waiting ? HANDOFF_IDLE_WINDOW_MS : HANDOFF_WINDOW_MS;
+    if (_mode !== 'radio' || performance.now() - _radioHandoff.endedAt > window) _radioHandoff = null;
   }
   return !!_radioHandoff;
 }

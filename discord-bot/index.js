@@ -67,7 +67,7 @@ import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
 import { createCreatorProfiles } from './creator-profiles.js';
 import { createArtworkUpdateQueue } from './artwork-updates.js';
 import { createDjukeGasQuoteReader, createDjukePlaylistGasQuoteReader, DJUKE_GAS_ABI, DJUKE_PLAYLIST_GAS_ABI } from './djuke-gas.js';
-import { createDjukePlaylistBatchReconciler, djukePlaylistReadiness, playlistBatchEventAbi, legacyPlaylistReceipts, playlistPlaybackFailure } from './djuke-playlist-batches.js';
+import { createDjukePlaylistBatchReconciler, djukePlaylistReadiness, playlistBatchEventAbi, legacyPlaylistReceipts, playlistPlaybackFailure, playlistLaneStatus } from './djuke-playlist-batches.js';
 import { createEnsResolver } from './ens-resolver.js';
 import { createDevertRemovals } from './devert-removals.js';
 import { ensureCheckpointGroups } from './checkpoint-groups.js';
@@ -675,7 +675,7 @@ async function main() {
     name: 'decentbusking-friday-top10-hype.json',
     restoreLatestOnly: true,
     tags: { app: 'decentbusking', kind: 'friday-top10-hype', schema: '1' },
-    beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined,
+    beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined,
     serialize: value => value,
     deserialize: value => value,
   }) : null;
@@ -684,7 +684,7 @@ async function main() {
     filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-playlist-shows.json', restoreLatestOnly: true,
     tags: { app: 'decentbusking', kind: 'playlist-shows', schema: '1' },
-    beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined,
+    beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined,
     serialize: value => value, deserialize: value => value,
   }) : null;
   const creatorProfiles = creatorStore ? createCreatorProfiles({ restore: creatorStore.restore, save: creatorStore.save }) : null;
@@ -1065,7 +1065,7 @@ async function main() {
       uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
       name: `decentbusking-djuke-${djukeAddress.toLowerCase()}-playlist-batches.json`, requireLocalMirror: true,
       tags: { app: 'decentbusking', kind: `djuke-playlist-batches-${djukeAddress.toLowerCase()}`, schema: '2' },
-      serialize: value => value, deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
+      serialize: value => value, deserialize: value => value, beforeUpload: (bytes, options) => checkpointMirror.mirror(bytes, options) });
     const eventContract = new Contract(djukeAddress, [...DJUKE_ABI, ...playlistBatchEventAbi()], getRpcRouter().provider('logs', 'djuke-playlist-events'));
     playlistBatchJournal = createDjukePlaylistBatchReconciler({ provider: eventContract.runner.provider, contract: eventContract,
       restore: batchStore.restore, save: batchStore.save, startBlock: playlistBatchStartBlock });
@@ -1092,6 +1092,8 @@ async function main() {
       const nowPlaying = getJukeLoopNowPlaying();
       const batches = playlistBatchJournal.getState();
       const recent = batches.filter(batch => batch.status !== 'pending').slice(-50);
+      const records = _djukeRuntime?.getJournalState() || [];
+      const hasPlaybackEvidence = record => _djukeRuntime?.hasPlaybackEvidence?.(record) === true;
       return [...historicalPlaylistReceipts, ...batches.filter(batch => batch.status === 'pending' || recent.includes(batch)).map(batch => {
         const saved = creatorProfilesReady ? creatorProfiles.findPlaylistRevision(batch.payer, batch.songIds) : null;
         return { batchId: batch.batchId, contractAddress: djukeAddress, name: saved?.name || `Playlist #${batch.batchId}`,
@@ -1102,14 +1104,13 @@ async function main() {
             ? (BigInt(batch.refundedSongUnits) + BigInt(batch.refundedFeeUnits)).toString() : null,
           playing: !!nowPlaying?.audible && nowPlaying.djukePlaylist?.batchId === batch.batchId,
           workerGasSponsored: sponsoredDjuke,
-          playbackFailure: playlistPlaybackFailure(batch, _djukeRuntime?.getJournalState() || [], djukeAddress),
+          playbackFailure: playlistPlaybackFailure(batch, records, djukeAddress),
           ...(saved ? { playlistId: saved.id, revision: saved.revision } : {}),
           songs: batch.songIds.map((songId, index) => {
             const laneId = batch.laneIds[index];
             const track = tracks.get(songId.toLowerCase());
             return { songId, laneId, title: track?.title || 'Recording awaiting catalog recovery',
-              artist: track?.uploader || '', status: batch.deliveredLaneIds?.includes(laneId) ? 'delivered'
-                : batch.refundedLaneIds?.includes(laneId) ? 'refunded' : 'pending' };
+              artist: track?.uploader || '', status: playlistLaneStatus({ batch, index, contractAddress: djukeAddress, nowPlaying, records, hasPlaybackEvidence }) };
           }) };
       })];
     },
@@ -1146,7 +1147,7 @@ async function main() {
       filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-djuke-journal.json',
       requireLocalMirror: playlistBatchWorkerEnabled,
       tags: { app: 'decentbusking', kind: 'djuke-journal', schema: '1' }, serialize: value => value,
-      deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
+      deserialize: value => value, beforeUpload: (bytes, options) => checkpointMirror.mirror(bytes, options) });
     _djukeRuntime = createDjukeRuntime({
       readState: async () => {
         if (playlistBatchJournal) {
@@ -1252,7 +1253,7 @@ async function main() {
         requireLocalMirror: true,
         tags: { app: 'decentbusking', kind: paidAdVersion === 1 ? 'devert-paid-journal'
           : `devert-paid-${paidAdAddress.toLowerCase()}`, schema: '1' },
-        serialize: value => value, deserialize: value => value, beforeUpload: bytes => checkpointMirror.mirror(bytes) });
+        serialize: value => value, deserialize: value => value, beforeUpload: (bytes, options) => checkpointMirror.mirror(bytes, options) });
       const paidAdRuntimeBase = createDevertQueueRuntime({ readState: readConfirmedQueue, store, contract: queueContract,
         isCampaignRemoved: campaignId => devertRemovals.isRemoved(campaignId),
         resolveCampaignMedia: (campaign, cid) => resolveDevertCampaignMedia(campaign, cid, {
@@ -1291,7 +1292,7 @@ async function main() {
     name: 'decentbusking-radio-announcements.json', restoreLatestOnly: true,
     tags: { app: 'decentbusking', kind: 'radio-announcements', schema: '1' },
     serialize: value => value, deserialize: deserializeAnnouncements,
-    beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined,
+    beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined,
   }) : null;
   const radioAnnouncements = createRadioAnnouncements({
     store: announcementStore, getClient: () => config.getDiscordClient?.() || client,
@@ -1305,7 +1306,7 @@ async function main() {
     gateway: config.ipfsGateway, name: 'decentbusking-live-bookings.json',
     tags: { app: 'decentbusking', kind: 'live-bookings', schema: '1' },
     serialize: value => value, deserialize: value => value,
-    beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined }) : null;
+    beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined }) : null;
   const liveBookings = createLiveBookings({ provider: paymentProvider, ownerWallet: config.mintOwnerWallet,
     escrowAddress: process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS || '',
     escrowStartBlock: Number(process.env.LIVE_PERFORMANCE_ESCROW_START_BLOCK || 0), ensResolver: createEnsResolver(),
@@ -1580,7 +1581,7 @@ async function main() {
       uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl,
       gateway: config.ipfsGateway,
-      beforeUpload: checkpointMirror ? bytes => checkpointMirror.mirror(bytes) : undefined,
+      beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined,
     });
     playlistStateStore = stateStore;
     liveScheduleStore = createPinataStateStore({

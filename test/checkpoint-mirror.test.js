@@ -100,3 +100,62 @@ test('Mac client rejects unsupported or invalid playback journals before importi
     await assert.rejects(poll(), /Only supported|Invalid|Unknown radio playlist/);
   }
 });
+test('required journal checkpoints are offered first and never fail because best-effort mirrors filled the queue', async () => {
+  const { createCheckpointMirror } = await import('../discord-bot/checkpoint-mirror.js');
+  const bridge = createCheckpointMirror({ secret, maxOptionalJobs: 2 });
+  const authorization = `Bearer ${secret}`;
+  bridge.claim(authorization);
+  const optional = ['radio', 'hype'].map(key => bridge.mirror(Buffer.from(`{"${key}":1}`), { key }));
+  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(bridge.mirror(Buffer.from('{"shows":1}'), { key: 'shows' }), /queue is full/);
+  const required = bridge.mirror(Buffer.from('{"records":[]}'), { key: 'djuke', required: true });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(bridge.status(), { available: true, pending: 3, required: 1 });
+  const job = bridge.claim(authorization);
+  assert.equal(Buffer.from(job.contentBase64, 'base64').toString(), '{"records":[]}');
+  bridge.acknowledge(authorization, { jobId: job.jobId, cid: job.expectedCid, recursivePinned: true });
+  assert.equal(await required, job.expectedCid);
+  for (const pending of optional) {
+    const next = bridge.claim(authorization);
+    bridge.acknowledge(authorization, { jobId: next.jobId, cid: next.expectedCid, recursivePinned: true });
+  }
+  assert.equal((await Promise.all(optional)).length, 2);
+});
+
+test('a newer best-effort snapshot of the same store supersedes its unclaimed predecessor', async () => {
+  const { createCheckpointMirror } = await import('../discord-bot/checkpoint-mirror.js');
+  const bridge = createCheckpointMirror({ secret });
+  const authorization = `Bearer ${secret}`;
+  bridge.claim(authorization);
+  const first = bridge.mirror(Buffer.from('{"v":1}'), { key: 'radio' });
+  await new Promise(resolve => setImmediate(resolve));
+  const second = bridge.mirror(Buffer.from('{"v":2}'), { key: 'radio' });
+  assert.equal(await first, null);
+  await new Promise(resolve => setImmediate(resolve));
+  const job = bridge.claim(authorization);
+  assert.equal(Buffer.from(job.contentBase64, 'base64').toString(), '{"v":2}');
+  const third = bridge.mirror(Buffer.from('{"v":3}'), { key: 'radio' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(bridge.status().pending, 2, 'a claimed snapshot is never withdrawn from the local client');
+  bridge.acknowledge(authorization, { jobId: job.jobId, cid: job.expectedCid, recursivePinned: true });
+  assert.equal(await second, job.expectedCid);
+  const last = bridge.claim(authorization);
+  bridge.acknowledge(authorization, { jobId: last.jobId, cid: last.expectedCid, recursivePinned: true });
+  assert.equal(await third, last.expectedCid);
+});
+
+test('an idle long-poll claim receives a new required checkpoint immediately', async () => {
+  const { createCheckpointMirror } = await import('../discord-bot/checkpoint-mirror.js');
+  const bridge = createCheckpointMirror({ secret });
+  const authorization = `Bearer ${secret}`;
+  const started = Date.now();
+  const waiting = bridge.claimWait(authorization, 5_000);
+  const mirrored = bridge.mirror(Buffer.from('{"records":[1]}'), { key: 'djuke', required: true });
+  const job = await waiting;
+  assert.ok(Date.now() - started < 1_000);
+  assert.equal(Buffer.from(job.contentBase64, 'base64').toString(), '{"records":[1]}');
+  bridge.acknowledge(authorization, { jobId: job.jobId, cid: job.expectedCid, recursivePinned: true });
+  assert.equal(await mirrored, job.expectedCid);
+  assert.equal(await bridge.claimWait(authorization, 20), null);
+  await assert.rejects(bridge.claimWait('Bearer wrong', 20), /authorization/);
+});

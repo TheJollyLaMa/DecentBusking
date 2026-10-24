@@ -97,6 +97,27 @@ test('the public radio widget preloads the next source, finishes the current pla
   assert.equal(h.audio().plays, 2, 'a repeated state snapshot is not another playback');
 });
 
+test('a widget listener who heard a song end keeps fast polling through the gap and starts the next song at 0:00', async t => {
+  const h = setup();
+  t.after(() => h.controller.destroy());
+  const first = snapshot();
+  await playing(h);
+  h.audio().fire('loadedmetadata');
+  h.setCurrent({ ...first, nowPlaying: null });
+  h.audio().ended = true;
+  h.audio().fire('ended');
+  await new Promise(resolve => setTimeout(resolve, 1600));
+  h.setCurrent({ ...first, nowPlaying: { ...first.nowPlaying, playId: 'play-2', trackId: 'track-2',
+    ipfsCid: 'bafy' + 'c'.repeat(55), positionMs: 12_000 } });
+  h.audio().ended = false;
+  await new Promise(resolve => setTimeout(resolve, 800));
+  await flush();
+  assert.equal(h.audio().plays, 2, 'the next song is found by the fast handoff poll, not the 8 s idle poll');
+  h.audio().currentTime = 0;
+  h.audio().fire('loadedmetadata');
+  assert.equal(h.audio().currentTime, 0, 'a continuing listener does not join the next song mid-way');
+});
+
 test('the widget cancels preloads on pause and respects data-saver connections', async t => {
   const h = setup();
   t.after(() => h.controller.destroy());
