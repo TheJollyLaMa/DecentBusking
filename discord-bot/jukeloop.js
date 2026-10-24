@@ -21,6 +21,7 @@
 // right before playback to obtain a fresh URL.
 
 import { spawn } from 'child_process';
+import { Transform } from 'node:stream';
 import { getAddress } from 'ethers';
 import { MessageFlags } from 'discord.js';
 import { DEVERT_MAX_AD_SECONDS, DEVERT_SONGS_PER_MAIN_AD } from '../js/devert-scheduler.mjs';
@@ -622,15 +623,15 @@ export function createJukeLoopSession(guildId, opts) {
  * @param {string} url
  * @returns {{ stream: import('stream').Readable, ffmpegProcess: import('child_process').ChildProcess }}
  */
-function createFFmpegStream(url, { ad = false } = {}) {
+export function createFFmpegStream(url, { ad = false } = {}) {
   const args = [
+    '-nostdin', '-hide_banner', '-loglevel', 'warning', '-xerror',
     '-reconnect',           '1',
     '-reconnect_streamed',  '1',
     '-reconnect_delay_max', '5',
     '-i',                   url,
     ...(ad ? ['-t', String(DEVERT_MAX_AD_SECONDS)] : []),
     '-analyzeduration',     '0',
-    '-loglevel',            '0',
     '-vn',
     // Ease each song in from silence so tracks never pop in at full volume.
     '-af', `afade=t=in:st=0:d=${FADE_IN_SECONDS}:curve=qsin`,
@@ -639,11 +640,71 @@ function createFFmpegStream(url, { ad = false } = {}) {
     '-ac', '2',
     'pipe:1',
   ];
-  const ffmpegProcess = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+  const ffmpegProcess = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   ffmpegProcess.on('error', (err) =>
     console.error('[jukeloop] FFmpeg spawn error:', err.message),
   );
   return { stream: ffmpegProcess.stdout, ffmpegProcess };
+}
+
+export function monitorAudioCompletion(input, process) {
+  let decodedBytes = 0, sourceEnded = false, streamError = false, interrupted = null;
+  let exitCode = process.exitCode ?? null, signal = process.signalCode ?? null;
+  let stderrBytes = 0;
+  const warnings = new Set();
+  let notifyExit;
+  const exited = new Promise(resolve => { notifyExit = resolve; });
+  const stream = new Transform({
+    transform(chunk, encoding, callback) {
+      decodedBytes += chunk.length;
+      callback(null, chunk);
+    },
+  });
+  const failed = () => { streamError = true; notifyExit(); };
+  input.on('error', error => { failed(); stream.destroy(error); });
+  stream.on('error', failed);
+  stream.once('close', () => { if (!input.destroyed) input.destroy(); });
+  stream.once('end', () => { sourceEnded = true; });
+  process.once?.('error', failed);
+  process.once?.('exit', (code, exitSignal) => {
+    exitCode = code;
+    signal = exitSignal;
+    notifyExit();
+  });
+  // Keep only bounded categories, never media URLs, gateway tokens or raw stderr.
+  process.stderr?.on('data', chunk => {
+    stderrBytes = Math.min(1_000_000, stderrBytes + chunk.length);
+    const text = String(chunk).slice(0, 4096);
+    if (/HTTP|connection|timed out|network/i.test(text)) warnings.add('network');
+    if (/invalid|corrupt|truncat|error|failed/i.test(text)) warnings.add('decode');
+    if (/timestamp|duration|estimating/i.test(text)) warnings.add('timing');
+  });
+  input.pipe(stream);
+  return {
+    stream,
+    interrupt(reason) { interrupted = reason; notifyExit(); },
+    async finish(resource, timeoutMs = 1000) {
+      let timer;
+      if (sourceEnded && exitCode === null && !signal && !streamError && !interrupted) {
+        try {
+          await Promise.race([exited, new Promise(resolve => { timer = setTimeout(resolve, timeoutMs); })]);
+        } finally { clearTimeout(timer); }
+      }
+      const decodedMs = decodedBytes / (48000 * 2 * 2) * 1000;
+      const playedMs = resource.playbackDuration;
+      const reason = interrupted || (streamError ? 'audio_stream_error'
+        : !sourceEnded ? 'audio_stream_incomplete'
+          : signal ? 'decoder_signaled'
+            : exitCode === null ? 'decoder_exit_timeout'
+              : exitCode !== 0 ? 'decoder_failed'
+                : decodedBytes === 0 ? 'no_decoded_audio'
+                  : !(playedMs > 0) || playedMs + 20 < decodedMs ? 'decoded_audio_not_fully_played' : 'clean_eof');
+      if (reason !== 'clean_eof') process.kill?.();
+      return { finished: reason === 'clean_eof', reason, interrupted, pid: process.pid || null, exitCode, signal,
+        sourceEnded, streamError, decodedBytes, decodedMs: Math.round(decodedMs),
+        playedMs, stderrBytes, warnings: [...warnings] };
+    },
+  };
 }
 
 export function waitForAudioReady(stream, ffmpegProcess, timeoutMs = NEXT_TRACK_READY_TIMEOUT_MS) {
@@ -659,6 +720,7 @@ export function waitForAudioReady(stream, ffmpegProcess, timeoutMs = NEXT_TRACK_
       ffmpegProcess?.off?.('exit', exited);
     };
     const ready = () => {
+      if (stream.readableLength === 0) return;
       cleanup();
       resolve();
     };
@@ -669,8 +731,8 @@ export function waitForAudioReady(stream, ffmpegProcess, timeoutMs = NEXT_TRACK_
       reject(error);
     };
     const ended = () => failed(new Error('FFmpeg ended before producing audio'));
-    const exited = code => {
-      if (stream.readableLength === 0) failed(new Error(`FFmpeg exited before producing audio (${code ?? 'unknown'})`));
+    const exited = (code, signal) => {
+      if (code !== 0 || signal) failed(new Error(`FFmpeg exited before audio was ready (${code ?? signal ?? 'unknown'})`));
     };
     stream.once('readable', ready);
     stream.once('error', failed);
@@ -736,6 +798,9 @@ export class JukeLoopSession {
 
     this._destroyed   = false;
     this._ffmpeg      = null;
+    this._activeAudio = null;
+    this._endingAudio = null;
+    this._audioCompletionTask = null;
     this._preparedNext = null;
     this._prepareTask = null;
     this._paidPollTimer = null;
@@ -776,8 +841,15 @@ export class JukeLoopSession {
       }
     });
 
-    this.player.on(AudioPlayerStatus.Idle, () => {
+    this.player.on(AudioPlayerStatus.Idle, oldState => {
       if (this._nowPlaying?.audible) {
+        const audio = this._activeAudio;
+        if (audio && oldState?.resource && oldState.resource !== audio.resource) {
+          audio.completion.interrupt('audio_resource_mismatch');
+        }
+        this._activeAudio = null;
+        this._endingAudio = audio;
+        this._audioCompletionTask = audio?.completion.finish(audio.resource) || null;
         const endedAt = Date.now();
         this._changeoverAt = endedAt + CHANGEOVER_GAP_MS;
         this._completedPlay = {
@@ -786,7 +858,9 @@ export class JukeLoopSession {
           startedAt: this._nowPlaying.startedAt,
           endedAt,
           audibleMs: Math.max(0, endedAt - this._nowPlaying.startedAt),
-          finished: this._ffmpeg?.exitCode === 0,
+          finished: false,
+          completion: this._audioCompletionTask,
+          countAdOnCompletion: !!this._currentDevertAd?.paidRequest && this._currentPaid?.tier === 0 && !!this._audioCompletionTask,
           firstWeekBonus: this._nowPlaying.firstWeekBonus,
           announcementId: this._announcementMsg?.id,
         };
@@ -980,7 +1054,10 @@ export class JukeLoopSession {
     if (eventId !== previousEventId) {
       this._liveEventId = eventId;
       if (event) {
-        if (this.player.state.status !== AudioPlayerStatus.Idle) this.player.stop(true);
+        if (this.player.state.status !== AudioPlayerStatus.Idle) {
+          this._activeAudio?.completion.interrupt('scheduled_handoff');
+          this.player.stop(true);
+        }
         this._sendPlaybackNotice(`🔴 **Live performance block: ${event.title}** starts now.`);
       } else if (previousEventId) {
         this._sendPlaybackNotice('📻 **Live performance block ended.** JukeLoop is resuming.');
@@ -1022,6 +1099,7 @@ export class JukeLoopSession {
       const enteringOrLeavingTopTen = previousShowKey &&
         (previousShowKey.startsWith('weekly_top10:') || show.type === 'weekly_top10');
       if (this._started && enteringOrLeavingTopTen && this.player.state.status !== AudioPlayerStatus.Idle) {
+        this._activeAudio?.completion.interrupt('scheduled_handoff');
         this.player.stop(true);
       }
       if (this._started && show.type !== 'live_performance') this._refreshQueue();
@@ -1292,7 +1370,10 @@ export class JukeLoopSession {
     }
 
     try {
-      const { stream, ffmpegProcess } = this._createStream(url, { ad: !!devertAd });
+      const source = this._createStream(url, { ad: !!devertAd });
+      const { ffmpegProcess } = source;
+      const completion = monitorAudioCompletion(source.stream, ffmpegProcess);
+      const { stream } = completion;
       await waitForAudioReady(stream, ffmpegProcess, this._audioReadyTimeoutMs);
       if (this._destroyed) {
         try { ffmpegProcess.kill(); } catch {}
@@ -1300,7 +1381,7 @@ export class JukeLoopSession {
         return null;
       }
       const resource = createAudioResource(stream, { inputType: StreamType.Raw });
-      return { track, paid, devertAd, queueIndex, url, resource, ffmpegProcess, hype: hypeSelection, playlistShow: playlistSelection,
+      return { track, paid, devertAd, queueIndex, url, resource, ffmpegProcess, completion, hype: hypeSelection, playlistShow: playlistSelection,
         playlistShowContext: activeShow.type === 'playlist_show'
           ? { title: activeShow.label, instanceId: activeShow.instanceId, fallback: !playlistSelection && !devertAd } : null };
     } catch (err) {
@@ -1505,6 +1586,7 @@ export class JukeLoopSession {
       try { this._ffmpeg.kill(); } catch {}
     }
     this._ffmpeg = prepared.ffmpegProcess;
+    this._activeAudio = prepared.completion ? { completion: prepared.completion, resource: prepared.resource } : null;
     this._currentPaid = prepared.paid?.record || null;
     if (this._currentPaid) this._playlistRetryReason = '';
     this._currentDevertAd = prepared.devertAd;
@@ -1622,6 +1704,7 @@ export class JukeLoopSession {
       let prepared = null;
       const epoch = this._preparationEpoch;
       try {
+        if (this._audioCompletionTask) await this._audioCompletionTask;
         if (this._prepareTask) await this._prepareTask;
         prepared = this._preparedNext;
         this._preparedNext = null;
@@ -1759,7 +1842,28 @@ export class JukeLoopSession {
     this._currentTrack    = null;
     this._announcementContext = null;
 
+    if (completedPlay?.completion) {
+      const media = await completedPlay.completion;
+      delete completedPlay.completion;
+      completedPlay.finished = media.finished;
+      completedPlay.media = media;
+      console.log('[jukeloop] Audio completion:', JSON.stringify({
+        playId: completedPlay.playId, trackId: completedPlay.trackId,
+        requestId: paidRecord?.requestId || null, attempt: paidRecord?.attempts || null,
+        audibleMs: completedPlay.audibleMs, ...media,
+      }));
+      if (media.finished && completedPlay.countAdOnCompletion) {
+        this._musicSinceAd = 0;
+        this._musicPlayCount++;
+        this._persistMainRadioAdState();
+      }
+    }
+
     if (paidRecord?.kind === 'devert' && this.djuke) {
+      if (['scheduled_handoff', 'radio_stopped'].includes(completedPlay?.media?.interrupted)) {
+        await this.djuke.release(paidRecord, new Error(completedPlay.media.reason));
+        return;
+      }
       await this.djuke.complete(paidRecord, completedPlay?.trackId === trackRef?.trackId ? completedPlay : null);
       return;
     }
@@ -1773,9 +1877,13 @@ export class JukeLoopSession {
     }
     if (paidRecord && this.djuke) {
       const play = trackRef && completedPlay?.trackId === trackRef.trackId ? completedPlay : null;
-      const recovery = await this.djuke.complete(paidRecord, play)
-        .catch((err) => console.warn('[jukeloop] DJuke completion pending:', err.message));
-      if (paidRecord.playlistBatchId !== undefined && recovery) this._setPlaylistMediaRetry(recovery);
+      if (['scheduled_handoff', 'radio_stopped'].includes(play?.media?.interrupted)) {
+        await this.djuke.release(paidRecord, new Error(play.media.reason));
+      } else {
+        const recovery = await this.djuke.complete(paidRecord, play)
+          .catch((err) => console.warn('[jukeloop] DJuke completion pending:', err.message));
+        if (paidRecord.playlistBatchId !== undefined && recovery) this._setPlaylistMediaRetry(recovery);
+      }
     }
     if (!msgRef || !trackRef) return;
 
@@ -1938,6 +2046,8 @@ export class JukeLoopSession {
   /** Stop all playback and disconnect from the voice channel. */
   destroy() {
     this._destroyed = true;
+    this._activeAudio?.completion.interrupt('radio_stopped');
+    this._endingAudio?.completion.interrupt('radio_stopped');
     clearTimeout(this._paidPollTimer);
     this._paidPollTimer = null;
     this._disposePrepared(this._preparedNext, 'Radio stopped');

@@ -19,17 +19,21 @@ export function playlistReceiptSummary(batch) {
   const paid = batch.subtotalUnits != null && batch.feeUnits != null
     ? BigInt(batch.subtotalUnits) + BigInt(batch.feeUnits) : null;
   const refunded = batch.refundedUnits == null ? null : BigInt(batch.refundedUnits);
+  const failure = batch.playbackFailure;
+  const failedSong = failure && batch.songs.find(song => song.laneId === failure.laneId);
+  const failureNote = failure && state !== 'completed'
+    ? ` Song ${batch.songs.indexOf(failedSong) + 1 || '?'}${failedSong?.title ? ` (${failedSong.title})` : ''}: ${failure.reason.replace(/_/g, ' ')}. ${failure.attempts}/${failure.maxAttempts} attempts failed${failure.exhausted ? '; retries exhausted' : state === 'refunded' ? '; batch refunded' : '; retry pending'}.` : '';
   return { state, label, delivered, total, progress: `${delivered} / ${total} songs delivered`,
     payment: paid === null ? 'Payment details are being verified'
       : `Paid ${formatDjukeUsdc(paid)} USDC${state === 'refunded'
         ? refunded === null ? ' · Refund amount is being verified'
           : ` · Refunded ${formatDjukeUsdc(refunded)} USDC · Settled ${formatDjukeUsdc(paid - refunded)} USDC` : ''}`,
-    note: state === 'refunded'
+    note: (state === 'refunded'
       ? batch.workerGasSponsored ? 'Undelivered songs and unreleased fee returned to your wallet. Network gas is not refunded.'
         : 'Undelivered songs and playlist fee returned to your wallet. Worker ETH and network gas are not refunded.'
       : state === 'completed' ? 'Playback delivered and platform fee settled.'
         : state === 'confirming' ? 'Purchase confirmed on Base. Waiting for the verified queue; playback is not complete.'
-          : 'Payment confirmed. Main paid requests may cut in; only delivered songs count toward completion.' };
+          : 'Payment confirmed. Main paid requests may cut in; only delivered songs count toward completion.') + failureNote };
 }
 
 export function quoteDjuke(pendingCount) {

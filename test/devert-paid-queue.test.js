@@ -27,12 +27,26 @@ test('a hung paid queue stays bounded without overlapping or discarding a late d
   assert.equal(await queues.nextPaid(), null);
   assert.equal(adCalls, 1, 'do not start another reservation while the old one is unresolved');
   assert.equal(songCalls, 2);
-  assert.match(warnings[0], /timed out; music rotation continues/);
+  assert.match(warnings[0], /timed out after \d+ms; selection remains pending/);
+  assert.doesNotMatch(warnings[0], /music rotation continues/);
   resolveAd({ record, track: {} });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(released, []);
   assert.equal((await queues.nextPaid()).record, record);
   assert.equal(adCalls, 1, 'consume the prepared reservation instead of paying for another checkpoint');
+});
+
+test('selection diagnostics report the paid playlist hold rather than promising rotation', async () => {
+  const { combinePaidQueues } = await import('../discord-bot/devert-queue.js');
+  let resolveSelection;
+  const messages = [];
+  const queues = combinePaidQueues({ timeoutMs: 5, log: { warn: message => messages.push(message) },
+    songs: { hasPendingPlaylist: () => true, nextPaid: () => new Promise(resolve => { resolveSelection = resolve; }) } });
+  assert.equal(await queues.nextPaid(), null);
+  assert.match(messages[0], /paid playlist holds rotation/);
+  assert.doesNotMatch(messages[0], /music rotation continues/);
+  resolveSelection(null);
+  await new Promise(resolve => setImmediate(resolve));
 });
 
 test('a late playlist selection stays paid and queued instead of refunding the batch', async () => {

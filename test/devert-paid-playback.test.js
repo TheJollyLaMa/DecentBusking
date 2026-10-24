@@ -10,6 +10,7 @@ async function tierSession(t, tier, name) {
   player.play = () => {};
   player.stop = () => {};
   const calls = [];
+  const inputs = [];
   const paid = { record: { requestId: `paid-${name}`, kind: 'devert', tier },
     track: { trackId: `paid-${name}`, title: 'Priority advert', campaignId: '7', mediaType: 'audio/mpeg' } };
   const ordinary = [8, 9].map(n => ({ campaignId: String(n), mainRadio: true,
@@ -18,12 +19,13 @@ async function tierSession(t, tier, name) {
     voiceChannel: { guild: { id: name } }, client: {}, textChannel: { send: async () => ({}) },
     audioPlayer: player, djuke: {
       nextPaid: async options => { calls.push(options); return tier === 1 || options.allowBump ? paid : null; },
-      fail: async () => {}, complete: async () => {},
+      fail: async () => {}, release: async () => {}, complete: async () => {},
     },
     devertPlayback: { nextMainRadioAd: async () => ordinary, isCampaignRemoved: () => false },
     createStream: () => {
       const stream = new PassThrough();
-      stream.write(Buffer.from('audio'));
+      stream.write(Buffer.alloc(19200));
+      inputs.push(stream);
       const ffmpegProcess = new EventEmitter();
       ffmpegProcess.kill = () => {};
       return { stream, ffmpegProcess };
@@ -34,7 +36,7 @@ async function tierSession(t, tier, name) {
   session._persistMainRadioAdState = async () => {};
   session._queue = [{ trackId: 'ordinary-music', title: 'Music' }];
   session._queueIndex = 0;
-  return { session, calls, paid, ordinary, player };
+  return { session, calls, paid, ordinary, player, inputs };
 }
 
 test('a base-price bump cannot add an extra break, while double price can play after any song', async t => {
@@ -48,9 +50,9 @@ test('a base-price bump cannot add an extra break, while double price can play a
   }
 });
 
-test('a queue bump replaces one normal advert slot and consumes cadence, without expanding the break', async t => {
+test('a queue bump replaces one normal advert slot and consumes cadence, without expanding the break', { timeout: 5000 }, async t => {
   const { DEVERT_SONGS_PER_MAIN_AD } = await import('../js/devert-scheduler.mjs');
-  const { session, ordinary, player } = await tierSession(t, 0, 'bump-normal-slot');
+  const { session, ordinary, player, inputs } = await tierSession(t, 0, 'bump-normal-slot');
   session._musicSinceAd = DEVERT_SONGS_PER_MAIN_AD;
   const prepared = await session._prepareNextPlayback();
   assert.equal(prepared.paid.record.tier, 0);
@@ -61,7 +63,12 @@ test('a queue bump replaces one normal advert slot and consumes cadence, without
   session._playNext = async () => {};
   session._nowPlaying.audible = true;
   session._nowPlaying.startedAt = Date.now() - 5000;
-  session._ffmpeg.exitCode = 0;
+  inputs[0].end();
+  prepared.ffmpegProcess.emit('exit', 0, null);
+  for await (const packet of prepared.resource.playStream) {
+    assert.ok(packet.length > 0);
+    prepared.resource.playbackDuration += 20;
+  }
   player.emit('idle');
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(session._musicSinceAd, 0, 'normal-slot bump resets the normal advert cadence');
@@ -83,7 +90,7 @@ test('an immediate purchase replaces a prepared bump but not one already playing
   const released = [];
   session._preparedNext = { paid, track: paid.track, devertAd: { paidRequest: true },
     ffmpegProcess: { kill() {} } };
-  session.djuke.fail = async record => released.push(record.requestId);
+  session.djuke.release = async record => released.push(record.requestId);
   let selectionOptions;
   const immediate = { record: { kind: 'devert', tier: 1, requestId: 'immediate' }, track: { trackId: 'immediate' } };
   session.djuke.nextPaid = async options => { selectionOptions = options; return immediate; };
@@ -100,7 +107,7 @@ test('failed preemption retains the prepared bump and releases the immediate res
   const original = { paid, track: paid.track, devertAd: { paidRequest: true }, ffmpegProcess: { kill() {} } };
   session._preparedNext = original;
   const releases = [];
-  session.djuke.fail = async record => {
+  session.djuke.release = async record => {
     if (record === paid.record) throw new Error('Mirror temporarily offline');
     releases.push(record.requestId);
   };
@@ -136,6 +143,10 @@ for (const ending of ['natural', 'interrupted', 'error']) {
     session._nowPlaying = { trackId: 'devert-paid:0', playId: 'paid-play',
       startedAt: Date.now() - 40_000, audible: true };
     session._ffmpeg = { exitCode: ending === 'natural' ? 0 : null, kill() {} };
+    session._activeAudio = { resource: {}, completion: {
+      finish: async () => ({ finished: ending === 'natural', reason: ending === 'natural' ? 'clean_eof' : 'audio_stream_incomplete' }),
+      interrupt() {},
+    } };
     if (ending === 'error') player.emit('error', new Error('Test audio failure'));
     else player.emit('idle');
     await new Promise(resolve => setImmediate(resolve));
@@ -166,7 +177,7 @@ test('prepared paid advert rechecks on-chain eligibility after the changeover an
         checks++;
         if (blockedBy === 'during-recheck') { showType = 'weekly_top10'; return true; }
         return false;
-      }, fail: async record => released.push(record.requestId) },
+      }, release: async record => released.push(record.requestId) },
     });
     t.after(() => session.destroy());
     session._preparedNext = { paid: { record: { requestId: 'paid-ad-0', kind: 'devert' } },

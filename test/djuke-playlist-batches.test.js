@@ -3,6 +3,20 @@ const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const { Wallet } = createRequire(require('node:path').join(__dirname, '../discord-bot/package.json'))('ethers');
 
+test('profile failure evidence is contract-scoped, sanitized and omitted for recovered deliveries', async () => {
+  const { playlistPlaybackFailure } = await import('../discord-bot/djuke-playlist-batches.js');
+  const address = `0x${'1'.repeat(40)}`;
+  const batch = { batchId: '0', deliveredLaneIds: ['3'] };
+  const record = { requestId: `8453:${address}:playlist:4`, playlistBatchId: '0', playlistLaneId: '4',
+    mediaFailures: 4, lastMediaError: 'http://secret.example?token=private', lastMedia: { reason: 'decoder_failed' } };
+  assert.deepEqual(playlistPlaybackFailure(batch, [record], address), {
+    laneId: '4', reason: 'decoder_failed', attempts: 4, maxAttempts: 4, exhausted: true,
+  });
+  assert.equal(playlistPlaybackFailure(batch, [record], `0x${'2'.repeat(40)}`), null);
+  assert.equal(playlistPlaybackFailure({ ...batch, deliveredLaneIds: ['4'] }, [record], address), null);
+  assert.equal(playlistPlaybackFailure(batch, [{ ...record, lastMedia: undefined }], address).reason, 'media_preparation_failed');
+});
+
 test('contract cutover preserves exact resolved v0.4 receipts without admitting active legacy lanes', async () => {
   const { legacyPlaylistReceipts } = await import('../discord-bot/djuke-playlist-batches.js');
   const active = `0x${'1'.repeat(40)}`, old = `0x${'2'.repeat(40)}`;
