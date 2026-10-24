@@ -1,4 +1,6 @@
-#admin-modal:has(#admin-radio-schedule[open]) { width: min(1240px, 96vw); }
+#admin-modal { width: min(1500px, 97vw); max-height: 96vh; }
+#admin-modal-inner { padding: clamp(12px, 2vw, 28px); min-width: 0; }
+#admin-modal-inner > * { min-width: 0; }
 .radio-programming-calendar { --calendar-line: #425268; --calendar-soft: #202c3c; color: #eef4fb; background: #131d2c; border: 1px solid #40536b; border-radius: 22px; padding: 20px; margin: 16px 0; font-family: system-ui, sans-serif; }
 .radio-calendar-toolbar, .radio-calendar-presets, .radio-calendar-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
 .radio-calendar-title { font-size: 1.3rem; font-weight: 750; margin-right: auto; }
@@ -7,15 +9,21 @@
 .radio-programming-calendar button:focus-visible, .radio-programming-calendar input:focus-visible, .radio-programming-calendar select:focus-visible { outline: 3px solid #f4d380; outline-offset: 2px; z-index: 5; }
 .radio-programming-calendar button:disabled { cursor: not-allowed; opacity: .5; }
 .radio-calendar-presets .radio-calendar-chip { background: #214f51; border-color: #65aaa4; cursor: grab; }
-.radio-calendar-hint { color: #c3d0df; font-size: .85rem; line-height: 1.6; }
-.radio-calendar-status { color: #c0e6cf; font-size: .88rem; min-height: 1.5em; }
+.radio-calendar-hint { color: #c3d0df; font-size: .85rem; line-height: 1.5; margin: 8px 0; }
+.radio-calendar-status { color: #c0e6cf; font-size: .88rem; min-height: 1.5em; margin: 8px 0; }
 .radio-calendar-status.error { color: #ffb5ae; }
-.radio-calendar-scroll { overflow: auto; max-height: 660px; border: 1px solid var(--calendar-line); border-radius: 16px; background: #182435; }
-.radio-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(145px, 1fr)); min-width: 1050px; }
+.radio-calendar-scroll { overflow-y: auto; overflow-x: hidden; max-height: clamp(200px, calc(96dvh - 500px), 620px); border: 1px solid var(--calendar-line); border-radius: 16px; background: #182435; }
+.radio-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); width: 100%; min-width: 0; }
+.radio-calendar-day-picker { display: none; }
 .radio-calendar-day { min-width: 0; border-right: 1px solid var(--calendar-line); }
 .radio-calendar-day:last-child { border: 0; }
 .radio-calendar-day h4 { position: sticky; top: 0; z-index: 4; margin: 0; padding: 12px 8px; background: #26354a; text-align: center; font-size: .9rem; border-bottom: 1px solid var(--calendar-line); }
 .radio-calendar-day.is-today h4 { background: #315e5a; color: #e3fff2; }
+.radio-calendar-day.is-today { background: #20443b33; }
+.radio-programming-calendar .radio-calendar-slot.is-current { background: #b9924438; color: #ffe19a; box-shadow: inset 0 0 0 2px #f4ce73; }
+.radio-calendar-now { position: absolute; left: 0; right: 0; z-index: 3; border-top: 2px solid #ffdb80; color: #17202b; font-size: .65rem; font-weight: 750; pointer-events: none; line-height: 1.4; }
+.radio-calendar-now::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #ffdb80; margin-right: 3px; }
+.radio-calendar-now { background: linear-gradient(#ffdb80 0 15px, transparent 15px); }
 .radio-calendar-timeline { position: relative; }
 .radio-programming-calendar .radio-calendar-slot { display: block; width: 100%; height: 42px; box-sizing: border-box; padding: 2px 6px; border: 0; border-bottom: 1px solid #29384c; border-radius: 0; background: transparent; color: #a8b8cb; font-size: .65rem; text-align: left; }
 .radio-programming-calendar .radio-calendar-slot:hover { background: #2b4159; }
@@ -32,4 +40,28 @@
 .radio-calendar-editor input[type="checkbox"] { width: 19px; height: 19px; accent-color: #74d0bc; }
 .radio-calendar-advanced { margin: 18px 0; }
 .radio-calendar-advanced > summary { cursor: pointer; padding: 10px; color: #bccbdd; }
-@media(max-width: 600px) { .radio-programming-calendar { padding: 12px; border-radius: 16px; } .radio-calendar-title { flex-basis: 100%; } .radio-calendar-scroll { max-height: 420px; } .radio-calendar-toolbar button { font-size: .8rem; } }
+@media(max-width: 1100px) {
+  .radio-programming-calendar { padding: 10px; }
+  .radio-calendar-day h4 { padding: 10px 2px; font-size: .75rem; }
+  .radio-programming-calendar .radio-calendar-event { left: 3px; padding: 4px; }
+  .radio-calendar-event small { display: none; }
+}
+@media(max-width: 700px) {
+  #admin-radio-schedule > .admin-section-header h3,
+  #admin-radio-schedule > .admin-section-header p { display: none; }
+  #admin-radio-schedule > .admin-section-header { justify-content: flex-end; }
+  .radio-programming-calendar { padding: 8px; border-radius: 16px; }
+  .radio-calendar-toolbar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .radio-calendar-title { grid-column: 1 / -1; font-size: 1rem; }
+  .radio-calendar-presets + .radio-calendar-hint { display: none; }
+  .radio-calendar-toolbar button { font-size: .75rem; padding: 8px 3px; }
+  .radio-calendar-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .radio-calendar-presets button { font-size: .8rem; padding: 8px 3px; }
+  .radio-calendar-scroll { max-height: clamp(200px, calc(96dvh - 650px), 620px); }
+  .radio-calendar-grid { grid-template-columns: minmax(0, 1fr); }
+  .radio-calendar-day:not(.is-selected) { display: none; }
+  .radio-calendar-day-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+  .radio-calendar-day-picker select { flex: 1; min-width: 0; padding: 8px; border-radius: 8px; background: #26354a; color: white; font: inherit; }
+  .radio-programming-calendar .radio-calendar-event { left: 44px; }
+  .radio-calendar-event small { display: block; }
+}

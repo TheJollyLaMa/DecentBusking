@@ -259,6 +259,12 @@ shows the Friday Top 10 (8 PM), Friday live block (9 PM), and Sunday Finish Line
 or time slot and fill out the form. Click a card to edit it; drag it to move it.
 Click/tap forms provide the same controls without dragging. Advanced controls
 and immediate manual promotion remain in a collapsed section.
+The enlarged Admin panel shows all seven day columns without horizontal scrolling.
+On narrow screens, a day picker shows one full-width day instead of squeezing or
+side-scrolling the week. Today's column and current half-hour slot are highlighted;
+a New York **Now** line refreshes every 30 seconds without closing the editor.
+**Today · now** returns to the current day/time. The 24-hour timeline scrolls
+vertically; saving or refreshing the calendar preserves its scroll position.
 
 Each new radio hour lasts 60 minutes. **Part of the default program** repeats
 it weekly, beginning on the selected date; unchecked means it plays once.

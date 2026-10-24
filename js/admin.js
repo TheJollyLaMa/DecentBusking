@@ -15,7 +15,7 @@ import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artw
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261024-programming-calendar';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261024-programming-calendar';
-import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261024-programming-calendar';
+import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261024-calendar-fit';
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 import { renderWallet } from './wallet-label.mjs';
@@ -249,6 +249,7 @@ function _resetAdminWallet() {
   _roleSection?.classList.add('hidden');
   _radioScheduleSection?.classList.add('hidden');
   _radioSchedule = null;
+  _programmingCalendar?.destroy();
   _programmingCalendar = null;
   document.getElementById('admin-programming-calendar')?.replaceChildren();
   document.getElementById('admin-devert-campaigns')?.classList.add('hidden');

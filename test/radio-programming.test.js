@@ -16,6 +16,16 @@ test('calendar offers scheduling presets without a front-end rule builder', () =
   assert.match(source, /button\('\+ Live block'/);
 });
 
+test('current calendar date and half-hour slot follow New York time and DST', async () => {
+  const { programmingNow } = await import('../js/radio-programming-calendar.mjs');
+  assert.deepEqual(programmingNow(Date.parse('2026-10-24T23:15:00Z')), { date: '2026-10-24', minute: 1155, slot: 38 });
+  assert.deepEqual(programmingNow(Date.parse('2026-10-26T03:59:00Z')), { date: '2026-10-25', minute: 1439, slot: 47 });
+  assert.deepEqual(programmingNow(Date.parse('2026-10-26T04:00:00Z')), { date: '2026-10-26', minute: 0, slot: 0 });
+  for (const value of ['2026-11-01T05:30:00Z', '2026-11-01T06:30:00Z']) {
+    assert.deepEqual(programmingNow(Date.parse(value)), { date: '2026-11-01', minute: 90, slot: 3 });
+  }
+});
+
 test('Rising Stars requires known positive net votes improving on the prior payroll week', async () => {
   const { previewRadioPlaylist } = await import('../js/radio-playlists.mjs');
   const catalog = [track('small', 2, 1), track('big', 8, 2), track('flat', 3, 3), track('falling', 2, 4),

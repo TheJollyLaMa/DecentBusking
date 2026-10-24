@@ -53,6 +53,12 @@ export function programmingWeek(value = Date.now(), offset = 0) {
   });
 }
 
+export function programmingNow(value = Date.now()) {
+  const local = utcToNewYorkInput(new Date(value).toISOString());
+  const minute = Number(local.slice(11, 13)) * 60 + Number(local.slice(14));
+  return { date: local.slice(0, 10), minute, slot: Math.floor(minute / 30) };
+}
+
 export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurrent = () => true }) {
   let offset = 0;
   let busy = false;
@@ -61,6 +67,8 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
   let editor;
   let status;
   let selectedPreset = 'songs-awaiting-your-vote';
+  let selectedDay = programmingNow().date;
+  let scrollToNow = true;
   const data = () => getSchedule();
   const presets = () => [...RADIO_PLAYLISTS, ...(data().weeklySchedule?.presets || [])];
   const say = (text, error = false) => {
@@ -202,6 +210,7 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
     (fixed ? (start.disabled ? announce : start) : title).focus();
   }
   function render() {
+    const previousScroll = root.querySelector('.radio-calendar-scroll')?.scrollTop;
     generation++;
     root.replaceChildren();
     root.className = 'radio-programming-calendar';
@@ -209,7 +218,7 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
     const dates = programmingWeek(Date.now(), offset);
     heading.append(node('div', 'Your station. Your week.', 'radio-calendar-title'),
       button('Previous week', () => { offset--; render(); }),
-      button('Today', () => { offset = 0; render(); }),
+      button('Today · now', () => { offset = 0; selectedDay = programmingNow().date; scrollToNow = true; render(); }),
       button('Next week', () => { offset++; render(); }));
     root.append(heading, node('p', `${dateLabel.format(new Date(`${dates[0]}T16:00:00Z`))} – ${dateLabel.format(new Date(`${dates[6]}T16:00:00Z`))} · New York time`, 'radio-calendar-hint'));
     const palette = node('div', undefined, 'radio-calendar-presets');
@@ -231,12 +240,22 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
     const scroll = node('div', undefined, 'radio-calendar-scroll');
     const grid = node('div', undefined, 'radio-calendar-grid');
     grid.setAttribute('aria-label', 'Weekly radio programming calendar');
+    if (!dates.includes(selectedDay)) selectedDay = dates[0];
+    const dayPicker = select(dates.map(day => [day, dateLabel.format(new Date(`${day}T16:00:00Z`))]), selectedDay);
+    const dayField = field(root, 'Day to view', dayPicker);
+    dayField.parentElement.className = 'radio-calendar-day-picker';
+    dayPicker.addEventListener('change', () => {
+      selectedDay = dayPicker.value;
+      grid.querySelectorAll('.radio-calendar-day').forEach(column => column.classList.toggle('is-selected', column.dataset.date === selectedDay));
+    });
     const occurrences = radioCalendarOccurrences(data(), {
       now: Date.parse(newYorkInputToUtc(`${dates[0]}T00:00`)), days: 6, pastDays: 1,
     });
     const nowLocal = utcToNewYorkInput(new Date().toISOString());
     for (const day of dates) {
       const column = node('section', undefined, 'radio-calendar-day');
+      column.dataset.date = day;
+      column.classList.toggle('is-selected', day === selectedDay);
       const label = dateLabel.format(new Date(`${day}T16:00:00Z`));
       column.append(node('h4', label));
       if (day === nowLocal.slice(0, 10)) column.classList.add('is-today');
@@ -245,6 +264,7 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
         const time = `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
         const slot = button(time, () => edit(null, `${day}T${time}`));
         slot.className = 'radio-calendar-slot';
+        slot.dataset.minute = String(minute);
         slot.setAttribute('aria-label', `Schedule radio hour ${label} at ${time} New York time`);
         slot.addEventListener('dragover', e => { e.preventDefault(); });
         slot.addEventListener('drop', async e => {
@@ -290,12 +310,38 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
     scroll.append(grid); root.append(scroll);
     editor = node('div', undefined, 'radio-calendar-editor-host'); root.append(editor);
     const version = generation;
-    requestAnimationFrame(() => { if (version === generation) scroll.scrollTop = 16 * slotHeight * 2; });
+    updateNow();
+    const initialMinute = dates.includes(programmingNow().date) ? programmingNow().minute : 16 * 60;
+    const target = scrollToNow || previousScroll === undefined ? Math.max(0, initialMinute / 30 * slotHeight - 120) : previousScroll;
+    scrollToNow = false;
+    requestAnimationFrame(() => { if (version === generation) scroll.scrollTop = target; });
     if (data().ready !== true) {
       say('Calendar is read-only while durable storage is unavailable.', true);
       root.querySelectorAll('button,input,select').forEach(el => { el.disabled = true; });
     }
   }
+  function updateNow() {
+    const current = programmingNow();
+    root.querySelectorAll('.radio-calendar-now').forEach(marker => marker.remove());
+    root.querySelectorAll('.radio-calendar-day').forEach(column => {
+      const today = column.dataset.date === current.date;
+      column.classList.toggle('is-today', today);
+      const header = column.querySelector('h4');
+      if (today) header.setAttribute('aria-current', 'date');
+      else header.removeAttribute('aria-current');
+      column.querySelectorAll('.radio-calendar-slot').forEach(slot => {
+        const active = today && Number(slot.dataset.minute) === current.slot * 30;
+        slot.classList.toggle('is-current', active);
+        if (active) slot.setAttribute('aria-current', 'time');
+        else slot.removeAttribute('aria-current');
+      });
+      if (!today) return;
+      const marker = node('div', `Now ${timeLabel.format(new Date())}`, 'radio-calendar-now');
+      marker.style.top = `${current.minute / 30 * slotHeight}px`;
+      column.querySelector('.radio-calendar-timeline').append(marker);
+    });
+  }
   render();
-  return { refresh: render };
+  const clock = setInterval(updateNow, 30_000);
+  return { refresh: render, destroy: () => clearInterval(clock) };
 }
