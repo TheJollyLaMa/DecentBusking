@@ -36,6 +36,18 @@ test('widget radio origins can preflight/vote without expanding authenticated AP
       assert.equal(vote.status, 200);
       assert.deepEqual(recorded, body);
       assert.equal(vote.headers.get('access-control-allow-origin'), origin);
+      assert.equal(vote.headers.get('access-control-allow-credentials'), null);
+      assert.equal(preflight.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS');
+      assert.equal(preflight.headers.get('access-control-allow-headers'), 'content-type, range');
+      recorded = null;
+      for (const deniedOrigin of ['https://untrusted.example', 'null', '']) {
+        const denied = await fetch(`${base}/api/radio/vote`, { method: 'POST',
+          headers: { origin: deniedOrigin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        assert.equal(denied.status, 400);
+        assert.match((await denied.json()).error, /Origin is not allowed/);
+        assert.equal(recorded, null);
+        assert.equal(denied.headers.get('access-control-allow-origin'), null);
+      }
       for (const path of ['/api/radio/schedule', '/api/radio/announcements/send', '/api/admin/requests']) {
         const denied = await fetch(`${base}${path}`, { method: 'OPTIONS', headers: { origin } });
         assert.equal(denied.status, 403);
