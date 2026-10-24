@@ -67,6 +67,7 @@ cp .env.example .env
 | `WORKER_MIN_BALANCE_WEI`     | DeVert   | Optional low-balance threshold (wei) for DeVert reporting; defaults to `20000000000000` (0.00002 ETH). Below this, impressions and music reports stay in the journal until the worker is funded again |
 | `WORKER_ESTIMATED_DAILY_BURN_WEI` | DeVert | Optional runway estimate for the worker-gas notice; defaults to the observed daily burn rate used in the operator UI |
 | `DVERT_LOOP_DISCORD_TOKEN`   | AdLoop   | Separate bot token for the dedicated ad-only voice channel |
+| `DVERT_LOOP_DISCORD_ENABLED` | AdLoop | Defaults off. Only literal `true` enables the separate Discord login, voice rotation, announcements, and bot intake; otherwise the website loop remains active |
 | `VERT_LOOP_CHANNEL_ID`       | AdLoop   | ID of the `#vertloop` text channel for announcements/submissions |
 | `VERTLOOP_VOICE_CHANNEL_ID`  | AdLoop   | ID of the `VertLoop` voice channel for the dedicated ad rotation |
 | `DVERT_LOOP_AD_INTAKE_ENABLED` | AdLoop | Enable DVertLoop intake in DecentJukebox after enabling Message Content intent for that bot |
@@ -487,7 +488,18 @@ balance, threshold, and a rough runway estimate using
 The worker wallet also funds `reportCompletedMusicPlays`; those batches use the
 same balance check and retry queue.
 
-Create the AdLoop voice channel as `VertLoop` and its announcement/submission text
+**Discord ad rotation is paused by default.** The website Ads Only loop keeps
+using the same campaign selection, media clock, and voting endpoint, but does not
+log DVertLoop into Discord, join voice, or send `#vertloop` announcements. The API
+reports `delivery: "website"` and `discord.enabled: false`. The local media player
+advances without a voice subscriber; this is not a Discord broadcast and does not
+record paid impressions for an unattended website stream. Main-radio playback,
+its qualifying ad impressions, and Discord traffic diagnostics are unchanged.
+The pause persists across restarts; resuming Discord requires explicitly setting
+`DVERT_LOOP_DISCORD_ENABLED=true` and redeploying. Website uploads remain available;
+the main bot handles intake while the separate bot is paused.
+
+When resuming Discord, create the AdLoop voice channel as `VertLoop` and its announcement/submission text
 channel as `#vertloop`. Channel names are for people; the worker connects using
 their numeric channel IDs configured above.
 
@@ -502,7 +514,8 @@ subject to the current show and on-chain campaign-slot eligibility. VertLoop's
 live ad accepts one durable vote per listener per play through Discord reactions
 or the DVert panel. Main-radio selection ranks the top ten eligible campaigns
 using those votes. Opening Ads Only hushes the main-radio browser player and
-mirrors VertLoop; a browser mirror never creates a second paid impression.
+mirrors the shared ad-loop media clock (website-only while Discord is paused);
+a browser mirror never creates a second paid impression.
 
 Media uploads in `#DecentJukebox`, `#jukeLoop`, and `#vertloop` now get a short
 prompt with **Song** and **Advert** buttons. JukeLoop/DecentJukebox default to
@@ -510,7 +523,8 @@ Song; VertLoop defaults to Advert. Only the uploader or a moderator can choose,
 and a timeout falls back to the channel default.
 
 To enable DVertLoop ad intake, enable Message Content intent for the DVertLoop
-application and set `DVERT_LOOP_AD_INTAKE_ENABLED=true`. Give the bot View Channel,
+application and set both `DVERT_LOOP_DISCORD_ENABLED=true` and
+`DVERT_LOOP_AD_INTAKE_ENABLED=true`. Give the bot View Channel,
 Read Message History, and Send Messages in DecentJukebox, plus Add Reactions in
 the vertloop text channel. If the advertiser wallet is not linked yet, the bot
 shows a **Link wallet** button and keeps the same upload pending until the user

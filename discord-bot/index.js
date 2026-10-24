@@ -55,7 +55,7 @@ import { createDevertQueueReader, createDevertQueueRuntime, createDevertQueueCat
 import { devertQueueAbi } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
-import { startDevertLoopWorker } from './devert-loop.js';
+import { startDevertLoopWorker, startDevertWebsiteLoopWorker } from './devert-loop.js';
 import { DISCORD_REST_OPTIONS, loginDiscordClient, recoverDiscordConnection, watchDiscordSession } from './discord-login.js';
 import { createDiscordDiagnostics } from './discord-diagnostics.js';
 import { DEFAULT_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
@@ -616,7 +616,9 @@ async function main() {
   if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt) {
     const missingDevertLoopSettings = ['DVERT_LOOP_DISCORD_TOKEN', 'VERT_LOOP_CHANNEL_ID', 'VERTLOOP_VOICE_CHANNEL_ID']
       .filter(name => !process.env[name]);
-    if (missingDevertLoopSettings.length) {
+    if (process.env.DVERT_LOOP_DISCORD_ENABLED !== 'true') {
+      _devertLoopWorker = await startDevertWebsiteLoopWorker({ playback: _devertPlaybackRuntime });
+    } else if (missingDevertLoopSettings.length) {
       console.warn(`[devert-loop] Not started; missing environment variables: ${missingDevertLoopSettings.join(', ')}`);
     } else {
       void recoverDiscordConnection({
@@ -1800,11 +1802,13 @@ async function main() {
       // Ignore bots and messages outside the configured channel
       if (message.author.bot) return;
       const devertCommand = message.channelId === config.jukeboxChannelId && /^!devert-ad\b/i.test(message.content || '');
-      if (devertCommand && process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true') return;
+      if (devertCommand && process.env.DVERT_LOOP_DISCORD_ENABLED === 'true' &&
+          process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true') return;
       if (devertCommand || shouldHandleDevertLoopSubmission(message, {
         jukeboxChannelId: config.jukeboxChannelId,
         vertLoopChannelId: process.env.VERT_LOOP_CHANNEL_ID,
-        adIntakeEnabled: process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true',
+        adIntakeEnabled: process.env.DVERT_LOOP_DISCORD_ENABLED === 'true' &&
+          process.env.DVERT_LOOP_AD_INTAKE_ENABLED === 'true',
       })) {
         await handleDevertLoopSubmission(message, config, creatorProfiles);
         return;

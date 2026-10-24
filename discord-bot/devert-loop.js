@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
 import { AudioPlayerStatus, createAudioPlayer, createAudioResource, entersState,
-  joinVoiceChannel, StreamType, VoiceConnectionStatus } from '@discordjs/voice';
+  joinVoiceChannel, NoSubscriberBehavior, StreamType, VoiceConnectionStatus } from '@discordjs/voice';
 import { buildSiteVotingLink, resolveStreamableIpfsUrl } from './jukeloop.js';
 import { createVoiceConnectionSupervisor } from './voice-connection.js';
 import { DISCORD_REST_OPTIONS, loginDiscordClient, watchDiscordSession } from './discord-login.js';
@@ -25,7 +25,8 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
   resolveAdUrl = cid => resolveStreamableIpfsUrl(process.env.IPFS_GATEWAY || 'https://dweb.link', cid),
   createStream: streamFactory = createStream, createResource = createAudioResource,
   now = () => Date.now(), setTimer = setTimeout, clearTimer = clearTimeout,
-  minimumAudibleMs = MIN_AUDIBLE_MS, retryMs = RETRY_MS, betweenAdsMs = BETWEEN_ADS_MS, log = console }) {
+  minimumAudibleMs = MIN_AUDIBLE_MS, retryMs = RETRY_MS, betweenAdsMs = BETWEEN_ADS_MS,
+  recordImpressions = true, log = console }) {
   let current = null;
   let child = null;
   let stopped = false;
@@ -56,7 +57,7 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
     stopChild();
     const completed = current;
     current = null;
-    if (completed?.audible) {
+    if (completed?.audible && recordImpressions) {
       const audibleMs = now() - completed.startedAt;
       if (audibleMs >= minimumAudibleMs) {
         try {
@@ -87,8 +88,10 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
     let ad;
     try { ad = await playback.nextDevertLoopAd({ excludeCampaignIds: [...failedCampaigns.keys()] }); }
     catch (error) { log.warn('[devert-loop] Campaign read failed:', error.message); scheduleNext(retryMs); return; }
+    if (stopped) return;
     if (!ad) { scheduleNext(retryMs); return; }
     const url = await resolveAdUrl(ad.track.ipfsCid);
+    if (stopped) return;
     if (!url) {
       failedCampaigns.set(ad.campaignId, timestamp + 5 * 60_000);
       log.warn(`[devert-loop] No gateway can stream campaign ${ad.campaignId}`);
@@ -105,6 +108,7 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
         return;
       }
     }
+    if (stopped) return;
     const radioPlayId = `devert-loop:${ad.campaignId}:${timestamp}`;
     announcement = null;
     child = streamFactory(url);
@@ -142,10 +146,25 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
       return playback.recordMainRadioAdVote({ campaignId: current.campaignId,
         radioPlayId: current.radioPlayId, voterId, vote });
     },
-    stop() { stopped = true; clearTimer(retryTimer); stopChild(); current = null; },
+    stop() { stopped = true; clearTimer(retryTimer); stopChild(); current = null; player.stop?.(true); },
     getState() {
       return { ready: !stopped, nowPlaying: current ? { ...current, positionMs: current.audible ? Math.max(0, now() - current.startedAt) : 0 } : null };
     },
+  };
+}
+
+export async function startDevertWebsiteLoopWorker({ playback, log = console }) {
+  const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+  const controller = createDevertLoopController({
+    player, playback, voiceChannel: { name: 'website only (Discord paused)' },
+    recordImpressions: false, log,
+  });
+  await controller.start();
+  log.log('[devert-loop] Website-only playback enabled; Discord login, voice, and announcements paused.');
+  return {
+    ...controller,
+    getState: () => ({ ...controller.getState(), delivery: 'website',
+      discord: { enabled: false, voiceConnected: false } }),
   };
 }
 
