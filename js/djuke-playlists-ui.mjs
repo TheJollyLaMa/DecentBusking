@@ -2,22 +2,12 @@ import { appendPlaylistSong, openPlaylistSelector } from './playlist-selector.mj
 import { createListenPlaylist } from './listens.mjs?v=20261023-usdc-only';
 import { createPersonalPlayRecovery } from './personal-play-recovery.mjs?v=20261023-personal-recovery';
 import { createNamedPlaylistClient, DJUKE_PLAYLIST_MAX_PER_PROFILE, getPlaylistBatchAbi,
-  matchesPlaylistRevision, quoteNamedPlaylist, supportsDJukePlaylistBatch, supportsDJukePlaylistRadio } from './djuke-playlists.mjs?v=20261022-playlist-lane';
-import { ensureBaseNetwork, approvalNotice, waitForAllowance } from './base-chain.mjs?v=20261023-usdc-only';
+  matchesPlaylistRevision, quoteNamedPlaylist, supportsDJukePlaylistBatch, supportsDJukePlaylistRadio } from './djuke-playlists.mjs?v=20261024-standalone-djuke';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
+import { checkoutRadioPlaylist, checkoutPrivatePlaylist } from './djuke-checkout.mjs';
 
-const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const GAS_QUOTE_TYPES = { PlaylistGasQuote: [
-  { name: 'listener', type: 'address' }, { name: 'songIdsHash', type: 'bytes32' },
-  { name: 'maxTotal', type: 'uint256' }, { name: 'fulfillmentCostWei', type: 'uint256' },
-  { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' },
-] };
 const PLAYLIST_BATCH_ABI = getPlaylistBatchAbi();
-const USDC_ABI = [
-  'function decimals() view returns (uint8)', 'function balanceOf(address) view returns (uint256)',
-  'function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)',
-];
 
 function makePlaylistId() {
   return globalThis.crypto.randomUUID().replaceAll('-', '').toLowerCase();
@@ -35,82 +25,18 @@ function safeButton(label, handler, disabled = false, title = '') {
   return button;
 }
 
-export async function purchaseRadioNamedPlaylist({ playlist, signer, config = window.DecentConfig || {}, onStep = () => {}, fetchImpl = fetch }) {
-  if (!supportsDJukePlaylistRadio(config)) throw new Error('Radio playlist checkout is unavailable');
-  const songIds = playlist.songIds;
-  quoteNamedPlaylist(songIds.length, 'radio');
-  await ensureBaseNetwork(signer.provider);
-  const listener = await signer.getAddress();
-  const quoteUrl = new URL(`${String(config.ipfsUploadServiceUrl || '').replace(/\/$/, '')}/api/djuke/playlist-gas-quote`);
-  quoteUrl.searchParams.set('listener', listener);
-  songIds.forEach(songId => quoteUrl.searchParams.append('songId', songId));
-  const response = await fetchImpl(quoteUrl, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
-  const quote = await response.json();
-  if (!response.ok) throw new Error(quote.error || 'Playlist gas quote is unavailable');
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const maxTotal = BigInt(quote.maxTotal);
-  const fulfillmentCostWei = BigInt(quote.fulfillmentCostWei);
-  const contributionWei = BigInt(quote.contributionWei);
-  if (quote.contractAddress?.toLowerCase() !== config.djukePlaylistBatchAddress?.toLowerCase() ||
-      quote.listener?.toLowerCase() !== listener.toLowerCase() || !Number.isInteger(quote.deadline) ||
-      quote.deadline < nowSeconds || quote.deadline > nowSeconds + 300 ||
-      maxTotal !== quoteNamedPlaylist(songIds.length, 'radio').totalUnits ||
-      contributionWei !== fulfillmentCostWei * 2n * BigInt(songIds.length)) throw new Error('Invalid or expired playlist payment quote');
-  const djuke = new ethers.Contract(config.djukePlaylistBatchAddress, PLAYLIST_BATCH_ABI, signer);
-  if (config.djukePlaylistBatchVersion === '0.5') {
-    if (contributionWei !== 0n || fulfillmentCostWei !== 0n || await djuke.CONTRACT_VERSION() !== '0.5') {
-      throw new Error('DJuke v0.5 requires a verified USDC-only purchase quote');
-    }
-  } else if (contributionWei <= 0n) throw new Error('Legacy playlist checkout requires its disclosed worker gas contribution');
-  const usdc = new ethers.Contract(BASE_USDC, USDC_ABI, signer);
-  if (Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');
-  if (await usdc.balanceOf(listener) < maxTotal) throw new Error(`You need ${formatUsdcUnits(maxTotal)} USDC on Base`);
-  if (contributionWei > 0n && await signer.provider.getBalance(listener) < contributionWei) throw new Error('Not enough Base ETH for the legacy playback contribution');
-  if (await usdc.allowance(listener, djuke.target) < maxTotal) {
-    onStep(approvalNotice(formatUsdcUnits(maxTotal), { workerContribution: contributionWei > 0n }));
-    const approval = await usdc.approve(djuke.target, maxTotal);
-    if ((await approval.wait())?.status !== 1) throw new Error('USDC approval did not confirm');
-    await waitForAllowance(usdc, listener, djuke.target, maxTotal);
-  }
-  onStep(`${songIds.length} songs · ${formatUsdcUnits(maxTotal)} USDC · ${contributionWei === 0n
-    ? 'standard Base network gas only' : `${ethers.formatEther(contributionWei)} ETH worker gas`}`);
-  await djuke.requestPlaylistWithGas.staticCall(songIds, maxTotal, fulfillmentCostWei, quote.deadline, quote.signature, { value: contributionWei });
-  onStep('Confirm radio playlist checkout in your wallet');
-  const transaction = await djuke.requestPlaylistWithGas(songIds, maxTotal, fulfillmentCostWei, quote.deadline, quote.signature, { value: contributionWei });
-  onStep('Waiting for Base confirmation…');
-  if ((await transaction.wait())?.status !== 1) throw new Error('Radio playlist request did not confirm');
-  announcePaymentCelebration({ chainId: 8453, txHash: transaction.hash, amountText: formatUsdcUnits(maxTotal), assetText: 'USDC',
+export async function purchaseRadioNamedPlaylist(options) {
+  const purchase = await checkoutRadioPlaylist({ ...options, config: options.config ?? window.DecentConfig ?? {} });
+  announcePaymentCelebration({ chainId: 8453, txHash: purchase.txHash, amountText: formatUsdcUnits(purchase.totalUnits), assetText: 'USDC',
     summary: 'Play Live queued · not yet delivered', txLabel: 'Follow delivery in Profile → Playlists', source: 'djuke' });
-  return { txHash: transaction.hash, totalUnits: maxTotal, contributionWei };
+  return purchase;
 }
 
-export async function purchasePrivateNamedPlaylist({ playlist, signer, config = window.DecentConfig || {}, onStep = () => {}, onSubmitted = () => {} }) {
-  if (!supportsDJukePlaylistBatch(config)) throw new Error('Private named-playlist checkout is unavailable until a compatible DJuke batch contract is configured');
-  await ensureBaseNetwork(signer.provider);
-  quoteNamedPlaylist(playlist.songIds.length, 'private');
-  const address = await signer.getAddress();
-  const djuke = new ethers.Contract(config.djukePlaylistBatchAddress, PLAYLIST_BATCH_ABI, signer);
-  const usdc = new ethers.Contract(BASE_USDC, USDC_ABI, signer);
-  if (Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');
-  const chainQuote = await djuke.quotePlaylist(playlist.songIds, false);
-  const quote = { totalUnits: BigInt(chainQuote.total ?? chainQuote[2]) };
-  if (await usdc.balanceOf(address) < quote.totalUnits) throw new Error(`You need ${formatUsdcUnits(quote.totalUnits)} USDC on Base`);
-  if (await usdc.allowance(address, djuke.target) < quote.totalUnits) {
-    onStep(approvalNotice(formatUsdcUnits(quote.totalUnits), { workerContribution: false }));
-    const approval = await usdc.approve(djuke.target, quote.totalUnits);
-    if ((await approval.wait())?.status !== 1) throw new Error('USDC approval did not confirm');
-    await waitForAllowance(usdc, address, djuke.target, quote.totalUnits);
-  }
-  onStep(`Private playlist · ${playlist.songIds.length} songs at creator listen prices · ${formatUsdcUnits(quote.totalUnits)} USDC total`);
-  await djuke.purchasePlaylistPrivate.staticCall(playlist.songIds, quote.totalUnits);
-  onStep('Confirm private playlist purchase in your wallet');
-  const transaction = await djuke.purchasePlaylistPrivate(playlist.songIds, quote.totalUnits);
-  await onSubmitted({ payer: address, contract: djuke.target, txHash: transaction.hash });
-  onStep('Waiting for Base confirmation…');
-  if ((await transaction.wait())?.status !== 1) throw new Error('Private playlist purchase did not confirm');
-  announcePaymentCelebration({ chainId: 8453, txHash: transaction.hash, amountText: formatUsdcUnits(quote.totalUnits),
+export async function purchasePrivateNamedPlaylist(options) {
+  const purchase = await checkoutPrivatePlaylist({ ...options, config: options.config ?? window.DecentConfig ?? {} });
+  announcePaymentCelebration({ chainId: 8453, txHash: purchase.txHash, amountText: formatUsdcUnits(purchase.totalUnits),
     assetText: 'USDC', summary: 'Personal Play purchased', txLabel: 'Resume without payment in Profile → Playlists', source: 'djuke' });
-  return { txHash: transaction.hash, totalUnits: quote.totalUnits };
+  return purchase;
 }
 
 export function initDjukePlaylists() {

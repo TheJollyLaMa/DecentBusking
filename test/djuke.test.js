@@ -17,7 +17,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261024-playback-proof/);
+  assert.match(html, /djuke\.mjs\?v=20261024-standalone-djuke/);
   assert.match(html, /devert-paid-queue\.mjs\?v=20261019-radio-recovery/);
 });
 

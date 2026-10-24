@@ -44,7 +44,8 @@ export function groupWatchlistByArtist(entries = []) {
 }
 
 export function createNamedPlaylistClient({ fetchImpl = globalThis.fetch, origin = globalThis.location?.origin || '',
-  getWallet = () => globalThis.window?._wallet, newNonce = () => globalThis.crypto.randomUUID(), now = () => Date.now() } = {}) {
+  getWallet = () => globalThis.window?._wallet, newNonce = () => globalThis.crypto.randomUUID(), now = () => Date.now(),
+  getServiceUrl = () => globalThis.window?.DecentConfig?.ipfsUploadServiceUrl || '' } = {}) {
   async function signAndSend(path, action, data, copy = false) {
     const wallet = getWallet();
     const address = wallet?.address;
@@ -59,7 +60,7 @@ export function createNamedPlaylistClient({ fetchImpl = globalThis.fetch, origin
     if (address.toLowerCase() !== String(getWallet()?.address || '').toLowerCase() || signer !== getWallet()?.signer) {
       throw new Error('Wallet changed; sign again');
     }
-    const response = await fetchImpl(`${String(globalThis.window?.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '')}${path}`, {
+    const response = await fetchImpl(`${String(getServiceUrl()).replace(/\/$/, '')}${path}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, signature }),
       signal: AbortSignal.timeout(30000),
     });
@@ -81,14 +82,14 @@ export function createNamedPlaylistClient({ fetchImpl = globalThis.fetch, origin
         { playlistId: playlist.id, revision: playlist.revision }, true);
     },
     async discover(query = '') {
-      const service = String(globalThis.window?.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+      const service = String(getServiceUrl()).replace(/\/$/, '');
       const response = await fetchImpl(`${service}/api/creator/playlists?${new URLSearchParams({ query })}`, { cache: 'no-store' });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Playlist library unavailable');
       return result.playlists || [];
     },
     async profile(address) {
-      const service = String(globalThis.window?.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+      const service = String(getServiceUrl()).replace(/\/$/, '');
       const response = await fetchImpl(`${service}/api/creator/profile?${new URLSearchParams({ address })}`, { cache: 'no-store' });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Playlist profile unavailable');
