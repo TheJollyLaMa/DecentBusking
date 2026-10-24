@@ -17,6 +17,36 @@ async function withServer(handler, callback) {
   }
 }
 
+test('widget radio origins can preflight/vote without expanding authenticated API permissions', async () => {
+    const { createWorkerRequestHandler } = await import(moduleUrl);
+    const origin = 'https://dbusk.decentagency.eth.limo';
+    let recorded = null;
+    const handler = createWorkerRequestHandler({
+      allowedOrigins: ['https://busking.example'], radioAllowedOrigins: [origin],
+      ownerWallet: Wallet.createRandom().address,
+      onRadioVote: async body => { recorded = body; return body; },
+    });
+    await withServer(handler, async base => {
+      const preflight = await fetch(`${base}/api/radio/vote`, { method: 'OPTIONS', headers: { origin } });
+      assert.equal(preflight.status, 204);
+      assert.equal(preflight.headers.get('access-control-allow-origin'), origin);
+      const body = { playId: 'one', voterId: 'listener-0000000001', vote: 1 };
+      const vote = await fetch(`${base}/api/radio/vote`, { method: 'POST',
+        headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal(vote.status, 200);
+      assert.deepEqual(recorded, body);
+      assert.equal(vote.headers.get('access-control-allow-origin'), origin);
+      for (const path of ['/api/radio/schedule', '/api/radio/announcements/send', '/api/admin/requests']) {
+        const denied = await fetch(`${base}${path}`, { method: 'OPTIONS', headers: { origin } });
+        assert.equal(denied.status, 403);
+        assert.equal(denied.headers.get('access-control-allow-origin'), null);
+      }
+      const deniedVote = await fetch(`${base}/api/radio/vote`, { method: 'OPTIONS',
+        headers: { origin: 'https://untrusted.example' } });
+      assert.equal(deniedVote.status, 403);
+    });
+});
+
 test('DJuke top earners endpoint returns indexed payouts or an explicit unavailable response', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const data = { chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address: Wallet.createRandom().address, totalUnits: '225000' }] };

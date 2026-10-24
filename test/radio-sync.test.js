@@ -10,7 +10,9 @@ function radioSyncSource() {
   const source = fs.readFileSync(path.join(__dirname, '../js/radio-sync.js'), 'utf8')
     .replace(/^import[^\n]*\n/gm, '')
     .replace(/export /g, '');
-  return `${formatter}\n${source}`;
+  const shared = fs.readFileSync(path.join(__dirname, '../js/radio-client.mjs'), 'utf8')
+    .replace(/export /g, '').replace('function sendRadioVote(', 'function sharedRadioVote(');
+  return `${formatter}\n${shared}\n${source}`;
 }
 
 test('next-ad notices identify paid priority, ordinary bumps, protected shows and playback outages', async () => {
