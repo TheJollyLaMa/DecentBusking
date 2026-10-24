@@ -4,6 +4,11 @@ export const LIVE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export const LIVE_PERFORMANCE_AIRTIME_MINUTES = 20;
 export const LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES = 15;
 export const LIVE_PERFORMANCE_FEE_UNITS = '20000000';
+export const LIVE_APPROVED_TERMS_V2 = {
+ version: 'LIVE PERFORMANCE v2',
+ uri: 'ipfs://bafkreidzxhbeub33romiprjlsjojgpitnwrqap52g6hpen3wowwhfi3zgq',
+ hash: '0x8ae5bc38f9d8a66b0c43ac4697c14d62e14ef1c3e66768b6df294ff5b68d88f6',
+};
 export const LIVE_NOTICE = 'Escrow keeps the booking fee locked until review; payout follows the agreed terms. Community-fund money is only earmarked, not escrowed, and may be recovered by the steward.';
 export const DRAFT_TERMS = 'Offer v2 is a draft until its exact agreement is pinned and approved. The proposed set is 20 minutes of airtime for $20 USDC; 15 live-music minutes earns the full fee, shorter sets are prorated, and no live set earns $0. Payout is based only on verified live-music minutes; outages do not create a separate full-fee exception.';
 export const LIVE_ESCROW_ABI = [
@@ -65,6 +70,7 @@ export function workReference(b) { return `decentbusking:live:v1:8453:${b.eventI
 export function bookingGroup(b, now = Date.now()) {
  if (b.cancelled) return 'cancelled';
  if (['paid', 'refunded'].includes(b.status)) return 'completed';
+ if (b.status === 'draft' && Date.parse(b.startUtc) <= now) return 'completed';
  if (b.status === 'draft') return 'draft';
  if (Date.parse(b.endUtc) <= now) return 'completed';
  return Date.parse(b.startUtc) <= now ? 'active' : 'upcoming';
@@ -74,6 +80,8 @@ export function claimState(b, escrowAddress, wallet, now = Date.now()) {
  if (!escrowAddress) return { enabled: false, label: 'Booking escrow is not configured' };
  if (String(wallet).toLowerCase() !== b.wallet.toLowerCase()) return { enabled: false, label: 'Connect performer wallet' };
  if (b.status === 'paid' || b.status === 'refunded') return { enabled: false, label: b.status === 'paid' ? 'Claimed' : 'Refunded' };
+ if (['draft', 'failed', 'funding pending'].includes(b.status)) return { enabled: false, label: 'No confirmed escrow funding; no payment to claim' };
+ if (now > Date.parse(b.claimDeadline)) return { enabled: false, label: 'Claim deadline passed; unclaimed funds require expiry/refund reconciliation' };
  const automaticAt = Date.parse(b.endUtc) + b.reviewWindow * 1000;
  const automatic = b.status === 'funded' && now >= automaticAt;
  const enabled = (b.status === 'approved' || automatic) && now <= Date.parse(b.claimDeadline);
@@ -87,9 +95,10 @@ function liveBookingDate(value) {
  return new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', dateStyle:'medium', timeStyle:'short' }).format(new Date(value));
 }
 function liveBookingMoney(units) { return `$${(Number(units || 0) / 1e6).toFixed(2)} USDC`; }
-export function liveBookingRows(bookings = [], { walletRenderer } = {}) {
+export function liveBookingRows(bookings = [], { walletRenderer, now = Date.now() } = {}) {
  return bookings.map(b => {
-  const status = b.cancelled ? 'Canceled' : b.acknowledged && b.status === 'draft' ? 'Accepted · awaiting funding'
+  const status = b.cancelled ? 'Canceled' : b.status === 'draft' && Date.parse(b.startUtc) <= now ? 'Invitation expired · no confirmed funding'
+   : b.acknowledged && b.status === 'draft' ? 'Accepted · awaiting funding'
    : ({ draft:'Draft invitation', funded:'Funded', approved:'Payment approved', paid:'Paid', refunded:'Refunded',
       'funding pending':'Funding pending', failed:'Needs review' }[b.status] || b.status);
   const terms = b.termsUri ? `<a href="${escapeLive(b.termsUri.replace('ipfs://','https://gateway.pinata.cloud/ipfs/'))}" target="_blank" rel="noopener noreferrer">📄 Read ${escapeLive(b.termsVersion)} terms</a>` : '';
