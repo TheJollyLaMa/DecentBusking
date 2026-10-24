@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DJuke.decentagency.eth · standalone widget</title>
+  <style>
+    body { margin: 0; background: #0d0b14; color: #f3f0ff; font: 16px/1.5 system-ui, sans-serif; }
+    main { max-width: 52rem; margin: 2rem auto; padding: 1rem; }
+    a { color: #d3bfff; }
+  </style>
+  <script>
+    window.DECENT_CONFIG = { appName: 'DJuke.decentagency.eth',
+      subtitle: 'Clone it. Theme it. Keep artists and shared infrastructure funded.',
+      chain: { chainId: 8453, chainName: 'Base', rpcUrls: ['https://mainnet.base.org'],
+        nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, blockExplorerUrls: ['https://basescan.org'] } };
+  </script>
+  <script type="module" src="https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@072a5206489d0e4a3f2576c56f8debb729d933c9/js/main.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.17.0/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+  <decent-header></decent-header>
+  <main>
+    <h1>A cloneable DJuke</h1>
+    <p>Real platform-backed single-song and playlist controls. Browsing is unsigned.
+      Wallet approval occurs only after your explicit purchase or Save action.
+      The shared host header owns your wallet and IPFS sessions.</p>
+    <div id="djuke"></div>
+    <p><a href="docs/DJUKE-WIDGET.md">Configuration, customization, support and release gates</a></p>
+  </main>
+  <script type="module">
+    import { mount } from './js/djuke-widget.mjs';
+    const widget = mount(document.getElementById('djuke'), { ethers: window.ethers,
+      config: {
+        ipfsUploadServiceUrl: 'https://decentbusking.onrender.com',
+        djukeContractAddress: '0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51',
+        djukeContractVersion: '0.5', djukePlaylistBatchEnabled: true,
+        djukePlaylistBatchVersion: '0.5',
+        djukePlaylistBatchAddress: '0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51',
+        djukePlaylistRadioReady: true
+      }
+    });
+    window.addEventListener('pagehide', () => widget.destroy(), { once: true });
+  </script>
+</body>
+</html>

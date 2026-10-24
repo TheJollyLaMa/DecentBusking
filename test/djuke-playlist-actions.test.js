@@ -28,14 +28,14 @@ test('radio checkout accepts zero worker ETH only for configured on-chain v0.5 b
   const djuke = { target: address, CONTRACT_VERSION: async () => version, requestPlaylistWithGas: request };
   const token = { decimals: async () => 6, balanceOf: async () => 100000000n,
     allowance: async () => 0n, approve: async () => ({ wait: async () => ({ status: 1 }) }) };
-  const context = vm.createContext({ ...helpers, AbortSignal, URL, BASE_USDC: 'usdc', PLAYLIST_BATCH_ABI: [], USDC_ABI: [],
+  const context = vm.createContext({ ...helpers, AbortSignal, URL, BASE_USDC_ADDRESS: 'usdc', USDC_BROWSER_ABI: [],
     ensureBaseNetwork: async () => {}, formatUsdcUnits: String, announcePaymentCelebration() {},
     approvalNotice: (await import('../js/base-chain.mjs')).approvalNotice, waitForAllowance: async () => {},
     ethers: { Contract: function(target) { return target === address ? djuke : token; } } });
-  const source = fs.readFileSync(path.join(__dirname, '../js/djuke-playlists-ui.mjs'), 'utf8');
-  vm.runInContext(source.slice(source.indexOf('export async function purchaseRadioNamedPlaylist'),
-    source.indexOf('export async function purchasePrivateNamedPlaylist')).replace('export ', ''), context);
-  const purchase = () => context.purchaseRadioNamedPlaylist({ config, playlist: { songIds: [`0x${'a'.repeat(64)}`] },
+  const source = fs.readFileSync(path.join(__dirname, '../js/djuke-checkout.mjs'), 'utf8');
+  vm.runInContext(source.slice(source.indexOf('export async function checkoutRadioPlaylist'),
+    source.indexOf('export async function checkoutPrivatePlaylist')).replace('export ', ''), context);
+  const purchase = () => context.checkoutRadioPlaylist({ ethers: context.ethers, config, playlist: { songIds: [`0x${'a'.repeat(64)}`] },
     signer: { provider: { getBalance: async () => 100000n }, getAddress: async () => listener },
     onStep: step => steps.push(step), fetchImpl: async () => ({ ok: true, json: async () => ({
       contractAddress: address, listener, maxTotal: '3250000', fulfillmentCostWei: cost, contributionWei: contribution,
@@ -142,15 +142,15 @@ test('unsaved draft buys one personal batch then plays in order; Live and Save s
     const djuke = { target: address, purchasePlaylistPrivate: purchase,
       quotePlaylist: async (ids, radio) => { calls.push({ type: 'quote', ids, radio }); return [950000n, 0n, 950000n]; } };
     const usdc = { decimals: async () => 6, balanceOf: async () => 1000000n, allowance: async () => 1000000n };
-    const context = vm.createContext({ ...helpers, BASE_USDC: 'usdc', PLAYLIST_BATCH_ABI: [], USDC_ABI: [],
+    const context = vm.createContext({ ...helpers, BASE_USDC_ADDRESS: 'usdc', USDC_BROWSER_ABI: [],
       window: {}, ensureBaseNetwork: async () => {}, formatUsdcUnits: String,
       announcePaymentCelebration: () => {},
       ethers: { Contract: function (target) { return target === address ? djuke : usdc; } },
     });
-    const source = fs.readFileSync(path.join(__dirname, '../js/djuke-playlists-ui.mjs'), 'utf8');
-    const purchaseSource = source.slice(source.indexOf('export async function purchasePrivateNamedPlaylist'), source.indexOf('export function initDjukePlaylists'));
+    const source = fs.readFileSync(path.join(__dirname, '../js/djuke-checkout.mjs'), 'utf8');
+    const purchaseSource = source.slice(source.indexOf('export async function checkoutPrivatePlaylist'));
     vm.runInContext(purchaseSource.replace('export ', ''), context);
-    await context.purchasePrivateNamedPlaylist({ playlist: { songIds }, signer: { provider: {}, getAddress: async () => address },
+    await context.checkoutPrivatePlaylist({ ethers: context.ethers, playlist: { songIds }, signer: { provider: {}, getAddress: async () => address },
       onSubmitted: submitted => { calls.push({ type: 'persist', submitted }); },
       config: { djukePlaylistBatchVersion: '0.4', djukePlaylistBatchAddress: address, djukePlaylistBatchEnabled: true } });
     assert.equal(calls.filter(call => call.type === 'purchase').length, 1);
