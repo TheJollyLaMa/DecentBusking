@@ -80,7 +80,7 @@ async function panelFixture({ wallet = null } = {}) {
   const requests = [];
   let read = async () => snapshot();
   let readAds = async () => ({ ads: [{ title: 'Ready ad', ipfsCid: 'ready', state: 'ready' }] });
-  const context = vm.createContext({ ...scheduler, document, formatUsdcUnits,
+  const context = vm.createContext({ ...scheduler, document, formatUsdcUnits, ethers: {},
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example',
       devertContractAddress: snapshot().contractAddress }, _wallet: wallet },
     canSetDevertListenMode: () => true,
@@ -199,7 +199,8 @@ test('ready-ad selection reveals Run Campaign before focus, keeps disclosures in
   assert.equal(ui.element('devert-run-campaign').open, true);
   assert.equal(ui.element('devert-submit-ad').open, false);
   assert.equal(ui.focus(), 'devert-weeks');
-  assert.equal(ui.element('devert-title').value, 'Ready ad');
+  assert.equal(ui.element('devert-campaign-title').value, 'Ready ad');
+  assert.equal(ui.element('devert-title').value, '');
   assert.equal(ui.element('devert-audio-uri').value, 'ipfs://ready');
   ui.element('devert-run-campaign').open = false;
   ui.element('devert-search-results').children[0].children[0].listeners.get('click')();
@@ -207,6 +208,69 @@ test('ready-ad selection reveals Run Campaign before focus, keeps disclosures in
   ui.element('devert-weeks').value = '3';
   ui.element('devert-weeks').listeners.get('input')();
   assert.match(ui.element('devert-campaign-total').textContent, /3 × 5.00 USDC = 15\.00 USDC/);
+});
+
+test('purchase without a selected ad explains the next step instead of silently returning', async () => {
+  const ui = await panelFixture({ wallet: { address: advertiser, signer: {}, chainId: 8453 } });
+  await ui.click('devert-tab');
+  await ui.settle();
+  await ui.element('devert-purchase-form').listeners.get('submit')({ preventDefault() {} });
+  assert.match(ui.element('devert-purchase-status').textContent, /Select a minted ad in My Ads/);
+  assert.equal(ui.element('devert-my-ads').open, true);
+  assert.equal(ui.focus(), 'devert-search');
+});
+
+test('selected expired ad reaches checkout independently of the upload draft', async () => {
+  const ui = await panelFixture({ wallet: { address: advertiser, signer: {}, chainId: 8453 } });
+  ui.readAds(async () => ({ ads: [{ title: 'Expired ad', ipfsCid: 'expired', state: 'ready' }] }));
+  await ui.click('devert-tab');
+  await ui.settle();
+  ui.element('devert-campaigns').children[0].children[1].listeners.get('click')();
+  ui.element('devert-title').value = 'Unrelated upload draft';
+  ui.element('devert-weeks').value = '1';
+  let purchase;
+  ui.context.ethers.Contract = function () {};
+  ui.context.purchaseDevertCampaign = async args => {
+    purchase = args;
+    assert.match(ui.element('devert-purchase-status').textContent, /Checking campaign availability/);
+    return '0xconfirmed';
+  };
+  await ui.element('devert-purchase-form').listeners.get('submit')({ preventDefault() {} });
+  assert.equal(purchase.title, 'Expired ad');
+  assert.equal(purchase.audioURI, 'ipfs://expired');
+  assert.equal(purchase.weeks, 1);
+  assert.match(ui.element('devert-purchase-status').textContent, /Campaign confirmed: 0xconfirmed/);
+  assert.equal(ui.element('devert-title').value, 'Unrelated upload draft');
+});
+
+test('checkout failures and invalid weeks are visible without a wallet transaction', async () => {
+  const ui = await panelFixture({ wallet: { address: advertiser, signer: {}, chainId: 8453 } });
+  await ui.click('devert-tab');
+  await ui.settle();
+  ui.element('devert-campaigns').children[0].children[1].listeners.get('click')();
+  const submit = () => ui.element('devert-purchase-form').listeners.get('submit')({ preventDefault() {} });
+  ui.context.window._wallet.chainId = 1;
+  await submit();
+  assert.match(ui.element('devert-purchase-status').textContent, /Switch your wallet to Base/);
+  ui.context.window._wallet.signer = null;
+  await submit();
+  assert.match(ui.element('devert-purchase-status').textContent, /Connect your wallet/);
+  ui.read(async () => { throw new Error('offline'); });
+  await ui.click('devert-refresh');
+  await ui.settle();
+  await submit();
+  assert.match(ui.element('devert-purchase-status').textContent, /availability is unavailable/);
+  ui.element('devert-run-campaign').open = false;
+  ui.element('devert-purchase-form').listeners.get('invalid')();
+  assert.equal(ui.element('devert-run-campaign').open, true);
+  assert.match(ui.element('devert-purchase-status').textContent, /whole number of weeks/);
+});
+
+test('upload title cannot block native campaign form validation while hidden', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.doesNotMatch(html.match(/<input id="devert-title"[^>]*>/)[0], /\brequired\b/);
+  assert.match(html, /id="devert-campaign-title"[^>]*readonly/);
+  assert.match(html, /id="devert-weeks"[^>]*required/);
 });
 
 test('instructions modal restores focus and Escape does not close its underlying panel', async () => {

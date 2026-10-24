@@ -174,7 +174,7 @@
       <form id="devert-purchase-form" hidden>
         <details id="devert-submit-ad" class="devert-disclosure">
         <summary>Submit Ad</summary>
-        <label>Ad title<input id="devert-title" type="text" maxlength="120" required /></label>
+        <label>Ad title<input id="devert-title" type="text" maxlength="120" /></label>
         <label>Audio or MP4<input id="devert-ad-file" type="file" accept="audio/*,video/mp4" /></label>
         <p class="devert-file-limit">Up to 250 MB · 1 minute</p>
         <label>Creator name<input id="devert-ad-artist" type="text" maxlength="80" /></label>
@@ -183,7 +183,8 @@
         </details>
         <details id="devert-run-campaign" class="devert-disclosure">
           <summary>Run Campaign</summary>
-          <p class="devert-checkout-status">Once your approved NFT arrives, select it below, choose the number of weeks, and purchase at $5.00 USDC per week.</p>
+          <p class="devert-checkout-status">Select a minted ad in My Ads above, choose the number of weeks, and purchase at $5.00 USDC per week. An ended campaign needs a new selection and purchase.</p>
+          <label>Selected ad<input id="devert-campaign-title" type="text" placeholder="Select an ad in My Ads" readonly /></label>
           <label>Selected media URI<input id="devert-audio-uri" type="text" inputmode="url" placeholder="ipfs://..." readonly required /></label>
           <label>Weeks<input id="devert-weeks" type="number" min="1" step="1" value="1" required /></label>
           <p id="devert-campaign-total" class="devert-checkout-status">Total: 1 × 5.00 USDC = 5.00 USDC + worker-gas ETH</p>
@@ -920,7 +921,7 @@
   <script type="module" src="js/fund-tour.mjs?v=20261024-djuke-labels"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261024-djuke-labels"></script>
   <script type="module" src="js/djuke.mjs?v=20261025-seamless-handoff"></script>
-  <script type="module" src="js/devert-site.mjs?v=20261025-seamless-handoff"></script>
+  <script type="module" src="js/devert-site.mjs?v=20261024-campaign-checkout"></script>
   <script type="module" src="js/creator-profile.mjs?v=20261024-admin-sections"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>

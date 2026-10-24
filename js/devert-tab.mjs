@@ -237,6 +237,7 @@ export function initDevertTab(environment = {}) {
   let previewToken = 0;
   let audioModeBusy = false;
   let snapshot = null;
+  let selectedAd = null;
   let purchaseBusy = false;
   let adMediaBusy = false;
   let radioState = radio.getRadioStateSnapshot();
@@ -443,8 +444,10 @@ export function initDevertTab(environment = {}) {
 
   function selectAdForCampaign(ad) {
     if (ad.state !== 'ready') return;
-    document.getElementById('devert-title').value = String(ad.title || '');
+    selectedAd = ad;
+    document.getElementById('devert-campaign-title').value = String(ad.title || '');
     document.getElementById('devert-audio-uri').value = `ipfs://${ad.ipfsCid}`;
+    purchaseStatus.textContent = `Selected ${ad.title}. Choose weeks, then Purchase Campaign.`;
     document.getElementById('devert-run-campaign').open = true;
     document.getElementById('devert-weeks').focus();
   }
@@ -517,10 +520,27 @@ export function initDevertTab(environment = {}) {
 
   async function submitCampaign(event) {
     event.preventDefault();
-    if (purchaseBusy || !snapshot) return;
+    if (purchaseBusy) return;
+    if (!selectedAd) {
+      purchaseStatus.textContent = 'Select a minted ad in My Ads before purchasing a campaign.';
+      document.getElementById('devert-my-ads').open = true;
+      searchInput.focus();
+      return;
+    }
+    if (!snapshot) {
+      purchaseStatus.textContent = 'Campaign availability is unavailable. Refresh My Ads and try again.';
+      return;
+    }
     const address = window.DecentConfig?.devertContractAddress || '';
-    if (!address || !window._wallet?.signer || window._wallet?.chainId !== 8453) { syncCheckout(); return; }
+    if (!address || !window._wallet?.signer || window._wallet?.chainId !== 8453) {
+      purchaseStatus.textContent = !address ? 'Campaign contract is not configured.'
+        : !window._wallet?.signer ? 'Connect your wallet in the page header before purchasing.'
+          : 'Switch your wallet to Base before purchasing.';
+      syncCheckout();
+      return;
+    }
     purchaseBusy = true;
+    purchaseStatus.textContent = 'Checking campaign availability, USDC balance, and Base gas…';
     syncCheckout();
     try {
       const signer = environment.getSigner ? await environment.getSigner() : window._wallet.signer;
@@ -528,8 +548,8 @@ export function initDevertTab(environment = {}) {
       const usdc = new ethers.Contract(DEVERT_USDC_ADDRESS, DEVERT_USDC_ABI, signer);
       const weeks = Number(document.getElementById('devert-weeks').value);
       const hash = await purchaseDevertCampaign({ signer, contract, usdc,
-        title: document.getElementById('devert-title').value,
-        audioURI: document.getElementById('devert-audio-uri').value,
+        title: selectedAd.title,
+        audioURI: `ipfs://${selectedAd.ipfsCid}`,
         weeks, readCampaigns: async () => {
           const response = await fetch(`${window.DecentConfig.ipfsUploadServiceUrl.replace(/\/$/, '')}/api/devert`,
             { cache: 'no-store', signal: AbortSignal.timeout(12_000) });
@@ -582,7 +602,6 @@ export function initDevertTab(environment = {}) {
         signer, address: wallet.address, origin: window.location.origin,
         media: { title, artist: adMediaArtist.value.trim() || wallet.address, ipfsCid: ipfsUri,
           mediaType, filename: file.name, recipient: wallet.address, isDevertAd: true } });
-      document.getElementById('devert-audio-uri').value = ipfsUri;
       adMediaStatus.textContent = 'Submitted for review.';
       await refresh();
     } catch (error) {
@@ -789,6 +808,10 @@ export function initDevertTab(environment = {}) {
   listen(document.getElementById('devert-queue-refresh'), 'click', refresh);
   listen(searchInput, 'input', renderAdLibrary);
   listen(purchaseForm, 'submit', submitCampaign);
+  listen(purchaseForm, 'invalid', () => {
+    document.getElementById('devert-run-campaign').open = true;
+    purchaseStatus.textContent = 'Choose a whole number of weeks, at least 1.';
+  }, true);
   listen(document.getElementById('devert-weeks'), 'input', syncCheckout);
   listen(adVoteButtons[0], 'click', () => voteOnAd(1));
   listen(adVoteButtons[1], 'click', () => voteOnAd(-1));
@@ -798,6 +821,9 @@ export function initDevertTab(environment = {}) {
   listen(document, 'wallet-connected', refresh);
   listen(document, 'wallet-chain-changed', syncCheckout);
   listen(document, 'wallet-disconnected', () => {
+    selectedAd = null;
+    document.getElementById('devert-campaign-title').value = '';
+    document.getElementById('devert-audio-uri').value = '';
     currentAds = [];
     adLibraryStatus = 'Connect your wallet to browse ads.';
     renderAdLibrary();
