@@ -1,10 +1,10 @@
-import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './radio-sync.js?v=20261022-playlist-lane';
+import { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode } from './devert-radio-adapter.mjs';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { submitMediaForApproval } from './mint-submission.js?v=20261017-mercury-release';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs';
 import { planDevertQueues, quoteDevertCampaign, DEVERT_SONGS_PER_MAIN_AD } from './devert-scheduler.mjs';
-import { announcePaymentCelebration } from './payment-celebration.mjs';
+import { announcePaymentCelebration } from './devert-payment.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { activeDevertCampaign, removeDevertCampaign } from './devert-campaigns.mjs';
 
@@ -117,7 +117,7 @@ export const DEVERT_USDC_ABI = [
 ];
 export const DEVERT_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
-export async function purchaseDevertCampaign({ signer, contract, usdc, title, audioURI, weeks, readCampaigns, onStep = () => {} }) {
+export async function purchaseDevertCampaign({ signer, contract, usdc, title, audioURI, weeks, readCampaigns, onStep = () => {}, onConfirmed = announcePaymentCelebration }) {
   await ensureBaseNetwork(signer.provider);
   if (usdc.target.toLowerCase() !== DEVERT_USDC_ADDRESS.toLowerCase() || Number(await usdc.decimals()) !== 6) {
     throw new Error('Configured token is not native Base USDC');
@@ -167,7 +167,7 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   const transaction = await contract.createCampaign(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides);
   onStep('Waiting for Base confirmation…');
   if ((await transaction.wait(2))?.status !== 1) throw new Error('Campaign purchase did not confirm');
-  announcePaymentCelebration({
+  onConfirmed({
     chainId: 8453,
     txHash: transaction.hash,
     amountText: formatUsdc(offerUnits.toString()),
@@ -178,7 +178,23 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
   return transaction.hash;
 }
 
-export function initDevertTab() {
+export function initDevertTab(environment = {}) {
+  const document = environment.document || globalThis.document;
+  const window = environment.window || globalThis.window;
+  const ethers = environment.ethers || globalThis.ethers || window?.ethers;
+  const fetch = environment.fetch || globalThis.fetch;
+  const setTimeout = environment.setTimeout || globalThis.setTimeout;
+  const clearTimeout = environment.clearTimeout || globalThis.clearTimeout;
+  const setInterval = environment.setInterval || globalThis.setInterval;
+  const clearInterval = environment.clearInterval || globalThis.clearInterval;
+  const listen = environment.listen || ((target, ...args) => target?.addEventListener(...args));
+  const radio = environment.radio || { canSetDevertListenMode, formatMainRadioAdCountdown, getRadioStateSnapshot, setDevertListenMode };
+  const node = (tag, text, className) => {
+    const element = document.createElement(tag);
+    if (text !== undefined) element.textContent = text;
+    if (className) element.className = className;
+    return element;
+  };
   const panel = document.getElementById('devert-panel');
   const toggle = document.getElementById('devert-tab');
   if (!panel || !toggle) return;
@@ -223,20 +239,20 @@ export function initDevertTab() {
   let snapshot = null;
   let purchaseBusy = false;
   let adMediaBusy = false;
-  let radioState = getRadioStateSnapshot();
+  let radioState = radio.getRadioStateSnapshot();
 
   const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
   previewPlayer.dataset.listenMode ||= 'radio';
 
   function syncRadioStatus() {
-    radioStatus.textContent = formatMainRadioAdCountdown(radioState?.mainRadioAdCountdown, {
+    radioStatus.textContent = radio.formatMainRadioAdCountdown(radioState?.mainRadioAdCountdown, {
       disconnected: radioState?.mainRadioAdCountdown?.reason === 'disconnected',
     });
   }
 
   function syncListenControls() {
     const adsOnly = previewPlayer.dataset.listenMode === 'ads-only';
-    const canSwitch = canSetDevertListenMode();
+    const canSwitch = radio.canSetDevertListenMode();
     const reconnecting = adLoopState?.voiceConnected === false && adLoopState?.ready !== false;
     audioModeButton.setAttribute('aria-pressed', String(adsOnly));
     audioModeButton.setAttribute('aria-label', adsOnly ? 'Return to Main Radio' : 'Listen to VertLoop');
@@ -250,12 +266,12 @@ export function initDevertTab() {
       if (button) button.disabled = !adsOnly || !playId || adVoteBusy || votedAdPlays.has(playId);
     }
 
-    document.addEventListener('dbusk-radio-state', (event) => {
-      radioState = event.detail || null;
-      syncRadioStatus();
-    });
     syncRadioStatus();
   }
+  listen(document, 'dbusk-radio-state', (event) => {
+    radioState = event.detail || null;
+    syncRadioStatus();
+  });
 
   function stopAdLoopMirror(message = '') {
     ++previewToken;
@@ -326,7 +342,7 @@ export function initDevertTab() {
           listenStatus.textContent = `Ready to play: ${item.title}`;
         });
       };
-      previewPlayer.addEventListener('loadedmetadata', syncAndPlay, { once: true });
+      listen(previewPlayer, 'loadedmetadata', syncAndPlay, { once: true });
       listenStatus.textContent = item.title;
       return;
     }
@@ -375,7 +391,7 @@ export function initDevertTab() {
     if (previewPlayer.paused) return;
     const initialVolume = previewPlayer.volume;
     const startedAt = performance.now();
-    while (performance.now() - startedAt < durationMs) {
+    while (!environment.destroyed?.() && performance.now() - startedAt < durationMs) {
       previewPlayer.volume = initialVolume * Math.max(0, 1 - (performance.now() - startedAt) / durationMs);
       await new Promise(resolve => setTimeout(resolve, 25));
     }
@@ -438,7 +454,8 @@ export function initDevertTab() {
     status.textContent = 'Sign the campaign removal request in your wallet...';
     try {
       await removeDevertCampaign({ service: window.DecentConfig.ipfsUploadServiceUrl,
-        signer: window._wallet.signer, campaignId });
+        signer: environment.getSigner ? await environment.getSigner() : window._wallet.signer, campaignId,
+        fetchImpl: fetch });
       await refresh();
     } catch (error) {
       status.textContent = `Removal failed: ${error.message}`;
@@ -492,7 +509,7 @@ export function initDevertTab() {
       if (ad.tokenId != null) body.append(node('span', `Token #${ad.tokenId}`, 'devert-library-meta'));
       card.append(art, body, node('span', ad.state === 'ready' ? 'Select'
         : ad.state === 'active' ? ad.removed ? 'Removed' : 'Active' : 'Pending', 'devert-library-badge'));
-      if (ad.state === 'ready') card.addEventListener('click', () => selectAdForCampaign(ad));
+      if (ad.state === 'ready') listen(card, 'click', () => selectAdForCampaign(ad));
       item.append(card);
       searchResults.append(item);
     }
@@ -502,11 +519,11 @@ export function initDevertTab() {
     event.preventDefault();
     if (purchaseBusy || !snapshot) return;
     const address = window.DecentConfig?.devertContractAddress || '';
-    const signer = window._wallet?.signer;
-    if (!address || !signer || window._wallet?.chainId !== 8453) { syncCheckout(); return; }
+    if (!address || !window._wallet?.signer || window._wallet?.chainId !== 8453) { syncCheckout(); return; }
     purchaseBusy = true;
     syncCheckout();
     try {
+      const signer = environment.getSigner ? await environment.getSigner() : window._wallet.signer;
       const contract = new ethers.Contract(address, DEVERT_BROWSER_ABI, signer);
       const usdc = new ethers.Contract(DEVERT_USDC_ADDRESS, DEVERT_USDC_ABI, signer);
       const weeks = Number(document.getElementById('devert-weeks').value);
@@ -519,7 +536,7 @@ export function initDevertTab() {
           const state = await response.json();
           if (!response.ok) throw new Error(state.error || 'Campaign availability could not be verified');
           return state;
-        }, onStep: message => { purchaseStatus.textContent = message; } });
+        }, onStep: message => { purchaseStatus.textContent = message; }, onConfirmed: environment.onConfirmed });
       purchaseStatus.textContent = `Campaign confirmed: ${hash}`;
       await refresh();
     } catch (error) {
@@ -549,17 +566,19 @@ export function initDevertTab() {
     adMediaBusy = true;
     syncCheckout();
     try {
+      const signer = environment.getSigner ? await environment.getSigner() : wallet.signer;
       const config = window.DecentConfig || {};
       const upload = createBrowserIpfsUploader({ provider: config.ipfsUploadProvider || 'pinata',
-        serviceUrl: config.ipfsUploadServiceUrl, ipfsApiUrl: config.ipfsApiUrl, signer: wallet.signer,
+        serviceUrl: config.ipfsUploadServiceUrl, ipfsApiUrl: config.ipfsApiUrl, signer,
         address: wallet.address, origin: window.location.origin, purpose: 'submission' });
       adMediaStatus.textContent = `Uploading ${file.name} to IPFS…`;
-      const ipfsUri = await upload(file);
+      const ipfsUri = await (environment.uploadMedia ? environment.uploadMedia(file, { purpose: 'submission' }) : upload(file));
+      if (environment.destroyed?.()) return;
       if (!/^ipfs:\/\/[^/\s]+$/.test(ipfsUri)) throw new Error('Ad upload did not return a file CID');
       document.getElementById('devert-audio-uri').value = ipfsUri;
       adMediaStatus.textContent = 'Confirm submission in your wallet…';
-      await submitMediaForApproval({ serviceUrl: config.ipfsUploadServiceUrl,
-        signer: wallet.signer, address: wallet.address, origin: window.location.origin,
+      await submitMediaForApproval({ serviceUrl: config.ipfsUploadServiceUrl, fetchImpl: fetch,
+        signer, address: wallet.address, origin: window.location.origin,
         media: { title, artist: adMediaArtist.value.trim() || wallet.address, ipfsCid: ipfsUri,
           mediaType, filename: file.name, recipient: wallet.address, isDevertAd: true } });
       document.getElementById('devert-audio-uri').value = ipfsUri;
@@ -584,7 +603,7 @@ export function initDevertTab() {
       await fadeOutAdAudio();
       stopAdLoopPlayback();
       previewPlayer.dataset.listenMode = 'radio';
-      setDevertListenMode('radio');
+      radio.setDevertListenMode('radio');
       audioModeBusy = false;
     } else stopAdLoopPlayback();
     toggle.setAttribute('aria-expanded', 'false');
@@ -597,7 +616,7 @@ export function initDevertTab() {
     syncListenControls();
   }
 
-  audioModeButton.addEventListener('click', async () => {
+  listen(audioModeButton, 'click', async () => {
     if (audioModeBusy) return;
     audioModeBusy = true;
     syncListenControls();
@@ -607,11 +626,11 @@ export function initDevertTab() {
         await fadeOutAdAudio();
         stopAdLoopPlayback();
         previewPlayer.dataset.listenMode = 'radio';
-        setDevertListenMode('radio');
+        radio.setDevertListenMode('radio');
         listenStatus.textContent = '';
       } else {
         if (adLoopState?.ready !== true) return;
-        if (!setDevertListenMode('ads-only')) { listenStatus.textContent = 'Finish archive playback or the current new-song preview first.'; return; }
+        if (!radio.setDevertListenMode('ads-only')) { listenStatus.textContent = 'Finish archive playback or the current new-song preview first.'; return; }
         previewPlayer.dataset.listenMode = 'ads-only';
         startAdLoopMirror();
       }
@@ -620,15 +639,15 @@ export function initDevertTab() {
       syncListenControls();
     }
   });
-  document.addEventListener('radio-source-mode-change', () => {
-    if (previewPlayer.dataset.listenMode === 'ads-only' && !canSetDevertListenMode()) {
+  listen(document, 'radio-source-mode-change', () => {
+    if (previewPlayer.dataset.listenMode === 'ads-only' && !radio.canSetDevertListenMode()) {
       stopAdLoopPlayback();
       previewPlayer.dataset.listenMode = 'radio';
-      setDevertListenMode('radio');
+      radio.setDevertListenMode('radio');
     }
     syncListenControls();
   });
-  previewPlayer.addEventListener('error', () => listenStatus.textContent = 'Could not mirror the current AdLoop stream. Retrying shortly.');
+  listen(previewPlayer, 'error', () => listenStatus.textContent = 'Could not mirror the current AdLoop stream. Retrying shortly.');
   syncListenControls();
 
   async function refresh() {
@@ -707,13 +726,13 @@ export function initDevertTab() {
           const select = node('button', 'Run Campaign', 'devert-use-ad');
           select.type = 'button';
           select.setAttribute('aria-label', `Use ${ad.title} in a campaign`);
-          select.addEventListener('click', () => selectAdForCampaign(ad));
+          listen(select, 'click', () => selectAdForCampaign(ad));
           item.append(select);
         }
         if (ad.state === 'active' && !ad.removed) {
           const remove = node('button', 'Remove from playback', 'devert-use-ad');
           remove.type = 'button';
-          remove.addEventListener('click', () => removeCampaign(ad.campaignId, campaignStatus));
+          listen(remove, 'click', () => removeCampaign(ad.campaignId, campaignStatus));
           item.append(remove);
         }
         campaignList.append(item);
@@ -747,7 +766,7 @@ export function initDevertTab() {
     syncListenControls();
   }
 
-  toggle.addEventListener('click', event => {
+  listen(toggle, 'click', event => {
     event.stopPropagation();
     if (isOpen()) { close(); return; }
     toggle.setAttribute('aria-expanded', 'true');
@@ -759,25 +778,25 @@ export function initDevertTab() {
     document.dispatchEvent(new CustomEvent('left-drawer-open', { detail: 'devert' }));
     refresh();
   });
-  closeButton?.addEventListener('click', async () => { await close(); toggle.focus(); });
-  infoButton.addEventListener('click', () => instructions.showModal());
-  instructionsClose.addEventListener('click', () => instructions.close());
-  instructions.addEventListener('close', () => {
+  listen(closeButton, 'click', async () => { await close(); toggle.focus(); });
+  listen(infoButton, 'click', () => instructions.showModal());
+  listen(instructionsClose, 'click', () => instructions.close());
+  listen(instructions, 'close', () => {
     if (isOpen()) infoButton.focus();
   });
-  refreshButton?.addEventListener('click', refresh);
-  document.getElementById('devert-queue-refresh').addEventListener('click', refresh);
-  searchInput?.addEventListener('input', renderAdLibrary);
-  purchaseForm?.addEventListener('submit', submitCampaign);
-  document.getElementById('devert-weeks')?.addEventListener('input', syncCheckout);
-  adVoteButtons[0]?.addEventListener('click', () => voteOnAd(1));
-  adVoteButtons[1]?.addEventListener('click', () => voteOnAd(-1));
-  adMediaFile?.addEventListener('change', syncCheckout);
-  adMediaQueueButton?.addEventListener('click', queueAdMedia);
-  document.addEventListener('wallet-connected', syncCheckout);
-  document.addEventListener('wallet-connected', refresh);
-  document.addEventListener('wallet-chain-changed', syncCheckout);
-  document.addEventListener('wallet-disconnected', () => {
+  listen(refreshButton, 'click', refresh);
+  listen(document.getElementById('devert-queue-refresh'), 'click', refresh);
+  listen(searchInput, 'input', renderAdLibrary);
+  listen(purchaseForm, 'submit', submitCampaign);
+  listen(document.getElementById('devert-weeks'), 'input', syncCheckout);
+  listen(adVoteButtons[0], 'click', () => voteOnAd(1));
+  listen(adVoteButtons[1], 'click', () => voteOnAd(-1));
+  listen(adMediaFile, 'change', syncCheckout);
+  listen(adMediaQueueButton, 'click', queueAdMedia);
+  listen(document, 'wallet-connected', syncCheckout);
+  listen(document, 'wallet-connected', refresh);
+  listen(document, 'wallet-chain-changed', syncCheckout);
+  listen(document, 'wallet-disconnected', () => {
     currentAds = [];
     adLibraryStatus = 'Connect your wallet to browse ads.';
     renderAdLibrary();
@@ -785,12 +804,19 @@ export function initDevertTab() {
     campaignList.replaceChildren();
     campaignStatus.textContent = 'Connect your wallet to view your ads.';
   });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && isOpen() && !instructions.open) { close().then(() => toggle.focus()); } });
-  document.addEventListener('left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
-  document.addEventListener('click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target) && !instructions.contains(event.target)) close(); });
-}
-
-if (typeof document !== 'undefined') {
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDevertTab);
-  else initDevertTab();
+  listen(document, 'keydown', event => { if (event.key === 'Escape' && isOpen() && !instructions.open) { close().then(() => toggle.focus()); } });
+  listen(document, 'left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
+  listen(document, 'click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target) && !instructions.contains(event.target)) close(); });
+  return {
+    refresh,
+    destroy() {
+      generation++;
+      clearTimeout(refreshTimer);
+      clearInterval(adLoopTimer);
+      if (previewPlayer.dataset.listenMode === 'ads-only') radio.setDevertListenMode('radio');
+      previewPlayer.dataset.listenMode = 'radio';
+      stopAdLoopPlayback();
+      if (instructions.open) instructions.close();
+    },
+  };
 }

@@ -24,7 +24,14 @@ export function filterDevertCampaigns(campaigns, query) {
       .some(value => String(value || '').toLowerCase().includes(term)));
 }
 
-export function initDevertPaidQueue() {
+export function initDevertPaidQueue(environment = {}) {
+  const document = environment.document || globalThis.document;
+  const window = environment.window || globalThis.window;
+  const ethers = environment.ethers || globalThis.ethers || window?.ethers;
+  const fetch = environment.fetch || globalThis.fetch;
+  const setInterval = environment.setInterval || globalThis.setInterval;
+  const clearInterval = environment.clearInterval || globalThis.clearInterval;
+  const listen = environment.listen || ((target, ...args) => target?.addEventListener(...args));
   const button = document.getElementById('devert-paid-queue-button');
   if (!button) return;
   const price = document.getElementById('devert-paid-price');
@@ -166,7 +173,7 @@ export function initDevertPaidQueue() {
     generation++;
     controls();
     try {
-      const signer = window._wallet?.signer;
+      const signer = environment.getSigner ? await environment.getSigner() : window._wallet?.signer;
       const walletAddress = window._wallet?.address;
       if (!signer || !address()) throw new Error('Connect a Base wallet and configure the paid advert contract');
       const check = message => {
@@ -179,7 +186,8 @@ export function initDevertPaidQueue() {
       if (!snapshot?.paymentsEnabled) throw new Error('Paid advert checkout is not enabled');
       const usdc = new ethers.Contract(DEVERT_QUEUE_USDC, USDC_BROWSER_ABI, signer);
       const result = await purchaseDevertRequest({ signer, queue, usdc, campaignId: select.value,
-        tier, maxPriceUnits: BigInt(tier === 1 ? snapshot.immediatePriceUnits : snapshot.priceUnits), onStep: check });
+        tier, maxPriceUnits: BigInt(tier === 1 ? snapshot.immediatePriceUnits : snapshot.priceUnits), onStep: check,
+        onConfirmed: environment.onConfirmed });
       receipt.textContent = `Request #${result.requestId} queued${tier === 1 ? ' for after-song priority' : ' for the next normal ad break'}. Funds are distributed automatically after completed playback. `;
       link(receipt, result.txHash, 'View payment receipt');
       busy = false;
@@ -190,19 +198,18 @@ export function initDevertPaidQueue() {
     }
     finally { busy = false; controls(); }
   };
-  button.addEventListener('click', () => transact());
-  immediateButton.addEventListener('click', () => transact(1));
-  select.addEventListener('change', controls);
-  search.addEventListener('input', renderCampaigns);
-  document.getElementById('devert-paid-refresh').addEventListener('click', refresh);
-  document.addEventListener('wallet-connected', refresh);
-  document.addEventListener('wallet-disconnected', refresh);
-  document.addEventListener('wallet-chain-changed', refresh);
-  document.addEventListener('left-drawer-open', event => { if (event.detail === 'devert') refresh(); });
-  setInterval(() => {
+  listen(button, 'click', () => transact());
+  listen(immediateButton, 'click', () => transact(1));
+  listen(select, 'change', controls);
+  listen(search, 'input', renderCampaigns);
+  listen(document.getElementById('devert-paid-refresh'), 'click', refresh);
+  listen(document, 'wallet-connected', refresh);
+  listen(document, 'wallet-disconnected', refresh);
+  listen(document, 'wallet-chain-changed', refresh);
+  listen(document, 'left-drawer-open', event => { if (event.detail === 'devert') refresh(); });
+  const timer = setInterval(() => {
     if (document.getElementById('devert-panel')?.classList.contains('is-open') && !busy) refresh();
   }, 30000);
   controls();
+  return { refresh, destroy() { generation++; clearInterval(timer); } };
 }
-
-if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', initDevertPaidQueue, { once: true });
