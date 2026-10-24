@@ -63,7 +63,7 @@ test('failure evidence follows the latest attempt and distinguishes clean EOF fr
   assert.equal(journal.getState()[0].lastMedia.reason, 'insufficient_audible_time');
   const second = await runtime.nextPaid();
   await runtime.retryMedia(second.record, new Error('Preparation timed out'));
-  assert.equal(journal.getState()[0].lastMedia, undefined, 'a preparation failure must not inherit a previous EOF diagnosis');
+  assert.equal(journal.getState()[0].lastMedia.reason, 'media_preparation_failed', 'a preparation failure must not inherit a previous EOF diagnosis');
   assert.equal(journal.getState()[0].mediaFailures, 2);
   assert.equal(f.settlements, 0);
 });

@@ -7,8 +7,7 @@ export function playlistPlaybackFailure(batch, records, contractAddress) {
   failures.sort((a, b) => String(b.lastMediaFailureAt || '').localeCompare(String(a.lastMediaFailureAt || '')));
   const failed = failures[0];
   if (!failed) return null;
-  return { laneId: failed.playlistLaneId, reason: failed.lastMedia?.reason ||
-    (/did not finish audibly/.test(failed.lastMediaError || failed.lastError || '') ? 'audio_completion_unverified' : 'media_preparation_failed'),
+  return { laneId: failed.playlistLaneId, reason: failed.lastMedia?.reason || 'media_failure_unverified',
     attempts: failed.mediaFailures, maxAttempts: 4, exhausted: failed.mediaFailures >= 4 };
 }
 

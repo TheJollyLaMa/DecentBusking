@@ -460,7 +460,8 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   }
   async function retryMedia(record, error, media = null) {
     if (record.playlistBatchId === undefined) throw new Error('Bounded media retries require a radio playlist request');
-    const updated = await journal.fail(record.requestId, error?.message || String(error), { mediaFailure: true, media });
+    const updated = await journal.fail(record.requestId, error?.message || String(error),
+      { mediaFailure: true, media: media || { reason: 'media_preparation_failed' } });
     const maxRetries = 3;
     if (updated.mediaFailures <= maxRetries) {
       log.warn(`[djuke] Playlist ${record.playlistBatchId} lane ${record.playlistLaneId}: media retry ${updated.mediaFailures}/${maxRetries}; payment stays queued (${updated.lastError}).`);
@@ -482,7 +483,7 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
         const reason = !play ? 'audio_evidence_missing'
           : play.finished !== true ? play.media?.reason || 'audio_stream_incomplete' : 'insufficient_audible_time';
         return retryMedia(record, new Error(`Playlist recording did not finish audibly (${reason})`),
-          play?.media ? { ...play.media, reason } : null);
+          { ...play?.media, reason });
       }
       if (!play || play.audibleMs < minAudibleMs) {
         await journal.fail(record.requestId, 'Paid play was not audible long enough');

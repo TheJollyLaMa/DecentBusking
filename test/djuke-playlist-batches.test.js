@@ -14,7 +14,8 @@ test('profile failure evidence is contract-scoped, sanitized and omitted for rec
   });
   assert.equal(playlistPlaybackFailure(batch, [record], `0x${'2'.repeat(40)}`), null);
   assert.equal(playlistPlaybackFailure({ ...batch, deliveredLaneIds: ['4'] }, [record], address), null);
-  assert.equal(playlistPlaybackFailure(batch, [{ ...record, lastMedia: undefined }], address).reason, 'media_preparation_failed');
+  assert.equal(playlistPlaybackFailure(batch, [{ ...record, lastMedia: undefined }], address).reason, 'media_failure_unverified',
+    'historical attempts without decoder evidence must not invent a preparation diagnosis');
 });
 
 test('contract cutover preserves exact resolved v0.4 receipts without admitting active legacy lanes', async () => {
