@@ -1,5 +1,5 @@
 import { getCreatorWatchlistState } from './watchlist.mjs?v=20261022-playlist-lane';
-import { renderUsdcAmount } from './fund-display.mjs?v=20261024-live-prototype';
+import { renderUsdcAmount } from './fund-display.mjs?v=20261024-djuke-labels';
 import { weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
 import { saveChartSongToWatchlist } from './top-ten-playlist.mjs?v=20261022-playlist-lane';

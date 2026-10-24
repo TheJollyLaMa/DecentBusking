@@ -141,6 +141,22 @@ test('known contracts render as explorer badges instead of raw addresses', async
   assert.match(queueHtml, /📜 DVert paid queue v0\.2/);
   assert.match(queueHtml, /basescan\.org\/address\/0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb#code/);
   assert.doesNotMatch(queueHtml, /data-creator/);
+  const noEns = { lookupAddress() { throw new Error('Known contracts must not need ENS'); } };
+  for (const [address, version] of [
+    ['0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51', '0.5'],
+    ['0xBBCb7F7369978cbdc32C6719B1d24B07f3d55619', '0.4'],
+    ['0x5d07489163feBCdB39C9F579CCC36dff5A067FF9', '0.3'],
+  ]) {
+    for (const input of [address, address.toLowerCase(), address.toUpperCase()]) {
+      const known = await resolveWalletLabel(input, noEns);
+      assert.equal(known.label, `📜 DJuke v${version}`);
+      assert.equal(known.kind, 'contract');
+      const rendered = renderWalletButton(known, { role: 'djuke' });
+      assert.ok(rendered.includes(`https://basescan.org/address/${address}#code`));
+      assert.ok(rendered.includes(`title="${address}"`));
+      assert.doesNotMatch(rendered, /data-creator|fund-wallet-address/);
+    }
+  }
 });
 
 test('fund wallet labels use the contributor whitelist without replacing ENS or labeling unknown wallets', async t => {

@@ -1,4 +1,4 @@
-import { initFundHeader, openFundPanel } from './fund-header.mjs?v=20261024-live-prototype';
+import { initFundHeader, openFundPanel } from './fund-header.mjs?v=20261024-djuke-labels';
 import { payrollPeriodFromKey } from './payroll-week.mjs';
 
 export function payrollTourWeek(search) {

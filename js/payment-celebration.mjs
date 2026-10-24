@@ -104,6 +104,15 @@ function paymentLine(detail) {
   return 'Confirmed transfer';
 }
 
+export function djukeCalloutPosition(anchor, viewport, height = 230) {
+  const width = Math.min(320, viewport.width - 24);
+  return {
+    width,
+    left: Math.max(12, Math.min(viewport.width - width - 12, anchor.right + 18)),
+    top: Math.max(12, Math.min(viewport.height - height - 12, anchor.top + anchor.height / 2 - height / 2)),
+  };
+}
+
 function renderFlyingMonies(detail, reduced) {
   if (reduced) return `<div class="pc-static-row">${emoji('pc-static-coin', '💸')}${emoji('pc-static-coin', '💸')}${emoji('pc-static-coin', '💸')}</div>`;
   return `<div class="pc-scene pc-flying">
@@ -366,18 +375,50 @@ function ensureStyles(documentRef) {
   text-decoration: none;
 }
 .payment-celebration-link:hover { text-decoration: underline; }
-.payment-celebration-dismiss {
+#payment-celebration-root .payment-celebration-dismiss {
   position: absolute;
   top: 8px;
   right: 8px;
   width: 34px;
   height: 34px;
+  min-height: 0;
+  padding: 0;
   border: 0;
   border-radius: 50%;
   background: rgba(255,255,255,.09);
   color: #fff;
   cursor: pointer;
   pointer-events: auto;
+}
+.payment-celebration-characters { display: none; }
+#payment-celebration-root[data-source="djuke"] .payment-celebration-shell {
+  position: fixed; width: var(--djuke-callout-width); left: var(--djuke-callout-left);
+  top: var(--djuke-callout-top); min-height: 0; margin: 0;
+  animation: pc-djuke-arrive .65s cubic-bezier(.16,1,.3,1) both;
+}
+#payment-celebration-root[data-source="djuke"] .payment-celebration-shell::before {
+  content: ''; position: absolute; width: 28px; height: 24px; left: -22px; top: 44%;
+  border-bottom: 1px solid #72e4eb99; border-left: 1px solid #72e4eb66;
+  filter: drop-shadow(0 0 5px #72e4eb); border-radius: 0 0 0 10px;
+}
+#payment-celebration-root[data-source="djuke"] .payment-celebration-card {
+  padding: 12px 14px; border-color: #72e4eb77; border-radius: 16px 16px 16px 4px;
+  background: linear-gradient(145deg,#12262af5,#111624f5);
+  box-shadow: 0 8px 26px #0006, 0 0 18px #72e4eb18, inset 0 0 14px #72e4eb08;
+}
+#payment-celebration-root[data-source="djuke"] h2 { font-size: .86rem; letter-spacing: .04em; color: #b2f4ed; }
+#payment-celebration-root[data-source="djuke"] .payment-celebration-summary { font-size: .8rem; font-weight: 600; }
+#payment-celebration-root[data-source="djuke"] .payment-celebration-subtitle { font-size: .72rem; color: #a4b9cd; }
+#payment-celebration-root[data-source="djuke"] .payment-celebration-link { font-size: .72rem; width: auto; }
+#payment-celebration-root[data-source="djuke"] .payment-celebration-characters {
+  display: block; margin-bottom: 6px; color: #99eeec; font-size: .9rem; letter-spacing: .45em;
+  text-shadow: 0 0 9px #69dcdd88; animation: pc-djuke-float 3s ease-in-out 2;
+}
+#payment-celebration-root[data-source="djuke"] .payment-celebration-stage { display: none; }
+@keyframes pc-djuke-arrive { from { opacity: 0; translate: -12px 8px; } to { opacity: 1; translate: 0 0; } }
+@keyframes pc-djuke-float { 50% { translate: 0 -3px; opacity: .72; } }
+@media (max-width: 600px) {
+  #payment-celebration-root[data-source="djuke"] .payment-celebration-shell::before { display: none; }
 }
 .payment-celebration-stage {
   position: fixed;
@@ -591,6 +632,7 @@ function ensureStyles(documentRef) {
     animation: none !important;
     transition: none !important;
     transform: none !important;
+    translate: none !important;
   }
 }
   `;
@@ -620,6 +662,7 @@ function ensureController(documentRef = globalThis.document, windowRef = globalT
     <div class="payment-celebration-shell">
       <article class="payment-celebration-card" role="status">
         <button type="button" class="payment-celebration-dismiss" aria-label="Dismiss payment celebration">×</button>
+        <span class="payment-celebration-characters" aria-hidden="true">♫ ── 🧞 ── ✦</span>
         <h2 class="payment-celebration-title">Payment confirmed on chain</h2>
         <p class="payment-celebration-summary"></p>
         <p class="payment-celebration-subtitle"></p>
@@ -637,6 +680,19 @@ function ensureController(documentRef = globalThis.document, windowRef = globalT
   const stage = root.querySelector('.payment-celebration-stage');
   const reducedMotion = !!windowRef.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const state = { timer: null, paused: false, reducedMotion };
+  const positionDjuke = () => {
+    if (root.hidden || root.dataset.source !== 'djuke') return;
+    const panel = documentRef.getElementById('djuke-panel');
+    const anchor = panel?.classList.contains('is-open') ? panel : documentRef.getElementById('djuke-tab');
+    if (!anchor) return;
+    const shell = root.querySelector('.payment-celebration-shell');
+    root.style.setProperty('--djuke-callout-width', `${Math.min(320, windowRef.innerWidth - 24)}px`);
+    const position = djukeCalloutPosition(anchor.getBoundingClientRect(),
+      { width: windowRef.innerWidth, height: windowRef.innerHeight }, shell.getBoundingClientRect().height || 230);
+    root.style.setProperty('--djuke-callout-width', `${position.width}px`);
+    root.style.setProperty('--djuke-callout-left', `${position.left}px`);
+    root.style.setProperty('--djuke-callout-top', `${position.top}px`);
+  };
 
   const hide = () => {
     clearTimeout(state.timer);
@@ -651,22 +707,27 @@ function ensureController(documentRef = globalThis.document, windowRef = globalT
   const showNext = () => {
     if (state.timer || !queue.length) return;
     const detail = queue.shift();
+    const modal = detail.source === 'djuke' ? documentRef.querySelector?.('dialog[open]') : null;
+    (modal || documentRef.body).appendChild(root);
     root.dataset.effect = detail.effectId;
+    root.dataset.source = detail.source;
     root.dataset.phase = reducedMotion ? 'reduced' : 'celebrating';
     root.hidden = false;
     stage.dataset.paused = documentRef.hidden ? 'true' : 'false';
     stage.hidden = false;
-    title.textContent = detail.title;
+    title.textContent = detail.source === 'djuke' ? 'DJuke · payment confirmed' : detail.title;
     summary.textContent = paymentLine(detail);
     subtitle.textContent = detail.txLabel || detail.source || `Tx ${detail.txHash.slice(0, 10)}…`;
     link.href = detail.explorerUrl;
     link.textContent = `Open ${detail.txHash.slice(0, 10)}…`;
     try {
-      stage.innerHTML = RENDERERS[detail.effectId](detail, reducedMotion);
+      if (detail.source === 'djuke') stage.replaceChildren();
+      else stage.innerHTML = RENDERERS[detail.effectId](detail, reducedMotion);
     } catch (error) {
       stage.replaceChildren();
       console.error('[payment-celebration] Animation failed; payment remains confirmed:', error);
     }
+    positionDjuke();
     if (reducedMotion) {
       state.timer = windowRef.setTimeout(() => {
         hide();
@@ -701,10 +762,14 @@ function ensureController(documentRef = globalThis.document, windowRef = globalT
     windowRef.setTimeout(() => showNext(), DEFAULT_PAUSE_MS);
   });
   documentRef.addEventListener('visibilitychange', pause);
+  windowRef.addEventListener?.('resize', positionDjuke);
+  documentRef.addEventListener('left-drawer-open', positionDjuke);
 
   const destroy = () => {
     hide();
     documentRef.removeEventListener?.('visibilitychange', pause);
+    windowRef.removeEventListener?.('resize', positionDjuke);
+    documentRef.removeEventListener?.('left-drawer-open', positionDjuke);
     root.remove?.();
     controller = null;
     booted = false;

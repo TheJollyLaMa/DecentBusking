@@ -8,7 +8,7 @@ import { formatUsdcUnits } from '../usdc-format.mjs?v=20261017-mercury-release';
 //
 import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261019-intro-visits';
 import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
-import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261024-live-prototype';
+import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261024-djuke-labels';
 
 // The CDN's AboutModal.js hard-codes a filter for listings whose note field
 // contains "decenthead", which causes BigNuten / DecentHead Supporter NFTs to

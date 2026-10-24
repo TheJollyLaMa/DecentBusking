@@ -110,6 +110,34 @@ test('payment celebrations rotate through 12 distinct effects before repeating',
       amountText: '0.25',
       assetText: 'USDC',
     });
+
+    test('DJuke uses a local callout with amount and transaction, without global particles', async () => {
+      const { announcePaymentCelebration, initPaymentCelebrations, resetPaymentCelebrationState } = await import('../js/payment-celebration.mjs');
+      resetPaymentCelebrationState();
+      const fixture = createCelebrationFixture();
+      const controller = initPaymentCelebrations(fixture);
+      announcePaymentCelebration({ chainId: 8453, txHash: `0x${'8'.repeat(64)}`, source: 'djuke',
+        amountText: '7', assetText: 'USDC', summary: 'Play Live queued · not yet delivered' });
+      assert.equal(fixture.root.dataset.source, 'djuke');
+      assert.equal(fixture.title.textContent, 'DJuke · payment confirmed');
+      assert.match(fixture.summary.textContent, /not yet delivered · 7 USDC/);
+      assert.match(fixture.link.href, /^https:\/\/basescan.org\/tx\//);
+      assert.equal(fixture.stage.innerHTML, '');
+      controller.destroy();
+    });
+
+    test('DJuke callout stays inside desktop, mobile and resized viewports', async () => {
+      const { djukeCalloutPosition } = await import('../js/payment-celebration.mjs');
+      for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 480 }]) {
+        for (const anchor of [{ right: 380, top: 100, height: 500 }, { right: 40, top: 800, height: 40 }]) {
+          const result = djukeCalloutPosition(anchor, viewport);
+          assert.ok(result.left >= 12);
+          assert.ok(result.left + result.width <= viewport.width - 12);
+          assert.ok(result.top >= 12);
+          assert.ok(result.top + 230 <= viewport.height - 12);
+        }
+      }
+    });
     assert.equal(result.accepted, true);
     effects.push(result.effectId);
   }

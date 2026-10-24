@@ -1,6 +1,6 @@
 # Live Performance — operator runbook
 
-Refs #210, Refs #223. **Booking/payment prototype; live rehearsal still required.**
+Refs #210, Refs #223. **Booking/payment prototype build complete; live rehearsal still required.**
 
 **This runbook does not authorize escrow deposits, payouts, refunds, invitations or schedule changes.** Use a newly agreed future date and performer, not the expired October 23 offer. Do not run a second bot from a development worktree against production secrets.
 
@@ -11,7 +11,7 @@ Refs #210, Refs #223. **Booking/payment prototype; live rehearsal still required
 - Jose's October 23 invitation is unaccepted, has no on-chain booking/deposit, and was not linked to the shared calendar. Keep it as history; lack of a response is not a paid no-show, and no payout/refund operation is required for it. A replacement date or musician requires a new booking and fresh consent, never editing the signed agreement.
 - New invitations default to the next future Friday at 9 p.m. New York time. October 30 is still EDT (`2026-10-31T01:00Z`); November 6 is EST (`2026-11-07T02:00Z`). Use the app's timezone conversion, not copied UTC offsets.
 - Expired invitations show as expired, cannot obtain new acceptance through either endpoint, and cannot request new funding from the admin UI. Previously submitted funding transactions can still be reconciled after the slot starts. An unfunded draft never advertises an automatic escrow claim.
-- Discord currently reports a gateway cooldown. Respect its persisted retry deadline; do not reset it or promise a working live channel/automatic announcement. Booking signatures and Base escrow can be tested independently, but a real musician soundcheck and full invite → funding → review → claim rehearsal remain release-validation gates for #210/#223.
+- Discord currently reports a gateway cooldown. Respect its persisted retry deadline; do not reset it or promise a working live channel/automatic announcement. Booking signatures and Base escrow can be tested independently, but a real musician soundcheck and full invite → funding → review → claim rehearsal remain operational validation gates. The owner approved closing #210/#223 as build-complete; track any rehearsal defects in separate issues.
 
 ### Next-musician rehearsal checklist
 
@@ -22,7 +22,7 @@ Refs #210, Refs #223. **Booking/payment prototype; live rehearsal still required
 5. Before funding/show commitment, verify Discord gateway readiness, voice/stage access, microphones, sound routing and the listener path with the actual musician. Pausing automated JukeLoop rotation is not evidence of live audio delivery or a browser microphone relay. Confirm the intended listening surface explicitly.
 6. Run the 20-minute slot, record whole verified live-music minutes, publish the performance report, and submit the agreed full/partial/zero decision within 24 hours. Verify that approval is not displayed as payment.
 7. Performer claims from their own Base wallet; confirm the exact transfer, Profile earnings receipt, public accounting and no double claim after refresh. Verify partial/zero refunds and cancellation paths with test fixtures rather than creating unwanted live financial operations.
-8. Record the rehearsal evidence on #210/#223 before closing them. Until then, keep both open as live-validation tracking; do not equate unit/fork tests with an actual musician show.
+8. Record rehearsal evidence and open separate issues for any defects. #210/#223 track the completed build, not proof of an actual musician show; do not equate unit/fork tests with a live rehearsal.
 
 ## Settlement mode
 

@@ -107,6 +107,29 @@ test('loadFundBreakdown reports indexing instead of scanning logs when the worke
   assert.equal(result.balanceUnits, 5n);
 });
 
+test('fund reports name current and historical DJuke inflows without requiring ENS', async () => {
+  const { loadFundBreakdown } = await import(url);
+  const addresses = [
+    '0xf51d2f7892cf9d49e14df4afdf227a59ee170a51',
+    '0xbbcb7f7369978cbdc32c6719b1d24b07f3d55619',
+  ];
+  const result = await loadFundBreakdown({
+    fundSlug: top10,
+    fundState: { balanceUnits: '500000', sourcesAvailable: true, payoutsAvailable: true, payouts: [],
+      sources: addresses.map((funder, index) => ({ funder, kind: 'djuke', amountUnits: '250000',
+        txHash: `0x${String(index + 1).repeat(64)}`, blockNumber: index + 1, logIndex: 0 })) },
+  });
+  assert.equal(result.reconciles, true);
+  for (const version of ['0.5', '0.4']) {
+    const row = result.rows.find(row => row.sourceLabel === `📜 DJuke v${version}`);
+    assert.ok(row, `DJuke v${version} must be named in the fund report`);
+    assert.equal(row.typeLabel, 'DJuke purchase');
+    assert.match(row.sourceHtml, /fund-contract-link/);
+    assert.match(row.sourceHtml, /basescan\.org\/address\/0x.*#code/);
+    assert.doesNotMatch(row.sourceHtml, /data-creator|fund-wallet-address/);
+  }
+});
+
 test('advert purchasers render as wallet buttons without ENS and campaign text is escaped only at rendering', async () => {
   const { loadFundBreakdown } = await import(url);
   const buyer = `0x${'1'.repeat(40)}`;

@@ -45,6 +45,16 @@ last verified receipt and show an unavailable notice rather than implying succes
 Receipts refresh while that profile is open, even with the DJuke drawer closed;
 they are hidden when viewing another wallet's profile or disconnecting. The DJuke
 drawer stays focused on selecting and queueing music.
+Its named queue highlights the exact DJuke request reported as playing by the
+radio, including its contract and playlist lane identity. The current song is
+centered when it changes or the drawer opens; routine polls preserve manual
+scroll position. A preparing interval clears the on-air marker and explains
+that paid playback is continuing without requiring another payment.
+DJuke purchase confirmations use a small, dismissible neon callout anchored by
+the drawer/tab (also visible over an open Profile), not full-screen celebration
+effects. They show confirmed USDC and a Base transaction link without stealing
+focus; purchase confirmation is not a delivery receipt. Reduced-motion settings
+disable the decorative movement.
 Public read-only snapshots include pending batches and the 50 most recent resolved
 batches. Legacy schema-2 checkpoints replay events once from the configured
 deployment block to recover exact amounts and resolution links; this adds no
@@ -60,6 +70,9 @@ prices; the deployment record lives in DecentMarket's
 `deployments/djuke-v05-base.json`. Old charges cannot be retroactively removed.
 Both versions retain ordinary
 wallet network gas, signed quotes, the same USDC tiers, and main-request cut-in.
+Fund reports resolve these verified contract addresses through the shared
+known-address book as **DJuke v0.5** and **DJuke v0.4** (with v0.3 retained),
+linking to their BaseScan contract pages rather than showing an unnamed wallet.
 
 The v0.5 candidate signs zero worker contributions only after verifying its
 on-chain version and worker solvency. Each fourth delivered playlist song releases
