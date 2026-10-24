@@ -18,6 +18,44 @@ export async function readRadioState({ radioUrl, fetchImpl = fetch, signal }) {
   return state;
 }
 
+export async function readRadioMediaBlob({ url, fetchImpl = fetch, signal, mime = '',
+  maxBytes = 80 * 1024 * 1024, onProgress = () => {} }) {
+  const response = await fetchImpl(url, { signal, mode: 'cors' });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const declared = Number(response.headers?.get?.('content-length'));
+  if (declared > maxBytes) {
+    await response.body?.cancel?.();
+    throw new Error('file is over the preload limit');
+  }
+  const chunks = [];
+  let bytes = 0;
+  const reader = response.body?.getReader?.();
+  if (reader) {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > maxBytes) throw new Error('file is over the preload limit');
+        onProgress(bytes);
+        chunks.push(value);
+      }
+    } catch (error) {
+      await reader.cancel();
+      throw error;
+    } finally { reader.releaseLock?.(); }
+  } else {
+    const buffer = await response.arrayBuffer();
+    bytes = buffer.byteLength;
+    if (bytes > maxBytes) throw new Error('file is over the preload limit');
+    onProgress(bytes);
+    chunks.push(buffer);
+  }
+  if (!bytes) throw new Error('empty radio recording');
+  const type = mime || response.headers?.get?.('content-type') || '';
+  return new Blob(chunks, type ? { type } : {});
+}
+
 export async function sendRadioVote({ radioUrl, playId, voterId, vote, fetchImpl = fetch, signal }) {
   const response = await fetchImpl(`${radioUrl}/vote`, {
     method: 'POST',

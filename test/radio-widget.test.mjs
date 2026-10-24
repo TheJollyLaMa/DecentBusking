@@ -35,9 +35,14 @@ function setup({ fetchImpl, head, storage = new Map(), options = {} } = {}) {
   const element = new Element('div', document);
   let posts = 0, net = 3, current = snapshot(), offline = false, voteError = false;
   const signals = [];
+  const mediaRequests = [];
   const fetcher = async (url, init) => {
     signals.push(init.signal);
     if (offline) throw new TypeError('CORS/network failure');
+    if (url.includes('/media?')) {
+      mediaRequests.push(url);
+      return new Response(new Uint8Array([1, 2, 3, 4]), { headers: { 'content-type': 'audio/mpeg' } });
+    }
     if (url.endsWith('/vote')) {
       posts++;
       const body = JSON.parse(init.body);
@@ -57,7 +62,7 @@ function setup({ fetchImpl, head, storage = new Map(), options = {} } = {}) {
   };
   const label = text => all().find(node => node.getAttribute('aria-label') === text);
   return {
-    controller, element, window, storage, signals, all, label,
+    controller, element, window, storage, signals, mediaRequests, all, label,
     audio: () => all().find(node => node.tagName === 'audio'),
     button: () => all().find(node => node.tagName === 'button' && /radio$/.test(node.getAttribute('aria-label') || '')),
     posts: () => posts,
@@ -66,6 +71,47 @@ function setup({ fetchImpl, head, storage = new Map(), options = {} } = {}) {
 }
 async function playing(h) { await flush(); h.button().fire('click'); await flush(); await flush(); }
 const text = h => h.all().map(node => node.textContent).join(' ');
+
+test('the public radio widget preloads the next source, finishes the current play and never replays an ended ID', async t => {
+  const h = setup();
+  t.after(() => h.controller.destroy());
+  const first = snapshot();
+  const next = { ...first.nowPlaying, playId: 'play-2', trackId: 'track-2', title: 'Next song',
+    ipfsCid: 'bafy' + 'b'.repeat(55), mediaType: 'audio/mpeg', positionMs: 0 };
+  h.setCurrent({ ...first, upNext: next });
+  await playing(h);
+  await flush(); await flush();
+  assert.equal(h.audio().crossOrigin, 'anonymous');
+  assert.equal(h.mediaRequests.length, 1, 'download the next source while the first song is playing');
+  assert.equal(h.audio().plays, 1);
+  h.setCurrent({ ...first, nowPlaying: next, upNext: null });
+  h.audio().ended = true;
+  h.audio().fire('ended');
+  await new Promise(resolve => setTimeout(resolve, 800));
+  await flush();
+  assert.match(h.audio().src, /^blob:/);
+  assert.equal(h.audio().plays, 2);
+  assert.equal(h.mediaRequests.length, 1);
+  h.audio().fire('ended');
+  await new Promise(resolve => setTimeout(resolve, 800));
+  assert.equal(h.audio().plays, 2, 'a repeated state snapshot is not another playback');
+});
+
+test('the widget cancels preloads on pause and respects data-saver connections', async t => {
+  const h = setup();
+  t.after(() => h.controller.destroy());
+  h.window.navigator = { connection: { saveData: true } };
+  h.setCurrent({ ...snapshot(), upNext: { ipfsCid: 'bafy' + 'b'.repeat(55) } });
+  await playing(h);
+  assert.equal(h.mediaRequests.length, 0);
+  h.button().fire('click');
+  h.window.navigator.connection.saveData = false;
+  await playing(h);
+  await flush();
+  assert.equal(h.mediaRequests.length, 1);
+  h.button().fire('click');
+  assert.ok(h.signals.some(signal => signal.aborted), 'pause aborts the speculative media request');
+});
 
 test('real mount is inert, scoped, quiet, uses late shared head and destroys/remounts idempotently', async t => {
   let subscribed = 0, unsubscribed = 0, connects = 0;

@@ -199,7 +199,7 @@ function memoryJournal(api) {
     save: async value => { snapshot = structuredClone(value); return 'ipfs://journal'; } });
 }
 
-test('public queue shows all twelve named songs while querying only the playable lane head', async () => {
+test('public queue exposes a bounded paid playlist window for the radio prefetcher', async () => {
   const { createDjukeQueueReader, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
   const wallet = `0x${'2'.repeat(40)}`;
   const tracks = Array.from({ length: 12 }, (_, i) => ({ trackId: `named-${i}`, title: `Song ${i + 1}`,
@@ -209,15 +209,16 @@ test('public queue shows all twelve named songs while querying only the playable
   let itemReads = 0;
   const contract = { headRequestId: async () => 0n, nextRequestId: async () => 0n,
     playlistHeadId: async () => 0n, playlistNextId: async () => 12n, playlistPendingCount: async () => 12n,
-    getPlaylistItem: async () => { itemReads++; return { status: 0, payer: wallet, amount: 250000n, songId: id('named-0'), batchId: 0n }; },
+    getPlaylistItem: async laneId => { itemReads++; return { status: 0, payer: wallet, amount: 250000n, songId: id(`named-${laneId}`), batchId: 0n }; },
     getSong: async songId => ({ enabled: true, audioURI: `ipfs://${tracks.find(track => id(track.trackId) === songId).ipfsCid}` }) };
   const read = createDjukeQueueReader({ provider: { getNetwork: async () => ({ chainId: 8453 }),
     getBlockNumber: async () => 100, getBlock: async () => ({ hash: 'canonical' }) }, contract,
     contractAddress: `0x${'1'.repeat(40)}`, playlistLaneEnabled: true, getPlaylist: () => tracks,
     getPlaylistBatches: () => [batch, { ...batch, batchId: 'previous', status: 'refunded' }] });
   const snapshot = await read();
-  assert.equal(itemReads, 1);
-  assert.equal(snapshot.requests.length, 1);
+  assert.equal(itemReads, 12);
+  assert.equal(snapshot.requests.length, 12);
+  assert.equal(snapshot.requests[1].trackId, 'named-1');
   assert.equal(snapshot.playlistPending, 12);
   assert.equal(snapshot.playlistBatches[0].songs.length, 12);
   assert.equal(snapshot.playlistBatches[0].name, 'BoogieNight');
@@ -227,6 +228,8 @@ test('public queue shows all twelve named songs while querying only the playable
   const journal = createDjukePlaybackJournal({ restore: async () => null, save: async () => 'ipfs://journal' });
   await journal.initialize();
   await journal.synchronize(snapshot.requests);
+  assert.equal(journal.getState().length, 12);
+  assert.ok(journal.getState().every(record => record.state === 'pending'), 'a verified snapshot is not a reservation or payment');
   assert.deepEqual((await journal.reserveNext()).playlist, snapshot.requests[0].playlist);
 });
 
@@ -339,6 +342,147 @@ test('runtime can reserve the next paid request while the current paid track is 
   assert.equal((await runtime.nextPaid()).track.trackId, 'b');
   assert.equal(await runtime.nextPaid(), null);
 });
+
+test('failed completion checkpoints recover without replaying or orphaning the paid request', async () => {
+  const api = await import('../discord-bot/djuke.js');
+  const request = { requestId: 'playlist:0', playlistLaneId: '0', playlistBatchId: '1',
+    songId: id('song'), revision: '0', trackId: 'song', playable: true };
+  let failSave = false, deliveries = 0;
+  let requests = [request];
+  const journal = api.createDjukePlaybackJournal({
+    restore: async () => null,
+    save: async () => {
+      if (failSave) throw new Error('Checkpoint mirror queue is full');
+      return 'ipfs://checkpoint';
+    },
+  });
+  const runtime = api.createDjukeRuntime({ journal,
+    readState: async () => ({ requests, playlistPending: requests.length }),
+    getTrack: trackId => ({ trackId }),
+    fulfill: async () => { deliveries++; requests = []; },
+  });
+  const paid = await runtime.nextPaid();
+  failSave = true;
+  await assert.rejects(runtime.complete(paid.record, { playId: 'finished', finished: true, audibleMs: 180000 }), /queue is full/);
+  assert.equal(journal.getState()[0].state, 'playing');
+  await assert.rejects(runtime.nextPaid(), /queue is full/, 'cannot replay while evidence is not durable');
+  failSave = false;
+  assert.equal(await runtime.nextPaid(), null);
+  assert.equal(deliveries, 1);
+  await runtime.reconcile();
+  assert.equal(journal.getState()[0].state, 'fulfilled');
+  assert.equal(await runtime.nextPaid(), null);
+  assert.equal(deliveries, 1);
+});
+
+test('failed release and media retry checkpoints are retained across radio-session replacement', async () => {
+  const api = await import('../discord-bot/djuke.js');
+  for (const operation of ['release', 'retryMedia']) {
+    const request = { requestId: 'playlist:0', playlistLaneId: '0', playlistBatchId: '1',
+      songId: id('song'), revision: '0', trackId: 'song', playable: true };
+    let failSave = false;
+    const journal = api.createDjukePlaybackJournal({ restore: async () => null, save: async () => {
+      if (failSave) throw new Error('Mirror temporarily unavailable');
+      return 'ipfs://checkpoint';
+    } });
+    const runtime = api.createDjukeRuntime({ journal,
+      readState: async () => ({ requests: [request] }),
+      getTrack: trackId => ({ trackId }),
+      fulfill: async () => assert.fail('Unheard audio cannot settle'),
+      refundPlaylistBatch: async () => assert.fail('One failed checkpoint cannot refund a purchase'),
+      log: { warn() {} },
+    });
+    const paid = await runtime.nextPaid();
+    failSave = true;
+    await assert.rejects(runtime[operation](paid.record, new Error('Preparation failed')), /unavailable/);
+    failSave = false;
+    const recovered = await runtime.nextPaid();
+    assert.equal(recovered.record.requestId, request.requestId);
+    assert.equal(recovered.record.attempts, 2);
+    assert.equal(recovered.record.mediaFailures || 0, operation === 'retryMedia' ? 1 : 0);
+  }
+});
+
+test('playlist prefetch preserves order, main priority and durable completion without waiting for settlement', async () => {
+  const api = await import('../discord-bot/djuke.js');
+  const requests = ['a', 'b'].map((trackId, index) => ({
+    requestId: `playlist:${index}`, playlistLaneId: String(index), playlistBatchId: '1',
+    songId: id(trackId), revision: '0', trackId, playable: true,
+  }));
+  let releaseSettlement;
+  const gate = new Promise(resolve => { releaseSettlement = resolve; });
+  const journal = memoryJournal(api);
+  const runtime = api.createDjukeRuntime({ journal,
+    readState: async () => ({ requests }),
+    getTrack: trackId => ({ trackId }), fulfill: async () => gate,
+  });
+  try {
+    const first = await runtime.nextPaid();
+    const second = await runtime.nextPaid();
+    assert.equal(second.track.trackId, 'b', 'the ordinary radio prefetcher can reserve the next paid song');
+    assert.equal(await runtime.canPlay(second.record), false, 'preparation cannot skip an unfinished song');
+    await runtime.complete(first.record, { playId: 'a:finished', audibleMs: 180000, finished: true });
+    assert.equal(await runtime.canPlay(second.record), true, 'durable completion, not transaction confirmation, unlocks playback');
+    requests.push({ requestId: 'main', chainRequestId: '0', trackId: 'main', playable: true });
+    assert.equal(await runtime.canPlay(second.record), false, 'new main paid requests retain priority');
+    requests.pop();
+    assert.equal(await runtime.canPlay(second.record), true);
+    await runtime.release(second.record, new Error('Protected show started'));
+    assert.equal(await runtime.canPlay(second.record), false, 'a released reservation cannot start');
+  } finally { releaseSettlement(); await runtime.reconcile(); }
+});
+
+test('a prefetched media failure cannot refund previously played but unsettled songs', async () => {
+  const api = await import('../discord-bot/djuke.js');
+  let requests = ['a', 'b'].map((trackId, index) => ({
+    requestId: `playlist:${index}`, playlistLaneId: String(index), playlistBatchId: '1',
+    songId: id(trackId), revision: '0', trackId, playable: true,
+  }));
+  const journal = memoryJournal(api);
+  let refunds = 0;
+  const runtime = api.createDjukeRuntime({ journal, readState: async () => ({ requests }),
+    getTrack: trackId => ({ trackId }),
+    fulfill: async () => { throw new Error('Settlement temporarily unavailable'); },
+    refundPlaylistBatch: async () => { refunds++; },
+    log: { warn() {} },
+  });
+  const first = await runtime.nextPaid();
+  await runtime.complete(first.record, { playId: 'a:finished', audibleMs: 180000, finished: true });
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const second = await runtime.nextPaid();
+    assert.equal(second.record.playlistLaneId, '1');
+    await runtime.retryMedia(second.record, new Error('Media unavailable'));
+  }
+  assert.equal(refunds, 0);
+  assert.equal(await runtime.nextPaid(), null);
+  requests = requests.slice(1);
+  assert.equal(await runtime.nextPaid(), null);
+  assert.equal(refunds, 1, 'refund the unheard suffix only after prior delivery is no longer pending on chain');
+});
+
+for (const failure of ['unplayable recording', 'missing local track']) {
+  test(`${failure} cannot refund an earlier played but unsettled song`, async () => {
+    const api = await import('../discord-bot/djuke.js');
+    let requests = ['a', 'b'].map((trackId, index) => ({
+      requestId: `playlist:${index}`, playlistLaneId: String(index), playlistBatchId: '1',
+      songId: id(trackId), revision: '0', trackId, playable: index === 0 || failure !== 'unplayable recording',
+    }));
+    let refunds = 0;
+    const runtime = api.createDjukeRuntime({ journal: memoryJournal(api), readState: async () => ({ requests }),
+      getTrack: trackId => trackId === 'b' && failure === 'missing local track' ? null : { trackId },
+      fulfill: async () => { throw new Error('Settlement temporarily unavailable'); },
+      refundPlaylistBatch: async () => { refunds++; },
+      log: { warn() {} },
+    });
+    const first = await runtime.nextPaid();
+    await runtime.complete(first.record, { playId: 'a:finished', audibleMs: 180000, finished: true });
+    assert.equal(await runtime.nextPaid(), null);
+    assert.equal(refunds, 0);
+    requests = requests.slice(1);
+    assert.equal(await runtime.nextPaid(), null);
+    assert.equal(refunds, 1);
+  });
+}
 
 test('durable playback journal retains failed requests and completed plays through restarts', async () => {
   const { createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');

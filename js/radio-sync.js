@@ -6,7 +6,7 @@
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261022-playlist-lane';
 import { formatUsdcUnits as _formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
-import { sendRadioVote as sharedRadioVote, radioListenerId, radioMediaUrl, readRadioState } from './radio-client.mjs';
+import { sendRadioVote as sharedRadioVote, radioListenerId, radioMediaUrl, readRadioState, readRadioMediaBlob } from './radio-client.mjs';
 
 const POLL_MS = 8_000;
 const FADE_IN_MS = 600;
@@ -766,7 +766,11 @@ function _syncRadio(message) {
       return;
     }
     if (playback?.status === 'preparing' && /paid playlist/i.test(playback.reason || '')) {
-      _setTrack('♫ Play Live is continuing — preparing the next song', '');
+      _setTrack(/paid playlist media retry/i.test(playback.reason)
+        ? '♫ Play Live is retrying — the previous attempt did not finish'
+        : playback.idleMs >= 30_000
+          ? '♫ Play Live is delayed — your paid playlist is still queued'
+          : '♫ Play Live is continuing — preparing the next song', '');
       _setActivity(/no new payment/i.test(playback.reason) ? playback.reason
         : `${playback.reason.replace(/[. ]+$/, '')}. No new payment is needed.`);
       return;
@@ -1211,32 +1215,10 @@ function _startPreload(track) {
   _preload = entry;
   entry.done = (async () => {
     try {
-      const response = await fetch(_gatewayUrl(entry.cid), { signal: controller?.signal, mode: 'cors' });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const declared = Number(response.headers?.get?.('content-length'));
-      if (declared > PRELOAD_MAX_BYTES) throw new Error(`file is ${_megabytes(declared)} MB, over the preload limit`);
-      const chunks = [];
-      const reader = response.body?.getReader?.();
-      if (reader) {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          entry.bytes += value.byteLength;
-          if (entry.bytes > PRELOAD_MAX_BYTES) {
-            reader.cancel().catch(() => {});
-            throw new Error('file is over the preload limit');
-          }
-          chunks.push(value);
-        }
-      } else {
-        const buffer = await response.arrayBuffer();
-        entry.bytes = buffer.byteLength;
-        if (entry.bytes > PRELOAD_MAX_BYTES) throw new Error('file is over the preload limit');
-        chunks.push(buffer);
-      }
+      const blob = await readRadioMediaBlob({ url: _gatewayUrl(entry.cid), signal: controller?.signal,
+        mime: entry.mime, maxBytes: PRELOAD_MAX_BYTES, onProgress: bytes => { entry.bytes = bytes; } });
       if (entry.discarded) return;
-      const type = entry.mime || response.headers?.get?.('content-type') || '';
-      entry.blobUrl = URL.createObjectURL(new Blob(chunks, type ? { type } : {}));
+      entry.blobUrl = URL.createObjectURL(blob);
       entry.status = 'ready';
       console.info(`[radio] Preloaded next track "${entry.title}" (${_megabytes(entry.bytes)} MB in ${((performance.now() - entry.startedAt) / 1000).toFixed(1)}s)`);
     } catch (error) {

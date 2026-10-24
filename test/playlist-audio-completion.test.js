@@ -147,13 +147,19 @@ test('real FFmpeg rejects a truncated recording before it can be classified as d
   assert.ok(result.warnings.includes('decode'));
 });
 
-test('twelve real player EOFs settle once in order, with incident media optionally in the fifth slot', { timeout: 240000 }, async t => {
+test('twelve real player EOFs settle once in order, with incident media optionally in the fifth and seventh slots', { timeout: 420000 }, async t => {
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
   const { createDjukeRuntime, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
   const { combinePaidQueues } = await import('../discord-bot/devert-queue.js');
   const incident = process.env.DJUKE_INCIDENT_MEDIA ? fs.readFileSync(process.env.DJUKE_INCIDENT_MEDIA) : null;
+  const refundIncident = process.env.DJUKE_REFUND_MEDIA ? fs.readFileSync(process.env.DJUKE_REFUND_MEDIA) : null;
   const short = wav();
-  const server = createServer((req, res) => serveMedia(req, res, incident && req.url === '/paid-4' ? incident : short));
+  const downloads = new Map();
+  const server = createServer((req, res) => {
+    downloads.set(req.url, (downloads.get(req.url) || 0) + 1);
+    serveMedia(req, res, incident && req.url === '/paid-4' ? incident
+      : refundIncident && req.url === '/paid-6' ? refundIncident : short);
+  });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
   let requests = Array.from({ length: 12 }, (_, i) => ({
@@ -161,14 +167,26 @@ test('twelve real player EOFs settle once in order, with incident media optional
     songId: `0x${String(i + 1).padStart(64, '0')}`, revision: '0', trackId: `paid-${i}`,
     payer: `0x${'1'.repeat(40)}`, amountUnits: '250000', playable: true,
   }));
-  const journal = createDjukePlaybackJournal({ restore: async () => null, save: async () => 'ipfs://test-checkpoint' });
+  let checkpointFailure = false;
+  const journal = createDjukePlaybackJournal({ restore: async () => null, save: async value => {
+    if (!checkpointFailure && value.records.some(record => record.requestId === 'playlist:4' && record.state === 'played')) {
+      checkpointFailure = true;
+      throw new Error('Checkpoint mirror queue is full');
+    }
+    return 'ipfs://test-checkpoint';
+  } });
   const deliveries = [], starts = [], evidence = [];
+  const transitions = [];
+  let releaseSettlement;
+  const settlementGate = new Promise(resolve => { releaseSettlement = resolve; });
+  t.after(() => releaseSettlement());
   let refunds = 0, resolveAll, rejectAll;
   const all = new Promise((resolve, reject) => { resolveAll = resolve; rejectAll = reject; });
   const runtime = createDjukeRuntime({ journal, minAudibleMs: 1,
-    readState: async () => ({ requests: structuredClone(requests.slice(0, 1)), playlistPending: requests.length }),
+    readState: async () => ({ requests: structuredClone(requests), playlistPending: requests.length }),
     getTrack: trackId => ({ trackId, title: trackId }),
     fulfill: async ({ playlistLaneId }) => {
+      if (playlistLaneId === '0') await settlementGate;
       deliveries.push(playlistLaneId);
       requests = requests.filter(request => request.playlistLaneId !== playlistLaneId);
       if (!requests.length) resolveAll();
@@ -179,15 +197,21 @@ test('twelve real player EOFs settle once in order, with incident media optional
   const complete = paid.complete;
   paid.complete = async (record, play) => {
     evidence.push({ record, play });
-    return complete(record, play);
+    const result = await complete(record, play);
+    if (evidence.length === 12) releaseSettlement();
+    return result;
   };
   const session = new JukeLoopSession({ websitePlayback: true, client: { isReady: () => false }, schedule: [], djuke: paid });
   t.after(() => session.destroy());
   session._getFreshUrl = async track => `http://127.0.0.1:${server.address().port}/${track.trackId}`;
-  session._primeNext = () => {};
   session._sleep = async () => {};
   const start = session._startPrepared.bind(session);
-  session._startPrepared = prepared => { starts.push(prepared.track.trackId); return start(prepared); };
+  session._startPrepared = prepared => {
+    if (starts.length) transitions.push(Date.now() - evidence.at(-1).play.endedAt);
+    if (starts.length < 12) assert.equal(deliveries.length, 0, 'playback must continue even while settlement is blocked');
+    starts.push(prepared.track.trackId);
+    return start(prepared);
+  };
   await session._playNext();
   await all;
   await runtime.reconcile();
@@ -198,9 +222,71 @@ test('twelve real player EOFs settle once in order, with incident media optional
   assert.ok(evidence.every(({ play }) => play.finished && play.media.reason === 'clean_eof'));
   assert.equal(journal.getState().filter(record => record.state === 'fulfilled').length, 12);
   assert.equal(refunds, 0);
+  assert.equal(checkpointFailure, true, 'the fifth song must recover a real failed journal save');
+  assert.deepEqual([...downloads.values()], Array(12).fill(1), 'each full media download is reused rather than streamed again');
+  assert.ok(transitions.every(ms => ms < 2000), `unexpected bookkeeping gaps: ${transitions.join(', ')}`);
   if (incident) {
     assert.ok(evidence[4].play.audibleMs >= 160000, 'the incident recording must be consumed in real time');
-    assert.ok(evidence[4].play.media.decodedMs >= 167000);
+    assert.equal(evidence[4].play.media.decodedBytes, 32149248);
     t.diagnostic(JSON.stringify(evidence[4].play.media));
   }
+  if (refundIncident) {
+    assert.equal(evidence[6].play.media.decodedBytes, 24514304);
+    assert.ok(evidence[6].play.audibleMs + 20 >= evidence[6].play.media.decodedMs,
+      'the refunded recording must be consumed in real time to its full decoded end');
+    t.diagnostic(JSON.stringify(evidence[6].play.media));
+  }
+});
+
+test('a severed paid preload spends one preparation retry, never starts partial audio, then plays once', { timeout: 10000 }, async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const { createDjukeRuntime, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
+  const media = wav();
+  let downloads = 0;
+  const server = createServer((req, res) => {
+    downloads++;
+    if (downloads === 1) {
+      res.writeHead(200, { 'content-length': media.length });
+      res.write(media.subarray(0, 1000));
+      setImmediate(() => res.destroy());
+    } else serveMedia(req, res, media);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const request = { requestId: 'playlist:6', playlistLaneId: '6', playlistBatchId: '1',
+    songId: 'song', revision: '0', trackId: 'seventh', playable: true };
+  let requests = [request], deliveries = 0, refunds = 0;
+  const journal = createDjukePlaybackJournal({ restore: async () => null, save: async () => 'ipfs://checkpoint' });
+  const runtime = createDjukeRuntime({ journal, minAudibleMs: 1, readState: async () => ({ requests }),
+    getTrack: trackId => ({ trackId, title: trackId }),
+    fulfill: async () => { deliveries++; requests = []; },
+    refundPlaylistBatch: async () => { refunds++; } });
+  let finished;
+  const completed = new Promise(resolve => { finished = resolve; });
+  const session = new JukeLoopSession({ websitePlayback: true, client: { isReady: () => false }, schedule: [],
+    djuke: { ...runtime, complete: async (record, play) => { await runtime.complete(record, play); finished(play); } } });
+  t.after(() => session.destroy());
+  session._getFreshUrl = async () => `http://127.0.0.1:${server.address().port}/seventh`;
+  session._primeNext = () => {};
+  let starts = 0;
+  session.player.on('stateChange', (before, after) => {
+    if (after.status === 'playing' && before.status !== 'playing') starts++;
+  });
+  assert.equal(await session._prepareNextPlayback(await runtime.nextPaid()), null);
+  assert.equal(starts, 0);
+  assert.equal(deliveries, 0);
+  assert.equal(journal.getState()[0].mediaFailures, 1);
+  assert.equal(journal.getState()[0].state, 'pending');
+  assert.ok(session._djukeCooldownUntil > Date.now(), 'a failed transfer retains the existing retry backoff');
+  const prepared = await session._prepareNextPlayback(await runtime.nextPaid());
+  assert.ok(prepared);
+  assert.equal(starts, 0, 'even a complete preload cannot start before authorization');
+  assert.equal(await runtime.canPlay(prepared.paid.record), true);
+  session._startPrepared(prepared);
+  assert.equal((await completed).media.reason, 'clean_eof');
+  await runtime.reconcile();
+  assert.equal(starts, 1);
+  assert.equal(downloads, 2);
+  assert.equal(deliveries, 1);
+  assert.equal(refunds, 0);
 });

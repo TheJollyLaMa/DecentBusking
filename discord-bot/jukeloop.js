@@ -58,6 +58,7 @@ import { mediaTypeFor, isDiscordAttachmentWithinLimit } from './media.js';
 import { createPlaylistShow } from './playlist-show.js';
 import { playlistTrackReason, radioPlaylistDefinition } from '../js/radio-playlists.mjs';
 import { createTopTenHype } from './top-ten-hype.js';
+import { bufferRadioMedia } from './radio-media-buffer.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -631,9 +632,11 @@ export function createJukeLoopSession(guildId, opts) {
 export function createFFmpegStream(url, { ad = false } = {}) {
   const args = [
     '-nostdin', '-hide_banner', '-loglevel', 'warning', '-xerror',
+    ...(/^https?:\/\//.test(url) ? [
     '-reconnect',           '1',
     '-reconnect_streamed',  '1',
     '-reconnect_delay_max', '5',
+    ] : []),
     '-i',                   url,
     ...(ad ? ['-t', String(DEVERT_MAX_AD_SECONDS)] : []),
     '-analyzeduration',     '0',
@@ -799,7 +802,20 @@ export class JukeLoopSession {
     this._currentPaid = null;
     this._djukeCooldownUntil = 0;
     this._paidFetchNotices = new Set();
-    this._createStream = createStream || createFFmpegStream;
+    this._mediaAbort = new AbortController();
+    this._createStream = createStream || (async (url, options) => {
+      if (!options.playlist) return createFFmpegStream(url, options);
+      const media = await bufferRadioMedia(url, { signal: this._mediaAbort.signal });
+      if (this._destroyed) {
+        await media.dispose();
+        throw new Error('Radio stopped during media download');
+      }
+      const source = createFFmpegStream(media.path, options);
+      const cleanup = () => media.dispose()
+        .catch(error => console.error('[jukeloop] Paid media cleanup failed:', error.message));
+      source.ffmpegProcess.once('close', cleanup);
+      return source;
+    });
 
     this._destroyed   = false;
     this._ffmpeg      = null;
@@ -989,15 +1005,15 @@ export class JukeLoopSession {
     if (this._nowPlaying?.audible && this.player.state.status === AudioPlayerStatus.Playing) {
       return { status: 'playing', ready: true, reason: null };
     }
+    const idleMs = this._playbackIdleSince === null ? 0 : Math.max(0, now - this._playbackIdleSince);
     if (show.type === 'normal_rotation' && this.djuke?.hasPendingPlaylist?.()) {
-      return { status: 'preparing', ready: false,
-        reason: this._playlistRetryReason || 'Continuing the paid playlist; waiting for its durable checkpoint or settlement' };
+      return { status: idleMs >= PLAYBACK_RECOVERY_TIMEOUT_MS ? 'recovering' : 'preparing', ready: false, idleMs,
+        reason: this._playlistRetryReason || 'Preparing the next paid playlist song; your existing payment stays queued' };
     }
     if (!this._queue.length && !this._prepareTask && !this._transitionTask && !this._preparedNext &&
         !this._nowPlaying && !this._currentPaid && !this._currentDevertAd) {
       return { status: 'empty', ready: false, reason: 'No playable recordings are available' };
     }
-    const idleMs = this._playbackIdleSince === null ? 0 : Math.max(0, now - this._playbackIdleSince);
     return { status: idleMs >= PLAYBACK_RECOVERY_TIMEOUT_MS ? 'recovering' : 'preparing',
       ready: false, reason: 'Radio is preparing the next recording', idleMs };
   }
@@ -1375,7 +1391,8 @@ export class JukeLoopSession {
     }
 
     try {
-      const source = this._createStream(url, { ad: !!devertAd });
+      const source = await this._createStream(url, { ad: !!devertAd,
+        playlist: paid?.record.playlistBatchId !== undefined });
       const { ffmpegProcess } = source;
       const completion = monitorAudioCompletion(source.stream, ffmpegProcess);
       const { stream } = completion;
@@ -1402,6 +1419,10 @@ export class JukeLoopSession {
         this._persistMainRadioAdState();
       }
       if (paid && this.djuke) {
+        if (this._destroyed) {
+          await this.djuke.release(paid.record, new Error('Radio stopped during media preparation'));
+          return null;
+        }
         if (paid.record.playlistBatchId !== undefined) {
           await this._retryPlaylistMedia(paid.record, err);
           return null;
@@ -1708,6 +1729,7 @@ export class JukeLoopSession {
       const epoch = this._preparationEpoch;
       try {
         if (this._audioCompletionTask) await this._audioCompletionTask;
+        if (this._paidCompletionTask) await this._paidCompletionTask;
         if (this._prepareTask) await this._prepareTask;
         prepared = this._preparedNext;
         this._preparedNext = null;
@@ -1883,7 +1905,12 @@ export class JukeLoopSession {
       if (['scheduled_handoff', 'radio_stopped'].includes(play?.media?.interrupted)) {
         await this.djuke.release(paidRecord, new Error(play.media.reason));
       } else {
-        const recovery = await this.djuke.complete(paidRecord, play)
+        const completion = this.djuke.complete(paidRecord, play);
+        if (paidRecord.playlistBatchId !== undefined) this._paidCompletionTask = completion;
+        const recovery = await completion
+          .finally(() => {
+            if (this._paidCompletionTask === completion) this._paidCompletionTask = null;
+          })
           .catch((err) => console.warn('[jukeloop] DJuke completion pending:', err.message));
         if (paidRecord.playlistBatchId !== undefined && recovery) this._setPlaylistMediaRetry(recovery);
       }
@@ -2049,6 +2076,7 @@ export class JukeLoopSession {
   /** Stop all playback and disconnect from the voice channel. */
   destroy() {
     this._destroyed = true;
+    this._mediaAbort.abort();
     this._activeAudio?.completion.interrupt('radio_stopped');
     this._endingAudio?.completion.interrupt('radio_stopped');
     clearTimeout(this._paidPollTimer);
