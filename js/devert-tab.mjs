@@ -22,9 +22,9 @@ export function devertPublicQueue(snapshot) {
   return { campaigns, minimumOfferUnits: quote.minimumOfferUnits };
 }
 
-async function readWalletAds(service, address) {
+async function readWalletAds(service, address, fetchImpl = fetch) {
   if (!address) throw new Error('Connect your wallet to view your ads.');
-  const response = await fetch(`${service}/api/devert/ads?wallet=${encodeURIComponent(address)}`, {
+  const response = await fetchImpl(`${service}/api/devert/ads?wallet=${encodeURIComponent(address)}`, {
     cache: 'no-store',
     signal: AbortSignal.timeout(12_000),
   });
@@ -686,7 +686,7 @@ export function initDevertTab(environment = {}) {
       let metadataUnavailable = 0;
       let ownershipUnavailable = 0;
       if (walletAddress) {
-        const library = await readWalletAds(service, walletAddress);
+        const library = await readWalletAds(service, walletAddress, fetch);
         if (request !== generation || !isOpen()) return;
         ads = library.ads;
         metadataUnavailable = library.metadataUnavailable;
