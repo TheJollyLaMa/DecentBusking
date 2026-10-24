@@ -77,7 +77,9 @@ test('AdLoop exposes the live play and records only completed audible non-main i
       recordMainRadioAdVote: async vote => { votes.push(vote); return { ...vote, duplicate: false }; },
     },
     voiceChannel: { name: 'AdLoop' },
-    textChannel: { send: message => { announcements.push(message); return Promise.resolve(); } },
+    textChannel: { send: message => { announcements.push(message); return Promise.resolve({
+      id: 'ad-announcement', react: () => assert.fail('must not seed Discord reactions'),
+    }); } },
     resolveAdUrl: async cid => `https://gateway.example/ipfs/${cid}`,
     createStream: () => ({ stdout: {}, kill() {} }),
     createResource: stream => stream,
@@ -88,7 +90,7 @@ test('AdLoop exposes the live play and records only completed audible non-main i
   });
 
   await controller.start();
-  assert.deepEqual(announcements, [{ content: '📢 **AdLoop:** Advert', flags: MessageFlags.SuppressNotifications,
+  assert.deepEqual(announcements, [{ content: '📢 **AdLoop:** Advert\n[Listen and vote on DecentBusking](https://thejollylama.github.io/DecentBusking/)', flags: MessageFlags.SuppressNotifications,
     allowedMentions: { parse: [] } }]);
   assert.equal(controller.getState().ready, true);
   assert.equal(controller.getState().nowPlaying.audible, false);
