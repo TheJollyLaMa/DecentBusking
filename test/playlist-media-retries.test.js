@@ -54,6 +54,34 @@ test('partial playlist audio is retried, not falsely settled even when more than
   assert.equal(f.refunds, 0);
 });
 
+test('an exhausted song is not replayed after a refund failure or worker restart', async () => {
+  const { createDjukeRuntime, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
+  const item = { requestId: 'playlist:4', playlistLaneId: '4', playlistBatchId: '0',
+    songId: `0x${'a'.repeat(64)}`, trackId: 'fifth', revision: '0', playable: true };
+  let snapshot, refundAttempts = 0;
+  const make = () => createDjukeRuntime({
+    journal: createDjukePlaybackJournal({ restore: async () => structuredClone(snapshot),
+      save: async value => { snapshot = structuredClone(value); return 'ipfs://durable'; } }),
+    readState: async () => ({ requests: [item], playlistPending: 1 }),
+    getTrack: trackId => ({ trackId }), fulfill: async () => assert.fail('must not settle'),
+    refundPlaylistBatch: async () => { refundAttempts++; if (refundAttempts === 1) throw new Error('RPC unavailable'); },
+    log: { warn() {} },
+  });
+  const runtime = make();
+  for (let failure = 1; failure <= 4; failure++) {
+    const selection = await runtime.nextPaid();
+    const result = runtime.retryMedia(selection.record, new Error('Decoder failed'), { reason: 'decoder_failed', exitCode: 1 });
+    if (failure === 4) await assert.rejects(result, /RPC unavailable/);
+    else await result;
+  }
+  const restarted = make();
+  assert.equal(await restarted.nextPaid(), null, 'only retry the refund, not a fifth media attempt');
+  assert.equal(refundAttempts, 2);
+  assert.equal(snapshot.records[0].attempts, 4);
+  assert.equal(snapshot.records[0].mediaFailures, 4);
+  assert.equal(snapshot.records[0].lastMedia.reason, 'decoder_failed');
+});
+
 test('real preparation timeouts hold rotation, back off, and recover on the third retry without refund or new payment', async t => {
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
   const { combinePaidQueues } = await import('../discord-bot/devert-queue.js');

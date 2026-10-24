@@ -67,7 +67,7 @@ import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
 import { createCreatorProfiles } from './creator-profiles.js';
 import { createArtworkUpdateQueue } from './artwork-updates.js';
 import { createDjukeGasQuoteReader, createDjukePlaylistGasQuoteReader, DJUKE_GAS_ABI, DJUKE_PLAYLIST_GAS_ABI } from './djuke-gas.js';
-import { createDjukePlaylistBatchReconciler, djukePlaylistReadiness, playlistBatchEventAbi, legacyPlaylistReceipts } from './djuke-playlist-batches.js';
+import { createDjukePlaylistBatchReconciler, djukePlaylistReadiness, playlistBatchEventAbi, legacyPlaylistReceipts, playlistPlaybackFailure } from './djuke-playlist-batches.js';
 import { createEnsResolver } from './ens-resolver.js';
 import { createDevertRemovals } from './devert-removals.js';
 import { ensureCheckpointGroups } from './checkpoint-groups.js';
@@ -1102,6 +1102,7 @@ async function main() {
             ? (BigInt(batch.refundedSongUnits) + BigInt(batch.refundedFeeUnits)).toString() : null,
           playing: !!nowPlaying?.audible && nowPlaying.djukePlaylist?.batchId === batch.batchId,
           workerGasSponsored: sponsoredDjuke,
+          playbackFailure: playlistPlaybackFailure(batch, _djukeRuntime?.getJournalState() || [], djukeAddress),
           ...(saved ? { playlistId: saved.id, revision: saved.revision } : {}),
           songs: batch.songIds.map((songId, index) => {
             const laneId = batch.laneIds[index];

@@ -35,6 +35,56 @@ than 30 seconds. The fourth media failure invokes the existing version-specific
 suffix/fee refund; v0.4 refunds the full reserved platform fee, not worker ETH or
 wallet network gas. Refunds already completed are final and are not requeued.
 
+### Verified audio completion (#274)
+
+Paid delivery is no longer inferred from a mutable session-wide FFmpeg exit code
+at the instant the player becomes Idle. Each prepared resource owns a PCM byte
+counter and decoder lifecycle monitor. A clean completion requires consumed source
+EOF, a successful matching decoder exit with no stream error or termination signal,
+and consumption of all decoded PCM (within one 20 ms encoding frame). An EOF that
+arrives just before the process exit notification waits at most one second for that
+exit; missing evidence remains a failure, never an assumed delivery.
+FFmpeg stops on decode errors instead of silently returning success for damaged
+packets. Early player stops, incomplete streams and unconsumed decoded audio cannot
+settle a playlist song. Scheduled handoffs and controlled shutdowns release a
+reservation without spending its media retry budget. After four media failures,
+recovery retries the suffix refund, not a fifth playback attempt, including after
+a failed refund or restart.
+
+Completion logs identify the play, track, paid request/attempt and decoder PID,
+exit code/signal, source EOF/error, decoded PCM bytes/duration, consumed duration
+and wall-clock audible time. Decoder stderr is drained but retained only as bounded
+network/decode/timing categories and a byte count; raw media URLs or credentials
+are not included. Playback checkpoint, settlement and deferred-selection timings
+make bookkeeping gaps distinguishable from audio failures. Duration evidence is
+decoded PCM, not an assumed trustworthy duration from a gateway response.
+
+Profile → Playlists receipts include the failed song, sanitized failure category,
+failed-attempt count and exhausted-retry status alongside the existing exact
+on-chain delivered/refunded amounts. An already-refunded purchase is final; the
+repair does not replay or recharge it.
+
+The regression in `test/playlist-audio-completion.test.js` drives twelve actual
+FFmpeg → PCM → Opus → player → Idle completions through the paid journal/runtime;
+it does not inject successful completion verdicts. By default it uses short local
+WAV fixtures served over HTTP. To repeat the incident-media check, download the
+public CID `bafybeicgdqwqww2frcnmvjmitt5zvqivtg3vemyekr7johxlkkdllea4di`
+and run:
+
+```sh
+DJUKE_INCIDENT_MEDIA=/path/to/recording.m4a node --test \
+  --test-name-pattern='twelve real player EOFs' test/playlist-audio-completion.test.js
+```
+
+The file is served locally with byte-range support (required for seekable M4A)
+and occupies the fifth slot. The October 24 check completed all twelve once, in
+order, without a refund: the incident recording decoded 32,149,248 PCM bytes
+(167,444 ms) and the player consumed 167,440 ms, within its 20 ms frame boundary.
+This verifies the actual recording/player lifecycle, not a new production payment.
+The historical worker did not capture decoder diagnostics, so this evidence cannot
+retroactively distinguish its gateway/decoder failure from an exit-notification
+race. The next authorized production test can distinguish them with the new logs.
+
 The Playlists section of the connected wallet's own profile shows its five most recent Play Live receipts:
 verifying queue, queued, playing, completed, or refunded. Expand a receipt for
 delivered-song progress, paid/refunded/settled USDC and Base transaction links.

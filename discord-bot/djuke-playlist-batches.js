@@ -1,5 +1,17 @@
 const BATCH_EVENTS = ['PlaylistBatchRequested', 'PlaylistBatchFeeSettled', 'PlaylistBatchFeeRefunded', 'PlaylistSongRefunded', 'PlaylistSongDelivered'];
 
+export function playlistPlaybackFailure(batch, records, contractAddress) {
+  const failures = records.filter(record => record.playlistBatchId === batch.batchId &&
+    record.requestId.startsWith(`8453:${contractAddress.toLowerCase()}:playlist:`) &&
+    record.mediaFailures > 0 && !batch.deliveredLaneIds?.includes(record.playlistLaneId));
+  failures.sort((a, b) => String(b.lastMediaFailureAt || '').localeCompare(String(a.lastMediaFailureAt || '')));
+  const failed = failures[0];
+  if (!failed) return null;
+  return { laneId: failed.playlistLaneId, reason: failed.lastMedia?.reason ||
+    (/did not finish audibly/.test(failed.lastMediaError || failed.lastError || '') ? 'audio_completion_unverified' : 'media_preparation_failed'),
+    attempts: failed.mediaFailures, maxAttempts: 4, exhausted: failed.mediaFailures >= 4 };
+}
+
 export function djukePlaylistReadiness({ configured, contractAddress, batchEventsDurable, workerReady, paymentsEnabled, mirrorAvailable, version = '0.4' }) {
   const reason = !configured ? 'DJuke v0.4 playlist checkout is not configured'
     : !batchEventsDurable ? 'Durable playlist event storage and an explicit start block are required'

@@ -229,19 +229,24 @@ export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 1
     }
     if (selecting.has(runtime)) return null;
     selecting.add(runtime);
+    const started = Date.now();
     let timedOut = false;
     let timer;
     const pending = Promise.resolve().then(() => runtime.nextPaid(options));
     pending.then(async selection => {
-      if (timedOut && selection) prepared.set(runtime, selection);
+      if (timedOut && selection) {
+        prepared.set(runtime, selection);
+        log.info?.(`[${label}] Late queue selection retained; selectionMs=${Date.now() - started}`);
+      }
     }).catch(error => {
-      if (timedOut) log.warn(`[${label}] Late queue selection/release failed: ${error.message}`);
+      if (timedOut) log.warn(`[${label}] Deferred queue selection: ${error.message}`);
     }).finally(() => selecting.delete(runtime));
     try {
       return await Promise.race([pending, new Promise((_, reject) => {
         timer = setTimeout(() => {
           timedOut = true;
-          reject(new Error('Queue selection timed out; music rotation continues'));
+          reject(new Error(`Queue selection timed out after ${Date.now() - started}ms; ${songs?.hasPendingPlaylist?.()
+            ? 'paid playlist holds rotation while its durable selection completes' : 'selection remains pending; playback policy decides the next item'}`));
         }, timeoutMs);
       })]);
     } catch (error) {

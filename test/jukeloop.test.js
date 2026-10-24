@@ -183,7 +183,7 @@ test('website radio starts without Discord readiness, channel lookup, text or vo
 });
 
 test('real audio frames advance from an ad back to music without a Discord voice subscriber', async t => {
-  const { JukeLoopSession, createJukeLoopSession, getActiveJukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const { JukeLoopSession, createJukeLoopSession, getActiveJukeLoopSession, monitorAudioCompletion } = await import('../discord-bot/jukeloop.js');
   const { spawn } = require('node:child_process');
   const voice = require('../discord-bot/node_modules/@discordjs/voice');
   const session = createJukeLoopSession('headless-audio-test', {
@@ -198,7 +198,8 @@ test('real audio frames advance from an ad back to music without a Discord voice
   const child = spawn('ffmpeg', ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.5',
     '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'] });
   t.after(() => { session.destroy(); child.kill(); });
-  const resource = voice.createAudioResource(child.stdout, { inputType: voice.StreamType.Raw });
+  const completion = monitorAudioCompletion(child.stdout, child);
+  const resource = voice.createAudioResource(completion.stream, { inputType: voice.StreamType.Raw });
   const idle = new Promise((resolve, reject) => {
     session.player.once(voice.AudioPlayerStatus.Idle, resolve);
     session.player.once('error', reject);
@@ -206,7 +207,7 @@ test('real audio frames advance from an ad back to music without a Discord voice
   });
   const paid = { kind: 'devert', tier: 1, requestId: 'test', payer: '0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f', amountUnits: '2000000' };
   const track = { trackId: 'devert:99', title: 'Real decoded advert', campaignId: '99', ipfsCid: 'test' };
-  session._startPrepared({ track, resource, ffmpegProcess: child, queueIndex: null,
+  session._startPrepared({ track, resource, completion, ffmpegProcess: child, queueIndex: null,
     paid: { record: paid }, devertAd: { campaignId: '99', track, paidRequest: true } });
   await voice.entersState(session.player, voice.AudioPlayerStatus.Playing, 5000);
   assert.equal(session.getPlaybackStatus().ready, true, 'voice disconnection must not mark the website offline');

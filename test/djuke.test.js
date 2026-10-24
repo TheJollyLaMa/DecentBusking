@@ -17,7 +17,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261023-djuke-feedback/);
+  assert.match(html, /djuke\.mjs\?v=20261024-playback-proof/);
   assert.match(html, /devert-paid-queue\.mjs\?v=20261019-radio-recovery/);
 });
 
@@ -54,6 +54,10 @@ test('playlist receipt distinguishes purchase, delivery and exact refund without
   assert.match(playlistReceiptSummary({ ...batch, refundedUnits: null }).payment, /Refund amount is being verified/);
   assert.match(playlistReceiptSummary({ ...batch, subtotalUnits: undefined }).payment, /Payment details are being verified/);
   assert.doesNotMatch(playlistReceiptSummary({ ...batch, workerGasSponsored: true }).note, /Worker ETH/);
+  const failed = playlistReceiptSummary({ ...batch, songs: batch.songs.map((song, i) => ({
+    ...song, laneId: String(i), title: i === 4 ? 'Algorhythm' : `Song ${i + 1}` })),
+    playbackFailure: { laneId: '4', reason: 'decoder_failed', attempts: 4, maxAttempts: 4, exhausted: true } });
+  assert.match(failed.note, /Song 5 \(Algorhythm\): decoder failed.*4\/4 attempts failed; retries exhausted/);
 });
 
 test('Play Live receipts belong to the profile, not the DJuke drawer', () => {

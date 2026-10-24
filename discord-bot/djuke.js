@@ -228,11 +228,16 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
       await commit(next);
       return copy(record);
     }),
-    fail: (requestId, error, { mediaFailure = false } = {}) => update(requestId, record => {
+    fail: (requestId, error, { mediaFailure = false, media = null } = {}) => update(requestId, record => {
       if (record.state !== 'playing') throw new Error('DJuke request is not playing');
       record.state = 'pending';
       record.lastError = String(error || 'Playback failed');
-      if (mediaFailure) record.mediaFailures = (record.mediaFailures || 0) + 1;
+      if (mediaFailure) {
+        record.mediaFailures = (record.mediaFailures || 0) + 1;
+        record.lastMediaError = record.lastError;
+        record.lastMediaFailureAt = new Date(now()).toISOString();
+        if (media) record.lastMedia = copy(media);
+      }
     }),
     complete: (requestId, { playId, audibleMs, finished, trackId, revision }) => update(requestId, record => {
       if (record.state !== 'playing' || (trackId !== undefined && (record.trackId !== trackId || record.revision !== revision))) {
@@ -387,8 +392,10 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       }
       if (request.playlistLaneId !== undefined && state.requests.some(entry => entry.playlistLaneId === undefined)) continue;
       try {
+        const started = Date.now();
         await fulfill({ playlistLaneId: request.playlistLaneId, chainRequestId: request.chainRequestId, songId: record.songId, revision: record.revision, playId: record.playId });
         await journal.confirmFulfilled(record.requestId);
+        log.info?.(`[djuke] Settlement confirmed ${record.requestId}; settlementAndCheckpointMs=${Date.now() - started}`);
       } catch (error) {
         if (/Paid recording changed/.test(error.shortMessage || error.message)) await journal.resetPlayed(record.requestId);
         else { log.warn(`[djuke] Fulfillment pending for ${record.requestId}: ${error.shortMessage || error.message}`); return; }
@@ -416,6 +423,11 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     if (!head) return null;
     const request = state.requests.find(entry => entry.requestId === head.requestId);
     if (!request || !await canPlayRequest(request, state)) return null;
+    if (request.playlistBatchId !== undefined && head.mediaFailures >= 4) {
+      if (!refundPlaylistBatch) throw new Error('Playlist media retries exhausted but the refund handler is unavailable');
+      await refundPlaylistBatch(request.playlistBatchId);
+      return null;
+    }
     const track = request?.playable ? getTrack(request.trackId) : null;
     if (!track) {
       if (request?.playlistBatchId && refundPlaylistBatch) {
@@ -445,9 +457,9 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     pendingClaim = null;
     return result;
   }
-  async function retryMedia(record, error) {
+  async function retryMedia(record, error, media = null) {
     if (record.playlistBatchId === undefined) throw new Error('Bounded media retries require a radio playlist request');
-    const updated = await journal.fail(record.requestId, error?.message || String(error), { mediaFailure: true });
+    const updated = await journal.fail(record.requestId, error?.message || String(error), { mediaFailure: true, media });
     const maxRetries = 3;
     if (updated.mediaFailures <= maxRetries) {
       log.warn(`[djuke] Playlist ${record.playlistBatchId} lane ${record.playlistLaneId}: media retry ${updated.mediaFailures}/${maxRetries}; payment stays queued (${updated.lastError}).`);
@@ -466,15 +478,19 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     },
     async complete(record, play) {
       if (record.playlistBatchId !== undefined && (!play || play.finished !== true || play.audibleMs < minAudibleMs)) {
-        return retryMedia(record, new Error('Playlist recording did not finish audibly'));
+        const reason = play?.media?.reason || (!play ? 'audio_evidence_missing'
+          : play.finished !== true ? 'audio_stream_incomplete' : 'insufficient_audible_time');
+        return retryMedia(record, new Error(`Playlist recording did not finish audibly (${reason})`), play?.media);
       }
       if (!play || play.audibleMs < minAudibleMs) {
         await journal.fail(record.requestId, 'Paid play was not audible long enough');
         if (record.playlistBatchId && refundPlaylistBatch) await refundPlaylistBatch(record.playlistBatchId);
         return;
       }
+      const started = Date.now();
       await journal.complete(record.requestId, { playId: play.playId, audibleMs: play.audibleMs, finished: true,
         trackId: record.trackId, revision: record.revision });
+      log.info?.(`[djuke] Playback checkpoint confirmed ${record.requestId}; checkpointMs=${Date.now() - started}`);
       readState().then(settleSerial).catch(error => log.warn(`[djuke] Fulfillment deferred: ${error.message}`));
     },
     async fail(record, error) {
