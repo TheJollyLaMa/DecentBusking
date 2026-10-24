@@ -6,7 +6,7 @@ import { getRadioStateSnapshot } from './radio-sync.js?v=20261022-playlist-lane'
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 import { lookupEnsName } from './ens-client.mjs?v=20261016-ens-worker';
-import { renderWalletAddress } from './fund-display.mjs?v=20261022-live-offer-v2';
+import { renderWalletAddress } from './fund-display.mjs?v=20261024-djuke-labels';
 export { USDC_BROWSER_ABI };
 
 export function playlistReceiptSummary(batch) {

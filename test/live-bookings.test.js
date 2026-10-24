@@ -101,6 +101,77 @@ test('performer acceptance is unavailable until the steward explicitly approves 
  await assert.rejects(f.service.acknowledgePerformer({id:b.id,address:performer.address,
    signature:await performer.signMessage(f.shared.liveAcknowledgement(b))}),/steward has not approved/);
 });
+test('expired invitations reject direct and owner-relayed acceptance without changing the agreement',async()=>{
+ for (const offset of [0, 1, 86400_000]) {
+  const f=await fixture({escrowAddress:'0x'+'ef'.repeat(20),escrowStartBlock:100});
+  const b=(await f.create({...input(),mode:'phase1',stewardApproved:true})).bookings[0];
+  const signature=await performer.signMessage(f.shared.liveAcknowledgement(b));
+  f.time(Date.parse(b.startUtc)+offset);
+  await assert.rejects(f.service.acknowledgePerformer({id:b.id,address:performer.address,signature}),/expired/);
+  await assert.rejects(f.exec({action:'acknowledge',id:b.id,stewardApproved:true,performerSignature:signature}),/expired/);
+  const unchanged=(await f.service.getState()).bookings[0];
+  assert.equal(unchanged.acknowledged,false);
+  assert.equal(unchanged.termsHash,b.termsHash);
+  assert.deepEqual(unchanged.transactions,{});
+ }
+});
+
+test('confirmed funding submitted before start can still be reconciled after start',async()=>{
+ const f=await fixture(); await f.create(); await f.ack(); f.funding();
+ const b=(await f.service.getState()).bookings[0];
+ f.time(Date.parse(b.startUtc)+1);
+ const state=await f.exec({action:'transaction',id:b.id,txAction:'funding',txHash});
+ assert.equal(state.bookings[0].status,'funded','expiry guards must not hide an already-mined deposit');
+});
+
+test('next Friday defaults use future New York time across date rollover and daylight saving',async()=>{
+ const {nextFridayLiveStart}=await import('../js/live-performance-admin.mjs');
+ const {newYorkInputToUtc}=await import('../js/radio-calendar.mjs');
+ for (const [instant,expected] of [
+  ['2026-10-24T08:21:00Z','2026-10-30T21:00'],
+  ['2026-10-24T00:59:59Z','2026-10-23T21:00'],
+  ['2026-10-24T01:00:00Z','2026-10-30T21:00'],
+  ['2026-10-31T01:00:00Z','2026-11-06T21:00'],
+ ]) {
+  const value=nextFridayLiveStart(Date.parse(instant));
+  assert.equal(value,expected);
+  assert.ok(Date.parse(newYorkInputToUtc(value))>Date.parse(instant));
+ }
+ assert.equal(newYorkInputToUtc(nextFridayLiveStart(Date.parse('2026-10-31T01:00:00Z'))),'2026-11-07T02:00:00.000Z');
+});
+
+test('prefilled approved v2 terms match the immutable agreement file and still require per-booking approval',async()=>{
+ const {readFileSync}=require('node:fs');
+ const {keccak256}=require('../discord-bot/node_modules/ethers');
+ const {LIVE_APPROVED_TERMS_V2}=await import('../js/live-bookings.mjs');
+ assert.equal(LIVE_APPROVED_TERMS_V2.hash,keccak256(readFileSync(new URL('../docs/LIVE_PERFORMANCE_TERMS_V2.json',`file://${__filename}`))));
+ assert.equal(LIVE_APPROVED_TERMS_V2.uri,'ipfs://bafkreidzxhbeub33romiprjlsjojgpitnwrqap52g6hpen3wowwhfi3zgq');
+ const f=await fixture({escrowAddress:'0x'+'ef'.repeat(20),escrowStartBlock:100});
+ const b=(await f.create({...input(),mode:'phase1',termsVersion:LIVE_APPROVED_TERMS_V2.version,
+  termsUri:LIVE_APPROVED_TERMS_V2.uri,termsHash:LIVE_APPROVED_TERMS_V2.hash})).bookings[0];
+ assert.equal(b.stewardApproved,false);
+ await assert.rejects(f.service.acknowledgePerformer({id:b.id,address:performer.address,
+  signature:await performer.signMessage(f.shared.liveAcknowledgement(b))}),/steward has not approved/);
+});
+
+test('expired invitation UI offers no signature or transaction controls and no fictional claim',async t=>{
+ const {renderPerformerBookingInvite}=await import('../js/live-performance-profile.mjs');
+ const {bookingGroup,claimState,liveBookingRows}=await import('../js/live-bookings.mjs');
+ const b={...input(),id:'past',wallet:performer.address,mode:'phase1',status:'draft',stewardApproved:true};
+ const now=Date.parse(b.startUtc);
+ const original=global.document;
+ t.after(()=>{ if(original===undefined) delete global.document; else global.document=original; });
+ global.document={createElement:tag=>({tag,children:[],textContent:'',setAttribute(){},append(...children){this.children.push(...children);}})};
+ const invite=renderPerformerBookingInvite({booking:b,wallet:b.wallet,serviceUrl:'https://worker.example',now});
+ assert.equal(invite.children.some(node=>node.tag==='button'||node.tag==='input'),false);
+ assert.match(invite.children[0].textContent,/new date and agreement/);
+ assert.equal(bookingGroup(b,now),'completed');
+ assert.match(liveBookingRows([b],{now}),/Invitation expired/);
+ assert.equal(claimState(b,owner.address,b.wallet,now).enabled,false);
+ assert.match(claimState(b,owner.address,b.wallet,now).label,/No confirmed escrow/);
+ b.status='approved';
+ assert.match(claimState(b,owner.address,b.wallet,Date.parse(b.claimDeadline)+1).label,/deadline passed/);
+});
 test('community schedule invite is scoped to the exact wallet and event occurrence',async()=>{
  const {performerBookingForOccurrence}=await import('../js/radio-schedule-ui.mjs');
  const booking={eventId:'friday-live-performance:2026-10-23',wallet:performer.address,mode:'phase1',status:'draft',cancelled:false};
