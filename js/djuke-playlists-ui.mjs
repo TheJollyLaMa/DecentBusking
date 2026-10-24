@@ -80,7 +80,7 @@ export async function purchaseRadioNamedPlaylist({ playlist, signer, config = wi
   onStep('Waiting for Base confirmation…');
   if ((await transaction.wait())?.status !== 1) throw new Error('Radio playlist request did not confirm');
   announcePaymentCelebration({ chainId: 8453, txHash: transaction.hash, amountText: formatUsdcUnits(maxTotal), assetText: 'USDC',
-    summary: 'Radio playlist request confirmed', txLabel: 'Radio playlist confirmed' });
+    summary: 'Play Live queued · not yet delivered', txLabel: 'Follow delivery in Profile → Playlists', source: 'djuke' });
   return { txHash: transaction.hash, totalUnits: maxTotal, contributionWei };
 }
 
@@ -109,7 +109,7 @@ export async function purchasePrivateNamedPlaylist({ playlist, signer, config = 
   onStep('Waiting for Base confirmation…');
   if ((await transaction.wait())?.status !== 1) throw new Error('Private playlist purchase did not confirm');
   announcePaymentCelebration({ chainId: 8453, txHash: transaction.hash, amountText: formatUsdcUnits(quote.totalUnits),
-    assetText: 'USDC', summary: 'Private playlist purchase confirmed', txLabel: 'Playlist purchase confirmed' });
+    assetText: 'USDC', summary: 'Personal Play purchased', txLabel: 'Resume without payment in Profile → Playlists', source: 'djuke' });
   return { txHash: transaction.hash, totalUnits: quote.totalUnits };
 }
 

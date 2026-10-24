@@ -133,6 +133,16 @@ test('radio does not describe an offline, stalled or protected stream as an ordi
   assert.match(title.textContent, /recovery will retry automatically/);
   vm.runInContext(`_radioState.playback = { status: 'paused', reason: 'Live set' }; _syncRadio();`, context);
   assert.match(title.textContent, /Radio paused · Live set/);
+  for (const reason of [
+    'Continuing the paid playlist; waiting for its durable checkpoint or settlement',
+    'Paid playlist media retry 1/3; payment stays queued.',
+  ]) {
+    context.reason = reason;
+    vm.runInContext(`_radioState.playback = { status: 'preparing', reason }; _syncRadio();`, context);
+    assert.match(title.textContent, /Play Live is continuing/);
+    assert.match(activity.textContent, /No new payment is needed/);
+    assert.doesNotMatch(title.textContent, /between tracks|recovery/);
+  }
 });
 
 

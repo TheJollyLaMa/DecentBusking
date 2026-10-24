@@ -17,7 +17,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261023-usdc-only/);
+  assert.match(html, /djuke\.mjs\?v=20261023-djuke-feedback/);
   assert.match(html, /devert-paid-queue\.mjs\?v=20261019-radio-recovery/);
 });
 
@@ -259,6 +259,7 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   const versions = await import('../js/djuke-version.mjs');
   const { renderWalletAddress } = await import('../js/fund-display.mjs');
   const { formatUsdcUnits } = await import('../js/usdc-format.mjs');
+  const { mountDjukeQueueFocus } = await import('../js/djuke-queue-focus.mjs');
   const nodes = new Map();
   let focused;
   function element(id) {
@@ -269,6 +270,7 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
       getAttribute(name) { return this.attributes[name]; },
       append(...children) { this.children.push(...children); },
       replaceChildren(...children) { this.children = children; },
+      querySelectorAll() { return []; },
       addEventListener(name, callback) { (this.listeners[name] ||= []).push(callback); },
       focus() { focused = id; }, showModal() { this.open = true; },
       close() { this.open = false; for (const callback of this.listeners.close || []) callback(); },
@@ -289,7 +291,8 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   let queueReads = 0;
   let scheduled;
   let tracks = [{ trackId: 'a', songId: `0x${'a'.repeat(64)}`, title: 'First song', artist: 'Musician' }];
-  const context = vm.createContext({ ...helpers, ...versions, renderWalletAddress, formatUsdcUnits, document, AbortSignal,
+  const context = vm.createContext({ ...helpers, ...versions, renderWalletAddress, formatUsdcUnits, mountDjukeQueueFocus,
+    getRadioStateSnapshot: () => null, document, AbortSignal,
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example', djukeContractAddress: address } },
     lookupEnsName: async () => 'musician.eth',
     CustomEvent: class { constructor(type, { detail }) { this.type = type; this.detail = detail; } },

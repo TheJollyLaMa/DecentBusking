@@ -779,6 +779,12 @@ function _syncRadio(message) {
       _setActivity(playback.reason || '');
       return;
     }
+    if (playback?.status === 'preparing' && /paid playlist/i.test(playback.reason || '')) {
+      _setTrack('♫ Play Live is continuing — preparing the next song', '');
+      _setActivity(/no new payment/i.test(playback.reason) ? playback.reason
+        : `${playback.reason.replace(/[. ]+$/, '')}. No new payment is needed.`);
+      return;
+    }
     if (playback?.status === 'preparing' && playback.idleMs >= 30_000) {
       _setTrack('📻 Preparing the next recording — radio recovery will retry automatically', '');
       _setActivity('The radio is taking longer than expected to load the next track.');

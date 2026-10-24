@@ -1,6 +1,8 @@
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { approvalNotice, ensureBaseNetwork, retryMissingRevertData, waitForAllowance } from './base-chain.mjs?v=20261023-usdc-only';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
+import { mountDjukeQueueFocus } from './djuke-queue-focus.mjs';
+import { getRadioStateSnapshot } from './radio-sync.js?v=20261022-playlist-lane';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 import { lookupEnsName } from './ens-client.mjs?v=20261016-ens-worker';
@@ -148,6 +150,7 @@ export async function payForDjukeSong({ signer, djuke, usdc, songId, maxPriceUni
     assetText: 'USDC',
     summary: 'DJuke queue payment confirmed',
     txLabel: 'DJuke request confirmed',
+    source: 'djuke',
   });
   return { txHash: transaction.hash, priceUnits: price };
 }
@@ -458,37 +461,54 @@ export function initDjuke() {
       if (receiptStatus) receiptStatus.textContent = '';
       renderReceipts();
       const wallet = window._wallet?.address?.toLowerCase();
-      queue.replaceChildren();
-      requests.forEach((request, index) => {
-        if (request.playlistLaneId !== undefined &&
-            snapshot.playlistBatches?.some(batch => batch.batchId === request.playlistBatchId)) return;
-        const item = node('li');
-        const details = node('span', undefined, 'djuke-request-details');
-        details.append(node('strong', request.title), node('span', typeof request.artist === 'string' ? request.artist : ''));
-        if (paymentsLive() && request.playable === false && wallet && String(request.payer).toLowerCase() === wallet) {
-          const replace = node('button', 'Replace with selected song', 'djuke-replace');
-          replace.type = 'button';
-          replace.addEventListener('click', () => replaceRequest(request));
-          details.append(node('span', 'This recording is unavailable — choose a replacement above.'), replace);
+      const queueKey = JSON.stringify([snapshot.contractAddress, requests, snapshot.playlistBatches, wallet, paymentsLive()]);
+      if (queue.dataset.snapshot !== queueKey) {
+        const scrollPositions = [...queue.querySelectorAll('.djuke-playlist-songs')].map(list => [list.dataset.batch, list.scrollTop]);
+        const scrollTop = queue.scrollTop;
+        queue.replaceChildren();
+        requests.forEach((request, index) => {
+          if (request.playlistLaneId !== undefined &&
+              snapshot.playlistBatches?.some(batch => batch.batchId === request.playlistBatchId)) return;
+          const item = node('li');
+          item.dataset.djukeRequest = request.requestId;
+          const details = node('span', undefined, 'djuke-request-details');
+          details.append(node('strong', request.title), node('span', typeof request.artist === 'string' ? request.artist : ''));
+          if (paymentsLive() && request.playable === false && wallet && String(request.payer).toLowerCase() === wallet) {
+            const replace = node('button', 'Replace with selected song', 'djuke-replace');
+            replace.type = 'button';
+            replace.addEventListener('click', () => replaceRequest(request));
+            details.append(node('span', 'This recording is unavailable — choose a replacement above.'), replace);
+          }
+          item.append(node('span', String(index + 1).padStart(2, '0'), 'djuke-request-number'), details);
+          queue.append(item);
+        });
+        for (const batch of snapshot.playlistBatches || []) {
+          const item = node('li', undefined, 'djuke-playlist-queue');
+          const remaining = batch.songs.filter(song => song.status === 'pending').length;
+          const details = node('div', undefined, 'djuke-request-details');
+          details.append(node('strong', `${batch.name} · ${remaining} of ${batch.songs.length} songs remaining`));
+          const songs = node('ol');
+          songs.className = 'djuke-playlist-songs';
+          songs.dataset.batch = batch.batchId;
+          for (const song of batch.songs) {
+            const entry = node('li');
+            entry.append(node('span', `${song.title}${song.artist ? ` — ${song.artist}` : ''}`));
+            const label = node('span', song.status, 'djuke-queue-song-status');
+            label.dataset.queueSongStatus = '';
+            entry.append(label);
+            entry.dataset.djukeRequest = `8453:${snapshot.contractAddress.toLowerCase()}:playlist:${song.laneId}`;
+            entry.dataset.state = song.status;
+            songs.append(entry);
+          }
+          details.append(songs);
+          item.append(details);
+          queue.append(item);
+          songs.scrollTop = scrollPositions.find(([id]) => id === batch.batchId)?.[1] || 0;
         }
-        item.append(node('span', String(index + 1).padStart(2, '0'), 'djuke-request-number'), details);
-        queue.append(item);
-      });
-      for (const batch of snapshot.playlistBatches || []) {
-        const item = node('li', undefined, 'djuke-playlist-queue');
-        const remaining = batch.songs.filter(song => song.status === 'pending').length;
-        const details = node('div', undefined, 'djuke-request-details');
-        details.append(node('strong', `${batch.name} · ${remaining} of ${batch.songs.length} songs remaining`));
-        const songs = node('ol');
-        for (const song of batch.songs) {
-          const entry = node('li', `${song.title}${song.artist ? ` — ${song.artist}` : ''} · ${song.status}`);
-          entry.dataset.state = song.status;
-          songs.append(entry);
-        }
-        details.append(songs);
-        item.append(details);
-        queue.append(item);
+        queue.scrollTop = scrollTop;
+        queue.dataset.snapshot = queueKey;
       }
+      queueFocus.sync();
       const pendingCount = Number.isSafeInteger(snapshot.mainPending) && Number.isSafeInteger(snapshot.playlistPending)
         ? snapshot.mainPending + snapshot.playlistPending : requests.length;
       const quote = quoteDjuke(pendingCount);
@@ -502,6 +522,7 @@ export function initDjuke() {
       refreshGasQuote();
     } catch (error) {
       if (requestGeneration !== generation || (!isOpen() && !ownProfileOpen())) return;
+      delete queue.dataset.snapshot;
       unavailable(error.message);
     }
     if (isOpen() || ownProfileOpen()) timer = setTimeout(refresh, 15000);
@@ -548,6 +569,7 @@ export function initDjuke() {
     'Queued! Your song plays after the paid requests ahead of it.');
   });
   select.addEventListener('change', () => { renderSongs(); refreshGasQuote(); });
+  const queueFocus = mountDjukeQueueFocus({ queue, isOpen, root: document, initialState: getRadioStateSnapshot() });
   select.addEventListener('blur', () => { if (live) renderSongs(); });
   search?.addEventListener('input', () => { renderSongs(); refreshGasQuote(); });
   const close = () => {
@@ -572,6 +594,7 @@ export function initDjuke() {
     panel.setAttribute('aria-hidden', 'false');
     panel.inert = false;
     document.body.classList.add('djuke-open');
+    queueFocus.sync({ force: true });
     document.dispatchEvent(new CustomEvent('left-drawer-open', { detail: 'djuke' }));
     updateWallet();
     refresh();
@@ -613,6 +636,7 @@ export function initDjuke() {
   document.addEventListener('left-drawer-open', event => { if (event.detail !== 'djuke' && isOpen()) close(); });
   document.addEventListener('click', event => {
     const path = event.composedPath();
+    if (path.some(element => element.id === 'payment-celebration-root' && element.dataset.source === 'djuke')) return;
     if (isOpen() && !path.includes(panel) && !path.includes(toggle) && !path.includes(instructions)) close();
   });
   document.addEventListener('wallet-connected', updateWallet);

@@ -1,6 +1,6 @@
 import { liveBookingRows } from './live-bookings.mjs?v=20261022-live-offer-v2';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261022-playlist-lane';
-import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261019-fund-wallet-labels';
+import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261024-djuke-labels';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 export { formatUsdcUnits };
 const USDC_ICON = '<img class="usdc-icon" src="img/usdc.svg" alt="USDC" width="16" height="16">';
