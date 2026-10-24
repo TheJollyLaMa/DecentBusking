@@ -1,4 +1,4 @@
-#admin-modal-inner:has(#admin-radio-schedule[open]) { width: min(1240px, 96vw); max-width: 1240px; }
+#admin-modal:has(#admin-radio-schedule[open]) { width: min(1240px, 96vw); }
 .radio-programming-calendar { --calendar-line: #425268; --calendar-soft: #202c3c; color: #eef4fb; background: #131d2c; border: 1px solid #40536b; border-radius: 22px; padding: 20px; margin: 16px 0; font-family: system-ui, sans-serif; }
 .radio-calendar-toolbar, .radio-calendar-presets, .radio-calendar-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
 .radio-calendar-title { font-size: 1.3rem; font-weight: 750; margin-right: auto; }

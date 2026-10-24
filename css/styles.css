@@ -2607,9 +2607,44 @@ decent-foot {
 #admin-connect-section {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  justify-content: flex-start;
+  gap: .5rem 1rem;
   flex-wrap: wrap;
 }
+#admin-connected-addr { display: inline-flex; align-items: center; gap: 4px; }
+#admin-connected-addr code { background: none; padding: 0; color: inherit; font: inherit; }
+#admin-connected-role { color: #a8edce; font: .72rem monospace; }
+#admin-connected-role[hidden] { display: none; }
+#admin-modal-inner > .admin-tool-section {
+  display: block;
+  border: 1px solid #91e2ce66;
+  border-radius: 12px;
+  margin: 0;
+  padding: 0;
+  background: #101a18;
+  overflow: hidden;
+  color: var(--text-primary);
+}
+#admin-modal-inner > .admin-tool-section.hidden { display: none; }
+#admin-modal-inner > .admin-tool-section > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem .8rem;
+  padding: 1rem;
+  cursor: pointer;
+  color: #a8edce;
+  font-weight: 800;
+  list-style: none;
+}
+#admin-modal-inner > .admin-tool-section > summary::-webkit-details-marker,
+#admin-modal .live-performance-admin > summary::-webkit-details-marker { display: none; }
+#admin-modal-inner > .admin-tool-section > summary > span { font-size: 1.1rem; }
+#admin-modal-inner > .admin-tool-section > summary small { color: #c7c3b8; font-weight: 400; }
+#admin-modal-inner > .admin-tool-section > summary:focus-visible { outline: 2px solid #a8edce; outline-offset: -4px; border-radius: 12px; }
+#admin-modal-inner > .admin-tool-section > :not(summary) { margin: 0 1rem 1rem; }
+#admin-live-performance-slot:empty { display: none; }
+#admin-live-performance-slot .live-performance-admin { margin-top: 0; }
 
 .admin-addr {
   font-family: 'Courier New', monospace;

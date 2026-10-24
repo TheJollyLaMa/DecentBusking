@@ -63,7 +63,7 @@ export function initWorkerGasNotices() {
     state.className = 'worker-gas-state';
     state.setAttribute('role', 'status');
     state.hidden = false;
-    notice.after(state);
+    notice.append(state);
     return state;
   });
   let pending = null;
@@ -75,9 +75,8 @@ export function initWorkerGasNotices() {
     document.dispatchEvent(new CustomEvent('worker-gas-state-updated', { detail: { action } }));
     if (alert) {
       alert.hidden = !action || !isAdminWallet();
-      alert.textContent = action ? `${action.label}.${state ? ` ${formatWorkerGasStatus(state)}.` : ''} Open Worker funding below for the verified address. No automatic transfer will be made.` : '';
+      alert.textContent = action ? `${action.label}.${state ? ` ${formatWorkerGasStatus(state)}.` : ''} Use the verified address in this section. No automatic transfer will be made.` : '';
     }
-    if (action && isAdminWallet()) notices.forEach(notice => { notice.open = true; });
   };
   async function check() {
     const revision = generation;

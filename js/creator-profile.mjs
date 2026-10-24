@@ -11,26 +11,7 @@ import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261025-seamles
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
   summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261023-djuke-v05';
 
-const WALLET_BREATHE_ICON = 'img/Ens_Eth_Breathe.png';
-
-// Shows 0x1234 + four breathing ENS/ETH icons + abcd in place of an ellipsis.
-function renderWallet(element, address) {
-  if (!element) return;
-  element.replaceChildren();
-  element.title = address || '';
-  if (!address) return;
-  const part = text => Object.assign(document.createElement('code'), { textContent: text });
-  const icons = document.createElement('span');
-  icons.className = 'creator-profile-wallet-icons';
-  icons.setAttribute('aria-hidden', 'true');
-  for (let i = 0; i < 4; i++) {
-    const icon = Object.assign(document.createElement('img'), { src: WALLET_BREATHE_ICON, alt: '', loading: 'lazy' });
-    icon.style.animationDelay = `${i * 0.25}s`;
-    icons.append(icon);
-  }
-  element.setAttribute('aria-label', `Wallet ${address}`);
-  element.append(part(address.slice(0, 6)), icons, part(address.slice(-4)));
-}
+import { renderWallet } from './wallet-label.mjs';
 
 export const CREATOR_ALBUM_ABI = [
   'function getAlbum(bytes32) view returns ((address mainOwner,string title,string manifestURI,uint256 revision,uint256 listenPrice,uint256 albumPrice,address[] recipients,uint16[] sharesBps,string[] positions,bytes32[] songIds))',

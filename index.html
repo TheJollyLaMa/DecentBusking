@@ -6,8 +6,8 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261025-seamless-handoff" />
-  <link rel="stylesheet" href="css/radio-programming.css?v=20261024-programming-calendar" />
+  <link rel="stylesheet" href="css/styles.css?v=20261024-admin-sections" />
+  <link rel="stylesheet" href="css/radio-programming.css?v=20261024-admin-sections" />
 
   <!-- CDN dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
@@ -637,27 +637,15 @@
         <h2>🔑 DecentBusking Admin</h2>
         <button id="admin-close-btn" aria-label="Close admin panel">✕</button>
       </div>
-      <p class="admin-description">
-        Review requests, select items, then confirm the mint in your wallet.
-      </p>
       <div id="admin-connect-section">
         <span id="admin-connected-addr" class="admin-addr"></span>
+        <span id="admin-connected-role" hidden>DEFAULT_ADMIN_ROLE</span>
       </div>
       <div id="admin-status" class="admin-status" role="status"></div>
-      <p id="admin-worker-alert" class="worker-gas-state" role="status" aria-live="polite" hidden></p>
-      <details class="worker-gas-notice"><summary>⛽ Worker funding</summary><p>Manual top-ups use <strong>ETH on Base</strong>, not Ethereum mainnet. Worker wallet: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Verify this address after the balance check below. <a data-worker-explorer target="_blank" rel="noopener noreferrer">View verified worker on Base</a>. No automatic top-ups are enabled. Mint gas comes from your wallet.</p></details>
-      <p id="admin-payment-ledger-status" class="admin-status" role="status">Payment proofs not loaded.</p>
-      <details id="admin-devert-campaigns" class="hidden">
-        <summary>DVert campaign moderation</summary>
-        <p>Remove an advert from main radio and VertLoop. No refund; the paid term remains unchanged.</p>
-        <button id="admin-devert-refresh" type="button" class="admin-btn admin-btn-secondary">Refresh campaigns</button>
-        <p id="admin-devert-status" class="admin-status" role="status"></p>
-        <ul id="admin-devert-list"></ul>
-      </details>
-      <details id="admin-radio-schedule" class="hidden" aria-labelledby="admin-radio-schedule-title">
-        <summary>📻 Radio Programming</summary>
+      <details id="admin-radio-schedule" class="admin-tool-section hidden" aria-labelledby="admin-radio-schedule-title">
+        <summary><span>📻 Radio Programming</span><small>Weekly calendar, radio hours, and Discord reminders</small></summary>
         <div class="admin-section-header">
-          <div><h3 id="admin-radio-schedule-title">Radio Programming</h3><p>Build your week. Drop a radio hour onto the calendar, choose its rules, and let the station handle reminders.</p></div>
+          <div><h3 id="admin-radio-schedule-title">Radio Programming</h3><p>Build your week. Drop a radio hour onto the calendar, choose a preset, and let the station handle reminders.</p></div>
           <button id="admin-radio-schedule-refresh" class="admin-btn admin-btn-secondary" type="button" aria-label="Refresh radio schedule" title="Refresh schedule">↻</button>
         </div>
         <div id="admin-programming-calendar"></div>
@@ -684,8 +672,8 @@
         <ul id="admin-radio-schedule-events" class="admin-schedule-events"></ul>
         </details>
         </details>
-      <details id="admin-mint-section" class="hidden" open>
-        <summary>💼 NFT Requests <span id="admin-mint-pending-badge" hidden aria-hidden="true"></span></summary>
+      <details id="admin-mint-section" class="admin-tool-section hidden">
+        <summary><span>💼 NFT Requests <span id="admin-mint-pending-badge" hidden aria-hidden="true"></span></span><small>Open to sign in and review the private mint queue</small></summary>
         <div class="admin-section-header">
           <div>
             <h3>Pending NFT Requests</h3>
@@ -701,8 +689,22 @@
         </div>
         <div id="admin-mint-status" class="admin-status"></div>
       </details>
-      <details id="admin-role-section" class="hidden">
-        <summary>🔑 Contract Roles</summary>
+      <div id="admin-live-performance-slot"></div>
+      <details id="admin-devert-campaigns" class="admin-tool-section hidden">
+        <summary><span>📣 DVert</span><small>Advert campaigns and moderation</small></summary>
+        <p>Remove an advert from main radio and VertLoop. No refund; the paid term remains unchanged.</p>
+        <button id="admin-devert-refresh" type="button" class="admin-btn admin-btn-secondary">Refresh campaigns</button>
+        <p id="admin-devert-status" class="admin-status" role="status"></p>
+        <ul id="admin-devert-list"></ul>
+      </details>
+      <details id="admin-worker-funding" class="admin-tool-section worker-gas-notice">
+        <summary><span>⛽ Worker funding</span><small>ETH on Base, balance checks, and manual top-ups</small></summary>
+        <p id="admin-worker-alert" class="worker-gas-state" role="status" aria-live="polite" hidden></p>
+        <p>Manual top-ups use <strong>ETH on Base</strong>, not Ethereum mainnet. Worker wallet: <code>0x4894698f2B5cAF13Fad4Aa8fbaFE3618b960909F</code>. Verify this address after the balance check below. <a data-worker-explorer target="_blank" rel="noopener noreferrer">View verified worker on Base</a>. No automatic top-ups are enabled. Mint gas comes from your wallet.</p>
+        <p id="admin-payment-ledger-status" class="admin-status" role="status">Payment proofs not loaded.</p>
+      </details>
+      <details id="admin-role-section" class="admin-tool-section hidden">
+        <summary><span>🔑 Contract Roles</span><small>Grant contract permissions to a wallet</small></summary>
         <div class="admin-field">
           <label for="admin-target-addr">Wallet Address to Grant Role</label>
           <input id="admin-target-addr" type="text" placeholder="0x…" />
@@ -906,8 +908,8 @@
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261023-neon-handoffs">
   <script type="module" src="js/live-booking-notifications.mjs?v=20261024-live-prototype"></script>
-  <script type="module" src="js/live-performance-admin.mjs?v=20261024-live-prototype"></script>
-  <script type="module" src="js/admin.js?v=20261024-programming-calendar"></script>
+  <script type="module" src="js/live-performance-admin.mjs?v=20261024-admin-sections"></script>
+  <script type="module" src="js/admin.js?v=20261024-admin-sections"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
   <script type="module" src="js/payroll.js?v=20261019-payroll-confirmations"></script>
@@ -919,12 +921,12 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261024-djuke-labels"></script>
   <script type="module" src="js/djuke.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/devert-site.mjs?v=20261025-seamless-handoff"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261024-live-prototype"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261024-admin-sections"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261024-standalone-djuke"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
-  <script type="module" src="js/worker-gas.mjs?v=20261023-v05-readiness"></script>
+  <script type="module" src="js/worker-gas.mjs?v=20261024-admin-sections"></script>
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/top-ten-live-meter.mjs?v=20261025-seamless-handoff"></script>
   <script type="module">

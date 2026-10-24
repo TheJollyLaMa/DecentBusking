@@ -206,7 +206,8 @@ test('Admin reuses the header signer, checks roles without reconnecting, and cle
     if (!elements.has(id)) elements.set(id, mockNode());
     return elements.get(id);
   };
-  const signer = {};
+  let signatures = 0;
+  const signer = { signMessage: async () => { signatures++; return 'signature'; } };
   const address = '0x1111111111111111111111111111111111111111';
   let queueCalls = 0;
   let allowed = true;
@@ -217,15 +218,28 @@ test('Admin reuses the header signer, checks roles without reconnecting, and cle
     ethers: { BrowserProvider: class { constructor() { throw new Error('Must not reconnect'); } },
       Contract: class { constructor(_address, _abi, runner) { assert.equal(runner, signer); }
         async DEFAULT_ADMIN_ROLE() { return 'admin'; } async hasRole() { return allowed; } } },
-    fetchMintQueue: async options => { assert.equal(options.signer, signer); queueCalls++; return []; }, clearMintQueueAuthorization() {},
+    fetchMintQueue: async options => { assert.equal(options.signer, signer); await options.signer.signMessage('mint queue'); queueCalls++; return []; }, clearMintQueueAuthorization() {},
+    renderWallet: (element, address) => { element.textContent = address; },
     isAdminWallet: () => true,
   });
   const source = fs.readFileSync(path.join(__dirname, '../js/admin.js'), 'utf8').replace(/^import .*;\n/gm, '');
   vm.runInContext(`${source}\nglobalThis.checkWallet = _connectWallet; globalThis.getSigner = () => _adminSigner;`, context);
+  const mintEvents = new Map();
+  element('admin-mint-section').addEventListener = (name, callback) => mintEvents.set(name, callback);
+  element('admin-connected-role').removeAttribute = () => {};
   events.get('DOMContentLoaded')();
   await events.get('open-admin')();
-  assert.equal(queueCalls, 1);
+  assert.equal(queueCalls, 0);
+  assert.equal(signatures, 0, 'opening Admin never prompts for the private queue signature');
   assert.equal(context.getSigner(), signer);
+  element('admin-mint-section').open = true;
+  mintEvents.get('toggle')();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(queueCalls, 1);
+  assert.equal(signatures, 1, 'expanding NFT Requests requests its authorization');
+  element('admin-mint-section').open = false;
+  mintEvents.get('toggle')();
+  assert.equal(signatures, 1, 'closing NFT Requests does not sign');
   events.get('wallet-disconnected')();
   assert.equal(context.getSigner(), null);
   assert.equal(element('admin-connected-addr').textContent, '');
@@ -233,4 +247,55 @@ test('Admin reuses the header signer, checks roles without reconnecting, and cle
   await context.checkWallet();
   assert.equal(queueCalls, 1);
   assert.equal(context.getSigner(), null);
+});
+
+test('admin section order, identity and worker notice stay scoped to their requested sections', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const admin = html.slice(html.indexOf('id="admin-modal"'), html.indexOf('id="payroll-overlay"'));
+  const ids = ['admin-radio-schedule', 'admin-mint-section', 'admin-live-performance-slot',
+    'admin-devert-campaigns', 'admin-worker-funding', 'admin-role-section'];
+  const positions = ids.map(id => admin.indexOf(`id="${id}"`));
+  assert.ok(positions.every(position => position >= 0));
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
+  assert.doesNotMatch(admin, /Review requests, select items, then confirm the mint in your wallet/);
+  assert.match(admin, /id="admin-connected-role" hidden>DEFAULT_ADMIN_ROLE/);
+  assert.match(admin, /<span>📣 DVert<\/span>/);
+  assert.doesNotMatch(admin, /id="admin-mint-section"[^>]*\bopen\b/);
+  assert.ok(admin.indexOf('id="admin-worker-alert"') > admin.indexOf('id="admin-worker-funding"'));
+  assert.ok(admin.indexOf('id="admin-worker-alert"') < admin.indexOf('id="admin-role-section"'));
+  assert.equal((admin.match(/class="admin-tool-section/g) || []).length, 5);
+  const live = fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8');
+  assert.match(live, /getElementById\('admin-live-performance-slot'\)/);
+});
+
+test('shared wallet label renders four icons with the full address accessible and clears on disconnect', async t => {
+  const previous = global.document;
+  t.after(() => {
+    if (previous === undefined) delete global.document;
+    else global.document = previous;
+  });
+  const node = tag => ({
+    tag, children: [], attrs: {}, style: {},
+    append(...children) { this.children.push(...children); },
+    replaceChildren() { this.children = []; },
+    setAttribute(key, value) { this.attrs[key] = value; },
+    removeAttribute(key) { delete this.attrs[key]; },
+  });
+  global.document = { createElement: node };
+  const { renderWallet } = await import('../js/wallet-label.mjs');
+  const root = node('span');
+  const address = '0x807061DF657A7697c04045dA7d16D941861cAABc';
+  renderWallet(root, address);
+  assert.equal(root.title, address);
+  assert.equal(root.attrs['aria-label'], `Wallet ${address}`);
+  assert.equal(root.children[0].textContent, '0x8070');
+  assert.equal(root.children[2].textContent, 'AABc');
+  const icons = root.children[1];
+  assert.equal(icons.attrs['aria-hidden'], 'true');
+  assert.equal(icons.children.length, 4);
+  assert.ok(icons.children.every(icon => icon.src === 'img/Ens_Eth_Breathe.png' && icon.alt === ''));
+  renderWallet(root, '');
+  assert.equal(root.children.length, 0);
+  assert.equal(root.title, '');
+  assert.equal(root.attrs['aria-label'], undefined);
 });

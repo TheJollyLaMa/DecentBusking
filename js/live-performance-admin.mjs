@@ -228,7 +228,7 @@ async function guarded(fn) {
  finally { busy = false; }
 }
 function mount() {
- const parent = document.getElementById('admin-role-section')?.parentElement;
+ const parent = document.getElementById('admin-live-performance-slot');
  if (!parent || section) return;
  section = document.createElement('details');
  section.className = 'live-performance-admin';

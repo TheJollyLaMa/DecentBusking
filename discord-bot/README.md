@@ -808,7 +808,15 @@ tracks and as a fallback.
 
 A true one-confirmation batch is possible through a separately deployed `BatchProductMinter` helper contract holding `DEFAULT_ADMIN_ROLE`: it can loop over requests and use each `registerToken` return value immediately in `mintProduct`. That privileged helper requires its own Solidity project, review, deployment, and explicit role grant before the dapp should use it.
 
-Admin reuses the wallet connected in the site header; opening the panel checks the on-chain admin role without another connection request. Loading the private queue still requires an owner-wallet message signature, since a public address alone is not proof of ownership. That authorization is reused in memory for four minutes (within the worker's five-minute validity window), then refreshed when needed. It is cleared on account/network changes or disconnect and never stored in browser storage. Upload authorizations and on-chain mint transactions remain separate approvals.
+Admin reuses the wallet connected in the site header; opening the panel checks the on-chain admin role without another connection request or message signature. NFT Requests starts collapsed: expanding it loads the private queue and requests its owner-wallet message signature, since a public address alone is not proof of ownership. Closing that section does not sign. That authorization is reused in memory for four minutes (within the worker's five-minute validity window), then refreshed when needed. It is cleared on account/network changes or disconnect and never stored in browser storage. Upload authorizations and on-chain mint transactions remain separate approvals.
+
+The Admin sections appear in this order: Radio Programming, NFT Requests, Live
+Performance, DVert, Worker funding, Contract Roles. The connected wallet reuses
+the creator-profile four-icon identity label, with `DEFAULT_ADMIN_ROLE` beside it
+below the header divider. Balance warnings and verified Base funding details stay
+inside Worker funding; a low balance does not force the section open and never
+initiates a transfer. The balance, threshold and runway remain live readings, not
+hardcoded display values.
 
 ---
 

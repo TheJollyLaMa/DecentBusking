@@ -18,6 +18,7 @@ import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklySchedul
 import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261024-programming-calendar';
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
+import { renderWallet } from './wallet-label.mjs';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -80,6 +81,9 @@ document.addEventListener('DOMContentLoaded', () => {
   _grantBtn?.addEventListener('click', _grantRole);
   _closeBtn?.addEventListener('click', _closeModal);
   _mintRefreshBtn?.addEventListener('click', () => _loadMintQueue({ reset: true }));
+  _mintSection?.addEventListener('toggle', () => {
+    if (_mintSection.open && _adminOpen && _adminSigner && _adminAddress) void _loadMintQueue();
+  });
   document.getElementById('admin-devert-refresh')?.addEventListener('click', _loadDevertCampaigns);
   _mintMoreBtn?.addEventListener('click', () => _loadMintQueue({ reset: false }));
   document.getElementById('admin-radio-schedule-refresh')?.addEventListener('click', _loadRadioSchedule);
@@ -163,6 +167,7 @@ async function _refreshPaymentLedger() {
 
 function _closeModal() {
   _adminOpen = false;
+  if (_mintSection) _mintSection.open = false;
   _modal?.classList.add('hidden');
   _setStatus('');
 }
@@ -193,7 +198,7 @@ async function _connectWallet() {
       return;
     }
 
-    if (_connectedAddr) _connectedAddr.textContent = address;
+    renderWallet(_connectedAddr, address);
 
     // Check that connected wallet is DEFAULT_ADMIN_ROLE on the contract
     const contract = new ethers.Contract(cfg.contractAddress, ROLE_GRANT_ABI, signer);
@@ -212,12 +217,13 @@ async function _connectWallet() {
 
     _adminSigner = signer;
     _adminAddress = address;
-    _setStatus('✅ Connected wallet has DEFAULT_ADMIN_ROLE.');
+    document.getElementById('admin-connected-role')?.removeAttribute('hidden');
+    _setStatus('');
     _mintSection?.classList.remove('hidden');
     _roleSection?.classList.remove('hidden');
     _radioScheduleSection?.classList.remove('hidden');
     document.getElementById('admin-devert-campaigns')?.classList.remove('hidden');
-    await Promise.all([_loadMintQueue(), _loadRadioSchedule(), _loadDevertCampaigns()]);
+    await Promise.all([_loadRadioSchedule(), _loadDevertCampaigns()]);
   } catch (err) {
     if (checkId === _walletCheckId) _setStatus(`❌ ${err.message || 'Wallet verification failed'}`, true);
   }
@@ -234,7 +240,9 @@ function _resetAdminWallet() {
   _mintQueueTotal = 0;
   _mintQueueLoading = false;
   if (_mintMoreBtn) _mintMoreBtn.classList.add('hidden');
-  if (_connectedAddr) _connectedAddr.textContent = '';
+  renderWallet(_connectedAddr, '');
+  document.getElementById('admin-connected-role')?.setAttribute('hidden', '');
+  if (_mintSection) _mintSection.open = false;
   _mintQueueEl?.replaceChildren();
   _setMintPendingCount(0);
   _mintSection?.classList.add('hidden');

@@ -44,7 +44,8 @@ test('admin monitor refreshes without automatic funding and discards disconnecte
   let admin = false, destroyed = 0;
   const alert = { hidden: true, textContent: '' };
   const address = { textContent: '' }, link = {};
-  const notice = { after() {}, querySelector: selector => selector === 'code' ? address : link };
+  const children = [];
+  const notice = { open: false, append: child => children.push(child), querySelector: selector => selector === 'code' ? address : link };
   const document = {
     hidden: false,
     querySelectorAll: () => [notice],
@@ -79,7 +80,9 @@ test('admin monitor refreshes without automatic funding and discards disconnecte
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(alert.hidden, false);
   assert.match(alert.textContent, /Top up/);
-  assert.equal(notice.open, true);
+  assert.equal(notice.open, false, 'low balance does not force open the funding section');
+  assert.equal(children.length, 1, 'live balance stays inside Worker funding');
+  assert.match(alert.textContent, /Use the verified address in this section/);
   assert.equal(link.href, `https://basescan.org/address/0x${'1'.repeat(40)}`);
   assert.equal(timers[0].ms, 60000);
   listeners.get('wallet-connected')();
