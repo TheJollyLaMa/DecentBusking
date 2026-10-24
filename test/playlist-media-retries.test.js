@@ -54,6 +54,20 @@ test('partial playlist audio is retried, not falsely settled even when more than
   assert.equal(f.refunds, 0);
 });
 
+test('failure evidence follows the latest attempt and distinguishes clean EOF from sufficient audible time', async () => {
+  const f = await fixture();
+  const { runtime, journal } = f.make();
+  const first = await runtime.nextPaid();
+  await runtime.complete(first.record, { playId: 'too-short', audibleMs: 100,
+    finished: true, media: { reason: 'clean_eof', exitCode: 0 } });
+  assert.equal(journal.getState()[0].lastMedia.reason, 'insufficient_audible_time');
+  const second = await runtime.nextPaid();
+  await runtime.retryMedia(second.record, new Error('Preparation timed out'));
+  assert.equal(journal.getState()[0].lastMedia, undefined, 'a preparation failure must not inherit a previous EOF diagnosis');
+  assert.equal(journal.getState()[0].mediaFailures, 2);
+  assert.equal(f.settlements, 0);
+});
+
 test('an exhausted song is not replayed after a refund failure or worker restart', async () => {
   const { createDjukeRuntime, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
   const item = { requestId: 'playlist:4', playlistLaneId: '4', playlistBatchId: '0',
