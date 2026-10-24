@@ -44,7 +44,11 @@ export function advertFundingHistory(state) {
     transactions: [...transactions.values()].sort((a, b) => b.blockNumber - a.blockNumber || a.txHash.localeCompare(b.txHash)) };
 }
 
-export function initDevertHistory() {
+export function initDevertHistory(environment = {}) {
+  const document = environment.document || globalThis.document;
+  const window = environment.window || globalThis.window;
+  const fetch = environment.fetch || globalThis.fetch;
+  const listen = environment.listen || ((target, ...args) => target?.addEventListener(...args));
   const disclosure = document.getElementById('devert-history');
   if (!disclosure) return;
   const list = document.getElementById('devert-history-list');
@@ -116,9 +120,8 @@ export function initDevertHistory() {
       status.textContent = `Funding history unavailable: ${error.message}`;
     } finally { if (check === generation) loading = false; }
   };
-  disclosure.addEventListener('toggle', () => { if (disclosure.open && !loading) refresh(); });
-  document.getElementById('devert-history-refresh').addEventListener('click', refresh);
-  more.addEventListener('click', () => { if (history) { limit += 10; render(); } });
+  listen(disclosure, 'toggle', () => { if (disclosure.open && !loading) refresh(); });
+  listen(document.getElementById('devert-history-refresh'), 'click', refresh);
+  listen(more, 'click', () => { if (history) { limit += 10; render(); } });
+  return { destroy() { generation++; } };
 }
-
-if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', initDevertHistory, { once: true });
