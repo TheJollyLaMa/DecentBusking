@@ -1,4 +1,4 @@
-import { claimState } from './live-bookings.mjs?v=20261022-live-offer-v2';
+import { claimState } from './live-bookings.mjs?v=20261024-live-prototype';
 import { isAdminWallet } from './admin-access.mjs';
 
 export const LIVE_BOOKING_POLL_MS = 5 * 60 * 1000;

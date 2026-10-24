@@ -1,5 +1,5 @@
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { LIVE_ESCROW_ABI, claimState, liveAcknowledgement, liveBookingRows } from './live-bookings.mjs?v=20261022-live-offer-v2';
+import { LIVE_ESCROW_ABI, claimState, liveAcknowledgement, liveBookingRows } from './live-bookings.mjs?v=20261024-live-prototype';
 
 export function liveReceiptEntry(bookings, wallet) {
  const paid = bookings.filter(b => b.mode === 'phase1' && b.wallet.toLowerCase() === wallet.toLowerCase() && BigInt(b.paidUnits || 0) > 0n);
@@ -10,13 +10,18 @@ export function liveReceiptEntry(bookings, wallet) {
      return { title:b.title, hash:tx.hash, blockNumber:tx.blockNumber, units:b.paidUnits, url:`https://basescan.org/tx/${tx.hash}` };
    }) };
 }
-export function renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, ethers, fetchImpl = fetch }) {
+export function renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, ethers, fetchImpl = fetch, now = Date.now() }) {
  const invitation = document.createElement('section');
  invitation.className = 'live-booking-invite';
  const description = document.createElement('p');
  const status = document.createElement('p');
  status.setAttribute('role', 'status');
  status.setAttribute('aria-live', 'polite');
+ if (b.cancelled || b.status !== 'draft' || Date.parse(b.startUtc) <= now) {
+   description.textContent = 'This invitation is closed or its start time has passed. Ask the steward for a new date and agreement; this invitation cannot be accepted or funded.';
+   invitation.append(description, status);
+   return invitation;
+ }
  if (b.stewardApproved) {
    const summary = document.createElement('p');
    const eventTime = value => new Intl.DateTimeFormat('en-US', {
@@ -68,6 +73,7 @@ export function renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, e
    status.textContent = 'Confirm the agreement in your wallet…';
    try {
      if (!checkbox.checked) throw new Error('Review and accept the terms first');
+     if (Date.now() >= Date.parse(b.startUtc)) throw new Error('This invitation has expired; request a new booking');
      if (!window.ethereum) throw new Error('A connected wallet is required');
      const provider = new ethers.BrowserProvider(window.ethereum);
      const signer = await provider.getSigner();

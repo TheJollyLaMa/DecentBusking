@@ -1,11 +1,12 @@
 import {
- LIVE_FUND, LIVE_ROUTER, LIVE_USDC, LIVE_ESCROW_ABI, LIVE_NOTICE, DRAFT_TERMS,
+ LIVE_FUND, LIVE_ROUTER, LIVE_USDC, LIVE_ESCROW_ABI, LIVE_NOTICE, LIVE_APPROVED_TERMS_V2,
  LIVE_PERFORMANCE_AIRTIME_MINUTES, LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES, LIVE_PERFORMANCE_FEE_UNITS,
  liveAuthorization, liveAcknowledgement, liveBookingRows, livePerformancePayoutBps, bookingGroup, escapeLive, workReference,
-} from './live-bookings.mjs?v=20261022-live-offer-v2';
-import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261022-action-badges';
+} from './live-bookings.mjs?v=20261024-live-prototype';
+import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261024-live-prototype';
+import { utcToNewYorkInput } from './radio-calendar.mjs';
 import { isAdminWallet } from './admin-access.mjs';
-import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261023-neon-handoffs';
+import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261024-live-prototype';
 
 const routerAbi = [
  'function funds(bytes32) view returns (string metadataUri,bool active,bool exists)',
@@ -16,6 +17,17 @@ const routerAbi = [
 ];
 const erc20Abi = ['function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)'];
 const base = () => String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+export function nextFridayLiveStart(now = Date.now()) {
+ const localDate = utcToNewYorkInput(new Date(now).toISOString()).slice(0, 10);
+ const date = new Date(`${localDate}T12:00:00Z`);
+ date.setUTCDate(date.getUTCDate() + (5 - date.getUTCDay() + 7) % 7);
+ let value = `${date.toISOString().slice(0, 10)}T21:00`;
+ if (Date.parse(newYorkInputToUtc(value)) <= now) {
+   date.setUTCDate(date.getUTCDate() + 7);
+   value = `${date.toISOString().slice(0, 10)}T21:00`;
+ }
+ return value;
+}
 const field = (name, label, value = '', type = 'text') => `<label>${label} <input name="${name}" type="${type}" value="${escapeLive(value)}" required></label>`;
 let state;
 let busy = false;
@@ -73,7 +85,7 @@ function render() {
  section.querySelector('[data-live-capability]').textContent = state.escrowAddress
   ? '🔒 Per-booking escrow is ready on Base. Check the exact offer before sending any funds.'
   : '⚠️ Per-booking escrow is not configured. The community-fund option is earmarked, not protected escrow.';
- const accepted = state.bookings.filter(b => b.acknowledged && b.status === 'draft' && !b.cancelled);
+ const accepted = state.bookings.filter(b => b.acknowledged && b.status === 'draft' && !b.cancelled && Date.parse(b.startUtc) > Date.now());
  const notice = section.querySelector('[data-live-acceptance-notice]');
  notice.hidden = accepted.length === 0;
  notice.textContent = accepted.length
@@ -122,6 +134,9 @@ async function review(b, bps, cancellation = false) {
  await command({ action:'decision', id:b.id, payoutBps:bps, liveMusicMinutes, reason, reportUri, reportHash, remainderDisposition, cancellation });
 }
 async function action(name, b) {
+ if (['agreement', 'acknowledge', 'fund'].includes(name) && Date.parse(b.startUtc) <= Date.now()) {
+   throw new Error('This invitation has expired; prepare a new booking and obtain fresh performer acceptance. Do not fund the old date.');
+ }
  if (name === 'agreement') { prompt('Send the exact text to the performer for personal_sign; never request their private key.', liveAcknowledgement(b)); return; }
  if (name === 'review') await review(b, null);
  else if (name === 'acknowledge') {
@@ -147,12 +162,14 @@ async function action(name, b) {
    const w = await wallet();
    const target = b.mode === 'phase1' ? state.escrowAddress : LIVE_ROUTER;
    if (!target) throw new Error('Escrow not deployed');
+   if (Date.parse(b.startUtc) <= Date.now()) throw new Error('The invitation expired while connecting the wallet; no approval or funding will be requested');
    const token = new w.ethers.Contract(LIVE_USDC, erc20Abi, w.signer);
    if (await token.allowance(w.address, target) < BigInt(b.amountUnits)) {
      const tx = await token.approve(target, b.amountUnits);
      await tx.wait(2);
    }
    await w.check();
+   if (Date.parse(b.startUtc) <= Date.now()) throw new Error('The show has started; do not fund this expired invitation');
    await transaction(b, 'funding', w => b.mode === 'phase0' ? new w.ethers.Contract(LIVE_ROUTER, routerAbi, w.signer).fundToken(w.ethers.id(LIVE_FUND), LIVE_USDC, b.amountUnits)
      : new w.ethers.Contract(state.escrowAddress, LIVE_ESCROW_ABI, w.signer).createBooking(w.ethers.id(b.id), b.wallet, b.amountUnits, Date.parse(b.startUtc)/1000, Date.parse(b.endUtc)/1000, Date.parse(b.claimDeadline)/1000, b.termsHash, b.termsUri, b.reviewWindow, b.cancellationWindow, b.killFeeBps));
  } else if (name === 'reconcile') {
@@ -220,10 +237,10 @@ function mount() {
  <p>${LIVE_NOTICE}</p><p data-live-capability></p>
  <ol class="live-performance-flow"><li>📝 Review the offer and pinned terms.</li><li>📨 Add the date to the community calendar; only the invited wallet can accept.</li><li>✅ Acceptance appears here. Funding is always a separate owner action.</li><li>🎙️ After the show, record live minutes and calculate the payout.</li></ol>
  <aside class="live-performance-offer"><strong>💵 Current offer: $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6} USDC</strong><span>🗓 ${LIVE_PERFORMANCE_AIRTIME_MINUTES}-minute calendar event</span><span>🎵 ${LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES} live-music minutes earns the full fee; shorter sets are prorated, capped at $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6}.</span><span>🚫 No live performance earns $0.</span></aside>
- <p class="live-performance-draft-note">${DRAFT_TERMS}</p>
+ <p class="live-performance-draft-note">The steward-approved v2 agreement is pinned. Each new performer and date still requires explicit approval and fresh performer acceptance before funding.</p>
  <details class="live-create-details" open><summary>➕ Prepare a performance invitation</summary><form data-live-create>
  ${field('performer','Performer wallet or ENS')}${field('displayName','Name shown on the calendar')}${field('discordHandle','Discord name (if agreed public)')}${field('title','Show title','Friday Live Performance')}
- ${field('startLocal','Start time (America/New_York)','2026-10-23T21:00','datetime-local')}
+ ${field('startLocal','Start time (America/New_York)',nextFridayLiveStart(),'datetime-local')}
  <p class="live-performance-form-note">The event lasts 20 minutes; its end time is calculated from the start. Current fee is fixed at $20 USDC on Base.</p>
  <input name="fee" type="hidden" value="${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6}"><input name="airtimeMinutes" type="hidden" value="${LIVE_PERFORMANCE_AIRTIME_MINUTES}">
  <input name="fullPayoutLiveMinutes" type="hidden" value="${LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES}">
@@ -232,8 +249,8 @@ function mount() {
  <label>Late-cancellation notice (hours)<input name="cancellationWindowHours" type="number" value="8" min="0" max="8760" step="1" required></label>
  <label>Late-cancellation fee (%)<input name="killFeePercent" type="number" value="50" min="0" max="100" step="1" required></label>
  <p class="live-performance-form-note">The performer’s claim deadline is set automatically to three days after the review window closes.</p>
- <details class="live-advanced-terms"><summary>📎 Pinned agreement details (advanced)</summary><p>Use the exact v2 agreement link and fingerprint after it is pinned. A CID alone is accepted and saved as an ipfs:// URI. Do not reuse v1: it describes a 60-minute show.</p>
- ${field('termsVersion','Agreement version','LIVE PERFORMANCE v2 — draft')}${field('termsUri','Pinned agreement IPFS link')}${field('termsHash','Agreement verification fingerprint')}</details>
+ <details class="live-advanced-terms"><summary>📎 Pinned agreement details (advanced)</summary><p>The verified v2 agreement is prefilled. Check the exact text before approving this offer. Do not reuse v1: it describes a 60-minute show.</p>
+ ${field('termsVersion','Agreement version',LIVE_APPROVED_TERMS_V2.version)}${field('termsUri','Pinned agreement IPFS link',LIVE_APPROVED_TERMS_V2.uri)}${field('termsHash','Agreement verification fingerprint',LIVE_APPROVED_TERMS_V2.hash)}</details>
  <label class="live-performance-approval"><input name="stewardApproved" type="checkbox"> I approve these exact pinned terms for this performer and date.</label>
  <button type="submit">📝 Save invitation draft (no payment)</button></form></details>
  <button type="button" data-live-refresh>🔄 Refresh bookings</button><p class="live-performance-acceptance" role="alert" aria-live="assertive" data-live-acceptance-notice hidden></p><p role="status" data-live-status></p><div data-live-list></div></div>`;
@@ -247,6 +264,7 @@ function mount() {
    const f = Object.fromEntries(new FormData(section.querySelector('form')));
    if (!state) state = await api();
    const startUtc = newYorkInputToUtc(f.startLocal);
+   if (Date.parse(startUtc) <= Date.now()) throw new Error('Choose a future New York start time; expired invitations must be replaced, not reused');
    const eventId = `friday-live-performance:${f.startLocal.slice(0,10)}`;
    const reviewWindow = Math.round(Number(f.reviewWindowHours) * 3600);
    const cancellationWindow = Math.round(Number(f.cancellationWindowHours) * 3600);

@@ -232,6 +232,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
         if (!b) throw new Error('Unknown booking');
         if (action === 'acknowledge') {
           if (b.status !== 'draft') throw new Error('Agreement is immutable after funding starts');
+          if (b.cancelled || now() >= Date.parse(b.startUtc)) throw new Error('This invitation has expired or was cancelled; prepare a new booking and agreement');
           const signature = required(command.performerSignature, 'Performer acknowledgement signature', 1000);
           if (lower(verifyMessage(liveAcknowledgement(b), signature)) !== b.wallet) throw new Error('Performer acknowledgement mismatch');
           if (command.stewardApproved !== true) throw new Error('Steward approval of precise terms required');
@@ -284,6 +285,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
       const b = next.bookings.find(item => item.id === bookingId);
       if (!b) throw new Error('Unknown booking');
       if (b.status !== 'draft' || b.cancelled) throw new Error('This booking invitation is no longer open');
+      if (now() >= Date.parse(b.startUtc)) throw new Error('This invitation has expired; ask the steward for a new booking and agreement');
       if (lower(address) !== b.wallet) throw new Error('Connect the invited performer wallet');
       if (b.acknowledgements) {
         if (lower(verifyMessage(liveAcknowledgement(b), signature)) === b.wallet) return publicState();

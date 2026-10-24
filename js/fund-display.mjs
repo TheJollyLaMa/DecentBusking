@@ -1,4 +1,4 @@
-import { liveBookingRows } from './live-bookings.mjs?v=20261022-live-offer-v2';
+import { liveBookingRows } from './live-bookings.mjs?v=20261024-live-prototype';
 import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261022-playlist-lane';
 import { labelKnownAddress, normalizeKnownAddress } from './known-addresses.mjs?v=20261019-fund-wallet-labels';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';

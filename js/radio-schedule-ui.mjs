@@ -1,7 +1,7 @@
 import { isAdminWallet } from './admin-access.mjs';
 import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261022-playlist-show';
 import { utcToNewYorkInput, newYorkInputToUtc, radioCalendarOccurrences, buildRadioCalendar, googleRadioCalendarUrl } from './radio-calendar.mjs';
-import { renderPerformerBookingInvite } from './live-performance-profile.mjs?v=20261022-action-badges';
+import { renderPerformerBookingInvite } from './live-performance-profile.mjs?v=20261024-live-prototype';
 export { utcToNewYorkInput, newYorkInputToUtc };
 const TIME_ZONE = 'America/New_York';
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
