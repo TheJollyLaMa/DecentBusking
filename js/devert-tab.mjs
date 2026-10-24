@@ -577,7 +577,8 @@ export function initDevertTab(environment = {}) {
       if (!/^ipfs:\/\/[^/\s]+$/.test(ipfsUri)) throw new Error('Ad upload did not return a file CID');
       document.getElementById('devert-audio-uri').value = ipfsUri;
       adMediaStatus.textContent = 'Confirm submission in your wallet…';
-      await submitMediaForApproval({ serviceUrl: config.ipfsUploadServiceUrl, fetchImpl: fetch,
+      const submitMedia = environment.submitMedia || submitMediaForApproval;
+      await submitMedia({ serviceUrl: config.ipfsUploadServiceUrl, fetchImpl: fetch,
         signer, address: wallet.address, origin: window.location.origin,
         media: { title, artist: adMediaArtist.value.trim() || wallet.address, ipfsCid: ipfsUri,
           mediaType, filename: file.name, recipient: wallet.address, isDevertAd: true } });
