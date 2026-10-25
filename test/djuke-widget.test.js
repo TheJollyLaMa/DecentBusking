@@ -136,11 +136,19 @@ test('checkout cancellation prevents a wallet mutation after async simulation', 
   assert.equal(transactions, 0);
 });
 
-test('mounted single, named save, Personal Play recovery and Play Live use real checkout boundaries', async () => {
+test('mounted single, named save, Personal Play recovery and Play Live use real checkout boundaries', async t => {
   const { mount } = await import('../js/djuke-widget.mjs');
   const { BASE_USDC_ADDRESS } = await import('../js/djuke-payment.mjs');
   const { element } = environment();
   const calls = [];
+  const previousConfirm = globalThis.confirm;
+  let acceptScheduling = false;
+  const warnings = [];
+  globalThis.confirm = message => { warnings.push(message); return acceptScheduling; };
+  t.after(() => {
+    if (previousConfirm === undefined) delete globalThis.confirm;
+    else globalThis.confirm = previousConfirm;
+  });
   const hash = `0x${'b'.repeat(64)}`;
   const transaction = name => {
     const send = async (...args) => { calls.push(name); return { hash, wait: async () => ({ status: 1 }) }; };
@@ -183,6 +191,7 @@ test('mounted single, named save, Personal Play recovery and Play Live use real 
       provider: { getSigner: async () => currentSigner } }) }),
     getIpfs: () => ({}), on: () => () => {},
   } });
+  t.after(() => controller.destroy());
   await tick();
   const section = element.shadowRoot.children[1];
   const $ = key => section.querySelector(`[data-${key}]`);
@@ -207,7 +216,14 @@ test('mounted single, named save, Personal Play recovery and Play Live use real 
   const paidBeforeResume = calls.length;
   $('recovery').children[0].children[0].dispatchEvent(new Event('click')); await tick();
   assert.equal(calls.length, paidBeforeResume);
+  assert.equal(warnings.length, 0, 'single, save and Personal Play do not request radio scheduling consent');
   $('live').dispatchEvent(new Event('click')); await tick();
+  assert.equal(calls.length, paidBeforeResume, 'declining scheduling terms must not purchase');
+  assert.match($('payment').textContent, /checkout cancelled/);
+  assert.match(warnings[0], /no refund solely for a protected-show delay or interruption/);
+  acceptScheduling = true;
+  $('live').dispatchEvent(new Event('click')); await tick();
+  assert.equal(warnings.length, 2);
   assert.equal(calls.at(-1), 'live');
   assert.match($('payment').textContent, /Profile → Playlists/);
   controller.destroy();

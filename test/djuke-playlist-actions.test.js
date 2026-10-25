@@ -36,6 +36,7 @@ test('radio checkout accepts zero worker ETH only for configured on-chain v0.5 b
   vm.runInContext(source.slice(source.indexOf('export async function checkoutRadioPlaylist'),
     source.indexOf('export async function checkoutPrivatePlaylist')).replace('export ', ''), context);
   const purchase = () => context.checkoutRadioPlaylist({ ethers: context.ethers, config, playlist: { songIds: [`0x${'a'.repeat(64)}`] },
+    confirmScheduling: () => true,
     signer: { provider: { getBalance: async () => 100000n }, getAddress: async () => listener },
     onStep: step => steps.push(step), fetchImpl: async () => ({ ok: true, json: async () => ({
       contractAddress: address, listener, maxTotal: '3250000', fulfillmentCostWei: cost, contributionWei: contribution,
@@ -101,6 +102,7 @@ test('unsaved draft buys one personal batch then plays in order; Live and Save s
   const config = { djukePlaylistBatchVersion: '0.4', djukePlaylistBatchAddress: address,
     djukePlaylistBatchEnabled: true, djukePlaylistRadioReady: true, ipfsUploadServiceUrl: 'https://worker.example' };
   const context = vm.createContext({ ...helpers, document, AbortSignal,
+    RADIO_PLAYLIST_SCHEDULING_WARNING: (await import('../js/djuke-checkout.mjs')).RADIO_PLAYLIST_SCHEDULING_WARNING,
     window: { DecentConfig: config, _wallet: { address, signer: { getAddress: async () => address } } },
     createPersonalPlayRecovery: () => ({
       check() { if (storageFails) throw new Error('Recovery storage unavailable'); },
@@ -198,4 +200,69 @@ test('unsaved draft buys one personal batch then plays in order; Live and Save s
   await click('djuke-named-playlist-private');
   assert.match(element('djuke-playlist-state').textContent, /Recovery storage unavailable/);
   assert.equal(calls.filter(call => call.type === 'personal').length, 1, 'storage must work before opening checkout');
+});
+
+test('Play Live scheduling acknowledgment blocks checkout before any wallet, quote, approval or purchase on cancel', async () => {
+  const { checkoutRadioPlaylist } = await import('../js/djuke-checkout.mjs');
+  const config = { djukePlaylistBatchAddress: `0x${'1'.repeat(40)}`, djukePlaylistBatchVersion: '0.5',
+    djukePlaylistBatchEnabled: true, djukePlaylistRadioReady: true };
+  const playlist = { songIds: [`0x${'a'.repeat(64)}`] };
+  const original = structuredClone(playlist);
+  for (const answer of [false, undefined, null, 'true']) {
+    let confirmations = 0;
+    const forbidden = () => { assert.fail('Cancelled checkout must not touch wallets, contracts or quotes'); };
+    await assert.rejects(checkoutRadioPlaylist({
+      config, playlist, signer: { get provider() { return forbidden(); }, getAddress: forbidden },
+      confirmScheduling: () => { confirmations++; return answer; },
+      ensureChain: forbidden, fetchImpl: forbidden, ethers: { Contract: forbidden },
+    }), /checkout cancelled.*No approval or purchase was requested/);
+    assert.equal(confirmations, 1);
+    assert.deepEqual(playlist, original);
+  }
+});
+
+test('Play Live requires fresh acknowledgment on every checkout and respects aborts during acknowledgment', async () => {
+  const { checkoutRadioPlaylist } = await import('../js/djuke-checkout.mjs');
+  const config = { djukePlaylistBatchAddress: `0x${'1'.repeat(40)}`, djukePlaylistBatchVersion: '0.5',
+    djukePlaylistBatchEnabled: true, djukePlaylistRadioReady: true };
+  const order = [];
+  for (let i = 0; i < 2; i++) {
+    await assert.rejects(checkoutRadioPlaylist({
+      config, playlist: { songIds: [`0x${'a'.repeat(64)}`] }, signer: { provider: {} },
+      confirmScheduling: async () => { order.push('acknowledged'); return true; },
+      ensureChain: async () => { order.push('chain'); throw new Error('Stop before real wallet activity'); },
+    }), /Stop before real wallet/);
+  }
+  assert.deepEqual(order, ['acknowledged', 'chain', 'acknowledged', 'chain']);
+  const controller = new AbortController();
+  await assert.rejects(checkoutRadioPlaylist({
+    config, playlist: { songIds: [`0x${'a'.repeat(64)}`] }, signer: {},
+    signal: controller.signal,
+    confirmScheduling: () => { controller.abort(); return true; },
+    ensureChain: () => assert.fail('Aborted checkout must not request wallet actions'),
+  }), { name: 'AbortError' });
+});
+
+test('shared scheduling terms distinguish protected-show delays from delivery failures on every purchase surface', async () => {
+  const { RADIO_PLAYLIST_SCHEDULING_WARNING: warning } = await import('../js/djuke-checkout.mjs');
+  assert.match(warning, /Protected radio hours and scheduled shows take priority/);
+  assert.match(warning, /remaining songs return to the queue when the protected block ends/);
+  assert.match(warning, /no refund solely for a protected-show delay or interruption/);
+  assert.match(warning, /do not pay again/);
+  assert.match(warning, /Separate refunds for failed delivery still apply/);
+  assert.match(warning, /Exact start and finish times are not guaranteed/);
+  const root = path.join(__dirname, '..');
+  const checkout = fs.readFileSync(path.join(root, 'js/djuke-checkout.mjs'), 'utf8');
+  assert.match(checkout, /globalThis\.confirm\(`\$\{RADIO_PLAYLIST_SCHEDULING_WARNING\}/);
+  const privateCheckout = checkout.slice(checkout.indexOf('export async function checkoutPrivatePlaylist'));
+  assert.doesNotMatch(privateCheckout, /confirmScheduling|RADIO_PLAYLIST_SCHEDULING_WARNING/);
+  for (const name of ['djuke-playlists-ui.mjs', 'djuke-widget.mjs']) {
+    const source = fs.readFileSync(path.join(root, 'js', name), 'utf8');
+    assert.match(source, /checkoutRadioPlaylist/);
+    assert.match(source, /textContent = RADIO_PLAYLIST_SCHEDULING_WARNING/);
+  }
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(html, /id="djuke-playlist-scheduling-notice"/);
+  assert.match(html, /Protected-show warning:/);
+  assert.match(html, /no refund solely for this delay or interruption/);
 });

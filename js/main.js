@@ -4,7 +4,7 @@
 import { initWallet } from './wallet.js';
 import { initStage } from './stage.js?v=20261025-seamless-handoff';
 import { initSpace } from './space.js?v=20261025-seamless-handoff';
-import { initTutorial } from './tutorial.js?v=20261025-playlist-tour';
+import { initTutorial } from './tutorial.js?v=20261025-protected-warning';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.
 

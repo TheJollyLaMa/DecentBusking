@@ -4,12 +4,17 @@ import { formatUsdcUnits } from './usdc-format.mjs';
 import { BASE_USDC_ADDRESS } from './djuke-payment.mjs';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 
+export const RADIO_PLAYLIST_SCHEDULING_WARNING = 'Play Live is queued radio playback, not an uninterrupted time slot. Protected radio hours and scheduled shows take priority: your playlist may wait or be set aside, then its remaining songs return to the queue when the protected block ends. Main paid requests may also cut in between songs. There is no refund solely for a protected-show delay or interruption; you do not pay again for the remaining songs. Separate refunds for failed delivery still apply. Exact start and finish times are not guaranteed.';
+
 export async function checkoutRadioPlaylist({ playlist, signer, config, onStep = () => {}, fetchImpl = fetch,
-  ethers: library = globalThis.ethers, signal, ensureChain = ensureBaseNetwork }) {
+  ethers: library = globalThis.ethers, signal, ensureChain = ensureBaseNetwork,
+  confirmScheduling = () => globalThis.confirm(`${RADIO_PLAYLIST_SCHEDULING_WARNING}\n\nSelect OK to acknowledge and continue to checkout, or Cancel to keep your playlist without purchasing.`) }) {
   signal?.throwIfAborted();
   if (!supportsDJukePlaylistRadio(config)) throw new Error('Radio playlist checkout is unavailable');
   const songIds = playlist.songIds;
   quoteNamedPlaylist(songIds.length, 'radio');
+  if (await confirmScheduling() !== true) throw new Error('Play Live checkout cancelled. No approval or purchase was requested; your playlist is unchanged.');
+  signal?.throwIfAborted();
   await ensureChain(signer.provider);
   const listener = await signer.getAddress();
   const quoteUrl = new URL(`${String(config.ipfsUploadServiceUrl || '').replace(/\/$/, '')}/api/djuke/playlist-gas-quote`);

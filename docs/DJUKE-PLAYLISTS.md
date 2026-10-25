@@ -406,6 +406,31 @@ no radio platform fee. Play Live preserves the tier prices and main paid-request
 priority below; it never interrupts a song already playing. Both purchases may
 need a separate USDC approval, and wallet gas is additional.
 
+### Protected shows and the Play Live acknowledgment
+
+Play Live buys queued delivery, **not an uninterrupted or guaranteed-time radio
+slot**. Protected radio hours and scheduled shows take priority. A mix can wait or
+be set aside for a protected block; its remaining songs return to the queue after
+the block ends without a second payment. Main paid requests can still cut in
+between songs. A scheduling delay or interruption alone does **not** trigger a
+refund. This does not remove the separate failed-delivery refund policy below.
+
+Every Play Live playlist checkout requires an explicit acknowledgment of these
+terms before network switching, gas quoting, USDC approval, or purchase. Cancel
+stops checkout and leaves the draft unchanged. The notice applies to unsaved
+drafts, saved/profile playlists, and the standalone DJuke widget through the
+shared `checkoutRadioPlaylist` helper in `js/djuke-checkout.mjs`. It is required
+on each purchase, not remembered as consent for later purchases. It is shown
+regardless of predicted overlap because queue depth, track lengths, and schedules
+can change; no exact start, finish, or uninterrupted duration is promised.
+Personal Play and saving a mix do not require this radio-only acknowledgment.
+
+The DJuke panel, information dialog, linked bunny tutorial, and standalone widget
+also display the scheduling terms. Reuse: adapt the existing shared checkout
+from `bac5caa` rather than duplicate warnings in individual payment handlers.
+The existing radio handoff releases paid reservations rather than treating a
+protected-show interruption as a failed delivery.
+
 ### Personal Play recovery
 
 New Personal Play purchases retain a wallet-scoped session in this browser's

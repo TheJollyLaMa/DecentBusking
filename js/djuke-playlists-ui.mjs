@@ -5,7 +5,7 @@ import { createNamedPlaylistClient, DJUKE_PLAYLIST_MAX_PER_PROFILE, getPlaylistB
   matchesPlaylistRevision, quoteNamedPlaylist, supportsDJukePlaylistBatch, supportsDJukePlaylistRadio } from './djuke-playlists.mjs?v=20261024-standalone-djuke';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { checkoutRadioPlaylist, checkoutPrivatePlaylist } from './djuke-checkout.mjs';
+import { checkoutRadioPlaylist, checkoutPrivatePlaylist, RADIO_PLAYLIST_SCHEDULING_WARNING } from './djuke-checkout.mjs?v=20261025-protected-warning';
 
 const PLAYLIST_BATCH_ABI = getPlaylistBatchAbi();
 
@@ -54,6 +54,8 @@ export function initDjukePlaylists() {
   const addSelected = document.getElementById('djuke-add-selected-playlist');
   const songSelect = document.getElementById('djuke-song');
   const state = document.getElementById('djuke-playlist-state');
+  const schedulingNotice = document.getElementById('djuke-playlist-scheduling-notice');
+  if (schedulingNotice) schedulingNotice.textContent = RADIO_PLAYLIST_SCHEDULING_WARNING;
   const profileDialog = document.getElementById('creator-profile');
   const profileSection = profileDialog?.querySelector('[data-playlists-section]');
   const profileStatus = profileSection?.querySelector('[data-playlists-status]');
@@ -182,7 +184,7 @@ export function initDjukePlaylists() {
         if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
         const purchase = await purchaseRadioNamedPlaylist({ playlist, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { profileStatus.textContent = text; } });
         event('djuke-radio-playlist-purchased', { ...purchase, name: playlist.name, songIds: playlist.songIds });
-        profileStatus.textContent = 'Purchase confirmed. Your profile has your Play Live receipt for delivery or refund.';
+        profileStatus.textContent = 'Purchase confirmed and queued. Protected shows may defer playback without a refund for that delay. Follow delivery and any failure refund in your Play Live receipt.';
       });
     }, !radioCapability() || busy, 'Radio checkout requires the compatible batch deployment and signed gas quote service');
     radioAction.hidden = !radioCapability();
@@ -383,7 +385,7 @@ export function initDjukePlaylists() {
       if (!window._wallet?.signer) throw new Error('Connect your wallet in the page header');
       const purchase = await purchaseRadioNamedPlaylist({ playlist: selected, signer: window._wallet.signer, config: { ...config(), djukePlaylistRadioReady: config().djukePlaylistRadioReady === true && workerRadioReady }, onStep: text => { state.textContent = text; } });
       event('djuke-radio-playlist-purchased', { ...purchase, name: nameInput.value.trim() || 'Your playlist', songIds: selected.songIds });
-      state.textContent = 'Purchase confirmed. Follow your Play Live receipt in your profile for delivery or refund; main paid requests can cut in.';
+      state.textContent = 'Purchase confirmed and queued. Protected shows may defer playback without a refund for that delay; remaining songs resume afterward. Follow delivery and any failure refund in Profile → Playlists.';
     });
   });
   const initialItems = draft.list();

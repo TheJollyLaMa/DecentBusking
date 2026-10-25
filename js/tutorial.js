@@ -103,11 +103,11 @@ const PLAYLIST_HOPS = [
   { title: 'Or keep the jam personal', target: '#djuke-named-playlist-private',
     body: 'Personal Play buys the ordered songs at creator prices in one batch, just for you. Song payments split 90% to musicians and collaborators, 8% to pinning, and 2% to development. No radio platform fee; Base gas is extra. Resume an interrupted purchase in Profile → Playlists without paying again.' },
   { title: 'Play Live for Earth Village', target: '#djuke-named-playlist-radio',
-    body: 'Play Live queues your mix for everyone. Songs 1–8 are $0.25 each, 9–16 $0.50, and 17–24 $1. Add $3 per started group of 12 songs ($3 for 1–12; $6 for 13–24). Review the quote and Base gas before approving or paying. This tour never presses the purchase button.' },
+    body: 'Play Live queues your mix for everyone. Songs 1–8 are $0.25 each, 9–16 $0.50, and 17–24 $1. Add $3 per started group of 12 songs ($3 for 1–12; $6 for 13–24). Protected shows may set your mix aside; remaining songs resume afterward without another payment. No refund solely for that delay or interruption. Checkout requires acknowledgment before approval or purchase. Review the quote and Base gas; the tour never buys.' },
   { title: 'Your fee fuels the radio funds', target: '#artist-filter-bar', illustration: 'funds',
     body: 'Song payments keep their 90 / 8 / 2 split. The separate radio fee goes 25% each to Playback, Top 10, Pinners, and Development. It is reserved until every song is delivered. Undelivered songs and the unreleased fee are refundable; a purchase confirmation is not proof of delivery.' },
   { title: 'Your mix takes the radio stage', target: '#now-playing-label', illustration: 'radio',
-    body: 'After the current song and protected shows, your mix joins public radio. Main paid requests can cut in between songs. The real radio shows the playlist and songs remaining when it airs. This illustration changes no audio or queue. Follow your delivery receipt in Profile → Playlists.' },
+    body: 'After the current song and protected shows, your mix joins public radio. A protected block can set it aside until the show ends; remaining songs return to the queue without another payment or a refund for that scheduling delay. Main paid requests can cut in between songs. This illustration changes no audio or queue. Follow delivery and any separate failure refund in Profile → Playlists.' },
 ];
 
 let _initialized = false;

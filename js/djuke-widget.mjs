@@ -1,5 +1,5 @@
 import { BASE_USDC_ADDRESS, DJUKE_BROWSER_ABI, purchaseDjukeSong, replaceDjukeSong } from './djuke-payment.mjs';
-import { checkoutRadioPlaylist, checkoutPrivatePlaylist } from './djuke-checkout.mjs';
+import { checkoutRadioPlaylist, checkoutPrivatePlaylist, RADIO_PLAYLIST_SCHEDULING_WARNING } from './djuke-checkout.mjs?v=20261025-protected-warning';
 import { createNamedPlaylistClient, quoteNamedPlaylist } from './djuke-playlists.mjs';
 import { createPersonalPlayRecovery, verifyPersonalPlaySession } from './personal-play-recovery.mjs';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
@@ -64,6 +64,7 @@ export function mount(element, options = {}) {
     <ol data-draft></ol><p data-total></p>
     <button data-save type="button">Save to Profile</button>
     <button data-private type="button">Personal Play</button><button data-live type="button">Play Live</button>
+    <p data-scheduling-notice class="notice"></p>
     <p data-payment role="status" aria-live="polite"></p>
     <details data-profile><summary>Profile → Playlists &amp; receipts</summary>
       <p>Saved mixes and recovery belong to your connected profile, not the public queue.</p>
@@ -84,6 +85,7 @@ export function mount(element, options = {}) {
       A queued or confirming purchase is not a delivered song. Keep your Base transaction receipts.</p>
     </details>`;
   section.querySelector('h2').textContent = options.title || 'DJuke.decentagency.eth';
+  section.querySelector('[data-scheduling-notice]').textContent = RADIO_PLAYLIST_SCHEDULING_WARNING;
   root.append(style, section);
   const $ = key => section.querySelector(`[data-${key}]`);
   const cleanups = [];
@@ -382,7 +384,7 @@ export function mount(element, options = {}) {
     const result = await checkoutRadioPlaylist({ playlist: { songIds: draft.map(track => track.songId) },
       signer: current, config, ethers: library, onStep: report, signal: lifetime.signal, ensureChain: requireBase,
       fetchImpl: (url, init) => request(url.pathname + url.search, init).then(body => ({ ok: true, json: async () => body })) });
-    report(`Purchase ${result.txHash} confirmed; delivery/refund receipts are in Profile → Playlists.`); await refresh();
+    report(`Purchase ${result.txHash} confirmed and queued. Protected shows may defer playback without a refund for that delay; remaining songs resume afterward. Follow delivery and any failure refund in Profile → Playlists.`); await refresh();
   }));
   on($('library-refresh'), 'click', () => run(profile));
   on($('profile'), 'toggle', () => { if ($('profile').open) run(profile); });
