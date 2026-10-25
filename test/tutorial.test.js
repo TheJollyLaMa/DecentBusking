@@ -555,6 +555,68 @@ test('playlist deep link opens the guided card for incomplete returning visitors
   assert.equal(timerQueue.filter(Boolean).length, 0);
 });
 
+test('split deep link opens independently of completed general tour and does not touch wallet or payment controls', () => {
+  const fixture = createTutorialContext();
+  fixture.storage.setItem('decentbusking:tutorial:completed:v1', '1');
+  vm.runInContext("window.location = { search: '?tutorial=splits' }; initTutorial();", fixture.context);
+  assert.equal(fixture.timerQueue.filter(Boolean).length, 1);
+  assert.equal(vm.runInContext('shouldAutoLaunchTutorial()', fixture.context), true);
+  fixture.timerQueue[0]();
+  assert.equal(vm.runInContext('_splitOnly && !_overlay.hidden', fixture.context), true);
+  assert.equal(vm.runInContext('_splitHop', fixture.context), 0);
+  assert.match(vm.runInContext('_bodyEl.textContent', fixture.context), /read-only.*without a wallet/);
+  for (let index = 0; index < 7; index++) {
+    assert.equal(vm.runInContext('_splitHop', fixture.context), index);
+    assert.match(vm.runInContext('_illustration.children[0].textContent', fixture.context), /Illustration only/);
+    assert.equal(vm.runInContext('_backButton.disabled', fixture.context), index === 0);
+    vm.runInContext('nextTutorialStep();', fixture.context);
+  }
+  assert.equal(vm.runInContext('_overlay.hidden', fixture.context), true);
+  assert.ok(fixture.clicks.every(id => id === 'menu-coin'), 'only the navigation menu is opened');
+  assert.equal(fixture.storage.getItem('decentbusking:tutorial:progress:v1'), null);
+  assert.equal(fixture.storage.getItem('decentbusking:tutorial:playlist-progress:v1'), null);
+});
+
+test('split tutorial resumes furthest card, hides all bunny controls on leave, and replays after completion', () => {
+  const first = createTutorialContext();
+  vm.runInContext("window.location = { search: '?tutorial=splits' }; initTutorial();", first.context);
+  first.timerQueue[0]();
+  vm.runInContext('nextTutorialStep(); nextTutorialStep(); previousTutorialStep(); skipTutorial(); _autoLaunch();', first.context);
+  assert.equal(first.document.getElementById('rabbit-tour-launch').hidden, true);
+  assert.equal(vm.runInContext('_overlay.hidden', first.context), true);
+  assert.equal(vm.runInContext('shouldAutoLaunchTutorial()', first.context), false);
+  assert.deepEqual(JSON.parse(first.storage.getItem('decentbusking:tutorial:split-progress:v1')), { hop: 2, completed: false });
+  const refreshed = createTutorialContext(first.storage);
+  vm.runInContext("window.location = { search: '?tutorial=splits' }; initTutorial();", refreshed.context);
+  refreshed.timerQueue[0]();
+  assert.equal(vm.runInContext('_splitHop', refreshed.context), 2);
+  vm.runInContext('while (_splitHop < SPLIT_HOPS.length - 1) nextTutorialStep(); skipTutorial();', refreshed.context);
+  const finished = createTutorialContext(first.storage);
+  vm.runInContext("window.location = { search: '?tutorial=splits' }; initTutorial();", finished.context);
+  assert.equal(finished.timerQueue.length, 0);
+  assert.equal(finished.document.getElementById('rabbit-tour-launch').hidden, true);
+  assert.equal(vm.runInContext('shouldAutoLaunchTutorial()', finished.context), false);
+  assert.equal(first.storage.getItem('decentbusking:tutorial:completed:v1'), null);
+  vm.runInContext("startTutorial({ card: 'splits' });", finished.context);
+  assert.equal(vm.runInContext('_splitHop', finished.context), 0);
+  assert.equal(vm.runInContext('_overlay.hidden', finished.context), false);
+  const about = fs.readFileSync(path.join(__dirname, '../js/components/about-override.js'), 'utf8');
+  assert.match(about, /data-split-tutorial-launch/);
+  assert.match(about, /startTutorial\(\{ card: 'splits' \}\)/);
+});
+
+test('split tutorial explains current payee consent, exact totals and separate on-chain confirmation', () => {
+  const { context } = createTutorialContext();
+  const copy = vm.runInContext('SPLIT_HOPS.map(step => step.body).join(" ")', context);
+  assert.match(copy, /total exactly 100%/);
+  assert.match(copy, /Every current payee must approve/);
+  assert.match(copy, /Newly added payees are not required/);
+  assert.match(copy, /sole current payee/);
+  assert.match(copy, /separate Base transaction, which requires gas/);
+  assert.match(copy, /already purchased requests keep their original snapshot/);
+  assert.match(copy, /Album inheritance is not part/);
+});
+
 test('playlist deep links resume their furthest hop and stay hidden after every linked card is viewed', () => {
   const first = createTutorialContext();
   vm.runInContext("window.location = { search: '?tutorial=playlists' }; initTutorial();", first.context);

@@ -253,6 +253,15 @@ Total earnings, Song collaborators & payments, and Albums & default payments
 use the same compact profile dropdowns as My NFTs, with padded content when
 expanded. Selecting a song opens its collaborator dropdown automatically.
 
+The poster links directly to `?tutorial=splits`, a seven-card white-rabbit
+walkthrough of standalone-song collaborator edits. It uses clearly labeled,
+read-only examples: no wallet connection, signature, proposal, purchase or
+payment change is triggered by the guide. Its progress and completion are
+independent of the general and playlist tours. Leave hides it until refresh;
+an incomplete linked guide resumes its furthest card, even if the general tour
+is complete. A completed linked guide stays hidden until explicitly replayed
+using **About → Collaborators & payments guide**.
+
 If older NFT metadata lacks a DJuke song ID, the editor matches the recording's
 exact IPFS CID against the configured deployment's public DJuke catalog, then
 checks the recording and current splits on-chain. Missing, ambiguous, mismatched,

@@ -6,7 +6,7 @@ import { formatUsdcUnits } from '../usdc-format.mjs?v=20261017-mercury-release';
 // Intercepts the CDN DecentHead 'about-modal' custom element definition and
 // replaces it with a DecentBusking-specific version.
 //
-import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261025-tour-resume-fix';
+import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261025-split-guide';
 import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
 import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261024-djuke-labels';
 
@@ -854,7 +854,7 @@ class DecentBuskingAboutModal extends HTMLElement {
                 <p class="about-kicker">Listen · Loop · Busk</p>
                 <h1>${_esc(appName)}</h1>
                 <p class="about-hero-copy">A community listening room, a 3D music archive, and direct artist support using Base and public IPFS.</p>
-                <div class="about-status-row"><span class="about-status">Base Mainnet</span><span class="about-status">IPFS · Pinata</span><span class="about-status">JukeLoop Radio</span><button class="about-tutorial-btn" type="button" data-tutorial-launch>Start Tutorial</button></div>
+                <div class="about-status-row"><span class="about-status">Base Mainnet</span><span class="about-status">IPFS · Pinata</span><span class="about-status">JukeLoop Radio</span><button class="about-tutorial-btn" type="button" data-tutorial-launch>Start Tutorial</button><button class="about-tutorial-btn" type="button" data-split-tutorial-launch>🐇 Collaborators &amp; payments guide</button></div>
               </div>
             </header>
 
@@ -943,6 +943,10 @@ class DecentBuskingAboutModal extends HTMLElement {
       });
     });
     syncTutorialLaunchButtons(this.shadowRoot);
+    this.shadowRoot.querySelector('[data-split-tutorial-launch]').addEventListener('click', () => {
+      this.close();
+      startTutorial({ card: 'splits' });
+    });
     this._loadCommunityFunds();
     this.shadowRoot.getElementById('paypal-btn-container')?.addEventListener('click', (e) => {
       if (e.target.id === 'paypal-launch-btn') this._handlePayPalLaunch();

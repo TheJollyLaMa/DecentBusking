@@ -2,6 +2,7 @@ const TUTORIAL_STORAGE_KEY = 'decentbusking:tutorial:seen:v1';
 const TUTORIAL_COMPLETED_KEY = 'decentbusking:tutorial:completed:v1';
 const TUTORIAL_PROGRESS_KEY = 'decentbusking:tutorial:progress:v1';
 const TUTORIAL_PLAYLIST_PROGRESS_KEY = 'decentbusking:tutorial:playlist-progress:v1';
+const TUTORIAL_SPLIT_PROGRESS_KEY = 'decentbusking:tutorial:split-progress:v1';
 const TUTORIAL_STYLE_ID = 'decentbusking-tutorial-style';
 const TUTORIAL_OVERLAY_ID = 'decentbusking-tutorial-overlay';
 const TUTORIAL_HIGHLIGHT_CLASS = 'decentbusking-tutorial-highlight';
@@ -115,6 +116,31 @@ let _overlay = null;
 let _panel = null;
 let _titleEl = null;
 let _bodyEl = null;
+const SPLIT_HOPS = [
+  { title: 'One song. More creators.', surface: 'menu',
+    target: 'decent-header >>> app-title >>> right-ankh >>> .dropdown-menu',
+    body: 'Follow the bunny to add collaborators and share a song’s artist payout. This read-only walkthrough works without a wallet. It never connects, signs, submits a proposal, buys playback, or changes payments. Examples below are illustrations, not your song or a saved request.',
+    example: ['Profile → My NFTs', 'Choose your own song', 'Collaborators & payments'] },
+  { title: 'Choose the exact song',
+    body: 'When you are ready to do this for real, connect your creator or current-payee wallet in the header. Open Profile → My NFTs, find your song, then choose Collaborators & payments beside it. Your song card offers Add collaborator / split payments too. Check the title, NFT token and song ID. No album is needed.',
+    example: ['Example song · NFT #49', 'Check the recording and identity', 'Open Song collaborators & payments'] },
+  { title: 'Add a wallet, role and share',
+    body: 'The editor loads the current on-chain payees. Add a collaborator’s wallet or ENS name, give them a role, and set each percentage. Confirm the resolved wallet with your collaborator. All shares must total exactly 100%. These divide the artist payout, not the platform funds, NFT ownership or NFT royalties.',
+    example: ['Current: creator 100%', 'Proposed: Audio 50% · Video 50%', 'Illustrative total: 100% of artist payout'] },
+  { title: 'Review before asking for approval',
+    body: 'Choose Review changes to resolve names and compare current and proposed payments for this song. Check every address, role and percentage. Editing a row invalidates the review. Create approval request asks for a gasless signature only after checking that the matching approval service is available.',
+    example: ['Review changes', 'Check exact wallets and percentages', 'Create approval request — only when ready'] },
+  { title: 'Who approves?',
+    body: 'Every current payee must approve. A current payee’s proposal signature counts as their approval; if you are the sole current payee, your signature makes it ready immediately. Newly added payees are not required to approve. Share the proposal link with any remaining current payees; they connect their wallet, review, and sign Review and approve. Requests expire after seven days.',
+    example: ['Sole current payee: your signature counts', 'Multiple current payees: all must approve', 'Gasless approval ≠ changed payouts'] },
+  { title: 'The owner applies the change',
+    body: 'A ready request goes to Admin → NFT Requests. The contract owner applies it in a separate Base transaction, which requires gas. The app rechecks approvals, expiry and the current on-chain split first. Payments remain unchanged until the transaction confirms and the worker reconciles it.',
+    example: ['Ready approval request', 'Owner submits on-chain change', 'Wait for confirmation and reconciliation'] },
+  { title: 'Check it, then play',
+    body: 'Reopen the song and verify its current on-chain payees and percentages. Future playback purchases use the confirmed new split; already purchased requests keep their original snapshot. This standalone-song flow uses deployed DJuke v0.5. Album inheritance is not part of this guide. Leave the tour to try your own song, or replay this guide from About.',
+    example: ['Verify the confirmed split', 'Future purchases → new artist shares', 'Earlier requests → original shares'] },
+];
+
 let _stepLabelEl = null;
 let _progressEl = null;
 let _backButton = null;
@@ -149,6 +175,10 @@ let _journeyTimer = null;
 let _journeyBusy = false;
 let _playlistHop = 0;
 let _playlistOnly = false;
+let _splitOnly = false;
+let _splitHop = 0;
+let _furthestSplitHop = 0;
+let _splitCompleted = false;
 let _mercury = null;
 let _illustration = null;
 
@@ -180,12 +210,28 @@ function _readProgress() {
       _furthestPlaylistHop = playlist.hop;
       _playlistCompleted = playlist.completed === true;
     }
+    const splits = JSON.parse(_storage()?.getItem(TUTORIAL_SPLIT_PROGRESS_KEY) || 'null');
+    if (splits && Number.isInteger(splits.hop) && splits.hop >= 0 && splits.hop < SPLIT_HOPS.length) {
+      _furthestSplitHop = splits.hop;
+      _splitCompleted = splits.completed === true;
+    }
   } catch (error) {
     console.warn('[tutorial] Could not restore tutorial progress:', error);
   }
 }
 
 function _rememberProgress() {
+  if (_splitOnly) {
+    _furthestSplitHop = Math.max(_furthestSplitHop, _splitHop);
+    _splitCompleted ||= _splitHop === SPLIT_HOPS.length - 1;
+    try {
+      _storage()?.setItem(TUTORIAL_SPLIT_PROGRESS_KEY,
+        JSON.stringify({ hop: _furthestSplitHop, completed: _splitCompleted }));
+    } catch (error) {
+      console.warn('[tutorial] Could not remember split tutorial progress:', error);
+    }
+    return;
+  }
   if (_playlistOnly) {
     _furthestPlaylistHop = Math.max(_furthestPlaylistHop, _playlistHop);
     _playlistCompleted ||= _playlistHop === PLAYLIST_HOPS.length - 1;
@@ -580,8 +626,9 @@ function _decorateLauncher(launcher) {
 
 function _syncLandingLauncher() {
   const launcher = document.getElementById('rabbit-tour-launch');
+  const requested = new URLSearchParams(window.location?.search || '').get('tutorial');
   if (launcher) launcher.hidden = _dismissed || _completed ||
-    (_playlistCompleted && new URLSearchParams(window.location?.search || '').get('tutorial') === 'playlists');
+    (_playlistCompleted && requested === 'playlists') || (_splitCompleted && requested === 'splits');
 }
 
 function _ensureOverlay() {
@@ -963,6 +1010,10 @@ function _syncButtonsIn(root = document) {
 }
 
 function _renderStep() {
+  if (_splitOnly) {
+    _renderSplitStep();
+    return;
+  }
   const step = TUTORIAL_STEPS[_currentStep] || TUTORIAL_STEPS[0];
   const hop = step.id === 'playlists' ? PLAYLIST_HOPS[_playlistHop] : null;
   _openSurface(step.surface);
@@ -989,6 +1040,40 @@ function _renderStep() {
   }
   _panel.focus();
   _departCard();
+  _rememberProgress();
+}
+
+function _renderSplitStep() {
+  const step = SPLIT_HOPS[_splitHop];
+  _openSurface(step.surface);
+  _titleEl.textContent = `Collaborators & payments: ${step.title}`;
+  _bodyEl.textContent = step.body;
+  _illustration.replaceChildren();
+  _illustration.hidden = false;
+  const label = document.createElement('strong');
+  label.textContent = 'Illustration only — no wallet or payment action';
+  const example = document.createElement('div');
+  example.className = 'tutorial-playlist-flow';
+  step.example.forEach(text => {
+    const row = document.createElement('span');
+    row.textContent = text;
+    example.append(row);
+  });
+  _illustration.append(label, example);
+  _panel.scrollTop = 0;
+  _propEl.textContent = '🎶';
+  _propEl.setAttribute('data-instrument', 'record');
+  _stepLabelEl.textContent = `${_splitHop + 1} / ${SPLIT_HOPS.length}`;
+  _stepLabelEl.setAttribute('aria-label', `Card ${_splitHop + 1} of ${SPLIT_HOPS.length}`);
+  _progressEl.textContent = SPLIT_HOPS.map((_, i) => i <= _splitHop ? '●' : '○').join(' ');
+  _progressEl.setAttribute('aria-label', `Stop ${_splitHop + 1} of ${SPLIT_HOPS.length}`);
+  _backButton.disabled = _splitHop === 0;
+  _nextButton.disabled = false;
+  _nextButton.textContent = _splitHop === SPLIT_HOPS.length - 1 ? 'Go explore' : 'Follow →';
+  _highlightTarget(_resolveTarget(step.target));
+  _rabbitAtHome = !_currentTarget;
+  _positionScene();
+  _panel.focus();
   _rememberProgress();
 }
 
@@ -1021,6 +1106,14 @@ function _cancelAutoLaunch() {
 function _autoLaunch() {
   const requested = new URLSearchParams(window.location?.search || '').get('tutorial');
   if (requested === 'payroll') return;
+  if (requested === 'splits') {
+    if (_dismissed || _splitCompleted || _autoLaunchTimer || _overlay?.hidden === false) return;
+    _autoLaunchTimer = setTimeout(() => {
+      _autoLaunchTimer = null;
+      startTutorial({ card: 'splits', resume: true });
+    }, 0);
+    return;
+  }
   if (_dismissed || _completed || _autoLaunchTimer || _overlay?.hidden === false) return;
   if (requested === 'playlists') {
     if (_playlistCompleted) return;
@@ -1107,6 +1200,8 @@ export function startTutorial({ card, resume = false } = {}) {
   _savedMint = mint ? { element: mint, visible: !mint.classList.contains('hidden') } : null;
   if (_savedMint?.visible) mint.classList.add('hidden');
   _playlistOnly = card === 'playlists';
+  _splitOnly = card === 'splits';
+  _splitHop = resume && _splitOnly ? _furthestSplitHop : 0;
   _playlistHop = resume ? _playlistOnly ? _furthestPlaylistHop : _furthest.hop : 0;
   _currentStep = _playlistOnly ? TUTORIAL_STEPS.findIndex(step => step.id === 'playlists') : resume ? _furthest.step : 0;
   _overlay.hidden = false;
@@ -1119,6 +1214,11 @@ export function startTutorial({ card, resume = false } = {}) {
 
 export function previousTutorialStep() {
   if (!_overlay || _overlay.hidden) return;
+  if (_splitOnly) {
+    _splitHop = Math.max(0, _splitHop - 1);
+    _renderStep();
+    return;
+  }
   if (TUTORIAL_STEPS[_currentStep].id === 'playlists' && _playlistHop > 0) {
     _changeStep(_currentStep, _playlistHop - 1);
     return;
@@ -1134,6 +1234,14 @@ export function previousTutorialStep() {
 export function nextTutorialStep() {
   if (!_overlay || _overlay.hidden) return;
   if (_journeyBusy) return;
+  if (_splitOnly) {
+    if (_splitHop === SPLIT_HOPS.length - 1) _endTutorial();
+    else {
+      _splitHop++;
+      _renderStep();
+    }
+    return;
+  }
   if (TUTORIAL_STEPS[_currentStep].id === 'playlists') {
     if (_playlistHop < PLAYLIST_HOPS.length - 1) {
       _changeStep(_currentStep, _playlistHop + 1);
@@ -1157,7 +1265,7 @@ export function nextTutorialStep() {
 }
 
 export function completeTutorial() {
-  if (_overlay?.hidden !== false || _playlistOnly || _currentStep !== TUTORIAL_STEPS.length - 1) return;
+  if (_overlay?.hidden !== false || _playlistOnly || _splitOnly || _currentStep !== TUTORIAL_STEPS.length - 1) return;
   try {
     _storage()?.setItem(TUTORIAL_COMPLETED_KEY, '1');
   } catch (error) {
@@ -1219,6 +1327,7 @@ export function isTutorialSeen() {
 
 export function shouldAutoLaunchTutorial() {
   const requested = new URLSearchParams(window.location?.search || '').get('tutorial');
+  if (requested === 'splits') return !_dismissed && !_splitCompleted;
   return !_dismissed && !_completed && requested !== 'payroll' &&
     !(requested === 'playlists' && _playlistCompleted);
 }
