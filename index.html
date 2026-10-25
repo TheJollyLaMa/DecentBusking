@@ -80,7 +80,6 @@
           <button id="djuke-named-playlist-private" class="djuke-playlist-action" type="button" disabled><span class="djuke-action-icon" aria-hidden="true">♫</span><span><strong>Personal Play</strong><small>Creator prices · one batch · just for you</small></span></button>
           <button id="djuke-named-playlist-radio" class="djuke-playlist-action" type="button" disabled><span class="djuke-action-icon" aria-hidden="true">◉</span><span><strong>Play Live</strong><small>Radio tiers + $3 / 12 songs · everyone hears</small></span></button>
         </div>
-        <p id="djuke-playlist-scheduling-notice">Protected radio hours and scheduled shows take priority. Your playlist may wait or be set aside, then resume afterward without another payment. There is no refund solely for that delay or interruption; separate failed-delivery refunds still apply. Exact start and finish times are not guaranteed.</p>
         <p id="djuke-playlist-state" role="status" aria-live="polite"></p>
       </details>
       <section class="djuke-earners" aria-labelledby="djuke-earners-title">
@@ -105,7 +104,7 @@
     <section><h4>Resume Personal Play without paying again</h4><p>After a refresh or playback interruption, open <strong>Profile → Playlists → Your Personal Play sessions</strong> and choose <strong>Resume · no payment</strong>. We verify your existing Base purchase and restore the remaining songs near your saved position. Keep this browser's site data and use the purchasing wallet; recovery does not transfer between devices or restore purchases made before this feature. Personal Play mutes the radio only for you.</p></section>
     <section><h4>🪙 A quarter to start</h4><p>The next play starts at <strong>0.25 USDC on Base</strong> and doubles every eight pending requests. The LCD shows the current queue price. Review the verified charge breakdown before payment. Your wallet's standard Base network gas still applies.</p></section>
     <section><h4>✨ Music pays people</h4><p><strong>90%</strong> goes to the artist and collaborators, <strong>8%</strong> to IPFS pinning rewards, and <strong>2%</strong> to repo development. Confirmed payments trigger our celebration animations.</p></section>
-    <section><h4>🎛️ Your mix, three ways</h4><p><strong>Save to Profile</strong> stores a named, immutable revision without purchasing playback. <strong>Personal Play</strong> buys the ordered songs at creator prices in one batch and plays them consecutively just for you. <strong>Play Live</strong> queues 1–24 songs on public radio: songs 1–8 cost $0.25 each, 9–16 cost $0.50, and 17–24 cost $1, plus $3 per started group of 12 songs. Main paid requests can cut in between songs; current recordings and protected shows are not interrupted.</p><p><strong>Protected-show warning:</strong> Play Live does not reserve an uninterrupted time slot. Protected radio hours and scheduled shows may set your playlist aside. Its remaining songs return to the queue afterward without another payment. There is no refund solely for this delay or interruption; separate failed-delivery refunds still apply. Exact start and finish times are not guaranteed. Checkout asks you to acknowledge this before any USDC approval or purchase.</p><p>The DJuke queue lists every song under its playlist name. While a playlist song is on air, the streamer shows the songs remaining and subtle notes, balloons and genies rise with the locally playing audio. Effects rest during personal playback, silence and reduced-motion mode. Review the USDC price and standard Base network gas; a USDC approval is only a spending allowance.</p></section>
+    <section><h4>🎛️ Your mix, three ways</h4><p><strong>Save to Profile</strong> stores a named, immutable revision without purchasing playback. <strong>Personal Play</strong> buys the ordered songs at creator prices in one batch and plays them consecutively just for you. <strong>Play Live</strong> queues 1–24 songs on public radio: songs 1–8 cost $0.25 each, 9–16 cost $0.50, and 17–24 cost $1, plus $3 per started group of 12 songs. Main paid requests can cut in between songs; current recordings and protected shows are not interrupted.</p><p><strong>Protected-show warning:</strong> Play Live does not reserve an uninterrupted time slot. Protected radio hours and scheduled shows may set your playlist aside. Its remaining songs return to the queue afterward without another payment. There is no refund solely for this delay or interruption; separate failed-delivery refunds still apply. Exact start and finish times are not guaranteed.</p><p>The DJuke queue lists every song under its playlist name. While a playlist song is on air, the streamer shows the songs remaining and subtle notes, balloons and genies rise with the locally playing audio. Effects rest during personal playback, silence and reduced-motion mode. Review the USDC price and standard Base network gas; a USDC approval is only a spending allowance.</p></section>
     <section><h4>🏆 The jukebox podium</h4><p>The top three ranks show all-time confirmed DJuke song-play payouts to artist and collaborator wallets. They exclude listener spending, album purchases, pending credits and platform funds. Select a name or wallet to view its on-chain history.</p><p>The dim LCD equalizer follows the live music spectrum and rests when playback stops. It stays still with reduced motion enabled.</p></section>
     <button id="djuke-instructions-close" type="button">Back to the music</button>
   </dialog>
@@ -886,7 +885,7 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js?v=20261025-protected-warning"></script>
+  <script type="module" src="js/components/about-override.js?v=20261025-scheduling-info"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
   <script type="module" src="js/components/header-right-ankh-override.js?v=20261022-pin-decenthead"></script>
@@ -905,7 +904,7 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261025-protected-warning"></script>
+  <script type="module" src="js/main.js?v=20261025-scheduling-info"></script>
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261023-neon-handoffs">
@@ -926,7 +925,7 @@
   <script type="module" src="js/creator-profile.mjs?v=20261024-admin-sections"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
-  <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-protected-warning"></script>
+  <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
   <script type="module" src="js/community-pinning.mjs?v=20261010-community-pin-2"></script>
   <script type="module" src="js/worker-gas.mjs?v=20261024-admin-sections"></script>
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>

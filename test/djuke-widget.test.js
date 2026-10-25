@@ -143,6 +143,7 @@ test('mounted single, named save, Personal Play recovery and Play Live use real 
   const calls = [];
   const previousConfirm = globalThis.confirm;
   let acceptScheduling = false;
+  let scheduleConflict = false;
   const warnings = [];
   globalThis.confirm = message => { warnings.push(message); return acceptScheduling; };
   t.after(() => {
@@ -169,13 +170,18 @@ test('mounted single, named save, Personal Play recovery and Play Live use real 
     verifyTypedData: () => address };
   const fetch = async (url, init) => {
     let body;
-    if (url.includes('gas-quote')) body = { listener: address, contractAddress: address, chainId: 8453, songId,
+    if (url.endsWith('/api/radio/schedule')) body = { ready: true, schedule: [], events: scheduleConflict
+      ? [{ id: 'protected', type: 'playlist_show', title: 'Protected hour',
+        startUtc: new Date(Date.now() + 60000).toISOString(), endUtc: new Date(Date.now() + 3660000).toISOString() }]
+      : [] };
+    else if (url.endsWith('/api/radio')) body = { nowPlaying: null };
+    else if (url.includes('gas-quote')) body = { listener: address, contractAddress: address, chainId: 8453, songId,
       maxPrice: '250000', maxTotal: '3250000', fulfillmentCostWei: '0', contributionWei: '0', nonce: '0',
       deadline: Math.floor(Date.now() / 1000) + 120, signature: '0xsynthetic' };
     else if (url.includes('/api/creator/playlists') && init.method === 'POST') {
       calls.push('profile-save'); body = { playlist: JSON.parse(init.body).playlist };
     } else if (url.includes('/api/creator/profile')) body = { madePlaylists: [], playlists: [] };
-    else if (url.endsWith('/api/djuke')) body = { ...snapshot,
+    else if (url.endsWith('/api/djuke')) body = { ...snapshot, mainPending: 1, playlistPending: 0,
       requests: [{ title: 'Unavailable request', playable: false, payer: address, chainRequestId: '7' }],
       playlistBatches: [{ name: 'BoogieNight', status: 'pending', songs: Array.from({ length: 12 }, (_, i) => ({
         title: `Song ${i + 1}`, status: i < 7 ? 'played' : i === 7 ? 'playing' : 'pending' })) }],
@@ -218,9 +224,15 @@ test('mounted single, named save, Personal Play recovery and Play Live use real 
   assert.equal(calls.length, paidBeforeResume);
   assert.equal(warnings.length, 0, 'single, save and Personal Play do not request radio scheduling consent');
   $('live').dispatchEvent(new Event('click')); await tick();
-  assert.equal(calls.length, paidBeforeResume, 'declining scheduling terms must not purchase');
+  assert.equal(calls.at(-1), 'live');
+  assert.equal(warnings.length, 0, 'ordinary Play Live checkout needs no extra confirmation');
+  const paidBeforeConflict = calls.length;
+  scheduleConflict = true;
+  $('live').dispatchEvent(new Event('click')); await tick();
+  assert.equal(calls.length, paidBeforeConflict, 'declining a detected conflict must not purchase');
   assert.match($('payment').textContent, /checkout cancelled/);
-  assert.match(warnings[0], /no refund solely for a protected-show delay or interruption/);
+  assert.match(warnings[0], /Protected hour/);
+  assert.match(warnings[0], /no refund solely for that delay or interruption/);
   acceptScheduling = true;
   $('live').dispatchEvent(new Event('click')); await tick();
   assert.equal(warnings.length, 2);

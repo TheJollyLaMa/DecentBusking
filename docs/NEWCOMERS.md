@@ -43,10 +43,14 @@ Mercury follows the bunny between the real controls:
 5. **Personal Play** buys your mix at creator prices for your ears only.
 6. **Play Live** queues it for the community, at the displayed radio tier prices
    plus $3 per started group of 12 songs. Base network gas is additional.
-   Before checkout, acknowledge that protected hours/shows can set your mix
-   aside; remaining songs return to the queue afterward without another payment.
+   Protected hours/shows can set your mix aside; remaining songs return to the
+   queue afterward without another payment.
    There is no refund solely for that delay or interruption. Separate
    failed-delivery refunds still apply; exact playback times are not guaranteed.
+   If your estimated playlist/current/queued playback overlaps a protected block
+   on the public calendar, checkout names the show and asks before proceeding.
+   Unknown song lengths use a rough four-minute-per-song allowance; ordinary
+   checkout without a detected overlap has no separate confirmation window.
 7. See how song payments split 90% to musicians/collaborators, 8% to pinning, and
    2% to development, while the separate radio fee splits 25% each to Playback,
    Top 10, Pinners, and Development. The radio fee settles after full delivery.

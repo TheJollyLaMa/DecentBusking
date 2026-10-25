@@ -406,7 +406,7 @@ no radio platform fee. Play Live preserves the tier prices and main paid-request
 priority below; it never interrupts a song already playing. Both purchases may
 need a separate USDC approval, and wallet gas is additional.
 
-### Protected shows and the Play Live acknowledgment
+### Protected shows and conditional Play Live warnings
 
 Play Live buys queued delivery, **not an uninterrupted or guaranteed-time radio
 slot**. Protected radio hours and scheduled shows take priority. A mix can wait or
@@ -415,19 +415,33 @@ the block ends without a second payment. Main paid requests can still cut in
 between songs. A scheduling delay or interruption alone does **not** trigger a
 refund. This does not remove the separate failed-delivery refund policy below.
 
-Every Play Live playlist checkout requires an explicit acknowledgment of these
-terms before network switching, gas quoting, USDC approval, or purchase. Cancel
-stops checkout and leaves the draft unchanged. The notice applies to unsaved
-drafts, saved/profile playlists, and the standalone DJuke widget through the
-shared `checkoutRadioPlaylist` helper in `js/djuke-checkout.mjs`. It is required
-on each purchase, not remembered as consent for later purchases. It is shown
-regardless of predicted overlap because queue depth, track lengths, and schedules
-can change; no exact start, finish, or uninterrupted duration is promised.
-Personal Play and saving a mix do not require this radio-only acknowledgment.
+The general terms are in DJuke's **i** information, the linked bunny tutorial, and
+the standalone widget's **How DJuke works** disclosure. There is **no blanket
+confirmation window** on ordinary Play Live checkout.
 
-The DJuke panel, information dialog, linked bunny tutorial, and standalone widget
-also display the scheduling terms. Reuse: adapt the existing shared checkout
-from `bac5caa` rather than duplicate warnings in individual payment handlers.
+Before network switching, gas quoting, USDC approval, or purchase, the shared
+`checkoutRadioPlaylist` helper reads fresh public calendar, queue, and radio
+snapshots. It uses `radioCalendarOccurrences` (the public calendar's own New York
+weekly/DST expansion) to compare protected blocks with an estimated window from
+now through current/queued audio plus the purchased playlist. Known durations
+use `durationMs` or `durationSeconds`; unknown songs use a clearly disclosed rough
+**four-minute-per-song** allowance. Pending counts cover playlist lanes omitted
+from the bounded queue window. A currently audible DJuke request is counted only
+once when its public request ID also appears in the pending queue.
+
+**Only a detected overlap** opens a pre-purchase message naming the dated show and
+New York start/end times, playlist and wait estimates, approximation caveats, and
+the scheduling/refund terms. Cancel stops checkout and leaves the draft
+unchanged. Acknowledging continues normal wallet checkout. The check runs for
+unsaved drafts, saved/profile mixes, and the standalone widget, but not for
+Personal Play or saving. No acknowledgment is remembered for later purchases.
+Unavailable calendar/queue data or invalid times stop checkout with an explicit
+retry error rather than silently claiming no conflict. These estimates cannot
+predict new requests, ad breaks, media retries, schedule changes, or exact
+start/finish times; no detected overlap is not an uninterrupted-play guarantee.
+
+Reuse: adapt the shared checkout from `bac5caa` and the public calendar occurrence
+helper, rather than duplicating calendar logic or payment handlers.
 The existing radio handoff releases paid reservations rather than treating a
 protected-show interruption as a failed delivery.
 

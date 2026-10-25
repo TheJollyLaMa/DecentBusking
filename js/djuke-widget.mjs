@@ -1,5 +1,5 @@
 import { BASE_USDC_ADDRESS, DJUKE_BROWSER_ABI, purchaseDjukeSong, replaceDjukeSong } from './djuke-payment.mjs';
-import { checkoutRadioPlaylist, checkoutPrivatePlaylist, RADIO_PLAYLIST_SCHEDULING_WARNING } from './djuke-checkout.mjs?v=20261025-protected-warning';
+import { checkoutRadioPlaylist, checkoutPrivatePlaylist } from './djuke-checkout.mjs?v=20261025-scheduling-info';
 import { createNamedPlaylistClient, quoteNamedPlaylist } from './djuke-playlists.mjs';
 import { createPersonalPlayRecovery, verifyPersonalPlaySession } from './personal-play-recovery.mjs';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
@@ -64,7 +64,6 @@ export function mount(element, options = {}) {
     <ol data-draft></ol><p data-total></p>
     <button data-save type="button">Save to Profile</button>
     <button data-private type="button">Personal Play</button><button data-live type="button">Play Live</button>
-    <p data-scheduling-notice class="notice"></p>
     <p data-payment role="status" aria-live="polite"></p>
     <details data-profile><summary>Profile → Playlists &amp; receipts</summary>
       <p>Saved mixes and recovery belong to your connected profile, not the public queue.</p>
@@ -80,12 +79,15 @@ export function mount(element, options = {}) {
       <p>Singles start at 0.25 USDC and double for each eight pending songs.
       Play Live playlists have radio tiers plus 3 USDC per started group of 12 songs (1–24).
       Main paid requests may cut in between playlist songs. Personal Play uses creator listen prices.</p>
+      <p>Protected radio hours and scheduled shows take priority. Your playlist may wait or be set aside,
+      then its remaining songs return to the queue after the protected block without another payment.
+      There is no refund solely for that delay or interruption; separate failed-delivery refunds still apply.
+      Exact start and finish times are not guaranteed.</p>
       <p>Save to Profile signs an authorization but does not buy playback. Purchases require explicit wallet approval.
       Worker retries, per-resource EOF/PCM evidence, partial refunds and fee settlement remain platform services.
       A queued or confirming purchase is not a delivered song. Keep your Base transaction receipts.</p>
     </details>`;
   section.querySelector('h2').textContent = options.title || 'DJuke.decentagency.eth';
-  section.querySelector('[data-scheduling-notice]').textContent = RADIO_PLAYLIST_SCHEDULING_WARNING;
   root.append(style, section);
   const $ = key => section.querySelector(`[data-${key}]`);
   const cleanups = [];
@@ -123,7 +125,7 @@ export function mount(element, options = {}) {
     const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const response = await fetchImpl(`${config.ipfsUploadServiceUrl}${path}`, { ...init,
-        cache: 'no-store', signal: controller.signal });
+        cache: 'no-store', signal: init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || `DJuke service unavailable (${response.status})`);
       return result;
@@ -383,7 +385,10 @@ export function mount(element, options = {}) {
     const current = await signer();
     const result = await checkoutRadioPlaylist({ playlist: { songIds: draft.map(track => track.songId) },
       signer: current, config, ethers: library, onStep: report, signal: lifetime.signal, ensureChain: requireBase,
-      fetchImpl: (url, init) => request(url.pathname + url.search, init).then(body => ({ ok: true, json: async () => body })) });
+      fetchImpl: (url, init) => {
+        const target = new URL(url);
+        return request(target.pathname + target.search, init).then(body => ({ ok: true, json: async () => body }));
+      } });
     report(`Purchase ${result.txHash} confirmed and queued. Protected shows may defer playback without a refund for that delay; remaining songs resume afterward. Follow delivery and any failure refund in Profile → Playlists.`); await refresh();
   }));
   on($('library-refresh'), 'click', () => run(profile));

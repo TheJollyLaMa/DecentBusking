@@ -5,7 +5,7 @@ import { createNamedPlaylistClient, DJUKE_PLAYLIST_MAX_PER_PROFILE, getPlaylistB
   matchesPlaylistRevision, quoteNamedPlaylist, supportsDJukePlaylistBatch, supportsDJukePlaylistRadio } from './djuke-playlists.mjs?v=20261024-standalone-djuke';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { checkoutRadioPlaylist, checkoutPrivatePlaylist, RADIO_PLAYLIST_SCHEDULING_WARNING } from './djuke-checkout.mjs?v=20261025-protected-warning';
+import { checkoutRadioPlaylist, checkoutPrivatePlaylist } from './djuke-checkout.mjs?v=20261025-scheduling-info';
 
 const PLAYLIST_BATCH_ABI = getPlaylistBatchAbi();
 
@@ -54,8 +54,6 @@ export function initDjukePlaylists() {
   const addSelected = document.getElementById('djuke-add-selected-playlist');
   const songSelect = document.getElementById('djuke-song');
   const state = document.getElementById('djuke-playlist-state');
-  const schedulingNotice = document.getElementById('djuke-playlist-scheduling-notice');
-  if (schedulingNotice) schedulingNotice.textContent = RADIO_PLAYLIST_SCHEDULING_WARNING;
   const profileDialog = document.getElementById('creator-profile');
   const profileSection = profileDialog?.querySelector('[data-playlists-section]');
   const profileStatus = profileSection?.querySelector('[data-playlists-status]');
