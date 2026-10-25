@@ -254,9 +254,14 @@ use the same compact profile dropdowns as My NFTs, with padded content when
 expanded. Selecting a song opens its collaborator dropdown automatically.
 
 The poster links directly to `?tutorial=splits`, a seven-card white-rabbit
-walkthrough of standalone-song collaborator edits. It uses clearly labeled,
-read-only examples: no wallet connection, signature, proposal, purchase or
-payment change is triggered by the guide. Its progress and completion are
+walkthrough of standalone-song collaborator edits. It opens the actual Profile
+modal, My NFTs dropdown, song editor, approvals section and Admin NFT Requests
+panel, with the bunny and spotlight beside each subject. Loaded song settings
+are preserved; when no song or request is loaded, disabled, labeled examples
+use the existing editor and approval markup in place. Panel controls are inert
+during the walkthrough; no wallet connection, signature, proposal, purchase or
+payment change is triggered. Leaving restores panel visibility, dropdown state,
+scroll and interactivity, and removes all examples. Its progress and completion are
 independent of the general and playlist tours. Leave hides it until refresh;
 an incomplete linked guide resumes its furthest card, even if the general tour
 is complete. A completed linked guide stays hidden until explicitly replayed

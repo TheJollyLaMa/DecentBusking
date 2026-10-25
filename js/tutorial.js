@@ -1,3 +1,5 @@
+import { createSplitTutorialSurfaces } from './split-tutorial-surfaces.mjs?v=20261025-split-surfaces';
+
 const TUTORIAL_STORAGE_KEY = 'decentbusking:tutorial:seen:v1';
 const TUTORIAL_COMPLETED_KEY = 'decentbusking:tutorial:completed:v1';
 const TUTORIAL_PROGRESS_KEY = 'decentbusking:tutorial:progress:v1';
@@ -119,26 +121,26 @@ let _bodyEl = null;
 const SPLIT_HOPS = [
   { title: 'One song. More creators.', surface: 'menu',
     target: 'decent-header >>> app-title >>> right-ankh >>> .dropdown-menu',
-    body: 'Follow the bunny to add collaborators and share a song’s artist payout. This read-only walkthrough works without a wallet. It never connects, signs, submits a proposal, buys playback, or changes payments. Examples below are illustrations, not your song or a saved request.',
-    example: ['Profile → My NFTs', 'Choose your own song', 'Collaborators & payments'] },
+    body: 'Follow the bunny through the real Profile and Admin panels to add collaborators and share a song’s artist payout. This read-only walkthrough works without a wallet. It never connects, signs, submits a proposal, buys playback, or changes payments. If no song or request is loaded, clearly labeled, disabled examples show the controls in place.',
+  },
   { title: 'Choose the exact song',
     body: 'When you are ready to do this for real, connect your creator or current-payee wallet in the header. Open Profile → My NFTs, find your song, then choose Collaborators & payments beside it. Your song card offers Add collaborator / split payments too. Check the title, NFT token and song ID. No album is needed.',
-    example: ['Example song · NFT #49', 'Check the recording and identity', 'Open Song collaborators & payments'] },
+  },
   { title: 'Add a wallet, role and share',
     body: 'The editor loads the current on-chain payees. Add a collaborator’s wallet or ENS name, give them a role, and set each percentage. Confirm the resolved wallet with your collaborator. All shares must total exactly 100%. These divide the artist payout, not the platform funds, NFT ownership or NFT royalties.',
-    example: ['Current: creator 100%', 'Proposed: Audio 50% · Video 50%', 'Illustrative total: 100% of artist payout'] },
+  },
   { title: 'Review before asking for approval',
     body: 'Choose Review changes to resolve names and compare current and proposed payments for this song. Check every address, role and percentage. Editing a row invalidates the review. Create approval request asks for a gasless signature only after checking that the matching approval service is available.',
-    example: ['Review changes', 'Check exact wallets and percentages', 'Create approval request — only when ready'] },
+  },
   { title: 'Who approves?',
     body: 'Every current payee must approve. A current payee’s proposal signature counts as their approval; if you are the sole current payee, your signature makes it ready immediately. Newly added payees are not required to approve. Share the proposal link with any remaining current payees; they connect their wallet, review, and sign Review and approve. Requests expire after seven days.',
-    example: ['Sole current payee: your signature counts', 'Multiple current payees: all must approve', 'Gasless approval ≠ changed payouts'] },
+  },
   { title: 'The owner applies the change',
     body: 'A ready request goes to Admin → NFT Requests. The contract owner applies it in a separate Base transaction, which requires gas. The app rechecks approvals, expiry and the current on-chain split first. Payments remain unchanged until the transaction confirms and the worker reconciles it.',
-    example: ['Ready approval request', 'Owner submits on-chain change', 'Wait for confirmation and reconciliation'] },
+  },
   { title: 'Check it, then play',
     body: 'Reopen the song and verify its current on-chain payees and percentages. Future playback purchases use the confirmed new split; already purchased requests keep their original snapshot. This standalone-song flow uses deployed DJuke v0.5. Album inheritance is not part of this guide. Leave the tour to try your own song, or replay this guide from About.',
-    example: ['Verify the confirmed split', 'Future purchases → new artist shares', 'Earlier requests → original shares'] },
+  },
 ];
 
 let _stepLabelEl = null;
@@ -179,6 +181,7 @@ let _splitOnly = false;
 let _splitHop = 0;
 let _furthestSplitHop = 0;
 let _splitCompleted = false;
+let _splitSurfaces = null;
 let _mercury = null;
 let _illustration = null;
 
@@ -287,6 +290,37 @@ function _ensureStyles() {
       pointer-events: none;
     }
     .decentbusking-tutorial-overlay[hidden] { display: none; }
+    .tutorial-split-surfaces #admin-modal {
+      inset: 0; width: 100vw; max-height: none; overflow: visible;
+      transform: none; animation: none; pointer-events: none;
+    }
+    .tutorial-split-surfaces #creator-profile,
+    .tutorial-split-surfaces #admin-modal-inner {
+      position: fixed; inset: 14px auto auto 14px; margin: 0;
+      width: min(55vw, 760px); max-width: calc(100vw - 28px);
+      max-height: calc(100dvh - 28px); overflow: auto; box-sizing: border-box;
+    }
+    .tutorial-split-surfaces .split-tutorial-example-label {
+      padding: 10px; border: 1px dashed #e9d7a0; border-radius: 8px;
+      color: #f3e6bd; background: #182938;
+    }
+    #creator-profile .decentbusking-tutorial-actions button {
+      color: #fff4eb; background: #29343f; border-radius: 999px;
+    }
+    #creator-profile .decentbusking-tutorial-actions button[data-tutorial-primary] {
+      color: #15161f; background: linear-gradient(135deg, #91ddd3, #b9a3ff);
+    }
+    @media (max-width: 980px) {
+      .tutorial-split-surfaces #creator-profile,
+      .tutorial-split-surfaces #admin-modal-inner {
+        inset: 10px 10px auto; width: calc(100vw - 20px);
+        max-width: none; height: 36dvh; max-height: 36dvh;
+      }
+      .tutorial-split-surfaces .decentbusking-tutorial-card { max-height: 56dvh; }
+      .tutorial-split-surfaces .tutorial-home-hole { height: 20px; margin: 0; }
+      .tutorial-split-surfaces .decentbusking-tutorial-body { font-size: .82rem; line-height: 1.4; }
+      .tutorial-split-surfaces .decentbusking-tutorial-progress { display: none; }
+    }
     .decentbusking-tutorial-backdrop {
       position: absolute;
       inset: 0;
@@ -756,7 +790,7 @@ function _highlightTarget(target) {
   if (target.classList?.add) target.classList.add(TUTORIAL_HIGHLIGHT_CLASS);
   if (typeof target.scrollIntoView === 'function') {
     try {
-      target.scrollIntoView({ block: TUTORIAL_STEPS[_currentStep].id === 'playlists' ? 'start' : 'nearest', inline: 'nearest', behavior: 'instant' });
+      target.scrollIntoView({ block: _splitOnly || TUTORIAL_STEPS[_currentStep].id === 'playlists' ? 'start' : 'nearest', inline: 'nearest', behavior: 'instant' });
     } catch {
       /* ignore scroll errors */
     }
@@ -840,6 +874,32 @@ function _positionScene() {
   const width = window.innerWidth;
   const height = window.innerHeight;
   let bounds = _currentTarget?.getBoundingClientRect();
+  if (_splitOnly && _splitHop > 0) {
+    const card = _panel.getBoundingClientRect();
+    const mobile = width <= 980;
+    Object.assign(_panel.style, {
+      left: `${mobile ? 16 : Math.max(16, width - card.width - 16)}px`,
+      top: `${mobile ? height - card.height - 12 : Math.max(16, (height - card.height) / 2)}px`,
+    });
+    const surface = _splitHop === 5 ? document.getElementById('admin-modal-inner') : document.getElementById('creator-profile');
+    const frame = surface.getBoundingClientRect();
+    const top = Math.max(frame.top + 6, bounds.top);
+    const bottom = Math.min(frame.bottom - 6, bounds.bottom);
+    const left = Math.max(frame.left + 6, bounds.left);
+    const right = Math.min(frame.right - 6, bounds.right);
+    const visible = right > left && bottom > top;
+    _spotlight.hidden = !visible;
+    if (visible) Object.assign(_spotlight.style, {
+      left: `${left}px`, top: `${top}px`, width: `${right - left}px`, height: `${bottom - top}px`,
+    });
+    _featurePosition = visible ? {
+      left: `${Math.max(frame.left, right - 72)}px`,
+      top: `${Math.max(frame.top, Math.min(frame.bottom - 84, top - 40))}px`,
+    } : null;
+    _rabbit.hidden = false;
+    _positionRabbit();
+    return;
+  }
   const playlist = TUTORIAL_STEPS[_currentStep].id === 'playlists';
   const stacked = playlist && (width <= 800 || (_panel.getBoundingClientRect().width + (bounds?.width || 0) + 60 > width));
   const wasStacked = document.body.classList.contains('tutorial-playlists-stacked');
@@ -940,7 +1000,7 @@ function _arriveAtFeature() {
   _afterJourney(650, () => {
     _rabbit.dataset.phase = 'resting';
     _journeyBusy = false;
-    _backButton.disabled = _playlistOnly ? _playlistHop === 0 : _currentStep === 0;
+    _backButton.disabled = _splitOnly ? _splitHop === 0 : _playlistOnly ? _playlistHop === 0 : _currentStep === 0;
     _nextButton.disabled = false;
   });
 }
@@ -952,7 +1012,7 @@ function _departCard() {
     _rabbitAtHome = !_featurePosition;
     _positionRabbit();
     _journeyBusy = false;
-    _backButton.disabled = _playlistOnly ? _playlistHop === 0 : _currentStep === 0;
+    _backButton.disabled = _splitOnly ? _splitHop === 0 : _playlistOnly ? _playlistHop === 0 : _currentStep === 0;
     _nextButton.disabled = false;
     return;
   }
@@ -1045,21 +1105,12 @@ function _renderStep() {
 
 function _renderSplitStep() {
   const step = SPLIT_HOPS[_splitHop];
+  _cancelJourney();
   _openSurface(step.surface);
   _titleEl.textContent = `Collaborators & payments: ${step.title}`;
   _bodyEl.textContent = step.body;
   _illustration.replaceChildren();
-  _illustration.hidden = false;
-  const label = document.createElement('strong');
-  label.textContent = 'Illustration only — no wallet or payment action';
-  const example = document.createElement('div');
-  example.className = 'tutorial-playlist-flow';
-  step.example.forEach(text => {
-    const row = document.createElement('span');
-    row.textContent = text;
-    example.append(row);
-  });
-  _illustration.append(label, example);
+  _illustration.hidden = true;
   _panel.scrollTop = 0;
   _propEl.textContent = '🎶';
   _propEl.setAttribute('data-instrument', 'record');
@@ -1070,10 +1121,19 @@ function _renderSplitStep() {
   _backButton.disabled = _splitHop === 0;
   _nextButton.disabled = false;
   _nextButton.textContent = _splitHop === SPLIT_HOPS.length - 1 ? 'Go explore' : 'Follow →';
-  _highlightTarget(_resolveTarget(step.target));
-  _rabbitAtHome = !_currentTarget;
+  if (_splitHop === 0) {
+    _splitSurfaces?.close();
+    _splitSurfaces = null;
+    document.body.classList.remove('tutorial-split-surfaces');
+    _highlightTarget(_resolveTarget(step.target));
+  } else {
+    document.body.classList.add('tutorial-split-surfaces');
+    _splitSurfaces ||= createSplitTutorialSurfaces({ overlay: _overlay });
+    _highlightTarget(_splitSurfaces.show(_splitHop));
+  }
   _positionScene();
   _panel.focus();
+  _departCard();
   _rememberProgress();
 }
 
@@ -1157,7 +1217,12 @@ export function initTutorial() {
   _ensureOverlay();
   _ensureLauncher();
   document.addEventListener('keydown', _handleKeydown, true);
-  window.addEventListener?.('resize', _schedulePosition);
+  window.addEventListener?.('resize', () => {
+    if (_splitOnly && _overlay?.hidden === false) {
+      _currentTarget?.scrollIntoView?.({ block: 'start', inline: 'nearest', behavior: 'instant' });
+    }
+    _schedulePosition();
+  });
   document.addEventListener('scroll', _schedulePosition, true);
   _overlay.addEventListener('transitionend', _schedulePosition);
   document.addEventListener('transitionend', _schedulePosition);
@@ -1214,6 +1279,7 @@ export function startTutorial({ card, resume = false } = {}) {
 
 export function previousTutorialStep() {
   if (!_overlay || _overlay.hidden) return;
+  if (_journeyBusy) return;
   if (_splitOnly) {
     _splitHop = Math.max(0, _splitHop - 1);
     _renderStep();
@@ -1280,6 +1346,9 @@ function _endTutorial() {
   _notice = null;
   _cancelAutoLaunch();
   _cancelJourney();
+  _splitSurfaces?.close();
+  _splitSurfaces = null;
+  document.body?.classList?.remove('tutorial-split-surfaces');
   _closeSurface();
   _clearHighlight();
   _mercury?.classList.remove('is-following');

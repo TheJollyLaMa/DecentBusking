@@ -29,7 +29,8 @@ test('guide covers both pills, separate fund panels, weekly archive, DVert and e
 });
 
 test('payroll deep link suppresses the unrelated first-visit tutorial without marking it completed', () => {
-  const source = fs.readFileSync('js/tutorial.js', 'utf8').replace(/^export /gm, '');
+  const source = fs.readFileSync('js/tutorial.js', 'utf8')
+    .replace(/^import .*split-tutorial-surfaces.*;\n/m, '').replace(/^export /gm, '');
   const timers = [];
   const context = vm.createContext({ URLSearchParams, window: { location: { search: '?tutorial=payroll' } },
     setTimeout: fn => timers.push(fn) });

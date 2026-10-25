@@ -19,6 +19,7 @@ test('tutorial parses as a browser ES module without duplicate bindings', () => 
 });
 
 const tutorialSource = fs.readFileSync(path.join(__dirname, '../js/tutorial.js'), 'utf8')
+  .replace(/^import .*split-tutorial-surfaces.*;\n/m, '')
   .replace(/^export /gm, '');
 
 function makeClassList() {
@@ -153,6 +154,13 @@ function createTutorialContext(storage = makeStorage()) {
     setTimeout: (fn) => { timerQueue.push(fn); return timerQueue.length; },
     clearTimeout: (id) => { timerQueue[id - 1] = null; },
     targets,
+    createSplitTutorialSurfaces: () => ({
+      show(hop) {
+        targets.splitSurfaceHop = hop;
+        return targets['#artist-filter-bar'];
+      },
+      close() { targets.splitSurfaceHop = null; },
+    }),
   });
 
   vm.runInContext(tutorialSource, context);
@@ -567,11 +575,12 @@ test('split deep link opens independently of completed general tour and does not
   assert.match(vm.runInContext('_bodyEl.textContent', fixture.context), /read-only.*without a wallet/);
   for (let index = 0; index < 7; index++) {
     assert.equal(vm.runInContext('_splitHop', fixture.context), index);
-    assert.match(vm.runInContext('_illustration.children[0].textContent', fixture.context), /Illustration only/);
+    assert.equal(vm.runInContext('_illustration.hidden', fixture.context), true);
     assert.equal(vm.runInContext('_backButton.disabled', fixture.context), index === 0);
     vm.runInContext('nextTutorialStep();', fixture.context);
   }
   assert.equal(vm.runInContext('_overlay.hidden', fixture.context), true);
+  assert.equal(fixture.targets.splitSurfaceHop, null);
   assert.ok(fixture.clicks.every(id => id === 'menu-coin'), 'only the navigation menu is opened');
   assert.equal(fixture.storage.getItem('decentbusking:tutorial:progress:v1'), null);
   assert.equal(fixture.storage.getItem('decentbusking:tutorial:playlist-progress:v1'), null);
@@ -615,6 +624,22 @@ test('split tutorial explains current payee consent, exact totals and separate o
   assert.match(copy, /separate Base transaction, which requires gas/);
   assert.match(copy, /already purchased requests keep their original snapshot/);
   assert.match(copy, /Album inheritance is not part/);
+});
+
+test('split tutorial opens the relevant surface at every instructional stop and restores it on Back and Leave', () => {
+  const fixture = createTutorialContext();
+  vm.runInContext("initTutorial(); startTutorial({ card: 'splits' });", fixture.context);
+  for (let hop = 1; hop <= 6; hop++) {
+    vm.runInContext('nextTutorialStep();', fixture.context);
+    assert.equal(fixture.targets.splitSurfaceHop, hop);
+    assert.equal(vm.runInContext('_currentTarget', fixture.context), fixture.targets['#artist-filter-bar']);
+    assert.equal(fixture.document.body.classList.contains('tutorial-split-surfaces'), true);
+  }
+  vm.runInContext('while (_splitHop > 0) previousTutorialStep();', fixture.context);
+  assert.equal(fixture.targets.splitSurfaceHop, null);
+  assert.equal(fixture.document.body.classList.contains('tutorial-split-surfaces'), false);
+  vm.runInContext('nextTutorialStep(); skipTutorial();', fixture.context);
+  assert.equal(fixture.targets.splitSurfaceHop, null);
 });
 
 test('playlist deep links resume their furthest hop and stay hidden after every linked card is viewed', () => {
