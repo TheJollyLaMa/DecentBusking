@@ -3,6 +3,26 @@ const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const { Wallet } = createRequire(require('node:path').join(__dirname, '../discord-bot/package.json'))('ethers');
 
+test('earnings and payment sections reuse collapsed profile dropdowns with padded bodies', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  for (const attribute of ['data-profile-earnings', 'data-song-section', 'data-album-section']) {
+    const section = html.match(new RegExp(`<details class="creator-dropdown" ${attribute}[^>]*>[\\s\\S]*?</details>`))?.[0];
+    assert.ok(section, `${attribute} uses the existing profile dropdown`);
+    assert.doesNotMatch(section.split('>')[0], /\bopen\b/);
+    assert.match(section, /<summary><span[^>]*class="creator-dropdown-title"/);
+    assert.match(section, /<div class="creator-dropdown-body/);
+    if (attribute !== 'data-profile-earnings') assert.match(section, /creator-payment-body/);
+  }
+  assert.match(html, /<strong class="creator-earnings-total" data-earnings-total>—<\/strong><\/summary>/);
+  const profile = fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8');
+  const reveal = profile.indexOf('songSplitForm.hidden = false;');
+  const expand = profile.indexOf("dialog.querySelector('[data-song-section]').open = true;", reveal);
+  const scroll = profile.indexOf('songSplitForm.scrollIntoView', reveal);
+  assert.ok(reveal >= 0 && expand > reveal && scroll > expand, 'song selection expands the editor before scrolling to it');
+});
+
 test('creator profiles require wallet signatures and verified Discord confirmation before linking', async () => {
   const { createCreatorProfiles } = await import('../discord-bot/creator-profiles.js');
   const { buildCreatorAuthorizationMessage } = await import('../js/creator-profile-data.mjs');

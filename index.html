@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261025-song-splits" />
+  <link rel="stylesheet" href="css/styles.css?v=20261025-profile-dropdowns" />
   <link rel="stylesheet" href="css/radio-programming.css?v=20261024-calendar-fit" />
 
   <!-- CDN dependencies -->
@@ -922,7 +922,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261024-djuke-labels"></script>
   <script type="module" src="js/djuke.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/devert-site.mjs?v=20261024-devert-sponsored"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261025-song-splits"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261025-profile-dropdowns"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -981,14 +981,13 @@
         <p data-profile-media-note></p>
       </div>
     </section>
-    <section class="creator-earnings" data-profile-earnings aria-labelledby="creator-earnings-title">
-      <div class="creator-earnings-heading">
-        <h3 id="creator-earnings-title">Total earnings</h3>
-        <strong data-earnings-total>—</strong>
+    <details class="creator-dropdown" data-profile-earnings aria-labelledby="creator-earnings-title">
+      <summary><span id="creator-earnings-title" class="creator-dropdown-title">Total earnings</span><strong class="creator-earnings-total" data-earnings-total>—</strong></summary>
+      <div class="creator-dropdown-body">
+        <p class="creator-earnings-status" data-earnings-status role="status" aria-live="polite"></p>
+        <ul class="creator-earnings-list" data-earnings-list></ul>
       </div>
-      <p class="creator-earnings-status" data-earnings-status role="status" aria-live="polite"></p>
-      <ul class="creator-earnings-list" data-earnings-list></ul>
-    </section>
+    </details>
     <dialog class="creator-profile-edit-dialog" data-profile-edit-dialog aria-labelledby="creator-profile-edit-title">
       <div class="creator-profile-toolbar">
         <h3 id="creator-profile-edit-title">Edit profile</h3>
@@ -1058,8 +1057,9 @@
         <ol data-playlist-results class="creator-nft-list"></ol>
       </div>
     </details>
-    <section class="creator-song-manager" aria-label="Song collaborators and payments">
-      <h3>Song collaborators &amp; payments</h3>
+    <details class="creator-dropdown" data-song-section>
+      <summary><span class="creator-dropdown-title">Song collaborators &amp; payments</span></summary>
+      <div class="creator-dropdown-body creator-payment-body">
       <p>Select <strong>Collaborators &amp; payments</strong> beside a song in My NFTs above, or open that song's card. You do not need an album.</p>
       <form data-song-split-form hidden>
         <h3 data-song-split-title>Selected song</h3>
@@ -1079,7 +1079,8 @@
         <button type="button" data-song-split-propose disabled>Create approval request for this song</button>
         <p>1. Review → 2. Current payees approve → 3. Admin applies on-chain → 4. Future requests use the new split. An approval request alone does not change payments.</p>
       </form>
-    </section>
+      </div>
+    </details>
       <section class="creator-split-approval" data-split-approval hidden>
         <h3 data-split-proposal-title>Split approval</h3>
         <p data-split-proposal-diff></p>
@@ -1092,7 +1093,9 @@
         <p data-split-proposal-status role="status" aria-live="polite"></p>
         <a data-split-proposal-link hidden></a>
       </section>
-    <details data-album-section><summary>Albums &amp; default payments</summary>
+    <details class="creator-dropdown" data-album-section>
+      <summary><span class="creator-dropdown-title">Albums &amp; default payments</span></summary>
+      <div class="creator-dropdown-body creator-payment-body">
       <form data-album-form>
         <p>An album default applies to creator-only songs added to the album. Songs with custom splits keep their own payees and percentages. Whole-album artist payouts are divided equally among tracks, then follow each track's split (DJuke v0.6).</p>
         <label>Album ID or Slug (leave blank to create a new album)<input name="albumId" maxlength="100" /></label><button type="button" data-album-load>Load Album</button>
@@ -1113,6 +1116,7 @@
         <output data-album-signature></output>
         <button type="button" data-album-update>Apply approved default to inheriting songs</button><button type="button" data-album-sync>Sync saved default to inheriting songs</button>
       </form>
+      </div>
     </details>
     <p data-profile-status role="status" aria-live="polite"></p>
   </dialog>

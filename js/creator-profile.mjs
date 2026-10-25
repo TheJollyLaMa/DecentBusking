@@ -1120,6 +1120,7 @@ export function initCreatorProfile() {
     setControls();
     message(`Editing collaborators & payments for ${activeSong?.title || nft.name || nft.title}`);
     songSplitForm.hidden = false;
+    dialog.querySelector('[data-song-section]').open = true;
     songSplitTitle.textContent = `Collaborators & payments: ${activeSong.title}`;
     dialog.querySelector('[data-song-split-identity]').textContent =
       `${nft.tokenId !== undefined ? `NFT #${nft.tokenId} · ` : ''}Song ID: ${activeSong.songId}`;

@@ -249,6 +249,10 @@ beside its title. Both paths open the same editor, labeled with the song title,
 NFT token (when available), and DJuke song ID. The song editor is separate from
 album creation; no album is needed to add a collaborator.
 
+Total earnings, Song collaborators & payments, and Albums & default payments
+use the same compact profile dropdowns as My NFTs, with padded content when
+expanded. Selecting a song opens its collaborator dropdown automatically.
+
 If older NFT metadata lacks a DJuke song ID, the editor matches the recording's
 exact IPFS CID against the configured deployment's public DJuke catalog, then
 checks the recording and current splits on-chain. Missing, ambiguous, mismatched,
