@@ -55,6 +55,14 @@ const TUTORIAL_STEPS = [
     surface: 'jukebox',
   },
   {
+    id: 'playlists',
+    title: 'DJuke playlists: take over the radio',
+    prop: '🪕', propName: 'banjo',
+    body: 'Build a mix, support the musicians, and share it with Earth Village.',
+    target: '#djuke-search',
+    surface: 'playlists',
+  },
+  {
     title: 'Explore the music archive',
     prop: '💿', propName: 'record',
     body: 'Open Archive to browse community recordings and filter by artist. Song cards include Preview, Listen, NFT details, and playlist controls. You can browse the archive without purchasing an NFT.',
@@ -83,6 +91,25 @@ const TUTORIAL_STEPS = [
   },
 ];
 
+const PLAYLIST_HOPS = [
+  { title: 'Find your village soundtrack', target: '#djuke-search',
+    body: 'Search by song or creator, then choose a song in the Song selector below. Follow the bunny to build a mix of up to 24 songs. This guide never selects songs, connects a wallet, pays, or starts audio for you.' },
+  { title: 'Add songs to your mix', target: '#djuke-add-selected-playlist',
+    body: 'Choose a song above, then use Add selected song. Repeat for your mix. Music cards and Top 10 also offer + to add a favorite. Disabled controls mean a song, catalog, or payment service may not be ready; the guide does not bypass them.' },
+  { title: 'Name it. Put it in order.', target: '.djuke-playlist-draft',
+    body: 'Give your playlist a name. In the ordered list, use ↑ and ↓ to move songs, or × to remove one. The total below the list shows the Personal Play and Play Live estimates. Your existing draft stays yours; the guide never adds example songs.' },
+  { title: 'Save without buying playback', target: '#djuke-playlist-save',
+    body: 'Save to Profile keeps a named revision with your wallet signature. It does not buy or start a play. Saving is optional before either playback purchase. Only use this button when you want to sign and save your own mix.' },
+  { title: 'Or keep the jam personal', target: '#djuke-named-playlist-private',
+    body: 'Personal Play buys the ordered songs at creator prices in one batch, just for you. Song payments split 90% to musicians and collaborators, 8% to pinning, and 2% to development. No radio platform fee; Base gas is extra. Resume an interrupted purchase in Profile → Playlists without paying again.' },
+  { title: 'Play Live for Earth Village', target: '#djuke-named-playlist-radio',
+    body: 'Play Live queues your mix for everyone. Songs 1–8 are $0.25 each, 9–16 $0.50, and 17–24 $1. Add $3 per started group of 12 songs ($3 for 1–12; $6 for 13–24). Review the quote and Base gas before approving or paying. This tour never presses the purchase button.' },
+  { title: 'Your fee fuels the radio funds', target: '#artist-filter-bar', illustration: 'funds',
+    body: 'Song payments keep their 90 / 8 / 2 split. The separate radio fee goes 25% each to Playback, Top 10, Pinners, and Development. It is reserved until every song is delivered. Undelivered songs and the unreleased fee are refundable; a purchase confirmation is not proof of delivery.' },
+  { title: 'Your mix takes the radio stage', target: '#now-playing-label', illustration: 'radio',
+    body: 'After the current song and protected shows, your mix joins public radio. Main paid requests can cut in between songs. The real radio shows the playlist and songs remaining when it airs. This illustration changes no audio or queue. Follow your delivery receipt in Profile → Playlists.' },
+];
+
 let _initialized = false;
 let _overlay = null;
 let _panel = null;
@@ -103,6 +130,7 @@ let _rabbit = null;
 let _spotlight = null;
 let _returnFocus = null;
 let _surfaceCleanup = null;
+let _surfaceName = null;
 let _savedDrawers = [];
 let _savedMint = null;
 let _savedScroll = null;
@@ -115,9 +143,13 @@ let _rabbitAtHome = true;
 let _featurePosition = null;
 let _journeyTimer = null;
 let _journeyBusy = false;
+let _playlistHop = 0;
+let _playlistOnly = false;
+let _mercury = null;
+let _illustration = null;
 
 const DRAWERS = ['top-ten-tab', 'devert-tab', 'djuke-tab', 'dnft-archive-toggle'];
-const SURFACES = { chart: 'top-ten-tab', adverts: 'devert-tab', jukebox: 'djuke-tab', archive: 'dnft-archive-toggle' };
+const SURFACES = { chart: 'top-ten-tab', adverts: 'devert-tab', jukebox: 'djuke-tab', playlists: 'djuke-tab', archive: 'dnft-archive-toggle' };
 
 function _storage() {
   try {
@@ -346,6 +378,34 @@ function _ensureStyles() {
     .mercury-sound::after { content: ''; left: -10px; top: -8px; width: 17px; height: 32px; }
     .is-arriving .mercury-sound { animation: mercury-sound 1.3s ease-out 3; }
     .tutorial-mercury.is-arriving { animation: mercury-arrive .75s ease-out both; }
+    .tutorial-mercury.is-following {
+      position: fixed; z-index: 5;
+      transition: left .65s ease .18s, top .65s ease .18s;
+    }
+    .tutorial-playlist-illustration {
+      padding: 10px; margin: 10px 0; border: 1px solid #ffad65;
+      border-radius: 12px; background: #102431; font: 13px/1.45 system-ui, sans-serif;
+    }
+    .tutorial-playlist-illustration[hidden] { display: none; }
+    .tutorial-playlist-illustration strong { display: block; color: #ffbd80; margin-bottom: 5px; }
+    .tutorial-playlist-flow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .tutorial-playlist-flow span {
+      flex: 1 1 70px; padding: 6px; border: 1px solid #52afff; border-radius: 8px;
+      text-align: center; background: #233c4e; animation: playlist-flow 3s ease-in-out infinite;
+    }
+    .tutorial-playlist-flow span:nth-child(2) { animation-delay: .5s; }
+    .tutorial-playlist-flow span:nth-child(3) { animation-delay: 1s; }
+    .tutorial-playlist-flow span:nth-child(4) { animation-delay: 1.5s; }
+    .tutorial-playlists-stacked #djuke-panel { top: 12px; bottom: calc(55dvh + 28px); }
+    .tutorial-playlists-stacked .decentbusking-tutorial-card { max-height: 55dvh; }
+    .tutorial-playlists-stacked .tutorial-home-hole { height: 24px; margin: 4px auto; }
+    .tutorial-playlists-stacked .decentbusking-tutorial-progress { display: none; }
+    .tutorial-playlists-stacked .decentbusking-tutorial-body { font-size: .84rem; line-height: 1.45; }
+    .tutorial-playlists-stacked .decentbusking-tutorial-footer {
+      position: sticky; bottom: -16px; padding: 8px 0; background: #171e28;
+    }
+    .tutorial-playlists-stacked .decentbusking-tutorial-highlight { scroll-margin: 8px; }
+    @keyframes playlist-flow { 50% { border-color: #ffad65; background: #493b30; } }
     .tutorial-spotlight {
       position: fixed; z-index: 1; pointer-events: none; border: 2px solid #b9e9d9;
       border-radius: 16px; box-sizing: border-box; box-shadow: 0 0 0 200vmax #030810a6, 0 0 22px #91ddd340;
@@ -397,8 +457,9 @@ function _ensureStyles() {
     @media (prefers-reduced-motion: reduce) {
       .rabbit-ears, .tutorial-rabbit .rabbit-ears, .tutorial-rabbit[data-phase] .rabbit-ears,
       .tutorial-rabbit[data-phase] .tutorial-magic, .tutorial-spotlight.is-magical .tutorial-magic,
-      .tutorial-mercury.is-arriving, .is-arriving .mercury-note, .is-arriving .mercury-sound { animation: none; }
-      .tutorial-rabbit, .tutorial-spotlight, .decentbusking-tutorial-card { transition: none; }
+      .tutorial-mercury.is-arriving, .is-arriving .mercury-note, .is-arriving .mercury-sound,
+      .tutorial-playlist-flow span { animation: none; }
+      .tutorial-rabbit, .tutorial-spotlight, .decentbusking-tutorial-card, .tutorial-mercury.is-following { transition: none; }
     }
     @media (max-width: 640px) {
       .decentbusking-tutorial-card { padding: 16px 14px 14px; }
@@ -518,7 +579,7 @@ function _ensureOverlay() {
   _stepLabelEl.className = 'decentbusking-tutorial-step';
   kicker.append(themeTitle, _stepLabelEl);
 
-  const mercury = document.createElement('span');
+  const mercury = _mercury = document.createElement('span');
   mercury.className = 'tutorial-mercury';
   mercury.setAttribute('aria-hidden', 'true');
   const money = document.createElement('span');
@@ -553,6 +614,9 @@ function _ensureOverlay() {
   _bodyEl.className = 'decentbusking-tutorial-body';
   _bodyEl.id = 'decentbusking-tutorial-body';
   _bodyEl.setAttribute('aria-live', 'polite');
+  _illustration = document.createElement('div');
+  _illustration.className = 'tutorial-playlist-illustration';
+  _illustration.hidden = true;
 
   const footer = document.createElement('div');
   footer.className = 'decentbusking-tutorial-footer';
@@ -578,7 +642,7 @@ function _ensureOverlay() {
   buttonRow.append(_backButton, _skipButton, _nextButton);
   footer.append(_progressEl, buttonRow);
 
-  _panel.append(mercury, kicker, _closeButton, _titleEl, _homeHole, _bodyEl, footer);
+  _panel.append(mercury, kicker, _closeButton, _titleEl, _homeHole, _bodyEl, _illustration, footer);
   _overlay.append(_backdrop, _spotlight, _rabbit, _panel);
   document.body?.appendChild(_overlay);
   return _overlay;
@@ -596,7 +660,7 @@ function _highlightTarget(target) {
   if (target.classList?.add) target.classList.add(TUTORIAL_HIGHLIGHT_CLASS);
   if (typeof target.scrollIntoView === 'function') {
     try {
-      target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      target.scrollIntoView({ block: TUTORIAL_STEPS[_currentStep].id === 'playlists' ? 'start' : 'nearest', inline: 'nearest', behavior: 'instant' });
     } catch {
       /* ignore scroll errors */
     }
@@ -618,6 +682,7 @@ function _resolveTarget(selector) {
 function _closeSurface() {
   _surfaceCleanup?.();
   _surfaceCleanup = null;
+  _surfaceName = null;
 }
 
 function _explainBlockedTour(message, root = document.body) {
@@ -630,11 +695,28 @@ function _explainBlockedTour(message, root = document.body) {
 }
 
 function _openSurface(surface) {
+  if (surface && surface === _surfaceName) {
+    const toggle = document.getElementById(SURFACES[surface]);
+    if (toggle && toggle.getAttribute('aria-expanded') !== 'true') toggle.click();
+    if (surface === 'playlists') {
+      const draft = document.querySelector('.djuke-playlist-draft');
+      if (draft) draft.open = true;
+    }
+    return;
+  }
   _closeSurface();
+  _surfaceName = surface;
   const toggle = SURFACES[surface] ? document.getElementById(SURFACES[surface]) : null;
   if (toggle) {
     if (toggle.getAttribute('aria-expanded') !== 'true') toggle.click();
+    const draft = surface === 'playlists' ? document.querySelector('.djuke-playlist-draft') : null;
+    const wasOpen = draft?.open;
+    const scroller = surface === 'playlists' ? document.querySelector('.djuke-body') : null;
+    const scrollTop = scroller?.scrollTop;
+    if (draft) draft.open = true;
     _surfaceCleanup = () => {
+      if (draft) draft.open = wasOpen;
+      if (scroller) scroller.scrollTop = scrollTop;
       if (toggle.getAttribute('aria-expanded') === 'true') toggle.click();
     };
   } else if (surface === 'briefcase') {
@@ -661,11 +743,20 @@ function _positionScene() {
   if (!_overlay || _overlay.hidden || !window.innerWidth) return;
   const width = window.innerWidth;
   const height = window.innerHeight;
-  const bounds = _currentTarget?.getBoundingClientRect();
+  let bounds = _currentTarget?.getBoundingClientRect();
+  const playlist = TUTORIAL_STEPS[_currentStep].id === 'playlists';
+  const stacked = playlist && (width <= 800 || (_panel.getBoundingClientRect().width + (bounds?.width || 0) + 60 > width));
+  const wasStacked = document.body.classList.contains('tutorial-playlists-stacked');
+  if (stacked) document.body.classList.add('tutorial-playlists-stacked');
+  else document.body.classList.remove('tutorial-playlists-stacked');
+  if (stacked !== wasStacked) {
+    _currentTarget?.scrollIntoView?.({ block: 'start', inline: 'nearest', behavior: 'instant' });
+    bounds = _currentTarget?.getBoundingClientRect();
+  }
   const visible = bounds && bounds.width > 0 && bounds.height > 0;
-  const mobile = width <= 640;
   const cardHeight = _panel.getBoundingClientRect().height;
   const cardWidth = _panel.getBoundingClientRect().width;
+  const mobile = width <= 640 || (bounds && cardWidth + bounds.width + 60 > width);
   let left = (width - cardWidth) / 2;
   let top = (height - cardHeight) / 2;
   if (visible) {
@@ -674,14 +765,16 @@ function _positionScene() {
     const targetWidth = Math.max(40, Math.min(width - targetLeft - 10, bounds.width));
     // Large forms/drawers get a window into their top, leaving room for the tour text.
     const mobileWindow = Math.max(40, Math.min(160, height - cardHeight - targetTop - 110));
-    const targetHeight = Math.min(bounds.height, mobile ? mobileWindow : height * .65, height - targetTop - 12);
+    const aboveCard = stacked && bounds.top <= height * .65;
+    const targetHeight = Math.min(bounds.height, mobile ? mobileWindow : height * .65, height - targetTop - 12,
+      aboveCard ? Math.max(20, height - cardHeight - 28 - targetTop) : height);
     Object.assign(_spotlight.style, {
       left: `${targetLeft - 4}px`, top: `${targetTop - 4}px`,
       width: `${targetWidth + 8}px`, height: `${targetHeight + 8}px`,
     });
     const below = targetTop + targetHeight + 90;
     if (mobile) {
-      top = bounds.top > height / 2 ? 16 : Math.min(height - cardHeight - 16, below);
+      top = stacked ? (aboveCard ? height - cardHeight - 16 : 16) : bounds.top > height / 2 ? 16 : Math.min(height - cardHeight - 16, below);
     } else {
       const onLeft = bounds.left + bounds.width / 2 < width / 2;
       left = onLeft ? width - cardWidth - 28 : 28;
@@ -709,6 +802,17 @@ function _positionRabbit() {
   } else {
     if (_rabbit.parentNode !== _overlay) _overlay.append(_rabbit);
     Object.assign(_rabbit.style, { position: 'fixed', ..._featurePosition });
+  }
+  const following = TUTORIAL_STEPS[_currentStep].id === 'playlists' && !_rabbitAtHome && !!_featurePosition;
+  if (following) {
+    _mercury.classList.add('is-following');
+    Object.assign(_mercury.style, {
+      left: `${Math.max(8, parseFloat(_featurePosition.left) - 76)}px`,
+      top: _featurePosition.top,
+    });
+  } else {
+    _mercury.classList.remove('is-following');
+    Object.assign(_mercury.style, { left: '', top: '' });
   }
 }
 
@@ -740,7 +844,7 @@ function _arriveAtFeature() {
   _afterJourney(650, () => {
     _rabbit.dataset.phase = 'resting';
     _journeyBusy = false;
-    _backButton.disabled = _currentStep === 0;
+    _backButton.disabled = _playlistOnly ? _playlistHop === 0 : _currentStep === 0;
     _nextButton.disabled = false;
   });
 }
@@ -752,7 +856,7 @@ function _departCard() {
     _rabbitAtHome = !_featurePosition;
     _positionRabbit();
     _journeyBusy = false;
-    _backButton.disabled = _currentStep === 0;
+    _backButton.disabled = _playlistOnly ? _playlistHop === 0 : _currentStep === 0;
     _nextButton.disabled = false;
     return;
   }
@@ -766,10 +870,11 @@ function _departCard() {
   });
 }
 
-function _changeStep(index) {
+function _changeStep(index, hop = 0) {
   if (_journeyBusy) return;
   const showNext = () => {
     _currentStep = index;
+    _playlistHop = hop;
     _renderStep();
   };
   if (_reducedMotion() || _rabbitAtHome) {
@@ -810,19 +915,24 @@ function _syncButtonsIn(root = document) {
 
 function _renderStep() {
   const step = TUTORIAL_STEPS[_currentStep] || TUTORIAL_STEPS[0];
+  const hop = step.id === 'playlists' ? PLAYLIST_HOPS[_playlistHop] : null;
   _openSurface(step.surface);
-  _titleEl.textContent = step.title;
-  _bodyEl.textContent = step.body;
+  _titleEl.textContent = hop ? `DJuke playlists: ${hop.title}` : step.title;
+  _bodyEl.textContent = hop?.body || step.body;
+  _renderPlaylistIllustration(hop?.illustration);
+  _panel.scrollTop = 0;
   _propEl.textContent = step.prop;
   _propEl.setAttribute('data-instrument', step.propName);
   _stepLabelEl.textContent = `${_currentStep + 1} / ${TUTORIAL_STEPS.length}`;
   _stepLabelEl.setAttribute('aria-label', `Card ${_currentStep + 1} of ${TUTORIAL_STEPS.length}`);
+  if (hop) _stepLabelEl.textContent += ` · Hop ${_playlistHop + 1} / ${PLAYLIST_HOPS.length}`;
   _progressEl.textContent = TUTORIAL_STEPS.map((_, i) => i <= _currentStep ? '●' : '○').join(' ');
   _progressEl.setAttribute('aria-label', `Stop ${_currentStep + 1} of ${TUTORIAL_STEPS.length}`);
-  _backButton.disabled = _currentStep === 0;
-  _nextButton.textContent = _currentStep === TUTORIAL_STEPS.length - 1 ? 'Go explore' : 'Follow →';
-  const target = _resolveTarget(step.target) || document.getElementById(SURFACES[step.surface]) || (step.surface === 'briefcase' ? document.getElementById('guitar-case-btn') : null);
-  _highlightTarget(target);
+  _backButton.disabled = _playlistOnly ? _playlistHop === 0 : _currentStep === 0;
+  _nextButton.textContent = _playlistOnly && _playlistHop === PLAYLIST_HOPS.length - 1 ? 'Go explore DJuke' : _currentStep === TUTORIAL_STEPS.length - 1 ? 'Go explore' : 'Follow →';
+  const target = _resolveTarget(hop?.target || step.target);
+  if (hop && !target) _bodyEl.textContent += ' This control is unavailable in this page. Open the full DecentBusking site to follow this step.';
+  _highlightTarget(target || document.getElementById(SURFACES[step.surface]) || (step.surface === 'briefcase' ? document.getElementById('guitar-case-btn') : null));
   _panel.querySelector?.('.tutorial-mercury')?.classList.remove('is-arriving');
   _positionScene();
   if (window.requestAnimationFrame) {
@@ -830,6 +940,25 @@ function _renderStep() {
   }
   _panel.focus();
   _departCard();
+}
+
+function _renderPlaylistIllustration(kind) {
+  _illustration.replaceChildren();
+  _illustration.hidden = !kind;
+  if (!kind) return;
+  const label = document.createElement('strong');
+  label.textContent = kind === 'funds' ? 'Illustration: $3 radio fee → four funds' : 'Illustration only — not live playback';
+  const flow = document.createElement('div');
+  flow.className = 'tutorial-playlist-flow';
+  const labels = kind === 'funds'
+    ? ['25% Playback', '25% Top 10', '25% Pinners', '25% Development']
+    : ['Current song →', 'Your playlist →', 'Radio rotation'];
+  labels.forEach(text => {
+    const item = document.createElement('span');
+    item.textContent = text;
+    flow.append(item);
+  });
+  _illustration.append(label, flow);
 }
 
 function _cancelAutoLaunch() {
@@ -840,7 +969,16 @@ function _cancelAutoLaunch() {
 }
 
 function _autoLaunch() {
-  if (window.location?.search && new URLSearchParams(window.location.search).get('tutorial') === 'payroll') return;
+  const requested = new URLSearchParams(window.location?.search || '').get('tutorial');
+  if (requested === 'payroll') return;
+  if (requested === 'playlists') {
+    // Drawer listeners finish wiring during DOMContentLoaded before the linked card opens.
+    _autoLaunchTimer = setTimeout(() => {
+      _autoLaunchTimer = null;
+      startTutorial({ card: 'playlists' });
+    }, 0);
+    return;
+  }
   if (_autoLaunchTimer || _visitNumber > TUTORIAL_INTRO_VISITS ||
     _storage()?.getItem(TUTORIAL_COMPLETED_KEY) === '1' || _overlay?.hidden === false) return;
   _autoLaunchTimer = setTimeout(() => {
@@ -891,7 +1029,7 @@ export function initTutorial() {
   _autoLaunch();
 }
 
-export function startTutorial() {
+export function startTutorial({ card } = {}) {
   _ensureOverlay();
   _cancelAutoLaunch();
   if (_overlay.hidden === false) return;
@@ -924,7 +1062,9 @@ export function startTutorial() {
   const mint = document.getElementById('mint-modal');
   _savedMint = mint ? { element: mint, visible: !mint.classList.contains('hidden') } : null;
   if (_savedMint?.visible) mint.classList.add('hidden');
-  _currentStep = 0;
+  _playlistOnly = card === 'playlists';
+  _playlistHop = 0;
+  _currentStep = _playlistOnly ? TUTORIAL_STEPS.findIndex(step => step.id === 'playlists') : 0;
   _overlay.hidden = false;
   _overlay.setAttribute('aria-hidden', 'false');
   document.body?.classList?.add(TUTORIAL_BODY_CLASS);
@@ -935,12 +1075,36 @@ export function startTutorial() {
 
 export function previousTutorialStep() {
   if (!_overlay || _overlay.hidden) return;
+  if (TUTORIAL_STEPS[_currentStep].id === 'playlists' && _playlistHop > 0) {
+    _changeStep(_currentStep, _playlistHop - 1);
+    return;
+  }
+  if (_playlistOnly) return;
+  if (TUTORIAL_STEPS[_currentStep - 1]?.id === 'playlists') {
+    _changeStep(_currentStep - 1, PLAYLIST_HOPS.length - 1);
+    return;
+  }
   _changeStep(Math.max(0, _currentStep - 1));
 }
 
 export function nextTutorialStep() {
   if (!_overlay || _overlay.hidden) return;
   if (_journeyBusy) return;
+  if (TUTORIAL_STEPS[_currentStep].id === 'playlists') {
+    if (_playlistHop < PLAYLIST_HOPS.length - 1) {
+      _changeStep(_currentStep, _playlistHop + 1);
+      return;
+    }
+    if (_playlistOnly) {
+      _endTutorial();
+      const toggle = document.getElementById('djuke-tab');
+      if (toggle?.getAttribute('aria-expanded') !== 'true') toggle?.click();
+      const draft = document.querySelector('.djuke-playlist-draft');
+      if (draft) draft.open = true;
+      document.getElementById('djuke-search')?.focus();
+      return;
+    }
+  }
   if (_currentStep >= TUTORIAL_STEPS.length - 1) {
     completeTutorial();
     return;
@@ -949,7 +1113,7 @@ export function nextTutorialStep() {
 }
 
 export function completeTutorial() {
-  if (_overlay?.hidden !== false || _currentStep !== TUTORIAL_STEPS.length - 1) return;
+  if (_overlay?.hidden !== false || _playlistOnly || _currentStep !== TUTORIAL_STEPS.length - 1) return;
   try {
     _storage()?.setItem(TUTORIAL_COMPLETED_KEY, '1');
   } catch (error) {
@@ -963,11 +1127,14 @@ function _endTutorial() {
   _cancelJourney();
   _closeSurface();
   _clearHighlight();
+  _mercury?.classList.remove('is-following');
+  if (_mercury) Object.assign(_mercury.style, { left: '', top: '' });
   if (_overlay) {
     _overlay.hidden = true;
     _overlay.setAttribute('aria-hidden', 'true');
   }
   document.body?.classList?.remove(TUTORIAL_BODY_CLASS);
+  document.body?.classList?.remove('tutorial-playlists-stacked');
   _savedDrawers.forEach(id => {
     const toggle = document.getElementById(id);
     if (toggle?.getAttribute('aria-expanded') !== 'true') toggle?.click();

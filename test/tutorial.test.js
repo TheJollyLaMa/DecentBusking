@@ -76,10 +76,14 @@ function createTutorialContext() {
     '#djuke-tab': makeNode('button'),
   };
   const clicks = [];
-  for (const id of ['top-ten-panel', 'devert-panel', 'djuke-panel', 'dnft-list', 'dnft-archive-toggle', 'mint-modal', 'mint-modal-inner', 'mint-submit-btn', 'mint-status', 'mint-cancel-btn']) {
+  for (const id of ['top-ten-panel', 'devert-panel', 'djuke-panel', 'dnft-list', 'dnft-archive-toggle', 'mint-modal', 'mint-modal-inner', 'mint-submit-btn', 'mint-status', 'mint-cancel-btn', 'djuke-search', 'djuke-add-selected-playlist', 'djuke-playlist-save', 'djuke-named-playlist-private', 'djuke-named-playlist-radio', 'artist-filter-bar']) {
     targets[`#${id}`] = makeNode('div');
   }
   Object.entries(targets).forEach(([selector, node]) => { node.id = selector.slice(1); });
+  targets['.djuke-playlist-draft'] = makeNode('details');
+  targets['.djuke-playlist-draft'].open = false;
+  targets['.djuke-body'] = makeNode('div');
+  targets['.djuke-body'].scrollTop = 0;
   targets['#mint-modal'].classList.add('hidden');
   ['top-ten-tab', 'devert-tab', 'djuke-tab', 'dnft-archive-toggle'].forEach(id => {
     targets[`#${id}`].setAttribute('aria-expanded', 'false');
@@ -129,6 +133,7 @@ function createTutorialContext() {
 
   const context = vm.createContext({
     console,
+    URLSearchParams,
     document,
     window: { localStorage: storage, getComputedStyle: element => ({ display: element.style.display }), scrollTo() {} },
     localStorage: storage,
@@ -229,7 +234,7 @@ test('only finishing the entire tour hides the landing launcher while About reta
   assert.equal(storage.getItem('decentbusking:tutorial:completed:v1'), null);
   assert.equal(document.getElementById('rabbit-tour-launch').hidden, false);
   vm.runInContext('skipTutorial(); startTutorial();', context);
-  for (let i = 0; i < 11; i++) vm.runInContext('nextTutorialStep();', context);
+  for (let i = 0; i < 19; i++) vm.runInContext('nextTutorialStep();', context);
   assert.equal(storage.getItem('decentbusking:tutorial:completed:v1'), '1');
   assert.equal(document.getElementById('rabbit-tour-launch').hidden, true);
   assert.equal(launchButton.hidden, false);
@@ -255,13 +260,13 @@ test('Mercury accompanies the rabbit through real surfaces, with no transactiona
   vm.runInContext('initTutorial(); startTutorial();', context);
   assert.ok(document.getElementById('rabbit-tour-launch'));
   const steps = vm.runInContext('TUTORIAL_STEPS.length', context);
-  assert.equal(steps, 11);
+  assert.equal(steps, 12);
   vm.runInContext('nextTutorialStep(); nextTutorialStep();', context);
   assert.equal(targets['#mint-modal'].classList.contains('hidden'), false);
   vm.runInContext('nextTutorialStep(); nextTutorialStep();', context);
   assert.equal(targets['#mint-modal'].classList.contains('hidden'), true);
   assert.equal(targets['#top-ten-tab'].getAttribute('aria-expanded'), 'true');
-  for (let index = 4; index < 8; index++) vm.runInContext('nextTutorialStep();', context);
+  vm.runInContext('while (_currentStep < 9) nextTutorialStep();', context);
   assert.equal(rightMenu.style.display, 'block');
   vm.runInContext('nextTutorialStep();', context);
   assert.equal(rightMenu.style.display, 'none');
@@ -290,8 +295,8 @@ test('Mercury keeps his symbol and flying-money ride but changes musical gear at
     props.add(prop);
     assert.equal(vm.runInContext('_panel.children[0].children[1].textContent', context), '☿');
     assert.equal(vm.runInContext('_panel.children[0].children[0].textContent', context), '💸');
-    assert.equal(vm.runInContext('_stepLabelEl.textContent', context), `${index + 1} / ${count}`);
-    vm.runInContext('nextTutorialStep();', context);
+    assert.equal(vm.runInContext('_stepLabelEl.textContent', context), `${index + 1} / ${count}${index === 7 ? ' · Hop 1 / 8' : ''}`);
+    vm.runInContext(`while (_currentStep === ${index} && !_overlay.hidden) nextTutorialStep();`, context);
   }
   vm.runInContext('startTutorial();', context);
   assert.equal(vm.runInContext('_propEl.textContent', context), '🎺');
@@ -320,7 +325,7 @@ test('rabbit dives from the centered card hole, emerges at the feature, and retu
   };
   vm.runInContext('startTutorial(); nextTutorialStep();', context);
   assert.equal(vm.runInContext('_rabbitAtHome', context), true);
-  assert.equal(vm.runInContext('_stepLabelEl.textContent', context), '2 / 11');
+  assert.equal(vm.runInContext('_stepLabelEl.textContent', context), '2 / 12');
   assert.equal(vm.runInContext('_journeyBusy', context), true);
   vm.runInContext('nextTutorialStep();', context);
   assert.equal(vm.runInContext('_currentStep', context), 1);
@@ -360,7 +365,7 @@ test('reduced motion changes stops directly with no rabbit journey timers or ins
   assert.equal(vm.runInContext('_currentStep', context), 2);
   assert.equal(vm.runInContext('_journeyBusy', context), false);
   assert.equal(timerQueue.filter(Boolean).length, 0);
-  assert.equal(vm.runInContext('_stepLabelEl.textContent', context), '3 / 11');
+  assert.equal(vm.runInContext('_stepLabelEl.textContent', context), '3 / 12');
   assert.equal(vm.runInContext('_panel.children[1].children[1] === _stepLabelEl', context), true);
   assert.doesNotMatch(vm.runInContext('_stepLabelEl.textContent', context), /Rabbit hole|microphone/);
 });
@@ -480,7 +485,115 @@ test('tour uses factual rabbit-themed copy and a smaller money icon without a Me
   vm.runInContext('initTutorial(); startTutorial();', context);
   const copy = vm.runInContext('TUTORIAL_STEPS.map(step => step.title + " " + step.body).join(" ")', context);
   assert.doesNotMatch(copy, /Mercury|messenger|narrator|I’m|I won’t|not just the little symbol/);
-  assert.match(vm.runInContext('TUTORIAL_STEPS[8].body', context), /right ankh menu.*Profile and Public Schedule/);
+  assert.match(vm.runInContext('TUTORIAL_STEPS[9].body', context), /right ankh menu.*Profile and Public Schedule/);
   assert.match(document.head.children[0].textContent, /\.mercury-money \{[^}]*font-size: 22px/);
   assert.equal(document.getElementById('rabbit-tour-launch').getAttribute('aria-label'), 'Follow the white rabbit: explore DecentBusking');
+});
+
+test('playlist deep link opens the guided card even for returning and completed visitors', () => {
+  const { context, storage, targets, timerQueue } = createTutorialContext();
+  storage.setItem('decentbusking:tutorial:completed:v1', '1');
+  storage.setItem('decentbusking:tutorial:visits:v1', '20');
+  vm.runInContext("window.location = { search: '?tutorial=playlists' }; initTutorial();", context);
+  assert.equal(timerQueue.filter(Boolean).length, 1);
+  const launch = timerQueue[0];
+  timerQueue[0] = null;
+  launch();
+  assert.equal(vm.runInContext('_overlay.hidden', context), false);
+  assert.equal(vm.runInContext('TUTORIAL_STEPS[_currentStep].id', context), 'playlists');
+  assert.equal(vm.runInContext('_playlistHop', context), 0);
+  assert.equal(vm.runInContext('_currentTarget === targets["#djuke-search"]', context), true);
+  assert.equal(targets['#djuke-tab'].getAttribute('aria-expanded'), 'true');
+  assert.equal(targets['.djuke-playlist-draft'].open, true);
+  assert.equal(vm.runInContext('_backButton.disabled', context), true);
+  assert.equal(timerQueue.filter(Boolean).length, 0);
+});
+
+test('playlist hops spotlight actual controls, explain both payment splits and demonstrate radio without buying', () => {
+  const { context, clicks, targets, storage } = createTutorialContext();
+  targets['.djuke-playlist-draft'].draft = ['Keep my existing song'];
+  vm.runInContext("initTutorial(); startTutorial({ card: 'playlists' });", context);
+  const selectors = ['#djuke-search', '#djuke-add-selected-playlist', '.djuke-playlist-draft',
+    '#djuke-playlist-save', '#djuke-named-playlist-private', '#djuke-named-playlist-radio',
+    '#artist-filter-bar', '#now-playing-label'];
+  for (const [index, selector] of selectors.entries()) {
+    assert.equal(vm.runInContext('_playlistHop', context), index);
+    assert.equal(vm.runInContext('_currentTarget', context), targets[selector]);
+    assert.equal(vm.runInContext('_backButton.disabled', context), index === 0);
+    if (index === 5) {
+      assert.match(vm.runInContext('_bodyEl.textContent', context), /\$3 for 1–12; \$6 for 13–24/);
+    }
+    if (index === 6) {
+      const text = vm.runInContext('_bodyEl.textContent', context);
+      assert.match(text, /90 \/ 8 \/ 2/);
+      assert.match(text, /25% each to Playback, Top 10, Pinners, and Development/);
+      assert.match(text, /reserved until every song is delivered/);
+      assert.equal(vm.runInContext('_illustration.children[1].children.length', context), 4);
+    }
+    if (index === 7) {
+      assert.match(vm.runInContext('_bodyEl.textContent', context), /current song and protected shows/);
+      assert.match(vm.runInContext('_illustration.children[0].textContent', context), /not live playback/);
+      assert.equal(vm.runInContext('_nextButton.textContent', context), 'Go explore DJuke');
+    }
+    vm.runInContext('nextTutorialStep();', context);
+  }
+  assert.equal(vm.runInContext('_overlay.hidden', context), true);
+  assert.equal(storage.getItem('decentbusking:tutorial:completed:v1'), null);
+  assert.equal(targets['#djuke-tab'].getAttribute('aria-expanded'), 'true');
+  assert.equal(targets['.djuke-playlist-draft'].open, true);
+  assert.deepEqual(targets['.djuke-playlist-draft'].draft, ['Keep my existing song']);
+  assert.ok(clicks.every(id => id === 'djuke-tab'));
+  assert.equal(clicks.length, 3);
+});
+
+test('playlist card supports backward hops and restores disclosure state on early exit', () => {
+  for (const open of [false, true]) {
+    const { context, targets } = createTutorialContext();
+    targets['.djuke-playlist-draft'].open = open;
+    targets['.djuke-body'].scrollTop = 80;
+    targets['#djuke-tab'].setAttribute('aria-expanded', 'true');
+    vm.runInContext("initTutorial(); startTutorial({ card: 'playlists' }); previousTutorialStep();", context);
+    assert.equal(vm.runInContext('_playlistHop', context), 0);
+    targets['.djuke-body'].scrollTop = 240;
+    vm.runInContext('nextTutorialStep(); previousTutorialStep(); skipTutorial();', context);
+    assert.equal(targets['.djuke-playlist-draft'].open, open);
+    assert.equal(targets['.djuke-body'].scrollTop, 80);
+    assert.equal(targets['#djuke-tab'].getAttribute('aria-expanded'), 'true');
+    vm.runInContext('startTutorial(); _changeStep(8); previousTutorialStep();', context);
+    assert.equal(vm.runInContext('_playlistHop', context), 7);
+    assert.equal(vm.runInContext('TUTORIAL_STEPS[_currentStep].id', context), 'playlists');
+  }
+});
+
+test('Mercury follows the playlist rabbit to each feature and returns when the guide closes', () => {
+  const { context, targets, timerQueue } = createTutorialContext();
+  targets['#djuke-search'].bounds = { left: 100, top: 250, width: 340, height: 38 };
+  vm.runInContext(`
+    window.innerWidth = 1440; window.innerHeight = 1000;
+    window.matchMedia = () => ({ matches: false });
+    initTutorial(); _panel.bounds = { width: 390, height: 450 };
+    startTutorial({ card: 'playlists' });
+  `, context);
+  for (let i = 0; i < 3; i++) {
+    const index = timerQueue.findIndex(Boolean);
+    const fn = timerQueue[index];
+    timerQueue[index] = null;
+    fn();
+  }
+  assert.equal(vm.runInContext('_rabbitAtHome', context), false);
+  assert.equal(vm.runInContext('_mercury.classList.contains("is-following")', context), true);
+  assert.equal(vm.runInContext('_mercury.style.top === _featurePosition.top', context), true);
+  assert.equal(vm.runInContext('_backButton.disabled', context), true);
+  vm.runInContext('skipTutorial();', context);
+  assert.equal(vm.runInContext('_mercury.classList.contains("is-following")', context), false);
+  assert.equal(timerQueue.filter(Boolean).length, 0);
+});
+
+test('payroll links still suppress the general tour and unknown links retain ordinary onboarding', () => {
+  for (const tutorial of ['payroll', 'unknown']) {
+    const { context, timerQueue } = createTutorialContext();
+    vm.runInContext(`window.location = { search: '?tutorial=${tutorial}' }; initTutorial();`, context);
+    assert.equal(vm.runInContext('_overlay.hidden', context), true);
+    assert.equal(timerQueue.filter(Boolean).length, tutorial === 'payroll' ? 0 : 1);
+  }
 });

@@ -374,6 +374,29 @@ cart retains its 50-song cap; only named saves and named checkouts require 1–2
 
 ## Prices and settlement
 
+### Guided playlist tutorial
+
+Share `?tutorial=playlists` on the landing page to open the existing white-rabbit
+tutorial directly at its DJuke playlist card, including for returning visitors.
+The card's eight hops spotlight search, adding songs, draft ordering, Save to
+Profile, Personal Play, Play Live, fund balances, and the radio footer. Mercury
+follows the bunny; reduced motion skips the travel and decorative flow animation.
+The same card appears in the general tour after the DJuke introduction.
+
+The guide opens only the drawer and playlist disclosure. It never edits the draft,
+requests a signature, connects a wallet, buys playback, changes audio, or submits a
+radio request. Fee allocation and radio handoff are explicitly labeled
+illustrations, not live transactions or fabricated station state. Closing early
+restores the prior disclosure/drawer state; finishing the linked guide leaves
+DJuke open without marking the whole site tour complete. No Discord announcement
+is sent by opening or completing the tutorial.
+
+Reuse: this adapts `js/tutorial.js`'s existing rabbit journey, Mercury, surface
+cleanup, and spotlight from `e52f9a7`, rather than introducing another tour engine.
+The separate `js/fund-tour.mjs` payroll guide retains its existing link and modal
+behavior. The receiving-app checks are the tutorial tests plus browser checks of
+the real landing page and playlist controls; no purchase is needed for the tour.
+
 The draft exposes exactly three actions: **Save to Profile** signs and stores a
 named revision without buying playback; **Personal Play** buys the current ordered
 draft in one creator-priced batch, then plays all songs consecutively locally;

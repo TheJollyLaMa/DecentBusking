@@ -4,7 +4,7 @@ Start here: [open DecentBusking](https://thejollylama.github.io/DecentBusking/).
 
 ## Follow The White Rabbit
 
-Look for **Follow the white rabbit** above the radio on the right. The large
+Look for **Follow the white rabbit** in the center of the landing scene. The large
 **☿** Mercury symbol follows the rabbit with a small flying-money icon and
 different musical accessories at every stop. Mercury is a visual companion,
 not a narrator. A white rabbit peeks out of little rabbit holes beside each
@@ -13,20 +13,47 @@ briefcase, Top 10, DVert, DJuke, archive, and both ankh menus, explaining what e
 is for without voting, submitting, connecting a wallet, paying, or starting audio.
 
 Choose **Follow**, **Back**, or **Leave tour** at your own pace. Arrow keys move
-between stops; Escape exits, and Tab stays within the tour controls. On exit,
+between stops when the card has focus; Tab also lets you explore the page. On exit,
 previously open drawers and any visible briefcase draft are restored. Finish any
 pending submission, close other dialogs, and return from VertLoop to main radio
 before starting. Reduced-motion settings keep the rabbit and Mercury still.
 The card count sits beside **Follow the White Rabbit**. A centered hole in the
 card is the rabbit's home: it dives down, emerges beside the highlighted feature
 with a short hop and sparkles, and returns home before the next card appears.
-Navigation pauses briefly during the trip; **Leave tour** and Escape remain
-available. Reduced motion skips the trip and decorative effects.
+Navigation pauses briefly during the trip; **Leave tour** and **Close tutorial**
+remain available. Outside clicks and Escape do not dismiss the tour.
+Reduced motion skips the trip and decorative effects.
 After completing every stop, the landing-page button is hidden in that browser.
 Leaving early does not count as completion. Click **DBusker** to open **About**
 and use the identical **Follow the white rabbit** button to replay the tour.
 Music notes and little sound-wave rings accompany Mercury's arrivals. These are
 visual effects, not extra audio over the radio.
+
+### Build a DJuke playlist with the bunny
+
+[Open the playlist tutorial](https://thejollylama.github.io/DecentBusking/?tutorial=playlists).
+This link opens directly to the playlist card even if you have already completed
+the general tour. The same card is included after DJuke in the full walkthrough.
+Mercury follows the bunny between the real controls:
+
+1. Search for a song or creator and choose a song.
+2. Use **Add selected song** to build a draft of up to 24 songs.
+3. Name the mix, reorder with **↑ / ↓**, or remove a song with **×**.
+4. **Save to Profile** signs and keeps a named revision, without buying playback.
+5. **Personal Play** buys your mix at creator prices for your ears only.
+6. **Play Live** queues it for the community, at the displayed radio tier prices
+   plus $3 per started group of 12 songs. Base network gas is additional.
+7. See how song payments split 90% to musicians/collaborators, 8% to pinning, and
+   2% to development, while the separate radio fee splits 25% each to Playback,
+   Top 10, Pinners, and Development. The radio fee settles after full delivery.
+8. See a labeled illustration of your playlist taking the radio stage after the
+   current song and protected shows. Main paid requests can cut in between songs.
+
+**Follow** and **Back** move through these hops without editing your draft,
+signing, paying, or changing the live radio. Empty/unavailable controls stay
+disabled. The fee-flow and radio illustrations are explanations, not payment
+receipts or a live takeover. Ending this linked guide leaves DJuke open to try;
+leaving early restores the original drawer and playlist disclosure state.
 
 ## Three Names, One Community
 
