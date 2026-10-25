@@ -9,6 +9,12 @@ test('tutorial parses as a browser ES module without duplicate bindings', () => 
   const result = spawnSync(process.execPath, ['--input-type=module', '--check'], {
     input: fs.readFileSync(path.join(__dirname, '../js/tutorial.js'), 'utf8'), encoding: 'utf8',
   });
+
+  test('main and About replay share the same tutorial module instance', () => {
+    const main = fs.readFileSync(path.join(__dirname, '../js/main.js'), 'utf8');
+    const about = fs.readFileSync(path.join(__dirname, '../js/components/about-override.js'), 'utf8');
+    assert.equal(main.match(/tutorial\.js\?v=([^']+)/)[1], about.match(/tutorial\.js\?v=([^']+)/)[1]);
+  });
   assert.equal(result.status, 0, result.stderr);
 });
 
