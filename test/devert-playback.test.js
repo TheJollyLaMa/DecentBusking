@@ -36,6 +36,7 @@ function harness({
   impressions = 0,
   failImpression = false,
   failMusic = false,
+  paused = false,
   balance = 1_000_000_000_000_000_000n,
   workerAddress = address('3'),
   workerMinBalanceWei = 0n,
@@ -71,8 +72,8 @@ function harness({
   let saves = 0;
   const runtime = null;
   return { contract, recorded, musicBatches, impressionCalls, state, resolveCampaignMedia, get saves() { return saves; },
-    workerAddress, workerMinBalanceWei, setBalance(next) { balance = next; }, setSave(fn) { save = fn; }, save: async snapshot => { saves++; await save(snapshot); Object.assign(state, snapshot); return 'ipfs://journal'; },
-    readCampaigns: async () => ({ chainId: 8453, snapshotAt: new Date(NOW).toISOString(), weekId: WEEK_ID,
+    workerAddress, workerMinBalanceWei, setPaused(next) { paused = next; }, setBalance(next) { balance = next; }, setSave(fn) { save = fn; }, save: async snapshot => { saves++; await save(snapshot); Object.assign(state, snapshot); return 'ipfs://journal'; },
+    readCampaigns: async () => ({ chainId: 8453, paused, snapshotAt: new Date(NOW).toISOString(), weekId: WEEK_ID,
       campaigns, market: { slots, seated: Math.min(slots, campaigns.length), lowestSeatedOfferUnits: campaigns[0]?.offerUnits || '0', mainRadioImpressions: impressions } }),
     unused: runtime };
 }
@@ -151,6 +152,25 @@ test('DeVert defers worker-gas-spent reports below threshold and retries after f
   assert.equal(fixture.musicBatches.length, 1);
   assert.equal(fixture.musicBatches[0].length, 10);
   assert.equal(fixture.state.pendingMusicPlayIds.length, 1);
+});
+
+test('paused cutover restores the scheduler without submitting its backlog and resumes after activation', async () => {
+  const fixture = harness({ paused: true });
+  const pending = Array.from({ length: 20 }, (_, index) => id(`paused-song-${index}`));
+  Object.assign(fixture.state, { musicWeekId: WEEK_ID, pendingMusicPlayIds: [...pending], seenMusicPlayIds: [...pending] });
+  fixture.contract.reportCompletedMusicPlays.staticCall = async () => {
+    assert.equal((await fixture.readCampaigns()).paused, false, 'paused reports must never be submitted');
+  };
+  const runtime = await makeRuntime(fixture);
+  assert.equal(fixture.musicBatches.length, 0);
+  assert.deepEqual(runtime.getState().pendingMusicPlayIds, pending);
+  await runtime.recordCompletedMusicPlay({ playId: id('paused-new-song'), audibleMs: 30_000 });
+  assert.equal(fixture.musicBatches.length, 0);
+  assert.equal(fixture.state.pendingMusicPlayIds.length, 21);
+  fixture.setPaused(false);
+  await runtime.recordCompletedMusicPlay({ playId: id('activated-new-song'), audibleMs: 30_000 });
+  assert.deepEqual(fixture.musicBatches, [pending.slice(0, 10), pending.slice(10)]);
+  assert.equal(fixture.state.pendingMusicPlayIds.length, 2);
 });
 
 test('DeVert impression is checkpointed before its chain write and retry uses the same idempotency key', async () => {

@@ -81,6 +81,11 @@ non-advert funding and final fund-beneficiary payouts. It loads on demand from
 
 ## Deployment status
 
+During a paused campaign cutover, the scheduler restores its durable journal
+without submitting queued music reports or deferred work. It can report checkout
+readiness before activation; the frontend still blocks purchases while the
+contract is paused. After activation, normal retries submit the preserved backlog.
+
 - Replacement Base v0.2 queue: [`0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb`](https://basescan.org/address/0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb#code), source verified.
 - Replacement deployment: [`0x48e8c5ce12cefc8a735e9af016d5475ac290db50e2924bba9d54fd9fc58b5240`](https://basescan.org/tx/0x48e8c5ce12cefc8a735e9af016d5475ac290db50e2924bba9d54fd9fc58b5240), block 52723789.
 - Legacy v0.1 queue: [`0x9ebf98367319E6c8b15b5517d808CCfEb3dddA61`](https://basescan.org/address/0x9ebf98367319E6c8b15b5517d808CCfEb3dddA61#code). Its pending count and USDC reserves were verified empty before replacement deployment.

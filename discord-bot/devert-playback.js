@@ -286,6 +286,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
     if (!journal.impressions.some(item => item.state === 'pending')) return false;
     const state = await refreshWorkerGasState({ force });
     if (!state || state.unavailable || state.lowBalance) return false;
+    if ((await readCampaigns()).paused) return false;
     let progressed = false;
     for (const impressionId of journal.impressions.filter(item => item.state === 'pending').map(item => item.impressionId)) {
       const entry = journal.impressions.find(item => item.impressionId === impressionId && item.state === 'pending');
@@ -301,6 +302,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
     const force = Boolean(workerGasState?.lowBalance || workerGasState?.unavailable);
     const state = await refreshWorkerGasState({ force });
     if (!state || state.unavailable || state.lowBalance) return false;
+    if ((await readCampaigns()).paused) return false;
     let progressed = false;
     while (journal.pendingMusicPlayIds.length >= MUSIC_BATCH_SIZE) {
       const flushed = await flushMusicBatch();
