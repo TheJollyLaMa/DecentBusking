@@ -1,4 +1,5 @@
 import { createRadioAnnouncements, deserializeAnnouncements } from './radio-announcements.js';
+import { createCommunityReminder, deserializeCommunityReminders } from './community-reminder.js';
 import { createLiveBookings } from './live-bookings.js';
 // discord-bot/index.js
 // DecentBusking Discord Bot — entry point
@@ -1327,6 +1328,20 @@ async function main() {
     getSchedule: () => ({ ready: liveScheduleReady, schedule: defaultRadioSchedule(liveWeeklySchedule), events: livePerformanceEvents }),
   });
   setInterval(() => { void radioAnnouncements.tick(); }, 15_000).unref();
+  const communityReminderStore = config.pinataJwt ? createPinataStateStore({
+    ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+    filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+    name: 'decentbusking-community-reminders.json', restoreLatestOnly: true,
+    tags: { app: 'decentbusking', kind: 'community-reminders', schema: '1' },
+    serialize: value => value, deserialize: deserializeCommunityReminders,
+    beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined,
+  }) : null;
+  const communityReminder = createCommunityReminder({
+    store: communityReminderStore, siteUrl: config.siteUrl,
+    getClient: () => config.getDiscordClient?.() || client,
+    canAnnounce: () => discordDiagnostics.bot('dbusker').notBefore() <= Date.now(),
+  });
+  setInterval(() => { void communityReminder.tick(); }, 60_000).unref();
   const liveBookingStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage,
     pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
     gateway: config.ipfsGateway, name: 'decentbusking-live-bookings.json',
@@ -1484,6 +1499,7 @@ async function main() {
           ready: paymentLedgerReady,
         },
         discord: { ready: client?.isReady() === true, reason: client?.isReady() ? null : discordOfflineReason,
+          communityReminder: communityReminder.getStatus(),
           diagnostics: discordDiagnostics.report() },
       };
     },

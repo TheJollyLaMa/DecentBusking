@@ -3,7 +3,7 @@ import {
  LIVE_PERFORMANCE_AIRTIME_MINUTES, LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES, LIVE_PERFORMANCE_FEE_UNITS,
  liveAuthorization, liveAcknowledgement, liveBookingRows, livePerformancePayoutBps, bookingGroup, escapeLive, workReference,
 } from './live-bookings.mjs?v=20261024-live-prototype';
-import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261024-live-prototype';
+import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { utcToNewYorkInput } from './radio-calendar.mjs';
 import { isAdminWallet } from './admin-access.mjs';
 import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261024-live-prototype';

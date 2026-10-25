@@ -267,6 +267,41 @@ a New York **Now** line refreshes every 30 seconds without closing the editor.
 **Today · now** returns to the current day/time. The 24-hour timeline scrolls
 vertically; saving or refreshing the calendar preserves its scroll position.
 
+### Monday community poster
+
+Every Monday at **09:00 America/New_York** (EST/EDT automatically), DBusker posts
+one `@everyone` community poster in DecentAgency's **#themessagebox**
+(`943117480883265539`). The first scheduled occurrence is October 26, 2026.
+The original psychedelic artwork is maintained in `img/community-monday.svg`;
+`img/community-monday.png` is the 1200 x 1500 Discord attachment. Rasterize the SVG
+with a standards-compliant browser at its intrinsic resolution after artwork edits;
+inspect the complete PNG before committing it. No image-generation service or
+new runtime dependency is needed.
+
+The poster asks people to check and sync **Public Schedule** in the right ankh
+menu, run DVert adverts/public announcements to fuel the funds, submit radio
+music and invite friends, and listen/vote. A short caption, accessible image
+description, and clickable links accompany it. `?schedule=1` opens the actual
+public schedule, including its calendar subscription controls, without a wallet.
+
+The worker checks its local clock every minute but makes no reminder-related
+Discord requests outside the delivery window. If unavailable at 09:00, it may
+retry until 10:00 New York time; it does not catch up missed weeks later.
+Discord cooldown/reconnect gates and channel permissions (including Attach Files
+and Mention Everyone) are checked before delivery. Durable pending/sent receipts
+use the existing Pinata checkpoint and mirror facilities under
+`decentbusking-community-reminders.json`, separate from radio-show reminders.
+An uncertain delivery is reconciled by its embed footer marker and never blindly
+reposted; an unresolved pending receipt blocks further posts and requires operator
+review of the channel and checkpoint. Logs and
+`/api/radio` → `discord.communityReminder` expose readiness, next run, errors, and
+last delivery. This adds one weekly post, not a Discord ad loop.
+
+Reuse decision: adapt `radio-announcements.js`'s checkpoint-before-send, footer
+reconciliation, permission, and cooldown patterns; reuse `radio-calendar.mjs`'s
+New York conversion helpers and the public schedule's existing subscription UI.
+DecentCalendar's payment-oriented prototype is not needed for this integration.
+
 Each new radio hour lasts 60 minutes. **Part of the default program** repeats
 it weekly, beginning on the selected date; unchecked means it plays once.
 Weekly cards represent the series, so moving/removing one edits the series.

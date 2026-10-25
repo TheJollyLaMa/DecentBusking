@@ -283,10 +283,11 @@ export function initRadioScheduleBoard() {
       status.textContent = `${error.message}. Try refreshing the schedule.`;
     }
   };
-  document.addEventListener('open-radio-schedule', () => {
+  const openSchedule = () => {
     if (!dialog.open) dialog.showModal();
     refresh();
-  });
+  };
+  document.addEventListener('open-radio-schedule', openSchedule);
   document.getElementById('radio-schedule-close')?.addEventListener('click', () => dialog.close());
   document.getElementById('radio-schedule-refresh')?.addEventListener('click', refresh);
   document.addEventListener('radio-schedule-updated', refresh);
@@ -294,6 +295,7 @@ export function initRadioScheduleBoard() {
   document.addEventListener('wallet-disconnected', () => { if (dialog.open) refresh(); });
   document.addEventListener('live-booking-acknowledged', () => { if (dialog.open) refresh(); });
   setInterval(() => { if (dialog.open) refresh(); }, 5 * 60 * 1000);
+  if (new URLSearchParams(window.location.search).get('schedule') === '1') openSchedule();
 }
 
 if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', initRadioScheduleBoard, { once: true });

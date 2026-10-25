@@ -13,7 +13,7 @@ import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261025-seamless-handoff';
 import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artwork-update.mjs';
 import { isAdminWallet } from './admin-access.mjs';
-import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261024-programming-calendar';
+import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261024-programming-calendar';
 import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261024-calendar-fit';
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';

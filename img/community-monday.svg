@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="1500" viewBox="0 0 1200 1500">
+  <title>The world is your village, Busk from home! - DecentBusking community call</title>
+  <desc>A psychedelic Monday poster: check and sync the community calendar, buy ads to fuel the funds and share public announcements, send jams and invite friends, listen and vote.</desc>
+  <defs>
+    <linearGradient id="electric" x1="0" y1="0" x2="1" y2=".5">
+      <stop stop-color="#c7ff00"/><stop offset=".38" stop-color="#39ffe2"/>
+      <stop offset=".7" stop-color="#9a7bff"/><stop offset="1" stop-color="#ff40d9"/>
+    </linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#ff36c9"/><stop offset=".5" stop-color="#ff67f3"/><stop offset="1" stop-color="#a968ff"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2=".5">
+      <stop stop-color="#24f1ff"/><stop offset=".5" stop-color="#75ffe0"/><stop offset="1" stop-color="#3bc6ff"/>
+    </linearGradient>
+    <linearGradient id="lime" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#e4ff30"/><stop offset="1" stop-color="#70ff8d"/>
+    </linearGradient>
+    <radialGradient id="aura">
+      <stop stop-color="#a62dff" stop-opacity=".65"/><stop offset="1" stop-color="#1a0738" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <path id="eyebrow" d="M210 136 Q600 35 990 136"/>
+    <path id="headline" d="M170 290 Q600 125 1030 290"/>
+    <path id="village" d="M150 355 Q600 470 1050 355"/>
+    <path id="home" d="M165 491 Q600 443 1035 491"/>
+    <path id="brand" d="M280 533 Q600 562 920 533"/>
+    <path id="calendar" d="M150 674 C410 574 790 754 1050 654"/>
+    <path id="ad" d="M158 895 C430 995 770 795 1042 895"/>
+    <path id="jams" d="M150 1115 C420 1000 780 1175 1050 1080"/>
+    <path id="vote" d="M170 1293 C420 1400 800 1200 1030 1293"/>
+    <g id="flower">
+      <g fill="url(#electric)" stroke="#a229ff" stroke-width="3">
+        <ellipse cy="-28" rx="15" ry="27"/><ellipse cy="-28" rx="15" ry="27" transform="rotate(60)"/>
+        <ellipse cy="-28" rx="15" ry="27" transform="rotate(120)"/><ellipse cy="-28" rx="15" ry="27" transform="rotate(180)"/>
+        <ellipse cy="-28" rx="15" ry="27" transform="rotate(240)"/><ellipse cy="-28" rx="15" ry="27" transform="rotate(300)"/>
+      </g>
+      <circle r="18" fill="#ff4bd8" stroke="#240c43" stroke-width="3"/>
+      <path d="M-8 4 Q0 12 8 4" fill="none" stroke="#240c43" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="-6" cy="-4" r="2.5" fill="#240c43"/><circle cx="6" cy="-4" r="2.5" fill="#240c43"/>
+    </g>
+    <g id="star" fill="#baff32">
+      <path d="M0-22Q4-4 20 0Q4 4 0 22Q-4 4-20 0Q-4-4 0-22"/>
+    </g>
+    <g id="badge">
+      <circle r="37" fill="#180a32" stroke="#c8ff32" stroke-width="2"/>
+      <circle r="32" fill="none" stroke="#8645cc" stroke-width="1"/>
+    </g>
+    <g id="calendar-icon" fill="none" stroke="#5bffe6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="-20" y="-19" width="40" height="35" rx="6"/>
+      <path d="M-20-7H20M-10-23V-15M10-23V-15M-11 3H-5M3 3H9M-11 10H-5"/>
+      <path d="M6 20C16 29 29 20 25 9M25 9L19 12M25 9L29 15"/>
+    </g>
+    <g id="megaphone-icon" fill="none" stroke="#63ffe4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-21-6L-8-6L15-19V13L-8 2H-21Z" fill="#443073"/>
+      <path d="M-12 3L-7 20H2L-2 5M23-13L28-17M24-3H30M23 7L28 11"/>
+    </g>
+    <g id="funds-icon" fill="none" stroke="#c9ff32" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="-5" cy="15" rx="20" ry="6"/>
+      <path d="M-25 15V22C-20 31 14 31 15 22V15M-25 8C-20 17 10 17 15 10"/>
+      <path d="M3 9V-7M3-5C-14-4-21-13-19-22C-4-24 5-16 3-5ZM3-7C3-20 11-27 23-25C25-12 15-5 3-7Z" fill="#266347"/>
+    </g>
+    <g id="music-icon" fill="none" stroke="#ff65de" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-10 12V-17L19-23V7M-10-9L19-15"/>
+      <ellipse cx="-17" cy="14" rx="8" ry="5" transform="rotate(-20 -17 14)" fill="#ff65de"/>
+      <ellipse cx="12" cy="9" rx="8" ry="5" transform="rotate(-20 12 9)" fill="#ff65de"/>
+    </g>
+    <g id="people-icon" fill="none" stroke="#53ffe2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <circle cy="-12" r="8"/><circle cx="-20" cy="-5" r="6"/><circle cx="20" cy="-5" r="6"/>
+      <path d="M-12 20V12C-12 0 12 0 12 12V20ZM-26 21V12C-26 5-19 3-15 7M26 21V12C26 5 19 3 15 7"/>
+      <path d="M-4 23L0 27L7 20" stroke="#ff65de"/>
+    </g>
+    <g id="headphones-icon" fill="none" stroke="#54ffe4" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-22 5V-3C-22-31 22-31 22-3V5"/>
+      <rect x="-25" y="-1" width="10" height="23" rx="5" fill="#7734a8"/>
+      <rect x="15" y="-1" width="10" height="23" rx="5" fill="#7734a8"/>
+      <path d="M-6 4Q0-7 6 4Q12 12 0 20Q-12 12-6 4Z" fill="#ff55d7" stroke="#ff55d7" stroke-width="2"/>
+    </g>
+    <g id="vote-icon" fill="none" stroke="#caff39" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-12 21V-3L0-12L4-25C14-25 14-12 8-5H23C27-5 28-1 26 4L20 21Z" fill="#482266"/>
+      <path d="M-23-3H-13V22H-23Z"/>
+      <path d="M-7-21L-12-26M18-22L23-27" stroke="#ff55d7"/>
+    </g>
+    <g id="radio-icon" fill="none" stroke="#65ffe8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="-25" y="-14" width="50" height="35" rx="7" fill="#39225d"/>
+      <path d="M-15-14L14-27M-17-5H5"/>
+      <circle cx="-10" cy="8" r="8"/><circle cx="16" cy="-3" r="3" fill="#ff65de"/>
+      <path d="M12 9H20M12 15H20M-11-1V17M-19 8H-2"/>
+    </g>
+  </defs>
+  <rect width="1200" height="1500" fill="#140724"/>
+  <ellipse cx="650" cy="340" rx="620" ry="440" fill="url(#aura)"/>
+  <path d="M0 0H1200V1500H0Z M45 75C220 30 310 85 440 55S780 40 925 55S1145 30 1155 105V1390C1100 1480 970 1440 820 1460S520 1445 370 1460S110 1475 45 1410Z" fill="url(#electric)" fill-rule="evenodd"/>
+  <path d="M0 200C75 115 154 77 168 0H210C191 122 82 176 54 274S115 450 72 550S16 718 57 826S105 1030 52 1164S93 1412 174 1500H91C-2 1387-18 1304 0 1175Z" fill="#bb29ff"/>
+  <path d="M1200 120C1116 184 1090 241 1130 332S1198 504 1150 605S1113 784 1167 879S1190 1099 1139 1215S1114 1410 1058 1500H1110C1185 1389 1164 1319 1200 1255Z" fill="#ff32cd"/>
+  <path d="M34 75C205 15 300 103 447 66S775 41 924 69S1090 28 1166 91V1414C1042 1490 965 1421 805 1453S508 1423 358 1454S111 1473 34 1417Z" fill="none" stroke="#51ffe7" stroke-width="7" filter="url(#glow)"/>
+  <path d="M55 101C218 56 325 127 458 87S770 72 909 94S1096 66 1143 113V1394C1031 1450 924 1398 788 1432S520 1401 368 1430S145 1447 55 1395Z" fill="none" stroke="#ff32cd" stroke-width="4"/>
+  <g fill="none" stroke="#c459ff" stroke-width="2" opacity=".28">
+    <ellipse cx="600" cy="319" rx="468" ry="226" transform="rotate(-14 600 319)"/>
+    <ellipse cx="600" cy="319" rx="490" ry="248" transform="rotate(-14 600 319)"/>
+    <ellipse cx="600" cy="319" rx="512" ry="270" transform="rotate(-14 600 319)"/>
+    <ellipse cx="600" cy="319" rx="534" ry="292" transform="rotate(-14 600 319)"/>
+    <ellipse cx="600" cy="319" rx="556" ry="314" transform="rotate(-14 600 319)"/>
+  </g>
+
+  <path d="M85 592C322 512 524 650 751 601S997 533 1115 590L1100 785C899 852 774 748 570 797S243 788 100 825Z" fill="url(#cyan)" stroke="#ab51ff" stroke-width="7"/>
+  <path d="M100 818C300 735 435 856 621 813S950 763 1100 815L1110 989C893 1050 752 961 553 1000S240 1003 90 1009Z" fill="url(#pink)" stroke="#ab51ff" stroke-width="7"/>
+  <path d="M90 1009C289 955 479 1059 671 1005S951 981 1110 989L1100 1204C880 1262 746 1166 550 1213S250 1204 100 1220Z" fill="url(#lime)" stroke="#ab51ff" stroke-width="7"/>
+  <path d="M100 1220C302 1137 481 1260 674 1210S938 1169 1100 1204L1090 1362C864 1436 744 1340 541 1386S261 1365 105 1381Z" fill="url(#cyan)" stroke="#ab51ff" stroke-width="7"/>
+
+  <g font-family="Georgia,serif" font-weight="bold" text-anchor="middle">
+    <text fill="#76ffe8" font-size="29" letter-spacing="4"><textPath xlink:href="#eyebrow" startOffset="50%">DecentAgency presents</textPath></text>
+    <text fill="url(#electric)" stroke="#bbff7d" stroke-width=".6" filter="url(#glow)" font-size="89" font-style="italic" letter-spacing="-3"><textPath xlink:href="#headline" startOffset="50%" textLength="840" lengthAdjust="spacingAndGlyphs">The world is</textPath></text>
+    <text fill="url(#pink)" stroke="#ff9df0" stroke-width=".6" filter="url(#glow)" font-size="103" font-style="italic" letter-spacing="-3"><textPath xlink:href="#village" startOffset="50%" textLength="850" lengthAdjust="spacingAndGlyphs">your village,</textPath></text>
+    <text fill="url(#electric)" stroke="#bbff7d" stroke-width=".6" filter="url(#glow)" font-size="73" font-style="italic" letter-spacing="-2"><textPath xlink:href="#home" startOffset="50%" textLength="860" lengthAdjust="spacingAndGlyphs">Busk from home!</textPath></text>
+    <text fill="#d0ff43" font-size="28" font-style="italic"><textPath xlink:href="#brand" startOffset="50%">decentbusking.decentagency.eth</textPath></text>
+
+    <text fill="#542652" stroke="#542652" stroke-width=".7" font-size="65" font-style="italic"><textPath xlink:href="#calendar" startOffset="50%" textLength="860" lengthAdjust="spacingAndGlyphs">Come make some plans</textPath></text>
+    <text x="600" y="735" fill="#542652" font-size="30">Community calendar / right ankh / Public Schedule</text>
+    <text x="600" y="776" fill="#542652" font-size="29" font-style="italic">One click to sync it to your own calendar.</text>
+
+    <text fill="#482149" stroke="#482149" stroke-width=".7" font-size="64" font-style="italic"><textPath xlink:href="#ad" startOffset="50%" textLength="860" lengthAdjust="spacingAndGlyphs">Run an ad. Fuel the funds.</textPath></text>
+    <text x="600" y="948" fill="#482149" font-size="30">Your project. Your event. Your public announcement.</text>
+
+    <text fill="#482149" stroke="#482149" stroke-width=".7" font-size="71" font-style="italic"><textPath xlink:href="#jams" startOffset="50%" textLength="880" lengthAdjust="spacingAndGlyphs">Send your jams to the radio</textPath></text>
+    <text x="600" y="1156" fill="#482149" font-size="32" font-style="italic">Bring a friend &amp; invite them to share theirs.</text>
+
+    <text fill="#542652" stroke="#542652" stroke-width=".7" font-size="68" font-style="italic"><textPath xlink:href="#vote" startOffset="50%" textLength="840" lengthAdjust="spacingAndGlyphs">Tune in &amp; vote!</textPath></text>
+    <text x="600" y="1346" fill="#542652" font-size="30">Listen to the songs. Help your discoveries rise.</text>
+  </g>
+
+  <g transform="translate(146 157) rotate(-15) scale(1.3)"><use xlink:href="#badge"/><use xlink:href="#radio-icon"/></g>
+  <g transform="translate(1042 177) rotate(15) scale(1.3)"><use xlink:href="#badge"/><use xlink:href="#headphones-icon"/></g>
+  <use xlink:href="#flower" transform="translate(150 495) rotate(-12) scale(.75)"/>
+  <use xlink:href="#flower" transform="translate(1050 487) rotate(12) scale(.85)"/>
+  <use xlink:href="#star" transform="translate(287 149) scale(.7)"/>
+  <use xlink:href="#star" transform="translate(920 132)"/>
+  <use xlink:href="#star" transform="translate(83 363) scale(.7)"/>
+  <use xlink:href="#star" transform="translate(1108 380)"/>
+  <use xlink:href="#star" transform="translate(600 167) scale(.8)"/>
+  <g transform="translate(113 711) rotate(-9)"><use xlink:href="#badge"/><use xlink:href="#calendar-icon"/></g>
+  <g transform="translate(1086 714) rotate(9)"><use xlink:href="#badge"/><use xlink:href="#calendar-icon"/></g>
+  <g transform="translate(113 932) rotate(-12)"><use xlink:href="#badge"/><use xlink:href="#megaphone-icon"/></g>
+  <g transform="translate(1084 930) rotate(10)"><use xlink:href="#badge"/><use xlink:href="#funds-icon"/></g>
+  <g transform="translate(113 1138) rotate(-12)"><use xlink:href="#badge"/><use xlink:href="#people-icon"/></g>
+  <g transform="translate(1086 1138) rotate(12)"><use xlink:href="#badge"/><use xlink:href="#music-icon"/></g>
+  <g transform="translate(113 1338) rotate(-12)"><use xlink:href="#badge"/><use xlink:href="#headphones-icon"/></g>
+  <g transform="translate(1084 1334) rotate(12)"><use xlink:href="#badge"/><use xlink:href="#vote-icon"/></g>
+  <g fill="none" stroke="#59ffe3" stroke-width="5" stroke-linecap="round" filter="url(#glow)">
+    <path d="M218 469C152 462 149 405 186 405C219 405 217 443 197 442"/>
+    <path d="M984 429C1043 426 1039 364 1002 369C976 373 979 403 997 400"/>
+  </g>
+</svg>
