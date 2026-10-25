@@ -3,6 +3,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { spawnSync } = require('node:child_process');
+
+test('tutorial parses as a browser ES module without duplicate bindings', () => {
+  const result = spawnSync(process.execPath, ['--input-type=module', '--check'], {
+    input: fs.readFileSync(path.join(__dirname, '../js/tutorial.js'), 'utf8'), encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+});
 
 const tutorialSource = fs.readFileSync(path.join(__dirname, '../js/tutorial.js'), 'utf8')
   .replace(/^export /gm, '');

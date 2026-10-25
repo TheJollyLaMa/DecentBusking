@@ -1011,25 +1011,6 @@ function _renderPlaylistIllustration(kind) {
   _illustration.append(label, flow);
 }
 
-function _renderPlaylistIllustration(kind) {
-  _illustration.replaceChildren();
-  _illustration.hidden = !kind;
-  if (!kind) return;
-  const label = document.createElement('strong');
-  label.textContent = kind === 'funds' ? 'Illustration: $3 radio fee → four funds' : 'Illustration only — not live playback';
-  const flow = document.createElement('div');
-  flow.className = 'tutorial-playlist-flow';
-  const labels = kind === 'funds'
-    ? ['25% Playback', '25% Top 10', '25% Pinners', '25% Development']
-    : ['Current song →', 'Your playlist →', 'Radio rotation'];
-  labels.forEach(text => {
-    const item = document.createElement('span');
-    item.textContent = text;
-    flow.append(item);
-  });
-  _illustration.append(label, flow);
-}
-
 function _cancelAutoLaunch() {
   if (_autoLaunchTimer) {
     clearTimeout(_autoLaunchTimer);
