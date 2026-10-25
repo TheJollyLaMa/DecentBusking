@@ -13,8 +13,8 @@ no private key).
 | DJuke sponsored playlist module | `0x093d2dbCcBA612d2B2aD9B620cA4d0A03D98fE11` | Immutable v0.5 module; $1 fee release per fourth delivery, unreleased-fee refunds | `DecentMarket/contracts/DJukeSponsoredPlaylistModule.sol` |
 | DJuke v0.4 (retired, requests paused) | `0xBBCb7F7369978cbdc32C6719B1d24B07f3d55619` | Drained before v0.5 migration; historical receipts retain their original refund terms | `DecentMarket/contracts/DecentJukeBox_v0.4.sol` |
 | DJuke v0.3 (retired) | `0x5d07489163feBCdB39C9F579CCC36dff5A067FF9` | Legacy song requests and listen purchases | `DecentJukeBox_v0.3.sol` (published on Basescan) |
-| DeVert v0.2 (deployed, activation pending) | `0xc73c9623C6E8E9c43872b1883ae4A290F2BAdD6F` | USDC-only campaigns, platform-funded worker; unchanged 45/45/8/2 routing | `DecentMarket/contracts/DeVert_v0.2.sol` |
-| DVert paid queue v0.2 (replacement, activation pending) | `0x3A771295af7F15B68c53251683916b65440eD8d3` | Two-tier priority for v0.2 campaigns | `DecentMarket/contracts/DeVertQueue_v0.2.sol` |
+| DeVert v0.2 (live) | `0xc73c9623C6E8E9c43872b1883ae4A290F2BAdD6F` | USDC-only campaigns, platform-funded worker; unchanged 45/45/8/2 routing | `DecentMarket/contracts/DeVert_v0.2.sol` |
+| DVert paid queue v0.2 (live replacement) | `0x3A771295af7F15B68c53251683916b65440eD8d3` | Two-tier priority for v0.2 campaigns | `DecentMarket/contracts/DeVertQueue_v0.2.sol` |
 | DeVert v0.1 (retired, paused) | `0x135Cbc573F87637158eb3186C87c584fb0B34CD9` | Historical campaign purchases (45/45/8/2); original ETH contribution retained in old receipts | `DecentMarket/contracts/DeVert_v0.1.sol` |
 | DVert paid queue v0.2 (legacy, paused) | `0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb` | Drained prior to campaign-contract replacement; retain historical receipts | `DecentMarket/contracts/DeVertQueue_v0.2.sol` |
 | DecentNFT v0.3 | `0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3` | Song DNFT collection | `DecentMarket/contracts/DecentNFT_v0.3.sol` |
