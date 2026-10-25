@@ -6,6 +6,8 @@ const ADDRESS_BOOK = [
   { address: '0xBBCb7F7369978cbdc32C6719B1d24B07f3d55619', label: '📜 DJuke v0.4', kind: 'contract' },
   { address: '0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51', label: '📜 DJuke v0.5', kind: 'contract' },
   { address: '0x135Cbc573F87637158eb3186C87c584fb0B34CD9', label: '📜 DeVert v0.1', kind: 'contract' },
+  { address: '0xc73c9623C6E8E9c43872b1883ae4A290F2BAdD6F', label: '📜 DeVert v0.2', kind: 'contract' },
+  { address: '0x3A771295af7F15B68c53251683916b65440eD8d3', label: '📜 DVert paid queue v0.2 (sponsored campaigns)', kind: 'contract' },
   { address: '0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb', label: '📜 DVert paid queue v0.2', kind: 'contract' },
   { address: '0x64D5aDc50E5513975EfF7e9ba366B7eE58586fa3', label: 'DecentNFT v0.3', kind: 'contract' },
   { address: '0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B', label: 'DecentNFT v0.2', kind: 'contract' },

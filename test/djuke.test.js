@@ -18,7 +18,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /djuke\.mjs\?v=20261025-seamless-handoff/);
-  assert.match(html, /devert-site\.mjs\?v=20261025-seamless-handoff/);
+  assert.match(html, /devert-site\.mjs\?v=20261024-devert-sponsored/);
   const adapter = fs.readFileSync(path.join(__dirname, '../js/devert-site.mjs'), 'utf8');
   assert.match(adapter, /devert-paid-queue\.mjs\?v=20261024-widget/);
 });
