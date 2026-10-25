@@ -138,6 +138,30 @@ test('DeVert reader includes a still-active campaign indexed from the previous w
   assert.equal(snapshot.campaigns[0].weekId, WEEK_ID - 1);
 });
 
+test('sponsored campaign snapshots verify contract version and gate checkout on platform ETH', async () => {
+  const { createDevertCampaignReader } = await import('../discord-bot/devert.js');
+  for (const balance of [999_999_999_999_999n, 1_000_000_000_000_000n]) {
+    const provider = fakeProvider();
+    provider.getBalance = async address => {
+      assert.equal(address, `0x${'33'.repeat(20)}`);
+      return balance;
+    };
+    const contract = { ...fakeContract(), CONTRACT_VERSION: async () => '0.2',
+      schedulerWallet: async () => `0x${'33'.repeat(20)}` };
+    const read = createDevertCampaignReader({ contractAddress: `0x${'22'.repeat(20)}`,
+      provider, contract, version: '0.2' });
+    const result = await read();
+    assert.equal(result.version, '0.2');
+    assert.equal(result.workerFunding.available, balance >= 1_000_000_000_000_000n);
+    assert.equal(result.workerFunding.balanceWei, balance.toString());
+    contract.CONTRACT_VERSION = async () => '0.1';
+    await assert.rejects(read(), /version mismatch/);
+    contract.CONTRACT_VERSION = async () => '0.2';
+    provider.getBalance = async () => { throw new Error('RPC unavailable'); };
+    await assert.rejects(read(), /RPC unavailable/);
+  }
+});
+
 test('DeVert reader rejects wrong-chain and reorged snapshots', async () => {
   const { createDevertCampaignReader } = await import('../discord-bot/devert.js');
   const wrongChain = createDevertCampaignReader({

@@ -66,6 +66,8 @@ export function createFundLedger({
   const paidAdQueues = new Map();
   const legacyAdAddress = '0x9ebf98367319e6c8b15b5517d808ccfeb3ddda61';
   paidAdQueues.set(legacyAdAddress, new Contract(legacyAdAddress, devertQueueAbi(1), provider));
+  const previousAdQueue = '0xe54609f022a8d760417e7cc0eea6360b6e1d11bb';
+  paidAdQueues.set(previousAdQueue, new Contract(previousAdQueue, devertQueueAbi(2), provider));
   if (paidAdAddress) paidAdQueues.set(paidAdAddress,
     new Contract(paidAdAddress, devertQueueAbi(config.devertQueueVersion ?? 1), provider));
 
@@ -126,14 +128,17 @@ export function createFundLedger({
         payer: request.payer, advertiser: request.advertiser,
         ...(request.tier !== undefined ? { priorityTier: Number(request.tier) } : {}) };
     }
-    const devertContract = normalizeKnownAddress(config.devertContractAddress || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9');
+    const devertContracts = new Set([
+      normalizeKnownAddress('0x135Cbc573F87637158eb3186C87c584fb0B34CD9'),
+      normalizeKnownAddress(config.devertContractAddress || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9'),
+    ]);
     const djukeContract = normalizeKnownAddress(config.djukeContractAddress || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9');
     const devert = snapshots.devert ?? await (readDevertState ? readDevertState().catch(() => null) : Promise.resolve(null));
     const djuke = snapshots.djuke ?? await (readDjukeState ? readDjukeState().catch(() => null) : Promise.resolve(null));
     let campaign = devert?.campaigns?.find(item =>
       (txHash && normalizeAddress(item.txHash || item.purchaseTxHash || item.transactionHash || item.eventTxHash) === txHash) ||
       (normalizeAddress(item.advertiser) === funder && toBigIntString(item.paidUnits) === amount));
-    if (!campaign && funder === devertContract && typeof provider.getTransactionReceipt === 'function') {
+    if (!campaign && devertContracts.has(funder) && typeof provider.getTransactionReceipt === 'function') {
       let receipt = receiptCache.get(txHash);
       if (!receipt) {
         receipt = await provider.getTransactionReceipt(txHash);
@@ -141,7 +146,7 @@ export function createFundLedger({
         receiptCache.set(txHash, receipt);
       }
       // CampaignCreated follows its routed deposits, including when a smart wallet buys several campaigns.
-      const created = receipt.logs.find(logEntry => normalizeAddress(logEntry.address) === devertContract &&
+      const created = receipt.logs.find(logEntry => normalizeAddress(logEntry.address) === funder &&
         logEntry.topics[0] === CAMPAIGN_TOPIC && Number(logEntry.index ?? logEntry.logIndex) > entry.logIndex);
       if (created) {
         const { args } = campaignInterface.parseLog(created);
@@ -150,7 +155,7 @@ export function createFundLedger({
         log.warn(`[fund-ledger] No campaign purchase event found for ${txHash}:${entry.logIndex}`);
       }
     }
-    if (funder === devertContract || campaign) {
+    if (devertContracts.has(funder) || campaign) {
       return {
         ...entry,
         slug: fund.slug,

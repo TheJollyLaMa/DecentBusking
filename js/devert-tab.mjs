@@ -104,6 +104,7 @@ async function getSchedulerTopUpQuote(signer, contract, advertiser, weeks = 1) {
 }
 
 export const DEVERT_BROWSER_ABI = [
+  'function CONTRACT_VERSION() view returns(string)',
   'function campaignWeek(uint256 timestamp) pure returns(uint64)',
   'function quoteCampaign(uint64 weekId) view returns(uint128 minimumOfferUnits,uint256 bumpedCampaignId)',
   'function quoteSchedulerGasTopUp(uint256 maxFeePerGas) pure returns(uint256)',
@@ -117,8 +118,12 @@ export const DEVERT_USDC_ABI = [
 ];
 export const DEVERT_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
-export async function purchaseDevertCampaign({ signer, contract, usdc, title, audioURI, weeks, readCampaigns, onStep = () => {}, onConfirmed = announcePaymentCelebration }) {
+export async function purchaseDevertCampaign({ signer, contract, usdc, title, audioURI, weeks, readCampaigns,
+  contractVersion = '0.1', onStep = () => {}, onConfirmed = announcePaymentCelebration }) {
+  if (!['0.1', '0.2'].includes(contractVersion)) throw new Error('Unsupported campaign contract version');
+  const sponsored = contractVersion === '0.2';
   await ensureBaseNetwork(signer.provider);
+  if (sponsored && await contract.CONTRACT_VERSION() !== contractVersion) throw new Error('Campaign contract version mismatch');
   if (usdc.target.toLowerCase() !== DEVERT_USDC_ADDRESS.toLowerCase() || Number(await usdc.decimals()) !== 6) {
     throw new Error('Configured token is not native Base USDC');
   }
@@ -140,20 +145,24 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
     const current = await readCampaigns();
     if (current.chainId !== 8453 || current.contractAddress?.toLowerCase() !== contract.target.toLowerCase() ||
       !Array.isArray(current.campaigns)) throw new Error('Campaign availability could not be verified for the configured Base contract');
+    if (sponsored && (current.version !== contractVersion || current.paused !== false || current.checkout?.available !== true)) {
+      throw new Error(current.checkout?.reason || 'Campaign checkout availability could not be verified');
+    }
     const existing = activeDevertCampaign(current.campaigns, advertiser, mediaUri);
     if (existing) throw new Error(`This advert already has a paid campaign until ${new Date(existing.expiresAt).toLocaleString()}. Removing it from playback does not end its paid term.`);
   };
   await checkExisting();
   if (await usdc.balanceOf(advertiser) < offerUnits) throw new Error('Insufficient Base USDC balance');
-  let gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser, weeks);
+  let gasQuote = sponsored ? { overrides: {} } : await getSchedulerTopUpQuote(signer, contract, advertiser, weeks);
   if (await usdc.allowance(advertiser, contract.target) < offerUnits) {
-    onStep(`${approvalNotice(formatUsdc(offerUnits.toString()))} Estimated worker-gas top-up ${formatEth(gasQuote.amount)} plus transaction gas`);
+    onStep(sponsored ? approvalNotice(formatUsdc(offerUnits.toString()))
+      : `${approvalNotice(formatUsdc(offerUnits.toString()))} Estimated worker-gas top-up ${formatEth(gasQuote.amount)} plus transaction gas`);
     const approval = await usdc.approve(contract.target, offerUnits);
     if ((await approval.wait())?.status !== 1) throw new Error('USDC approval did not confirm');
     onStep('Confirming approval…');
     await waitForAllowance(usdc, advertiser, contract.target, offerUnits);
   }
-  gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser, weeks);
+  if (!sponsored) gasQuote = await getSchedulerTopUpQuote(signer, contract, advertiser, weeks);
   await checkExisting();
   onStep(`Creating campaign…`);
   await retryMissingRevertData(
@@ -163,7 +172,8 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
       await waitForAllowance(usdc, advertiser, contract.target, offerUnits);
     },
   );
-  onStep(`Confirm the ${weeks}-week campaign purchase: ${formatUsdc(offerUnits.toString())} plus ${formatEth(gasQuote.amount)} worker-gas top-up; transaction gas is separate`);
+  onStep(sponsored ? `Confirm the campaign purchase: ${formatUsdc(offerUnits.toString())} plus normal Base network gas only`
+    : `Confirm the ${weeks}-week campaign purchase: ${formatUsdc(offerUnits.toString())} plus ${formatEth(gasQuote.amount)} worker-gas top-up; transaction gas is separate`);
   const transaction = await contract.createCampaign(campaignTitle, mediaUri, offerUnits, maxPaymentUnits, gasQuote.overrides);
   onStep('Waiting for Base confirmation…');
   if ((await transaction.wait(2))?.status !== 1) throw new Error('Campaign purchase did not confirm');
@@ -172,7 +182,8 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
     txHash: transaction.hash,
     amountText: formatUsdc(offerUnits.toString()),
     assetText: 'USDC',
-    summary: `Campaign purchase confirmed · ${formatEth(gasQuote.amount)} worker-gas ETH included`,
+    summary: sponsored ? 'Campaign purchase confirmed'
+      : `Campaign purchase confirmed · ${formatEth(gasQuote.amount)} worker-gas ETH included`,
     txLabel: 'Campaign purchase confirmed',
   });
   return transaction.hash;
@@ -405,17 +416,21 @@ export function initDevertTab(environment = {}) {
     const wallet = window._wallet;
     const confirmedContract = !!address && !!snapshot && snapshot.contractAddress?.toLowerCase() === address.toLowerCase();
     const verifiedContract = confirmedContract && snapshot.paused === false;
+    const sponsored = window.DecentConfig?.devertContractVersion === '0.2';
+    const fundingAvailable = !sponsored || snapshot?.version === '0.2' && snapshot.checkout?.available === true;
     const weeksValue = Number(document.getElementById('devert-weeks')?.value || 1);
     const weeks = Number.isSafeInteger(weeksValue) && weeksValue > 0 ? weeksValue : 1;
     const totalUnits = 5_000_000n * BigInt(weeks);
     const campaignTotal = document.getElementById('devert-campaign-total');
     purchaseForm.hidden = !verifiedContract;
-    purchaseButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || purchaseBusy;
+    purchaseButton.disabled = !verifiedContract || !fundingAvailable || !wallet?.signer || wallet.chainId !== 8453 || purchaseBusy;
     adMediaQueueButton.disabled = !verifiedContract || !wallet?.signer || wallet.chainId !== 8453 || adMediaBusy || !adMediaFile.files?.[0];
-    if (campaignTotal) campaignTotal.textContent = `Total: ${weeks} × 5.00 USDC = ${formatUsdc(totalUnits.toString())} + worker-gas ETH`;
+    if (campaignTotal) campaignTotal.textContent = `Total: ${weeks} × 5.00 USDC = ${formatUsdc(totalUnits.toString())}${
+      sponsored ? ' + normal Base network gas only' : ' + worker-gas ETH'}`;
     if (!address) minimumOffer.textContent = 'Campaigns unavailable';
     else if (confirmedContract && snapshot.paused) minimumOffer.textContent = 'Campaign purchases paused';
     else if (!verifiedContract) minimumOffer.textContent = 'Connecting…';
+    else if (!fundingAvailable) minimumOffer.textContent = snapshot.checkout?.reason || 'Campaign checkout availability could not be verified';
     else if (!wallet?.address) minimumOffer.textContent = 'Connect in the page header to submit an ad';
     else if (wallet.chainId !== 8453) minimumOffer.textContent = 'Switch to Base';
     else minimumOffer.textContent = '';
@@ -550,6 +565,7 @@ export function initDevertTab(environment = {}) {
       const hash = await purchaseDevertCampaign({ signer, contract, usdc,
         title: selectedAd.title,
         audioURI: `ipfs://${selectedAd.ipfsCid}`,
+        contractVersion: window.DecentConfig?.devertContractVersion || '0.1',
         weeks, readCampaigns: async () => {
           const response = await fetch(`${window.DecentConfig.ipfsUploadServiceUrl.replace(/\/$/, '')}/api/devert`,
             { cache: 'no-store', signal: AbortSignal.timeout(12_000) });

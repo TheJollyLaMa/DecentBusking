@@ -183,6 +183,59 @@ test('DeVert purchase rejects insufficient top-up ETH before prompting for USDC 
   assert.deepEqual(state.calls.purchases, []);
 });
 
+function sponsoredFixture(options) {
+  const state = fixture(options);
+  state.contractVersion = '0.2';
+  state.contract.CONTRACT_VERSION = async () => '0.2';
+  state.readCampaigns = async () => ({ chainId: 8453, contractAddress: CONTRACT_ADDRESS, campaigns: [],
+    version: '0.2', paused: false, checkout: { available: true } });
+  return state;
+}
+
+test('sponsored DVert pays only USDC and network gas, without estimating or attaching a worker contribution', async () => {
+  const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
+  const state = sponsoredFixture({ nativeBalance: 1n });
+  state.signer.provider.getBalance = async () => { throw new Error('must not require a worker contribution from the buyer'); };
+  state.contract.quoteSchedulerGasTopUp = async () => { throw new Error('must not quote a worker contribution'); };
+  await purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio', weeks: 1,
+    onStep: text => state.calls.steps.push(text) });
+  assert.deepEqual(state.calls.approvals, [5_000_000n]);
+  assert.deepEqual(state.calls.simulations[0][4], {});
+  assert.deepEqual(state.calls.purchases[0][4], {});
+  assert.ok(state.calls.steps.some(text => /normal Base network gas only/.test(text)));
+  assert.ok(state.calls.steps.every(text => !/worker-gas top-up/.test(text)));
+});
+
+test('sponsored checkout fails closed before approval for a legacy contract or unavailable scheduler', async () => {
+  const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
+  for (const failure of ['version', 'funding', 'snapshot']) {
+    const state = sponsoredFixture();
+    if (failure === 'version') state.contract.CONTRACT_VERSION = async () => '0.1';
+    else {
+      const read = state.readCampaigns;
+      state.readCampaigns = async () => ({ ...await read(),
+        ...(failure === 'snapshot' ? { version: '0.1' } : { checkout: { available: false, reason: 'Platform worker needs funding' } }) });
+    }
+    await assert.rejects(purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio', weeks: 1 }),
+      /version mismatch|availability could not be verified|Platform worker needs funding/);
+    assert.equal(state.calls.approvals.length, 0);
+    assert.equal(state.calls.purchases.length, 0);
+  }
+});
+
+test('sponsored scheduler readiness is checked again after approval before sending a campaign purchase', async () => {
+  const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
+  const state = sponsoredFixture();
+  const read = state.readCampaigns;
+  let checks = 0;
+  state.readCampaigns = async () => ({ ...await read(),
+    checkout: { available: ++checks === 1, reason: 'Platform worker needs funding' } });
+  await assert.rejects(purchaseDevertCampaign({ ...state, title: 'Campaign', audioURI: 'ipfs://bafy-audio', weeks: 1 }),
+    /Platform worker needs funding/);
+  assert.equal(state.calls.approvals.length, 1);
+  assert.equal(state.calls.purchases.length, 0);
+});
+
 test('DeVert purchase uses the legacy gasPrice quote when maxFeePerGas is unavailable', async () => {
   const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
   const state = fixture({ allowance: 5_000_000n });

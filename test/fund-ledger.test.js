@@ -140,15 +140,39 @@ function makeProvider({ head, logs, txFrom }) {
   };
 }
 
-for (const version of [1, 2, 'legacy']) {
+test('replacement campaign indexing retains legacy campaign purchases after the address cutover', async () => {
+  const { createFundLedger } = await import(url);
+  const replacement = `0x${'3'.repeat(40)}`;
+  const buyer = `0x${'1'.repeat(40)}`;
+  const hashes = [`0x${'a'.repeat(64)}`, `0x${'b'.repeat(64)}`];
+  const logs = [makeLog(funds.top10, devertContract, 2_250_000n, hashes[0], 10, 1),
+    makeLog(funds.top10, replacement, 2_250_000n, hashes[1], 11, 1)];
+  const provider = makeProvider({ head: 11, logs, txFrom: new Map() });
+  provider.getTransactionReceipt = async hash => ({ status: 1, logs: [
+    makeCampaignLog(hash === hashes[0] ? 2 : 1, buyer, 3, hash === hashes[0] ? devertContract : replacement),
+  ] });
+  const ledger = createFundLedger({ provider, router: makeRouter(logs, new Map()), startBlock: 10,
+    config: { routerAddress, devertContractAddress: replacement, radioFunds: { topTen: funds.top10 },
+      assets: { USDC: { address: usdc } } } });
+  await ledger.initialize();
+  const sources = (await ledger.getCurrentState()).funds[funds.top10].sources;
+  assert.equal(sources.length, 2);
+  assert.ok(sources.every(source => source.kind === 'advert' && source.advertiser === buyer));
+  assert.deepEqual(sources.map(source => source.campaignId).sort(), ['1', '2']);
+});
+
+for (const version of [1, 2, 'legacy', 'previous-v2']) {
 test(`paid advert ${version} settlements identify request, payer and campaign rather than generic sponsor deposits`, async () => {
   const { createFundLedger } = await import(url);
   const { devertQueueAbi } = await import('../js/devert-queue.mjs');
-  const queue = version === 'legacy' ? '0x9ebf98367319e6c8b15b5517d808ccfeb3ddda61' : `0x${'3'.repeat(40)}`;
+  const previous = version === 'legacy' || version === 'previous-v2';
+  const queue = version === 'legacy' ? '0x9ebf98367319e6c8b15b5517d808ccfeb3ddda61'
+    : version === 'previous-v2' ? '0xe54609f022a8d760417e7cc0eea6360b6e1d11bb' : `0x${'3'.repeat(40)}`;
   const payer = `0x${'1'.repeat(40)}`;
   const advertiser = `0x${'2'.repeat(40)}`;
   const txHash = `0x${'a'.repeat(64)}`;
-  const paidInterface = new Interface(devertQueueAbi(version === 'legacy' ? 1 : version));
+  const queueVersion = version === 'legacy' ? 1 : version === 'previous-v2' ? 2 : version;
+  const paidInterface = new Interface(devertQueueAbi(queueVersion));
   const logs = [makeLog(funds.top10, queue, 450000n, txHash, 10, 1)];
   const provider = makeProvider({ head: 10, logs, txFrom: new Map() });
   provider.getTransactionReceipt = async () => {
@@ -159,12 +183,12 @@ test(`paid advert ${version} settlements identify request, payer and campaign ra
     assert.equal(transaction.to.toLowerCase(), queue);
     assert.equal(paidInterface.decodeFunctionData('getRequest', transaction.data)[0], 8n);
     const request = [9n, payer, 1000000n, 1, 'Paid advert', 'ipfs://ad', advertiser];
-    if (version === 2) request.push(1);
+    if (queueVersion === 2) request.push(1);
     return paidInterface.encodeFunctionResult('getRequest', [request]);
   };
   const ledger = createFundLedger({ provider, router: makeRouter(logs, new Map()), startBlock: 10,
-    config: { routerAddress, devertQueueContractAddress: version === 'legacy' ? `0x${'4'.repeat(40)}` : queue,
-      devertQueueVersion: version === 'legacy' ? 2 : version, radioFunds: { topTen: funds.top10 },
+    config: { routerAddress, devertQueueContractAddress: previous ? `0x${'4'.repeat(40)}` : queue,
+      devertQueueVersion: previous ? 2 : version, radioFunds: { topTen: funds.top10 },
       assets: { USDC: { address: usdc } } } });
   await ledger.initialize();
   const source = (await ledger.getCurrentState()).funds[funds.top10].sources[0];
@@ -174,7 +198,7 @@ test(`paid advert ${version} settlements identify request, payer and campaign ra
   assert.equal(source.advertiser, advertiser);
   assert.equal(source.requestId, '8');
   assert.equal(source.campaignId, '9');
-  if (version === 2) assert.equal(source.priorityTier, 1);
+  if (queueVersion === 2) assert.equal(source.priorityTier, 1);
 });
 }
 

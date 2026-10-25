@@ -564,6 +564,7 @@ async function main() {
     ? createCheckpointMirror({ secret: process.env.CHECKPOINT_MIRROR_SECRET }) : null;
   const devertSchedulerPrivateKey = resolveDevertSchedulerPrivateKey();
   let readDevertState;
+  let devertSchedulerReady = false;
   let devertRemovals;
   if (process.env.DEVERT_CONTRACT_ADDRESS) {
     try {
@@ -571,11 +572,14 @@ async function main() {
         provider: getRpcRouter().provider('read', 'devert-reader'),
         contractAddress: process.env.DEVERT_CONTRACT_ADDRESS,
         confirmations: Number(process.env.DEVERT_CONFIRMATIONS || 2),
+        version: process.env.DEVERT_CONTRACT_VERSION || '0.1',
       });
       if (config.pinataJwt) {
+        const removalKind = process.env.DEVERT_CONTRACT_VERSION === '0.2'
+          ? `devert-removals-${process.env.DEVERT_CONTRACT_ADDRESS.toLowerCase()}` : 'devert-removals';
         const removalStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
           filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
-          name: 'decentbusking-devert-removals.json', tags: { app: 'decentbusking', kind: 'devert-removals', schema: '1' },
+          name: `decentbusking-${removalKind}.json`, tags: { app: 'decentbusking', kind: removalKind, schema: '1' },
           serialize: value => value, deserialize: value => value });
         devertRemovals = createDevertRemovals(removalStore);
         await initializeDevertPlaybackWithRetry({ initialize: () => devertRemovals.initialize() });
@@ -583,7 +587,11 @@ async function main() {
       const readChainCampaigns = readDevertState;
       readDevertState = async () => {
         const snapshot = await readChainCampaigns();
-        return { ...snapshot, campaigns: snapshot.campaigns.map(campaign => ({
+        return { ...snapshot, ...(snapshot.version === '0.2' ? {
+          checkout: { available: devertSchedulerReady && snapshot.workerFunding.available,
+            reason: !devertSchedulerReady ? 'Campaign scheduler is not ready. Please try again shortly.'
+              : snapshot.workerFunding.reason },
+        } : {}), campaigns: snapshot.campaigns.map(campaign => ({
           ...campaign, removed: devertRemovals ? devertRemovals.isRemoved(campaign.campaignId) : false,
         })) };
       };
@@ -594,12 +602,22 @@ async function main() {
   if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt) {
     const scheduler = new Wallet(devertSchedulerPrivateKey, getRpcRouter().provider('critical', 'devert-scheduler'));
     const contract = new Contract(process.env.DEVERT_CONTRACT_ADDRESS, DEVERT_ABI, scheduler);
+    if (process.env.DEVERT_CONTRACT_VERSION === '0.2') {
+      const djukeWorker = new Contract(process.env.DJUKE_CONTRACT_ADDRESS, ['function gasWorker() view returns(address)'], scheduler.provider);
+      const expected = await contract.schedulerWallet();
+      if (expected.toLowerCase() !== scheduler.address.toLowerCase() ||
+          (await djukeWorker.gasWorker()).toLowerCase() !== scheduler.address.toLowerCase()) {
+        throw new Error('Sponsored DVert must use the shared, admin-monitored DJuke worker');
+      }
+    }
     _devertSchedulerContract = contract;
     const workerMinBalanceWei = process.env.WORKER_MIN_BALANCE_WEI
       ? BigInt(process.env.WORKER_MIN_BALANCE_WEI) : DEFAULT_WORKER_MIN_BALANCE_WEI;
+    const schedulerJournalKind = process.env.DEVERT_CONTRACT_VERSION === '0.2'
+      ? `devert-main-radio-${process.env.DEVERT_CONTRACT_ADDRESS.toLowerCase()}` : 'devert-main-radio';
     const journalStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
-      filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-devert-main-radio.json',
-      tags: { app: 'decentbusking', kind: 'devert-main-radio', schema: '1' }, serialize: value => value,
+      filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: `decentbusking-${schedulerJournalKind}.json`,
+      tags: { app: 'decentbusking', kind: schedulerJournalKind, schema: '1' }, serialize: value => value,
       deserialize: value => value });
     _devertPlaybackRuntime = createDevertPlaybackRuntime({ contract, provider: scheduler.provider,
       restore: journalStore.restore, save: journalStore.save, readCampaigns: readDevertState,
@@ -609,7 +627,10 @@ async function main() {
       }), isCampaignRemoved: campaignId => devertRemovals ? devertRemovals.isRemoved(campaignId) : false });
     _devertPlaybackInitialization = initializeDevertPlaybackWithRetry({
       initialize: () => _devertPlaybackRuntime.initialize(),
-    }).then(() => console.log(`[devert] Durable scheduler journal ready; scheduler ${scheduler.address}.`));
+    }).then(() => {
+      devertSchedulerReady = true;
+      console.log(`[devert] Durable scheduler journal ready; scheduler ${scheduler.address}.`);
+    });
   } else if (process.env.DEVERT_CONTRACT_ADDRESS) {
     console.warn('[devert] Campaign reads are configured, but audio scheduling is disabled until a DeVert/DJuke worker key and PINATA_JWT are available.');
   }
@@ -958,7 +979,8 @@ async function main() {
   const fundLedger = createFundLedger({
     provider: paymentProvider,
     router: payflowRouter,
-    config: { ...payrollAssets, devertQueueContractAddress: process.env.DEVERT_QUEUE_CONTRACT_ADDRESS,
+    config: { ...payrollAssets, devertContractAddress: process.env.DEVERT_CONTRACT_ADDRESS,
+      devertQueueContractAddress: process.env.DEVERT_QUEUE_CONTRACT_ADDRESS,
       devertQueueVersion: Number(process.env.DEVERT_QUEUE_VERSION || 1) },
     getWeeklyPayflow: () => payflow.getState(),
     readDevertState: () => readDevertState?.(),

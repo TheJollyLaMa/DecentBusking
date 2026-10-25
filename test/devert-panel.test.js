@@ -266,6 +266,23 @@ test('checkout failures and invalid weeks are visible without a wallet transacti
   assert.match(ui.element('devert-purchase-status').textContent, /whole number of weeks/);
 });
 
+test('sponsored checkout shows USDC plus network gas and explains platform funding pauses', async () => {
+  const ui = await panelFixture({ wallet: { address: advertiser, signer: {}, chainId: 8453 } });
+  ui.context.window.DecentConfig.devertContractVersion = '0.2';
+  ui.read(async () => ({ ...snapshot(), version: '0.2', checkout: { available: true } }));
+  await ui.click('devert-tab');
+  await ui.settle();
+  assert.equal(ui.element('devert-purchase').disabled, false);
+  assert.match(ui.element('devert-campaign-total').textContent, /normal Base network gas only/);
+  assert.doesNotMatch(ui.element('devert-campaign-total').textContent, /worker-gas/);
+  ui.read(async () => ({ ...snapshot(), version: '0.2',
+    checkout: { available: false, reason: 'Platform worker needs funding' } }));
+  await ui.click('devert-refresh');
+  await ui.settle();
+  assert.equal(ui.element('devert-purchase').disabled, true);
+  assert.equal(ui.element('devert-minimum-offer').textContent, 'Platform worker needs funding');
+});
+
 test('upload title cannot block native campaign form validation while hidden', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.doesNotMatch(html.match(/<input id="devert-title"[^>]*>/)[0], /\brequired\b/);

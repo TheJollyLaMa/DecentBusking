@@ -4,6 +4,7 @@ const DEFAULT_ESTIMATED_DAILY_BURN_WEI = 86_000_000_000_000n;
 // 0.00002 ETH: roughly ten music-play reports or fifty impressions at October 2026 Base fees.
 export const DEFAULT_WORKER_MIN_BALANCE_WEI = 20_000_000_000_000n;
 export const SPONSORED_WORKER_WARNING_WEI = 2_000_000_000_000_000n;
+export const SPONSORED_WORKER_MIN_BALANCE_WEI = 1_000_000_000_000_000n;
 export const SPONSORED_WORKER_TARGET_WEI = 3_000_000_000_000_000n;
 
 export function workerAlertAction(state, unavailable = false) {

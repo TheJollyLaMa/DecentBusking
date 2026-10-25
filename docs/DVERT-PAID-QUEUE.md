@@ -270,3 +270,56 @@ claimed using its numeric request ID from the payer's transaction receipt.
 The checkout includes a receipt link and request ID after confirmation.
 
 No mainnet deployment or payments are performed by the implementation tests.
+# Platform-funded DVert campaign cutover (v0.2)
+
+Campaign v0.2 removes the advertiser's worker ETH contribution. Advertisers pay
+the existing USDC campaign price and normal Base transaction gas. Campaign revenue
+still routes 45/45/8/2 to Playback, Top10, Pinners and Repo; no new deduction,
+automatic swap or reserve transfer is introduced. Operators manually convert
+funds and top up the shared DJuke/DVert worker with native ETH on Base.
+
+Reuse: the v0.2 contract extends the existing DeVert scheduling and settlement
+implementation; checkout reuses Base approvals and duplicate-term checks.
+Worker balance checks and admin funding alerts reuse DJuke's manual-funding policy.
+Checkout pauses below 0.001 ETH; the existing admin alert warns below 0.002 ETH
+and suggests a 0.003 ETH target. The worker is verified against both contracts.
+
+Do not point a sponsored checkout at the legacy campaign contract: it still
+requires ETH. The new contract rejects attached ETH from stale clients.
+
+Release order:
+
+1. In DecentMarket, compile and run the DeVert v0.1/v0.2 and queue v0.2 suites,
+   including the Base-fork settlement rehearsal. Run
+   `npx hardhat run scripts/deploy_devert_v02.js --network base` for read-only
+   preflight. All old campaigns must have expired, and pending requests plus
+   unclaimed queue refund reserves must be zero.
+2. With an authorized local owner signer, run the same script with
+   `CONFIRM_DEPLOY=v0.2-base`. It pauses the old campaign/queue, rechecks drainage,
+   deploys v0.2 campaigns plus a replacement v0.2 paid queue, and leaves the new
+   contracts paused. The old queue's campaign reference is immutable. The script
+   journals transaction hashes and can resume without duplicate deployments.
+3. Verify both deployed sources. Retain the old deployment records and journals.
+   Do not reuse old campaign removal or impression journals: IDs restart at 1.
+   The worker automatically scopes v0.2 journals by campaign address.
+4. Deploy the compatible worker with `DEVERT_CONTRACT_ADDRESS` set to the new
+   campaign address, `DEVERT_CONTRACT_VERSION=0.2`,
+   `DEVERT_QUEUE_CONTRACT_ADDRESS` set to its replacement queue, and
+   `DEVERT_QUEUE_VERSION=2`. Use the existing shared DJuke fulfiller key.
+   Keep manual worker funding and existing checkpoint-mirror requirements.
+5. Set the matching browser campaign address/version and queue address in
+   `decent.config.js`, update its cache tag, and bump the site/controller module
+   tags. Verify `/api/devert` reports the same address, `version: "0.2"`,
+   `checkout.available: true`, and adequate `workerFunding`. Verify
+   `/api/devert/queue` reports the replacement queue.
+6. Run the deployment script with `CONFIRM_ACTIVATE=v0.2-base`, separately from
+   deployment. It refuses activation until the configured worker reports the
+   replacement contracts and ready funding. Verify both contracts are unpaused,
+   ordinary radio remains available, the public checkout has no worker charge,
+   and one owner-approved campaign purchase/rotation succeeds.
+
+The fund ledger recognizes both legacy and replacement campaign/queue receipts;
+history must never be cleared at cutover. Existing minted ad NFTs are reused
+without reminting. If any legacy paid term or queue reserve remains, stop rather
+than discarding that entitlement. Do not roll back to the old contract after a
+new paid campaign exists without an explicit entitlement-preserving migration.

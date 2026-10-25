@@ -1,4 +1,5 @@
 import { Contract, JsonRpcProvider, isAddress } from 'ethers';
+import { readWorkerGasState, SPONSORED_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
 
 const SECONDS_PER_WEEK = 7 * 24 * 60 * 60;
 const MAX_WEEKLY_CAMPAIGNS = 1000;
@@ -6,6 +7,8 @@ const READ_CONCURRENCY = 20;
 const ZERO_ADDRESS = /^0x0{40}$/i;
 
 export const DEVERT_ABI = [
+  'function CONTRACT_VERSION() view returns(string)',
+  'function schedulerWallet() view returns(address)',
   'function campaignWeek(uint256 timestamp) pure returns (uint64)',
   'function paused() view returns (bool)',
   'function getWeekCampaignIds(uint64 weekId) view returns (uint256[])',
@@ -110,7 +113,8 @@ function normalizeMarket(raw) {
   return { slots, seated, lowestSeatedOfferUnits: lowest.toString(), mainRadioImpressions };
 }
 
-export function createDevertCampaignReader({ contractAddress, provider, contract, rpcUrl, confirmations = 2 }) {
+export function createDevertCampaignReader({ contractAddress, provider, contract, rpcUrl, confirmations = 2, version = '0.1' }) {
+  if (!['0.1', '0.2'].includes(version)) throw new Error('Unsupported DeVert contract version');
   if (!isAddress(contractAddress) || ZERO_ADDRESS.test(contractAddress)) throw new Error('Invalid DeVert contract address');
   if (!Number.isSafeInteger(confirmations) || confirmations < 2) throw new Error('DeVert reads need at least two confirmations');
   const rpc = provider || new JsonRpcProvider(rpcUrl);
@@ -125,6 +129,15 @@ export function createDevertCampaignReader({ contractAddress, provider, contract
     if (!before?.hash) throw new Error('DeVert confirmation block unavailable');
     const timestamp = asSafeNumber(before.timestamp, 'snapshot timestamp');
     const options = { blockTag: blockNumber };
+    let workerFunding;
+    if (version === '0.2') {
+      if (await devert.CONTRACT_VERSION(options) !== version) throw new Error('DeVert contract version mismatch');
+      const worker = await readWorkerGasState({ provider: rpc, workerAddress: await devert.schedulerWallet(options),
+        minBalanceWei: SPONSORED_WORKER_MIN_BALANCE_WEI });
+      workerFunding = { address: worker.workerAddress, balanceWei: worker.balanceWei.toString(),
+        minimumWei: worker.thresholdWei.toString(), available: !worker.lowBalance,
+        reason: worker.lowBalance ? 'Campaign checkout is paused until the platform replenishes its worker ETH.' : '' };
+    }
     const weekId = asSafeNumber(await devert.campaignWeek(timestamp, options), 'week ID');
     const [ids, marketRaw, paused] = await Promise.all([
       devert.getWeekCampaignIds(weekId, options),
@@ -144,6 +157,8 @@ export function createDevertCampaignReader({ contractAddress, provider, contract
     if ((await rpc.getBlock(blockNumber))?.hash !== before.hash) throw new Error('DeVert snapshot is not canonical');
     return {
       chainId: 8453,
+      version,
+      ...(workerFunding ? { workerFunding } : {}),
       contractAddress,
       blockNumber,
       blockHash: before.hash,

@@ -43,6 +43,7 @@ window.DecentConfig = {
   djukePlaylistBatchAddress: "0xf51D2F7892cF9D49e14DF4afDf227a59ee170A51",
   djukePlaylistRadioReady: true,
   devertContractAddress: "0x135Cbc573F87637158eb3186C87c584fb0B34CD9",
+  devertContractVersion: "0.1",
   devertQueueContractAddress: "0xe54609f022A8D760417E7cc0Eea6360b6E1D11Bb",
   ensRpcUrl: "https://ethereum-rpc.publicnode.com",
   adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",
