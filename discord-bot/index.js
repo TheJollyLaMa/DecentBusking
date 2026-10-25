@@ -69,6 +69,7 @@ import { createCreatorProfiles } from './creator-profiles.js';
 import { createArtworkUpdateQueue } from './artwork-updates.js';
 import { createDjukeGasQuoteReader, createDjukePlaylistGasQuoteReader, DJUKE_GAS_ABI, DJUKE_PLAYLIST_GAS_ABI } from './djuke-gas.js';
 import { createDjukePlaylistBatchReconciler, djukePlaylistReadiness, playlistBatchEventAbi, legacyPlaylistReceipts, playlistPlaybackFailure, playlistLaneStatus } from './djuke-playlist-batches.js';
+import { createCreatorSplitUpdateQueue } from './creator-split-updates.js';
 import { createEnsResolver } from './ens-resolver.js';
 import { createDevertRemovals } from './devert-removals.js';
 import { ensureCheckpointGroups } from './checkpoint-groups.js';
@@ -98,6 +99,7 @@ import {
   requestTrackMint,
   completeTrackMint,
   updateTrackPin,
+  savePlaylist,
   hasPayrollHistoryRecovery,
   mergePayrollHistorySnapshot,
   seedPlaylistFromPayrollSnapshot,
@@ -679,6 +681,20 @@ async function main() {
     save: artworkUpdateStore ? artworkUpdateStore.save : async () => {},
   });
   await artworkUpdateQueue.initialize();
+  const creatorSplitUpdateStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage,
+    pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
+    gateway: config.ipfsGateway, name: 'decentbusking-creator-split-updates.json',
+    tags: { app: 'decentbusking', kind: 'creator-split-updates', schema: '1' },
+    serialize: value => ({ schemaVersion: 1, requests: value }),
+    deserialize: value => {
+      if (value?.schemaVersion === 1 && Array.isArray(value.requests)) return value.requests;
+      throw new Error('Invalid creator split update checkpoint');
+    } }) : null;
+  const creatorSplitUpdateQueue = creatorSplitUpdateStore ? createCreatorSplitUpdateQueue({
+    restore: creatorSplitUpdateStore.restore,
+    save: creatorSplitUpdateStore.save,
+  }) : null;
+  await creatorSplitUpdateQueue?.initialize();
   config.jukeLoopMainRadioAdStore = config.pinataJwt ? createPinataStateStore({
     ...config.checkpointStorage,
     pinataJwt: config.pinataJwt,
@@ -752,6 +768,28 @@ async function main() {
     currentArtworkCid: String(request.oldImageUri || '').replace(/^ipfs:\/\//i, ''),
     currentMetadataUri: request.oldUri || '',
     metadataUri: request.metadataUri || '',
+    status: request.status,
+  });
+  const mapCreatorSplitUpdateRequest = request => ({
+    trackId: request.requestId,
+    requestType: 'split-update',
+    title: request.title,
+    uploader: request.kind === 'album' ? `Album ${request.resourceId.slice(0, 10)}` : request.title,
+    uploaderId: request.owners[0] || '',
+    recipient: request.owners[0] || '',
+    requestedAt: request.requestedAt,
+    contractAddress: request.contractAddress,
+    resourceId: request.resourceId,
+    kind: request.kind,
+    audioURI: request.audioURI,
+    currentRecipients: request.currentRecipients,
+    currentSharesBps: request.currentSharesBps,
+    currentPositions: request.currentPositions,
+    recipients: request.recipients,
+    sharesBps: request.sharesBps,
+    positions: request.positions,
+    approvalCount: request.approvals.length,
+    ownerCount: request.owners.length,
     status: request.status,
   });
   const handleMintRequestInteraction = createMintRequestInteractionHandler({
@@ -1375,7 +1413,22 @@ async function main() {
       if (!playlistReady) throw new Error('Playlist is restoring; retry shortly');
       if (Date.now() - _nftCatalogCheckedAt >= 60000) syncMintedTracks(config);
       if (!_nftCatalog) throw new Error(_nftCatalogError ? `NFT catalog unavailable: ${_nftCatalogError}` : 'NFT catalog is restoring; retry shortly');
-      return { ...nftCatalogPage(_nftCatalog, options), lastCheckedAt: new Date(_nftCatalogCheckedAt).toISOString(),
+      const tracksByCid = new Map(getPlaylist().filter(track => track.ipfsCid && track.trackId)
+        .map(track => [String(track.ipfsCid).replace(/^ipfs:\/\//i, '').split('/')[0], track]));
+      const catalog = _nftCatalog.map(nft => {
+        const uri = String(nft.audioUrl || nft.videoUrl || nft.animation_url || '').replace(/^ipfs:\/\//i, '');
+        const cid = uri.split('/')[0];
+        const track = tracksByCid.get(cid);
+        return track ? { ...nft, trackId: track.trackId, djukeSongId: id(track.trackId),
+          ...(track.creatorSplits ? { creatorSplits: track.creatorSplits } : {}),
+          ...(track.djukeSplitMode ? { djukeSplitMode: track.djukeSplitMode } : {}),
+          ...(track.djukeAlbumId ? {
+            djukeAlbumId: track.djukeAlbumId,
+            djukeAlbumTitle: track.djukeAlbumTitle || '',
+            djukeAlbumState: 'album',
+          } : { djukeAlbumState: track.djukeAlbumState || 'unverified' }) } : nft;
+      });
+      return { ...nftCatalogPage(catalog, options), lastCheckedAt: new Date(_nftCatalogCheckedAt).toISOString(),
         refreshError: _nftCatalogError };
     },
     getRadioSchedule: () => ({
@@ -1429,6 +1482,58 @@ async function main() {
       return track;
     },
     artworkUpdateQueue,
+    creatorSplitUpdateQueue,
+    verifyCreatorSplitProposer: async ({ address, contractAddress, tokenId }) => {
+      const configuredCollections = new Set(
+        (config.nftContractAddresses || [config.nftContractAddress]).filter(Boolean)
+          .map(value => String(value).toLowerCase()),
+      );
+      if (!configuredCollections.has(String(contractAddress).toLowerCase())) return false;
+      if (!/^\d+$/.test(String(tokenId))) return false;
+      const nft = new Contract(contractAddress,
+        ['function creatorOf(uint256 tokenId) view returns (address)'],
+        getRpcRouter().provider('read', 'creator-split-creator-verify'));
+      return (await nft.creatorOf(BigInt(tokenId))).toLowerCase() === String(address).toLowerCase();
+    },
+    onCreatorSplitUpdate: async ({ proposal }) => {
+      const songIds = proposal.kind === 'album' ? proposal.currentSongIds || [] : [proposal.resourceId];
+      let changed = false;
+      for (const songId of songIds) {
+        const track = getPlaylist().find(entry => id(entry.trackId).toLowerCase() === songId.toLowerCase());
+        if (!track) continue;
+        const previousCredits = track.creatorSplits || [];
+        track.creatorSplits = proposal.recipients.map((wallet, index) => ({
+          wallet,
+          shareBps: Number(proposal.sharesBps[index]),
+          position: String(proposal.kind === 'migration' && !proposal.useAlbumDefault
+            ? previousCredits.find(entry => String(entry.wallet || entry.address).toLowerCase() === wallet.toLowerCase())?.position || ''
+            : proposal.positions?.[index] || ''),
+        }));
+        track.djukeSplitMode = proposal.kind === 'song' || (proposal.kind === 'migration' && !proposal.useAlbumDefault)
+          ? 'custom' : 'album-default';
+        if (proposal.kind === 'migration') {
+          track.djukeAlbumId = proposal.albumId;
+          track.djukeAlbumTitle = proposal.albumTitle || '';
+          track.djukeAlbumState = 'album';
+        }
+        changed = true;
+      }
+      if (changed) {
+        savePlaylist();
+        await waitForRemotePersistence();
+      }
+    },
+    onCreatorAlbumTrackRemoved: async ({ songId }) => {
+      const track = getPlaylist().find(entry => id(entry.trackId).toLowerCase() === songId.toLowerCase());
+      if (!track) throw new Error('Removed song is not present in playlist metadata');
+      delete track.djukeAlbumId;
+      delete track.djukeAlbumTitle;
+      track.djukeAlbumState = 'standalone';
+      track.djukeSplitMode = 'custom';
+      savePlaylist();
+      await waitForRemotePersistence();
+    },
+    djukeContractAddress: djukeAddress || process.env.DJUKE_CONTRACT_ADDRESS || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9',
     rpcUrl: config.baseRpcUrl,
     rpcProvider: getRpcRouter().provider('read', 'worker-reads'),
     getRpcHealth: () => getRpcRouter().health(),
@@ -1464,7 +1569,11 @@ async function main() {
         requestedAt: track.mintRequestedAt,
         requestType: 'mint',
       }));
-      return mintRequests.concat(artworkUpdateQueue.getPendingRequests().map(mapArtworkUpdateRequest))
+      return mintRequests.concat(
+        artworkUpdateQueue.getPendingRequests().map(mapArtworkUpdateRequest),
+        (creatorSplitUpdateQueue?.getReadyRequests() || []).filter(request => request.kind === 'song')
+          .map(mapCreatorSplitUpdateRequest),
+      )
         .sort((first, second) => Date.parse(first.requestedAt || 0) - Date.parse(second.requestedAt || 0));
     },
     getRadioState: async () => {

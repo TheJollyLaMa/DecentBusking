@@ -2,6 +2,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
+test('shared header markup and both stylesheets use one pinned compatible DecentHead revision', () => {
+  const header = fs.readFileSync('js/components/header.js', 'utf8');
+  const right = fs.readFileSync('js/components/header-right-ankh-override.js', 'utf8');
+  const source = fs.readFileSync('js/components/header-source.mjs', 'utf8');
+  assert.match(source, /DecentHead@7baa1c8c47ee33a2162b4dbd4570a14108a24d53/);
+  for (const consumer of [header, right]) {
+    assert.match(consumer, /import \{ DECENT_HEAD_BASE \} from '\.\/header-source\.mjs'/);
+    assert.doesNotMatch(consumer, /DecentHead@main/);
+  }
+});
 test('mobile ankhs sit beside the top-row IPFS and wallet controls without moving their DOM', () => {
   const source = fs.readFileSync('js/components/header.js', 'utf8');
   const mobileTitle = source.slice(source.indexOf('const MOBILE_APP_TITLE_STYLE'), source.indexOf('const BRAND_TITLE_STYLE'));
@@ -12,6 +22,51 @@ test('mobile ankhs sit beside the top-row IPFS and wallet controls without movin
   assert.match(mobileTitle, /\.ankh-right \{ right: 56px; \}/);
   assert.match(source, /installCoinHitArea\(appTitle\?\.shadowRoot, 'Left menu'\)/);
   assert.match(source, /installCoinHitArea\(appTitle\?\.shadowRoot\?\.querySelector\('right-ankh'\)\?\.shadowRoot, 'Right menu'\)/);
+});
+
+test('header wallet uses the app connection path once and reflects account changes', () => {
+  const vm = require('node:vm');
+  const source = fs.readFileSync('js/components/header.js', 'utf8');
+  const methods = source.slice(source.indexOf('  _installWallet() {'), source.indexOf('  _installBuskerAvatar('));
+  const listeners = new Map();
+  let click;
+  let connects = 0;
+  const wallet = {
+    shadowRoot: { querySelector: () => ({
+      addEventListener(type, handler, options) {
+        assert.equal(type, 'click');
+        assert.equal(options.capture, true);
+        click = handler;
+      },
+    }) },
+    updateWalletUI() { this.renders = (this.renders || 0) + 1; },
+  };
+  const context = {
+    window: { ethereum: {}, _wallet: { address: null } },
+    document: {
+      addEventListener: (type, handler) => listeners.set(type, handler),
+      removeEventListener: type => listeners.delete(type),
+    },
+    connectWallet: () => { connects++; },
+  };
+  vm.runInNewContext(`class Header { ${methods} } globalThis.Header = Header;`, context);
+  const header = new context.Header();
+  header.shadowRoot = { querySelector: () => wallet };
+  header._installWallet();
+  assert.equal(wallet.walletConnected, false);
+  let stopped = false;
+  click({ stopImmediatePropagation() { stopped = true; } });
+  assert.equal(connects, 1);
+  assert.equal(stopped, true);
+  context.window._wallet.address = `0x${'1'.repeat(40)}`;
+  listeners.get('wallet-connected')();
+  assert.equal(wallet.walletAddress, context.window._wallet.address);
+  assert.equal(wallet.walletConnected, true);
+  context.window._wallet.address = null;
+  listeners.get('wallet-disconnected')();
+  assert.equal(wallet.walletConnected, false);
+  header.disconnectedCallback();
+  assert.equal(listeners.size, 0);
 });
 
 test('mobile fund pills flank a compact search field and hide only their text labels and Archive toggle', () => {
@@ -77,6 +132,7 @@ test('DecentHead CDN imports are pinned to an immutable commit, never a moving b
   for (const file of ['js/components/header.js', 'js/components/header-right-ankh-override.js']) {
     const source = fs.readFileSync(file, 'utf8');
     assert.doesNotMatch(source, /DecentHead@(main|master|latest)\b/, `${file} must not track a moving DecentHead branch`);
-    assert.match(source, /DecentHead@[0-9a-f]{40}\//, `${file} must pin DecentHead to a full commit SHA`);
+    assert.match(source, /import \{ DECENT_HEAD_BASE \} from '\.\/header-source\.mjs'/);
   }
+  assert.match(fs.readFileSync('js/components/header-source.mjs', 'utf8'), /DecentHead@[0-9a-f]{40}\//);
 });

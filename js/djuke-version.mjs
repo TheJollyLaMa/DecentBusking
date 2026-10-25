@@ -1,5 +1,5 @@
 export const DJUKE_SIGNING_DOMAIN_VERSION = '0.2';
 
 export function supportsDjukeAlbumsAndGas(version) {
-  return version === '0.2' || version === '0.3' || version === '0.4' || version === '0.5';
+  return ['0.2', '0.3', '0.4', '0.5', '0.6'].includes(version);
 }

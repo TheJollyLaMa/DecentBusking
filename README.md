@@ -60,10 +60,13 @@ the matching worker update; older workers show unavailable rather than zero.
 **First visit?** Follow the [newcomer walkthrough](docs/NEWCOMERS.md) for a click-by-click listener and artist route with screenshots.
 
 The on-site **Follow the white rabbit** launcher appears front and center in the
-main scene on mobile and desktop for the first three visits per browser. The tour
-automatically opens on each of those visits unless already completed. Completing
-every stop retires the launcher early; after the third visit it is available only
-in About. Visit counts and completion are remembered in that browser.
+main scene on mobile and desktop until the tour is dismissed or completed. An
+incomplete tour automatically resumes on refresh at the furthest card reached,
+including its playlist hop; going Back does not reduce saved progress. Viewing
+every card completes the tour, so later refreshes keep it hidden. Progress and
+completion are remembered in that browser, using local storage.
+The playlist-only deep-link guide remembers its own furthest hop and completion
+without marking the rest of onboarding complete.
 The identical rabbit button remains
 available in the DBusker About modal for replay. The Mercury symbol follows the white rabbit with
 musical accessories and a small flying-money icon, while the rabbit mascot peeks
@@ -72,8 +75,11 @@ Mercury is a visual companion, not a narrator. This
 read-only guided tour opens real drawers and ankh menus; it never triggers wallet,
 vote, upload, purchase, or audio actions. Exit restores existing drawers and visible
 briefcase drafts. The tutorial stays open while visitors click or keyboard-navigate
-the highlighted site features on mobile and desktop. Outside clicks and Escape do
-not dismiss it; use **Close tutorial** (X) or **Leave tour** to exit early.
+the highlighted site features on mobile and desktop. Outside clicks do not
+dismiss it; **Escape**, **Close tutorial** (X), or **Leave tour** hide the card,
+buttons, bunny, and center launcher until refresh. About remains available for
+explicit replay, including after completion. A completed tour does not auto-open
+even if the URL still contains `?tutorial=playlists`.
 Active submissions, open dialogs, and VertLoop listening defer
 the tour with an explanation. Keyboard navigation, focus return, narrow screens,
 and reduced-motion preferences are supported.
@@ -234,6 +240,68 @@ shares; existing registered/requested on-chain splits are never silently
 rewritten. A conflicting registration logs an explicit admin-review warning.
 Resubmitting the same recording with changed shares or advert classification
 requires owner review instead of silently returning the old settings.
+
+### Editing collaborators on an existing song
+
+Open a song card and choose **Add collaborator / split payments**, or open
+**Profile → My NFTs**, search for a song, and choose **Collaborators & payments**
+beside its title. Both paths open the same editor, labeled with the song title,
+NFT token (when available), and DJuke song ID. The song editor is separate from
+album creation; no album is needed to add a collaborator.
+
+If older NFT metadata lacks a DJuke song ID, the editor matches the recording's
+exact IPFS CID against the configured deployment's public DJuke catalog, then
+checks the recording and current splits on-chain. Missing, ambiguous, mismatched,
+or unavailable registrations produce an explicit error rather than a guessed
+song or an editable empty split. The app targets the deployed v0.5.
+Opening an editor alone does not mean approvals or payments have changed.
+
+The header reuses DecentHead's compatible menu/wallet components at MIT-licensed
+commit `7baa1c8c47ee33a2162b4dbd4570a14108a24d53`, rather than tracking mutable
+`main`. App-specific menu controls and the shared app wallet state remain local.
+This release builds on production commit `be3fb9b`, preserving its existing
+`purchaseDjukeSong` in `js/djuke-payment.mjs`, live-show and playlist flows.
+Approval persistence reuses `createPinataStateStore`; no shared package or new
+contract is required for standalone-song edits on v0.5. Album migration and
+inheritance changes below remain gated on the undeployed v0.6 candidate.
+
+Split proposals preflight `GET /api/creator/split-status` against the configured
+chain and contract before requesting a wallet signature. A current payee's
+proposal signature counts as their approval; newly added recipients do not
+approve. A sole current payee therefore produces a ready owner-queue request
+immediately. Other current payees use the public app's `?splitProposal=…` link
+and **Review and approve**, with no gas. The owner rechecks approval status,
+expiry, and the live split before applying `configureSong`; reconciliation
+requires a confirmed on-chain result. Proposals persist in a dedicated Pinata
+checkpoint and expire after seven days.
+
+Release order: deploy the matching worker, verify `/api/creator/split-status`,
+then use the matching published frontend. Production authenticated APIs do not
+allow arbitrary localhost origins; use the public app for real signatures.
+
+Enter wallet/ENS, role, and percentage in each row. The total must be exactly
+100%, with 1–16 distinct nonzero wallets. Choose **Review changes** to resolve
+names and compare current and proposed payments. Editing any row invalidates
+that review. Create an approval request only after reviewing. Current payees
+approve through the shared link, then the admin applies the song change
+on-chain. Creating an approval request does not change payments. Credits and
+these shares affect DJuke artist payouts, not NFT ownership or ERC-2981 royalties.
+
+The v0.6 candidate treats an untouched single-payee song as using the album
+default when it joins an album, after that payee approves migration. Existing
+multi-payee or explicitly configured song splits stay custom, even if their
+percentages happen to match the album default. New default changes update only
+inheriting songs, with current album-payee approvals. A song-specific update on
+v0.6 makes an album track custom; v0.5 cannot do that without removing album
+membership. Whole-album artist proceeds on v0.6 are divided equally by track
+(the last track receives the integer rounding remainder), then distributed
+using each track's current split. Requests already purchased retain their
+on-chain payment snapshot.
+
+This UI/worker work and v0.6 remain uncommitted release candidates. Deploy the
+matching worker routes and coordinate the app's contract address/version before
+attempting paid end-to-end validation. Do not point this interface at v0.5 and
+expect v0.6 album inheritance behavior.
 
 Deploy the updated worker before publishing the redesigned briefcase: it needs
 the media-detection endpoint and signature support for creator splits.

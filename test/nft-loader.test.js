@@ -144,9 +144,11 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   const listenBtn = makeButton();
   const muteBtn = makeButton();
   const playlistBtn = makeButton();
+  const creditsBtn = makeButton();
   const shareBtn = makeButton();
   const listenStatus = { textContent: '' };
   const shareStatus = { innerHTML: '', textContent: '', querySelector: () => null };
+  const creditWallet = `0x${'3'.repeat(40)}`;
   const panel = {
     open: false,
     classList: { remove: (name) => classes.delete(name), add: (name) => classes.add(name) },
@@ -160,6 +162,7 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
       if (selector === '.nft-listen-btn') return listenBtn;
       if (selector === '.nft-mute-btn') return muteBtn;
       if (selector === '.nft-playlist-btn') return playlistBtn;
+      if (selector === '.nft-credits-edit-btn') return creditsBtn;
       if (selector === '.nft-share-btn') return shareBtn;
       if (selector === '.nft-listen-status') return listenStatus;
       if (selector === '.nft-share-status') return shareStatus;
@@ -207,7 +210,8 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   });
   vm.runInContext(source, context);
   context.renderNFTCard({ tokenId: 12, contractAddress, name: '<script>bad</script>', image: 'ipfs://artwork',
-    audioUrl: 'ipfs://audio', metadataUri: 'ipfs://metadata', artist: '0xartist', description: '<b>description</b>' });
+    audioUrl: 'ipfs://audio', metadataUri: 'ipfs://metadata', artist: '0xartist', description: '<b>description</b>',
+    creatorSplits: [{ wallet: creditWallet, shareBps: 10000, position: 'Performer' }] });
   assert.equal(panel.open, true);
   assert.equal(classes.has('hidden'), false);
   assert.match(content.innerHTML, /nft-detail-image/);
@@ -219,6 +223,8 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   assert.doesNotMatch(content.innerHTML, /<audio/);
   assert.match(content.innerHTML, /▶ Preview/);
   assert.match(content.innerHTML, /🎧 Listen \(0\.25 USDC\)/);
+  assert.match(content.innerHTML, /nft-credit-avatar/);
+  assert.match(content.innerHTML, new RegExp(`data-credit-wallet="${creditWallet}"`));
   assert.match(content.innerHTML, /Share/);
   assert.equal(events.includes('dbusk-listen'), false);
   await shareBtn.listeners.click();
@@ -245,6 +251,21 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
   close.onclick();
   assert.equal(panel.open, false);
   assert.equal(classes.has('hidden'), true);
+  const owner = `0x${'4'.repeat(40)}`;
+  const ownerSong = { tokenId: 13, contractAddress, name: 'Exact owner song', creator: owner, audioUrl: 'ipfs://registered-recording' };
+  context.window._wallet = { address: owner };
+  context.renderNFTCard(ownerSong);
+  assert.match(content.innerHTML, /Add collaborator \/ split payments/);
+  assert.match(content.innerHTML, /Exact owner song/);
+  assert.doesNotMatch(content.innerHTML, /Not registered as a DJuke song/);
+  let selected;
+  listeners.set('open-creator-profile', [event => { selected = event.detail; }]);
+  creditsBtn.listeners.click();
+  assert.equal(panel.open, false);
+  assert.equal(selected.nft, ownerSong);
+  assert.equal(selected.songId, '');
+  assert.equal(selected.address, owner);
+  assert.equal(context.canEditCreatorSplits(ownerSong, `0x${'5'.repeat(40)}`), false);
 });
 
 test('artist filtering hides other artists in both the 3D scene and archive', async () => {

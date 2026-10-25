@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261024-admin-sections" />
+  <link rel="stylesheet" href="css/styles.css?v=20261025-song-splits" />
   <link rel="stylesheet" href="css/radio-programming.css?v=20261024-calendar-fit" />
 
   <!-- CDN dependencies -->
@@ -885,13 +885,13 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js?v=20261025-scheduling-info"></script>
+  <script type="module" src="js/components/about-override.js?v=20261025-tour-resume"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
-  <script type="module" src="js/components/header-right-ankh-override.js?v=20261022-pin-decenthead"></script>
+  <script type="module" src="js/components/header-right-ankh-override.js?v=20261025-header-compat"></script>
 
   <!-- Load DecentHead components without its legacy IPFS status widget -->
-  <script type="module" src="js/components/header.js?v=20261022-pin-decenthead"></script>
+  <script type="module" src="js/components/header.js?v=20261025-header-compat"></script>
 
   <!-- Inject 💸 Payroll link into left ankh header dropdown -->
   <script type="module" src="js/components/header-payroll-inject.js?v=20261006-owner-payroll"></script>
@@ -904,13 +904,13 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261025-scheduling-info"></script>
+  <script type="module" src="js/main.js?v=20261025-tour-resume"></script>
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261023-neon-handoffs">
   <script type="module" src="js/live-booking-notifications.mjs?v=20261024-live-prototype"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261025-community-reminder"></script>
-  <script type="module" src="js/admin.js?v=20261025-community-reminder"></script>
+  <script type="module" src="js/admin.js?v=20261025-song-splits"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
   <script type="module" src="js/payroll.js?v=20261019-payroll-confirmations"></script>
@@ -922,7 +922,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261024-djuke-labels"></script>
   <script type="module" src="js/djuke.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/devert-site.mjs?v=20261024-devert-sponsored"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261024-admin-sections"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261025-song-splits"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -1019,6 +1019,12 @@
       <summary><span class="creator-dropdown-title">🎵 My NFTs</span><span class="creator-dropdown-count" data-my-nfts-count></span></summary>
       <div class="creator-dropdown-body">
         <label class="creator-dropdown-search"><span class="sr-only">Search your NFTs</span><input data-my-nfts-search type="search" placeholder="Search title or token ID…" /></label>
+        <section data-album-song-selection hidden>
+          <p><span data-album-song-selection-count>0 selected</span> for the loaded album.</p>
+          <button type="button" data-album-song-propose-selected>Propose selected songs</button>
+          <p data-album-song-selection-status role="status" aria-live="polite"></p>
+          <ul data-album-song-selection-links></ul>
+        </section>
         <p class="creator-dropdown-status" data-my-nfts-status role="status" aria-live="polite">Connect your wallet to search your NFTs.</p>
         <ol data-my-nfts-items class="creator-nft-list"></ol>
       </div>
@@ -1052,14 +1058,60 @@
         <ol data-playlist-results class="creator-nft-list"></ol>
       </div>
     </details>
-    <details><summary>Albums and Collaborators</summary>
+    <section class="creator-song-manager" aria-label="Song collaborators and payments">
+      <h3>Song collaborators &amp; payments</h3>
+      <p>Select <strong>Collaborators &amp; payments</strong> beside a song in My NFTs above, or open that song's card. You do not need an album.</p>
+      <form data-song-split-form hidden>
+        <h3 data-song-split-title>Selected song</h3>
+        <p data-song-split-identity></p>
+        <input name="songId" type="hidden" />
+        <p data-song-split-mode></p>
+        <p data-song-split-current class="creator-dropdown-status"></p>
+        <fieldset data-song-split-editor>
+          <legend>Proposed song split</legend>
+          <div data-split-rows></div>
+          <button type="button" data-split-add>Add collaborator</button>
+          <output data-split-total aria-live="polite"></output>
+        </fieldset>
+        <p>These percentages divide this song's artist payout, not the platform allocations. Adding a collaborator requires no platform account.</p>
+        <button type="button" data-song-split-review>Review changes</button>
+        <p data-song-split-review-text role="status" aria-live="polite"></p>
+        <button type="button" data-song-split-propose disabled>Create approval request for this song</button>
+        <p>1. Review → 2. Current payees approve → 3. Admin applies on-chain → 4. Future requests use the new split. An approval request alone does not change payments.</p>
+      </form>
+    </section>
+      <section class="creator-split-approval" data-split-approval hidden>
+        <h3 data-split-proposal-title>Split approval</h3>
+        <p data-split-proposal-diff></p>
+        <p data-split-proposal-progress role="status" aria-live="polite"></p>
+        <div class="creator-profile-actions">
+          <button type="button" data-split-proposal-approve>Review and approve</button>
+          <button type="button" data-split-proposal-refresh>Refresh approvals</button>
+          <button type="button" data-song-migration-apply hidden>Apply approved song migration</button>
+        </div>
+        <p data-split-proposal-status role="status" aria-live="polite"></p>
+        <a data-split-proposal-link hidden></a>
+      </section>
+    <details data-album-section><summary>Albums &amp; default payments</summary>
       <form data-album-form>
-        <label>Album ID or Slug<input name="albumId" required maxlength="100" /></label><button type="button" data-album-load>Load Album</button>
+        <p>An album default applies to creator-only songs added to the album. Songs with custom splits keep their own payees and percentages. Whole-album artist payouts are divided equally among tracks, then follow each track's split (DJuke v0.6).</p>
+        <label>Album ID or Slug (leave blank to create a new album)<input name="albumId" maxlength="100" /></label><button type="button" data-album-load>Load Album</button>
         <label>Title<input name="title" required maxlength="120" /></label><label>Manifest URI<input name="manifest" required /></label>
         <div class="creator-profile-image-fields"><label>Personal Listen Price (USDC)<input name="listenPrice" type="number" min="0.000001" step="0.000001" value="0.25" required /></label><label>Whole Album Price (USDC)<input name="albumPrice" type="number" min="0.000001" step="0.000001" value="1" required /></label></div>
-        <label>Collaborators<textarea name="splits" rows="4" placeholder="0xWallet, 70, Performer&#10;0xWallet, 30, Producer" required></textarea></label>
-        <div class="creator-profile-actions"><button type="submit">Create Album</button><button type="button" data-album-sign>Sign Split Approval</button><button type="button" data-album-metadata>Save Manifest and Prices</button></div>
-        <output data-album-signature></output><label>Current Owner Approvals (JSON)<textarea name="approvals" rows="3" placeholder="[]"></textarea></label><button type="button" data-album-update>Apply Approved Split and Sync Songs</button><button type="button" data-album-sync>Sync Saved Split to Songs</button>
+        <fieldset data-album-split-editor>
+          <legend>Album default collaborators</legend>
+          <div data-split-rows></div>
+          <button type="button" data-split-add>Add collaborator</button>
+          <output data-split-total aria-live="polite"></output>
+        </fieldset>
+        <section class="creator-album-tracks" data-album-track-management hidden>
+          <h4>Album tracks</h4>
+          <p class="creator-dropdown-status">The album manager can reorder tracks or remove them. Removing a track preserves its current payout split.</p>
+          <ol data-album-track-list class="creator-album-track-list"></ol>
+        </section>
+        <div class="creator-profile-actions"><button type="submit">Create Album</button><button type="button" data-album-sign>Create shared approval link</button><button type="button" data-album-metadata>Save Manifest and Prices</button></div>
+        <output data-album-signature></output>
+        <button type="button" data-album-update>Apply approved default to inheriting songs</button><button type="button" data-album-sync>Sync saved default to inheriting songs</button>
       </form>
     </details>
     <p data-profile-status role="status" aria-live="polite"></p>

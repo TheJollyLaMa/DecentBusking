@@ -2,6 +2,7 @@
 //
 // Owns the wallet-specific playback menu. header.js imports this module before
 // loading DecentHead components, so the legacy token dropdown is never needed.
+import { DECENT_HEAD_BASE } from './header-source.mjs';
 
 class CleanRightAnkh extends HTMLElement {
   constructor() {
@@ -12,10 +13,9 @@ class CleanRightAnkh extends HTMLElement {
   connectedCallback() {
     // Resolve the DecentHead CDN base path so the shared header.css
     // (which styles .ankh-wrapper, .ankh-coin and .sparkle) is loaded.
-    const cdnBase = 'https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@7baa1c8c47ee33a2162b4dbd4570a14108a24d53/';
 
     this.shadowRoot.innerHTML = `
-      <link rel="stylesheet" href="${cdnBase}css/header.css" />
+      <link rel="stylesheet" href="${DECENT_HEAD_BASE}css/header.css" />
       <style>
         .ankh-container { position: relative; }
         .dropdown-menu.right-ankh-menu {

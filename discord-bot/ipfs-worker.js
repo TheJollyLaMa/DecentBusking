@@ -1,5 +1,5 @@
 import { liveAuthorization } from '../js/live-bookings.mjs';
-import { Contract, Interface, JsonRpcProvider, verifyMessage } from 'ethers';
+import { AbiCoder, Contract, Interface, JsonRpcProvider, keccak256, toUtf8Bytes, verifyMessage, verifyTypedData } from 'ethers';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
@@ -13,6 +13,10 @@ import { buildArtworkUpdateAuthorizationMessage, buildArtworkUpdateMetadata } fr
 import { buildDevertRemovalMessage } from '../js/devert-campaigns.mjs';
 import { buildRadioCalendar, radioCalendarOccurrences } from '../js/radio-calendar.mjs';
 import { detectSubmissionMedia, mediaFilename, validateCreatorSplits } from '../js/submission-media.mjs';
+import {
+  buildAlbumSplitTypedData, buildAlbumTrackRemovalAuthorizationMessage, buildSongAlbumMigrationTypedData,
+  buildSongSplitTypedData, validateCreatorSplitRows,
+} from '../js/creator-splits.mjs';
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 async function readMediaProbe(response) {
@@ -47,6 +51,15 @@ const NFT_ARTWORK_ABI = [
   'function uri(uint256 tokenId) view returns (string)',
   'function creatorOf(uint256 tokenId) view returns (address)',
   'function totalMinted(uint256 tokenId) view returns (uint256)',
+];
+const CREATOR_SPLIT_ABI = [
+  'function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
+  'function getAlbum(bytes32) view returns ((address mainOwner,string title,string manifestURI,uint256 revision,uint256 listenPrice,uint256 albumPrice,address[] recipients,uint16[] sharesBps,string[] positions,bytes32[] songIds))',
+  'function songAlbum(bytes32) view returns (bytes32)',
+  'function songHasCustomSplit(bytes32) view returns (bool)',
+  'function songSplitRevision(bytes32) view returns (uint256)',
+  'function CONTRACT_VERSION() view returns (string)',
+  'event AlbumSongRemoved(bytes32 indexed albumId,bytes32 indexed songId)',
 ];
 
 export function buildUploadAuthorizationMessage({ address, origin, name, size, type, issuedAt, purpose }) {
@@ -257,6 +270,11 @@ export function createWorkerRequestHandler({
   onRadioVote,
   onMediaSubmission,
   artworkUpdateQueue,
+  creatorSplitUpdateQueue,
+  onCreatorSplitUpdate,
+  onCreatorAlbumTrackRemoved,
+  verifyCreatorSplitProposer,
+  djukeContractAddress = '',
   verifyArtworkUpdateTransaction,
   rpcUrl = 'https://mainnet.base.org',
   rpcProvider = null,
@@ -280,20 +298,136 @@ export function createWorkerRequestHandler({
     return consumedSignatures.has(signature);
   }
   const artistLimits = new Map();
+  const splitProposalLimits = new Map();
   const paymentLimits = new Map();
-  function limitArtist(address) {
+  function limitWalletOperation(limits, address, message) {
     const time = now();
-    for (const [key, entry] of artistLimits) {
-      if (entry.until <= time) artistLimits.delete(key);
+    for (const [key, entry] of limits) {
+      if (entry.until <= time) limits.delete(key);
     }
     const key = address.toLowerCase();
-    const entry = artistLimits.get(key) || { count: 0, until: time + 60 * 60 * 1000 };
-    if (entry.count >= 20 || (!artistLimits.has(key) && artistLimits.size >= 2000)) {
-      throw new Error('Artist submission limit reached; try again later');
+    const entry = limits.get(key) || { count: 0, until: time + 60 * 60 * 1000 };
+    if (entry.count >= 20 || (!limits.has(key) && limits.size >= 2000)) {
+      throw new Error(message);
     }
     entry.count++;
-    artistLimits.set(key, entry);
+    limits.set(key, entry);
   }
+  const limitArtist = address => limitWalletOperation(artistLimits, address, 'Artist submission limit reached; try again later');
+  const limitSplitProposal = address => limitWalletOperation(splitProposalLimits, address, 'Split proposal limit reached; try again later');
+  const splitContract = () => {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(djukeContractAddress || '')) throw new Error('DJuke contract is not configured');
+    return new Contract(djukeContractAddress, CREATOR_SPLIT_ABI, rpcProvider || new JsonRpcProvider(rpcUrl));
+  };
+  const sameAddresses = (left, right) => Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+    left.every((value, index) => String(value).toLowerCase() === String(right[index]).toLowerCase());
+  const sameNumbers = (left, right) => Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+    left.every((value, index) => Number(value) === Number(right[index]));
+  const sameStrings = (left, right) => Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+    left.every((value, index) => String(value) === String(right[index]));
+  const readSplitState = async (kind, resourceId, targetAlbumId = '') => {
+    const contract = splitContract();
+    if (kind === 'album') {
+      const album = await contract.getAlbum(resourceId);
+      if (!album.mainOwner || /^0x0{40}$/i.test(album.mainOwner)) throw new Error('Album not found');
+      const contractVersion = await contract.CONTRACT_VERSION();
+      const inheritingSongIds = [];
+      if (contractVersion === '0.6') {
+        for (const songId of album.songIds) {
+          if (!await contract.songHasCustomSplit(songId)) inheritingSongIds.push(songId);
+        }
+      } else inheritingSongIds.push(...album.songIds);
+      return { contract, title: album.title, audioURI: '', revision: String(album.revision), mainOwner: album.mainOwner,
+        recipients: [...album.recipients], sharesBps: [...album.sharesBps].map(Number), positions: [...album.positions],
+        songIds: [...album.songIds], inheritingSongIds, contractVersion };
+    }
+    if (kind === 'song') {
+      const song = await contract.getSong(resourceId);
+      if (!song.audioURI || song.enabled === false) throw new Error('DJuke song is not registered or enabled');
+      if (await contract.songAlbum(resourceId) !== '0x' + '0'.repeat(64) &&
+          await contract.CONTRACT_VERSION() !== '0.6') {
+        throw new Error('Custom splits for album songs require DJuke v0.6');
+      }
+      return { contract, audioURI: song.audioURI, revision: '', mainOwner: '',
+        recipients: [...song.recipients], sharesBps: [...song.sharesBps].map(Number), positions: [] };
+    }
+    if (kind === 'migration') {
+      if (!/^0x[0-9a-fA-F]{64}$/.test(targetAlbumId || '')) throw new Error('A target album is required');
+      if (await contract.CONTRACT_VERSION() !== '0.6') throw new Error('Existing-song album migration requires DJuke v0.6');
+      targetAlbumId = targetAlbumId.toLowerCase();
+      const [song, currentAlbumId, album] = await Promise.all([
+        contract.getSong(resourceId), contract.songAlbum(resourceId), contract.getAlbum(targetAlbumId),
+      ]);
+      if (!song.audioURI || song.enabled === false) throw new Error('DJuke song is not registered or enabled');
+      if (!album.mainOwner || /^0x0{40}$/i.test(album.mainOwner)) throw new Error('Target album not found');
+      if (currentAlbumId !== '0x' + '0'.repeat(64) && currentAlbumId.toLowerCase() !== targetAlbumId.toLowerCase()) {
+        throw new Error('Song already belongs to another album');
+      }
+      const useAlbumDefault = !await contract.songHasCustomSplit(resourceId) &&
+        song.recipients.length === 1 && Number(song.sharesBps[0]) === 10000;
+      return { contract, title: album.title, audioURI: song.audioURI, revision: String(album.revision), mainOwner: album.mainOwner,
+        recipients: [...song.recipients], sharesBps: [...song.sharesBps].map(Number), positions: [],
+        albumId: targetAlbumId, currentAlbumId, useAlbumDefault,
+        albumRecipients: [...album.recipients], albumSharesBps: [...album.sharesBps].map(Number),
+        albumPositions: [...album.positions] };
+    }
+    throw new Error('Unsupported split proposal type');
+  };
+  const splitTypedData = (kind, resourceId, state, proposed) => kind === 'album'
+    ? buildAlbumSplitTypedData({
+      ethers: { AbiCoder, keccak256 },
+      contractAddress: djukeContractAddress,
+      albumId: resourceId,
+      revision: state.revision,
+      recipients: proposed.recipients,
+      sharesBps: proposed.sharesBps,
+      positions: proposed.positions,
+    })
+    : kind === 'migration'
+      ? buildSongAlbumMigrationTypedData({
+        ethers: { AbiCoder, keccak256, toUtf8Bytes },
+        contractAddress: djukeContractAddress,
+        albumId: state.albumId,
+        songId: resourceId,
+        albumRevision: state.revision,
+        audioURI: state.audioURI,
+        currentRecipients: state.recipients,
+        currentSharesBps: state.sharesBps,
+        albumRecipients: state.albumRecipients,
+        albumSharesBps: state.albumSharesBps,
+        albumPositions: state.albumPositions,
+        useAlbumDefault: state.useAlbumDefault,
+      })
+      : buildSongSplitTypedData({
+      ethers: { AbiCoder, keccak256, toUtf8Bytes },
+      contractAddress: djukeContractAddress,
+      songId: resourceId,
+      audioURI: state.audioURI,
+      currentRecipients: state.recipients,
+      currentSharesBps: state.sharesBps,
+      recipients: proposed.recipients,
+      sharesBps: proposed.sharesBps,
+      positions: proposed.positions,
+    });
+  const splitIsCurrent = (request, state) => request.kind === 'album'
+    ? state.revision === request.revision && sameAddresses(state.recipients, request.currentRecipients) &&
+      sameNumbers(state.sharesBps, request.currentSharesBps) && sameStrings(state.positions, request.currentPositions)
+    : request.kind === 'migration'
+      ? state.currentAlbumId === '0x' + '0'.repeat(64) && state.albumId.toLowerCase() === request.albumId.toLowerCase() &&
+        state.revision === request.revision && state.audioURI === request.audioURI &&
+        sameAddresses(state.recipients, request.currentRecipients) && sameNumbers(state.sharesBps, request.currentSharesBps) &&
+        state.useAlbumDefault === request.useAlbumDefault &&
+        sameAddresses(state.albumRecipients, request.albumRecipients) && sameNumbers(state.albumSharesBps, request.albumSharesBps) &&
+        sameStrings(state.albumPositions, request.albumPositions)
+      : state.audioURI === request.audioURI && sameAddresses(state.recipients, request.currentRecipients) &&
+        sameNumbers(state.sharesBps, request.currentSharesBps);
+  const verifySplitSignature = (request, address, signature, state) => {
+    const recovered = verifyTypedData(request.typedData.domain, request.typedData.types,
+      request.typedData.value, signature).toLowerCase();
+    if (recovered !== String(address || '').toLowerCase()) throw new Error('Split approval signature does not match the connected wallet');
+    if (!state.recipients.some(owner => owner.toLowerCase() === recovered)) throw new Error('Only a current split recipient can approve');
+    return recovered;
+  };
 
   return async function handleRequest(request, response) {
     const requestUrl = new URL(request.url, 'http://localhost');
@@ -535,9 +669,289 @@ export function createWorkerRequestHandler({
           limit: Number(params.get('limit') || 25),
           query: params.get('query') || '',
           artist: params.get('artist') || '',
+          wallet: params.get('wallet') || '',
           before: params.get('before') || '',
           after: params.get('after') || '',
         }), '*');
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/creator/split-proposals') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!creatorSplitUpdateQueue) throw new Error('Creator split approvals are not configured');
+        const body = await readJson(request);
+        const resourceId = String(body.resourceId || '').toLowerCase();
+        if (!/^0x[0-9a-fA-F]{64}$/.test(resourceId) ||
+            !/^0x[0-9a-fA-F]{40}$/.test(body.address || '') ||
+            typeof body.signature !== 'string' || !body.signature ||
+            typeof body.title !== 'string' || body.title.length > 160) {
+          throw new Error('Invalid split proposal');
+        }
+        const state = await readSplitState(body.kind, resourceId, body.albumId);
+        if (['album', 'migration'].includes(body.kind) && String(body.revision) !== state.revision) {
+          throw new Error('Album changed; reload before proposing this update');
+        }
+        const isCurrentOwner = state.recipients.some(owner => owner.toLowerCase() === body.address.toLowerCase());
+        const isCreator = body.kind === 'song' && !isCurrentOwner && verifyCreatorSplitProposer &&
+          /^0x[0-9a-fA-F]{40}$/.test(body.nftContractAddress || '') &&
+          /^\d+$/.test(String(body.nftTokenId || '')) &&
+          await verifyCreatorSplitProposer({
+            address: body.address,
+            contractAddress: body.nftContractAddress,
+            tokenId: String(body.nftTokenId),
+          });
+        if (!isCurrentOwner && !isCreator) {
+          throw new Error('Only a current split recipient or verified NFT creator can start this proposal');
+        }
+        let proposed;
+        if (body.kind === 'migration') {
+          proposed = {
+            recipients: state.useAlbumDefault ? state.albumRecipients : state.recipients,
+            sharesBps: state.useAlbumDefault ? state.albumSharesBps : state.sharesBps,
+            positions: state.useAlbumDefault ? state.albumPositions : state.recipients.map(() => ''),
+          };
+        } else {
+          const proposedRows = validateCreatorSplitRows((body.recipients || []).map((wallet, index) => ({
+            wallet, shareBps: Number(body.sharesBps?.[index]), position: String(body.positions?.[index] || ''),
+          })));
+          if (proposedRows.length !== body.recipients.length ||
+              body.sharesBps?.length !== proposedRows.length || body.positions?.length !== proposedRows.length) {
+            throw new Error('Incomplete proposed split');
+          }
+          proposed = {
+            recipients: proposedRows.map(row => row.wallet),
+            sharesBps: proposedRows.map(row => row.shareBps),
+            positions: proposedRows.map(row => row.position),
+          };
+        }
+        const typedData = splitTypedData(body.kind, resourceId, state, proposed);
+        const recovered = verifyTypedData(typedData.domain, typedData.types, typedData.value, body.signature).toLowerCase();
+        if (recovered !== body.address.toLowerCase()) throw new Error('Split proposal signature does not match the connected wallet');
+        limitSplitProposal(recovered);
+        const expiresAt = new Date(now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const requestRecord = await creatorSplitUpdateQueue.queueRequest({
+          requestType: 'split-update',
+          kind: body.kind,
+          resourceId,
+          ...(body.kind === 'migration' ? { albumId: state.albumId } : {}),
+          ...(body.kind === 'migration' ? { albumTitle: state.title } : {}),
+          ...(body.kind === 'migration' ? {
+            useAlbumDefault: state.useAlbumDefault, albumRecipients: state.albumRecipients,
+            albumSharesBps: state.albumSharesBps, albumPositions: state.albumPositions,
+          } : {}),
+          title: body.title.trim() || `${body.kind === 'album' ? 'Album' : 'Song'} ${resourceId.slice(0, 10)}`,
+          contractAddress: djukeContractAddress.toLowerCase(),
+          audioURI: state.audioURI,
+          revision: state.revision,
+          currentRecipients: state.recipients,
+          currentSharesBps: state.sharesBps,
+          currentPositions: state.positions,
+          ...(body.kind === 'album' ? { currentSongIds: state.songIds } : {}),
+          recipients: proposed.recipients,
+          sharesBps: proposed.sharesBps,
+          positions: proposed.positions,
+          owners: state.recipients,
+          typedData,
+          initiatorAddress: body.address,
+          initiatorIsCreator: isCreator,
+          approvals: isCurrentOwner
+            ? [{ address: body.address, signature: body.signature, approvedAt: new Date(now()).toISOString() }]
+            : [],
+          expiresAt,
+        });
+        sendJson(response, 200, { request: requestRecord }, corsOrigin);
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/creator/split-status') {
+        if (!creatorSplitUpdateQueue || !rpcProvider) throw new Error('Creator split approvals are not configured');
+        const contractVersion = await splitContract().CONTRACT_VERSION();
+        sendJson(response, 200, { available: true, chainId: 8453,
+          contractAddress: djukeContractAddress.toLowerCase(), contractVersion }, '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/creator/split-proposal') {
+        if (!creatorSplitUpdateQueue) throw new Error('Creator split approvals are not configured');
+        const requestRecord = creatorSplitUpdateQueue.getRequest(requestUrl.searchParams.get('requestId'));
+        if (!requestRecord) { sendJson(response, 404, { error: 'Split proposal not found' }, '*'); return; }
+        sendJson(response, 200, { request: requestRecord }, '*');
+        return;
+      }
+      const splitApprovalMatch = requestUrl.pathname.match(/^\/api\/creator\/split-proposals\/([0-9a-f-]+)\/approve$/i);
+      if (request.method === 'POST' && splitApprovalMatch) {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!creatorSplitUpdateQueue) throw new Error('Creator split approvals are not configured');
+        const body = await readJson(request);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') || typeof body.signature !== 'string' || !body.signature) {
+          throw new Error('Invalid split approval');
+        }
+        const proposal = creatorSplitUpdateQueue.getRequest(splitApprovalMatch[1]);
+        if (!proposal) throw new Error('Split proposal not found');
+        if (proposal.status === 'expired' || Date.parse(proposal.expiresAt) <= now()) throw new Error('Split proposal has expired');
+        if (proposal.status !== 'pending') throw new Error('Split proposal is no longer pending');
+        const state = await readSplitState(proposal.kind, proposal.resourceId, proposal.albumId);
+        if (!splitIsCurrent(proposal, state)) throw new Error('On-chain split changed; create a new proposal');
+        const recovered = verifySplitSignature(proposal, body.address, body.signature, state);
+        const updated = await creatorSplitUpdateQueue.addApproval(proposal.requestId, {
+          address: recovered,
+          signature: body.signature,
+          approvedAt: new Date(now()).toISOString(),
+        });
+        sendJson(response, 200, { request: updated }, corsOrigin);
+        return;
+      }
+      const splitCompleteMatch = requestUrl.pathname.match(/^\/api\/creator\/split-proposals\/([0-9a-f-]+)\/complete$/i);
+      if (request.method === 'POST' && splitCompleteMatch) {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!creatorSplitUpdateQueue || !rpcProvider) throw new Error('Creator split reconciliation is not configured');
+        const body = await readJson(request);
+        const issuedAt = Date.parse(body.issuedAt);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') || !/^0x[0-9a-fA-F]{64}$/.test(body.txHash || '') ||
+            typeof body.signature !== 'string' || !Number.isFinite(issuedAt) || Math.abs(now() - issuedAt) > MAX_SIGNATURE_AGE_MS) {
+          throw new Error('Invalid split completion authorization');
+        }
+        const message = [
+          'DecentBusking creator split update completion',
+          `Wallet: ${body.address.toLowerCase()}`,
+          `Origin: ${origin}`,
+          `Proposal: ${splitCompleteMatch[1]}`,
+          `Transaction: ${body.txHash.toLowerCase()}`,
+          `Issued At: ${body.issuedAt}`,
+        ].join('\n');
+        const recovered = verifyMessage(message, body.signature).toLowerCase();
+        if (recovered !== body.address.toLowerCase()) throw new Error('Split completion signature does not match the connected wallet');
+        const proposal = creatorSplitUpdateQueue.getRequest(splitCompleteMatch[1]);
+        if (!proposal) throw new Error('Split proposal not found');
+        if (proposal.status === 'expired' || Date.parse(proposal.expiresAt) <= now()) throw new Error('Split proposal has expired');
+        if (proposal.status !== 'pending' || proposal.approvals.length !== proposal.owners.length) {
+          throw new Error('Fully approved split proposal not found');
+        }
+        const [transaction, receipt] = await Promise.all([
+          rpcProvider.getTransaction(body.txHash),
+          rpcProvider.getTransactionReceipt(body.txHash),
+        ]);
+        if (!transaction || !receipt || Number(receipt.status) !== 1 ||
+            String(transaction.to || '').toLowerCase() !== djukeContractAddress.toLowerCase() ||
+            String(transaction.from || '').toLowerCase() !== recovered) {
+          throw new Error('Split update transaction could not be verified');
+        }
+        const state = await readSplitState(proposal.kind, proposal.resourceId, proposal.albumId);
+        if (proposal.kind === 'song' && recovered !== expectedOwner) {
+          throw new Error('Only the configured owner can complete song split updates');
+        }
+        if (proposal.kind === 'album') {
+          const currentOwner = proposal.owners.some(owner => owner.toLowerCase() === recovered);
+          const admin = recovered === expectedOwner;
+          const manager = recovered === String(state.mainOwner).toLowerCase();
+          const initiator = recovered === String(proposal.initiatorAddress || '').toLowerCase();
+          if (state.contractVersion === '0.6'
+            ? !currentOwner && !admin && !manager && !initiator
+            : !manager) {
+            throw new Error('Wallet cannot submit this album split update');
+          }
+        }
+        if (proposal.kind === 'migration' && recovered !== String(state.mainOwner).toLowerCase()) {
+          throw new Error('Only the album manager can complete this migration');
+        }
+        if (proposal.kind === 'migration' &&
+            await state.contract.songHasCustomSplit(proposal.resourceId) !== !proposal.useAlbumDefault) {
+          throw new Error('On-chain song default/custom mode does not match the approved proposal');
+        }
+        const expectedAlbum = proposal.kind === 'migration' ? proposal.albumId.toLowerCase() : '';
+        if ((proposal.kind === 'migration' && String(state.currentAlbumId).toLowerCase() !== expectedAlbum) ||
+            !sameAddresses(state.recipients, proposal.recipients) || !sameNumbers(state.sharesBps, proposal.sharesBps) ||
+            (proposal.kind === 'album' && !sameStrings(state.positions, proposal.positions)) ||
+            (proposal.kind === 'album' && BigInt(state.revision) !== BigInt(proposal.revision) + 1n) ||
+            (proposal.kind === 'migration' && (state.revision !== proposal.revision ||
+              !sameAddresses(state.albumRecipients, proposal.albumRecipients) ||
+              !sameNumbers(state.albumSharesBps, proposal.albumSharesBps) ||
+              !sameStrings(state.albumPositions, proposal.albumPositions)))) {
+          throw new Error('On-chain split does not match the approved proposal');
+        }
+        if (proposal.kind === 'album') {
+          for (const songId of state.inheritingSongIds) {
+            const song = await state.contract.getSong(songId);
+            if (!sameAddresses([...song.recipients], proposal.recipients) ||
+                !sameNumbers([...song.sharesBps], proposal.sharesBps) ||
+                (state.contractVersion === '0.6' &&
+                  String(await state.contract.songSplitRevision(songId)) !== state.revision)) {
+              throw new Error('Album default saved, but inheriting songs still need synchronization');
+            }
+          }
+        }
+        if (onCreatorSplitUpdate) await onCreatorSplitUpdate({
+          proposal: proposal.kind === 'album' ? { ...proposal, currentSongIds: state.inheritingSongIds } : proposal,
+          txHash: body.txHash,
+        });
+        sendJson(response, 200, await creatorSplitUpdateQueue.completeRequest(proposal.requestId, { txHash: body.txHash }), corsOrigin);
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/creator/album-track-removal') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!rpcProvider || !onCreatorAlbumTrackRemoved) throw new Error('Album track reconciliation is not configured');
+        const body = await readJson(request);
+        const issuedAt = Date.parse(body.issuedAt);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') ||
+            !/^0x[0-9a-fA-F]{64}$/.test(body.albumId || '') ||
+            !/^0x[0-9a-fA-F]{64}$/.test(body.songId || '') ||
+            !/^0x[0-9a-fA-F]{64}$/.test(body.txHash || '') ||
+            typeof body.signature !== 'string' || !Number.isFinite(issuedAt) ||
+            Math.abs(now() - issuedAt) > MAX_SIGNATURE_AGE_MS) {
+          throw new Error('Invalid album track reconciliation authorization');
+        }
+        if (hasConsumedSignature(body.signature)) {
+          throw new Error('Album track reconciliation authorization has already been used');
+        }
+        const recovered = verifyMessage(buildAlbumTrackRemovalAuthorizationMessage({ ...body, origin }), body.signature).toLowerCase();
+        if (recovered !== body.address.toLowerCase()) {
+          throw new Error('Album track reconciliation signature does not match the connected wallet');
+        }
+        const [transaction, receipt] = await Promise.all([
+          rpcProvider.getTransaction(body.txHash),
+          rpcProvider.getTransactionReceipt(body.txHash),
+        ]);
+        if (!transaction || !receipt || Number(receipt.status) !== 1 ||
+            String(transaction.to || '').toLowerCase() !== djukeContractAddress.toLowerCase() ||
+            String(transaction.from || '').toLowerCase() !== recovered) {
+          throw new Error('Album track removal transaction could not be verified');
+        }
+        const eventInterface = new Interface(CREATOR_SPLIT_ABI);
+        const removed = (receipt.logs || []).some(log => {
+          if (String(log.address || '').toLowerCase() !== djukeContractAddress.toLowerCase()) return false;
+          try {
+            const event = eventInterface.parseLog(log);
+            return event?.name === 'AlbumSongRemoved' &&
+              String(event.args.albumId).toLowerCase() === body.albumId.toLowerCase() &&
+              String(event.args.songId).toLowerCase() === body.songId.toLowerCase();
+          } catch {
+            return false;
+          }
+        });
+        if (!removed) throw new Error('Transaction does not prove removal of this album track');
+        if (await splitContract().songAlbum(body.songId) !== `0x${'0'.repeat(64)}`) {
+          throw new Error('Song is still assigned to an album on-chain');
+        }
+        await onCreatorAlbumTrackRemoved({
+          albumId: body.albumId.toLowerCase(),
+          songId: body.songId.toLowerCase(),
+          txHash: body.txHash.toLowerCase(),
+        });
+        consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
+        sendJson(response, 200, { reconciled: true, songId: body.songId.toLowerCase() }, corsOrigin);
+        return;
+      }
+      const splitRejectMatch = requestUrl.pathname.match(/^\/api\/creator\/split-proposals\/([0-9a-f-]+)\/reject$/i);
+      if (request.method === 'POST' && splitRejectMatch) {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!creatorSplitUpdateQueue) throw new Error('Creator split approvals are not configured');
+        const body = await readJson(request);
+        const issuedAt = Date.parse(body.issuedAt);
+        if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') || typeof body.signature !== 'string' ||
+            !Number.isFinite(issuedAt) || Math.abs(now() - issuedAt) > MAX_SIGNATURE_AGE_MS) {
+          throw new Error('Invalid split rejection authorization');
+        }
+        const message = buildAdminAuthorizationMessage({ address: body.address, origin, issuedAt: body.issuedAt });
+        const recovered = verifyMessage(message, body.signature).toLowerCase();
+        if (recovered !== expectedOwner) throw new Error('Only the configured owner can reject split proposals');
+        sendJson(response, 200, await creatorSplitUpdateQueue.rejectRequest(splitRejectMatch[1], body.reason || 'rejected'), corsOrigin);
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/devert/queue') {

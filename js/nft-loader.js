@@ -1,5 +1,9 @@
 const CACHE_TTL_MS = 60 * 60 * 1000;
 
+export function audioCid(value) {
+  return String(value || '').match(/^ipfs:\/\/(?:ipfs\/)?([^/?#]+)/)?.[1] || String(value || '').match(/\/ipfs\/([^/?#]+)/)?.[1] || '';
+}
+
 export function isMusicNft(nft) {
   const animation = String(nft?.animation_url || '').toLowerCase();
   return !!(nft && (nft.audioUrl || nft.videoUrl || nft.mediaType === 'video/mp4' ||
@@ -24,7 +28,7 @@ export function catalogPage(items, { offset = 0, limit = 25 } = {}, maxLimit = 2
     nextOffset: offset + limit < items.length ? offset + limit : null };
 }
 
-export function nftCatalogPage(nfts, { query = '', artist = '', before = '', after = '', ...paging } = {}) {
+export function nftCatalogPage(nfts, { query = '', artist = '', wallet = '', before = '', after = '', ...paging } = {}) {
   const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const lower = after ? Date.parse(after) : null;
   const upper = before ? Date.parse(before) : null;
@@ -33,9 +37,11 @@ export function nftCatalogPage(nfts, { query = '', artist = '', before = '', aft
   const artists = [...new Map(music.map(nft => [nftArtistKey(nft), nftArtistLabel(nft)])).entries()]
     .map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
   const matching = music.filter(nft => {
-    const text = [nft.name, nft.title, nftArtistLabel(nft), nft.artist, nft.creator].filter(Boolean).join(' ').toLowerCase();
+    const text = [nft.name, nft.title, nftArtistLabel(nft), nft.artist, nft.creator, nft.tokenId].filter(Boolean).join(' ').toLowerCase();
     const date = Date.parse(nft.mintedAt);
-    return (!artist || nftArtistKey(nft) === artist.toLowerCase()) && terms.every(term => text.includes(term)) &&
+    const splitWallets = Array.isArray(nft.creatorSplits) ? nft.creatorSplits.map(entry => entry?.wallet || entry?.address) : [];
+    const walletMatch = !wallet || [nft.artist, nft.creator, ...splitWallets].some(value => String(value || '').toLowerCase() === wallet.toLowerCase());
+    return (!artist || nftArtistKey(nft) === artist.toLowerCase()) && walletMatch && terms.every(term => text.includes(term)) &&
       (lower === null || date >= lower) && (upper === null || date < upper);
   }).sort((a, b) => (Date.parse(b.mintedAt) || 0) - (Date.parse(a.mintedAt) || 0) || b.tokenId - a.tokenId ||
     a.contractAddress.localeCompare(b.contractAddress));

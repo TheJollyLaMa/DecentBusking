@@ -22,7 +22,7 @@
 //   • THREE  (three.js r128)
 //   • OrbitControls  (from three@0.128.0 examples)
 
-import { renderNFTCard } from './nft-card.js?v=20261025-seamless-handoff';
+import { renderNFTCard } from './nft-card.js?v=20261025-song-splits';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { setNowPlaying } from './stage.js?v=20261025-seamless-handoff';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';

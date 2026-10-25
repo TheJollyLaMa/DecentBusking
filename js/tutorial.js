@@ -1,7 +1,7 @@
 const TUTORIAL_STORAGE_KEY = 'decentbusking:tutorial:seen:v1';
 const TUTORIAL_COMPLETED_KEY = 'decentbusking:tutorial:completed:v1';
-const TUTORIAL_VISITS_KEY = 'decentbusking:tutorial:visits:v1';
-const TUTORIAL_INTRO_VISITS = 3;
+const TUTORIAL_PROGRESS_KEY = 'decentbusking:tutorial:progress:v1';
+const TUTORIAL_PLAYLIST_PROGRESS_KEY = 'decentbusking:tutorial:playlist-progress:v1';
 const TUTORIAL_STYLE_ID = 'decentbusking-tutorial-style';
 const TUTORIAL_OVERLAY_ID = 'decentbusking-tutorial-overlay';
 const TUTORIAL_HIGHLIGHT_CLASS = 'decentbusking-tutorial-highlight';
@@ -125,7 +125,11 @@ let _backdrop = null;
 let _currentStep = 0;
 let _currentTarget = null;
 let _autoLaunchTimer = null;
-let _visitNumber = 0;
+let _dismissed = false;
+let _furthest = { step: 0, hop: 0 };
+let _completed = false;
+let _furthestPlaylistHop = 0;
+let _playlistCompleted = false;
 let _rabbit = null;
 let _spotlight = null;
 let _returnFocus = null;
@@ -161,6 +165,50 @@ function _storage() {
 
 function _isSeen() {
   return _storage()?.getItem(TUTORIAL_STORAGE_KEY) === '1';
+}
+
+function _readProgress() {
+  try {
+    _completed = _storage()?.getItem(TUTORIAL_COMPLETED_KEY) === '1';
+    const saved = JSON.parse(_storage()?.getItem(TUTORIAL_PROGRESS_KEY) || 'null');
+    if (saved && Number.isInteger(saved.step) && saved.step >= 0 && saved.step < TUTORIAL_STEPS.length &&
+        Number.isInteger(saved.hop) && saved.hop >= 0 && saved.hop < PLAYLIST_HOPS.length) {
+      _furthest = { step: saved.step, hop: TUTORIAL_STEPS[saved.step].id === 'playlists' ? saved.hop : 0 };
+    }
+    const playlist = JSON.parse(_storage()?.getItem(TUTORIAL_PLAYLIST_PROGRESS_KEY) || 'null');
+    if (playlist && Number.isInteger(playlist.hop) && playlist.hop >= 0 && playlist.hop < PLAYLIST_HOPS.length) {
+      _furthestPlaylistHop = playlist.hop;
+      _playlistCompleted = playlist.completed === true;
+    }
+  } catch (error) {
+    console.warn('[tutorial] Could not restore tutorial progress:', error);
+  }
+}
+
+function _rememberProgress() {
+  if (_playlistOnly) {
+    _furthestPlaylistHop = Math.max(_furthestPlaylistHop, _playlistHop);
+    _playlistCompleted ||= _playlistHop === PLAYLIST_HOPS.length - 1;
+    try {
+      _storage()?.setItem(TUTORIAL_PLAYLIST_PROGRESS_KEY,
+        JSON.stringify({ hop: _furthestPlaylistHop, completed: _playlistCompleted }));
+    } catch (error) {
+      console.warn('[tutorial] Could not remember playlist tutorial progress:', error);
+    }
+    return;
+  }
+  if (_currentStep > _furthest.step || (_currentStep === _furthest.step && _playlistHop > _furthest.hop)) {
+    _furthest = { step: _currentStep, hop: _playlistHop };
+  }
+  try {
+    _storage()?.setItem(TUTORIAL_PROGRESS_KEY, JSON.stringify(_furthest));
+    if (_currentStep === TUTORIAL_STEPS.length - 1) {
+      _completed = true;
+      _storage()?.setItem(TUTORIAL_COMPLETED_KEY, '1');
+    }
+  } catch (error) {
+    console.warn('[tutorial] Could not remember tutorial progress:', error);
+  }
 }
 
 function _setSeen(seen) {
@@ -532,7 +580,8 @@ function _decorateLauncher(launcher) {
 
 function _syncLandingLauncher() {
   const launcher = document.getElementById('rabbit-tour-launch');
-  if (launcher) launcher.hidden = _storage()?.getItem(TUTORIAL_COMPLETED_KEY) === '1' || _visitNumber > TUTORIAL_INTRO_VISITS;
+  if (launcher) launcher.hidden = _dismissed || _completed ||
+    (_playlistCompleted && new URLSearchParams(window.location?.search || '').get('tutorial') === 'playlists');
 }
 
 function _ensureOverlay() {
@@ -940,6 +989,26 @@ function _renderStep() {
   }
   _panel.focus();
   _departCard();
+  _rememberProgress();
+}
+
+function _renderPlaylistIllustration(kind) {
+  _illustration.replaceChildren();
+  _illustration.hidden = !kind;
+  if (!kind) return;
+  const label = document.createElement('strong');
+  label.textContent = kind === 'funds' ? 'Illustration: $3 radio fee → four funds' : 'Illustration only — not live playback';
+  const flow = document.createElement('div');
+  flow.className = 'tutorial-playlist-flow';
+  const labels = kind === 'funds'
+    ? ['25% Playback', '25% Top 10', '25% Pinners', '25% Development']
+    : ['Current song →', 'Your playlist →', 'Radio rotation'];
+  labels.forEach(text => {
+    const item = document.createElement('span');
+    item.textContent = text;
+    flow.append(item);
+  });
+  _illustration.append(label, flow);
 }
 
 function _renderPlaylistIllustration(kind) {
@@ -971,19 +1040,19 @@ function _cancelAutoLaunch() {
 function _autoLaunch() {
   const requested = new URLSearchParams(window.location?.search || '').get('tutorial');
   if (requested === 'payroll') return;
+  if (_dismissed || _completed || _autoLaunchTimer || _overlay?.hidden === false) return;
   if (requested === 'playlists') {
+    if (_playlistCompleted) return;
     // Drawer listeners finish wiring during DOMContentLoaded before the linked card opens.
     _autoLaunchTimer = setTimeout(() => {
       _autoLaunchTimer = null;
-      startTutorial({ card: 'playlists' });
+      startTutorial({ card: 'playlists', resume: true });
     }, 0);
     return;
   }
-  if (_autoLaunchTimer || _visitNumber > TUTORIAL_INTRO_VISITS ||
-    _storage()?.getItem(TUTORIAL_COMPLETED_KEY) === '1' || _overlay?.hidden === false) return;
   _autoLaunchTimer = setTimeout(() => {
     _autoLaunchTimer = null;
-    startTutorial({ source: 'auto' });
+    startTutorial({ resume: true });
   }, 500);
 }
 
@@ -992,6 +1061,7 @@ function _handleKeydown(event) {
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopImmediatePropagation();
+    skipTutorial();
     return;
   }
   if (document.activeElement !== _panel) return;
@@ -1009,14 +1079,7 @@ function _handleKeydown(event) {
 export function initTutorial() {
   if (_initialized || typeof document === 'undefined') return;
   _initialized = true;
-  try {
-    const visits = Number(_storage()?.getItem(TUTORIAL_VISITS_KEY) || '0');
-    _visitNumber = (Number.isSafeInteger(visits) && visits >= 0 ? visits : 0) + 1;
-    _storage()?.setItem(TUTORIAL_VISITS_KEY, String(_visitNumber));
-  } catch (error) {
-    console.warn('[tutorial] Could not remember tutorial visits:', error);
-    _visitNumber = 1;
-  }
+  _readProgress();
   _ensureOverlay();
   _ensureLauncher();
   document.addEventListener('keydown', _handleKeydown, true);
@@ -1029,7 +1092,7 @@ export function initTutorial() {
   _autoLaunch();
 }
 
-export function startTutorial({ card } = {}) {
+export function startTutorial({ card, resume = false } = {}) {
   _ensureOverlay();
   _cancelAutoLaunch();
   if (_overlay.hidden === false) return;
@@ -1063,8 +1126,8 @@ export function startTutorial({ card } = {}) {
   _savedMint = mint ? { element: mint, visible: !mint.classList.contains('hidden') } : null;
   if (_savedMint?.visible) mint.classList.add('hidden');
   _playlistOnly = card === 'playlists';
-  _playlistHop = 0;
-  _currentStep = _playlistOnly ? TUTORIAL_STEPS.findIndex(step => step.id === 'playlists') : 0;
+  _playlistHop = resume ? _playlistOnly ? _furthestPlaylistHop : _furthest.hop : 0;
+  _currentStep = _playlistOnly ? TUTORIAL_STEPS.findIndex(step => step.id === 'playlists') : resume ? _furthest.step : 0;
   _overlay.hidden = false;
   _overlay.setAttribute('aria-hidden', 'false');
   document.body?.classList?.add(TUTORIAL_BODY_CLASS);
@@ -1123,6 +1186,9 @@ export function completeTutorial() {
 }
 
 function _endTutorial() {
+  _dismissed = true;
+  _notice?.remove();
+  _notice = null;
   _cancelAutoLaunch();
   _cancelJourney();
   _closeSurface();
@@ -1171,7 +1237,9 @@ export function isTutorialSeen() {
 }
 
 export function shouldAutoLaunchTutorial() {
-  return !_isSeen();
+  const requested = new URLSearchParams(window.location?.search || '').get('tutorial');
+  return !_dismissed && !_completed && requested !== 'payroll' &&
+    !(requested === 'playlists' && _playlistCompleted);
 }
 
 export function syncTutorialLaunchButtons(root = document) {

@@ -8,9 +8,22 @@ import { returnToRadio } from './radio-sync.js?v=20261025-seamless-handoff';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261025-seamless-handoff';
 import { canEditArtwork } from './artwork-update.mjs';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
+import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
+import { creatorImageURL, creatorPresentation, resolveCreatorENS } from './creator-profile-data.mjs';
+
+export function canEditCreatorSplits(nft = {}, walletAddress = '') {
+  const wallet = String(walletAddress || '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(wallet) ||
+      !(nft.audioUrl || nft.videoUrl || nft.animation_url || nft.djukeSongId)) return false;
+  const creator = String(nft.creator || nft.artist || '').toLowerCase();
+  const recipients = Array.isArray(nft.creatorSplits)
+    ? nft.creatorSplits.map(entry => String(entry?.wallet || entry?.address || '').toLowerCase()) : [];
+  return creator === wallet || recipients.includes(wallet);
+}
 
 // NFT currently shown in the single view; previews and purchases are handled explicitly.
 let _cardNft = null;
+const _creditProfileCache = new Map();
 
 function _cardAudioUrl(nft) {
   return nft ? (nft.videoUrl || nft.audioUrl || nft.animation_url || '') : '';
@@ -112,6 +125,7 @@ export function renderNFTCard(nft) {
     closeBtn.onclick = () => panel.close();
   }
   _cardNft = nft;
+  void _resolveCreditNames(content, nft);
   const watchlistBtn = content.querySelector('.nft-watchlist-btn');
   const watchlistStatus = content.querySelector('.nft-watchlist-status');
   const renderWatchlist = (options = {}) => {
@@ -180,6 +194,12 @@ export function renderNFTCard(nft) {
   });
   content.querySelector('.nft-artwork-edit-btn')?.addEventListener('click', () => {
     document.dispatchEvent?.(new CustomEvent('open-artwork-editor', { detail: { nft } }));
+  });
+  content.querySelector('.nft-credits-edit-btn')?.addEventListener('click', () => {
+    panel.close();
+    document.dispatchEvent?.(new CustomEvent('open-creator-profile', {
+      detail: { address: window._wallet?.address, songId: nft.djukeSongId || '', nft },
+    }));
   });
   watchlistBtn?.addEventListener('click', async () => {
     if (!window._wallet?.address || !window._wallet?.signer) {
@@ -296,6 +316,19 @@ function _buildCardHTML(nft) {
   const metadataUrl = (nft.metadataUri || '').replace('ipfs://', gateway);
   const contractAddress = nft.contractAddress || cfg.contractAddress;
   const explorerUrl = `${cfg.blockExplorerUrl || 'https://basescan.org'}/token/${contractAddress}?a=${encodeURIComponent(nft.tokenId)}`;
+  const creditRows = Array.isArray(nft.creatorSplits) ? nft.creatorSplits : [];
+  const credits = creditRows.length ? creditRows.map(entry => {
+    const wallet = String(entry.wallet || entry.address || '');
+    const percent = entry.shareBps !== undefined ? Number(entry.shareBps) / 100 : Number(entry.share);
+    return `<li class="nft-credit-row"><span class="nft-credit-avatar-wrap"><img class="nft-credit-avatar" data-credit-avatar-wallet="${_esc(wallet)}" alt="" hidden><span class="nft-credit-avatar-fallback" aria-hidden="true">♪</span></span><span><span data-credit-wallet="${_esc(wallet)}">${_esc(_shortAddr(wallet))}</span>${entry.position || entry.title ? ` · ${_esc(entry.position || entry.title)}` : ''}${Number.isFinite(percent) ? ` · ${_esc(String(percent))}%` : ''}</span></li>`;
+  }).join('') : '<li>Collaborator credits are not available in this NFT metadata.</li>';
+  const albumLabel = nft.djukeAlbumId
+    ? `<a href="#album-${_esc(nft.djukeAlbumId)}" data-album-id="${_esc(nft.djukeAlbumId)}">Part of album ${_esc(nft.djukeAlbumTitle || nft.djukeAlbumId)}</a>`
+    : nft.djukeSongId && nft.djukeAlbumState === 'unverified'
+      ? 'Album membership could not be verified.'
+      : nft.djukeSongId
+        ? 'Standalone DJuke song'
+        : 'DJuke registration is not included in this NFT metadata.';
 
   return `
     <div class="nft-detail-artwork">
@@ -316,6 +349,14 @@ function _buildCardHTML(nft) {
     </div>
     <p class="nft-watchlist-status" role="status" aria-live="polite"></p>
     ${/^0x[0-9a-fA-F]{40}$/.test(nft.artist || nft.creator || '') ? `<button class="nft-creator-profile nft-buy-btn" type="button" data-creator="${_esc(nft.artist || nft.creator)}" data-album="${_esc(nft.djukeAlbumId || '')}">Profile / Collaborators</button>` : ''}
+    <section class="nft-credits-section" aria-label="Credits and payout splits">
+      <h4>Credits &amp; splits</h4>
+      <p>${albumLabel}</p>
+      ${nft.djukeAlbumId && nft.djukeSplitMode ? `<p>${nft.djukeSplitMode === 'custom' ? 'Custom song split - album default changes do not overwrite this song.' : 'Uses album default payments.'}</p>` : ''}
+      <ul>${credits}</ul>
+      ${canEditCreatorSplits(nft, window._wallet?.address)
+        ? `<p>Add collaborators or adjust payments for <strong>${_esc(nft.name || nft.title || `Track #${nft.tokenId}`)}</strong>. Changes need approval before payouts change.</p><button class="nft-credits-edit-btn nft-buy-btn" type="button">${PENCIL_ICON} Add collaborator / split payments</button>` : ''}
+    </section>
 
     <button class="nft-share-btn nft-buy-btn" type="button" title="Share a link to this NFT">Share</button>
     <p class="nft-share-status" role="status" aria-live="polite"></p>
@@ -344,6 +385,64 @@ function _buildCardHTML(nft) {
     </div>
     <a class="nft-buy-btn" href="${_esc(marketUrl)}" target="_blank" rel="noopener">View in DecentMarket</a>
   `;
+}
+
+async function _resolveCreditNames(content, nft) {
+  const targets = [...content.querySelectorAll('[data-credit-wallet]')];
+  await Promise.all(targets.map(async target => {
+    const wallet = target.dataset.creditWallet;
+    const row = target.closest('.nft-credit-row');
+    const avatar = row?.querySelector('[data-credit-avatar-wallet]');
+    const fallback = row?.querySelector('.nft-credit-avatar-fallback');
+    const gateway = window.DecentConfig?.ipfsGateway;
+    const loadProfile = () => {
+      const service = String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+      if (!service) return Promise.resolve({});
+      const key = wallet.toLowerCase();
+      if (!_creditProfileCache.has(key)) {
+        const request = fetch(`${service}/api/creator/profile?${new URLSearchParams({ address: wallet })}`,
+          { signal: AbortSignal.timeout(6000) }).then(async response => {
+          if (!response.ok) throw new Error(`Creator profile returned ${response.status}`);
+          return response.json();
+        });
+        _creditProfileCache.set(key, request);
+        request.catch(() => {
+          if (_creditProfileCache.get(key) === request) _creditProfileCache.delete(key);
+        });
+      }
+      return _creditProfileCache.get(key);
+    };
+    const [profileResult, ensResult] = await Promise.allSettled([
+      loadProfile(),
+      resolveCreatorENS(wallet, workerEnsProvider),
+    ]);
+    if (_cardNft !== nft || !target.isConnected) return;
+    if (ensResult.status === 'fulfilled' && ensResult.value?.name) {
+      target.textContent = `${ensResult.value.name} (${target.textContent})`;
+    } else if (ensResult.status === 'rejected') {
+      target.title = 'ENS unavailable; showing wallet address';
+    }
+    const profile = profileResult.status === 'fulfilled' ? profileResult.value || {} : {};
+    const ens = ensResult.status === 'fulfilled' ? ensResult.value : null;
+    const avatarUri = creatorPresentation(profile, ens).avatarURI;
+    const imageUrl = creatorImageURL(avatarUri, gateway);
+    if (!imageUrl || !avatar) {
+      if (profileResult.status === 'rejected' || ensResult.status === 'rejected') {
+        if (avatar) avatar.title = 'Creator image unavailable; showing a placeholder';
+      }
+      return;
+    }
+    avatar.alt = `Avatar for ${ens?.name || _shortAddr(wallet)}`;
+    avatar.addEventListener('error', () => {
+      if (_cardNft !== nft || !avatar.isConnected) return;
+      avatar.hidden = true;
+      if (fallback) fallback.hidden = false;
+      avatar.title = 'Creator image could not be loaded; showing a placeholder';
+    }, { once: true });
+    avatar.src = imageUrl;
+    avatar.hidden = false;
+    if (fallback) fallback.hidden = true;
+  }));
 }
 
 // ── Parent Track Playback ─────────────────────────────────────────────────

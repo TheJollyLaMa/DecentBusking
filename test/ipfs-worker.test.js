@@ -4,7 +4,8 @@ const http = require('node:http');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
-const { Interface, Wallet, id } = require('../discord-bot/node_modules/ethers');
+const ethers = require('../discord-bot/node_modules/ethers');
+const { Interface, Wallet, id } = ethers;
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'ipfs-worker.js')).href;
 
 async function withServer(handler, callback) {
@@ -902,7 +903,379 @@ test('returns the pending queue only to the mint owner', async () => {
     });
   });
 
-test('reviewed album import requires fresh owner authorization and rejects replay', async () => {
+  test('v0.5 sole-payee proposal is immediately ready, persists through restart, and reconciles only after chain confirmation', async () => {
+    const { createWorkerRequestHandler } = await import(moduleUrl);
+    const { createCreatorSplitUpdateQueue } = await import('../discord-bot/creator-split-updates.js');
+    const { buildSongSplitTypedData } = await import('../js/creator-splits.mjs');
+    const owner = Wallet.createRandom();
+    const added = Wallet.createRandom();
+    const address = Wallet.createRandom().address;
+    const songId = id('wharf-rat-test');
+    const origin = 'https://busking.example';
+    let saved = [];
+    let recipients = [owner.address];
+    let shares = [10000];
+    let reconciled;
+    const txHash = `0x${'1'.repeat(64)}`;
+    const abi = new Interface([
+      'function CONTRACT_VERSION() view returns(string)',
+      'function getSong(bytes32) view returns((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
+      'function songAlbum(bytes32) view returns(bytes32)',
+    ]);
+    const provider = {
+      call: async tx => {
+        const call = abi.parseTransaction(tx);
+        if (call.name === 'CONTRACT_VERSION') return abi.encodeFunctionResult(call.name, ['0.5']);
+        if (call.name === 'songAlbum') return abi.encodeFunctionResult(call.name, [ethers.ZeroHash]);
+        return abi.encodeFunctionResult('getSong', [['ipfs://wharf', true, recipients, shares]]);
+      },
+      getTransaction: async () => ({ to: address, from: owner.address }),
+      getTransactionReceipt: async () => ({ status: 1 }),
+    };
+    const queue = createCreatorSplitUpdateQueue({ restore: async () => saved, save: async next => { saved = next; } });
+    await queue.initialize();
+    const options = { allowedOrigins: [origin], ownerWallet: owner.address, djukeContractAddress: address,
+      rpcProvider: provider, onCreatorSplitUpdate: async result => { reconciled = result; } };
+    const data = buildSongSplitTypedData({ ethers, contractAddress: address, songId, audioURI: 'ipfs://wharf',
+      currentRecipients: recipients, currentSharesBps: shares,
+      recipients: [owner.address, added.address], sharesBps: [5000, 5000], positions: ['Audio', 'Video'] });
+    let request;
+    await withServer(createWorkerRequestHandler({ ...options, creatorSplitUpdateQueue: queue }), async base => {
+      const status = await (await fetch(`${base}/api/creator/split-status`)).json();
+      assert.equal(status.available, true);
+      assert.equal(status.contractVersion, '0.5');
+      assert.equal(status.contractAddress, address.toLowerCase());
+      const response = await fetch(`${base}/api/creator/split-proposals`, { method: 'POST',
+        headers: { origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'song', resourceId: songId, title: 'Wharf Rat',
+          address: owner.address, recipients: [owner.address, added.address], sharesBps: [5000, 5000],
+          positions: ['Audio', 'Video'], signature: await owner.signTypedData(data.domain, data.types, data.value) }),
+      });
+      assert.equal(response.status, 200);
+      request = (await response.json()).request;
+      assert.equal(request.approvals.length, 1);
+      assert.deepEqual(request.owners, [owner.address]);
+      assert.equal(queue.getReadyRequests().length, 1);
+    });
+    const restored = createCreatorSplitUpdateQueue({ restore: async () => saved, save: async next => { saved = next; } });
+    await restored.initialize();
+    assert.equal(restored.getReadyRequests().length, 1);
+    await withServer(createWorkerRequestHandler({ ...options, creatorSplitUpdateQueue: restored }), async base => {
+      const issuedAt = new Date().toISOString();
+      const message = ['DecentBusking creator split update completion',
+        `Wallet: ${owner.address.toLowerCase()}`, `Origin: ${origin}`, `Proposal: ${request.requestId}`,
+        `Transaction: ${txHash}`, `Issued At: ${issuedAt}`].join('\n');
+      const body = { address: owner.address, txHash, issuedAt, signature: await owner.signMessage(message) };
+      const complete = () => fetch(`${base}/api/creator/split-proposals/${request.requestId}/complete`, {
+        method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body),
+      });
+      assert.equal((await complete()).status, 400);
+      assert.equal(reconciled, undefined);
+      recipients = [owner.address, added.address];
+      shares = [5000, 5000];
+      const completed = await complete();
+      assert.equal(completed.status, 200);
+      assert.equal(restored.getReadyRequests().length, 0);
+      assert.equal(restored.getRequest(request.requestId).status, 'completed');
+      assert.deepEqual(reconciled.proposal.positions, ['Audio', 'Video']);
+    });
+  });
+
+  test('shared DJuke migration proposals require every live song payee approval', async () => {
+    const { createWorkerRequestHandler } = await import(moduleUrl);
+    const { createCreatorSplitUpdateQueue } = await import('../discord-bot/creator-split-updates.js');
+    const { buildSongAlbumMigrationTypedData, buildSongSplitTypedData } = await import('../js/creator-splits.mjs');
+    const ownerA = Wallet.createRandom();
+    const ownerB = Wallet.createRandom();
+    const albumManager = Wallet.createRandom();
+    const albumPayee = Wallet.createRandom();
+    const nftCreator = Wallet.createRandom();
+    const songId = id('worker-migration-song');
+    const albumId = id('worker-migration-album');
+    const contractAddress = Wallet.createRandom().address;
+    const origin = 'https://busking.example';
+    const abi = new Interface([
+      'function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
+      'function getAlbum(bytes32) view returns ((address mainOwner,string title,string manifestURI,uint256 revision,uint256 listenPrice,uint256 albumPrice,address[] recipients,uint16[] sharesBps,string[] positions,bytes32[] songIds))',
+      'function songAlbum(bytes32) view returns (bytes32)',
+      'function songHasCustomSplit(bytes32) view returns (bool)',
+      'function CONTRACT_VERSION() view returns (string)',
+    ]);
+    let songRecipients = [ownerA.address, ownerB.address];
+    const albumRecipients = [albumPayee.address];
+    const runner = {
+      call: async transaction => {
+        const call = abi.parseTransaction(transaction);
+        if (call.name === 'getSong') {
+          return abi.encodeFunctionResult('getSong', [[
+            'ipfs://worker-migration-song', true, songRecipients, [6000, 4000],
+          ]]);
+        }
+        if (call.name === 'getAlbum') {
+          return abi.encodeFunctionResult('getAlbum', [[
+            albumManager.address, 'Migration album', 'ipfs://manifest', 1, 250000, 2500000,
+            albumRecipients, [10000], ['Performer'], [],
+          ]]);
+        }
+        if (call.name === 'songAlbum') return abi.encodeFunctionResult('songAlbum', [`0x${'0'.repeat(64)}`]);
+        if (call.name === 'songHasCustomSplit') return abi.encodeFunctionResult('songHasCustomSplit', [false]);
+        if (call.name === 'CONTRACT_VERSION') return abi.encodeFunctionResult('CONTRACT_VERSION', ['0.6']);
+        throw new Error(`Unexpected DJuke read: ${call.name}`);
+      },
+    };
+    const queue = createCreatorSplitUpdateQueue();
+    await queue.initialize();
+    const typedData = buildSongAlbumMigrationTypedData({
+      ethers,
+      contractAddress,
+      albumId,
+      songId,
+      albumRevision: 1n,
+      audioURI: 'ipfs://worker-migration-song',
+      currentRecipients: songRecipients,
+      currentSharesBps: [6000, 4000],
+      albumRecipients,
+      albumSharesBps: [10000],
+      albumPositions: ['Performer'],
+      useAlbumDefault: false,
+    });
+    const signature = await ownerA.signTypedData(typedData.domain, typedData.types, typedData.value);
+    const handler = createWorkerRequestHandler({
+      allowedOrigins: [origin],
+      ownerWallet: albumManager.address,
+      creatorSplitUpdateQueue: queue,
+      djukeContractAddress: contractAddress,
+      rpcProvider: runner,
+      verifyCreatorSplitProposer: async ({ address, contractAddress: nftAddress, tokenId }) =>
+        address.toLowerCase() === nftCreator.address.toLowerCase() &&
+        nftAddress.toLowerCase() === albumManager.address.toLowerCase() && tokenId === '42',
+    });
+    await withServer(handler, async base => {
+      const create = await fetch(`${base}/api/creator/split-proposals`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'migration',
+          resourceId: songId,
+          albumId,
+          revision: '1',
+          title: 'Migrated song',
+          address: ownerA.address,
+          signature,
+        }),
+      });
+      assert.equal(create.status, 200);
+      const request = (await create.json()).request;
+      assert.equal(request.kind, 'migration');
+      assert.deepEqual(request.owners, songRecipients);
+      assert.deepEqual(request.recipients, songRecipients);
+      assert.deepEqual(request.sharesBps, [6000, 4000]);
+      assert.equal(request.useAlbumDefault, false);
+      assert.equal(request.approvals.length, 1);
+
+      const approval = await ownerB.signTypedData(request.typedData.domain, request.typedData.types, request.typedData.value);
+      const response = await fetch(`${base}/api/creator/split-proposals/${request.requestId}/approve`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ address: ownerB.address, signature: approval }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).request.approvals.length, 2);
+
+      songRecipients = [ownerA.address, albumPayee.address];
+      const staleApproval = await fetch(`${base}/api/creator/split-proposals/${request.requestId}/approve`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ address: ownerB.address, signature: approval }),
+      });
+      assert.equal(staleApproval.status, 400);
+      assert.match((await staleApproval.json()).error, /changed/i);
+
+      songRecipients = [ownerA.address, ownerB.address];
+      const standaloneSongId = id('creator-proposed-song');
+      const songData = buildSongSplitTypedData({
+        ethers,
+        contractAddress,
+        songId: standaloneSongId,
+        audioURI: 'ipfs://worker-migration-song',
+        currentRecipients: songRecipients,
+        currentSharesBps: [6000, 4000],
+        recipients: [ownerA.address, albumPayee.address],
+        sharesBps: [5000, 5000],
+        positions: ['', 'Producer'],
+      });
+      const creatorSignature = await nftCreator.signTypedData(songData.domain, songData.types, songData.value);
+      const creatorRequestResponse = await fetch(`${base}/api/creator/split-proposals`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'song',
+          resourceId: standaloneSongId,
+          title: 'Creator-started song',
+          recipients: [ownerA.address, albumPayee.address],
+          sharesBps: [5000, 5000],
+          positions: ['', 'Producer'],
+          nftContractAddress: albumManager.address,
+          nftTokenId: '42',
+          address: nftCreator.address,
+          signature: creatorSignature,
+        }),
+      });
+      assert.equal(creatorRequestResponse.status, 200);
+      const creatorRequest = (await creatorRequestResponse.json()).request;
+      assert.equal(creatorRequest.initiatorIsCreator, true);
+      assert.equal(creatorRequest.approvals.length, 0);
+      assert.deepEqual(creatorRequest.owners, songRecipients);
+    });
+  });
+
+  test('album default reconciliation updates only inheriting songs and refuses unfinished song sync', async () => {
+    const { createWorkerRequestHandler } = await import(moduleUrl);
+    const { createCreatorSplitUpdateQueue } = await import('../discord-bot/creator-split-updates.js');
+    const { buildAlbumSplitTypedData } = await import('../js/creator-splits.mjs');
+    const owner = Wallet.createRandom();
+    const next = Wallet.createRandom();
+    const contractAddress = Wallet.createRandom().address;
+    const albumId = id('default-album');
+    const inheritedId = id('default-track');
+    const customId = id('custom-track');
+    const origin = 'https://busking.example';
+    const txHash = id('default-update-transaction');
+    const abi = new Interface([
+      'function getAlbum(bytes32) view returns ((address mainOwner,string title,string manifestURI,uint256 revision,uint256 listenPrice,uint256 albumPrice,address[] recipients,uint16[] sharesBps,string[] positions,bytes32[] songIds))',
+      'function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
+      'function songHasCustomSplit(bytes32) view returns (bool)',
+      'function songSplitRevision(bytes32) view returns (uint256)',
+      'function CONTRACT_VERSION() view returns (string)',
+    ]);
+    let revision = 1;
+    let synced = false;
+    let reconciled = null;
+    const runner = {
+      call: async transaction => {
+        const call = abi.parseTransaction(transaction);
+        if (call.name === 'CONTRACT_VERSION') return abi.encodeFunctionResult(call.name, ['0.6']);
+        if (call.name === 'songHasCustomSplit') return abi.encodeFunctionResult(call.name, [call.args[0] === customId]);
+        if (call.name === 'songSplitRevision') return abi.encodeFunctionResult(call.name, [synced ? 2 : 1]);
+        if (call.name === 'getAlbum') return abi.encodeFunctionResult(call.name, [[
+          owner.address, 'Defaults', 'ipfs://album', revision, 250000, 1000000,
+          [revision === 1 ? owner.address : next.address], [10000], ['Artist'], [inheritedId, customId],
+        ]]);
+        if (call.name === 'getSong') return abi.encodeFunctionResult(call.name, [[
+          'ipfs://song', true, [synced ? next.address : owner.address], [10000],
+        ]]);
+        throw new Error(`Unexpected default reconciliation read: ${call.name}`);
+      },
+      getTransaction: async () => ({ to: contractAddress, from: owner.address }),
+      getTransactionReceipt: async () => ({ status: 1 }),
+    };
+    const queue = createCreatorSplitUpdateQueue();
+    await queue.initialize();
+    const handler = createWorkerRequestHandler({
+      allowedOrigins: [origin], ownerWallet: owner.address, creatorSplitUpdateQueue: queue,
+      djukeContractAddress: contractAddress, rpcProvider: runner,
+      onCreatorSplitUpdate: async ({ proposal }) => { reconciled = proposal; },
+    });
+    const data = buildAlbumSplitTypedData({ ethers, contractAddress, albumId, revision: 1,
+      recipients: [next.address], sharesBps: [10000], positions: ['Artist'] });
+    await withServer(handler, async base => {
+      const create = await fetch(`${base}/api/creator/split-proposals`, {
+        method: 'POST', headers: { origin, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'album', resourceId: albumId, revision: '1', title: 'Defaults',
+          address: owner.address, recipients: [next.address], sharesBps: [10000], positions: ['Artist'],
+          signature: await owner.signTypedData(data.domain, data.types, data.value),
+        }),
+      });
+      assert.equal(create.status, 200);
+      const { request } = await create.json();
+      revision = 2;
+      const issuedAt = new Date().toISOString();
+      const message = [
+        'DecentBusking creator split update completion', `Wallet: ${owner.address.toLowerCase()}`,
+        `Origin: ${origin}`, `Proposal: ${request.requestId}`, `Transaction: ${txHash}`, `Issued At: ${issuedAt}`,
+      ].join('\n');
+      const body = JSON.stringify({ address: owner.address, txHash, issuedAt, signature: await owner.signMessage(message) });
+      const complete = () => fetch(`${base}/api/creator/split-proposals/${request.requestId}/complete`, {
+        method: 'POST', headers: { origin, 'content-type': 'application/json' }, body,
+      });
+      const unfinished = await complete();
+      assert.equal(unfinished.status, 400);
+      assert.match((await unfinished.json()).error, /still need synchronization/);
+      assert.equal(reconciled, null);
+      synced = true;
+      const completed = await complete();
+      assert.equal(completed.status, 200);
+      assert.deepEqual(reconciled.currentSongIds, [inheritedId]);
+      assert.deepEqual(reconciled.recipients, [next.address]);
+    });
+  });
+
+  test('album track removal metadata sync requires a signed, confirmed DJuke event and rejects replay', async () => {
+    const { createWorkerRequestHandler } = await import(moduleUrl);
+    const { buildAlbumTrackRemovalAuthorizationMessage } = await import('../js/creator-splits.mjs');
+    const manager = Wallet.createRandom();
+    const songId = id('removed-song');
+    const albumId = id('removed-album');
+    const contractAddress = Wallet.createRandom().address;
+    const origin = 'https://busking.example';
+    const abi = new Interface([
+      'function songAlbum(bytes32) view returns (bytes32)',
+      'event AlbumSongRemoved(bytes32 indexed albumId,bytes32 indexed songId)',
+    ]);
+    const event = abi.encodeEventLog(abi.getEvent('AlbumSongRemoved'), [albumId, songId]);
+    const runner = {
+      call: async transaction => {
+        const call = abi.parseTransaction(transaction);
+        assert.equal(call.name, 'songAlbum');
+        return abi.encodeFunctionResult('songAlbum', [`0x${'0'.repeat(64)}`]);
+      },
+      getTransaction: async () => ({ to: contractAddress, from: manager.address }),
+      getTransactionReceipt: async () => ({
+        status: 1,
+        logs: [{ address: contractAddress, ...event }],
+      }),
+    };
+    let reconciled;
+    const handler = createWorkerRequestHandler({
+      allowedOrigins: [origin],
+      ownerWallet: manager.address,
+      djukeContractAddress: contractAddress,
+      rpcProvider: runner,
+      onCreatorAlbumTrackRemoved: async value => { reconciled = value; },
+    });
+    const issuedAt = new Date().toISOString();
+    const authorization = {
+      address: manager.address,
+      origin,
+      albumId,
+      songId,
+      txHash: `0x${'1'.repeat(64)}`,
+      issuedAt,
+    };
+    const signature = await manager.signMessage(buildAlbumTrackRemovalAuthorizationMessage(authorization));
+    const payload = JSON.stringify({ ...authorization, signature });
+
+    await withServer(handler, async base => {
+      const response = await fetch(`${base}/api/creator/album-track-removal`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json' },
+        body: payload,
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(reconciled, { albumId, songId, txHash: authorization.txHash });
+
+      const replay = await fetch(`${base}/api/creator/album-track-removal`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json' },
+        body: payload,
+      });
+      assert.equal(replay.status, 400);
+      assert.match((await replay.json()).error, /already been used/);
+    });
+  });
+
+  test('reviewed album import requires fresh owner authorization and rejects replay', async () => {
   const { buildReviewedAlbumImportAuthorizationMessage, createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom();
   const origin = 'https://busking.example';

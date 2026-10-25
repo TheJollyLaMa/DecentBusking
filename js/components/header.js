@@ -1,6 +1,6 @@
-import './header-right-ankh-override.js?v=20261022-pin-decenthead';
-
-const DECENT_HEAD_BASE = 'https://cdn.jsdelivr.net/gh/TheJollyLaMa/DecentHead@7baa1c8c47ee33a2162b4dbd4570a14108a24d53/';
+import './header-right-ankh-override.js?v=20261025-header-compat';
+import { DECENT_HEAD_BASE } from './header-source.mjs';
+import { connectWallet } from '../wallet.js';
 const DBUSKER_AVATAR_URL = new URL('../../img/D_Busker.jpeg', import.meta.url).href;
 const IPFS_LOGO_URL = new URL('../../img/IPFS_Logo.png', import.meta.url).href;
 const JAM_SUBTITLE_PARTS = [
@@ -21,6 +21,9 @@ const JAM_SUBTITLE_PARTS = [
 
 const MOBILE_HEADER_SHELL_STYLE = `
   decent-header { display: block; }
+  @media (min-width: 601px) {
+    app-title { display: block; width: calc(100% - 200px); margin: 0 auto; }
+  }
   @keyframes header-energy-pulse {
     0%, 100% { box-shadow: 0 0 0 1px rgba(255,180,105,.38), 0 0 8px rgba(255,145,75,.18); }
     50% { box-shadow: 0 0 0 2px rgba(255,201,145,.72), 0 0 15px rgba(255,145,75,.42); }
@@ -270,6 +273,9 @@ const MOBILE_APP_TITLE_STYLE = `
 `;
 
 const BRAND_TITLE_STYLE = `
+  @media (min-width: 601px) {
+    #app-title { font-size: clamp(1rem, 3.4vw, 3.5rem); }
+  }
   #app-title { display: flex; align-items: center; justify-content: center; white-space: nowrap; pointer-events: none; }
   .title-symbol { color: #ffe8d1; font-size: 1.15rem; margin: 0 .32rem; opacity: .85; text-shadow: 0 1px 0 #a64b20, 0 2px 2px rgba(0,0,0,.75); pointer-events: none; }
   .title-main {
@@ -319,6 +325,8 @@ const BRAND_TITLE_STYLE = `
 `;
 
 const MOBILE_WALLET_STYLE = `
+  #walletHeaderContainer { pointer-events: none; }
+  #wallet-connect { pointer-events: auto; }
   @media (max-width: 600px) {
     #walletHeaderContainer {
       position: relative;
@@ -450,10 +458,35 @@ class DecentBuskingHeader extends HTMLElement {
     installCoinHitArea(appTitle?.shadowRoot, 'Left menu');
     installCoinHitArea(appTitle?.shadowRoot?.querySelector('right-ankh')?.shadowRoot, 'Right menu');
     injectStyle(this.shadowRoot.querySelector('wallet-connect')?.shadowRoot, 'decentbusking-mobile-wallet', MOBILE_WALLET_STYLE);
+    this._installWallet();
     this._installBuskerAvatar(appTitle?.shadowRoot);
     this._installJamSubtitle(appTitle?.shadowRoot);
     this._installIpfsStatus();
     this._installEnergyNetwork(appTitle?.shadowRoot);
+  }
+
+  _installWallet() {
+    const wallet = this.shadowRoot.querySelector('wallet-connect');
+    const button = wallet?.shadowRoot?.querySelector('#wallet-connect');
+    if (!button) return;
+    button.addEventListener('click', event => {
+      if (!window.ethereum) return;
+      event.stopImmediatePropagation();
+      void connectWallet();
+    }, { capture: true });
+    this._syncWallet = () => {
+      wallet.walletAddress = window._wallet?.address || null;
+      wallet.walletConnected = !!wallet.walletAddress;
+      wallet.updateWalletUI();
+    };
+    document.addEventListener('wallet-connected', this._syncWallet);
+    document.addEventListener('wallet-disconnected', this._syncWallet);
+    this._syncWallet();
+  }
+
+  disconnectedCallback() {
+    document.removeEventListener('wallet-connected', this._syncWallet);
+    document.removeEventListener('wallet-disconnected', this._syncWallet);
   }
 
   _installBuskerAvatar(shadowRoot) {

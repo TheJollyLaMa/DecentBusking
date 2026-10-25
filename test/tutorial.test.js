@@ -62,8 +62,7 @@ function makeStorage() {
   };
 }
 
-function createTutorialContext() {
-  const storage = makeStorage();
+function createTutorialContext(storage = makeStorage()) {
   const timerQueue = [];
   const launchButton = makeNode('button');
   launchButton.setAttribute('data-tutorial-launch', '1');
@@ -167,28 +166,61 @@ test('tutorial walkthrough auto-launches on an introductory visit and marks visi
   assert.equal(vm.runInContext('_overlay.hidden', context), true);
   assert.equal(storage.getItem('decentbusking:tutorial:seen:v1'), '1');
   assert.equal(launchButton.children[1].textContent, 'Follow the white rabbit');
-  assert.equal(document.getElementById('rabbit-tour-launch').hidden, false);
+  assert.equal(document.getElementById('rabbit-tour-launch').hidden, true);
+  vm.runInContext('_autoLaunch(); syncTutorialLaunchButtons();', context);
+  assert.equal(document.getElementById('rabbit-tour-launch').hidden, true);
+  assert.equal(timerQueue.filter(Boolean).length, 1);
 });
 
-test('tutorial auto-opens on exactly the first three visits, then remains available from About', () => {
+test('incomplete tutorials auto-open after refresh regardless of past visits or the old seen flag', () => {
   for (const previousVisits of [0, 1, 2, 3, 10]) {
     const { context, storage, timerQueue, document, launchButton } = createTutorialContext();
     storage.setItem('decentbusking:tutorial:visits:v1', String(previousVisits));
     storage.setItem('decentbusking:tutorial:seen:v1', '1');
     vm.runInContext('initTutorial();', context);
-    assert.equal(storage.getItem('decentbusking:tutorial:visits:v1'), String(previousVisits + 1));
-    assert.equal(timerQueue.length, previousVisits < 3 ? 1 : 0);
-    assert.equal(document.getElementById('rabbit-tour-launch').hidden, previousVisits >= 3);
-    if (previousVisits < 3) {
-      timerQueue[0]();
-      assert.equal(vm.runInContext('_overlay.hidden', context), false);
-    } else {
-      vm.runInContext('startTutorial();', context);
-      assert.equal(vm.runInContext('_overlay.hidden', context), false);
-    }
+    assert.equal(timerQueue.length, 1);
+    assert.equal(document.getElementById('rabbit-tour-launch').hidden, false);
+    timerQueue[0]();
+    assert.equal(vm.runInContext('_overlay.hidden', context), false);
     assert.equal(launchButton.hidden, false);
     vm.runInContext('initTutorial();', context);
-    assert.equal(storage.getItem('decentbusking:tutorial:visits:v1'), String(previousVisits + 1));
+    assert.equal(timerQueue.length, 1);
+  }
+});
+
+test('refresh resumes the furthest card and playlist hop, never the most recent Back destination', () => {
+  const first = createTutorialContext();
+  vm.runInContext('initTutorial(); startTutorial(); while (_currentStep < 7) nextTutorialStep(); nextTutorialStep(); nextTutorialStep(); previousTutorialStep(); skipTutorial();', first.context);
+  assert.deepEqual(JSON.parse(first.storage.getItem('decentbusking:tutorial:progress:v1')), { step: 7, hop: 2 });
+  const refreshed = createTutorialContext(first.storage);
+  vm.runInContext('initTutorial();', refreshed.context);
+  refreshed.timerQueue[0]();
+  assert.equal(vm.runInContext('_currentStep', refreshed.context), 7);
+  assert.equal(vm.runInContext('_playlistHop', refreshed.context), 2);
+  assert.equal(vm.runInContext('_overlay.hidden', refreshed.context), false);
+});
+
+test('seeing every card completes the tutorial even if Leave is used on the final card; About can replay', () => {
+  const first = createTutorialContext();
+  vm.runInContext('initTutorial(); startTutorial(); while (_currentStep < TUTORIAL_STEPS.length - 1) nextTutorialStep(); skipTutorial();', first.context);
+  assert.equal(first.storage.getItem('decentbusking:tutorial:completed:v1'), '1');
+  const refreshed = createTutorialContext(first.storage);
+  vm.runInContext('initTutorial();', refreshed.context);
+  assert.equal(refreshed.timerQueue.length, 0);
+  assert.equal(refreshed.document.getElementById('rabbit-tour-launch').hidden, true);
+  assert.equal(refreshed.launchButton.hidden, false);
+  vm.runInContext('startTutorial();', refreshed.context);
+  assert.equal(vm.runInContext('_currentStep', refreshed.context), 0);
+  assert.equal(vm.runInContext('_overlay.hidden', refreshed.context), false);
+});
+
+test('invalid persisted progress is ignored without stopping the tour', () => {
+  for (const saved of ['broken', '{"step":999,"hop":0}', '{"step":-1,"hop":0}', '{"step":7,"hop":99}']) {
+    const fixture = createTutorialContext();
+    fixture.storage.setItem('decentbusking:tutorial:progress:v1', saved);
+    vm.runInContext('initTutorial();', fixture.context);
+    fixture.timerQueue[0]();
+    assert.equal(vm.runInContext('_currentStep', fixture.context), 0);
   }
 });
 
@@ -399,7 +431,7 @@ test('leaving restores drawers, menus, visible briefcase drafts and launch focus
   assert.equal(rightMenu.style.display, 'block');
   assert.equal(clicks.includes('guitar-case-btn'), false);
   assert.equal(clicks.includes('mint-cancel-btn'), false);
-  assert.equal(document.activeElement.id, 'rabbit-tour-launch');
+  assert.equal(document.activeElement.id, 'guitar-case-btn');
   assert.equal(vm.runInContext('_currentTarget', context), null);
 });
 
@@ -429,7 +461,7 @@ test('pending uploads, open dialogs and VertLoop defer the tour explicitly witho
   assert.ok(document.body);
 });
 
-test('tutorial permits keyboard exploration and Escape cannot dismiss it', () => {
+test('tutorial permits keyboard exploration and Escape dismisses all tour UI', () => {
   const { context, document } = createTutorialContext();
   vm.runInContext('initTutorial(); startTutorial();', context);
   const event = key => ({ key, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } });
@@ -443,8 +475,9 @@ test('tutorial permits keyboard exploration and Escape cannot dismiss it', () =>
   assert.equal(context.event.stopped, true);
   context.event = event('Escape');
   vm.runInContext('_handleKeydown(event);', context);
-  assert.equal(vm.runInContext('_overlay.hidden', context), false);
-  assert.equal(document.body.classList.contains('decentbusking-tutorial-open'), true);
+  assert.equal(vm.runInContext('_overlay.hidden', context), true);
+  assert.equal(document.body.classList.contains('decentbusking-tutorial-open'), false);
+  assert.equal(document.getElementById('rabbit-tour-launch').hidden, true);
   assert.equal(context.event.stopped, true);
   vm.runInContext('targets["#radio-voting"].focus();', context);
   context.event = event('ArrowRight');
@@ -490,9 +523,8 @@ test('tour uses factual rabbit-themed copy and a smaller money icon without a Me
   assert.equal(document.getElementById('rabbit-tour-launch').getAttribute('aria-label'), 'Follow the white rabbit: explore DecentBusking');
 });
 
-test('playlist deep link opens the guided card even for returning and completed visitors', () => {
+test('playlist deep link opens the guided card for incomplete returning visitors', () => {
   const { context, storage, targets, timerQueue } = createTutorialContext();
-  storage.setItem('decentbusking:tutorial:completed:v1', '1');
   storage.setItem('decentbusking:tutorial:visits:v1', '20');
   vm.runInContext("window.location = { search: '?tutorial=playlists' }; initTutorial();", context);
   assert.equal(timerQueue.filter(Boolean).length, 1);
@@ -509,6 +541,30 @@ test('playlist deep link opens the guided card even for returning and completed 
   assert.equal(timerQueue.filter(Boolean).length, 0);
 });
 
+test('playlist deep links resume their furthest hop and stay hidden after every linked card is viewed', () => {
+  const first = createTutorialContext();
+  vm.runInContext("window.location = { search: '?tutorial=playlists' }; initTutorial();", first.context);
+  first.timerQueue[0]();
+  vm.runInContext('nextTutorialStep(); nextTutorialStep(); previousTutorialStep(); skipTutorial();', first.context);
+  const refreshed = createTutorialContext(first.storage);
+  vm.runInContext("window.location = { search: '?tutorial=playlists' }; initTutorial();", refreshed.context);
+  refreshed.timerQueue[0]();
+  assert.equal(vm.runInContext('_playlistHop', refreshed.context), 2);
+  vm.runInContext('while (_playlistHop < PLAYLIST_HOPS.length - 1) nextTutorialStep(); skipTutorial();', refreshed.context);
+  const finished = createTutorialContext(first.storage);
+  vm.runInContext("window.location = { search: '?tutorial=playlists' }; initTutorial();", finished.context);
+  assert.equal(finished.timerQueue.length, 0);
+  assert.equal(finished.document.getElementById('rabbit-tour-launch').hidden, true);
+  assert.equal(first.storage.getItem('decentbusking:tutorial:completed:v1'), null);
+});
+test('completed visitors do not reopen automatically even with a playlist URL; About can still replay it', () => {
+  const fixture = createTutorialContext();
+  fixture.storage.setItem('decentbusking:tutorial:completed:v1', '1');
+  vm.runInContext("window.location = { search: '?tutorial=playlists' }; initTutorial();", fixture.context);
+  assert.equal(fixture.timerQueue.length, 0);
+  vm.runInContext("startTutorial({ card: 'playlists' });", fixture.context);
+  assert.equal(vm.runInContext('_overlay.hidden', fixture.context), false);
+});
 test('playlist hops spotlight actual controls, explain both payment splits and demonstrate radio without buying', () => {
   const { context, clicks, targets, storage } = createTutorialContext();
   targets['.djuke-playlist-draft'].draft = ['Keep my existing song'];

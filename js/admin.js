@@ -12,6 +12,7 @@ import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-snif
 import { reportMintCompletion } from './mint-reconciliation.js';
 import { addNFTToSpace } from './space.js?v=20261025-seamless-handoff';
 import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artwork-update.mjs';
+import { completeCreatorSplitProposal, fetchCreatorSplitProposal, rejectCreatorSplitProposal } from './creator-split-proposal.mjs?v=20261025-song-splits';
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261024-programming-calendar';
@@ -30,6 +31,10 @@ const ROLE_GRANT_ABI = [
   'event TokenRegistered(uint256 indexed tokenId, address indexed creator, uint256 maxSupply, uint8 kind, string uri)',
   ...PRODUCT_BATCH_ABI.slice(0, 1),
   PRODUCT_BATCH_ABI[2],
+];
+const DJUKE_SPLIT_ADMIN_ABI = [
+  'function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
+  'function configureSong(bytes32 songId,string audioURI,address[] recipients,uint16[] sharesBps)',
 ];
 
 // ── DOM references (resolved after DOMContentLoaded) ─────────────────────────
@@ -108,10 +113,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
   _mintQueueEl?.addEventListener('click', (event) => {
-    const approve = event.target.closest('.admin-mint-one, .admin-artwork-approve');
-    const reject = event.target.closest('.admin-artwork-reject');
+    const approve = event.target.closest('.admin-mint-one, .admin-artwork-approve, .admin-split-approve');
+    const reject = event.target.closest('.admin-artwork-reject, .admin-split-reject');
     if (approve) _processQueue([Number(approve.dataset.index)]);
-    if (reject) _rejectArtworkUpdate(Number(reject.dataset.index));
+    if (reject) {
+      const track = _mintQueue[Number(reject.dataset.index)];
+      if (track?.requestType === 'split-update') _rejectCreatorSplitUpdate(Number(reject.dataset.index));
+      else _rejectArtworkUpdate(Number(reject.dataset.index));
+    }
   });
   _mintQueueEl?.addEventListener('change', event => {
     if (event.target.matches('.admin-artwork, .admin-artwork-cid')) _updateArtworkPreview(Number(event.target.dataset.index));
@@ -612,6 +621,12 @@ function _setRadioScheduleStatus(message, isError = false) {
             <span>by ${_esc(track.uploader)} · ${_esc(track.requestedAt ? new Date(track.requestedAt).toLocaleString() : '')}</span>
             <span>Current → new artwork</span>
             <span class="admin-artwork-status" data-index="${index}" role="status">Pending review</span>
+          ` : track.requestType === 'split-update' ? `
+            <strong>${_esc(track.title)}</strong>
+            <span>Standalone DJuke split update · ${track.approvalCount}/${track.ownerCount} current owners approved</span>
+            <span>Before: ${track.currentRecipients.map((wallet, item) => `${_esc(wallet)} · ${_esc(track.currentSharesBps[item] / 100)}%`).join(' / ')}</span>
+            <span>After: ${track.recipients.map((wallet, item) => `${_esc(wallet)} · ${_esc(track.sharesBps[item] / 100)}%`).join(' / ')}</span>
+            <span class="admin-artwork-status" role="status">All current recipients signed. Admin approval calls configureSong.</span>
           ` : `
           <img class="admin-artwork-preview" data-index="${index}" ${track.artworkCid ? `src="${_esc(_gatewayUrl(track.artworkCid))}"` : 'hidden'} alt="Artwork for ${_esc(track.title)}" />
           <strong>${_esc(track.title)}</strong>
@@ -633,6 +648,8 @@ function _setRadioScheduleStatus(message, isError = false) {
         </div>
         ${track.requestType === 'artwork-update'
           ? `<div class="admin-mint-actions"><button class="admin-btn admin-btn-secondary admin-artwork-approve" type="button" data-index="${index}">Approve</button><button class="admin-btn admin-btn-secondary admin-artwork-reject" type="button" data-index="${index}">Reject</button></div>`
+          : track.requestType === 'split-update'
+            ? `<div class="admin-mint-actions"><button class="admin-btn admin-btn-secondary admin-split-approve" type="button" data-index="${index}">Apply split</button><button class="admin-btn admin-btn-secondary admin-split-reject" type="button" data-index="${index}">Reject</button></div>`
           : `<button class="admin-btn admin-btn-secondary admin-mint-one" type="button" data-index="${index}">Mint</button>`}
       </div>
     `).join('');
@@ -680,23 +697,27 @@ function _setRadioScheduleStatus(message, isError = false) {
     _setMintControlsDisabled(true);
     let completed = false;
     let completedBatches = 0;
+    let completedItems = 0;
     let failureMessage = '';
     try {
       const selectedTracks = indices.map(index => ({ index, track: _mintQueue[index] })).filter(entry => entry.track);
-      const hasArtworkUpdates = selectedTracks.some(entry => entry.track.requestType === 'artwork-update');
-      if (!hasArtworkUpdates && window.DecentConfig?.nftBatchMintEnabled === true) {
+      const hasSpecialRequests = selectedTracks.some(entry => entry.track.requestType !== 'mint');
+      if (!hasSpecialRequests && window.DecentConfig?.nftBatchMintEnabled === true) {
         const batches = splitMintBatches(indices);
         for (let index = 0; index < batches.length; index++) {
           _setMintStatus(`Preparing batch ${index + 1}/${batches.length} (${batches[index].length} songs)…`);
           await _mintQueuedBatch(batches[index]);
           completedBatches++;
+          completedItems += batches[index].length;
         }
       } else {
         for (let position = 0; position < selectedTracks.length; position++) {
           const { index, track } = selectedTracks[position];
           _setMintStatus(`Processing ${position + 1}/${selectedTracks.length}: ${track.title}`);
           if (track.requestType === 'artwork-update') await _approveArtworkUpdate(track, index);
+          else if (track.requestType === 'split-update') await _approveCreatorSplitUpdate(track);
           else await _mintQueuedTrack(track, index);
+          completedItems++;
         }
       }
       completed = true;
@@ -709,7 +730,7 @@ function _setRadioScheduleStatus(message, isError = false) {
     }
     if (completed || completedBatches > 0) {
       await _loadMintQueue();
-      if (completed) _setMintStatus(`✅ Minted and announced ${indices.length} track(s) in ${completedBatches} batch(es).`);
+      if (completed) _setMintStatus(`✅ Processed ${completedItems} queue request(s).`);
       else _setMintStatus(failureMessage, true);
     }
   }
@@ -824,6 +845,61 @@ function _setRadioScheduleStatus(message, isError = false) {
       txHash,
     });
     _setMintStatus(`✅ Artwork updated for ${track.title}.`);
+  }
+
+  async function _approveCreatorSplitUpdate(track) {
+    if (!track || track.requestType !== 'split-update' || track.kind !== 'song') {
+      throw new Error('DJuke song split update not found');
+    }
+    const cfg = window.DecentConfig || {};
+    const contract = new ethers.Contract(cfg.djukeContractAddress, DJUKE_SPLIT_ADMIN_ABI, _adminSigner);
+    const { request } = await fetchCreatorSplitProposal({ serviceUrl: cfg.ipfsUploadServiceUrl, requestId: track.trackId });
+    if (request.kind !== 'song' || request.status !== 'pending' || Date.parse(request.expiresAt) <= Date.now() ||
+        !Number.isFinite(Date.parse(request.expiresAt)) ||
+        request.contractAddress.toLowerCase() !== cfg.djukeContractAddress.toLowerCase() ||
+        request.resourceId !== track.resourceId ||
+        !request.owners.every(owner => request.approvals.some(approval =>
+          approval.address.toLowerCase() === owner.toLowerCase()))) {
+      throw new Error('Split approval is stale or incomplete; refresh the owner queue');
+    }
+    const current = await contract.getSong(request.resourceId);
+    if (!current.enabled || current.audioURI !== request.audioURI ||
+        current.recipients.length !== request.currentRecipients.length ||
+        current.recipients.some((wallet, index) => wallet.toLowerCase() !== request.currentRecipients[index].toLowerCase() ||
+          Number(current.sharesBps[index]) !== Number(request.currentSharesBps[index]))) {
+      throw new Error('On-chain song split changed; create a new approval request');
+    }
+    _setMintStatus(`Applying approved creator split for ${track.title}…`);
+    const tx = await contract.configureSong(request.resourceId, request.audioURI, request.recipients, request.sharesBps);
+    const receipt = await tx.wait();
+    if (Number(receipt?.status) !== 1) throw new Error('DJuke split update transaction did not confirm');
+    await completeCreatorSplitProposal({
+      serviceUrl: cfg.ipfsUploadServiceUrl,
+      signer: _adminSigner,
+      address: _adminAddress,
+      requestId: track.trackId,
+      txHash: receipt.hash || tx.hash,
+      origin: window.location.origin,
+    });
+    _setMintStatus(`✅ Creator split updated for ${track.title}.`);
+  }
+
+  async function _rejectCreatorSplitUpdate(index) {
+    const track = _mintQueue[index];
+    if (!track || track.requestType !== 'split-update') return;
+    const cfg = window.DecentConfig || {};
+    try {
+      await rejectCreatorSplitProposal({
+        serviceUrl: cfg.ipfsUploadServiceUrl,
+        signer: _adminSigner,
+        address: _adminAddress,
+        requestId: track.trackId,
+      });
+      await _loadMintQueue();
+      _setMintStatus(`Rejected split update for ${track.title}.`);
+    } catch (error) {
+      _setMintStatus(`❌ ${error.message}`, true);
+    }
   }
 
   async function _rejectArtworkUpdate(index) {

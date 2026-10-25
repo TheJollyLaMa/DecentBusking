@@ -65,4 +65,5 @@ window.DecentConfig = {
   // Community links
   discord: "https://discord.gg/SCtcBggHPa",
   github: "https://github.com/TheJollyLaMa/DecentBusking",
+  appUrl: "https://thejollylama.github.io/DecentBusking/",
 };

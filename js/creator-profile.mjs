@@ -4,6 +4,11 @@ import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261025-seamless-handoff';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { canEditArtwork } from './artwork-update.mjs';
+import { approveCreatorSplitProposal, createCreatorSplitProposal, fetchCreatorSplitProposal,
+  completeCreatorSplitProposal, reconcileRemovedAlbumTrack } from './creator-split-proposal.mjs?v=20261025-song-splits';
+import { buildAlbumSplitTypedData, buildSongAlbumMigrationTypedData, buildSongSplitTypedData, resolveNftSongId } from './creator-splits.mjs?v=20261025-song-splits';
+import { audioCid, isMusicNft } from './nft-loader.js?v=20261025-song-identity';
+import { createSplitEditor } from './creator-split-editor.mjs?v=20261025-song-splits';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { supportsDjukeAlbumsAndGas, DJUKE_SIGNING_DOMAIN_VERSION } from './djuke-version.mjs';
 import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist } from './watchlist.mjs?v=20261025-seamless-handoff';
@@ -14,12 +19,31 @@ import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readC
 import { renderWallet } from './wallet-label.mjs';
 
 export const CREATOR_ALBUM_ABI = [
+  'function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
   'function getAlbum(bytes32) view returns ((address mainOwner,string title,string manifestURI,uint256 revision,uint256 listenPrice,uint256 albumPrice,address[] recipients,uint16[] sharesBps,string[] positions,bytes32[] songIds))',
   'function createAlbum(bytes32,string,string,address[],uint16[],string[],uint256,uint256)',
   'function updateAlbumOwners(bytes32,address[],uint16[],string[],bytes[])',
   'function updateAlbumManifest(bytes32,string)',
   'function updateAlbumFees(bytes32,uint256,uint256)',
   'function syncAlbumSongSplits(bytes32,bytes32[])',
+  'function removeAlbumSong(bytes32,bytes32)',
+  'function moveAlbumSong(bytes32,bytes32,uint256)',
+  'function songAlbum(bytes32) view returns (bytes32)',
+  'function songHasCustomSplit(bytes32) view returns (bool)',
+  'function migrateSongToAlbum(bytes32,bytes32,bytes[])',
+  'error UnknownAlbum()',
+  'error UnauthorizedAlbumEditor()',
+  'error IncompleteAlbumSync()',
+  'error InvalidAlbumMembership()',
+  'error DuplicateAlbumSong()',
+  'error InvalidAlbumTrackPosition()',
+  'error SongNotInAlbum()',
+  'error NonAdjacentAlbumMove()',
+  'error SongUnavailable()',
+  'error SongAlreadyInAlbum()',
+  'error AlbumFull()',
+  'error MissingMigrationApprovals()',
+  'error MissingMigrationConsent()',
 ];
 
 export function parseCreatorSplits(text) {
@@ -44,7 +68,14 @@ export function displayArtist(value = '') {
   return /^0x[0-9a-fA-F]{40}$/.test(text) ? `${text.slice(0, 6)}…${text.slice(-4)}` : (text || 'Unknown artist');
 }
 
-export function buildNftListItem({ index = 0, title, subtitle = '', meta = '', artwork = '', fallback = '🎵', onOpen, onEdit = null, onRemove = null }) {
+const sameAddresses = (left, right) => Array.isArray(left) && Array.isArray(right) &&
+  left.length === right.length && left.every((value, index) =>
+    String(value).toLowerCase() === String(right[index]).toLowerCase());
+
+export function buildNftListItem({
+  index = 0, title, subtitle = '', meta = '', artwork = '', fallback = '🎵',
+  onOpen, onEdit = null, onSplits = null, onAlbumToggle = null, albumSelected = false, onRemove = null,
+}) {
   const li = document.createElement('li');
   li.className = 'creator-nft-item';
   li.style.setProperty('--i', String(Math.min(index, 12)));
@@ -87,6 +118,26 @@ export function buildNftListItem({ index = 0, title, subtitle = '', meta = '', a
   details.className = 'creator-nft-meta';
   details.textContent = meta;
   copy.append(heading, artist, details);
+  if (onSplits) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.songSplitSelect = '';
+    button.textContent = 'Collaborators & payments';
+    button.setAttribute('aria-label', `Collaborators and payments for ${title}`);
+    button.addEventListener('click', () => onSplits());
+    copy.append(button);
+  }
+  if (onAlbumToggle) {
+    const label = document.createElement('label');
+    label.className = 'creator-nft-album-select';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = albumSelected;
+    checkbox.addEventListener('click', event => event.stopPropagation());
+    checkbox.addEventListener('change', () => onAlbumToggle(checkbox.checked));
+    label.append(checkbox, document.createTextNode(' Select for album'));
+    copy.append(label);
+  }
   li.append(artWrap, copy);
   if (onRemove) {
     const remove = document.createElement('button');
@@ -230,6 +281,22 @@ export function initCreatorProfile() {
   const status = dialog.querySelector('[data-profile-status]');
   const form = dialog.querySelector('[data-profile-form]');
   const albumForm = dialog.querySelector('[data-album-form]');
+  const songSplitForm = dialog.querySelector('[data-song-split-form]');
+  const songSplitTitle = dialog.querySelector('[data-song-split-title]');
+  const songSplitCurrent = dialog.querySelector('[data-song-split-current]');
+  const songSplitReview = dialog.querySelector('[data-song-split-review-text]');
+  let reviewedSongRows = null;
+  const songEditor = createSplitEditor(dialog.querySelector('[data-song-split-editor]'), {
+    resolveName: name => workerEnsProvider.resolveName(name),
+    onChange: () => {
+      reviewedSongRows = null;
+      songSplitReview.textContent = '';
+      songSplitForm.querySelector('[data-song-split-propose]').disabled = true;
+    },
+  });
+  const albumEditor = createSplitEditor(dialog.querySelector('[data-album-split-editor]'), {
+    resolveName: name => workerEnsProvider.resolveName(name),
+  });
   const editDialog = dialog.querySelector('[data-profile-edit-dialog]');
   const editStatus = dialog.querySelector('[data-profile-edit-status]');
   const bannerImage = dialog.querySelector('[data-profile-banner]');
@@ -253,6 +320,13 @@ export function initCreatorProfile() {
   let viewingOwnProfile = false;
   let revision = 0;
   let album = null;
+  let selectedAlbumSongs = new Map();
+  let selectedAlbumId = '';
+  let nftBySongId = new Map();
+  let albumSplitModes = new Map();
+  let activeProposalId = '';
+  let activeSong = null;
+  let songSelection = 0;
   let busy = false;
   let bannerCandidates = [];
   let bannerCandidateIndex = 0;
@@ -262,17 +336,29 @@ export function initCreatorProfile() {
   const config = () => window.DecentConfig || {};
   const service = () => String(config().ipfsUploadServiceUrl || '').replace(/\/$/, '');
   const editable = () => address && window._wallet?.address?.toLowerCase() === address.toLowerCase();
+  const connectedSigner = () => {
+    if (!window._wallet?.address || !window._wallet?.signer) throw new Error('Connect a wallet in the page header');
+    return window._wallet.signer;
+  };
+  const renderAlbumSongSelection = () => {
+    const enabled = config().djukeContractVersion === '0.6' && album &&
+      !/^0x0{40}$/i.test(String(album.mainOwner || ''));
+    if (albumSongSelection) albumSongSelection.hidden = !enabled;
+    if (albumSongSelectionCount) albumSongSelectionCount.textContent = `${selectedAlbumSongs.size} selected`;
+    setControls();
+  };
   const message = text => { status.textContent = text; if (editStatus) editStatus.textContent = text; };
   const signer = () => {
     if (!editable() || !window._wallet?.signer) throw new Error('Connect the profile wallet in the page header');
     return window._wallet.signer;
   };
-  const albumContract = () => {
-    if (!supportsDjukeAlbumsAndGas(config().djukeContractVersion)) throw new Error('Album management requires DJuke v0.2 or v0.3');
-    return new ethers.Contract(config().djukeContractAddress, CREATOR_ALBUM_ABI, signer());
+  const albumContractWith = activeSigner => {
+    if (!supportsDjukeAlbumsAndGas(config().djukeContractVersion)) throw new Error('Album management requires a DJuke version with album support');
+    return new ethers.Contract(config().djukeContractAddress, CREATOR_ALBUM_ABI, activeSigner);
   };
+  const albumContract = () => albumContractWith(connectedSigner());
   const requireBase = async () => {
-    if (Number((await signer().provider.getNetwork()).chainId) !== 8453) throw new Error('Switch to Base');
+    if (Number((await connectedSigner().provider.getNetwork()).chainId) !== 8453) throw new Error('Switch to Base');
   };
   const setControls = () => {
     form.querySelectorAll('input, textarea, button').forEach(element => { element.disabled = busy || !editable(); });
@@ -281,8 +367,27 @@ export function initCreatorProfile() {
     if (!editable() && editDialog?.open) editDialog.close();
     if (editButton) editButton.hidden = !editable();
     if (discordCopy) discordCopy.disabled = busy || !discordCode?.textContent;
-    albumForm.querySelectorAll('input, textarea, button').forEach(element => {
-      element.disabled = busy || !editable() || !supportsDjukeAlbumsAndGas(config().djukeContractVersion);
+    albumForm.querySelectorAll('input, textarea, button, select').forEach(element => {
+      element.disabled = busy || !window._wallet?.signer || !supportsDjukeAlbumsAndGas(config().djukeContractVersion);
+    });
+    const songDisabled = busy || !window._wallet?.signer ||
+      !supportsDjukeAlbumsAndGas(config().djukeContractVersion) ||
+      !activeSong || !(activeSong.recipients.some(recipient => recipient.toLowerCase() === window._wallet?.address?.toLowerCase()) ||
+        activeSong.creatorAddress === window._wallet?.address?.toLowerCase());
+    songSplitForm.querySelectorAll('input, textarea, button, select').forEach(element => { element.disabled = songDisabled; });
+    songSplitForm.querySelector('[data-song-split-propose]').disabled = songDisabled || !reviewedSongRows;
+    songEditor.setDisabled(songDisabled);
+    dialog.querySelectorAll('[data-song-split-select]').forEach(button => { button.disabled = busy || !editable(); });
+    albumEditor.setDisabled(busy || !window._wallet?.signer || !supportsDjukeAlbumsAndGas(config().djukeContractVersion));
+    const albumProposeButton = dialog.querySelector('[data-album-song-propose-selected]');
+    if (albumProposeButton) albumProposeButton.disabled = busy || !window._wallet?.signer ||
+      !selectedAlbumSongs.size || config().djukeContractVersion !== '0.6';
+    dialog.querySelectorAll('[data-album-track-action]').forEach(button => {
+      button.disabled = busy || !window._wallet?.signer || config().djukeContractVersion !== '0.6' ||
+        !album || (button.dataset.albumTrackAction !== 'splits' &&
+          album.mainOwner.toLowerCase() !== window._wallet?.address?.toLowerCase()) ||
+        (button.dataset.albumTrackAction === 'up' && button.closest('li') === albumTrackList?.firstElementChild) ||
+        (button.dataset.albumTrackAction === 'down' && button.closest('li') === albumTrackList?.lastElementChild);
     });
     const watchlistSection = dialog.querySelector('[data-watchlist-section]');
     if (watchlistSection) watchlistSection.hidden = !editable();
@@ -298,6 +403,64 @@ export function initCreatorProfile() {
   const myNftsStatus = dialog.querySelector('[data-my-nfts-status]');
   const myNftsItems = dialog.querySelector('[data-my-nfts-items]');
   const myNftsCount = dialog.querySelector('[data-my-nfts-count]');
+  const albumSongSelection = dialog.querySelector('[data-album-song-selection]');
+  const albumSongSelectionCount = dialog.querySelector('[data-album-song-selection-count]');
+  const albumSongSelectionStatus = dialog.querySelector('[data-album-song-selection-status]');
+  const albumSongSelectionLinks = dialog.querySelector('[data-album-song-selection-links]');
+  const albumTrackManagement = dialog.querySelector('[data-album-track-management]');
+  const albumTrackList = dialog.querySelector('[data-album-track-list]');
+  const splitApprovalSection = dialog.querySelector('[data-split-approval]');
+  const splitProposalTitle = dialog.querySelector('[data-split-proposal-title]');
+  const splitProposalDiff = dialog.querySelector('[data-split-proposal-diff]');
+  const splitProposalProgress = dialog.querySelector('[data-split-proposal-progress]');
+  const splitProposalStatus = dialog.querySelector('[data-split-proposal-status]');
+  const splitProposalLink = dialog.querySelector('[data-split-proposal-link]');
+  const splitProposalApprove = dialog.querySelector('[data-split-proposal-approve]');
+  const songMigrationApply = dialog.querySelector('[data-song-migration-apply]');
+  const renderAlbumTracks = () => {
+    if (!albumTrackManagement || !albumTrackList) return;
+    const songIds = album ? [...album.songIds] : [];
+    const versionSupported = config().djukeContractVersion === '0.6';
+    albumTrackManagement.hidden = !album || !versionSupported;
+    albumTrackList.replaceChildren();
+    if (!songIds.length) {
+      const empty = document.createElement('li');
+      empty.textContent = 'No tracks in this album yet.';
+      albumTrackList.append(empty);
+      return;
+    }
+    songIds.forEach((songId, index) => {
+      const item = document.createElement('li');
+      item.className = 'creator-album-track';
+      const title = nftBySongId.get(songId.toLowerCase())?.name ||
+        nftBySongId.get(songId.toLowerCase())?.title || `Song ${songId.slice(0, 10)}…`;
+      const label = document.createElement('span');
+      label.textContent = `${title} - ${albumSplitModes.get(songId.toLowerCase()) || 'Album default'}`;
+      const actions = document.createElement('div');
+      actions.className = 'creator-album-track-actions';
+      for (const [action, text, disabled] of [
+        ['splits', 'Collaborators & payments', false],
+        ['up', '↑', index === 0],
+        ['down', '↓', index === songIds.length - 1],
+        ['remove', 'Remove', false],
+      ]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = text;
+        button.dataset.albumTrackAction = action;
+        button.dataset.songId = songId;
+        button.disabled = busy || !window._wallet?.signer || !versionSupported ||
+          (action !== 'splits' && album.mainOwner.toLowerCase() !== window._wallet.address.toLowerCase()) || disabled;
+        button.setAttribute('aria-label', action === 'splits' ? `Collaborators and payments for album track ${title}` :
+          action === 'remove' ? `Remove ${title} from album` :
+          `${action === 'up' ? 'Move up' : 'Move down'} ${title}`);
+        actions.append(button);
+      }
+      item.append(label, actions);
+      albumTrackList.append(item);
+    });
+  };
+  let activeProposal = null;
   let myNftsTimer = null;
   let myNftsAbort = null;
   const openNftCard = async identity => {
@@ -308,6 +471,71 @@ export function initCreatorProfile() {
     } catch (error) {
       message(error.message);
     }
+  };
+  const proposalLink = requestId => {
+    const url = new URL(config().appUrl || window.location.href);
+    url.search = '';
+    url.hash = '';
+    url.searchParams.set('splitProposal', requestId);
+    return url.toString();
+  };
+  const renderSplitProposal = request => {
+    activeProposal = request || null;
+    if (!request) {
+      if (splitApprovalSection) splitApprovalSection.hidden = true;
+      return;
+    }
+    const owners = Array.isArray(request.owners) ? request.owners : [];
+    const approvals = Array.isArray(request.approvals) ? request.approvals : [];
+    const before = (request.currentRecipients || []).map((wallet, index) =>
+      `${wallet} · ${Number(request.currentSharesBps?.[index] || 0) / 100}%${request.currentPositions?.[index] ? ` · ${request.currentPositions[index]}` : ''}`);
+    const after = (request.recipients || []).map((wallet, index) =>
+      `${wallet} · ${Number(request.sharesBps?.[index] || 0) / 100}%${request.positions?.[index] ? ` · ${request.positions[index]}` : ''}`);
+    splitApprovalSection.hidden = false;
+    splitProposalTitle.textContent = request.kind === 'album'
+      ? `Album split approval · ${request.title}`
+      : request.kind === 'migration'
+        ? `Add song to album · ${request.title}`
+        : `Song split approval · ${request.title}`;
+    splitProposalDiff.textContent = `${request.kind === 'migration'
+      ? request.useAlbumDefault ? 'This song will use the album default. ' : 'This song keeps its custom split; only album membership changes. '
+      : ''}Current: ${before.join(' / ')}. Proposed: ${after.join(' / ')}.`;
+    splitProposalProgress.textContent = `${approvals.length} of ${owners.length} current owners approved · ${request.status || 'pending'}`;
+    const wallet = window._wallet?.address?.toLowerCase();
+    splitProposalApprove.hidden = request.status !== 'pending' || !owners.some(owner => owner.toLowerCase() === wallet) ||
+      approvals.some(entry => entry.address?.toLowerCase() === wallet);
+    if (songMigrationApply) songMigrationApply.hidden = request.kind !== 'migration' ||
+      request.status !== 'pending' || approvals.length !== owners.length;
+    const href = proposalLink(request.requestId);
+    splitProposalLink.href = href;
+    splitProposalLink.textContent = 'Open shareable approval link';
+    splitProposalLink.hidden = request.status !== 'pending';
+    if (splitProposalStatus) splitProposalStatus.textContent = request.status !== 'pending'
+      ? `This request is ${request.status}.`
+      : approvals.length === owners.length
+        ? 'All current payees approved. The owner can now apply this update in Admin → NFT Mint Queue. Payments stay unchanged until that transaction confirms.'
+        : `Approval progress: ${approvals.length}/${owners.length}. Share this link with the remaining current payees. Newly added payees do not need to approve.`;
+  };
+  const refreshSplitProposal = async () => {
+    if (!activeProposalId) throw new Error('Create or open a split proposal first');
+    const { request } = await fetchCreatorSplitProposal({ serviceUrl: service(), requestId: activeProposalId });
+    renderSplitProposal(request);
+    return request;
+  };
+  const loadSplitProposal = async requestId => {
+    activeProposalId = requestId;
+    const request = await refreshSplitProposal();
+    if (request.kind === 'album' || request.kind === 'migration') {
+      albumForm.elements.namedItem('albumId').value = request.kind === 'album' ? request.resourceId : request.albumId;
+      await loadAlbum();
+    }
+    else if (songSplitForm) {
+      await loadSongSplitEditor({ djukeSongId: request.resourceId, name: request.title });
+      songEditor.setRows(request.recipients.map((wallet, index) => ({
+        wallet, shareBps: Number(request.sharesBps[index]), position: request.positions[index],
+      })));
+    }
+    return request;
   };
   const renderWatchlist = () => {
     if (!watchlistSection || !watchlistStatus || !watchlistGroups) return;
@@ -375,18 +603,23 @@ export function initCreatorProfile() {
     myNftsStatus.textContent = 'Loading your NFTs…';
     myNftsItems.replaceChildren();
     try {
-      const params = new URLSearchParams({ artist: address, limit: '25', query });
+      const params = new URLSearchParams({ wallet: address, limit: '25', query });
       const response = await fetch(`${service()}/api/nfts?${params}`, { signal: myNftsAbort.signal });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || `NFTs unavailable (${response.status})`);
       const nfts = Array.isArray(result.nfts) ? result.nfts : [];
+      for (const nft of nfts) {
+        if (/^0x[0-9a-fA-F]{64}$/.test(nft.djukeSongId || '')) {
+          nftBySongId.set(nft.djukeSongId.toLowerCase(), nft);
+        }
+      }
       myNftsItems.replaceChildren();
       if (!nfts.length) {
-        myNftsStatus.textContent = query ? 'No matching NFTs found.' : 'No NFTs minted from this wallet yet.';
+        myNftsStatus.textContent = query ? 'No matching NFTs found.' : 'No NFTs credit this wallet yet.';
         if (myNftsCount && !query) myNftsCount.textContent = '0';
         return;
       }
-      myNftsStatus.textContent = query ? `${nfts.length} match${nfts.length === 1 ? '' : 'es'}` : 'Tap artwork to open its card · ✏️ edits artwork';
+      myNftsStatus.textContent = query ? `${nfts.length} match${nfts.length === 1 ? '' : 'es'}` : 'Choose Collaborators & payments to edit a song. Tap artwork to open its card.';
       if (myNftsCount && !query) myNftsCount.textContent = String(nfts.length);
       nfts.forEach((nft, index) => {
         const title = nft.name || nft.title || `Track #${nft.tokenId}`;
@@ -402,9 +635,21 @@ export function initCreatorProfile() {
           onEdit: canEditArtwork(nft, address)
             ? () => document.dispatchEvent(new CustomEvent('open-artwork-editor', { detail: { nft } }))
             : null,
+          onSplits: isMusicNft(nft) ? () => run(() => loadSongSplitEditor(nft)) : null,
+          onAlbumToggle: config().djukeContractVersion === '0.6' && album && nft.djukeSongId &&
+            ![...album.songIds].some(songId => songId.toLowerCase() === nft.djukeSongId.toLowerCase())
+            ? checked => {
+              if (checked) selectedAlbumSongs.set(nft.djukeSongId.toLowerCase(), nft);
+              else selectedAlbumSongs.delete(nft.djukeSongId.toLowerCase());
+              renderAlbumSongSelection();
+            }
+            : null,
+          albumSelected: !!nft.djukeSongId && selectedAlbumSongs.has(nft.djukeSongId.toLowerCase()),
         });
         myNftsItems.append(li);
       });
+      renderAlbumTracks();
+      setControls();
     } catch (error) {
       if (error.name === 'AbortError') return;
       myNftsStatus.textContent = error.message;
@@ -557,12 +802,30 @@ export function initCreatorProfile() {
     setControls();
     renderWatchlist();
     void renderMyNFTs();
+    renderAlbumSongSelection();
   };
   const run = async operation => {
     if (busy) return;
     busy = true;
     setControls();
-    try { await operation(); } catch (error) { message(error.shortMessage || error.reason || error.message); }
+    try { await operation(); } catch (error) {
+      const known = {
+        UnknownAlbum: 'Album not found.',
+        UnauthorizedAlbumEditor: 'Only a current album collaborator, manager, or admin can change its split.',
+        IncompleteAlbumSync: 'Sync the complete album song list.',
+        InvalidAlbumMembership: 'The track is not a member of this album.',
+        DuplicateAlbumSong: 'The album song list contains a duplicate track.',
+        InvalidAlbumTrackPosition: 'Choose a valid album track position.',
+        SongNotInAlbum: 'That track is not in the album.',
+        NonAdjacentAlbumMove: 'Move a track one position at a time.',
+        SongUnavailable: 'The registered song is unavailable.',
+        SongAlreadyInAlbum: 'This song already belongs to an album.',
+        AlbumFull: 'The album has reached its track limit.',
+        MissingMigrationApprovals: 'Every current song collaborator must approve this migration.',
+        MissingMigrationConsent: 'A current song collaborator approval is missing or stale.',
+      };
+      message(known[error?.revert?.name] || error?.shortMessage || error?.reason || error?.message || 'Operation failed');
+    }
     finally { busy = false; setControls(); }
   };
   const request = async (action, nextProfile = {}) => {
@@ -678,6 +941,18 @@ export function initCreatorProfile() {
     ensError = '';
     ensLoading = true;
     album = null;
+    selectedAlbumSongs.clear();
+    selectedAlbumId = '';
+    nftBySongId.clear();
+    albumSplitModes.clear();
+    renderAlbumTracks();
+    activeProposalId = '';
+    activeSong = null;
+    reviewedSongRows = null;
+    albumEditor.setRows([{ wallet: window._wallet?.address || '', shareBps: 10000, position: 'Creator' }]);
+    if (songSplitForm) songSplitForm.hidden = true;
+    renderSplitProposal(null);
+    renderAlbumSongSelection();
     clearDiscordLinkTimers();
     discordLinkExpiryAt = 0;
     const check = ++revision;
@@ -694,6 +969,9 @@ export function initCreatorProfile() {
     await loadProfileData({ resolveEns: true });
     document.dispatchEvent(new CustomEvent('creator-profile-playlists-refresh', { detail: { address, editable: viewingOwnProfile } }));
     if (detail?.albumId) albumForm.elements.namedItem('albumId').value = detail.albumId;
+    if (detail?.nft || detail?.songId) await loadSongSplitEditor(detail.nft || { djukeSongId: detail.songId });
+    const proposalId = new URLSearchParams(window.location.search).get('splitProposal');
+    if (proposalId) await loadSplitProposal(proposalId);
   };
   form.addEventListener('submit', event => {
     event.preventDefault();
@@ -805,28 +1083,172 @@ export function initCreatorProfile() {
    clearTimeout(myNftsTimer);
    myNftsTimer = setTimeout(() => { void renderMyNFTs(); }, 250);
   });
-  const getAlbumId = () => /^0x[0-9a-fA-F]{64}$/.test(albumValue('albumId')) ? albumValue('albumId') : ethers.id(albumValue('albumId').trim());
+  const loadSongSplitEditor = async nft => {
+    const selection = ++songSelection;
+    const profileRevision = revision;
+    const deployment = config().djukeContractAddress;
+    activeSong = null;
+    reviewedSongRows = null;
+    if (songSplitForm) songSplitForm.hidden = true;
+    setControls();
+    if (!nft || !songSplitForm) throw new Error('Choose an NFT song to edit');
+    message(`Loading collaborators & payments for ${nft.name || nft.title || `NFT #${nft.tokenId}`}…`);
+    const songId = await resolveNftSongId(nft, { config: config() });
+    if (selection !== songSelection || profileRevision !== revision) return;
+    nft = { ...nft, djukeSongId: songId };
+    await requireBase();
+    const contract = new ethers.Contract(config().djukeContractAddress, [
+      'function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
+      'function songAlbum(bytes32) view returns (bytes32)',
+      'function songHasCustomSplit(bytes32) view returns (bool)',
+    ], connectedSigner());
+    const song = await contract.getSong(nft.djukeSongId);
+    if (!song.audioURI || song.enabled === false) throw new Error('DJuke song is not registered or enabled');
+    const expectedCid = audioCid(nft.videoUrl || nft.audioUrl || nft.animation_url);
+    if (expectedCid && audioCid(song.audioURI) !== expectedCid) {
+      throw new Error('This NFT recording does not match the registered DJuke song; payment editing is blocked');
+    }
+    const currentAlbumId = await contract.songAlbum(nft.djukeSongId);
+    const inAlbum = currentAlbumId !== ethers.ZeroHash;
+    const custom = config().djukeContractVersion === '0.6'
+      ? await contract.songHasCustomSplit(nft.djukeSongId) : false;
+    if (selection !== songSelection || profileRevision !== revision ||
+        deployment !== config().djukeContractAddress) return;
+    activeSong = { songId: nft.djukeSongId, title: nft.name || nft.title || `Song ${nft.tokenId}`, audioURI: song.audioURI,
+      recipients: [...song.recipients], sharesBps: [...song.sharesBps].map(Number), nft,
+      creatorAddress: String(nft.creator || nft.artist || '').toLowerCase() };
+    setControls();
+    message(`Editing collaborators & payments for ${activeSong?.title || nft.name || nft.title}`);
+    songSplitForm.hidden = false;
+    songSplitTitle.textContent = `Collaborators & payments: ${activeSong.title}`;
+    dialog.querySelector('[data-song-split-identity]').textContent =
+      `${nft.tokenId !== undefined ? `NFT #${nft.tokenId} · ` : ''}Song ID: ${activeSong.songId}`;
+    dialog.querySelector('[data-song-split-mode]').textContent = inAlbum
+      ? custom ? 'Custom song split. Album default changes will not overwrite this song.'
+        : 'Uses album default. Saving a song-specific split makes this song independent of future album defaults.'
+      : 'Standalone song. These changes apply only to this song.';
+    songSplitForm.elements.namedItem('songId').value = activeSong.songId;
+    const positions = new Map((nft.creatorSplits || []).map(entry => [String(entry.wallet || entry.address).toLowerCase(), entry.position || entry.title || '']));
+    songEditor.setRows(activeSong.recipients.map((wallet, index) => ({
+      wallet, shareBps: activeSong.sharesBps[index], position: positions.get(wallet.toLowerCase()) || '',
+    })));
+    songSplitCurrent.textContent = `Current on-chain split: ${activeSong.recipients.map((wallet, index) =>
+      `${wallet} · ${activeSong.sharesBps[index] / 100}%`).join(' / ')}${activeSong.recipients.some(wallet =>
+        wallet.toLowerCase() === window._wallet?.address?.toLowerCase()) ||
+        activeSong.creatorAddress === window._wallet?.address?.toLowerCase()
+        ? '' : ' · Only a current collaborator or the NFT creator can create an update proposal.'}`;
+    if (inAlbum && config().djukeContractVersion !== '0.6') {
+      activeSong = null;
+      songSplitCurrent.textContent += ' · Individual album-song overrides require DJuke v0.6; this version only supports album-wide changes.';
+    }
+    setControls();
+    songSplitForm.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
+  const getAlbumId = () => {
+    const value = albumValue('albumId').trim();
+    return /^0x[0-9a-fA-F]{64}$/.test(value) ? value : value ? ethers.id(value) : '';
+  };
   const loadAlbum = async () => {
     const contract = albumContract();
-    if (Number((await signer().provider.getNetwork()).chainId) !== 8453) throw new Error('Switch to Base');
-    album = await contract.getAlbum(getAlbumId());
+    await requireBase();
+    const albumId = getAlbumId();
+    if (!albumId) throw new Error('Enter an album ID or slug to load an album');
+    album = await contract.getAlbum(albumId);
     if (album.mainOwner === ethers.ZeroAddress) throw new Error('Album not found');
+    albumSplitModes = new Map(config().djukeContractVersion === '0.6'
+      ? await Promise.all([...album.songIds].map(async songId => [
+        songId.toLowerCase(), await contract.songHasCustomSplit(songId) ? 'Custom song split' : 'Uses album default',
+      ])) : []);
+    if (selectedAlbumId !== albumId.toLowerCase()) {
+      selectedAlbumSongs.clear();
+      selectedAlbumId = albumId.toLowerCase();
+      if (albumSongSelectionLinks) albumSongSelectionLinks.replaceChildren();
+      if (albumSongSelectionStatus) albumSongSelectionStatus.textContent = '';
+    }
     albumForm.elements.namedItem('title').value = album.title;
     albumForm.elements.namedItem('manifest').value = album.manifestURI;
     albumForm.elements.namedItem('listenPrice').value = ethers.formatUnits(album.listenPrice, 6);
     albumForm.elements.namedItem('albumPrice').value = ethers.formatUnits(album.albumPrice, 6);
-    albumForm.elements.namedItem('splits').value = album.recipients.map((recipient, index) => `${recipient}, ${Number(album.sharesBps[index]) / 100}, ${album.positions[index]}`).join('\n');
-    message(`Album revision ${album.revision}. ${album.mainOwner.toLowerCase() === address.toLowerCase() ? 'Manager access verified' : 'Collaborator signature access only'}`);
+    albumEditor.setRows(album.recipients.map((wallet, index) => ({
+      wallet, shareBps: Number(album.sharesBps[index]), position: album.positions[index],
+    })));
+    dialog.querySelector('[data-album-section]').open = true;
+    albumForm.elements.namedItem('albumId').value = albumId;
+    message(`Album revision ${album.revision}. Connected wallet ${album.recipients.some(recipient => recipient.toLowerCase() === window._wallet?.address?.toLowerCase()) ? 'is a current collaborator' : 'can review but cannot approve this split'}.`);
+    renderAlbumTracks();
+    renderAlbumSongSelection();
+    void renderMyNFTs();
   };
   dialog.querySelector('[data-album-load]').addEventListener('click', () => run(loadAlbum));
+  dialog.querySelector('[data-album-song-propose-selected]')?.addEventListener('click', () =>
+    run(proposeSelectedAlbumSongs));
+  albumTrackList?.addEventListener('click', event => {
+    const button = event.target.closest('button[data-album-track-action]');
+    if (!button) return;
+    run(async () => {
+      if (button.dataset.albumTrackAction === 'splits') {
+        await loadSongSplitEditor(nftBySongId.get(button.dataset.songId.toLowerCase()) || {
+          djukeSongId: button.dataset.songId, name: `Song ${button.dataset.songId.slice(0, 10)}`,
+        });
+        return;
+      }
+      await requireBase();
+      const albumId = getAlbumId();
+      const contract = albumContract();
+      const current = await contract.getAlbum(albumId);
+      if (current.mainOwner.toLowerCase() !== window._wallet?.address?.toLowerCase()) {
+        throw new Error('Only the album manager can edit track order or remove a track');
+      }
+      const songIds = [...current.songIds];
+      const index = songIds.findIndex(songId => songId.toLowerCase() === button.dataset.songId.toLowerCase());
+      if (index < 0) throw new Error('Album track list changed; reload the album');
+      let transaction;
+      if (button.dataset.albumTrackAction === 'remove') {
+        if (!window.confirm('Remove this song from the album? Its current payout split will remain unchanged.')) return;
+        transaction = await contract.removeAlbumSong(albumId, songIds[index]);
+      } else {
+        const targetIndex = index + (button.dataset.albumTrackAction === 'up' ? -1 : 1);
+        if (targetIndex < 0 || targetIndex >= songIds.length) throw new Error('Track is already at that end of the album');
+        [songIds[index], songIds[targetIndex]] = [songIds[targetIndex], songIds[index]];
+        transaction = await contract.moveAlbumSong(albumId, songIds[index], targetIndex);
+      }
+      const receipt = await transaction.wait();
+      if (Number(receipt?.status) !== 1) throw new Error('Album track update did not confirm');
+      await loadAlbum();
+      if (button.dataset.albumTrackAction === 'remove') {
+        try {
+          await reconcileRemovedAlbumTrack({
+            serviceUrl: service(),
+            signer: connectedSigner(),
+            address: window._wallet.address,
+            albumId,
+            songId: button.dataset.songId,
+            txHash: receipt.hash || transaction.hash,
+            origin: window.location.origin,
+          });
+        } catch (error) {
+          throw new Error(`Track was removed on-chain, but NFT catalog metadata could not be refreshed: ${error.message}`);
+        }
+      }
+      message(button.dataset.albumTrackAction === 'remove'
+        ? 'Song removed from album; its current payout split was preserved.'
+        : 'Album track order updated.');
+    });
+  });
   albumForm.addEventListener('submit', event => {
     event.preventDefault();
     run(async () => {
       const contract = albumContract();
-      if (Number((await signer().provider.getNetwork()).chainId) !== 8453) throw new Error('Switch to Base');
-      const split = parseCreatorSplits(albumValue('splits'));
-      const transaction = await contract.createAlbum(getAlbumId(), albumValue('title'), albumValue('manifest'),
-        split.recipients, split.shares, split.positions, ethers.parseUnits(albumValue('listenPrice'), 6), ethers.parseUnits(albumValue('albumPrice'), 6));
+      await requireBase();
+      let albumId = getAlbumId();
+      if (!albumId) {
+        albumId = ethers.hexlify(ethers.randomBytes(32));
+        albumForm.elements.namedItem('albumId').value = albumId;
+      }
+      const rows = await albumEditor.resolve();
+      const transaction = await contract.createAlbum(albumId, albumValue('title'), albumValue('manifest'),
+        rows.map(row => row.wallet), rows.map(row => row.shareBps), rows.map(row => row.position),
+        ethers.parseUnits(albumValue('listenPrice'), 6), ethers.parseUnits(albumValue('albumPrice'), 6));
       if ((await transaction.wait())?.status !== 1) throw new Error('Album creation did not confirm');
       await loadAlbum();
     });
@@ -835,47 +1257,269 @@ export function initCreatorProfile() {
     await requireBase();
     const contract = albumContract();
     const albumId = getAlbumId();
+    if (!albumId) throw new Error('Load or create an album first');
     const current = await contract.getAlbum(albumId);
-    const split = parseCreatorSplits(albumValue('splits'));
-    const coder = ethers.AbiCoder.defaultAbiCoder();
-    const domain = { name: 'DecentJukeBox', version: DJUKE_SIGNING_DOMAIN_VERSION, chainId: 8453, verifyingContract: contract.target };
-    const types = { AlbumSplit: [{ name: 'albumId', type: 'bytes32' }, { name: 'revision', type: 'uint256' },
-      { name: 'recipientsHash', type: 'bytes32' }, { name: 'sharesHash', type: 'bytes32' }, { name: 'positionsHash', type: 'bytes32' }] };
-    const data = { albumId, revision: current.revision, recipientsHash: ethers.keccak256(coder.encode(['address[]'], [split.recipients])),
-      sharesHash: ethers.keccak256(coder.encode(['uint16[]'], [split.shares])), positionsHash: ethers.keccak256(coder.encode(['string[]'], [split.positions])) };
-    return { contract, current, split, domain, types, data, albumId };
+    if (current.mainOwner === ethers.ZeroAddress) throw new Error('Album not found');
+    const rows = await albumEditor.resolve();
+    const split = { recipients: rows.map(row => row.wallet), shares: rows.map(row => row.shareBps), positions: rows.map(row => row.position) };
+    const typedData = buildAlbumSplitTypedData({
+      ethers,
+      contractAddress: contract.target,
+      albumId,
+      revision: current.revision,
+      recipients: split.recipients,
+      sharesBps: split.shares,
+      positions: split.positions,
+    });
+    return { contract, current, split, albumId, typedData };
   };
+  const proposeSongAlbumMigration = async nft => {
+    if (config().djukeContractVersion !== '0.6') throw new Error('Adding existing songs requires the DJuke v0.6 release');
+    if (!album) throw new Error('Load the target album first');
+    const wallet = window._wallet?.address?.toLowerCase();
+    const contract = albumContract();
+    const [song, currentAlbumId] = await Promise.all([
+      contract.getSong(nft.djukeSongId),
+      contract.songAlbum(nft.djukeSongId),
+    ]);
+    const useAlbumDefault = !await contract.songHasCustomSplit(nft.djukeSongId) &&
+      song.recipients.length === 1 && Number(song.sharesBps[0]) === 10000;
+    if (!song.audioURI || song.enabled === false) throw new Error('DJuke song is not registered or enabled');
+    if (currentAlbumId !== ethers.ZeroHash) throw new Error('This song already belongs to an album');
+    if (!song.recipients.some(recipient => recipient.toLowerCase() === wallet)) {
+      throw new Error('Only a current song collaborator can start this migration proposal');
+    }
+    const typedData = buildSongAlbumMigrationTypedData({
+      ethers,
+      contractAddress: config().djukeContractAddress,
+      albumId: getAlbumId(),
+      songId: nft.djukeSongId,
+      albumRevision: album.revision,
+      audioURI: song.audioURI,
+      currentRecipients: [...song.recipients],
+      currentSharesBps: [...song.sharesBps].map(Number),
+      albumRecipients: [...album.recipients],
+      albumSharesBps: [...album.sharesBps].map(Number),
+      albumPositions: [...album.positions],
+      useAlbumDefault,
+    });
+    const response = await createCreatorSplitProposal({
+      serviceUrl: service(),
+      signer: connectedSigner(),
+      address: window._wallet.address,
+      proposal: {
+        kind: 'migration',
+        resourceId: nft.djukeSongId,
+        albumId: getAlbumId(),
+        revision: String(album.revision),
+        title: nft.name || nft.title || `Track #${nft.tokenId}`,
+        ...typedData,
+      },
+    });
+    activeProposalId = response.request.requestId;
+    renderSplitProposal(response.request);
+    return response.request;
+  };
+  const proposeSelectedAlbumSongs = async () => {
+    if (!selectedAlbumSongs.size) throw new Error('Select one or more registered songs first');
+    if (!album) throw new Error('Load the target album first');
+    albumSongSelectionLinks?.replaceChildren();
+    const failures = [];
+    let created = 0;
+    for (const [songId, nft] of selectedAlbumSongs) {
+      try {
+        const request = await proposeSongAlbumMigration(nft);
+        const link = document.createElement('a');
+        link.href = proposalLink(request.requestId);
+        link.textContent = `${request.title} · open approvals`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        albumSongSelectionLinks?.append(link);
+        activeProposalId = request.requestId;
+        renderSplitProposal(request);
+        selectedAlbumSongs.delete(songId);
+        created++;
+      } catch (error) {
+        failures.push(`${nft.name || nft.title || songId}: ${error.message}`);
+      }
+    }
+    renderAlbumSongSelection();
+    await renderMyNFTs();
+    if (failures.length) throw new Error(`${created} proposals created. ${failures.join('; ')}`);
+    if (created) {
+      if (albumSongSelectionStatus) albumSongSelectionStatus.textContent =
+        `${created} proposal${created === 1 ? '' : 's'} created. Share each approval link with the current song collaborators.`;
+      message(`${created} song migration proposal${created === 1 ? '' : 's'} created. The album manager submits after all current song owners approve.`);
+    }
+  };
+  songSplitForm.addEventListener('submit', event => event.preventDefault());
+  songSplitForm.querySelector('[data-song-split-review]').addEventListener('click', () => run(async () => {
+    if (!activeSong) throw new Error('Select a registered song in My NFTs first');
+    const rows = await songEditor.resolve();
+    reviewedSongRows = rows;
+    songSplitReview.textContent = `Proposed for "${activeSong.title}": ${rows.map(row =>
+      `${row.wallet} - ${row.shareBps / 100}%${row.position ? ` (${row.position})` : ''}`).join(' / ')}. Current payees must approve before the admin applies this on-chain.`;
+  }));
+  songSplitForm?.querySelector('[data-song-split-propose]')?.addEventListener('click', () => run(async () => {
+    if (!activeSong) throw new Error('Open a registered DJuke song first');
+    if (!reviewedSongRows) throw new Error('Review the collaborators and percentages first');
+    await requireBase();
+    const rows = reviewedSongRows;
+    const split = { recipients: rows.map(row => row.wallet), sharesBps: rows.map(row => row.shareBps), positions: rows.map(row => row.position) };
+    const typedData = buildSongSplitTypedData({
+      ethers,
+      contractAddress: config().djukeContractAddress,
+      songId: activeSong.songId,
+      audioURI: activeSong.audioURI,
+      currentRecipients: activeSong.recipients,
+      currentSharesBps: activeSong.sharesBps,
+      ...split,
+    });
+    const response = await createCreatorSplitProposal({
+      serviceUrl: service(),
+      signer: connectedSigner(),
+      address: window._wallet.address,
+      proposal: {
+        kind: 'song',
+        resourceId: activeSong.songId,
+        title: activeSong.title,
+        nftContractAddress: activeSong.nft.contractAddress,
+        nftTokenId: String(activeSong.nft.tokenId),
+        ...split,
+        ...typedData,
+      },
+    });
+    activeProposalId = response.request.requestId;
+    renderSplitProposal(response.request);
+    message(response.request.approvals.length === response.request.owners.length
+      ? 'Your signature approved the proposal. All current payees have approved; the request is ready in the owner Admin queue. No payments have changed yet.'
+      : 'Proposal saved. Share the approval link with the remaining current payees before the owner applies the split.');
+  }));
   dialog.querySelector('[data-album-sign]').addEventListener('click', () => run(async () => {
     const proposed = await proposal();
-    if (!proposed.current.recipients.some(recipient => recipient.toLowerCase() === address.toLowerCase())) throw new Error('Only current recipients can approve a split');
-    const signature = await signer().signTypedData(proposed.domain, proposed.types, proposed.data);
-    dialog.querySelector('[data-album-signature]').textContent = JSON.stringify({ address, albumId: proposed.albumId, revision: String(proposed.current.revision), signature });
-    message('Approval signed. Share the proposal fields and this approval with the album manager');
+    const response = await createCreatorSplitProposal({
+      serviceUrl: service(),
+      signer: connectedSigner(),
+      address: window._wallet.address,
+      proposal: {
+        kind: 'album',
+        resourceId: proposed.albumId,
+        revision: String(proposed.current.revision),
+        title: proposed.current.title,
+        recipients: proposed.split.recipients,
+        sharesBps: proposed.split.shares,
+        positions: proposed.split.positions,
+        ...proposed.typedData,
+      },
+    });
+    activeProposalId = response.request.requestId;
+    renderSplitProposal(response.request);
+    message('Proposal saved. Share the link with every current collaborator for gasless approvals.');
   }));
+  splitProposalApprove?.addEventListener('click', () => run(async () => {
+    if (!activeProposalId) throw new Error('Open a split approval link first');
+    const response = await approveCreatorSplitProposal({
+      serviceUrl: service(), signer: connectedSigner(), address: window._wallet.address, requestId: activeProposalId,
+    });
+    renderSplitProposal(response.request);
+    message('Approval recorded. Share the same link with the remaining current owners.');
+  }));
+  dialog.querySelector('[data-split-proposal-refresh]')?.addEventListener('click', () => run(refreshSplitProposal));
   dialog.querySelector('[data-album-update]').addEventListener('click', () => run(async () => {
-    const proposed = await proposal();
-    if (proposed.current.mainOwner.toLowerCase() !== address.toLowerCase()) throw new Error('Only the album manager can apply changes');
-    const supplied = JSON.parse(albumValue('approvals') || '[]');
-    if (!Array.isArray(supplied)) throw new Error('Approvals must be a JSON array');
-    const approvals = proposed.current.recipients.map(recipient => {
-      const approval = supplied.find(entry => entry.address?.toLowerCase() === recipient.toLowerCase());
-      if (!approval || approval.albumId !== proposed.albumId || String(approval.revision) !== String(proposed.current.revision)) throw new Error('Missing current-revision approval');
+    if (!activeProposalId) throw new Error('Create a shared approval link before applying the split');
+    const request = await refreshSplitProposal();
+    if (request.kind !== 'album') throw new Error('Open an approved album split proposal first');
+    const contract = albumContract();
+    const albumId = getAlbumId();
+    if (request.resourceId.toLowerCase() !== albumId.toLowerCase()) throw new Error('The shared proposal does not match this album');
+    const current = await contract.getAlbum(albumId);
+    const wallet = window._wallet?.address?.toLowerCase();
+    const isAdmin = config().adminWalletAddress?.toLowerCase() === wallet;
+    const isCurrentOwner = [...current.recipients].some(owner => owner.toLowerCase() === wallet);
+    const isManager = current.mainOwner.toLowerCase() === wallet;
+    if (config().djukeContractVersion === '0.6' ? !isCurrentOwner && !isAdmin && !isManager :
+      current.mainOwner.toLowerCase() !== wallet) {
+      throw new Error(config().djukeContractVersion === '0.6'
+        ? 'Only a current album collaborator or admin can apply this split'
+        : 'Only the album manager can apply this split');
+    }
+    if (String(current.revision) !== String(request.revision) &&
+        !(BigInt(current.revision) === BigInt(request.revision) + 1n &&
+          sameAddresses([...current.recipients], request.recipients) &&
+          [...current.sharesBps].map(Number).every((share, index) => share === Number(request.sharesBps[index])) &&
+          current.positions.length === request.positions.length &&
+          [...current.positions].every((position, index) => position === request.positions[index]))) {
+      throw new Error('Album changed after this proposal was created');
+    }
+    const approvals = request.owners.map(recipient => {
+      const approval = request.approvals.find(entry => entry.address.toLowerCase() === recipient.toLowerCase());
+      if (!approval) throw new Error(`Waiting for ${request.approvals.length} of ${request.owners.length} current-owner approvals`);
       return approval.signature;
     });
-    const transaction = await proposed.contract.updateAlbumOwners(proposed.albumId, proposed.split.recipients, proposed.split.shares, proposed.split.positions, approvals);
-    if ((await transaction.wait())?.status !== 1) throw new Error('Split change did not confirm');
-    message('Split revision confirmed; syncing songs');
-    if (proposed.current.songIds.length) {
-      const sync = await proposed.contract.syncAlbumSongSplits(proposed.albumId, [...proposed.current.songIds]);
-      if ((await sync.wait())?.status !== 1) throw new Error('Split saved; song sync is pending. Do not resubmit approvals');
+    let txHash = '';
+    if (String(current.revision) === String(request.revision)) {
+      const transaction = config().djukeContractVersion === '0.6'
+        ? await contract.updateAlbumOwners(albumId, request.recipients, request.sharesBps, request.positions, approvals)
+        : await contract.updateAlbumOwners(albumId, request.recipients, request.sharesBps, request.positions, approvals);
+      const receipt = await transaction.wait();
+      if (Number(receipt?.status) !== 1) throw new Error('Split change did not confirm');
+      txHash = receipt.hash || transaction.hash;
     }
+    const updated = await contract.getAlbum(albumId);
+    if (updated.songIds.length) {
+      message('Album split revision confirmed; syncing songs');
+      const sync = config().djukeContractVersion === '0.6'
+        ? await contract.syncAlbumSongSplits(albumId, [...updated.songIds])
+        : await contract.syncAlbumSongSplits(albumId, [...updated.songIds]);
+      const syncReceipt = await sync.wait();
+      if (Number(syncReceipt?.status) !== 1) throw new Error('Split saved; song sync is pending. Retry after the album finishes syncing.');
+      txHash = syncReceipt.hash || sync.hash;
+    }
+    if (!txHash) throw new Error('Album split update did not produce a verifiable transaction');
+    await completeCreatorSplitProposal({
+      serviceUrl: service(), signer: connectedSigner(), address: window._wallet.address,
+      requestId: activeProposalId, txHash, origin: window.location.origin,
+    });
+    await refreshSplitProposal();
+    await loadAlbum();
+  }));
+  songMigrationApply?.addEventListener('click', () => run(async () => {
+    if (!activeProposalId) throw new Error('Open a shared song migration proposal first');
+    const request = await refreshSplitProposal();
+    if (request.kind !== 'migration') throw new Error('Open a song-to-album migration proposal first');
+    const contract = albumContract();
+    const target = await contract.getAlbum(request.albumId);
+    if (target.mainOwner.toLowerCase() !== window._wallet?.address?.toLowerCase()) {
+      throw new Error('Only the album manager can submit this migration');
+    }
+    if (String(target.revision) !== String(request.revision)) throw new Error('Album changed after this proposal was created');
+    const approvals = request.owners.map(owner => {
+      const approval = request.approvals.find(entry => entry.address.toLowerCase() === owner.toLowerCase());
+      if (!approval) throw new Error(`Waiting for ${request.approvals.length} of ${request.owners.length} current-owner approvals`);
+      return approval.signature;
+    });
+    const songAlbum = await contract.songAlbum(request.resourceId);
+    if (songAlbum === ethers.ZeroHash) {
+      const transaction = await contract.migrateSongToAlbum(request.albumId, request.resourceId, approvals);
+      const receipt = await transaction.wait();
+      if (Number(receipt?.status) !== 1) throw new Error('Song migration did not confirm');
+      await completeCreatorSplitProposal({
+        serviceUrl: service(), signer: connectedSigner(), address: window._wallet.address,
+        requestId: activeProposalId, txHash: receipt.hash || transaction.hash, origin: window.location.origin,
+      });
+    } else if (songAlbum.toLowerCase() !== request.albumId.toLowerCase()) {
+      throw new Error('Song has already been assigned to another album');
+    } else {
+      throw new Error('Song migration is already on-chain; refresh the proposal status');
+    }
+    await refreshSplitProposal();
     await loadAlbum();
   }));
   dialog.querySelector('[data-album-metadata]').addEventListener('click', () => run(async () => {
     await requireBase();
     const contract = albumContract();
     const current = await contract.getAlbum(getAlbumId());
-    if (current.mainOwner.toLowerCase() !== address.toLowerCase()) throw new Error('Only the album manager can apply changes');
+    if (current.mainOwner.toLowerCase() !== window._wallet?.address?.toLowerCase()) throw new Error('Only the album manager can apply changes');
     const manifest = await contract.updateAlbumManifest(getAlbumId(), albumValue('manifest'));
     if ((await manifest.wait())?.status !== 1) throw new Error('Manifest update did not confirm');
     const fees = await contract.updateAlbumFees(getAlbumId(), ethers.parseUnits(albumValue('listenPrice'), 6), ethers.parseUnits(albumValue('albumPrice'), 6));
@@ -885,10 +1529,17 @@ export function initCreatorProfile() {
   dialog.querySelector('[data-album-sync]').addEventListener('click', () => run(async () => {
     await requireBase();
     const contract = albumContract();
-    const current = await contract.getAlbum(getAlbumId());
-    if (current.mainOwner.toLowerCase() !== address.toLowerCase()) throw new Error('Only the album manager can sync splits');
+    const albumId = getAlbumId();
+    const current = await contract.getAlbum(albumId);
+    const wallet = window._wallet?.address?.toLowerCase();
+    const isManager = current.mainOwner.toLowerCase() === wallet;
+    if (config().djukeContractVersion !== '0.6' && !isManager) {
+      throw new Error('Only the album manager can sync splits');
+    }
     if (!current.songIds.length) throw new Error('No album songs to sync');
-    const transaction = await contract.syncAlbumSongSplits(getAlbumId(), [...current.songIds]);
+    const transaction = config().djukeContractVersion === '0.6'
+      ? await contract.syncAlbumSongSplits(albumId, [...current.songIds])
+      : await contract.syncAlbumSongSplits(getAlbumId(), [...current.songIds]);
     if ((await transaction.wait())?.status !== 1) throw new Error('Song split sync did not confirm');
     await loadAlbum();
   }));
@@ -905,6 +1556,14 @@ export function initCreatorProfile() {
   });
   document.getElementById('djuke-profile')?.addEventListener('click', () => { run(() => open({})); });
   document.addEventListener('wallet-disconnected', () => { revision++; setControls(); });
+  const linkedProposal = new URLSearchParams(window.location.search).get('splitProposal');
+  if (linkedProposal) {
+    if (window._wallet?.address) void run(() => open({}));
+    else {
+      if (!dialog.open) dialog.showModal();
+      message('Connect your wallet in the page header to review the shared split proposal.');
+    }
+  }
   import('https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm').then(icons => {
     for (const element of dialog.querySelectorAll('[data-profile-icon]')) {
       const icon = icons[element.dataset.profileIcon];

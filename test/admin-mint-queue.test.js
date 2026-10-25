@@ -40,6 +40,56 @@ const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+test('split application refreshes approvals and live state before any transaction', async () => {
+  const admin = fs.readFileSync(path.join(__dirname, '../js/admin.js'), 'utf8');
+  const source = admin.slice(admin.indexOf('  async function _approveCreatorSplitUpdate('),
+    admin.indexOf('  async function _rejectCreatorSplitUpdate('));
+  const owner = `0x${'1'.repeat(40)}`;
+  const added = `0x${'2'.repeat(40)}`;
+  const contractAddress = `0x${'3'.repeat(40)}`;
+  const request = { kind: 'song', status: 'pending', expiresAt: new Date(Date.now() + 60000).toISOString(),
+    contractAddress, resourceId: 'song', audioURI: 'ipfs://song', owners: [owner],
+    approvals: [{ address: owner }], currentRecipients: [owner], currentSharesBps: [10000],
+    recipients: [owner, added], sharesBps: [5000, 5000] };
+  const current = { enabled: true, audioURI: request.audioURI, recipients: [owner], sharesBps: [10000n] };
+  let transactions = 0;
+  let completions = 0;
+  const context = vm.createContext({
+    window: { DecentConfig: { djukeContractAddress: contractAddress }, location: { origin: 'https://app.test' } },
+    ethers: { Contract: class {
+      async getSong() { return current; }
+      async configureSong(...args) {
+        assert.deepEqual(Array.from(args), ['song', 'ipfs://song', request.recipients, request.sharesBps]);
+        transactions++;
+        return { wait: async () => ({ status: 1, hash: '0xconfirmed' }) };
+      }
+    } },
+    DJUKE_SPLIT_ADMIN_ABI: [], _adminSigner: {}, _adminAddress: owner, _setMintStatus() {},
+    fetchCreatorSplitProposal: async () => ({ request }),
+    completeCreatorSplitProposal: async ({ txHash }) => { assert.equal(txHash, '0xconfirmed'); completions++; },
+  });
+  vm.runInContext(`${source}\nglobalThis.applySplit = _approveCreatorSplitUpdate;`, context);
+  const track = { requestType: 'split-update', kind: 'song', trackId: 'proposal', resourceId: 'song', title: 'Song' };
+  for (const status of ['expired', 'completed', 'superseded']) {
+    request.status = status;
+    await assert.rejects(context.applySplit(track), /stale or incomplete/);
+  }
+  request.status = 'pending';
+  request.approvals = [];
+  await assert.rejects(context.applySplit(track), /stale or incomplete/);
+  request.approvals = [{ address: owner }];
+  request.expiresAt = new Date(Date.now() - 1000).toISOString();
+  await assert.rejects(context.applySplit(track), /stale or incomplete/);
+  request.expiresAt = new Date(Date.now() + 60000).toISOString();
+  current.sharesBps = [9000n];
+  await assert.rejects(context.applySplit(track), /On-chain song split changed/);
+  assert.equal(transactions, 0);
+  current.sharesBps = [10000n];
+  await context.applySplit(track);
+  assert.equal(transactions, 1);
+  assert.equal(completions, 1);
+});
+
 const mockNode = () => ({
   textContent: '',
   innerHTML: '',

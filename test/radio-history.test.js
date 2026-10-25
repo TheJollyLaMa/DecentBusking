@@ -192,7 +192,8 @@ test('Right Ankh keeps the public schedule visible and hides My Playbacks on dis
     HTMLElement: class { attachShadow() { this.shadowRoot = root; } },
     CustomEvent: class { constructor(name, options) { this.type = name; this.detail = options.detail; } },
     document: { addEventListener: (name, callback) => events.set(name, callback), dispatchEvent: event => { dispatched = event; } } });
-  const source = fs.readFileSync(path.join(__dirname, '../js/components/header-right-ankh-override.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../js/components/header-right-ankh-override.js'), 'utf8')
+    .replace(/^import .*header-source\.mjs';$/m, "const DECENT_HEAD_BASE = 'https://example.test/';");
   vm.runInContext(`${source}\nnew CleanRightAnkh().connectedCallback();`, context);
   assert.equal((root.innerHTML.match(/<li /g) || []).length, 3);
   nodes.get('#creator-profile-btn').listeners.get('click')({ stopPropagation() {} });
@@ -219,9 +220,11 @@ test('header registers the local Right Ankh before CDN imports without loading t
   const registered = new Map();
   const context = vm.createContext({ customElements: { get: name => registered.get(name), define: (name, constructor) => registered.set(name, constructor) },
     HTMLElement: class {} });
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/components/header-right-ankh-override.js'), 'utf8'), context);
+  const source = fs.readFileSync(path.join(__dirname, '../js/components/header-right-ankh-override.js'), 'utf8')
+    .replace(/^import .*header-source\.mjs';$/m, "const DECENT_HEAD_BASE = 'https://example.test/';");
+  vm.runInContext(source, context);
   assert.equal(registered.get('right-ankh').name, 'CleanRightAnkh');
   const header = fs.readFileSync(path.join(__dirname, '../js/components/header.js'), 'utf8');
-  assert.match(header, /^import '\.\/header-right-ankh-override\.js\?v=20261022-pin-decenthead';/);
+  assert.match(header, /^import '\.\/header-right-ankh-override\.js\?v=20261025-header-compat';/);
   assert.doesNotMatch(header, /import\([^\n]*RightAnkhDropdown/);
 });
