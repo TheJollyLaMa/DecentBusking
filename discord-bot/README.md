@@ -272,7 +272,8 @@ vertically; saving or refreshing the calendar preserves its scroll position.
 Every Monday at **09:00 America/New_York** (EST/EDT automatically), DBusker posts
 one `@everyone` community poster in DecentAgency's **#themessagebox**
 (`943117480883265539`). The first scheduled occurrence is October 26, 2026.
-The original psychedelic artwork is maintained in `img/community-monday.svg`;
+The original orange/blue psychedelic artwork with metallic gold/silver accents
+is maintained in `img/community-monday.svg`;
 `img/community-monday.png` is the 1200 x 1500 Discord attachment. Rasterize the SVG
 with a standards-compliant browser at its intrinsic resolution after artwork edits;
 inspect the complete PNG before committing it. No image-generation service or

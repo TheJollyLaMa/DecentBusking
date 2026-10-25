@@ -100,6 +100,7 @@ test('poster message is concise, accessible, mentions everyone once, and links t
   assert.equal(payload.files.length, 1);
   assert.match(payload.files[0].description, /calendar.*ads.*jams.*vote/i);
   assert.equal(payload.embeds[0].image.url, 'attachment://community-monday.png');
+  assert.equal(payload.embeds[0].color, 0xff8a32);
   assert.match(payload.embeds[0].description, /DecentBusking\/\?schedule=1/);
   assert.equal(payload.embeds[0].footer.text, 'decent-community-monday:2026-10-26');
   const bytes = fs.readFileSync(payload.files[0].attachment);
@@ -114,6 +115,10 @@ test('poster message is concise, accessible, mentions everyone once, and links t
   assert.match(artwork, /The world is your village, Busk from home!/);
   assert.match(artwork, /decentbusking\.decentagency\.eth/);
   assert.doesNotMatch(artwork, /Your Monday signal|links below/);
+  for (const color of ['#f0c040', '#ff8a32', '#52afff', '#c4cdd7']) {
+    assert.ok(artwork.includes(color), `Brand palette must include ${color}`);
+  }
+  assert.doesNotMatch(artwork, /#(?:c7ff00|ff36c9|e4ff30|a62dff)\b/i);
   assert.throws(() => buildCommunityReminder('2026-10-26', 'javascript:alert(1)'), /HTTPS/);
 });
 

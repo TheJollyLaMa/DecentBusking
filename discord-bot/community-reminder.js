@@ -56,7 +56,7 @@ export function buildCommunityReminder(date, siteUrl) {
     files: [{ attachment: poster, name: 'community-monday.png',
       description: 'The world is your village, Busk from home! Check the Public Schedule and sync it to your calendar. Buy DVert ads for your projects, events and public announcements to fuel the funds. Send jams to the radio and invite friends to do the same. Listen and vote on songs.' }],
     embeds: [{
-      color: 0x39ffe2,
+      color: 0xff8a32,
       image: { url: 'attachment://community-monday.png' },
       description: `[Community calendar & sync](${calendar.href}) · [Run a DVert ad](${adverts.href}) · [Send jams, listen & vote](${site.href})`,
       footer: { text: markerFor(date) },
