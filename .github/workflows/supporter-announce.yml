@@ -23,11 +23,11 @@ concurrency:
 jobs:
   announce:
     if: ${{ vars.SUPPORTER_DISCORD_ENABLED == 'true' }}
-    uses: TheJollyLaMa/DecentHead/.github/workflows/product-supporter-announce.yml@3b2a72f7f8c49fb2af89ea7df2ead8e338e0e870
+    uses: TheJollyLaMa/DecentHead/.github/workflows/product-supporter-announce.yml@409fa9decd22715c94b827455bede7d43cc884dc
     with:
       tag: ${{ inputs.tag || github.event.release.tag_name || '' }}
       mint_evidence: ${{ inputs.mint_evidence || '' }}
-      head_ref: 3b2a72f7f8c49fb2af89ea7df2ead8e338e0e870
+      head_ref: 409fa9decd22715c94b827455bede7d43cc884dc
       ens_rpc_url: ${{ vars.SUPPORTER_ENS_RPC_URL || 'https://ethereum-rpc.publicnode.com' }}
     secrets:
       DISCORD_SUPPORTER_WEBHOOK: ${{ secrets.DISCORD_SUPPORTER_WEBHOOK }}
