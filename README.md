@@ -15,6 +15,33 @@ countdown is centered at the bottom on mobile and stays in the player on desktop
 
 Read the [Decent Busking whitepaper](WHITEPAPER.md) for the vision, current architecture, payment mechanics, artist-rights limits, and roadmap. Implemented features are separated from future plans.
 
+## v1.0.0 Supporter release
+
+Approved release terms: **100 editions at 100 Base USDC each**, with a 10%
+ERC-2981 royalty signal to `thejollylama.eth` (not universally enforced).
+Preparation archives and pins the exact release commit, runnable site, front/back
+artwork and metadata. It does not mint, transfer stock, list or update ENS.
+The steward reviews each wallet signature: mint to the resolved creator wallet,
+then deposit/list in the existing shared escrow. Primary proceeds stay in that
+owner-controlled escrow until withdrawn; the royalty recipient does not redirect
+primary sales.
+
+The target is `decentbusking.decentagency.eth`. Its Ethereum controller must sign
+the fresh contenthash update and the result must serve the pinned site. About
+keeps its explicit preparation state until verified Base purchase evidence exists.
+[Issue #73](https://github.com/TheJollyLaMa/DecentBusking/issues/73) remains the
+acceptance gate for mint, ownership/supply/royalties, purchase path and announcement.
+The existing escrow's MetaMask/Blockaid false-positive review is pending; this
+release neither claims clearance nor disables wallet warnings.
+
+Reuse: the shared
+[DecentHead product kit at `409fa9d`](https://github.com/TheJollyLaMa/DecentHead/tree/409fa9decd22715c94b827455bede7d43cc884dc)
+binds quantity and six-decimal price across artwork, metadata, listing verification
+and announcements. Matching Market studio and Office checkout support 100 USDC
+without changing historical 10-USDC editions. This release uses current main's
+integrated collaborator/tutorial work; the older dirty development checkout is
+preserved separately, not copied over newer shipped functionality.
+
 <p align="center">
   <a href="https://thejollylama.github.io/DecentBusking/"><img src="img/DBusker_in_Town_Square.jpeg" width="100%" alt="A DecentBusker performing in the town square" /></a>
 </p>
