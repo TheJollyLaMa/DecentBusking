@@ -10,11 +10,8 @@ import { startTutorial, syncTutorialLaunchButtons } from '../tutorial.js?v=20261
 import { workerEnsProvider } from '../ens-client.mjs?v=20261016-ens-worker';
 import { renderFundsSection, resolveWalletLabel, renderWalletButton } from '../fund-display.mjs?v=20261024-djuke-labels';
 
-// The CDN's AboutModal.js hard-codes a filter for listings whose note field
-// contains "decenthead", which causes BigNuten / DecentHead Supporter NFTs to
-// appear instead of DecentBusking Supporter DNFTs.  This override replaces
-// that filter with one that matches "decentbusking" so only the correct
-// Supporter DNFTs minted under the DecentBusking collection are shown.
+// The CDN AboutModal lists generic escrow listings. This override pins the
+// purchase card to the reviewed DecentBusking v1.0.0 Base listing in config.
 //
 // Loading order: this module must be loaded BEFORE the CDN Header.js script
 // so the interception fires before customElements.define('about-modal') runs.
@@ -43,21 +40,21 @@ function _esc(str) {
     .replace(/'/g, '&#39;');
 }
 
-// ── Purchase constants (mirrors CDN AboutModal.js) ─────────────────────────
-const _ESCROW_ADDRESS    = '0x23A457AD3C33d68E4fAd2FCa7c5d9a511E0C350e';
-const _USDC_ADDRESS      = '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85';
-const _ZERO_ADDRESS      = '0x0000000000000000000000000000000000000000';
-const _OPTIMISM_CHAIN_ID = 10n;
+// ── Base Supporter purchase constants ──────────────────────────────────────
+const _NFT_ADDRESS       = '0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B';
+const _ESCROW_ADDRESS    = '0x31b07b83e99A9bdF379bf40225b8A80d3804C89d';
+const _USDC_ADDRESS      = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const _BASE_CHAIN_ID     = 8453n;
 
 const _ESCROW_ABI = [
-  'function nextListingId() view returns (uint256)',
   'function getListing(uint256 listingId) view returns (tuple(address nftContract, uint256 tokenId, uint256 priceETH, address priceToken, uint256 priceAmount, uint256 available, bool active, string note))',
   'function getNFTBalance(address nftContract, uint256 tokenId) view returns (uint256)',
-  'function purchaseWithETH(uint256 listingId, uint256 amount) payable',
   'function purchaseWithToken(uint256 listingId, uint256 amount)',
+  'event Purchased(uint256 indexed listingId,address indexed buyer,uint256 amount,address indexed paymentToken,uint256 totalPaid)',
 ];
 
 const _ERC20_ABI = [
+  'function balanceOf(address owner) view returns (uint256)',
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
 ];
@@ -145,90 +142,53 @@ class DecentBuskingAboutModal extends HTMLElement {
 
     try {
       const ethers = window.ethers;
-      if (!ethers || !window.ethereum) {
-        container.innerHTML = '<p style="color:#aaa;font-size:0.85em;">Connect MetaMask to see live availability.</p>';
+      const config = window.DecentConfig?.supporterDnft;
+      if (!ethers || !config || config.chainId !== Number(_BASE_CHAIN_ID)
+        || config.contract?.toLowerCase() !== _NFT_ADDRESS.toLowerCase()
+        || config.escrowAddress?.toLowerCase() !== _ESCROW_ADDRESS.toLowerCase()
+        || config.paymentToken?.toLowerCase() !== _USDC_ADDRESS.toLowerCase()
+        || !/^(0|[1-9]\d*)$/.test(config.tokenId || '')
+        || !/^(0|[1-9]\d*)$/.test(config.listingId || '')
+        || !/^\d+$/.test(config.expectedPriceAmount || '')) {
+        container.innerHTML = '<p style="color:#aaa;font-size:0.85em;">Base Supporter purchase details are not configured or verified.</p>';
         return;
       }
 
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const escrow   = new ethers.Contract(_ESCROW_ADDRESS, _ESCROW_ABI, provider);
-
-      const count = Number(await escrow.nextListingId());
-
-      const raws = await Promise.all(
-        Array.from({ length: count }, (_, i) => escrow.getListing(i))
-      );
-
-      // Filter to only active DecentBusking Supporter DNFT listings
-      const matched = raws
-        .map((raw, i) => ({
-          id:          i,
-          nftContract: raw[0],
-          tokenId:     raw[1],
-          priceETH:    raw[2],
-          priceToken:  raw[3],
-          priceAmount: raw[4],
-          available:   raw[5],
-          active:      raw[6],
-          note:        raw[7],
-        }))
-        .filter(l =>
-          l.active &&
-          l.available > 0n &&
-          l.note.toLowerCase().includes('decentbusking')
-        );
-
-      if (matched.length === 0) {
-        container.innerHTML = '<p style="color:#aaa;font-size:0.85em;">No editions currently listed — check back soon.</p>';
-        return;
-      }
-
-      // Verify actual escrow NFT stock
-      const nftBalances = await Promise.all(
-        matched.map(l => escrow.getNFTBalance(l.nftContract, l.tokenId))
-      );
-
-      container.innerHTML = matched.map((l, idx) => {
-        const nftInStock = nftBalances[idx] > 0n;
-
-        let priceLabel;
-        if (l.priceETH > 0n) {
-          priceLabel = `${ethers.formatEther(l.priceETH)} ETH`;
-        } else if (l.priceAmount > 0n) {
-          const isUsdc = !l.priceToken
-            || l.priceToken === _ZERO_ADDRESS
-            || l.priceToken.toLowerCase() === _USDC_ADDRESS.toLowerCase();
-          if (isUsdc) {
-            priceLabel = `$${formatUsdcUnits(l.priceAmount)} USDC`;
-          } else {
-            priceLabel = `${l.priceAmount.toString()} raw units (${l.priceToken.slice(0, 8)}…)`;
-          }
-        } else {
-          priceLabel = 'Free';
+      const provider = new ethers.JsonRpcProvider(window.DecentConfig.rpcUrl || 'https://mainnet.base.org');
+      try {
+        if ((await provider.getNetwork()).chainId !== _BASE_CHAIN_ID) throw new Error('Public listing provider is not on Base.');
+        const escrow = new ethers.Contract(_ESCROW_ADDRESS, _ESCROW_ABI, provider);
+        const id = BigInt(config.listingId);
+        const l = await escrow.getListing(id);
+        const matches = l.nftContract.toLowerCase() === _NFT_ADDRESS.toLowerCase()
+          && l.tokenId === BigInt(config.tokenId) && l.priceETH === 0n
+          && l.priceToken.toLowerCase() === _USDC_ADDRESS.toLowerCase()
+          && l.priceAmount === BigInt(config.expectedPriceAmount);
+        if (!matches || !l.active || l.available < 1n) {
+          container.innerHTML = '<p style="color:#aaa;font-size:0.85em;">The configured Base Supporter listing is unavailable or its terms changed.</p>';
+          return;
         }
-
-        return `
+        const stock = await escrow.getNFTBalance(_NFT_ADDRESS, BigInt(config.tokenId));
+        if (stock < l.available) throw new Error('Escrow NFT balance is below the advertised listing availability.');
+        const priceLabel = `$${formatUsdcUnits(l.priceAmount)} USDC`;
+        container.innerHTML = `
           <div class="buy-card">
-            <div class="buy-card-label">${l.note}</div>
-            <div class="buy-card-supply">${l.available} available</div>
-            ${nftInStock
-              ? `<button class="buy-btn" data-listing-id="${l.id}" data-price-eth="${l.priceETH.toString()}" data-price="${l.priceAmount.toString()}">
-                   🎟️ Buy Now — ${priceLabel}
-                 </button>`
-              : `<span role="status" style="color:#ff8800;font-size:0.8em;">${_MSG_NFT_NOT_IN_ESCROW}</span>`
-            }
+            <div class="buy-card-label">DecentBusking v1.0.0 Supporter DNFT · Base listing #${id}</div>
+            <div class="buy-card-supply">${l.available} available · ${priceLabel} each</div>
+            <button class="buy-btn" data-listing-id="${id}" data-price-eth="0" data-price="${l.priceAmount}">
+              🎟️ Buy Now — ${priceLabel}
+            </button>
           </div>
         `;
-      }).join('');
 
-      container.querySelectorAll('.buy-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const listingId = parseInt(btn.dataset.listingId);
-          const price     = BigInt(btn.dataset.price);
-          this._handleBuy(listingId, price, btn, statusEl);
+        container.querySelectorAll('.buy-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            this._handleBuy(id, BigInt(btn.dataset.price), btn, statusEl);
+          });
         });
-      });
-
+      } finally {
+        provider.destroy();
+      }
     } catch (err) {
       console.warn('[about-override] _loadDecentBuskingListings failed:', err);
       container.innerHTML = '<p style="color:#aaa;font-size:0.85em;">Could not load listings — please refresh.</p>';
@@ -241,10 +201,6 @@ class DecentBuskingAboutModal extends HTMLElement {
       statusEl.textContent = msg;
     };
 
-    if (!window.ethereum) {
-      setStatus('⚠ MetaMask not found. Please install it to buy on-chain.', '#ff8800');
-      return;
-    }
     const ethers = window.ethers;
     if (!ethers) {
       setStatus('⚠ ethers.js not loaded.', '#ff8800');
@@ -255,44 +211,68 @@ class DecentBuskingAboutModal extends HTMLElement {
       btn.disabled = true;
       btn.textContent = '⏳ Connecting wallet…';
 
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      await provider.send('eth_requestAccounts', []);
-
-      const network = await provider.getNetwork();
-      if (network.chainId !== _OPTIMISM_CHAIN_ID) {
-        setStatus('⏳ Switching to Optimism…');
-        try {
-          await window.ethereum.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: '0xa' }],
-          });
-        } catch (switchErr) {
-          if (switchErr.code === 4902) {
-            await window.ethereum.request({
+      const wallet = window.DecentHead?.getWallet?.();
+      let address;
+      if (wallet && !wallet.snapshot().connected) await wallet.connect();
+      const raw = wallet ? wallet.rawProvider : window.ethereum;
+      if (!raw) throw new Error('No wallet provider found. Connect a wallet and try again.');
+      if (wallet) {
+        address = wallet.snapshot().address;
+      } else {
+        const accounts = await raw.request({ method: 'eth_requestAccounts' });
+        address = accounts?.[0];
+      }
+      if (!address) throw new Error('No wallet account is available.');
+      const generation = wallet?.generation;
+      if (BigInt(await raw.request({ method: 'eth_chainId' })) !== _BASE_CHAIN_ID) {
+        setStatus('⏳ Switching to Base…');
+        const chain = window.DecentConfig.supporterDnft.chain;
+        if (wallet?.ensureChain) {
+          await wallet.ensureChain(chain);
+        } else {
+          const chainId = `0x${BigInt(chain.chainId).toString(16)}`;
+          try {
+            await raw.request({ method: 'wallet_switchEthereumChain', params: [{ chainId }] });
+          } catch (switchError) {
+            if (Number(switchError.code ?? switchError.data?.originalError?.code) !== 4902) throw switchError;
+            await raw.request({
               method: 'wallet_addEthereumChain',
               params: [{
-                chainId: '0xa',
-                chainName: 'Optimism Mainnet',
-                nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-                rpcUrls: ['https://mainnet.optimism.io'],
-                blockExplorerUrls: ['https://optimistic.etherscan.io'],
+                chainId,
+                chainName: chain.chainName,
+                nativeCurrency: chain.nativeCurrency,
+                rpcUrls: chain.rpcUrls,
+                blockExplorerUrls: chain.blockExplorerUrls,
               }],
             });
-          } else {
-            throw switchErr;
+            await raw.request({ method: 'wallet_switchEthereumChain', params: [{ chainId }] });
           }
         }
-        const freshProvider = new ethers.BrowserProvider(window.ethereum);
-        await this._doPurchase(freshProvider, ethers, listingId, price, btn, setStatus);
-        return;
       }
-
-      await this._doPurchase(provider, ethers, listingId, price, btn, setStatus);
+      if (BigInt(await raw.request({ method: 'eth_chainId' })) !== _BASE_CHAIN_ID) throw new Error('Wallet did not switch to Base.');
+      const assertWallet = async expectedAddress => {
+        const current = wallet?.snapshot();
+        const accounts = await raw.request({ method: 'eth_accounts' });
+        if ((wallet && (wallet.rawProvider !== raw || wallet.generation !== generation
+            || current.address?.toLowerCase() !== expectedAddress.toLowerCase()))
+          || accounts?.[0]?.toLowerCase() !== expectedAddress.toLowerCase()
+          || BigInt(await raw.request({ method: 'eth_chainId' })) !== _BASE_CHAIN_ID) {
+          throw new Error('Wallet account or network changed. Review this purchase again.');
+        }
+      };
+      await assertWallet(address);
+      const provider = new ethers.BrowserProvider(raw, 'any');
+      await this._doPurchase(provider, ethers, listingId, price, btn, setStatus, {
+        assertWallet,
+      });
     } catch (err) {
-      btn.disabled = false;
-      btn.textContent = '🎟️ Buy Now';
+      const submissionUncertain = err?.purchaseSubmitted === true;
+      btn.disabled = submissionUncertain;
+      btn.textContent = submissionUncertain ? '⚠ Check transaction' : '🎟️ Buy Now';
       const data = err?.data ?? err?.info?.error?.data ?? '';
-      if (typeof data === 'string' && data.startsWith('0x03dee4c5')) {
+      if (submissionUncertain) {
+        setStatus(`⚠ Purchase was submitted but its final result is uncertain. Check the transaction before trying again. ${err.message}`, '#ff8800');
+      } else if (typeof data === 'string' && data.startsWith('0x03dee4c5')) {
         setStatus('⚠ NFT stock not in escrow — the seller needs to deposit NFTs before purchase.', '#ff8800');
       } else {
         setStatus(`⚠ ${err.reason || err.message || 'Unknown error'}`, '#ff4444');
@@ -300,14 +280,23 @@ class DecentBuskingAboutModal extends HTMLElement {
     }
   }
 
-  async _doPurchase(provider, ethers, listingId, price, btn, setStatus) {
+  async _doPurchase(provider, ethers, listingId, price, btn, setStatus, session) {
     const signer = await provider.getSigner();
-    const buyer  = signer.address;
+    const buyer  = await signer.getAddress();
+    const guard = () => session.assertWallet(buyer);
+    await guard();
 
     setStatus('⏳ Checking listing…');
     const escrow  = new ethers.Contract(_ESCROW_ADDRESS, _ESCROW_ABI, signer);
     const listing = await escrow.getListing(listingId);
 
+    const config = window.DecentConfig.supporterDnft;
+    if (listing.nftContract.toLowerCase() !== config.contract.toLowerCase()
+      || listing.tokenId !== BigInt(config.tokenId) || listing.priceETH !== 0n
+      || listing.priceToken.toLowerCase() !== config.paymentToken.toLowerCase()
+      || listing.priceAmount !== BigInt(config.expectedPriceAmount) || listing.priceAmount !== price) {
+      throw new Error('The live listing differs from the reviewed Base Supporter terms.');
+    }
     if (!listing.active) {
       btn.disabled = false;
       btn.textContent = '🎟️ Buy Now';
@@ -323,7 +312,7 @@ class DecentBuskingAboutModal extends HTMLElement {
 
     setStatus('⏳ Verifying NFT stock…');
     const nftBalance = await escrow.getNFTBalance(listing.nftContract, listing.tokenId);
-    if (nftBalance < 1n) {
+    if (nftBalance < listing.available) {
       btn.disabled = false;
       btn.textContent = '🎟️ Buy Now';
       setStatus(`⚠ ${_MSG_NFT_NOT_IN_ESCROW}`, '#ff8800');
@@ -334,45 +323,75 @@ class DecentBuskingAboutModal extends HTMLElement {
     const priceETH    = listing.priceETH ?? 0n;
     const rawToken    = listing.priceToken;
 
-    let purchaseTx;
-    let paymentToken = _USDC_ADDRESS;
-
-    if (priceETH > 0n) {
-      setStatus('⏳ Confirm purchase in MetaMask…');
-      btn.textContent = '⏳ Purchasing…';
-      purchaseTx = await escrow.purchaseWithETH(listingId, 1, { value: priceETH });
-    } else {
-      paymentToken = (rawToken && rawToken !== _ZERO_ADDRESS)
-        ? rawToken
-        : _USDC_ADDRESS;
-
-      setStatus('⏳ Checking token allowance…');
-      const token     = new ethers.Contract(paymentToken, _ERC20_ABI, signer);
-      const allowance = await token.allowance(buyer, _ESCROW_ADDRESS);
-
-      if (allowance < tokenAmount) {
-        setStatus('⏳ Approving token spend (confirm in MetaMask)…');
-        btn.textContent = '⏳ Approving…';
-        const approveTx = await token.approve(_ESCROW_ADDRESS, tokenAmount);
-        setStatus('⏳ Waiting for approval confirmation…');
-        await approveTx.wait();
-      }
-
-      setStatus('⏳ Confirm purchase in MetaMask…');
-      btn.textContent = '⏳ Purchasing…';
-      purchaseTx = await escrow.purchaseWithToken(listingId, 1);
+    const purchaseToken = rawToken;
+    if (priceETH !== 0n || purchaseToken.toLowerCase() !== _USDC_ADDRESS.toLowerCase()
+      || tokenAmount !== price || tokenAmount !== BigInt(config.expectedPriceAmount)) {
+      throw new Error('Only the configured exact-price Base USDC listing can be purchased here.');
     }
 
+    setStatus('⏳ Checking token allowance…');
+    const token = new ethers.Contract(_USDC_ADDRESS, _ERC20_ABI, signer);
+    if (await token.balanceOf(buyer) < tokenAmount) throw new Error('Insufficient Base USDC for this edition.');
+    const allowance = await token.allowance(buyer, _ESCROW_ADDRESS);
+
+    if (allowance !== tokenAmount) {
+      await guard();
+      setStatus('⏳ Approving exact USDC spend (confirm in wallet)…');
+      btn.textContent = '⏳ Approving…';
+      const approveTx = await token.approve(_ESCROW_ADDRESS, tokenAmount);
+      setStatus('⏳ Waiting for approval confirmation…');
+      const approvalReceipt = await approveTx.wait();
+      if (approvalReceipt?.status !== 1) throw new Error('USDC approval did not confirm.');
+    }
+
+    await guard();
+    const currentListing = await escrow.getListing(listingId);
+    if (!currentListing.active || currentListing.available < 1n
+      || currentListing.priceETH !== 0n || currentListing.priceAmount !== tokenAmount
+      || currentListing.nftContract.toLowerCase() !== config.contract.toLowerCase()
+      || currentListing.tokenId !== BigInt(config.tokenId)
+      || currentListing.priceToken.toLowerCase() !== config.paymentToken.toLowerCase()
+      || await escrow.getNFTBalance(config.contract, config.tokenId) < 1n
+      || await token.balanceOf(buyer) < tokenAmount
+      || await token.allowance(buyer, _ESCROW_ADDRESS) !== tokenAmount) {
+      throw new Error('Listing or exact USDC approval changed; no purchase submitted.');
+    }
+    await guard();
+    setStatus('⏳ Confirm purchase in wallet…');
+    btn.textContent = '⏳ Purchasing…';
+    const purchaseTx = await escrow.purchaseWithToken(listingId, 1);
+
     setStatus('⏳ Waiting for purchase confirmation…');
-    const receipt = await purchaseTx.wait();
+    let receipt;
+    try {
+      receipt = await purchaseTx.wait();
+    } catch (error) {
+      error.purchaseSubmitted = true;
+      throw error;
+    }
     if (receipt?.status !== 1) throw new Error('Supporter DNFT purchase did not confirm');
-    if (priceETH > 0n || tokenAmount > 0n) {
+    const iface = escrow.interface;
+    const purchaseEvent = receipt.logs.some(log => {
+      if (log.address.toLowerCase() !== _ESCROW_ADDRESS.toLowerCase()) return false;
+      try {
+        const event = iface.parseLog(log);
+        return event?.name === 'Purchased' && event.args.listingId === listingId
+          && event.args.buyer.toLowerCase() === buyer.toLowerCase() && event.args.amount === 1n
+          && event.args.paymentToken.toLowerCase() === _USDC_ADDRESS.toLowerCase()
+          && event.args.totalPaid === price;
+      } catch { return false; }
+    });
+    if (!purchaseEvent) {
+      const error = new Error('Purchase confirmed but the expected Base Purchased event was not found.');
+      error.purchaseSubmitted = true;
+      throw error;
+    }
+    if (tokenAmount > 0n) {
       announcePaymentCelebration({
-        chainId: Number(_OPTIMISM_CHAIN_ID),
+        chainId: Number(_BASE_CHAIN_ID),
         txHash: receipt.hash || purchaseTx.hash,
-        amountText: priceETH > 0n ? ethers.formatEther(priceETH)
-          : paymentToken === _USDC_ADDRESS ? formatUsdcUnits(tokenAmount) : String(tokenAmount),
-        assetText: priceETH > 0n ? 'ETH' : (paymentToken === _USDC_ADDRESS ? 'USDC' : 'token base units'),
+        amountText: formatUsdcUnits(tokenAmount),
+        assetText: 'USDC',
         summary: 'Supporter DNFT purchase confirmed',
         txLabel: 'Supporter DNFT transferred',
       });
@@ -892,7 +911,9 @@ class DecentBuskingAboutModal extends HTMLElement {
 
           <section class="supporter-remint" aria-labelledby="supporter-remint-title">
             <h3 id="supporter-remint-title">🎟️ DecentBusking Supporter DNFTs</h3>
-            <p>Supporter DNFTs are a separate thank-you from music NFTs. We’re preparing a fresh Base version for this DecentBusking release; the previous Optimism editions are not the purchase path for this launch.</p>
+            <p>Supporter DNFTs are a separate thank-you from music NFTs. The v1.0.0 edition is listed on Base for $100 USDC. Review the live listing and stock below; each purchase requires an exact USDC approval and a separate wallet confirmation.</p>
+            <div id="buy-cards" aria-live="polite"></div>
+            <p id="buy-status" role="status" aria-live="polite"></p>
           </section>
 
           <div class="about-section">
@@ -948,6 +969,7 @@ class DecentBuskingAboutModal extends HTMLElement {
       startTutorial({ card: 'splits' });
     });
     this._loadCommunityFunds();
+    this._loadDecentBuskingListings();
     this.shadowRoot.getElementById('paypal-btn-container')?.addEventListener('click', (e) => {
       if (e.target.id === 'paypal-launch-btn') this._handlePayPalLaunch();
     });

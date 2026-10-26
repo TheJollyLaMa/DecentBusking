@@ -16,6 +16,7 @@
 //   tokenSymbol    — Native currency symbol used for tips
 //   uniswapUrl     — (optional) Uniswap link shown in the right-ankh dropdown
 //   tokenAddress   — (optional) ERC-20 token address for tips / right-ankh balance
+//   supporterDnft — exact Base listing terms for the About purchase card
 //   discord        — Discord invite link (shown in the footer)
 //   github         — GitHub repo URL (shown in the footer)
 
@@ -48,6 +49,22 @@ window.DecentConfig = {
   ensRpcUrl: "https://ethereum-rpc.publicnode.com",
   adminWalletAddress: "0x807061DF657A7697c04045dA7d16D941861cAABc",
   marketUrl: "https://thejollylama.github.io/DecentMarket/",
+  supporterDnft: {
+    chainId: 8453,
+    contract: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B",
+    tokenId: "75",
+    escrowAddress: "0x31b07b83e99A9bdF379bf40225b8A80d3804C89d",
+    listingId: "5",
+    paymentToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    expectedPriceAmount: "100000000",
+    chain: {
+      chainId: 8453,
+      chainName: "Base",
+      rpcUrls: ["https://mainnet.base.org"],
+      blockExplorerUrls: ["https://basescan.org"],
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }
+    }
+  },
 
   // IPFS uploads. This public URL never contains the server-side Pinata JWT.
   ipfsUploadProvider: "pinata",
