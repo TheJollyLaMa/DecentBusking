@@ -119,7 +119,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   host.id = 'dbusker-companion';
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `
-    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261027-routing', import.meta.url).href}">
+    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261027-rabbit', import.meta.url).href}">
     <div class="greeting" hidden><span>How can I help you, Earthling?</span><button type="button" class="dismiss" aria-label="Dismiss DBusker greeting">Not now</button></div>
     <button type="button" class="launcher" aria-label="Ask DBusker, AI community guide" aria-expanded="false" aria-controls="dbusker-chat">
       <span class="launcher-portrait"><img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="" width="58" height="58"></span><span><small>A friendly signal</small>Ask DBusker</span><span class="signal-dot" aria-hidden="true"></span>
@@ -138,18 +138,22 @@ export function initDBusker({ document = globalThis.document, window = globalThi
         </div>
         <p class="paths-hint">Choose a path to draft a question. Nothing sends until you ask.</p>
       </details>
-      <details class="field-notes"><summary>Maps, bunny trails &amp; the small print</summary>
-        <p class="intro">An AI public-code guide, not a human steward. No transactions or automatic posting.
-          <a href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/docs/NEWCOMERS.md" target="_blank" rel="noopener noreferrer">Public newcomer guide</a></p>
-        <p>Public guides (new tabs):
-          <a href="?tutorial=payroll" target="_blank" rel="noopener noreferrer">Fund proofs</a> ·
-          <a href="?tutorial=playlists" target="_blank" rel="noopener noreferrer">Playlist bunny</a> ·
-          <a href="?tutorial=splits" target="_blank" rel="noopener noreferrer">Collaborator bunny</a>.
-          <a href="https://github.com/TheJollyLaMa/DecentBusking/issues/new/choose" target="_blank" rel="noopener noreferrer">Report or propose an improvement</a>.
-        </p>
-        <p><a href="https://github.com/TheJollyLaMa/DecentBusking/issues/new?template=whitelist-request.yml" target="_blank" rel="noopener noreferrer">Contributor Request</a>
-          publishes your GitHub handle and payout wallet on GitHub. Chat access does not enroll you for rewards.</p>
+      <details class="rabbit-trails"><summary aria-label="Follow the white rabbit">
+        <span class="rabbit-invitation" aria-hidden="true"><span class="letter-stream">${[...'Follow the white rabbit'].map((letter, index) => `<span style="--letter:${index}">${letter === ' ' ? '&nbsp;' : letter}</span>`).join('')}</span><span class="burrow"></span><span class="rabbit-runner">🐇</span></span>
+        <span class="trail-toggle" aria-hidden="true">+</span>
+      </summary>
+        <p class="tutorial-heading" id="dbusker-tutorials">Tutorials <small>Open a trail in a new tab</small></p>
+        <div class="tutorial-garden">
+          <ol class="tutorial-links" aria-labelledby="dbusker-tutorials">
+            <li><a href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/docs/NEWCOMERS.md" target="_blank" rel="noopener noreferrer">First steps: listen &amp; bring a song</a></li>
+            <li><a href="?tutorial=payroll" target="_blank" rel="noopener noreferrer">Follow the funds &amp; payment proofs</a></li>
+            <li><a href="?tutorial=playlists" target="_blank" rel="noopener noreferrer">DJuke: make a playlist</a></li>
+            <li><a href="?tutorial=splits" target="_blank" rel="noopener noreferrer">Collaborators &amp; song splits</a></li>
+          </ol>
+          <span class="garden-bunny" aria-hidden="true"><span class="nibbling-bunny">🐇</span><span class="carrot">🥕</span></span>
+        </div>
       </details>
+      <p class="role-note">An AI guide, not a human steward. No transactions or automatic posting. Chat access does not enroll you for rewards.</p>
       <label class="consent"><input type="checkbox"> I agree to send my questions and recent chat context to OpenAI.
         Don't share secrets. Chat is kept in server memory for up to 15 minutes; the provider's own retention policy also applies.
         <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></label>
@@ -168,6 +172,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       </div>
       <div class="cabin-foot" aria-hidden="true"><span>Earth Village / open frequencies</span><span class="speaker-grille"></span><span class="foot-light"></span></div>
     </section>`;
+  host.hidden = true;
   document.body.append(host);
   const find = selector => root.querySelector(selector);
   const launcher = find('.launcher'), panel = find('section'), status = find('.status');
@@ -182,6 +187,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   mode.addEventListener('change', () => { find('.mode-note').textContent = modeNotes[mode.value]; });
   let credential = null, wallet = null, expiresAt = 0, pending = false, generation = 0;
   let controller = null, expiryTimer = null, dismissed = false, returnFocus = null;
+  let invited = false, invitationAddress = null, invitationGeneration = 0, invitationController = null;
   const sound = find('.sound');
   const chime = createCompanionChime(window, document, error => {
     sound.setAttribute('aria-pressed', 'false');
@@ -240,7 +246,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     return data;
   }
   function show() {
-    if (companionBlocked(document)) return;
+    if (!invited || companionBlocked(document)) return;
     returnFocus = document.activeElement === host ? root.activeElement : document.activeElement;
     dismiss();
     panel.hidden = false;
@@ -386,15 +392,19 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   const walletChanged = () => {
     if ((wallet && window._wallet?.address?.toLowerCase() !== wallet) || pending ||
         (credential && window._wallet?.chainId !== 8453)) signout.click();
+    void checkInvitation();
   };
   document.addEventListener('wallet-connected', walletChanged);
-  document.addEventListener('wallet-disconnected', () => signout.click());
-  // Hide the companion when existing dialogs or the tour need the screen.
-  const observer = new window.MutationObserver(records => {
-    if (records.every(record => record.attributeName === 'style' &&
-        !record.target.matches('dialog, [aria-modal="true"]') &&
-        !record.target.querySelector('dialog, [aria-modal="true"]'))) return;
-    const blocked = companionBlocked(document);
+  document.addEventListener('wallet-disconnected', () => {
+    signout.click();
+    invitationGeneration++;
+    invitationController?.abort();
+    invited = false;
+    invitationAddress = null;
+    syncVisibility();
+  });
+  function syncVisibility() {
+    const blocked = !invited || companionBlocked(document);
     if (host.hidden !== blocked) host.hidden = blocked;
     if (blocked && !panel.hidden) {
       chime.stop();
@@ -403,10 +413,55 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       launcher.setAttribute('aria-expanded', 'false');
     }
     find('.greeting').hidden = blocked || dismissed || !panel.hidden;
+  }
+  async function checkInvitation() {
+    const attempt = ++invitationGeneration;
+    invitationController?.abort();
+    const current = window._wallet;
+    if (!current?.address || current.chainId !== 8453) {
+      invited = false;
+      invitationAddress = null;
+      syncVisibility();
+      return;
+    }
+    const address = current.address;
+    if (invitationAddress !== address) invited = false;
+    syncVisibility();
+    const check = new AbortController();
+    invitationController = check;
+    const timeout = window.setTimeout(() => check.abort(), 10000);
+    try {
+      const result = await request('/invitation', { address, chainId: current.chainId },
+        { auth: null, signal: check.signal });
+      if (attempt !== invitationGeneration || window._wallet?.address !== address ||
+          window._wallet?.chainId !== 8453) return;
+      if (typeof result.invited !== 'boolean') throw new Error('Invalid DBusker invitation response.');
+      invited = result.invited;
+      invitationAddress = address;
+      if (!invited && credential) signout.click();
+    } catch (error) {
+      if (attempt !== invitationGeneration) return;
+      invited = false;
+      console.warn('[dbusker] invitation check failed:', error.message);
+      if (credential) signout.click();
+    } finally {
+      window.clearTimeout(timeout);
+      if (attempt === invitationGeneration) { invitationController = null; syncVisibility(); }
+    }
+  }
+  // Hide the companion when existing dialogs or the tour need the screen.
+  const observer = new window.MutationObserver(records => {
+    if (records.every(record => record.attributeName === 'style' &&
+        !record.target.matches('dialog, [aria-modal="true"]') &&
+        !record.target.querySelector('dialog, [aria-modal="true"]'))) return;
+    syncVisibility();
   });
   observer.observe(document.body, { attributes: true, childList: true, subtree: true,
     attributeFilter: ['hidden', 'class', 'style', 'open', 'disabled', 'aria-pressed', 'aria-modal', 'aria-hidden'] });
-  host.hidden = companionBlocked(document);
-  find('.greeting').hidden = dismissed || host.hidden;
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) void checkInvitation();
+  });
+  window.addEventListener('pageshow', event => { if (event.persisted) void checkInvitation(); });
+  void checkInvitation();
   controls();
 }

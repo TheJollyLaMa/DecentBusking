@@ -11,7 +11,7 @@ export const directory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.dirname(directory);
 
 export function readHandoff(base = directory) {
-  const files = ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'routing.json', 'stewardship.md'];
+  const files = ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'routing.json', 'stewardship.md', 'welcome.md'];
   const contents = files.map(file => readFileSync(path.join(base, 'handoff', file), 'utf8'));
   const digest = createHash('sha256').update(JSON.stringify(contents)).digest('hex');
   const snapshot = JSON.parse(contents[5]);
@@ -26,9 +26,11 @@ export function readHandoff(base = directory) {
     throw new Error('Invalid reviewed topic routes');
   }
   for (const topic of topics) {
-    for (const [file, text] of Object.entries(topic.entryEvidence || {})) {
-      if (!topic.entryFiles.includes(file) || typeof text !== 'string' || !text.trim() ||
-          !snapshot.sources.some(source => source.file === file && source.text.includes(text))) {
+    for (const [file, evidence] of Object.entries(topic.entryEvidence || {})) {
+      const anchors = Array.isArray(evidence) ? evidence : [evidence];
+      if (!topic.entryFiles.includes(file) || !anchors.length || anchors.some(text =>
+        typeof text !== 'string' || !text.trim() ||
+          !snapshot.sources.some(source => source.file === file && source.text.includes(text)))) {
         throw new Error(`Missing reviewed entry-point evidence for ${topic.id}: ${file}`);
       }
     }
@@ -36,14 +38,18 @@ export function readHandoff(base = directory) {
   return {
     digest, instructions: `${contents[0]}\n\n${contents[1]}\n\n${contents[2]}`,
     topics, evaluation: JSON.parse(contents[4]), routing: validateRouting(JSON.parse(contents[6])),
-    stewardship: contents[7], ...snapshot,
+    stewardship: contents[7], welcome: contents[8], ...snapshot,
   };
 }
 
 export function questionInstructions(pack, message, history = []) {
-  const relevant = matchTopics(message, history, pack.topics).some(({ topic }) =>
-    ['steward', 'independent-host', 'multisig', 'seed'].includes(topic.id));
-  return relevant ? `${pack.instructions}\n\n${pack.stewardship}` : pack.instructions;
+  const matches = matchTopics(message, history, pack.topics);
+  const guides = [];
+  if (matches.some(({ topic }) => ['steward', 'independent-host', 'multisig', 'seed'].includes(topic.id))) {
+    guides.push(pack.stewardship);
+  }
+  if (matches.some(({ topic }) => topic.id === 'newcomer')) guides.push(pack.welcome);
+  return [pack.instructions, ...guides].join('\n\n');
 }
 
 export function isApproved(handoff, approvalFile) {

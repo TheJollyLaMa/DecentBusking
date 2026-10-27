@@ -1,5 +1,23 @@
 [
   {
+    "question": "What's this all about? a friend told me its a radio I can add my music to?",
+    "expect": "Welcome them as DBusker, the AI host, not an outside auditor. Directly explain the community radio, optional wallet-free listening and the briefcase/Bring your sound artist path. Briefly mention public uploads, rights and owner review, not guaranteed mint/airtime/pay. Offer one next step. Usually under 180 words, no evidence-report headings, advert implementation trivia, raw source IDs or invented live verification; sourceIds separately cite the guide.",
+    "retrieval": [["README.md"], ["docs/NEWCOMERS.md"]],
+    "evidence": ["community listening room", "Bring your sound", "Submit for Approval", "does not mint automatically", "IPFS files can be downloaded", "You can listen and explore without connecting a wallet"]
+  },
+  {
+    "question": "How do I submit a song?",
+    "expect": "Give the documented website artist path, public-upload/rights notice, deliberate wallet connection and Submit for Approval. Explain owner review and no guaranteed airtime, mint or payout. Do not claim submission instructions are missing.",
+    "retrieval": [["docs/NEWCOMERS.md"]],
+    "evidence": ["Bring your sound", "Submit for Approval", "does not mint automatically"]
+  },
+  {
+    "question": "What's this?",
+    "expect": "A short welcoming overview of the community listening room/radio, no wallet needed just to listen, and one question about their interest. Not a code audit, fund report or claim of current stream health.",
+    "retrieval": [["README.md"], ["docs/NEWCOMERS.md"]],
+    "evidence": ["community listening room", "You can listen and explore without connecting a wallet"]
+  },
+  {
     "question": "Who is Jolly and which parts still depend on him?",
     "expect": "Attribute aliases and creator/coordinator role to the steward, credit contributors from NOTICE, and separate personal identity from configured authority. Explain owner review/settlement and operator dependencies using snapshot evidence, not assumed current key/account control.",
     "retrieval": [["NOTICE"], ["docs/PAYROLL.md"]],

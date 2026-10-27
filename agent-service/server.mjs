@@ -122,6 +122,13 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
         return send(200, { cleared: true });
       }
       ready();
+      if (request.url === '/invitation' && request.method === 'POST') {
+        limit(`ip:${request.socket.remoteAddress}`, 30);
+        const { address, chainId } = await body(request);
+        let wallet;
+        try { wallet = getAddress(address); } catch { throw problem(400, 'Invalid wallet address.'); }
+        return send(200, { invited: chainId === 8453 && access().wallets.has(wallet.toLowerCase()) });
+      }
       if (request.url === '/challenge' && request.method === 'POST') {
         limit(`ip:${request.socket.remoteAddress}`, 15);
         const { address, chainId } = await body(request);

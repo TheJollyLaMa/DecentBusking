@@ -148,6 +148,50 @@ test('guidance follows a short founder follow-up but is not added to unrelated q
     [{ role: 'assistant', content: 'Jolly says hello' }]), pack.instructions, 'Assistant prose cannot activate founder context');
 });
 
+test('newcomer guidance follows visitor intent without consuming unrelated governance context', () => {
+  for (const question of ["What's this?", 'How do I submit a song?', pack.evaluation[0].question]) {
+    assert.ok(questionInstructions(pack, question).includes(pack.welcome), question);
+  }
+  assert.ok(questionInstructions(pack, 'What next?',
+    [{ role: 'user', content: 'How do I submit a song?' }]).includes(pack.welcome));
+  assert.equal(questionInstructions(pack, 'Explain verifyAlchemySignature'), pack.instructions);
+  assert.ok(!questionInstructions(pack, 'Can we multisig this?').includes(pack.welcome));
+  assert.ok(!questionInstructions(pack, 'What next?',
+    [{ role: 'assistant', content: 'Submit a song' }]).includes(pack.welcome));
+  assert.match(pack.instructions, /sourceIds/);
+  assert.match(pack.welcome, /under 180 words/);
+  assert.match(pack.welcome, /genuinely missing, stale or conflicting facts explicit/);
+});
+
+test('newcomer anchors retain upload, review, public-storage and wallet-free evidence in either pass', () => {
+  const question = pack.evaluation[0].question;
+  for (const draft of [undefined, {
+    answer: 'An uncertain first welcome. '.repeat(200), review: 'needs_deeper_review', sourceIds: [],
+  }]) {
+    const context = fitContext({
+      instructions: questionInstructions(pack, question), sources: retrieve(question),
+      messages: [{ role: 'user', content: question }], draft,
+    });
+    for (const evidence of pack.evaluation[0].evidence) {
+      assert.ok(context.sources.some(source => source.text.includes(evidence)), evidence);
+    }
+    assert.ok(Buffer.byteLength(JSON.stringify(modelContext(context))) <= 28000);
+  }
+});
+
+test('review rejects empty, invalid or unsupported multiple entry-point anchors', t => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dbusker-anchor-test-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  cpSync(path.join(directory, 'handoff'), path.join(dir, 'handoff'), { recursive: true });
+  const target = path.join(dir, 'handoff/topics.json');
+  for (const anchors of [[], [''], [42], ['not an actual approved excerpt']]) {
+    const topics = structuredClone(pack.topics);
+    topics[0].entryEvidence['docs/NEWCOMERS.md'] = anchors;
+    writeFileSync(target, JSON.stringify(topics));
+    assert.throws(() => readHandoff(dir), /Missing reviewed entry-point evidence/);
+  }
+});
+
 test('seed orientation distinguishes steward testimony, contributors, infrastructure, licenses and staged multisig limits', () => {
   for (const phrase of [
     'his supplied orientation', 'not a', 'verified on-chain identity', 'A Decent Agency contributors',
@@ -195,7 +239,7 @@ test('community routes, mission, evaluation and corpus all invalidate prior appr
   const initial = readHandoff(dir), approval = path.join(dir, 'approval.json');
   writeFileSync(approval, JSON.stringify({ digest: initial.digest, reviewer: 'offline test', approvedAt: new Date().toISOString() }));
   assert.equal(isApproved(initial, approval), true);
-  for (const file of ['participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'stewardship.md']) {
+  for (const file of ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'stewardship.md', 'welcome.md']) {
     const target = path.join(dir, 'handoff', file), original = readFileSync(target, 'utf8');
     writeFileSync(target, `${original}\n`);
     assert.equal(isApproved(readHandoff(dir), approval), false, file);

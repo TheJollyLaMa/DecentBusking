@@ -128,8 +128,10 @@ export function createRetriever(sources, topics = []) {
       for (const { topic } of matches) {
         const file = topic.entryFiles?.[index];
         const evidence = topic.entryEvidence?.[file];
-        if (file) select(ranked.find(item => item.source.file === file &&
-          (!evidence || item.source.text.includes(evidence)))?.source);
+        for (const anchor of Array.isArray(evidence) ? evidence : [evidence]) {
+          if (file) select(ranked.find(item => item.source.file === file &&
+            (!anchor || item.source.text.includes(anchor)))?.source);
+        }
       }
     }
     for (const item of ranked) {

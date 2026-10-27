@@ -24,6 +24,8 @@ Edit these files together before the first live conversation:
   pinning, artist funds, advertising, playlists, collaboration and independence.
 - [Topic routes](../agent-service/handoff/topics.json): editable vocabulary,
   public-file entry points and optional evidence anchors for each subject.
+  An anchor may be a string or a list of strings to preserve separate essential
+  excerpts from one file; the eight-source/three-per-file limits still apply.
 - [Evaluation questions](../agent-service/handoff/evaluation.json): add the
   questions you want DBusker to handle, and what good answers should do.
 - [Public excerpts](../agent-service/handoff/sources.json): generated from
@@ -33,6 +35,8 @@ Edit these files together before the first live conversation:
 - [Stewardship and independent centers](../agent-service/handoff/stewardship.md):
   Jolly's supplied aliases/seed metaphor, role dependencies, independent forks
   and a staged multisig compatibility checklist.
+- [First welcome](../agent-service/handoff/welcome.md): concise newcomer/artist
+  guidance, added only for matching questions and short follow-ups.
 
 Review process:
 
@@ -58,10 +62,30 @@ Review process:
    accessibility checks, data-policy review and a real operating-budget review.
    There is no auto-publish or automatic learning from visitor messages.
 
-Changing **any** of the eight handoff files invalidates approval. A running
+Changing **any** of the nine handoff files invalidates approval. A running
 service detects edits and refuses new answers; restart with the newly approved
 pack. Approval is an operator workflow, not a cryptographic defense against a
 server administrator who can edit both the pack and its approval.
+
+### First-conversation regression
+
+The newcomer route reuses the public README introduction and
+[Bring One Song walkthrough](NEWCOMERS.md#4-bring-one-song), pinned in the
+approved snapshot, rather than deriving artist onboarding from playback tests.
+Its acceptance questions include the pilot's first "a radio I can add my music
+to?" question and short overview/submission variants. Retrieval checks verify
+the actual overview, submission, review and rights text survives context fitting.
+No new knowledge service or cross-repository dependency is needed.
+
+Voice review is separate from retrieval: the model should welcome visitors as
+the project's AI host, explain supported steps directly, and keep source IDs in
+the structured citation field instead of reciting an evidence report. The
+steward welcomes natural street-corner slang, contractions and informal grammar,
+not forced catchphrases or stereotyped accents. Uncertainty
+must remain explicit for genuinely unknown facts, especially live availability,
+approval, rights and payment. Offline tests cannot prove tone or factual quality;
+after steward approval, repeat the first question in a fresh private chat and
+review the real answer before expanding access.
 
 ## Local setup
 
@@ -298,6 +322,65 @@ Motion respects the system's reduced-motion preference.
   someone submit it. It cannot whitelist contributors or grant a bounty.
 
 ## Bounds and deployment
+
+### Invitation-only launcher
+
+The companion starts hidden. Once a wallet is connected to Base through the
+existing site header, it checks `POST /invitation` on the separate DBusker API.
+This sends that connected address and chain ID to the operator's service,
+without a signature, chat content, model call or provider consent. The response
+is only `{invited: boolean}`, never the private roster or a session credential.
+Disconnected, wrong-chain, uninvited and unavailable/error states stay hidden.
+Wallet changes and page return recheck access; stale responses cannot reveal
+the companion for another account. Server revocation still denies the very next
+protected request, even if an old launcher remains visible until its next check.
+
+This is discoverability, **not secrecy or authentication**: public frontend
+code is visible to anyone, and someone who knows an address can query its
+invitation status. Only a valid, one-time wallet signature creates a session;
+the server rechecks the private allowlist for chat. Do not publish invited
+addresses in frontend configuration. Infrastructure access logging must not
+capture request bodies, signatures or credentials.
+
+The "Follow the white rabbit" disclosure contains only existing tutorial links.
+It reuses the site's newcomer, payroll, playlist and collaborator teaching
+routes; the buddy art is browser-rendered, with no external media or audio.
+Letters arrive in a green code-like stream, the bunny dives into a hole, and
+the opened list gets a finite hopping tour followed by a carrot break.
+Decorations are hidden from assistive technology; the disclosure and links stay
+native keyboard controls. Reduced motion removes travel and keeps choices
+readable. Opening this disclosure neither signs nor starts a tutorial or audio.
+
+### Sharing the closed pilot without changing the radio
+
+Adding `OPENAI_API_KEY` to Render alone is **not** a deployment. Create a
+**separate** Node service for `agent-service`; do not add it to or restart the
+existing radio/Discord service. Use Node >=24.3, install from the service's lock
+file, and start `node server.mjs` with host-provided environment variables.
+Configure its own HTTPS URL, port/host binding, exact HTTPS `DBUSKER_SITE_URL`,
+enabled flag, private access/approval paths and persistent SQLite state path.
+Supply the key only through host secrets; supply the reviewed private access
+and matching approval files through private configuration, never static assets.
+
+Choose the frontend URL first: wallet sign-in binds its domain/URI and CORS
+allows only that origin. A feature-branch static preview or sanitized IPFS
+export can point `dbusker.serviceUrl` at the new API. Prefer a stable HTTPS
+pilot hostname or isolated CID subdomain gateway; do not upload the repository
+root, private environment/configuration, database or dependencies to IPFS.
+An IPFS link is public, even when chat is invite-only.
+
+Keep one service replica and preserve the existing durable budget. Migrating
+SQLite needs a consistent backup with the writer stopped or SQLite's backup
+facility, not a casual copy of a live WAL database. Do not create a fresh
+database simply to reset the allowance. Verify private-file exclusion, current
+approval, invited/stranger checks, actual wallet sign-in and chat on the chosen
+origin before sending invitations.
+
+A preview leaves the main frontend deployment untouched. Putting the gated
+launcher on the main site is still a frontend release, requiring the normal
+review and deployment process. Either way, wallet hiding does not disable real
+financial/radio controls elsewhere on a full-site preview. No radio process,
+contracts, treasury permissions or broadcast configuration need change.
 
 The pilot uses one Node process/replica with a persistent writable volume for
 `state.sqlite` and private configuration. HTTPS must terminate at a trusted

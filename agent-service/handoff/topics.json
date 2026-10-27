@@ -1,5 +1,13 @@
 [
   {
+    "id": "newcomer",
+    "entryFiles": ["README.md", "docs/NEWCOMERS.md"],
+    "entryEvidence": { "README.md": "Drop a track. Join the loop.", "docs/NEWCOMERS.md": ["### Website Route", "does not mint automatically", "You can listen and explore without connecting a wallet"] },
+    "aliases": ["what is this", "what's this", "what is decentbusking", "what's decentbusking", "what is decent busking", "what's this all about", "what is this all about", "i'm new", "im new", "first visit", "listen without", "add my music", "add music", "my music", "submit a song", "submit music", "upload a song", "upload music", "bring a song", "bring my music", "i'm an artist"],
+    "terms": ["community listening room radio JukeLoop briefcase Bring your sound Website Route Submit for Approval Queued owner review Public Uploads rights"],
+    "files": ["README.md", "docs/NEWCOMERS.md", "js/tutorial.js"]
+  },
+  {
     "id": "multisig",
     "entryFiles": ["js/admin.js", "discord-bot/ipfs-worker.js"],
     "entryEvidence": { "js/admin.js": "function grantRole(bytes32 role, address account)", "discord-bot/ipfs-worker.js": "Only the owner wallet may manage live bookings" },

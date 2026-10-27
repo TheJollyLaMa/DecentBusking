@@ -3,42 +3,124 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createCompanionChime, initDBusker, validServiceUrl } from '../../js/dbusker.mjs';
 
-function fixture(t, enabled = true) {
+async function fixture(t, enabled = true, connected = true) {
   const dom = new JSDOM('<body><button id="header-wallet">Wallet</button><footer id="radio-footer">Radio</footer></body>',
     { url: 'http://localhost:8080' });
   t.after(() => dom.window.close());
   const { window } = dom, { document } = window;
   window.HTMLElement.prototype.scrollIntoView = function () {};
   window.DecentConfig = { dbusker: { enabled, serviceUrl: 'http://localhost:8788' } };
-  let calls = [];
-  window.fetch = async (...args) => { calls.push(args); throw new Error('Offline test'); };
+  if (connected) window._wallet = { address: '0x1111111111111111111111111111111111111111', chainId: 8453 };
+  let calls = [], invitationCalls = [];
+  window.fetch = async (...args) => {
+    if (args[0].endsWith('/invitation')) {
+      invitationCalls.push(args);
+      return Response.json({ invited: true });
+    }
+    calls.push(args); throw new Error('Offline test');
+  };
   initDBusker({ document, window });
+  await new Promise(resolve => window.setTimeout(resolve, 0));
   const host = document.getElementById('dbusker-companion');
-  return { window, document, host, root: host?.shadowRoot, calls };
+  return { window, document, host, root: host?.shadowRoot, calls, invitationCalls };
 }
 
-test('disabled widget does not mount, prompt for a wallet, or request the service', t => {
-  const f = fixture(t, false);
+test('disabled widget does not mount, prompt for a wallet, or request the service', async t => {
+  const f = await fixture(t, false);
   assert.equal(f.host, null);
   assert.equal(f.calls.length, 0);
+  assert.equal(f.invitationCalls.length, 0);
 });
 
-test('public onboarding links reuse actual bunny routes and disclose contributor-request privacy', t => {
-  const { root } = fixture(t);
+test('disconnected widget stays hidden and sends no address or request until a Base wallet connects', async t => {
+  const f = await fixture(t, true, false), { window, document, root, host } = f;
+  assert.equal(host.hidden, true);
+  root.querySelector('.launcher').click();
+  assert.equal(root.querySelector('section').hidden, true);
+  assert.equal(f.invitationCalls.length, 0);
+  window._wallet = { address: '0x1111111111111111111111111111111111111111', chainId: 1 };
+  document.dispatchEvent(new window.Event('wallet-connected'));
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  assert.equal(host.hidden, true);
+  assert.equal(f.invitationCalls.length, 0);
+  window._wallet.chainId = 8453;
+  document.dispatchEvent(new window.Event('wallet-connected'));
+  assert.equal(host.hidden, true, 'Hidden while server invitation check is pending');
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  assert.equal(host.hidden, false);
+  assert.equal(f.invitationCalls.length, 1);
+  const init = f.invitationCalls[0][1];
+  assert.equal(init.credentials, 'omit');
+  assert.equal(init.headers.Authorization, undefined);
+  assert.equal(JSON.parse(init.body).address, window._wallet.address);
+  root.querySelector('.launcher').click();
+  document.dispatchEvent(new window.Event('wallet-disconnected'));
+  assert.equal(host.hidden, true);
+  assert.equal(root.querySelector('section').hidden, true);
+});
+
+test('uninvited, invalid, offline and stale invitation responses fail closed without losing the race', async t => {
+  const f = await fixture(t), { window, document, host } = f;
+  const warnings = [];
+  t.mock.method(console, 'warn', (...args) => warnings.push(args));
+  for (const result of [{ invited: false }, {}, null]) {
+    window.fetch = async () => {
+      if (result === null) throw new Error('Offline test');
+      return Response.json(result);
+    };
+    document.dispatchEvent(new window.Event('wallet-connected'));
+    await new Promise(resolve => window.setTimeout(resolve, 0));
+    assert.equal(host.hidden, true);
+  }
+  assert.equal(warnings.length, 2, 'Invalid responses and transport failures are reported');
+  let finish;
+  window.fetch = () => new Promise(resolve => { finish = resolve; });
+  document.dispatchEvent(new window.Event('wallet-connected'));
+  window._wallet.address = '0x2222222222222222222222222222222222222222';
+  document.dispatchEvent(new window.Event('wallet-disconnected'));
+  finish(Response.json({ invited: true }));
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  assert.equal(host.hidden, true, 'Old successful check cannot reveal a disconnected/new account');
+});
+
+test('returning to the same invited wallet rechecks without closing the reading panel; revocation closes it', async t => {
+  const f = await fixture(t), { window, document, host, root } = f;
+  Object.defineProperty(document, 'hidden', { value: false });
+  root.querySelector('.launcher').click();
+  root.querySelector('.rabbit-trails').open = true;
+  document.dispatchEvent(new window.Event('visibilitychange'));
+  assert.equal(root.querySelector('section').hidden, false);
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  assert.equal(root.querySelector('section').hidden, false);
+  assert.equal(root.querySelector('.rabbit-trails').open, true);
+  window.fetch = async () => Response.json({ invited: false });
+  document.dispatchEvent(new window.Event('visibilitychange'));
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  assert.equal(host.hidden, true);
+  assert.equal(root.querySelector('section').hidden, true);
+});
+
+test('rabbit dropdown contains only a tutorial list and decorative, inaccessible-to-focus animation', async t => {
+  const { root } = await fixture(t);
   for (const kind of ['payroll', 'playlists', 'splits']) {
     const link = root.querySelector(`a[href="?tutorial=${kind}"]`);
     assert.ok(link);
     assert.equal(link.target, '_blank');
     assert.equal(link.rel, 'noopener noreferrer');
   }
-  const contributor = root.querySelector('a[href*="template=whitelist-request"]');
-  assert.ok(contributor);
-  assert.match(contributor.parentElement.textContent, /publishes your GitHub handle and payout wallet/);
-  assert.match(contributor.parentElement.textContent, /Chat access does not enroll you/);
+  const trails = root.querySelector('.rabbit-trails');
+  assert.equal(trails.querySelector('summary').getAttribute('aria-label'), 'Follow the white rabbit');
+  assert.equal(trails.querySelector('.letter-stream').textContent.replaceAll('\u00a0', ' '), 'Follow the white rabbit');
+  assert.equal(trails.querySelectorAll('ol li a').length, 4);
+  assert.equal(trails.querySelectorAll('a').length, 4);
+  assert.equal(trails.querySelector('.garden-bunny').getAttribute('aria-hidden'), 'true');
+  assert.equal(trails.querySelector('.rabbit-invitation').getAttribute('aria-hidden'), 'true');
+  assert.equal(trails.querySelector('a[href*="issues"]'), null);
+  assert.match(root.querySelector('.role-note').textContent, /AI guide.*No transactions/);
 });
 
-test('greeting is dismissible; opening and closing does not fetch or alter radio', t => {
-  const f = fixture(t), { root, document } = f;
+test('greeting is dismissible; opening and closing does not fetch or alter radio', async t => {
+  const f = await fixture(t), { root, document } = f;
   root.querySelector('.dismiss').click();
   assert.equal(f.window.localStorage.getItem('decentbusking:dbusker:dismissed:v1'), '1');
   root.querySelector('.launcher').click();
@@ -50,8 +132,8 @@ test('greeting is dismissible; opening and closing does not fetch or alter radio
   assert.equal(f.calls.length, 0);
 });
 
-test('Escape returns focus to the launcher when the shadow host retargets native focus', t => {
-  const { root, document, host, window } = fixture(t);
+test('Escape returns focus to the launcher when the shadow host retargets native focus', async t => {
+  const { root, document, host, window } = await fixture(t);
   const launcher = root.querySelector('.launcher');
   launcher.focus();
   assert.equal(document.activeElement, host);
@@ -62,7 +144,7 @@ test('Escape returns focus to the launcher when the shadow host retargets native
 });
 
 test('tour defers companion and clearing a tour restores it without an observer loop', async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   const tour = f.document.createElement('div');
   tour.id = 'decentbusking-tutorial-overlay';
   tour.hidden = false;
@@ -75,7 +157,7 @@ test('tour defers companion and clearing a tour restores it without an observer 
 });
 
 test('a modal inside a hidden ancestor does not hide DBusker; opening it does', async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   const wrapper = f.document.createElement('div');
   wrapper.className = 'hidden';
   wrapper.innerHTML = '<div role="dialog" aria-modal="true">Mint</div>';
@@ -91,7 +173,7 @@ test('a modal inside a hidden ancestor does not hide DBusker; opening it does', 
 });
 
 test('consent is required and the widget reuses the site wallet without connecting automatically', async t => {
-  const f = fixture(t), { root } = f;
+  const f = await fixture(t), { root } = f;
   assert.equal(root.querySelector('.signin').disabled, true);
   const consent = root.querySelector('input');
   consent.checked = true;
@@ -102,8 +184,8 @@ test('consent is required and the widget reuses the site wallet without connecti
   assert.equal(f.calls.length, 0);
 });
 
-test('community routes draft editable questions without sending, signing, or connecting a wallet', t => {
-  const f = fixture(t), { root } = f;
+test('community routes draft editable questions without sending, signing, or connecting a wallet', async t => {
+  const f = await fixture(t), { root } = f;
   assert.equal(root.querySelectorAll('[data-starter]').length, 7);
   const route = root.querySelector('[data-starter]');
   route.click();
@@ -118,8 +200,8 @@ test('community routes draft editable questions without sending, signing, or con
   assert.equal(root.querySelectorAll('[data-starter][aria-pressed="true"]').length, 1);
 });
 
-test('portrait welcome and illustrated paths preserve readable accessible names', t => {
-  const { root } = fixture(t);
+test('portrait welcome and illustrated paths preserve readable accessible names', async t => {
+  const { root } = await fixture(t);
   assert.equal(root.querySelector('.hello').textContent, 'How can I help you, Earthling?');
   assert.match(root.querySelector('.greeting').textContent, /How can I help you, Earthling\?/);
   assert.match(root.querySelector('.portrait-port img').alt, /DBusker/);
@@ -129,8 +211,8 @@ test('portrait welcome and illustrated paths preserve readable accessible names'
   }
 });
 
-test('mode selection defaults to Balanced and changes only the compute explanation, without requests or persistence', t => {
-  const { root, window, calls } = fixture(t);
+test('mode selection defaults to Balanced and changes only the compute explanation, without requests or persistence', async t => {
+  const { root, window, calls } = await fixture(t);
   const mode = root.querySelector('#dbusker-mode');
   assert.equal(mode.value, 'balanced');
   assert.deepEqual([...mode.options].map(option => option.value), ['efficient', 'balanced', 'deep']);
@@ -216,7 +298,7 @@ test('closing or disabling sound cancels a chime awaiting browser audio permissi
 });
 
 test('sound toggle is session-only and unsupported audio gives an explicit error', async t => {
-  const f = fixture(t), { root, window } = f;
+  const f = await fixture(t), { root, window } = f;
   Object.defineProperty(f.document, 'hidden', { value: false });
   const warnings = [];
   t.mock.method(console, 'warn', (...args) => warnings.push(args));
@@ -233,7 +315,7 @@ test('sound toggle is session-only and unsupported audio gives an explicit error
 });
 
 test('sound integration stops notes for media start, drawer close, and hidden pages', async t => {
-  const f = fixture(t), audio = audioFixture(), { root, window, document } = f;
+  const f = await fixture(t), audio = audioFixture(), { root, window, document } = f;
   Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   window.AudioContext = audio.AudioContext;
   root.querySelector('.launcher').click();
@@ -264,11 +346,12 @@ test('sound integration stops notes for media start, drawer close, and hidden pa
 });
 
 test('wallet switch clears an in-flight sign-in and cannot leak its session into the new account', async t => {
-  const f = fixture(t), { root, window } = f;
+  const f = await fixture(t), { root, window } = f;
   let finishSignature;
   window._wallet = { address: '0x1111111111111111111111111111111111111111', chainId: 8453,
     signer: { signMessage: () => new Promise(resolve => { finishSignature = resolve; }) } };
-  window.fetch = async () => Response.json({ message: 'offline test challenge' });
+  window.fetch = async url => Response.json(url.endsWith('/invitation')
+    ? { invited: true } : { message: 'offline test challenge' });
   root.querySelector('input').checked = true;
   root.querySelector('input').dispatchEvent(new window.Event('change'));
   root.querySelector('.signin').click();
@@ -283,12 +366,13 @@ test('wallet switch clears an in-flight sign-in and cannot leak its session into
 });
 
 test('signed-in chat renders answers as text, cites sources and clears on disconnect', async t => {
-  const f = fixture(t), { root, window } = f;
+  const f = await fixture(t), { root, window } = f;
   const address = '0x1111111111111111111111111111111111111111', token = 'a'.repeat(64);
   const calls = [];
   window._wallet = { address, chainId: 8453, signer: { signMessage: async () => 'offline-signature' } };
   window.fetch = async (url, init) => {
     calls.push({ url, init });
+    if (url.endsWith('/invitation')) return Response.json({ invited: true });
     if (url.endsWith('/challenge')) return Response.json({ message: 'offline challenge' });
     if (url.endsWith('/session') && init.method === 'POST') return Response.json({
       token, wallet: address, expiresAt: Date.now() + 60000,

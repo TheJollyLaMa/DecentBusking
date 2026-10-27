@@ -81,6 +81,25 @@ test('only invited Base wallets with valid one-time signatures get sessions', as
   assert.equal((await f.request('/session', { message: challenge.body.message, signature: badSignature })).status, 401);
 });
 
+test('invitation visibility check returns no roster or credentials and does not authorize chat', async t => {
+  const f = await fixture(t);
+  const address = f.wallet.address;
+  const invited = await f.request('/invitation', { address, chainId: 8453 });
+  assert.equal(invited.status, 200);
+  assert.deepEqual(invited.body, { invited: true });
+  assert.deepEqual((await f.request('/invitation', { address: Wallet.createRandom().address, chainId: 8453 })).body,
+    { invited: false });
+  assert.deepEqual((await f.request('/invitation', { address, chainId: 1 })).body, { invited: false });
+  assert.equal((await f.request('/invitation', { address: 'invalid', chainId: 8453 })).status, 400);
+  assert.equal((await f.request('/invitation', { address, chainId: 8453 }, null, 'POST', 'https://evil.example')).status, 403);
+  assert.equal((await f.request('/chat', { message: 'Hello', consent: true })).status, 401);
+  f.access({ enabled: true, wallets: [] });
+  assert.deepEqual((await f.request('/invitation', { address, chainId: 8453 })).body, { invited: false });
+  f.access({ enabled: false, wallets: [address] });
+  assert.equal((await f.request('/invitation', { address, chainId: 8453 })).status, 503);
+  assert.equal(f.calls.length, 0);
+});
+
 test('wrong domain, expired challenges, and expired sessions are rejected', async t => {
   const f = await fixture(t);
   const session = await f.login();
