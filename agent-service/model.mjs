@@ -9,6 +9,27 @@ const answerSchema = {
   required: ['answer', 'sourceIds', 'abstained', 'review'],
 };
 
+const failureMessages = {
+  transport: 'The model connection failed. Your question was not answered.',
+  provider_http: 'The model provider rejected the request.',
+  provider_json: 'The model provider returned an unreadable response.',
+  output_limit: 'The model ran out of answer space. No partial answer was shown. Try a narrower question.',
+  incomplete: 'The model response did not complete. No partial answer was shown.',
+  refusal: 'The model declined this request. Try rephrasing the question.',
+  answer_json: 'The model did not return a readable answer.',
+  evidence_validation: 'The model response failed evidence validation. The unchecked answer was withheld.',
+};
+
+export class ModelFailure extends Error {
+  constructor(code, httpStatus) {
+    if (!Object.hasOwn(failureMessages, code)) throw new Error('Unknown model failure category');
+    super(`${failureMessages[code]}${code === 'provider_http' && Number.isInteger(httpStatus)
+      ? ` HTTP ${httpStatus}.` : ''} No automatic retry was made. [model:${code}]`);
+    this.status = 503;
+    this.code = code;
+  }
+}
+
 export function retrieveSources(sources, message, topics = [], history = []) {
   return createRetriever(sources, topics)(message, history);
 }
@@ -25,7 +46,9 @@ export function modelContext({ instructions, sources, messages, draft }) {
 }
 
 export async function askModel({ apiKey, model, instructions, sources, messages, draft, signal, fetchImpl = fetch }) {
-  const response = await fetchImpl('https://api.openai.com/v1/responses', {
+  let response;
+  try {
+    response = await fetchImpl('https://api.openai.com/v1/responses', {
     method: 'POST', signal,
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -33,21 +56,39 @@ export async function askModel({ apiKey, model, instructions, sources, messages,
       ...modelContext({ instructions, sources, messages, draft }),
       text: { format: { type: 'json_schema', name: 'dbusker_answer', strict: true, schema: answerSchema } },
     }),
-  });
-  if (!response.ok) throw new Error(`Model service returned HTTP ${response.status}`);
-  const result = await response.json();
-  if (result.status !== 'completed') throw new Error('Model response did not complete');
-  const text = result.output?.flatMap(item => item.type === 'message' ? item.content : [])
-    .filter(item => item.type === 'output_text').map(item => item.text).join('');
-  const answer = JSON.parse(text);
+    });
+  } catch {
+    if (signal?.aborted) throw signal.reason;
+    throw new ModelFailure('transport');
+  }
+  if (!response.ok) throw new ModelFailure('provider_http', response.status);
+  let result;
+  try { result = await response.json(); }
+  catch {
+    if (signal?.aborted) throw signal.reason;
+    throw new ModelFailure('provider_json');
+  }
+  if (!result || typeof result !== 'object') throw new ModelFailure('provider_json');
+  if (result.status !== 'completed') {
+    throw new ModelFailure(result.incomplete_details?.reason === 'max_output_tokens' ? 'output_limit' : 'incomplete');
+  }
+  if (!Array.isArray(result.output)) throw new ModelFailure('answer_json');
+  const content = result.output.flatMap(item => item?.type === 'message' && Array.isArray(item.content) ? item.content : []);
+  if (content.some(item => item?.type === 'refusal')) throw new ModelFailure('refusal');
+  const text = content
+    .filter(item => item?.type === 'output_text' && typeof item.text === 'string').map(item => item.text).join('');
+  let answer;
+  try { answer = JSON.parse(text); }
+  catch { throw new ModelFailure('answer_json'); }
   const ids = new Set(sources.map(source => source.id));
-  if (typeof answer.answer !== 'string' || !answer.answer.trim() || answer.answer.length > 8000 ||
+  if (!answer || typeof answer !== 'object' ||
+      typeof answer.answer !== 'string' || !answer.answer.trim() || answer.answer.length > 8000 ||
       typeof answer.abstained !== 'boolean' || !Array.isArray(answer.sourceIds) ||
       answer.sourceIds.some(id => !ids.has(id)) || (!answer.abstained && !answer.sourceIds.length) ||
       !['ready', 'needs_deeper_review', 'insufficient_evidence'].includes(answer.review) ||
       (answer.review === 'insufficient_evidence' && !answer.abstained) ||
       (answer.review === 'ready' && answer.abstained)) {
-    throw new Error('Model response failed evidence validation');
+    throw new ModelFailure('evidence_validation');
   }
   return {
     answer: answer.answer, abstained: answer.abstained, review: answer.review,

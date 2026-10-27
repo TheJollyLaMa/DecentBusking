@@ -13,9 +13,9 @@ test('public pilot configuration contains only the separate service URL and enab
   assert.equal(Object.keys(window.DecentConfig.dbusker).sort().join(','), 'enabled,serviceUrl');
   const index = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
   assert.match(index, /decent\.config\.js\?v=20261027-dbusker-invited/);
-  assert.match(index, /js\/main\.js\?v=20261027-dbusker-invited/);
+  assert.match(index, /js\/main\.js\?v=20261027-dbusker-mode-feedback/);
   assert.match(readFileSync(new URL('../../js/main.js', import.meta.url), 'utf8'),
-    /dbusker\.mjs\?v=20261027-invited/);
+    /dbusker\.mjs\?v=20261027-mode-feedback/);
 });
 
 async function fixture(t, enabled = true, connected = true) {
@@ -234,6 +234,9 @@ test('mode selection defaults to Balanced and changes only the compute explanati
   mode.value = 'efficient';
   mode.dispatchEvent(new window.Event('change'));
   assert.match(root.querySelector('.mode-note').textContent, /One light-model pass/);
+  assert.match(root.querySelector('.mode-note').textContent, /Efficient selected for your next question/);
+  assert.match(root.querySelector('.mode-note').textContent, /does not resend/);
+  assert.equal(root.querySelector('.mode-note').getAttribute('aria-live'), 'polite');
   mode.value = 'deep';
   mode.dispatchEvent(new window.Event('change'));
   assert.match(root.querySelector('.mode-note').textContent, /missing evidence/);
@@ -418,7 +421,17 @@ test('signed-in chat renders answers as text, cites sources and clears on discon
   assert.equal(JSON.parse(chat.init.body).consent, true);
   assert.equal(JSON.parse(chat.init.body).mode, 'efficient');
   assert.match(root.querySelector('.route-result').textContent, /efficient.*offline-light-model.*1 provider pass/);
+  assert.match(root.querySelector('.route-result').textContent, /^Last answer:/);
   assert.match(root.querySelector('.transcript').textContent, /plain text/);
+  window.fetch = async () => Response.json({ error: 'Answer space exceeded. [model:output_limit]' }, { status: 503 });
+  root.querySelector('textarea').value = 'Another question';
+  root.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true }));
+  await new Promise(resolve => window.setTimeout(resolve, 5));
+  assert.match(root.querySelector('.status').textContent, /Efficient.*did not return an answer.*model:output_limit/);
+  assert.equal(root.querySelector('textarea').value, 'Another question', 'Failed question remains editable');
+  assert.equal(root.querySelector('textarea').disabled, false);
+  assert.equal(root.querySelectorAll('.from-dbusker').length, 1, 'No success-shaped answer is added on failure');
+  window.fetch = async () => Response.json({ cleared: true });
   f.document.dispatchEvent(new window.Event('wallet-disconnected'));
   assert.equal(root.querySelector('.transcript').children.length, 0);
   assert.equal(root.querySelector('.route-result').textContent, '');
