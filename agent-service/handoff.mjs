@@ -5,12 +5,13 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { chunkSource, sourceDisposition, createRetriever } from './knowledge.mjs';
 import { modelContext } from './model.mjs';
+import { validateRouting } from './routing.mjs';
 
 export const directory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.dirname(directory);
 
 export function readHandoff(base = directory) {
-  const files = ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json'];
+  const files = ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'routing.json'];
   const contents = files.map(file => readFileSync(path.join(base, 'handoff', file), 'utf8'));
   const digest = createHash('sha256').update(JSON.stringify(contents)).digest('hex');
   const snapshot = JSON.parse(contents[5]);
@@ -34,7 +35,7 @@ export function readHandoff(base = directory) {
   }
   return {
     digest, instructions: `${contents[0]}\n\n${contents[1]}\n\n${contents[2]}`,
-    topics, evaluation: JSON.parse(contents[4]), ...snapshot,
+    topics, evaluation: JSON.parse(contents[4]), routing: validateRouting(JSON.parse(contents[6])), ...snapshot,
   };
 }
 
@@ -97,7 +98,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(JSON.stringify({ digest: pack.digest, publicCommit: pack.commit, indexedAt: pack.indexedAt,
       coverage: { indexed: pack.coverage?.filter(file => file.status === 'indexed').length,
         excluded: pack.coverage?.filter(file => file.status === 'excluded') },
-      topics: pack.topics.map(topic => topic.id), evaluation: pack.evaluation, approved: isApproved(pack,
+      topics: pack.topics.map(topic => topic.id), routing: pack.routing, evaluation: pack.evaluation, approved: isApproved(pack,
         path.resolve(process.env.DBUSKER_APPROVAL_FILE || 'approval.json')) }, null, 2));
   } else if (command === 'evaluate-retrieval') {
     const pack = readHandoff(), retrieve = createRetriever(pack.sources, pack.topics);

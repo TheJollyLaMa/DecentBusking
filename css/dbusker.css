@@ -13,7 +13,7 @@
 }
 :host([hidden]), [hidden] { display: none !important; }
 * { box-sizing: border-box; }
-button, textarea, input { font: inherit; }
+button, textarea, input, select { font: inherit; }
 button { cursor: pointer; border: 1px solid #728c9c; border-radius: 12px; background: #172b37; color: #effaff; padding: 9px 13px; transition: background .2s, border-color .2s, box-shadow .2s, transform .2s; }
 button:hover:not(:disabled) { border-color: var(--mint); background: #193b46; }
 button:disabled { opacity: .6; cursor: not-allowed; }
@@ -76,6 +76,10 @@ summary { cursor: pointer; }
 .signin, .send { color: #09262d; border: 1px solid #b9f4e3; font-weight: 650; background: linear-gradient(115deg, #81dfff, #b6f6dd); box-shadow: 0 0 16px #55d9ff12; }
 .signin:hover:not(:disabled), .send:hover:not(:disabled) { background: linear-gradient(115deg, #b4edff, #d0ffe7); border-color: #efffff; }
 .status { font-size: 11px; color: #b9dedf; padding-left: 10px; border-left: 2px solid var(--cyan); }
+.mode-label { display: grid; gap: 6px; font-size: 12px; color: var(--mint); }
+select { width: 100%; padding: 10px; border-radius: 12px 12px 4px 12px; background: #102c39; color: #eefaff; border: 1px solid #749daa; }
+.mode-note, .route-result { font-size: 11px; color: var(--muted); }
+.route-result:empty { display: none; }
 .is-thinking .status { animation: thinking 1.4s ease-in-out infinite alternate; }
 .transcript { overflow-y: auto; max-height: 300px; flex-shrink: 0; scrollbar-width: thin; }
 .transcript:empty { display: none; }

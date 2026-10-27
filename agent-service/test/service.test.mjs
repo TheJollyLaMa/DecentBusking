@@ -8,6 +8,7 @@ import { SiweMessage } from 'siwe';
 import { createAgentServer, loadSettings } from '../server.mjs';
 import { directory, readHandoff, isApproved } from '../handoff.mjs';
 import { askModel, retrieveSources, modelContext } from '../model.mjs';
+import { DatabaseSync } from 'node:sqlite';
 
 async function fixture(t, options = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'dbusker-test-'));
@@ -24,7 +25,7 @@ async function fixture(t, options = {}) {
   const logs = [];
   const modelCall = options.modelCall || (async input => {
     calls.push(input);
-    return { answer: `Answer to ${input.messages.at(-1).content}`, abstained: false,
+    return { answer: `Answer to ${input.messages.at(-1).content}`, abstained: false, review: 'ready',
       sources: [{ id: input.sources[0].id, file: input.sources[0].file, line: input.sources[0].line, url: input.sources[0].url }] };
   });
   let time = Date.now();
@@ -109,8 +110,8 @@ test('direct API access requires origin, session and explicit consent', async t 
 test('conversations stay isolated and clearing a session destroys its history', async t => {
   const f = await fixture(t);
   const a = await f.login(), b = await f.login(f.other);
-  assert.equal((await f.request('/chat', { message: 'my private question', consent: true }, a.token)).status, 200);
-  assert.equal((await f.request('/chat', { message: 'another visitor', consent: true }, b.token)).status, 200);
+  assert.equal((await f.request('/chat', { message: 'my private question about playlists', consent: true }, a.token)).status, 200);
+  assert.equal((await f.request('/chat', { message: 'another visitor asks about playlists', consent: true }, b.token)).status, 200);
   assert.equal(f.calls[1].messages.length, 1);
   assert.ok(!JSON.stringify(f.calls[1].messages).includes('my private question'));
   await f.request('/chat', { message: 'follow up', consent: true }, a.token);
@@ -134,7 +135,7 @@ test('long conversations trim old context while preserving the byte ceiling and 
   const inputs = [];
   const f = await fixture(t, { modelCall: async input => {
     inputs.push(input);
-    return { answer: 'a'.repeat(8000), abstained: false, sources: [] };
+    return { answer: 'a'.repeat(8000), abstained: false, sources: [], review: 'ready' };
   } });
   const session = await f.login();
   for (const message of ['Explain listening', 'What is running on the live server right this second?', 'Follow up']) {
@@ -155,7 +156,7 @@ test('malformed JSON shapes and provider failures are explicit and consume no ex
   const nullBody = await fetch(`${f.base}/chat`, { method: 'POST',
     headers: { Origin: f.settings.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` }, body: 'null' });
   assert.equal(nullBody.status, 400);
-  const response = await f.request('/chat', { message: 'A question', consent: true }, session.token);
+  const response = await f.request('/chat', { message: 'A playlist question', consent: true }, session.token);
   assert.equal(response.status, 503);
   assert.match(response.body.error, /unavailable/);
   assert.equal(JSON.stringify(response.body).includes('test provider outage'), false);
@@ -169,7 +170,7 @@ test('active model request is aborted on revocation', async t => {
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
   }) });
   const a = await f.login();
-  const response = f.request('/chat', { message: 'hello', consent: true }, a.token);
+  const response = f.request('/chat', { message: 'hello playlists', consent: true }, a.token);
   await waiting;
   assert.equal((await f.request('/chat', { message: 'duplicate', consent: true }, a.token)).status, 409);
   f.access({ enabled: true, wallets: [] });
@@ -179,8 +180,8 @@ test('active model request is aborted on revocation', async t => {
 test('durable global call ceiling survives a fresh server instance', async t => {
   const f = await fixture(t, { settings: { maxCalls: 1 } });
   const a = await f.login();
-  assert.equal((await f.request('/chat', { message: 'first', consent: true }, a.token)).status, 200);
-  assert.equal((await f.request('/chat', { message: 'second', consent: true }, a.token)).status, 429);
+  assert.equal((await f.request('/chat', { message: 'first playlist question', consent: true }, a.token)).status, 200);
+  assert.equal((await f.request('/chat', { message: 'second playlist question', consent: true }, a.token)).status, 429);
   const fresh = createAgentServer(f.settings, { logger: { error() {} } });
   await new Promise(resolve => fresh.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => { fresh.closeAllConnections(); fresh.close(resolve); }));
@@ -194,7 +195,7 @@ test('durable global call ceiling survives a fresh server instance', async t => 
   const challenge = await post('/challenge', { address: f.wallet.address, chainId: 8453 });
   const session = await post('/session', { message: challenge.body.message,
     signature: await f.wallet.signMessage(challenge.body.message) });
-  assert.equal((await post('/chat', { message: 'third', consent: true }, session.body.token)).status, 429);
+  assert.equal((await post('/chat', { message: 'third playlist question', consent: true }, session.body.token)).status, 429);
 });
 
 test('handoff changes invalidate human approval', t => {
@@ -217,7 +218,7 @@ test('Responses request has no tools/storage and validates returned source IDs',
       assert.equal(url, 'https://api.openai.com/v1/responses');
       sent = JSON.parse(init.body);
       return Response.json({ status: 'completed', output: [{ type: 'message', content: [{
-        type: 'output_text', text: JSON.stringify({ answer: 'Yes', sourceIds: [sources[0].id], abstained: false }),
+        type: 'output_text', text: JSON.stringify({ answer: 'Yes', sourceIds: [sources[0].id], abstained: false, review: 'ready' }),
       }] }] });
     } };
   const answer = await askModel(args);
@@ -227,7 +228,7 @@ test('Responses request has no tools/storage and validates returned source IDs',
   assert.equal(answer.sources[0].id, sources[0].id);
   assert.equal(answer.sources[0].text, undefined);
   args.fetchImpl = async () => Response.json({ status: 'completed', output: [{ type: 'message', content: [{
-    type: 'output_text', text: '{"answer":"invented","sourceIds":["not-real"],"abstained":false}',
+    type: 'output_text', text: '{"answer":"invented","sourceIds":["not-real"],"abstained":false,"review":"ready"}',
   }] }] });
   await assert.rejects(askModel(args), /evidence validation/);
   args.fetchImpl = async () => Response.json({ status: 'incomplete', output: [] });
@@ -239,4 +240,154 @@ test('Responses request has no tools/storage and validates returned source IDs',
 test('configuration rejects remote HTTP and invalid usage ceilings', () => {
   assert.throws(() => loadSettings({ DBUSKER_SITE_URL: 'http://example.com' }), /HTTPS/);
   assert.throws(() => loadSettings({ DBUSKER_MAX_CALLS: 'NaN' }), /MAX_CALLS/);
+  assert.throws(() => loadSettings({ DBUSKER_MODEL: 'unreviewed-model' }), /routing.json/);
+});
+
+function candidate(input, review = 'ready') {
+  const { text: _text, ...source } = input.sources[0];
+  return { answer: review === 'needs_deeper_review' ? 'PRIVATE UNCHECKED DRAFT' : 'Checked playlist guidance',
+    abstained: review === 'insufficient_evidence', review, sources: [source],
+    usage: { inputTokens: 25, outputTokens: 15 } };
+}
+
+function readState(file) {
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    return { calls: db.prepare('SELECT calls FROM budget WHERE id=1').get().calls,
+      rows: db.prepare('SELECT * FROM route_totals').all() };
+  } finally { db.close(); }
+}
+
+test('Balanced revisits its own draft exactly once and publishes only the checked final answer', async t => {
+  const inputs = [];
+  const f = await fixture(t, { modelCall: async input => {
+    inputs.push(input);
+    return candidate(input, inputs.length === 1 ? 'needs_deeper_review' : 'ready');
+  } });
+  const session = await f.login();
+  const response = await f.request('/chat', { message: 'Where is the playlist tutorial?', consent: true, mode: 'balanced' }, session.token);
+  assert.equal(response.status, 200);
+  assert.deepEqual(inputs.map(input => input.model), [readHandoff().routing.models.light, readHandoff().routing.models.standard]);
+  assert.equal(inputs[0].draft, undefined);
+  assert.equal(inputs[1].draft.answer, 'PRIVATE UNCHECKED DRAFT');
+  assert.equal(response.body.answer, 'Checked playlist guidance');
+  assert.equal(response.body.routing.attempts, 2);
+  assert.equal(response.body.routing.escalation, 'used');
+  assert.equal(response.body.usage, undefined);
+  const state = readState(f.settings.stateFile);
+  assert.equal(state.calls, 2);
+  assert.equal(state.rows.reduce((sum, row) => sum + row.input_tokens, 0), 50);
+  assert.ok(!JSON.stringify(state).includes('PRIVATE UNCHECKED DRAFT'));
+  assert.ok(!JSON.stringify(state).includes('playlist tutorial'));
+  assert.ok(!JSON.stringify(state).toLowerCase().includes(f.wallet.address.toLowerCase()));
+  await f.request('/chat', { message: 'How does that work?', consent: true }, session.token);
+  assert.ok(!JSON.stringify(inputs[2].messages).includes('PRIVATE UNCHECKED DRAFT'));
+});
+
+test('recursion stops after two passes even when both ask for deeper review', async t => {
+  let count = 0;
+  const f = await fixture(t, { modelCall: async input => { count++; return candidate(input, 'needs_deeper_review'); } });
+  const session = await f.login();
+  const response = await f.request('/chat', { message: 'How do playlists work?', consent: true }, session.token);
+  assert.equal(response.status, 200);
+  assert.equal(count, 2);
+  assert.equal(response.body.abstained, true);
+  assert.ok(!response.body.answer.includes('PRIVATE UNCHECKED DRAFT'));
+  assert.deepEqual(response.body.sources, []);
+});
+
+test('Efficient and Deep dive make only one pass and do not silently escalate', async t => {
+  const inputs = [];
+  const f = await fixture(t, { modelCall: async input => { inputs.push(input); return candidate(input, 'needs_deeper_review'); } });
+  const session = await f.login();
+  for (const mode of ['efficient', 'deep']) {
+    const response = await f.request('/chat', { message: 'How do playlists work?', consent: true, mode }, session.token);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.routing.attempts, 1);
+    assert.equal(response.body.routing.escalation, 'mode_limit');
+    assert.equal(response.body.abstained, true);
+  }
+  assert.deepEqual(inputs.map(input => input.model), [readHandoff().routing.models.light, readHandoff().routing.models.deep]);
+});
+
+test('missing evidence costs no provider call; invalid modes cannot select arbitrary models', async t => {
+  const f = await fixture(t);
+  const session = await f.login();
+  const response = await f.request('/chat', { message: 'zyxqv987654321', consent: true }, session.token);
+  assert.equal(response.status, 200);
+  assert.equal(response.body.abstained, true);
+  assert.equal(response.body.routing.attempts, 0);
+  for (const mode of [null, 'unlimited', { model: 'anything' }]) {
+    assert.equal((await f.request('/chat', { message: 'How do playlists work?', consent: true, mode }, session.token)).status, 400);
+  }
+  assert.equal(f.calls.length, 0);
+  assert.equal(readState(f.settings.stateFile).calls, 0);
+});
+
+test('insufficient evidence verdicts do not buy a second model pass', async t => {
+  let count = 0;
+  const f = await fixture(t, { modelCall: async input => { count++; return candidate(input, 'insufficient_evidence'); } });
+  const session = await f.login();
+  const response = await f.request('/chat', { message: 'How do playlists work?', consent: true }, session.token);
+  assert.equal(response.status, 200);
+  assert.equal(count, 1);
+  assert.equal(response.body.abstained, true);
+});
+
+test('every recursive pass reserves the durable budget and cannot return an unchecked draft on exhaustion', async t => {
+  let count = 0;
+  const f = await fixture(t, { settings: { maxCalls: 1 }, modelCall: async input => { count++; return candidate(input, 'needs_deeper_review'); } });
+  const session = await f.login();
+  const response = await f.request('/chat', { message: 'How do playlists work?', consent: true }, session.token);
+  assert.equal(response.status, 429);
+  assert.equal(count, 1);
+  assert.match(response.body.error, /budget/);
+  assert.equal(response.body.answer, undefined);
+  assert.equal(readState(f.settings.stateFile).calls, 1);
+});
+
+test('provider failures are recorded in aggregate without retries, error text or prompt persistence', async t => {
+  let count = 0;
+  const f = await fixture(t, { modelCall: async () => { count++; throw new Error('PRIVATE PROVIDER FAILURE'); } });
+  const session = await f.login();
+  const response = await f.request('/chat', { message: 'my PRIVATE QUESTION about playlists', consent: true }, session.token);
+  assert.equal(response.status, 503);
+  assert.equal(count, 1);
+  const state = readState(f.settings.stateFile);
+  assert.equal(state.calls, 1);
+  assert.equal(state.rows[0].outcome, 'error');
+  assert.equal(state.rows[0].usage_missing, 1);
+  assert.ok(!JSON.stringify(state).includes('PRIVATE'));
+  assert.ok(!f.logs.join('\n').includes('PRIVATE'));
+});
+
+test('a pause between recursive passes denies the next provider request', async t => {
+  let f, count = 0;
+  f = await fixture(t, { modelCall: async input => {
+    count++;
+    f.access({ enabled: false, wallets: [f.wallet.address] });
+    return candidate(input, 'needs_deeper_review');
+  } });
+  const session = await f.login();
+  const response = await f.request('/chat', { message: 'How do playlists work?', consent: true }, session.token);
+  assert.equal(response.status, 503);
+  assert.equal(count, 1);
+});
+
+test('the 20-call session ceiling counts both passes, not just visitor messages', async t => {
+  let count = 0;
+  const f = await fixture(t, { modelCall: async input => { count++; return candidate(input, 'needs_deeper_review'); } });
+  const session = await f.login();
+  for (let index = 0; index < 9; index++) {
+    f.advance(10000);
+    const response = await f.request('/chat', { message: 'How do playlists work?', consent: true }, session.token);
+    assert.equal(response.status, 200);
+  }
+  f.advance(60000);
+  assert.equal((await f.request('/chat', { message: 'How do playlists work?', consent: true, mode: 'efficient' }, session.token)).status, 200);
+  const response = await f.request('/chat', { message: 'How do playlists work?', consent: true }, session.token);
+  assert.equal(response.status, 429);
+  assert.match(response.body.error, /session.*provider-call/i);
+  assert.equal(count, 20);
+  assert.equal(readState(f.settings.stateFile).calls, 20);
 });

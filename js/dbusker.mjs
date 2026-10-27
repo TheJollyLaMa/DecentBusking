@@ -119,7 +119,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   host.id = 'dbusker-companion';
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `
-    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261027-neon', import.meta.url).href}">
+    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261027-routing', import.meta.url).href}">
     <div class="greeting" hidden><span>How can I help you, Earthling?</span><button type="button" class="dismiss" aria-label="Dismiss DBusker greeting">Not now</button></div>
     <button type="button" class="launcher" aria-label="Ask DBusker, AI community guide" aria-expanded="false" aria-controls="dbusker-chat">
       <span class="launcher-portrait"><img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="" width="58" height="58"></span><span><small>A friendly signal</small>Ask DBusker</span><span class="signal-dot" aria-hidden="true"></span>
@@ -155,6 +155,13 @@ export function initDBusker({ document = globalThis.document, window = globalThi
         <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></label>
       <div class="actions"><button type="button" class="signin">Sign in with wallet</button><button type="button" class="signout" hidden>Clear chat &amp; sign out</button></div>
       <p class="status" role="status" aria-live="polite">Invite-only. Connect through the site header, then sign in here on Base. No gas or payment.</p>
+      <label class="mode-label" for="dbusker-mode">How shall we travel?<select id="dbusker-mode" aria-describedby="dbusker-mode-note">
+        <option value="efficient">Efficient / one light pass</option>
+        <option value="balanced" selected>Balanced / automatic triage</option>
+        <option value="deep">Deep dive / stronger model</option>
+      </select></label>
+      <p class="mode-note" id="dbusker-mode-note">Balanced chooses a model locally and may make one deeper pass. No automatic learning from your chat; private aggregate performance counters help the steward review routes.</p>
+      <p class="route-result" role="status" aria-live="polite"></p>
       <div class="transcript" role="log" aria-label="DBusker conversation" aria-live="polite" tabindex="0"></div>
       <form><label for="dbusker-question">Your question</label><textarea id="dbusker-question" maxlength="2000" rows="3" required disabled></textarea><button type="submit" class="send" disabled>Ask DBusker</button></form>
       <p class="handoff"></p>
@@ -166,6 +173,13 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   const launcher = find('.launcher'), panel = find('section'), status = find('.status');
   const consent = find('input'), signin = find('.signin'), signout = find('.signout');
   const question = find('textarea'), send = find('.send'), transcript = find('.transcript');
+  const mode = find('#dbusker-mode');
+  const modeNotes = {
+    efficient: 'One light-model pass. Lowest compute ceiling, not a guarantee of the best answer. If it needs deeper review, choose Balanced or Deep dive.',
+    balanced: 'Balanced chooses a model locally and may make one deeper pass. No automatic learning from your chat; private aggregate performance counters help the steward review routes.',
+    deep: 'One stronger-model pass for complex questions. More compute does not supply missing evidence or verify live payouts.',
+  };
+  mode.addEventListener('change', () => { find('.mode-note').textContent = modeNotes[mode.value]; });
   let credential = null, wallet = null, expiresAt = 0, pending = false, generation = 0;
   let controller = null, expiryTimer = null, dismissed = false, returnFocus = null;
   const sound = find('.sound');
@@ -191,6 +205,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     signout.hidden = !credential;
     question.disabled = pending || !credential || !consent.checked;
     send.disabled = question.disabled;
+    mode.disabled = pending;
     root.querySelectorAll('[data-starter]').forEach(button => { button.disabled = pending; });
     transcript.setAttribute('aria-busy', String(pending));
     panel.classList.toggle('is-thinking', pending);
@@ -207,6 +222,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     transcript.replaceChildren();
     question.value = '';
     find('.handoff').textContent = '';
+    find('.route-result').textContent = '';
     status.textContent = message;
     controls();
   }
@@ -347,12 +363,18 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     const message = question.value.trim(), attempt = generation;
     pending = true; controls();
     controller = new AbortController();
-    status.textContent = 'Reading approved sources. Answers appear after their source IDs have been checked.';
+    status.textContent = `${mode.options[mode.selectedIndex].text}. Reading approved sources and checking the answer; Balanced may take one deeper pass.`;
+    find('.route-result').textContent = '';
     append('You', message);
     try {
-      const answer = await request('/chat', { message, consent: true }, { signal: controller.signal });
+      const answer = await request('/chat', { message, consent: true, mode: mode.value }, { signal: controller.signal });
       if (attempt !== generation) return;
       append('DBusker', answer.answer, answer.sources);
+      if (answer.routing) {
+        find('.route-result').textContent = answer.routing.attempts
+          ? `${answer.routing.mode} / ${answer.routing.models.join(' → ')} / ${answer.routing.attempts} provider pass${answer.routing.attempts === 1 ? '' : 'es'}. ${answer.routing.attempts > 1 ? 'One deeper review used. ' : ''}Self-check: ${answer.routing.review.replaceAll('_', ' ')}; not independent fact verification.`
+          : 'No provider call: approved evidence was not found. Try a more specific question.';
+      }
       question.value = '';
       status.textContent = answer.abstained ? 'DBusker could not verify part of this question. Check the evidence limits above.' : 'Answer ready. Source links are evidence, not proof of live deployment.';
     } catch (error) {

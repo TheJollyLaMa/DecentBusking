@@ -10,6 +10,7 @@
     "snapshot": "node handoff.mjs snapshot",
     "review": "node handoff.mjs review",
     "evaluate:retrieval": "node handoff.mjs evaluate-retrieval",
+    "routing:report": "node --env-file=.env metrics.mjs",
     "approve": "node handoff.mjs approve"
   },
   "dependencies": {

@@ -129,6 +129,21 @@ test('portrait welcome and illustrated paths preserve readable accessible names'
   }
 });
 
+test('mode selection defaults to Balanced and changes only the compute explanation, without requests or persistence', t => {
+  const { root, window, calls } = fixture(t);
+  const mode = root.querySelector('#dbusker-mode');
+  assert.equal(mode.value, 'balanced');
+  assert.deepEqual([...mode.options].map(option => option.value), ['efficient', 'balanced', 'deep']);
+  mode.value = 'efficient';
+  mode.dispatchEvent(new window.Event('change'));
+  assert.match(root.querySelector('.mode-note').textContent, /One light-model pass/);
+  mode.value = 'deep';
+  mode.dispatchEvent(new window.Event('change'));
+  assert.match(root.querySelector('.mode-note').textContent, /missing evidence/);
+  assert.equal(calls.length, 0);
+  assert.equal(window.localStorage.length, 0);
+});
+
 function audioFixture() {
   const oscillators = [], errors = [], gains = [];
   let contexts = 0, resumes = 0, closed = 0;
@@ -281,6 +296,7 @@ test('signed-in chat renders answers as text, cites sources and clears on discon
     });
     if (url.endsWith('/chat')) return Response.json({
       answer: '<img src=x onerror=alert(1)> is plain text, not markup.', abstained: false,
+      routing: { mode: 'efficient', models: ['offline-light-model'], attempts: 1, review: 'ready' },
       sources: [{ file: 'README.md', line: 1,
         url: `https://github.com/TheJollyLaMa/DecentBusking/blob/${'1'.repeat(40)}/README.md#L1` }],
     });
@@ -292,6 +308,7 @@ test('signed-in chat renders answers as text, cites sources and clears on discon
   root.querySelector('.signin').click();
   await new Promise(resolve => window.setTimeout(resolve, 5));
   assert.equal(root.querySelector('textarea').disabled, false);
+  root.querySelector('#dbusker-mode').value = 'efficient';
   root.querySelector('textarea').value = 'Can I listen?';
   root.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true }));
   await new Promise(resolve => window.setTimeout(resolve, 5));
@@ -300,9 +317,12 @@ test('signed-in chat renders answers as text, cites sources and clears on discon
   const chat = calls.find(call => call.url.endsWith('/chat'));
   assert.equal(chat.init.headers.Authorization, `Bearer ${token}`);
   assert.equal(JSON.parse(chat.init.body).consent, true);
+  assert.equal(JSON.parse(chat.init.body).mode, 'efficient');
+  assert.match(root.querySelector('.route-result').textContent, /efficient.*offline-light-model.*1 provider pass/);
   assert.match(root.querySelector('.transcript').textContent, /plain text/);
   f.document.dispatchEvent(new window.Event('wallet-disconnected'));
   assert.equal(root.querySelector('.transcript').children.length, 0);
+  assert.equal(root.querySelector('.route-result').textContent, '');
   assert.equal(root.querySelector('textarea').disabled, true);
 });
 

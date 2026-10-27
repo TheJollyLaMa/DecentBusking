@@ -1,14 +1,16 @@
 import { createServer } from 'node:http';
 import { randomBytes, createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { getAddress } from 'ethers';
 import { SiweMessage } from 'siwe';
 import { directory, readHandoff, isApproved } from './handoff.mjs';
-import { askModel, modelContext } from './model.mjs';
+import { askModel } from './model.mjs';
 import { createRetriever } from './knowledge.mjs';
+import { MODES, selectRoute, deeperRoute, fitContext, finalAnswer } from './routing.mjs';
+import { createMetrics } from './metrics.mjs';
 
 const SESSION_MS = 15 * 60 * 1000;
 const NONCE_MS = 5 * 60 * 1000;
@@ -23,9 +25,10 @@ export function loadSettings(env = process.env) {
       ['localhost', '127.0.0.1'].includes(site.hostname))) throw new Error('Site URL requires HTTPS outside localhost');
   const maxCalls = Number(env.DBUSKER_MAX_CALLS || 100);
   if (!Number.isSafeInteger(maxCalls) || maxCalls < 1 || maxCalls > 10000) throw new Error('Invalid DBUSKER_MAX_CALLS');
+  if (env.DBUSKER_MODEL) throw new Error('DBUSKER_MODEL has been replaced by reviewed handoff/routing.json; remove the environment override.');
   return {
     enabled: env.DBUSKER_ENABLED === 'true', siteUrl: site.href, origin: site.origin,
-    domain: site.host, apiKey: env.OPENAI_API_KEY || '', model: env.DBUSKER_MODEL || 'gpt-4.1-mini',
+    domain: site.host, apiKey: env.OPENAI_API_KEY || '',
     accessFile: path.resolve(env.DBUSKER_ACCESS_FILE || path.join(directory, 'access.json')),
     approvalFile: path.resolve(env.DBUSKER_APPROVAL_FILE || path.join(directory, 'approval.json')),
     stateFile: path.resolve(env.DBUSKER_STATE_FILE || path.join(directory, 'state.sqlite')), maxCalls,
@@ -36,7 +39,9 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
   const pack = readHandoff();
   const retrieve = createRetriever(pack.sources, pack.topics);
   const db = new DatabaseSync(settings.stateFile);
+  chmodSync(settings.stateFile, 0o600);
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS budget (id INTEGER PRIMARY KEY CHECK(id=1), calls INTEGER NOT NULL); INSERT OR IGNORE INTO budget VALUES (1,0)');
+  const metrics = createMetrics(db);
   const reserve = db.prepare('UPDATE budget SET calls=calls+1 WHERE id=1 AND calls < ? RETURNING calls');
   const challenges = new Map(), sessions = new Map(), rates = new Map(), active = new Map();
   let closed = false;
@@ -160,19 +165,21 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
         if (active.has(key)) throw problem(409, 'Wait for your current answer.');
         if (active.size >= 3) throw problem(429, 'DBusker is busy. Please try shortly.');
         if (session.calls >= 20) throw problem(429, 'This session has reached its pilot limit.');
-        const { message, consent } = await body(request);
+        const { message, consent, mode = 'balanced' } = await body(request);
         if (consent !== true) throw problem(400, 'Consent to send messages to the model provider is required.');
         if (typeof message !== 'string' || !message.trim() || message.length > 2000) throw problem(400, 'Enter a question of 1-2000 characters.');
+        if (!MODES.includes(mode)) throw problem(400, 'Choose Efficient, Balanced or Deep dive.');
         if (active.has(key)) throw problem(409, 'Wait for your current answer.');
         if (active.size >= 3) throw problem(429, 'DBusker is busy. Please try shortly.');
         const sources = retrieve(message, session.messages);
         const messages = [...session.messages, { role: 'user', content: message.trim() }].slice(-7);
-        const contextBytes = () => Buffer.byteLength(JSON.stringify(modelContext({ instructions: pack.instructions, sources, messages })));
-        while (contextBytes() > 28000 && messages.length > 3) messages.splice(0, 2);
-        while (contextBytes() > 28000 && sources.length > 1) sources.pop();
-        while (contextBytes() > 28000 && messages.length > 1) messages.splice(0, 2);
-        if (contextBytes() > 28000) {
-          throw problem(413, 'Conversation context is too large. Sign out and start a shorter conversation.');
+        let route = selectRoute(pack.routing, mode, message, session.task);
+        if (!sources.length) {
+          const answer = 'I could not find approved public evidence for this question. Try naming the feature or code symbol, or use the public newcomer guide and community links. I cannot verify live balances, payouts or deployment state.';
+          session.messages = [...messages, { role: 'assistant', content: answer }].slice(-6);
+          session.task = route.task;
+          return send(200, { answer, abstained: true, sources: [], handoffDigest: pack.digest,
+            routing: { mode, task: route.task, models: [], tiers: [], attempts: 0, review: 'insufficient_evidence', escalation: 'missing_evidence' } });
         }
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(problem(504, 'DBusker took too long. Please try again.')), 45000);
@@ -180,20 +187,48 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
         response.on('close', disconnect);
         active.set(key, controller);
         try {
-          if (!reserve.get(settings.maxCalls)) throw problem(429, 'The pilot usage budget is exhausted. Please contact the steward.');
-          session.calls++;
-          let answer;
-          try {
-            answer = await modelCall({ apiKey: settings.apiKey, model: settings.model,
-              instructions: pack.instructions, sources, messages, signal: controller.signal });
-          } catch (error) {
-            throw controller.signal.aborted ? controller.signal.reason : error;
+          let candidate, context, draft;
+          const used = [];
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            controller.signal.throwIfAborted();
+            ready();
+            authorized(request);
+            context = fitContext({ instructions: pack.instructions, sources, messages, draft });
+            if (session.calls >= 20) throw problem(429, 'This session has reached its pilot provider-call limit.');
+            if (!reserve.get(settings.maxCalls)) throw problem(429, 'The pilot usage budget is exhausted. Please contact the steward.');
+            session.calls++;
+            used.push(route);
+            const started = performance.now();
+            let outcome = 'error', usage = null;
+            try {
+              candidate = await modelCall({ ...context, apiKey: settings.apiKey, model: route.model, signal: controller.signal });
+              controller.signal.throwIfAborted();
+              outcome = candidate.review;
+              usage = candidate.usage;
+            } catch (error) {
+              if (controller.signal.aborted) outcome = 'cancelled';
+              throw controller.signal.aborted ? controller.signal.reason : error;
+            } finally {
+              metrics.record({ digest: pack.digest, route, attempt, outcome, usage, latencyMs: performance.now() - started });
+            }
+            const next = deeperRoute(pack.routing, route, candidate.review, attempt);
+            if (!next) break;
+            draft = { answer: candidate.answer, review: candidate.review, sourceIds: candidate.sources.map(source => source.id) };
+            route = next;
           }
           controller.signal.throwIfAborted();
           ready();
           authorized(request);
-          session.messages = [...messages, { role: 'assistant', content: answer.answer }].slice(-6);
-          return send(200, { ...answer, handoffDigest: pack.digest });
+          const answer = finalAnswer(candidate);
+          session.messages = [...context.messages, { role: 'assistant', content: answer.answer }].slice(-6);
+          session.task = route.task;
+          return send(200, { answer: answer.answer, sources: answer.sources, abstained: answer.abstained,
+            handoffDigest: pack.digest, routing: {
+              mode, task: route.task, models: used.map(item => item.model), tiers: used.map(item => item.tier),
+              attempts: used.length, review: answer.review,
+              escalation: used.length > 1 ? 'used' : answer.review === 'needs_deeper_review'
+                ? (mode === 'balanced' ? 'tier_limit' : 'mode_limit') : 'not_needed',
+            } });
         } finally {
           clearTimeout(timeout);
           response.off('close', disconnect);

@@ -28,6 +28,8 @@ Edit these files together before the first live conversation:
   questions you want DBusker to handle, and what good answers should do.
 - [Public excerpts](../agent-service/handoff/sources.json): generated from
   explicit public Git history, never from uncommitted local changes.
+- [Routing policy](../agent-service/handoff/routing.json): reviewed model
+  assignments, Balanced task routes and aggregate recommendation thresholds.
 
 Review process:
 
@@ -53,7 +55,7 @@ Review process:
    accessibility checks, data-policy review and a real operating-budget review.
    There is no auto-publish or automatic learning from visitor messages.
 
-Changing **any** of the six handoff files invalidates approval. A running
+Changing **any** of the seven handoff files invalidates approval. A running
 service detects edits and refuses new answers; restart with the newly approved
 pack. Approval is an operator workflow, not a cryptographic defense against a
 server administrator who can edit both the pack and its approval.
@@ -79,8 +81,11 @@ provider readiness, or deployment validation.
 
 Before any real model call:
 
-- In `.env`, set `OPENAI_API_KEY` from a dedicated provider project and choose
-  a currently supported structured-output model in `DBUSKER_MODEL`.
+- In `.env`, set `OPENAI_API_KEY` from a dedicated provider project. Review
+  all three model assignments in `handoff/routing.json` for project access,
+  current availability, structured-output support and pricing. The old
+  `DBUSKER_MODEL` environment override is rejected; remove it rather than
+  bypassing the fingerprinted policy.
 - Review provider terms/retention. `store:false` avoids Responses conversation
   storage but does **not** promise zero provider retention or opt out of every
   provider-side logging mechanism. Review the
@@ -117,13 +122,13 @@ the test process, and never pretend to be a real knowledge evaluation.
    Configure API billing before making a live test.
 2. In the organization/project selector, create a dedicated **DBusker pilot**
    project. Keep its membership limited to the people operating this service.
-3. In that project's **Limits**, select the intended model and set a small
+3. In that project's **Limits**, enable the three reviewed models and set a small
    monthly budget and usage alerts. Project budgets are alert thresholds,
    **not hard spending caps**. The service's persistent `DBUSKER_MAX_CALLS`
    counter is a separate call-count limit, not a dollar cap.
 4. In the selected project's **API keys**, create a new secret key named
    **DBusker local pilot**. Prefer restricted permissions: allow writing to
-   `/v1/responses`, with the chosen model available to the project. This
+   `/v1/responses`, with the reviewed models available to the project. This
    service does not need Files, Assistants, fine-tuning, or administrative keys.
    If access fails, inspect the provider's error and adjust only the required
    permission; do not make a broadly privileged key as a workaround.
@@ -141,6 +146,107 @@ the test process, and never pretend to be a real knowledge evaluation.
 See the provider's [project and key administration guide](https://help.openai.com/en/articles/9186755-managing-projects-in-the-api-platform)
 for current controls. Key creation and adding billing do not approve DBusker's
 handoff, invite a community member, or make a model call.
+
+## Modes and bounded self-review
+
+The pilot supports OpenAI Responses models, not access to a maintainer's
+Copilot session. Each mode uses the same community guidance and public corpus.
+The [reviewed policy](../agent-service/handoff/routing.json) starts with these
+assignments; availability and actual quality still require a private live test:
+
+| Mode | First pass | Maximum provider calls per question |
+| --- | --- | --- |
+| Efficient | Light model (`gpt-5.6-luna`) | 1 |
+| Balanced (default) | Local task triage: navigation -> light; general guidance -> standard (`gpt-5.4-mini`); technical or sensitive questions -> deep (`gpt-5.4`) | 2, only when a higher tier is available |
+| Deep dive | Deep model | 1 |
+
+These are initial test assignments, not a measured optimal ranking. Provider
+documentation was checked on 2026-10-27: [Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna),
+[5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini) and
+[5.4](https://developers.openai.com/api/docs/models/gpt-5.4) support Responses
+and structured output. Project access is not established by documentation.
+The former 4.1 nano default was not retained: its model page marks it shut down.
+This pilot explicitly uses `reasoning.effort=none` and an 800-token output
+ceiling in every tier. Deep dive selects a stronger model, not an unbounded
+hidden-reasoning budget. Revisit these limits during human evaluation.
+
+Triage is a small, deterministic English-language heuristic, not another paid
+model call or a reliable semantic classifier. Risk/technical words take
+precedence over simple navigation; short referential follow-ups inherit the
+previous task unless a more explicit task matches. It is not a security or
+truthfulness boundary. Users can choose a mode; all modes retain the same
+evidence, privacy and permissions boundaries.
+
+1. Retrieve approved public evidence first. With no matches, return an
+   explicit evidence-limit answer and make **zero** provider calls.
+2. Select the reviewed model locally. Each answer includes a structured
+   checklist verdict: `ready`, `insufficient_evidence`, or
+   `needs_deeper_review`. This is a self-assessment, not independent validation
+   or proof of factual entailment.
+3. Only Balanced may move up one tier after `needs_deeper_review`. The second
+   pass sees a clearly untrusted earlier draft (at most 2,000 characters, with
+   truncation labelled), the visitor question and approved evidence. Its exact
+   escaped JSON context must fit 28,000 bytes too. Drafts are not new facts.
+4. Stop after that pass, even if it requests another. Withhold an unresolved
+   draft and return an explicit limitation instead. Missing/stale evidence
+   does not justify another model call. HTTP/provider failures, incomplete
+   output, malformed self-checks and invalid citations fail explicitly with
+   **no** automatic retry or fallback model.
+5. Every pass reserves a durable call allowance and a session call slot
+   **before** dispatch. Both passes share the original 45-second deadline.
+   Revocation, sign-out, origin/consent checks and shutdown still apply.
+   Budget exhaustion between passes returns an error, never an unchecked
+   first-pass draft. Only the final answer enters the session history.
+
+The UI sends the selected mode and reports the models used, number of passes
+and review verdict after the complete response. It does not claim live
+streaming visibility into the router. A mode change alone sends no request.
+
+## Learning with steward approval
+
+This is **review-gated routing feedback, not autonomous training**. DBusker
+does not rewrite instructions, change model assignments, ingest conversations
+as knowledge, or share a visitor's chat with another visitor.
+
+The existing private SQLite database stores aggregate provider-pass counters,
+keyed only by handoff fingerprint, fixed mode/task/tier, configured model,
+attempt number and fixed outcome code. Counters accumulate latency,
+provider-reported input/output tokens and counts of calls with missing usage.
+Failed or cancelled calls still spend the allowance; their unknown tokens are
+not silently estimated as zero-cost. There are no per-request rows, individual
+timestamps, prompts, draft/final answers, signatures, session IDs or wallets.
+No-match answers make no provider call and are not counted as provider samples.
+There is no public statistics endpoint or automatic export.
+
+After starting the service once to initialize its tables, run locally:
+
+```sh
+cd agent-service
+npm run routing:report
+```
+
+The command loads `.env`, opens the private database read-only and reports only
+the current handoff fingerprint. It does not contact OpenAI, change the policy,
+approve a handoff, reset budgets or publish anything. Keep reports private.
+
+Recommendations require at least **20 first-pass samples per route** by
+default; second passes cannot inflate that threshold. At a provider-error rate
+of **10%** across all passes (including escalation failures), investigate
+configuration/provider issues first. The report also shows deeper-pass
+ready/cancellation counts, mean provider latency and token totals. At an
+evidence-limit rate of **25%**, review source coverage instead of buying more
+compute. At a deeper-review rate of **25%**, test a higher starting tier in
+Balanced against the same steward evaluation questions. These rates are
+review triggers, not statistical proof of improvement. Low review rates do
+not prove correctness, justify automatic downgrades, or establish optimality.
+Token totals with missing usage are lower bounds, not dollar costs.
+
+Compare correctness/citations, helpfulness, latency and actual token usage on
+the evaluation set. Approve a routing change only when that evidence supports
+it. Edit the reviewed policy, rerun tests/retrieval, review the new fingerprint,
+explicitly approve it and restart. Counters never activate a recommendation.
+Each new fingerprint begins a separate report cohort; older aggregate rows
+remain private and do not reset or refill the lifetime call budget.
 
 ## Companion look and sound
 
@@ -202,9 +308,10 @@ Do not delete the database to work around an exhausted allowance; a steward
 must deliberately review spending before increasing the configured ceiling.
 
 Additional bounds: at most three active calls, one per session; six requests
-per wallet per minute; 20 calls per session; 2,000-character questions;
-28,000 UTF-8 bytes of instructions/evidence/context; 800 maximum output tokens;
-45-second model deadline. Challenge/signature endpoints are also IP-limited.
+per wallet per minute; 20 provider calls per session, including deeper passes;
+2,000-character questions; 28,000 UTF-8 bytes of instructions/evidence/context
+per pass; 800 maximum output tokens per pass; 45-second whole-question model
+deadline, shared by both passes. Challenge/signature endpoints are also IP-limited.
 The service does not trust forwarded IP headers, so a reverse proxy can make
 the sign-in limit shared by visitors. Review proxy-level limits before launch.
 
@@ -342,3 +449,18 @@ manager or tutorial engine is introduced. Receiving-app checks include exact
 public-tree coverage, required evidence for community questions, and existing
 tutorial/header regressions. Real model conversations remain a steward-led
 private test, not a result of these automated checks.
+
+Routing reuse decision: need bounded model selection and reviewed operational
+feedback without visitor transcript storage. Rechecked Canopy's curated map,
+the receiving feature branch/worktrees, current public issue #291 and open PR
+list, and `jolly-sim-siddhi/server/routes/simSiddhiChat.js` at `e643800`
+(committed source; unrelated local donor changes were left untouched). That
+route uses a global beta Assistants thread and logs message/delta content; it
+does not provide this pilot's isolated, privacy-preserving bounded router.
+Build the small router here, reusing Busking's own `modelContext`, public
+retriever, approval digest, durable SQLite allowance and wallet session checks.
+No donor code was copied, no shared package is justified, and no public Canopy
+snapshot was updated from private findings. Receiving-app tests exercise all
+modes, review limits, per-pass quotas, policy invalidation, aggregate schema
+and exact recommendation thresholds. Live model quality/optimality is still
+unmeasured and must not be inferred from stubbed tests.
