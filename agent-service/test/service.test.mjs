@@ -334,6 +334,44 @@ test('insufficient evidence verdicts do not buy a second model pass', async t =>
   assert.equal(response.body.abstained, true);
 });
 
+test('the real request path includes reviewed founder guidance for aliases and follow-ups, with valid public evidence', async t => {
+  const inputs = [];
+  const f = await fixture(t, { modelCall: async input => {
+    inputs.push(input);
+    return candidate(input);
+  } });
+  const session = await f.login();
+  for (const message of ['Who is jollyEast?', 'And what still depends on him?']) {
+    const response = await f.request('/chat', { message, consent: true }, session.token);
+    assert.equal(response.status, 200);
+  }
+  for (const input of inputs) {
+    assert.ok(input.instructions.includes(readHandoff().stewardship));
+    assert.ok(input.sources.some(source => source.file === 'NOTICE'));
+    assert.ok(input.sources.some(source => source.file === 'docs/PAYROLL.md'));
+    assert.ok(Buffer.byteLength(JSON.stringify(modelContext(input))) <= 28000);
+  }
+});
+
+test('multisig self-review starts deep, retains the server-signature blocker and exposes no execution tools', async t => {
+  const inputs = [];
+  const f = await fixture(t, { modelCall: async input => {
+    inputs.push(input);
+    return candidate(input, inputs.length === 1 ? 'needs_deeper_review' : 'ready');
+  } });
+  const session = await f.login();
+  const response = await f.request('/chat', {
+    message: 'Can we multisig the whole thing so it no longer depends on Jolly?', consent: true,
+  }, session.token);
+  assert.equal(response.status, 200);
+  assert.equal(inputs.length, 1, 'Sensitive task starts at the deepest tier; no recursive call above the ceiling');
+  assert.equal(response.body.abstained, true);
+  assert.equal(response.body.routing.task, 'sensitive');
+  assert.ok(inputs[0].instructions.includes('not a checkbox'));
+  assert.ok(inputs[0].sources.some(source => source.text.includes('Only the owner wallet may manage live bookings')));
+  assert.equal(inputs[0].tools, undefined);
+});
+
 test('every recursive pass reserves the durable budget and cannot return an unchecked draft on exhaustion', async t => {
   let count = 0;
   const f = await fixture(t, { settings: { maxCalls: 1 }, modelCall: async input => { count++; return candidate(input, 'needs_deeper_review'); } });

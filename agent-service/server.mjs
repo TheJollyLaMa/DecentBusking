@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { getAddress } from 'ethers';
 import { SiweMessage } from 'siwe';
-import { directory, readHandoff, isApproved } from './handoff.mjs';
+import { directory, readHandoff, isApproved, questionInstructions } from './handoff.mjs';
 import { askModel } from './model.mjs';
 import { createRetriever } from './knowledge.mjs';
 import { MODES, selectRoute, deeperRoute, fitContext, finalAnswer } from './routing.mjs';
@@ -172,6 +172,7 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
         if (active.has(key)) throw problem(409, 'Wait for your current answer.');
         if (active.size >= 3) throw problem(429, 'DBusker is busy. Please try shortly.');
         const sources = retrieve(message, session.messages);
+        const instructions = questionInstructions(pack, message, session.messages);
         const messages = [...session.messages, { role: 'user', content: message.trim() }].slice(-7);
         let route = selectRoute(pack.routing, mode, message, session.task);
         if (!sources.length) {
@@ -193,7 +194,7 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
             controller.signal.throwIfAborted();
             ready();
             authorized(request);
-            context = fitContext({ instructions: pack.instructions, sources, messages, draft });
+            context = fitContext({ instructions, sources, messages, draft });
             if (session.calls >= 20) throw problem(429, 'This session has reached its pilot provider-call limit.');
             if (!reserve.get(settings.maxCalls)) throw problem(429, 'The pilot usage budget is exhausted. Please contact the steward.');
             session.calls++;

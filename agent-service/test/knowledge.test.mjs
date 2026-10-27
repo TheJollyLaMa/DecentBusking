@@ -6,8 +6,9 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chunkSource, createRetriever, sourceDisposition } from '../knowledge.mjs';
-import { directory, readHandoff, isApproved } from '../handoff.mjs';
+import { directory, readHandoff, isApproved, questionInstructions } from '../handoff.mjs';
 import { modelContext } from '../model.mjs';
+import { fitContext } from '../routing.mjs';
 
 const pack = readHandoff();
 const retrieve = createRetriever(pack.sources, pack.topics);
@@ -89,7 +90,12 @@ test('credentials, individual records, binary assets, lockfiles and recursive sn
 
 for (const item of pack.evaluation.filter(item => item.retrieval)) {
   test(`retrieval: ${item.question}`, () => {
-    const sources = retrieve(item.question, item.history || []);
+    const context = fitContext({
+      instructions: questionInstructions(pack, item.question, item.history || []),
+      sources: retrieve(item.question, item.history || []),
+      messages: [{ role: 'user', content: item.question }],
+    });
+    const sources = context.sources;
     assert.ok(sources.length <= 8 && sources.length > 0);
     for (const file of new Set(sources.map(source => source.file))) {
       assert.ok(sources.filter(source => source.file === file).length <= 3, file);
@@ -102,9 +108,8 @@ for (const item of pack.evaluation.filter(item => item.retrieval)) {
       assert.ok(sources.some(source => source.text.toLowerCase().includes(evidence.toLowerCase())),
         `Missing actual evidence text: ${evidence}`);
     }
-    assert.ok(Buffer.byteLength(JSON.stringify(modelContext({
-      instructions: pack.instructions, sources, messages: [{ role: 'user', content: item.question }],
-    }))) <= 28000, 'Evaluation evidence does not fit the real request ceiling');
+    assert.ok(Buffer.byteLength(JSON.stringify(modelContext(context))) <= 28000,
+      'Evaluation evidence does not fit the real request ceiling');
   });
 }
 
@@ -116,6 +121,60 @@ test('topics point to indexed public evidence and small follow-ups keep the prio
   const source = retrieve('And how do I get approved?', [{ role: 'user', content: 'I want repo dev bounties' }]);
   assert.ok(source.some(item => item.file === '.github/ISSUE_TEMPLATE/whitelist-request.yml'));
   assert.deepEqual(retrieve('zzzzzzzzzzzzzzzzzzzz'), [], 'No matches must not silently become the first source');
+});
+
+test('all supplied founder aliases and independence/governance paths receive reviewed stewardship guidance', () => {
+  for (const question of [
+    'Who is Jolly?', 'Who is THEJOLLYLAMA?', 'Who is TheJollyLaMa?', 'What does jollyEast do?',
+    'Who is the one who made all this?', 'Who built this?',
+    'Can I clone it?', 'Can we multisig this?', 'What about ERC-1271?',
+    'Explain the center of the seed.', 'What is at the center of every seed?', 'How do I build my own center?',
+    'Does the project have a single point of failure?',
+  ]) {
+    const instructions = questionInstructions(pack, question);
+    assert.ok(instructions.includes(pack.stewardship), question);
+    assert.ok(instructions.startsWith(pack.instructions), 'Core boundaries are retained');
+    assert.ok(retrieve(question).length > 0, 'Aliases must retrieve actual public attribution/authority evidence');
+  }
+});
+
+test('guidance follows a short founder follow-up but is not added to unrelated questions or partial-name matches', () => {
+  assert.ok(questionInstructions(pack, 'And what still depends on him?',
+    [{ role: 'user', content: 'Who is jollyEast?' }]).includes(pack.stewardship));
+  for (const question of ['Where is the playlist tutorial?', 'How do I add an album collaborator?', 'What is jollygoodness?']) {
+    assert.equal(questionInstructions(pack, question), pack.instructions, question);
+  }
+  assert.equal(questionInstructions(pack, 'Where is the playlist tutorial?',
+    [{ role: 'assistant', content: 'Jolly says hello' }]), pack.instructions, 'Assistant prose cannot activate founder context');
+});
+
+test('seed orientation distinguishes steward testimony, contributors, infrastructure, licenses and staged multisig limits', () => {
+  for (const phrase of [
+    'his supplied orientation', 'not a', 'verified on-chain identity', 'A Decent Agency contributors',
+    'roots reach for water', 'shoots reach for light', 'not make the founder indispensable',
+    'not proof who controls each account', 'owner review and settlement', 'domain/DNS',
+    'start local/read-only', 'artist', 'cloning code does not clone',
+    'DEFAULT_ADMIN_ROLE alone', 'never renounce first', 'ERC-1271',
+    'EOA-only', 'MINT_OWNER_WALLET', 'narrowly scoped worker role',
+  ]) assert.ok(pack.stewardship.toLowerCase().includes(phrase.toLowerCase()), phrase);
+});
+
+test('both bounded multisig passes retain the role and EOA-auth blocker evidence after context fitting', () => {
+  const question = 'Can we multisig the whole thing so it no longer depends on Jolly?';
+  const args = {
+    instructions: questionInstructions(pack, question), sources: retrieve(question),
+    messages: [{ role: 'user', content: question }],
+  };
+  for (const draft of [undefined, {
+    answer: 'An uncertain governance draft. '.repeat(200), review: 'needs_deeper_review', sourceIds: [],
+  }]) {
+    const context = fitContext({ ...args, draft });
+    assert.ok(Buffer.byteLength(JSON.stringify(modelContext(context))) <= 28000);
+    assert.ok(context.sources.some(source => source.file === 'js/admin.js' && source.text.includes('function grantRole')));
+    assert.ok(context.sources.some(source => source.file === 'discord-bot/ipfs-worker.js' && source.text.includes('verifyMessage')));
+    assert.ok(context.sources.some(source => source.file === 'NOTICE'));
+    assert.equal(context.messages.at(-1).content, question);
+  }
 });
 
 test('code navigation outside curated topics retrieves actual implementation and related tests', () => {
@@ -136,7 +195,7 @@ test('community routes, mission, evaluation and corpus all invalidate prior appr
   const initial = readHandoff(dir), approval = path.join(dir, 'approval.json');
   writeFileSync(approval, JSON.stringify({ digest: initial.digest, reviewer: 'offline test', approvedAt: new Date().toISOString() }));
   assert.equal(isApproved(initial, approval), true);
-  for (const file of ['participation.md', 'topics.json', 'evaluation.json', 'sources.json']) {
+  for (const file of ['participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'stewardship.md']) {
     const target = path.join(dir, 'handoff', file), original = readFileSync(target, 'utf8');
     writeFileSync(target, `${original}\n`);
     assert.equal(isApproved(readHandoff(dir), approval), false, file);

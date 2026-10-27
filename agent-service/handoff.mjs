@@ -3,15 +3,15 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { chunkSource, sourceDisposition, createRetriever } from './knowledge.mjs';
+import { chunkSource, sourceDisposition, createRetriever, matchTopics } from './knowledge.mjs';
 import { modelContext } from './model.mjs';
-import { validateRouting } from './routing.mjs';
+import { validateRouting, fitContext } from './routing.mjs';
 
 export const directory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.dirname(directory);
 
 export function readHandoff(base = directory) {
-  const files = ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'routing.json'];
+  const files = ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'routing.json', 'stewardship.md'];
   const contents = files.map(file => readFileSync(path.join(base, 'handoff', file), 'utf8'));
   const digest = createHash('sha256').update(JSON.stringify(contents)).digest('hex');
   const snapshot = JSON.parse(contents[5]);
@@ -35,8 +35,15 @@ export function readHandoff(base = directory) {
   }
   return {
     digest, instructions: `${contents[0]}\n\n${contents[1]}\n\n${contents[2]}`,
-    topics, evaluation: JSON.parse(contents[4]), routing: validateRouting(JSON.parse(contents[6])), ...snapshot,
+    topics, evaluation: JSON.parse(contents[4]), routing: validateRouting(JSON.parse(contents[6])),
+    stewardship: contents[7], ...snapshot,
   };
+}
+
+export function questionInstructions(pack, message, history = []) {
+  const relevant = matchTopics(message, history, pack.topics).some(({ topic }) =>
+    ['steward', 'independent-host', 'multisig', 'seed'].includes(topic.id));
+  return relevant ? `${pack.instructions}\n\n${pack.stewardship}` : pack.instructions;
 }
 
 export function isApproved(handoff, approvalFile) {
@@ -98,19 +105,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(JSON.stringify({ digest: pack.digest, publicCommit: pack.commit, indexedAt: pack.indexedAt,
       coverage: { indexed: pack.coverage?.filter(file => file.status === 'indexed').length,
         excluded: pack.coverage?.filter(file => file.status === 'excluded') },
-      topics: pack.topics.map(topic => topic.id), routing: pack.routing, evaluation: pack.evaluation, approved: isApproved(pack,
+      topics: pack.topics.map(topic => topic.id), routing: pack.routing, stewardship: pack.stewardship,
+      evaluation: pack.evaluation, approved: isApproved(pack,
         path.resolve(process.env.DBUSKER_APPROVAL_FILE || 'approval.json')) }, null, 2));
   } else if (command === 'evaluate-retrieval') {
     const pack = readHandoff(), retrieve = createRetriever(pack.sources, pack.topics);
     const results = pack.evaluation.filter(item => item.retrieval).map(item => {
-      const sources = retrieve(item.question, item.history || []);
+      const context = fitContext({
+        instructions: questionInstructions(pack, item.question, item.history || []),
+        sources: retrieve(item.question, item.history || []),
+        messages: [{ role: 'user', content: item.question }],
+      });
+      const sources = context.sources;
       const files = [...new Set(sources.map(source => source.file))];
       const missing = item.retrieval.filter(alternatives => !alternatives.some(file => files.includes(file)));
       const missingEvidence = (item.evidence || []).filter(term =>
         !sources.some(source => source.text.toLowerCase().includes(term.toLowerCase())));
-      const contextBytes = Buffer.byteLength(JSON.stringify(modelContext({
-        instructions: pack.instructions, sources, messages: [{ role: 'user', content: item.question }],
-      })));
+      const contextBytes = Buffer.byteLength(JSON.stringify(modelContext(context)));
       return { question: item.question, passed: missing.length === 0 && missingEvidence.length === 0 && contextBytes <= 28000,
         files, missing, missingEvidence, contextBytes };
     });

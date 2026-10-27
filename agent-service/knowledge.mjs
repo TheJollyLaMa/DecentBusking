@@ -66,6 +66,18 @@ export function words(text) {
   return text.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().match(/[a-z0-9]+/g) || [];
 }
 
+export function matchTopics(message, history, topics) {
+  const previous = history.filter(item => item.role === 'user').at(-1)?.content || '';
+  const followup = words(message).length < 9 || /^(and |what about |how about |why |that |those )/i.test(message);
+  const normalized = ` ${words(message).join(' ')} `;
+  const previousNormalized = ` ${words(previous).join(' ')} `;
+  return topics.map(topic => {
+    const current = topic.aliases.some(alias => normalized.includes(` ${words(alias).join(' ')} `));
+    const prior = followup && topic.aliases.some(alias => previousNormalized.includes(` ${words(alias).join(' ')} `));
+    return { topic, weight: current ? 1 : prior ? 0.3 : 0 };
+  }).filter(match => match.weight);
+}
+
 export function createRetriever(sources, topics = []) {
   const frequency = new Map(), documents = [];
   for (const source of sources) {
@@ -87,13 +99,7 @@ export function createRetriever(sources, topics = []) {
     const previous = history.filter(item => item.role === 'user').at(-1)?.content || '';
     const followup = words(message).length < 9 || /^(and |what about |how about |why |that |those )/i.test(message);
     if (followup) addTerms(previous, 0.3);
-    const normalized = ` ${words(message).join(' ')} `;
-    const previousNormalized = ` ${words(previous).join(' ')} `;
-    const matches = topics.map(topic => {
-      const current = topic.aliases.some(alias => normalized.includes(` ${words(alias).join(' ')} `));
-      const prior = followup && topic.aliases.some(alias => previousNormalized.includes(` ${words(alias).join(' ')} `));
-      return { topic, weight: current ? 1 : prior ? 0.3 : 0 };
-    }).filter(match => match.weight);
+    const matches = matchTopics(message, history, topics);
     for (const { topic, weight } of matches) addTerms(topic.terms.join(' '), 0.45 * weight);
     const ranked = documents.map(({ source, counts, length }, order) => {
       let score = 0;

@@ -26,7 +26,7 @@ export function validateRouting(policy) {
 }
 
 export function classifyTask(message, previousTask) {
-  if (/\b(payout|paid|payment|funds?|money|balances?|transactions?|fees?|earn|rewards?|signature|seed|private key|lost|stolen|scam|rights?|copyright|consent|splits?|withdraw|transfer)\b/i.test(message)) return 'sensitive';
+  if (/\b(payout|paid|payment|funds?|money|balances?|transactions?|fees?|earn|rewards?|signature|seed phrase|private key|lost|stolen|scam|rights?|copyright|consent|splits?|withdraw|transfer|multisig|multi.sig|safe (?:wallet|contract)|erc.?1271|governance|decentrali[sz](?:e|ed|ation)|admin roles)\b/i.test(message)) return 'sensitive';
   if (/\b(debug|error|bug|fail(?:ed|ing|ure)?|architect(?:ure)?|implement|clone|fork|host|deploy|contract|code|function|tests?|compare)\b/i.test(message)) return 'technical';
   if (message.length <= 160 && /\b(where|link|find|open|tutorial|guide)\b/i.test(message)) return 'navigation';
   if (message.length <= 80 && TASKS.includes(previousTask) &&

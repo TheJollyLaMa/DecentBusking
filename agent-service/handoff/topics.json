@@ -1,5 +1,28 @@
 [
   {
+    "id": "multisig",
+    "entryFiles": ["js/admin.js", "discord-bot/ipfs-worker.js"],
+    "entryEvidence": { "js/admin.js": "function grantRole(bytes32 role, address account)", "discord-bot/ipfs-worker.js": "Only the owner wallet may manage live bookings" },
+    "aliases": ["multisig", "multi sig", "multi signature", "safe wallet", "safe contract", "erc1271", "erc 1271", "decentralize", "decentralized", "decentralisation", "decentralization", "governance", "transfer ownership", "admin roles"],
+    "terms": ["owner expectedOwner verifyMessage DEFAULT_ADMIN_ROLE grantRole permissions worker scheduler signature"],
+    "files": ["docs/CONTRACTS.md", "docs/PAYROLL.md", "js/admin.js", "discord-bot/ipfs-worker.js", "discord-bot/README.md", "js/settlement-funds.mjs"]
+  },
+  {
+    "id": "steward",
+    "entryFiles": ["NOTICE", "docs/PAYROLL.md"],
+    "entryEvidence": { "NOTICE": "The Jolly LaMa", "docs/PAYROLL.md": "## Base Payroll Panel" },
+    "aliases": ["jolly", "thejollylama", "the jolly lama", "jollyEast", "jolly east", "who made this", "who made all this", "the one who made all this", "who built this", "who created this", "creator of decentbusking", "founder", "steward", "depends on you", "depends on him", "depends on jolly", "without jolly", "single point of failure", "who controls", "who runs", "who maintains"],
+    "terms": ["owner admin approval maintainers settlement review hosting attribution NOTICE"],
+    "files": ["NOTICE", "README.md", "docs/PAYROLL.md", "docs/CONTRACTS.md", "discord-bot/README.md", "discord-bot/ipfs-worker.js"]
+  },
+  {
+    "id": "seed",
+    "entryFiles": ["NOTICE", "README.md"],
+    "aliases": ["seed center", "center of the seed", "centre of the seed", "center of every seed", "centre of every seed", "seed metaphor", "roots and shoots", "roots and branches", "roots and trunk", "both sides", "organism", "sustenance", "independent center", "independent centre", "own center", "own centre", "founding purpose", "why does this exist"],
+    "terms": ["community participation infrastructure support work fork independent permission attribution"],
+    "files": ["NOTICE", "README.md", "discord-bot/README.md", "docs/PAYROLL.md"]
+  },
+  {
     "id": "getting-involved",
     "entryFiles": ["README.md", "docs/PAYROLL.md"],
     "entryEvidence": { "README.md": "## Help Without Coding", "docs/PAYROLL.md": "## Contributor Requests" },
@@ -74,6 +97,7 @@
   {
     "id": "independent-host",
     "entryFiles": ["NOTICE", "discord-bot/README.md"],
+    "entryEvidence": { "NOTICE": "Not covered by these licenses", "discord-bot/README.md": "Prerequisites" },
     "aliases": ["clone", "fork", "hosting", "host my own", "own community", "own radio", "own beacon", "own signal"],
     "terms": ["setup configuration independent hosting license attribution permission"],
     "files": ["README.md", "NOTICE", "discord-bot/README.md", "WHITEPAPER.md", "docs/CONTRACTS.md"]

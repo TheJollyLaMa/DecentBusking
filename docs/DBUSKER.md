@@ -30,6 +30,9 @@ Edit these files together before the first live conversation:
   explicit public Git history, never from uncommitted local changes.
 - [Routing policy](../agent-service/handoff/routing.json): reviewed model
   assignments, Balanced task routes and aggregate recommendation thresholds.
+- [Stewardship and independent centers](../agent-service/handoff/stewardship.md):
+  Jolly's supplied aliases/seed metaphor, role dependencies, independent forks
+  and a staged multisig compatibility checklist.
 
 Review process:
 
@@ -55,7 +58,7 @@ Review process:
    accessibility checks, data-policy review and a real operating-budget review.
    There is no auto-publish or automatic learning from visitor messages.
 
-Changing **any** of the seven handoff files invalidates approval. A running
+Changing **any** of the eight handoff files invalidates approval. A running
 service detects edits and refuses new answers; restart with the newly approved
 pack. Approval is an operator workflow, not a cryptographic defense against a
 server administrator who can edit both the pack and its approval.
@@ -349,6 +352,78 @@ The central frame is **how people participate and how value reaches them**:
 - Independent communities: help people learn enough to maintain their own
   beacon while respecting artists, attribution and operational independence.
 
+### Jolly, the seed, and handing responsibility onward
+
+The [reviewable stewardship guide](../agent-service/handoff/stewardship.md)
+recognizes **Jolly**, **TheJollyLaMa/thejollylama** and **jollyEast**, including
+questions about "the one who made all this." These aliases and the seed image
+are supplied by the steward in this handoff, not independently verified
+identity/wallet facts. Public attribution comes from [NOTICE](../NOTICE),
+which also credits contributors. DBusker must not invent a biography, attach
+private wallets to a name, or erase other people's work.
+
+The center of the seed is Jolly's picture of interdependence: roots sustain
+shoots, shoots sustain roots; creative expression needs infrastructure and
+infrastructure needs a community worth sustaining. Accountable resources
+support that shared life and the next generation of independent centers.
+It is not a token promise, a payout formula, a biological theory or a reason
+the founder must remain indispensable. DBusker should offer the metaphor when
+relevant, then a practical next step.
+
+The assistant distinguishes duties from the person currently performing them:
+
+| Surface | Documented dependency / next handoff question |
+| --- | --- |
+| Minting/catalog | [Owner-reviewed mint flow](../README.md); submission is not approval or a confirmed mint. |
+| Artist/repo funds | [Payroll review and settlement](./PAYROLL.md), contributor/asset eligibility and [contract roles](./CONTRACTS.md); estimates or allocations are not unattended transfers. |
+| Operator services | [Worker/Discord/IPFS setup](../discord-bot/README.md), scheduler/fulfiller role, uptime, gas, checkpoints and backups. |
+| Releases and accounts | Inventory repository, frontend/backend, domain/DNS, Discord, storage, RPC, billing and incident-response custody with the operators. A code snapshot does not identify their current account holders. |
+| DBusker itself | Steward-controlled invitations, provider account, approval/routing review and durable usage allowance; this pilot still supports EOA login only. |
+
+This is a map of dependencies documented at the pinned baseline, **not** a
+current ownership audit. DBusker cannot establish that Jolly personally holds
+every role today or that another operator has already taken over.
+
+For a new center, teach a staged fork: retain code licenses/NOTICE and credit;
+use distinct branding unless separately permitted; ask artists about their
+recordings. Start local/read-only. Choose the modules actually needed, establish
+the new operators' own infrastructure, secrets and budgets, and deliberately
+replace original origins, addresses, roles, channels and deployment settings
+before enabling paid actions. Shared contracts remain a dependency; cloned code
+does not copy treasury balances, approvals, accounts, users or content rights.
+Independent contract deployment/configuration and rehearsed recovery are
+separate work, not consequences of pressing Fork.
+
+For multisig, do **not** say "change one address" or prescribe
+`transferOwnership` for every contract. Inspect each version's verified source,
+chain, current roles, role admins, pause/recovery powers and immutable settings.
+Agree independent signers, threshold, recovery and emergency procedures with
+the new community. Rehearse grant -> execute representative operations ->
+verify authority/events -> retire old roles only after approval. Role grants
+and old EOA powers must be checked individually.
+
+The current [worker authorization](../discord-bot/ipfs-worker.js) includes
+`verifyMessage` / `verifyTypedData` EOA recovery and comparisons with the
+configured owner. A contract-wallet owner cannot satisfy those paths merely
+by having one of its signers sign personally. Contract-signature validation
+(such as ERC-1271 where appropriate), connection/proposal/execution UX,
+receipt reconciliation and DBusker authentication need separate implementation
+and tests. Time-sensitive worker actions may still need tightly scoped
+automation rather than a multisig vote per song. Hosting, releases, storage,
+curation and billing need their own shared operating arrangements.
+**No multisig integration, role grant, signature or migration was performed
+by adding this teaching guide.**
+
+Stewardship text is fingerprinted with the handoff but appended to model
+instructions **only** for matching founder, independence, governance or seed
+questions and short topic-follow-ups. It uses the same topic matcher as public
+retrieval, not another paid classifier. Unrelated playlist questions do not
+pay for this extra context. It remains steward orientation, not a fabricated
+GitHub source or an addition to the public snapshot. Project facts still need
+actual retrieved public evidence. Both ordinary and deeper passes fit their
+exact serialized context to the same 28,000-byte limit; evaluation checks run
+against the fitted evidence, not the larger pre-trimming candidate set.
+
 The drawer offers seven optional question starters. Selecting one only drafts
 a question; it never signs, submits an issue, sends a prompt, makes a purchase
 or enrolls anyone in a rewards program. No live model call is made before
@@ -449,6 +524,22 @@ manager or tutorial engine is introduced. Receiving-app checks include exact
 public-tree coverage, required evidence for community questions, and existing
 tutorial/header regressions. Real model conversations remain a steward-led
 private test, not a result of these automated checks.
+
+Stewardship reuse decision: consulted Canopy's role/treasury leads, existing
+Busking worktrees, issue #291 and open PRs; adapted this app's public
+`951374b` [NOTICE](../NOTICE), [payroll policy](./PAYROLL.md),
+[contract inventory](./CONTRACTS.md) and
+[worker EOA authorization](../discord-bot/ipfs-worker.js). Read-only comparison
+with ArtFi's `contracts/ArtFiSettlementRouter.sol` at `843e770` and
+DecentMarket's `contracts/DecentNFT_v0.3.sol` at `0b9349a` confirmed the need
+for role-specific review, not a universal ownership-transfer recipe.
+Those are separate contract implementations, not tested multisig integrations;
+unrelated donor work was untouched and no donor code or private account data
+was copied into the corpus. Reused the existing topic matcher and exact-context
+fitter; new code only selects the reviewed teaching context. Receiving-app
+checks cover all aliases, concrete dependency/auth evidence, two-pass context
+limits, changed-guide approval invalidation and existing onboarding behavior.
+No live model answer or decentralized deployment is certified by these tests.
 
 Routing reuse decision: need bounded model selection and reviewed operational
 feedback without visitor transcript storage. Rechecked Canopy's curated map,

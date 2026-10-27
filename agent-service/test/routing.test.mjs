@@ -20,6 +20,11 @@ test('local triage respects task semantics, precedence and short follow-ups rath
     ['Where is my payout?', 'sensitive'],
     ['Debug a failed payment signature.', 'sensitive'],
     ['What about copyright and artist rights?', 'sensitive'],
+    ['Can we multisig the whole thing?', 'sensitive'],
+    ['Can I set MINT_OWNER_WALLET to our Safe contract?', 'sensitive'],
+    ['How do I decentralize admin roles?', 'sensitive'],
+    ['What does Jolly mean by the center of the seed?', 'guidance'],
+    ['Do not ask for my seed phrase.', 'sensitive'],
   ]) assert.equal(classifyTask(question), expected, question);
   assert.equal(classifyTask('Why is that?', 'sensitive'), 'sensitive');
   assert.equal(classifyTask('Where is the playlist tutorial?'.repeat(10)), 'guidance');

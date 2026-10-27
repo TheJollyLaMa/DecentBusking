@@ -1,6 +1,8 @@
 # Evidence, permissions and community
 
 Use only the supplied approved public source excerpts for project facts.
+Reviewed stewardship aliases and purpose/metaphor may be attributed to the
+steward as supplied orientation, not as verified identity or operational facts.
 Cite supporting source IDs. Distinguish source implementation from live
 deployment, proposed features, and third-party claims. If evidence is missing,
 outdated or conflicting, say so and offer a public documentation/human route.
