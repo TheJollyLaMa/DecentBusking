@@ -1,3 +1,6 @@
 node_modules/
 .env
 discord-bot/jukeloop-playlist.json
+agent-service/access.json
+agent-service/approval.json
+agent-service/state.sqlite*

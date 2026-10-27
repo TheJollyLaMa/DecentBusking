@@ -15,6 +15,16 @@ countdown is centered at the bottom on mobile and stays in the player on desktop
 
 Read the [Decent Busking whitepaper](WHITEPAPER.md) for the vision, current architecture, payment mechanics, artist-rights limits, and roadmap. Implemented features are separated from future plans.
 
+**DBusker community guide (invited pilot):** a wallet-allowlisted AI companion
+with an editable, steward-approved handoff. Its launcher stays hidden until a
+connected Base wallet passes the separate service's invitation check; chat
+still requires a wallet signature and explicit provider consent.
+Its community-first guidance covers contribution/bounty onboarding, pinning
+readiness, artist funds, DVert, DJuke/playlists, collaborations and the bunny
+tutorials, backed by a searchable snapshot of eligible public repo text.
+See [setup, review and privacy boundaries](docs/DBUSKER.md). Access is limited
+to the private trial roster; it does not enroll anyone for community rewards.
+
 ## v1.0.0 Supporter release
 
 Approved release terms: **100 editions at 100 Base USDC each**, with a 10%

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "models": {
+    "light": "gpt-5.6-luna",
+    "standard": "gpt-5.4-mini",
+    "deep": "gpt-5.4"
+  },
+  "balancedRoutes": {
+    "navigation": "light",
+    "guidance": "standard",
+    "technical": "deep",
+    "sensitive": "deep"
+  },
+  "recommendations": {
+    "minSamples": 20,
+    "reviewRate": 0.25,
+    "failureRate": 0.1
+  }
+}
