@@ -5,8 +5,16 @@ knowledge. It is not a connection to a maintainer's VS Code session, personal
 Copilot subscription, private repositories, or administrative tools.
 Tracking: [issue #291](https://github.com/TheJollyLaMa/DecentBusking/issues/291).
 
-**Branch-only, disabled by default, not deployed or approved.** No real model
-evaluation or wallet invitation is implied by the offline automated tests.
+**Invited pilot, not open community access.** The site configuration points to
+the separate `https://decentbusking-dbusker.onrender.com` service. The launcher
+is hidden until an invited Base wallet connects; signatures and provider consent
+are still required for chat. The service uses private configuration and reviewed
+handoff approval. Offline tests do not establish live answer quality.
+
+The initial remote site is `https://thejollylama.github.io/DecentBusking/`.
+Other origins (including localhost and ENS gateways) are not implicitly allowed.
+Independent forks should disable the supplied companion or configure their own
+service and exact site origin; cloning grants no access to this pilot.
 
 ## The steward leads the handoff
 
@@ -352,6 +360,21 @@ native keyboard controls. Reduced motion removes travel and keeps choices
 readable. Opening this disclosure neither signs nor starts a tutorial or audio.
 
 ### Sharing the closed pilot without changing the radio
+
+The invited deployment uses one separate Render web service, manual deploys,
+Node 24.3.0, a 1 GB disk at `/var/data`, and
+`DBUSKER_STATE_FILE=/var/data/state.sqlite`. The startup command loads a private
+Render secret file; host environment variables override its local-only values.
+Private access and approval files also live under `/etc/secrets`, not in Git.
+The local model service was stopped before the existing SQLite budget and
+aggregate metrics were transferred and compared by checksum. Do not start a
+second spending service against a stale copy of that database.
+
+The steward approved approximately $7.25/month base hosting at the checked
+Render prices ($7 compute plus $0.25 for 1 GB disk), excluding model usage,
+taxes and other account/usage charges. Recheck prices before future provisioning.
+Remote invitation/origin/unsigned-access checks are not a substitute for a real
+visitor signing in and reviewing the answers.
 
 Adding `OPENAI_API_KEY` to Render alone is **not** a deployment. Create a
 **separate** Node service for `agent-service`; do not add it to or restart the

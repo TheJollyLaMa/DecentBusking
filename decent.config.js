@@ -81,8 +81,8 @@ window.DecentConfig = {
 
   // Community links
   dbusker: {
-    enabled: false,
-    serviceUrl: "",
+    enabled: true,
+    serviceUrl: "https://decentbusking-dbusker.onrender.com",
   },
   discord: "https://discord.gg/SCtcBggHPa",
   github: "https://github.com/TheJollyLaMa/DecentBusking",

@@ -1,7 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { createCompanionChime, initDBusker, validServiceUrl } from '../../js/dbusker.mjs';
+
+test('public pilot configuration contains only the separate service URL and enabled flag', () => {
+  const window = {};
+  runInNewContext(readFileSync(new URL('../../decent.config.js', import.meta.url), 'utf8'), { window });
+  assert.equal(window.DecentConfig.dbusker.enabled, true);
+  assert.equal(window.DecentConfig.dbusker.serviceUrl, 'https://decentbusking-dbusker.onrender.com');
+  assert.equal(Object.keys(window.DecentConfig.dbusker).sort().join(','), 'enabled,serviceUrl');
+  const index = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+  assert.match(index, /decent\.config\.js\?v=20261027-dbusker-invited/);
+  assert.match(index, /js\/main\.js\?v=20261027-dbusker-invited/);
+  assert.match(readFileSync(new URL('../../js/main.js', import.meta.url), 'utf8'),
+    /dbusker\.mjs\?v=20261027-invited/);
+});
 
 async function fixture(t, enabled = true, connected = true) {
   const dom = new JSDOM('<body><button id="header-wallet">Wallet</button><footer id="radio-footer">Radio</footer></body>',
