@@ -19,6 +19,11 @@ Edit these files together before the first live conversation:
 - [Voice](../agent-service/handoff/voice.md): personality, welcome and mission.
 - [Boundaries](../agent-service/handoff/boundaries.md): consent, rights,
   evidence, uncertainty and human handoff.
+- [Participation orientation](../agent-service/handoff/participation.md): the
+  steward's grassroots mission and welcoming routes through contributing,
+  pinning, artist funds, advertising, playlists, collaboration and independence.
+- [Topic routes](../agent-service/handoff/topics.json): editable vocabulary,
+  public-file entry points and optional evidence anchors for each subject.
 - [Evaluation questions](../agent-service/handoff/evaluation.json): add the
   questions you want DBusker to handle, and what good answers should do.
 - [Public excerpts](../agent-service/handoff/sources.json): generated from
@@ -30,7 +35,10 @@ Review process:
    policy, EOA-only wallet support, the provider's data terms, operating costs,
    an actual human-contact route, and the community covenant before approval.
 2. Run `npm run review` in `agent-service`. This prints the handoff fingerprint,
-   source commit/date, and questions without contacting OpenAI.
+   source commit/date, coverage/exclusions, topic routes and questions without
+   contacting OpenAI. Run `npm run evaluate:retrieval` to check that each
+   community question retrieves the required source files and key evidence
+   text. Passing retrieval is not evidence that a model's answer is correct.
 3. Only after the steward approves the material for a **private live test**,
    run `npm run approve -- "reviewer name"`. This writes a local ignored approval
    file, not a public endorsement or evidence that the evaluation passed.
@@ -45,7 +53,7 @@ Review process:
    accessibility checks, data-policy review and a real operating-budget review.
    There is no auto-publish or automatic learning from visitor messages.
 
-Changing **any** of the four handoff files invalidates approval. A running
+Changing **any** of the six handoff files invalidates approval. A running
 service detects edits and refuses new answers; restart with the newly approved
 pack. Approval is an operator workflow, not a cryptographic defense against a
 server administrator who can edit both the pack and its approval.
@@ -126,6 +134,10 @@ the test process, and never pretend to be a real knowledge evaluation.
 - Human handoff is currently guidance/drafting only. Visitors choose whether
   and where to share it. No transcript is automatically sent to Discord,
   GitHub, a maintainer or another user.
+- Chat access is not contributor reward enrollment, recipient approval or
+  artist/pinner eligibility. The public Contributor Request form links a GitHub
+  handle to a payout wallet publicly; DBusker must explain that before helping
+  someone submit it. It cannot whitelist contributors or grant a bounty.
 
 ## Bounds and deployment
 
@@ -161,24 +173,81 @@ presented as finished answers. Citation validation checks membership in the
 approved excerpts; it does not prove that the prose accurately interprets them.
 Human factual evaluation remains essential.
 
-## Updating knowledge
+## Community context and updating knowledge
 
-The explicit public file selection is in
-[the snapshot command](../agent-service/handoff.mjs). It starts narrowly with
-the README, whitepaper, newcomer guide, NOTICE, shared wallet and admin-access
-module. This is not a whole-codebase index. Four keyword-ranked excerpts are
-selected per question; missing knowledge must lead to uncertainty, not guesses.
-Expand this reviewed list when the test conversations identify real gaps.
+The central frame is **how people participate and how value reaches them**:
+
+- Repo development: a useful issue/test, agreed bounty, contributor request,
+  accepted work, queue and owner-authorized settlement are separate stages.
+- IPFS: additional available community copies are useful, but at the indexed
+  baseline the UI explicitly marks availability rewards **not active**. An
+  allocation algorithm or funded pinner pot is not a public payout program.
+- Top 10, Playback and Live Performance: explain their distinct qualification,
+  allocation, review, funding, escrow/earmark and actual transfer/claim stages.
+- DVert: distinguish campaigns and optional priority from settled fund deposits,
+  then from final artist/builder payments. Trace evidence, not just percentages.
+- DJuke, playlists, collaborators and albums: listener choices, save versus pay,
+  personal versus radio, rights/consent, splits and version-specific delivery.
+- Bunny tutorials: general tour, playlist hops, splits and the payroll/fund proof
+  walkthrough are actual teaching sources, not invented UI instructions.
+- Independent communities: help people learn enough to maintain their own
+  beacon while respecting artists, attribution and operational independence.
+
+The drawer offers seven optional question starters. Selecting one only drafts
+a question; it never signs, submits an issue, sends a prompt, makes a purchase
+or enrolls anyone in a rewards program. No live model call is made before
+consent and wallet authentication.
+The same optional section links to the existing playlist, collaborator and fund
+bunny guides plus public issue/contributor forms. Links open in new tabs and
+the contributor link discloses its public wallet/handle association.
+
+The [snapshot command](../agent-service/handoff.mjs) now enumerates the complete
+public Git tree. Its [coverage policy](../agent-service/knowledge.mjs) indexes
+eligible first-party source, tests, docs, workflows, markup/styles, licenses and
+configuration. At public commit `951374b93d3875342d3bf269a834b984bf998ae6`,
+**324 text files** are included. Every tracked file has a manifest entry with
+its public blob identity, size and either chunk count or exclusion reason.
+
+The **21 explicit exclusions** cover creative/binary assets, credential-style
+files (including environment examples), dependency lockfiles, generated
+operational reports and individual contributor/accounting records. A future
+snapshot also excludes the generated knowledge file itself to avoid recursive
+ingestion. These boundaries apply even to a closed, allowlisted trial:
+restricted chat access is not a reason to ingest secrets or other people's
+records. The snapshot contains public source text; it does not grant reuse
+rights to artist recordings or brands.
+
+**Repo-wide searchable context is not the whole repo in every prompt.** The
+service builds a local term-frequency/inverse-frequency index at startup.
+Queries include code-symbol/camel-case tokens, reviewed topic vocabulary,
+specific entry-point evidence, and the previous user question for short
+follow-ups. It supplies at most eight excerpts, at most three per file, each
+at most 1,800 UTF-8 bytes. Total instructions/evidence/history retain the
+28,000-byte request ceiling. Older conversation pairs are removed first while
+retaining the latest pair; lower-priority evidence is then removed if needed,
+and only then the latest conversation pair if it cannot fit. No-match queries supply no
+invented fallback source. Evidence references remain commit/file/line anchored.
+The byte check uses the exact serialized instructions/input shape sent to
+Responses, including the evidence wrapper and JSON escaping; fixed request
+options and the output schema are outside that context ceiling.
+
+Repo discussions, current issue/PR contents, live balances/deployments, other
+repositories and uncommitted work are not included. Stale or conflicting
+version/deployment claims in public docs must be identified, not reconciled by
+guessing. Public Git history cannot establish whether a current bounty or a
+specific payout is available.
 
 From `agent-service`, after fetching public `origin/main`:
 
 ```sh
 npm run snapshot -- <full-public-commit-sha>
 npm run review
+npm run evaluate:retrieval
 ```
 
-The command only accepts a commit reachable from fetched `origin/main` and
-reads committed files via `git show`, not local working copies. Check that the
+The command verifies the public DecentBusking origin and only accepts a commit
+reachable from fetched `origin/main`. It reads committed public blobs, not
+local working copies. Check that the
 origin really is the public DecentBusking repository before capture.
 The snapshot records commit, time, source file, line and public URL.
 Snapshot creation does not approve it. Do not add credentials, personal records,
@@ -194,7 +263,12 @@ node --test agent-service/test/*.test.mjs test/tutorial.test.js test/header-layo
 git diff --check
 ```
 
-Tests use ephemeral wallets and stubbed provider calls. They cover authentication,
+Tests use ephemeral wallets and stubbed provider calls. Corpus tests compare
+every indexed excerpt to its exact public Git blob, account for every tree
+entry and exclusion, exercise long UTF-8 line bounds, and verify topic/evidence
+retrieval including obscure code symbols and short conversational follow-ups.
+They also check that the actual evaluation evidence fits the request ceiling.
+Other checks cover authentication,
 nonce reuse/expiry, wrong domains, consent, isolation, revocation and active
 cancellation, durable quotas, handoff approval, Responses request shape,
 evidence validation, disabled UI, tour deferral and wallet changes. They do
@@ -209,3 +283,13 @@ API runtime were incompatible with isolated community sessions; no donor code
 was copied. This dedicated ESM service uses a supported HTTP Responses boundary,
 single-purpose SIWE sessions and bounded stateless calls. Preserve Busking's
 [NOTICE](../NOTICE) and individual content/artist permissions.
+
+This expansion adapts the app's own public `951374b` baseline:
+[contributor policy](./PAYROLL.md),
+[pinning implementation](../js/pinner-rewards.mjs),
+[fund bunny](../js/fund-tour.mjs) and
+[playlist/split bunny](../js/tutorial.js). No second reward policy, wallet
+manager or tutorial engine is introduced. Receiving-app checks include exact
+public-tree coverage, required evidence for community questions, and existing
+tutorial/header regressions. Real model conversations remain a steward-led
+private test, not a result of these automated checks.

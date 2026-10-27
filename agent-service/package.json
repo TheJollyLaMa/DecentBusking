@@ -9,6 +9,7 @@
     "test": "node --test test/*.test.mjs",
     "snapshot": "node handoff.mjs snapshot",
     "review": "node handoff.mjs review",
+    "evaluate:retrieval": "node handoff.mjs evaluate-retrieval",
     "approve": "node handoff.mjs approve"
   },
   "dependencies": {

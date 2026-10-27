@@ -23,6 +23,20 @@ test('disabled widget does not mount, prompt for a wallet, or request the servic
   assert.equal(f.calls.length, 0);
 });
 
+test('public onboarding links reuse actual bunny routes and disclose contributor-request privacy', t => {
+  const { root } = fixture(t);
+  for (const kind of ['payroll', 'playlists', 'splits']) {
+    const link = root.querySelector(`a[href="?tutorial=${kind}"]`);
+    assert.ok(link);
+    assert.equal(link.target, '_blank');
+    assert.equal(link.rel, 'noopener noreferrer');
+  }
+  const contributor = root.querySelector('a[href*="template=whitelist-request"]');
+  assert.ok(contributor);
+  assert.match(contributor.parentElement.textContent, /publishes your GitHub handle and payout wallet/);
+  assert.match(contributor.parentElement.textContent, /Chat access does not enroll you/);
+});
+
 test('greeting is dismissible; opening and closing does not fetch or alter radio', t => {
   const f = fixture(t), { root, document } = f;
   root.querySelector('.dismiss').click();
@@ -74,6 +88,20 @@ test('consent is required and the widget reuses the site wallet without connecti
   root.querySelector('.signin').click();
   await new Promise(resolve => f.window.setTimeout(resolve, 0));
   assert.match(root.querySelector('.status').textContent, /site header first/);
+  assert.equal(f.calls.length, 0);
+});
+
+test('community routes draft editable questions without sending, signing, or connecting a wallet', t => {
+  const f = fixture(t), { root } = f;
+  assert.equal(root.querySelectorAll('[data-starter]').length, 7);
+  const route = root.querySelector('[data-starter]');
+  route.click();
+  assert.match(root.querySelector('textarea').value, /not a coder/);
+  assert.match(root.querySelector('.status').textContent, /not sent/);
+  assert.equal(root.querySelector('textarea').disabled, true);
+  assert.equal(root.querySelector('.paths').open, false);
+  assert.equal(root.activeElement, root.querySelector('input'));
+  assert.equal(root.querySelector('.transcript').children.length, 0);
   assert.equal(f.calls.length, 0);
 });
 

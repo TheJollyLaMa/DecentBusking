@@ -45,6 +45,26 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       <header><h2 id="dbusker-title">DBusker <small>AI guide · invited pilot</small></h2><button type="button" class="close" aria-label="Close DBusker chat">Close</button></header>
       <p class="intro">A public-code guide, not a human steward. No transactions or automatic posting.
         <a href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/docs/NEWCOMERS.md" target="_blank" rel="noopener noreferrer">Public newcomer guide</a></p>
+      <details class="paths"><summary>Find your way to contribute</summary>
+        <p>Listening counts, too. Pick a question to edit; nothing is sent until you sign in and choose Ask.</p>
+        <div class="starters">
+          <button type="button" data-starter="I'm not a coder. Could testing help with repo dev, and how do I file an issue?">Help build or test</button>
+          <button type="button" data-starter="Can I earn IPFS pinning rewards by keeping a copy of the community music?">Keep a community copy</button>
+          <button type="button" data-starter="How do Top10, Playback and Live Performance funds work, and what makes someone eligible?">Artists &amp; weekly funds</button>
+          <button type="button" data-starter="I want to run a DVert ad campaign. How do I trace its funds to artists and platform builders?">Promote with DVert</button>
+          <button type="button" data-starter="Show me the bunny tutorial for DJuke playlists, Personal Play and radio takeover.">Listen &amp; make a playlist</button>
+          <button type="button" data-starter="How do album collaborators agree to split payments, and which version supports that?">Collaborators &amp; albums</button>
+          <button type="button" data-starter="I want to fork this and host my own community beacon. What do I need?">Build my own beacon</button>
+        </div>
+        <p>Public guides (new tabs):
+          <a href="?tutorial=payroll" target="_blank" rel="noopener noreferrer">Fund proofs</a> ·
+          <a href="?tutorial=playlists" target="_blank" rel="noopener noreferrer">Playlist bunny</a> ·
+          <a href="?tutorial=splits" target="_blank" rel="noopener noreferrer">Collaborator bunny</a>.
+          <a href="https://github.com/TheJollyLaMa/DecentBusking/issues/new/choose" target="_blank" rel="noopener noreferrer">Report or propose an improvement</a>.
+        </p>
+        <p><a href="https://github.com/TheJollyLaMa/DecentBusking/issues/new?template=whitelist-request.yml" target="_blank" rel="noopener noreferrer">Contributor Request</a>
+          publishes your GitHub handle and payout wallet on GitHub. Chat access does not enroll you for rewards.</p>
+      </details>
       <label class="consent"><input type="checkbox"> I agree to send my questions and recent chat context to OpenAI.
         Don't share secrets. Chat is kept in server memory for up to 15 minutes; the provider's own retention policy also applies.
         <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></label>
@@ -76,6 +96,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     signout.hidden = !credential;
     question.disabled = pending || !credential || !consent.checked;
     send.disabled = question.disabled;
+    root.querySelectorAll('[data-starter]').forEach(button => { button.disabled = pending; });
     transcript.setAttribute('aria-busy', String(pending));
   }
   function clear(message = 'Chat cleared. Sign in again when ready.') {
@@ -144,6 +165,15 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   launcher.addEventListener('click', show);
   find('.dismiss').addEventListener('click', dismiss);
   find('.close').addEventListener('click', hide);
+  root.querySelectorAll('[data-starter]').forEach(button => button.addEventListener('click', () => {
+    question.value = button.dataset.starter;
+    find('.paths').open = false;
+    status.textContent = credential
+      ? 'Question drafted. Edit it if you like, then choose Ask DBusker.'
+      : 'Question drafted, not sent. Review the data notice and sign in with an invited wallet when ready.';
+    if (!question.disabled) question.focus();
+    else consent.focus();
+  }));
   root.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !panel.hidden) { event.stopPropagation(); hide(); }
   });

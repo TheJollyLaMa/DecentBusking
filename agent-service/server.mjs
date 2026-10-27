@@ -7,7 +7,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { getAddress } from 'ethers';
 import { SiweMessage } from 'siwe';
 import { directory, readHandoff, isApproved } from './handoff.mjs';
-import { askModel, retrieveSources } from './model.mjs';
+import { askModel, modelContext } from './model.mjs';
+import { createRetriever } from './knowledge.mjs';
 
 const SESSION_MS = 15 * 60 * 1000;
 const NONCE_MS = 5 * 60 * 1000;
@@ -33,6 +34,7 @@ export function loadSettings(env = process.env) {
 
 export function createAgentServer(settings, { modelCall = askModel, now = Date.now, logger = console } = {}) {
   const pack = readHandoff();
+  const retrieve = createRetriever(pack.sources, pack.topics);
   const db = new DatabaseSync(settings.stateFile);
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS budget (id INTEGER PRIMARY KEY CHECK(id=1), calls INTEGER NOT NULL); INSERT OR IGNORE INTO budget VALUES (1,0)');
   const reserve = db.prepare('UPDATE budget SET calls=calls+1 WHERE id=1 AND calls < ? RETURNING calls');
@@ -163,11 +165,12 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
         if (typeof message !== 'string' || !message.trim() || message.length > 2000) throw problem(400, 'Enter a question of 1-2000 characters.');
         if (active.has(key)) throw problem(409, 'Wait for your current answer.');
         if (active.size >= 3) throw problem(429, 'DBusker is busy. Please try shortly.');
-        const sources = retrieveSources(pack.sources, message);
+        const sources = retrieve(message, session.messages);
         const messages = [...session.messages, { role: 'user', content: message.trim() }].slice(-7);
-        const contextBytes = () => Buffer.byteLength(JSON.stringify({ instructions: pack.instructions, sources, messages }));
-        while (contextBytes() > 28000 && messages.length > 1) messages.splice(0, 2);
+        const contextBytes = () => Buffer.byteLength(JSON.stringify(modelContext({ instructions: pack.instructions, sources, messages })));
+        while (contextBytes() > 28000 && messages.length > 3) messages.splice(0, 2);
         while (contextBytes() > 28000 && sources.length > 1) sources.pop();
+        while (contextBytes() > 28000 && messages.length > 1) messages.splice(0, 2);
         if (contextBytes() > 28000) {
           throw problem(413, 'Conversation context is too large. Sign out and start a shorter conversation.');
         }

@@ -23,6 +23,11 @@ h2 { font-size: 19px; margin: 0; }
 small { display: block; font-size: 12px; font-weight: normal; color: #d7cebb; }
 p { margin: 0; }
 .intro, .consent, .handoff { font-size: 12px; }
+.paths { font-size: 12px; }
+.paths summary { cursor: pointer; color: #ffe4a0; }
+.paths p { margin: 6px 0; }
+.starters { display: flex; flex-wrap: wrap; gap: 6px; }
+.starters button { padding: 5px 8px; }
 .consent input { accent-color: #d5ab62; }
 .actions { display: flex; gap: 8px; }
 .status { font-size: 12px; color: #e8cf99; }

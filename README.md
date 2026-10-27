@@ -17,6 +17,9 @@ Read the [Decent Busking whitepaper](WHITEPAPER.md) for the vision, current arch
 
 **DBusker community guide (feature-branch pilot):** a disabled-by-default,
 wallet-allowlisted AI companion with an editable, steward-approved handoff.
+Its community-first guidance covers contribution/bounty onboarding, pinning
+readiness, artist funds, DVert, DJuke/playlists, collaborations and the bunny
+tutorials, backed by a searchable snapshot of eligible public repo text.
 See [setup, review and privacy boundaries](docs/DBUSKER.md). No community model
 access is enabled by this change.
 

@@ -7,7 +7,7 @@ import { Wallet } from 'ethers';
 import { SiweMessage } from 'siwe';
 import { createAgentServer, loadSettings } from '../server.mjs';
 import { directory, readHandoff, isApproved } from '../handoff.mjs';
-import { askModel, retrieveSources } from '../model.mjs';
+import { askModel, retrieveSources, modelContext } from '../model.mjs';
 
 async function fixture(t, options = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'dbusker-test-'));
@@ -141,7 +141,7 @@ test('long conversations trim old context while preserving the byte ceiling and 
     assert.equal((await f.request('/chat', { message, consent: true }, session.token)).status, 200);
   }
   for (const input of inputs) {
-    assert.ok(Buffer.byteLength(JSON.stringify({ instructions: input.instructions, sources: input.sources, messages: input.messages })) <= 28000);
+    assert.ok(Buffer.byteLength(JSON.stringify(modelContext(input))) <= 28000);
   }
   assert.equal(inputs.at(-1).messages.at(-1).content, 'Follow up');
 });

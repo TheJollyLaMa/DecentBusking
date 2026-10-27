@@ -1,0 +1,81 @@
+[
+  {
+    "id": "getting-involved",
+    "entryFiles": ["README.md", "docs/PAYROLL.md"],
+    "entryEvidence": { "README.md": "## Help Without Coding", "docs/PAYROLL.md": "## Contributor Requests" },
+    "aliases": ["help the community", "help out", "get involved", "contribute", "contribution", "little money", "where should I start"],
+    "terms": ["help testing art documentation issue bounty contributor consent"],
+    "files": ["README.md", "docs/PAYROLL.md", ".github/ISSUE_TEMPLATE/whitelist-request.yml"]
+  },
+  {
+    "id": "contribution",
+    "entryFiles": ["docs/PAYROLL.md", ".github/ISSUE_TEMPLATE/whitelist-request.yml"],
+    "entryEvidence": { "docs/PAYROLL.md": "## Contributor Requests" },
+    "aliases": ["repo dev", "repo development", "bounty", "bounties", "contributor", "whitelist", "whitelisted", "file an issue", "report a bug", "help without coding", "not a coder", "test the site", "help with development"],
+    "terms": ["contributor request bounty testing issue assignment approval merged payroll"],
+    "files": ["docs/PAYROLL.md", ".github/ISSUE_TEMPLATE/whitelist-request.yml", "README.md", "scripts/processMergedBounty.js", "scripts/processTestingBounty.js"]
+  },
+  {
+    "id": "pinning",
+    "entryFiles": ["js/pinner-rewards.mjs", "js/community-pinning.mjs"],
+    "aliases": ["ipfs", "pinning", "pinner", "pinners", "pin content", "keep a copy", "preserve music"],
+    "terms": ["pinning pinner rewards manifest availability not active verified community"],
+    "files": ["js/pinner-rewards.mjs", "js/community-pinning.mjs", "test/pinner-rewards.test.js"]
+  },
+  {
+    "id": "funds",
+    "entryFiles": ["js/fund-tour.mjs"],
+    "aliases": ["fund", "funds", "fund allocation", "follow the money", "trace", "traceable", "funding history", "paid the artists"],
+    "terms": ["fund allocation pending confirmed payment proof ledger"],
+    "files": ["js/fund-tour.mjs", "docs/PAYROLL.md", "js/fund-header.mjs", "discord-bot/fund-ledger.js", "discord-bot/payment-ledger.js"]
+  },
+  {
+    "id": "adverts",
+    "entryFiles": ["docs/DVERT-PAID-QUEUE.md", "js/devert-history.mjs"],
+    "aliases": ["dvert", "devert", "advert", "advertising", "ad campaign", "ads", "promote my"],
+    "terms": ["DVert campaign funding history priority purchase settlement"],
+    "files": ["docs/DVERT-PAID-QUEUE.md", "js/devert-history.mjs", "js/devert-campaigns.mjs", "js/devert-tab.mjs"]
+  },
+  {
+    "id": "jukebox",
+    "entryFiles": ["js/tutorial.js"],
+    "aliases": ["djuke", "jukebox", "playlist", "playlists", "personal play", "takeover", "take over", "listener"],
+    "terms": ["DJuke personal playlist save radio playback fee"],
+    "files": ["js/tutorial.js", "docs/NEWCOMERS.md", "docs/DJUKE-PLAYLISTS.md", "js/djuke-playlists.mjs"]
+  },
+  {
+    "id": "splits",
+    "entryFiles": ["README.md"],
+    "aliases": ["collaborator", "collaborators", "split", "splits", "album", "albums"],
+    "terms": ["collaborator album song split payment consent version"],
+    "files": ["js/tutorial.js", "js/creator-splits.mjs", "js/creator-split-proposal.mjs", "docs/DJUKE-ROLLOUT.md", "README.md"]
+  },
+  {
+    "id": "live",
+    "entryFiles": ["docs/LIVE_PERFORMANCE_RUNBOOK.md", "js/live-bookings.mjs"],
+    "aliases": ["live performance", "live performer", "live performers", "performer", "performers", "book a show", "escrow"],
+    "terms": ["Live Performance booking invitation acceptance funding escrow review claim terms"],
+    "files": ["docs/LIVE_PERFORMANCE_RUNBOOK.md", "docs/LIVE_PERFORMANCE_TERMS_V2.json", "js/live-bookings.mjs", "discord-bot/live-bookings.js"]
+  },
+  {
+    "id": "weekly-artists",
+    "entryFiles": ["docs/PAYROLL.md"],
+    "aliases": ["top10", "top 10", "playback", "weekly reward", "weekly rewards", "song prizes"],
+    "terms": ["Top10 Playback qualified artist song weekly allocation payout"],
+    "files": ["docs/PAYROLL.md", "js/top-ten-prizes.mjs", "js/radio-payroll.mjs", "js/fund-tour.mjs"]
+  },
+  {
+    "id": "tutorial",
+    "entryFiles": ["js/tutorial.js", "js/fund-tour.mjs"],
+    "aliases": ["bunny", "rabbit", "tutorial", "tutorials", "walkthrough", "show me around"],
+    "terms": ["tutorial bunny rabbit guide hops"],
+    "files": ["js/tutorial.js", "js/fund-tour.mjs", "docs/NEWCOMERS.md", "js/split-tutorial-surfaces.mjs"]
+  },
+  {
+    "id": "independent-host",
+    "entryFiles": ["NOTICE", "discord-bot/README.md"],
+    "aliases": ["clone", "fork", "hosting", "host my own", "own community", "own radio", "own beacon", "own signal"],
+    "terms": ["setup configuration independent hosting license attribution permission"],
+    "files": ["README.md", "NOTICE", "discord-bot/README.md", "WHITEPAPER.md", "docs/CONTRACTS.md"]
+  }
+]
