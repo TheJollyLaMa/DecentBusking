@@ -110,6 +110,55 @@ Before any real model call:
 There is no live mock mode: automated tests inject a fake provider only inside
 the test process, and never pretend to be a real knowledge evaluation.
 
+### Creating the provider key
+
+1. Sign in to the [OpenAI API platform](https://platform.openai.com/), not the
+   ChatGPT subscription page. API billing is separate from ChatGPT and Copilot.
+   Configure API billing before making a live test.
+2. In the organization/project selector, create a dedicated **DBusker pilot**
+   project. Keep its membership limited to the people operating this service.
+3. In that project's **Limits**, select the intended model and set a small
+   monthly budget and usage alerts. Project budgets are alert thresholds,
+   **not hard spending caps**. The service's persistent `DBUSKER_MAX_CALLS`
+   counter is a separate call-count limit, not a dollar cap.
+4. In the selected project's **API keys**, create a new secret key named
+   **DBusker local pilot**. Prefer restricted permissions: allow writing to
+   `/v1/responses`, with the chosen model available to the project. This
+   service does not need Files, Assistants, fine-tuning, or administrative keys.
+   If access fails, inspect the provider's error and adjust only the required
+   permission; do not make a broadly privileged key as a workaround.
+5. Copy the secret directly into the ignored `agent-service/.env` file after
+   `OPENAI_API_KEY=`. Do not paste it into chat, a GitHub issue, site
+   configuration, a terminal command, or a screenshot. Restrict `.env` to
+   your OS account (`chmod 600 .env` on macOS/Linux), and close the editor tab
+   before screen sharing. If exposed, revoke the key and replace it.
+6. Leave `DBUSKER_ENABLED=false` and `access.json.enabled=false` until the
+   steward has reviewed and approved the current handoff for a private test.
+   Start with `npm start` from `agent-service` so Node loads `.env`. A process
+   already running will not pick up a newly pasted key; restart it after the
+   approval and enablement step. Never print `.env` to verify setup.
+
+See the provider's [project and key administration guide](https://help.openai.com/en/articles/9186755-managing-projects-in-the-api-platform)
+for current controls. Key creation and adding billing do not approve DBusker's
+handoff, invite a community member, or make a model call.
+
+## Companion look and sound
+
+The drawer borrows DJuke's platinum finish and cyan/mint palette, with an
+inside avatar, the welcome "How can I help you, Earthling?", and seven
+illustrated community paths. Paths only draft questions; they do not send,
+sign, connect a wallet, or promise rewards. Public guides and bunny routes
+remain available in the expandable field notes.
+
+Companion chimes are **off by default** and can be enabled with the drawer's
+Sound button for the current page session only. Short, quiet synthesized notes
+respond to opening the drawer or selecting a path; no speech, loops, remote
+sound files, or model-reply autoplay. Chimes are skipped while an audible
+audio/video element is playing, stopped when media starts or the page becomes
+hidden, and cancelled when the drawer closes or a blocking overlay appears.
+They do not change the radio's source, playback, volume or wallet flow.
+Motion respects the system's reduced-motion preference.
+
 ## Access, privacy and shutdown
 
 - Pilot supports ordinary externally owned accounts. Smart-contract wallets,

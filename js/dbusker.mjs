@@ -1,5 +1,88 @@
 const DISMISSED = 'decentbusking:dbusker:dismissed:v1';
 
+const PATHS = [
+  { title: 'Help build or test', label: 'Tinker', note: 'Small fixes. Real impact.', icon: 'tools',
+    question: "I'm not a coder. Could testing help with repo dev, and how do I file an issue?" },
+  { title: 'Keep a community copy', label: 'Keep the signal', note: 'A little help from IPFS.', icon: 'signal',
+    question: 'Can I earn IPFS pinning rewards by keeping a copy of the community music?' },
+  { title: 'Artists & weekly funds', label: 'Take the stage', note: 'Music, shows & shared pots.', icon: 'star',
+    question: 'How do Top10, Playback and Live Performance funds work, and what makes someone eligible?' },
+  { title: 'Promote with DVert', label: 'Make some waves', note: 'Your project. A wider horizon.', icon: 'waves',
+    question: 'I want to run a DVert ad campaign. How do I trace its funds to artists and platform builders?' },
+  { title: 'Listen & make a playlist', label: 'Find your groove', note: 'A mix for you. Or everyone.', icon: 'notes',
+    question: 'Show me the bunny tutorial for DJuke playlists, Personal Play and radio takeover.' },
+  { title: 'Collaborators & albums', label: 'Share the tune', note: 'Good company. Clear splits.', icon: 'link',
+    question: 'How do album collaborators agree to split payments, and which version supports that?' },
+  { title: 'Build my own beacon', label: 'Light a beacon', note: 'Your own corner of Earth.', icon: 'beacon',
+    question: 'I want to fork this and host my own community beacon. What do I need?' },
+];
+
+const MARKS = {
+  tools: '<path d="m8 6 4 4m-6 8 7-7m1-5a5 5 0 0 0 5 6l-7 7-4-4 7-7a5 5 0 0 0 6 5"/><path d="m4 4 3 1 1 3-2 2-3-1-1-3z"/>',
+  signal: '<path d="m12 3 8 5v8l-8 5-8-5V8zM4 8l8 5 8-5m-8 5v8"/><path d="m8 6 8 5"/>',
+  star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"/>',
+  waves: '<path d="M3 8c3-5 5 5 9 0s6 5 9 0M3 13c3-5 5 5 9 0s6 5 9 0M3 18c3-5 5 5 9 0s6 5 9 0"/>',
+  notes: '<path d="M9 17V5l11-2v12M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/>',
+  link: '<path d="m10 14 4-4m-6 1-3 3a4 4 0 0 0 6 6l3-3m2-4 3-3a4 4 0 0 0-6-6l-3 3"/><path d="m5 5 1 1m12 12 1 1"/>',
+  beacon: '<path d="m8 21 2-11h4l2 11M7 21h10M9 10V6h6v4M10 6l2-3 2 3M5 5 2 3m17 2 3-2M5 9H1m18 0h4"/><path d="M11 16h2"/>',
+};
+
+function mark(name) {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MARKS[name]}</svg>`;
+}
+
+export function createCompanionChime(window, document, onError) {
+  let context = null, enabled = false, disposed = false, playing = false, generation = 0;
+  const voices = new Set();
+  const mediaPlaying = () => [...document.querySelectorAll('audio,video')]
+    .some(media => !media.paused && !media.muted && media.volume > 0);
+  const stop = () => {
+    generation++;
+    for (const oscillator of voices) oscillator.stop();
+    voices.clear();
+  };
+  return {
+    async setEnabled(value) {
+      enabled = value;
+      if (!enabled) { stop(); return; }
+      await this.play();
+    },
+    async play() {
+      if (!enabled || disposed || playing || document.hidden || mediaPlaying()) return;
+      playing = true;
+      const current = generation;
+      try {
+        if (!window.AudioContext) throw new Error('This browser does not support companion sounds.');
+        context ||= new window.AudioContext();
+        await context.resume();
+        if (!enabled || disposed || document.hidden || current !== generation || mediaPlaying()) return;
+        const start = context.currentTime;
+        for (const [index, frequency] of [523.25, 783.99].entries()) {
+          const oscillator = context.createOscillator(), gain = context.createGain();
+          oscillator.type = 'sine';
+          oscillator.frequency.value = frequency;
+          gain.gain.setValueAtTime(0, start);
+          gain.gain.linearRampToValueAtTime(0.018, start + index * 0.075 + 0.012);
+          gain.gain.exponentialRampToValueAtTime(0.0001, start + index * 0.075 + 0.16);
+          oscillator.connect(gain); gain.connect(context.destination);
+          voices.add(oscillator);
+          oscillator.onended = () => { voices.delete(oscillator); oscillator.disconnect(); gain.disconnect(); };
+          oscillator.start(start + index * 0.075);
+          oscillator.stop(start + index * 0.075 + 0.18);
+        }
+      } catch (error) {
+        enabled = false;
+        onError(error);
+      } finally { playing = false; }
+    },
+    stop,
+    dispose() {
+      enabled = false; disposed = true; stop();
+      if (context) context.close().catch(onError);
+    },
+  };
+}
+
 export function validServiceUrl(value) {
   const url = new URL(value);
   if ((url.protocol !== 'https:' && !(url.protocol === 'http:' &&
@@ -36,26 +119,28 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   host.id = 'dbusker-companion';
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `
-    <link rel="stylesheet" href="${new URL('../css/dbusker.css', import.meta.url).href}">
-    <div class="greeting" hidden><span>Any questions?</span><button type="button" class="dismiss" aria-label="Dismiss DBusker greeting">Not now</button></div>
+    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261027-neon', import.meta.url).href}">
+    <div class="greeting" hidden><span>How can I help you, Earthling?</span><button type="button" class="dismiss" aria-label="Dismiss DBusker greeting">Not now</button></div>
     <button type="button" class="launcher" aria-label="Ask DBusker, AI community guide" aria-expanded="false" aria-controls="dbusker-chat">
-      <img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="" width="58" height="58"><span>Ask DBusker</span>
+      <span class="launcher-portrait"><img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="" width="58" height="58"></span><span><small>A friendly signal</small>Ask DBusker</span><span class="signal-dot" aria-hidden="true"></span>
     </button>
     <section id="dbusker-chat" role="dialog" aria-labelledby="dbusker-title" hidden>
-      <header><h2 id="dbusker-title">DBusker <small>AI guide · invited pilot</small></h2><button type="button" class="close" aria-label="Close DBusker chat">Close</button></header>
-      <p class="intro">A public-code guide, not a human steward. No transactions or automatic posting.
-        <a href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/docs/NEWCOMERS.md" target="_blank" rel="noopener noreferrer">Public newcomer guide</a></p>
-      <details class="paths"><summary>Find your way to contribute</summary>
-        <p>Listening counts, too. Pick a question to edit; nothing is sent until you sign in and choose Ask.</p>
+      <header class="cabin-header"><span class="station-mark" aria-hidden="true">${mark('beacon')}</span><h2 id="dbusker-title">DBusker <small>AI guide / invited pilot</small></h2><div class="cabin-controls"><button type="button" class="sound" aria-label="Enable DBusker chimes" aria-pressed="false" title="Optional chimes. Quiet while the radio plays.">Sound off</button><button type="button" class="close" aria-label="Close DBusker chat" title="Close chat">Close</button></div></header>
+      <div class="cabin-body">
+      <div class="welcome">
+        <div class="portrait-port"><span class="orbit orbit-one" aria-hidden="true"></span><span class="orbit orbit-two" aria-hidden="true"></span><img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="DBusker, your street-corner companion" width="92" height="92"><span class="portrait-star" aria-hidden="true">+</span></div>
+        <div class="welcome-copy"><p class="eyebrow">Good company. Open horizons.</p><p class="hello">How can I help you, <br><em>Earthling?</em></p><p class="welcome-note">Pull up a corner of the universe.</p></div>
+      </div>
+      <details class="paths" open><summary><span>Pick a little adventure</span><span class="path-count" aria-hidden="true">07 paths / one planet</span></summary>
+        <p class="paths-hint">A tune, a question, a bright idea. Where shall we wander?</p>
         <div class="starters">
-          <button type="button" data-starter="I'm not a coder. Could testing help with repo dev, and how do I file an issue?">Help build or test</button>
-          <button type="button" data-starter="Can I earn IPFS pinning rewards by keeping a copy of the community music?">Keep a community copy</button>
-          <button type="button" data-starter="How do Top10, Playback and Live Performance funds work, and what makes someone eligible?">Artists &amp; weekly funds</button>
-          <button type="button" data-starter="I want to run a DVert ad campaign. How do I trace its funds to artists and platform builders?">Promote with DVert</button>
-          <button type="button" data-starter="Show me the bunny tutorial for DJuke playlists, Personal Play and radio takeover.">Listen &amp; make a playlist</button>
-          <button type="button" data-starter="How do album collaborators agree to split payments, and which version supports that?">Collaborators &amp; albums</button>
-          <button type="button" data-starter="I want to fork this and host my own community beacon. What do I need?">Build my own beacon</button>
+          ${PATHS.map(route => `<button type="button" class="path path-${route.icon}" aria-label="${route.label}: ${route.title.replaceAll('&', '&amp;')}" title="${route.note}" aria-pressed="false" data-starter="${route.question.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}"><span class="path-medallion">${mark(route.icon)}</span><span class="path-label">${route.label}</span><span class="path-note">${route.note}</span></button>`).join('')}
         </div>
+        <p class="paths-hint">Choose a path to draft a question. Nothing sends until you ask.</p>
+      </details>
+      <details class="field-notes"><summary>Maps, bunny trails &amp; the small print</summary>
+        <p class="intro">An AI public-code guide, not a human steward. No transactions or automatic posting.
+          <a href="https://github.com/TheJollyLaMa/DecentBusking/blob/main/docs/NEWCOMERS.md" target="_blank" rel="noopener noreferrer">Public newcomer guide</a></p>
         <p>Public guides (new tabs):
           <a href="?tutorial=payroll" target="_blank" rel="noopener noreferrer">Fund proofs</a> ·
           <a href="?tutorial=playlists" target="_blank" rel="noopener noreferrer">Playlist bunny</a> ·
@@ -73,6 +158,8 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       <div class="transcript" role="log" aria-label="DBusker conversation" aria-live="polite" tabindex="0"></div>
       <form><label for="dbusker-question">Your question</label><textarea id="dbusker-question" maxlength="2000" rows="3" required disabled></textarea><button type="submit" class="send" disabled>Ask DBusker</button></form>
       <p class="handoff"></p>
+      </div>
+      <div class="cabin-foot" aria-hidden="true"><span>Earth Village / open frequencies</span><span class="speaker-grille"></span><span class="foot-light"></span></div>
     </section>`;
   document.body.append(host);
   const find = selector => root.querySelector(selector);
@@ -81,6 +168,14 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   const question = find('textarea'), send = find('.send'), transcript = find('.transcript');
   let credential = null, wallet = null, expiresAt = 0, pending = false, generation = 0;
   let controller = null, expiryTimer = null, dismissed = false, returnFocus = null;
+  const sound = find('.sound');
+  const chime = createCompanionChime(window, document, error => {
+    sound.setAttribute('aria-pressed', 'false');
+    sound.setAttribute('aria-label', 'Enable DBusker chimes');
+    sound.textContent = 'Sound off';
+    status.textContent = `Companion sound unavailable: ${error.message}`;
+    console.warn('[dbusker] companion sound unavailable:', error.message);
+  });
   try { dismissed = window.localStorage.getItem(DISMISSED) === '1'; }
   catch (error) { console.warn('[dbusker] greeting preference could not be read:', error.message); }
 
@@ -98,6 +193,8 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     send.disabled = question.disabled;
     root.querySelectorAll('[data-starter]').forEach(button => { button.disabled = pending; });
     transcript.setAttribute('aria-busy', String(pending));
+    panel.classList.toggle('is-thinking', pending);
+    panel.classList.toggle('is-connected', Boolean(credential));
   }
   function clear(message = 'Chat cleared. Sign in again when ready.') {
     generation++;
@@ -128,17 +225,19 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   }
   function show() {
     if (companionBlocked(document)) return;
-    returnFocus = document.activeElement;
+    returnFocus = document.activeElement === host ? root.activeElement : document.activeElement;
     dismiss();
     panel.hidden = false;
     launcher.hidden = true;
     launcher.setAttribute('aria-expanded', 'true');
     find('.close').focus();
+    void chime.play();
   }
   function hide() {
     panel.hidden = true;
     launcher.hidden = false;
     launcher.setAttribute('aria-expanded', 'false');
+    chime.stop();
     if (returnFocus?.isConnected && returnFocus !== document.body) returnFocus.focus();
     else launcher.focus();
   }
@@ -160,14 +259,32 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       article.append(link);
     }
     transcript.append(article);
+    article.className = role === 'DBusker' ? 'from-dbusker' : 'from-visitor';
     article.scrollIntoView({ block: 'nearest' });
   }
   launcher.addEventListener('click', show);
   find('.dismiss').addEventListener('click', dismiss);
   find('.close').addEventListener('click', hide);
+  sound.addEventListener('click', () => {
+    const enabled = sound.getAttribute('aria-pressed') !== 'true';
+    sound.setAttribute('aria-pressed', String(enabled));
+    sound.setAttribute('aria-label', enabled ? 'Disable DBusker chimes' : 'Enable DBusker chimes');
+    sound.textContent = enabled ? 'Sound on' : 'Sound off';
+    void chime.setEnabled(enabled);
+  });
+  document.addEventListener('play', () => chime.stop(), true);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) chime.stop(); });
+  window.addEventListener('pagehide', event => {
+    if (event.persisted) chime.stop();
+    else chime.dispose();
+  });
   root.querySelectorAll('[data-starter]').forEach(button => button.addEventListener('click', () => {
     question.value = button.dataset.starter;
     find('.paths').open = false;
+    root.querySelectorAll('[data-starter]').forEach(route => {
+      route.setAttribute('aria-pressed', String(route === button));
+    });
+    void chime.play();
     status.textContent = credential
       ? 'Question drafted. Edit it if you like, then choose Ask DBusker.'
       : 'Question drafted, not sent. Review the data notice and sign in with an invited wallet when ready.';
@@ -258,6 +375,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     const blocked = companionBlocked(document);
     if (host.hidden !== blocked) host.hidden = blocked;
     if (blocked && !panel.hidden) {
+      chime.stop();
       panel.hidden = true;
       launcher.hidden = false;
       launcher.setAttribute('aria-expanded', 'false');

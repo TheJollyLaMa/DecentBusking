@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { initDBusker, validServiceUrl } from '../../js/dbusker.mjs';
+import { createCompanionChime, initDBusker, validServiceUrl } from '../../js/dbusker.mjs';
 
 function fixture(t, enabled = true) {
   const dom = new JSDOM('<body><button id="header-wallet">Wallet</button><footer id="radio-footer">Radio</footer></body>',
@@ -48,6 +48,17 @@ test('greeting is dismissible; opening and closing does not fetch or alter radio
   assert.equal(root.activeElement, root.querySelector('.launcher'));
   assert.equal(document.getElementById('radio-footer').textContent, 'Radio');
   assert.equal(f.calls.length, 0);
+});
+
+test('Escape returns focus to the launcher when the shadow host retargets native focus', t => {
+  const { root, document, host, window } = fixture(t);
+  const launcher = root.querySelector('.launcher');
+  launcher.focus();
+  assert.equal(document.activeElement, host);
+  launcher.click();
+  root.querySelector('.close').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(root.querySelector('section').hidden, true);
+  assert.equal(root.activeElement, launcher);
 });
 
 test('tour defers companion and clearing a tour restores it without an observer loop', async t => {
@@ -102,6 +113,138 @@ test('community routes draft editable questions without sending, signing, or con
   assert.equal(root.querySelector('.paths').open, false);
   assert.equal(root.activeElement, root.querySelector('input'));
   assert.equal(root.querySelector('.transcript').children.length, 0);
+  assert.equal(f.calls.length, 0);
+  assert.equal(route.getAttribute('aria-pressed'), 'true');
+  assert.equal(root.querySelectorAll('[data-starter][aria-pressed="true"]').length, 1);
+});
+
+test('portrait welcome and illustrated paths preserve readable accessible names', t => {
+  const { root } = fixture(t);
+  assert.equal(root.querySelector('.hello').textContent, 'How can I help you, Earthling?');
+  assert.match(root.querySelector('.greeting').textContent, /How can I help you, Earthling\?/);
+  assert.match(root.querySelector('.portrait-port img').alt, /DBusker/);
+  for (const route of root.querySelectorAll('[data-starter]')) {
+    assert.ok(route.querySelector('svg[aria-hidden="true"]'));
+    assert.ok(route.getAttribute('aria-label').includes(route.querySelector('.path-label').textContent));
+  }
+});
+
+function audioFixture() {
+  const oscillators = [], errors = [], gains = [];
+  let contexts = 0, resumes = 0, closed = 0;
+  const media = { paused: true, muted: false, volume: 1 };
+  const document = { hidden: false, querySelectorAll: () => [media] };
+  let resume = async () => {};
+  class AudioContext {
+    constructor() { contexts++; this.currentTime = 0; this.destination = {}; }
+    async resume() { resumes++; await resume(); }
+    async close() { closed++; }
+    createOscillator() {
+      const oscillator = { frequency: {}, connect() {}, disconnect() {},
+        start(time) { this.started = time; }, stop(time) { this.stopped = time ?? 'now'; } };
+      oscillators.push(oscillator);
+      return oscillator;
+    }
+    createGain() {
+      return { gain: { setValueAtTime() {}, linearRampToValueAtTime(value) { gains.push(value); }, exponentialRampToValueAtTime() {} },
+        connect() {}, disconnect() {} };
+    }
+  }
+  const chime = createCompanionChime({ AudioContext }, document, error => errors.push(error));
+  return { chime, document, media, oscillators, errors, gains, AudioContext,
+    counts: () => ({ contexts, resumes, closed }), setResume: fn => { resume = fn; } };
+}
+
+test('chimes are off by default, quiet and bounded, and do not fetch or create media elements', async () => {
+  const f = audioFixture();
+  await f.chime.play();
+  assert.equal(f.counts().contexts, 0);
+  await f.chime.setEnabled(true);
+  assert.equal(f.oscillators.length, 2);
+  assert.deepEqual(f.gains, [.018, .018]);
+  assert.ok(f.oscillators.every(voice => voice.stopped < .3));
+  await f.chime.setEnabled(false);
+  assert.ok(f.oscillators.every(voice => voice.stopped === 'now'));
+  await f.chime.play();
+  assert.equal(f.oscillators.length, 2);
+  f.chime.dispose();
+  assert.equal(f.counts().closed, 1);
+  assert.deepEqual(f.errors, []);
+});
+
+test('chimes yield to audible media and hidden pages, including while audio resumes', async () => {
+  const f = audioFixture();
+  f.media.paused = false;
+  await f.chime.setEnabled(true);
+  assert.equal(f.counts().contexts, 0);
+  f.media.paused = true;
+  f.document.hidden = true;
+  await f.chime.play();
+  assert.equal(f.counts().contexts, 0);
+  f.document.hidden = false;
+  f.setResume(async () => { f.media.paused = false; });
+  await f.chime.play();
+  assert.equal(f.oscillators.length, 0);
+  f.chime.dispose();
+});
+
+test('closing or disabling sound cancels a chime awaiting browser audio permission', async () => {
+  const f = audioFixture();
+  let finish;
+  f.setResume(() => new Promise(resolve => { finish = resolve; }));
+  const pending = f.chime.setEnabled(true);
+  f.chime.stop();
+  finish();
+  await pending;
+  assert.equal(f.oscillators.length, 0);
+  f.chime.dispose();
+});
+
+test('sound toggle is session-only and unsupported audio gives an explicit error', async t => {
+  const f = fixture(t), { root, window } = f;
+  Object.defineProperty(f.document, 'hidden', { value: false });
+  const warnings = [];
+  t.mock.method(console, 'warn', (...args) => warnings.push(args));
+  const sound = root.querySelector('.sound');
+  assert.equal(sound.getAttribute('aria-pressed'), 'false');
+  assert.equal(window.localStorage.length, 0);
+  sound.click();
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  assert.equal(sound.getAttribute('aria-pressed'), 'false');
+  assert.match(root.querySelector('.status').textContent, /sound unavailable/);
+  assert.equal(warnings.length, 1);
+  assert.equal(f.calls.length, 0);
+  assert.equal(window.localStorage.length, 0);
+});
+
+test('sound integration stops notes for media start, drawer close, and hidden pages', async t => {
+  const f = fixture(t), audio = audioFixture(), { root, window, document } = f;
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  window.AudioContext = audio.AudioContext;
+  root.querySelector('.launcher').click();
+  assert.equal(audio.counts().contexts, 0);
+  root.querySelector('.sound').click();
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  assert.equal(audio.oscillators.length, 2);
+  const radio = document.createElement('audio');
+  document.body.append(radio);
+  radio.dispatchEvent(new window.Event('play'));
+  assert.ok(audio.oscillators.every(voice => voice.stopped === 'now'));
+  root.querySelector('.close').click();
+  root.querySelector('.launcher').click();
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  assert.equal(audio.oscillators.length, 4);
+  window.dispatchEvent(new window.PageTransitionEvent('pagehide', { persisted: true }));
+  assert.equal(audio.counts().closed, 0);
+  root.querySelector('.close').click();
+  assert.ok(audio.oscillators.every(voice => voice.stopped === 'now'));
+  root.querySelector('.launcher').click();
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  Object.defineProperty(document, 'hidden', { value: true });
+  document.dispatchEvent(new window.Event('visibilitychange'));
+  assert.ok(audio.oscillators.every(voice => voice.stopped === 'now'));
+  window.dispatchEvent(new window.Event('pagehide'));
+  assert.equal(audio.counts().closed, 1);
   assert.equal(f.calls.length, 0);
 });
 
