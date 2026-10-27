@@ -1,0 +1,23 @@
+# Copy to .github/workflows/notify-planning-office.yml in an observed repository.
+# Needs the repository secret OFFICE_DISPATCH_TOKEN (fine-grained PAT: a-decent-agency.github.io, Contents read/write).
+name: Notify planning office
+on:
+  issues:
+    types: [opened, closed, reopened, deleted, transferred, milestoned, demilestoned]
+  pull_request:
+    types: [opened, closed, reopened, milestoned, demilestoned]
+  milestone:
+    types: [created, edited, opened, closed, deleted]
+  release:
+    types: [published]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: notify-planning-office
+  cancel-in-progress: true
+jobs:
+  notify:
+    uses: A-Decent-Agency/a-decent-agency.github.io/.github/workflows/notify-planning-office.yml@main
+    secrets: inherit
