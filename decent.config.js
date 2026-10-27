@@ -80,6 +80,10 @@ window.DecentConfig = {
   tokenAddress: "",                                  // TODO: add ERC-20 tip token address if desired
 
   // Community links
+  dbusker: {
+    enabled: false,
+    serviceUrl: "",
+  },
   discord: "https://discord.gg/SCtcBggHPa",
   github: "https://github.com/TheJollyLaMa/DecentBusking",
   appUrl: "https://thejollylama.github.io/DecentBusking/",

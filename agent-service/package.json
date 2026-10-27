@@ -1,0 +1,21 @@
+{
+  "name": "decentbusking-dbusker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": { "node": ">=24.3.0" },
+  "scripts": {
+    "start": "node --env-file=.env server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "snapshot": "node handoff.mjs snapshot",
+    "review": "node handoff.mjs review",
+    "approve": "node handoff.mjs approve"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0",
+    "siwe": "^3.0.0"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

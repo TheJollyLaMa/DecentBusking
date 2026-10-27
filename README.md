@@ -15,6 +15,11 @@ countdown is centered at the bottom on mobile and stays in the player on desktop
 
 Read the [Decent Busking whitepaper](WHITEPAPER.md) for the vision, current architecture, payment mechanics, artist-rights limits, and roadmap. Implemented features are separated from future plans.
 
+**DBusker community guide (feature-branch pilot):** a disabled-by-default,
+wallet-allowlisted AI companion with an editable, steward-approved handoff.
+See [setup, review and privacy boundaries](docs/DBUSKER.md). No community model
+access is enabled by this change.
+
 ## v1.0.0 Supporter release
 
 Approved release terms: **100 editions at 100 Base USDC each**, with a 10%
