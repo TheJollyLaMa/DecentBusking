@@ -5,7 +5,7 @@ import { initWallet } from './wallet.js';
 import { initStage } from './stage.js?v=20261025-seamless-handoff';
 import { initSpace } from './space.js?v=20261025-seamless-handoff';
 import { initTutorial } from './tutorial.js?v=20261025-split-surfaces';
-import { initDBusker } from './dbusker.mjs?v=20261027-invited';
+import { initDBusker } from './dbusker.mjs?v=20261027-mode-feedback';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.
 

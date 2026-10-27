@@ -7,7 +7,7 @@ import { Wallet } from 'ethers';
 import { SiweMessage } from 'siwe';
 import { createAgentServer, loadSettings } from '../server.mjs';
 import { directory, readHandoff, isApproved } from '../handoff.mjs';
-import { askModel, retrieveSources, modelContext } from '../model.mjs';
+import { askModel, retrieveSources, modelContext, ModelFailure } from '../model.mjs';
 import { DatabaseSync } from 'node:sqlite';
 
 async function fixture(t, options = {}) {
@@ -260,6 +260,50 @@ test('configuration rejects remote HTTP and invalid usage ceilings', () => {
   assert.throws(() => loadSettings({ DBUSKER_SITE_URL: 'http://example.com' }), /HTTPS/);
   assert.throws(() => loadSettings({ DBUSKER_MAX_CALLS: 'NaN' }), /MAX_CALLS/);
   assert.throws(() => loadSettings({ DBUSKER_MODEL: 'unreviewed-model' }), /routing.json/);
+});
+
+test('model failures classify safe diagnostics without leaking provider bodies or retrying', async () => {
+  const args = { apiKey: 'not-a-key', model: 'offline', instructions: '', sources: [],
+    messages: [{ role: 'user', content: 'public question' }] };
+  for (const [code, response] of [
+    ['provider_http', () => new Response('PRIVATE provider billing detail', { status: 429 })],
+    ['provider_json', () => new Response('PRIVATE non-JSON body')],
+    ['provider_json', () => Response.json(null)],
+    ['output_limit', () => Response.json({ status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } })],
+    ['incomplete', () => Response.json({ status: 'failed' })],
+    ['refusal', () => Response.json({ status: 'completed', output: [{ type: 'message',
+      content: [{ type: 'refusal', refusal: 'PRIVATE refusal text' }] }] })],
+    ['answer_json', () => Response.json({ status: 'completed', output: [] })],
+    ['answer_json', () => Response.json({ status: 'completed', output: 'PRIVATE malformed output' })],
+    ['evidence_validation', () => Response.json({ status: 'completed', output: [{ type: 'message',
+      content: [{ type: 'output_text', text: 'null' }] }] })],
+    ['transport', () => { throw new Error('PRIVATE network detail'); }],
+  ]) {
+    let calls = 0;
+    await assert.rejects(askModel({ ...args, fetchImpl: async () => { calls++; return response(); } }),
+      error => error instanceof ModelFailure && error.status === 503 && error.code === code &&
+        error.message.includes(`[model:${code}]`) && !error.message.includes('PRIVATE'), code);
+    assert.equal(calls, 1, code);
+  }
+  const controller = new AbortController();
+  const reason = new Error('visitor cancelled');
+  controller.abort(reason);
+  await assert.rejects(askModel({ ...args, signal: controller.signal,
+    fetchImpl: async () => { throw reason; } }), error => error === reason);
+});
+
+test('safe model errors reach the visitor and logs while the failed Efficient call stays budgeted', async t => {
+  const f = await fixture(t, { modelCall: async () => { throw new ModelFailure('output_limit'); } });
+  const session = await f.login();
+  const result = await f.request('/chat', { message: 'DVert campaigns', consent: true, mode: 'efficient' }, session.token);
+  assert.equal(result.status, 503);
+  assert.match(result.body.error, /\[model:output_limit\]/);
+  assert.match(f.logs.at(-1), /\[model:output_limit\]/);
+  const state = readState(f.settings.stateFile);
+  assert.equal(state.calls, 1);
+  assert.equal(state.rows.length, 1);
+  assert.equal(state.rows[0].mode, 'efficient');
+  assert.equal(state.rows[0].outcome, 'error');
 });
 
 function candidate(input, review = 'ready') {

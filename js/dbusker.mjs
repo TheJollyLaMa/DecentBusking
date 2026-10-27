@@ -164,7 +164,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
         <option value="balanced" selected>Balanced / automatic triage</option>
         <option value="deep">Deep dive / stronger model</option>
       </select></label>
-      <p class="mode-note" id="dbusker-mode-note">Balanced chooses a model locally and may make one deeper pass. No automatic learning from your chat; private aggregate performance counters help the steward review routes.</p>
+      <p class="mode-note" id="dbusker-mode-note" role="status" aria-live="polite">For your next question: Balanced chooses a model locally and may make one deeper pass. Changing mode does not resend a question.</p>
       <p class="route-result" role="status" aria-live="polite"></p>
       <div class="transcript" role="log" aria-label="DBusker conversation" aria-live="polite" tabindex="0"></div>
       <form><label for="dbusker-question">Your question</label><textarea id="dbusker-question" maxlength="2000" rows="3" required disabled></textarea><button type="submit" class="send" disabled>Ask DBusker</button></form>
@@ -180,9 +180,9 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   const question = find('textarea'), send = find('.send'), transcript = find('.transcript');
   const mode = find('#dbusker-mode');
   const modeNotes = {
-    efficient: 'One light-model pass. Lowest compute ceiling, not a guarantee of the best answer. If it needs deeper review, choose Balanced or Deep dive.',
-    balanced: 'Balanced chooses a model locally and may make one deeper pass. No automatic learning from your chat; private aggregate performance counters help the steward review routes.',
-    deep: 'One stronger-model pass for complex questions. More compute does not supply missing evidence or verify live payouts.',
+    efficient: 'Efficient selected for your next question. One light-model pass; no deeper pass or automatic retry. Changing mode does not resend a question.',
+    balanced: 'Balanced selected for your next question. Automatic triage with at most one deeper pass. Changing mode does not resend a question.',
+    deep: 'Deep dive selected for your next question. One stronger-model pass; missing evidence stays missing. Changing mode does not resend a question.',
   };
   mode.addEventListener('change', () => { find('.mode-note').textContent = modeNotes[mode.value]; });
   let credential = null, wallet = null, expiresAt = 0, pending = false, generation = 0;
@@ -378,13 +378,13 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       append('DBusker', answer.answer, answer.sources);
       if (answer.routing) {
         find('.route-result').textContent = answer.routing.attempts
-          ? `${answer.routing.mode} / ${answer.routing.models.join(' → ')} / ${answer.routing.attempts} provider pass${answer.routing.attempts === 1 ? '' : 'es'}. ${answer.routing.attempts > 1 ? 'One deeper review used. ' : ''}Self-check: ${answer.routing.review.replaceAll('_', ' ')}; not independent fact verification.`
+          ? `Last answer: ${answer.routing.mode} / ${answer.routing.models.join(' → ')} / ${answer.routing.attempts} provider pass${answer.routing.attempts === 1 ? '' : 'es'}. ${answer.routing.attempts > 1 ? 'One deeper review used. ' : ''}Self-check: ${answer.routing.review.replaceAll('_', ' ')}; not independent fact verification.`
           : 'No provider call: approved evidence was not found. Try a more specific question.';
       }
       question.value = '';
       status.textContent = answer.abstained ? 'DBusker could not verify part of this question. Check the evidence limits above.' : 'Answer ready. Source links are evidence, not proof of live deployment.';
     } catch (error) {
-      if (attempt === generation) status.textContent = error.message;
+      if (attempt === generation) status.textContent = `${mode.options[mode.selectedIndex].text} did not return an answer: ${error.message}`;
     } finally {
       if (attempt === generation) { pending = false; controller = null; controls(); question.focus(); }
     }

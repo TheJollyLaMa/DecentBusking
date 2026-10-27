@@ -331,6 +331,22 @@ Motion respects the system's reduced-motion preference.
 
 ## Bounds and deployment
 
+### Mode feedback and failed answers
+
+Changing mode selects the route for the **next** submitted question; it never
+resends a question, rewrites an existing answer or spends a provider call by
+itself. The selector announces this, and the previous routing receipt is labeled
+"Last answer". An unsuccessful chat request names the selected mode and keeps
+the question editable.
+
+Model failures expose fixed, safe categories: connection failure, provider HTTP
+rejection, unreadable provider/answer JSON, refusal, incomplete response, output
+limit and evidence-validation failure. The same category appears in operator
+logs without provider bodies, prompts, answers, credentials or private reasoning.
+An output-limit failure withholds the partial answer; it does not silently raise
+the 800-token limit or buy another pass. Existing aggregate counters still record
+these as failures, not successes. No automatic retry is added.
+
 ### Invitation-only launcher
 
 The companion starts hidden. Once a wallet is connected to Base through the
