@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261025-profile-dropdowns" />
+  <link rel="stylesheet" href="css/styles.css?v=20261028-archive-search" />
   <link rel="stylesheet" href="css/radio-programming.css?v=20261024-calendar-fit" />
 
   <!-- CDN dependencies -->
@@ -368,9 +368,13 @@
       <span id="dnft-list-count"></span>
       <button id="dnft-list-close" type="button" aria-label="Close archive">✕</button>
     </div>
+    <label class="archive-artist-filter" for="archive-search">Song or artist
+      <input id="archive-search" type="search" placeholder="Search artist and/or song" aria-label="Search the archive by artist and/or song" autocomplete="off" />
+    </label>
     <label class="archive-artist-filter" for="archive-artist-filter">Artist
       <select id="archive-artist-filter"><option value="">All artists</option></select>
     </label>
+    <p id="archive-search-status" class="archive-search-status" role="status" aria-live="polite"></p>
     <!-- Spinner shown while the initial batch is loading -->
     <div id="dnft-list-spinner" class="dnft-list-spinner hidden" aria-label="Loading tracks…">
       <span class="dnft-spinner-dot"></span>

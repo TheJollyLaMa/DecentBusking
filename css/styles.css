@@ -3311,7 +3311,7 @@ decent-foot {
   gap: 12px;
   min-width: 0;
 }
-#scene-music-search, .archive-artist-filter select {
+#scene-music-search, .archive-artist-filter select, .archive-artist-filter input {
   min-width: 0;
   max-width: 100%;
   min-height: 32px;
@@ -3437,6 +3437,10 @@ decent-foot {
 .fund-weekly-details.fund-weekly-partial .usdc-amount-text { animation-duration: 11s; }
 .fund-weekly-details.fund-weekly-queued .usdc-amount-text { animation-duration: 0s; }
 .archive-artist-filter { display: grid; gap: 6px; padding: 10px 16px; font-size: .8rem; color: var(--text-dim); }
+.archive-artist-filter + .archive-artist-filter { padding-top: 0; }
+.archive-artist-filter input { width: 100%; box-sizing: border-box; font: inherit; }
+.archive-search-status { margin: 0; padding: 0 16px 8px; font-size: .75rem; color: var(--text-dim); }
+.archive-search-status:empty { display: none; }
 #dnft-archive-toggle { top: calc(var(--header-height, 112px) + 58px); }
 #dnft-list { top: calc(var(--header-height, 112px) + 102px); bottom: calc(var(--radio-footer-height, 96px) + 12px); }
 .dnft-list-item[hidden] { display: none; }

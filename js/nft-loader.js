@@ -28,8 +28,26 @@ export function catalogPage(items, { offset = 0, limit = 25 } = {}, maxLimit = 2
     nextOffset: offset + limit < items.length ? offset + limit : null };
 }
 
+// Accents are folded so "Jose" and "José" (precomposed or combining) match.
+function searchText(value) {
+  return String(value ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+export function nftSearchTerms(query = '') {
+  return searchText(query).trim().split(/\s+/).filter(Boolean);
+}
+
+/** True when every query word appears in the song title or artist fields. */
+export function nftMatchesQuery(nft, query = '') {
+  const terms = Array.isArray(query) ? query : nftSearchTerms(query);
+  if (!terms.length) return true;
+  const text = searchText([nft?.name, nft?.title, nftArtistLabel(nft || {}), nft?.artistName, nft?.uploader,
+    nft?.artist, nft?.creator, nft?.djukeAlbumTitle, nft?.tokenId].filter(value => value != null && value !== '').join(' '));
+  return terms.every(term => text.includes(term));
+}
+
 export function nftCatalogPage(nfts, { query = '', artist = '', wallet = '', before = '', after = '', ...paging } = {}) {
-  const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const terms = nftSearchTerms(query);
   const lower = after ? Date.parse(after) : null;
   const upper = before ? Date.parse(before) : null;
   if ((after && !Number.isFinite(lower)) || (before && !Number.isFinite(upper))) throw new Error('Invalid timeline dates');
@@ -37,11 +55,10 @@ export function nftCatalogPage(nfts, { query = '', artist = '', wallet = '', bef
   const artists = [...new Map(music.map(nft => [nftArtistKey(nft), nftArtistLabel(nft)])).entries()]
     .map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
   const matching = music.filter(nft => {
-    const text = [nft.name, nft.title, nftArtistLabel(nft), nft.artist, nft.creator, nft.tokenId].filter(Boolean).join(' ').toLowerCase();
     const date = Date.parse(nft.mintedAt);
     const splitWallets = Array.isArray(nft.creatorSplits) ? nft.creatorSplits.map(entry => entry?.wallet || entry?.address) : [];
     const walletMatch = !wallet || [nft.artist, nft.creator, ...splitWallets].some(value => String(value || '').toLowerCase() === wallet.toLowerCase());
-    return (!artist || nftArtistKey(nft) === artist.toLowerCase()) && walletMatch && terms.every(term => text.includes(term)) &&
+    return (!artist || nftArtistKey(nft) === artist.toLowerCase()) && walletMatch && nftMatchesQuery(nft, terms) &&
       (lower === null || date >= lower) && (upper === null || date < upper);
   }).sort((a, b) => (Date.parse(b.mintedAt) || 0) - (Date.parse(a.mintedAt) || 0) || b.tokenId - a.tokenId ||
     a.contractAddress.localeCompare(b.contractAddress));
