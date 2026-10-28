@@ -26,7 +26,7 @@ import { renderNFTCard } from './nft-card.js?v=20261025-song-splits';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { setNowPlaying } from './stage.js?v=20261025-seamless-handoff';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
-import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft } from './nft-loader.js?v=20261012-paging';
+import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft, nftMatchesQuery } from './nft-loader.js?v=20261028-archive-search';
 import { createRadioPlaylistEffects } from './radio-playlist-effects.mjs?v=20261025-seamless-handoff';
 
 // ── Timeline constants ────────────────────────────────────────────────────
@@ -95,6 +95,9 @@ let _archiveRequest = null;
 let _archiveTimer = null;
 let _catalogArtists = [];
 let _archiveQuery = '';
+let _archiveRetries = 0;
+const ARCHIVE_RETRY_MS = 5000;
+const ARCHIVE_MAX_RETRIES = 12;
 let _pointerStart = null;
 let _activeArtist = '';
 let _sharedFocusLookupToken = 0;
@@ -518,11 +521,15 @@ async function _loadNFTs(reset = true) {
       if (!_allNFTs.some(entry => _nftKey(entry.nft) === _nftKey(nft))) _spawnMesh(nft, false);
     }
     _archiveNext = page.nextOffset;
+    _archiveRetries = 0;
     _refreshArtistFilters();
     _updateVisibility();
     if (!_allNFTs.length) _markListEmpty('No matching music NFTs.');
     const status = document.getElementById('archive-search-status');
-    if (status) status.textContent = `${_allNFTs.length} of ${page.total} matching tracks loaded` +
+    const shown = _allNFTs.filter(({ nft }) => _matchesArtist(nft) && _matchesQuery(nft)).length;
+    if (status) status.textContent = (page.total === 0 && (_archiveQuery.trim() || _activeArtist)
+      ? `No songs or artists match${_archiveQuery.trim() ? ` “${_archiveQuery.trim()}”` : ' this artist filter'}.`
+      : `${shown} of ${page.total} matching tracks loaded`) +
       (page.refreshError ? `; showing the last verified index: ${page.refreshError}` : '');
     if (button) {
       button.classList.toggle('hidden', page.nextOffset === null);
@@ -532,7 +539,14 @@ async function _loadNFTs(reset = true) {
     if (generation !== _archiveGeneration || controller.signal.aborted) return;
     console.warn('[space] NFT load failed:', err.message);
     const status = document.getElementById('archive-search-status');
-    if (status) status.textContent = err.message;
+    // The worker answers "restoring; retry shortly" while it rebuilds the index after a restart.
+    const retrying = reset && /retry shortly/i.test(err.message) && _archiveRetries < ARCHIVE_MAX_RETRIES;
+    if (status) status.textContent = retrying ? `${err.message} Retrying automatically…` : err.message;
+    if (retrying) {
+      _archiveRetries++;
+      clearTimeout(_archiveTimer);
+      _archiveTimer = setTimeout(() => _loadNFTs(true), ARCHIVE_RETRY_MS);
+    }
     if (reset) _archiveNext = 0;
     if (!_allNFTs.length) _markListEmpty(err.message);
     if (button) { button.classList.remove('hidden'); button.textContent = 'Retry loading'; }
@@ -851,7 +865,8 @@ function _updateVisibility() {
   }
   let matched = 0;
   for (const { nft } of _allNFTs) {
-    const visible = _matchesArtist(nft);
+    // Now-playing meshes survive search resets; hide their rows unless they match too.
+    const visible = _matchesArtist(nft) && _matchesQuery(nft);
     if (visible) matched++;
     const row = _nftRow(nft);
     if (row) row.hidden = !visible;
@@ -874,6 +889,10 @@ function _artistLabel(nft) {
 
 function _matchesArtist(nft) {
   return !_activeArtist || _artistKey(nft) === _activeArtist;
+}
+
+function _matchesQuery(nft) {
+  return !_archiveQuery.trim() || nftMatchesQuery(nft, _archiveQuery);
 }
 
 function _refreshArtistFilters() {
@@ -909,6 +928,7 @@ function _bindArtistFilters() {
         _refreshArtistFilters();
       }
       clearTimeout(_archiveTimer);
+      _archiveRetries = 0;
       _archiveRequest?.abort();
       _archiveTimer = setTimeout(() => _loadNFTs(true), 250);
     });
