@@ -45,6 +45,8 @@ Edit these files together before the first live conversation:
   and a staged multisig compatibility checklist.
 - [First welcome](../agent-service/handoff/welcome.md): concise newcomer/artist
   guidance, added only for matching questions and short follow-ups.
+- [Public chain evidence](../agent-service/handoff/chain.md): money-trail
+  interpretation, supported coverage and no identity/trust inferences.
 
 Review process:
 
@@ -70,7 +72,7 @@ Review process:
    accessibility checks, data-policy review and a real operating-budget review.
    There is no auto-publish or automatic learning from visitor messages.
 
-Changing **any** of the nine handoff files invalidates approval. A running
+Changing **any** of the ten handoff files invalidates approval. A running
 service detects edits and refuses new answers; restart with the newly approved
 pack. Approval is an operator workflow, not a cryptographic defense against a
 server administrator who can edit both the pack and its approval.
@@ -299,6 +301,81 @@ audio/video element is playing, stopped when media starts or the page becomes
 hidden, and cancelled when the drawer closes or a blocking overlay appears.
 They do not change the radio's source, playback, volume or wallet flow.
 Motion respects the system's reduced-motion preference.
+
+## Public money-trail pilot (not enabled by default)
+
+This is retrieval of public evidence, not fine-tuning, financial advice or a
+connection to the maintainer's chat. Describe DecentBusking as a **community
+music platform powered by an open protocol**: a participation surface backed by
+inspectable contracts, rules and interfaces, not a promise of trustlessness.
+
+After review of the new handoff, set `DBUSKER_CHAIN_ENABLED=true` on the separate
+assistant service to allow bounded read-only lookups. The example defaults to
+false. Do not deploy this handoff over the live pilot without a new approval.
+The existing broadcast worker is only a public read source; no new worker route,
+deployment, scheduler, signer or background index is introduced.
+
+- "When was I last paid?" uses the authenticated session's wallet, only for a
+  first-person payment question. An explicit public `0x` address investigates
+  that wallet; names alone never establish an address. Short financial
+  follow-ups can reuse the previous lookup target within that session.
+- A Base transaction hash or BaseScan transaction link traces that receipt.
+  The service extracts a hash; it never fetches a visitor-supplied URL.
+- Wallet history reuses
+  [`DJUKE_EARNING_CONTRACTS`](../js/creator-earnings.mjs) and the existing public
+  `/api/earnings/:address` index to locate receipts. Direct totals and unclaimed
+  credits come from separate contract views at a confirmed Base block.
+- The reader checks chain ID, waits three confirmations and compares receipts
+  to their canonical block. It verifies at most twelve indexed transactions per
+  question against actual recipient/amount/log-index/block evidence. Index
+  descriptions, identity labels and track titles are not trusted as facts.
+- **Not all-time/family-wide completeness:** cumulative direct totals cover only
+  the listed DJuke v0.3/v0.5 contracts. The index lacks a start/error coverage
+  manifest and excludes other deployments, including v0.4. Recent router payroll
+  subtotals cover only receipt-verified candidates. Empty/behind indexes are not
+  proof of no payments, and "latest indexed payment" is not necessarily latest
+  on chain. Unclaimed credits, withdrawals and cumulative totals are separate.
+- Transaction tracing recognizes native top-level ETH value, Base USDC/ART
+  transfers, configured DJuke artist/playlist events and router fund/payout
+  events. Internal ETH traces, arbitrary tokens and automatic multi-hop
+  attribution are not included. Anyone can inspect a public transaction, but
+  this does not establish who controls its addresses or that they are safe.
+- Amounts use exact integer units and ethers `formatUnits`, not the existing
+  two-decimal display formatter: 0.225 USDC must stay 0.225, not 0.23. Semantic
+  payout events and token transfers describing the same money are never added
+  together. Cumulative batch-fee events are not new charges.
+- Evidence links include the transaction, Base block and relevant contracts,
+  even if the model omits the chain source in its answer. The UI accepts only
+  strict BaseScan transaction/address/block routes and the existing public
+  GitHub code citations.
+
+Public RPC/index calls use fixed HTTPS endpoints, a shared request deadline,
+bounded receipts/events/context and existing authenticated concurrency/rate
+limits. Failures are explicit; no zero-income fallback or signing methods exist.
+No wallet lookup occurs for ordinary code questions. No extra model call is
+added to discover tools, and no wallet alias roster is published.
+
+The existing provider-consent notice now discloses requested public-chain
+evidence: it may include connected or explicitly supplied wallet addresses,
+amounts and public payment history. There is no separate per-lookup opt-in.
+Evidence and lookup targets remain session-memory data, not SQLite routing
+metrics or routine application logs. Public RPC/index operators receive the
+requested address/hash; their own retention/access logs are outside this service.
+
+Acceptance questions include connected-wallet latest/history, another public
+wallet, the twelve-song batch's final settlement, failed/pending transactions,
+stale/unavailable/empty indexes, and requests whose coverage is missing. Offline
+tests do not establish live model answer quality. Enabling or deploying requires
+steward review of the updated fingerprint and separate launch approval.
+
+Reuse decision: adapt the existing committed creator-earnings contract registry,
+fund labels and public index; reuse its event semantics and canonical receipt
+comparison pattern from `discord-bot/payment-ledger.js`. The Canopy curated
+`fund-ledgers` offer led to these concrete sources; no cross-repo extraction or
+dependency is needed. The index's missing coverage manifest and its browser
+formatter's rounding are explicit incompatibilities, not silently trusted
+interfaces. Keep broader index/contract coverage as a follow-up rather than
+claiming a tested whole-ecosystem integration.
 
 ## Access, privacy and shutdown
 

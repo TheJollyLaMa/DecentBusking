@@ -153,8 +153,9 @@ export function initDBusker({ document = globalThis.document, window = globalThi
           <span class="garden-bunny" aria-hidden="true"><span class="nibbling-bunny">🐇</span><span class="carrot">🥕</span></span>
         </div>
       </details>
-      <p class="role-note">An AI guide, not a human steward. No transactions or automatic posting. Chat access does not enroll you for rewards.</p>
-      <label class="consent"><input type="checkbox"> I agree to send my questions and recent chat context to OpenAI.
+      <p class="role-note">An AI guide, not a human steward. No transactions or automatic posting. When enabled, read-only Base evidence covers named contracts and blocks, not all activity. Chat access does not enroll you for rewards.</p>
+      <label class="consent"><input type="checkbox"> I agree to send my questions, recent chat context and requested public-chain evidence to OpenAI.
+        For payment questions, this may include my connected wallet address or a public wallet/transaction I ask about, amounts and payment history. Read-only lookups use public Base RPC and the public earnings index.
         Don't share secrets. Chat is kept in server memory for up to 15 minutes; the provider's own retention policy also applies.
         <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></label>
       <div class="actions"><button type="button" class="signin">Sign in with wallet</button><button type="button" class="signout" hidden>Clear chat &amp; sign out</button></div>
@@ -271,14 +272,23 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     content.textContent = text;
     article.append(label, content);
     for (const source of sources) {
-      const url = new URL(source.url);
-      if (url.origin !== 'https://github.com' || !url.pathname.startsWith('/TheJollyLaMa/DecentBusking/blob/')) {
-        throw new Error('DBusker returned an unexpected source URL.');
+      const links = [{ url: source.url, label: source.kind === 'chain' ? source.file : `${source.file}:${source.line}` },
+        ...(source.kind === 'chain' ? source.references || [] : [])];
+      for (const item of links) {
+        const url = new URL(item.url);
+        const code = source.kind !== 'chain' && url.origin === 'https://github.com' &&
+          url.pathname.startsWith('/TheJollyLaMa/DecentBusking/blob/');
+        const chain = source.kind === 'chain' && url.origin === 'https://basescan.org' &&
+          /^\/(?:tx\/0x[0-9a-f]{64}|address\/0x[0-9a-f]{40}|block\/\d+)$/i.test(url.pathname);
+        if ((!code && !chain) || url.username || url.password || url.search ||
+            (url.hash && (!code || !/^#L\d+(?:-L\d+)?$/.test(url.hash)))) {
+          throw new Error('DBusker returned an unexpected source URL.');
+        }
+        const link = document.createElement('a');
+        link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        link.textContent = item.label;
+        article.append(link);
       }
-      const link = document.createElement('a');
-      link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
-      link.textContent = `${source.file}:${source.line}`;
-      article.append(link);
     }
     transcript.append(article);
     article.className = role === 'DBusker' ? 'from-dbusker' : 'from-visitor';
@@ -345,7 +355,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       }
       credential = session.token; wallet = session.wallet; expiresAt = session.expiresAt;
       expiryTimer = window.setTimeout(() => signout.click(), Math.max(0, expiresAt - Date.now()));
-      find('.handoff').textContent = `Public source ${session.handoff.commit.slice(0, 8)} · handoff ${session.handoff.digest.slice(0, 8)}. No live-state access.`;
+      find('.handoff').textContent = `Public source ${session.handoff.commit.slice(0, 8)} · handoff ${session.handoff.digest.slice(0, 8)}. ${session.capabilities?.chain ? 'Read-only Base evidence enabled; each answer has coverage limits.' : 'No live-state access.'}`;
       status.textContent = 'Signed in. Ask about getting started, the public code, or hosting your own community.';
     } catch (error) {
       if (attempt === generation) status.textContent = error.message;

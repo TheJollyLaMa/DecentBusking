@@ -239,7 +239,7 @@ test('community routes, mission, evaluation and corpus all invalidate prior appr
   const initial = readHandoff(dir), approval = path.join(dir, 'approval.json');
   writeFileSync(approval, JSON.stringify({ digest: initial.digest, reviewer: 'offline test', approvedAt: new Date().toISOString() }));
   assert.equal(isApproved(initial, approval), true);
-  for (const file of ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'stewardship.md', 'welcome.md']) {
+  for (const file of ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'stewardship.md', 'welcome.md', 'chain.md']) {
     const target = path.join(dir, 'handoff', file), original = readFileSync(target, 'utf8');
     writeFileSync(target, `${original}\n`);
     assert.equal(isApproved(readHandoff(dir), approval), false, file);

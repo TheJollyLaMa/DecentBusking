@@ -11,6 +11,7 @@ import { askModel } from './model.mjs';
 import { createRetriever } from './knowledge.mjs';
 import { MODES, selectRoute, deeperRoute, fitContext, finalAnswer } from './routing.mjs';
 import { createMetrics } from './metrics.mjs';
+import { chainIntent, createChainReader } from './chain.mjs';
 
 const SESSION_MS = 15 * 60 * 1000;
 const NONCE_MS = 5 * 60 * 1000;
@@ -32,10 +33,11 @@ export function loadSettings(env = process.env) {
     accessFile: path.resolve(env.DBUSKER_ACCESS_FILE || path.join(directory, 'access.json')),
     approvalFile: path.resolve(env.DBUSKER_APPROVAL_FILE || path.join(directory, 'approval.json')),
     stateFile: path.resolve(env.DBUSKER_STATE_FILE || path.join(directory, 'state.sqlite')), maxCalls,
+    chainEnabled: env.DBUSKER_CHAIN_ENABLED === 'true',
   };
 }
 
-export function createAgentServer(settings, { modelCall = askModel, now = Date.now, logger = console } = {}) {
+export function createAgentServer(settings, { modelCall = askModel, chainRead = createChainReader(), now = Date.now, logger = console } = {}) {
   const pack = readHandoff();
   const retrieve = createRetriever(pack.sources, pack.topics);
   const db = new DatabaseSync(settings.stateFile);
@@ -164,6 +166,7 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
         const credential = token(), expires = now() + SESSION_MS;
         sessions.set(hash(credential), { wallet: challenge.wallet, expires, messages: [], calls: 0 });
         return send(200, { token: credential, expiresAt: expires, wallet: challenge.wallet,
+          capabilities: { chain: settings.chainEnabled === true },
           handoff: { digest: pack.digest, commit: pack.commit, indexedAt: pack.indexedAt } });
       }
       if (request.url === '/chat' && request.method === 'POST') {
@@ -178,11 +181,16 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
         if (!MODES.includes(mode)) throw problem(400, 'Choose Efficient, Balanced or Deep dive.');
         if (active.has(key)) throw problem(409, 'Wait for your current answer.');
         if (active.size >= 3) throw problem(429, 'DBusker is busy. Please try shortly.');
+        const intent = settings.chainEnabled ? chainIntent(message, session.wallet, session.chainIntent) : null;
+        if (!intent) session.chainIntent = null;
+        if (intent?.clarification) return send(200, { answer: intent.clarification, abstained: true, sources: [],
+          handoffDigest: pack.digest, routing: { mode, task: 'sensitive', models: [], tiers: [], attempts: 0,
+            review: 'insufficient_evidence', escalation: 'missing_evidence' } });
         const sources = retrieve(message, session.messages);
-        const instructions = questionInstructions(pack, message, session.messages);
+        const instructions = [questionInstructions(pack, message, session.messages), ...(intent ? [pack.chain] : [])].join('\n\n');
         const messages = [...session.messages, { role: 'user', content: message.trim() }].slice(-7);
         let route = selectRoute(pack.routing, mode, message, session.task);
-        if (!sources.length) {
+        if (!sources.length && !intent) {
           const answer = 'I could not find approved public evidence for this question. Try naming the feature or code symbol, or use the public newcomer guide and community links. I cannot verify live balances, payouts or deployment state.';
           session.messages = [...messages, { role: 'assistant', content: answer }].slice(-6);
           session.task = route.task;
@@ -195,6 +203,17 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
         response.on('close', disconnect);
         active.set(key, controller);
         try {
+          let chainSource;
+          if (intent) {
+            const evidence = await chainRead(intent, { signal: controller.signal });
+            controller.signal.throwIfAborted();
+            ready();
+            authorized(request);
+            sources.unshift(evidence);
+            const { text: _text, ...reference } = evidence;
+            chainSource = reference;
+            session.chainIntent = intent;
+          }
           let candidate, context, draft;
           const used = [];
           for (let attempt = 1; attempt <= 2; attempt++) {
@@ -230,7 +249,9 @@ export function createAgentServer(settings, { modelCall = askModel, now = Date.n
           const answer = finalAnswer(candidate);
           session.messages = [...context.messages, { role: 'assistant', content: answer.answer }].slice(-6);
           session.task = route.task;
-          return send(200, { answer: answer.answer, sources: answer.sources, abstained: answer.abstained,
+          return send(200, { answer: answer.answer,
+            sources: chainSource ? [chainSource, ...answer.sources.filter(source => source.id !== chainSource.id)] : answer.sources,
+            abstained: answer.abstained,
             handoffDigest: pack.digest, routing: {
               mode, task: route.task, models: used.map(item => item.model), tiers: used.map(item => item.tier),
               attempts: used.length, review: answer.review,

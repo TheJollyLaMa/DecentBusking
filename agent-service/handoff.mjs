@@ -11,7 +11,7 @@ export const directory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.dirname(directory);
 
 export function readHandoff(base = directory) {
-  const files = ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'routing.json', 'stewardship.md', 'welcome.md'];
+  const files = ['voice.md', 'boundaries.md', 'participation.md', 'topics.json', 'evaluation.json', 'sources.json', 'routing.json', 'stewardship.md', 'welcome.md', 'chain.md'];
   const contents = files.map(file => readFileSync(path.join(base, 'handoff', file), 'utf8'));
   const digest = createHash('sha256').update(JSON.stringify(contents)).digest('hex');
   const snapshot = JSON.parse(contents[5]);
@@ -38,7 +38,7 @@ export function readHandoff(base = directory) {
   return {
     digest, instructions: `${contents[0]}\n\n${contents[1]}\n\n${contents[2]}`,
     topics, evaluation: JSON.parse(contents[4]), routing: validateRouting(JSON.parse(contents[6])),
-    stewardship: contents[7], welcome: contents[8], ...snapshot,
+    stewardship: contents[7], welcome: contents[8], chain: contents[9], ...snapshot,
   };
 }
 

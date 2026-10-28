@@ -13,9 +13,9 @@ test('public pilot configuration contains only the separate service URL and enab
   assert.equal(Object.keys(window.DecentConfig.dbusker).sort().join(','), 'enabled,serviceUrl');
   const index = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
   assert.match(index, /decent\.config\.js\?v=20261027-dbusker-invited/);
-  assert.match(index, /js\/main\.js\?v=20261027-dbusker-mode-feedback/);
+  assert.match(index, /js\/main\.js\?v=20261028-dbusker-chain-evidence/);
   assert.match(readFileSync(new URL('../../js/main.js', import.meta.url), 'utf8'),
-    /dbusker\.mjs\?v=20261027-mode-feedback/);
+    /dbusker\.mjs\?v=20261028-chain-evidence/);
 });
 
 async function fixture(t, enabled = true, connected = true) {
@@ -423,6 +423,25 @@ test('signed-in chat renders answers as text, cites sources and clears on discon
   assert.match(root.querySelector('.route-result').textContent, /efficient.*offline-light-model.*1 provider pass/);
   assert.match(root.querySelector('.route-result').textContent, /^Last answer:/);
   assert.match(root.querySelector('.transcript').textContent, /plain text/);
+  const hash = `0x${'a'.repeat(64)}`;
+  window.fetch = async () => Response.json({ answer: 'Verified subset, not lifetime income.', sources: [{
+    kind: 'chain', file: 'Base wallet earnings evidence', url: `https://basescan.org/address/${address}`,
+    references: [{ url: `https://basescan.org/tx/${hash}`, label: 'Payment transaction' },
+      { url: 'https://basescan.org/block/53199272', label: 'Base block 53199272' }],
+  }] });
+  root.querySelector('textarea').value = 'When was I paid?';
+  root.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true }));
+  await new Promise(resolve => window.setTimeout(resolve, 5));
+  assert.equal(root.querySelector(`a[href="https://basescan.org/tx/${hash}"]`).textContent, 'Payment transaction');
+  assert.equal(root.querySelector('a[href="https://basescan.org/block/53199272"]').target, '_blank');
+  window.fetch = async () => Response.json({ answer: 'Do not display this.', sources: [{
+    kind: 'chain', file: 'Unsafe', url: 'https://basescan.org.evil.example/tx/' + hash,
+  }] });
+  root.querySelector('textarea').value = 'Check another payment';
+  root.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true }));
+  await new Promise(resolve => window.setTimeout(resolve, 5));
+  assert.match(root.querySelector('.status').textContent, /unexpected source URL/);
+  assert.ok(!root.querySelector('.transcript').textContent.includes('Do not display this.'));
   window.fetch = async () => Response.json({ error: 'Answer space exceeded. [model:output_limit]' }, { status: 503 });
   root.querySelector('textarea').value = 'Another question';
   root.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true }));
@@ -430,7 +449,7 @@ test('signed-in chat renders answers as text, cites sources and clears on discon
   assert.match(root.querySelector('.status').textContent, /Efficient.*did not return an answer.*model:output_limit/);
   assert.equal(root.querySelector('textarea').value, 'Another question', 'Failed question remains editable');
   assert.equal(root.querySelector('textarea').disabled, false);
-  assert.equal(root.querySelectorAll('.from-dbusker').length, 1, 'No success-shaped answer is added on failure');
+  assert.equal(root.querySelectorAll('.from-dbusker').length, 2, 'No success-shaped answer is added on failure');
   window.fetch = async () => Response.json({ cleared: true });
   f.document.dispatchEvent(new window.Event('wallet-disconnected'));
   assert.equal(root.querySelector('.transcript').children.length, 0);
