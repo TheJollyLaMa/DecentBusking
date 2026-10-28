@@ -73,3 +73,40 @@ test('dual pin does not report success when local storage fails after Pinata upl
   });
   assert.equal(uploads, 1);
 });
+test('retries transient Pinata timeouts and server errors, but not client errors', async () => {
+  const { createIpfsUploader } = await import(moduleUrl);
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const statuses = [408, 502];
+    let calls = 0;
+    const upload = createIpfsUploader({ pinataJwt: 'test-jwt', retryDelayMs: 0, fetchImpl: async () => {
+      calls++;
+      const status = statuses.shift();
+      return status ? new Response('busy', { status }) : new Response(JSON.stringify({ data: { cid: 'bafyretry' } }), { status: 200 });
+    } });
+    assert.equal(await upload(Buffer.from('art'), 'cover.png', 'image/png'), 'ipfs://bafyretry');
+    assert.equal(calls, 3);
+
+    let rejectedCalls = 0;
+    const rejected = createIpfsUploader({ pinataJwt: 'test-jwt', retryDelayMs: 0, fetchImpl: async () => {
+      rejectedCalls++; return new Response('bad', { status: 400 });
+    } });
+    await assert.rejects(rejected(Buffer.from('art'), 'cover.png', 'image/png'), /Pinata upload failed \(400\)/);
+    assert.equal(rejectedCalls, 1);
+
+    let timeoutCalls = 0;
+    const exhausted = createIpfsUploader({ pinataJwt: 'test-jwt', retryDelayMs: 0, attempts: 3, fetchImpl: async () => {
+      timeoutCalls++; return new Response('timeout', { status: 408 });
+    } });
+    await assert.rejects(exhausted(Buffer.from('art'), 'cover.png', 'image/png'), /Pinata upload failed \(408\)/);
+    assert.equal(timeoutCalls, 3);
+
+    let networkCalls = 0;
+    const network = createIpfsUploader({ pinataJwt: 'test-jwt', retryDelayMs: 0, fetchImpl: async () => {
+      if (++networkCalls === 1) throw new TypeError('fetch failed');
+      return new Response(JSON.stringify({ data: { cid: 'bafynet' } }), { status: 200 });
+    } });
+    assert.equal(await network(Buffer.from('art'), 'cover.png', 'image/png'), 'ipfs://bafynet');
+  } finally { console.warn = originalWarn; }
+});

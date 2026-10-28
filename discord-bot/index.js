@@ -820,6 +820,9 @@ async function main() {
       if (choice === 'song') {
         const attachment = record.attachment;
         const filename = attachment.name || 'track.mp3';
+        // Acknowledge within Discord's 3s window and remove the buttons so the choice can't be clicked twice.
+        await interaction?.update({ content: `🎵 **${filename}** — song. Archiving to IPFS…`, components: [], allowedMentions: { parse: [] } })
+          .catch(error => console.warn('[submission] Could not acknowledge song choice:', error.message));
         const track = {
           attachmentId: attachment.id,
           messageId: record.message.id,
