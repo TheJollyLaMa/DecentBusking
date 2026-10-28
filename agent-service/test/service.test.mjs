@@ -29,7 +29,8 @@ async function fixture(t, options = {}) {
       sources: [{ id: input.sources[0].id, file: input.sources[0].file, line: input.sources[0].line, url: input.sources[0].url }] };
   });
   let time = Date.now();
-  const server = createAgentServer(settings, { modelCall, now: () => time, logger: { error: message => logs.push(message) } });
+  const server = createAgentServer(settings, { modelCall, ...(options.chainRead ? { chainRead: options.chainRead } : {}),
+    now: () => time, logger: { error: message => logs.push(message) } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   t.after(async () => {
@@ -66,6 +67,44 @@ test('pilot fails closed when disabled or handoff is not approved', async t => {
   writeFileSync(f.settings.approvalFile, '{"digest":"outdated"}');
   assert.equal((await f.request('/challenge', { address: f.wallet.address, chainId: 8453 })).status, 503);
   assert.equal(f.calls.length, 0);
+});
+
+test('chain evidence is opt-in configuration, authenticated, cancellable and precedes model evidence', async t => {
+  const reads = [];
+  const f = await fixture(t, { settings: { chainEnabled: true }, chainRead: async (intent, { signal }) => {
+    assert.ok(signal instanceof AbortSignal);
+    reads.push(intent);
+    return { id: 'chain-offline', kind: 'chain', file: 'Base wallet earnings evidence', line: 1,
+      url: `https://basescan.org/address/${intent.address}`, text: '{"scope":"verified subset"}' };
+  } });
+  const session = await f.login();
+  assert.equal((await f.request('/chat', { message: 'When was I last paid?', consent: false }, session.token)).status, 400);
+  assert.equal(reads.length, 0);
+  const result = await f.request('/chat', { message: 'When was I last paid?', consent: true }, session.token);
+  assert.equal(result.status, 200);
+  assert.deepEqual(reads[0], { kind: 'wallet', address: f.wallet.address.toLowerCase() });
+  assert.equal(f.calls[0].sources[0].kind, 'chain');
+  assert.ok(result.body.sources.some(source => source.id === 'chain-offline' && !Object.hasOwn(source, 'text')));
+  assert.match(f.calls[0].instructions, /latest verified indexed payment/);
+  assert.ok(!JSON.stringify(readState(f.settings.stateFile)).includes(f.wallet.address.toLowerCase()));
+  const named = await f.request('/chat', { message: 'When was José last paid?', consent: true }, session.token);
+  assert.match(named.body.answer, /Names alone/);
+  assert.equal(reads.length, 1, 'No wallet identity guessed from a name');
+  f.settings.chainEnabled = false;
+  await f.request('/chat', { message: 'How much have I been paid?', consent: true }, session.token);
+  assert.equal(reads.length, 1);
+});
+
+test('chain lookup failure is not sent to model as zero income and consumes no provider budget', async t => {
+  const f = await fixture(t, { settings: { chainEnabled: true }, chainRead: async () => {
+    throw Object.assign(new Error('Public chain evidence is unavailable.'), { status: 503 });
+  } });
+  const session = await f.login();
+  const result = await f.request('/chat', { message: 'How much have I earned?', consent: true }, session.token);
+  assert.equal(result.status, 503);
+  assert.match(result.body.error, /unavailable/);
+  assert.equal(f.calls.length, 0);
+  assert.equal(readState(f.settings.stateFile).calls, 0);
 });
 
 test('only invited Base wallets with valid one-time signatures get sessions', async t => {
