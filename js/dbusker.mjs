@@ -119,7 +119,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   host.id = 'dbusker-companion';
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `
-    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261027-rabbit', import.meta.url).href}">
+    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261028-credits', import.meta.url).href}">
     <div class="greeting" hidden><span>How can I help you, Earthling?</span><button type="button" class="dismiss" aria-label="Dismiss DBusker greeting">Not now</button></div>
     <button type="button" class="launcher" aria-label="Ask DBusker, AI community guide" aria-expanded="false" aria-controls="dbusker-chat">
       <span class="launcher-portrait"><img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="" width="58" height="58"></span><span><small>A friendly signal</small>Ask DBusker</span><span class="signal-dot" aria-hidden="true"></span>
@@ -157,6 +157,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       <label class="consent"><input type="checkbox"> I agree to send my questions, recent chat context and requested public-chain evidence to OpenAI.
         For payment questions, this may include my connected wallet address or a public wallet/transaction I ask about, amounts and payment history. Read-only lookups use public Base RPC and the public earnings index.
         Don't share secrets. Chat is kept in server memory for up to 15 minutes; the provider's own retention policy also applies.
+        The steward keeps private per-wallet credit/token totals, not automatic conversation logs. A separate voluntary share preview lets you submit an exchange for up to 30 days of steward review.
         <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></label>
       <div class="actions"><button type="button" class="signin">Sign in with wallet</button><button type="button" class="signout" hidden>Clear chat &amp; sign out</button></div>
       <p class="status" role="status" aria-live="polite">Invite-only. Connect through the site header, then sign in here on Base. No gas or payment.</p>
@@ -167,8 +168,17 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       </select></label>
       <p class="mode-note" id="dbusker-mode-note" role="status" aria-live="polite">For your next question: Balanced chooses a model locally and may make one deeper pass. Changing mode does not resend a question.</p>
       <p class="route-result" role="status" aria-live="polite"></p>
+      <p class="usage-note" role="status" aria-live="polite"></p>
       <div class="transcript" role="log" aria-label="DBusker conversation" aria-live="polite" tabindex="0"></div>
       <form><label for="dbusker-question">Your question</label><textarea id="dbusker-question" maxlength="2000" rows="3" required disabled></textarea><button type="submit" class="send" disabled>Ask DBusker</button></form>
+      <details class="review-share" hidden>
+        <summary>Help DBusker improve: preview an exchange for the steward</summary>
+        <p>Optional. Only this question, answer, linked sources and model/handoff receipt are shared, together with your signed-in wallet and sharing time. No earlier turns or raw chain lookup are included. Keep for up to 30 days; delete from the active inbox below. Provider/operator backups have their own retention policies. Clearing chat does not delete a shared exchange. This is human review, not automatic model training. Don't share secrets.</p>
+        <pre class="review-preview"></pre>
+        <button type="button" class="share-exchange">Share this preview with the steward</button>
+      </details>
+      <p class="review-status" role="status" aria-live="polite"></p>
+      <div class="shared-reviews" aria-label="Your shared exchanges"></div>
       <p class="handoff"></p>
       </div>
       <div class="cabin-foot" aria-hidden="true"><span>Earth Village / open frequencies</span><span class="speaker-grille"></span><span class="foot-light"></span></div>
@@ -189,6 +199,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   let credential = null, wallet = null, expiresAt = 0, pending = false, generation = 0;
   let controller = null, expiryTimer = null, dismissed = false, returnFocus = null;
   let invited = false, invitationAddress = null, invitationGeneration = 0, invitationController = null;
+  let exchangeId = null, reviewPending = false;
   const sound = find('.sound');
   const chime = createCompanionChime(window, document, error => {
     sound.setAttribute('aria-pressed', 'false');
@@ -210,9 +221,11 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     signin.hidden = Boolean(credential);
     signin.disabled = pending || !consent.checked;
     signout.hidden = !credential;
-    question.disabled = pending || !credential || !consent.checked;
+    question.disabled = pending || reviewPending || !credential || !consent.checked;
     send.disabled = question.disabled;
     mode.disabled = pending;
+    find('.share-exchange').disabled = pending || reviewPending || !credential || !exchangeId;
+    find('.shared-reviews').querySelectorAll('button').forEach(button => { button.disabled = pending || reviewPending; });
     root.querySelectorAll('[data-starter]').forEach(button => { button.disabled = pending; });
     transcript.setAttribute('aria-busy', String(pending));
     panel.classList.toggle('is-thinking', pending);
@@ -230,6 +243,13 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     question.value = '';
     find('.handoff').textContent = '';
     find('.route-result').textContent = '';
+    exchangeId = null; reviewPending = false;
+    find('.review-share').hidden = true;
+    find('.review-share').open = false;
+    find('.review-preview').textContent = '';
+    find('.review-status').textContent = '';
+    find('.usage-note').textContent = '';
+    find('.shared-reviews').replaceChildren();
     status.textContent = message;
     controls();
   }
@@ -246,6 +266,67 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     }
     return data;
   }
+  function showUsage(usage) {
+    if (!usage || !['calls', 'inputTokens', 'outputTokens', 'usageMissing'].every(key =>
+      Number.isSafeInteger(usage[key]) && usage[key] >= 0)) throw new Error('Usage totals were not returned correctly.');
+    find('.usage-note').textContent = `Your credits: ${usage.calls} provider passes since ${usage.startedAt}. Tokens: ${usage.inputTokens} in / ${usage.outputTokens} out. ${usage.usageMissing} passes with missing usage. Failed/cancelled passes count; tokens are not a dollar bill.`;
+  }
+  async function refreshUsage(attempt) {
+    if (!credential) return;
+    try {
+      const usage = await request('/usage', null, { method: 'GET' });
+      if (attempt === generation) showUsage(usage);
+    } catch (error) {
+      if (attempt === generation) find('.usage-note').textContent = `Usage totals unavailable: ${error.message}`;
+    }
+  }
+  async function refreshReviews(attempt) {
+    const data = await request('/reviews', null, { method: 'GET' });
+    if (attempt !== generation) return;
+    if (!Array.isArray(data.reviews)) throw new Error('Shared-exchange list was not returned correctly.');
+    const list = find('.shared-reviews');
+    list.replaceChildren();
+    for (const review of data.reviews) {
+      const row = document.createElement('p'), button = document.createElement('button');
+      row.textContent = `Shared exchange ${review.id.slice(0, 8)}; expires ${new Date(review.expiresAt).toLocaleDateString()}. `;
+      button.type = 'button'; button.textContent = 'Delete shared exchange';
+      button.addEventListener('click', async () => {
+        if (pending || reviewPending || !credential) return;
+        const current = generation;
+        reviewPending = true; controls();
+        try {
+          await request(`/review/${review.id}`, null, { method: 'DELETE' });
+          if (current !== generation) return;
+          find('.review-status').textContent = 'Shared exchange deleted from the active review inbox.';
+          await refreshReviews(current);
+        } catch (error) {
+          if (current === generation) find('.review-status').textContent = `Could not delete shared exchange: ${error.message}`;
+        } finally {
+          if (current === generation) { reviewPending = false; controls(); }
+        }
+      });
+      row.append(button); list.append(row);
+    }
+    controls();
+  }
+  find('.share-exchange').addEventListener('click', async () => {
+    if (pending || reviewPending || !credential || !exchangeId) return;
+    const attempt = generation;
+    reviewPending = true; controls();
+    try {
+      await request('/review', { exchangeId, consent: true });
+      if (attempt !== generation) return;
+      exchangeId = null;
+      find('.review-status').textContent = 'Shared with the steward for review, not automatic training. You can delete it below.';
+      find('.review-share').hidden = true;
+      find('.review-preview').textContent = '';
+      await refreshReviews(attempt);
+    } catch (error) {
+      if (attempt === generation) find('.review-status').textContent = `Sharing could not be completed: ${error.message}`;
+    } finally {
+      if (attempt === generation) { reviewPending = false; controls(); }
+    }
+  });
   function show() {
     if (!invited || companionBlocked(document)) return;
     returnFocus = document.activeElement === host ? root.activeElement : document.activeElement;
@@ -354,6 +435,14 @@ export function initDBusker({ document = globalThis.document, window = globalThi
         return;
       }
       credential = session.token; wallet = session.wallet; expiresAt = session.expiresAt;
+      if (session.usage) showUsage(session.usage);
+      if (session.capabilities?.reviews) {
+        try { await refreshReviews(attempt); }
+        catch (error) {
+          if (attempt === generation) find('.review-status').textContent = `Shared-exchange list unavailable: ${error.message}`;
+        }
+        if (attempt !== generation) return;
+      }
       expiryTimer = window.setTimeout(() => signout.click(), Math.max(0, expiresAt - Date.now()));
       find('.handoff').textContent = `Public source ${session.handoff.commit.slice(0, 8)} · handoff ${session.handoff.digest.slice(0, 8)}. ${session.capabilities?.chain ? 'Read-only Base evidence enabled; each answer has coverage limits.' : 'No live-state access.'}`;
       status.textContent = 'Signed in. Ask about getting started, the public code, or hosting your own community.';
@@ -374,18 +463,28 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   });
   find('form').addEventListener('submit', async event => {
     event.preventDefault();
-    if (!credential || !consent.checked || pending || !question.value.trim()) return;
+    if (!credential || !consent.checked || pending || reviewPending || !question.value.trim()) return;
     if (Date.now() >= expiresAt) { signout.click(); return; }
     const message = question.value.trim(), attempt = generation;
     pending = true; controls();
     controller = new AbortController();
     status.textContent = `${mode.options[mode.selectedIndex].text}. Reading approved sources and checking the answer; Balanced may take one deeper pass.`;
     find('.route-result').textContent = '';
+    exchangeId = null;
+    find('.review-share').hidden = true;
+    find('.review-share').open = false;
+    find('.review-preview').textContent = '';
     append('You', message);
     try {
       const answer = await request('/chat', { message, consent: true, mode: mode.value }, { signal: controller.signal });
       if (attempt !== generation) return;
       append('DBusker', answer.answer, answer.sources);
+      if (answer.exchangeId) {
+        exchangeId = answer.exchangeId;
+        find('.review-preview').textContent = JSON.stringify({ question: message, answer: answer.answer,
+          sources: answer.sources, routing: answer.routing, handoffDigest: answer.handoffDigest }, null, 2);
+        find('.review-share').hidden = false;
+      }
       if (answer.routing) {
         find('.route-result').textContent = answer.routing.attempts
           ? `Last answer: ${answer.routing.mode} / ${answer.routing.models.join(' → ')} / ${answer.routing.attempts} provider pass${answer.routing.attempts === 1 ? '' : 'es'}. ${answer.routing.attempts > 1 ? 'One deeper review used. ' : ''}Self-check: ${answer.routing.review.replaceAll('_', ' ')}; not independent fact verification.`
@@ -397,6 +496,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       if (attempt === generation) status.textContent = `${mode.options[mode.selectedIndex].text} did not return an answer: ${error.message}`;
     } finally {
       if (attempt === generation) { pending = false; controller = null; controls(); question.focus(); }
+      if (attempt === generation) await refreshUsage(attempt);
     }
   });
   const walletChanged = () => {

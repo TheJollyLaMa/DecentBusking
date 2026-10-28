@@ -12,6 +12,7 @@ import { createRetriever } from './knowledge.mjs';
 import { MODES, selectRoute, deeperRoute, fitContext, finalAnswer } from './routing.mjs';
 import { createMetrics } from './metrics.mjs';
 import { chainIntent, createChainReader } from './chain.mjs';
+import { createAccounting, validUsage } from './accounting.mjs';
 
 const SESSION_MS = 15 * 60 * 1000;
 const NONCE_MS = 5 * 60 * 1000;
@@ -44,7 +45,7 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
   chmodSync(settings.stateFile, 0o600);
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS budget (id INTEGER PRIMARY KEY CHECK(id=1), calls INTEGER NOT NULL); INSERT OR IGNORE INTO budget VALUES (1,0)');
   const metrics = createMetrics(db);
-  const reserve = db.prepare('UPDATE budget SET calls=calls+1 WHERE id=1 AND calls < ? RETURNING calls');
+  const accounting = createAccounting(db, now);
   const challenges = new Map(), sessions = new Map(), rates = new Map(), active = new Map();
   let closed = false;
   function access() {
@@ -113,7 +114,7 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
       response.setHeader('Access-Control-Allow-Origin', settings.origin);
       response.setHeader('Vary', 'Origin');
       if (request.method === 'OPTIONS') {
-        response.setHeader('Access-Control-Allow-Methods', 'POST, DELETE, OPTIONS');
+        response.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
         response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
         response.writeHead(204); response.end(); return;
       }
@@ -124,6 +125,28 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
         return send(200, { cleared: true });
       }
       ready();
+      if (request.url === '/usage' && request.method === 'GET') {
+        const { session } = authorized(request);
+        return send(200, accounting.usage(session.wallet));
+      }
+      if (request.url === '/reviews' && request.method === 'GET') {
+        const { session } = authorized(request);
+        return send(200, { reviews: accounting.reviews(session.wallet) });
+      }
+      if (request.url === '/review' && request.method === 'POST') {
+        const { key, session } = authorized(request);
+        limit(`review:${session.wallet}`, 6);
+        const { exchangeId, consent } = await body(request);
+        if (consent !== true) throw problem(400, 'Preview and explicitly consent before sharing this exchange.');
+        if (active.has(key)) throw problem(409, 'Wait for your current answer before sharing.');
+        if (!session.exchange || session.exchange.id !== exchangeId) throw problem(409, 'This exchange is no longer available. Ask again before sharing.');
+        return send(200, accounting.share(session.wallet, session.exchange));
+      }
+      if (/^\/review\/[a-f0-9]{64}$/.test(request.url) && request.method === 'DELETE') {
+        const { session } = authorized(request);
+        accounting.remove(session.wallet, request.url.slice('/review/'.length));
+        return send(200, { deleted: true });
+      }
       if (request.url === '/invitation' && request.method === 'POST') {
         limit(`ip:${request.socket.remoteAddress}`, 30);
         const { address, chainId } = await body(request);
@@ -166,7 +189,8 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
         const credential = token(), expires = now() + SESSION_MS;
         sessions.set(hash(credential), { wallet: challenge.wallet, expires, messages: [], calls: 0 });
         return send(200, { token: credential, expiresAt: expires, wallet: challenge.wallet,
-          capabilities: { chain: settings.chainEnabled === true },
+          capabilities: { chain: settings.chainEnabled === true, reviews: true },
+          usage: accounting.usage(challenge.wallet),
           handoff: { digest: pack.digest, commit: pack.commit, indexedAt: pack.indexedAt } });
       }
       if (request.url === '/chat' && request.method === 'POST') {
@@ -179,6 +203,7 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
         if (consent !== true) throw problem(400, 'Consent to send messages to the model provider is required.');
         if (typeof message !== 'string' || !message.trim() || message.length > 2000) throw problem(400, 'Enter a question of 1-2000 characters.');
         if (!MODES.includes(mode)) throw problem(400, 'Choose Efficient, Balanced or Deep dive.');
+        session.exchange = null;
         if (active.has(key)) throw problem(409, 'Wait for your current answer.');
         if (active.size >= 3) throw problem(429, 'DBusker is busy. Please try shortly.');
         const intent = settings.chainEnabled ? chainIntent(message, session.wallet, session.chainIntent) : null;
@@ -222,20 +247,22 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
             authorized(request);
             context = fitContext({ instructions, sources, messages, draft });
             if (session.calls >= 20) throw problem(429, 'This session has reached its pilot provider-call limit.');
-            if (!reserve.get(settings.maxCalls)) throw problem(429, 'The pilot usage budget is exhausted. Please contact the steward.');
+            if (!accounting.reserve(session.wallet, settings.maxCalls)) throw problem(429, 'The pilot usage budget is exhausted. Please contact the steward.');
             session.calls++;
             used.push(route);
             const started = performance.now();
             let outcome = 'error', usage = null;
             try {
               candidate = await modelCall({ ...context, apiKey: settings.apiKey, model: route.model, signal: controller.signal });
+              usage = validUsage(candidate.usage);
               controller.signal.throwIfAborted();
               outcome = candidate.review;
-              usage = candidate.usage;
             } catch (error) {
+              usage = usage || validUsage(error.usage);
               if (controller.signal.aborted) outcome = 'cancelled';
               throw controller.signal.aborted ? controller.signal.reason : error;
             } finally {
+              accounting.finish(session.wallet, outcome, usage);
               metrics.record({ digest: pack.digest, route, attempt, outcome, usage, latencyMs: performance.now() - started });
             }
             const next = deeperRoute(pack.routing, route, candidate.review, attempt);
@@ -249,7 +276,7 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
           const answer = finalAnswer(candidate);
           session.messages = [...context.messages, { role: 'assistant', content: answer.answer }].slice(-6);
           session.task = route.task;
-          return send(200, { answer: answer.answer,
+          const result = { answer: answer.answer,
             sources: chainSource ? [chainSource, ...answer.sources.filter(source => source.id !== chainSource.id)] : answer.sources,
             abstained: answer.abstained,
             handoffDigest: pack.digest, routing: {
@@ -257,7 +284,10 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
               attempts: used.length, review: answer.review,
               escalation: used.length > 1 ? 'used' : answer.review === 'needs_deeper_review'
                 ? (mode === 'balanced' ? 'tier_limit' : 'mode_limit') : 'not_needed',
-            } });
+            } };
+          session.exchange = { id: token(), question: message.trim(), answer: result.answer,
+            sources: result.sources, routing: result.routing, handoffDigest: pack.digest };
+          return send(200, { ...result, exchangeId: session.exchange.id });
         } finally {
           clearTimeout(timeout);
           response.off('close', disconnect);
@@ -275,6 +305,7 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
   const sweep = setInterval(() => {
+    accounting.purge();
     for (const [key, challenge] of challenges) if (challenge.expires <= now()) challenges.delete(key);
     for (const [key, entry] of rates) if (entry.expires <= now()) rates.delete(key);
     for (const [key, session] of sessions) if (session.expires <= now()) sessions.delete(key);

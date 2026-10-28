@@ -13,9 +13,9 @@ test('public pilot configuration contains only the separate service URL and enab
   assert.equal(Object.keys(window.DecentConfig.dbusker).sort().join(','), 'enabled,serviceUrl');
   const index = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
   assert.match(index, /decent\.config\.js\?v=20261027-dbusker-invited/);
-  assert.match(index, /js\/main\.js\?v=20261028-dbusker-chain-evidence/);
+  assert.match(index, /js\/main\.js\?v=20261028-dbusker-credits/);
   assert.match(readFileSync(new URL('../../js/main.js', import.meta.url), 'utf8'),
-    /dbusker\.mjs\?v=20261028-chain-evidence/);
+    /dbusker\.mjs\?v=20261028-credits/);
 });
 
 async function fixture(t, enabled = true, connected = true) {
@@ -455,6 +455,62 @@ test('signed-in chat renders answers as text, cites sources and clears on discon
   assert.equal(root.querySelector('.transcript').children.length, 0);
   assert.equal(root.querySelector('.route-result').textContent, '');
   assert.equal(root.querySelector('textarea').disabled, true);
+});
+
+test('usage is private UI data and an exchange is shared only after a deliberate preview action, with deletion', async t => {
+  const { root, window, document } = await fixture(t);
+  const address = '0x1111111111111111111111111111111111111111', exchangeId = 'c'.repeat(64);
+  const calls = [];
+  let shared = false;
+  const usage = { calls: 2, inputTokens: 123, outputTokens: 45, usageMissing: 1, startedAt: '2026-10-28T19:00:00Z' };
+  window._wallet = { address, chainId: 8453, signer: { signMessage: async () => 'offline-signature' } };
+  window.fetch = async (url, init) => {
+    calls.push({ url, init });
+    if (url.endsWith('/challenge')) return Response.json({ message: 'challenge' });
+    if (url.endsWith('/session') && init.method === 'POST') return Response.json({
+      token: 'a'.repeat(64), wallet: address, expiresAt: Date.now() + 60000,
+      usage, capabilities: { reviews: true, chain: true },
+      handoff: { commit: '1'.repeat(40), digest: '2'.repeat(64) },
+    });
+    if (url.endsWith('/usage')) return Response.json(usage);
+    if (url.endsWith('/reviews')) return Response.json({ reviews: shared ? [{ id: exchangeId, expiresAt: Date.now() + 100000 }] : [] });
+    if (url.endsWith('/chat')) return Response.json({ answer: 'A helpful answer', sources: [], exchangeId,
+      routing: { mode: 'efficient', models: ['offline'], attempts: 1, review: 'ready' }, handoffDigest: '2'.repeat(64) });
+    if (url.endsWith('/review')) {
+      assert.deepEqual(JSON.parse(init.body), { exchangeId, consent: true });
+      shared = true; return Response.json({ id: exchangeId });
+    }
+    if (url.endsWith(`/review/${exchangeId}`)) {
+      assert.equal(init.method, 'DELETE'); shared = false; return Response.json({ deleted: true });
+    }
+    return Response.json({ cleared: true });
+  };
+  root.querySelector('input').checked = true;
+  root.querySelector('input').dispatchEvent(new window.Event('change'));
+  root.querySelector('.signin').click();
+  await new Promise(resolve => window.setTimeout(resolve, 10));
+  assert.match(root.querySelector('.usage-note').textContent, /2 provider passes.*123 in \/ 45 out/);
+  assert.match(root.querySelector('.handoff').textContent, /Read-only Base evidence enabled/);
+  root.querySelector('textarea').value = 'PRIVATE question';
+  root.querySelector('form').dispatchEvent(new window.Event('submit', { cancelable: true }));
+  await new Promise(resolve => window.setTimeout(resolve, 10));
+  assert.equal(root.querySelector('.review-share').hidden, false);
+  assert.equal(root.querySelector('.review-share').open, false);
+  assert.match(root.querySelector('.review-preview').textContent, /PRIVATE question.*|A helpful answer/);
+  assert.equal(calls.filter(call => call.url.endsWith('/review')).length, 0, 'No automatic sharing');
+  root.querySelector('.review-share').open = true;
+  root.querySelector('.share-exchange').click();
+  await new Promise(resolve => window.setTimeout(resolve, 10));
+  assert.equal(shared, true);
+  assert.match(root.querySelector('.review-status').textContent, /Shared with the steward/);
+  root.querySelector('.shared-reviews button').click();
+  await new Promise(resolve => window.setTimeout(resolve, 10));
+  assert.equal(shared, false);
+  assert.match(root.querySelector('.review-status').textContent, /deleted/);
+  document.dispatchEvent(new window.Event('wallet-disconnected'));
+  assert.equal(root.querySelector('.usage-note').textContent, '');
+  assert.equal(root.querySelector('.review-preview').textContent, '');
+  assert.equal(root.querySelector('.shared-reviews').children.length, 0);
 });
 
 test('service URL requires HTTPS outside explicit localhost and never embeds credentials', () => {

@@ -11,6 +11,8 @@
     "review": "node handoff.mjs review",
     "evaluate:retrieval": "node handoff.mjs evaluate-retrieval",
     "routing:report": "node --env-file=.env metrics.mjs",
+    "accounting:report": "node --env-file=.env accounting-report.mjs",
+    "reviews:report": "node --env-file=.env accounting-report.mjs reviews",
     "approve": "node handoff.mjs approve"
   },
   "dependencies": {
