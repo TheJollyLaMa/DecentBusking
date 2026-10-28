@@ -152,3 +152,33 @@ test('invalid artwork CIDs and conflicting artwork sources are rejected without 
     assert.match(rejected.content, attachment ? /Choose one artwork source/ : /valid artwork file CID/);
   }
 });
+test('failed artwork uploads queue nothing, are logged, and tell the uploader to retry', async () => {
+  const { createMintRequestInteractionHandler } = await import(interactionsUrl);
+  const { mintRequestKey } = await import(embedUrl);
+  const track = { trackId: 'dollar', title: 'I need a dollar', uploaderId: 'artist', ipfsCid: 'bafy-audio', pinStatus: 'pinned', mintStatus: 'unminted' };
+  const artwork = { name: 'cover.png', contentType: 'image/png', size: 1024 };
+  let queued = false;
+  let reply;
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    const handler = createMintRequestInteractionHandler({ getPlaylist: () => [track],
+      uploadArtwork: async () => { throw new Error('Pinata upload failed (408)'); },
+      requestTrackMint: () => { queued = true; return track; }, waitForPersistence: async () => {} });
+    await handler({ isModalSubmit: () => true, customId: `mint-wallet:${mintRequestKey(track.trackId)}`, user: { id: 'artist' },
+      fields: { getTextInputValue: id => id === 'artist-wallet' ? `0x${'1'.repeat(40)}` : '', getUploadedFiles: () => ({ first: () => artwork }) },
+      deferReply: async () => {}, editReply: async options => { reply = options; } });
+  } finally { console.warn = originalWarn; }
+  assert.equal(queued, false);
+  assert.match(reply.content, /Pinata upload failed \(408\)/);
+  assert.match(reply.content, /Nothing was queued.*Request NFT.*again/s);
+  assert.ok(warnings.some(line => /\[mint-request\] Track dollar request failed/.test(line)));
+});
+
+test('choosing Song acknowledges the click and removes the choice buttons before archiving', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../discord-bot/index.js'), 'utf8');
+  const song = source.slice(source.indexOf("if (choice === 'song')"), source.indexOf('handleAudioAttachment(record.message'));
+  assert.match(song, /interaction\?\.update\(\{.*components: \[\]/);
+  assert.ok(song.indexOf('interaction?.update') < song.indexOf('addTrack(track)'));
+});

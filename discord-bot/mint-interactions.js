@@ -106,7 +106,9 @@ export function createMintRequestInteractionHandler({ getPlaylist, requestTrackM
       embeds: [new EmbedBuilder().setTitle('Selected NFT artwork').setImage(`https://gateway.pinata.cloud/ipfs/${artworkCid}`)],
       allowedMentions: { parse: [] } });
     } catch (error) {
-      await interaction.editReply({ content: `Could not submit the mint request: ${error.message}`, allowedMentions: { parse: [] } });
+      console.warn(`[mint-request] Track ${track.trackId} request failed:`, error.message);
+      await interaction.editReply({ content: `Could not submit the mint request: ${error.message}\n` +
+        'Nothing was queued. Click **Request NFT** again to retry.', allowedMentions: { parse: [] } });
     }
     return true;
   };
