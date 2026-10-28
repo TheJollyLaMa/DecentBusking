@@ -129,8 +129,8 @@ Before any real model call:
   [provider's data controls](https://developers.openai.com/api/docs/guides/your-data);
   default abuse-monitoring retention can include prompts and responses for up
   to 30 days, subject to exceptions and approved account controls.
-  No wallet address is sent by this service
-  to the model; a visitor can still type identifying information.
+  When chain evidence is enabled, requested public wallet addresses and payment
+  evidence can be sent to the model, as disclosed by the provider-consent notice.
 - Set `DBUSKER_SITE_URL` to the exact frontend URL, including its path, e.g.
   `https://thejollylama.github.io/DecentBusking/`. Only its origin receives CORS
   permission. The login message binds the full URI, domain, Base chain,
@@ -245,7 +245,7 @@ This is **review-gated routing feedback, not autonomous training**. DBusker
 does not rewrite instructions, change model assignments, ingest conversations
 as knowledge, or share a visitor's chat with another visitor.
 
-The existing private SQLite database stores aggregate provider-pass counters,
+The existing private SQLite routing table stores aggregate provider-pass counters,
 keyed only by handoff fingerprint, fixed mode/task/tier, configured model,
 attempt number and fixed outcome code. Counters accumulate latency,
 provider-reported input/output tokens and counts of calls with missing usage.
@@ -379,13 +379,63 @@ claiming a tested whole-ecosystem integration.
 
 ## Access, privacy and shutdown
 
+### Wallet credits and voluntary review
+
+The private persistent database now also contains `wallet_usage`: lowercase
+signed-in wallet, reserved provider passes, summed input/output tokens, missing
+usage, failed and cancelled pass counts. It contains no prompts, answers or
+per-call timestamps. One **credit** is one reserved provider pass, not one
+question or a dollar amount; Balanced may consume two. Reservations update the
+global budget and wallet tally in the same SQLite transaction **before**
+dispatch. A crash leaves that pass counted with unknown usage. Failed and
+cancelled passes count; known provider usage on invalid/incomplete responses is
+included. These are conservative service accounting totals, not invoice proof.
+
+The migration records its start time and preserves existing global calls as
+**legacy/unattributed**: old anonymous aggregate metrics cannot tell us which
+wallet spent them. No budget is reset. A signed-in wallet can read only its own
+`GET /usage` totals; the widget displays these on sign-in and refreshes after
+answers/errors. There is no public roster or browser-accessible steward report.
+
+For private operator reporting in the service shell:
+
+```sh
+DBUSKER_STATE_FILE=/var/data/state.sqlite node accounting-report.mjs
+DBUSKER_STATE_FILE=/var/data/state.sqlite node accounting-report.mjs reviews
+```
+
+The first prints totals and legacy attribution limits, **not conversations**.
+The second is a deliberate private steward action that prints only voluntarily
+shared exchanges. Do not copy either output into public issues or analytics.
+Local equivalents are `npm run accounting:report` and `npm run reviews:report`.
+
+The latest successful provider-backed answer offers a collapsed **preview**
+containing exactly one question, answer, public source links, routing receipt
+and handoff digest. Opening it does not save anything. The clearly labeled
+**Share this preview with the steward** button explicitly sends consent and a
+server-held exchange ID. The server stores its own matching exchange, not a
+client-supplied replacement. Earlier turns and raw chain-lookup evidence are not
+stored. The preview notice discloses attached wallet, sharing time and 30-day
+retention. Sharing is optional, idempotent and uses no AI credits.
+
+Shared exchanges stay in `shared_reviews` on the existing private disk for up to
+30 days (cleanup on access and while the service runs). The signed-in owner can
+delete them through the list below chat, including after a fresh sign-in. Limits
+are ten retained exchanges per wallet, 500 total, plus rate limiting. Deleting
+or expiry removes them from the active inbox; provider/operator backups have
+their own retention policies. Clearing chat is not deletion of a deliberately
+shared exchange; use its delete button. No automatic first-turn logging,
+transcript publication, model training, prompt rewriting or policy activation
+is introduced. Steward review can inform a later explicitly approved handoff.
+
 - Pilot supports ordinary externally owned accounts. Smart-contract wallets,
   delegated keys and universal-signature schemes are not supported yet.
 - Sessions use random bearer tokens held only in browser memory. No tokens,
   prompts, signatures or addresses are placed in local storage or routine
   request logs. The dismissal preference alone uses local storage.
 - Chat history stays in server memory, bounded to recent turns and a
-  15-minute session. It is not sent to another session or saved to SQLite.
+  15-minute session. It is not sent to another session or saved to SQLite unless
+  the visitor deliberately shares an exchange through the separate preview.
   Closing the drawer does not sign out. **Clear chat & sign out**, consent
   withdrawal, account changes and disconnects clear the browser conversation
   and attempt server-session deletion. If offline, the session expires.

@@ -100,6 +100,10 @@ summary { cursor: pointer; }
 select { width: 100%; padding: 10px; border-radius: 12px 12px 4px 12px; background: #102c39; color: #eefaff; border: 1px solid #749daa; }
 .mode-note, .route-result { font-size: 11px; color: var(--muted); }
 .route-result:empty { display: none; }
+.usage-note, .review-status, .shared-reviews { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.review-share { border: 1px solid #728c9c; border-radius: 12px; padding: 10px; font-size: 12px; }
+.review-share summary { cursor: pointer; color: var(--mint); }
+.review-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; font-size: 11px; }
 .is-thinking .status { animation: thinking 1.4s ease-in-out infinite alternate; }
 .transcript { overflow-y: auto; max-height: 300px; flex-shrink: 0; scrollbar-width: thin; }
 .transcript:empty { display: none; }

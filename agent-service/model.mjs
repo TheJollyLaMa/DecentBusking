@@ -21,12 +21,13 @@ const failureMessages = {
 };
 
 export class ModelFailure extends Error {
-  constructor(code, httpStatus) {
+  constructor(code, httpStatus, usage = null) {
     if (!Object.hasOwn(failureMessages, code)) throw new Error('Unknown model failure category');
     super(`${failureMessages[code]}${code === 'provider_http' && Number.isInteger(httpStatus)
       ? ` HTTP ${httpStatus}.` : ''} No automatic retry was made. [model:${code}]`);
     this.status = 503;
     this.code = code;
+    this.usage = usage;
   }
 }
 
@@ -69,17 +70,21 @@ export async function askModel({ apiKey, model, instructions, sources, messages,
     throw new ModelFailure('provider_json');
   }
   if (!result || typeof result !== 'object') throw new ModelFailure('provider_json');
+  const usage = Number.isSafeInteger(result.usage?.input_tokens) && result.usage.input_tokens >= 0 &&
+    Number.isSafeInteger(result.usage?.output_tokens) && result.usage.output_tokens >= 0
+    ? { inputTokens: result.usage.input_tokens, outputTokens: result.usage.output_tokens } : null;
+  const failure = code => new ModelFailure(code, undefined, usage);
   if (result.status !== 'completed') {
-    throw new ModelFailure(result.incomplete_details?.reason === 'max_output_tokens' ? 'output_limit' : 'incomplete');
+    throw failure(result.incomplete_details?.reason === 'max_output_tokens' ? 'output_limit' : 'incomplete');
   }
-  if (!Array.isArray(result.output)) throw new ModelFailure('answer_json');
+  if (!Array.isArray(result.output)) throw failure('answer_json');
   const content = result.output.flatMap(item => item?.type === 'message' && Array.isArray(item.content) ? item.content : []);
-  if (content.some(item => item?.type === 'refusal')) throw new ModelFailure('refusal');
+  if (content.some(item => item?.type === 'refusal')) throw failure('refusal');
   const text = content
     .filter(item => item?.type === 'output_text' && typeof item.text === 'string').map(item => item.text).join('');
   let answer;
   try { answer = JSON.parse(text); }
-  catch { throw new ModelFailure('answer_json'); }
+  catch { throw failure('answer_json'); }
   const ids = new Set(sources.map(source => source.id));
   if (!answer || typeof answer !== 'object' ||
       typeof answer.answer !== 'string' || !answer.answer.trim() || answer.answer.length > 8000 ||
@@ -88,13 +93,11 @@ export async function askModel({ apiKey, model, instructions, sources, messages,
       !['ready', 'needs_deeper_review', 'insufficient_evidence'].includes(answer.review) ||
       (answer.review === 'insufficient_evidence' && !answer.abstained) ||
       (answer.review === 'ready' && answer.abstained)) {
-    throw new ModelFailure('evidence_validation');
+    throw failure('evidence_validation');
   }
   return {
     answer: answer.answer, abstained: answer.abstained, review: answer.review,
-    usage: Number.isSafeInteger(result.usage?.input_tokens) && result.usage.input_tokens >= 0 &&
-      Number.isSafeInteger(result.usage?.output_tokens) && result.usage.output_tokens >= 0
-      ? { inputTokens: result.usage.input_tokens, outputTokens: result.usage.output_tokens } : null,
+    usage,
     sources: [...new Set(answer.sourceIds)].map(id => {
       const { text: _text, ...source } = sources.find(item => item.id === id);
       return source;

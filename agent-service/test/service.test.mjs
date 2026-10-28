@@ -69,6 +69,67 @@ test('pilot fails closed when disabled or handoff is not approved', async t => {
   assert.equal(f.calls.length, 0);
 });
 
+test('wallet accounting counts both Balanced passes, exposes only self totals and retains no exchanges automatically', async t => {
+  let count = 0;
+  const f = await fixture(t, { modelCall: async input => {
+    count++;
+    return { ...candidate(input, count === 1 ? 'needs_deeper_review' : 'ready'),
+      usage: { inputTokens: 100, outputTokens: 20 } };
+  } });
+  const session = await f.login(), other = await f.login(f.other);
+  assert.equal(session.usage.calls, 0);
+  assert.equal((await f.request('/usage', null, null, 'GET')).status, 401);
+  const answer = await f.request('/chat', { message: 'Explain playlist payments', consent: true }, session.token);
+  assert.equal(answer.status, 200);
+  assert.equal(answer.body.exchangeId.length, 64);
+  const usage = (await f.request('/usage', null, session.token, 'GET')).body;
+  assert.equal(usage.calls, 2);
+  assert.equal(usage.inputTokens, 200);
+  assert.equal(usage.outputTokens, 40);
+  assert.equal(usage.usageMissing, 0);
+  assert.equal((await f.request('/usage', null, other.token, 'GET')).body.calls, 0);
+  assert.deepEqual((await f.request('/reviews', null, session.token, 'GET')).body.reviews, []);
+  const db = new DatabaseSync(f.settings.stateFile, { readOnly: true });
+  try { assert.equal(db.prepare('SELECT count(*) AS n FROM shared_reviews').get().n, 0); }
+  finally { db.close(); }
+});
+
+test('only an explicitly approved server-held exchange is shared, owner-deleted and expired', async t => {
+  const f = await fixture(t), session = await f.login(), other = await f.login(f.other);
+  const answer = await f.request('/chat', { message: 'Explain playlists', consent: true }, session.token);
+  const exchangeId = answer.body.exchangeId;
+  assert.equal((await f.request('/review', { exchangeId }, session.token)).status, 400);
+  assert.equal((await f.request('/review', { exchangeId, consent: true }, other.token)).status, 409);
+  assert.equal((await f.request('/review', { exchangeId, consent: true, answer: 'FORGED' }, session.token)).status, 200);
+  const db = new DatabaseSync(f.settings.stateFile, { readOnly: true });
+  try {
+    const stored = JSON.parse(db.prepare('SELECT exchange FROM shared_reviews').get().exchange);
+    assert.equal(stored.answer, answer.body.answer);
+    assert.equal(stored.question, 'Explain playlists');
+    assert.equal(stored.messages, undefined);
+  } finally { db.close(); }
+  assert.equal((await f.request(`/review/${exchangeId}`, null, other.token, 'DELETE')).status, 404);
+  assert.equal((await f.request(`/review/${exchangeId}`, null, session.token, 'DELETE')).status, 200);
+  await f.request('/review', { exchangeId, consent: true }, session.token);
+  f.advance(30 * 24 * 60 * 60 * 1000);
+  const fresh = await f.login();
+  assert.deepEqual((await f.request('/reviews', null, fresh.token, 'GET')).body.reviews, []);
+});
+
+test('failed provider calls count once for the signed-in wallet including known usage', async t => {
+  const f = await fixture(t, { modelCall: async () => {
+    throw new ModelFailure('output_limit', undefined, { inputTokens: 123, outputTokens: 800 });
+  } });
+  const session = await f.login();
+  await f.request('/chat', { message: 'Explain playlists', consent: true }, session.token);
+  const usage = (await f.request('/usage', null, session.token, 'GET')).body;
+  assert.equal(usage.calls, 1);
+  assert.equal(usage.failed, 1);
+  assert.equal(usage.inputTokens, 123);
+  assert.equal(usage.outputTokens, 800);
+  assert.equal(usage.usageMissing, 0);
+});
+
 test('chain evidence is opt-in configuration, authenticated, cancellable and precedes model evidence', async t => {
   const reads = [];
   const f = await fixture(t, { settings: { chainEnabled: true }, chainRead: async (intent, { signal }) => {
