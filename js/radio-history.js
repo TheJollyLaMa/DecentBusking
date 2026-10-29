@@ -167,6 +167,36 @@ function renderWeek() {
   const trackScroll = element('div', 'radio-history-table-scroll');
   trackScroll.append(trackTable);
   content.append(trackHeading, trackScroll);
+
+  if (mode === 'personal' || report.adverts === undefined) return;
+  content.append(element('h3', '', 'Adverts'));
+  if (!Array.isArray(report.adverts)) {
+    content.append(element('p', 'radio-history-note', 'Advert vote tallies are unavailable right now.'));
+    return;
+  }
+  const adverts = report.adverts.filter((advert) => !query || String(advert.title || '').toLocaleLowerCase().includes(query));
+  if (!adverts.length) {
+    content.append(element('p', 'radio-history-note', `No advert plays or votes recorded ${allTime ? 'yet' : 'this week'}.`));
+    return;
+  }
+  content.append(element('p', 'radio-history-note', 'Adverts are tallied separately and never compete in the Top 10. Counts cover recent advert plays retained by the radio worker.'));
+  const advertTable = element('table', 'radio-history-table radio-history-advert-table');
+  const advertHead = element('thead');
+  const advertHeader = element('tr');
+  for (const title of ['Advert', 'Plays', 'Up', 'Down', 'Net votes']) advertHeader.append(element('th', '', title));
+  advertHead.append(advertHeader);
+  const advertBody = element('tbody');
+  for (const advert of adverts) {
+    const row = element('tr');
+    row.append(element('td', '', advert.title || `Advert #${advert.campaignId}`), element('td', '', String(advert.plays)),
+      element('td', 'radio-history-number', String(advert.up)), element('td', 'radio-history-number', String(advert.down)),
+      element('td', 'radio-history-number', `${advert.net > 0 ? '+' : ''}${advert.net}`));
+    advertBody.append(row);
+  }
+  advertTable.append(advertHead, advertBody);
+  const advertScroll = element('div', 'radio-history-table-scroll');
+  advertScroll.append(advertTable);
+  content.append(advertScroll);
 }
 
 async function openHistory(event) {

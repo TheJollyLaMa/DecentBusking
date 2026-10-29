@@ -29,12 +29,40 @@ export function catalogPage(items, { offset = 0, limit = 25 } = {}, maxLimit = 2
 }
 
 // Accents are folded so "Jose" and "José" (precomposed or combining) match.
-function searchText(value) {
+export function searchText(value) {
   return String(value ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
 export function nftSearchTerms(query = '') {
   return searchText(query).trim().split(/\s+/).filter(Boolean);
+}
+
+/** Catalog artists ({value,label}) whose label contains every query word; exact, then prefix matches first. */
+export function matchCatalogArtists(artists = [], query = '', limit = 5) {
+  const terms = nftSearchTerms(query);
+  if (!terms.length) return [];
+  const whole = terms.join(' ');
+  const rank = label => (label === whole ? 0 : label.startsWith(whole) ? 1 : 2);
+  return (Array.isArray(artists) ? artists : [])
+    .filter(artist => artist?.value && artist.label && artist.label !== 'Unknown artist')
+    .map(artist => ({ artist, label: searchText(artist.label).trim() }))
+    .filter(({ label }) => terms.every(term => label.includes(term)))
+    .sort((a, b) => rank(a.label) - rank(b.label) || a.label.localeCompare(b.label))
+    .slice(0, limit)
+    .map(({ artist }) => artist);
+}
+
+/** The artist whose songs should light up as the user types: an exact label match, or the only match. */
+export function autoHighlightArtist(matches = [], query = '') {
+  const whole = nftSearchTerms(query).join(' ');
+  if (!whole) return null;
+  return matches.find(artist => searchText(artist.label).trim() === whole) || (matches.length === 1 ? matches[0] : null);
+}
+
+/** Newest-first songs, at most `limit`. */
+export function latestSongs(nfts = [], limit = 10) {
+  const time = nft => { const t = Date.parse(nft?.mintedAt || ''); return Number.isFinite(t) ? t : 0; };
+  return [...(Array.isArray(nfts) ? nfts : [])].sort((a, b) => time(b) - time(a)).slice(0, limit);
 }
 
 /** True when every query word appears in the song title or artist fields. */

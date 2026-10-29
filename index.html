@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261028-archive-search" />
+  <link rel="stylesheet" href="css/styles.css?v=20261028-main-search" />
   <link rel="stylesheet" href="css/radio-programming.css?v=20261024-calendar-fit" />
 
   <!-- CDN dependencies -->
@@ -259,7 +259,8 @@
   <div id="artist-filter-bar" role="group" aria-label="Search music by artist or song">
     <button id="dbusk-top10-button" class="fund-header-pill fund-header-left" type="button" aria-label="Top10 fund: Loading" disabled>🏆<span class="fund-header-label"> Top10 fund:</span> Loading…</button>
     <div class="artist-filter-core">
-      <input id="scene-music-search" type="search" placeholder="Search Artist or Song" aria-label="Search Artist or Song" />
+      <input id="scene-music-search" type="search" placeholder="Search Artist or Song" aria-label="Search Artist or Song" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="scene-music-search-results" autocomplete="off" />
+      <ul id="scene-music-search-results" class="scene-search-results" role="listbox" aria-label="Search results" hidden></ul>
     </div>
     <button id="dbusk-playback-button" class="fund-header-pill fund-header-right" type="button" aria-label="Playback fund: Loading" disabled>🎧<span class="fund-header-label"> Playback fund:</span> Loading…</button>
   </div>
@@ -918,12 +919,12 @@
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
   <script type="module" src="js/payroll.js?v=20261019-payroll-confirmations"></script>
-  <script type="module" src="js/radio-history.js?v=20261017-mercury-release"></script>
+  <script type="module" src="js/radio-history.js?v=20261028-advert-votes"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261025-community-reminder"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261019-fund-tour">
   <script type="module" src="js/fund-header.mjs?v=20261024-djuke-labels"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261024-djuke-labels"></script>
-  <script type="module" src="js/top-ten-board.mjs?v=20261024-djuke-labels"></script>
+  <script type="module" src="js/top-ten-board.mjs?v=20261028-advert-votes"></script>
   <script type="module" src="js/djuke.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/devert-site.mjs?v=20261024-devert-sponsored"></script>
   <script type="module" src="js/creator-profile.mjs?v=20261025-profile-dropdowns"></script>

@@ -424,3 +424,20 @@ test('archive search finds songs by artist and/or title, folds accents, and hide
   assert.match(drawer, /<input id="archive-search" type="search"[^>]*artist and\/or song/);
   assert.match(drawer, /id="archive-search-status"[^>]*role="status"/);
 });
+
+test('main search matches catalog artists by accent-folded label and picks the latest songs', async () => {
+  const { matchCatalogArtists, autoHighlightArtist, latestSongs } = await import(loaderUrl);
+  const artists = [
+    { value: 'a', label: 'Zaalbert' }, { value: 'b', label: 'zaal' }, { value: 'c', label: 'José Cabrera' },
+    { value: 'unknown artist', label: 'Unknown artist' }, { value: '', label: 'zaal ghost' },
+  ];
+  assert.deepEqual(matchCatalogArtists(artists, 'ZAAL').map(a => a.value), ['b', 'a'], 'exact label first, empty values dropped');
+  assert.deepEqual(matchCatalogArtists(artists, 'jose cab').map(a => a.value), ['c']);
+  assert.deepEqual(matchCatalogArtists(artists, 'unknown'), [], 'the Unknown artist bucket is not offered');
+  assert.deepEqual(matchCatalogArtists(artists, '  '), []);
+  assert.equal(autoHighlightArtist(matchCatalogArtists(artists, 'zaal'), 'zaal').value, 'b', 'an exact label lights up even with other matches');
+  assert.equal(autoHighlightArtist(matchCatalogArtists(artists, 'jose'), 'jose').value, 'c', 'a single match lights up');
+  assert.equal(autoHighlightArtist(matchCatalogArtists(artists, 'za'), 'za'), null, 'ambiguous prefixes wait for a choice');
+  const songs = Array.from({ length: 14 }, (_, i) => ({ tokenId: i, mintedAt: new Date(Date.UTC(2026, 0, i + 1)).toISOString() }));
+  assert.deepEqual(latestSongs(songs, 10).map(s => s.tokenId), [13, 12, 11, 10, 9, 8, 7, 6, 5, 4]);
+});

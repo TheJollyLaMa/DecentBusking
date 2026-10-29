@@ -59,10 +59,12 @@ test('audio stays connected to speakers across repeated audio/video advert hando
   assert.equal(sources.size, 2);
 });
 
-test('subheader searches artists or songs with a shared debounced archive query and no count label', () => {
+test('archive search keeps its debounced catalog query; the subheader search no longer reloads the scene', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const bar = html.slice(html.indexOf('<div id="artist-filter-bar"'), html.indexOf('<dialog id="fund-breakdown-dialog"'));
-  assert.match(bar, /type="search" placeholder="Search Artist or Song" aria-label="Search Artist or Song"/);
+  assert.match(bar, /type="search" placeholder="Search Artist or Song" aria-label="Search Artist or Song" role="combobox"/);
+  assert.match(bar, /aria-controls="scene-music-search-results" autocomplete="off"/);
+  assert.match(bar, /<ul id="scene-music-search-results" class="scene-search-results" role="listbox"[^>]*hidden><\/ul>/);
   assert.doesNotMatch(bar, /<label|<select|artist-filter-count/);
   const nodes = Object.fromEntries(['scene-music-search', 'archive-search', 'archive-artist-filter'].map(id => [id, {
     value: '', handlers: {}, addEventListener(type, handler) { this.handlers[type] = handler; },
@@ -72,7 +74,7 @@ test('subheader searches artists or songs with a shared debounced archive query 
   const loads = [];
   const context = vm.createContext({
     document: { getElementById: id => nodes[id] || null, querySelector: () => null, addEventListener() {} },
-    setTimeout(callback, delay) { assert.equal(delay, 250); pending = callback; return 1; },
+    setTimeout(callback, delay) { pending = { callback, delay }; return 1; },
     clearTimeout() { pending = null; },
     loads, abort: () => { canceled++; },
   });
@@ -80,28 +82,147 @@ test('subheader searches artists or songs with a shared debounced archive query 
     _refreshArtistFilters = () => {};
     _updateVisibility = () => {};
     _loadNFTs = () => loads.push({query: _archiveQuery, artist: _activeArtist});
-    _activeArtist = 'old-artist';
     _archiveRequest = {abort};
     _bindArtistFilters();`, context);
-  const search = nodes['scene-music-search'];
+  const archive = nodes['archive-search'];
   for (const query of ['Jose', 'Joseph Goats']) {
-    search.value = query;
-    search.handlers.input({ target: search });
+    archive.value = query;
+    archive.handlers.input({ target: archive });
   }
-  assert.equal(loads.length, 0);
-  pending();
-  assert.equal(loads.length, 1);
-  assert.equal(loads[0].query, 'Joseph Goats');
-  assert.equal(loads[0].artist, '');
-  assert.equal(nodes['archive-search'].value, 'Joseph Goats');
+  assert.equal(pending.delay, 250);
+  pending.callback();
+  assert.deepEqual(loads.map(load => load.query), ['Joseph Goats']);
   assert.equal(canceled, 2);
-  nodes['archive-search'].value = 'song title';
-  nodes['archive-search'].handlers.input({ target: nodes['archive-search'] });
-  assert.equal(search.value, 'song title');
-  search.value = '';
-  search.handlers.input({ target: search });
-  pending();
-  assert.equal(loads.at(-1).query, '', 'clearing search restores the unfiltered catalog');
+  const scene = nodes['scene-music-search'];
+  scene.value = 'zaal';
+  scene.handlers.input({ target: scene });
+  assert.equal(pending.delay, 200, 'subheader search debounces its own dropdown query');
+  assert.equal(vm.runInContext('_archiveQuery', context), 'Joseph Goats', 'subheader typing leaves the archive query alone');
+  assert.equal(archive.value, 'Joseph Goats');
+});
+
+function makeElement(tag = 'div') {
+  const el = {
+    tag, id: '', className: '', textContent: '', hidden: false, value: '', children: [], attrs: {}, handlers: {},
+    classList: { set: new Set(), toggle(name, on) { on ? this.set.add(name) : this.set.delete(name); }, contains(name) { return this.set.has(name); } },
+    setAttribute(name, value) { this.attrs[name] = String(value); },
+    removeAttribute(name) { delete this.attrs[name]; },
+    getAttribute(name) { return this.attrs[name]; },
+    addEventListener(type, handler) { this.handlers[type] = handler; },
+    append(...nodes) { this.children.push(...nodes); },
+    replaceChildren(...nodes) { this.children = nodes; },
+    querySelector(selector) {
+      const cls = selector.replace(/^\./, '');
+      return this.children.find(child => child.className.split(' ').includes(cls)) || null;
+    },
+  };
+  return el;
+}
+
+test('subheader search shows an as-you-type dropdown, lights up an artist\'s latest 10 songs, and flies to a chosen song', async () => {
+  const { matchCatalogArtists, autoHighlightArtist, latestSongs, nftArtistLabel, isMusicNft } = await import(loaderUrl);
+  const input = makeElement('input');
+  const list = makeElement('ul');
+  const nodes = { 'scene-music-search': input, 'scene-music-search-results': list };
+  const timers = [];
+  const artistKey = `0x${'7'.repeat(40)}`;
+  const song = (tokenId, daysAgo, name, artist = artistKey) => ({
+    tokenId, chainId: 8453, contractAddress: `0x${'6'.repeat(40)}`, name, artist, artistName: artist === artistKey ? 'zaal' : 'other',
+    mintedAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString(), audioUrl: `ipfs://song${tokenId}`,
+  });
+  const artistSongs = Array.from({ length: 12 }, (_, i) => song(100 + i, i + 1, `Track ${i}`)).reverse();
+  const requests = [];
+  const spawned = [];
+  const selected = [];
+  const context = vm.createContext({
+    console,
+    window: { DecentConfig: {} },
+    document: { getElementById: id => nodes[id] || null, createElement: makeElement, querySelector: () => null, querySelectorAll: () => [], addEventListener() {} },
+    setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
+    clearTimeout() {},
+    AbortController,
+    THREE: makeThreeStubs(),
+    matchCatalogArtists, autoHighlightArtist, latestSongs, nftArtistLabel, isMusicNft,
+    requests, spawned, selected,
+    fetchNftCatalogPage: async (options) => {
+      requests.push({ query: options.query, artist: options.artist });
+      const artists = [{ value: artistKey, label: 'zaal' }, { value: '0xabc', label: 'other' }, { value: 'unknown artist', label: 'Unknown artist' }];
+      if (options.artist) return { nfts: artistSongs, total: 12, nextOffset: null, artists };
+      return { nfts: [song(7, 3, 'Zaal Anthem')], total: 1, nextOffset: null, artists };
+    },
+  });
+  vm.runInContext(`${spaceSource}
+    _updateVisibility = () => {};
+    _nftRow = () => null;
+    _spawnMesh = (nft) => {
+      const mesh = { position: new THREE.Vector3(0, 0, -Date.parse(nft.mintedAt) / 1e10), userData: { nft }, add() {} };
+      _allNFTs.push({ nft, mesh });
+      spawned.push(nft.tokenId);
+      return mesh;
+    };
+    _ensureSearchGlow = (mesh) => (mesh.userData.searchGlow ||= { visible: false });
+    _selectNFT = (nft, mesh, row, showCard, options) => selected.push({ tokenId: nft.tokenId, showCard, options });
+    _controls = new THREE.OrbitControls();
+    _camera = new THREE.PerspectiveCamera();
+    _bindSceneSearch();`, context);
+
+  input.value = 'zaal';
+  input.handlers.input();
+  assert.equal(timers.at(-1).delay, 200);
+  await timers.at(-1).callback();
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(requests, [{ query: 'zaal', artist: undefined }, { query: undefined, artist: artistKey }]);
+  assert.equal(list.hidden, false);
+  assert.equal(input.attrs['aria-expanded'], 'true');
+  const options = list.children.filter(row => row.attrs.role === 'option');
+  assert.deepEqual(options.map(row => row.children[0].textContent), ['zaal', 'Zaal Anthem'], 'one matching artist, then songs');
+  assert.equal(options[0].children[1].textContent, 'Latest 10 lit up');
+
+  const highlighted = [...vm.runInContext('_highlightMeshes.map(mesh => mesh.userData.nft.tokenId)', context)];
+  assert.deepEqual(highlighted, [100, 101, 102, 103, 104, 105, 106, 107, 108, 109], 'the newest 10 by mint date');
+  assert.ok(vm.runInContext('_highlightMeshes.every(mesh => mesh.userData.pinnedVisible && mesh.userData.searchGlow.visible)', context));
+  assert.equal(vm.runInContext('_controls.target.z', context), vm.runInContext('_highlightMeshes[0].position.z', context), 'camera frames the newest lit song');
+
+  input.handlers.keydown({ key: 'ArrowDown', preventDefault() {} });
+  input.handlers.keydown({ key: 'ArrowDown', preventDefault() {} });
+  assert.equal(input.attrs['aria-activedescendant'], options[1].id);
+  input.handlers.keydown({ key: 'Enter', preventDefault() {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(selected)), [{ tokenId: 7, showCard: true, options: { play: false, pinVisible: true } }]);
+  assert.equal(list.hidden, true);
+
+  input.value = '';
+  input.handlers.input();
+  assert.equal(vm.runInContext('_highlightMeshes.length', context), 0);
+  assert.ok(vm.runInContext('_allNFTs.filter(e => e.nft.tokenId >= 100 && e.nft.tokenId < 110).every(e => !e.mesh.userData.pinnedVisible && !e.mesh.userData.searchGlow?.visible)', context),
+    'clearing the search unlights and unpins the artist songs');
+});
+
+test('subheader search retries while the catalog restores and reports no matches', async () => {
+  const { matchCatalogArtists, autoHighlightArtist, latestSongs, nftArtistLabel, isMusicNft } = await import(loaderUrl);
+  const input = makeElement('input');
+  const list = makeElement('ul');
+  const timers = [];
+  let calls = 0;
+  const context = vm.createContext({
+    console, window: { DecentConfig: {} },
+    document: { getElementById: id => ({ 'scene-music-search': input, 'scene-music-search-results': list })[id] || null, createElement: makeElement, addEventListener() {} },
+    setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
+    clearTimeout() {}, AbortController, THREE: makeThreeStubs(),
+    matchCatalogArtists, autoHighlightArtist, latestSongs, nftArtistLabel, isMusicNft,
+    fetchNftCatalogPage: async () => {
+      if (++calls === 1) throw new Error('NFT catalog is restoring; retry shortly');
+      return { nfts: [], total: 0, nextOffset: null, artists: [] };
+    },
+  });
+  vm.runInContext(`${spaceSource}\n_bindSceneSearch();`, context);
+  input.value = 'nobody';
+  input.handlers.input();
+  await timers.at(-1).callback();
+  assert.match(list.children[0].textContent, /restoring\. Retrying/);
+  assert.equal(timers.at(-1).delay, 5000);
+  await timers.at(-1).callback();
+  assert.equal(list.children[0].textContent, 'No songs or artists match “nobody”.');
 });
 
 function makeThreeStubs() {
