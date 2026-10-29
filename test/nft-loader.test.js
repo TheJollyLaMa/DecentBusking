@@ -379,3 +379,65 @@ test('coin face clips translucent artwork to a circle and draws song, artist, an
   assert.ok(labels.includes('Alice'));
   assert.ok(labels.includes(new Date('2026-10-03T00:00:00Z').toLocaleDateString()));
 });
+test('archive search finds songs by artist and/or title, folds accents, and hides non-matching now-playing rows', async () => {
+  const { nftArtistKey, nftCatalogPage, nftMatchesQuery } = await import(loaderUrl);
+  const address = `0x${'4'.repeat(40)}`;
+  const base = { contractAddress: address, chainId: 8453, audioUrl: 'ipfs://audio' };
+  const nfts = [
+    { ...base, tokenId: 195, name: 'IMan Afrikah - BetterCallZaal', description: 'Shared through DecentJukebox by zaal',
+      artist: '0x7234c36A71ec237c2Ae7698e8916e0735001E9Af', mintedAt: '2026-10-27T12:16:36.632Z' },
+    { ...base, tokenId: 150, name: 'ChaseTheDevil S.B.1.3', uploader: 'thejollylama',
+      artist: '0x807061DF657A7697c04045dA7d16D941861cAABc', mintedAt: '2026-10-11T00:00:00.000Z' },
+    { ...base, tokenId: 160, name: 'Algorhythm - Joseph Goats - Jose\u0301 Cabrera', uploader: 'joseacabrerav',
+      artist: '0x29185eB8cfD22Aa719529217bFbadE61677e0Ad2', mintedAt: '2026-10-12T00:00:00.000Z' },
+  ];
+  const ids = query => nftCatalogPage(nfts, { query }).nfts.map(nft => nft.tokenId);
+  assert.deepEqual(ids('zaal'), [195], 'artist only');
+  assert.deepEqual(ids('BetterCallZaal'), [195], 'song only');
+  assert.deepEqual(ids('iman ZAAL'), [195], 'song and artist together');
+  assert.deepEqual(ids('thejollylama chase'), [150]);
+  assert.deepEqual(ids('José'), [160], 'precomposed accent matches combining accent');
+  assert.deepEqual(ids('jose cabrera'), [160]);
+  assert.deepEqual(ids('nobody-matches'), []);
+  assert.equal(nftMatchesQuery(nfts[0], '   '), true);
+
+  const source = fs.readFileSync(path.join(__dirname, '../js/space.js'), 'utf8')
+    .replace(/^import .*;$/gm, '').replace(/export /g, '');
+  const rows = { 195: {}, 150: {} };
+  const summary = {};
+  const entries = nfts.slice(0, 2).map(nft => ({ nft, mesh: { userData: { nft, ageDays: 0 } } }));
+  entries[1].mesh.userData.pinnedVisible = true;
+  const context = vm.createContext({
+    entries, nftArtistKey, nftMatchesQuery,
+    document: {
+      querySelector: selector => rows[selector.match(/:(\d+)"\]$/)?.[1]],
+      getElementById: id => id === 'dnft-list-count' ? summary : null,
+    },
+  });
+  vm.runInContext(`${source}\n_allNFTs = entries; _archiveQuery = 'zaal'; _updateVisibility();`, context);
+  assert.equal(rows[195].hidden, false);
+  assert.equal(rows[150].hidden, true, 'retained now-playing row is hidden when it does not match');
+  assert.equal(entries[1].mesh.visible, true, 'now-playing mesh stays in the scene');
+  assert.equal(summary.textContent, '1 of 2 tracks');
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const drawer = html.slice(html.indexOf('<aside id="dnft-list"'), html.indexOf('</aside>', html.indexOf('<aside id="dnft-list"')));
+  assert.match(drawer, /<input id="archive-search" type="search"[^>]*artist and\/or song/);
+  assert.match(drawer, /id="archive-search-status"[^>]*role="status"/);
+});
+
+test('main search matches catalog artists by accent-folded label and picks the latest songs', async () => {
+  const { matchCatalogArtists, autoHighlightArtist, latestSongs } = await import(loaderUrl);
+  const artists = [
+    { value: 'a', label: 'Zaalbert' }, { value: 'b', label: 'zaal' }, { value: 'c', label: 'José Cabrera' },
+    { value: 'unknown artist', label: 'Unknown artist' }, { value: '', label: 'zaal ghost' },
+  ];
+  assert.deepEqual(matchCatalogArtists(artists, 'ZAAL').map(a => a.value), ['b', 'a'], 'exact label first, empty values dropped');
+  assert.deepEqual(matchCatalogArtists(artists, 'jose cab').map(a => a.value), ['c']);
+  assert.deepEqual(matchCatalogArtists(artists, 'unknown'), [], 'the Unknown artist bucket is not offered');
+  assert.deepEqual(matchCatalogArtists(artists, '  '), []);
+  assert.equal(autoHighlightArtist(matchCatalogArtists(artists, 'zaal'), 'zaal').value, 'b', 'an exact label lights up even with other matches');
+  assert.equal(autoHighlightArtist(matchCatalogArtists(artists, 'jose'), 'jose').value, 'c', 'a single match lights up');
+  assert.equal(autoHighlightArtist(matchCatalogArtists(artists, 'za'), 'za'), null, 'ambiguous prefixes wait for a choice');
+  const songs = Array.from({ length: 14 }, (_, i) => ({ tokenId: i, mintedAt: new Date(Date.UTC(2026, 0, i + 1)).toISOString() }));
+  assert.deepEqual(latestSongs(songs, 10).map(s => s.tokenId), [13, 12, 11, 10, 9, 8, 7, 6, 5, 4]);
+});

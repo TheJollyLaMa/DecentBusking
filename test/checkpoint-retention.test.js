@@ -291,6 +291,15 @@ test('paid-playback and advert-vote history survive journal eviction', async t =
   assert.equal(events.find(event => event.type === 'playback-transition').record.impressionId, 'played-ad');
 });
 
+test('versioned DeVert journals archive advert votes and paid advert plays', async () => {
+  const { stateHistoryEvents } = await import('../discord-bot/checkpoint-history.js');
+  const vote = { radioPlayId: 'play', voterId: 'existing-pseudonym', campaignId: '1', vote: 1, recordedAt: '2026-10-17T15:01:00Z' };
+  const paidPlay = { radioPlayId: 'devert-paid:9:1', campaignId: '1', recordedAt: '2026-10-17T15:02:00Z' };
+  const events = stateHistoryEvents('devert-main-radio-0x4894698f2b5caf13fad4aa8fbafe3618b960909f',
+    { impressions: [], adVotes: [vote], paidPlays: [paidPlay] }, { impressions: [], adVotes: [], paidPlays: [] }, '2026-10-17T15:03:00Z');
+  assert.deepEqual(events.map(event => [event.type, event.recordType]), [['vote', 'adVotes'], ['playback-transition', 'paidPlays']]);
+});
+
 test('critical writes publish immediately, supersede routine state and survive explicit flush', async t => {
   const { store, time, api } = await setup(t);
   store.schedule({ count: 1 });

@@ -21,12 +21,15 @@ function readRadioSpectrum(out) {
 export function topTenDisplayRows(tracks, nowPlaying) {
   const ranked = rankTopTenSongs(tracks, nowPlaying?.trackId);
   if (nowPlaying?.isDevert) {
-    const tally = nowPlaying.adVotes;
-    const available = Number.isSafeInteger(tally?.up) && tally.up >= 0 &&
+    const valid = tally => Number.isSafeInteger(tally?.up) && tally.up >= 0 &&
       Number.isSafeInteger(tally?.down) && tally.down >= 0 && tally.net === tally.up - tally.down;
+    const play = nowPlaying.adVotes;
+    const campaign = valid(play?.campaign) && Number.isSafeInteger(play.campaign.plays) ? play.campaign : null;
+    const tally = campaign || (valid(play) ? play : null);
     return [{ trackId: nowPlaying.trackId || nowPlaying.playId, title: nowPlaying.title || 'Live advert',
-      artist: nowPlaying.uploader || 'DVert advertiser', votes: available ? tally.net : null,
-      adVotes: available ? tally : null, isAdvert: true, rank: null, nowPlaying: true, outsideTopTen: true }, ...ranked];
+      artist: nowPlaying.uploader || 'DVert advertiser', votes: tally ? tally.net : null,
+      adVotes: tally ? { up: tally.up, down: tally.down, net: tally.net, ...(campaign ? { plays: campaign.plays,
+        play: valid(play) ? { up: play.up, down: play.down, net: play.net } : null } : {}) } : null, isAdvert: true, rank: null, nowPlaying: true, outsideTopTen: true }, ...ranked];
   }
   if (!nowPlaying?.trackId || ranked.some(track => track.trackId === nowPlaying.trackId)) return ranked;
   const recorded = tracks.find(track => track.trackId === nowPlaying.trackId);
@@ -281,9 +284,12 @@ export function initTopTenBoard() {
       if (opening) details.append(el('span', 'top-ten-opening-rank', `Opening #${opening.openingRank} \u00b7 live ${track.rank ? `#${track.rank}` : 'outside Top 10'}`));
       const score = el('span', 'top-ten-vote-score');
       score.append(el('span', 'top-ten-net-votes', track.votes === null ? '—' : `${track.votes > 0 ? '+' : ''}${track.votes}`),
-        el('span', 'top-ten-vote-label', track.isAdvert ? 'this play' : 'net votes'));
-      if (track.isAdvert) score.title = track.adVotes
-        ? `${track.adVotes.up} up · ${track.adVotes.down} down · this advert play only` : 'Advert vote counts unavailable until the worker update is deployed';
+        el('span', 'top-ten-vote-label', !track.isAdvert ? 'net votes' : Number.isSafeInteger(track.adVotes?.plays) ? 'all plays' : 'this play'));
+      if (track.isAdvert) score.title = !track.adVotes ? 'Advert vote counts unavailable until the worker update is deployed'
+        : Number.isSafeInteger(track.adVotes.plays)
+          ? `${track.adVotes.up} up · ${track.adVotes.down} down across ${track.adVotes.plays} recorded plays` +
+            (track.adVotes.play ? ` · this play ${track.adVotes.play.up} up · ${track.adVotes.play.down} down` : '')
+          : `${track.adVotes.up} up · ${track.adVotes.down} down · this advert play only`;
       const prize = el('span', 'top-ten-prize');
       if (track.prizeUnits === null) {
         prize.textContent = '—';

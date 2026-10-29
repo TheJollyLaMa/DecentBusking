@@ -104,9 +104,9 @@ export function stateHistoryEvents(kind, value, previous, observedAt) {
   const paidPlayback = kind === 'djuke-journal' || kind.startsWith('devert-paid');
   const fields = kind === 'payment-ledger' ? ['entries'] : kind === 'fund-ledger' ? ['sources', 'payouts'] :
     kind === 'earnings-index' ? ['items'] : paidPlayback ? ['records'] :
-      kind === 'devert-main-radio' ? ['impressions', 'adVotes'] : [];
+      kind === 'devert-main-radio' || kind.startsWith('devert-main-radio-') ? ['impressions', 'adVotes', 'paidPlays'] : [];
   const identity = entry => entry.txHash ? `${entry.txHash}:${entry.logIndex}` :
-    entry.requestId || entry.impressionId || `${entry.radioPlayId}:${entry.voterId}`;
+    entry.requestId || entry.impressionId || (entry.voterId ? `${entry.radioPlayId}:${entry.voterId}` : `play:${entry.radioPlayId}`);
   return fields.flatMap(field => {
     const old = new Map((previous?.[field] || []).map(entry => [identity(entry), entry]));
     return (value?.[field] || []).filter(entry => {
@@ -114,7 +114,7 @@ export function stateHistoryEvents(kind, value, previous, observedAt) {
       return JSON.stringify(prior) !== JSON.stringify(entry);
     }).map(entry => ({
       id: `${kind}:${field}:${contentHash(entry)}`,
-      type: field === 'adVotes' ? 'vote' : paidPlayback || field === 'impressions' ? 'playback-transition' : 'financial',
+      type: field === 'adVotes' ? 'vote' : paidPlayback || field === 'impressions' || field === 'paidPlays' ? 'playback-transition' : 'financial',
       observedAt, occurredAt: entry.paidAt || entry.recordedAt ||
         (entry.timestamp ? new Date(entry.timestamp * 1000).toISOString() : null),
       source: kind, recordType: field, record: entry,

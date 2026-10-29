@@ -93,7 +93,9 @@ export function saveRadioVotes(storage, radioUrl, votes) {
 
 export async function readRadioNet({ radioUrl, track, fetchImpl = fetch, signal }) {
   if (track?.isDevert) {
-    const tally = track.adVotes;
+    const valid = tally => Number.isSafeInteger(tally?.up) && tally.up >= 0 &&
+      Number.isSafeInteger(tally?.down) && tally.down >= 0 && tally.net === tally.up - tally.down;
+    const tally = valid(track.adVotes?.campaign) ? track.adVotes.campaign : track.adVotes;
     return Number.isSafeInteger(tally?.up) && tally.up >= 0 &&
       Number.isSafeInteger(tally?.down) && tally.down >= 0 && tally.net === tally.up - tally.down ? tally.net : null;
   }

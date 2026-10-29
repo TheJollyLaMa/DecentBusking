@@ -906,6 +906,10 @@ export class JukeLoopSession {
                 audibleMs: this._completedPlay.audibleMs });
           Promise.resolve(durableRecord)
             .catch(error => console.warn('[devert] Durable play record deferred:', error.message));
+        } else if (this.devertPlayback?.recordPaidAdvertPlay && this._currentDevertAd) {
+          Promise.resolve(this.devertPlayback.recordPaidAdvertPlay({ campaignId: this._currentDevertAd.campaignId,
+            radioPlayId: this._nowPlaying.playId, audibleMs: this._completedPlay.audibleMs }))
+            .catch(error => console.warn('[devert] Paid advert play tally deferred:', error.message));
         }
       }
       this._collectReactions()
@@ -1656,6 +1660,7 @@ export class JukeLoopSession {
       ...(videoUrl ? { videoUrl } : {}),
       ipfsCid: prepared.track.ipfsCid || null,
       isDevert: !!prepared.devertAd,
+      ...(prepared.devertAd?.campaignId != null ? { campaignId: String(prepared.devertAd.campaignId) } : {}),
       ...(prepared.paid?.record.playlist ? { djukePlaylist: { ...prepared.paid.record.playlist } } : {}),
       ...((prepared.playlistShow || prepared.playlistShowContext) ? { playlistShow: {
         title: (prepared.playlistShow || prepared.playlistShowContext).title,

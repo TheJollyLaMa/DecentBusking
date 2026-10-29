@@ -55,6 +55,8 @@ export function createIpfsUploader({
   pinataApiUrl = DEFAULT_PINATA_API_URL,
   ipfsApiUrl = DEFAULT_IPFS_API_URL,
   fetchImpl = globalThis.fetch,
+  attempts = 3,
+  retryDelayMs = 1000,
 } = {}) {
   if (provider === 'pinata' && !pinataJwt) {
     throw new Error('PINATA_JWT is required when IPFS_UPLOAD_PROVIDER=pinata');
@@ -63,7 +65,8 @@ export function createIpfsUploader({
     throw new Error(`Unsupported IPFS_UPLOAD_PROVIDER: ${provider}`);
   }
 
-  return async function upload(buffer, filename, mimeType) {
+  const label = provider === 'pinata' ? 'Pinata' : 'Local IPFS';
+  const uploadOnce = async (buffer, filename, mimeType) => {
     const form = new FormData();
     form.append('file', new Blob([buffer], { type: mimeType }), filename);
 
@@ -77,14 +80,40 @@ export function createIpfsUploader({
       endpoint = `${ipfsApiUrl.replace(/\/$/, '')}/api/v0/add?cid-version=1&pin=true`;
     }
 
-    const response = await fetchImpl(endpoint, options);
+    let response;
+    try {
+      response = await fetchImpl(endpoint, options);
+    } catch (error) {
+      const failure = new Error(`${label} upload failed: ${error.message}`);
+      failure.retryable = true;
+      throw failure;
+    }
     if (!response.ok) {
-      throw new Error(`${provider === 'pinata' ? 'Pinata' : 'Local IPFS'} upload failed (${response.status})`);
+      const failure = new Error(`${label} upload failed (${response.status})`);
+      failure.retryable = isRetryableUploadStatus(response.status);
+      throw failure;
     }
     const cid = extractCid(await response.json());
     if (!cid) throw new Error('IPFS upload response did not include a CID');
     return `ipfs://${cid}`;
   };
+
+  // IPFS content addressing makes a retried upload of the same bytes idempotent.
+  return async function upload(buffer, filename, mimeType) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await uploadOnce(buffer, filename, mimeType);
+      } catch (error) {
+        if (!error.retryable || attempt >= attempts) throw error;
+        console.warn(`[ipfs] ${filename}: ${error.message}; retrying (${attempt + 1}/${attempts})`);
+        if (retryDelayMs > 0) await new Promise(resolve => setTimeout(resolve, retryDelayMs * attempt));
+      }
+    }
+  };
+}
+
+export function isRetryableUploadStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 /** Upload one file using the configured provider. */

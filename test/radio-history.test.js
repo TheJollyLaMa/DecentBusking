@@ -182,6 +182,22 @@ test('both tally modes show all-time song votes and recompute filtered artist to
   }
 });
 
+test('public tally lists advert vote totals separately and explains when they are unavailable', async () => {
+  const report = { ...week, adverts: [{ campaignId: '4', title: 'Shop Local', plays: 3, up: 5, down: 1, net: 4 }] };
+  const page = historyPage(async () => ({ ok: true, json: async () => ({ weeks: [report] }) }));
+  await page.open('totals');
+  const content = page.node('radio-history-content');
+  assert.match(content.textContent, /Adverts/);
+  const advertBody = content.children.at(-1).children[0].children[1];
+  assert.deepEqual(advertBody.children[0].children.map(cell => cell.textContent), ['Shop Local', '3', '5', '1', '+4']);
+  const unavailable = historyPage(async () => ({ ok: true, json: async () => ({ weeks: [{ ...week, adverts: null }] }) }));
+  await unavailable.open('totals');
+  assert.match(unavailable.node('radio-history-content').textContent, /Advert vote tallies are unavailable/);
+  const personal = historyPage(async () => ({ ok: true, json: async () => ({ weeks: [report] }) }));
+  await personal.open('personal');
+  assert.doesNotMatch(personal.node('radio-history-content').textContent, /Shop Local/);
+});
+
 test('Right Ankh keeps the public schedule visible and hides My Playbacks on disconnect', () => {
   const nodes = new Map(['.ankh-coin', '.dropdown-menu.right-ankh-menu', '#radio-schedule-btn', '#radio-history-btn', '#creator-profile-btn'].map(selector => [selector, new Node()]));
   const root = { innerHTML: '', querySelector: selector => nodes.get(selector) };

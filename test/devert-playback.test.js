@@ -386,6 +386,45 @@ test('main-radio listener votes are durable and reorder only seated campaigns', 
   assert.ok(fixture.state.adVotes.every(entry => entry.campaignId !== '3'));
 });
 
+test('advert vote tallies carry across plays and into weekly history without voter IDs', async () => {
+  const { summarizeMainRadioAdverts, withAdvertTallies } = await import('../discord-bot/devert-playback.js');
+  const fixture = harness({ campaigns: [campaign('1'), campaign('2')], slots: 2 });
+  const runtime = await makeRuntime(fixture);
+  await runtime.recordMainRadioAdVote({ campaignId: '1', radioPlayId: 'devert:1:play-1', voterId: 'listener-browser-0001', vote: 1 });
+  await runtime.recordMainRadioAdVote({ campaignId: '1', radioPlayId: 'devert:1:play-1', voterId: 'listener-browser-0002', vote: 1 });
+  await runtime.recordMainRadioAdVote({ campaignId: '1', radioPlayId: 'devert:1:play-2', voterId: 'listener-browser-0001', vote: -1 });
+  const summary = runtime.getMainRadioAdVoteSummary('devert:1:play-2', '1');
+  assert.deepEqual({ ...summary, campaign: { ...summary.campaign } },
+    { up: 0, down: 1, net: -1, campaign: { campaignId: '1', up: 2, down: 1, net: 1, plays: 2 } });
+  assert.deepEqual({ ...runtime.getMainRadioAdVoteSummary('devert:2:play-1', '2').campaign },
+    { campaignId: '2', plays: 0, up: 0, down: 0, net: 0 });
+
+  const rows = summarizeMainRadioAdverts({ periodOf: at => new Date(at).toISOString().slice(0, 10),
+    impressions: [{ campaignId: '2', radioPlayId: 'p-a', mainRadio: true, recordedAt: '2026-10-27T10:00:00Z' },
+      { campaignId: '2', radioPlayId: 'loop', mainRadio: false, recordedAt: '2026-10-27T10:00:00Z' },
+      { campaignId: '2', radioPlayId: 'p-b', mainRadio: true, recordedAt: '2026-10-28T10:00:00Z' }],
+    adVotes: [{ campaignId: '2', radioPlayId: 'p-a', voterId: 'secret-voter-0001', vote: -1, recordedAt: '2026-10-27T10:01:00Z' }] });
+  assert.deepEqual(rows.map(row => ({ ...row })), [
+    { period: '2026-10-27', campaignId: '2', up: 0, down: 1, plays: 1, net: -1 },
+    { period: '2026-10-28', campaignId: '2', up: 0, down: 0, plays: 1, net: 0 }]);
+
+  const reports = withAdvertTallies([{ week: 'NY-2026-10-26', tracks: [] }, { week: 'all-time', tracks: [] }], runtime,
+    { periodOf: () => 'NY-2026-10-26', titles: new Map([['1', 'Shop Local']]) });
+  assert.deepEqual(reports.map(report => report.adverts.map(row => ({ ...row }))), [
+    [{ campaignId: '1', up: 2, down: 1, plays: 2, net: 1, title: 'Shop Local' }],
+    [{ campaignId: '1', up: 2, down: 1, plays: 2, net: 1, title: 'Shop Local' }]]);
+  assert.ok(!JSON.stringify(reports).includes('listener-browser'));
+  assert.equal(await runtime.recordPaidAdvertPlay({ campaignId: '1', radioPlayId: 'devert-paid:9:1', audibleMs: 1000 }), false);
+  assert.equal(await runtime.recordPaidAdvertPlay({ campaignId: '1', radioPlayId: 'devert-paid:9:1', audibleMs: 60_000 }), true);
+  assert.equal(await runtime.recordPaidAdvertPlay({ campaignId: '1', radioPlayId: 'devert-paid:9:1', audibleMs: 60_000 }), true);
+  assert.equal(fixture.state.paidPlays.length, 1, 'paid advert plays are durable and idempotent');
+  assert.equal(runtime.getMainRadioAdVoteSummary('devert-paid:9:1', '1').campaign.plays, 3);
+  const restored = await makeRuntime(fixture);
+  assert.equal(restored.getMainRadioAdVoteSummary('x', '1').campaign.plays, 3);
+  assert.deepEqual(withAdvertTallies([{ week: 'w' }], { getMainRadioAdvertTallies: () => { throw new Error('not ready'); } })
+    .map(report => report.adverts), [null]);
+});
+
 test('AdLoop queue includes active unseated campaigns and ranks DJuke boosts before prior loop plays', async () => {
   const campaigns = [campaign('low', { offerUnits: '5000000', devertPlays: 0 }),
     campaign('boosted', { offerUnits: '5000000', djukeBoosts: 1, devertPlays: 4 }),
