@@ -406,9 +406,10 @@ async function _refreshVoteNet() {
     return;
   }
   if (_radio.isDevert) {
-    const tally = _radio.adVotes;
-    _voteNet = Number.isSafeInteger(tally?.up) && tally.up >= 0 &&
-      Number.isSafeInteger(tally?.down) && tally.down >= 0 && tally.net === tally.up - tally.down ? tally.net : null;
+    const valid = tally => Number.isSafeInteger(tally?.up) && tally.up >= 0 &&
+      Number.isSafeInteger(tally?.down) && tally.down >= 0 && tally.net === tally.up - tally.down;
+    const tally = valid(_radio.adVotes?.campaign) ? _radio.adVotes.campaign : _radio.adVotes;
+    _voteNet = valid(tally) ? tally.net : null;
     _renderVoting();
     return;
   }
@@ -474,7 +475,7 @@ function _renderVoting() {
     const available = _mode === 'radio' && _devertListenMode === 'radio' && _radioReachable &&
       _voteNetPlayId === _radio?.playId && Number.isSafeInteger(_voteNet);
     _renderVoteNetValue(available ? _voteNet : null, _radio?.playId);
-    const scope = _radio?.isDevert ? 'this advert play' : 'this week';
+    const scope = !_radio?.isDevert ? 'this week' : _radio.adVotes?.campaign ? 'across all plays of this advert' : 'this advert play';
     _voteNetEl.setAttribute('aria-label', available ? `${_voteNet} net votes ${scope}` : 'Net votes unavailable');
     _voteNetEl.title = available ? `Net votes ${scope} (upvotes minus downvotes)` : 'Live net votes unavailable';
   }

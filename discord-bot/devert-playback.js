@@ -3,6 +3,50 @@ import { planDevertQueues } from '../js/devert-scheduler.mjs';
 import { DEFAULT_WORKER_MIN_BALANCE_WEI, readWorkerGasState } from '../js/worker-gas.mjs';
 
 const SCHEMA_VERSION = 1;
+
+function voteTally(votes) {
+  const up = votes.filter(entry => entry.vote === 1).length;
+  const down = votes.filter(entry => entry.vote === -1).length;
+  return { up, down, net: up - down };
+}
+
+/** Group retained main-radio ad plays and votes by period and campaign; voter IDs are never returned. */
+export function summarizeMainRadioAdverts({ adVotes = [], impressions = [], periodOf }) {
+  const rows = new Map();
+  const rowFor = (recordedAt, campaignId) => {
+    const at = Date.parse(recordedAt);
+    const period = Number.isFinite(at) ? periodOf(at) : null;
+    if (!period || !/^\d+$/.test(String(campaignId))) return null;
+    const key = `${period}\n${campaignId}`;
+    if (!rows.has(key)) rows.set(key, { period, campaignId: String(campaignId), playIds: new Set(), up: 0, down: 0 });
+    return rows.get(key);
+  };
+  for (const entry of impressions) {
+    if (entry.mainRadio === true) rowFor(entry.recordedAt, entry.campaignId)?.playIds.add(entry.radioPlayId);
+  }
+  for (const entry of adVotes) {
+    const row = rowFor(entry.recordedAt, entry.campaignId);
+    if (!row) continue;
+    row.playIds.add(entry.radioPlayId);
+    if (entry.vote === 1) row.up++;
+    else if (entry.vote === -1) row.down++;
+  }
+  return [...rows.values()].map(({ playIds, ...row }) => ({ ...row, plays: playIds.size, net: row.up - row.down }));
+}
+
+/** Attach advert vote tallies to New York payroll reports without mixing adverts into music rankings. */
+export function withAdvertTallies(reports, runtime, { periodOf, titles = new Map() } = {}) {
+  let rows;
+  try {
+    rows = [...runtime.getMainRadioAdvertTallies(periodOf), ...runtime.getMainRadioAdvertTallies(() => 'all-time')];
+  } catch {
+    return reports.map(report => ({ ...report, adverts: null }));
+  }
+  return reports.map(report => ({ ...report, adverts: rows.filter(row => row.period === report.week)
+    .map(({ period, ...row }) => ({ ...row, title: titles.get(row.campaignId) || `Advert #${row.campaignId}` }))
+    .sort((first, second) => second.net - first.net || second.plays - first.plays || first.campaignId.localeCompare(second.campaignId)) }));
+}
+
 const MUSIC_PLAYS_PER_MAIN_AD = 10;
 const MUSIC_BATCH_SIZE = 10;
 const MAX_SAVED_IDS = 2000;
@@ -393,12 +437,18 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       }
       return campaigns.map(campaign => ({ campaignId: campaign.campaignId, mainRadio: true, track: campaignTrack(campaign, 'main-radio') }));
     },
-    getMainRadioAdVoteSummary: radioPlayId => {
+    getMainRadioAdVoteSummary: (radioPlayId, campaignId) => {
       requireReady();
-      const votes = journal.adVotes.filter(entry => entry.radioPlayId === radioPlayId);
-      const up = votes.filter(entry => entry.vote === 1).length;
-      const down = votes.filter(entry => entry.vote === -1).length;
-      return { up, down, net: up - down };
+      const summary = voteTally(journal.adVotes.filter(entry => entry.radioPlayId === radioPlayId));
+      if (!/^\d+$/.test(String(campaignId ?? ''))) return summary;
+      const [campaign] = summarizeMainRadioAdverts({ adVotes: journal.adVotes, impressions: journal.impressions,
+        periodOf: () => 'all-time' }).filter(row => row.campaignId === String(campaignId));
+      const { period, ...totals } = campaign || { campaignId: String(campaignId), plays: 0, up: 0, down: 0, net: 0 };
+      return { ...summary, campaign: totals };
+    },
+    getMainRadioAdvertTallies: periodOf => {
+      requireReady();
+      return summarizeMainRadioAdverts({ adVotes: journal.adVotes, impressions: journal.impressions, periodOf });
     },
     recordMainRadioAdVote: ({ campaignId, radioPlayId, voterId, vote }) => run(async () => {
       requireReady();

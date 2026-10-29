@@ -43,7 +43,7 @@ import { createAlchemyWebhook } from './alchemy-webhook.js';
 import { createFundLedger } from './fund-ledger.js';
 import { createWeeklyPayflow, findBlockAtOrBefore, readClosingFundBalance } from './weekly-payflow.js';
 import { createWeeklyPayrollReporter } from './weekly-payroll-report.js';
-import { payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
+import { currentPayrollPeriod, payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '../js/payroll-week.mjs';
 
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
@@ -55,7 +55,7 @@ import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime,
 import { createDevertQueueReader, createDevertQueueRuntime, createDevertQueueCatalogSync, combinePaidQueues } from './devert-queue.js';
 import { devertQueueAbi } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
-import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry } from './devert-playback.js';
+import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry, withAdvertTallies } from './devert-playback.js';
 import { startDevertLoopWorker, startDevertWebsiteLoopWorker } from './devert-loop.js';
 import { DISCORD_REST_OPTIONS, loginDiscordClient, recoverDiscordConnection, watchDiscordSession } from './discord-login.js';
 import { createDiscordDiagnostics } from './discord-diagnostics.js';
@@ -1592,8 +1592,15 @@ async function main() {
       }
       const mainRadioAdCountdown = jukeLoopSession ? await jukeLoopSession.getMainRadioAdCountdown(Date.now(), paidQueue) : null;
       const nowPlaying = getJukeLoopNowPlaying();
-      const adVotes = nowPlaying?.isDevert
-        ? _devertPlaybackRuntime?.getMainRadioAdVoteSummary(nowPlaying.playId) ?? null : null;
+      let adVotes = null;
+      if (nowPlaying?.isDevert) {
+        try {
+          adVotes = _devertPlaybackRuntime?.getMainRadioAdVoteSummary(nowPlaying.playId,
+            String(nowPlaying.trackId || '').replace(/^devert:/, '')) ?? null;
+        } catch (error) {
+          console.warn('[devert-playback] Advert vote tally unavailable:', error.message);
+        }
+      }
       return {
         ...buildRadioState({
           nowPlaying,
@@ -1713,7 +1720,20 @@ async function main() {
     },
     getDevertLoopState: () => _devertLoopWorker?.getState() || { ready: false, nowPlaying: null, voiceConnected: false },
     onDevertLoopVote: payload => _devertLoopWorker ? _devertLoopWorker.submitVote(payload) : Promise.reject(new Error('VertLoop is not ready')),
-    getRadioHistory: async ({ weeks, wallet, includeAllTime, calendar }) => getWeeklyPlayHistory({ weeks, wallet, includeAllTime, calendar }),
+    getRadioHistory: async ({ weeks, wallet, includeAllTime, calendar }) => {
+      const reports = getWeeklyPlayHistory({ weeks, wallet, includeAllTime, calendar });
+      if (wallet || calendar !== 'new-york') return reports;
+      if (!_devertPlaybackRuntime) return reports.map(report => ({ ...report, adverts: null }));
+      const titles = new Map();
+      try {
+        for (const campaign of (await readDevertState?.())?.campaigns || []) {
+          if (campaign?.title) titles.set(String(campaign.campaignId), campaign.title);
+        }
+      } catch (error) {
+        console.warn('[radio-history] Advert titles unavailable:', error.message);
+      }
+      return withAdvertTallies(reports, _devertPlaybackRuntime, { periodOf: at => currentPayrollPeriod(at).week, titles });
+    },
     getWeeklyPayflow: ({ wallet }) => payflow.getState({ wallet }),
     getPaymentLedger: () => ({ ...paymentLedger.getState(), ready: paymentLedgerReady,
       payrollAnnouncements: payrollReporter.getState(),

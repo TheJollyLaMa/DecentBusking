@@ -970,6 +970,10 @@ test('footer net votes refresh from weekly totals, handle errors and distinguish
   await pending;
   assert.equal(counter.textContent, '+3', 'late song response cannot overwrite advert votes');
   assert.match(counter['aria-label'], /this advert play/);
+  vm.runInContext("_radio = { playId: 'ad-2', isDevert: true, adVotes: { up: 0, down: 0, net: 0, campaign: { campaignId: '7', up: 6, down: 1, net: 5, plays: 3 } } };", context);
+  await vm.runInContext('_refreshVoteNet()', context);
+  assert.equal(counter.textContent, '+5', 'advert shows its running tally rather than resetting each play');
+  assert.match(counter['aria-label'], /across all plays of this advert/);
   vm.runInContext("_mode = 'archive'; _renderVoting();", context);
   assert.equal(counter.textContent, '—');
 });

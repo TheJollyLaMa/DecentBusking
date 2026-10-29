@@ -156,6 +156,11 @@ test('playing adverts have an unranked per-play row without altering music prize
   assert.equal(topTenDisplayRows(songs, { ...ad, adVotes: { up: 0, down: 0, net: 0 } })[0].votes, 0);
   assert.equal(topTenDisplayRows(songs, { ...ad, adVotes: { up: 1, down: 5, net: -4 } })[0].votes, -4);
   assert.equal(topTenDisplayRows(songs, null).length, 1);
+  const running = topTenDisplayRows(songs, { ...ad, adVotes: { up: 0, down: 1, net: -1,
+    campaign: { campaignId: '7', up: 9, down: 2, net: 7, plays: 4 } } })[0];
+  assert.equal(running.votes, 7, 'advert rows show the running tally across all recorded plays');
+  assert.deepEqual({ ...running.adVotes, play: { ...running.adVotes.play } },
+    { up: 9, down: 2, net: 7, plays: 4, play: { up: 0, down: 1, net: -1 } });
 });
 
 test('pullout leaderboard exposes public weekly ranking and a distinct current-playing state', () => {
