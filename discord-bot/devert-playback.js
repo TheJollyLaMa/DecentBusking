@@ -11,7 +11,7 @@ function voteTally(votes) {
 }
 
 /** Group retained main-radio ad plays and votes by period and campaign; voter IDs are never returned. */
-export function summarizeMainRadioAdverts({ adVotes = [], impressions = [], periodOf }) {
+export function summarizeMainRadioAdverts({ adVotes = [], impressions = [], paidPlays = [], periodOf }) {
   const rows = new Map();
   const rowFor = (recordedAt, campaignId) => {
     const at = Date.parse(recordedAt);
@@ -24,6 +24,7 @@ export function summarizeMainRadioAdverts({ adVotes = [], impressions = [], peri
   for (const entry of impressions) {
     if (entry.mainRadio === true) rowFor(entry.recordedAt, entry.campaignId)?.playIds.add(entry.radioPlayId);
   }
+  for (const entry of paidPlays) rowFor(entry.recordedAt, entry.campaignId)?.playIds.add(entry.radioPlayId);
   for (const entry of adVotes) {
     const row = rowFor(entry.recordedAt, entry.campaignId);
     if (!row) continue;
@@ -83,7 +84,7 @@ function validateJournal(value) {
   if (!value || value.schemaVersion !== SCHEMA_VERSION ||
     value.musicWeekId !== null && (!Number.isSafeInteger(value.musicWeekId) || value.musicWeekId < 0) ||
     !Array.isArray(value.pendingMusicPlayIds) || !Array.isArray(value.seenMusicPlayIds) || !Array.isArray(value.impressions) ||
-    value.adVotes !== undefined && !Array.isArray(value.adVotes)) {
+    value.adVotes !== undefined && !Array.isArray(value.adVotes) || value.paidPlays !== undefined && !Array.isArray(value.paidPlays)) {
     throw new Error('Invalid DeVert playback journal');
   }
   const impressionIds = new Set();
@@ -109,7 +110,14 @@ function validateJournal(value) {
     if (voteKeys.has(key)) throw new Error('Duplicate DeVert radio ad vote');
     voteKeys.add(key);
   }
-  return structuredClone({ ...value, adVotes });
+  const paidPlays = value.paidPlays || [];
+  const paidPlayIds = new Set();
+  for (const entry of paidPlays) {
+    if (!entry || !/^\d+$/.test(String(entry.campaignId)) || typeof entry.radioPlayId !== 'string' || !entry.radioPlayId ||
+      !Number.isFinite(Date.parse(entry.recordedAt)) || paidPlayIds.has(entry.radioPlayId)) throw new Error('Invalid DeVert paid advert play');
+    paidPlayIds.add(entry.radioPlayId);
+  }
+  return structuredClone({ ...value, adVotes, paidPlays });
 }
 
 export function createDevertPlaybackRuntime({ contract, provider = contract?.runner?.provider, restore, save,
@@ -442,14 +450,24 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       const summary = voteTally(journal.adVotes.filter(entry => entry.radioPlayId === radioPlayId));
       if (!/^\d+$/.test(String(campaignId ?? ''))) return summary;
       const [campaign] = summarizeMainRadioAdverts({ adVotes: journal.adVotes, impressions: journal.impressions,
-        periodOf: () => 'all-time' }).filter(row => row.campaignId === String(campaignId));
+        paidPlays: journal.paidPlays, periodOf: () => 'all-time' }).filter(row => row.campaignId === String(campaignId));
       const { period, ...totals } = campaign || { campaignId: String(campaignId), plays: 0, up: 0, down: 0, net: 0 };
       return { ...summary, campaign: totals };
     },
     getMainRadioAdvertTallies: periodOf => {
       requireReady();
-      return summarizeMainRadioAdverts({ adVotes: journal.adVotes, impressions: journal.impressions, periodOf });
+      return summarizeMainRadioAdverts({ adVotes: journal.adVotes, impressions: journal.impressions,
+        paidPlays: journal.paidPlays, periodOf });
     },
+    recordPaidAdvertPlay: ({ campaignId, radioPlayId, audibleMs }) => run(async () => {
+      requireReady();
+      if (!Number.isSafeInteger(audibleMs) || audibleMs < minimumAudibleMs) return false;
+      if (!/^\d+$/.test(String(campaignId)) || typeof radioPlayId !== 'string' || !radioPlayId) throw new Error('Invalid DeVert paid advert play');
+      if (journal.paidPlays.some(entry => entry.radioPlayId === radioPlayId)) return true;
+      const entry = { campaignId: String(campaignId), radioPlayId, recordedAt: new Date(now()).toISOString() };
+      await commit({ ...journal, paidPlays: [...journal.paidPlays, entry].slice(-MAX_SAVED_IDS) });
+      return true;
+    }),
     recordMainRadioAdVote: ({ campaignId, radioPlayId, voterId, vote }) => run(async () => {
       requireReady();
       if (!/^\d+$/.test(String(campaignId)) || typeof radioPlayId !== 'string' || !radioPlayId ||
