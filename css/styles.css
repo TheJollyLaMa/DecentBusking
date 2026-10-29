@@ -3322,6 +3322,42 @@ decent-foot {
   border-radius: 4px;
 }
 #scene-music-search { width: 100%; box-sizing: border-box; font: inherit; }
+.artist-filter-core { position: relative; }
+.scene-search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 120;
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: rgba(13, 8, 32, .97);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .55);
+}
+.scene-search-results[hidden] { display: none; }
+.scene-search-heading {
+  padding: 6px 10px 2px;
+  color: var(--text-secondary, #a99fc9);
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.scene-search-option {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.scene-search-option.active, .scene-search-option:hover { background: rgba(79, 227, 255, .14); }
+.scene-search-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scene-search-detail { flex: 0 0 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary, #a99fc9); font-size: .8em; }
+.scene-search-artist .scene-search-title::before { content: "✦ "; color: #4fe3ff; }
 .fund-header-pill {
   display: inline-block;
   flex: 0 0 auto;
@@ -3467,6 +3503,7 @@ decent-foot {
   .fund-header-right { grid-column: 3; grid-row: 1; justify-self: end; }
   .artist-filter-core { flex: none; grid-column: 2; grid-row: 1; }
   #scene-music-search { min-height: 28px; padding: 3px 6px; font-size: .7rem; }
+  .scene-search-results { left: 50%; right: auto; width: min(94vw, 420px); transform: translateX(-50%); font-size: .8rem; }
   #dnft-archive-toggle { display: none; }
   #hat-btn, #guitar-case-btn { width: 64px; height: 64px; bottom: 12px; font-size: 3.25rem; }
   #hat-btn { left: 4px; }

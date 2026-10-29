@@ -26,7 +26,7 @@ import { renderNFTCard } from './nft-card.js?v=20261025-song-splits';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { setNowPlaying } from './stage.js?v=20261025-seamless-handoff';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
-import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft, nftMatchesQuery } from './nft-loader.js?v=20261028-archive-search';
+import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft, nftMatchesQuery, nftArtistLabel, matchCatalogArtists, autoHighlightArtist, latestSongs } from './nft-loader.js?v=20261028-main-search';
 import { createRadioPlaylistEffects } from './radio-playlist-effects.mjs?v=20261025-seamless-handoff';
 
 // ── Timeline constants ────────────────────────────────────────────────────
@@ -100,6 +100,18 @@ const ARCHIVE_RETRY_MS = 5000;
 const ARCHIVE_MAX_RETRIES = 12;
 let _pointerStart = null;
 let _activeArtist = '';
+
+// ── Main search dropdown state ────────────────────────────────────────────
+const SCENE_SEARCH_DELAY_MS = 200;
+const ARTIST_HIGHLIGHT_LIMIT = 10;
+let _sceneSearchTimer = null;
+let _sceneSearchRequest = null;
+let _sceneSearchRetries = 0;
+let _sceneSearchOptions = [];
+let _sceneSearchActive = -1;
+let _highlightRequest = null;
+let _highlightArtist = '';
+let _highlightMeshes = [];
 let _sharedFocusLookupToken = 0;
 
 // ── Public API ────────────────────────────────────────────────────────────
@@ -916,23 +928,14 @@ function _bindArtistFilters() {
       _loadNFTs(true);
     });
   }
-  for (const id of ['scene-music-search', 'archive-search']) {
-    document.getElementById(id)?.addEventListener('input', event => {
-      _archiveQuery = event.target.value;
-      for (const other of ['scene-music-search', 'archive-search']) {
-        const input = document.getElementById(other);
-        if (input && input !== event.target) input.value = _archiveQuery;
-      }
-      if (id === 'scene-music-search') {
-        _activeArtist = '';
-        _refreshArtistFilters();
-      }
-      clearTimeout(_archiveTimer);
-      _archiveRetries = 0;
-      _archiveRequest?.abort();
-      _archiveTimer = setTimeout(() => _loadNFTs(true), 250);
-    });
-  }
+  document.getElementById('archive-search')?.addEventListener('input', event => {
+    _archiveQuery = event.target.value;
+    clearTimeout(_archiveTimer);
+    _archiveRetries = 0;
+    _archiveRequest?.abort();
+    _archiveTimer = setTimeout(() => _loadNFTs(true), 250);
+  });
+  _bindSceneSearch();
   const header = document.querySelector('decent-header');
   if (header && typeof ResizeObserver !== 'undefined') {
     customElements.whenDefined('decent-header').then(() => {
@@ -946,6 +949,257 @@ function _bindArtistFilters() {
       observer.observe(shell);
       measure();
     });
+  }
+}
+
+// ── Main search: as-you-type dropdown, fly-to-song, artist highlight ───────
+function _bindSceneSearch() {
+  const input = document.getElementById('scene-music-search');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    clearTimeout(_sceneSearchTimer);
+    _sceneSearchRequest?.abort();
+    _sceneSearchRetries = 0;
+    if (!input.value.trim()) {
+      _clearArtistHighlight();
+      _renderSceneSearch(null);
+      return;
+    }
+    _sceneSearchTimer = setTimeout(() => _runSceneSearch(input.value), SCENE_SEARCH_DELAY_MS);
+  });
+  input.addEventListener('keydown', event => {
+    const count = _sceneSearchOptions.length;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (!count) return;
+      event.preventDefault();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      _setSceneSearchActive((_sceneSearchActive + step + count) % count);
+    } else if (event.key === 'Enter') {
+      if (!count) return;
+      event.preventDefault();
+      _chooseSceneSearchOption(_sceneSearchOptions[Math.max(0, _sceneSearchActive)]);
+    } else if (event.key === 'Escape') {
+      _setSceneSearchOpen(false);
+    }
+  });
+  input.addEventListener('focus', () => { if (_sceneSearchOptions.length) _setSceneSearchOpen(true); });
+  input.addEventListener('blur', () => setTimeout(() => _setSceneSearchOpen(false), 150));
+}
+
+async function _runSceneSearch(query) {
+  const controller = new AbortController();
+  _sceneSearchRequest = controller;
+  _renderSceneSearch({ status: 'Searching…' });
+  try {
+    const page = await fetchNftCatalogPage({ config: window.DecentConfig || {}, query, signal: controller.signal });
+    if (controller.signal.aborted) return;
+    _sceneSearchRetries = 0;
+    const artists = matchCatalogArtists(page.artists, query);
+    const songs = page.nfts.filter(isMusicNft);
+    _renderSceneSearch({ query, artists, songs, total: page.total });
+    const auto = autoHighlightArtist(artists, query);
+    if (auto) {
+      if (auto.value !== _highlightArtist) void _highlightArtistSongs(auto);
+    } else if (_highlightArtist) {
+      _clearArtistHighlight();
+    }
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    // The worker answers "restoring; retry shortly" while it rebuilds the index after a restart.
+    const retrying = /retry shortly/i.test(err.message) && _sceneSearchRetries < ARCHIVE_MAX_RETRIES;
+    _renderSceneSearch({ status: retrying ? 'The catalog is restoring. Retrying…' : `Search failed: ${err.message}` });
+    if (retrying) {
+      _sceneSearchRetries++;
+      _sceneSearchTimer = setTimeout(() => _runSceneSearch(query), ARCHIVE_RETRY_MS);
+    }
+  } finally {
+    if (_sceneSearchRequest === controller) _sceneSearchRequest = null;
+  }
+}
+
+function _renderSceneSearch(result) {
+  const list = document.getElementById('scene-music-search-results');
+  if (!list) return;
+  _sceneSearchOptions = [];
+  _sceneSearchActive = -1;
+  list.replaceChildren();
+  if (!result) { _setSceneSearchOpen(false); return; }
+  const addHeading = text => {
+    const heading = document.createElement('li');
+    heading.className = 'scene-search-heading';
+    heading.setAttribute('role', 'presentation');
+    heading.textContent = text;
+    list.append(heading);
+  };
+  const addOption = (option, title, detail) => {
+    const row = document.createElement('li');
+    const index = _sceneSearchOptions.length;
+    row.id = `scene-search-option-${index}`;
+    row.className = `scene-search-option scene-search-${option.type}`;
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', 'false');
+    const name = document.createElement('span');
+    name.className = 'scene-search-title';
+    name.textContent = title;
+    const meta = document.createElement('span');
+    meta.className = 'scene-search-detail';
+    meta.textContent = detail;
+    row.append(name, meta);
+    // pointerdown keeps focus in the input so the blur handler doesn't close the list first.
+    row.addEventListener('pointerdown', event => event.preventDefault());
+    row.addEventListener('click', () => _chooseSceneSearchOption(option));
+    row.addEventListener('pointerenter', () => _setSceneSearchActive(index));
+    _sceneSearchOptions.push({ ...option, row });
+    list.append(row);
+  };
+  if (result.status) {
+    addHeading(result.status);
+  } else {
+    if (result.artists.length) {
+      addHeading('Artists');
+      for (const artist of result.artists) {
+        addOption({ type: 'artist', artist }, artist.label,
+          artist.value === _highlightArtist ? 'Latest 10 lit up' : `Light up latest ${ARTIST_HIGHLIGHT_LIMIT}`);
+      }
+    }
+    if (result.songs.length) {
+      addHeading(result.total > result.songs.length ? `Songs (${result.songs.length} of ${result.total})` : 'Songs');
+      for (const nft of result.songs) addOption({ type: 'song', nft }, nft.name || `Token #${nft.tokenId}`, nftArtistLabel(nft));
+    }
+    if (!_sceneSearchOptions.length) addHeading(`No songs or artists match “${result.query.trim()}”.`);
+  }
+  _setSceneSearchOpen(true);
+}
+
+function _setSceneSearchOpen(open) {
+  const input = document.getElementById('scene-music-search');
+  const list = document.getElementById('scene-music-search-results');
+  if (list) list.hidden = !open || !list.children.length;
+  input?.setAttribute('aria-expanded', String(Boolean(list && !list.hidden)));
+  if (!open) input?.removeAttribute('aria-activedescendant');
+}
+
+function _setSceneSearchActive(index) {
+  _sceneSearchActive = index;
+  _sceneSearchOptions.forEach(({ row }, i) => {
+    row.classList.toggle('active', i === index);
+    row.setAttribute('aria-selected', String(i === index));
+  });
+  const row = _sceneSearchOptions[index]?.row;
+  const input = document.getElementById('scene-music-search');
+  if (row) {
+    input?.setAttribute('aria-activedescendant', row.id);
+    row.scrollIntoView?.({ block: 'nearest' });
+  }
+}
+
+function _chooseSceneSearchOption(option) {
+  if (!option) return;
+  _setSceneSearchOpen(false);
+  if (option.type === 'artist') {
+    void _highlightArtistSongs(option.artist);
+  } else {
+    _flyToSearchSong(option.nft);
+  }
+}
+
+function _ensureSearchEntry(nft) {
+  const key = _nftKey(nft);
+  let entry = _allNFTs.find(item => _nftKey(item.nft) === key);
+  if (!entry) {
+    const mesh = _spawnMesh(nft, false);
+    entry = mesh ? { nft, mesh } : null;
+  }
+  return entry;
+}
+
+function _flyToSearchSong(nft) {
+  const entry = _ensureSearchEntry(nft);
+  if (!entry) return;
+  _selectNFT(entry.nft, entry.mesh, _nftRow(entry.nft), true, { play: false, pinVisible: true });
+}
+
+async function _highlightArtistSongs(artist) {
+  _highlightRequest?.abort();
+  const controller = new AbortController();
+  _highlightRequest = controller;
+  try {
+    const page = await fetchNftCatalogPage({ config: window.DecentConfig || {}, artist: artist.value, signal: controller.signal });
+    if (controller.signal.aborted) return;
+    _clearArtistHighlight();
+    _highlightArtist = artist.value;
+    for (const nft of latestSongs(page.nfts.filter(isMusicNft), ARTIST_HIGHLIGHT_LIMIT)) {
+      const entry = _ensureSearchEntry(nft);
+      if (!entry) continue;
+      const ud = entry.mesh.userData;
+      if (!ud.pinnedVisible) { ud.pinnedVisible = true; ud.searchPinned = true; }
+      _ensureSearchGlow(entry.mesh).visible = true;
+      _highlightMeshes.push(entry.mesh);
+    }
+    _updateVisibility();
+    _sceneSearchOptions.forEach(({ type, artist: a, row }) => {
+      if (type === 'artist') row.querySelector('.scene-search-detail').textContent =
+        a.value === _highlightArtist ? 'Latest 10 lit up' : `Light up latest ${ARTIST_HIGHLIGHT_LIMIT}`;
+    });
+    _frameHighlightedSongs();
+  } catch (err) {
+    if (!controller.signal.aborted) console.warn('[space] artist highlight failed:', err.message);
+  } finally {
+    if (_highlightRequest === controller) _highlightRequest = null;
+  }
+}
+
+// Stand just in front of the newest song and look back along the artist's trail.
+function _frameHighlightedSongs() {
+  const newest = _highlightMeshes[0];
+  if (!newest || !_controls || !_camera) return;
+  _controls.target.copy(newest.position);
+  _camera.position.copy(newest.position).add(new THREE.Vector3(0, 4, 18));
+  _controls.update();
+}
+
+function _clearArtistHighlight() {
+  _highlightRequest?.abort();
+  _highlightRequest = null;
+  for (const mesh of _highlightMeshes) {
+    const ud = mesh.userData;
+    if (ud.searchGlow) ud.searchGlow.visible = false;
+    if (ud.searchPinned && _nftKey(ud.nft) !== _activeId) ud.pinnedVisible = false;
+    ud.searchPinned = false;
+  }
+  const changed = _highlightMeshes.length > 0;
+  _highlightMeshes = [];
+  _highlightArtist = '';
+  if (changed) _updateVisibility();
+}
+
+function _ensureSearchGlow(mesh) {
+  const ud = mesh.userData;
+  if (ud.searchGlow) return ud.searchGlow;
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x4fe3ff,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending ?? undefined,
+  });
+  const glow = new THREE.Mesh(new THREE.RingGeometry(1.9, 2.5, 64), material);
+  glow.position.set(0, 0, -0.03);
+  glow.renderOrder = 20;
+  mesh.add(glow);
+  ud.searchGlow = glow;
+  return glow;
+}
+
+function _updateSearchHighlightPulse(now) {
+  if (!_highlightMeshes.length) return;
+  const pulse = _prefersReducedMotion() ? 0.5 : 0.5 + 0.5 * Math.sin(now / 320);
+  for (const mesh of _highlightMeshes) {
+    const glow = mesh.userData.searchGlow;
+    if (!glow?.visible) continue;
+    glow.material.opacity = 0.3 + pulse * 0.5;
+    glow.scale.setScalar(1 + pulse * 0.08);
   }
 }
 
@@ -1648,6 +1902,7 @@ function _animate() {
   }
 
   _updateNowPlayingPulse();
+  _updateSearchHighlightPulse(performance.now());
 
   // WASD / Arrow keys are always active — they move the camera AND the
   // OrbitControls target together so the orbit centre follows the flight.
