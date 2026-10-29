@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { createAccounting, accountingReport, REVIEW_RETENTION_MS } from '../accounting.mjs';
+import { createAccounting, accountingReport, REVIEW_RETENTION_MS, UNKNOWN_PER_WALLET } from '../accounting.mjs';
 
 const wallet = '0x1111111111111111111111111111111111111111';
 const other = '0x2222222222222222222222222222222222222222';
@@ -65,4 +65,19 @@ test('sharing is idempotent, private to owner, expiring and bounded; accounting 
   assert.throws(() => store.share(wallet, { ...exchange, id: 'b'.repeat(64) }), /ten shared/);
   advance(REVIEW_RETENTION_MS);
   assert.equal(store.reviews(wallet).length, 0);
+});
+
+test('automatic unknown captures have their own cap and never block voluntary sharing', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE budget (id INTEGER PRIMARY KEY, calls INTEGER NOT NULL); INSERT INTO budget VALUES (1, 0);');
+  const accounting = createAccounting(db, () => 1000);
+  const wallet = `0x${'a'.repeat(40)}`;
+  for (let index = 0; index < UNKNOWN_PER_WALLET; index++) {
+    assert.ok(accounting.capture(wallet, { id: index.toString(16).padStart(64, '0'), question: `q${index}` }));
+  }
+  assert.equal(accounting.capture(wallet, { id: 'f'.repeat(64), question: 'over cap' }), null);
+  assert.ok(accounting.share(wallet, { id: 'e'.repeat(64), question: 'voluntary' }));
+  const kinds = accounting.reviews(wallet).map(review => review.kind);
+  assert.equal(kinds.filter(kind => kind === 'unknown').length, UNKNOWN_PER_WALLET);
+  assert.equal(kinds.filter(kind => kind === 'shared').length, 1);
 });

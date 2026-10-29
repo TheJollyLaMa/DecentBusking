@@ -1,6 +1,7 @@
 import { getAddress } from 'ethers';
 
 export const REVIEW_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export const UNKNOWN_PER_WALLET = 50;
 const problem = (status, message) => Object.assign(new Error(message), { status });
 const normalized = wallet => getAddress(wallet).toLowerCase();
 
@@ -61,7 +62,8 @@ export function createAccounting(db, now = Date.now) {
       if (db.prepare('SELECT count(*) AS count FROM shared_reviews').get().count >= 500) {
         throw problem(429, 'The steward review inbox is full. Nothing was shared.');
       }
-      if (db.prepare('SELECT count(*) AS count FROM shared_reviews WHERE wallet=?').get(normalized(wallet)).count >= 10) {
+      if (db.prepare(`SELECT count(*) AS count FROM shared_reviews WHERE wallet=?
+        AND json_extract(exchange,'$.capture') IS NULL`).get(normalized(wallet)).count >= 10) {
         throw problem(429, 'You have ten shared exchanges. Delete an older one before sharing another.');
       }
       const expiresAt = now() + REVIEW_RETENTION_MS;
@@ -69,10 +71,22 @@ export function createAccounting(db, now = Date.now) {
         .run(exchange.id, normalized(wallet), now(), expiresAt, JSON.stringify(exchange));
       return { id: exchange.id, expiresAt };
     },
+    // Questions DBusker could not answer are kept for steward review under the disclosed retention, never for automatic training.
+    capture(wallet, exchange) {
+      purge();
+      if (db.prepare('SELECT count(*) AS count FROM shared_reviews').get().count >= 500 ||
+          db.prepare(`SELECT count(*) AS count FROM shared_reviews WHERE wallet=?
+            AND json_extract(exchange,'$.capture')='unknown'`).get(normalized(wallet)).count >= UNKNOWN_PER_WALLET) return null;
+      const expiresAt = now() + REVIEW_RETENTION_MS;
+      db.prepare('INSERT INTO shared_reviews VALUES (?,?,?,?,?)')
+        .run(exchange.id, normalized(wallet), now(), expiresAt, JSON.stringify({ ...exchange, capture: 'unknown' }));
+      return { id: exchange.id, expiresAt };
+    },
     reviews(wallet) {
       purge();
-      return db.prepare('SELECT id,created_at AS createdAt,expires_at AS expiresAt FROM shared_reviews WHERE wallet=? ORDER BY created_at DESC')
-        .all(normalized(wallet));
+      return db.prepare(`SELECT id,created_at AS createdAt,expires_at AS expiresAt,
+        CASE WHEN json_extract(exchange,'$.capture')='unknown' THEN 'unknown' ELSE 'shared' END AS kind
+        FROM shared_reviews WHERE wallet=? ORDER BY created_at DESC`).all(normalized(wallet));
     },
     remove(wallet, reviewId) {
       purge();

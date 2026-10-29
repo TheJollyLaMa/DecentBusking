@@ -14,6 +14,9 @@ let artistSelect;
 let fromInput;
 let toInput;
 let rewardsEl;
+let viewSelect;
+let fundingState = null;
+const openSections = new Map();
 let requestId = 0;
 let fundingRequestId = 0;
 
@@ -22,6 +25,28 @@ function element(tag, className, text) {
   if (className) node.className = className;
   if (text != null) node.textContent = text;
   return node;
+}
+
+// Long tally sections collapse into dropdowns; a reader's open/closed choice survives search re-renders.
+function section(key, title, summary, defaultOpen) {
+  const details = element('details', 'radio-history-section');
+  details.setAttribute('data-section', key);
+  const forced = viewSelect?.value === key;
+  details.open = forced || (openSections.has(key) ? openSections.get(key) : defaultOpen);
+  details.addEventListener('toggle', () => { openSections.set(key, details.open); });
+  const head = element('summary');
+  head.append(element('span', 'radio-history-section-title', title), element('small', 'radio-history-section-summary', summary));
+  const body = element('div', 'radio-history-section-body');
+  details.append(head, body);
+  return { details, body };
+}
+
+function shows(key) {
+  return !viewSelect?.value || viewSelect.value === key;
+}
+
+function searchText() {
+  return (searchInput?.value || '').trim().toLocaleLowerCase();
 }
 
 function renderFundingTable(rows, headers, className) {
@@ -58,29 +83,46 @@ async function loadArtistFunding(service, currentRequest, address, showLoading =
     const state = await response.json();
     if (currentRequest !== requestId || fundingRequest !== fundingRequestId || mode !== 'personal' || window._wallet?.address?.toLowerCase() !== address.toLowerCase()) return;
     if (!response.ok || !state.ready || state.chainId !== 8453 || state.timeZone !== 'America/New_York' || state.lastError) throw new Error(state.lastError || 'Funding estimates are not available yet');
-    rewardsEl.replaceChildren(element('h3', '', `Weekly funding & estimates · ${state.currentPeriod.week}`),
-      element('p', 'radio-history-note', `Next close: ${new Date(state.nextCloseAt).toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' })}${state.partial ? ' · partial first tracking week' : ''}`));
-    const funds = Object.entries(state.funds || {});
-    const fundingRows = funds.map(([category, fund]) => {
-      const share = fund.estimatedShares.find(entry => entry.wallet.toLowerCase() === address.toLowerCase());
-      const amount = BigInt(share?.amountUnits || '0');
-      return [category === 'playback' ? 'Playback' : 'Top 10 votes', `${usdc(fund.balanceUnits)} USDC`,
-        `${usdc(fund.reservedUnits)} USDC`, `${usdc(fund.availableUnits)} USDC`, `${usdc(amount)} USDC${share && !share.payable ? ' · below minimum' : ''}`];
-    });
-    rewardsEl.append(element('h4', '', 'Allocation funds'), renderFundingTable(fundingRows,
-      ['Fund', 'Balance', 'Committed', 'Available', 'Your estimate'], 'radio-history-fund-balances'));
-    const warnings = funds.filter(([, fund]) => fund.warning).map(([category, fund]) =>
-      `${category === 'playback' ? 'Playback' : 'Top 10'}: ${fund.warning}`);
-    if (warnings.length) rewardsEl.append(element('p', 'payroll-funding-warning', warnings.join(' · ')));
-    rewardsEl.append(element('h4', '', 'Your song estimates · playback only'));
-    const songs = (state.currentSongs || []).slice().sort((first, second) => BigInt(second.estimatedPlaybackUnits || '0') > BigInt(first.estimatedPlaybackUnits || '0') ? 1
-      : BigInt(second.estimatedPlaybackUnits || '0') < BigInt(first.estimatedPlaybackUnits || '0') ? -1 : first.title.localeCompare(second.title));
-    rewardsEl.append(renderFundingTable(songs.map(song => [song.title, String(song.plays), String(song.votes), `${usdc(song.estimatedPlaybackUnits || '0')} USDC`]),
-      ['Song', 'Plays', 'Net votes', 'Est. playback share'], 'radio-history-song-estimates'));
-    rewardsEl.append(element('p', 'radio-history-note', 'Top 10 prize estimates are per artist wallet, ranked by weekly net votes; they are not per-song playback amounts. All estimates are provisional, not accrued debt or claimable funds. Activity, available funds and earlier commitments can change the result. Owner review and wallet-confirmed payout are required after close. The tally period below is separate.'));
+    fundingState = { address, state };
+    renderFunding();
   } catch (error) {
-    if (currentRequest === requestId && fundingRequest === fundingRequestId && mode === 'personal') rewardsEl.replaceChildren(element('p', 'radio-history-note', `${error.message}. Song totals remain available.`));
+    if (currentRequest === requestId && fundingRequest === fundingRequestId && mode === 'personal') {
+      fundingState = null;
+      rewardsEl.replaceChildren(element('p', 'radio-history-note', `${error.message}. Song totals remain available.`));
+    }
   }
+}
+
+function renderFunding() {
+  if (!rewardsEl || mode !== 'personal' || !fundingState) return;
+  if (!shows('funding')) { rewardsEl.replaceChildren(); return; }
+  const { address, state } = fundingState;
+  const funds = Object.entries(state.funds || {});
+  let yourTotal = 0n;
+  const fundingRows = funds.map(([category, fund]) => {
+    const share = fund.estimatedShares.find(entry => entry.wallet.toLowerCase() === address.toLowerCase());
+    const amount = BigInt(share?.amountUnits || '0');
+    yourTotal += amount;
+    return [category === 'playback' ? 'Playback' : 'Top 10 votes', `${usdc(fund.balanceUnits)} USDC`,
+      `${usdc(fund.reservedUnits)} USDC`, `${usdc(fund.availableUnits)} USDC`, `${usdc(amount)} USDC${share && !share.payable ? ' · below minimum' : ''}`];
+  });
+  const { details, body } = section('funding', `Weekly funding & estimates · ${state.currentPeriod.week}`,
+    `Your estimate ${usdc(yourTotal)} USDC · provisional`, false);
+  body.append(element('p', 'radio-history-note', `Next close: ${new Date(state.nextCloseAt).toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' })}${state.partial ? ' · partial first tracking week' : ''}`));
+  body.append(element('h4', '', 'Allocation funds'), renderFundingTable(fundingRows,
+    ['Fund', 'Balance', 'Committed', 'Available', 'Your estimate'], 'radio-history-fund-balances'));
+  const warnings = funds.filter(([, fund]) => fund.warning).map(([category, fund]) =>
+    `${category === 'playback' ? 'Playback' : 'Top 10'}: ${fund.warning}`);
+  if (warnings.length) body.append(element('p', 'payroll-funding-warning', warnings.join(' · ')));
+  body.append(element('h4', '', 'Your song estimates · playback only'));
+  const query = searchText();
+  const songs = (state.currentSongs || []).filter(song => !query || String(song.title || '').toLocaleLowerCase().includes(query))
+    .sort((first, second) => BigInt(second.estimatedPlaybackUnits || '0') > BigInt(first.estimatedPlaybackUnits || '0') ? 1
+      : BigInt(second.estimatedPlaybackUnits || '0') < BigInt(first.estimatedPlaybackUnits || '0') ? -1 : first.title.localeCompare(second.title));
+  body.append(renderFundingTable(songs.map(song => [song.title, String(song.plays), String(song.votes), `${usdc(song.estimatedPlaybackUnits || '0')} USDC`]),
+    ['Song', 'Plays', 'Net votes', 'Est. playback share'], 'radio-history-song-estimates'));
+  body.append(element('p', 'radio-history-note', 'Top 10 prize estimates are per artist wallet, ranked by weekly net votes; they are not per-song playback amounts. All estimates are provisional, not accrued debt or claimable funds. Activity, available funds and earlier commitments can change the result. Owner review and wallet-confirmed payout are required after close. The tally period below is separate.'));
+  rewardsEl.replaceChildren(details);
 }
 
 function renderWeek() {
@@ -102,7 +144,7 @@ function renderWeek() {
   }
   artistSelect.value = artists.includes(selectedArtist) ? selectedArtist : '';
 
-  const query = searchInput.value.trim().toLocaleLowerCase();
+  const query = searchText();
   const artistKey = artistSelect.value;
   const from = fromInput.value;
   const to = toInput.value;
@@ -131,55 +173,67 @@ function renderWeek() {
     artist.tracks++;
     artistTotals.set(track.artist, artist);
   }
-  const artistHeading = element('h3', '', 'By Artist');
-  const artistTable = element('table', 'radio-history-table');
-  const artistHead = element('thead');
-  const artistHeader = element('tr');
-  for (const title of ['Artist', 'Songs', 'Plays', 'Likes', 'Dislikes']) artistHeader.append(element('th', '', title));
-  artistHead.append(artistHeader);
-  const artistBody = element('tbody');
-  for (const artist of [...artistTotals.values()].sort((first, second) => second.plays - first.plays)) {
-    const row = element('tr');
-    row.append(element('td', '', artist.artist), element('td', '', String(artist.tracks)), element('td', '', String(artist.plays)),
-      element('td', 'radio-history-number', String(artist.likes)), element('td', 'radio-history-number', String(artist.dislikes)));
-    artistBody.append(row);
+  const artistRows = [...artistTotals.values()].sort((first, second) => second.plays - first.plays);
+  if (shows('artists')) {
+    const { details, body } = section('artists', 'By artist', `${artistRows.length} artist${artistRows.length === 1 ? '' : 's'}`, true);
+    const artistTable = element('table', 'radio-history-table');
+    const artistHead = element('thead');
+    const artistHeader = element('tr');
+    for (const title of ['Artist', 'Songs', 'Plays', 'Likes', 'Dislikes']) artistHeader.append(element('th', '', title));
+    artistHead.append(artistHeader);
+    const artistBody = element('tbody');
+    for (const artist of artistRows) {
+      const row = element('tr');
+      row.append(element('td', '', artist.artist), element('td', '', String(artist.tracks)), element('td', '', String(artist.plays)),
+        element('td', 'radio-history-number', String(artist.likes)), element('td', 'radio-history-number', String(artist.dislikes)));
+      artistBody.append(row);
+    }
+    artistTable.append(artistHead, artistBody);
+    const artistScroll = element('div', 'radio-history-table-scroll');
+    artistScroll.append(artistTable);
+    body.append(artistScroll);
+    content.append(details);
   }
-  artistTable.append(artistHead, artistBody);
-  const artistScroll = element('div', 'radio-history-table-scroll');
-  artistScroll.append(artistTable);
-  content.append(artistHeading, artistScroll);
 
-  const trackHeading = element('h3', '', 'By Song');
-  const trackTable = element('table', 'radio-history-table radio-history-song-table');
-  const trackHead = element('thead');
-  const trackHeader = element('tr');
-  for (const title of ['Song', 'Artist', 'Uploaded', 'Plays', 'Likes', 'Dislikes']) trackHeader.append(element('th', '', title));
-  trackHead.append(trackHeader);
-  const trackBody = element('tbody');
-  for (const track of filtered) {
-    const row = element('tr');
-    const uploadDate = track.uploadedAt ? new Date(track.uploadedAt).toLocaleDateString() : '—';
-    row.append(element('td', '', track.title), element('td', '', track.artist), element('td', '', uploadDate), element('td', '', String(track.plays)),
-      element('td', 'radio-history-number', String(track.likes || 0)), element('td', 'radio-history-number', String(track.dislikes || 0)));
-    trackBody.append(row);
+  if (shows('songs')) {
+    const filtering = Boolean(query || artistKey || from || to);
+    const { details, body } = section('songs', 'By song', `${filtered.length} song${filtered.length === 1 ? '' : 's'} · ${filteredTotal} plays`,
+      filtering || filtered.length <= 10);
+    const trackTable = element('table', 'radio-history-table radio-history-song-table');
+    const trackHead = element('thead');
+    const trackHeader = element('tr');
+    for (const title of ['Song', 'Artist', 'Uploaded', 'Plays', 'Likes', 'Dislikes']) trackHeader.append(element('th', '', title));
+    trackHead.append(trackHeader);
+    const trackBody = element('tbody');
+    for (const track of filtered) {
+      const row = element('tr');
+      const uploadDate = track.uploadedAt ? new Date(track.uploadedAt).toLocaleDateString() : '—';
+      row.append(element('td', '', track.title), element('td', '', track.artist), element('td', '', uploadDate), element('td', '', String(track.plays)),
+        element('td', 'radio-history-number', String(track.likes || 0)), element('td', 'radio-history-number', String(track.dislikes || 0)));
+      trackBody.append(row);
+    }
+    trackTable.append(trackHead, trackBody);
+    const trackScroll = element('div', 'radio-history-table-scroll');
+    trackScroll.append(trackTable);
+    body.append(trackScroll);
+    content.append(details);
   }
-  trackTable.append(trackHead, trackBody);
-  const trackScroll = element('div', 'radio-history-table-scroll');
-  trackScroll.append(trackTable);
-  content.append(trackHeading, trackScroll);
 
-  if (mode === 'personal' || report.adverts === undefined) return;
-  content.append(element('h3', '', 'Adverts'));
+  if (mode === 'personal' || report.adverts === undefined || !shows('adverts')) return;
   if (!Array.isArray(report.adverts)) {
-    content.append(element('p', 'radio-history-note', 'Advert vote tallies are unavailable right now.'));
+    const { details, body } = section('adverts', 'Adverts', 'unavailable', false);
+    body.append(element('p', 'radio-history-note', 'Advert vote tallies are unavailable right now.'));
+    content.append(details);
     return;
   }
   const adverts = report.adverts.filter((advert) => !query || String(advert.title || '').toLocaleLowerCase().includes(query));
+  const { details, body } = section('adverts', 'Adverts', `${adverts.length} advert${adverts.length === 1 ? '' : 's'}`, Boolean(query) && adverts.length > 0);
+  content.append(details);
   if (!adverts.length) {
-    content.append(element('p', 'radio-history-note', `No advert plays or votes recorded ${allTime ? 'yet' : 'this week'}.`));
+    body.append(element('p', 'radio-history-note', `No advert plays or votes recorded ${allTime ? 'yet' : 'this week'}${query ? ' matching your search' : ''}.`));
     return;
   }
-  content.append(element('p', 'radio-history-note', 'Adverts are tallied separately and never compete in the Top 10. Counts cover recent advert plays retained by the radio worker.'));
+  body.append(element('p', 'radio-history-note', 'Adverts are tallied separately and never compete in the Top 10. Counts cover recent advert plays retained by the radio worker.'));
   const advertTable = element('table', 'radio-history-table radio-history-advert-table');
   const advertHead = element('thead');
   const advertHeader = element('tr');
@@ -196,7 +250,12 @@ function renderWeek() {
   advertTable.append(advertHead, advertBody);
   const advertScroll = element('div', 'radio-history-table-scroll');
   advertScroll.append(advertTable);
-  content.append(advertScroll);
+  body.append(advertScroll);
+}
+
+function refresh() {
+  renderWeek();
+  renderFunding();
 }
 
 async function openHistory(event) {
@@ -204,15 +263,24 @@ async function openHistory(event) {
   mode = event?.detail?.mode === 'personal' ? 'personal' : 'totals';
   wallet = mode === 'personal' ? String(window._wallet?.address || '') : '';
   reports = [];
+  fundingState = null;
+  openSections.clear();
   weekSelect.replaceChildren();
   searchInput.value = '';
+  if (viewSelect) {
+    viewSelect.value = '';
+    viewSelect.querySelector?.('option[value="funding"]')?.toggleAttribute?.('hidden', mode !== 'personal');
+  }
   artistSelect.value = '';
   fromInput.value = '';
   toInput.value = '';
   if (!dialog.open) dialog.showModal();
   content.textContent = 'Loading playback tally…';
   if (titleEl) titleEl.textContent = mode === 'personal' ? 'My Playback Tally' : 'Playback Tally';
-  if (rewardsEl) rewardsEl.hidden = mode !== 'personal' || !/^0x[0-9a-fA-F]{40}$/.test(wallet);
+  if (rewardsEl) {
+    rewardsEl.hidden = mode !== 'personal' || !/^0x[0-9a-fA-F]{40}$/.test(wallet);
+    rewardsEl.replaceChildren();
+  }
   if (noteEl) noteEl.textContent = mode === 'personal'
     ? `Playback tally for connected wallet ${wallet.slice(0, 6)}…${wallet.slice(-4)}`
     : 'Community playback tally';
@@ -257,6 +325,7 @@ function init() {
   fromInput = document.getElementById('radio-history-from');
   toInput = document.getElementById('radio-history-to');
   rewardsEl = document.getElementById('radio-history-rewards');
+  viewSelect = document.getElementById('radio-history-view');
   if (!dialog || !weekSelect || !content) return;
   setInterval(() => {
     if (!dialog.open || mode !== 'personal' || !wallet) return;
@@ -272,6 +341,7 @@ function init() {
     ++requestId;
     reports = [];
     wallet = '';
+    fundingState = null;
     content.replaceChildren();
     weekSelect.replaceChildren();
     if (rewardsEl) rewardsEl.hidden = true;
@@ -279,7 +349,8 @@ function init() {
   });
   document.getElementById('radio-history-close')?.addEventListener('click', () => dialog.close());
   weekSelect.addEventListener('change', renderWeek);
-  searchInput?.addEventListener('input', renderWeek);
+  searchInput?.addEventListener('input', refresh);
+  viewSelect?.addEventListener('change', refresh);
   artistSelect?.addEventListener('change', renderWeek);
   fromInput?.addEventListener('change', renderWeek);
   toInput?.addEventListener('change', renderWeek);

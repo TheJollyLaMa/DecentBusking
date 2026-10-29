@@ -157,7 +157,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       <label class="consent"><input type="checkbox"> I agree to send my questions, recent chat context and requested public-chain evidence to OpenAI.
         For payment questions, this may include my connected wallet address or a public wallet/transaction I ask about, amounts and payment history. Read-only lookups use public Base RPC and the public earnings index.
         Don't share secrets. Chat is kept in server memory for up to 15 minutes; the provider's own retention policy also applies.
-        The steward keeps private per-wallet credit/token totals, not automatic conversation logs. A separate voluntary share preview lets you submit an exchange for up to 30 days of steward review.
+        The steward keeps private per-wallet credit/token totals, not full conversation logs. If DBusker can't answer, that question and its reply are saved with your wallet for up to 30 days of steward review (you can delete them below); a separate share preview lets you submit any other exchange. Human review, not automatic training.
         <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></label>
       <div class="actions"><button type="button" class="signin">Sign in with wallet</button><button type="button" class="signout" hidden>Clear chat &amp; sign out</button></div>
       <p class="status" role="status" aria-live="polite">Invite-only. Connect through the site header, then sign in here on Base. No gas or payment.</p>
@@ -288,7 +288,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
     list.replaceChildren();
     for (const review of data.reviews) {
       const row = document.createElement('p'), button = document.createElement('button');
-      row.textContent = `Shared exchange ${review.id.slice(0, 8)}; expires ${new Date(review.expiresAt).toLocaleDateString()}. `;
+      row.textContent = `${review.kind === 'unknown' ? 'Unanswered question' : 'Shared exchange'} ${review.id.slice(0, 8)}; expires ${new Date(review.expiresAt).toLocaleDateString()}. `;
       button.type = 'button'; button.textContent = 'Delete shared exchange';
       button.addEventListener('click', async () => {
         if (pending || reviewPending || !credential) return;
@@ -479,7 +479,13 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       const answer = await request('/chat', { message, consent: true, mode: mode.value }, { signal: controller.signal });
       if (attempt !== generation) return;
       append('DBusker', answer.answer, answer.sources);
-      if (answer.exchangeId) {
+      if (answer.captured) {
+        exchangeId = null;
+        find('.review-status').textContent = "DBusker didn't know this one, so the question was saved for steward review. You can delete it below.";
+        try { await refreshReviews(attempt); }
+        catch (error) { if (attempt === generation) find('.review-status').textContent = `Question saved; the list could not refresh: ${error.message}`; }
+        if (attempt !== generation) return;
+      } else if (answer.exchangeId) {
         exchangeId = answer.exchangeId;
         find('.review-preview').textContent = JSON.stringify({ question: message, answer: answer.answer,
           sources: answer.sources, routing: answer.routing, handoffDigest: answer.handoffDigest }, null, 2);
@@ -488,10 +494,10 @@ export function initDBusker({ document = globalThis.document, window = globalThi
       if (answer.routing) {
         find('.route-result').textContent = answer.routing.attempts
           ? `Last answer: ${answer.routing.mode} / ${answer.routing.models.join(' → ')} / ${answer.routing.attempts} provider pass${answer.routing.attempts === 1 ? '' : 'es'}. ${answer.routing.attempts > 1 ? 'One deeper review used. ' : ''}Self-check: ${answer.routing.review.replaceAll('_', ' ')}; not independent fact verification.`
-          : 'No provider call: approved evidence was not found. Try a more specific question.';
+          : 'No provider call: approved evidence was not found.';
       }
       question.value = '';
-      status.textContent = answer.abstained ? 'DBusker could not verify part of this question. Check the evidence limits above.' : 'Answer ready. Source links are evidence, not proof of live deployment.';
+      status.textContent = answer.abstained ? "DBusker doesn't know all of this yet." : 'Answer ready. Follow the links to check for yourself.';
     } catch (error) {
       if (attempt === generation) status.textContent = `${mode.options[mode.selectedIndex].text} did not return an answer: ${error.message}`;
     } finally {

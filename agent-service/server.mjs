@@ -216,11 +216,13 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
         const messages = [...session.messages, { role: 'user', content: message.trim() }].slice(-7);
         let route = selectRoute(pack.routing, mode, message, session.task);
         if (!sources.length && !intent) {
-          const answer = 'I could not find approved public evidence for this question. Try naming the feature or code symbol, or use the public newcomer guide and community links. I cannot verify live balances, payouts or deployment state.';
+          const answer = "I don't know that one yet. I've noted the question for the steward. Meanwhile, try the public newcomer guide or ask the community.";
           session.messages = [...messages, { role: 'assistant', content: answer }].slice(-6);
           session.task = route.task;
-          return send(200, { answer, abstained: true, sources: [], handoffDigest: pack.digest,
-            routing: { mode, task: route.task, models: [], tiers: [], attempts: 0, review: 'insufficient_evidence', escalation: 'missing_evidence' } });
+          const result = { answer, abstained: true, sources: [], handoffDigest: pack.digest,
+            routing: { mode, task: route.task, models: [], tiers: [], attempts: 0, review: 'insufficient_evidence', escalation: 'missing_evidence' } };
+          session.exchange = { id: token(), question: message.trim(), answer, sources: [], routing: result.routing, handoffDigest: pack.digest };
+          return send(200, { ...result, exchangeId: session.exchange.id, captured: accounting.capture(session.wallet, session.exchange) });
         }
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(problem(504, 'DBusker took too long. Please try again.')), 45000);
@@ -287,7 +289,8 @@ export function createAgentServer(settings, { modelCall = askModel, chainRead = 
             } };
           session.exchange = { id: token(), question: message.trim(), answer: result.answer,
             sources: result.sources, routing: result.routing, handoffDigest: pack.digest };
-          return send(200, { ...result, exchangeId: session.exchange.id });
+          return send(200, { ...result, exchangeId: session.exchange.id,
+            captured: result.abstained ? accounting.capture(session.wallet, session.exchange) : null });
         } finally {
           clearTimeout(timeout);
           response.off('close', disconnect);
