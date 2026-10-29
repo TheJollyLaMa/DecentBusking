@@ -192,6 +192,8 @@ test('real audio frames advance from an ad back to music without a Discord voice
   assert.ok(session instanceof JukeLoopSession);
   const completed = [];
   session.djuke = { complete: async (record, play) => { completed.push({ record, play }); } };
+  const paidPlays = [];
+  session.devertPlayback = { recordPaidAdvertPlay: async play => { paidPlays.push(play); return true; } };
   session._primeNext = () => {};
   session._prepareNextPlayback = async () => null;
   session._voiceConnection = { getState: () => ({ voiceConnected: false }), stop() {} };
@@ -212,6 +214,8 @@ test('real audio frames advance from an ad back to music without a Discord voice
   await voice.entersState(session.player, voice.AudioPlayerStatus.Playing, 5000);
   assert.equal(session.getPlaybackStatus().ready, true, 'voice disconnection must not mark the website offline');
   assert.equal(completed.length, 0, 'starting or announcing an ad never settles payment');
+  assert.equal(session._nowPlaying.campaignId, '99', 'paid adverts expose their campaign for running vote tallies');
+  const adPlayId = session._nowPlaying.playId;
   const musicStream = new PassThrough();
   musicStream.end(Buffer.alloc(48000 * 2 * 2));
   session._preparedNext = {
@@ -227,6 +231,7 @@ test('real audio frames advance from an ad back to music without a Discord voice
   assert.equal(completed[0].record, paid);
   assert.equal(completed[0].play.finished, true);
   assert.ok(completed[0].play.audibleMs >= 400, 'PCM must be consumed in real time, not drained immediately');
+  assert.deepEqual(paidPlays.map(play => [play.campaignId, play.radioPlayId]), [['99', adPlayId]]);
   assert.equal(session._nowPlaying, null);
   await voice.entersState(session.player, voice.AudioPlayerStatus.Playing, 5000);
   assert.equal(session._nowPlaying.trackId, 'music-after-ad');

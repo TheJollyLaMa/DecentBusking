@@ -414,6 +414,13 @@ test('advert vote tallies carry across plays and into weekly history without vot
     [{ campaignId: '1', up: 2, down: 1, plays: 2, net: 1, title: 'Shop Local' }],
     [{ campaignId: '1', up: 2, down: 1, plays: 2, net: 1, title: 'Shop Local' }]]);
   assert.ok(!JSON.stringify(reports).includes('listener-browser'));
+  assert.equal(await runtime.recordPaidAdvertPlay({ campaignId: '1', radioPlayId: 'devert-paid:9:1', audibleMs: 1000 }), false);
+  assert.equal(await runtime.recordPaidAdvertPlay({ campaignId: '1', radioPlayId: 'devert-paid:9:1', audibleMs: 60_000 }), true);
+  assert.equal(await runtime.recordPaidAdvertPlay({ campaignId: '1', radioPlayId: 'devert-paid:9:1', audibleMs: 60_000 }), true);
+  assert.equal(fixture.state.paidPlays.length, 1, 'paid advert plays are durable and idempotent');
+  assert.equal(runtime.getMainRadioAdVoteSummary('devert-paid:9:1', '1').campaign.plays, 3);
+  const restored = await makeRuntime(fixture);
+  assert.equal(restored.getMainRadioAdVoteSummary('x', '1').campaign.plays, 3);
   assert.deepEqual(withAdvertTallies([{ week: 'w' }], { getMainRadioAdvertTallies: () => { throw new Error('not ready'); } })
     .map(report => report.adverts), [null]);
 });

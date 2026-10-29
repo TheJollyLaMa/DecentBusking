@@ -1595,8 +1595,7 @@ async function main() {
       let adVotes = null;
       if (nowPlaying?.isDevert) {
         try {
-          adVotes = _devertPlaybackRuntime?.getMainRadioAdVoteSummary(nowPlaying.playId,
-            String(nowPlaying.trackId || '').replace(/^devert:/, '')) ?? null;
+          adVotes = _devertPlaybackRuntime?.getMainRadioAdVoteSummary(nowPlaying.playId, nowPlaying.campaignId) ?? null;
         } catch (error) {
           console.warn('[devert-playback] Advert vote tally unavailable:', error.message);
         }
