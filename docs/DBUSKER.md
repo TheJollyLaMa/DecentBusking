@@ -409,12 +409,15 @@ For private operator reporting in the service shell:
 ```sh
 DBUSKER_STATE_FILE=/var/data/state.sqlite node accounting-report.mjs
 DBUSKER_STATE_FILE=/var/data/state.sqlite node accounting-report.mjs reviews
+DBUSKER_STATE_FILE=/var/data/state.sqlite node accounting-report.mjs unknowns
 ```
 
 The first prints totals and legacy attribution limits, **not conversations**.
 The second is a deliberate private steward action that prints only voluntarily
-shared exchanges. Do not copy either output into public issues or analytics.
-Local equivalents are `npm run accounting:report` and `npm run reviews:report`.
+shared exchanges and captured unknown questions; `unknowns` prints only the
+latter. Do not copy any output into public issues or analytics. Local
+equivalents are `npm run accounting:report`, `npm run reviews:report` and
+`npm run unknowns:report`.
 
 The latest successful provider-backed answer offers a collapsed **preview**
 containing exactly one question, answer, public source links, routing receipt
@@ -431,9 +434,30 @@ delete them through the list below chat, including after a fresh sign-in. Limits
 are ten retained exchanges per wallet, 500 total, plus rate limiting. Deleting
 or expiry removes them from the active inbox; provider/operator backups have
 their own retention policies. Clearing chat is not deletion of a deliberately
-shared exchange; use its delete button. No automatic first-turn logging,
-transcript publication, model training, prompt rewriting or policy activation
-is introduced. Steward review can inform a later explicitly approved handoff.
+shared exchange; use its delete button.
+
+### Signpost answers and unknown-question capture
+
+DBusker answers in a few short sentences and points visitors to where they can
+check facts themselves (for example **My Playbacks** or Profile → **Total
+earnings**) rather than reciting earnings totals. Chain evidence still supplies
+transaction, block and contract links beneath the answer.
+
+When DBusker abstains (the model returns `abstained=true`, or no approved
+evidence is found and no provider call is made), the server stores that one
+question, its reply, source links and routing receipt in `shared_reviews` with
+`capture: "unknown"`, the signed-in wallet and capture time. The consent text
+discloses this before sign-in. The response includes a `captured` receipt and the
+widget lists it as an **Unanswered question** the owner can delete. Captures
+share the 30-day expiry and 500-row total but have their own 50-per-wallet cap,
+so they never use up the ten voluntary shares. When a cap is reached the
+question is simply not captured. Chain clarification prompts, provider failures
+and answered questions are not captured. Earlier turns and raw chain evidence
+are never stored. Captures cost no extra credits.
+
+No transcript publication, model training, prompt rewriting or policy activation
+is introduced. Steward review of shared and captured questions can inform a
+later explicitly approved handoff.
 
 - Pilot supports ordinary externally owned accounts. Smart-contract wallets,
   delegated keys and universal-signature schemes are not supported yet.
@@ -442,7 +466,8 @@ is introduced. Steward review can inform a later explicitly approved handoff.
   request logs. The dismissal preference alone uses local storage.
 - Chat history stays in server memory, bounded to recent turns and a
   15-minute session. It is not sent to another session or saved to SQLite unless
-  the visitor deliberately shares an exchange through the separate preview.
+  DBusker could not answer the question (captured as above) or the visitor
+  deliberately shares an exchange through the separate preview.
   Closing the drawer does not sign out. **Clear chat & sign out**, consent
   withdrawal, account changes and disconnects clear the browser conversation
   and attempt server-session deletion. If offline, the session expires.

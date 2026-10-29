@@ -116,6 +116,32 @@ test('only an explicitly approved server-held exchange is shared, owner-deleted 
   assert.deepEqual((await f.request('/reviews', null, fresh.token, 'GET')).body.reviews, []);
 });
 
+test('questions DBusker cannot answer are captured for steward review, owner-visible and deletable', async t => {
+  const f = await fixture(t, { modelCall: async input => ({ answer: "I don't know that one yet; I've flagged it for the steward.",
+    abstained: true, review: 'insufficient_evidence', sources: [], usage: { inputTokens: 10, outputTokens: 5 } }) });
+  const session = await f.login(), other = await f.login(f.other);
+  const answer = await f.request('/chat', { message: 'Explain playlist payments', consent: true }, session.token);
+  assert.equal(answer.status, 200);
+  assert.equal(answer.body.abstained, true);
+  assert.equal(answer.body.captured.id, answer.body.exchangeId);
+  const none = await f.request('/chat', { message: 'zyxqv987654321', consent: true }, (await f.login()).token);
+  assert.equal(none.body.routing.attempts, 0);
+  assert.match(none.body.answer, /I don't know that one yet/);
+  assert.ok(none.body.captured);
+  const reviews = (await f.request('/reviews', null, session.token, 'GET')).body.reviews;
+  assert.deepEqual(reviews.map(review => review.kind), ['unknown', 'unknown']);
+  assert.deepEqual((await f.request('/reviews', null, other.token, 'GET')).body.reviews, []);
+  const db = new DatabaseSync(f.settings.stateFile, { readOnly: true });
+  try {
+    const stored = db.prepare('SELECT exchange FROM shared_reviews').all().map(row => JSON.parse(row.exchange));
+    assert.deepEqual(stored.map(row => row.capture), ['unknown', 'unknown']);
+    assert.ok(stored.some(row => row.question === 'Explain playlist payments'));
+    assert.ok(stored.every(row => row.messages === undefined));
+  } finally { db.close(); }
+  assert.equal((await f.request(`/review/${answer.body.exchangeId}`, null, session.token, 'DELETE')).status, 200);
+  assert.equal((await f.request('/reviews', null, session.token, 'GET')).body.reviews.length, 1);
+});
+
 test('failed provider calls count once for the signed-in wallet including known usage', async t => {
   const f = await fixture(t, { modelCall: async () => {
     throw new ModelFailure('output_limit', undefined, { inputTokens: 123, outputTokens: 800 });

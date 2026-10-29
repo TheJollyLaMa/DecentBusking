@@ -3756,7 +3756,7 @@ decent-foot {
 .radio-history-header h2 { margin: 0; color: var(--gold); font-size: 1.15rem; }
 #radio-history-close { width: 36px; height: 36px; color: var(--text-primary); background: #141720; border: 1px solid var(--panel-border); border-radius: 4px; cursor: pointer; }
 .radio-history-note { color: var(--text-dim); font-size: .8rem; }
-#radio-history-rewards { display: block; min-width: 0; padding: 12px 0; margin: 0; border-bottom: 1px solid var(--panel-border); font-size: .85rem; }
+#radio-history-rewards { display: block; min-width: 0; padding: 0; margin: 0; font-size: .85rem; }
 #radio-history-rewards[hidden] { display: none; }
 #radio-history-rewards h3 { margin: 0 0 6px; color: var(--gold); font-size: .95rem; }
 #radio-history-rewards h4 { margin: 16px 0 6px; color: var(--text-primary); font-size: .82rem; }
@@ -3774,13 +3774,23 @@ decent-foot {
 #mint-form .mint-source-controls input { width: auto; margin: 0; }
 #mint-form select { width: 100%; padding: 10px; font: inherit; color: var(--text-primary); background: #10121a; border: 1px solid var(--panel-border); border-radius: 4px; }
 #mint-file-section[hidden], #mint-cid-section[hidden] { display: none; }
-.radio-history-filters { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 10px; margin: 14px 0; }
+.radio-history-toolbar { position: sticky; top: -1px; z-index: 1; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; padding: 12px 0 8px; margin-top: 8px; background: inherit; }
+.radio-history-toolbar label { display: grid; min-width: 0; gap: 5px; color: var(--text-dim); font-size: .78rem; }
+.radio-history-more-filters { margin: 0 0 10px; color: var(--text-dim); font-size: .8rem; }
+.radio-history-more-filters > summary { cursor: pointer; width: max-content; }
+.radio-history-filters { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 10px 0 4px; }
 .radio-history-filters label { display: grid; min-width: 0; gap: 5px; color: var(--text-dim); font-size: .78rem; }
+.radio-history-toolbar input, .radio-history-toolbar select,
 .radio-history-filters input, .radio-history-filters select { width: 100%; min-width: 0; min-height: 38px; padding: 6px 8px; color: var(--text-primary); background: #10121a; border: 1px solid var(--panel-border); border-radius: 4px; }
-.radio-history-week-label { display: grid; gap: 6px; max-width: 220px; margin: 14px 0; color: var(--text-dim); font-size: .8rem; }
 #radio-history-week { min-height: 38px; padding: 6px 8px; color: var(--text-primary); background: #10121a; border: 1px solid var(--panel-border); border-radius: 4px; }
 .radio-history-total { padding: 12px; color: var(--teal); background: rgba(0, 212, 170, .08); border-left: 2px solid var(--teal); }
 #radio-history-content h3 { margin: 20px 0 8px; color: var(--gold); font-size: .9rem; }
+.radio-history-section { margin: 10px 0; border: 1px solid var(--panel-border); border-radius: 4px; background: rgba(255,255,255,.02); }
+.radio-history-section > summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 12px; cursor: pointer; }
+.radio-history-section-title { color: var(--gold); font-size: .9rem; font-weight: 600; }
+.radio-history-section-summary { color: var(--text-dim); font-size: .78rem; text-align: right; font-variant-numeric: tabular-nums; }
+.radio-history-section-body { padding: 0 12px 10px; }
+#radio-history-rewards .radio-history-section { margin: 0; }
 .radio-history-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
 .radio-history-table-scroll { max-width: 100%; overflow-x: auto; }
 .radio-history-song-table { min-width: 570px; }
@@ -3791,6 +3801,8 @@ decent-foot {
 @media (max-width: 600px) {
   #radio-history-dialog { width: calc(100vw - 20px); max-height: 84dvh; padding: 18px 14px; }
   #radio-video-stage { inset: 140px 12px calc(var(--radio-footer-height, 96px) + 100px); }
+  .radio-history-toolbar { grid-template-columns: 1fr 1fr; }
+  .radio-history-search-label { grid-column: 1 / -1; }
   .radio-history-filters { grid-template-columns: 1fr 1fr; }
   .radio-history-table { font-size: .75rem; }
   .radio-history-table th, .radio-history-table td { padding: 7px 4px; }

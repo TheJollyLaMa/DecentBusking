@@ -159,7 +159,9 @@ test('newcomer guidance follows visitor intent without consuming unrelated gover
   assert.ok(!questionInstructions(pack, 'What next?',
     [{ role: 'assistant', content: 'Submit a song' }]).includes(pack.welcome));
   assert.match(pack.instructions, /sourceIds/);
-  assert.match(pack.welcome, /under 180 words/);
+  assert.match(pack.welcome, /under 70 words/);
+  assert.match(pack.instructions, /I don.t know that one yet/);
+  assert.match(pack.instructions, /My Playbacks/);
   assert.match(pack.welcome, /genuinely missing, stale or conflicting facts explicit/);
 });
 

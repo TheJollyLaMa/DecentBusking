@@ -23,6 +23,11 @@ class Node {
   close() { this.open = false; }
 }
 
+const descendants = node => node.children.flatMap(child => [child, ...descendants(child)]);
+const byClass = (node, name) => descendants(node).filter(child => String(child.className || '').split(' ').includes(name));
+const section = (node, key) => descendants(node).find(child => child['data-section'] === key);
+const tableBody = scope => byClass(scope, 'radio-history-table')[0]?.children[1];
+
 const walletA = `0x${'1'.repeat(40)}`;
 const walletB = `0x${'2'.repeat(40)}`;
 const week = { week: '2026-W41', current: true, totalPlays: 7, trackCount: 1,
@@ -130,12 +135,14 @@ test('My Playbacks funding panel shows provisional wallet/song shares without a 
   const panel = page.node('radio-history-rewards');
   assert.match(panel.textContent, /Allocation funds/);
   assert.match(panel.textContent, /10\.00 USDC.*1\.00 USDC.*9\.00 USDC.*2\.50 USDC/);
-  const fundScroll = panel.children.find(node => node.className?.includes('radio-history-table-scroll') && node.children[0]?.className?.includes('radio-history-fund-balances'));
+  assert.equal(section(panel, 'funding').open, false);
+  assert.match(panel.textContent, /Your estimate 3\.50 USDC · provisional/);
+  const fundScroll = byClass(panel, 'radio-history-table-scroll').find(node => node.children[0]?.className?.includes('radio-history-fund-balances'));
   assert.deepEqual(fundScroll.children[0].children[1].children.map(row => row.children.map(cell => cell.textContent)), [
     ['Playback', '10.00 USDC', '1.00 USDC', '9.00 USDC', '2.50 USDC'], ['Top 10 votes', '2.00 USDC', '0.00 USDC', '2.00 USDC', '1.00 USDC'],
   ]);
   assert.match(panel.textContent, /Your song estimates · playback only/);
-  const songScroll = panel.children.find(node => node.className?.includes('radio-history-table-scroll') && node.children[0]?.className?.includes('radio-history-song-estimates'));
+  const songScroll = byClass(panel, 'radio-history-table-scroll').find(node => node.children[0]?.className?.includes('radio-history-song-estimates'));
   assert.ok(songScroll);
   const songTable = songScroll.children[0];
   assert.deepEqual(songTable.children[1].children[0].children.map(cell => cell.textContent), ['Song A', '7', '3', '2.50 USDC']);
@@ -171,13 +178,13 @@ test('both tally modes show all-time song votes and recompute filtered artist to
     await page.open(mode);
     const content = page.node('radio-history-content');
     assert.match(content.textContent, /all-time totals/);
-    const artistBody = content.children[3].children[0].children[1];
+    const artistBody = tableBody(section(content, 'artists'));
     assert.deepEqual(artistBody.children[0].children.map(cell => cell.textContent), ['Artist A', '2', '10', '16', '3']);
-    const songBody = content.children[5].children[0].children[1];
+    const songBody = tableBody(section(content, 'songs'));
     assert.deepEqual(songBody.children[0].children.slice(-3).map(cell => cell.textContent), ['7', '12', '2']);
     page.node('radio-history-search').value = 'Song B';
     page.node('radio-history-search').listeners.get('input')();
-    const filteredArtist = content.children[3].children[0].children[1].children[0];
+    const filteredArtist = tableBody(section(content, 'artists')).children[0];
     assert.deepEqual(filteredArtist.children.map(cell => cell.textContent), ['Artist A', '1', '3', '4', '1']);
   }
 });
@@ -188,7 +195,7 @@ test('public tally lists advert vote totals separately and explains when they ar
   await page.open('totals');
   const content = page.node('radio-history-content');
   assert.match(content.textContent, /Adverts/);
-  const advertBody = content.children.at(-1).children[0].children[1];
+  const advertBody = tableBody(section(content, 'adverts'));
   assert.deepEqual(advertBody.children[0].children.map(cell => cell.textContent), ['Shop Local', '3', '5', '1', '+4']);
   const unavailable = historyPage(async () => ({ ok: true, json: async () => ({ weeks: [{ ...week, adverts: null }] }) }));
   await unavailable.open('totals');
@@ -196,6 +203,64 @@ test('public tally lists advert vote totals separately and explains when they ar
   const personal = historyPage(async () => ({ ok: true, json: async () => ({ weeks: [report] }) }));
   await personal.open('personal');
   assert.doesNotMatch(personal.node('radio-history-content').textContent, /Shop Local/);
+});
+
+test('tally sections collapse into dropdowns while search and Show filter narrow every list', async () => {
+  const tracks = Array.from({ length: 12 }, (_, index) => ({ title: `Tune ${index}`, artist: index ? 'Artist A' : 'Busker B',
+    uploadedAt: '2026-10-01T00:00:00Z', plays: 1, likes: 0, dislikes: 0 }));
+  const report = { ...week, totalPlays: 12, trackCount: 12, tracks,
+    adverts: [{ campaignId: '4', title: 'Shop Local', plays: 3, up: 5, down: 1, net: 4 }] };
+  const page = historyPage(async () => ({ ok: true, json: async () => ({ weeks: [report] }) }));
+  await page.open('totals');
+  const content = page.node('radio-history-content');
+  assert.equal(section(content, 'artists').open, true);
+  assert.equal(section(content, 'songs').open, false, 'long song list starts collapsed');
+  assert.equal(section(content, 'adverts').open, false);
+  assert.match(section(content, 'songs').textContent, /12 songs · 12 plays/);
+  page.node('radio-history-search').value = 'busker';
+  page.node('radio-history-search').listeners.get('input')();
+  assert.equal(section(content, 'songs').open, true, 'search opens the narrowed song list');
+  assert.equal(tableBody(section(content, 'songs')).children.length, 1);
+  assert.match(section(content, 'adverts').textContent, /0 adverts.*matching your search/);
+  page.node('radio-history-search').value = 'shop';
+  page.node('radio-history-search').listeners.get('input')();
+  assert.equal(section(content, 'adverts').open, true);
+  page.node('radio-history-search').value = '';
+  page.node('radio-history-view').value = 'adverts';
+  page.node('radio-history-view').listeners.get('change')();
+  assert.equal(section(content, 'songs'), undefined);
+  assert.equal(section(content, 'artists'), undefined);
+  assert.equal(section(content, 'adverts').open, true);
+  page.node('radio-history-view').value = '';
+  page.node('radio-history-view').listeners.get('change')();
+  section(content, 'songs').open = true;
+  section(content, 'songs').listeners.get('toggle')();
+  page.node('radio-history-search').listeners.get('input')();
+  assert.equal(section(content, 'songs').open, true, 'reader choice survives re-render');
+});
+
+test('funding estimates follow the search and Show filter', async () => {
+  const state = { ready: true, chainId: 8453, timeZone: 'America/New_York', currentPeriod: { week: 'NY-2026-10-05' },
+    nextCloseAt: '2026-10-12T04:00:00Z', funds: { playback: { balanceUnits: '1', reservedUnits: '0', availableUnits: '1', warning: '',
+      estimatedShares: [] } },
+    currentSongs: [{ title: 'Song A', plays: 7, votes: 3, estimatedPlaybackUnits: '2500000' },
+      { title: 'Other', plays: 1, votes: 0, estimatedPlaybackUnits: '0' }] };
+  const page = historyPage(async () => ({ ok: true, json: async () => ({ weeks: [week] }) }), state);
+  await page.open('personal');
+  await Promise.resolve(); await Promise.resolve();
+  const panel = page.node('radio-history-rewards');
+  const estimates = () => byClass(panel, 'radio-history-song-estimates')[0].children[1].children.length;
+  assert.equal(estimates(), 2);
+  page.node('radio-history-search').value = 'other';
+  page.node('radio-history-search').listeners.get('input')();
+  assert.equal(estimates(), 1);
+  page.node('radio-history-view').value = 'songs';
+  page.node('radio-history-view').listeners.get('change')();
+  assert.equal(panel.children.length, 0);
+  page.node('radio-history-view').value = 'funding';
+  page.node('radio-history-view').listeners.get('change')();
+  assert.equal(section(panel, 'funding').open, true);
+  assert.equal(section(page.node('radio-history-content'), 'songs'), undefined);
 });
 
 test('Right Ankh keeps the public schedule visible and hides My Playbacks on disconnect', () => {

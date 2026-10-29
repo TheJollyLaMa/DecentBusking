@@ -13,9 +13,9 @@ test('public pilot configuration contains only the separate service URL and enab
   assert.equal(Object.keys(window.DecentConfig.dbusker).sort().join(','), 'enabled,serviceUrl');
   const index = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
   assert.match(index, /decent\.config\.js\?v=20261027-dbusker-invited/);
-  assert.match(index, /js\/main\.js\?v=20261028-dbusker-credits/);
+  assert.match(index, /js\/main\.js\?v=20261029-dbusker-signpost/);
   assert.match(readFileSync(new URL('../../js/main.js', import.meta.url), 'utf8'),
-    /dbusker\.mjs\?v=20261028-credits/);
+    /dbusker\.mjs\?v=20261029-signpost/);
 });
 
 async function fixture(t, enabled = true, connected = true) {
