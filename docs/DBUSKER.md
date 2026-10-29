@@ -239,6 +239,13 @@ The UI sends the selected mode and reports the models used, number of passes
 and review verdict after the complete response. It does not claim live
 streaming visibility into the router. A mode change alone sends no request.
 
+Chain display-reference lists stay in the response for clickable transaction,
+contract and block citations, but are excluded from the model payload and its
+28,000-byte context calculation. The verified chain evidence text, including
+amounts, transaction hashes, blocks and coverage limits, is preserved unchanged.
+Duplicating those links in the model payload can otherwise prevent a wallet
+with a larger payment history from receiving an answer before any provider call.
+
 ## Learning with steward approval
 
 This is **review-gated routing feedback, not autonomous training**. DBusker

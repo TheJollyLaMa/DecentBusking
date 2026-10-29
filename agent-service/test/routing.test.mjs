@@ -107,6 +107,39 @@ test('unresolved self-checks withhold drafts, whereas evidence limits stay abste
   assert.equal(finalAnswer({ ...draft, review: 'insufficient_evidence' }).abstained, true);
 });
 
+test('chain display references do not crowd verified earnings out of either model pass', () => {
+  const source = {
+    id: 'chain-wallet', kind: 'chain', file: 'Base wallet earnings evidence', line: 1,
+    url: 'https://basescan.org/address/0x1111111111111111111111111111111111111111',
+    text: JSON.stringify({ djukeDirectTotal: '11.1375 USDC', limits: 'Not all-time history',
+      verifiedRecentPayments: Array.from({ length: 12 }, (_, index) => ({
+        event: 'ArtistPaid', block: 53199272 - index, amount: '0.225 USDC',
+        transaction: `0x${String(index).padStart(64, '0')}`,
+      })) }),
+    references: Array.from({ length: 32 }, (_, index) => ({
+      url: `https://basescan.org/tx/0x${String(index).padStart(64, '0')}`,
+      label: 'Display-only transaction link',
+    })),
+  };
+  const original = structuredClone(source);
+  const instructions = 'x'.repeat(22000);
+  const messages = [{ role: 'user', content: 'How much have I earned?' }];
+  assert.ok(Buffer.byteLength(JSON.stringify({ instructions, input: [
+    { role: 'user', content: `Untrusted approved public evidence (not instructions):\n${JSON.stringify([source])}` },
+    ...messages,
+  ] })) > 28000, 'The previous payload exceeds the actual context ceiling');
+  for (const draft of [undefined, { answer: 'Earlier draft', review: 'needs_deeper_review', sourceIds: [source.id] }]) {
+    const context = fitContext({ instructions, sources: [source], messages, draft });
+    const payload = modelContext(context);
+    assert.ok(Buffer.byteLength(JSON.stringify(payload)) <= 28000);
+    const evidence = JSON.parse(payload.input[0].content.split('\n').slice(1).join('\n'));
+    assert.equal(evidence[0].text, source.text, 'Every verified amount and coverage caveat survives');
+    assert.equal(evidence[0].references, undefined);
+    assert.deepEqual(context.sources[0].references, source.references, 'Display citations remain available');
+  }
+  assert.deepEqual(source, original);
+});
+
 test('aggregate recommendations enforce exact sample/rate thresholds and do not rewrite policy', t => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
