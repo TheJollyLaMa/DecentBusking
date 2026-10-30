@@ -1,6 +1,7 @@
 import { createRadioAnnouncements, deserializeAnnouncements } from './radio-announcements.js';
 import { createCommunityReminder, deserializeCommunityReminders } from './community-reminder.js';
 import { createLiveBookings } from './live-bookings.js';
+import { createPromotions, promotionCheckpointCodec } from './promotions.js';
 // discord-bot/index.js
 // DecentBusking Discord Bot — entry point
 //
@@ -1403,7 +1404,26 @@ async function main() {
       updateJukeLoopRadioSchedule({ events, schedule: defaultRadioSchedule(weeklySchedule) });
     },
   });
+  let promotions;
+  if (process.env.PROMOTIONS_STORAGE_KEY) {
+    const codec = promotionCheckpointCodec(process.env.PROMOTIONS_STORAGE_KEY);
+    if (!config.pinataJwt) throw new Error('Promotions require Pinata checkpoint storage');
+    const promotionsStore = createPinataStateStore({ ...config.checkpointStorage,
+      pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
+      gateway: config.ipfsGateway, name: 'decentbusking-promotions-encrypted.json',
+      tags: { app: 'decentbusking', kind: 'promotions-encrypted', schema: '1' }, ...codec, restoreLatestOnly: true,
+      beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined });
+    promotions = createPromotions({ restore: promotionsStore.restore, save: promotionsStore.save,
+      provider: paymentProvider, routerAddress: payrollAssets.routerAddress, ownerWallet: config.mintOwnerWallet,
+      devertContractAddress: process.env.DEVERT_CONTRACT_ADDRESS,
+      voteOnRadio: async vote => {
+        const playing = getJukeLoopNowPlaying();
+        if (!playing || playing.isDevert || playing.playId !== vote.playId) throw new Error('A current song, not an advert, is required');
+        return submitJukeLoopVote(vote);
+      } });
+  }
   const requestHandler = createWorkerRequestHandler({
+    promotions,
     getMediaGateways: async () => [await discoverDedicatedGateway(config) || config.ipfsGateway],
     radioAnnouncements,
     liveBookings,
