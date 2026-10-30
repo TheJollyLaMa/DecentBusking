@@ -1,4 +1,4 @@
-import { fetchNFTMetaById } from './space.js?v=20261025-seamless-handoff';
+import { fetchNFTMetaById } from './space.js?v=20261030-ad-cutoff';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { submitMediaForApproval } from './mint-submission.js?v=20261017-mercury-release';
 import { detectSubmissionMedia, mediaFilename, evenCreatorSplits, validateCreatorSplits } from './submission-media.mjs';

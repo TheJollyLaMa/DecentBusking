@@ -2,12 +2,12 @@ import { supportsDjukeAlbumsAndGas } from './djuke-version.mjs';
 import { purchaseDjukeSong, replaceDjukeSong } from './djuke-payment.mjs';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { mountDjukeQueueFocus } from './djuke-queue-focus.mjs';
-import { getRadioStateSnapshot } from './radio-sync.js?v=20261025-seamless-handoff';
+import { getRadioStateSnapshot } from './radio-sync.js?v=20261030-ad-cutoff';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 import { lookupEnsName } from './ens-client.mjs?v=20261016-ens-worker';
 import { renderWalletAddress } from './fund-display.mjs?v=20261024-djuke-labels';
-import { playlistBatchProgress } from './djuke-playlist-progress.mjs?v=20261025-seamless-handoff';
+import { playlistBatchProgress } from './djuke-playlist-progress.mjs?v=20261030-ad-cutoff';
 export { USDC_BROWSER_ABI };
 
 export function playlistReceiptSummary(batch) {

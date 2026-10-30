@@ -8,6 +8,62 @@ const { PassThrough } = require('node:stream');
 const { pathToFileURL } = require('node:url');
 const vm = require('node:vm');
 
+test('worker advert deadline stops at 120 seconds and cancels itself on Idle', async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  let stopped = 0;
+  let interrupted;
+  const player = new EventEmitter();
+  player.state = { status: 'playing' };
+  player.stop = () => { stopped++; player.emit('idle'); };
+  const session = new JukeLoopSession({ audioPlayer: player, client: {} });
+  t.after(() => session.destroy());
+  session._primeNext = () => {};
+  session._playNext = async () => {};
+  session._collectReactions = async () => {};
+  session._nowPlaying = { playId: 'ad-limit', trackId: 'ad', startedAt: Date.now(), audible: false };
+  session._currentDevertAd = { campaignId: '1' };
+  session._activeAudio = { resource: {}, completion: {
+    interrupt(reason) { interrupted = reason; },
+    finish: async () => ({ finished: false }),
+  } };
+  session._ffmpeg = { kill() {} };
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  player.emit('stateChange', {}, { status: 'playing' });
+  t.mock.timers.tick(119999);
+  assert.equal(stopped, 0);
+  t.mock.timers.tick(1);
+  assert.equal(stopped, 1);
+  assert.equal(interrupted, 'advert_time_limit');
+  assert.equal(session._completedPlay.audibleMs, 120000);
+  assert.equal(session._adCutoffTimer, null);
+  session._finishAdvertAtLimit('obsolete');
+  assert.equal(stopped, 1);
+});
+
+test('capped adverts require 120 seconds of actual decoded and consumed audio for paid completion', async () => {
+  const { monitorAudioCompletion } = await import('../discord-bot/jukeloop.js');
+  for (const [decodedMs, playedMs, streamError, expected] of [
+    [120000, 120000, false, true], [1000, 120000, false, false],
+    [120000, 1000, false, false], [120000, 120000, true, false],
+  ]) {
+    const input = new PassThrough();
+    const process = new EventEmitter();
+    process.exitCode = null;
+    process.kill = () => {};
+    const completion = monitorAudioCompletion(input, process);
+    completion.stream.on('data', () => {});
+    completion.stream.on('error', () => {});
+    input.write(Buffer.alloc(decodedMs * 192));
+    if (streamError) process.emit('error', new Error('test decoder failure'));
+    completion.interrupt('advert_time_limit');
+    const result = await completion.finish({ playbackDuration: playedMs });
+    assert.equal(result.finished, expected);
+    assert.equal(result.reason, 'advert_time_limit');
+    input.destroy();
+    completion.stream.destroy();
+  }
+});
+
 test('failed media preparation cannot wait on a stuck Discord skip notice', async t => {
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
   const streams = [];

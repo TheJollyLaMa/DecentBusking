@@ -1,12 +1,12 @@
-// js/stage.js?v=20261025-seamless-handoff — DecentBusking
+// js/stage.js?v=20261030-ad-cutoff — DecentBusking
 // Hat (tip) + Guitar Case (mint) interactions and the now-playing banner.
 
-import { openMintModal } from './mint.js?v=20261025-seamless-handoff';
-import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261025-seamless-handoff';
+import { openMintModal } from './mint.js?v=20261030-ad-cutoff';
+import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261030-ad-cutoff';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { resolveNowPlayingNFT } from './space.js?v=20261025-seamless-handoff';
+import { resolveNowPlayingNFT } from './space.js?v=20261030-ad-cutoff';
 import { nftArtistLabel } from './nft-loader.js?v=20261012-paging';
-import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, getCreatorWatchlistState, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261025-seamless-handoff';
+import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, getCreatorWatchlistState, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261030-ad-cutoff';
 
 let _tipPlayingTrack = null;
 let _tipHistory = [];

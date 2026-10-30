@@ -12,8 +12,152 @@ function radioSyncSource() {
     .replace(/export /g, '');
   const shared = fs.readFileSync(path.join(__dirname, '../js/radio-client.mjs'), 'utf8')
     .replace(/export /g, '').replace('function sendRadioVote(', 'function sharedRadioVote(');
-  return `${formatter}\n${shared}\n${source}`;
+  return `const DEVERT_MAX_AD_SECONDS = 120;\n${formatter}\n${shared}\n${source}`;
 }
+
+function adClockHarness() {
+  let time = 0;
+  const timers = new Map();
+  let timerId = 0;
+  const audio = { currentTime: 0, paused: false, pause() { this.paused = true; } };
+  const context = vm.createContext({
+    console, audio, performance: { now: () => time },
+    setTimeout: (callback, delay) => { timers.set(++timerId, { callback, at: time + delay }); return timerId; },
+    clearTimeout: id => timers.delete(id),
+    window: { DecentConfig: {} },
+  });
+  vm.runInContext(`${radioSyncSource()}
+    _audio = audio; _audioPlayer = audio;
+    _loadedPlayId = 'ad-play'; _radio = { playId: 'ad-play', isDevert: true };
+    globalThis.transitions = 0;
+    _playAdTransition = () => { transitions++; return Promise.resolve(); };
+    _broadcastNowPlayingStopped = () => {};
+    _setActivity = () => {};
+    _renderVoting = () => {};
+    _renderSponsorTag = () => {};
+    _poll = () => {};
+    globalThis.arm = offset => _armRadioAd({ playId: 'ad-play', isDevert: true }, offset);
+    globalThis.check = _checkRadioAdLimit;
+  `, context);
+  return { context, audio, timers, tick(next) {
+    time = next;
+    for (const [id, timer] of [...timers]) {
+      if (timer.at <= time) { timers.delete(id); timer.callback(); }
+    }
+  } };
+}
+
+test('radio adverts stop at exactly 120 seconds even while the original video continues', () => {
+  const { context, audio, tick } = adClockHarness();
+  context.arm(0);
+  tick(119999);
+  assert.equal(audio.paused, false);
+  assert.equal(context.transitions, 0);
+  tick(120000);
+  assert.equal(audio.paused, true);
+  assert.equal(context.transitions, 1);
+  assert.equal(vm.runInContext('_radioHandoff.afterAd', context), true);
+  context.check();
+  assert.equal(context.transitions, 1, 'a stale worker ad cannot replay its transition');
+  vm.runInContext('_syncRadio();', context);
+  assert.equal(audio.paused, true, 'the same worker play must not restart after its cap');
+  vm.runInContext(`_onEnded(); _loadedPlayId = null; _syncRadio();`, context);
+  assert.equal(context.transitions, 1, 'a duplicate ended event or stale snapshot cannot replay an expired ad');
+});
+
+test('late ad joins get only the remaining slot and media position also enforces the cap', () => {
+  const late = adClockHarness();
+  late.audio.currentTime = 90;
+  late.context.arm(90);
+  late.tick(29999);
+  assert.equal(late.audio.paused, false);
+  late.tick(30000);
+  assert.equal(late.audio.paused, true);
+  const media = adClockHarness();
+  media.context.arm(0);
+  media.audio.currentTime = 119.999;
+  media.context.check();
+  assert.equal(media.audio.paused, false);
+  media.audio.currentTime = 120;
+  media.context.check();
+  assert.equal(media.audio.paused, true);
+});
+
+test('short adverts transition early and the next radio song starts at zero rather than live offset', () => {
+  const { context, audio } = adClockHarness();
+  context.arm(0);
+  audio.currentTime = 20;
+  vm.runInContext(`_onEnded();
+    globalThis.nextStarts = [];
+    _switchTo = options => nextStarts.push(options);
+    _radio = { playId: 'song-after-ad', title: 'Next song', ipfsCid: 'bafy-next', positionMs: 65000, receivedAt: performance.now() };
+    _syncRadio();`, context);
+  assert.equal(context.transitions, 1);
+  assert.equal(context.nextStarts.length, 1);
+  assert.equal(context.nextStarts[0].offset(), 0);
+  assert.equal(vm.runInContext('_radioAd', context), null);
+});
+
+test('stopping radio cancels ad timers and transitions without cutting later archive playback', () => {
+  const { context, audio, tick } = adClockHarness();
+  context.arm(0);
+  vm.runInContext(`globalThis.stops = 0;
+    _adTransition = { stop() { stops++; }, setVolume() {} };
+    _stopAudio(); _mode = 'archive';`, context);
+  audio.paused = false;
+  tick(120000);
+  assert.equal(audio.paused, false);
+  assert.equal(context.stops, 1);
+  assert.equal(context.transitions, 0);
+});
+
+test('ad intro finishes before content starts and cancelled switches never start the ad', async () => {
+  let finishIntro;
+  const intro = new Promise(resolve => { finishIntro = resolve; });
+  const audio = { paused: true, currentTime: 0, pause() { this.paused = true; },
+    removeAttribute() {}, querySelectorAll: () => [], load() {}, play: async function () { this.paused = false; } };
+  const context = vm.createContext({ audio, intro, console, performance, setTimeout, clearTimeout });
+  vm.runInContext(`${radioSyncSource()}
+    _audio = audio; _audioPlayer = audio;
+    _playAdTransition = () => intro;
+    _waitForMetadata = async () => ({ loaded: true });
+    _broadcastNowPlaying = () => {};
+    _broadcastNowPlayingStopped = () => {};
+    _recordTransition = () => {};
+    _fadeIn = async () => {};
+    _renderVideo = () => {};
+    globalThis.start = () => _switchTo({ title: 'Ad', url: 'https://example.test/ad.mp4',
+      nowPlaying: { source: 'radio', playId: 'ad-play', isDevert: true } });
+  `, context);
+  const pending = context.start();
+  assert.equal(audio.paused, true);
+  assert.equal(vm.runInContext('_radioAd', context), null, 'snow does not consume any of the ad content limit');
+  finishIntro();
+  await pending;
+  assert.equal(audio.paused, false);
+  assert.ok(vm.runInContext('_radioAd', context));
+  vm.runInContext('_clearRadioAd();', context);
+
+  let finishCanceled;
+  context.intro = new Promise(resolve => { finishCanceled = resolve; });
+  const canceled = context.start();
+  vm.runInContext('_stopAudio();', context);
+  finishCanceled();
+  await canceled;
+  assert.equal(audio.paused, true);
+  assert.equal(vm.runInContext('_radioAd', context), null);
+
+  let finishOutro;
+  context.outro = new Promise(resolve => { finishOutro = resolve; });
+  vm.runInContext('_adExitTransition = outro;', context);
+  const music = vm.runInContext(`_switchTo({ title: 'Next song', url: 'https://example.test/song.mp3',
+    nowPlaying: { source: 'radio', playId: 'next-song' } })`, context);
+  assert.equal(audio.paused, true, 'the next song waits for the outro snow to finish');
+  finishOutro();
+  await music;
+  assert.equal(audio.paused, false);
+  assert.equal(audio.currentTime, 0);
+});
 
 test('next-ad notices identify paid priority, ordinary bumps, protected shows and playback outages', async () => {
   const { buildMainRadioAdCountdown } = await import('../discord-bot/jukeloop.js');

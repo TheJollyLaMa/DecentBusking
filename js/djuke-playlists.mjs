@@ -1,4 +1,4 @@
-import { buildCreatorPlaylistAuthorizationMessage, buildCreatorPlaylistCopyAuthorizationMessage, normalizeNamedPlaylist } from './creator-profile-data.mjs?v=20261025-seamless-handoff';
+import { buildCreatorPlaylistAuthorizationMessage, buildCreatorPlaylistCopyAuthorizationMessage, normalizeNamedPlaylist } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
 
 export const DJUKE_PLAYLIST_MAX_SONGS = 24;
 export const DJUKE_PLAYLIST_MAX_PER_PROFILE = 20;

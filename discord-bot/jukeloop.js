@@ -700,6 +700,8 @@ export function monitorAudioCompletion(input, process) {
       }
       const decodedMs = decodedBytes / (48000 * 2 * 2) * 1000;
       const playedMs = resource.playbackDuration;
+      const cappedAdvert = interrupted === 'advert_time_limit' && !streamError &&
+        decodedMs >= DEVERT_MAX_AD_SECONDS * 1000 - 20 && playedMs >= DEVERT_MAX_AD_SECONDS * 1000 - 20;
       const reason = interrupted || (streamError ? 'audio_stream_error'
         : !sourceEnded ? 'audio_stream_incomplete'
           : signal ? 'decoder_signaled'
@@ -708,7 +710,7 @@ export function monitorAudioCompletion(input, process) {
                 : decodedBytes === 0 ? 'no_decoded_audio'
                   : !(playedMs > 0) || playedMs + 20 < decodedMs ? 'decoded_audio_not_fully_played' : 'clean_eof');
       if (reason !== 'clean_eof') process.kill?.();
-      return { finished: reason === 'clean_eof', reason, interrupted, pid: process.pid || null, exitCode, signal,
+      return { finished: cappedAdvert || reason === 'clean_eof', reason, interrupted, pid: process.pid || null, exitCode, signal,
         sourceEnded, streamError, decodedBytes, decodedMs: Math.round(decodedMs),
         playedMs, stderrBytes, warnings: [...warnings] };
     },
@@ -789,6 +791,7 @@ export class JukeLoopSession {
     this._musicSinceAd = 0;
     this._musicPlayCount = 0;
     this._currentDevertAd = null;
+    this._adCutoffTimer = null;
     this._preparedDevertAd = null;
     this._pendingDevertAds = [];
     this._failedDevertCampaigns = new Map();
@@ -860,11 +863,18 @@ export class JukeLoopSession {
       ) {
         this._nowPlaying.startedAt = Date.now();
         this._nowPlaying.audible = true;
+        if (this._currentDevertAd) {
+          const playId = this._nowPlaying.playId;
+          this._adCutoffTimer = setTimeout(() => this._finishAdvertAtLimit(playId), DEVERT_MAX_AD_SECONDS * 1000);
+          this._adCutoffTimer.unref?.();
+        }
         this._primeNext();
       }
     });
 
     this.player.on(AudioPlayerStatus.Idle, oldState => {
+      clearTimeout(this._adCutoffTimer);
+      this._adCutoffTimer = null;
       if (this._nowPlaying?.audible) {
         const audio = this._activeAudio;
         if (audio && oldState?.resource && oldState.resource !== audio.resource) {
@@ -929,6 +939,8 @@ export class JukeLoopSession {
     });
 
     this.player.on('error', (err) => {
+      clearTimeout(this._adCutoffTimer);
+      this._adCutoffTimer = null;
       console.error('[jukeloop] Audio player error:', err.message);
       const paidAdvert = this._currentPaid?.kind === 'devert';
       if (this._nowPlaying?.playlistShow && !this._nowPlaying.playlistShow.fallback && !this._nowPlaying.isDevert) {
@@ -1614,6 +1626,14 @@ export class JukeLoopSession {
     }
   }
 
+  _finishAdvertAtLimit(playId) {
+    if (this._destroyed || !this._currentDevertAd || !this._nowPlaying?.audible ||
+        this._nowPlaying.playId !== playId) return;
+    this._activeAudio?.completion.interrupt('advert_time_limit');
+    this._ffmpeg?.kill();
+    this.player.stop(true);
+  }
+
   _startPrepared(prepared) {
     if (!prepared || this._destroyed) return false;
     if (prepared.paid?.record.kind === 'devert' &&
@@ -2110,6 +2130,8 @@ export class JukeLoopSession {
   /** Stop all playback and disconnect from the voice channel. */
   destroy() {
     this._destroyed = true;
+    clearTimeout(this._adCutoffTimer);
+    this._adCutoffTimer = null;
     this._mediaAbort.abort();
     this._activeAudio?.completion.interrupt('radio_stopped');
     this._endingAudio?.completion.interrupt('radio_stopped');

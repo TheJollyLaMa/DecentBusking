@@ -1,4 +1,4 @@
-// js/space.js?v=20261025-seamless-handoff — DecentBusking
+// js/space.js?v=20261030-ad-cutoff — DecentBusking
 // Three.js-powered NFT asteroid field.
 //
 // Behaviour:
@@ -24,10 +24,10 @@
 
 import { renderNFTCard } from './nft-card.js?v=20261025-song-splits';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { setNowPlaying } from './stage.js?v=20261025-seamless-handoff';
+import { setNowPlaying } from './stage.js?v=20261030-ad-cutoff';
 import { fetchIpfsJson, buildIpfsGatewayUrls } from './ipfs-gateway.js?v=20261003-coins-radio-votes';
 import { loadMintedToken, nftArtistKey, fetchNftCatalogPage, configuredNftCollections, parseNftIdentitySearch, isMusicNft, nftMatchesQuery, nftArtistLabel, matchCatalogArtists, autoHighlightArtist, latestSongs } from './nft-loader.js?v=20261028-main-search';
-import { createRadioPlaylistEffects } from './radio-playlist-effects.mjs?v=20261025-seamless-handoff';
+import { createRadioPlaylistEffects } from './radio-playlist-effects.mjs?v=20261030-ad-cutoff';
 
 // ── Timeline constants ────────────────────────────────────────────────────
 const UNITS_PER_DAY   = 5;          // 3-D units per day on the Z-axis

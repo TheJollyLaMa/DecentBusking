@@ -1404,6 +1404,7 @@ async function main() {
     },
   });
   const requestHandler = createWorkerRequestHandler({
+    getMediaGateways: async () => [await discoverDedicatedGateway(config) || config.ipfsGateway],
     radioAnnouncements,
     liveBookings,
     alchemyWebhook,

@@ -1,11 +1,11 @@
-// js/nft-card.js?v=20261025-seamless-handoff — DecentBusking
+// js/nft-card.js?v=20261030-ad-cutoff — DecentBusking
 // NFT detail panel — mirrors the listing style used in DecentMarket.
 // Rendered when a user clicks on a floating NFT mesh in the space field.
 
-import { fetchNFTMetaById } from './space.js?v=20261025-seamless-handoff';
+import { fetchNFTMetaById } from './space.js?v=20261030-ad-cutoff';
 import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
-import { returnToRadio } from './radio-sync.js?v=20261025-seamless-handoff';
-import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261025-seamless-handoff';
+import { returnToRadio } from './radio-sync.js?v=20261030-ad-cutoff';
+import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261030-ad-cutoff';
 import { canEditArtwork } from './artwork-update.mjs';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
@@ -170,7 +170,7 @@ export function renderNFTCard(nft) {
       if (result !== 'failed' && isVideo) panel.close();
       return;
     }
-    const { setNowPlaying } = await import('./stage.js?v=20261025-seamless-handoff');
+    const { setNowPlaying } = await import('./stage.js?v=20261030-ad-cutoff');
     setNowPlaying({ nft, title: nft.name || nft.title, artist: nft.artist || nft.creator,
       audioUrl: nft.videoUrl || nft.audioUrl || nft.animation_url, mediaType: nft.mediaType || (nft.videoUrl ? 'video/mp4' : '') });
     if (isVideo) panel.close();
@@ -178,10 +178,10 @@ export function renderNFTCard(nft) {
 
   content.querySelector('.nft-mute-btn')?.addEventListener('click', async (event) => {
     const muted = event.currentTarget.getAttribute('aria-pressed') !== 'true';
-    const { setArchiveMuted } = await import('./radio-sync.js?v=20261025-seamless-handoff');
+    const { setArchiveMuted } = await import('./radio-sync.js?v=20261030-ad-cutoff');
     setArchiveMuted(muted);
   });
-  import('./radio-sync.js?v=20261025-seamless-handoff')
+  import('./radio-sync.js?v=20261030-ad-cutoff')
     .then(({ archiveMuted }) => { if (_cardNft === nft) _renderMute(content, archiveMuted()); })
     .catch(() => {});
 
@@ -448,7 +448,7 @@ async function _resolveCreditNames(content, nft) {
 // ── Parent Track Playback ─────────────────────────────────────────────────
 async function _playParent(parentTokenId) {
   if (!parentTokenId) return;
-  const { setNowPlaying } = await import('./stage.js?v=20261025-seamless-handoff');
+  const { setNowPlaying } = await import('./stage.js?v=20261030-ad-cutoff');
   const meta = await fetchNFTMetaById(parentTokenId);
   if (!meta) return;
   const cfg = window.DecentConfig || {};

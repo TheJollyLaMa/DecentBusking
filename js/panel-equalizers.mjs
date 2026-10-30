@@ -52,7 +52,7 @@ export function mountPanelEqualizers({ readSpectrum, root = document } = {}) {
 if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', async () => {
   try {
     // Match main.js: every meter must share the existing media-element audio graph.
-    const { readNowPlayingSpectrum } = await import('./space.js?v=20261025-seamless-handoff');
+    const { readNowPlayingSpectrum } = await import('./space.js?v=20261030-ad-cutoff');
     mountPanelEqualizers({ readSpectrum: readNowPlayingSpectrum });
   } catch (error) {
     console.warn('[panel-equalizers] Live audio spectrum unavailable:', error.message);

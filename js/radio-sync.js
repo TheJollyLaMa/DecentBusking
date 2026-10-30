@@ -1,12 +1,14 @@
-// js/radio-sync.js?v=20261025-seamless-handoff — DecentBusking
+// js/radio-sync.js?v=20261030-ad-cutoff — DecentBusking
 // Mirrors the Discord JukeLoop voice channel in the Now Playing banner. New
 // Discord uploads briefly take over the site radio for their first play, and
 // archive selections mute the radio until the listener returns to it.
 
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
-import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261025-seamless-handoff';
+import { resolveCreatorENS } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
 import { formatUsdcUnits as _formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
 import { sendRadioVote as sharedRadioVote, radioListenerId, radioMediaUrl, readRadioState, readRadioMediaBlob } from './radio-client.mjs';
+import { createRadioAdTransition } from './radio-ad-transition.mjs?v=20261030-ad-cutoff';
+import { DEVERT_MAX_AD_SECONDS } from './devert-scheduler.mjs';
 
 const POLL_MS = 8_000;
 const FADE_IN_MS = 600;
@@ -185,8 +187,13 @@ let _radioHandoff = null;
 let _preload = null;
 let _activeBlobUrl = null;
 const _transitionLog = [];
+let _radioAd = null;
+let _endedRadioAdPlayId = null;
+let _adTransition = null;
+let _adExitTransition = null;
 
 function _applyRadioVolume() {
+  _adTransition?.setVolume(_mode === 'radio' && !_radioMuted ? _radioVolume : 0);
   if (!_audio) return;
   _audio.muted = _mode === 'archive' ? _archiveMuted : _radioMuted;
   _audio.volume = _fadeLevel * (_mode === 'archive' ? 1 : _radioVolume);
@@ -558,6 +565,9 @@ export function initRadioSync() {
   _audio.addEventListener('pause', _onPause);
   _videoPlayer?.addEventListener('pause', _onPause);
   _videoPlayer?.addEventListener('ended', _onEnded);
+  _audio.addEventListener('timeupdate', _checkRadioAdLimit);
+  _videoPlayer?.addEventListener('timeupdate', _checkRadioAdLimit);
+  document.addEventListener('visibilitychange', _checkRadioAdLimit);
   _videoToggle?.addEventListener('click', () => { _videoHidden = !_videoHidden; _renderVideo(); });
   _playBtn?.addEventListener('click', _unlock);
   _radioBtn?.addEventListener('click', returnToRadio);
@@ -798,6 +808,13 @@ function _syncRadio(message) {
   if (_radio.playId === _loadedPlayId) {
     return;
   }
+  if (_radio.isDevert && _radio.playId === _endedRadioAdPlayId) return;
+
+  if (_radio.isDevert && _radioPositionS() >= DEVERT_MAX_AD_SECONDS) {
+    _loadedPlayId = _radio.playId;
+    _radioHandoff = { endedAt: performance.now(), previousPlayId: _loadedPlayId, afterAd: true };
+    return;
+  }
 
   if (_loadedPlayId && !_audio.paused) {
     _setActivity(message || '📻 Waiting for the current song to finish before switching tracks');
@@ -807,7 +824,7 @@ function _syncRadio(message) {
   _loadedPlayId = _radio.playId;
   // A listener whose last song played to its end hears the next one from 0:00; joins and returns sync live.
   const continuing = !!_radioHandoff && _radio.playId !== _radioHandoff.previousPlayId &&
-    _radioPositionS() <= CONTINUOUS_START_MAX_S;
+    (_radioHandoff.afterAd || _radioPositionS() <= CONTINUOUS_START_MAX_S);
   _radioHandoff = null;
   if (!_radio.ipfsCid) {
     _stopAudio();
@@ -834,6 +851,7 @@ function _syncRadio(message) {
       mediaType: _mediaTypeForTrack(_radio),
       videoUrl: _radio.videoUrl || (_mediaTypeForTrack(_radio) === 'video/mp4' ? _gatewayUrl(_radio.ipfsCid) : ''),
       ipfsCid: _radio.ipfsCid || null,
+      isDevert: _radio.isDevert === true,
       nft: null,
     },
   });
@@ -911,6 +929,20 @@ function _clearTakeover() {
 
 function _onEnded(event) {
   if (event?.target && event.target !== _audio) return;
+  if (_mode === 'radio' && !_radioAd && _loadedPlayId && _loadedPlayId === _endedRadioAdPlayId) return;
+  const afterAd = _mode === 'radio' && !!_radioAd;
+  if (afterAd) {
+    _endedRadioAdPlayId = _radioAd.playId;
+    _fadeNextRadioSwitch = true;
+    _clearRadioAd();
+    _pauseAudio();
+    if (_videoStage) _videoStage.hidden = true;
+    const transition = _playAdTransition();
+    _adExitTransition = transition;
+    void transition.finally(() => {
+      if (_adExitTransition === transition) _adExitTransition = null;
+    });
+  }
   _broadcastNowPlayingStopped('ended');
   if (_mode === 'takeover') {
     _startNextTakeover();
@@ -925,12 +957,52 @@ function _onEnded(event) {
     if (_takeoverQueue.length) _startNextTakeover();
     else _syncRadio('🎧 Archive track finished — back to the JukeLoop');
   } else {
-    _radioHandoff = { endedAt: performance.now(), previousPlayId: _loadedPlayId };
+    _radioHandoff = { endedAt: performance.now(), previousPlayId: _loadedPlayId, afterAd };
     _setActivity(_upNext?.title ? `📻 Up next: ${_upNext.title}` : '📻 Waiting for the JukeLoop’s next track…');
     clearTimeout(_pollTimer);
     _pollTimer = setTimeout(_poll, HANDOFF_POLL_MS);
     _pollTimer?.unref?.();
   }
+}
+
+function _clearRadioAd() {
+  clearTimeout(_radioAd?.timer);
+  _radioAd = null;
+}
+
+function _playAdTransition() {
+  _adTransition ||= createRadioAdTransition();
+  _adTransition.setVolume(_mode === 'radio' && !_radioMuted ? _radioVolume : 0);
+  return _adTransition.play();
+}
+
+function _checkRadioAdLimit() {
+  if (!_radioAd || _mode !== 'radio') return;
+  if (_audio.currentTime >= DEVERT_MAX_AD_SECONDS ||
+      performance.now() >= _radioAd.deadline) {
+    _onEnded();
+    if (_radio && _radio.playId !== _loadedPlayId) _syncRadio();
+  }
+}
+
+function _scheduleRadioAdLimit() {
+  if (!_radioAd) return;
+  const remainingMs = _radioAd.deadline - performance.now();
+  if (remainingMs <= 0) {
+    _checkRadioAdLimit();
+    return;
+  }
+  _radioAd.timer = setTimeout(_scheduleRadioAdLimit, Math.ceil(remainingMs));
+  _radioAd.timer?.unref?.();
+}
+
+function _armRadioAd(nowPlaying, offset) {
+  _clearRadioAd();
+  if (_mode !== 'radio' || !nowPlaying?.isDevert) return;
+  const remainingMs = Math.max(0, DEVERT_MAX_AD_SECONDS - Math.max(offset, _audio.currentTime || 0)) * 1000;
+  _radioAd = { playId: nowPlaying.playId, deadline: performance.now() + remainingMs, timer: null };
+  _scheduleRadioAdLimit();
+  _checkRadioAdLimit();
 }
 
 // ── Audio element control ─────────────────────────────────────────────────
@@ -957,6 +1029,17 @@ function _gatewayUrl(cid) {
 
 async function _switchTo({ title, artist, url, fallbackUrls = [], mime = _mimeType(url), offset = () => 0, nowPlaying = null, preloadCid = null }) {
   const token = ++_switchToken;
+  _clearRadioAd();
+  if (nowPlaying?.source !== 'radio') _adTransition?.stop();
+  if (_adExitTransition) await _adExitTransition;
+  else _adTransition?.stop();
+  if (token !== _switchToken) return;
+  if (nowPlaying?.source === 'radio' && nowPlaying.isDevert) {
+    _pauseAudio();
+    await _playAdTransition();
+    if (token !== _switchToken) return;
+    _fadeNextRadioSwitch = true;
+  }
   const switchStartedAt = performance.now();
   _setTrack(title, artist);
   const preloaded = preloadCid && _preload?.cid === preloadCid ? await _takePreload(preloadCid) : null;
@@ -1055,6 +1138,8 @@ async function _switchTo({ title, artist, url, fallbackUrls = [], mime = _mimeTy
     return;
   }
   if (token !== _switchToken) return;
+  _armRadioAd(nowPlaying, at);
+  if (nowPlaying?.isDevert && _endedRadioAdPlayId === nowPlaying.playId) return;
   if (_mode === 'radio' && _radio?.playId === nowPlaying?.playId) _radioLoadFailure = null;
   _recordTransition({
     source: nowPlaying?.source || _mode,
@@ -1309,6 +1394,8 @@ function _fadeIn(token = _switchToken, ms = FADE_IN_MS) {
 }
 
 function _fadeMainRadioOut(ms = FADE_IN_MS) {
+  _clearRadioAd();
+  _adTransition?.stop();
   const token = ++_switchToken;
   const initial = _fadeLevel;
   const startedAt = performance.now();
@@ -1327,6 +1414,8 @@ function _fadeMainRadioOut(ms = FADE_IN_MS) {
 }
 
 function _stopAudio() {
+  _clearRadioAd();
+  _adTransition?.stop();
   ++_switchToken;
   _broadcastNowPlayingStopped('stopped');
   _pauseAudio();
@@ -1335,6 +1424,10 @@ function _stopAudio() {
 }
 
 async function _unlock() {
+  if (_mode === 'radio' && _loadedPlayId && _loadedPlayId === _endedRadioAdPlayId) {
+    _syncRadio();
+    return;
+  }
   _fadeLevel = 1;
   _applyRadioVolume();
   try {
@@ -1344,6 +1437,7 @@ async function _unlock() {
     return;
   }
   _blocked = false;
+  _armRadioAd(_nowPlayingBroadcastDetail, _mode === 'radio' && _radio ? _radioPositionS() : 0);
   _playBtn?.classList.add('hidden');
   if (_mode === 'radio' && _radio) {
     const target = _radioPositionS();

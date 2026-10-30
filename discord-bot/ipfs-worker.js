@@ -8,7 +8,7 @@ import { buildFundWeeklyArchive } from '../js/fund-archive.mjs';
 import { catalogPage } from '../js/nft-loader.js';
 import { uploadToIPFS } from './ipfs.js';
 import { readRawBody } from './alchemy-webhook.js';
-import { fetchMintMetadata } from './mint-sync.js';
+import { buildGatewayUrl, fetchMintMetadata } from './mint-sync.js';
 import { buildArtworkUpdateAuthorizationMessage, buildArtworkUpdateMetadata } from '../js/artwork-update.mjs';
 import { buildDevertRemovalMessage } from '../js/devert-campaigns.mjs';
 import { buildRadioCalendar, radioCalendarOccurrences } from '../js/radio-calendar.mjs';
@@ -20,7 +20,10 @@ import {
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 async function readMediaProbe(response) {
-  if (!response.ok || !response.body) throw new Error('Could not read the IPFS file to detect its format; try again');
+  if (!response.ok || !response.body) {
+    await response.body?.cancel();
+    throw new Error(`HTTP ${response.status}`);
+  }
   const reader = response.body.getReader();
   const bytes = new Uint8Array(65536);
   let length = 0;
@@ -36,6 +39,32 @@ async function readMediaProbe(response) {
     await reader.cancel();
   }
   return bytes.subarray(0, length);
+}
+
+async function probeMediaGateways(cid, range, gateways, fetchImpl, deadline) {
+  const failures = [];
+  for (const gateway of gateways) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      failures.push('probe time budget exhausted');
+      break;
+    }
+    const url = buildGatewayUrl(gateway, cid);
+    const host = new URL(url).hostname;
+    try {
+      const response = await fetchImpl(url, {
+        headers: { Range: range }, signal: AbortSignal.timeout(Math.min(8000, remaining)),
+      });
+      const bytes = await readMediaProbe(response);
+      if (!bytes.length) throw new Error('empty response');
+      return { bytes, type: response.headers.get('content-type')?.split(';')[0] };
+    } catch (error) {
+      const detail = /^HTTP \d+$|^empty response$/.test(error.message) ? error.message : 'network, timeout or stream error';
+      failures.push(`${host}: ${detail}`);
+      console.warn(`[ipfs] Media probe failed (${host}, ${range}): ${detail}`);
+    }
+  }
+  throw new Error(`Could not read the IPFS file to detect its format. IPFS gateways are unavailable (${failures.join('; ')}). Retry shortly; you do not need to upload it again.`);
 }
 
 const SIGNED_UPLOAD_OVERHEAD_BYTES = 64 * 1024;
@@ -243,6 +272,7 @@ export function createWorkerRequestHandler({
   creatorProfiles,
   getRadioState,
   getRadioMediaUrl,
+  getMediaGateways = async () => [],
   getRadioSchedule,
   saveRadioSchedule,
   radioAnnouncements,
@@ -496,22 +526,23 @@ export function createWorkerRequestHandler({
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/ipfs/media-type') {
         const cid = normalizeMediaCid(requestUrl.searchParams.get('cid'));
-        const upstream = await fetchImpl(`https://gateway.pinata.cloud/ipfs/${cid}`, {
-          headers: { Range: 'bytes=0-65535' }, signal: AbortSignal.timeout(15000),
-        });
-        let bytes = await readMediaProbe(upstream);
+        const deadline = Date.now() + 30000;
+        const gateways = [...new Set([
+          ...await getMediaGateways(),
+          'https://gateway.pinata.cloud/ipfs/',
+          'https://ipfs.io/ipfs/',
+        ].filter(Boolean))].slice(0, 3);
+        const upstream = await probeMediaGateways(cid, 'bytes=0-65535', gateways, fetchImpl, deadline);
+        let bytes = upstream.bytes;
         const text = new TextDecoder('latin1').decode(bytes);
         if (text.slice(4, 8) === 'ftyp' && !text.includes('vide') && !text.includes('soun')) {
-          const tailResponse = await fetchImpl(`https://gateway.pinata.cloud/ipfs/${cid}`, {
-            headers: { Range: 'bytes=-65536' }, signal: AbortSignal.timeout(15000),
-          });
-          const tail = await readMediaProbe(tailResponse);
+          const { bytes: tail } = await probeMediaGateways(cid, 'bytes=-65536', gateways, fetchImpl, deadline);
           const combined = new Uint8Array(bytes.length + tail.length);
           combined.set(bytes);
           combined.set(tail, bytes.length);
           bytes = combined;
         }
-        const mediaType = detectSubmissionMedia(bytes, { type: upstream.headers.get('content-type')?.split(';')[0] });
+        const mediaType = detectSubmissionMedia(bytes, { type: upstream.type });
         sendJson(response, 200, { cid, mediaType, filename: mediaFilename(mediaType) }, '*');
         return;
       }

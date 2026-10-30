@@ -665,6 +665,89 @@ test('CID format detection reads a bounded prefix, normalizes CIDs and cancels t
   });
 });
 
+test('CID detection falls back after HTTP, network, empty and stream failures without exposing gateway tokens', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const cid = 'bafybeifynaihnl2t37s3nfez3k5vbwwziaqyvayadqwt4bou3yv6jstxye';
+  for (const failure of ['http', 'network', 'empty', 'stream']) {
+    const calls = [];
+    let canceled = false;
+    const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+      getMediaGateways: async () => ['https://dedicated.example/ipfs/?pinataGatewayToken=test-only'],
+      fetchImpl: async (url, options) => {
+        calls.push(url);
+        assert.equal(options.headers.Range, 'bytes=0-65535');
+        if (calls.length === 1) {
+          assert.equal(url, `https://dedicated.example/ipfs/${cid}?pinataGatewayToken=test-only`);
+          if (failure === 'network') throw new Error(`Failed fetching ${url}`);
+          if (failure === 'empty') return new Response('');
+          if (failure === 'stream') return new Response(new ReadableStream({
+            start(controller) { controller.error(new Error('stream interrupted')); },
+          }));
+          return new Response(new ReadableStream({ cancel() { canceled = true; } }), { status: 403 });
+        }
+        assert.equal(url, `https://gateway.pinata.cloud/ipfs/${cid}`);
+        return new Response('ID3test');
+      } });
+    await withServer(handler, async base => {
+      const response = await fetch(`${base}/api/ipfs/media-type?cid=${cid}`);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { cid, mediaType: 'audio/mpeg', filename: 'track.mp3' });
+      assert.equal(calls.length, 2);
+      if (failure === 'http') assert.equal(canceled, true);
+    });
+  }
+});
+
+test('CID MP4 detection can recover a failed tail probe through another gateway', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const cid = 'bafybeifynaihnl2t37s3nfez3k5vbwwziaqyvayadqwt4bou3yv6jstxye';
+  const calls = [];
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+    fetchImpl: async (url, options) => {
+      calls.push([url, options.headers.Range]);
+      if (options.headers.Range === 'bytes=0-65535') return new Response(Buffer.from('\0\0\0\x18ftypisom'));
+      if (url.includes('gateway.pinata.cloud')) return new Response('unavailable', { status: 502 });
+      return new Response('moov-trak-vide');
+    } });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/ipfs/media-type?cid=${cid}`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).mediaType, 'video/mp4');
+    assert.deepEqual(calls.map(call => call[1]), ['bytes=0-65535', 'bytes=-65536', 'bytes=-65536']);
+    assert.equal(calls[2][0], `https://ipfs.io/ipfs/${cid}`);
+  });
+});
+
+test('CID gateway exhaustion stays explicit and does not leak authenticated URLs', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const cid = 'bafybeifynaihnl2t37s3nfez3k5vbwwziaqyvayadqwt4bou3yv6jstxye';
+  let calls = 0;
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+    getMediaGateways: async () => ['https://dedicated.example/ipfs/?pinataGatewayToken=test-only'],
+    fetchImpl: async url => { calls++; throw new Error(`Could not fetch ${url}`); } });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/ipfs/media-type?cid=${cid}`);
+    assert.equal(response.status, 400);
+    const result = await response.json();
+    assert.match(result.error, /gateways are unavailable/);
+    assert.match(result.error, /do not need to upload it again/);
+    assert.doesNotMatch(result.error, /test-only|pinataGatewayToken/);
+    assert.equal(calls, 3);
+  });
+});
+
+test('CID detection rejects non-media content rather than trusting its MIME header', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const cid = 'bafybeifynaihnl2t37s3nfez3k5vbwwziaqyvayadqwt4bou3yv6jstxye';
+  const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+    fetchImpl: async () => new Response('<html>folder listing</html>', { headers: { 'content-type': 'video/mp4' } }) });
+  await withServer(handler, async base => {
+    const response = await fetch(`${base}/api/ipfs/media-type?cid=${cid}`);
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /Could not detect supported media/);
+  });
+});
+
 test('signed CID submissions validate the artist, media, expiry, origin, and replay protection', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const mediaModule = pathToFileURL(path.join(__dirname, '../discord-bot/media.js')).href;

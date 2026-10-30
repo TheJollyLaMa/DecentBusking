@@ -255,13 +255,26 @@ wallets. Local media is detected from its content and previewed without
 autoplay; there is no manual format selector or MP3 fallback for unknown files.
 Pinned media uses `GET /api/ipfs/media-type?cid=...`, which normalizes the CID
 and reads bounded 64 KiB header/tail samples rather than downloading the whole
-file. Detection failures are shown explicitly. Artwork accepts an image upload
+file. The worker uses its discovered authenticated Pinata gateway (keeping the
+access token server-side), with public Pinata and ipfs.io fallbacks and an
+eight-second timeout per probe within a shared 30-second budget. Gateway failures
+are shown explicitly; a failed probe does not mean the file needs uploading again.
+Artwork accepts an image upload
 or a file CID independently of the main media source.
 
 Check **This is a DVert advertisement** for ad submissions. Approval marks the
 NFT and recording as an advert, excluded from ordinary music rotation, music
 Top 10 and DJuke song registration. Advertisers still book and fund airtime
 through DVert separately; this checkbox does not create a paid campaign.
+
+Main-radio adverts play for at most 120 seconds of content, not until the
+original file ends. Short adverts finish early. Both the worker's audio stream
+and the website player enforce the limit. The site plays a three-second TV-snow
+and radio-tuning transition before and after each advert, outside that content
+limit, then starts the next queued song from its beginning. Tuning audio follows
+the radio mute/volume controls; reduced-motion mode replaces moving snow with a
+static panel. The snow asset is adapted from the steward-supplied screen
+recording, with generated tuning audio rather than the recording's audio.
 
 For songs, add up to nine collaborator wallets alongside the artist. Adding or
 removing a collaborator defaults the shares to an even split (10000 basis

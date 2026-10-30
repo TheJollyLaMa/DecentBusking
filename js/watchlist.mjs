@@ -1,4 +1,4 @@
-import { buildCreatorWatchlistAuthorizationMessage, normalizeCreatorWatchlistEntry } from './creator-profile-data.mjs?v=20261025-seamless-handoff';
+import { buildCreatorWatchlistAuthorizationMessage, normalizeCreatorWatchlistEntry } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
 import { nftIdentity } from './nft-loader.js';
 
 const WATCHLIST_EVENT = 'creator-watchlist-changed';

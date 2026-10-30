@@ -1,9 +1,9 @@
-// js/main.js?v=20261025-seamless-handoff — DecentBusking boot loader
+// js/main.js?v=20261030-ad-cutoff — DecentBusking boot loader
 // Initialises the header, footer, stage interactions, and the 3-D space field.
 
 import { initWallet } from './wallet.js';
-import { initStage } from './stage.js?v=20261025-seamless-handoff';
-import { initSpace } from './space.js?v=20261025-seamless-handoff';
+import { initStage } from './stage.js?v=20261030-ad-cutoff';
+import { initSpace } from './space.js?v=20261030-ad-cutoff';
 import { initTutorial } from './tutorial.js?v=20261025-split-surfaces';
 import { initDBusker } from './dbusker.mjs?v=20261029-signpost';
 
