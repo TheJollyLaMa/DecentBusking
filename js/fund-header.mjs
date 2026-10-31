@@ -6,6 +6,7 @@ import { currentPayrollPeriod, weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
 import { playbackArtistKey, previewPlaybackPayroll } from './radio-payroll.mjs?v=20261019-payroll-confirmations';
 import { initFundContributions } from './fund-contribution.mjs?v=20261019-fund-tour';
+import { animateFundInflow, fundInflowSnapshot, planFundInflow } from './fund-inflow.mjs?v=20261030-fund-inflow';
 
 const ROUTER_ADDRESS = '0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5';
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -374,6 +375,8 @@ async function initializeFundHeader() {
   let activeFund = null;
   let pending = null;
   let opening = false;
+  const inflowSnapshots = new Map();
+  const inflowCleanup = new Map();
   const renderActive = async () => {
     const fund = activeFund;
     if (!fund) return;
@@ -393,10 +396,15 @@ async function initializeFundHeader() {
         const button = document.getElementById(`${fund.slug}-button`);
         if (!button) continue;
         const amount = fundState.budgetUnits ?? fundState.balanceUnits;
+        const nextSnapshot = fundInflowSnapshot(fundState, currentPayrollPeriod().week);
+        const inflow = planFundInflow(inflowSnapshots.get(fund.slug), nextSnapshot);
+        inflowSnapshots.set(fund.slug, nextSnapshot);
+        inflowCleanup.get(fund.slug)?.();
         button.innerHTML = fundButtonHtml(fund, amount);
         button.title = fundState.budgetUnits != null ? 'Current weekly pot; older unpaid prizes are reserved separately' : 'Total balance; weekly budget unavailable';
         button.setAttribute('aria-label', `${fundTitle(fund)}: ${amount == null ? 'balance unavailable' : `$${formatUsdcUnits(amount)} USDC${fundState.budgetUnits == null ? ' balance; weekly budget unavailable' : ' weekly pot'}`}`);
         button.disabled = false;
+        if (inflow) inflowCleanup.set(fund.slug, animateFundInflow(button, inflow));
       }
       if (dialog?.open) await renderActive();
     })().finally(() => { pending = null; });

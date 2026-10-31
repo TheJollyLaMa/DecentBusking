@@ -2731,6 +2731,15 @@ decent-foot {
 .fund-wallet-address code { padding: 0; background: transparent; font: inherit; color: inherit; }
 .usdc-amount { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .usdc-amount-text { display: inline-block; background-size: 200% 100%; }
+.fund-header-pill.fund-inflow-active .usdc-amount-text { color: transparent; background-image: linear-gradient(120deg, #5ba68b, #d6ffe7 30%, #77cba2 50%, #effff7 65%, #64ad8f); background-clip: text; -webkit-background-clip: text; text-shadow: 0 0 12px #80ffc970; }
+.fund-inflow-digit { display: inline-block; height: 1.2em; overflow: hidden; vertical-align: bottom; }
+.fund-inflow-reel { display: inline-flex; flex-direction: column; vertical-align: top; }
+.fund-inflow-reel > span { display: block; height: 1.2em; line-height: 1.2; color: transparent; background: linear-gradient(120deg, #5ba68b, #d6ffe7 30%, #77cba2 50%, #effff7 65%, #64ad8f); background-clip: text; -webkit-background-clip: text; }
+.fund-inflow-particle { position: fixed; z-index: 10000; pointer-events: none; user-select: none; font-size: 26px; line-height: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .fund-inflow-particle { display: none; }
+  .fund-header-pill.fund-inflow-active .usdc-amount-text { color: #b6ffd7 !important; }
+}
 .usdc-amount--artist .usdc-amount-text { color: #d9ffd5; text-shadow: 0 0 10px rgba(123, 255, 180, .15), 0 0 18px rgba(189, 200, 84, .16); animation: usdc-artist-shimmer 9s linear infinite; background-image: linear-gradient(90deg, #d5ffd4 0%, #f2f6bd 32%, #b6f4a6 50%, #ffe7a8 68%, #d5ffd4 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .usdc-amount--sponsor .usdc-amount-text { color: #dfeaff; text-shadow: 0 0 10px rgba(142, 189, 255, .15), 0 0 18px rgba(203, 211, 255, .12); animation: usdc-sponsor-shimmer 11s linear infinite; background-image: linear-gradient(90deg, #e7f0ff 0%, #b8d1ff 32%, #f5f7ff 50%, #d3deff 68%, #e7f0ff 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .usdc-amount--queued .usdc-amount-text { color: var(--text-dim); }

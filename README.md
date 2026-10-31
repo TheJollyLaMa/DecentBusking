@@ -125,6 +125,20 @@ The subheader's **Search Artist or Song** field searches the indexed music
 catalog by artist or title. It shares its query with archive search; typing in
 the subheader clears any archive artist selection so a new search covers all
 artists. The archive retains its separate artist dropdown and result counts.
+The header Top10 and Playback fund pills celebrate increases after the first
+successful balance load. Changed digits roll upward with staggered,
+ease-in/ease-out metallic-green reels; coins (under $1), dollar bills ($1 and up)
+or cash bags (a newly indexed sponsor deposit of at least $100) converge from all
+four screen edges. Particle counts scale with the balance increase, capped at
+24 per pill. Initial loads, decreases, unavailable balances, budget/balance
+display-mode changes and payroll-week changes do not celebrate. The accessible
+label always reports the actual new total, not intermediate reel digits.
+Everyone viewing the page can see these updates without connecting a wallet;
+the existing visible-page refresh checks approximately every 15 seconds, not a
+push subscription. Reduced-motion users see the updated total immediately with
+a brief static green highlight instead of moving particles or rolling digits.
+These are observed balance changes, not additional payment confirmations.
+
 The footer shows live net votes beside the thumbs: songs use the current New York
 weekly chart total; adverts use votes for the current advert play. Totals refresh
 with the radio poll and after a confirmed vote. Unavailable totals show a dash,
