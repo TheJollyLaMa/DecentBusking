@@ -98,19 +98,26 @@ test('default Top 10 finale runs during the last New York payroll hour and ends 
   assert.equal(resolveActiveShow({ now: DST_PAYROLL_BOUNDARY, schedule }).type, 'normal_rotation');
 });
 
-test('Friday Top 10 hype hour hands off to a live performance block at 9pm New York time', async () => {
+test('Friday Top 10 hands off to radio with an unbooked occurrence at 9pm New York time', async () => {
   const { resolveActiveShow, defaultRadioSchedule } = await import('../js/radio-schedule.mjs');
   const schedule = defaultRadioSchedule();
   const hype = resolveActiveShow({ now: FRIDAY_HYPE_START, schedule });
   assert.equal(hype.type, 'weekly_top10');
   assert.equal(hype.label, 'Friday Top 10 Hype Hour');
   const live = resolveActiveShow({ now: FRIDAY_LIVE_START, schedule });
-  assert.equal(live.type, 'live_performance');
-  assert.equal(live.label, 'Friday Live Performance Block');
-  assert.equal(live.event.id, 'friday-live-performance:2026-10-09');
+  assert.equal(live.type, 'normal_rotation');
+  assert.equal(live.unbookedLiveOccurrenceId, 'friday-live-performance:2026-10-09');
+  assert.equal(live.event, undefined);
+  const booked = resolveActiveShow({ now: FRIDAY_LIVE_START, schedule, livePerformanceEvents: [{
+    id: 'booked-artist', title: 'Booked artist', type: 'live_performance',
+    startUtc: new Date(FRIDAY_LIVE_START).toISOString(), endUtc: new Date(FRIDAY_NORMAL_START).toISOString(),
+  }] });
+  assert.equal(booked.type, 'live_performance');
+  assert.equal(booked.event.id, 'booked-artist');
   assert.equal(resolveActiveShow({ now: FRIDAY_NORMAL_START, schedule }).type, 'normal_rotation');
   assert.equal(resolveActiveShow({ now: FRIDAY_HYPE_START_STANDARD_TIME, schedule }).type, 'weekly_top10');
-  assert.equal(resolveActiveShow({ now: FRIDAY_LIVE_START_STANDARD_TIME, schedule }).type, 'live_performance');
+  assert.equal(resolveActiveShow({ now: FRIDAY_LIVE_START_STANDARD_TIME, schedule }).type, 'normal_rotation');
+  assert.match(resolveActiveShow({ now: FRIDAY_LIVE_START_STANDARD_TIME, schedule }).unbookedLiveOccurrenceId, /^friday-live-performance:/);
 });
 
 test('Top 10 radio queue uses New York payroll-week votes, not lifetime reactions', async () => {

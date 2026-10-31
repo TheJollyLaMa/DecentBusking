@@ -8,6 +8,12 @@ const { PassThrough } = require('node:stream');
 const { pathToFileURL } = require('node:url');
 const vm = require('node:vm');
 
+test.beforeEach(t => {
+  const realNow = Date.now.bind(Date);
+  const startedAt = realNow();
+  t.mock.method(Date, 'now', () => Date.parse('2026-10-17T12:00:00Z') + realNow() - startedAt);
+});
+
 test('worker advert deadline stops at 120 seconds and cancels itself on Idle', async t => {
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
   let stopped = 0;
@@ -1754,7 +1760,7 @@ test('JukeLoop announces the Top 10 final voting hour and its close', async (t) 
     client: {},
   });
   t.after(() => session.destroy());
-  const now = new Date();
+  const now = new Date(Date.now());
   session._started = true;
   session.schedule = [
     { id: 'friday-top10-hype', type: 'weekly_top10', label: 'Friday Top 10 Hype Hour',

@@ -152,6 +152,7 @@ function validateMainRadioAdState(value) {
     preparedDevertAd: value.preparedDevertAd ? normalizeMainRadioAd(value.preparedDevertAd) : null,
     pendingDevertAds: value.pendingDevertAds.map(normalizeMainRadioAd),
     breakAwaitingUnlock: value.breakAwaitingUnlock === true,
+    unbookedLiveOccurrenceId: typeof value.unbookedLiveOccurrenceId === 'string' ? value.unbookedLiveOccurrenceId : null,
     failedDevertCampaigns: value.failedDevertCampaigns.map(entry => {
       if (!entry || !/^\d+$/.test(String(entry.campaignId)) ||
         !Number.isSafeInteger(entry.failedAt) || entry.failedAt < 0 ||
@@ -799,6 +800,8 @@ export class JukeLoopSession {
     this.schedule     = Array.isArray(schedule) ? schedule : defaultRadioSchedule();
     this.livePerformanceEvents = Array.isArray(livePerformanceEvents) ? livePerformanceEvents : [];
     this._liveEventId = null;
+    this._unbookedLiveOccurrenceId = null;
+    this._unbookedLiveFallbackTask = null;
     this._activeShowKey = null;
     this._scheduleWatcher = null;
     this._started = false;
@@ -1088,7 +1091,7 @@ export class JukeLoopSession {
     const event = show.type === 'live_performance' ? show.event : null;
     const eventId = event?.id || null;
     const previousEventId = this._liveEventId;
-    const showKey = `${show.type}:${show.id || ''}`;
+    const showKey = `${show.type}:${show.id || ''}${show.unbookedLiveOccurrenceId ? `:${show.unbookedLiveOccurrenceId}` : ''}`;
 
     if (eventId !== previousEventId) {
       this._liveEventId = eventId;
@@ -1223,6 +1226,55 @@ export class JukeLoopSession {
     }
   }
 
+  async _ensureUnbookedLiveFallback(show) {
+    if (this._unbookedLiveFallbackTask) return this._unbookedLiveFallbackTask;
+    const occurrenceId = show.unbookedLiveOccurrenceId;
+    if (!occurrenceId || this._unbookedLiveOccurrenceId === occurrenceId) return false;
+    this._unbookedLiveOccurrenceId = occurrenceId;
+    this._unbookedLiveFallbackTask = (async () => {
+      const existing = [this._preparedDevertAd, ...this._pendingDevertAds].filter(Boolean);
+      const excluded = new Set([
+        ...this._getActiveFailedDevertCampaignIds(),
+        ...existing.map(ad => String(ad.campaignId)),
+        ...(this._currentDevertAd ? [String(this._currentDevertAd.campaignId)] : []),
+      ]);
+      let selected = [];
+      if (this.devertPlayback && existing.length < 4) {
+        let selectionTimer;
+        try {
+          const ads = await Promise.race([
+            this.devertPlayback.nextMainRadioAd({ excludeCampaignIds: [...excluded], count: 4 - existing.length }),
+            new Promise((_, reject) => {
+              selectionTimer = setTimeout(() => reject(new Error('Unbooked live-slot ad selection timed out')), 10000);
+            }),
+          ]);
+          selected = Array.isArray(ads) ? ads : ads ? [ads] : [];
+        } catch (error) {
+          console.warn('[jukeloop] Unbooked live-slot adverts unavailable; resuming radio:', error.message);
+          this._setMainRadioAdSkip('unbooked live-slot ad selection unavailable', null);
+        } finally {
+          clearTimeout(selectionTimer);
+        }
+      }
+      if (this._destroyed) return false;
+      const seen = new Set(this._currentDevertAd ? [String(this._currentDevertAd.campaignId)] : []);
+      const ads = [...existing, ...selected].filter(ad => {
+        const id = String(ad.campaignId);
+        if (seen.has(id) || this.devertPlayback?.isCampaignRemoved?.(id)) return false;
+        seen.add(id);
+        return true;
+      }).slice(0, 4);
+      [this._preparedDevertAd, ...this._pendingDevertAds] = ads;
+      this._preparedDevertAd ||= null;
+      this._breakAwaitingUnlock = false;
+      this._musicSinceAd = 0;
+      await this._persistMainRadioAdState();
+      this._sendPlaybackNotice(`📻 **No live performance is booked.** ${ads.length ? `Playing ${ads.length} available advert${ads.length === 1 ? '' : 's'} once, then returning to music.` : 'No adverts are available; returning directly to music.'}`);
+      return true;
+    })().finally(() => { this._unbookedLiveFallbackTask = null; });
+    return this._unbookedLiveFallbackTask;
+  }
+
   /**
    * @param {object|null} [forcedPaid]
    * @param {{ projectedMusicSinceAd?: number|null, allowAds?: boolean }} [options]
@@ -1243,6 +1295,13 @@ export class JukeLoopSession {
       livePerformanceEvents: this.livePerformanceEvents,
     });
     if (activeShow.type === 'live_performance') return;
+    const initializedLiveFallback = allowAds ? await this._ensureUnbookedLiveFallback(activeShow) : false;
+    const fallbackBreak = !!activeShow.unbookedLiveOccurrenceId &&
+      !!(this._preparedDevertAd || this._pendingDevertAds.length);
+    if (fallbackBreak && forcedPaid && this.djuke) {
+      await this.djuke.release(forcedPaid.record, new Error('Unbooked live-slot advert break takes priority'));
+      forcedPaid = null;
+    }
     if (activeShow.type === 'playlist_show' && forcedPaid && this.djuke) {
       await this.djuke.release(forcedPaid.record, new Error('Paid request deferred during playlist show'));
       forcedPaid = null;
@@ -1265,12 +1324,12 @@ export class JukeLoopSession {
       if (!hypeSelection.track) return this._skipHype(hypeSelection, 'Recording is no longer eligible or available.', options);
     }
 
-    const musicSinceAd = Number.isFinite(projectedMusicSinceAd) ? projectedMusicSinceAd : this._musicSinceAd;
+    const musicSinceAd = initializedLiveFallback ? 0 : Number.isFinite(projectedMusicSinceAd) ? projectedMusicSinceAd : this._musicSinceAd;
     const normalSlotDue = allowAds && (musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD ||
       (!!(this._preparedDevertAd || this._pendingDevertAds.length) && !this._breakAwaitingUnlock));
     // Only immediate adverts and DJuke songs buy an extra break between ordinary slots.
     let paid = isHype || activeShow.type === 'playlist_show' ? null : forcedPaid;
-    if (!paid && this.djuke && activeShow.type !== 'playlist_show' && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
+    if (!paid && !fallbackBreak && this.djuke && activeShow.type !== 'playlist_show' && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
       paid = await this.djuke.nextPaid({ allowBump: normalSlotDue });
       if (this._destroyed && paid) {
         await this.djuke.release(paid.record, new Error('Radio stopped')).catch(() => {});
@@ -1359,7 +1418,9 @@ export class JukeLoopSession {
         await this._retryPlaylistMedia(paid.record, error);
         return null;
       }
-      throw error;
+      if (!devertAd || devertAd.paidRequest) throw error;
+      console.warn('[devert] Advert media lookup failed; skipping:', error.message);
+      url = null;
     }
     if (this._destroyed) {
       if (paid && this.djuke) await this.djuke.release(paid.record, new Error('Radio stopped during media lookup'));
@@ -1489,6 +1550,7 @@ export class JukeLoopSession {
       livePerformanceEvents: this.livePerformanceEvents,
     });
     if (!this.djuke || !this._preparedNext || (this._preparedNext.paid && this._preparedNext.paid.record.tier !== 0) ||
+      (activeShow.unbookedLiveOccurrenceId && (this._preparedDevertAd || this._pendingDevertAds.length)) ||
       activeShow.type === 'playlist_show' || activeShow.type === 'weekly_top10' || activeShow.type === 'live_performance' ||
       this.player.state.status !== AudioPlayerStatus.Playing) return;
     this._paidPollTimer = setTimeout(() => {
@@ -2055,6 +2117,7 @@ export class JukeLoopSession {
       musicPlayCount: entry.musicPlayCount,
     }]));
     this._lastMainRadioAdSkip = state.lastSkip || null;
+    this._unbookedLiveOccurrenceId = state.unbookedLiveOccurrenceId;
     this._pruneExpiredFailedDevertCampaigns();
   }
 
@@ -2066,6 +2129,7 @@ export class JukeLoopSession {
       preparedDevertAd: this._preparedDevertAd,
       pendingDevertAds: this._pendingDevertAds,
       breakAwaitingUnlock: this._breakAwaitingUnlock,
+      unbookedLiveOccurrenceId: this._unbookedLiveOccurrenceId,
       failedDevertCampaigns: [...this._failedDevertCampaigns.entries()].map(([campaignId, entry]) => ({
         campaignId,
         failedAt: entry.failedAt,

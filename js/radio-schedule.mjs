@@ -308,14 +308,12 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
       (Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc)))));
   if (liveShow) {
     const localDate = localDateAndHour(now, liveShow.timeZone || PAYROLL_TIME_ZONE).date;
+    const fallback = (schedule || []).find(show => show.type === 'normal_rotation') ||
+      { id: 'normal-rotation', label: 'Normal Rotation', priority: 10 };
     return {
-      ...liveShow,
-      type: 'live_performance',
-      event: {
-        id: `${liveShow.id}:${localDate}`,
-        title: liveShow.label,
-        priority: Number(liveShow.priority || 200),
-      },
+      ...fallback,
+      type: 'normal_rotation',
+      unbookedLiveOccurrenceId: `${liveShow.id}:${localDate}`,
     };
   }
 

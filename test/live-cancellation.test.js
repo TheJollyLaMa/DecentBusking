@@ -13,7 +13,10 @@ test('cancelled Friday occurrence survives validation and leaves Hype and future
   for (const time of ['2026-10-17T01:00:00Z', '2026-10-17T01:30:00Z', '2026-10-17T01:59:59Z']) {
     assert.equal(resolveActiveShow({ now: Date.parse(time), livePerformanceEvents: events }).type, 'normal_rotation');
   }
-  assert.equal(resolveActiveShow({ now: Date.parse('2026-10-24T01:30:00Z'), livePerformanceEvents: events }).type, 'live_performance');
+  const nextFriday = resolveActiveShow({ now: Date.parse('2026-10-24T01:30:00Z'), livePerformanceEvents: events });
+  assert.equal(nextFriday.type, 'normal_rotation');
+  assert.equal(nextFriday.unbookedLiveOccurrenceId, 'friday-live-performance:2026-10-23');
+  assert.equal(nextFriday.cancelledOccurrenceId, undefined);
   assert.throws(() => cancelLivePerformanceEvent([], occurrence, ''), /reason/);
   assert.equal(validateLivePerformanceSchedule(events, { now: Date.parse('2026-10-18T01:00:00Z') }).length, 1);
 });

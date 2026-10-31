@@ -387,7 +387,10 @@ test('at-start and in-progress cancellation suppress recurring live slot and pre
    const instant=Date.parse(b.startUtc)+offset; f.time(instant);
    await f.exec({action:'cancel',id:b.id,reason:'Platform incident',confirm:true});
    assert.notEqual(resolveActiveShow({now:instant,livePerformanceEvents:f.schedule().events}).type,'live_performance');
-   assert.equal(resolveActiveShow({now:instant+7*86400000,livePerformanceEvents:f.schedule().events}).type,'live_performance');
+   const nextFriday=resolveActiveShow({now:instant+7*86400000,livePerformanceEvents:f.schedule().events});
+   assert.equal(nextFriday.type,'normal_rotation');
+   assert.ok(nextFriday.unbookedLiveOccurrenceId);
+   assert.equal(nextFriday.cancelledOccurrenceId,undefined);
    assert.equal(f.schedule().events[0].cancellationReason,'Platform incident');
  }
 });

@@ -87,7 +87,9 @@ test('playlist one-off scheduling honors tonight ET, DST, cancellation, v1/v2 co
   assert.equal(resolveActiveShow({ now: friday, livePerformanceEvents: [event({ startUtc: new Date(friday).toISOString(), endUtc: new Date(friday + 3600_000).toISOString() })] }).type, 'weekly_top10');
   const duringLive = event({ startUtc: '2026-10-24T01:00:00Z', endUtc: '2026-10-24T02:00:00Z' });
   const cancelledDuringLive = cancelLivePerformanceEvent([], duringLive, 'Playlist canceled');
-  assert.equal(resolveActiveShow({ now: Date.parse(duringLive.startUtc), livePerformanceEvents: cancelledDuringLive }).type, 'live_performance');
+  const unbooked = resolveActiveShow({ now: Date.parse(duringLive.startUtc), livePerformanceEvents: cancelledDuringLive });
+  assert.equal(unbooked.type, 'normal_rotation');
+  assert.equal(unbooked.unbookedLiveOccurrenceId, 'friday-live-performance:2026-10-23');
   const cancelled = cancelLivePerformanceEvent(events, events[0], 'Canceled by owner');
   assert.equal(cancelled[0].type, 'playlist_show');
   assert.equal(cancelled[0].playlistId, ID);

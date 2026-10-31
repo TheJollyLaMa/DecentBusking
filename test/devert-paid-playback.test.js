@@ -16,6 +16,7 @@ async function tierSession(t, tier, name) {
   const ordinary = [8, 9].map(n => ({ campaignId: String(n), mainRadio: true,
     track: { trackId: `devert:${n}`, title: `Ordinary ${n}` } }));
   const session = new JukeLoopSession({
+    schedule: [],
     voiceChannel: { guild: { id: name } }, client: {}, textChannel: { send: async () => ({}) },
     audioPlayer: player, djuke: {
       nextPaid: async options => { calls.push(options); return tier === 1 || options.allowBump ? paid : null; },

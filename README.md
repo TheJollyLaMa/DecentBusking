@@ -474,6 +474,17 @@ Support the work with a [Supporter DNFT](https://thejollylama.github.io/DecentMa
 
 ### Scheduled live performances
 
+An empty recurring live-performance window does not pause JukeLoop. Only an
+explicit, active live event takes over automated playback. At an unbooked
+occurrence the worker selects up to four distinct eligible adverts from the
+existing main-radio queue, plays the available ads once, then resumes music.
+Fewer than four ads are not repeated to fill the break; no eligible ads, selection
+errors or unavailable media return to music instead of waiting for a performer.
+The occurrence marker and remaining ads use the existing durable ad journal so
+restarting the worker does not schedule another four-ad break for the same slot.
+Ad eligibility, impression accounting, two-minute limits and snow/tuning
+transitions are unchanged. Explicit bookings and cancellations retain priority.
+
 The dedicated admin Live Performance panel, public Live Performers fund and performer cards share dated booking IDs. Tomorrow’s Phase 0 uses **earmarked, NOT escrowed** router funds; Phase 1 stays disabled without an explicitly configured escrow. See [operator runbook and DRAFT v1 terms](docs/LIVE_PERFORMANCE_RUNBOOK.md) before any owner signing. No deployment or financial operation is implied by these docs.
 # Embed the DBusk radio
 
