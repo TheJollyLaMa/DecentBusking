@@ -69,7 +69,7 @@ test('reels and particles are bounded, noninteractive and cleaned up before anot
     },
   });
   const win = { innerWidth: 390, innerHeight: 844, matchMedia: () => motion,
-    setTimeout(fn) { timers.set(fn, fn); return fn; }, clearTimeout(id) { timers.delete(id); },
+    setTimeout(fn, delay) { timers.set(fn, { fn, delay }); return fn; }, clearTimeout(id) { timers.delete(id); },
     addEventListener(key, fn) { listeners.set(key, fn); }, removeEventListener(key) { listeners.delete(key); } };
   const doc = { defaultView: win, hidden: false, body: make('body'), createElement: make,
     createTextNode: text => ({ textContent: text }), addEventListener() {}, removeEventListener() {} };
@@ -81,6 +81,14 @@ test('reels and particles are bounded, noninteractive and cleaned up before anot
     getBoundingClientRect: () => ({ left: 20, top: 100, width: 140, height: 30 }) };
   const cleanup = animateFundInflow(button, { from: 9990000n, to: 100000000n, count: 24, kind: 'bag' });
   assert.equal(doc.body.children.length, 24);
+  const reels = animations.filter(animation => animation.frames[0].transform === 'translateY(0)');
+  const flights = animations.filter(animation => animation.frames.length === 4);
+  assert.ok(reels.length > 0);
+  assert.ok(reels.every(animation => animation.options.duration === 3200));
+  assert.equal(flights.length, 24);
+  assert.ok(flights.every(animation => animation.options.duration === 2800));
+  assert.equal(flights.at(-1).options.delay, 23 * 90);
+  assert.ok([...timers.values()].every(timer => timer.delay >= 5200));
   assert.equal(target.attributes['aria-hidden'], 'true');
   assert.ok(animations.every(animation => animation.options.easing === 'cubic-bezier(.65,0,.35,1)'));
   assert.equal(doc.body.children[0].style.left, '-32px');

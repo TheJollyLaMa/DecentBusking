@@ -4,6 +4,7 @@ import { weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
 import { saveChartSongToWatchlist } from './top-ten-playlist.mjs?v=20261030-ad-cutoff';
 import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261016-hype-bunny';
+import { fundBudgetFor } from './fund-budget.mjs?v=20261030-fund-refresh';
 
 export { rankTopTenSongs };
 
@@ -91,6 +92,8 @@ export function initTopTenBoard() {
   let autoOpenedInstance = null;
   let lastReport = null;
   let lastWeekly = null;
+  let lastFunds = null;
+  let fundRevision = 0;
   let lastNowPlaying = null;
   let lastPlayingId = null;
   const closeButton = document.getElementById('top-ten-panel-close');
@@ -248,7 +251,8 @@ export function initTopTenBoard() {
     lastNowPlaying = nowPlaying;
     const focusedTrack = content.contains(document.activeElement) ? document.activeElement.dataset.trackId : null;
     const rows = topTenPrizeRows(report.tracks || [], nowPlaying, {
-      budgetUnits: weekly?.funds?.top10?.budgetUnits ?? null, minimumUnits: weekly?.minimumPayoutUnits,
+      budgetUnits: fundBudgetFor({ ...lastFunds, weekly }, 'dbusk-top10').budgetUnits,
+      minimumUnits: weekly?.minimumPayoutUnits,
     });
     const sameWeek = previousChart?.week === report.week;
     const gains = chartRankGains(sameWeek ? previousChart.rows : null, rows);
@@ -376,26 +380,36 @@ export function initTopTenBoard() {
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service) { status.textContent = 'JukeLoop service is not configured.'; return; }
     status.textContent = 'Loading this week’s song votes…';
+    const startingFundRevision = fundRevision;
     try {
-      const [historyResponse, radioResponse, weeklyResponse] = await Promise.all([
+      const [historyResponse, radioResponse, weeklyResponse, fundsResponse] = await Promise.all([
         fetch(`${service}/api/radio/history?weeks=1&calendar=new-york`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }),
         fetch(`${service}/api/radio`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }),
         fetch(`${service}/api/payroll/weekly`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }).catch(() => null),
+        fetch(`${service}/api/funds`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }).catch(() => null),
       ]);
-      const [history, radio, weeklyState] = await Promise.all([
+      const [history, radio, weeklyState, fundsState] = await Promise.all([
         historyResponse.json(), radioResponse.json(),
         weeklyResponse?.json().catch(() => null) ?? null,
+        fundsResponse?.json().catch(() => null) ?? null,
       ]);
       if (request !== generation || !isOpen()) return;
       if (!historyResponse.ok) throw new Error(history.error || `Weekly votes unavailable (${historyResponse.status})`);
       if (!radioResponse.ok) throw new Error(radio.error || `Live track unavailable (${radioResponse.status})`);
+      if (startingFundRevision === fundRevision) {
+        lastFunds = fundsResponse?.ok && fundsState?.funds?.['dbusk-top10'] ? fundsState : {
+          funds: { 'dbusk-top10': { balanceUnits: null, balanceAvailable: false } },
+        };
+      }
       applyRadioState(radio);
       const report = (history.weeks || []).find(entry => entry.current) || (history.weeks || []).at(-1);
-      const weekly = weeklyResponse?.ok && weeklyState?.ready && !weeklyState.lastError && weeklyState.currentPeriod?.week === report?.week &&
-        /^\d+$/.test(String(weeklyState.funds?.top10?.budgetUnits ?? '')) ? weeklyState : null;
+      const payroll = startingFundRevision === fundRevision ? (weeklyResponse?.ok ? weeklyState : null) : lastFunds?.weekly;
+      const weekly = payroll?.ready && !payroll.lastError && payroll.currentPeriod?.week === report?.week &&
+        /^\d+$/.test(String(payroll.funds?.top10?.budgetUnits ?? '')) ? payroll : null;
       if (!report) { header.textContent = 'Weekly vote chart'; content.replaceChildren(el('p', 'top-ten-empty', 'Weekly song votes are not available yet.')); }
       else render(report, radio.nowPlaying, weekly);
-      status.textContent = weekly ? '' : 'Prize estimates are unavailable. Song votes are current.';
+      status.textContent = weekly && fundBudgetFor({ ...lastFunds, weekly }, 'dbusk-top10').budgetUnits != null
+        ? '' : 'Prize estimates are unavailable. Song votes are current.';
     } catch (error) {
       if (request !== generation || !isOpen()) return;
       status.textContent = `${error.message}. Retrying while this panel is open.`;
@@ -408,6 +422,16 @@ export function initTopTenBoard() {
   document.addEventListener('visibilitychange', () => { if (festival && performance.now() >= hypeDeadline) endHype(); });
   document.addEventListener('dbusk-radio-state', event => applyRadioState(event.detail));
   document.addEventListener('dbusk-radio-vote-recorded', () => { if (isOpen()) refresh(); });
+  document.addEventListener('fund-state-updated', event => {
+    fundRevision += 1;
+    lastFunds = event.detail;
+    if (!lastReport || !isOpen()) return;
+    const weekly = event.detail?.weekly;
+    const current = weekly?.ready && !weekly.lastError && weekly.currentPeriod?.week === lastReport.week;
+    render(lastReport, lastNowPlaying, current ? weekly : null);
+    status.textContent = current && fundBudgetFor({ ...lastFunds, weekly }, 'dbusk-top10').budgetUnits != null
+      ? '' : 'Prize estimates are unavailable. Song votes are current.';
+  });
   content.addEventListener('scroll', syncFlights, { passive: true });
   document.getElementById('top-ten-panel-close')?.addEventListener('click', () => { close(); toggle.focus(); });
   infoButton?.addEventListener('click', () => instructions.showModal());

@@ -73,9 +73,17 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
     endAt: new Date(now + 3600_000).toISOString(), tracks: tracks.map((track, index) => ({ ...track, openingRank: index + 1 })), skipped: [] };
   let radio = { serverTime: now, activeShow: { id: 'friday-top10-hype' }, topTenHype: hype,
     nowPlaying: { trackId: 'b', title: 'B', hype: { openingRank: 2, encore: false } } };
-  global.fetch = async url => ({ ok: true, json: async () => url.includes('/history')
-    ? { weeks: [{ current: true, week: 'NY-2026-10-12', tracks }] }
-    : url.includes('/payroll') ? { ready: false } : radio });
+  const weekly = { ready: true, currentPeriod: { week: 'NY-2026-10-12' }, fundShareBps: 10000,
+    funds: { top10: { balanceUnits: '11000000', reservedUnits: '1000000', budgetUnits: '10000000' } } };
+  let funds = { ready: true, funds: { 'dbusk-top10': { balanceUnits: '21000000', balanceAvailable: true } } };
+  let fundsAvailable = true;
+  let delayedFunds = null;
+  global.fetch = async url => {
+    if (url.includes('/api/funds') && delayedFunds) await delayedFunds;
+    return { ok: !url.includes('/api/funds') || fundsAvailable, json: async () => url.includes('/history')
+      ? { weeks: [{ current: true, week: 'NY-2026-10-12', tracks }] }
+      : url.includes('/payroll') ? weekly : url.includes('/funds') ? funds : radio };
+  };
   const { initTopTenBoard } = await import('../js/top-ten-board.mjs');
   initTopTenBoard();
   const publish = () => doc.dispatchEvent(new CustomEvent('dbusk-radio-state', { detail: radio }));
@@ -89,6 +97,20 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
   assert.equal(panel.querySelectorAll('.top-ten-watchlist-add').length, 2);
   assert.equal(panel.querySelector('.top-ten-playlist-add').textContent, '+');
   assert.equal(panel.querySelector('.top-ten-watchlist-add').textContent, '👀');
+  assert.match(panel.querySelector('.top-ten-prize').innerHTML, /\$10\.00/, 'latest ledger balance, not stale payroll budget');
+  funds = { ...funds, funds: { 'dbusk-top10': { balanceUnits: '31000000', balanceAvailable: true } } };
+  doc.dispatchEvent(new CustomEvent('fund-state-updated', { detail: { ...funds, weekly } }));
+  assert.match(panel.querySelector('.top-ten-prize').innerHTML, /\$15\.00/, 'header refresh immediately updates the visible chart');
+  doc.dispatchEvent(new CustomEvent('fund-state-updated', { detail: { funds: {
+    'dbusk-top10': { balanceUnits: null, balanceAvailable: false },
+  }, weekly } }));
+  assert.equal(panel.querySelector('.top-ten-prize').textContent, '—', 'unavailable balances never leave stale prize estimates');
+  assert.match(ids['top-ten-status'].textContent, /unavailable/);
+  doc.dispatchEvent(new CustomEvent('fund-state-updated', { detail: { ...funds, weekly: {
+    ...weekly, currentPeriod: { week: 'another-week' },
+  } } }));
+  assert.equal(panel.querySelector('.top-ten-prize').textContent, '—', 'never use a different week’s payroll');
+  doc.dispatchEvent(new CustomEvent('fund-state-updated', { detail: { ...funds, weekly } }));
   assert.match(panel.querySelector('.top-ten-watchlist-add').getAttribute('aria-label'), /watchlist/);
   doc.dispatchEvent(new Event('click'));
   assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'true', 'stray page clicks do not hide the Hype board');
@@ -122,6 +144,22 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
   tracks[1].votes = 20;
   const refresh = [...timers.values()].find(timer => timer.delay === 15000);
   await refresh.callback();
+  fundsAvailable = false;
+  await refresh.callback();
+  assert.equal(panel.querySelector('.top-ten-prize').textContent, '—', 'ledger outage does not fall back to stale payroll money');
+  assert.match(ids['top-ten-status'].textContent, /unavailable/);
+  fundsAvailable = true;
+  await refresh.callback();
+  let releaseFunds;
+  delayedFunds = new Promise(resolve => { releaseFunds = resolve; });
+  const staleRefresh = refresh.callback();
+  doc.dispatchEvent(new CustomEvent('fund-state-updated', { detail: {
+    funds: { 'dbusk-top10': { balanceUnits: '41000000', balanceAvailable: true } }, weekly,
+  } }));
+  releaseFunds();
+  await staleRefresh;
+  assert.match(panel.querySelector('.top-ten-prize').innerHTML, /\$20\.00/, 'a slower chart request cannot overwrite a newer header update');
+  delayedFunds = null;
   const first = panel.querySelector('.top-ten-song');
   assert.equal(first.dataset.trackId, 'b');
   assert.equal(first.querySelector('.top-ten-opening-rank').textContent, 'Opening #2 · live #1');

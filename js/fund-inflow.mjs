@@ -68,7 +68,7 @@ export function animateFundInflow(button, plan) {
   motion.addEventListener('change', cleanup);
   button.classList.add('fund-inflow-active');
   if (motion.matches) {
-    timer = win.setTimeout(cleanup, 2400);
+    timer = win.setTimeout(cleanup, 4800);
     return cleanup;
   }
   target.setAttribute('aria-hidden', 'true');
@@ -94,7 +94,7 @@ export function animateFundInflow(button, plan) {
     animations.push(reel.animate([
       { transform: 'translateY(0)' },
       { transform: `translateY(-${(sequence.length - 1) * 1.2}em)` },
-    ], { duration: 1700, delay: index * 65, easing: 'cubic-bezier(.65,0,.35,1)', fill: 'forwards' }));
+    ], { duration: 3200, delay: index * 110, easing: 'cubic-bezier(.65,0,.35,1)', fill: 'forwards' }));
   });
   const rect = button.getBoundingClientRect();
   for (let index = 0; index < plan.count; index++) {
@@ -113,9 +113,10 @@ export function animateFundInflow(button, plan) {
     animations.push(particle.animate([
       { transform: 'translate(-50%, -50%) scale(1) rotate(-25deg)', opacity: 0 },
       { opacity: 1, offset: .12 },
-      { transform: `translate(${rect.left + rect.width / 2 - x}px, ${rect.top + rect.height / 2 - y}px) scale(.15) rotate(25deg)`, opacity: 0 },
-    ], { duration: 1400, delay: index * 45, easing: 'cubic-bezier(.65,0,.35,1)', fill: 'both' }));
+      { opacity: 1, offset: .8 },
+      { transform: `translate(${rect.left + rect.width / 2 - x}px, ${rect.top + rect.height / 2 - y}px) scale(.4) rotate(25deg)`, opacity: 0 },
+    ], { duration: 2800, delay: index * 90, easing: 'cubic-bezier(.65,0,.35,1)', fill: 'both' }));
   }
-  timer = win.setTimeout(cleanup, Math.max(2400, finalText.length * 65 + 1800, plan.count * 45 + 1500));
+  timer = win.setTimeout(cleanup, Math.max(5200, finalText.length * 110 + 3500, plan.count * 90 + 3100));
   return cleanup;
 }

@@ -282,6 +282,6 @@ test('fund details stay in the fund modals rather than the Top10 song panel', ()
   assert.match(aboutSource, /community-funds-section/);
   assert.match(aboutSource, /Fund balances unavailable right now/);
   assert.doesNotMatch(topTenSource, /renderFundSourcesTable|renderFundWeeklyArchive|Funding ▾|fundsSummary/);
-  assert.match(topTenSource, /weekly\?\.funds\?\.top10\?\.budgetUnits/);
+  assert.match(topTenSource, /fundBudgetFor\(\{ \.\.\.lastFunds, weekly \}, 'dbusk-top10'\)/);
   assert.match(topTenSource, /\/api\/payroll\/weekly/);
 });
