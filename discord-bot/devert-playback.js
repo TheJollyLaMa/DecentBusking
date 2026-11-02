@@ -335,12 +335,33 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
   }
 
   async function retryPendingImpressions({ force = false } = {}) {
-    if (!journal.impressions.some(item => item.state === 'pending')) return false;
+    const pending = journal.impressions.filter(item => item.state === 'pending');
+    if (!pending.length) return false;
     const state = await refreshWorkerGasState({ force });
     if (!state || state.unavailable || state.lowBalance) return false;
-    if ((await readCampaigns()).paused) return false;
+    const snapshot = await readCampaigns();
+    if (snapshot.paused) return false;
+    const timestamp = now();
+    const retryAtById = new Map();
+    for (const entry of pending) {
+      if (Number.isSafeInteger(entry.nextRetryAt) && entry.nextRetryAt > timestamp) continue;
+      const campaign = snapshot.campaigns.find(item => String(item.campaignId) === entry.campaignId);
+      if (!campaign) continue;
+      const startsAt = Date.parse(campaign.startedAt);
+      const expiresAt = Date.parse(campaign.expiresAt);
+      if (Number.isFinite(startsAt) && startsAt > timestamp) {
+        retryAtById.set(entry.impressionId, startsAt);
+      } else if (Number.isFinite(expiresAt) && expiresAt <= timestamp) {
+        retryAtById.set(entry.impressionId, Number.MAX_SAFE_INTEGER);
+        log.warn(`[devert] Retaining pending impression ${entry.impressionId} for expired campaign ${entry.campaignId}; it cannot be recorded on-chain.`);
+      }
+    }
+    if (retryAtById.size) {
+      await commit({ ...journal, impressions: journal.impressions.map(entry =>
+        retryAtById.has(entry.impressionId) ? { ...entry, nextRetryAt: retryAtById.get(entry.impressionId) } : entry) });
+    }
     let progressed = false;
-    for (const impressionId of journal.impressions.filter(item => item.state === 'pending').map(item => item.impressionId)) {
+    for (const impressionId of pending.map(item => item.impressionId)) {
       const entry = journal.impressions.find(item => item.impressionId === impressionId && item.state === 'pending');
       if (!entry) continue;
       const submitted = await submitImpression(entry);

@@ -231,6 +231,28 @@ test('a pending main-radio slot rejection does not block restore, VertLoop, or t
   assert.equal(fixture.impressionCalls.find(entry => entry.mainRadio).impressionId, pendingId);
 });
 
+test('expired campaign impressions remain in the journal without blocking scheduler restore or active ads', async () => {
+  const expired = campaign('1', { expiresAt: new Date(NOW - 1_000).toISOString() });
+  const active = campaign('2');
+  const fixture = harness({ campaigns: [expired, active], slots: 10 });
+  const pendingId = id('expired-main-radio');
+  fixture.state.impressions = [{ impressionId: pendingId, campaignId: '1', mainRadio: true,
+    radioPlayId: 'expired-main-radio', recordedAt: new Date(NOW - 60_000).toISOString(), state: 'pending' }];
+  let contractAttempts = 0;
+  fixture.contract.recordCampaignPlay.staticCall = async () => {
+    contractAttempts++;
+    throw Object.assign(new Error('execution reverted'), { code: 'CALL_EXCEPTION', reason: 'Campaign inactive' });
+  };
+
+  const runtime = await makeRuntime(fixture);
+
+  assert.equal(contractAttempts, 0);
+  assert.equal(fixture.state.impressions[0].state, 'pending');
+  assert.equal(fixture.state.impressions[0].nextRetryAt, Number.MAX_SAFE_INTEGER);
+  assert.equal((await runtime.nextMainRadioAd()).campaignId, '2');
+  assert.equal(contractAttempts, 0);
+});
+
 test('unexpected main-radio reverts still surface rather than being classified as slot cooldowns', async () => {
   const fixture = harness();
   const runtime = await makeRuntime(fixture);
