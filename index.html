@@ -6,7 +6,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261030-fund-refresh" />
+  <link rel="stylesheet" href="css/styles.css?v=20261102-checkout-readiness" />
   <link rel="stylesheet" href="css/radio-programming.css?v=20261024-calendar-fit" />
 
   <!-- CDN dependencies -->
@@ -67,7 +67,8 @@
       <input id="djuke-search" type="search" aria-label="Search songs and creators" placeholder="Search songs or creators" />
       <p id="djuke-search-state" role="status" aria-live="polite"></p>
       <select id="djuke-song" disabled><option value="">Song catalog unavailable</option></select>
-      <button id="djuke-pay" type="button" disabled title="DJuke payment contract is not deployed">Queue Song</button>
+      <button id="djuke-pay" type="button" disabled aria-describedby="djuke-readiness" title="Checking DJuke payment availability">Queue Song</button>
+      <p id="djuke-readiness" role="status" aria-live="polite">Checking DJuke payment availability</p>
       <details class="djuke-playlist-draft">
         <summary>🎛️ Playlist draft <span id="djuke-playlist-draft-count">0/24</span></summary>
         <button id="djuke-add-selected-playlist" type="button" disabled>Add selected song</button>
@@ -936,7 +937,7 @@
   <script type="module" src="js/fund-header.mjs?v=20261030-fund-refresh"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261030-fund-refresh"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261030-fund-refresh"></script>
-  <script type="module" src="js/djuke.mjs?v=20261025-seamless-handoff"></script>
+  <script type="module" src="js/djuke.mjs?v=20261102-checkout-readiness"></script>
   <script type="module" src="js/devert-site.mjs?v=20261024-devert-sponsored"></script>
   <script type="module" src="js/creator-profile.mjs?v=20261025-profile-dropdowns"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
