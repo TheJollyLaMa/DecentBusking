@@ -17,7 +17,9 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261025-seamless-handoff/);
+  assert.match(html, /djuke\.mjs\?v=20261102-checkout-readiness/);
+  assert.match(html, /id="djuke-pay"[^>]*aria-describedby="djuke-readiness"/);
+  assert.ok(html.indexOf('id="djuke-readiness"') < html.indexOf('class="djuke-playlist-draft"'));
   assert.match(html, /devert-site\.mjs\?v=20261024-devert-sponsored/);
   const adapter = fs.readFileSync(path.join(__dirname, '../js/devert-site.mjs'), 'utf8');
   assert.match(adapter, /devert-paid-queue\.mjs\?v=20261024-widget/);
@@ -311,17 +313,21 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   const address = `0x${'1'.repeat(40)}`;
   let earningsFail = false;
   let catalogFail = false;
+  let gasFailure = 'Playback execution budget is low; checkout is paused until the platform replenishes it';
   let playlistReceipts = [];
   let queueReads = 0;
   let scheduled;
   let tracks = [{ trackId: 'a', songId: `0x${'a'.repeat(64)}`, title: 'First song', artist: 'Musician' }];
   const context = vm.createContext({ ...helpers, ...versions, renderWalletAddress, formatUsdcUnits, mountDjukeQueueFocus, playlistBatchProgress,
-    getRadioStateSnapshot: () => null, document, AbortSignal,
+    getRadioStateSnapshot: () => null, document, AbortSignal, URLSearchParams,
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://service.example', djukeContractAddress: address } },
     lookupEnsName: async () => 'musician.eth',
     CustomEvent: class { constructor(type, { detail }) { this.type = type; this.detail = detail; } },
     clearTimeout() { scheduled = null; }, setTimeout(callback) { scheduled = callback; },
     fetch: async url => {
+      if (url.includes('/gas-quote?')) return { ok: !gasFailure,
+        json: async () => gasFailure ? { error: gasFailure } : { contributionWei: '0',
+          deadline: Math.floor(Date.now() / 1000) + 120 } };
       if (url.endsWith('/earners')) return { ok: !earningsFail, status: earningsFail ? 503 : 200,
         json: async () => ({ chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address, totalUnits: '1125000' }] }) };
       queueReads++;
@@ -377,6 +383,25 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   document.dispatchEvent({ type: 'wallet-connected' });
   assert.equal(element('djuke-payment-state').textContent, '');
   assert.equal(element('djuke-pay').disabled, true, 'a connected wallet still needs a selected song');
+  assert.match(element('djuke-readiness').textContent, /Select a song/);
+  context.window.DecentConfig.djukeContractVersion = '0.5';
+  select.value = 'a';
+  context.window._wallet.chainId = 1;
+  await click('djuke-refresh');
+  assert.match(element('djuke-pay').title, /Switch your wallet to Base/);
+  context.window._wallet.chainId = 8453;
+  await click('djuke-refresh');
+  assert.equal(element('djuke-pay').disabled, true);
+  assert.equal(element('djuke-pay').title, gasFailure);
+  assert.equal(element('djuke-readiness').textContent, gasFailure);
+  gasFailure = 'RPC request limit reached';
+  await click('djuke-refresh');
+  assert.match(element('djuke-readiness').textContent, /verification is busy/);
+  gasFailure = '';
+  await click('djuke-refresh');
+  assert.equal(element('djuke-pay').disabled, false, 'a successful retry restores checkout');
+  assert.equal(element('djuke-pay').title, 'Pay to queue the selected song');
+  assert.equal(element('djuke-readiness').textContent, '');
   await click('djuke-info');
   document.dispatchEvent({ type: 'keydown', key: 'Escape' });
   assert.equal(element('djuke-tab').getAttribute('aria-expanded'), 'true');

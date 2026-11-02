@@ -1127,7 +1127,8 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 #listen-gate-pay { color: white; background: #ab343b; }
 #listen-gate-add, #listen-gate-radio { color: #15221c; background: #ebefea; }
 #listen-gate-status { min-height: 1em; margin: 10px 0 0 !important; color: #b6c6bb; font-size: .74rem !important; }
-#djuke-queue-state, #djuke-payment-state { margin: 8px 0; color: #b6c6bb; font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
+#djuke-queue-state, #djuke-payment-state, #djuke-readiness { margin: 8px 0; color: #b6c6bb; font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
+#djuke-readiness:empty { display: none; }
 .djuke-song-label { display: block; margin-top: 12px; margin-bottom: 5px; font-size: .73rem; }
 #djuke-song { width: 100%; box-sizing: border-box; height: 36px; padding: 6px; background: #1b2924; color: #ecf1ed; border: 1px solid #52675a; border-radius: 4px; font: inherit; font-size: .76rem; }
 .djuke-wallet-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; margin-top: 8px; }

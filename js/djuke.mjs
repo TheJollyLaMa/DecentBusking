@@ -130,6 +130,7 @@ export function initDjuke() {
   const paymentStatus = document.getElementById('djuke-payment-state');
   const tiers = document.getElementById('djuke-price-tiers');
   const pay = document.getElementById('djuke-pay');
+  const readinessStatus = document.getElementById('djuke-readiness');
   const gasStatus = document.getElementById('djuke-gas-status');
   const instructions = document.getElementById('djuke-instructions');
   const info = document.getElementById('djuke-info');
@@ -148,6 +149,7 @@ export function initDjuke() {
   let earnersGeneration = 0;
   let walletPromptShown = false;
   let gasQuote = null;
+  let gasQuoteError = '';
   let gasGeneration = 0;
   let timer;
   let generation = 0;
@@ -164,11 +166,20 @@ export function initDjuke() {
       usdc: new ethers.Contract(BASE_USDC_ADDRESS, USDC_BROWSER_ABI, signer) };
   };
   const syncPayButton = () => {
-    const ready = paymentsLive() && !!window._wallet?.address && window._wallet?.chainId === 8453 && !!selectedSongId() && !busy &&
-      (!supportsDjukeAlbumsAndGas(window.DecentConfig?.djukeContractVersion) || !!gasQuote && gasQuote.deadline > Date.now() / 1000);
-    pay.disabled = busy || (!!window._wallet?.address && !ready);
-    pay.title = !window._wallet?.address ? 'Queue Song'
-      : paymentsLive() ? 'Pay to queue the selected song' : 'DJuke payments are not live yet';
+    let reason = '';
+    if (busy) reason = 'Payment in progress. Check your wallet.';
+    else if (window._wallet?.address) {
+      if (!paymentsLive()) reason = 'DJuke payment availability could not be verified. Checkout is unavailable.';
+      else if (window._wallet.chainId !== 8453) reason = 'Switch your wallet to Base to queue a song.';
+      else if (!selectedSongId()) reason = 'Select a song to queue.';
+      else if (supportsDjukeAlbumsAndGas(window.DecentConfig?.djukeContractVersion) &&
+          (!gasQuote || gasQuote.deadline <= Date.now() / 1000)) {
+        reason = gasQuoteError || 'Verifying payment availability. Please wait.';
+      }
+    }
+    pay.disabled = Boolean(reason);
+    pay.title = reason || (!window._wallet?.address ? 'Queue Song' : 'Pay to queue the selected song');
+    if (readinessStatus) readinessStatus.textContent = reason;
   };
   let gasQuoteKey = '';
   const currentGasKey = () => `${window._wallet?.address?.toLowerCase() || ''}|${selectedSongId()}|${live?.priceUnits || ''}`;
@@ -180,6 +191,7 @@ export function initDjuke() {
       return;
     }
     gasQuote = null;
+    gasQuoteError = '';
     gasQuoteKey = key;
     const check = ++gasGeneration;
     if (gasStatus) gasStatus.textContent = '';
@@ -198,9 +210,10 @@ export function initDjuke() {
     } catch (error) {
       if (check !== gasGeneration) return;
       gasQuoteKey = '';
-      if (gasStatus) gasStatus.replaceChildren();
-      if (gasStatus) gasStatus.textContent = /request limit|rate limit|too many/i.test(error.message)
+      gasQuoteError = /request limit|rate limit|too many/i.test(error.message)
         ? 'Payment verification is busy; retrying shortly' : error.message;
+      if (gasStatus) gasStatus.replaceChildren();
+      if (gasStatus) gasStatus.textContent = gasQuoteError;
     }
     syncPayButton();
   };

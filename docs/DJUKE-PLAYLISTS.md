@@ -317,6 +317,12 @@ For v0.5, warn below **0.002 ETH**, suggest a **0.003 ETH** target, and pause
 sponsored quotes below **0.001 ETH** or when twice the estimated execution
 budget exceeds the balance. This is an early warning, not a promise of capacity
 for all outstanding purchases. Top up only the verified worker with ETH on Base.
+If single-song checkout is disabled, its reason appears directly beneath
+**Queue Song** and in the button tooltip. A low playback execution budget means
+the platform worker needs Base ETH, not that the listener lacks USDC or that an
+Alchemy invoice must be paid. Refreshing the queue retries payment verification;
+normal open-panel polling also retries failed quotes. Never bypass the funding
+check to enable a purchase.
 Before cutover, verify funded worker, fulfiller/registrar roles, matching
 frontend/backend addresses and versions, deployment-block event replay, and
 durable mirror/journals. Drain both old paid lanes and stop new v0.4 purchases
