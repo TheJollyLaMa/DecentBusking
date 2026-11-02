@@ -44,7 +44,13 @@ fees and Base L1 data fees (and operator fees when provided); unavailable receip
 fees are explicitly marked incomplete, never estimated as zero. Stopped attempts
 keep their confirmed results and costs. This session summary is not durable payment
 history: reloading starts a new summary; the on-chain ledger remains authoritative.
-Other site payment celebrations are unchanged.
+Recipient labels resolve to the signed creator-profile display name, registered
+contributor name, verified ENS name, or linked Discord display name, in that
+order. Names are presentation only: each recipient remains independently
+linked to their BaseScan address, and the transaction link remains available.
+If lookup is unavailable, the panel shows the wallet address and says names
+could not be resolved. This does not change payout identity or the frozen
+receipt. Other site payment celebrations are unchanged.
 
 1. Deposit native USDC into the relevant Playback or Top 10 allocation. The schedule closes Sunday/Monday at 00:00 New York time. It does not create or fund allocations for you.
 2. The running worker checks every 15 seconds and publishes eligible closed-week allocation JSON plus a retained IPFS schedule checkpoint. Default `radioPayflow` uses 100% of unreserved money, a 0.01 USDC minimum and a 1 USDC significant-share warning. Current/boundary balances cap budgets; deposits after close do not fund the previous period. Existing unpaid receipts reserve money in service accounting, not contract-enforced escrow. Older eligible weeks are handled first on catch-up. If RPC historical state or IPFS is unavailable, preparation stops and the dashboard reports it. Sleeping/stopped service execution is delayed until it resumes.
