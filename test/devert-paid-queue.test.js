@@ -163,6 +163,14 @@ test('compact paid panel keeps tier order, filters eligible adverts, handles fai
   assert.equal(select.value, '1');
   assert.equal(nodes['devert-paid-queue-button'].disabled, true);
   assert.equal(nodes['devert-paid-immediate-button'].disabled, true);
+  const option = select.children[0];
+  const requestRow = nodes['devert-paid-requests'].children[0];
+  select.scrollTop = 42;
+  await nodes['devert-paid-refresh'].listeners.click();
+  assert.equal(select.children[0], option, 'unchanged polling must not rebuild the advert dropdown');
+  assert.equal(select.value, '1');
+  assert.equal(select.scrollTop, 42);
+  assert.equal(nodes['devert-paid-requests'].children[0], requestRow, 'unchanged paid requests retain their rows');
   const search = nodes['devert-search'];
   search.value = 'not found';
   search.listeners.input();

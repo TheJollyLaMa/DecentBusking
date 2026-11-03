@@ -40,6 +40,13 @@ the price model are collapsed until requested.
 Wallet connection uses the page header, not a second connect control in DVert.
 Campaign and priority checkout follow that shared wallet and its network changes.
 
+Background refreshes retain the loaded rotation and wallet lists while requests
+are pending. Unchanged rows and advert options keep their DOM identity, so polling
+does not collapse the scroll area, reload artwork, or remove a focused control.
+Changed results replace lists in one operation; request failures still report
+unavailability and disable checkout rather than presenting stale quotes as live.
+Open disclosures, search text, and upload/campaign drafts are not reset by polling.
+
 The orangutan/TV icon toggles the live 24/7 VertLoop audio/video feed, hushing
 main radio only for this listener. Its hover/focus help explains the switch.
 Clicking again or closing DVert returns to main radio. Video and voting
