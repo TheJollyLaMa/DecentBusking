@@ -48,14 +48,10 @@ export function initDevertPaidQueue(environment = {}) {
   let snapshot = null;
   let busy = false;
   let generation = 0;
+  let campaignOptionsKey;
+  let requestListKey;
   const config = () => window.DecentConfig || {};
   const address = () => config().devertQueueContractAddress || '';
-  const row = (text, parent) => {
-    const item = document.createElement('li');
-    item.textContent = text;
-    parent.append(item);
-    return item;
-  };
   const link = (parent, txHash, text) => {
     const anchor = document.createElement('a');
     anchor.href = `https://basescan.org/tx/${txHash}`;
@@ -80,20 +76,28 @@ export function initDevertPaidQueue(environment = {}) {
   const renderCampaigns = () => {
     const previous = select.value;
     const visible = filterDevertCampaigns(activeCampaigns, search.value);
-    select.replaceChildren();
-    for (const campaign of visible) {
-      const option = document.createElement('option');
-      option.value = campaign.campaignId;
-      option.textContent = campaign.title;
-      option.title = `Campaign #${campaign.campaignId} · ${campaign.advertiser}`;
-      select.append(option);
+    const emptyLabel = activeCampaigns.length ? 'No matching adverts' : 'No active approved adverts';
+    const key = JSON.stringify([emptyLabel, visible.map(campaign => [campaign.campaignId, campaign.title, campaign.advertiser])]);
+    if (key !== campaignOptionsKey) {
+      const options = visible.map(campaign => {
+        const option = document.createElement('option');
+        option.value = campaign.campaignId;
+        option.textContent = campaign.title;
+        option.title = `Campaign #${campaign.campaignId} · ${campaign.advertiser}`;
+        return option;
+      });
+      if (!options.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = emptyLabel;
+        options.push(option);
+      }
+      const scrollTop = select.scrollTop;
+      select.replaceChildren(...options);
+      if (visible.some(campaign => campaign.campaignId === previous)) select.value = previous;
+      select.scrollTop = scrollTop;
+      campaignOptionsKey = key;
     }
-    if (!visible.length) {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = activeCampaigns.length ? 'No matching adverts' : 'No active approved adverts';
-      select.append(option);
-    } else if (visible.some(campaign => campaign.campaignId === previous)) select.value = previous;
     select.disabled = !visible.length;
     searchStatus.textContent = search.value.trim()
       ? `${visible.length} matching advert${visible.length === 1 ? '' : 's'}` : '';
@@ -120,6 +124,7 @@ export function initDevertPaidQueue(environment = {}) {
         status.textContent = 'Paid advert requests are not enabled yet. No payment will be requested.';
         count.textContent = '—';
         list.replaceChildren();
+        requestListKey = undefined;
         activeCampaigns = [];
         renderCampaigns();
         return;
@@ -133,17 +138,27 @@ export function initDevertPaidQueue(environment = {}) {
         state.approvedCampaignIds?.includes(campaign.campaignId) && !campaigns.paused && !campaign.removed &&
         Date.parse(campaign.startedAt) <= Date.now() && Date.parse(campaign.expiresAt) > Date.now());
       renderCampaigns();
-      list.replaceChildren();
-      for (const entry of [...state.requests].sort((a, b) => b.tier - a.tier || Number(a.chainRequestId) - Number(b.chainRequestId))) {
-        const item = row('', list);
-        item.title = `Request #${entry.chainRequestId} · payer ${entry.payer}`;
-        const title = document.createElement('strong');
-        title.textContent = entry.title;
-        const detail = document.createElement('span');
-        detail.textContent = `${entry.tier === 0 ? 'Next ad break' : 'After this song'} · ${formatUsdcUnits(BigInt(entry.amountUnits))} USDC`;
-        item.append(title, detail);
+      const requests = [...state.requests].sort((a, b) => b.tier - a.tier || Number(a.chainRequestId) - Number(b.chainRequestId));
+      const key = JSON.stringify(requests.map(entry => [entry.chainRequestId, entry.payer, entry.title, entry.tier, entry.amountUnits]));
+      if (key !== requestListKey) {
+        const rows = requests.map(entry => {
+          const item = document.createElement('li');
+          item.title = `Request #${entry.chainRequestId} · payer ${entry.payer}`;
+          const title = document.createElement('strong');
+          title.textContent = entry.title;
+          const detail = document.createElement('span');
+          detail.textContent = `${entry.tier === 0 ? 'Next ad break' : 'After this song'} · ${formatUsdcUnits(BigInt(entry.amountUnits))} USDC`;
+          item.append(title, detail);
+          return item;
+        });
+        if (!rows.length) {
+          const item = document.createElement('li');
+          item.textContent = 'No paid requests';
+          rows.push(item);
+        }
+        list.replaceChildren(...rows);
+        requestListKey = key;
       }
-      if (!state.requests.length) row('No paid requests', list);
       snapshot = state;
       count.textContent = String(state.pendingCount);
       price.textContent = formatUsdcUnits(BigInt(state.priceUnits));
@@ -161,6 +176,7 @@ export function initDevertPaidQueue(environment = {}) {
         immediatePrice.textContent = 'Unavailable';
         count.textContent = '—';
         list.replaceChildren();
+        requestListKey = undefined;
         activeCampaigns = [];
         renderCampaigns();
         status.textContent = error.message;

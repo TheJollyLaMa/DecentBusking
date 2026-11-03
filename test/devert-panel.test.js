@@ -190,6 +190,66 @@ test('wallet gating and pending-upload polling remain independent of the public 
   assert.equal(ui.timers.at(-1).delay, 3_000);
 });
 
+test('polling preserves loaded rows, focused controls, disclosures and drafts while both requests are pending', async () => {
+  const ui = await panelFixture({ wallet: { address: advertiser, signer: {}, chainId: 8453 } });
+  ui.read(async () => snapshot([campaign(1)]));
+  ui.readAds(async () => ({ ads: [{ title: 'Ready ad', ipfsCid: 'ready', state: 'ready' }], scanPending: true }));
+  await ui.click('devert-tab');
+  await ui.settle();
+  const queueRow = ui.element('devert-queue').children[0];
+  const libraryRow = ui.element('devert-search-results').children[0];
+  const campaignRow = ui.element('devert-campaigns').children[0];
+  const campaignStatus = ui.element('devert-campaign-status').textContent;
+  const price = ui.element('devert-price').textContent;
+  const runButton = campaignRow.children[1];
+  runButton.focus();
+  ui.element('devert-my-ads').open = true;
+  ui.element('devert-run-campaign').open = true;
+  ui.element('devert-title').value = 'My unfinished advert';
+  ui.element('devert-weeks').value = '3';
+  let releaseQueue, releaseAds;
+  ui.read(() => new Promise(resolve => { releaseQueue = resolve; }));
+  ui.readAds(() => new Promise(resolve => { releaseAds = resolve; }));
+  assert.equal(ui.timers.at(-1).delay, 3_000);
+  ui.timers.at(-1).callback();
+  assert.equal(ui.element('devert-queue').children[0], queueRow);
+  assert.equal(ui.element('devert-price').textContent, price);
+  assert.equal(ui.element('devert-campaign-status').textContent, campaignStatus);
+  releaseQueue({ ...snapshot([campaign(1)]), snapshotAt: new Date(at + 100).toISOString() });
+  await ui.settle();
+  assert.equal(ui.element('devert-campaigns').children[0], campaignRow, 'wallet rows must not clear while the ad library loads');
+  releaseAds({ ads: [{ title: 'Ready ad', ipfsCid: 'ready', state: 'ready' }], scanPending: true });
+  await ui.settle();
+  assert.equal(ui.element('devert-queue').children[0], queueRow);
+  assert.equal(ui.element('devert-search-results').children[0], libraryRow);
+  assert.equal(ui.element('devert-campaigns').children[0], campaignRow);
+  assert.equal(ui.focus(), runButton.id);
+  assert.equal(ui.element('devert-my-ads').open, true);
+  assert.equal(ui.element('devert-run-campaign').open, true);
+  assert.equal(ui.element('devert-title').value, 'My unfinished advert');
+  assert.equal(ui.element('devert-weeks').value, '3');
+  ui.read(async () => snapshot([campaign(2)]));
+  ui.readAds(async () => ({ ads: [{ title: 'New ad', ipfsCid: 'new', state: 'ready' }] }));
+  await ui.click('devert-refresh');
+  await ui.settle();
+  assert.equal(ui.element('devert-queue').children[0].children[0].textContent, 'Ad 2');
+  assert.equal(ui.element('devert-campaigns').children[0].children[0].children[0].textContent, 'New ad');
+});
+
+test('disconnecting invalidates an in-flight wallet library refresh', async () => {
+  const ui = await panelFixture({ wallet: { address: advertiser } });
+  let releaseAds;
+  ui.readAds(() => new Promise(resolve => { releaseAds = resolve; }));
+  await ui.click('devert-tab');
+  await ui.settle();
+  ui.context.window._wallet = null;
+  ui.document.dispatchEvent({ type: 'wallet-disconnected' });
+  releaseAds({ ads: [{ title: 'Old wallet ad', state: 'ready', ipfsCid: 'old' }] });
+  await ui.settle();
+  assert.equal(ui.element('devert-campaigns').children.length, 0);
+  assert.match(ui.element('devert-search-results').children[0].textContent, /Connect your wallet/);
+});
+
 test('ready-ad selection reveals Run Campaign before focus, keeps disclosures independent and weekly checkout fixed', async () => {
   const ui = await panelFixture({ wallet: { address: advertiser, signer: {}, chainId: 8453 } });
   await ui.click('devert-tab');

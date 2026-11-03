@@ -221,6 +221,9 @@ export function initDevertTab(environment = {}) {
   const queueStatus = document.getElementById('devert-queue-status');
   let currentAds = [];
   let adLibraryStatus = 'Connect your wallet to browse ads.';
+  let publicQueueKey;
+  let adLibraryKey;
+  let campaignListKey;
   const campaignList = document.getElementById('devert-campaigns');
   const campaignStatus = document.getElementById('devert-campaign-status');
   const radioStatus = document.getElementById('devert-radio-status');
@@ -437,6 +440,7 @@ export function initDevertTab(environment = {}) {
   }
 
   function queueState(message, price = 'Unavailable') {
+    publicQueueKey = undefined;
     publicQueue.replaceChildren();
     priceDisplay.textContent = price;
     queueStatus.textContent = message;
@@ -444,12 +448,16 @@ export function initDevertTab(environment = {}) {
 
   function renderPublicQueue(result) {
     const { campaigns, minimumOfferUnits } = devertPublicQueue(result);
-    publicQueue.replaceChildren();
-    for (const campaign of campaigns) {
-      const item = node('li');
-      item.append(node('strong', campaign.title),
-        node('span', `Campaign #${campaign.campaignId} · ${campaign.advertiser}`));
-      publicQueue.append(item);
+    const key = JSON.stringify(campaigns.map(campaign => [campaign.campaignId, campaign.title, campaign.advertiser]));
+    if (key !== publicQueueKey) {
+      const rows = campaigns.map(campaign => {
+        const item = node('li');
+        item.append(node('strong', campaign.title),
+          node('span', `Campaign #${campaign.campaignId} · ${campaign.advertiser}`));
+        return item;
+      });
+      publicQueue.replaceChildren(...rows);
+      publicQueueKey = key;
     }
     priceDisplay.textContent = formatUsdc(minimumOfferUnits.toString()).replace(' USDC', '');
     queueStatus.textContent = campaigns.length
@@ -490,9 +498,13 @@ export function initDevertTab(environment = {}) {
         String(first.title || '').localeCompare(String(second.title || '')) ||
         String(first.tokenId || '').localeCompare(String(second.tokenId || '')))
       .filter(ad => !query || adSearchText(ad).includes(query));
-    searchResults.replaceChildren();
+    const key = JSON.stringify([query, visibleAds.length ? null : adLibraryStatus, visibleAds.map(ad =>
+      [ad.campaignId, ad.title, ad.state, ad.removed, ad.expiresAt, ad.tokenId, ad.image, ad.artworkCid, ad.ipfsCid]), gateway]);
+    if (key === adLibraryKey) return;
+    const rows = [];
     if (!visibleAds.length) {
-      searchResults.append(node('li', query ? `No ads match “${query}”.` : adLibraryStatus, 'devert-library-empty'));
+      searchResults.replaceChildren(node('li', query ? `No ads match “${query}”.` : adLibraryStatus, 'devert-library-empty'));
+      adLibraryKey = key;
       return;
     }
     for (const ad of visibleAds) {
@@ -529,8 +541,10 @@ export function initDevertTab(environment = {}) {
         : ad.state === 'active' ? ad.removed ? 'Removed' : 'Active' : 'Pending', 'devert-library-badge'));
       if (ad.state === 'ready') listen(card, 'click', () => selectAdForCampaign(ad));
       item.append(card);
-      searchResults.append(item);
+      rows.push(item);
     }
+    searchResults.replaceChildren(...rows);
+    adLibraryKey = key;
   }
 
   async function submitCampaign(event) {
@@ -692,7 +706,7 @@ export function initDevertTab(environment = {}) {
     const request = ++generation;
     let scanPending = false;
     let publicLoaded = false;
-    queueState('Loading public queue…', 'Loading…');
+    if (!snapshot) queueState('Loading public queue…', 'Loading…');
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service) {
       snapshot = null;
@@ -705,7 +719,7 @@ export function initDevertTab(environment = {}) {
       syncCheckout();
       return;
     }
-    campaignStatus.textContent = 'Loading confirmed campaigns…';
+    if (!snapshot) campaignStatus.textContent = 'Loading confirmed campaigns…';
     try {
       const response = await fetch(`${service}/api/devert`, { cache: 'no-store', signal: AbortSignal.timeout(12_000) });
       const result = await response.json();
@@ -715,7 +729,6 @@ export function initDevertTab(environment = {}) {
       renderPublicQueue(result);
       publicLoaded = true;
       snapshot = result;
-      campaignList.replaceChildren();
       const walletAddress = window._wallet?.address;
       let ads = [];
       let metadataUnavailable = 0;
@@ -749,29 +762,36 @@ export function initDevertTab(environment = {}) {
       const campaignRows = [...ads, ...paidTerms.filter(campaign => !ads.some(ad => ad.campaignId === campaign.campaignId))
         .map(campaign => ({ ...campaign, state: 'active', secondsRemaining:
           Math.max(0, Math.ceil((Date.parse(campaign.expiresAt) - Date.now()) / 1000)) }))];
-      for (const ad of campaignRows) {
-        const item = node('li', undefined, 'devert-campaign');
-        const details = node('span', undefined, 'devert-campaign-details');
-        const state = ad.state === 'active'
-          ? `${ad.removed ? 'Removed from playback · paid term ends' : 'Active until'} ${new Date(ad.expiresAt).toLocaleString()}`
-          : ad.state === 'ready' ? 'NFT minted · ready for campaign' : 'Waiting for admin mint';
-        const remaining = ad.secondsRemaining > 0 ? ` · ${Math.floor(ad.secondsRemaining / 86400)}d ${Math.floor(ad.secondsRemaining % 86400 / 3600)}h left` : '';
-        details.append(node('strong', ad.title), node('span', `${state}${remaining}`));
-        item.append(details);
-        if (ad.state === 'ready') {
-          const select = node('button', 'Run Campaign', 'devert-use-ad');
-          select.type = 'button';
-          select.setAttribute('aria-label', `Use ${ad.title} in a campaign`);
-          listen(select, 'click', () => selectAdForCampaign(ad));
-          item.append(select);
+      const key = JSON.stringify(campaignRows.map(ad => [ad.campaignId, ad.title, ad.state, ad.removed,
+        ad.expiresAt, ad.ipfsCid, Math.floor((ad.secondsRemaining || 0) / 3600), ad.secondsRemaining > 0]));
+      if (key !== campaignListKey) {
+        const rows = [];
+        for (const ad of campaignRows) {
+          const item = node('li', undefined, 'devert-campaign');
+          const details = node('span', undefined, 'devert-campaign-details');
+          const state = ad.state === 'active'
+            ? `${ad.removed ? 'Removed from playback · paid term ends' : 'Active until'} ${new Date(ad.expiresAt).toLocaleString()}`
+            : ad.state === 'ready' ? 'NFT minted · ready for campaign' : 'Waiting for admin mint';
+          const remaining = ad.secondsRemaining > 0 ? ` · ${Math.floor(ad.secondsRemaining / 86400)}d ${Math.floor(ad.secondsRemaining % 86400 / 3600)}h left` : '';
+          details.append(node('strong', ad.title), node('span', `${state}${remaining}`));
+          item.append(details);
+          if (ad.state === 'ready') {
+            const select = node('button', 'Run Campaign', 'devert-use-ad');
+            select.type = 'button';
+            select.setAttribute('aria-label', `Use ${ad.title} in a campaign`);
+            listen(select, 'click', () => selectAdForCampaign(ad));
+            item.append(select);
+          }
+          if (ad.state === 'active' && !ad.removed) {
+            const remove = node('button', 'Remove from playback', 'devert-use-ad');
+            remove.type = 'button';
+            listen(remove, 'click', () => removeCampaign(ad.campaignId, campaignStatus));
+            item.append(remove);
+          }
+          rows.push(item);
         }
-        if (ad.state === 'active' && !ad.removed) {
-          const remove = node('button', 'Remove from playback', 'devert-use-ad');
-          remove.type = 'button';
-          listen(remove, 'click', () => removeCampaign(ad.campaignId, campaignStatus));
-          item.append(remove);
-        }
-        campaignList.append(item);
+        campaignList.replaceChildren(...rows);
+        campaignListKey = key;
       }
       campaignStatus.textContent = adLibraryStatus;
       syncRadioStatus();
@@ -785,6 +805,7 @@ export function initDevertTab(environment = {}) {
       adLibraryStatus = error.message;
       renderAdLibrary();
       campaignList.replaceChildren();
+      campaignListKey = undefined;
       campaignStatus.textContent = error.message;
       syncRadioStatus();
       syncCheckout();
@@ -837,6 +858,7 @@ export function initDevertTab(environment = {}) {
   listen(document, 'wallet-connected', refresh);
   listen(document, 'wallet-chain-changed', syncCheckout);
   listen(document, 'wallet-disconnected', () => {
+    generation++;
     selectedAd = null;
     document.getElementById('devert-campaign-title').value = '';
     document.getElementById('devert-audio-uri').value = '';
@@ -845,7 +867,9 @@ export function initDevertTab(environment = {}) {
     renderAdLibrary();
     syncCheckout();
     campaignList.replaceChildren();
+    campaignListKey = undefined;
     campaignStatus.textContent = 'Connect your wallet to view your ads.';
+    refresh();
   });
   listen(document, 'keydown', event => { if (event.key === 'Escape' && isOpen() && !instructions.open) { close().then(() => toggle.focus()); } });
   listen(document, 'left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
