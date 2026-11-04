@@ -20,6 +20,7 @@ import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 import { renderWallet } from './wallet-label.mjs';
+import { mountAdminPromotions, mountPublicPromotion } from './promotions-ui.mjs?v=20261030-promotions';
 
 const ROLE_GRANT_ABI = [
   'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
@@ -82,6 +83,8 @@ document.addEventListener('DOMContentLoaded', () => {
   _radioWeeklyForm = document.getElementById('admin-radio-weekly-form');
 
   if (!_modal) return; // guard: panel HTML not present
+  mountAdminPromotions(document.getElementById('admin-promotions'));
+  mountPublicPromotion();
 
   _grantBtn?.addEventListener('click', _grantRole);
   _closeBtn?.addEventListener('click', _closeModal);
@@ -232,6 +235,7 @@ async function _connectWallet() {
     _roleSection?.classList.remove('hidden');
     _radioScheduleSection?.classList.remove('hidden');
     document.getElementById('admin-devert-campaigns')?.classList.remove('hidden');
+    document.getElementById('admin-promotions')?.classList.remove('hidden');
     await Promise.all([_loadRadioSchedule(), _loadDevertCampaigns()]);
   } catch (err) {
     if (checkId === _walletCheckId) _setStatus(`❌ ${err.message || 'Wallet verification failed'}`, true);
@@ -262,6 +266,7 @@ function _resetAdminWallet() {
   _programmingCalendar = null;
   document.getElementById('admin-programming-calendar')?.replaceChildren();
   document.getElementById('admin-devert-campaigns')?.classList.add('hidden');
+  document.getElementById('admin-promotions')?.classList.add('hidden');
   document.getElementById('admin-devert-list')?.replaceChildren();
   _radioScheduleEventsEl?.replaceChildren();
   _radioScheduleSection?.querySelector('[data-radio-announcements]')?.remove();

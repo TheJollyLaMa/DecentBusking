@@ -2,6 +2,11 @@
 
 ## Base Payroll Panel
 
+Promotional offers use the separate **Promotionals (`dbusk-promotionals`)**
+allocation, not artist or development payroll. Create/deposit using Settlements
+Router, then review offers and reward claims in Admin → Invites & Promotions.
+See [promotions setup, activity rules and payment recovery](PROMOTIONS.md).
+
 Active payroll is Base-only. Historical records are preserved outside the active queue; see [retired payroll history](LEGACY-PAYROLL.md). The public Left Ankh entry is Playback Tally; Admin Nft Mint and Payroll are visible only to the configured admin wallet. UI visibility does not replace transaction-level owner and role checks.
 
 The panel opens with a week-first **Weekly Artist Payments** workspace: choose a completed week, review and back up receipts, then confirm wallet payments. Separate Playback and Top 10 cards show the unpaid amount, payment progress, readiness and the next required action. Missing receipts say **Not prepared**, not zero dollars. Expand a card's recipients to review wallets or copy technical payment references. There is no manual contributor-identity entry. Existing payment references and frozen amounts are unchanged.

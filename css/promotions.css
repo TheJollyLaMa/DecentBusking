@@ -1,0 +1,31 @@
+.promotion-dialog {
+  box-sizing: border-box;
+  width: min(94vw, 760px);
+  max-height: 85vh;
+  overflow: auto;
+  background: #17212c;
+  color: #edf1f5;
+  border: 2px solid #f0c040;
+  border-radius: 14px;
+  padding: 22px;
+}
+.promotion-dialog::backdrop { background: #000b; }
+.promotion-card { border: 1px solid #617383; border-radius: 10px; padding: 14px; margin: 14px 0; overflow-wrap: anywhere; }
+.promotion-terms { white-space: pre-wrap; }
+#admin-promotions label, .promotion-dialog label { display: block; margin: 10px 0; }
+#admin-promotions input, #admin-promotions textarea, #admin-promotions select,
+.promotion-dialog input:not([type="checkbox"]), .promotion-dialog textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  background: #101720;
+  color: #edf1f5;
+  border: 1px solid #617383;
+  border-radius: 5px;
+}
+#admin-promotions textarea, .promotion-dialog textarea { min-height: 100px; }
+#admin-promotions button, .promotion-dialog button { margin: 5px 5px 5px 0; padding: 8px 12px; }
+#admin-promotions [role="status"], .promotion-dialog [role="status"] { color: #ffc078; overflow-wrap: anywhere; }
+.promotion-dialog a { color: #aad8fa; }
+.promotion-launcher { position: fixed; top: 85px; right: 12px; z-index: 10000; padding: 10px 14px; }

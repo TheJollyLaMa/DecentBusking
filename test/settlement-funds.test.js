@@ -46,12 +46,12 @@ test('fund preflight rejects wrong owners, chains, roles, addresses, and URI wit
 test('fund selector uses only this app configured radio and repository allocations', async () => {
   const { configuredSettlementFunds, validateSettlementFundSlug, resolveSettlementFundSlug } = await import(url);
   assert.deepEqual(configuredSettlementFunds({ radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' }, fundSlug: 'dbusk-repo-dev' })
-    .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-live-performers']);
+    .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-live-performers', 'dbusk-promotionals']);
   assert.deepEqual(configuredSettlementFunds({ radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' }, fundSlug: 'dbusk-repo-dev', pinnerFundSlug: 'dbusk-pinners' })
-    .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners', 'dbusk-live-performers']);
+    .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners', 'dbusk-live-performers', 'dbusk-promotionals']);
   assert.deepEqual(configuredSettlementFunds(payrollAssets).map(fund => fund.slug),
-    ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners', 'dbusk-live-performers']);
-  assert.equal(configuredSettlementFunds({ fundSlug: 'wrong#slug' }).length, 1);
+    ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners', 'dbusk-live-performers', 'dbusk-promotionals']);
+  assert.equal(configuredSettlementFunds({ fundSlug: 'wrong#slug' }).length, 2);
   assert.equal(resolveSettlementFundSlug('__custom_fund__', 'dmtv-referrals', { fundSlug: 'dbusk-repo-dev' }), 'dmtv-referrals');
   assert.equal(resolveSettlementFundSlug('dmtv-referrals', '', {}, ['dmtv-referrals']), 'dmtv-referrals');
   assert.throws(() => validateSettlementFundSlug('DMTV Referrals'), /Fund slug must be/);

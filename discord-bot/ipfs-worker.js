@@ -298,6 +298,7 @@ export function createWorkerRequestHandler({
   ensResolver,
   reconcilePayment,
   onRadioVote,
+  promotions,
   onMediaSubmission,
   artworkUpdateQueue,
   creatorSplitUpdateQueue,
@@ -495,6 +496,17 @@ export function createWorkerRequestHandler({
         const rpc = getRpcHealth?.();
         sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured',
           ...(rpc ? { rpc: { ...rpc.tiers, computeUnits: rpc.computeUnits } } : {}) }, '*');
+        return;
+      }
+      if (requestUrl.pathname === '/api/promotions' && ['GET', 'POST'].includes(request.method)) {
+        response.setHeader('Cache-Control', 'no-store');
+        if (!promotions) throw new Error('Promotions unavailable: configure encrypted promotions storage before creating offers');
+        if (request.method === 'GET') {
+          sendJson(response, 200, await promotions.publicState(), '*');
+        } else {
+          if (!corsOrigin) throw new Error('Origin is not allowed');
+          sendJson(response, 200, await promotions.execute(await readJson(request), origin), corsOrigin);
+        }
         return;
       }
       if (requestUrl.pathname === '/api/creator/profile' && request.method === 'GET') {
