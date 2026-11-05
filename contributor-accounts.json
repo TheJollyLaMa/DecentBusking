@@ -1,5 +1,15 @@
 {
   "_comment": "Whitelist of registered contributor accounts for the ETH bounty system. Entries are added exclusively by the maintainer (@TheJollyLaMa) after personal onboarding (video call or direct contact). Do NOT submit PRs to self-register. Each entry tracks a contributor's GitHub username, their Optimism Mainnet wallet address, and cumulative ETH earnings. Wallet addresses are required before any payout can be queued.",
+  "_invitationComment": "Wallet-only trial invitations are not GitHub payroll registrations or payout approvals. Verify identity and wallet ownership before promoting an invitation into contributors; no admin role or automatic reward is granted.",
+  "invitedParticipants": [
+    {
+      "displayName": "GrannyLyn",
+      "github": null,
+      "walletAddress": "0xF18E19c537a7A99571Bc3F8cef81DCBCaea7c3AE",
+      "status": "pending-github-registration",
+      "invitedBy": "TheJollyLaMa"
+    }
+  ],
   "contributors": [
     {
       "github": "TheJollyLaMa",
