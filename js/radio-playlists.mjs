@@ -39,7 +39,8 @@ export function radioPlaylistDefinition(id, customDefinition) {
 }
 
 export function isEligibleRadioMusic(track) {
-  return !!track?.trackId && !track.isDevertAd && track.enabled !== false && track.available !== false &&
+  return !!track?.trackId && !track.isDevertAd && !['music-only', 'all-radio'].includes(track.contentReview?.scope) &&
+    track.enabled !== false && track.available !== false &&
     (track.source !== 'site' || track.mintStatus === 'minted') &&
     (!track.mediaType || (typeof track.mediaType === 'string' && (track.mediaType.startsWith('audio/') || track.mediaType === 'video/mp4')));
 }

@@ -283,6 +283,7 @@ export function createWorkerRequestHandler({
   getDevertState,
   getDevertQueue,
   removeDevertCampaign,
+  contentReview,
   getDevertAds,
   getDevertLoopState,
   onDevertLoopVote,
@@ -1016,6 +1017,13 @@ export function createWorkerRequestHandler({
           (recovered !== expectedOwner && recovered !== campaign.advertiser.toLowerCase())) throw new Error('Only the advertiser or radio owner can remove this campaign');
         consumedSignatures.set(body.signature, now() + MAX_SIGNATURE_AGE_MS);
         sendJson(response, 200, await removeDevertCampaign({ campaignId: body.campaignId, address: recovered }), corsOrigin);
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/content-review') {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!contentReview) throw new Error('Content review unavailable: encrypted storage is not configured');
+        response.setHeader('Cache-Control', 'no-store');
+        sendJson(response, 200, await contentReview.execute(await readJson(request), origin), corsOrigin);
         return;
       }
       if ((request.method === 'GET' || request.method === 'POST') && requestUrl.pathname === '/api/devert/ads') {

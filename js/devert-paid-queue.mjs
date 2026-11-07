@@ -139,7 +139,7 @@ export function initDevertPaidQueue(environment = {}) {
         Date.parse(campaign.startedAt) <= Date.now() && Date.parse(campaign.expiresAt) > Date.now());
       renderCampaigns();
       const requests = [...state.requests].sort((a, b) => b.tier - a.tier || Number(a.chainRequestId) - Number(b.chainRequestId));
-      const key = JSON.stringify(requests.map(entry => [entry.chainRequestId, entry.payer, entry.title, entry.tier, entry.amountUnits]));
+      const key = JSON.stringify(requests.map(entry => [entry.chainRequestId, entry.payer, entry.title, entry.tier, entry.amountUnits, entry.moderationBlocked]));
       if (key !== requestListKey) {
         const rows = requests.map(entry => {
           const item = document.createElement('li');
@@ -147,7 +147,7 @@ export function initDevertPaidQueue(environment = {}) {
           const title = document.createElement('strong');
           title.textContent = entry.title;
           const detail = document.createElement('span');
-          detail.textContent = `${entry.tier === 0 ? 'Next ad break' : 'After this song'} · ${formatUsdcUnits(BigInt(entry.amountUnits))} USDC`;
+          detail.textContent = `${entry.moderationBlocked ? 'Blocked by admin · payment awaits review' : entry.tier === 0 ? 'Next ad break' : 'After this song'} · ${formatUsdcUnits(BigInt(entry.amountUnits))} USDC`;
           item.append(title, detail);
           return item;
         });

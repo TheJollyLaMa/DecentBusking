@@ -148,6 +148,7 @@ export async function purchaseDevertCampaign({ signer, contract, usdc, title, au
     if (sponsored && (current.version !== contractVersion || current.paused !== false || current.checkout?.available !== true)) {
       throw new Error(current.checkout?.reason || 'Campaign checkout availability could not be verified');
     }
+    if (current.contentBlockedMedia?.includes(mediaUri)) throw new Error('This advert is blocked by content review; contact the admin before purchasing');
     const existing = activeDevertCampaign(current.campaigns, advertiser, mediaUri);
     if (existing) throw new Error(`This advert already has a paid campaign until ${new Date(existing.expiresAt).toLocaleString()}. Removing it from playback does not end its paid term.`);
   };
@@ -516,7 +517,7 @@ export function initDevertTab(environment = {}) {
       card.setAttribute('aria-label', ad.state === 'ready'
         ? `Use ${ad.title} in a campaign`
         : ad.state === 'active' ? `${ad.title}: ${ad.removed ? 'removed from playback; paid term ends' : 'campaign active until'} ${new Date(ad.expiresAt).toLocaleString()}`
-          : `${ad.title} is waiting for mint`);
+          : ad.state === 'blocked' ? `${ad.title} is blocked by admin review` : `${ad.title} is waiting for mint`);
       if (ad.state !== 'ready') card.setAttribute('aria-disabled', 'true');
       const art = node('span', undefined, 'devert-library-art');
       const imageUrl = resolveAdArtworkUrl(ad.image || ad.artworkCid || '', gateway);
@@ -535,10 +536,10 @@ export function initDevertTab(environment = {}) {
       body.append(node('strong', ad.title), node('span',
         ad.state === 'active' ? `${ad.removed ? 'Removed from playback · paid term ends' : 'Campaign active until'} ${new Date(ad.expiresAt).toLocaleString()}`
           : ad.state === 'ready' ? 'Minted · ready to run'
-            : 'Waiting for mint', 'devert-library-status'));
+            : ad.state === 'blocked' ? 'Blocked by admin review' : 'Waiting for mint', 'devert-library-status'));
       if (ad.tokenId != null) body.append(node('span', `Token #${ad.tokenId}`, 'devert-library-meta'));
       card.append(art, body, node('span', ad.state === 'ready' ? 'Select'
-        : ad.state === 'active' ? ad.removed ? 'Removed' : 'Active' : 'Pending', 'devert-library-badge'));
+        : ad.state === 'active' ? ad.removed ? 'Removed' : 'Active' : ad.state === 'blocked' ? 'Blocked' : 'Pending', 'devert-library-badge'));
       if (ad.state === 'ready') listen(card, 'click', () => selectAdForCampaign(ad));
       item.append(card);
       rows.push(item);
@@ -771,7 +772,7 @@ export function initDevertTab(environment = {}) {
           const details = node('span', undefined, 'devert-campaign-details');
           const state = ad.state === 'active'
             ? `${ad.removed ? 'Removed from playback · paid term ends' : 'Active until'} ${new Date(ad.expiresAt).toLocaleString()}`
-            : ad.state === 'ready' ? 'NFT minted · ready for campaign' : 'Waiting for admin mint';
+            : ad.state === 'ready' ? 'NFT minted · ready for campaign' : ad.state === 'blocked' ? 'Blocked by admin review' : 'Waiting for admin mint';
           const remaining = ad.secondsRemaining > 0 ? ` · ${Math.floor(ad.secondsRemaining / 86400)}d ${Math.floor(ad.secondsRemaining % 86400 / 3600)}h left` : '';
           details.append(node('strong', ad.title), node('span', `${state}${remaining}`));
           item.append(details);

@@ -5,6 +5,7 @@ import { createPersonalPlayRecovery, verifyPersonalPlaySession } from './persona
 import { USDC_BROWSER_ABI } from './usdc-abi.mjs';
 import { formatUsdcUnits } from './usdc-format.mjs';
 import { playlistBatchProgress } from './djuke-playlist-progress.mjs';
+import { verifyRadioSongEligibility } from './content-review.mjs';
 
 const mounts = new WeakMap();
 const ADDRESS = /^0x[0-9a-f]{40}$/i;
@@ -97,6 +98,8 @@ export function mount(element, options = {}) {
   let unsubscribe, snapshot = null, radioReady = false, draft = [], activeSession = null, progressAt = 0;
   const library = options.ethers || view.ethers;
   const fetchImpl = options.fetch || view.fetch?.bind(view) || globalThis.fetch;
+  const verifyEligibility = songId => verifyRadioSongEligibility({
+    service: config.ipfsUploadServiceUrl, songId, fetchImpl, signal: lifetime.signal });
   const recovery = () => createPersonalPlayRecovery(options.storage || view.localStorage);
   const report = text => { if (!destroyed) $('payment').textContent = text; };
   const requireBase = async provider => {
@@ -282,12 +285,13 @@ export function mount(element, options = {}) {
       $('queue').replaceChildren();
       for (const item of result.requests) {
         const row = node('li', item.title);
+        if (item.moderationBlocked) row.append(node('small', 'Blocked by admin review · payment remains pending.'));
         if (item.playable === false && item.payer?.toLowerCase() === wallet.address?.toLowerCase()) {
           row.append(button('Replace with selected song', async () => {
             const current = await signer();
             if (!selected()) throw new Error('Choose a replacement song');
             await replaceDjukeSong({ signer: current, signal: lifetime.signal, djuke: new library.Contract(config.djukeContractAddress, DJUKE_BROWSER_ABI, current),
-              chainRequestId: item.chainRequestId, songId: selected().songId });
+              chainRequestId: item.chainRequestId, songId: selected().songId, verifyEligibility });
             report('Replacement confirmed; your place and payment are unchanged.'); await refresh();
           }));
         }
@@ -355,7 +359,7 @@ export function mount(element, options = {}) {
     const result = await purchaseDjukeSong({ signer: current, ethers: library, songId, signal: lifetime.signal, ensureChain: requireBase,
       djuke: new library.Contract(config.djukeContractAddress, DJUKE_BROWSER_ABI, current),
       usdc: new library.Contract(BASE_USDC_ADDRESS, USDC_BROWSER_ABI, current),
-      maxPriceUnits: BigInt(snapshot.priceUnits), gasQuote: quote, onStep: report });
+      maxPriceUnits: BigInt(snapshot.priceUnits), gasQuote: quote, onStep: report, verifyEligibility });
     report(`Purchase ${result.txHash} confirmed; queued, not yet delivered.`); await refresh();
   }));
   on($('save'), 'click', () => run(async () => {

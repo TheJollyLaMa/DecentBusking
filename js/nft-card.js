@@ -346,6 +346,8 @@ function _buildCardHTML(nft) {
     <div class="nft-card-actions">
       <button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>
       <button class="nft-watchlist-btn nft-buy-btn" type="button" aria-pressed="false" title="Save to watchlist">👀 Save</button>
+      <button class="content-review-flag nft-buy-btn" type="button" data-content-report data-contract="${_esc(contractAddress)}"
+        data-token="${_esc(String(nft.tokenId))}" data-title="${_esc(nft.name || nft.title || 'This NFT')}" title="Flag for admin review" aria-label="Flag this recording for admin review">⚑</button>
     </div>
     <p class="nft-watchlist-status" role="status" aria-live="polite"></p>
     ${/^0x[0-9a-fA-F]{40}$/.test(nft.artist || nft.creator || '') ? `<button class="nft-creator-profile nft-buy-btn" type="button" data-creator="${_esc(nft.artist || nft.creator)}" data-album="${_esc(nft.djukeAlbumId || '')}">Profile / Collaborators</button>` : ''}

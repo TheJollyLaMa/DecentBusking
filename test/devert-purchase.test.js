@@ -104,6 +104,17 @@ function fixture({ nativeBalance = 1_000_000_000_000_000_000n, allowance = 0n } 
     setChainId: chainId => { currentChainId = chainId; } };
 }
 
+test('all-radio moderation blocks campaign purchase before approval or broadcast', async () => {
+  const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
+  const state = fixture();
+  const base = await state.readCampaigns();
+  state.readCampaigns = async () => ({ ...base, contentBlockedMedia: ['ipfs://bafy-audio'] });
+  await assert.rejects(purchaseDevertCampaign({ ...state, title: 'Campaign',
+    audioURI: 'ipfs://bafy-audio', weeks: 1 }), /blocked by content review/);
+  assert.deepEqual(state.calls.approvals, []);
+  assert.deepEqual(state.calls.purchases, []);
+});
+
 test('DeVert purchase attaches the current worker-gas top-up and keeps USDC approval exact', async () => {
   const { purchaseDevertCampaign } = await import('../js/devert-tab.mjs');
   const state = fixture();

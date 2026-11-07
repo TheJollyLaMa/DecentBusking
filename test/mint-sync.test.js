@@ -113,6 +113,25 @@ test('wallet ad recovery checks newest owned tokens first', async () => {
   assert.deepEqual(checked, [2, 1, 0]);
 });
 
+test('wallet ad recovery honors reversible classification without changing NFT metadata', async () => {
+  const { readOwnedDevertAds } = await import(moduleUrl);
+  const owner = `0x${'1'.repeat(40)}`;
+  const contractAddress = `0x${'2'.repeat(40)}`;
+  const metadata = { name: 'A song', audioUrl: 'ipfs://song', isDevertAd: false };
+  const collection = { contractAddress, contract: {
+    nextTokenId: async () => 1n, balanceOf: async () => 1n, uri: async () => 'ipfs://metadata',
+  } };
+  const options = { collections: [collection], address: owner, metadataReader: async () => metadata, log: { warn() {} } };
+  assert.equal((await readOwnedDevertAds(options)).ads.length, 0);
+  const result = await readOwnedDevertAds({ ...options, transformMetadata: (value, identity) => {
+    assert.deepEqual(identity, { chainId: 8453, contractAddress, tokenId: '0' });
+    return { ...value, isDevertAd: true };
+  } });
+  assert.equal(result.ads.length, 1);
+  assert.equal(result.ads[0].ipfsCid, 'song');
+  assert.equal(metadata.isDevertAd, false);
+});
+
 test('wallet ad recovery checks ownership concurrently and reports failed checks', async () => {
   const { readOwnedDevertAds } = await import(moduleUrl);
   const owner = `0x${'1'.repeat(40)}`;

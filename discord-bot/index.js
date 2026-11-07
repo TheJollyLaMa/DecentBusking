@@ -72,6 +72,8 @@ import { createDjukePlaylistBatchReconciler, djukePlaylistReadiness, playlistBat
 import { createCreatorSplitUpdateQueue } from './creator-split-updates.js';
 import { createEnsResolver } from './ens-resolver.js';
 import { createDevertRemovals } from './devert-removals.js';
+import { createContentReview, contentReviewCodec } from './content-review.js';
+import { contentCid, radioContentAllowed } from '../js/content-review.mjs';
 import { ensureCheckpointGroups } from './checkpoint-groups.js';
 import { createMintTransactionVerifier, createArtworkUpdateTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
@@ -89,6 +91,8 @@ import {
   submitMediaTrack,
   getTrackId,
   getPlaylist,
+  getPlaybackPlaylist,
+  configureContentOverlay,
   getMintBacklog,
   getMintRequests,
   getDevertAdsForWallet,
@@ -139,6 +143,12 @@ const _jukeLoopRestartTimers = new Map();
 const _jukeLoopRestartAttempts = new Map();
 let _djukeRuntime = null;
 let _radioPaidQueues = null;
+let _contentReview = null;
+const _contentCampaigns = new Map();
+const campaignContentBlocked = campaignId => {
+  const campaign = _contentCampaigns.get(String(campaignId));
+  return !!(_contentReview && campaign && !radioContentAllowed(_contentReview.apply(campaign), true));
+};
 let _devertPlaybackRuntime = null;
 let _devertPlaybackInitialization = null;
 let _devertLoopWorker = null;
@@ -567,6 +577,35 @@ async function main() {
     ? createCheckpointMirror({ secret: process.env.CHECKPOINT_MIRROR_SECRET }) : null;
   const devertSchedulerPrivateKey = resolveDevertSchedulerPrivateKey();
   let readDevertState;
+  if (process.env.CONTENT_REVIEW_STORAGE_KEY) {
+    if (!config.pinataJwt) throw new Error('Content review requires Pinata checkpoint storage');
+    const codec = contentReviewCodec(process.env.CONTENT_REVIEW_STORAGE_KEY);
+    const reviewStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
+      uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+      name: 'decentbusking-content-review-encrypted.json',
+      tags: { app: 'decentbusking', kind: 'content-review-encrypted', schema: '1' },
+      ...codec, restoreLatestOnly: true,
+      beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined });
+    _contentReview = createContentReview({ store: reviewStore, ownerWallet: config.mintOwnerWallet,
+      getItems: () => {
+        if (!playlistReady || !_nftCatalog) throw new Error('Content catalog is restoring; retry shortly');
+        return [...getPlaylist(), ..._nftCatalog];
+      },
+      onChange: async ({ stopNow }) => {
+        _devertAdsOnChainCache.clear();
+        if (stopNow) {
+          for (const campaign of _contentCampaigns.values()) {
+            if (_contentReview.apply(campaign).contentReview.scope === 'all-radio') {
+              _devertLoopWorker?.removeCampaign(campaign.campaignId);
+            }
+          }
+        }
+        await getActiveJukeLoopSession()?.refreshContentReview({ stopNow });
+      },
+    });
+    await _contentReview.initialize();
+    configureContentOverlay(track => _contentReview.apply(track));
+  }
   let devertSchedulerReady = false;
   let devertRemovals;
   if (process.env.DEVERT_CONTRACT_ADDRESS) {
@@ -590,12 +629,19 @@ async function main() {
       const readChainCampaigns = readDevertState;
       readDevertState = async () => {
         const snapshot = await readChainCampaigns();
-        return { ...snapshot, ...(snapshot.version === '0.2' ? {
+        for (const campaign of snapshot.campaigns) _contentCampaigns.set(String(campaign.campaignId), campaign);
+        return { ...snapshot,
+          contentBlockedMedia: _contentReview ? [...getPlaybackPlaylist(), ...(_nftCatalog || []).map(nft => _contentReview.apply(nft))]
+            .filter(item => item.contentReview?.scope === 'all-radio').map(item => `ipfs://${contentCid(item)}`).filter(uri => uri !== 'ipfs://') : [],
+          ...(snapshot.version === '0.2' ? {
           checkout: { available: devertSchedulerReady && snapshot.workerFunding.available,
             reason: !devertSchedulerReady ? 'Campaign scheduler is not ready. Please try again shortly.'
               : snapshot.workerFunding.reason },
         } : {}), campaigns: snapshot.campaigns.map(campaign => ({
-          ...campaign, removed: devertRemovals ? devertRemovals.isRemoved(campaign.campaignId) : false,
+          ...campaign,
+          moderationBlocked: _contentReview?.apply(campaign).contentReview.scope === 'all-radio',
+          removed: (devertRemovals ? devertRemovals.isRemoved(campaign.campaignId) : false) ||
+            _contentReview?.apply(campaign).contentReview.scope === 'all-radio',
         })) };
       };
     } catch (error) {
@@ -626,8 +672,9 @@ async function main() {
       restore: journalStore.restore, save: journalStore.save, readCampaigns: readDevertState,
       workerAddress: scheduler.address, workerMinBalanceWei,
       resolveCampaignMedia: (campaign, cid) => resolveDevertCampaignMedia(campaign, cid, {
-        playlist: getPlaylist(), nfts: _nftCatalog || [],
-      }), isCampaignRemoved: campaignId => devertRemovals ? devertRemovals.isRemoved(campaignId) : false });
+        playlist: getPlaybackPlaylist(), nfts: (_nftCatalog || []).map(nft => _contentReview ? _contentReview.apply(nft) : nft),
+      }), isCampaignRemoved: campaignId => campaignContentBlocked(campaignId) ||
+        (devertRemovals ? devertRemovals.isRemoved(campaignId) : false) });
     _devertPlaybackInitialization = initializeDevertPlaybackWithRetry({
       initialize: () => _devertPlaybackRuntime.initialize(),
     }).then(() => {
@@ -1106,10 +1153,22 @@ async function main() {
   const sponsoredDjuke = process.env.DJUKE_CONTRACT_VERSION === '0.5';
   const quoteSigner = supportsDjukeAlbumsAndGas(process.env.DJUKE_CONTRACT_VERSION) && process.env.DJUKE_FULFILLER_PRIVATE_KEY
     ? new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-gas-quote')) : null;
-  const getDjukeGasQuote = quoteSigner ? createDjukeGasQuoteReader({ provider: quoteSigner.provider, signer: quoteSigner,
+  const requireReviewedSongs = songIds => {
+    if (!_contentReview) return;
+    const tracks = new Map(getPlaybackPlaylist().map(track => [id(track.trackId).toLowerCase(), track]));
+    for (const songId of songIds) {
+      const track = tracks.get(String(songId).toLowerCase());
+      if (!track || !radioContentAllowed(track)) throw new Error('Recording is not eligible for radio checkout; refresh or contact the admin');
+    }
+  };
+  const readDjukeGasQuote = quoteSigner ? createDjukeGasQuoteReader({ provider: quoteSigner.provider, signer: quoteSigner,
     sponsored: sponsoredDjuke,
     contract: new Contract(djukeAddress, [...DJUKE_ABI, ...DJUKE_GAS_ABI, 'function quote() view returns(uint256)'], quoteSigner),
     fulfillmentGasUnits: BigInt(process.env.DJUKE_FULFILLMENT_GAS_UNITS || '1000000') }) : null;
+  const getDjukeGasQuote = readDjukeGasQuote ? input => {
+    requireReviewedSongs([input.songId]);
+    return readDjukeGasQuote(input);
+  } : null;
   const playlistContractEnabled = process.env.DJUKE_PLAYLIST_BATCH_ENABLED === 'true' &&
     ['0.4', '0.5'].includes(process.env.DJUKE_CONTRACT_VERSION) &&
     process.env.DJUKE_PLAYLIST_BATCH_VERSION === process.env.DJUKE_CONTRACT_VERSION &&
@@ -1145,6 +1204,7 @@ async function main() {
     mirrorAvailable: !!checkpointMirror?.status().available,
   });
   const getDjukePlaylistGasQuote = readDjukePlaylistGasQuote ? async input => {
+    requireReviewedSongs(input.songIds || []);
     const readiness = await getDjukePlaylistReadiness();
     if (!readiness.ready) throw new Error(readiness.reason);
     return readDjukePlaylistGasQuote(input);
@@ -1183,10 +1243,25 @@ async function main() {
     paymentsEnabled: process.env.DJUKE_PAYMENTS_ENABLED === 'true',
     getPlaylist: () => {
       if (!playlistReady) throw new Error('DJuke catalog is restoring');
-      return getPlaylist();
+      return getPlaybackPlaylist();
     },
   }) : undefined;
-  const readDjukeState = readDjukeQueueState;
+  const readDjukeState = readDjukeQueueState ? Object.assign(async () => {
+    const snapshot = await readDjukeQueueState();
+    if (!_contentReview) return snapshot;
+    const tracks = new Map(getPlaybackPlaylist().map(track => [id(track.trackId).toLowerCase(), track]));
+    return { ...snapshot,
+      tracks: snapshot.tracks.filter(entry => {
+        const track = tracks.get(entry.songId.toLowerCase());
+        return track && radioContentAllowed(track);
+      }),
+      requests: snapshot.requests.map(request => {
+      const track = tracks.get(request.songId.toLowerCase());
+      const blocked = track && !radioContentAllowed(track);
+      return blocked ? { ...request, trackId: track.trackId, title: track.title,
+        playable: false, moderationBlocked: true, moderationReason: 'Blocked by content review; owner review required' } : request;
+    }) };
+  }, { invalidate: (...args) => readDjukeQueueState.invalidate(...args) }) : undefined;
   const syncDevertDjukeBoosts = () => {
     if (!readDevertState || !readDjukeState || !_devertSchedulerContract || _devertBoostTask) return _devertBoostTask;
     _devertBoostTask = applyDevertDjukeBoosts({ contract: _devertSchedulerContract,
@@ -1202,7 +1277,7 @@ async function main() {
   if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY) {
     const worker = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-registrar'));
     const registerSongs = createDjukeSongRegistrar({ contract: new Contract(djukeAddress, DJUKE_ABI, worker),
-      getPlaylist: () => (playlistReady ? getPlaylist() : []), onRegistered: songIds => readDjukeState.invalidate(songIds) });
+      getPlaylist: () => (playlistReady ? getPlaybackPlaylist() : []), onRegistered: songIds => readDjukeState.invalidate(songIds) });
     const runRegistrar = () => registerSongs().catch(error => console.warn('[djuke] Song registration deferred:', error.shortMessage || error.message));
     setTimeout(runRegistrar, 30_000).unref();
     setInterval(budgetPaced(runRegistrar), 120_000).unref();
@@ -1251,6 +1326,7 @@ async function main() {
           djukeState: state, inFlightRequests: _devertBoostsInFlight });
       },
       getTrack: trackId => getPlaylist().find(track => track.trackId === trackId) || null,
+      canPlayRequest: request => !request.moderationBlocked,
     });
     if (playlistBatchWorkerEnabled) {
       await verifyDjukePlaylistWorker({ provider: fulfiller.provider, workerAddress: fulfiller.address, version: process.env.DJUKE_CONTRACT_VERSION,
@@ -1289,7 +1365,7 @@ async function main() {
         if (!session) return { ready: false, reason: discordOfflineReason };
         return session.getPlaybackStatus();
       },
-      getApprovedCampaignIds: () => approvedAdCampaignIds, cacheMs: 5000 });
+      getApprovedCampaignIds: () => approvedAdCampaignIds.filter(id => !campaignContentBlocked(id)), cacheMs: 5000 });
     if (canFulfill) {
       const worker = new Wallet(devertSchedulerPrivateKey, provider);
       const queueContract = new Contract(paidAdAddress, devertQueueAbi(paidAdVersion), worker);
@@ -1303,13 +1379,15 @@ async function main() {
         contract: queueContract, removals: devertRemovals, readCampaigns: readDevertState,
         beforeRemove: campaignId => paidAdRuntime?.prepareCampaignRemoval(campaignId),
         resolveApprovedMedia: (campaign, cid) => resolveApprovedDevertCampaignMedia(campaign, cid, {
-          playlist: getPlaylist(), nfts: _nftCatalog || [],
+          playlist: getPlaybackPlaylist(), nfts: (_nftCatalog || []).map(nft => _contentReview ? _contentReview.apply(nft) : nft),
         }),
       });
       const readConfirmedQueue = readDevertQueue;
       readDevertQueue = async () => {
         approvedAdCampaignIds = await syncPaidAdRemovals();
-        return readConfirmedQueue();
+        const state = await readConfirmedQueue();
+        return { ...state, requests: state.requests.map(request => campaignContentBlocked(request.campaignId)
+          ? { ...request, moderationBlocked: true } : request) };
       };
       setInterval(() => syncPaidAdRemovals().catch(error => console.warn('[devert-queue] Catalog reconciliation pending:', error.message)), 15000).unref();
       const store = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
@@ -1321,9 +1399,9 @@ async function main() {
           : `devert-paid-${paidAdAddress.toLowerCase()}`, schema: '1' },
         serialize: value => value, deserialize: value => value, beforeUpload: (bytes, options) => checkpointMirror.mirror(bytes, options) });
       const paidAdRuntimeBase = createDevertQueueRuntime({ readState: readConfirmedQueue, store, contract: queueContract,
-        isCampaignRemoved: campaignId => devertRemovals.isRemoved(campaignId),
+        isCampaignRemoved: campaignId => campaignContentBlocked(campaignId) || devertRemovals.isRemoved(campaignId),
         resolveCampaignMedia: (campaign, cid) => resolveDevertCampaignMedia(campaign, cid, {
-          playlist: getPlaylist(), nfts: _nftCatalog || [],
+          playlist: getPlaybackPlaylist(), nfts: (_nftCatalog || []).map(nft => _contentReview ? _contentReview.apply(nft) : nft),
         }) });
       paidAdRuntime = {
         ...paidAdRuntimeBase,
@@ -1404,6 +1482,7 @@ async function main() {
     },
   });
   const requestHandler = createWorkerRequestHandler({
+    contentReview: _contentReview,
     getMediaGateways: async () => [await discoverDedicatedGateway(config) || config.ipfsGateway],
     radioAnnouncements,
     liveBookings,
@@ -1417,20 +1496,21 @@ async function main() {
       if (!playlistReady) throw new Error('Playlist is restoring; retry shortly');
       if (Date.now() - _nftCatalogCheckedAt >= 60000) syncMintedTracks(config);
       if (!_nftCatalog) throw new Error(_nftCatalogError ? `NFT catalog unavailable: ${_nftCatalogError}` : 'NFT catalog is restoring; retry shortly');
-      const tracksByCid = new Map(getPlaylist().filter(track => track.ipfsCid && track.trackId)
+      const tracksByCid = new Map(getPlaybackPlaylist().filter(track => track.ipfsCid && track.trackId)
         .map(track => [String(track.ipfsCid).replace(/^ipfs:\/\//i, '').split('/')[0], track]));
       const catalog = _nftCatalog.map(nft => {
-        const uri = String(nft.audioUrl || nft.videoUrl || nft.animation_url || '').replace(/^ipfs:\/\//i, '');
-        const cid = uri.split('/')[0];
+        const cid = contentCid(nft).split('/')[0];
         const track = tracksByCid.get(cid);
-        return track ? { ...nft, trackId: track.trackId, djukeSongId: id(track.trackId),
+        const effectiveNft = _contentReview ? _contentReview.apply(nft) : nft;
+        return track ? { ...effectiveNft, trackId: track.trackId, djukeSongId: id(track.trackId),
+          isDevertAd: track.isDevertAd === true, contentReview: track.contentReview,
           ...(track.creatorSplits ? { creatorSplits: track.creatorSplits } : {}),
           ...(track.djukeSplitMode ? { djukeSplitMode: track.djukeSplitMode } : {}),
           ...(track.djukeAlbumId ? {
             djukeAlbumId: track.djukeAlbumId,
             djukeAlbumTitle: track.djukeAlbumTitle || '',
             djukeAlbumState: 'album',
-          } : { djukeAlbumState: track.djukeAlbumState || 'unverified' }) } : nft;
+          } : { djukeAlbumState: track.djukeAlbumState || 'unverified' }) } : effectiveNft;
       });
       return { ...nftCatalogPage(catalog, options), lastCheckedAt: new Date(_nftCatalogCheckedAt).toISOString(),
         refreshError: _nftCatalogError };
@@ -1438,7 +1518,7 @@ async function main() {
     getRadioSchedule: () => ({
       timeZone: PAYROLL_TIME_ZONE,
       playlistDefinitions: [...RADIO_PLAYLISTS, ...(liveWeeklySchedule.presets || [])].map(definition => playlistReady
-        ? previewRadioPlaylist(definition.id, getPlaylist(), { definition: RADIO_PLAYLISTS.includes(definition) ? undefined : definition })
+        ? previewRadioPlaylist(definition.id, getPlaybackPlaylist(), { definition: RADIO_PLAYLISTS.includes(definition) ? undefined : definition })
         : { ...definition, count: null, unknownCount: null, estimatedDurationMs: null, tracks: [] }),
       schedule: defaultRadioSchedule(liveWeeklySchedule),
       weeklySchedule: liveWeeklySchedule,
@@ -1685,6 +1765,7 @@ async function main() {
               };
               const result = await readOwnedDevertAds({ collections, address: normalizedAddress,
                 ownershipConcurrency: DEVERT_OWNERSHIP_BATCH_SIZE, ownershipReader,
+                transformMetadata: (metadata, identity) => _contentReview ? _contentReview.apply({ ...metadata, ...identity }) : metadata,
                 onProgress: progress => _devertAdsOnChainCache.set(normalizedAddress, {
                   result: progress, expiresAt: Date.now() + 60_000,
                 }),
@@ -1705,9 +1786,10 @@ async function main() {
       }
       const mergedAds = mergeDevertAdsForWallet(localAds, chainResult.ads);
       for (const ad of mergedAds) {
+        if (_contentReview) ad.contentReview = _contentReview.apply(ad).contentReview;
         const campaign = snapshot?.campaigns?.find(item => item.advertiser?.toLowerCase() === normalizedAddress &&
           item.audioURI === `ipfs://${ad.ipfsCid}` && Date.parse(item.startedAt) <= Date.now() && Date.now() < Date.parse(item.expiresAt));
-        ad.state = campaign ? 'active' : ad.mintStatus === 'minted' ? 'ready' : 'pending';
+        ad.state = ad.contentReview?.scope === 'all-radio' ? 'blocked' : campaign ? 'active' : ad.mintStatus === 'minted' ? 'ready' : 'pending';
         ad.removed = campaign?.removed === true;
         ad.campaignId = campaign?.campaignId || null;
         ad.expiresAt = campaign?.expiresAt || null;
@@ -2592,6 +2674,7 @@ async function startWebsiteRadio(client, config) {
       mainRadioAdStateStore: config.jukeLoopMainRadioAdStore,
       topTenHypeStore: config.topTenHypeStore,
       playlistShowStore: config.playlistShowStore,
+      isContentAllowed: (track, advert) => !_contentReview || radioContentAllowed(_contentReview.apply(track), advert),
       onTerminalDisconnect: () => scheduleJukeLoopRestart(session.client, config, 'Website playback stalled'),
     });
     await session.start();

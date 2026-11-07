@@ -171,6 +171,10 @@ test('compact paid panel keeps tier order, filters eligible adverts, handles fai
   assert.equal(select.value, '1');
   assert.equal(select.scrollTop, 42);
   assert.equal(nodes['devert-paid-requests'].children[0], requestRow, 'unchanged paid requests retain their rows');
+  state.requests[1].moderationBlocked = true;
+  await nodes['devert-paid-refresh'].listeners.click();
+  assert.match(nodes['devert-paid-requests'].children[0].children[1].textContent, /Blocked by admin · payment awaits review/);
+  assert.notEqual(nodes['devert-paid-requests'].children[0], requestRow, 'Policy changes refresh existing request labels');
   const search = nodes['devert-search'];
   search.value = 'not found';
   search.listeners.input();
