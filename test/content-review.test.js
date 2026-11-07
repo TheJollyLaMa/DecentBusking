@@ -85,6 +85,19 @@ test('authorization binds origin, wallet, command, age and admin role', async ()
   await assert.rejects(f.service.execute(stale, stale.origin), /expired/);
 });
 
+test('read-only admin authorization can refresh reports but cannot authorize a policy', async () => {
+  const f = await fixture();
+  const view = await f.body({ action: 'view' });
+  assert.equal((await f.service.execute(view, view.origin)).revision, 0);
+  await f.exec({ action: 'report', target: { trackId: track.trackId }, reason: 'copyright' }, listener);
+  assert.equal((await f.service.execute(view, view.origin)).items[0].reports.length, 1);
+  assert.equal(f.changes(), 0);
+  const forged = structuredClone(view);
+  forged.command = { action: 'policy', revision: 1, target: { trackId: track.trackId },
+    scope: 'all-radio', classification: 'original', reason: 'Forged command', stopNow: true };
+  await assert.rejects(f.service.execute(forged, forged.origin), /authorization/);
+});
+
 test('unknown targets and invalid scopes are rejected without saving', async () => {
   const f = await fixture();
   await assert.rejects(f.policy({ target: { trackId: 'unknown' } }), /not in the platform catalog/);

@@ -24,3 +24,20 @@
 .content-review-list small { display: block; opacity: .7; }
 .content-review-detail, .content-review-report { padding: 12px 0; border-top: 1px solid #8884; }
 #admin-content-review [data-detail] { overflow-wrap: anywhere; }
+#radio-footer #radio-content-report {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--gold-dim);
+  border-radius: 4px;
+  background: rgba(5, 3, 18, 0.75);
+  color: var(--gold);
+  font-size: 20px;
+  cursor: pointer;
+}
+#radio-footer #radio-content-report:disabled { opacity: .5; cursor: default; }
+.nft-card-actions .content-review-flag { min-width: 36px; width: 36px; padding-inline: 0; }
+@media (max-width: 600px) {
+  #radio-footer #radio-content-report { position: fixed; right: 62px; bottom: 68px; }
+}

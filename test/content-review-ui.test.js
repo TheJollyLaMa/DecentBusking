@@ -20,7 +20,8 @@ function fixture() {
   vm.runInContext(source, context);
   return { window, context, resolve: () => resolveSignature('mock'),
     change: () => listeners.get('wallet-connected').forEach(fn => fn()), requests: () => requests,
-    send: () => vm.runInContext("sendContentCommand({action:'report'})", context) };
+    send: () => vm.runInContext("sendContentCommand({action:'report'})", context),
+    view: (reuse = false) => vm.runInContext(`sendContentCommand({action:'view'}, {reuseViewAuthorization:${reuse}})`, context) };
 }
 
 test('wallet change during report signature prevents sending, even after switching back', async () => {
@@ -58,6 +59,29 @@ test('compact UI includes one admin section, fixed report target, four reasons a
   assert.match(source, /Block all radio, including adverts/);
   assert.match(source, /wallet-connected/);
   assert.match(css, /\[hidden\].*display: none !important/);
+  assert.match(html, /id="now-playing-watchlist-btn"[^>]*>👀<\/button>\s*<button id="radio-content-report"/);
+  assert.doesNotMatch(html.match(/<div id="radio-voting"[\s\S]*?<\/div>/)[0], /radio-content-report/);
+  const card = fs.readFileSync(path.join(root, 'js/nft-card.js'), 'utf8');
+  assert.match(card, /class="nft-watchlist-btn[^>]*>👀 Save<\/button>\s*<button class="content-review-flag/);
+  assert.match(source, /setInterval\(\(\) => void refreshReports\(\), 30000\)/);
+  assert.match(source, /dirty \|\| root.contains\(document.activeElement\)/);
+  assert.match(source, /Title, artist, token or collection/);
+});
+
+test('automatic review reads reuse only the signed view and stop on wallet changes or expiry', async () => {
+  const f = fixture();
+  await assert.rejects(f.view(true), /renew the read-only signature/);
+  const initial = f.view();
+  f.resolve();
+  await initial;
+  await f.view(true);
+  assert.equal(f.requests(), 2, 'Polling reuses authorization without another signature');
+  await assert.rejects(vm.runInContext("sendContentCommand({action:'policy'}, {reuseViewAuthorization:true})", f.context), /renew/);
+  vm.runInContext('Date.now = () => new Date().getTime() + 270001', f.context);
+  await assert.rejects(f.view(true), /renew/);
+  assert.equal(f.requests(), 2);
+  f.change();
+  await assert.rejects(f.view(true), /renew/);
 });
 
 test('checkout rechecks eligibility and does not silently treat missing catalogs as safe', async () => {

@@ -1,6 +1,7 @@
 # Content Review
 
-Listeners can flag the current radio recording or an NFT card using four reasons:
+Listeners use the small **flag beside the watchlist eyes** on the radio or an
+NFT card to report a recording using four reasons:
 Inappropriate, Mislabeled, Copyright, or Other. Other requires an explanation,
 limited to 1,000 characters. Reports require an explicit wallet signature, not
 a transaction. The target is frozen when the dialog opens. Reporting does not
@@ -9,8 +10,19 @@ automatically remove content or establish a copyright violation.
 ## Admin
 
 Open **Admin -> Content Review -> Unlock / refresh** with the configured admin
-wallet. Reports appear first. Search by title/token, optionally select Reports
-only, and choose a recording. Unreported catalog NFTs can also be selected.
+wallet. Reports appear first with an awaiting-review count. Search the entire
+collection by title, artist, token or collection address, optionally select
+Reports only, and choose a recording. Unreported catalog NFTs can also be
+selected and relabeled/excluded in this same section.
+
+While the section is open and the page visible, the list checks for new reports
+every 30 seconds using the existing signed **view-only** command. No repeated
+wallet prompts, actions or transactions occur during polling. The authorization
+expires after five minutes; automatic checks pause slightly early, and
+**Unlock / refresh** renews it. Closing the section or changing wallets clears
+polling. New results update the count, but do not overwrite focused controls or
+unsaved edits; a notice asks for refresh when ready. Fetch failures explicitly
+pause updates rather than implying the review queue is current.
 
 The selected recording has two independent controls:
 
@@ -107,11 +119,15 @@ node --test test/content-review.test.js test/content-review-ui.test.js \
   test/devert-loop.test.js test/mint-sync.test.js test/radio-playlists.test.js \
   test/ipfs-worker.test.js test/devert-panel.test.js test/devert-paid-queue.test.js \
   test/devert-purchase.test.js test/devert-scheduler.test.js \
-  test/djuke-widget.test.js test/nft-loader.test.js
+  test/djuke-widget.test.js test/nft-loader.test.js test/header-layout.test.js
 ```
 
 Tests use synthetic wallets/media/receipts. Local browser mocks verify the
 four-reason modal, frozen target, admin relabel/exclusion, wallet cleanup,
 mobile fit and focus restoration. They are not live moderation or payments.
-The focused command passed 297 tests; modified runtime syntax checks and
+The focused command passed 309 tests; modified runtime syntax checks and
 `git diff --check` also passed. Deployment/key activation remains separate.
+The local browser also verified automatic report arrival with no extra
+signature, flagged-first ordering, collection/token search, preserved unsaved
+review text and wallet-change cleanup. At 390px the page had no horizontal
+overflow and the report dialog measured 352px wide.

@@ -3,11 +3,12 @@ import { isAdminWallet } from './admin-access.mjs';
 import { escapeLive as escape } from './live-bookings.mjs';
 
 let walletGeneration = 0;
+let viewAuthorization;
 for (const name of ['wallet-connected', 'wallet-disconnected']) {
-  document.addEventListener(name, () => { walletGeneration++; });
+  document.addEventListener(name, () => { walletGeneration++; viewAuthorization = null; });
 }
 
-export async function sendContentCommand(command) {
+export async function sendContentCommand(command, { reuseViewAuthorization = false } = {}) {
   const wallet = window._wallet;
   const signer = wallet?.signer;
   const address = wallet?.address;
@@ -19,8 +20,18 @@ export async function sendContentCommand(command) {
     if (walletGeneration !== generation || window._wallet?.signer !== signer ||
         window._wallet?.address?.toLowerCase() !== address.toLowerCase()) throw new Error('Wallet changed; refresh before retrying');
   };
-  const body = { address, origin: location.origin, issuedAt: new Date().toISOString(), command };
-  body.signature = await signer.signMessage(contentAuthorization(body));
+  let body;
+  if (reuseViewAuthorization) {
+    if (command.action !== 'view' || !viewAuthorization ||
+        viewAuthorization.service !== service || viewAuthorization.signer !== signer ||
+        viewAuthorization.body.address !== address || Date.now() - Date.parse(viewAuthorization.body.issuedAt) >= 270000) {
+      throw new Error('Automatic review updates paused. Unlock / refresh to renew the read-only signature.');
+    }
+    body = viewAuthorization.body;
+  } else {
+    body = { address, origin: location.origin, issuedAt: new Date().toISOString(), command };
+    body.signature = await signer.signMessage(contentAuthorization(body));
+  }
   check();
   const response = await fetch(`${service.replace(/\/$/, '')}/api/content-review`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -29,6 +40,7 @@ export async function sendContentCommand(command) {
   const result = await response.json();
   check();
   if (!response.ok) throw new Error(result.error || `Content review HTTP ${response.status}`);
+  if (command.action === 'view') viewAuthorization = { body, service, signer };
   return result;
 }
 
@@ -78,6 +90,7 @@ export function openContentReport(item) {
     try {
       await sendContentCommand({ action: 'report', target, reason: form.elements.reason.value,
         note: form.elements.note.value });
+      document.dispatchEvent(new Event('content-report-submitted'));
       status.textContent = 'Report received. Thank you.';
       form.querySelector('fieldset').disabled = true;
     } catch (error) {
@@ -89,23 +102,28 @@ export function openContentReport(item) {
 
 export function mountContentReview(root) {
   if (!root) return;
-  root.innerHTML = `<summary>Content Review</summary>
-    <p class="content-review-help">Flagged recordings and radio controls. Nothing is deleted.</p>
+  root.innerHTML = `<summary>Content Review <small data-count></small></summary>
+    <p class="content-review-help">Search the entire collection or review flags here. Nothing is deleted. After unlocking, new reports update every 30 seconds while this section is open. Renew the read-only signature after five minutes.</p>
     <button type="button" data-refresh>Unlock / refresh</button>
     <p role="status" aria-live="polite"></p>
     <div data-workspace hidden>
-      <label>Find a recording<input type="search" data-search placeholder="Title or token number"></label>
+      <label>Find a recording<input type="search" data-search placeholder="Title, artist, token or collection"></label>
       <label><input type="checkbox" data-reported> Reports only</label>
       <div data-list class="content-review-list"></div><button type="button" data-more hidden>Show more</button>
       <div data-detail></div>
     </div>`;
   const status = root.querySelector('[role="status"]');
-  let state, selected, busy = false, limit = 30;
+  let state, selected, busy = false, dirty = false, timer, limit = 30;
+  function renderCount(next) {
+    const reports = new Map(next.items.flatMap(item => item.reports).map(report => [report.id, report]));
+    const count = [...reports.values()].filter(report => ['new', 'in-review'].includes(report.status)).length;
+    root.querySelector('[data-count]').textContent = `· ${count} awaiting review`;
+  }
   function renderList() {
     const search = root.querySelector('[data-search]').value.toLowerCase();
     const reported = root.querySelector('[data-reported]').checked;
     const items = state.items.filter(item => (!reported || item.reports.length) &&
-      `${item.title} ${item.tokenId || ''}`.toLowerCase().includes(search))
+      `${item.title} ${item.artist || ''} ${item.uploader || ''} ${item.creator || ''} ${item.key} ${item.nftReferences?.map(ref => `${ref.contractAddress} ${ref.tokenId}`).join(' ') || ''}`.toLowerCase().includes(search))
       .sort((a, b) => b.reports.filter(r => ['new', 'in-review'].includes(r.status)).length -
         a.reports.filter(r => ['new', 'in-review'].includes(r.status)).length || String(a.title).localeCompare(String(b.title)));
     root.querySelector('[data-list]').innerHTML = items.slice(0, limit).map(item =>
@@ -156,6 +174,8 @@ export function mountContentReview(root) {
       const next = await sendContentCommand({ ...command, revision: state?.revision });
       if (generation !== walletGeneration) return;
       state = next;
+      dirty = false;
+      renderCount(next);
       root.querySelector('[data-workspace]').hidden = false;
       renderList();
       renderDetail();
@@ -163,11 +183,47 @@ export function mountContentReview(root) {
     } catch (error) { if (generation === walletGeneration) status.textContent = error.message; }
     finally { busy = false; }
   }
+  async function refreshReports() {
+    if (!state || busy || !root.open || document.hidden || !isAdminWallet()) return;
+    busy = true;
+    const generation = walletGeneration;
+    try {
+      const next = await sendContentCommand({ action: 'view' }, { reuseViewAuthorization: true });
+      if (generation !== walletGeneration) return;
+      renderCount(next);
+      if (next.revision === state.revision && next.items.map(item => item.key).join() === state.items.map(item => item.key).join()) return;
+      if (dirty || root.contains(document.activeElement)) {
+        status.textContent = 'New review updates are available. Your edits are kept; use Unlock / refresh when ready.';
+        return;
+      }
+      const scrollTop = root.querySelector('[data-list]').scrollTop;
+      state = next;
+      renderList();
+      renderDetail();
+      root.querySelector('[data-list]').scrollTop = scrollTop;
+      status.textContent = 'Review list updated. Flagged recordings appear first.';
+    } catch (error) {
+      if (generation === walletGeneration) status.textContent = error.message;
+      clearInterval(timer);
+      timer = null;
+    } finally { busy = false; }
+  }
+  function watchReports() {
+    if (!timer) timer = setInterval(() => void refreshReports(), 30000);
+  }
+  root.addEventListener('toggle', () => {
+    if (root.open) { watchReports(); void refreshReports(); }
+    else { clearInterval(timer); timer = null; }
+  });
+  document.addEventListener('content-report-submitted', () => void refreshReports());
+  root.addEventListener('input', event => {
+    if (event.target.closest('[data-detail]')) dirty = true;
+  });
   root.addEventListener('click', event => {
     const button = event.target.closest('button');
     if (!button) return;
-    if (button.matches('[data-refresh]')) void act({ action: 'view' });
-    if (button.dataset.item && !busy) { selected = button.dataset.item; renderDetail(); }
+    if (button.matches('[data-refresh]')) { watchReports(); void act({ action: 'view' }); }
+    if (button.dataset.item && !busy) { selected = button.dataset.item; dirty = false; renderDetail(); }
     if (button.matches('[data-more]')) { limit += 30; renderList(); }
     if (button.matches('[data-review]')) {
       const report = button.closest('[data-report]');
@@ -187,7 +243,9 @@ export function mountContentReview(root) {
     root.querySelector(selector).addEventListener('input', () => { if (state) { limit = 30; renderList(); } });
   }
   const clear = () => {
-    state = null; selected = null;
+    state = null; selected = null; dirty = false;
+    clearInterval(timer); timer = null;
+    root.querySelector('[data-count]').textContent = '';
     root.querySelector('[data-search]').value = '';
     root.classList.toggle('hidden', !isAdminWallet());
     root.querySelector('[data-workspace]').hidden = true;
