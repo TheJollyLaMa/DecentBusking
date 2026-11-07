@@ -87,6 +87,8 @@ export function filterDjukeSongs(tracks, query = '') {
   });
 }
 
+import { verifyRadioSongEligibility } from './content-review.mjs';
+
 export const BASE_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export const DJUKE_BROWSER_ABI = [
   'function CONTRACT_VERSION() view returns(string)',
@@ -161,7 +163,8 @@ export function initDjuke() {
     const signer = window._wallet?.signer;
     if (!signer || typeof ethers === 'undefined') throw new Error('Connect your wallet first');
     return { signer, djuke: new ethers.Contract(contractAddress(), DJUKE_BROWSER_ABI, signer),
-      usdc: new ethers.Contract(BASE_USDC_ADDRESS, USDC_BROWSER_ABI, signer) };
+      usdc: new ethers.Contract(BASE_USDC_ADDRESS, USDC_BROWSER_ABI, signer),
+      verifyEligibility: songId => verifyRadioSongEligibility({ service: window.DecentConfig?.ipfsUploadServiceUrl, songId }) };
   };
   const syncPayButton = () => {
     const ready = paymentsLive() && !!window._wallet?.address && window._wallet?.chainId === 8453 && !!selectedSongId() && !busy &&
@@ -426,6 +429,7 @@ export function initDjuke() {
           item.dataset.djukeRequest = request.requestId;
           const details = node('span', undefined, 'djuke-request-details');
           details.append(node('strong', request.title), node('span', typeof request.artist === 'string' ? request.artist : ''));
+          if (request.moderationBlocked) details.append(node('span', 'Blocked by admin review · payment remains pending.'));
           if (paymentsLive() && request.playable === false && wallet && String(request.payer).toLowerCase() === wallet) {
             const replace = node('button', 'Replace with selected song', 'djuke-replace');
             replace.type = 'button';
@@ -445,7 +449,8 @@ export function initDjuke() {
           for (const song of batch.songs) {
             const entry = node('li');
             entry.append(node('span', `${song.title}${song.artist ? ` — ${song.artist}` : ''}`));
-            const label = node('span', song.status, 'djuke-queue-song-status');
+            const blocked = requests.some(request => request.playlistLaneId === song.laneId && request.moderationBlocked);
+            const label = node('span', blocked ? 'Blocked by admin review · payment remains pending' : song.status, 'djuke-queue-song-status');
             label.dataset.queueSongStatus = '';
             entry.append(label);
             entry.dataset.djukeRequest = `8453:${snapshot.contractAddress.toLowerCase()}:playlist:${song.laneId}`;

@@ -566,6 +566,7 @@
           <div id="radio-voting" role="group" aria-label="Vote on the current radio play">
             <button id="radio-vote-up" type="button" data-radio-vote="1" aria-label="Thumbs up current radio play" aria-pressed="false" title="Like this listen? Vote thumbs up to boost the song in the JukeLoop rotation. One vote per play." disabled>👍</button>
             <button id="radio-vote-down" type="button" data-radio-vote="-1" aria-label="Thumbs down current radio play" aria-pressed="false" title="Not enjoying this listen? Vote thumbs down to lower the song in the JukeLoop rotation. One vote per play." disabled>👎</button>
+            <button id="radio-content-report" type="button" title="Flag this recording for admin review" aria-label="Flag current recording for admin review" disabled>⚑</button>
             <span id="radio-vote-net" role="status" aria-live="polite" aria-atomic="true" aria-label="Net votes unavailable" title="Live weekly net votes"><span data-vote-number>—</span><span data-vote-effects aria-hidden="true"></span></span>
             <span id="radio-vote-status" role="status" aria-live="polite"></span>
           </div>
@@ -707,6 +708,7 @@
         <div id="admin-mint-status" class="admin-status"></div>
       </details>
       <div id="admin-live-performance-slot"></div>
+      <details id="admin-content-review" class="admin-tool-section hidden"></details>
       <details id="admin-devert-campaigns" class="admin-tool-section hidden">
         <summary><span>📣 DVert</span><small>Advert campaigns and moderation</small></summary>
         <p>Remove an advert from main radio and VertLoop. No refund; the paid term remains unchanged.</p>
@@ -927,6 +929,8 @@
   <script type="module" src="js/live-booking-notifications.mjs?v=20261024-live-prototype"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261025-community-reminder"></script>
   <script type="module" src="js/admin.js?v=20261025-song-splits"></script>
+  <link rel="stylesheet" href="css/content-review.css?v=20261107-review">
+  <script type="module" src="js/content-review-ui.mjs?v=20261107-review"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
   <script type="module" src="js/payroll.js?v=20261102-recipient-names"></script>
@@ -936,8 +940,8 @@
   <script type="module" src="js/fund-header.mjs?v=20261030-fund-refresh"></script>
   <script type="module" src="js/fund-tour.mjs?v=20261030-fund-refresh"></script>
   <script type="module" src="js/top-ten-board.mjs?v=20261030-fund-refresh"></script>
-  <script type="module" src="js/djuke.mjs?v=20261025-seamless-handoff"></script>
-  <script type="module" src="js/devert-site.mjs?v=20261103-stable-refresh"></script>
+  <script type="module" src="js/djuke.mjs?v=20261107-review"></script>
+  <script type="module" src="js/devert-site.mjs?v=20261107-review"></script>
   <script type="module" src="js/creator-profile.mjs?v=20261025-profile-dropdowns"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261015-nft-dropdowns"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>

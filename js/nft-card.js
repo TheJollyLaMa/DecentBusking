@@ -344,6 +344,8 @@ function _buildCardHTML(nft) {
     </div>
     <p class="nft-listen-status" role="status" aria-live="polite"></p>` : ''}
     <div class="nft-card-actions">
+      <button class="nft-buy-btn" type="button" data-content-report data-contract="${_esc(contractAddress)}"
+        data-token="${_esc(String(nft.tokenId))}" data-title="${_esc(nft.name || nft.title || 'This NFT')}">Flag for review</button>
       <button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>
       <button class="nft-watchlist-btn nft-buy-btn" type="button" aria-pressed="false" title="Save to watchlist">👀 Save</button>
     </div>

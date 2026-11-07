@@ -44,7 +44,7 @@ import {
   applySiteVote,
   reconcileRatings,
   getWeightedShuffledPlaylist,
-  getPlaylist,
+  getPlaybackPlaylist as getPlaylist,
   getWeeklyPlayHistory,
   restoreTrackTitles,
 } from './playlist-store.js';
@@ -767,8 +767,10 @@ export class JukeLoopSession {
    */
     constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback,
       schedule, livePerformanceEvents, audioPlayer, createStream, mainRadioAdStateStore, restoreMainRadioAdState, saveMainRadioAdState,
-      topTenHype, topTenHypeStore, playlistShow, playlistShowStore, audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS, websitePlayback = false }) {
+      topTenHype, topTenHypeStore, playlistShow, playlistShowStore, isContentAllowed = () => true,
+      audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS, websitePlayback = false }) {
     this.websitePlayback = websitePlayback;
+    this.isContentAllowed = isContentAllowed;
     this._discordOutputsAttached = false;
     this._discordOutputsBlocked = false;
     this.voiceChannel = voiceChannel;
@@ -1410,6 +1412,22 @@ export class JukeLoopSession {
 
     const track = hypeSelection ? hypeSelection.track : playlistSelection ? playlistSelection.track : paid ? paid.track : devertAd ? devertAd.track : this._queue[this._queueIndex];
     const queueIndex = !hypeSelection && !playlistSelection && !paid && !devertAd ? this._queueIndex : null;
+    if (!this.isContentAllowed(track, !!devertAd || paid?.record.kind === 'devert')) {
+      if (paid) {
+        await this.djuke.release(paid.record, new Error('Recording blocked by content review; payment remains unresolved'));
+        this._djukeCooldownUntil = Date.now() + PAID_FETCH_RETRY_MS;
+        return null;
+      }
+      if (devertAd) {
+        this._preparedDevertAd = null;
+        await this._persistMainRadioAdState();
+      } else if (playlistSelection) {
+        await this._playlistShow.advance(playlistSelection, 'Recording excluded by content review');
+      } else if (hypeSelection) {
+        return this._skipHype(hypeSelection, 'Recording excluded by content review', options);
+      } else this._queueIndex++;
+      return this._prepareNextPlayback(null, options);
+    }
 
     let url;
     try { url = await this._getFreshUrl(track); }
@@ -1698,6 +1716,10 @@ export class JukeLoopSession {
 
   _startPrepared(prepared) {
     if (!prepared || this._destroyed) return false;
+    if (this.isContentAllowed && !this.isContentAllowed(prepared.track, !!prepared.devertAd || prepared.paid?.record.kind === 'devert')) {
+      this._disposePrepared(prepared, 'Recording excluded by content review');
+      return false;
+    }
     if (prepared.paid?.record.kind === 'devert' &&
         ['weekly_top10', 'live_performance'].includes(this.getShowState().activeShow.type)) {
       this._disposePrepared(prepared, 'Protected show began before paid advert playback');
@@ -2083,6 +2105,30 @@ export class JukeLoopSession {
     }
     await this._persistMainRadioAdState();
     if (matches(this._currentDevertAd)) this.player.stop(true);
+  }
+
+  async refreshContentReview({ stopNow = false } = {}) {
+    this._preparationEpoch++;
+    this._disposePrepared(this._preparedNext, 'Content review changed');
+    this._preparedNext = null;
+    this._refreshQueue();
+    if (stopNow && this._currentTrack && !this.isContentAllowed(this._currentTrack,
+      !!this._currentDevertAd || this._currentPaid?.kind === 'devert')) {
+      const paid = this._currentPaid;
+      this._currentPaid = null;
+      if (this._currentDevertAd) this._currentDevertAd = null;
+      this._activeAudio?.completion.interrupt('content_review');
+      this._activeAudio = null;
+      this._completedPlay = null;
+      this._currentTrack = null;
+      this._announcementMsg = null;
+      this._announcementContext = null;
+      this._nowPlaying = null;
+      this.player.stop(true);
+      if (paid) await this.djuke.fail(paid, new Error('Recording excluded by content review; interrupted payment remains queued'));
+    }
+    if (this.player.state.status === AudioPlayerStatus.Playing) this._primeNext();
+    else await this._playNext();
   }
 
   _ensureMainRadioAdState() {

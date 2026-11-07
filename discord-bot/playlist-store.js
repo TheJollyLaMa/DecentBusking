@@ -59,6 +59,15 @@ export function getUtcWeekKey(date = new Date()) {
 
 /** @type {TrackEntry[]} */
 let _playlist = [];
+let _contentOverlay = track => track;
+
+export function configureContentOverlay(overlay) {
+  _contentOverlay = overlay;
+}
+
+export function getPlaybackPlaylist() {
+  return _playlist.map(_contentOverlay);
+}
 let _remoteSaver = null;
 let _remoteScheduler = null;
 let _remoteFlusher = null;
@@ -661,7 +670,7 @@ export function getMintRequests() {
 export function getDevertAdsForWallet(address, campaigns = [], now = Date.now()) {
   if (!/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('Invalid advertiser wallet');
   const owner = address.toLowerCase();
-  return _playlist.filter(track => track.isDevertAd === true && track.mintRecipient?.toLowerCase() === owner)
+  return getPlaybackPlaylist().filter(track => track.isDevertAd === true && track.mintRecipient?.toLowerCase() === owner)
     .map(track => {
       const campaign = campaigns.find(item => item.advertiser?.toLowerCase() === owner &&
         item.audioURI === `ipfs://${track.ipfsCid}` && Date.parse(item.startedAt) <= now && now < Date.parse(item.expiresAt));
@@ -676,6 +685,7 @@ export function getDevertAdsForWallet(address, campaigns = [], now = Date.now())
         videoUrl: track.videoUrl || (track.mediaType === 'video/mp4' ? `ipfs://${track.ipfsCid}` : ''),
         filename: track.filename || '',
         mintStatus: minted ? 'minted' : 'pending',
+        contentReview: track.contentReview,
         tokenId: minted ? String(track.tokenId) : null,
         state: campaign ? 'active' : minted ? 'ready' : 'pending',
         campaignId: campaign?.campaignId || null,
@@ -724,7 +734,7 @@ export function getWeight(track) {
  * @returns {TrackEntry[]}
  */
 export function getWeightedShuffledPlaylist(now = Date.now()) {
-  const eligible = _playlist.filter(isEligibleRadioMusic);
+  const eligible = getPlaybackPlaylist().filter(isEligibleRadioMusic);
   if (eligible.length === 0) return [];
 
   // Build mutable candidate array with weights

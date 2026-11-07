@@ -1,6 +1,6 @@
 import * as radio from './radio-sync.js?v=20261030-ad-cutoff';
-import { initDevertTab } from './devert-tab.mjs?v=20261103-stable-refresh';
-import { initDevertPaidQueue } from './devert-paid-queue.mjs?v=20261103-stable-refresh';
+import { initDevertTab } from './devert-tab.mjs?v=20261107-review';
+import { initDevertPaidQueue } from './devert-paid-queue.mjs?v=20261107-review';
 import { initDevertHistory } from './devert-history.mjs?v=20261024-widget';
 
 function initialize() {

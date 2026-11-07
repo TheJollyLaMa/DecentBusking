@@ -32,7 +32,8 @@ export async function verifyDjukePlaylistWorker({ provider, contract, workerAddr
 }
 
 export function djukeCatalog(playlist) {
-  return playlist.filter(track => !track.isDevertAd && track.ipfsCid && /^0x[0-9a-fA-F]{40}$/.test(track.mintRecipient || '') &&
+  return playlist.filter(track => !track.isDevertAd && !['music-only', 'all-radio'].includes(track.contentReview?.scope) &&
+    track.ipfsCid && /^0x[0-9a-fA-F]{40}$/.test(track.mintRecipient || '') &&
     (track.source !== 'site' || track.mintStatus === 'minted'))
     .map(track => ({ songId: id(track.trackId), track }));
 }
@@ -387,6 +388,7 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   let pendingClaim = null;
   let restored = false;
   let pendingPlaylistCount = 0;
+  let playlistModerationBlocked = false;
   const pendingUpdates = new Map();
   // Clean audible completions whose durable checkpoint is still in flight. They unlock the next lane's
   // playback but never settlement, which still requires the durable `played` record.
@@ -449,7 +451,12 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     await ready();
     for (const entry of pendingUpdates.values()) await entry.run();
     const state = await readState();
-    pendingPlaylistCount = state.playlistPending ?? state.requests.filter(request => request.playlistLaneId !== undefined).length;
+    const playlistHead = state.requests.filter(request => request.playlistLaneId !== undefined)
+      .reduce((head, request) => !head || BigInt(request.playlistLaneId) < BigInt(head.playlistLaneId) ? request : head, null);
+    playlistModerationBlocked = playlistHead?.moderationBlocked === true;
+    pendingPlaylistCount = state.requests.some(request => request.moderationBlocked)
+      ? state.requests.filter(request => request.playlistLaneId !== undefined && !request.moderationBlocked).length
+      : state.playlistPending ?? state.requests.filter(request => request.playlistLaneId !== undefined).length;
     if (onVerifiedRequests) Promise.resolve().then(() => onVerifiedRequests(state))
       .catch(error => log.warn(`[djuke] Confirmed-request hook deferred: ${error.message}`));
     await journal.synchronize(state.requests, { preserveMissing: record => preserveMissingRequest(record, state) });
@@ -471,7 +478,7 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   async function claim(options) {
     const state = await reconcile({ waitForSettlement: false });
     const pending = journal.getState().filter(record => record.state === 'pending');
-    const main = state.requests.filter(request => request.playlistLaneId === undefined);
+    const main = state.requests.filter(request => request.playlistLaneId === undefined && !request.moderationBlocked);
     const eligible = main.length ? main : state.requests;
     const candidates = pending.filter(record => eligible.some(request => request.requestId === record.requestId));
     const head = selectRequest ? selectRequest(state, candidates, options)
@@ -560,7 +567,7 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     },
     retryMedia,
     hasPendingPlaylist() {
-      return restored && (pendingPlaylistCount > 0 ||
+      return restored && !playlistModerationBlocked && (pendingPlaylistCount > 0 ||
         journal.getState().some(record => record.playlistBatchId !== undefined && record.state !== 'fulfilled'));
     },
     hasPlaybackEvidence(record) { return evidenced.has(record?.requestId); },

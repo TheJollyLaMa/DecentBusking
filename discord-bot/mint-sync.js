@@ -92,7 +92,7 @@ export function resolveApprovedDevertCampaignMedia(campaign, cid, { playlist = [
 
 export async function readOwnedDevertAds({ collections, address, fetchImpl = fetch, retry = {}, pauseMs = 0,
   ownershipConcurrency = 32, metadataConcurrency = 8, ownershipReader, metadataReader = fetchMintMetadata,
-  onProgress, log = console } = {}) {
+  onProgress, transformMetadata = metadata => metadata, log = console } = {}) {
   if (!Array.isArray(collections) || !/^0x[0-9a-fA-F]{40}$/.test(address || '')) throw new Error('DeVert ad recovery requires collections and a wallet');
   if (!Number.isSafeInteger(ownershipConcurrency) || ownershipConcurrency < 1 ||
       !Number.isSafeInteger(metadataConcurrency) || metadataConcurrency < 1) throw new Error('Invalid ownership scan concurrency');
@@ -132,7 +132,8 @@ export async function readOwnedDevertAds({ collections, address, fetchImpl = fet
         await Promise.all(ownedTokenIds.slice(index, index + metadataConcurrency).map(async tokenId => {
           try {
             const uri = await withRetry(() => collection.contract.uri(tokenId), retry);
-            const metadata = await metadataReader(uri, fetchImpl, { attempts: 1 });
+            const metadata = transformMetadata(await metadataReader(uri, fetchImpl, { attempts: 1 }),
+              { chainId: 8453, contractAddress: collection.contractAddress, tokenId: String(tokenId) });
             const isAd = isDevertAdvertMetadata(metadata);
             if (!isAd) return;
             const mediaUri = metadata.videoUrl || metadata.audioUrl || metadata.animation_url || '';

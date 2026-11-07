@@ -16,11 +16,12 @@ export const DJUKE_BROWSER_ABI = [
 
 // Both the platform drawer and the standalone widget use this checkout boundary.
 export async function purchaseDjukeSong({ signer, djuke, usdc, songId, maxPriceUnits, gasQuote = null,
-  ethers: library = globalThis.ethers, onStep = () => {}, signal, ensureChain = ensureBaseNetwork }) {
+  ethers: library = globalThis.ethers, onStep = () => {}, signal, ensureChain = ensureBaseNetwork, verifyEligibility = async () => {} }) {
   signal?.throwIfAborted();
   await ensureChain(signer.provider);
   if (usdc.target.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase() || Number(await usdc.decimals()) !== 6) throw new Error('Configured token is not native Base USDC');
   if (!/^0x[0-9a-fA-F]{64}$/.test(songId || '')) throw new Error('Select a song');
+  await verifyEligibility(songId);
   const address = await signer.getAddress();
   const price = await djuke.quote();
   if (price > maxPriceUnits) throw new Error(`Price rose to ${formatUsdcUnits(price)} USDC; refresh and try again`);
@@ -60,6 +61,7 @@ export async function purchaseDjukeSong({ signer, djuke, usdc, songId, maxPriceU
     await waitForAllowance(usdc, address, djuke.target, price);
   });
   onStep('Confirm your DJuke request');
+  await verifyEligibility(songId);
   signal?.throwIfAborted();
   const transaction = await request(...args);
   onStep('Waiting for Base confirmation…');
@@ -67,10 +69,11 @@ export async function purchaseDjukeSong({ signer, djuke, usdc, songId, maxPriceU
   return { txHash: transaction.hash, priceUnits: price };
 }
 
-export async function replaceDjukeSong({ signer, djuke, chainRequestId, songId, signal }) {
+export async function replaceDjukeSong({ signer, djuke, chainRequestId, songId, signal, verifyEligibility = async () => {} }) {
   signal?.throwIfAborted();
   if (Number((await signer.provider.getNetwork()).chainId) !== 8453) throw new Error('Switch your wallet to Base');
   await djuke.replaceRequest.staticCall(BigInt(chainRequestId), songId);
+  await verifyEligibility(songId);
   signal?.throwIfAborted();
   const transaction = await djuke.replaceRequest(BigInt(chainRequestId), songId);
   if ((await transaction.wait())?.status !== 1) throw new Error('Replacement did not confirm');

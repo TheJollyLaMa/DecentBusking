@@ -95,6 +95,12 @@ Votes influence the radio rotation. New Top 10 prize drafts use weekly net votes
 
 **You have reached this step when:** the vote control acknowledges your choice.
 
+For a problem that needs steward attention, choose **Flag for review** on the
+radio or NFT card. Select Inappropriate, Mislabeled, Copyright, or Other; Other
+needs a short explanation. Connect your wallet and sign the report, without a
+payment. A report requests review; it does not automatically ban a recording.
+See [Content Review](CONTENT-REVIEW.md) for radio scopes and paid-request handling.
+
 ## 3. Meet A Song And Its Artist
 
 Select a music NFT in the **3D music space / archive**. Inspect its song details and artwork. Click **Preview** for a free 30-second taste or **Listen** to play the whole song. Selecting an archive recording is different from listening to the live radio: use **Radio** in the bottom bar to return to JukeLoop.
