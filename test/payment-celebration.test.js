@@ -38,7 +38,7 @@ function createTimerHarness() {
   };
 }
 
-function createCelebrationFixture({ reducedMotion = false } = {}) {
+function createCelebrationFixture({ reducedMotion = false, panelSource, panelOpen = true, modalOpen = false } = {}) {
   const timers = createTimerHarness();
   const listeners = new Map();
   const stage = {
@@ -63,8 +63,10 @@ function createCelebrationFixture({ reducedMotion = false } = {}) {
     className: '',
     innerHTML: '',
     removeCalled: false,
+    style: { values: {}, setProperty(name, value) { this.values[name] = value; } },
     querySelector(selector) {
       return {
+        '.payment-celebration-shell': { getBoundingClientRect: () => ({ height: 200 }) },
         '.payment-celebration-title': title,
         '.payment-celebration-summary': summary,
         '.payment-celebration-subtitle': subtitle,
@@ -76,12 +78,25 @@ function createCelebrationFixture({ reducedMotion = false } = {}) {
     setAttribute() {},
     remove() { this.removeCalled = true; },
   };
+  const appended = [];
+  const requestedIds = [];
   const document = {
     hidden: false,
     readyState: 'complete',
-    body: { appendChild() {} },
+    body: { appendChild(node) { appended.push(['body', node]); } },
     head: { appendChild() {} },
-    getElementById() { return null; },
+    getElementById(id) {
+      requestedIds.push(id);
+      if (panelSource && id === `${panelSource}-panel`) return {
+        classList: { contains: () => panelOpen },
+        getBoundingClientRect: () => ({ right: 380, top: 100, height: 500 }),
+      };
+      if (panelSource && id === `${panelSource}-tab`) return {
+        getBoundingClientRect: () => ({ right: 40, top: 300, height: 40 }),
+      };
+      return null;
+    },
+    querySelector: () => modalOpen ? { appendChild(node) { appended.push(['modal', node]); } } : null,
     createElement(tag) {
       if (tag === 'style') return { id: '', textContent: '' };
       return root;
@@ -92,12 +107,50 @@ function createCelebrationFixture({ reducedMotion = false } = {}) {
     },
   };
   const window = {
+    innerWidth: 1440,
+    innerHeight: 900,
+    listeners: new Map(),
+    addEventListener(name, callback) { this.listeners.set(name, callback); },
+    removeEventListener(name) { this.listeners.delete(name); },
     matchMedia: () => ({ matches: reducedMotion }),
     setTimeout: timers.setTimeout,
     clearTimeout: timers.clearTimeout,
   };
-  return { timers, document, window, root, stage, title, summary, subtitle, link, dismiss };
+  return { timers, document, window, root, stage, title, summary, subtitle, link, dismiss, appended, requestedIds };
 }
+
+test('DVert uses the DJuke side-callout for campaign and priority confirmations, with resize and tab fallback', async () => {
+  const { announcePaymentCelebration, initPaymentCelebrations, resetPaymentCelebrationState } = await import('../js/payment-celebration.mjs');
+  for (const panelOpen of [true, false]) {
+    resetPaymentCelebrationState();
+    const ui = createCelebrationFixture({ panelSource: 'devert', panelOpen, modalOpen: true, reducedMotion: !panelOpen });
+    const controller = initPaymentCelebrations(ui);
+    try {
+      for (const [index, summary] of ['Campaign purchase confirmed', 'DVert queue bump confirmed', 'DVert after-song priority confirmed'].entries()) {
+        announcePaymentCelebration({ chainId: 8453, txHash: `0x${String(index + 81).padStart(64, '0')}`,
+          source: 'devert', summary, amountText: index ? '2.00' : '5.00', assetText: 'USDC' });
+        assert.equal(ui.root.dataset.callout, 'true');
+        assert.equal(ui.title.textContent, 'DVert · payment confirmed');
+        assert.match(ui.summary.textContent, new RegExp(summary));
+        assert.equal(ui.stage.innerHTML, '');
+        assert.equal(ui.appended.at(-1)[0], 'modal', 'Popout remains visible in the top layer');
+        assert.equal(ui.root.style.values['--djuke-callout-left'], panelOpen ? '398px' : '58px');
+        ui.window.innerWidth = 390;
+        ui.window.innerHeight = 844;
+        ui.window.listeners.get('resize')();
+        assert.equal(ui.root.style.values['--djuke-callout-left'], '58px');
+        assert.equal(ui.root.style.values['--djuke-callout-width'], '320px');
+        ui.dismiss.click();
+        ui.timers.runAll();
+        ui.window.innerWidth = 1440;
+        ui.window.innerHeight = 900;
+      }
+      assert.ok(ui.requestedIds.includes('devert-panel'));
+      assert.ok(!ui.requestedIds.includes('djuke-panel'));
+    } finally { controller.destroy(); }
+    assert.equal(ui.window.listeners.has('resize'), false);
+  }
+});
 
 test('payment celebrations rotate through 12 distinct effects before repeating', async () => {
   const { announcePaymentCelebration, resetPaymentCelebrationState } = await import('../js/payment-celebration.mjs');

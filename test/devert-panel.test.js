@@ -139,6 +139,21 @@ test('public queue loads without a wallet, refreshes tiers, and clears stale quo
   assert.match(ui.element('devert-queue-status').textContent, /unavailable: offline/);
 });
 
+test('DVert confirmation links and dismissal do not close the open panel; unrelated outside clicks do', async () => {
+  const ui = await panelFixture();
+  await ui.click('devert-tab');
+  await ui.settle();
+  const root = { id: 'payment-celebration-root', dataset: { source: 'devert' } };
+  for (const target of [{ id: 'confirmation-link' }, { id: 'confirmation-dismiss' }]) {
+    ui.document.dispatchEvent({ type: 'click', target, composedPath: () => [target, root] });
+    assert.equal(ui.element('devert-tab').getAttribute('aria-expanded'), 'true');
+  }
+  const outside = { id: 'outside' };
+  ui.document.dispatchEvent({ type: 'click', target: outside, composedPath: () => [outside] });
+  await ui.settle();
+  assert.equal(ui.element('devert-tab').getAttribute('aria-expanded'), 'false');
+});
+
 test('wallet library failures do not hide the public quote or queue', async () => {
   const ui = await panelFixture({ wallet: { address: advertiser } });
   ui.read(async () => snapshot([campaign(1)]));

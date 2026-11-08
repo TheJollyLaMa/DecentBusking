@@ -56,10 +56,26 @@ Refund claim controls are intentionally absent from this simplified panel.
 Removal refund eligibility, contract claims and the exported
 `claimDevertRefund` helper remain unchanged for later recovery tooling.
 Payment receipts still identify the request and transaction.
+Confirmed campaign purchases and both priority tiers use the same compact
+side-popout as DJuke, anchored to the open DVert panel (or its tab if closed).
+It retains the amount and Base transaction link without fullscreen money
+effects. Opening the link or dismissing the popout does not close DVert.
+Mobile positioning stays inside the viewport; reduced motion remains respected.
 Confirmed purchases refresh the panel automatically. The shared next-ad notice
 identifies paid queued adverts, after-song priority, protected-show deferrals,
 and playback delays. The radio audio graph is reused across audio/video advert
 handoffs, so regular radio resumes without a page refresh.
+
+Reuse: adapted DecentBusking `payment-celebration.mjs`'s DJuke callout and
+`djuke.mjs`'s outside-click exception from main `90344f0`, rather than adding
+a second confirmation component. Existing DVert notification wrappers retain
+checkout and receipt semantics; no cross-repository donor was needed after
+checking the Canopy leads and receiving-app worktrees.
+Focused confirmation, panel, purchase, paid-queue and DJuke regressions verify
+unchanged checkout alongside side positioning, resize/tab fallback, reduced
+motion and top-layer rendering. Synthetic local browser previews confirm the
+campaign and priority popouts fit desktop and 390px viewports without global
+particles; no payment is made by these checks.
 
 Checkout is temporarily disabled when the main radio or required local checkpoint
 mirror is offline. Existing on-chain requests remain queued and retry automatically
