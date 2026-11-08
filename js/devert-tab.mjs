@@ -874,7 +874,10 @@ export function initDevertTab(environment = {}) {
   });
   listen(document, 'keydown', event => { if (event.key === 'Escape' && isOpen() && !instructions.open) { close().then(() => toggle.focus()); } });
   listen(document, 'left-drawer-open', event => { if (event.detail !== 'devert' && isOpen()) close(); });
-  listen(document, 'click', event => { if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target) && !instructions.contains(event.target)) close(); });
+  listen(document, 'click', event => {
+    if (event.composedPath().some(element => element.id === 'payment-celebration-root' && element.dataset.source === 'devert')) return;
+    if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target) && !instructions.contains(event.target)) close();
+  });
   return {
     refresh,
     destroy() {
