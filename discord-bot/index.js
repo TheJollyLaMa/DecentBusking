@@ -1,6 +1,9 @@
 import { createRadioAnnouncements, deserializeAnnouncements } from './radio-announcements.js';
 import { createCommunityReminder, deserializeCommunityReminders } from './community-reminder.js';
 import { createLiveBookings } from './live-bookings.js';
+import { createLiveAudioService } from './live-audio.js';
+import { createLiveAudioPinataStore } from './live-audio-store.js';
+import { createLiveAudioTransport } from './live-audio-transport.js';
 // discord-bot/index.js
 // DecentBusking Discord Bot — entry point
 //
@@ -1521,11 +1524,52 @@ async function main() {
       updateJukeLoopRadioSchedule({ events, schedule: defaultRadioSchedule(weeklySchedule) });
     },
   });
+  let liveAudioStore = null;
+  if (process.env.LIVE_AUDIO_STORAGE_KEY && config.pinataJwt && checkpointMirror) {
+    try {
+      liveAudioStore = createLiveAudioPinataStore({
+        storageKey: process.env.LIVE_AUDIO_STORAGE_KEY,
+        distinctFrom: [process.env.CONTENT_REVIEW_STORAGE_KEY],
+        checkpointMirror, ...config.checkpointStorage, pinataJwt: config.pinataJwt,
+        uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+      });
+    } catch {
+      console.warn('[live-audio] Encrypted mirrored storage unavailable; media remains disabled.');
+    }
+  }
+  const liveAudio = createLiveAudioService({
+    ownerWallet: config.mintOwnerWallet,
+    getBookings: () => liveBookings.getState(),
+    store: liveAudioStore,
+    transport: createLiveAudioTransport({
+      enabled: process.env.LIVE_AUDIO_ENABLED === 'true',
+      ingressEnabled: process.env.LIVE_AUDIO_OBS_ENABLED === 'true',
+      url: process.env.LIVEKIT_URL || '', apiKey: process.env.LIVEKIT_API_KEY || '', apiSecret: process.env.LIVEKIT_API_SECRET || '',
+    }),
+    onPolicy: policy => {
+      config.liveAudioPolicy = policy;
+      getActiveJukeLoopSession()?.setLiveAudioPolicy(policy);
+    },
+    onCancel: (booking, reason) => liveBookings.execute({ action: 'cancel', id: booking.id, reason, confirm: true }),
+  });
+  if (liveAudio.configured) {
+    let ticking = false;
+    const tick = async () => {
+      if (ticking) return;
+      ticking = true;
+      try { await liveAudio.tick(); }
+      catch { console.warn('[live-audio] Room state/receiver unavailable; inspect hosting and durable storage.'); }
+      finally { ticking = false; }
+    };
+    void tick();
+    setInterval(() => { void tick(); }, 1000).unref();
+  }
   const requestHandler = createWorkerRequestHandler({
     contentReview: _contentReview,
     getMediaGateways: async () => [await discoverDedicatedGateway(config) || config.ipfsGateway],
     radioAnnouncements,
     liveBookings,
+    liveAudio,
     alchemyWebhook,
     checkpointMirror,
     creatorProfiles,
@@ -1722,6 +1766,8 @@ async function main() {
         }
       }
       return {
+        liveAudio: await liveAudio.current().catch(() => ({ configured: false, phase: 'unavailable', status: 'OFF-AIR',
+          reason: 'Live room control state is unavailable', policy: config.liveAudioPolicy || null })),
         ...buildRadioState({
           nowPlaying,
           playback: jukeLoopSession?.getPlaybackStatus() || { status: 'offline', ready: false, reason: discordOfflineReason },
@@ -2717,6 +2763,7 @@ async function startWebsiteRadio(client, config) {
       isContentAllowed: (track, advert) => !_contentReview || radioContentAllowed(_contentReview.apply(track), advert),
       onTerminalDisconnect: () => scheduleJukeLoopRestart(session.client, config, 'Website playback stalled'),
     });
+    if (config.liveAudioPolicy) session.setLiveAudioPolicy?.(config.liveAudioPolicy);
     await session.start();
     session.client = config.getDiscordClient?.() || client;
     _jukeLoopRestartAttempts.delete(config.jukeLoopTextChannelId);

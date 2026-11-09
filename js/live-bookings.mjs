@@ -4,6 +4,9 @@ export const LIVE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export const LIVE_PERFORMANCE_AIRTIME_MINUTES = 20;
 export const LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES = 15;
 export const LIVE_PERFORMANCE_FEE_UNITS = '20000000';
+export const LIVE_PILOT_POLICY = 'pilot-guaranteed-v1';
+export const LIVE_PILOT_TERMS_VERSION = 'LIVE PERFORMANCE PILOT v1';
+export const LIVE_PILOT_COMPANION_OFFER = 'Four guided prep tasks: $10 USDC each, paid separately upon task completion; Friday technical success does not affect task pay. Success gift: one DecentBusking v1.0.0 Supporter DNFT (Base DecentNFT 0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B, token 75), after all four prep tasks, both passed T-60 and T-15 soundchecks, and at least 75% verified website-radio slot coverage, with steward review. The gift is outside the USDC escrow and requires a separately confirmed NFT transfer; listing price is not cash value. The $20 pilot cash fee remains guaranteed regardless of technical outcome. No purchase or audience recruitment is required.';
 export const LIVE_APPROVED_TERMS_V2 = {
  version: 'LIVE PERFORMANCE v2',
  uri: 'ipfs://bafkreidzxhbeub33romiprjlsjojgpitnwrqap52g6hpen3wowwhfi3zgq',
@@ -26,6 +29,28 @@ export function liveAuthorization({ address, origin, issuedAt, command }) {
  return ['DecentBusking Live Performance authorization v1', `Wallet: ${address.toLowerCase()}`, `Origin: ${origin}`, `Issued: ${issuedAt}`, `Command: ${JSON.stringify(command)}`].join('\n');
 }
 export function liveAcknowledgement(b) {
+ if (b.payoutPolicy === LIVE_PILOT_POLICY) {
+  return [
+   'DecentBusking Live Performance pilot agreement v1',
+   `Booking reference: ${b.id}`,
+   `Performer wallet: ${b.wallet}`,
+   `Community calendar date: ${b.eventId}`,
+   `Event time (UTC): ${b.startUtc} to ${b.endUtc}`,
+   `Airtime: ${b.airtimeMinutes} minutes`,
+   `Payout policy: ${b.payoutPolicy}`,
+   livePerformancePolicyText(b),
+   'Soundchecks: 60 and 15 minutes before the booked start; both must pass before going on air. Failed checks, no verified start, interruptions or cancellation do not reduce this pilot fee.',
+   'Rehearsal coverage: verified whole seconds within the booked slot only. The estimate is not vested, claimable or paid money.',
+   `Additional offer (outside performance escrow): ${b.additionalOffer || 'None recorded'}`,
+   'Payment handling: per-booking Base USDC escrow; one full-fee approval after the booked end, then performer claim. Schedule cancellation is not a financial cancellation.',
+   `Review window: ${b.reviewWindow} seconds after booked end; no decision by then allows full-fee claim.`,
+   `Claim deadline (UTC): ${b.claimDeadline}`,
+   `Contract cancellation parameters: ${b.cancellationWindow} seconds; ${b.killFeeBps} basis points. Direct contract cancellation/expiry/pause still apply; the steward must separately honor any guaranteed shortfall.`,
+   `Agreement version: ${b.termsVersion}`,
+   `Pinned agreement: ${b.termsUri}`,
+   `Technical fingerprint for verifying the pinned agreement: ${b.termsHash}`,
+  ].join('\n');
+ }
  if (Number.isInteger(b.airtimeMinutes) && Number.isInteger(b.fullPayoutLiveMinutes)) {
   const formatWindow = seconds => seconds % 3600 === 0
    ? `${seconds / 3600} hours` : `${seconds / 60} minutes`;
@@ -66,6 +91,24 @@ export function livePerformancePayoutBps(liveMinutes, fullPayoutLiveMinutes = LI
  }
  return Math.min(10000, Math.floor(liveMinutes * 10000 / fullPayoutLiveMinutes));
 }
+export function liveRehearsalPayoutBps(verifiedSeconds, durationSeconds, verifiedStart) {
+ if (!Number.isSafeInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 14400 ||
+     !Number.isSafeInteger(verifiedSeconds) || verifiedSeconds < 0 || verifiedSeconds > durationSeconds ||
+     typeof verifiedStart !== 'boolean' || !verifiedStart && verifiedSeconds !== 0) {
+  throw new Error('Rehearsal requires valid whole seconds within the slot and an explicit verified start');
+ }
+ if (!verifiedStart) return 0;
+ // Nine remaining tranches span three quarters of the slot: one every 1/12 slot.
+ return Math.min(10000, (1 + Math.floor(verifiedSeconds * 12 / durationSeconds)) * 1000);
+}
+export function livePerformancePolicyText(b) {
+ if (b.payoutPolicy === LIVE_PILOT_POLICY) {
+  return `${b.airtimeMinutes} minutes of airtime. Guaranteed pilot fee: ${liveBookingMoney(b.amountUnits)}, regardless of coverage or technical outcome. Rehearsal only: 10% at verified start, then nine equal 10% steps, one every ${b.airtimeMinutes * 5} verified seconds; 100% at ${b.airtimeMinutes * 0.75} minutes (75% of the slot). No mid-show transfers.`;
+ }
+ return Number.isInteger(b.airtimeMinutes) && Number.isInteger(b.fullPayoutLiveMinutes)
+  ? `${b.airtimeMinutes} minutes of airtime; full fee after ${b.fullPayoutLiveMinutes} live minutes; shorter sets earn the fee × live minutes ÷ ${b.fullPayoutLiveMinutes}, capped at the fee; no live minutes earns $0.`
+  : '';
+}
 export function workReference(b) { return `decentbusking:live:v1:8453:${b.eventId}:${b.wallet.toLowerCase()}`; }
 export function bookingGroup(b, now = Date.now()) {
  if (b.cancelled) return 'cancelled';
@@ -102,13 +145,16 @@ export function liveBookingRows(bookings = [], { walletRenderer, now = Date.now(
    : ({ draft:'Draft invitation', funded:'Funded', approved:'Payment approved', paid:'Paid', refunded:'Refunded',
       'funding pending':'Funding pending', failed:'Needs review' }[b.status] || b.status);
   const terms = b.termsUri ? `<a href="${escapeLive(b.termsUri.replace('ipfs://','https://gateway.pinata.cloud/ipfs/'))}" target="_blank" rel="noopener noreferrer">📄 Read ${escapeLive(b.termsVersion)} terms</a>` : '';
-  const policy = Number.isInteger(b.airtimeMinutes) && Number.isInteger(b.fullPayoutLiveMinutes)
-   ? `<p>🎙️ ${b.airtimeMinutes} minutes of airtime · full fee after ${b.fullPayoutLiveMinutes} live minutes · shorter sets earn the fee × live minutes ÷ ${b.fullPayoutLiveMinutes}, capped at the fee; no live minutes earns $0.</p>` : '';
-  const performance = Number.isInteger(b.decision?.liveMusicMinutes)
+  const policyText = livePerformancePolicyText(b);
+  const policy = policyText ? `<p>🎙️ ${escapeLive(policyText)}</p>` : '';
+  const additional = b.additionalOffer ? `<p>Outside performance escrow: ${escapeLive(b.additionalOffer)}</p>` : '';
+  const performance = b.payoutPolicy === LIVE_PILOT_POLICY && b.decision
+   ? `<p>Rehearsal: ${b.decision.verifiedSeconds} verified seconds, ${b.decision.rehearsalPayoutBps / 100}% simulated. Guaranteed fee decision: ${liveBookingMoney(b.approvedUnits)}; approval and claim still require confirmed transactions.</p>`
+   : Number.isInteger(b.decision?.liveMusicMinutes)
    ? `<p>Verified live music: ${b.decision.liveMusicMinutes} minutes · approved ${liveBookingMoney(b.approvedUnits)}.</p>` : '';
   const transactions = Object.values(b.transactions || {}).filter(tx => tx?.hash).map(tx =>
    `<p>${escapeLive(tx.action || 'Transaction')} · ${escapeLive(tx.status || 'submitted')} · <a href="https://basescan.org/tx/${escapeLive(tx.hash)}" target="_blank" rel="noopener noreferrer">View receipt</a></p>`).join('');
   const technical = `<details class="live-booking-technical"><summary>Technical details</summary><p>Occurrence: <code>${escapeLive(b.eventId)}</code></p><p>Terms fingerprint: <code>${escapeLive(b.termsHash)}</code></p>${transactions}</details>`;
-  return `<article class="live-booking" data-booking-id="${escapeLive(b.id)}"><header><strong>${escapeLive(b.displayName || b.ens || b.wallet)}</strong> · ${walletRenderer ? walletRenderer(b) : `<a href="https://basescan.org/address/${escapeLive(b.wallet)}" target="_blank" rel="noopener noreferrer">${escapeLive(b.ens || b.wallet)}</a>`} <span class="live-status">${escapeLive(status)}</span></header><p>🗓 ${escapeLive(liveBookingDate(b.startUtc))}–${escapeLive(new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', timeStyle:'short' }).format(new Date(b.endUtc)))} ET</p><p>💵 Maximum fee: ${escapeLive(liveBookingMoney(b.amountUnits))} · ${b.mode === 'phase0' ? 'community fund (not escrowed)' : 'protected in booking escrow'}</p>${policy}${performance}${terms}<p>📅 Community calendar: ${escapeLive(b.scheduleStatus || 'Not linked yet')}${b.cancelled && b.cancellationReason ? ` · ${escapeLive(b.cancellationReason)}` : ''}</p>${b.reason ? `<p>📝 ${escapeLive(b.reason)}</p>` : ''}${b.remainderDisposition ? `<p>Remainder: ${escapeLive(b.remainderDisposition)}</p>` : ''}${technical}</article>`;
+  return `<article class="live-booking" data-booking-id="${escapeLive(b.id)}"><header><strong>${escapeLive(b.displayName || b.ens || b.wallet)}</strong> · ${walletRenderer ? walletRenderer(b) : `<a href="https://basescan.org/address/${escapeLive(b.wallet)}" target="_blank" rel="noopener noreferrer">${escapeLive(b.ens || b.wallet)}</a>`} <span class="live-status">${escapeLive(status)}</span></header><p>🗓 ${escapeLive(liveBookingDate(b.startUtc))}–${escapeLive(new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', timeStyle:'short' }).format(new Date(b.endUtc)))} ET</p><p>💵 ${b.payoutPolicy === LIVE_PILOT_POLICY ? 'Guaranteed pilot fee' : 'Maximum fee'}: ${escapeLive(liveBookingMoney(b.amountUnits))} · ${b.mode === 'phase0' ? 'community fund (not escrowed)' : 'per-booking escrow; see confirmed funding status'}</p>${policy}${additional}${performance}${terms}<p>📅 Community calendar: ${escapeLive(b.scheduleStatus || 'Not linked yet')}${b.cancelled && b.cancellationReason ? ` · ${escapeLive(b.cancellationReason)}` : ''}</p>${b.reason ? `<p>📝 ${escapeLive(b.reason)}</p>` : ''}${b.remainderDisposition ? `<p>Remainder: ${escapeLive(b.remainderDisposition)}</p>` : ''}${technical}</article>`;
  }).join('');
 }

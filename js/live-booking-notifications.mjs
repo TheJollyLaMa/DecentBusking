@@ -1,4 +1,4 @@
-import { claimState } from './live-bookings.mjs?v=20261024-live-prototype';
+import { claimState, LIVE_PILOT_POLICY } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { isAdminWallet } from './admin-access.mjs';
 
 export const LIVE_BOOKING_POLL_MS = 5 * 60 * 1000;
@@ -11,12 +11,13 @@ export function liveBookingActions(state, wallet, owner, now = Date.now(), pendi
   if (b.mode === 'phase1' && state.escrowAddress && !pending &&
       wallet.toLowerCase() === owner?.toLowerCase()) {
    let label;
-   if (b.cancelled && b.status === 'funded') label = 'Reconcile cancellation payment';
-   else if (!b.cancelled && !['paid', 'refunded'].includes(b.status)) {
+   const pilot = b.payoutPolicy === LIVE_PILOT_POLICY;
+   if (b.cancelled && b.status === 'funded' && !pilot) label = 'Reconcile cancellation payment';
+   else if ((!b.cancelled || pilot && b.status === 'funded') && !['paid', 'refunded'].includes(b.status)) {
     if (['draft', 'failed'].includes(b.status) && b.acknowledged && Date.parse(b.startUtc) > now) label = 'Performer accepted: fund booking';
     else if (b.status === 'funded' && now >= Date.parse(b.endUtc) &&
              now < Date.parse(b.endUtc) + b.reviewWindow * 1000) {
-     label = b.decision ? 'Submit recorded payment decision' : 'Review performance and record live minutes';
+     label = b.decision ? 'Submit recorded payment decision' : pilot ? 'Review rehearsal and approve guaranteed pilot fee' : 'Review performance and record live minutes';
     }
    }
    if (label) actions.admin.push({ id: b.id, label });

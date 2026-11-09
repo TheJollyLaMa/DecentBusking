@@ -25,6 +25,7 @@ import { Transform } from 'node:stream';
 import { getAddress } from 'ethers';
 import { MessageFlags } from 'discord.js';
 import { DEVERT_MAX_AD_SECONDS, DEVERT_SONGS_PER_MAIN_AD } from '../js/devert-scheduler.mjs';
+import { applyLiveAudioShow } from '../js/live-audio.mjs';
 import {
   joinVoiceChannel,
   createAudioPlayer,
@@ -295,11 +296,9 @@ export async function buildMainRadioAdCountdown({ session, now = Date.now(), son
     return { status: 'unavailable', reason: 'radio session unavailable', updatedAt: now, includesCurrentSong: false };
   }
 
-  const activeShow = resolveActiveShow({
-    now,
-    schedule: session.schedule,
-    livePerformanceEvents: session.livePerformanceEvents,
-  });
+  const activeShow = applyLiveAudioShow(resolveActiveShow({
+    now, schedule: session.schedule, livePerformanceEvents: session.livePerformanceEvents,
+  }), session.liveAudioPolicy);
   const summary = {
     updatedAt: now,
     activeShow: {
@@ -931,11 +930,7 @@ export class JukeLoopSession {
         .catch(error => console.warn('[jukeloop] Previous-track bookkeeping deferred:', error.message));
       this._currentDevertAd = null;
       this._nowPlaying = null;
-      const activeShow = resolveActiveShow({
-        now: Date.now(),
-        schedule: this.schedule,
-        livePerformanceEvents: this.livePerformanceEvents,
-      });
+      const activeShow = this._resolveShow();
       if (!this._destroyed && activeShow.type !== 'live_performance') {
         this._playNext().catch((err) =>
           console.error('[jukeloop] Unhandled error in _playNext:', err),
@@ -1021,6 +1016,9 @@ export class JukeLoopSession {
   getPlaybackStatus(now = Date.now()) {
     const show = this.getShowState().activeShow;
     if (show.type === 'live_performance') return { status: 'paused', ready: false, reason: show.label || 'Live performance' };
+    if (show.type === 'live_audio_ads' && !this._nowPlaying?.audible) {
+      return { status: 'paused', ready: false, reason: 'DVert recovery window: waiting for an eligible advert; no delivery is being claimed' };
+    }
     const voice = this._voiceConnection?.getState();
     if (this._destroyed || (!this.websitePlayback && voice?.voiceConnected === false)) {
       return { status: 'recovering', ready: false, reason: 'Radio voice connection is recovering' };
@@ -1078,6 +1076,42 @@ export class JukeLoopSession {
     this._syncScheduledShow();
   }
 
+  setLiveAudioPolicy(policy) {
+    const previous = this.liveAudioPolicy;
+    const previousShow = this._resolveShow();
+    const key = policy ? `${policy.bookingId}:${policy.mode}` : '';
+    this.liveAudioPolicy = policy;
+    if (key === this._liveAudioPolicyKey) return;
+    this._liveAudioPolicyKey = key;
+    const nextShow = this._resolveShow();
+    if (previousShow.event?.id && previousShow.event.id === nextShow.event?.id &&
+        previousShow.event.id !== policy?.eventId) {
+      this._syncScheduledShow();
+      return;
+    }
+    if (previous?.mode === 'radio' && !policy && previousShow.type === 'normal_rotation' &&
+        this._resolveShow().type === 'normal_rotation') return;
+    this._preparationEpoch++;
+    this._disposePrepared(this._preparedNext, 'Live audio policy changed');
+    this._preparedNext = null;
+    this._activeAudio?.completion.interrupt('scheduled_handoff');
+    if (this.player.state.status !== AudioPlayerStatus.Idle) this.player.stop(true);
+    if (policy?.mode === 'fault') this._sendPlaybackNotice(`📴 ${policy.reason}`);
+    if (policy?.mode === 'adverts') {
+      this._musicSinceAd = Math.max(this._musicSinceAd, DEVERT_SONGS_PER_MAIN_AD);
+      this._breakAwaitingUnlock = false;
+    }
+    this._syncScheduledShow({ requestPlayback: false });
+    if (this._started && !['live', 'fault'].includes(policy?.mode)) {
+      void this._playNext().catch(error => console.warn('[live-audio] Radio handoff deferred:', error.message));
+    }
+  }
+
+  _resolveShow(now = Date.now()) {
+    return applyLiveAudioShow(resolveActiveShow({ now, schedule: this.schedule,
+      livePerformanceEvents: this.livePerformanceEvents }), this.liveAudioPolicy);
+  }
+
   setSchedule(schedule) {
     this.schedule = Array.isArray(schedule) ? schedule : defaultRadioSchedule();
     this._syncScheduledShow();
@@ -1085,11 +1119,7 @@ export class JukeLoopSession {
 
   _syncScheduledShow({ requestPlayback = true } = {}) {
     if (this._destroyed) return;
-    const show = resolveActiveShow({
-      now: Date.now(),
-      schedule: this.schedule,
-      livePerformanceEvents: this.livePerformanceEvents,
-    });
+    const show = this._resolveShow();
     const event = show.type === 'live_performance' ? show.event : null;
     const eventId = event?.id || null;
     const previousEventId = this._liveEventId;
@@ -1102,8 +1132,11 @@ export class JukeLoopSession {
           this._activeAudio?.completion.interrupt('scheduled_handoff');
           this.player.stop(true);
         }
-        this._sendPlaybackNotice(`🔴 **Live performance block: ${event.title}** starts now.`);
-      } else if (previousEventId) {
+        if (this.liveAudioPolicy?.mode !== 'fault' ||
+            event.id !== `${this.liveAudioPolicy.eventId || this.liveAudioPolicy.bookingId}:fault`) {
+          this._sendPlaybackNotice(`🔴 **Live performance block: ${event.title}** starts now.`);
+        }
+      } else if (previousEventId && !this.liveAudioPolicy?.cancelledAt) {
         this._sendPlaybackNotice('📻 **Live performance block ended.** JukeLoop is resuming.');
       }
     }
@@ -1160,11 +1193,7 @@ export class JukeLoopSession {
 
   /** (Re)build the active queue for the current show slot. */
   _refreshQueue() {
-    const activeShow = resolveActiveShow({
-      now: Date.now(),
-      schedule: this.schedule,
-      livePerformanceEvents: this.livePerformanceEvents,
-    });
+    const activeShow = this._resolveShow();
 
     if (activeShow.type === 'weekly_top10') {
       if (activeShow.instanceId && activeShow.id === 'friday-top10-hype') {
@@ -1190,7 +1219,7 @@ export class JukeLoopSession {
   }
 
   getShowState(now = Date.now()) {
-    const activeShow = resolveActiveShow({ now, schedule: this.schedule, livePerformanceEvents: this.livePerformanceEvents });
+    const activeShow = this._resolveShow(now);
     return { activeShow, topTenHype: this._topTenHype.publicState(activeShow), playlistShow: this._playlistShow.publicState(activeShow) };
   }
 
@@ -1291,12 +1320,13 @@ export class JukeLoopSession {
     if (this._preparedDevertAd && this.devertPlayback?.isCampaignRemoved?.(this._preparedDevertAd.campaignId)) {
       this._preparedDevertAd = null;
     }
-    const activeShow = resolveActiveShow({
-      now: Date.now(),
-      schedule: this.schedule,
-      livePerformanceEvents: this.livePerformanceEvents,
-    });
+    const activeShow = this._resolveShow();
     if (activeShow.type === 'live_performance') return;
+    const cancellationAds = activeShow.type === 'live_audio_ads';
+    if (cancellationAds && forcedPaid?.record.kind !== 'devert' && forcedPaid) {
+      await this.djuke.release(forcedPaid.record, new Error('DJuke songs deferred during live cancellation recovery'));
+      forcedPaid = null;
+    }
     const initializedLiveFallback = allowAds ? await this._ensureUnbookedLiveFallback(activeShow) : false;
     const fallbackBreak = !!activeShow.unbookedLiveOccurrenceId &&
       !!(this._preparedDevertAd || this._pendingDevertAds.length);
@@ -1326,13 +1356,13 @@ export class JukeLoopSession {
       if (!hypeSelection.track) return this._skipHype(hypeSelection, 'Recording is no longer eligible or available.', options);
     }
 
-    const musicSinceAd = initializedLiveFallback ? 0 : Number.isFinite(projectedMusicSinceAd) ? projectedMusicSinceAd : this._musicSinceAd;
+    const musicSinceAd = cancellationAds ? DEVERT_SONGS_PER_MAIN_AD : initializedLiveFallback ? 0 : Number.isFinite(projectedMusicSinceAd) ? projectedMusicSinceAd : this._musicSinceAd;
     const normalSlotDue = allowAds && (musicSinceAd >= DEVERT_SONGS_PER_MAIN_AD ||
       (!!(this._preparedDevertAd || this._pendingDevertAds.length) && !this._breakAwaitingUnlock));
     // Only immediate adverts and DJuke songs buy an extra break between ordinary slots.
     let paid = isHype || activeShow.type === 'playlist_show' ? null : forcedPaid;
     if (!paid && !fallbackBreak && this.djuke && activeShow.type !== 'playlist_show' && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
-      paid = await this.djuke.nextPaid({ allowBump: normalSlotDue });
+      paid = await this.djuke.nextPaid({ allowBump: normalSlotDue, ...(cancellationAds ? { includeSongs: false } : {}) });
       if (this._destroyed && paid) {
         await this.djuke.release(paid.record, new Error('Radio stopped')).catch(() => {});
         return null;
@@ -1353,7 +1383,7 @@ export class JukeLoopSession {
       const selectedAds = Array.isArray(ads) ? ads : ads ? [ads] : [];
       [this._preparedDevertAd, ...this._pendingDevertAds] = selectedAds;
       this._preparedDevertAd ||= null;
-      this._breakAwaitingUnlock = this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD;
+      this._breakAwaitingUnlock = !cancellationAds && this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD;
       await this._persistMainRadioAdState();
     }
     if (!allowAds || isHype) {
@@ -1378,13 +1408,14 @@ export class JukeLoopSession {
       if (selectedAds.length) {
         [this._preparedDevertAd, ...this._pendingDevertAds] = selectedAds;
         devertAd = this._preparedDevertAd;
-        this._breakAwaitingUnlock = this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD;
+        this._breakAwaitingUnlock = !cancellationAds && this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD;
         this._persistMainRadioAdState();
       } else {
         this._setMainRadioAdSkip('no eligible campaign available', null);
       }
     }
 
+    if (cancellationAds && !paid && !devertAd) return null;
     let playlistSelection = null;
     if (activeShow.type === 'playlist_show' && !paid && !devertAd) {
       try {
@@ -1477,11 +1508,7 @@ export class JukeLoopSession {
       return this._prepareNextPlayback(null, options);
     }
 
-    const showAfterMediaLookup = resolveActiveShow({
-      now: Date.now(),
-      schedule: this.schedule,
-      livePerformanceEvents: this.livePerformanceEvents,
-    });
+    const showAfterMediaLookup = this._resolveShow();
     if (showAfterMediaLookup.type === 'live_performance') {
       if (paid && this.djuke) await this.djuke.release(paid.record, new Error('Live performance block began before playback')).catch(() => {});
       return null;
@@ -1562,11 +1589,7 @@ export class JukeLoopSession {
   _schedulePaidPriorityCheck() {
     clearTimeout(this._paidPollTimer);
     this._paidPollTimer = null;
-    const activeShow = resolveActiveShow({
-      now: Date.now(),
-      schedule: this.schedule,
-      livePerformanceEvents: this.livePerformanceEvents,
-    });
+    const activeShow = this._resolveShow();
     if (!this.djuke || !this._preparedNext || (this._preparedNext.paid && this._preparedNext.paid.record.tier !== 0) ||
       (activeShow.unbookedLiveOccurrenceId && (this._preparedDevertAd || this._pendingDevertAds.length)) ||
       activeShow.type === 'playlist_show' || activeShow.type === 'weekly_top10' || activeShow.type === 'live_performance' ||
@@ -1589,7 +1612,8 @@ export class JukeLoopSession {
       }
       const preparedBump = this._preparedNext.paid?.record.kind === 'devert' && this._preparedNext.paid.record.tier === 0;
       const normalSlotDue = !!this._preparedNext.devertAd;
-      const paid = await this.djuke.nextPaid({ allowBump: normalSlotDue && !preparedBump, includeSongs: !preparedBump });
+      const paid = await this.djuke.nextPaid({ allowBump: normalSlotDue && !preparedBump,
+        includeSongs: !preparedBump && this._resolveShow().type !== 'live_audio_ads' });
       if (!paid) {
         this._schedulePaidPriorityCheck();
         return this._preparedNext;
@@ -1716,6 +1740,15 @@ export class JukeLoopSession {
 
   _startPrepared(prepared) {
     if (!prepared || this._destroyed) return false;
+    if (prepared.devertAd && this.devertPlayback?.isCampaignRemoved?.(prepared.devertAd.campaignId)) {
+      this._disposePrepared(prepared, 'Advert removed from playback');
+      return false;
+    }
+    const show = this.getShowState().activeShow;
+    if (show.type === 'live_performance' || (show.type === 'live_audio_ads' && !prepared.devertAd)) {
+      this._disposePrepared(prepared, 'Live audio handoff excludes this prepared recording');
+      return false;
+    }
     if (this.isContentAllowed && !this.isContentAllowed(prepared.track, !!prepared.devertAd || prepared.paid?.record.kind === 'devert')) {
       this._disposePrepared(prepared, 'Recording excluded by content review');
       return false;
@@ -1725,14 +1758,10 @@ export class JukeLoopSession {
       this._disposePrepared(prepared, 'Protected show began before paid advert playback');
       return false;
     }
-    if (prepared.paid?.record.kind === 'devert' && prepared.paid.record.tier === 0 &&
+    if (show.type !== 'live_audio_ads' && prepared.paid?.record.kind === 'devert' && prepared.paid.record.tier === 0 &&
         this._musicSinceAd < DEVERT_SONGS_PER_MAIN_AD && (this._breakAwaitingUnlock ||
         !(this._preparedDevertAd || this._pendingDevertAds.length))) {
       this._disposePrepared(prepared, 'Normal advert slot was not reached');
-      return false;
-    }
-    if (prepared.devertAd && this.devertPlayback?.isCampaignRemoved?.(prepared.devertAd.campaignId)) {
-      this._disposePrepared(prepared, 'Advert removed from playback');
       return false;
     }
     if (this._ffmpeg && this._ffmpeg !== prepared.ffmpegProcess) {
@@ -1921,7 +1950,8 @@ export class JukeLoopSession {
             (prepared.playlistShow && show.instanceId !== prepared.playlistShow.instanceId) ||
             (show.type === 'playlist_show' && !prepared.playlistShow && !prepared.paid && !prepared.devertAd &&
               this._playlistShow.publicState(show)?.status === 'ready') ||
-            show.type === 'live_performance' || (prepared.paid && ['weekly_top10', 'playlist_show'].includes(show.type)) || (prepared.hype
+            show.type === 'live_performance' || (show.type === 'live_audio_ads' && !prepared.devertAd) ||
+            (prepared.paid && ['weekly_top10', 'playlist_show'].includes(show.type)) || (prepared.hype
             ? show.instanceId !== prepared.hype.instanceId
             : show.id === 'friday-top10-hype')) {
             this._disposePrepared(prepared, 'Scheduled handoff reached');

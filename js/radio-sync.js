@@ -1,4 +1,4 @@
-// js/radio-sync.js?v=20261030-ad-cutoff — DecentBusking
+// js/radio-sync.js?v=20261108-live-audio-pilot — DecentBusking
 // Mirrors the Discord JukeLoop voice channel in the Now Playing banner. New
 // Discord uploads briefly take over the site radio for their first play, and
 // archive selections mute the radio until the listener returns to it.
@@ -9,6 +9,7 @@ import { formatUsdcUnits as _formatUsdcUnits } from './usdc-format.mjs?v=2026101
 import { sendRadioVote as sharedRadioVote, radioListenerId, radioMediaUrl, readRadioState, readRadioMediaBlob } from './radio-client.mjs';
 import { createRadioAdTransition } from './radio-ad-transition.mjs?v=20261030-ad-cutoff';
 import { DEVERT_MAX_AD_SECONDS } from './devert-scheduler.mjs';
+import { createLiveAudioListener, createLiveAudioFaultSlate } from './live-audio-client.mjs';
 
 const POLL_MS = 8_000;
 const FADE_IN_MS = 600;
@@ -18,6 +19,8 @@ const LOAD_TIMEOUT_MS = 20_000;
 const GATEWAY_RETRY_TIMEOUT_MS = 5_000;
 const RADIO_LOAD_MAX_ATTEMPTS = 3;
 const RADIO_LOAD_RETRY_MS = 15_000;
+let _liveAudioListener = null, _liveAudioActive = false, _liveAudioPolicy = null;
+let _liveFaultSlate = null, _lastLiveFault = null;
 // After a song ends, poll quickly so the next one starts right after the JukeLoop changeover gap.
 const HANDOFF_POLL_MS = 750;
 const HANDOFF_WINDOW_MS = 30_000;
@@ -133,6 +136,7 @@ function _renderVideo() {
 }
 
 function _onPause(event) {
+  if (_liveAudioActive) return;
   if (_suppressPauseStop) {
     _suppressPauseStop = false;
     return;
@@ -193,6 +197,7 @@ let _adTransition = null;
 let _adExitTransition = null;
 
 function _applyRadioVolume() {
+  if (_radioMuted) _liveFaultSlate?.stop();
   _adTransition?.setVolume(_mode === 'radio' && !_radioMuted ? _radioVolume : 0);
   if (!_audio) return;
   _audio.muted = _mode === 'archive' ? _archiveMuted : _radioMuted;
@@ -553,6 +558,16 @@ export function initRadioSync() {
   _playBtn = document.getElementById('now-playing-play-btn');
   _radioBtn = document.getElementById('now-playing-radio-btn');
   if (!_audio || !_radioUrl()) return;
+  _liveAudioListener = createLiveAudioListener({
+    audio: _audioPlayer, serviceUrl: _radioUrl().replace(/\/api\/radio$/, ''),
+    onStatus: ({ status, blocked, reason }) => {
+      if (!_liveAudioActive || _liveAudioPolicy?.mode !== 'live') return;
+      _setLabel(`${status === 'ON-AIR' ? '🔴' : '⏳'} ${status} · Live audio`);
+      _setActivity(reason || (status === 'ON-AIR' ? 'Live audio through the website radio'
+        : 'Retrying the live feed. Cancellation follows 60 seconds without verified audio.'));
+      _playBtn?.classList.toggle('hidden', !blocked);
+    },
+  });
   _initAudioControls();
   _voteButtons = [...document.querySelectorAll('[data-radio-vote]')];
   _voteStatusEl = document.getElementById('radio-vote-status');
@@ -590,6 +605,7 @@ export function canSetDevertListenMode() {
 }
 
 export function setDevertListenMode(mode) {
+  if (_liveAudioActive && mode === 'ads-only') return false;
   if (!['radio', 'ads-only'].includes(mode)) return false;
   if (mode === 'ads-only' && _mode !== 'radio') return false;
   if (_devertListenMode === mode) return true;
@@ -618,6 +634,9 @@ export function setDevertListenMode(mode) {
 /** Play a user-selected archive track; the radio stays muted until returnToRadio(). */
 export function playArchiveTrack({ title, artist, audioUrl, mediaType, nft = null, sessionId = null, onEnded = null }) {
   if (!_audio) return;
+  if (_liveAudioActive) {
+    _liveAudioActive = false; void _liveAudioListener?.disconnect(); _liveFaultSlate?.stop();
+  }
   _archiveSession = { id: sessionId, onEnded };
   _radioHandoff = null;
   if (_takeover) _takeoverQueue.unshift(_takeover.track);
@@ -678,7 +697,8 @@ async function _poll() {
     _activeShowId = state.activeShow?.id || null;
     _radio = state.nowPlaying ? { ...state.nowPlaying, receivedAt: performance.now() } : null;
     _upNext = state.upNext && typeof state.upNext === 'object' ? state.upNext : null;
-    _detectNewUploads(Array.isArray(state.recent) ? state.recent : [], state.serverTime);
+    _applyLiveAudioState(state.liveAudio);
+    if (!_liveAudioPolicy || _liveAudioPolicy.mode === 'radio') _detectNewUploads(Array.isArray(state.recent) ? state.recent : [], state.serverTime);
     if (_mode === 'radio') _syncRadio();
     _maybePreload();
   } catch (err) {
@@ -692,7 +712,7 @@ async function _poll() {
     _radioReachable = false;
   }
   _renderVoting();
-  _pollTimer = setTimeout(_poll, _handoffActive() ? HANDOFF_POLL_MS : POLL_MS);
+  _pollTimer = setTimeout(_poll, _liveAudioPolicy || _radioState?.liveAudio ? 2000 : _handoffActive() ? HANDOFF_POLL_MS : POLL_MS);
   void _refreshVoteNet();
   _pollTimer?.unref?.();
 }
@@ -740,11 +760,63 @@ function _detectNewUploads(recent, serverTime) {
 
 // ── Radio mirroring ───────────────────────────────────────────────────────
 
+function _applyLiveAudioState(state) {
+  _liveAudioPolicy = state?.policy || null;
+  const active = ['live', 'fault'].includes(_liveAudioPolicy?.mode) && _mode !== 'archive' && _devertListenMode !== 'ads-only';
+  if (!active) {
+    if (_liveAudioActive) {
+      _liveAudioActive = false;
+      void _liveAudioListener?.disconnect();
+      _liveFaultSlate?.stop();
+      _loadedPlayId = null;
+      _audio = _audioPlayer || _audio;
+    }
+    return false;
+  }
+  if (!_liveAudioActive) {
+    _liveAudioActive = true;
+    _stopAudio(); _clearTakeover(); _takeoverQueue.length = 0; _discardPreload();
+    _mode = 'radio'; _radioHandoff = null; _loadedPlayId = null;
+    _audio = _audioPlayer || _audio;
+    _audio?.removeAttribute?.('src');
+    _audio?.load?.();
+    _fadeLevel = 1; _applyRadioVolume();
+    _notifyRadioSourceMode();
+    _broadcastNowPlayingStopped('live-audio-handoff');
+  }
+  _radio = null;
+  _renderSponsorTag(null);
+  _renderVoting();
+  if (_liveAudioPolicy.mode === 'fault') {
+    void _liveAudioListener?.disconnect();
+    _setLabel('OFF-AIR · Live performance cancelled');
+    _setTrack(_liveAudioPolicy.title, '');
+    _setActivity(state.reason || 'Live performance cancelled');
+    const key = `${state.bookingId}:${_liveAudioPolicy.cancelledAt}`;
+    if (_lastLiveFault !== key) {
+      _lastLiveFault = key;
+      _liveFaultSlate ||= createLiveAudioFaultSlate();
+      _liveFaultSlate.play({ message: state.reason || 'Live performance cancelled',
+        remainingMs: _liveAudioPolicy.slateEndsAt - state.serverTime,
+        volume: _radioMuted ? 0 : _radioVolume });
+    }
+  } else {
+    _setTrack(_liveAudioPolicy.title, 'Live audio');
+    if (!state.armed) {
+      _setLabel('OFF-AIR · Live room not ready');
+      _setActivity('The private checks did not arm this slot. Waiting for the 60-second cancellation deadline.');
+    }
+    _liveAudioListener?.update(state);
+  }
+  return true;
+}
+
 function _radioPositionS() {
   return (_radio.positionMs + (performance.now() - _radio.receivedAt)) / 1000;
 }
 
 function _liveLabel() {
+  if (_liveAudioPolicy?.mode === 'adverts') return 'OFF-AIR · DVert cancellation recovery window';
   if (_radioState?.activeShow?.type === 'playlist_show') {
     const fallback = _radio?.playlistShow?.fallback ? _radioState.playlistShow?.fallbackReason : null;
     return `📻 ${_radioState.activeShow.label} · ${fallback ? `Normal rotation (${fallback}) · ` : ''}Vote up OR down!`;
@@ -756,6 +828,7 @@ function _liveLabel() {
 }
 
 function _syncRadio(message) {
+  if (_applyLiveAudioState(_radioState?.liveAudio)) return;
   _setLabel(_liveLabel());
   _renderVoting();
   if (_devertListenMode === 'ads-only') {
@@ -860,6 +933,7 @@ function _syncRadio(message) {
 // ── New-upload takeovers ──────────────────────────────────────────────────
 
 function _startNextTakeover() {
+  if (_liveAudioPolicy && _liveAudioPolicy.mode !== 'radio') return;
   _clearTakeover();
   const track = _takeoverQueue.shift();
   if (!track) {
@@ -928,6 +1002,7 @@ function _clearTakeover() {
 }
 
 function _onEnded(event) {
+  if (_liveAudioActive) return;
   if (event?.target && event.target !== _audio) return;
   if (_mode === 'radio' && !_radioAd && _loadedPlayId && _loadedPlayId === _endedRadioAdPlayId) return;
   const afterAd = _mode === 'radio' && !!_radioAd;
@@ -1275,6 +1350,7 @@ function _preloadAllowed() {
 }
 
 function _maybePreload() {
+  if (_liveAudioActive) { _discardPreload(); return; }
   if (!_preloadAllowed()) {
     _discardPreload();
     return;
@@ -1424,6 +1500,10 @@ function _stopAudio() {
 }
 
 async function _unlock() {
+  if (_liveAudioActive) {
+    try { await _liveAudioListener?.play(); } catch { _setActivity('Tap Play again when the live audio connection is ready'); }
+    return;
+  }
   if (_mode === 'radio' && _loadedPlayId && _loadedPlayId === _endedRadioAdPlayId) {
     _syncRadio();
     return;

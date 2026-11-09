@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DecentBusking · Live audio backstage</title>
+  <link rel="stylesheet" href="css/live-audio.css?v=20261108-live-audio-pilot">
+  <script src="decent.config.js"></script>
+</head>
+<body class="live-audio-room">
+  <h1>Live audio backstage</h1>
+  <p>Private T−60 / T−15 soundchecks. The public audience listens on the <a href="./">website radio</a>.
+    No recording, video, payment or wallet transaction. Use headphones.</p>
+  <output id="room-status" role="status" aria-live="polite">Checking room availability…</output>
+  <button id="room-authorize" type="button" disabled>Connect booking wallet</button>
+  <section id="room-controls" hidden>
+    <p id="room-targets"></p>
+    <fieldset id="room-publisher" hidden>
+      <legend>Booked performer · one audio source</legend>
+      <label>Microphone / audio interface <select id="room-input" aria-label="Audio input"><option value="">Default audio input</option></select></label>
+      <button id="room-devices" type="button">Allow microphone and list inputs</button>
+      <button id="room-publish" type="button">Publish browser audio</button>
+      <button id="room-stop" type="button">Stop microphone</button>
+      <button id="room-obs" type="button">Create / replace private OBS input</button>
+      <output id="room-obs-secret"></output>
+      <p>OBS uses WHIP + Opus audio. Creating a replacement invalidates the previous input. Keep credentials private.</p>
+    </fieldset>
+    <fieldset id="room-owner" hidden>
+      <legend>Operator · listen before confirming</legend>
+      <button id="room-monitor" type="button">Listen to private soundcheck</button>
+      <button id="room-check60" type="button">I heard the T−60 check</button>
+      <button id="room-check15" type="button">I heard the T−15 check</button>
+      <button id="room-arm" type="button">Arm scheduled radio handoff</button>
+      <button id="room-cancel" type="button">Cancel live audio</button>
+    </fieldset>
+    <audio id="room-audio" controls playsinline></audio>
+    <p>Verified transport audio, including intentional silence, keeps the feed healthy. A loss of verified delivery for
+      60 seconds during the slot automatically cancels the broadcast. The guaranteed performer fee is unchanged.
+      Discord live-audio parity is not enabled.</p>
+  </section>
+  <script type="module" src="js/live-audio-room.mjs?v=20261108-live-audio-pilot"></script>
+</body>
+</html>

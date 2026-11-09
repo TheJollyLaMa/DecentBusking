@@ -1,12 +1,14 @@
 import {
  LIVE_FUND, LIVE_ROUTER, LIVE_USDC, LIVE_ESCROW_ABI, LIVE_NOTICE, LIVE_APPROVED_TERMS_V2,
  LIVE_PERFORMANCE_AIRTIME_MINUTES, LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES, LIVE_PERFORMANCE_FEE_UNITS,
+ LIVE_PILOT_POLICY, LIVE_PILOT_TERMS_VERSION, LIVE_PILOT_COMPANION_OFFER, livePerformancePolicyText, liveRehearsalPayoutBps,
  liveAuthorization, liveAcknowledgement, liveBookingRows, livePerformancePayoutBps, bookingGroup, escapeLive, workReference,
-} from './live-bookings.mjs?v=20261024-live-prototype';
+} from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { utcToNewYorkInput } from './radio-calendar.mjs';
 import { isAdminWallet } from './admin-access.mjs';
-import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261024-live-prototype';
+import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261108-live-audio-pilot';
+import { liveAudioRoomUrl } from './live-audio.mjs?v=20261108-live-audio-pilot';
 
 const routerAbi = [
  'function funds(bytes32) view returns (string metadataUri,bool active,bool exists)',
@@ -96,12 +98,18 @@ function render() {
   const labels = { draft:'📨 Invitations & drafts', upcoming:'🗓 Upcoming performances', active:'🔴 In progress',
    completed:'📚 Completed performances', cancelled:'❌ Canceled performances' };
   return `<details class="live-booking-group"${group === 'draft' ? ' open' : ''}><summary>${labels[group]} (${bookings.length})</summary>${bookings.length
-   ? bookings.map(b => `${liveBookingRows([b])}<div data-live-actions="${escapeLive(b.id)}"><details class="live-booking-actions"><summary>🛠️ Booking actions</summary><div>${bookingActionButtons(b)}</div></details></div>`).join('')
+   ? bookings.map(b => renderLivePerformanceAdminBooking(b)).join('')
    : '<p class="live-booking-empty">No bookings in this group.</p>'}</details>`;
  }).join('');
 }
+export function renderLivePerformanceAdminBooking(b, now = Date.now()) {
+ const roomUrl = liveAudioRoomUrl(b, now);
+ const room = roomUrl ? `<p><a data-live-room="operator" href="${escapeLive(roomUrl)}">Open operator audio room</a><br><small>This link does not grant access. Authorize with the configured owner wallet; publishing remains performer-only. Hosting may be unavailable. Private checks open at T−70 minutes.</small></p>` : '';
+ return `${liveBookingRows([b])}${room}<div data-live-actions="${escapeLive(b.id)}"><details class="live-booking-actions"><summary>🛠️ Booking actions</summary><div>${bookingActionButtons(b)}</div></details></div>`;
+}
 function bookingActionButtons(b) {
- const reviewActions = Number.isInteger(b.airtimeMinutes)
+ const pilot = b.payoutPolicy === LIVE_PILOT_POLICY;
+ const reviewActions = pilot ? [['review','Record rehearsal & approve guaranteed fee']] : Number.isInteger(b.airtimeMinutes)
   ? [['review','🎙️ Record live minutes & calculate payout']]
   : [['full','✅ Approve full payment'], ['partial','🧮 Set a partial payment'], ['withhold','⛔ Withhold / reject payment']];
  const actions = [
@@ -112,11 +120,23 @@ function bookingActionButtons(b) {
   ['cancel','❌ Cancel this date'], ['recover','↩️ Return unused community-fund money'],
   ['financialCancel','🧾 Reconcile cancellation payment'],
  ];
- return actions.map(([action, label]) => `<button type="button" data-live-action="${action}">${label}</button>`).join('');
+ return actions.filter(([action]) => !pilot || !['financialCancel', 'recover', 'createFund'].includes(action))
+  .map(([action, label]) => `<button type="button" data-live-action="${action}">${label}</button>`).join('');
 }
 async function review(b, bps, cancellation = false) {
  let liveMusicMinutes;
- if (Number.isInteger(b.airtimeMinutes) && !cancellation) {
+ let verifiedSeconds;
+ let verifiedStart;
+ if (b.payoutPolicy === LIVE_PILOT_POLICY) {
+  const entered = prompt(`Verified live-audio seconds within the ${b.airtimeMinutes}-minute slot (0–${b.airtimeMinutes * 60}). Rehearsal only: the full $20 pilot fee is guaranteed even if the show was cancelled.`, '0');
+  if (entered === null) return;
+  if (!/^(0|[1-9]\d*)$/.test(entered)) throw new Error('Enter non-negative whole seconds');
+  verifiedSeconds = Number(entered);
+  verifiedStart = confirm('Did a verified on-air start occur after both soundchecks passed? OK = yes; Cancel = no verified start.');
+  const rehearsalBps = liveRehearsalPayoutBps(verifiedSeconds, b.airtimeMinutes * 60, verifiedStart);
+  if (!confirm(`Rehearsal score: ${rehearsalBps / 100}%. Record a FULL $20 fee decision, independent of that score? This does not send funds.`)) return;
+  bps = 10000;
+ } else if (Number.isInteger(b.airtimeMinutes) && !cancellation) {
   const entered = prompt(`Verified live-music minutes (0–${b.airtimeMinutes}). ${b.fullPayoutLiveMinutes} minutes earns the full $${Number(b.amountUnits) / 1e6}; shorter sets are prorated. Enter 0 for no live performance.`);
   if (entered === null) return;
   if (!/^(0|[1-9]\d*)$/.test(entered) || Number(entered) > b.airtimeMinutes) throw new Error(`Enter a whole number from 0 to ${b.airtimeMinutes}`);
@@ -129,9 +149,10 @@ async function review(b, bps, cancellation = false) {
  if (!reportUri) return;
  const reportHash = b.mode === 'phase0' ? prompt('Advanced: content fingerprint for the pinned report (bytes32)') : '';
  if (b.mode === 'phase0' && !/^0x[0-9a-fA-F]{64}$/.test(reportHash || '')) throw new Error('The pinned report fingerprint is required');
- const remainderDisposition = prompt('What should happen to the unpaid remainder? (e.g. keep for future shows or return to funder)');
+ const remainderDisposition = b.payoutPolicy === LIVE_PILOT_POLICY ? 'No remainder; full pilot fee guaranteed'
+  : prompt('What should happen to the unpaid remainder? (e.g. keep for future shows or return to funder)');
  if (!remainderDisposition) return;
- await command({ action:'decision', id:b.id, payoutBps:bps, liveMusicMinutes, reason, reportUri, reportHash, remainderDisposition, cancellation });
+ await command({ action:'decision', id:b.id, payoutBps:bps, liveMusicMinutes, verifiedSeconds, verifiedStart, reason, reportUri, reportHash, remainderDisposition, cancellation });
 }
 async function action(name, b) {
  if (['agreement', 'acknowledge', 'fund'].includes(name) && Date.parse(b.startUtc) <= Date.now()) {
@@ -181,6 +202,7 @@ async function action(name, b) {
  else if (name === 'withhold') await review(b, 0);
  else if (name === 'settle') {
    if (!b.decision) throw new Error('Record the completion decision first');
+   if (b.payoutPolicy === LIVE_PILOT_POLICY && b.decision.payoutBps !== 10000) throw new Error('This pilot requires a full-fee decision');
    if (b.mode === 'phase1') {
      await transaction(b, b.decision.payoutBps ? 'approve' : 'reject', w => {
        const contract = new w.ethers.Contract(state.escrowAddress, LIVE_ESCROW_ABI, w.signer);
@@ -205,6 +227,7 @@ async function action(name, b) {
    const reason = prompt('PUBLIC cancellation reason (schedule only; financial consequences handled separately)');
    if (reason && confirm('Cancel ONLY this dated occurrence? Radio continues. Financial cancellation/refund is a separate step.')) await command({ action:'cancel', id:b.id, reason, confirm:true });
  } else if (name === 'financialCancel') {
+   if (b.payoutPolicy === LIVE_PILOT_POLICY) throw new Error('Pilot fee is guaranteed. Cancel the schedule only, then approve the full fee after the original booked end.');
    if (!b.cancelled) throw new Error('Cancel the schedule occurrence first');
    if (b.mode === 'phase0') {
      if (!confirm(`Record agreed cancellation consequence: ${Number(b.cancellationFeeUnits || 0)/1e6} USDC kill fee? No funds move now; execute fee payment and recovery separately only after reviewing the report/disposition.`)) return;
@@ -235,26 +258,58 @@ function mount() {
  section.innerHTML = `<summary class="live-performance-admin-summary"><span>🎤 Live Performance</span><small>Invitations, schedule listings, and payment review</small></summary>
  <div class="live-performance-admin-content">
  <p>${LIVE_NOTICE}</p><p data-live-capability></p>
- <ol class="live-performance-flow"><li>📝 Review the offer and pinned terms.</li><li>📨 Add the date to the community calendar; only the invited wallet can accept.</li><li>✅ Acceptance appears here. Funding is always a separate owner action.</li><li>🎙️ After the show, record live minutes and calculate the payout.</li></ol>
- <aside class="live-performance-offer"><strong>💵 Current offer: $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6} USDC</strong><span>🗓 ${LIVE_PERFORMANCE_AIRTIME_MINUTES}-minute calendar event</span><span>🎵 ${LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES} live-music minutes earns the full fee; shorter sets are prorated, capped at $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6}.</span><span>🚫 No live performance earns $0.</span></aside>
- <p class="live-performance-draft-note">The steward-approved v2 agreement is pinned. Each new performer and date still requires explicit approval and fresh performer acceptance before funding.</p>
+ <ol class="live-performance-flow"><li>📝 Review the offer and pinned terms.</li><li>📨 Add the date to the community calendar; only the invited wallet can accept.</li><li>✅ Acceptance appears here. Funding is always a separate owner action.</li><li>🎙️ After the show, review the actual coverage under this booking's agreed payment policy.</li></ol>
+ <aside class="live-performance-offer" data-live-offer><strong>💵 Current offer: $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6} USDC</strong><span>🗓 ${LIVE_PERFORMANCE_AIRTIME_MINUTES}-minute calendar event</span><span>🎵 ${LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES} live-music minutes earns the full fee; shorter sets are prorated, capped at $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6}.</span><span>🚫 No live performance earns $0.</span></aside>
+ <p class="live-performance-draft-note">Legacy v2 terms are pinned. The guaranteed audio pilot requires a NEW reviewed agreement pin and fingerprint; never reuse v2. Each performer and date requires fresh acceptance before funding.</p>
  <details class="live-create-details" open><summary>➕ Prepare a performance invitation</summary><form data-live-create>
- ${field('performer','Performer wallet or ENS')}${field('displayName','Name shown on the calendar')}${field('discordHandle','Discord name (if agreed public)')}${field('title','Show title','Friday Live Performance')}
+ <label>Offer policy<select name="payoutPolicy"><option value="">Legacy v2: prorated live minutes</option><option value="${LIVE_PILOT_POLICY}">Audio pilot: guaranteed $20, rehearsal ladder only</option></select></label>
+ ${field('performer','Performer wallet or ENS')}${field('displayName','Name shown on the calendar')}<label>Discord name (optional, with consent)<input name="discordHandle"></label>${field('title','Show title','Friday Live Performance')}
  ${field('startLocal','Start time (America/New_York)',nextFridayLiveStart(),'datetime-local')}
- <p class="live-performance-form-note">The event lasts 20 minutes; its end time is calculated from the start. Current fee is fixed at $20 USDC on Base.</p>
- <input name="fee" type="hidden" value="${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6}"><input name="airtimeMinutes" type="hidden" value="${LIVE_PERFORMANCE_AIRTIME_MINUTES}">
+ <p class="live-performance-form-note">End time is calculated from the duration. Fee is $20 USDC on Base. Legacy v2 is fixed at 20 minutes; the pilot uses the agreed duration.</p>
+ <input name="fee" type="hidden" value="${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6}"><label>Duration (minutes)<input name="airtimeMinutes" type="number" value="${LIVE_PERFORMANCE_AIRTIME_MINUTES}" min="11" max="59" step="1" required readonly></label>
  <input name="fullPayoutLiveMinutes" type="hidden" value="${LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES}">
+ <label data-live-additional hidden>Additional pilot offer (public; NOT funded by performance escrow)<textarea name="additionalOffer" maxlength="1000" placeholder="Separate prep-task payments and supporter gift, including their conditions. No private notes."></textarea></label>
  <label>Payment handling<select name="mode"><option value="phase1">🔒 Protected booking escrow (recommended)</option><option value="phase0">🏦 Community fund (earmarked, not escrowed)</option></select></label>
  <label>Review period after the show (hours)<input name="reviewWindowHours" type="number" value="24" min="1" max="8760" step="1" required></label>
  <label>Late-cancellation notice (hours)<input name="cancellationWindowHours" type="number" value="8" min="0" max="8760" step="1" required></label>
  <label>Late-cancellation fee (%)<input name="killFeePercent" type="number" value="50" min="0" max="100" step="1" required></label>
  <p class="live-performance-form-note">The performer’s claim deadline is set automatically to three days after the review window closes.</p>
- <details class="live-advanced-terms"><summary>📎 Pinned agreement details (advanced)</summary><p>The verified v2 agreement is prefilled. Check the exact text before approving this offer. Do not reuse v1: it describes a 60-minute show.</p>
+ <details class="live-advanced-terms"><summary>📎 Pinned agreement details (advanced)</summary><p>Legacy v2 references are prefilled only for the legacy policy. The guaranteed audio pilot requires its own reviewed pin and fingerprint. Check the exact text before approving.</p>
  ${field('termsVersion','Agreement version',LIVE_APPROVED_TERMS_V2.version)}${field('termsUri','Pinned agreement IPFS link',LIVE_APPROVED_TERMS_V2.uri)}${field('termsHash','Agreement verification fingerprint',LIVE_APPROVED_TERMS_V2.hash)}</details>
  <label class="live-performance-approval"><input name="stewardApproved" type="checkbox"> I approve these exact pinned terms for this performer and date.</label>
  <button type="submit">📝 Save invitation draft (no payment)</button></form></details>
  <button type="button" data-live-refresh>🔄 Refresh bookings</button><p class="live-performance-acceptance" role="alert" aria-live="assertive" data-live-acceptance-notice hidden></p><p role="status" data-live-status></p><div data-live-list></div></div>`;
  parent.append(section);
+ const form = section.querySelector('form');
+ const updatePolicy = () => {
+  const pilot = form.elements.payoutPolicy.value === LIVE_PILOT_POLICY;
+  form.elements.airtimeMinutes.readOnly = !pilot;
+  if (!pilot) form.elements.airtimeMinutes.value = LIVE_PERFORMANCE_AIRTIME_MINUTES;
+  form.elements.mode.value = 'phase1';
+  form.elements.mode.querySelector('[value="phase0"]').disabled = pilot;
+  form.elements.killFeePercent.value = pilot ? '100' : '50';
+  for (const name of ['reviewWindowHours', 'cancellationWindowHours', 'killFeePercent']) form.elements[name].readOnly = pilot;
+  form.elements.reviewWindowHours.value = '24';
+  form.elements.cancellationWindowHours.value = '8';
+  form.elements.termsVersion.value = pilot ? LIVE_PILOT_TERMS_VERSION : LIVE_APPROVED_TERMS_V2.version;
+  form.elements.termsUri.value = pilot ? '' : LIVE_APPROVED_TERMS_V2.uri;
+  form.elements.termsHash.value = pilot ? '' : LIVE_APPROVED_TERMS_V2.hash;
+  form.elements.stewardApproved.checked = false;
+  section.querySelector('[data-live-additional]').hidden = !pilot;
+  if (pilot && !form.elements.additionalOffer.value.trim()) form.elements.additionalOffer.value = LIVE_PILOT_COMPANION_OFFER;
+  if (pilot) section.querySelector('.live-advanced-terms').open = true;
+  updateOffer();
+ };
+ const updateOffer = () => {
+  const pilot = form.elements.payoutPolicy.value === LIVE_PILOT_POLICY;
+  section.querySelector('[data-live-offer]').textContent = livePerformancePolicyText({
+   payoutPolicy: pilot ? LIVE_PILOT_POLICY : undefined,
+   airtimeMinutes: Number(form.elements.airtimeMinutes.value),
+   fullPayoutLiveMinutes: LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES, amountUnits: LIVE_PERFORMANCE_FEE_UNITS,
+  });
+ };
+ form.elements.payoutPolicy.addEventListener('change', updatePolicy);
+ form.elements.airtimeMinutes.addEventListener('input', updateOffer);
  section.querySelector('[data-live-refresh]').onclick = () => guarded(async () => {
   state = await api();
   render();
@@ -284,6 +339,8 @@ function mount() {
    delete booking.reviewWindowHours;
    delete booking.cancellationWindowHours;
    delete booking.killFeePercent;
+   if (booking.payoutPolicy === LIVE_PILOT_POLICY) delete booking.fullPayoutLiveMinutes;
+   else { delete booking.payoutPolicy; delete booking.additionalOffer; }
    const id = `${eventId}:${crypto.randomUUID()}`;
    await command({ action:'create', id, booking });
    return `Invitation draft saved for ${booking.displayName || booking.wallet}. It is not funded or listed on the community calendar yet.`;

@@ -1,5 +1,6 @@
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { LIVE_ESCROW_ABI, claimState, liveAcknowledgement, liveBookingRows } from './live-bookings.mjs?v=20261024-live-prototype';
+import { LIVE_ESCROW_ABI, claimState, liveAcknowledgement, liveBookingRows, livePerformancePolicyText } from './live-bookings.mjs?v=20261108-live-audio-pilot';
+import { liveAudioRoomUrl } from './live-audio.mjs?v=20261108-live-audio-pilot';
 
 export function liveReceiptEntry(bookings, wallet) {
  const paid = bookings.filter(b => b.mode === 'phase1' && b.wallet.toLowerCase() === wallet.toLowerCase() && BigInt(b.paidUnits || 0) > 0n);
@@ -34,9 +35,9 @@ export function renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, e
    termsLink.rel = 'noopener noreferrer';
    termsLink.textContent = `Open ${b.termsVersion}`;
    const policy = document.createElement('p');
-   if (Number.isInteger(b.airtimeMinutes) && Number.isInteger(b.fullPayoutLiveMinutes)) {
-     policy.textContent = `🎙️ ${b.airtimeMinutes} minutes of airtime. ${b.fullPayoutLiveMinutes} live minutes earns the full fee; shorter sets earn the fee × live minutes ÷ ${b.fullPayoutLiveMinutes} (capped at the fee), and no live minutes earns $0.`;
-   }
+   policy.textContent = livePerformancePolicyText(b);
+   const additional = document.createElement('p');
+   additional.textContent = b.additionalOffer ? `Outside performance escrow: ${b.additionalOffer}` : '';
    const technical = document.createElement('details');
    const technicalSummary = document.createElement('summary');
    technicalSummary.textContent = 'Technical verification details';
@@ -45,6 +46,7 @@ export function renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, e
    technical.append(technicalSummary, termsHash);
    invitation.append(summary, termsLink);
    if (policy.textContent) invitation.append(policy);
+   if (additional.textContent) invitation.append(additional);
    invitation.append(technical);
  }
  if (!b.stewardApproved) {
@@ -117,6 +119,18 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
    article.innerHTML = liveBookingRows([b]);
    if (b.mode === 'phase1' && b.status === 'draft' && !b.cancelled) {
      article.append(renderPerformerBookingInvite({ booking: b, state, wallet, serviceUrl, ethers, fetchImpl }));
+   }
+   const roomUrl = liveAudioRoomUrl(b);
+   if (roomUrl) {
+     const entry = document.createElement('p');
+     const link = document.createElement('a');
+     link.href = roomUrl;
+     link.textContent = 'Open performer audio room';
+     link.setAttribute('data-live-room', 'performer');
+     const notice = document.createElement('small');
+     notice.textContent = 'This link does not grant access. Authorize with the booked performer wallet; hosting may be unavailable. Private checks open at T−70 minutes. Keep the room open while publishing browser audio.';
+     entry.append(link, document.createElement('br'), notice);
+     article.append(entry);
    }
    const button = document.createElement('button');
    const connected = window._wallet?.address || '';

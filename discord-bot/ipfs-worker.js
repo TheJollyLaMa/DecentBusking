@@ -294,6 +294,7 @@ export function createWorkerRequestHandler({
   getPaymentLedger,
   getFunds,
   liveBookings,
+  liveAudio,
   getEarnings,
   getDjukeTopEarners,
   ensResolver,
@@ -467,6 +468,11 @@ export function createWorkerRequestHandler({
     const radioCorsOrigin = radioOrigins.has(origin) ? origin : '';
 
     try {
+      if (requestUrl.pathname.startsWith('/api/live-audio/')) {
+        const { handleLiveAudioRequest } = await import('./live-audio-http.js');
+        await handleLiveAudioRequest(request, response, { service: liveAudio, allowedOrigins });
+        return;
+      }
       if (request.method === 'POST' && ['/api/checkpoint-mirror/claim', '/api/checkpoint-mirror/ack'].includes(requestUrl.pathname)) {
         if (!checkpointMirror) { sendJson(response, 404, { error: 'Checkpoint mirroring is not configured' }); return; }
         const authorization = String(request.headers.authorization || '');

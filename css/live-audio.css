@@ -1,0 +1,8 @@
+.live-audio-fault{position:fixed;z-index:10000;bottom:6rem;left:50%;transform:translateX(-50%);width:min(28rem,90vw);padding:1rem;background:#171410;color:#f4dfb2;border:1px solid #a87c36;border-radius:.5rem}
+.live-audio-color-bars{height:2rem;background:linear-gradient(to right,#bbb 0 14%,#bb0 14% 28%,#0bb 28% 42%,#0b0 42% 56%,#b0b 56% 70%,#b00 70% 84%,#00b 84%)}
+.live-audio-room{max-width:42rem;margin:2rem auto;padding:1rem;background:#171410;color:#f4dfb2;font:16px/1.5 system-ui}
+.live-audio-room button,.live-audio-room select{font:inherit;margin:.3rem;padding:.5rem}
+.live-audio-room fieldset{margin:1rem 0;border:1px solid #a87c36}
+.live-audio-room output{display:block;white-space:pre-wrap;overflow-wrap:anywhere}
+.live-audio-room audio{width:100%}
+.live-audio-room [hidden]{display:none}
