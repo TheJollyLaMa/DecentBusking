@@ -4,6 +4,114 @@ Refs #210, Refs #223. **Booking/payment prototype build complete; live rehearsal
 
 **This runbook does not authorize escrow deposits, payouts, refunds, invitations or schedule changes.** Use a newly agreed future date and performer, not the expired October 23 offer. Do not run a second bot from a development worktree against production secrets.
 
+## Guaranteed audio pilot (application policy; not a new deployed contract)
+
+Select **Audio pilot: guaranteed $20, rehearsal ladder only** when preparing
+this new kind of invitation. Legacy v1/v2 bookings and signed text are unchanged.
+The [pilot terms draft](./LIVE_PERFORMANCE_PILOT_TERMS_V1.json) needs joint review,
+an immutable pin and a verified hash before approval/signing. Selecting the pilot
+clears the incompatible v2 pin and unchecked approval; there is no automatic pin,
+public invitation, calendar write, deposit, task payment or token transfer.
+
+- Use the agreed future start and 11-59 minute duration. Check the actual Friday
+  Hype schedule, not just the form's 9 p.m. New York default.
+- Private soundchecks are T-60 and T-15. Both gate broadcast, not this pilot's pay.
+- The fee is guaranteed regardless of technical outcome. Rehearsal alone scores
+  10% at a qualified verified start, then nine 10% increments every one twelfth
+  of the booked duration. For 20 minutes: $2 at start, then $2 every 100 verified
+  seconds; $18 at 13:20 and $20 at 15:00. Zero start scores zero, not zero pay.
+- Record whole verified seconds and the truthful start result after booked end.
+  The server calculates the rehearsal score separately and requires a full-fee
+  decision. This is neither automatic audio measurement nor on-chain vesting.
+- Cancel only the schedule/broadcast if necessary. Keep escrow funded and
+  approve 100% after the **original booked end**, even for a cancelled show.
+  The pilot UI does not offer a financial-cancellation transaction. Direct
+  contract actions, pause, auto-claim and expiry still operate: any shortfall
+  against the guarantee is a separately owed steward payment, not invented
+  escrow income. Approval must precede the 24-hour review cutoff; afterwards
+  reconcile the performer's automatic full-fee claim.
+- Companion offers are optional public text in the signed invitation. Describe
+  prep payments and gifts with exact conditions and say they are **outside**
+  this USDC escrow. Track/pay them separately with their own receipts. Never
+  describe the token's list price as guaranteed cash value.
+- No recording/archive/video rights are silently inherited from legacy v2.
+
+The revised first-pilot companion gift is conditional: all four prep tasks,
+both passed T-60/T-15 soundchecks and at least 75% verified slot coverage, with
+steward review. Selecting the pilot policy prefills these conditions only in an
+empty additional-offer draft; existing text and signatures are not rewritten.
+Record and jointly review those exact conditions in the new signed additional offer;
+do not edit an already signed invitation. This replaces the earlier unconditional
+participation-gift proposal, not the guaranteed $20 cash fee. The gift remains
+outside the USDC escrow. An admin approval or success animation is not an NFT
+transfer; reconcile inventory and the actual transfer receipt separately.
+
+### Prep calendar and reuse
+
+[DecentCalendar](https://thejollylama.github.io/DecentCalendar/) is a separate
+small-value booking beta, not automatic wallet-to-availability discovery. Its
+published timebox links (`?booking=<actual id>`) and recipient invitations require
+real Base records; creating or copying a link sends no message and holds no seat.
+For paid helper sessions, do not invert the money flow by charging the helper
+an attendance fee. Agree the daily time first; use private local appointments or
+an explicitly approved timebox and share only its actual generated link.
+
+Inspected Calendar `a3b5c360e5e038536c902f1dbd4d4506d496afc2`,
+`decent-calendar-vanilla/js/invitations.js` (`timeboxLink`, `calendarICS`) and
+`booking-client.js`. Reuse the app's existing scheduling/export UX, not its
+attendee-payment contract for performer wages. Canopy's inventory is only a lead.
+Receiving-app booking reuse is `js/live-bookings.mjs`, the existing signed
+booking service, Admin/Profile UI and action badges at Busking `5c1db30`.
+Keep the DecentMarket escrow as deployed: no NFT custody or mid-show payments.
+Focused booking/notification tests cover preserved legacy policies, all ten
+rehearsal thresholds, guaranteed cancellation review and explicit funding state.
+A real audio rehearsal and wallet acceptance/funding/claim are separate gates.
+
+### Exact signed invitation handoff
+
+The agreed Friday slot is November 13, 2026, 21:00–21:20 New York:
+`2026-11-14T02:00:00.000Z`–`2026-11-14T02:20:00.000Z`. Checks are
+20:00 and 20:45 New York. Monday onboarding does not grant early access to this
+Friday media room, create another funded show or require any token purchase.
+
+Use the deployed worker's `GET /api/live-bookings` revision and escrow address.
+From the website's actual allowed origin, the owner signs `liveAuthorization(body)`
+from `js/live-bookings.mjs` and appends the result as `body.signature`. Submit
+`POST /api/live-bookings`, JSON with this shape (replace placeholders, not dates):
+
+```js
+{
+  address: OWNER, origin: location.origin, issuedAt: new Date().toISOString(),
+  command: {
+    action: 'create', id: 'friday-live-performance:2026-11-13:' + crypto.randomUUID(),
+    revision: currentState.revision,
+    booking: {
+      performer: AGREED_WALLET, displayName: AGREED_NAME, title: AGREED_TITLE,
+      eventId: 'friday-live-performance:2026-11-13',
+      startUtc: '2026-11-14T02:00:00.000Z', endUtc: '2026-11-14T02:20:00.000Z',
+      amountUnits: '20000000', airtimeMinutes: 20, mode: 'phase1',
+      payoutPolicy: 'pilot-guaranteed-v1', termsVersion: 'LIVE PERFORMANCE PILOT v1',
+      termsUri: REVIEWED_PIN, termsHash: VERIFIED_CONTENT_HASH, stewardApproved: true,
+      additionalOffer: LIVE_PILOT_COMPANION_OFFER,
+      reviewWindow: 86400, cancellationWindow: 28800, killFeeBps: 10000,
+      claimDeadline: '2026-11-18T02:20:00.000Z'
+    }
+  }
+}
+```
+
+`LIVE_PILOT_COMPANION_OFFER` is the exact exported text: four separate $10 USDC
+tasks and conditional token 75, never an automatic payment/gift. Do not include
+`fullPayoutLiveMinutes`; it is incompatible with this guaranteed policy.
+The HTTP `Origin` must match the signed origin. Signing/creation moves no money.
+The performer signs `liveAcknowledgement(savedBooking)` from the same deployed
+module, then submits `POST /api/live-bookings/acknowledge` with
+`{id: savedBooking.id, address: performerWallet, signature}`. Use the saved record,
+not reconstructed or edited terms. The owner separately signs a `schedule`
+command with the latest revision to publish the dated listing. Acceptance,
+scheduling, exact USDC funding and post-end approval/claim remain separate steps.
+An ETH balance is not USDC funding and grants no permission for a swap.
+
 ## Prototype readiness (verified October 24, 2026)
 
 - Production `/api/live-bookings` reports ready; escrow is configured, unpaused, uses Base USDC, and grants the expected steward the admin role.

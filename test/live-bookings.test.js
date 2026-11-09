@@ -224,6 +224,108 @@ test('20-minute offer calculates prorated payout from verified live minutes serv
  assert.equal(updated.approvedUnits,'9332000');
  assert.equal(updated.remainderUnits,'10668000');
 });
+const pilotInput = () => ({
+ ...input(), mode:'phase1', termsVersion:'LIVE PERFORMANCE PILOT v1', payoutPolicy:'pilot-guaranteed-v1',
+ airtimeMinutes:20, endUtc:'2026-10-24T01:20:00Z', reviewWindow:86400, cancellationWindow:28800,
+ killFeeBps:10000, claimDeadline:'2026-10-28T01:20:00Z', discordHandle:'',
+ additionalOffer:'Four $10 prep tasks, paid separately; one supporter gift for participation, not contingent on technical success.',
+});
+test('pilot rehearsal has all ten rungs, exact 75% completion and no invented start',async()=>{
+ const {liveRehearsalPayoutBps}=await import('../js/live-bookings.mjs');
+ assert.equal(liveRehearsalPayoutBps(0,1200,false),0);
+ for (let step=0;step<10;step++) assert.equal(liveRehearsalPayoutBps(step*100,1200,true),(step+1)*1000);
+ assert.equal(liveRehearsalPayoutBps(799,1200,true),8000);
+ assert.equal(liveRehearsalPayoutBps(800,1200,true),9000);
+ assert.equal(liveRehearsalPayoutBps(899,1200,true),9000);
+ assert.equal(liveRehearsalPayoutBps(900,1200,true),10000);
+ assert.equal(liveRehearsalPayoutBps(1200,1200,true),10000);
+ for(const duration of [660,1200,1800,3540]) {
+  for(let step=1;step<=9;step++) {
+   const threshold=Math.ceil(duration*step/12);
+   assert.equal(liveRehearsalPayoutBps(threshold-1,duration,true),step*1000);
+   assert.equal(liveRehearsalPayoutBps(threshold,duration,true),(step+1)*1000);
+  }
+ }
+ for(const args of [[1,1200,false],[-1,1200,true],[1201,1200,true],[1.5,1200,true],[0,0,true],[0,1200,undefined],[null,1200,true],['0',1200,true]]) {
+  assert.throws(()=>liveRehearsalPayoutBps(...args),/verified start/);
+ }
+});
+test('new pilot companion draft binds the revised conditional gift without weakening guaranteed cash or old signatures',async()=>{
+ const f=await fixture({escrowAddress:owner.address,escrowStartBlock:100});
+ const offer=f.shared.LIVE_PILOT_COMPANION_OFFER;
+ assert.ok(offer.length<=1000);
+ assert.match(offer,/all four prep tasks/);
+ assert.match(offer,/both passed T-60 and T-15 soundchecks/);
+ assert.match(offer,/at least 75% verified website-radio slot coverage/);
+ assert.match(offer,/\$20 pilot cash fee remains guaranteed/);
+ const b=(await f.create({...pilotInput(),additionalOffer:offer},'live:success-gift')).bookings[0];
+ assert.ok(f.shared.liveAcknowledgement(b).includes(offer));
+ assert.notEqual(f.shared.liveAcknowledgement({...b,additionalOffer:pilotInput().additionalOffer}),f.shared.liveAcknowledgement(b));
+});
+test('pilot policy signs guarantee and companion offer without changing legacy agreements',async()=>{
+ const f=await fixture({escrowAddress:owner.address,escrowStartBlock:100});
+ const b=(await f.create(pilotInput(),'live:pilot')).bookings[0];
+ assert.equal(b.payoutPolicy,'pilot-guaranteed-v1');
+ assert.equal(b.fullPayoutLiveMinutes,undefined);
+ assert.equal(b.additionalOffer,pilotInput().additionalOffer);
+ assert.equal(b.stewardApproved,false);
+ const text=f.shared.liveAcknowledgement(b);
+ assert.match(text,/Guaranteed pilot fee: \$20.00 USDC/);
+ assert.match(text,/every 100 verified seconds/);
+ assert.match(text,/60 and 15 minutes/);
+ assert.match(text,/Four \$10 prep tasks/);
+ assert.doesNotMatch(text,/no live minutes earns \$0/);
+ assert.notEqual(f.shared.liveAcknowledgement({...b,additionalOffer:'Different gift'}),text);
+ await f.ack();
+ assert.equal((await f.service.getState()).bookings[0].acknowledged,true);
+ const rows=f.shared.liveBookingRows([{...b,additionalOffer:'<script>gift</script>'}]);
+ assert.match(rows,/&lt;script&gt;/);
+ assert.match(rows,/see confirmed funding status/);
+ assert.match(f.shared.liveAcknowledgement({...input(),wallet:performer.address}),/agreement v1/);
+});
+test('pilot rejects incompatible legacy terms, policy, custody and contract parameters',async()=>{
+ const f=await fixture({escrowAddress:owner.address,escrowStartBlock:100});
+ const changes=[
+  {payoutPolicy:'unknown'}, {payoutPolicy:undefined}, {termsVersion:'LIVE PERFORMANCE v2'},
+  {termsHash:f.shared.LIVE_APPROVED_TERMS_V2.hash}, {termsUri:f.shared.LIVE_APPROVED_TERMS_V2.uri},
+  {fullPayoutLiveMinutes:15},{mode:'phase0'},{amountUnits:'10000000'},{endUtc:'2026-10-24T01:21:00Z'},
+  {airtimeMinutes:10},{airtimeMinutes:60},{reviewWindow:1},{cancellationWindow:0},
+  {killFeeBps:5000},{claimDeadline:'2026-10-29T01:20:00Z'},{additionalOffer:'x'.repeat(1001)},
+ ];
+ for(const change of changes) await assert.rejects(f.create({...pilotInput(),...change},'live:bad-pilot'));
+ const b=(await f.create({...pilotInput(),airtimeMinutes:30,endUtc:'2026-10-24T01:30:00Z',claimDeadline:'2026-10-28T01:30:00Z'},'live:30-minute-pilot')).bookings[0];
+ assert.match(f.shared.liveAcknowledgement(b),/every 150 verified seconds/);
+ assert.match(f.shared.liveAcknowledgement(b),/22.5 minutes/);
+});
+test('funded pilot pays full fee even with zero coverage or schedule cancellation, never before booked end',async()=>{
+ for(const cancelled of [false,true]) {
+  const f=await fixture({escrowAddress:owner.address,escrowStartBlock:100});
+  await f.create(pilotInput(),'live:pilot'); await f.ack();
+  const snapshot=structuredClone(f.stored());
+  snapshot.bookings[0].status='funded';
+  snapshot.bookings[0].cancelled=cancelled;
+  const {createLiveBookings}=await import('../discord-bot/live-bookings.js');
+  const service=createLiveBookings({...f.cfg,restore:async()=>snapshot});
+  const b=snapshot.bookings[0];
+  const decision={action:'decision',id:b.id,revision:snapshot.revision,payoutBps:10000,verifiedSeconds:0,verifiedStart:false,
+   reason:'No verified audio; guarantee honored honestly',reportUri:'ipfs://pilotreport',remainderDisposition:'None'};
+  f.time(Date.parse(b.endUtc)-1);
+  await assert.rejects(service.execute(decision),/funded completed/);
+  f.time(Date.parse(b.endUtc));
+  await assert.rejects(service.execute({...decision,payoutBps:0}),/guarantees the full fee/);
+  await assert.rejects(service.execute({...decision,verifiedSeconds:1}),/verified start/);
+  const result=await service.execute(decision);
+  const reviewed=result.bookings[0];
+  assert.equal(reviewed.approvedUnits,'20000000');
+  assert.equal(reviewed.remainderUnits,'0');
+  assert.equal(reviewed.decision.rehearsalPayoutBps,0);
+  assert.equal(reviewed.status,'funded');
+  assert.match(reviewed.financialStatus,/not yet confirmed/);
+  assert.match(f.shared.liveBookingRows([reviewed]),/0 verified seconds, 0% simulated/);
+  f.time(Date.parse(b.endUtc)+86400000);
+  await assert.rejects(service.execute({...decision,revision:result.revision}),/Review window ended/);
+ }
+});
 test('pending, reverted, insufficient confirmation, successful funding and payout evidence',async()=>{
  const f=await fixture(); await f.create(); await f.ack();
  const id=(await f.service.getState()).bookings[0].id;

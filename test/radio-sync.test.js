@@ -4,6 +4,25 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+test('cached radio importers resolve to one cache-busted live-audio controller', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const match = html.match(/<script type="importmap">\s*([\s\S]*?)<\/script>/);
+  assert.ok(match);
+  assert.ok(match.index < html.indexOf('<script type="module"'));
+  const base = 'https://radio.example/index.html';
+  const imports = new Map(Object.entries(JSON.parse(match[1]).imports).map(([key, value]) =>
+    [new URL(key, base).href, new URL(value, base).href]));
+  for (const file of ['stage.js', 'nft-card.js', 'devert-site.mjs', 'djuke.mjs', 'listens.mjs']) {
+    const source = fs.readFileSync(path.join(__dirname, '../js', file), 'utf8');
+    const references = [...source.matchAll(/['"](\.\/radio-sync\.js[^'"]*)['"]/g)];
+    assert.ok(references.length, file);
+    for (const [, reference] of references) {
+      const url = new URL(reference, `https://radio.example/js/${file}`).href;
+      assert.equal(imports.get(url) || url, 'https://radio.example/js/radio-sync.js?v=20261108-live-audio-pilot');
+    }
+  }
+});
+
 function radioSyncSource() {
   const formatter = fs.readFileSync(path.join(__dirname, '../js/usdc-format.mjs'), 'utf8')
     .replace('export function formatUsdcUnits', 'function _formatUsdcUnits');
@@ -12,8 +31,37 @@ function radioSyncSource() {
     .replace(/export /g, '');
   const shared = fs.readFileSync(path.join(__dirname, '../js/radio-client.mjs'), 'utf8')
     .replace(/export /g, '').replace('function sendRadioVote(', 'function sharedRadioVote(');
-  return `const DEVERT_MAX_AD_SECONDS = 120;\n${formatter}\n${shared}\n${source}`;
+  return `const DEVERT_MAX_AD_SECONDS = 120;
+    const createLiveAudioListener = () => ({ update() {}, disconnect() { return Promise.resolve(); }, play() {} });
+    const createLiveAudioFaultSlate = () => ({ play() {}, stop() {} });
+    \n${formatter}\n${shared}\n${source}`;
 }
+
+test('live audio handoff stops the current website recording and invalidates preloads/takeovers before attaching', () => {
+  const audio = { paused: false, muted: false, volume: 0.1, pause() { this.paused = true; }, removeAttribute() {}, load() {} };
+  const context = vm.createContext({ console, audio, performance: { now: () => 0 }, clearTimeout() {}, setTimeout() { return 1; } });
+  vm.runInContext(`${radioSyncSource()}
+    _audio = audio; _audioPlayer = audio; _radioMuted = false; _radioVolume = 0.1;
+    _radio = { playId: 'old-recording' }; _loadedPlayId = 'old-recording';
+    _mode = 'takeover'; _takeoverQueue.push({ trackId: 'new-upload' });
+    _broadcastNowPlayingStopped = () => {}; _notifyRadioSourceMode = () => {};
+    _renderSponsorTag = () => {}; _renderVoting = () => {}; _setTrack = () => {}; _setActivity = () => {};
+    _liveAudioListener = { update() { globalThis.updated = true; }, disconnect() { return Promise.resolve(); } };
+    _radioState = { liveAudio: { bookingId: 'booked', phase: 'live', armed: true,
+      policy: { mode: 'live', bookingId: 'booked', title: 'Real live audio' } } };
+    _syncRadio();
+    globalThis.result = { active: _liveAudioActive, mode: _mode, queue: _takeoverQueue.length,
+      loaded: _loadedPlayId, token: _switchToken, radio: _radio };
+  `, context);
+  assert.equal(audio.paused, true);
+  assert.equal(context.updated, true);
+  assert.equal(context.result.active, true);
+  assert.equal(context.result.mode, 'radio');
+  assert.equal(context.result.queue, 0);
+  assert.equal(context.result.loaded, null);
+  assert.equal(context.result.radio, null);
+  assert.ok(context.result.token > 0);
+});
 
 function adClockHarness() {
   let time = 0;

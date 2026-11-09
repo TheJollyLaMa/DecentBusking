@@ -2,7 +2,8 @@ import { Contract, Interface, id, verifyMessage } from 'ethers';
 import {
   LIVE_FUND, LIVE_ROUTER, LIVE_USDC, LIVE_ESCROW_ABI,
   LIVE_PERFORMANCE_AIRTIME_MINUTES, LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES, LIVE_PERFORMANCE_FEE_UNITS,
-  liveAcknowledgement, livePerformancePayoutBps, workReference,
+  LIVE_PILOT_POLICY, LIVE_PILOT_TERMS_VERSION, LIVE_APPROVED_TERMS_V2,
+  liveAcknowledgement, livePerformancePayoutBps, liveRehearsalPayoutBps, workReference,
 } from '../js/live-bookings.mjs';
 import { cancelLivePerformanceEvent, upsertLivePerformanceEvent } from '../js/radio-schedule.mjs';
 
@@ -200,7 +201,20 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
         if (!/^[1-9][0-9]*$/.test(amount)) throw new Error('Amount must be positive USDC base units');
         let airtimeMinutes;
         let fullPayoutLiveMinutes;
-        if (input.airtimeMinutes !== undefined || input.fullPayoutLiveMinutes !== undefined) {
+        const pilot = input.payoutPolicy === LIVE_PILOT_POLICY;
+        if (input.payoutPolicy !== undefined && !pilot) throw new Error('Unknown payout policy');
+        if (!pilot && input.termsVersion === LIVE_PILOT_TERMS_VERSION) throw new Error('Pilot terms require the guaranteed pilot payout policy');
+        if (pilot) {
+          airtimeMinutes = integer(input.airtimeMinutes, 11, 59, 'pilot airtime minutes');
+          if (end - start !== airtimeMinutes * 60_000 || amount !== LIVE_PERFORMANCE_FEE_UNITS ||
+              input.fullPayoutLiveMinutes !== undefined || input.mode !== 'phase1') {
+            throw new Error('Guaranteed pilot requires $20 booking escrow and the exact slot duration, not a prorated policy');
+          }
+          if (input.termsVersion !== LIVE_PILOT_TERMS_VERSION ||
+              lower(input.termsHash) === lower(LIVE_APPROVED_TERMS_V2.hash) || input.termsUri === LIVE_APPROVED_TERMS_V2.uri) {
+            throw new Error('Pin and approve fresh pilot terms; v2 terms are incompatible');
+          }
+        } else if (input.airtimeMinutes !== undefined || input.fullPayoutLiveMinutes !== undefined) {
           airtimeMinutes = integer(input.airtimeMinutes, 1, 240, 'airtime minutes');
           fullPayoutLiveMinutes = integer(input.fullPayoutLiveMinutes, 1, airtimeMinutes, 'full-payout live minutes');
           if (airtimeMinutes !== LIVE_PERFORMANCE_AIRTIME_MINUTES ||
@@ -217,13 +231,17 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
         const killFeeBps = integer(input.killFeeBps, 0, 10000, 'kill fee');
         const claimDeadline = Date.parse(input.claimDeadline);
         if (!Number.isFinite(claimDeadline) || claimDeadline <= end + reviewWindow * 1000) throw new Error('Claim deadline must follow automatic review window');
+        if (pilot && (reviewWindow !== 86400 || cancellationWindow !== 28800 || killFeeBps !== 10000 ||
+            claimDeadline !== end + 4 * 86400_000)) throw new Error('Pilot terms require 24-hour review, eight-hour cancellation window, 100% late kill fee and three further days to claim');
         b = { id: bookingId, wallet, ens: addressPattern.test(performer) ? '' : performer,
-          displayName: required(input.displayName, 'Display name', 80), discordHandle: required(input.discordHandle, 'Discord handle', 80),
+          displayName: required(input.displayName, 'Display name', 80), discordHandle: input.discordHandle ? required(input.discordHandle, 'Discord handle', 80) : '',
           eventId, title: required(input.title, 'Show title', 80), startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(),
           amountUnits: amount, asset: 'USDC', chainId: 8453, mode, termsVersion: required(input.termsVersion, 'Terms version', 80),
           termsHash: input.termsHash, termsUri: uri(input.termsUri, 'Terms URI'), termsStatus: 'DRAFT pending steward approval',
           stewardApproved: input.stewardApproved === true,
-          ...(airtimeMinutes ? { airtimeMinutes, fullPayoutLiveMinutes } : {}),
+          ...(pilot ? { payoutPolicy: LIVE_PILOT_POLICY, airtimeMinutes,
+            additionalOffer: input.additionalOffer ? required(input.additionalOffer, 'Additional offer', 1000) : '' }
+            : airtimeMinutes ? { airtimeMinutes, fullPayoutLiveMinutes } : {}),
           reviewWindow, cancellationWindow, killFeeBps, claimDeadline: new Date(claimDeadline).toISOString(),
           status: 'draft', transactions: {}, createdAt: new Date(now()).toISOString() };
         if (b.stewardApproved) b.termsStatus = 'Steward-approved; awaiting performer acknowledgement';
@@ -245,11 +263,20 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
           if (command.txAction === 'payout' && (!b.decision || b.mode !== 'phase0')) throw new Error('Phase 0 payment requires a recorded completion decision');
           await reconcile(next, b, command.txAction, command.txHash);
         } else if (action === 'decision') {
-          const cancellation = command.cancellation === true && b.cancelled;
-          if (b.status !== 'funded' || !cancellation && (b.cancelled || now() < Date.parse(b.endUtc))) throw new Error('Review requires a funded completed show or cancelled booking');
-          const liveMusicMinutes = b.airtimeMinutes && !cancellation
+          const pilot = b.payoutPolicy === LIVE_PILOT_POLICY;
+          const cancellation = !pilot && command.cancellation === true && b.cancelled;
+          if (b.status !== 'funded' || !cancellation && ((!pilot && b.cancelled) || now() < Date.parse(b.endUtc))) throw new Error('Review requires a funded completed show or cancelled booking');
+          if (pilot && now() >= Date.parse(b.endUtc) + b.reviewWindow * 1000) throw new Error('Review window ended; reconcile the full-fee performer claim instead');
+          let rehearsal;
+          if (pilot) {
+            const verifiedSeconds = command.verifiedSeconds;
+            const rehearsalPayoutBps = liveRehearsalPayoutBps(verifiedSeconds, b.airtimeMinutes * 60, command.verifiedStart);
+            if (command.payoutBps !== 10000) throw new Error('This pilot guarantees the full fee; rehearsal coverage cannot reduce payment');
+            rehearsal = { verifiedSeconds, verifiedStart: command.verifiedStart, rehearsalPayoutBps };
+          }
+          const liveMusicMinutes = b.airtimeMinutes && !cancellation && !pilot
             ? integer(command.liveMusicMinutes, 0, b.airtimeMinutes, 'verified live-music minutes') : null;
-          const bps = liveMusicMinutes === null
+          const bps = pilot ? 10000 : liveMusicMinutes === null
             ? integer(command.payoutBps, 0, 10000, 'payout basis points')
             : livePerformancePayoutBps(liveMusicMinutes, b.fullPayoutLiveMinutes);
           if (cancellation && (BigInt(b.amountUnits) * BigInt(bps) / 10000n).toString() !== b.cancellationFeeUnits) throw new Error('Cancellation decision must match agreed kill-fee consequence');
@@ -258,7 +285,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
           if (b.mode === 'phase0' && !hashPattern.test(command.reportHash || '')) throw new Error('Pinned report content hash required for Phase 0 payout metadata');
           b.reportHash = command.reportHash || '';
           b.remainderDisposition = required(command.remainderDisposition, 'Remainder disposition');
-          b.decision = { payoutBps: bps, ...(liveMusicMinutes === null ? {} : { liveMusicMinutes }), at: new Date(now()).toISOString() };
+          b.decision = { payoutBps: bps, ...rehearsal, ...(liveMusicMinutes === null ? {} : { liveMusicMinutes }), at: new Date(now()).toISOString() };
           b.approvedUnits = (BigInt(b.amountUnits) * BigInt(bps) / 10000n).toString();
           b.remainderUnits = (BigInt(b.amountUnits) - BigInt(b.approvedUnits)).toString();
           b.financialStatus = b.mode === 'phase0' ? 'Decision recorded; router payment/recovery requires separate confirmed transaction' : 'Decision proposal; escrow approval/refund not yet confirmed';
@@ -271,6 +298,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
           b.cancellationFeeUnits = late ? (BigInt(b.amountUnits) * BigInt(b.killFeeBps) / 10000n).toString() : '0';
           b.financialStatus = b.status === 'draft' ? 'No confirmed deposit; verify any pending wallet transaction' : 'Pending separate financial reconciliation; schedule cancellation does not move funds';
           if (now() >= Date.parse(b.startUtc)) b.financialStatus += '; show started: escrow pre-show cancel unavailable, review/reject after end';
+          if (b.payoutPolicy === LIVE_PILOT_POLICY) b.financialStatus = 'Pilot fee remains guaranteed; keep escrow funded and approve the full fee after the original booked end. Do not execute a financial cancellation.';
         } else if (action !== 'schedule') throw new Error('Unknown booking action');
       }
       if (action === 'schedule' || action === 'cancel') await syncSchedule(next, b);

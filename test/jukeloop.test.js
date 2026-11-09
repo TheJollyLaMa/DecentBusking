@@ -921,6 +921,7 @@ test('main-radio ad countdown reports shared scheduler state without browser-sid
     process,
     console,
     resolveActiveShow: radioSchedule.resolveActiveShow,
+    applyLiveAudioShow: (await import('../js/live-audio.mjs')).applyLiveAudioShow,
     DEVERT_SONGS_PER_MAIN_AD: 10,
   });
   vm.runInContext(source, context);

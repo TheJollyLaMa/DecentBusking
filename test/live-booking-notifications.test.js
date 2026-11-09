@@ -62,6 +62,15 @@ test('cancellation reconciliation and independent booking counts are preserved',
  const invites = state(booking, { ...booking, id: 'live:second' });
  assert.equal(liveBookingActions(invites, performer, owner, now).schedule.length, 2);
 });
+test('cancelled guaranteed pilot waits for booked end and prompts full-fee review, not financial cancellation', async () => {
+ const { liveBookingActions } = await import('../js/live-booking-notifications.mjs');
+ const end = Date.parse(booking.endUtc);
+ const b = { ...booking, payoutPolicy:'pilot-guaranteed-v1', cancelled:true, status:'funded' };
+ assert.equal(liveBookingActions(state(b),owner,owner,end-1).admin.length,0);
+ assert.match(liveBookingActions(state(b),owner,owner,end).admin[0].label,/guaranteed pilot fee/);
+ assert.equal(liveBookingActions(state(b),owner,owner,end+86400000).admin.length,0);
+ assert.equal(liveBookingActions(state(b),performer,owner,end+86400000).profile.length,1);
+});
 
 test('waiting for the other party and pending review/claim confirmations never light action badges', async () => {
  const { liveBookingActions } = await import('../js/live-booking-notifications.mjs');
@@ -90,7 +99,7 @@ test('booking and mint notification timers use five-minute checks, with no fifte
 });
 
 test('notification polling starts on connection, runs at five minutes, and ignores disconnected responses', async () => {
- const { claimState } = await import('../js/live-bookings.mjs');
+ const { claimState, LIVE_PILOT_POLICY } = await import('../js/live-bookings.mjs');
  const listeners = new Map();
  const timers = new Map();
  const requests = [];
@@ -110,7 +119,7 @@ test('notification polling starts on connection, runs at five minutes, and ignor
  };
  const window = { _wallet: {}, DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example', adminWalletAddress: owner } };
  const context = vm.createContext({
-  document, window, claimState, isAdminWallet: () => false, localStorage: { getItem: () => null },
+  document, window, claimState, LIVE_PILOT_POLICY, isAdminWallet: () => false, localStorage: { getItem: () => null },
   queueMicrotask, console, AbortSignal,
   MutationObserver: class { observe() {} },
   CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
@@ -143,7 +152,7 @@ test('notification polling starts on connection, runs at five minutes, and ignor
 });
 
 test('worker funding and booking badges aggregate only at admin anchors', async () => {
- const { claimState } = await import('../js/live-bookings.mjs');
+ const { claimState, LIVE_PILOT_POLICY } = await import('../js/live-bookings.mjs');
  const listeners = new Map(), badges = new Map();
  const target = () => ({
   classList: { add() {} }, querySelector() { return this.badge; },
@@ -169,7 +178,7 @@ test('worker funding and booking badges aggregate only at admin anchors', async 
  badges.set('.live-performance-admin-summary', bookingPanel);
  const context = vm.createContext({
   document, window: { _wallet: { address: owner }, DecentConfig: { adminWalletAddress: owner } },
-  claimState, isAdminWallet: () => isAdmin, localStorage: { getItem: () => null },
+  claimState, LIVE_PILOT_POLICY, isAdminWallet: () => isAdmin, localStorage: { getItem: () => null },
   queueMicrotask, console, MutationObserver: class { observe() {} },
   setInterval() {}, clearInterval() {},
   Date: class extends Date { static now() { return now; } },

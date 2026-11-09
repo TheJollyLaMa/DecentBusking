@@ -4,3 +4,6 @@ discord-bot/jukeloop-playlist.json
 agent-service/access.json
 agent-service/approval.json
 agent-service/state.sqlite*
+.npm-cache/
+discord-bot/live-audio-state.json*
+discord-bot/.env.live-audio.local

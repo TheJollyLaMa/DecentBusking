@@ -12,11 +12,12 @@
     "mint-queue": "node mint-queue.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.19.0",
+    "@livekit/rtc-node": "1.2.1",
     "acorn": "^8.19.0",
     "cheerio": "^1.2.0",
     "discord.js": "^14.16.0",
@@ -24,6 +25,8 @@
     "ethers": "^6.17.0",
     "ffmpeg-static": "^5.3.0",
     "ipfs-unixfs-importer": "^17.1.1",
+    "livekit-client": "2.23.0",
+    "livekit-server-sdk": "2.19.2",
     "multiformats": "^13.4.2",
     "opusscript": "^0.0.8",
     "tweetnacl": "^1.0.3"
