@@ -139,6 +139,13 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /live-performance-admin\.mjs\?v=20261108-live-audio-pilot/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261108-live-audio-pilot/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261108-live-audio-pilot"/);
+  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261108-live-audio-pilot"/);
+  const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
+  assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
+    './js/radio-schedule-ui.mjs?v=20261108-live-audio-pilot');
+  assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],
+    './js/fund-display.mjs?v=20261108-live-audio-pilot');
 });
 
 test('production live audio reuses encrypted mirrored storage, never an ephemeral file path', () => {
