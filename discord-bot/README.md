@@ -1048,3 +1048,21 @@ discord-bot/
   .env.example             ← template for required environment variables
   README.md                ← this file
 ```
+# Calendar booking gifts (optional)
+
+`DCAL_REWARDS_ENABLED=true` enables the ten-copy DCal first-booking relay using
+the existing server-only `DJUKE_FULFILLER_PRIVATE_KEY`, pinned
+`DCAL_REWARDS_ADDRESS` and `DCAL_REWARDS_RUNTIME_HASH`, Pinata and
+`CHECKPOINT_MIRROR_SECRET`. Defaults off. Restore the mirrored signed-transaction
+journal before any DJuke/DVert sends; uncertain receipts stop nonce reuse.
+The caller cannot redirect the contract's guest recipient. Retain at least
+0.001 ETH for DJuke; the separate relay cap is 0.0007 ETH, with 0.0003 ETH
+reserved for approved setup. No extra top-up or activation is implied.
+Keep the gift vault inactive until the Calendar release and real wallet
+rehearsal are ready. Never run a second production worker from a worktree.
+
+Reuse: the isolated `feat/within-live-audio-pilot` uncommitted
+`calendar-rewards.js:createCalendarRewardWorker` and
+`worker-signing.js:createWorkerSigningCoordinator` are promoted without the
+unfinished media/booking policy changes. Existing `ipfs-state.js` and
+`checkpoint-mirror.js` preserve durable-before-broadcast recovery.

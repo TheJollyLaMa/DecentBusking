@@ -61,6 +61,8 @@ import { DISCORD_REST_OPTIONS, loginDiscordClient, recoverDiscordConnection, wat
 import { createDiscordDiagnostics } from './discord-diagnostics.js';
 import { DEFAULT_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
 import { createWorkerReserve } from './worker-reserve.js';
+import { createWorkerSigningCoordinator } from './worker-signing.js';
+import { createCalendarRewardWorker } from './calendar-rewards.js';
 import { createPinataStateStore, recoverVerifiedPlaylistBaseline } from './ipfs-state.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
@@ -563,6 +565,8 @@ const SLASH_COMMANDS = [
 // ── Main ───────────────────────────────────────────────────────────────────────
 async function main() {
   const config = loadConfig();
+  const calendarRewardsEnabled = process.env.DCAL_REWARDS_ENABLED === 'true';
+  const workerSigning = createWorkerSigningCoordinator({enabled:calendarRewardsEnabled});
   config.checkpointStorage = config.pinataJwt ? await ensureCheckpointGroups({ pinataJwt: config.pinataJwt }) : {};
   const discordAbort = new AbortController();
   const discordCooldownStore = config.pinataJwt ? createPinataStateStore({
@@ -575,6 +579,42 @@ async function main() {
   const discordDiagnostics = createDiscordDiagnostics({ store: discordCooldownStore });
   const checkpointMirror = process.env.CHECKPOINT_MIRROR_SECRET
     ? createCheckpointMirror({ secret: process.env.CHECKPOINT_MIRROR_SECRET }) : null;
+  if (calendarRewardsEnabled) {
+    if (!process.env.DJUKE_FULFILLER_PRIVATE_KEY || !config.pinataJwt || !checkpointMirror ||
+        !process.env.DCAL_REWARDS_ADDRESS || !process.env.DCAL_REWARDS_RUNTIME_HASH) {
+      throw new Error('Calendar promotion requires reviewed reward pin, existing DJuke signer and durable mirrored checkpoints.');
+    }
+    const rewardProvider = getRpcRouter().provider('critical','calendar-rewards');
+    const rewardSigner = workerSigning.wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY,rewardProvider);
+    const rewardStore = createPinataStateStore({...config.checkpointStorage,pinataJwt:config.pinataJwt,
+      uploadUrl:config.pinataApiUrl,filesApiUrl:config.pinataFilesApiUrl,gateway:config.ipfsGateway,
+      name:`dcal-rewards-${process.env.DCAL_REWARDS_ADDRESS.toLowerCase()}.json`,requireLocalMirror:true,restoreLatestOnly:true,
+      tags:{app:'decentbusking',kind:`dcal-rewards-${process.env.DCAL_REWARDS_ADDRESS.toLowerCase()}`,schema:'1'},
+      serialize:value=>value,deserialize:value=>value,beforeUpload:(bytes,options)=>checkpointMirror.mirror(bytes,options)});
+    const rewardWorker = createCalendarRewardWorker({provider:rewardProvider,signer:rewardSigner,coordinator:workerSigning,
+      address:process.env.DCAL_REWARDS_ADDRESS,runtimeCodeHash:process.env.DCAL_REWARDS_RUNTIME_HASH,
+      minimumReserveWei: process.env.WORKER_MIN_BALANCE_WEI && BigInt(process.env.WORKER_MIN_BALANCE_WEI)>1_000_000_000_000_000n
+        ? BigInt(process.env.WORKER_MIN_BALANCE_WEI) : 1_000_000_000_000_000n,
+      restore:rewardStore.restore,save:rewardStore.save});
+    await rewardWorker.initialize();
+    try {
+      const initialStatus = await rewardWorker.check();
+      const state = initialStatus.reason ? `paused: ${initialStatus.reason}`
+        : initialStatus.pending ? `pending: ${initialStatus.pending}` : 'ready';
+      console.info(`[calendar-rewards] Worker initialized; ${state}; contract=${process.env.DCAL_REWARDS_ADDRESS}; worker=${rewardSigner.address}`);
+    } catch (error) {
+      console.error('[calendar-rewards] Worker initialized; initial readiness check failed:',error.shortMessage || error.message);
+    }
+    let lastScan=Date.now();
+    const runRewards = async () => {
+      if (!rewardWorker.status().pendingHash && Date.now()-lastScan<30000) return;
+      lastScan=Date.now();
+      try { await rewardWorker.check(); }
+      catch (error) { console.error('[calendar-rewards] Automatic delivery unavailable:',error.shortMessage || error.message); }
+    };
+    void runRewards();
+    setInterval(()=>{void runRewards();},2000).unref();
+  }
   const devertSchedulerPrivateKey = resolveDevertSchedulerPrivateKey();
   let readDevertState;
   if (process.env.CONTENT_REVIEW_STORAGE_KEY) {
@@ -649,7 +689,7 @@ async function main() {
     }
   }
   if (readDevertState && devertSchedulerPrivateKey && config.pinataJwt) {
-    const scheduler = new Wallet(devertSchedulerPrivateKey, getRpcRouter().provider('critical', 'devert-scheduler'));
+    const scheduler = workerSigning.wallet(devertSchedulerPrivateKey, getRpcRouter().provider('critical', 'devert-scheduler'));
     const contract = new Contract(process.env.DEVERT_CONTRACT_ADDRESS, DEVERT_ABI, scheduler);
     if (process.env.DEVERT_CONTRACT_VERSION === '0.2') {
       const djukeWorker = new Contract(process.env.DJUKE_CONTRACT_ADDRESS, ['function gasWorker() view returns(address)'], scheduler.provider);
@@ -1275,7 +1315,7 @@ async function main() {
     setInterval(budgetPaced(syncDevertDjukeBoosts), 60_000).unref();
   }
   if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY) {
-    const worker = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-registrar'));
+    const worker = workerSigning.wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-registrar'));
     const registerSongs = createDjukeSongRegistrar({ contract: new Contract(djukeAddress, DJUKE_ABI, worker),
       getPlaylist: () => (playlistReady ? getPlaybackPlaylist() : []), onRegistered: songIds => readDjukeState.invalidate(songIds) });
     const runRegistrar = () => registerSongs().catch(error => console.warn('[djuke] Song registration deferred:', error.shortMessage || error.message));
@@ -1283,7 +1323,7 @@ async function main() {
     setInterval(budgetPaced(runRegistrar), 120_000).unref();
   }
   if (readDjukeState && process.env.DJUKE_FULFILLER_PRIVATE_KEY && checkpointMirror && config.pinataJwt) {
-    const fulfiller = new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-fulfiller'));
+    const fulfiller = workerSigning.wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-fulfiller'));
     const journalStore = createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
       filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway, name: 'decentbusking-djuke-journal.json',
       requireLocalMirror: playlistBatchWorkerEnabled,
@@ -1367,7 +1407,7 @@ async function main() {
       },
       getApprovedCampaignIds: () => approvedAdCampaignIds.filter(id => !campaignContentBlocked(id)), cacheMs: 5000 });
     if (canFulfill) {
-      const worker = new Wallet(devertSchedulerPrivateKey, provider);
+      const worker = workerSigning.wallet(devertSchedulerPrivateKey, provider);
       const queueContract = new Contract(paidAdAddress, devertQueueAbi(paidAdVersion), worker);
       if ((await queueContract.campaigns()).toLowerCase() !== process.env.DEVERT_CONTRACT_ADDRESS?.toLowerCase()) {
         throw new Error('Paid advert queue uses a different campaign contract');
