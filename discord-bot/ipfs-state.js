@@ -142,6 +142,7 @@ export function createPinataStateStore({
   tags = STATE_KEYVALUES,
   retainSnapshots = SNAPSHOTS_TO_KEEP,
   restoreLatestOnly = false,
+  rejectAmbiguousLatest = false,
   groupId,
   archiveGroupId,
   retentionDays = 0,
@@ -261,6 +262,11 @@ export function createPinataStateStore({
   async function restore() {
     const snapshots = await listSnapshots();
     if (!snapshots.length) return null;
+    if (rejectAmbiguousLatest && (snapshots.some(file => !Number.isFinite(Date.parse(file.created_at || ''))) ||
+        snapshots.length > 1 && Date.parse(snapshots[0].created_at) === Date.parse(snapshots[1].created_at) &&
+          snapshots[0].cid !== snapshots[1].cid)) {
+      throw new Error('Ambiguous latest checkpoint');
+    }
 
     const failures = [];
     const candidates = snapshots.slice(0, restoreLatestOnly ? 1 : MAX_RESTORE_CANDIDATES);

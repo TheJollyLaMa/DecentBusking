@@ -295,6 +295,7 @@ export function createWorkerRequestHandler({
   getFunds,
   liveBookings,
   liveAudio,
+  rehearsal,
   getEarnings,
   getDjukeTopEarners,
   ensResolver,
@@ -468,6 +469,11 @@ export function createWorkerRequestHandler({
     const radioCorsOrigin = radioOrigins.has(origin) ? origin : '';
 
     try {
+      if (requestUrl.pathname.startsWith('/api/private-rehearsal/')) {
+        const { handleRehearsalRequest } = await import('./rehearsal-http.js');
+        await handleRehearsalRequest(request, response, { service: rehearsal, allowedOrigins });
+        return;
+      }
       if (requestUrl.pathname.startsWith('/api/live-audio/')) {
         const { handleLiveAudioRequest } = await import('./live-audio-http.js');
         await handleLiveAudioRequest(request, response, { service: liveAudio, allowedOrigins });

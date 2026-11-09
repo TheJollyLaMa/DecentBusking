@@ -45,17 +45,70 @@ credentials out of chat, and both enable flags false until hosting/quota/storage
 approval. Calendar deployment uses its own ignored `.env` in the Calendar
 feature worktree; the two applications do not share keys or credentials.
 
-Friday's room cannot be used for Monday rehearsal: access opens at Friday T−70.
-Monday needs a separately agreed, funded and acknowledged bounded booking (a separate
-financial obligation), or a separately implemented authenticated rehearsal mode that
-cannot arm public radio. Neither is silently created by this release. Missing USDC
-is not permission to swap ETH, fund an escrow, transfer token 75 or activate a broadcast.
+Friday's funded room cannot be used for an earlier rehearsal: access opens at Friday T−70.
+The separate private rehearsal mode below requires no booking or payment and cannot arm
+public radio. Missing USDC is not permission to swap ETH, fund an escrow, transfer token 75
+or activate a broadcast.
 
 Booking verification refreshes in the background rather than blocking the media watchdog on RPC/indexing. Initial access remains unavailable until a snapshot loads; verification older than thirty seconds denies new authorization, publishing and listener grants. Existing room health/cancellation continues using its previously verified booking and original end. Operator cancellation remains available with the existing room session. Test booking-service failure as well as media transport failure.
 
 Once enabled, the worker prepares eligible funded pilot rooms at T−70, even if nobody opens backstage; a missed soundcheck cannot leave radio paused indefinitely. Stop/revoke an existing OBS input before disabling ingress configuration. Switching to browser publishing while ingress is enabled revokes the old OBS key.
 
 Never enable automatic egress/recording in the hosting project. This code requests no recording/egress. OBS video/crowd features are not implemented; configure only the required audio where the encoder permits, and do not assume hidden video is a privacy guarantee.
+
+## Separate private rehearsal
+
+The receiving need is a short two-wallet audio rehearsal without a funded booking or
+public radio. Reuse decision: adapt this repository's `discord-bot/live-audio-transport.js`
+independent receiver and `js/live-audio-client.mjs` SDK loader from merged pilot commit
+`f60fbb48b225ad9bbcfa35ffbcd59006a1f3e6d4`; use a separate service, routes, signed
+challenge text, encrypted checkpoint namespace and rehearsal-prefixed random IDs. The
+Canopy `data/agency-map.json` inventory was consulted; the existing Rabbit Hole/PeerJS
+candidate lacks the independent receiver and managed relay required here. No shared code
+was extracted. The existing paid booking/policy and financial signer mirror paths are not
+reused as rehearsal state or relaxed.
+
+`PRIVATE_REHEARSAL_ENABLED=true` is a separate server-only switch, default false.
+It requires the existing owner wallet, allowed website origin, LiveKit URL/key/secret,
+Pinata JWT, and dedicated `LIVE_AUDIO_STORAGE_KEY`; `LIVE_AUDIO_ENABLED` and
+`LIVE_AUDIO_OBS_ENABLED` can remain false. Confirm the free LiveKit participant quota and
+disable egress/recording in the project; the rehearsal requests neither recording nor OBS.
+Only one rehearsal at a time, two humans plus the worker receiver, for at most 120 minutes.
+
+Only the configured owner may create an invitation: open `/rehearsal.html`, enter the
+confirmed guest wallet and a duration, connect the owner wallet and sign the displayed
+origin-bound message. Share the resulting invitation privately. The guest opens it,
+connects the invited wallet, and signs the explicit consent message. Neither signature
+is a transaction or authorizes payment. Each may select an input, publish and listen, or
+listen only. Use headphones. The worker receiver verifies the guest's incoming audio;
+that indication is not proof the owner heard it. Stop or leave when finished; the owner
+can end for everyone. Browser wallet sessions expire after 15 minutes or at the room
+deadline, whichever is earlier. A new signature is required; if all participants leave
+or stop heartbeating for 30 seconds the room ends. Closing the page stops browser audio.
+
+The lifecycle checkpoint is AES-GCM encrypted on Pinata with an allowlist of room ID,
+guest wallet, expiry and ended time; no media, tokens, signatures or credentials are
+stored. It has a distinct name and authenticated-data domain and does not require the
+local mirror, allowing unattended hosted operation. Saves require a successful latest
+listing and authenticated read-back; listing, latest-read, integrity, or save failure
+closes controls. Equal-time ambiguous latest checkpoints are rejected. Like any
+Pinata-only store, it relies on the provider returning a complete, correctly ordered
+listing; it cannot detect an omitted latest checkpoint or prove rollback resistance
+without an independent durable authority. Financial signer journals and funded live
+audio still require their existing local mirror. Back up the key privately.
+
+Restart invalidates all rehearsal sessions and ends restored room generations; cleanup
+retries until LiveKit confirms deletion. Short-lived join grants may recreate a deleted
+room briefly, so the worker retains the ended tombstone and retries deletion for at least
+35 seconds. Expiry is **not a strict provider-side TTL**: LiveKit token expiry applies to
+initial connection, not an already-connected participant. During a worker outage the
+browser stops at its deadline, but an uncooperative or disconnected-from-control client
+could remain connected until the worker recovers and deletes the room. This limitation was
+explicitly accepted; no claim of provider-enforced cleanup is made.
+
+Validation uses mocked browser transport and signed test wallets; it does not demonstrate
+real audio, consent by the invited person, or an actual room. Live listening requires
+both people to participate after deployment and enablement.
 
 ## Private room and controls
 
