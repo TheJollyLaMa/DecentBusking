@@ -125,13 +125,14 @@ test('encrypted hosted checkpoints restore latest and reject bad key, latest cor
     const found = files.find(f => target.pathname.endsWith(`/ipfs/${f.cid}`));
     return gatewayFails || !found ? new Response('fail', { status: 503 }) : new Response(found.bytes);
   }
-  const make = k => createRehearsalStore({ storageKey: k, pinataJwt: 'fixture', fetchImpl,
-    gateway: 'https://gateway.example', gatewayAccessToken: '', log: { warn() {} } });
-  const store = make(key);
+  const make = (k, options = {}) => createRehearsalStore({ storageKey: k, pinataJwt: 'fixture', fetchImpl,
+    gateway: 'https://gateway.example', gatewayAccessToken: '', log: { warn() {} }, ...options });
+  const store = make(key, { retentionDays: 7, groupId: 'live-group', archiveGroupId: 'archive-group' });
   assert.deepEqual(await store.restore(), { version: 1, rooms: [] });
   const value = { version: 1, rooms: [{ id: `rehearsal:${'a'.repeat(64)}`, guest: guest.address.toLowerCase(), expiresAt: 123456, endedAt: 0 }] };
   await store.save(value);
   assert.equal(files[0].bytes.toString().includes(value.rooms[0].guest), false);
+  assert.equal(JSON.parse(files[0].bytes)._checkpoint, undefined, 'hosted lifecycle does not inherit daily archival writes');
   assert.deepEqual(await make(key).restore(), value);
   await assert.rejects(make(randomBytes(32).toString('hex')).restore(), /restore failed/);
   gatewayFails = true; await assert.rejects(make(key).restore(), /restore failed/); gatewayFails = false;

@@ -27,6 +27,7 @@ export function createRehearsalStore({ storageKey, distinctFrom = [], pinataJwt,
   const key = Buffer.from(storageKey, 'hex');
   const store = createPinataStateStore({
     ...options, pinataJwt, name, tags, restoreLatestOnly: true, rejectAmbiguousLatest: true,
+    retentionDays: 0, archiveGroupId: undefined,
     requireLocalMirror: false, beforeUpload: undefined,
     serialize(value) {
       const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv);
