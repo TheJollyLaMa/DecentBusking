@@ -4,6 +4,8 @@ import { createLiveBookings } from './live-bookings.js';
 import { createLiveAudioService } from './live-audio.js';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
 import { createLiveAudioTransport } from './live-audio-transport.js';
+import { createRehearsalService } from './rehearsal.js';
+import { createRehearsalStore } from './rehearsal-store.js';
 // discord-bot/index.js
 // DecentBusking Discord Bot — entry point
 //
@@ -1552,6 +1554,35 @@ async function main() {
     },
     onCancel: (booking, reason) => liveBookings.execute({ action: 'cancel', id: booking.id, reason, confirm: true }),
   });
+  let rehearsalStore = null;
+  if (process.env.PRIVATE_REHEARSAL_ENABLED === 'true' && process.env.LIVE_AUDIO_STORAGE_KEY && config.pinataJwt) {
+    try {
+      rehearsalStore = createRehearsalStore({
+        ...config.checkpointStorage, storageKey: process.env.LIVE_AUDIO_STORAGE_KEY,
+        distinctFrom: [process.env.CONTENT_REVIEW_STORAGE_KEY], pinataJwt: config.pinataJwt,
+        uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+      });
+    } catch { console.warn('[rehearsal] Encrypted hosted storage unavailable.'); }
+  }
+  const rehearsal = createRehearsalService({
+    ownerWallet: config.mintOwnerWallet, store: rehearsalStore,
+    transport: createLiveAudioTransport({
+      enabled: process.env.PRIVATE_REHEARSAL_ENABLED === 'true',
+      url: process.env.LIVEKIT_URL || '', apiKey: process.env.LIVEKIT_API_KEY || '', apiSecret: process.env.LIVEKIT_API_SECRET || '',
+    }),
+  });
+  if (rehearsal.configured) {
+    let ticking = false;
+    const tickRehearsal = async () => {
+      if (ticking) return;
+      ticking = true;
+      try { await rehearsal.tick(); }
+      catch { console.warn('[rehearsal] Private room state or cleanup unavailable.'); }
+      finally { ticking = false; }
+    };
+    void tickRehearsal();
+    setInterval(() => { void tickRehearsal(); }, 1000).unref();
+  }
   if (liveAudio.configured) {
     let ticking = false;
     const tick = async () => {
@@ -1570,6 +1601,7 @@ async function main() {
     radioAnnouncements,
     liveBookings,
     liveAudio,
+    rehearsal,
     alchemyWebhook,
     checkpointMirror,
     creatorProfiles,

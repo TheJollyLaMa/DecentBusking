@@ -5,6 +5,9 @@ import { LiveAudioError } from './live-audio-errors.js';
 export function liveAudioRoomName(bookingId) {
   return `dbusk-audio-${createHash('sha256').update(String(bookingId)).digest('hex').slice(0, 32)}`;
 }
+export function rehearsalRoomName(id) {
+  return `dbusk-rehearsal-${createHash('sha256').update(String(id)).digest('hex').slice(0, 32)}`;
+}
 
 export function receivedAudioPackets(stats) {
   return (stats?.subscriberStats || []).reduce((total, entry) => {
@@ -21,23 +24,26 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
   const ingress = ingressClient || (ready ? new IngressClient(host, apiKey, apiSecret, { requestTimeout: 5 }) : null);
   const monitors = new Map();
   const publisherIdentity = booking => `performer:${booking.wallet.toLowerCase()}`;
+  const roomName = booking => booking.rehearsal === true ? rehearsalRoomName(booking.id) : liveAudioRoomName(booking.id);
   const requireReady = () => { if (!ready) throw new LiveAudioError('Live audio hosting is not configured'); };
-  async function grant(booking, identity, publish = false) {
+  async function grant(booking, identity, publish = false, subscribe = !publish) {
     requireReady();
     const remaining = Math.floor((Date.parse(booking.endUtc) - now()) / 1000);
     if (remaining <= 0) throw new LiveAudioError('This live room has reached its booked end');
     const token = new AccessToken(apiKey, apiSecret, { identity, ttl: Math.min(30, remaining) });
-    token.addGrant({ roomJoin: true, room: liveAudioRoomName(booking.id), canPublish: publish,
-      canPublishSources: publish ? [TrackSource.MICROPHONE] : [], canSubscribe: !publish, canPublishData: false });
+    token.addGrant({ roomJoin: true, room: roomName(booking), canPublish: publish,
+      canPublishSources: publish ? [TrackSource.MICROPHONE] : [], canSubscribe: subscribe, canPublishData: false });
     return { url, token: await token.toJwt(), publisherIdentity: publisherIdentity(booking) };
   }
   async function ensureRoom(booking) {
     requireReady();
-    await rooms.createRoom({ name: liveAudioRoomName(booking.id), emptyTimeout: 60, departureTimeout: 20,
-      maxParticipants: 13, metadata: JSON.stringify({ purpose: 'DecentBusking audio pilot', bookingId: booking.id }) });
+    await rooms.createRoom({ name: roomName(booking), emptyTimeout: 60, departureTimeout: 20,
+      maxParticipants: booking.rehearsal === true ? 3 : 13,
+      metadata: JSON.stringify({ purpose: booking.rehearsal === true ? 'DecentBusking private rehearsal' : 'DecentBusking audio pilot',
+        bookingId: booking.id }) });
   }
   async function revokeIngress(booking) {
-    const existing = await ingress.listIngress({ roomName: liveAudioRoomName(booking.id) });
+    const existing = await ingress.listIngress({ roomName: roomName(booking) });
     for (const item of existing) await ingress.deleteIngress(item.ingressId);
   }
   async function monitor(booking, onFrame) {
@@ -118,9 +124,17 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
       if (role === 'publisher' && ingressEnabled) await revokeIngress(booking);
       return grant(booking, role === 'publisher' ? publisherIdentity(booking) : `owner:${randomUUID()}`, role === 'publisher');
     },
+    async rehearsalConnect(booking, wallet, publish) {
+      await ensureRoom(booking);
+      const identity = wallet.toLowerCase() === booking.wallet.toLowerCase()
+        ? publisherIdentity(booking) : `rehearsal-owner:${wallet.toLowerCase()}`;
+      const otherIdentity = wallet.toLowerCase() === booking.wallet.toLowerCase()
+        ? `rehearsal-owner:${booking.owner.toLowerCase()}` : publisherIdentity(booking);
+      return { ...(await grant(booking, identity, publish, true)), otherIdentity };
+    },
     async listener(booking) {
       requireReady();
-      const participants = await rooms.listParticipants(liveAudioRoomName(booking.id));
+      const participants = await rooms.listParticipants(roomName(booking));
       if (participants.filter(p => p.identity.startsWith('listener:')).length >= 10) throw new LiveAudioError('The ten-listener pilot room is full');
       return grant(booking, `listener:${randomUUID()}`);
     },
@@ -130,7 +144,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
       await ensureRoom(booking);
       await revokeIngress(booking);
       const result = await ingress.createIngress(IngressInput.WHIP_INPUT, {
-        name: `DecentBusking audio ${booking.id}`, roomName: liveAudioRoomName(booking.id),
+        name: `DecentBusking audio ${booking.id}`, roomName: roomName(booking),
         participantIdentity: publisherIdentity(booking), participantName: 'Live performer',
         enableTranscoding: false,
       });
@@ -144,7 +158,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
       if (ingressEnabled) {
         try { await revokeIngress(booking); } catch (error) { ingressError = error; }
       }
-      try { await rooms.deleteRoom(liveAudioRoomName(booking.id)); }
+      try { await rooms.deleteRoom(roomName(booking)); }
       catch (error) { if (error.code !== 'not_found' && error.status !== 404) throw error; }
       if (ingressError) throw ingressError;
     },
