@@ -89,7 +89,8 @@ wallet/network, rejected signatures, storage failure, funded-room gating,
 legacy offers and notification state.
 
 After confirmed performer acceptance only, a silent 4.4-second Secret Pyramid,
-twelve-sign zodiac and star overlay celebrates the saved invitation. It is
+twelve-sign zodiac, stars and twelve figure-like alchemical/planetary glyphs
+(including 🜡 ☿ ♀︎ 🜐 🜑 ⚸) celebrate the saved invitation. It is
 decorative, pointer-transparent and cleaned up on timeout or page exit; reduced
 motion uses a still composition. It never indicates funding or payment.
 

@@ -241,8 +241,10 @@ test('cosmic acceptance confirmation includes all zodiac signs and cleans up wit
   assert.match(effect.className, /is-still/);
   assert.equal(effect.attributes['aria-hidden'], 'true');
   assert.equal(effect.attributes.popover, 'manual');
-  assert.equal(effect.children.length, 37);
+  assert.equal(effect.children.length, 49);
   assert.equal(effect.children.filter(node => node.className === 'live-cosmos-sign').map(node => node.textContent).join(''), '♈♉♊♋♌♍♎♏♐♑♒♓');
+  assert.deepEqual(effect.children.filter(node => node.className === 'live-cosmos-figure').map(node => node.textContent),
+    ['🜡', '☿', '♀︎', '🜐', '🜑', '⚸', '♁', '♄', '⚳', '⚵', '⚶', '⚷']);
   timeout();
   assert.equal(effect.removed, true);
   exit();

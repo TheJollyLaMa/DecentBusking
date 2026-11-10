@@ -25,6 +25,7 @@ export function celebrateLiveInvitation({ documentRef = document, windowRef = wi
  pyramid.alt = '';
  const stars = ['✦', '✧', '⋆'];
  const signs = ['♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒', '♓'];
+ const figures = ['🜡', '☿', '♀︎', '🜐', '🜑', '⚸', '♁', '♄', '⚳', '⚵', '⚶', '⚷'];
  effect.append(pyramid);
  for (let index = 0; index < 36; index++) {
    const particle = documentRef.createElement('span');
@@ -35,6 +36,15 @@ export function celebrateLiveInvitation({ documentRef = document, windowRef = wi
    particle.style.setProperty('--top', `${(index * 23 + 7) % 100}%`);
    particle.style.setProperty('--delay', `${index % 6 * 80}ms`);
    effect.append(particle);
+ }
+ for (const [index, symbol] of figures.entries()) {
+   const figure = documentRef.createElement('span');
+   figure.className = 'live-cosmos-figure';
+   figure.textContent = symbol;
+   figure.style.setProperty('--left', `${8 + index % 4 * 28}%`);
+   figure.style.setProperty('--top', `${18 + Math.floor(index / 4) * 28}%`);
+   figure.style.setProperty('--delay', `${index % 4 * 100}ms`);
+   effect.append(figure);
  }
  documentRef.body.append(effect);
  const remove = () => {
