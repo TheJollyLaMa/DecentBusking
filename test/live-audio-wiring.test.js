@@ -31,10 +31,12 @@ function dom(t) {
     tag, children: [], attributes: {}, textContent: '', innerHTML: '',
     append(...children) { this.children.push(...children); },
     setAttribute(name, value) { this.attributes[name] = value; },
-    addEventListener() {},
+    addEventListener(name, callback) { this.listeners ||= {}; this.listeners[name] = callback; },
+    style: { setProperty() {} },
+    remove() { this.removed = true; },
   });
-  global.document = { createElement, createTextNode: text => ({ textContent: text }) };
-  global.window = { _wallet: { address: wallet } };
+  global.document = { createElement, body: createElement('body'), createTextNode: text => ({ textContent: text }), dispatchEvent() {} };
+  global.window = { _wallet: { address: wallet }, setTimeout() { return 1; }, clearTimeout() {}, addEventListener() {}, removeEventListener() {} };
   global.localStorage = { getItem: () => null };
   return createElement;
 }
@@ -122,24 +124,33 @@ test('withinthevacuum Profile invitation is wallet-scoped and cannot imply accep
     ] }) }) };
   await renderLivePerformances(options);
   assert.equal(container.children.length, 1);
-  assert.match(container.children[0].innerHTML, /Draft invitation/);
-  assert.doesNotMatch(container.children[0].innerHTML, /live-status">Funded|Outside performance escrow/);
+  assert.equal(container.children[0].className, 'live-booking-invite live-invitation-card');
   let nodes = descendants(container);
+  const text = nodes.map(node => node.textContent).join(' ');
+  assert.match(text, /Hey withinthevacuum, you're invited/);
+  assert.match(text, /\$20 USDC on Base · guaranteed/);
+  assert.match(text, /Your escrow will be funded after you accept/);
+  assert.doesNotMatch(text, /Technical verification|fingerprint|Open LIVE PERFORMANCE|Draft invitation/);
   assert.equal(nodes.filter(node => node.attributes?.['data-live-room']).length, 0);
-  const accept = nodes.find(node => node.textContent === 'Review and accept terms');
-  assert.equal(accept.disabled, true, 'explicit review checkbox required before signing');
-  assert.ok(nodes.some(node => /no payment or escrow transaction is submitted/.test(node.textContent)));
-  const directions = nodes.find(node => 'data-live-performer-directions' in (node.attributes || {})).textContent;
-  assert.match(directions, /review and accept → wait for confirmed escrow funding → open performer audio room/);
-  assert.match(directions, /8:00 PM and 8:45 PM New York → ON-AIR only after both checks pass/);
-  assert.match(directions, /claim here after approval or the review window/);
-  assert.doesNotMatch(directions, /task|token|Calendar/);
+  const accept = nodes.find(node => node.tag === 'button');
+  assert.equal(accept.disabled, false, 'the invitation button itself is explicit consent');
+  assert.ok(descendants(accept).some(node => node.alt === 'Secret Pyramid'));
+  assert.equal(nodes.filter(node => node.alt === 'Secret Pyramid').length, 2);
+  assert.doesNotMatch(text, /licensed music|No recording|headphones|💛|💌/);
+  assert.equal(nodes.filter(node => node.tag === 'input').length, 0);
+  assert.equal(nodes.filter(node => node.tag === 'button').length, 1, 'no dead claim button on invitations');
+  assert.match(text, /No payment\. No gas/);
+  assert.match(text, /8:00 PM & 8:45 PM/);
+  assert.doesNotMatch(text, /task|token|Calendar/);
+  assert.equal(nodes.filter(node => node.tag === 'details').length, 1);
+  assert.equal(nodes.filter(node => node.tag === 'a').length, 0, 'no separate agreement-reading step');
   b.acknowledged = true;
   const acceptedContainer = createElement('section');
   await renderLivePerformances({ ...options, container: acceptedContainer });
   nodes = descendants(acceptedContainer);
-  assert.match(acceptedContainer.children[0].innerHTML, /Accepted · awaiting funding/);
-  assert.ok(nodes.some(node => /no funds have been sent by this acceptance/.test(node.textContent)));
+  assert.ok(nodes.some(node => /guest list.*fund your escrow/.test(node.textContent)));
+  assert.ok(nodes.some(node => /No payment was sent by accepting/.test(node.textContent)));
+  assert.equal(nodes.filter(node => node.tag === 'button').length, 0);
   assert.equal(nodes.filter(node => node.attributes?.['data-live-room']).length, 0);
 });
 
@@ -169,6 +180,97 @@ test('Admin wires an escaped operator link separately from all existing guarante
   assert.match(source, /bookings\.map\(b => renderLivePerformanceAdminBooking\(b\)\)/);
 });
 
+test('one-button invitation preserves exact wallet consent and explicit failure states', async t => {
+  const [, { renderPerformerBookingInvite }] = await modules;
+  const { liveAcknowledgement } = await import('../js/live-bookings.mjs');
+  dom(t);
+  t.mock.method(Date, 'now', () => NOW);
+  const b = { ...booking(), status: 'draft', acknowledged: false, stewardApproved: true,
+    additionalOffer: '', termsVersion: 'LIVE PERFORMANCE PILOT v1', termsUri: 'ipfs://bafyfixture',
+    termsHash: '0x' + 'ab'.repeat(32), cancellationWindow: 28800, killFeeBps: 10000 };
+  for (const scenario of ['no-wallet', 'wrong-chain', 'wrong-wallet', 'rejected', 'service-error', 'unconfirmed', 'success']) {
+    let signed = '', posts = 0;
+    global.window.ethereum = scenario === 'no-wallet' ? undefined : {};
+    const ethers = { BrowserProvider: class {
+      async getNetwork() { return { chainId: scenario === 'wrong-chain' ? 1n : 8453n }; }
+      async getSigner() { return {
+        getAddress: async () => scenario === 'wrong-wallet' ? otherWallet : wallet,
+        signMessage: async message => {
+          if (scenario === 'rejected') throw new Error('Signature declined');
+          signed = message;
+          return '0xfixture-signature';
+        },
+      }; }
+    } };
+    const card = renderPerformerBookingInvite({ booking: b, wallet, serviceUrl: 'https://worker.example/',
+      ethers, now: NOW, fetchImpl: async (url, options) => {
+        posts++;
+        assert.equal(url, 'https://worker.example/api/live-bookings/acknowledge');
+        assert.deepEqual(JSON.parse(options.body), { id: b.id, address: wallet, signature: '0xfixture-signature' });
+        return { ok: scenario !== 'service-error', json: async () => scenario === 'service-error'
+          ? { error: 'Storage unavailable' } : { bookings: [{ ...b, acknowledged: scenario === 'success' }] } };
+      } });
+    const nodes = descendants(card), button = nodes.find(node => node.tag === 'button');
+    await button.listeners.click();
+    const status = nodes.find(node => node.attributes?.role === 'status').textContent;
+    if (scenario === 'success') {
+      assert.equal(signed, liveAcknowledgement(b), 'existing immutable agreement text is not rewritten');
+      assert.match(status, /You’re in.*funding your escrow/);
+      assert.equal(button.disabled, true);
+      assert.ok(nodes.some(node => /guest list.*fund your escrow/.test(node.textContent)));
+    } else {
+      assert.match(status, /No escrow transaction was sent/);
+      assert.equal(button.disabled, false, 'failed acceptance can be retried');
+    }
+    assert.equal(global.document.body.children.length, scenario === 'success' ? 1 : 0, 'only a saved acceptance celebrates');
+    assert.equal(posts, ['service-error', 'unconfirmed', 'success'].includes(scenario) ? 1 : 0);
+    assert.equal(b.acknowledged, false, 'rendering/signing does not fabricate a saved acknowledgement');
+  }
+});
+
+test('cosmic acceptance confirmation includes all zodiac signs and cleans up without blocking input', async t => {
+  const [, { celebrateLiveInvitation }] = await modules;
+  dom(t);
+  let timeout, exit, cleared = 0;
+  global.window.matchMedia = () => ({ matches: true });
+  global.window.setTimeout = (callback, duration) => { timeout = callback; assert.equal(duration, 4400); return 42; };
+  global.window.clearTimeout = id => { assert.equal(id, 42); cleared++; };
+  global.window.addEventListener = (name, callback) => { assert.equal(name, 'pagehide'); exit = callback; };
+  celebrateLiveInvitation();
+  const effect = global.document.body.children[0];
+  assert.match(effect.className, /is-still/);
+  assert.equal(effect.attributes['aria-hidden'], 'true');
+  assert.equal(effect.attributes.popover, 'manual');
+  assert.equal(effect.children.length, 49);
+  assert.equal(effect.children.filter(node => node.className === 'live-cosmos-sign').map(node => node.textContent).join(''), '♈♉♊♋♌♍♎♏♐♑♒♓');
+  assert.deepEqual(effect.children.filter(node => node.className === 'live-cosmos-figure').map(node => node.textContent),
+    ['🜡', '☿', '♀︎', '🜐', '🜑', '⚸', '♁', '♄', '⚳', '⚵', '⚶', '⚷']);
+  timeout();
+  assert.equal(effect.removed, true);
+  exit();
+  assert.equal(cleared, 2);
+  const css = fs.readFileSync(path.join(__dirname, '../css/live-performance.css'), 'utf8');
+  assert.match(css, /live-invitation-cosmos[^}]+pointer-events: none/s);
+  assert.match(css, /prefers-reduced-motion: reduce/);
+});
+
+test('funded invitation stays compact during the show and offers only the authorized room link', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t), container = createElement('section');
+  t.mock.method(Date, 'now', () => Date.parse('2026-11-14T02:05:00Z'));
+  const b = { ...booking(), stewardApproved: true, additionalOffer: '' };
+  await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+    fetchImpl: async () => ({ ok: true, json: async () => ({ bookings: [b], escrowAddress: otherWallet }) }) });
+  const nodes = descendants(container), text = nodes.map(node => node.textContent).join(' ');
+  assert.match(container.children[0].className, /live-invitation-card/);
+  assert.match(text, /Your fee is in escrow/);
+  const link = nodes.find(node => node.attributes?.['data-live-room'] === 'performer');
+  assert.equal(link.textContent, '🎙 Open your rehearsal room');
+  assert.equal(link.target, undefined);
+  assert.match(text, /Connect your invited wallet, allow your mic/);
+  assert.equal(nodes.filter(node => node.tag === 'button').length, 0);
+});
+
 test('Profile/Admin and index preserve live-audio-pilot cache references', async () => {
   for (const file of ['live-performance-profile.mjs', 'live-performance-admin.mjs']) {
     const source = fs.readFileSync(path.join(__dirname, '../js', file), 'utf8');
@@ -178,16 +280,17 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /live-performance-admin\.mjs\?v=20261110-profile-invitation/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261110-profile-invitation"/);
-  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261110-profile-invitation"/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261110-invitation-card"/);
+  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261110-invitation-card"/);
+  assert.match(html, /live-performance\.css\?v=20261110-invitation-card/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
-    './js/radio-schedule-ui.mjs?v=20261110-profile-invitation');
+    './js/radio-schedule-ui.mjs?v=20261110-invitation-card');
   assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],
     './js/fund-display.mjs?v=20261108-live-audio-pilot');
   for (const file of ['creator-profile.mjs', 'radio-schedule-ui.mjs']) {
     assert.match(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'),
-      /live-performance-profile\.mjs\?v=20261110-profile-invitation/);
+      /live-performance-profile\.mjs\?v=20261110-invitation-card/);
   }
   assert.match(fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8'),
     /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);

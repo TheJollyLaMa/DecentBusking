@@ -69,6 +69,31 @@ A real audio rehearsal and wallet acceptance/funding/claim are separate gates.
 
 ### Exact signed invitation handoff
 
+The performer-facing guaranteed-pilot invitation is a compact, illustrated card
+in Profile and Schedule, with the time, soundchecks and guaranteed fee on the
+card. **Count me in** signs acceptance directly; there is no separate document
+visit or checkbox step. Payment mechanics and the claim deadline are available
+inline under **Payment & practical details**. Existing immutable agreement
+bytes, signature authorization and funding gates are unchanged. The card does
+not claim a deposit is escrow: only a confirmed funded booking gets that label
+and a rehearsal-room link. Legacy offers and historical receipts retain their
+existing detail view.
+
+Reuse: the card adapts the existing `renderPerformerBookingInvite` and unchanged
+`liveAcknowledgement` signature, using Busking's own DBusker portrait and theme.
+The Secret Pyramid image is copied unchanged from DecentEscrow
+`6b7958a6720ac8c335cad433db529c4d4b261dcd`, `img/SecretPyramid.png`, with its
+MIT attribution in NOTICE. This is presentation reuse, not a Calendar payment
+integration. Targeted receiving-app tests cover one-button acceptance, wrong
+wallet/network, rejected signatures, storage failure, funded-room gating,
+legacy offers and notification state.
+
+After confirmed performer acceptance only, a silent 4.4-second Secret Pyramid,
+twelve-sign zodiac, stars and twelve figure-like alchemical/planetary glyphs
+(including 🜡 ☿ ♀︎ 🜐 🜑 ⚸) celebrate the saved invitation. It is
+decorative, pointer-transparent and cleaned up on timeout or page exit; reduced
+motion uses a still composition. It never indicates funding or payment.
+
 The agreed Friday slot is November 13, 2026, 21:00–21:20 New York:
 `2026-11-14T02:00:00.000Z`–`2026-11-14T02:20:00.000Z`. Checks are
 20:00 and 20:45 New York. Monday onboarding does not grant early access to this
