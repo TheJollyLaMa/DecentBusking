@@ -8,9 +8,10 @@ const audio = el('audio');
 let session, room, localTrack, remoteTrack, generation = 0, disposed = false, polling = false, deadlineTimer;
 const status = text => { el('status').textContent = text; };
 async function request(path, input, token, keepalive = false) {
+  const timeout = path === 'session' || path === 'challenge' || input.action === 'end' ? 60000 : 10000;
   const response = await fetch(`${service}/api/private-rehearsal/${path}`, {
     method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify(input), cache: 'no-store', keepalive, signal: AbortSignal.timeout(10000),
+    body: JSON.stringify(input), cache: 'no-store', keepalive, signal: AbortSignal.timeout(timeout),
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Private rehearsal unavailable');

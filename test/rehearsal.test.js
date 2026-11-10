@@ -12,7 +12,11 @@ async function fixture(options = {}) {
   const calls = [], monitors = [];
   const store = {
     async restore() { if (options.restoreFailure) throw Error('restore'); return structuredClone(durable.value); },
-    async save(value) { if (options.saveFailure) throw Error('save'); durable.value = structuredClone(value); return 'ipfs://x'; },
+    async save(value) {
+      if (options.saveFailure) throw Error('save');
+      if (options.saveDelayMs) await new Promise(resolve => setTimeout(resolve, options.saveDelayMs));
+      durable.value = structuredClone(value); return 'ipfs://x';
+    },
   };
   const transport = {
     ready: true, async close(b) { calls.push(['close', b.id]); if (options.closeFailure) throw Error('close'); },
@@ -28,6 +32,19 @@ async function fixture(options = {}) {
   async function create(minutes = 60) { return sign(owner, { action: 'create', guest: guest.address, minutes }); }
   return { service, clock, calls, monitors, durable, sign, create };
 }
+
+test('checkpoint budget permits a verified save longer than ten seconds without reopening failed writes', async t => {
+  const f = await fixture({ saveDelayMs: 11000 });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = f.create();
+  await new Promise(setImmediate);
+  t.mock.timers.tick(10001);
+  assert.equal(f.service.configured, true);
+  t.mock.timers.tick(999);
+  const authorized = await pending;
+  assert.equal(authorized.role, 'owner');
+  assert.equal(f.durable.value.rooms.length, 1);
+});
 
 test('invited artist can start repeat private practice before acceptance without funding or operator presence', async () => {
   const b = { id: 'friday:practice', wallet: guest.address.toLowerCase(), mode: 'phase1',

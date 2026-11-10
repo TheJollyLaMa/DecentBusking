@@ -11,7 +11,7 @@ const SESSION_DURATION = 15 * 60_000;
 const HEARTBEAT = 30_000;
 
 export function createRehearsalService({ ownerWallet, transport, store, now = () => Date.now(),
-  verify = verifyMessage, checkpointTimeoutMs = 10_000, getBookings } = {}) {
+  verify = verifyMessage, checkpointTimeoutMs = 45_000, getBookings } = {}) {
   const owner = address(ownerWallet), challenges = new Map(), sessions = new Map(), frames = new Map();
   const monitoring = new Set(), connected = new Map();
   let bookingSnapshot, bookingSnapshotAt = -Infinity;
@@ -46,7 +46,9 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
         timer = setTimeout(() => reject(new Error('checkpoint timeout')), checkpointTimeoutMs);
       })]);
       state = next;
-    } catch {
+    } catch (error) {
+      const known = ['checkpoint timeout', 'Latest rehearsal checkpoint was not verified', 'Rehearsal checkpoint not confirmed'];
+      console.warn('[rehearsal] Checkpoint unavailable:', known.includes(error.message) ? error.message : error.name || 'storage error');
       failed = true; sessions.clear(); challenges.clear(); frames.clear();
       for (const room of state?.rooms || []) void transport.close(booking(room)).catch(() => {});
       throw new LiveAudioError('Rehearsal checkpoint failed; access is closed');
