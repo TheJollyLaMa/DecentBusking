@@ -7,7 +7,7 @@ export function configuredSettlementFunds(config = {}) {
     { label: 'Top 10 Prize Payouts', slug: config.radioFunds?.topTen },
     { label: 'Repo Dev Bot Payouts', slug: config.fundSlug },
     { label: 'Community Pinning Rewards (required for DJuke)', slug: config.pinnerFundSlug },
-    { label: '🎤 Live Performers', slug: 'dbusk-live-performers' },
+    { label: '🎤 Live Performers — earmarked/recoverable, NOT escrow', slug: config.liveFundSlug },
   ].filter(fund => typeof fund.slug === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(fund.slug));
 }
 

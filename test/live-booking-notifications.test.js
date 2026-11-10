@@ -202,3 +202,51 @@ test('worker funding and booking badges aggregate only at admin anchors', async 
  await new Promise(resolve => setImmediate(resolve));
  assert.equal(admin.badge.hidden, true);
 });
+
+test('the invited guest sees the existing invitation badge in Profile as well as Schedule, never another wallet', async () => {
+ const { claimState, LIVE_PILOT_POLICY } = await import('../js/live-bookings.mjs');
+ const guest = '0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f';
+ const listeners = new Map(), targets = new Map();
+ const target = () => ({
+  classList: { add() {} }, querySelector() { return this.badge; },
+  append(badge) { this.badge = badge; },
+ });
+ for (const selector of ['#creator-profile-btn', '#radio-schedule-btn', '.ankh-container']) targets.set(selector, target());
+ const document = {
+  readyState: 'loading', head: { append() {} },
+  addEventListener(name, fn) {
+   if (!listeners.has(name)) listeners.set(name, []);
+   listeners.get(name).push(fn);
+  },
+  dispatchEvent(event) { for (const fn of listeners.get(event.type) || []) fn(event); },
+  createElement: () => ({ dataset: {}, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } }),
+  querySelector: selector => targets.get(selector) || null, querySelectorAll: () => [],
+ };
+ const context = vm.createContext({
+  document, window: { _wallet: { address: guest }, DecentConfig: {} },
+  claimState, LIVE_PILOT_POLICY, isAdminWallet: () => false, localStorage: { getItem: () => null },
+  queueMicrotask, console, MutationObserver: class { observe() {} },
+  setInterval() {}, clearInterval() {},
+  Date: class extends Date { static now() { return now; } },
+ });
+ const source = fs.readFileSync(new URL('../js/live-booking-notifications.mjs', `file://${__filename}`), 'utf8')
+  .replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+ vm.runInContext(source, context);
+ document.dispatchEvent({ type: 'DOMContentLoaded' });
+ const b = { ...booking, wallet: guest.toLowerCase() };
+ const publish = async bookings => {
+  document.dispatchEvent({ type: 'live-booking-state-updated', detail: { state: state(...bookings) } });
+  await new Promise(resolve => setImmediate(resolve));
+ };
+ await publish([b, { ...b, id: 'other-guest', wallet: performer }]);
+ for (const node of targets.values()) assert.equal(node.badge.textContent, '1');
+ assert.match(targets.get('#creator-profile-btn').badge.attributes['aria-label'], /invitations or payments/);
+ await publish([{ ...b, acknowledged: true }]);
+ for (const node of targets.values()) assert.equal(node.badge.hidden, true, 'acceptance waits for steward funding');
+ await publish([{ ...b, status: 'approved', acknowledged: true }]);
+ assert.equal(targets.get('#creator-profile-btn').badge.textContent, '1', 'claim workflow retained');
+ assert.equal(targets.get('#radio-schedule-btn').badge.hidden, true);
+ context.window._wallet.address = performer;
+ await publish([b]);
+ for (const node of targets.values()) assert.equal(node.badge.hidden, true);
+});

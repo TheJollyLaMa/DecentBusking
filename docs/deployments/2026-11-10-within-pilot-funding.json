@@ -1,0 +1,66 @@
+{
+  "verifiedAt": "2026-11-10T13:56:29.306Z",
+  "chainId": 8453,
+  "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "routerAddress": "0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5",
+  "owner": "0x807061DF657A7697c04045dA7d16D941861cAABc",
+  "bookingId": "friday-live-performance:2026-11-13:withinthevacuum",
+  "performer": "0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f",
+  "amountUnits": "20000000",
+  "transactions": [
+    {
+      "action": "october-pinner-reward",
+      "hash": "0x748daf44da45b44869bea63837873524ee4250b7fee92739bfa3ab511d7cfb46",
+      "blockNumber": 55642373,
+      "gasFeeWeiIncludingL1": "627384995514"
+    },
+    {
+      "action": "create-live-performer-fund",
+      "hash": "0x4dfc10cd9e57d3178507b2097a1dcaed2e8a1f69b1c89c6a876ae8718dc54d9c",
+      "blockNumber": 55642418,
+      "gasFeeWeiIncludingL1": "1016396202186"
+    },
+    {
+      "action": "approve-exact-live-fund-deposit",
+      "hash": "0xf225987322bbbc638626b63bfaae05fb8642f395f6a9a532e153e64940e3bff4",
+      "blockNumber": 55642463,
+      "gasFeeWeiIncludingL1": "336300019662"
+    },
+    {
+      "action": "contribute-reward-to-live-fund",
+      "hash": "0xf5ec6919b1cfc049a12d26e38abfd376112c23f404c74ec8665ccdbfa467dd82",
+      "blockNumber": 55642508,
+      "gasFeeWeiIncludingL1": "555688715989"
+    }
+  ],
+  "totalGasFeeWeiIncludingL1": "2535769933351",
+  "balances": {
+    "pinnerFundUnits": "10730000",
+    "livePerformerFundUnits": "20000000",
+    "jollyWalletUsdcUnits": "8063349"
+  },
+  "rewardMetadata": {
+    "uri": "ipfs://bafkreig6tag2eoerfzul2tvntoceai4lxpjl6ze4txsrrqolycplib3zae",
+    "hash": "0x25c94e6ec5497f423710cb24e05f03f0e3df00b0dd55fdad519feb0981ea2067"
+  },
+  "liveFundMetadata": {
+    "uri": "ipfs://bafkreih7lqktkj6clc4tkjjyql47aou3qirpjvm64ucxoyvm6um6g3zcnu",
+    "hash": "0x1a6db04d70cdc04eacf4920aa1e89db93a1e6f3cea898a334c28a8f3190f5100"
+  },
+  "terms": {
+    "uri": "ipfs://bafkreie7gdkjle4uhth7zu2y6qpdhejtmtxplsnurf3k7wgibijah62bj4",
+    "hash": "0xf2b2a6f65f7496a189abe438d6ef36eb0be29ff4b5608aeb0a9f4d6e19c2199d"
+  },
+  "payrollEvidence": {
+    "verification": "verified",
+    "workReference": "0x2704636e171993066ac2e807e0aacf825ae5e3c783f83fb4ad012e89d25c77f2",
+    "snapshotUri": "ipfs://bafkreibw45lqrm7pnukdhfbqs6xqd2udtv7aa5nta46ek62io55ihdjgwm",
+    "backupPending": false
+  },
+  "escrow": {
+    "lockedForPerformer": false,
+    "state": "Invitation awaiting performer acceptance. $20 is earmarked in the recoverable live-performer fund, NOT yet per-booking escrow."
+  },
+  "next": "After performer acceptance, recover exactly this $20 allocation to the owner, approve the escrow for exactly $20, and call createBooking once with the signed invitation terms. Reconcile the actual BookingFunded receipt. Do not send an additional $20 or mark the fund deposit as booking escrow.",
+  "limitations": "Public live broadcast is disabled pending actual audio verification. Performer signs their own acceptance and claim; steward approval is required after booked end."
+}

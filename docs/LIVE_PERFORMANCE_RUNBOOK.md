@@ -86,13 +86,14 @@ from `js/live-bookings.mjs` and appends the result as `body.signature`. Submit
     action: 'create', id: 'friday-live-performance:2026-11-13:' + crypto.randomUUID(),
     revision: currentState.revision,
     booking: {
-      performer: AGREED_WALLET, displayName: AGREED_NAME, title: AGREED_TITLE,
+      performer: '0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f',
+      displayName: 'withinthevacuum', title: 'withinthevacuum — guaranteed audio pilot',
       eventId: 'friday-live-performance:2026-11-13',
       startUtc: '2026-11-14T02:00:00.000Z', endUtc: '2026-11-14T02:20:00.000Z',
       amountUnits: '20000000', airtimeMinutes: 20, mode: 'phase1',
       payoutPolicy: 'pilot-guaranteed-v1', termsVersion: 'LIVE PERFORMANCE PILOT v1',
       termsUri: REVIEWED_PIN, termsHash: VERIFIED_CONTENT_HASH, stewardApproved: true,
-      additionalOffer: LIVE_PILOT_COMPANION_OFFER,
+      additionalOffer: '',
       reviewWindow: 86400, cancellationWindow: 28800, killFeeBps: 10000,
       claimDeadline: '2026-11-18T02:20:00.000Z'
     }
@@ -100,8 +101,11 @@ from `js/live-bookings.mjs` and appends the result as `body.signature`. Submit
 }
 ```
 
-`LIVE_PILOT_COMPANION_OFFER` is the exact exported text: four separate $10 USDC
-tasks and conditional token 75, never an automatic payment/gift. Do not include
+This invitation is **$20 USDC guaranteed only**: no four prep tasks, token
+promise, Calendar dependency or purchase. Clear any companion-offer text
+prefilled by an older form. The earlier companion proposal above does not apply.
+Pin newly reviewed terms reflecting this scope; do not reuse an incompatible
+agreement or alter an accepted booking. Do not include
 `fullPayoutLiveMinutes`; it is incompatible with this guaranteed policy.
 The HTTP `Origin` must match the signed origin. Signing/creation moves no money.
 The performer signs `liveAcknowledgement(savedBooking)` from the same deployed
@@ -111,6 +115,43 @@ not reconstructed or edited terms. The owner separately signs a `schedule`
 command with the latest revision to publish the dated listing. Acceptance,
 scheduling, exact USDC funding and post-end approval/claim remain separate steps.
 An ETH balance is not USDC funding and grants no permission for a swap.
+
+The Profile menu's existing notification badge includes invitations and claims;
+the Schedule invitation badge is retained. The invited wallet opens Profile →
+reviews and accepts → waits for **confirmed escrow funding** → opens the audio
+room → authorizes the booked wallet and allows/publishes microphone audio →
+attends 8 p.m. and 8:45 p.m. New York checks → goes ON-AIR only after both checks
+pass and operator arming → claims here after approval or the review window,
+before November 17 at 9:20 p.m. New York. Keep the room open while publishing.
+Creation, a badge, allocation and acceptance are not a funded booking. A mock
+guest view must be prominently labelled simulated; never sign as the performer.
+`payroll-assets.json:liveFundSlug` includes the recoverable live-performer
+allocation in the shared fund selector and worker `/api/funds` evidence. It is
+optional for other configurations; neither its balance nor a payroll reward
+receipt is proof of a booking escrow deposit. The worker must load the updated
+configuration for changes to its configured fund list to take effect.
+
+The [November 10 public receipt](./deployments/2026-11-10-within-pilot-funding.json)
+records the verified October pinner reward and the distinct $20 live-fund
+deposit; the remaining pinner allocation was $10.73. The actual invitation
+`friday-live-performance:2026-11-13:withinthevacuum` is steward-approved, awaiting
+performer acceptance, with no extras. These are timestamped facts, not a live
+balance feed or a confirmed booking deposit.
+
+**After the artist accepts:** recover exactly the existing $20 allocation to
+the owner, approve the booking escrow for exactly $20, call `createBooking`
+once with the accepted terms, then reconcile the actual `BookingFunded`
+receipt. The Admin **Fund booking** action pulls from the owner's wallet; it
+does not automatically pull the live-fund allocation. Do not donate another
+$20, double-fund, or mark the recoverable deposit as locked escrow. Reconcile
+any pending transaction before retrying.
+
+Reuse decision: adapted DecentBusking `996a526`,
+`js/live-booking-notifications.mjs:startNotifications` and
+`js/live-performance-profile.mjs:renderLivePerformances`; retained the existing
+wallet-scoped signed booking workflow and claim/funding gates, with no Calendar
+integration. Targeted notification and audio/Profile wiring tests cover the
+invited wallet, existing Schedule path and absence of unfunded room access.
 
 ## Prototype readiness (verified October 24, 2026)
 

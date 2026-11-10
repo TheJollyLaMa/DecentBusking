@@ -7,7 +7,7 @@ import {
 import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { utcToNewYorkInput } from './radio-calendar.mjs';
 import { isAdminWallet } from './admin-access.mjs';
-import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261108-live-audio-pilot';
+import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261110-profile-invitation';
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261108-live-audio-pilot';
 
 const routerAbi = [
