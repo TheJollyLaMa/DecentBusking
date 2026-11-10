@@ -58,6 +58,29 @@ Never enable automatic egress/recording in the hosting project. This code reques
 
 ## Separate private rehearsal
 
+### Wallet-linked practice before show day
+
+The invitation and Profile card link to `live-room.html?booking=<id>` even
+before acceptance/funding. That URL grants no access. Before T-70 it embeds
+the existing private rehearsal client with the booking reference. The worker
+verifies the live booking and signed wallet (only performer or configured
+operator) before creating/rejoining a private room. Practice uses no financial
+signature, radio arming or soundcheck credit. The per-wallet session lasts at
+most 15 minutes; reauthorize for another session, with rooms capped at two hours.
+There remains one private rehearsal at a time; a closing room can take 35 seconds
+to clear. Provider failure/restart cleanup limitations below still apply.
+
+At T-70, private practice ends and the same page switches to the existing
+funded/accepted backstage flow. Both actual soundchecks and explicit operator
+arming are still required. The top-center sign counts down from the booking;
+it lights ON AIR only for fresh server-confirmed delivered audio in the exact
+funded/accepted booking, inside its slot. A clock, green mic indicator or practice
+audio cannot light it. An expired service response goes OFF AIR.
+
+Reuse: adapt `rehearsal.js` / `rehearsal.mjs` and the existing live backstage
+client, retaining separate private/public transport namespaces, signatures and
+escrow gates. No recording, payout streaming or Calendar integration is added.
+
 The receiving need is a short two-wallet audio rehearsal without a funded booking or
 public radio. Reuse decision: adapt this repository's `discord-bot/live-audio-transport.js`
 independent receiver and `js/live-audio-client.mjs` SDK loader from merged pilot commit

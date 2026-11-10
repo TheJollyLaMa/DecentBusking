@@ -11,7 +11,7 @@ const SESSION_DURATION = 15 * 60_000;
 const HEARTBEAT = 30_000;
 
 export function createRehearsalService({ ownerWallet, transport, store, now = () => Date.now(),
-  verify = verifyMessage, checkpointTimeoutMs = 10_000 } = {}) {
+  verify = verifyMessage, checkpointTimeoutMs = 10_000, getBookings } = {}) {
   const owner = address(ownerWallet), challenges = new Map(), sessions = new Map(), frames = new Map();
   const monitoring = new Set(), connected = new Map();
   let state, failed = false, tail = Promise.resolve();
@@ -21,6 +21,18 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
     endUtc: new Date(room.expiresAt).toISOString() });
   const lookup = id => state.rooms.find(room => room.id === id);
   const active = room => room && !room.endedAt && room.expiresAt > now();
+  async function practiceBooking(id, who) {
+    if (!getBookings || typeof id !== 'string' || id.length > 100) throw new LiveAudioError('Practice booking unavailable');
+    const result = await getBookings();
+    const b = (Array.isArray(result) ? result : result.bookings || []).find(item => item.id === id);
+    if (!b || b.mode !== 'phase1' || b.payoutPolicy !== 'pilot-guaranteed-v1' || !b.stewardApproved ||
+        b.cancelled || !['draft', 'funded'].includes(b.status) || !address(b.wallet) ||
+        ![owner, address(b.wallet)].includes(who) || !Number.isFinite(Date.parse(b.startUtc)) ||
+        Date.parse(b.startUtc) - 70 * 60_000 <= now()) {
+      throw new LiveAudioError('Practice is for the invited wallet before backstage opens at T−70');
+    }
+    return b;
+  }
   async function save(next) {
     let timer;
     try {
@@ -91,7 +103,9 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
     monitoring.add(room.id);
     void transport.monitor(booking(room), frame => {
       if (!failed && active(lookup(room.id)) && frame.samples > 0) frames.set(room.id, now());
-    }).catch(() => {}).finally(() => monitoring.delete(room.id));
+    }).catch(error => {
+      console.warn('[rehearsal] Independent receiver unavailable:', error.code || error.name || 'transport error');
+    }).finally(() => monitoring.delete(room.id));
   }
   return {
     get configured() { return configured && !failed; },
@@ -100,8 +114,18 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
         await initialize(); await cleanup();
         const who = address(input.wallet);
         if (!who) throw new LiveAudioError('Connect a valid wallet');
-        let room, kind;
-        if (input.action === 'create') {
+        let room, kind, practiceId;
+        if (input.action === 'practice') {
+          const b = await practiceBooking(input.bookingId, who);
+          practiceId = b.id;
+          room = state.rooms.find(item => active(item) && item.guest === address(b.wallet) && item.bookingId === b.id);
+          if (!room) {
+            if (state.rooms.length) throw new LiveAudioError('Another private rehearsal is active or closing; retry shortly');
+            room = { id: `rehearsal:${opaque()}`, guest: address(b.wallet), bookingId: b.id,
+              expiresAt: Math.min(now() + MAX_DURATION, Date.parse(b.startUtc) - 70 * 60_000), endedAt: 0 };
+          }
+          kind = 'practice';
+        } else if (input.action === 'create') {
           const guest = address(input.guest);
           if (who !== owner || !guest || guest === owner || !Number.isInteger(input.minutes) ||
               input.minutes < 1 || input.minutes > MAX_DURATION / 60_000) {
@@ -123,7 +147,7 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
           `Room expires: ${new Date(room.expiresAt).toISOString()}`, `Nonce: ${id}`,
           `Challenge expires: ${new Date(expiresAt).toISOString()}`,
           'I consent to private live audio. No public radio, recording, booking, payment, or transaction.'].join('\n');
-        challenges.set(id, { kind, room, who, origin, message, expiresAt });
+        challenges.set(id, { kind, room, who, origin, message, expiresAt, practiceId });
         return { challengeId: id, message };
       });
     },
@@ -134,10 +158,19 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
         if (!c || c.origin !== origin || c.expiresAt <= now()) throw new LiveAudioError('Rehearsal challenge expired');
         challenges.delete(challengeId);
         if (address(verify(c.message, signature)) !== c.who) throw new LiveAudioError('Rehearsal signature does not match');
+        if (c.practiceId) await practiceBooking(c.practiceId, c.who);
         let room = lookup(c.room.id);
         if (c.kind === 'create') {
           if (state.rooms.length || c.who !== owner || c.room.expiresAt <= now()) throw new LiveAudioError('Rehearsal can no longer be created');
           const next = clone(state); next.rooms.push(c.room); await save(next); room = lookup(c.room.id);
+        }
+        if (c.kind === 'practice' && !room) {
+          const existing = state.rooms.find(item => active(item) && item.bookingId === c.practiceId);
+          if (existing) room = existing;
+          else {
+            if (state.rooms.length || c.room.expiresAt <= now()) throw new LiveAudioError('Practice room is no longer available');
+            const next = clone(state); next.rooms.push(c.room); await save(next); room = lookup(c.room.id);
+          }
         }
         if (!active(room) || ![owner, room.guest].includes(c.who)) throw new LiveAudioError('Rehearsal has ended');
         for (const [key, s] of sessions) if (s.expiresAt <= now()) sessions.delete(key);
@@ -151,6 +184,7 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
       return run(async () => {
         await initialize(); await cleanup();
         const { s, room } = auth(token, origin);
+        if (room.bookingId && input.action !== 'leave' && input.action !== 'end') await practiceBooking(room.bookingId, s.wallet);
         if (input.action === 'state') {
           if (connected.get(room.id)?.has(token)) connected.get(room.id).set(token, now());
           return publicState(room);

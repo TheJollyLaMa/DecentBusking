@@ -10,7 +10,8 @@ export function validateRehearsalState(value) {
       !Array.isArray(value.rooms) || value.rooms.length > 100) throw new Error('Invalid rehearsal checkpoint');
   const ids = new Set();
   for (const room of value.rooms) {
-    if (!room || Object.keys(room).some(k => !['id', 'guest', 'expiresAt', 'endedAt'].includes(k)) ||
+    if (!room || Object.keys(room).some(k => !['id', 'guest', 'bookingId', 'expiresAt', 'endedAt'].includes(k)) ||
+        room.bookingId !== undefined && (typeof room.bookingId !== 'string' || !/^[a-z0-9:_-]{1,100}$/.test(room.bookingId)) ||
         !/^rehearsal:[0-9a-f]{64}$/.test(room.id || '') || ids.has(room.id) ||
         !/^0x[0-9a-f]{40}$/.test(room.guest || '') || !Number.isSafeInteger(room.expiresAt) ||
         room.expiresAt < 0 || !Number.isSafeInteger(room.endedAt) || room.endedAt < 0) throw new Error('Invalid rehearsal checkpoint');

@@ -143,7 +143,8 @@ test('withinthevacuum Profile invitation is wallet-scoped and cannot imply accep
   assert.match(text, /8:00 PM & 8:45 PM/);
   assert.doesNotMatch(text, /task|token|Calendar/);
   assert.equal(nodes.filter(node => node.tag === 'details').length, 1);
-  assert.equal(nodes.filter(node => node.tag === 'a').length, 0, 'no separate agreement-reading step');
+  assert.equal(nodes.filter(node => node.tag === 'a').length, 1, 'only a private practice-room link, not an external agreement');
+  assert.match(nodes.find(node => node.tag === 'a').href, /live-room.html\?booking=/);
   b.acknowledged = true;
   const acceptedContainer = createElement('section');
   await renderLivePerformances({ ...options, container: acceptedContainer });
@@ -280,17 +281,17 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /live-performance-admin\.mjs\?v=20261110-profile-invitation/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261110-invitation-card"/);
-  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261110-invitation-card"/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261110-wallet-practice"/);
+  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261110-wallet-practice"/);
   assert.match(html, /live-performance\.css\?v=20261110-invitation-card/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
-    './js/radio-schedule-ui.mjs?v=20261110-invitation-card');
+    './js/radio-schedule-ui.mjs?v=20261110-wallet-practice');
   assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],
     './js/fund-display.mjs?v=20261108-live-audio-pilot');
   for (const file of ['creator-profile.mjs', 'radio-schedule-ui.mjs']) {
     assert.match(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'),
-      /live-performance-profile\.mjs\?v=20261110-invitation-card/);
+      /live-performance-profile\.mjs\?v=20261110-wallet-practice/);
   }
   assert.match(fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8'),
     /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);

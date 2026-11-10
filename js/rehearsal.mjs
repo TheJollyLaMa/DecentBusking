@@ -3,6 +3,7 @@ import { loadLiveAudioSdk } from './live-audio-client.mjs';
 const el = id => document.getElementById(id);
 const service = String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
 const initialId = new URL(location.href).searchParams.get('rehearsal') || '';
+const practiceBookingId = new URL(location.href).searchParams.get('booking') || '';
 const audio = el('audio');
 let session, room, localTrack, remoteTrack, generation = 0, disposed = false, polling = false, deadlineTimer;
 const status = text => { el('status').textContent = text; };
@@ -110,7 +111,8 @@ async function connect(publish) {
   }
 }
 el('create-room').onclick = action(() => authorize({ action: 'create', guest: el('guest').value.trim(), minutes: Number(el('minutes').value) }));
-el('join-room').onclick = action(() => authorize({ action: 'join', id: initialId }));
+el('join-room').onclick = action(() => authorize(practiceBookingId
+  ? { action: 'practice', bookingId: practiceBookingId } : { action: 'join', id: initialId }));
 el('devices').onclick = action(async () => {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   stream.getTracks().forEach(track => track.stop());
@@ -150,7 +152,13 @@ window.addEventListener('pagehide', () => {
   void disconnect();
 });
 setInterval(() => { void poll(); }, 2000);
-el('join').hidden = !initialId;
+el('join').hidden = !initialId && !practiceBookingId;
+if (practiceBookingId) {
+  el('create').hidden = true;
+  el('join').querySelector('h2').textContent = 'Your private practice stage';
+  document.querySelector('h1').textContent = 'Make yourself at home';
+  document.querySelector('h1 + p').textContent = 'Try your microphone any day before backstage opens. Only your invited wallet and Jolly can enter. Private practice does not count as a Friday soundcheck.';
+}
 if (!service) status('Private rehearsal unavailable: configure the worker first.');
 else {
   try {

@@ -3,12 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DecentBusking · Live audio backstage</title>
-  <link rel="stylesheet" href="css/live-audio.css?v=20261108-live-audio-pilot">
+  <title>DecentBusking · Your stage</title>
+  <link rel="stylesheet" href="css/live-audio.css?v=20261110-wallet-practice">
   <script src="decent.config.js"></script>
 </head>
 <body class="live-audio-room">
-  <h1>Live audio backstage</h1>
+  <header class="performer-room-header">
+    <div id="room-on-air" class="room-on-air" role="status" aria-label="Broadcast status">OFF AIR</div>
+    <p id="room-countdown">Checking your showtime…</p>
+    <h1 id="room-welcome">Your Decent stage</h1>
+    <a href="./">← Profile & radio</a>
+  </header>
+  <section id="room-practice" hidden>
+    <p>Your private corner to try things out. Nothing here goes on public radio.</p>
+    <iframe id="room-practice-frame" title="Private practice stage" allow="microphone" referrerpolicy="same-origin"></iframe>
+  </section>
+  <section id="room-backstage">
   <p>Private T−60 / T−15 soundchecks. The public audience listens on the <a href="./">website radio</a>.
     No recording, video, payment or wallet transaction. Use headphones.</p>
   <output id="room-status" role="status" aria-live="polite">Checking room availability…</output>
@@ -38,6 +48,7 @@
       60 seconds during the slot automatically cancels the broadcast. The guaranteed performer fee is unchanged.
       Discord live-audio parity is not enabled.</p>
   </section>
-  <script type="module" src="js/live-audio-room.mjs?v=20261108-live-audio-pilot"></script>
+  </section>
+  <script type="module" src="js/live-audio-room.mjs?v=20261110-wallet-practice"></script>
 </body>
 </html>
