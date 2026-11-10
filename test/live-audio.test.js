@@ -379,7 +379,19 @@ test('listener ON-AIR requires local packet progression and playback, not merely
   assert.equal(listenerAudioStatus({ ...state, phase: 'cancelled' }), 'OFF-AIR');
 });
 
-test('worker receiver requires both decoded frames and advancing inbound packets; concealment alone is not delivery', async t => {
+test('receiver recognizes audio inbound RTP on either native peer connection, never outbound/video counters', async () => {
+  const { receivedAudioPackets } = await import('../discord-bot/live-audio-transport.js');
+  const stat = (kind, media, count) => ({ stats: { case: kind, value: {
+    stream: { kind: media }, received: { packetsReceived: BigInt(count) } } } });
+  const audio = stat('inboundRtp', 'audio', 286);
+  assert.equal(receivedAudioPackets({ subscriberStats: [], publisherStats: [audio] }), 286n);
+  assert.equal(receivedAudioPackets({ subscriberStats: [audio], publisherStats: [] }), 286n);
+  assert.equal(receivedAudioPackets({ subscriberStats: [stat('outboundRtp', 'audio', 100),
+    stat('inboundRtp', 'video', 200)], publisherStats: [audio] }), 286n);
+  assert.equal(receivedAudioPackets({}), 0n);
+});
+
+test('worker receiver requires decoded frames and advancing native publisher-list inbound packets; concealment alone is not delivery', async t => {
   const { createLiveAudioTransport } = await import('../discord-bot/live-audio-transport.js');
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: START });
   let controller, packetCount = 0n, fresh = 0;
@@ -387,7 +399,7 @@ test('worker receiver requires both decoded frames and advancing inbound packets
   class Room extends EventEmitter {
     remoteParticipants = new Map();
     async connect() { this.emit('trackSubscribed', { kind: 1 }, { sid: 'audio' }, participant); }
-    async getRtcStats() { return { subscriberStats: [{ stats: { case: 'inboundRtp', value: {
+    async getRtcStats() { return { subscriberStats: [], publisherStats: [{ stats: { case: 'inboundRtp', value: {
       stream: { kind: 'audio' }, received: { packetsReceived: packetCount } } } }] }; }
     async disconnect() {}
   }
