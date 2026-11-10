@@ -5,6 +5,7 @@
   "routerAddress": "0x8ecca903e2a6Daa8CCbB933700e4F2C58C44A4B5",
   "fundSlug": "dbusk-repo-dev",
   "pinnerFundSlug": "dbusk-pinners",
+  "liveFundSlug": "dbusk-live-performers",
   "blockedPayoutAddresses": [
     { "address": "0x23A457AD3C33d68E4fAd2FCa7c5d9a511E0C350e", "reason": "DecentEscrow contract on Optimism only; nothing is deployed at this address on Base, so payouts would be unrecoverable" }
   ],

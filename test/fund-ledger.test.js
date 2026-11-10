@@ -227,7 +227,8 @@ test('public balances distinguish RPC failure, real zero and recovery without lo
   const checkedAt = '2026-10-23T12:00:00.000Z';
   const ledger = createFundLedger({
     provider: makeProvider({ head: 10, logs: [], txFrom: new Map() }), router, startBlock: 10,
-    config: { chainId: 8453, routerAddress, radioFunds: { topTen: funds.top10 }, assets: { USDC: { address: usdc } } },
+    config: { chainId: 8453, routerAddress, radioFunds: { topTen: funds.top10 },
+      liveFundSlug: 'dbusk-live-performers', assets: { USDC: { address: usdc } } },
     now: () => Date.parse(checkedAt),
     getWeeklyPayflow: () => ({ ready: true, funds: { top10: { reservedUnits: '7', availableUnits: '123' } } }),
   });
@@ -263,6 +264,34 @@ test('public balances distinguish RPC failure, real zero and recovery without lo
   assert.equal(recovered.balanceUnits, '9007199254740993123456');
   assert.equal(recovered.balanceAvailable, true);
   assert.equal(recovered.balanceError, '');
+});
+
+test('configured live allocation exposes exact USDC evidence as recoverable money, not booking escrow', async () => {
+  const { createFundLedger } = await import(url);
+  const liveFundSlug = 'dbusk-live-performers';
+  const txHash = '0x' + 'a'.repeat(64);
+  const owner = '0x' + '1'.repeat(40);
+  const logs = [makeLog(liveFundSlug, owner, 20000000n, txHash, 10, 0)];
+  const config = { chainId: 8453, routerAddress, assets: { USDC: { address: usdc, decimals: 6 } } };
+  const options = {
+    provider: makeProvider({ head: 10, logs, txFrom: new Map([[txHash, owner]]) }),
+    router: makeRouter(logs, new Map([[id(liveFundSlug).toLowerCase(), 20000000n]])),
+    startBlock: 10,
+  };
+  const absent = createFundLedger({ ...options, config });
+  assert.equal(absent.getState().funds[liveFundSlug], undefined);
+  const ledger = createFundLedger({ ...options, config: { ...config, liveFundSlug } });
+  await ledger.initialize();
+  const fund = (await ledger.getCurrentState()).funds[liveFundSlug];
+  assert.equal(fund.balanceAvailable, true);
+  assert.equal(fund.balanceUnits, '20000000');
+  assert.match(fund.label, /earmarked\/recoverable, NOT escrow/);
+  assert.equal(fund.sources.length, 1);
+  assert.equal(fund.sources[0].txHash, txHash);
+  assert.equal(fund.sources[0].amountUnits, '20000000');
+  assert.equal(fund.sponsorUnits, '20000000');
+  assert.equal(fund.payoutsAvailable, false, 'unindexed payouts are not invented as zero');
+  assert.equal(fund.status, undefined, 'an allocation is not a funded booking');
 });
 
 test('weekly failure does not substitute total balance for an unknown spendable balance', async () => {

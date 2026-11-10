@@ -23,7 +23,7 @@
 import { isAdminWallet } from './admin-access.mjs';
 import { previewPlaybackPayroll, previewTopTenPayroll, finalizeRadioAllocation, settleRadioAllocation, validateRadioReceipt, radioWorkReferenceText, radioAllocationMatchesReport } from './radio-payroll.mjs?v=20261019-payroll-confirmations';
 import { previewTopTenSongPayroll } from './top-ten-prizes.mjs';
-import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261017-mercury-release';
+import { configuredSettlementFunds, resolveSettlementFundSlug, validateSettlementFundSlug, defaultSettlementFundMetadata, buildSettlementFundMetadata, CUSTOM_FUND_OPTION, createConfiguredSettlementFund, depositSettlementUsdc, recoverSettlementUsdc, verifySettlementRecoveryReceipt } from './settlement-funds.mjs?v=20261110-profile-invitation';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { recordPayrollConfirmation, setPayrollConfirmationStatus } from './payroll-confirmations.mjs?v=20261102-recipient-names';

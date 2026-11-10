@@ -125,6 +125,26 @@ pass and operator arming → claims here after approval or the review window,
 before November 17 at 9:20 p.m. New York. Keep the room open while publishing.
 Creation, a badge, allocation and acceptance are not a funded booking. A mock
 guest view must be prominently labelled simulated; never sign as the performer.
+`payroll-assets.json:liveFundSlug` includes the recoverable live-performer
+allocation in the shared fund selector and worker `/api/funds` evidence. It is
+optional for other configurations; neither its balance nor a payroll reward
+receipt is proof of a booking escrow deposit. The worker must load the updated
+configuration for changes to its configured fund list to take effect.
+
+The [November 10 public receipt](./deployments/2026-11-10-within-pilot-funding.json)
+records the verified October pinner reward and the distinct $20 live-fund
+deposit; the remaining pinner allocation was $10.73. The actual invitation
+`friday-live-performance:2026-11-13:withinthevacuum` is steward-approved, awaiting
+performer acceptance, with no extras. These are timestamped facts, not a live
+balance feed or a confirmed booking deposit.
+
+**After the artist accepts:** recover exactly the existing $20 allocation to
+the owner, approve the booking escrow for exactly $20, call `createBooking`
+once with the accepted terms, then reconcile the actual `BookingFunded`
+receipt. The Admin **Fund booking** action pulls from the owner's wallet; it
+does not automatically pull the live-fund allocation. Do not donate another
+$20, double-fund, or mark the recoverable deposit as locked escrow. Reconcile
+any pending transaction before retrying.
 
 Reuse decision: adapted DecentBusking `996a526`,
 `js/live-booking-notifications.mjs:startNotifications` and
