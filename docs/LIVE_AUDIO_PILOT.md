@@ -77,6 +77,13 @@ it lights ON AIR only for fresh server-confirmed delivered audio in the exact
 funded/accepted booking, inside its slot. A clock, green mic indicator or practice
 audio cannot light it. An expired service response goes OFF AIR.
 
+The independent native receiver checks advancing **audio inbound-RTP** packet
+counters across both SDK peer-connection statistics lists, plus recently decoded
+PCM. In rtc-node 1.2.1 the actual receive connection can appear in
+`publisherStats` while `subscriberStats` is empty. The list's name does not make
+an outbound counter delivery evidence. Video/outbound counters and decoded
+concealment without new packets never establish freshness.
+
 Reuse: adapt `rehearsal.js` / `rehearsal.mjs` and the existing live backstage
 client, retaining separate private/public transport namespaces, signatures and
 escrow gates. No recording, payout streaming or Calendar integration is added.

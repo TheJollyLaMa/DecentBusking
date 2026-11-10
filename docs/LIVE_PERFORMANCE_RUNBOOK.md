@@ -76,7 +76,9 @@ visit or checkbox step. Payment mechanics and the claim deadline are available
 inline under **Payment & practical details**. Existing immutable agreement
 bytes, signature authorization and funding gates are unchanged. The card does
 not claim a deposit is escrow: only a confirmed funded booking gets that label
-and a rehearsal-room link. Legacy offers and historical receipts retain their
+as escrow funded. An approved invitation also includes a private practice-room
+link before acceptance/funding; that link grants no access or soundcheck credit.
+Legacy offers and historical receipts retain their
 existing detail view.
 
 Reuse: the card adapts the existing `renderPerformerBookingInvite` and unchanged
@@ -96,8 +98,10 @@ motion uses a still composition. It never indicates funding or payment.
 
 The agreed Friday slot is November 13, 2026, 21:00–21:20 New York:
 `2026-11-14T02:00:00.000Z`–`2026-11-14T02:20:00.000Z`. Checks are
-20:00 and 20:45 New York. Monday onboarding does not grant early access to this
-Friday media room, create another funded show or require any token purchase.
+20:00 and 20:45 New York. The wallet-linked room offers private practice until
+T-70, then switches to the actual funded/accepted backstage. Early practice
+does not create another funded show, pass Friday checks or require a token
+purchase. See [wallet-linked practice](./LIVE_AUDIO_PILOT.md#wallet-linked-practice-before-show-day).
 
 Use the deployed worker's `GET /api/live-bookings` revision and escrow address.
 From the website's actual allowed origin, the owner signs `liveAuthorization(body)`

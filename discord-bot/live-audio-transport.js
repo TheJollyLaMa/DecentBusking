@@ -10,7 +10,8 @@ export function rehearsalRoomName(id) {
 }
 
 export function receivedAudioPackets(stats) {
-  return (stats?.subscriberStats || []).reduce((total, entry) => {
+  // rtc-node can report inbound media on either peer connection's stats list.
+  return [...(stats?.subscriberStats || []), ...(stats?.publisherStats || [])].reduce((total, entry) => {
     const rtp = entry.stats?.case === 'inboundRtp' ? entry.stats.value : null;
     return rtp?.stream?.kind === 'audio' ? total + BigInt(rtp.received?.packetsReceived || 0) : total;
   }, 0n);
@@ -110,7 +111,9 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
           if (!state.statsLogged && state.decodedAt) {
             state.statsLogged = true;
             console.info('[live-audio-receiver] Packet evidence:', JSON.stringify({
-              receivedPackets: String(next), subscriberKinds: (stats.subscriberStats || []).map(entry => entry.stats?.case),
+              receivedPackets: String(next),
+              subscriberKinds: (stats.subscriberStats || []).map(entry => entry.stats?.case),
+              publisherKinds: (stats.publisherStats || []).map(entry => entry.stats?.case),
             }));
           }
           if (!state.closed && next > packets && now() - state.decodedAt < 2000) onFrame({ samples: 1 });
