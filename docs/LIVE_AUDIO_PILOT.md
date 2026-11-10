@@ -69,6 +69,11 @@ signature, radio arming or soundcheck credit. The per-wallet session lasts at
 most 15 minutes; reauthorize for another session, with rooms capped at two hours.
 There remains one private rehearsal at a time; a closing room can take 35 seconds
 to clear. Provider failure/restart cleanup limitations below still apply.
+Private checkpoints retain encrypted latest-state readback verification. Their
+bounded 45-second write deadline allows the storage helper's 15-second gateway
+attempts to finish; consent/end requests allow 60 seconds, while ordinary audio
+controls retain their 10-second unavailable cutoff. A failed checkpoint still
+closes access rather than pretending the room was saved.
 
 At T-70, private practice ends and the same page switches to the existing
 funded/accepted backstage flow. Both actual soundchecks and explicit operator
