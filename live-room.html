@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DecentBusking · Your stage</title>
-  <link rel="stylesheet" href="css/live-audio.css?v=20261110-studio-monitor">
+  <link rel="stylesheet" href="css/live-audio.css?v=20261110-entry-help">
   <script src="decent.config.js"></script>
 </head>
 <body class="live-audio-room rehearsal-room">
@@ -20,6 +20,12 @@
     <iframe id="room-practice-frame" title="Private practice stage" allow="microphone" referrerpolicy="same-origin"></iframe>
   </section>
   <section id="room-backstage" class="studio-card">
+  <h2>Enter your backstage</h2>
+  <details class="room-entry-info">
+    <summary aria-label="Why sign to enter backstage?">i</summary>
+    <p>Your wallet is your personal key. Signing proves you control the booked performer or operator wallet and unlocks a temporary backstage audio session on this site.</p>
+    <p>No gas, payment, token approval or booking acceptance. Your private key stays in your wallet. Practice access and backstage access are separate: reconnect here for the scheduled soundchecks. Going on air still requires both checks and operator clearance.</p>
+  </details>
   <p>Private T−60 / T−15 soundchecks. The public audience listens on the <a href="./">website radio</a>.
     No recording, video, payment or wallet transaction. Use headphones.</p>
   <p class="studio-note">Practice and show day use this same stable stage link. Backstage opens at T−70 and requires fresh wallet authorization and reconnection. A real broadcast still needs both soundchecks and the operator to confirm and arm it.</p>
@@ -67,7 +73,7 @@
       Discord live-audio parity is not enabled.</p>
   </section>
   </section>
-  <aside class="studio-helper" aria-label="DBusker's soundcheck tips">
+  <aside id="room-helper" class="studio-helper" aria-label="DBusker's soundcheck tips" hidden>
     <img src="img/D_Busker.jpeg" width="48" height="48" alt="DBusker">
     <div><p><strong>DBusker's here to help</strong> <span>Your setup guide · not a live conversation.</span></p>
       <details>
@@ -80,6 +86,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/live-audio-room.mjs?v=20261110-studio-monitor"></script>
+  <script type="module" src="js/live-audio-room.mjs?v=20261110-entry-help"></script>
 </body>
 </html>

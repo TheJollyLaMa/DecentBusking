@@ -80,6 +80,10 @@ headphones and delivery checks, not a connected AI agent or a claim that the
 operator is present. The stable room link transitions to booked backstage at
 T-70 with fresh wallet authorization; neither self-monitoring nor practice
 passes the two operator-confirmed Friday soundchecks.
+Only one help section is visible: the embedded practice guide before T-70,
+then the outer backstage guide. The entry title's keyboard-accessible “i”
+explains wallet-control proof, temporary access and private-audio consent,
+separately from booking acceptance or financial authorization.
 
 ### Wallet-linked practice before show day
 
