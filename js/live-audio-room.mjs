@@ -1,4 +1,5 @@
 import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs';
+import { performerRoomSign } from './performer-room.mjs?v=20261110-wallet-practice';
 
 const byId = id => document.getElementById(id);
 const bookingId = new URL(location.href).searchParams.get('booking') || '';
@@ -6,6 +7,7 @@ const serviceUrl = String(window.DecentConfig?.ipfsUploadServiceUrl || '').repla
 const audio = byId('room-audio');
 let session, wallet, room, localTrack, remoteTrack, polling = false, disposed = false;
 let authGeneration = 0, connectionGeneration = 0;
+let booking, broadcastState, observedAt = 0, refreshing = false, practiceMode = false;
 const status = message => { byId('room-status').textContent = message; };
 const command = input => roomRequest(serviceUrl, 'control', input, session?.token);
 const perform = fn => async () => {
@@ -67,6 +69,7 @@ async function connect(publish) {
   }
 }
 function render(state) {
+  broadcastState = state; observedAt = Date.now(); renderSign();
   const fresh = state.privateAudioFresh ? 'Worker receiver verifies fresh delivered audio' : 'No fresh delivery verified';
   status(`${state.status} · ${state.phase} · ${fresh}\n${state.reason || 'Soundchecks are private until the armed slot starts.'}`);
   if (state.targets) byId('room-targets').textContent = `T−60: ${new Date(state.targets.t60).toLocaleString()} · T−15: ${new Date(state.targets.t15).toLocaleString()} · Checks: ${state.checks?.t60 ? 'T−60 passed' : 'T−60 pending'}, ${state.checks?.t15 ? 'T−15 passed' : 'T−15 pending'}`;
@@ -76,6 +79,59 @@ function render(state) {
     byId('room-obs-secret').textContent = '';
     void disconnect();
   }
+}
+function renderSign() {
+    const sign = performerRoomSign(booking, broadcastState, Date.now(), observedAt);
+    byId('room-on-air').textContent = sign.label;
+    byId('room-on-air').classList.toggle('is-live', sign.live);
+    byId('room-countdown').textContent = sign.detail;
+    const practice = booking && !booking.cancelled && ['draft', 'funded'].includes(booking.status) &&
+      Date.now() < Date.parse(booking.startUtc) - 70 * 60_000;
+    byId('room-practice').hidden = !practice;
+    byId('room-backstage').hidden = !!practice;
+    if (practice && !practiceMode) {
+      const url = new URL('rehearsal.html', location.href);
+      url.searchParams.set('booking', bookingId);
+      byId('room-practice-frame').src = url.href;
+    } else if (!practice && practiceMode) {
+      byId('room-practice-frame').removeAttribute('src');
+    }
+    practiceMode = !!practice;
+  }
+async function refreshBooking() {
+    if (refreshing || disposed || !bookingId || !serviceUrl) return;
+    refreshing = true;
+    try {
+      const response = await fetch(`${serviceUrl}/api/live-bookings`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+      if (!response.ok) throw new Error('Booking unavailable');
+      const state = await response.json();
+      const selected = state.bookings?.find(item => item.id === bookingId);
+      if (!selected || selected.mode !== 'phase1' || selected.payoutPolicy !== 'pilot-guaranteed-v1' || !selected.stewardApproved) {
+        throw new Error('Open the room from your performance invitation');
+      }
+      booking = selected;
+      byId('room-welcome').textContent = `${booking.displayName || 'Your'} · your Decent stage`;
+      renderSign();
+      if (practiceMode) return;
+      if (booking.status !== 'funded' || !booking.acknowledged || booking.cancelled || Date.parse(booking.endUtc) <= Date.now()) {
+        byId('room-authorize').disabled = true;
+        if (session) { session = null; byId('room-controls').hidden = true; await disconnect(); }
+        status('Backstage opens after acceptance and confirmed escrow funding, from 70 minutes before your set.');
+        return;
+      }
+      const liveResponse = await fetch(`${serviceUrl}/api/live-audio/state?bookingId=${encodeURIComponent(bookingId)}`, {
+        cache: 'no-store', signal: AbortSignal.timeout(10000) });
+      const liveState = await liveResponse.json();
+      if (!liveResponse.ok || !liveState.configured) throw new Error(liveState.error || 'Live audio hosting unavailable');
+      broadcastState = liveState; observedAt = Date.now(); renderSign();
+      byId('room-authorize').disabled = false;
+      if (!session) status('Backstage is ready. Connect your invited wallet to soundcheck.');
+    } catch (error) {
+      broadcastState = null; observedAt = 0;
+      byId('room-authorize').disabled = true;
+      status(error.message || 'Room unavailable; retry shortly.');
+      renderSign();
+    } finally { refreshing = false; }
 }
 byId('room-authorize').onclick = perform(async () => {
   if (!window.ethereum) throw new Error('A browser wallet is needed for backstage access');
@@ -152,13 +208,7 @@ window.ethereum?.on?.('accountsChanged', () => {
 });
 window.addEventListener('pagehide', () => { disposed = true; ++authGeneration; session = null; void disconnect(); });
 setInterval(() => { void poll(); }, 2000);
+setInterval(renderSign, 1000);
+setInterval(() => { void refreshBooking(); }, 10000);
 if (!bookingId || !serviceUrl) status('Live audio unavailable: open the funded booking link and configure the radio worker first.');
-else {
-  try {
-    const response = await fetch(`${serviceUrl}/api/live-audio/state?bookingId=${encodeURIComponent(bookingId)}`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
-    const state = await response.json();
-    if (!response.ok || !state.configured) throw new Error(state.error || state.reason || 'Live audio hosting is not configured');
-    status('Room available. Only the booked performer and configured owner can enter backstage.');
-    byId('room-authorize').disabled = false;
-  } catch (error) { status(`Live audio unavailable: ${error.message || 'check hosting and retry'}`); }
-}
+else void refreshBooking();

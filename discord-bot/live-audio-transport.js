@@ -49,7 +49,8 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
   async function monitor(booking, onFrame) {
     requireReady();
     if (monitors.has(booking.id)) return;
-    const state = { room: null, closed: false, readers: new Map(), decodedAt: 0, statsTimer: null };
+    const state = { room: null, closed: false, readers: new Map(), decodedAt: 0, statsTimer: null,
+      decodedLogged: false, statsLogged: false };
     monitors.set(booking.id, state);
     try {
       await ensureRoom(booking);
@@ -73,9 +74,17 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
               const { value: frame, done } = await reader.read();
               if (done) break;
               // Zero-valued PCM is valid delivered silence, not a disconnection.
-              if (frame.samplesPerChannel > 0 && frame.data?.length) state.decodedAt = now();
+              if (frame.samplesPerChannel > 0 && frame.data?.length) {
+                state.decodedAt = now();
+                if (!state.decodedLogged) {
+                  state.decodedLogged = true;
+                  console.info('[live-audio-receiver] First decoded audio frame');
+                }
+              }
             }
-          } catch { /* Missing frames are handled by the service's sixty-second watchdog. */ }
+          } catch (error) {
+            if (!state.closed) console.warn('[live-audio-receiver] Audio reader unavailable:', error.code || error.name || 'reader error');
+          }
           finally { state.readers.delete(publication.sid); await reader.cancel().catch(() => {}); }
         })();
       });
@@ -86,6 +95,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
       const auth = await grant(booking, `health:${booking.id}`);
       await room.connect(url, auth.token, { autoSubscribe: false, dynacast: false,
         dataStream: { maxPayloadByteLength: 1024 } });
+      console.info('[live-audio-receiver] Independent receiver connected');
       if (state.closed) { await room.disconnect(); return; }
       for (const participant of room.remoteParticipants.values()) {
         for (const publication of participant.trackPublications.values()) subscribe(publication, participant);
@@ -95,7 +105,14 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
         if (checking || state.closed) return;
         checking = true;
         try {
-          const next = receivedAudioPackets(await room.getRtcStats());
+          const stats = await room.getRtcStats();
+          const next = receivedAudioPackets(stats);
+          if (!state.statsLogged && state.decodedAt) {
+            state.statsLogged = true;
+            console.info('[live-audio-receiver] Packet evidence:', JSON.stringify({
+              receivedPackets: String(next), subscriberKinds: (stats.subscriberStats || []).map(entry => entry.stats?.case),
+            }));
+          }
           if (!state.closed && next > packets && now() - state.decodedAt < 2000) onFrame({ samples: 1 });
           packets = next;
         } catch { /* Transport counters, not amplitude or concealed frames, establish freshness. */ }

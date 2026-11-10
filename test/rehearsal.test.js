@@ -19,7 +19,8 @@ async function fixture(options = {}) {
     async rehearsalConnect(b, wallet, publish) { calls.push(['connect', b.id, wallet, publish]); return { token: 'secret' }; },
     async monitor(b, cb) { calls.push(['monitor', b.id]); monitors.push(cb); },
   };
-  const service = createRehearsalService({ ownerWallet: owner.address, store, transport, now: () => clock.now });
+  const service = createRehearsalService({ ownerWallet: owner.address, store, transport, now: () => clock.now,
+    getBookings: options.getBookings });
   async function sign(wallet, input, requestOrigin = origin) {
     const challenge = await service.challenge({ ...input, wallet: wallet.address }, requestOrigin);
     return service.authorize({ challengeId: challenge.challengeId, signature: await wallet.signMessage(challenge.message) }, requestOrigin);
@@ -27,6 +28,43 @@ async function fixture(options = {}) {
   async function create(minutes = 60) { return sign(owner, { action: 'create', guest: guest.address, minutes }); }
   return { service, clock, calls, monitors, durable, sign, create };
 }
+
+test('invited artist can start repeat private practice before acceptance without funding or operator presence', async () => {
+  const b = { id: 'friday:practice', wallet: guest.address.toLowerCase(), mode: 'phase1',
+    payoutPolicy: 'pilot-guaranteed-v1', stewardApproved: true, status: 'draft',
+    startUtc: '2026-11-14T02:00:00Z' };
+  const f = await fixture({ getBookings: async () => ({ bookings: [b] }) });
+  const enter = wallet => f.sign(wallet, { action: 'practice', bookingId: b.id });
+  await assert.rejects(enter(stranger), /invited wallet/);
+  const g = await enter(guest), a = await enter(owner);
+  assert.equal(g.state.id, a.state.id);
+  assert.equal(g.role, 'guest');
+  assert.equal(f.durable.value.rooms.length, 1);
+  assert.equal(f.durable.value.rooms[0].bookingId, b.id);
+  await f.service.command(g.token, { action: 'connect', publish: true }, origin);
+  await assert.rejects(f.service.command(g.token, { action: 'arm' }, origin), /unauthorized/);
+  assert.equal(b.acknowledged, undefined);
+  await f.service.command(g.token, { action: 'leave' }, origin);
+  f.clock.now += 36_000; await f.service.tick();
+  const repeat = await enter(guest);
+  assert.notEqual(repeat.state.id, g.state.id);
+});
+
+test('practice closes at backstage boundary and rechecks booking at signature and connection', async () => {
+  const clock = { now: Date.parse('2026-11-14T00:49:00Z') };
+  const b = { id: 'friday:practice', wallet: guest.address.toLowerCase(), mode: 'phase1',
+    payoutPolicy: 'pilot-guaranteed-v1', stewardApproved: true, status: 'draft', startUtc: '2026-11-14T02:00:00Z' };
+  const f = await fixture({ clock, getBookings: async () => ({ bookings: [b] }) });
+  const g = await f.sign(guest, { action: 'practice', bookingId: b.id });
+  assert.equal(g.state.expiresAt, Date.parse(b.startUtc) - 70 * 60_000);
+  const c = await f.service.challenge({ action: 'practice', bookingId: b.id, wallet: guest.address }, origin);
+  b.cancelled = true;
+  await assert.rejects(f.service.authorize({ challengeId: c.challengeId, signature: await guest.signMessage(c.message) }, origin), /invited wallet/);
+  await assert.rejects(f.service.command(g.token, { action: 'connect', publish: true }, origin), /invited wallet/);
+  b.cancelled = false; clock.now += 60000;
+  await assert.rejects(f.sign(guest, { action: 'practice', bookingId: b.id }), /T−70/);
+  await assert.rejects(f.service.command(g.token, { action: 'state' }, origin), /expired/);
+});
 
 test('signed owner invitation and guest consent stay separate from booking, public radio and payment', async () => {
   const f = await fixture();

@@ -1566,6 +1566,7 @@ async function main() {
   }
   const rehearsal = createRehearsalService({
     ownerWallet: config.mintOwnerWallet, store: rehearsalStore,
+    getBookings: () => liveBookings.getState(),
     transport: createLiveAudioTransport({
       enabled: process.env.PRIVATE_REHEARSAL_ENABLED === 'true',
       url: process.env.LIVEKIT_URL || '', apiKey: process.env.LIVEKIT_API_KEY || '', apiSecret: process.env.LIVEKIT_API_SECRET || '',

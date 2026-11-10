@@ -1,6 +1,7 @@
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, claimState, liveAcknowledgement, liveBookingRows, livePerformancePolicyText } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261108-live-audio-pilot';
+import { performerRoomUrl } from './performer-room.mjs?v=20261110-wallet-practice';
 
 function secretPyramid() {
  const image = document.createElement('img');
@@ -101,6 +102,14 @@ function pilotInvitationCard(b) {
    element('p', '', `Jolly funds escrow after you accept, then approves the full fee after the set. Claim here with your wallet (Base ETH for gas). Without a review, full claim opens after ${b.reviewWindow / 3600} hours. Claim by ${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(b.claimDeadline))} New York.`),
    element('p', '', 'Contract pause, cancellation or expiry can affect escrow; Jolly still owes any shortfall against the guarantee. Both soundchecks must pass before broadcast.'));
  card.append(details);
+ const roomUrl = performerRoomUrl(b);
+ if (roomUrl) {
+   const link = document.createElement('a');
+   link.href = roomUrl;
+   link.textContent = '🎙 Your room · practise before Friday';
+   link.setAttribute('data-performer-room', '');
+   card.append(link);
+ }
  if (b.status === 'funded') {
    card.append(element('p', 'live-invitation-response', '🔒 Your fee is in escrow. Come back here for your soundcheck.'));
  } else if (b.acknowledged) {
