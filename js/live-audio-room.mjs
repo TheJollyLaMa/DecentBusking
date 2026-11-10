@@ -1,5 +1,7 @@
 import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs';
 import { performerRoomSign } from './performer-room.mjs?v=20261110-wallet-practice';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261110-studio-monitor';
+import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 
 const byId = id => document.getElementById(id);
 const bookingId = new URL(location.href).searchParams.get('booking') || '';
@@ -8,6 +10,13 @@ const audio = byId('room-audio');
 let session, wallet, room, localTrack, remoteTrack, polling = false, disposed = false;
 let authGeneration = 0, connectionGeneration = 0;
 let booking, broadcastState, observedAt = 0, refreshing = false, practiceMode = false;
+const meter = createInputMeter({
+  level: byId('room-mic-level'), state: byId('room-mic-state'), note: byId('room-meter-note'),
+});
+const headphones = bindInputMonitor({
+  toggle: byId('room-monitor-toggle'), volume: byId('room-monitor-volume'), status: byId('room-monitor-status'),
+  getTrack: () => localTrack,
+});
 const status = message => { byId('room-status').textContent = message; };
 const command = input => roomRequest(serviceUrl, 'control', input, session?.token);
 const perform = fn => async () => {
@@ -17,6 +26,8 @@ const perform = fn => async () => {
 async function disconnect() {
   ++connectionGeneration;
   localTrack?.stop(); localTrack = null;
+  await headphones.stop();
+  await meter.stop();
   remoteTrack?.detach(audio); remoteTrack = null; audio.pause(); audio.srcObject = null;
   const previous = room; room = null;
   await previous?.disconnect().catch(() => {});
@@ -41,7 +52,12 @@ async function connect(publish) {
     void audio.play().catch(() => status('Tap the audio Play control to hear the private feed'));
   });
   next.on(sdk.RoomEvent.Disconnected, () => {
-    if (room === next) { room = null; localTrack?.stop(); localTrack = null; status('RECONNECTING — reconnect this input; the live 60-second deadline still applies'); }
+    if (room === next) {
+      room = null; localTrack?.stop(); localTrack = null;
+      void headphones.stop();
+      void meter.stop();
+      status('RECONNECTING — reconnect this input; the live 60-second deadline still applies');
+    }
   });
   try {
     await next.connect(grant.url, grant.token, { autoSubscribe: false });
@@ -52,6 +68,7 @@ async function connect(publish) {
       });
       if (!current()) { capture.stop(); await next.disconnect(); return; }
       localTrack = capture;
+      meter.start(sdk, capture);
       await next.localParticipant.publishTrack(capture, { source: sdk.Track.Source.Microphone,
         dtx: false, red: true, audioPreset: { maxBitrate: 128000 }, forceStereo: true });
       if (!current()) { capture.stop(); await next.disconnect(); return; }

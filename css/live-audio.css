@@ -14,3 +14,64 @@
 #room-practice-frame{width:100%;height:650px;border:1px solid #a87c3666;border-radius:12px;background:#171410}
 .live-audio-room{box-sizing:border-box;max-width:48rem;background:radial-gradient(ellipse at top,#211138,#090610);color:#f0e6c8;border-radius:16px}
 .live-audio-room h1{font-family:Georgia,serif;color:#f0c040}
+.rehearsal-room{margin:0 auto;padding:clamp(.85rem,3vw,1.5rem);min-height:100vh;min-height:100dvh;border-radius:0;color-scheme:dark}
+.rehearsal-welcome{display:flex;align-items:center;gap:1rem}
+.rehearsal-welcome img{flex:none;border-radius:50%;box-shadow:0 0 25px #f0c04033}
+.rehearsal-welcome h1{margin:.25rem 0;font-size:clamp(1.6rem,5vw,2.1rem);font-weight:400;line-height:1.2}
+.rehearsal-welcome p{margin:.3rem 0}
+.rehearsal-eyebrow{font-size:.65rem;letter-spacing:.13em;color:#e5c76d}
+.rehearsal-private{color:#b6dccb;font-size:.85rem}
+.rehearsal-status{padding:.75rem 1rem;margin:1rem 0;border-left:3px solid #f0c040;background:#f0c0400b;border-radius:0 10px 10px 0}
+.rehearsal-status[data-error="true"]{border-color:#ffaba0;color:#ffd2ca}
+.rehearsal-card{padding:clamp(.85rem,3vw,1.3rem);margin:.8rem 0;border:1px solid #f0c04044;border-radius:18px;background:linear-gradient(145deg,#24162d,#100c19);box-shadow:0 12px 30px #0003}
+.rehearsal-card h2{margin:0 0 .6rem;color:#f0c040;font:400 1.4rem Georgia,serif}
+.rehearsal-card p{margin:.65rem 0}
+.rehearsal-room button{min-height:44px;margin:.25rem 0;padding:.65rem 1rem;border:1px solid #b8922a;border-radius:999px;background:#33233d;color:#f0e6c8;cursor:pointer}
+.rehearsal-room button:disabled{opacity:.5;cursor:default}
+.rehearsal-room .rehearsal-primary{background:#f0c040;color:#171025;font-weight:750}
+.rehearsal-room button:not(:disabled):hover{filter:brightness(1.15)}
+.rehearsal-room :is(button,select,summary):focus-visible{outline:2px solid #00d4aa;outline-offset:3px}
+.rehearsal-card label{display:block;font-size:.9rem}
+.rehearsal-room select,.rehearsal-room input{box-sizing:border-box;max-width:100%;width:100%;min-height:44px;margin:.4rem 0;padding:.6rem;border:1px solid #806d69;border-radius:8px;background:#110d19;color:#f0e6c8;font:inherit}
+.rehearsal-actions{display:flex;flex-wrap:wrap;gap:.6rem;margin:.5rem 0 1rem}
+.rehearsal-meter{padding:.7rem;border:1px solid #ffffff20;border-radius:10px}
+.rehearsal-meter label{display:flex;justify-content:space-between;gap:.5rem}
+.rehearsal-meter span,.rehearsal-meter small{color:#c7c3b8;font-size:.8rem}
+.rehearsal-meter meter{display:block;width:100%;height:1.4rem;accent-color:#00d4aa}
+.rehearsal-delivery{color:#e5c76d}
+.rehearsal-delivery[data-fresh="true"]{color:#91e2ce}
+.rehearsal-hint,.rehearsal-details{font-size:.85rem;color:#d0c9b8}
+.rehearsal-details{margin:.8rem 0;border-top:1px solid #ffffff20;padding-top:.7rem;overflow-wrap:anywhere}
+.rehearsal-details summary{cursor:pointer;color:#e5c76d;min-height:32px}
+.rehearsal-footnote{font-size:.75rem}
+@media(max-width:420px){.rehearsal-welcome{gap:.65rem}.rehearsal-welcome img{width:42px;height:42px}.rehearsal-actions button{flex:1}.rehearsal-meter label{flex-direction:column;gap:.1rem}}
+.live-audio-room{color-scheme:dark;background:radial-gradient(ellipse at 50% 0,#352047 0,#171021 48%,#0b0910 100%)}
+.studio-signal-strip{display:flex;justify-content:center;align-items:center;gap:clamp(1rem,7vw,3rem);margin:.8rem 0 1.2rem;padding:.45rem .75rem;border-block:1px solid #f0c04033;color:#d9bd75;font-size:1.15rem}
+.studio-signal-strip span:nth-child(even){color:#72d7c2}
+.performer-room-header{padding:1rem clamp(.5rem,3vw,1.5rem);border:1px solid #f0c04033;border-radius:20px;background:linear-gradient(145deg,#24162d,#100c19);box-shadow:0 12px 30px #0003}
+.performer-room-header h1{font-size:clamp(1.7rem,6vw,2.4rem);font-weight:400}
+.performer-room-header a{display:inline-block;padding:.35rem .7rem;border-radius:999px}
+.studio-card,.studio-panel{box-sizing:border-box;min-width:0;padding:clamp(.8rem,3vw,1.25rem);margin:.8rem 0;border:1px solid #f0c04044;border-radius:18px;background:linear-gradient(145deg,#24162d,#100c19);box-shadow:0 12px 30px #0003}
+.studio-panel{border-color:#72d7c255;background:#191321}
+.studio-note{color:#c8dfd7;font-size:.9rem}
+.live-audio-room .self-monitor{box-sizing:border-box;min-width:0;margin:1rem 0;padding:.8rem;border:1px solid #72d7c288;border-radius:14px;background:#0d1718}
+.self-monitor legend{padding:0 .35rem;color:#91e2ce;font-weight:650}
+.live-audio-room .self-monitor label{display:block;margin:.25rem 0;color:#f0e6c8}
+.live-audio-room .self-monitor .monitor-toggle{display:flex;align-items:center;gap:.6rem;min-height:44px;font-weight:700}
+.live-audio-room .self-monitor input[type="checkbox"]{flex:none;width:1.2rem;min-height:1.2rem;height:1.2rem;margin:0;accent-color:#00d4aa}
+.live-audio-room .self-monitor input[type="range"]{display:block;width:100%;height:2rem;min-height:2rem;margin:.25rem 0;accent-color:#00d4aa}
+.live-audio-room .self-monitor output{color:#91e2ce;font-size:.85rem}
+.monitor-warning{margin:.5rem 0 0;color:#dbcba7;font-size:.82rem;line-height:1.45}
+.remote-listen{margin:1rem 0;padding:.75rem;border:1px solid #ffffff20;border-radius:12px}
+.remote-listen summary,.studio-helper summary{min-height:40px;padding:.3rem 0;color:#e5c76d;cursor:pointer}
+.delivery-note{color:#c8dfd7;font-size:.88rem}
+.studio-helper{display:flex;align-items:flex-start;gap:.75rem;box-sizing:border-box;min-width:0;margin:1rem 0;padding:.8rem;border:1px solid #f0c04044;border-radius:16px;background:#17111f}
+.studio-helper>img{flex:none;width:48px;height:48px;object-fit:cover;border:1px solid #f0c04088;border-radius:50%}
+.studio-helper>div{min-width:0}
+.studio-helper p{margin:.15rem 0 .4rem}
+.studio-helper p span{display:block;color:#bfb6c5;font-size:.8rem}
+.studio-helper details,.studio-helper li{overflow-wrap:anywhere}
+.studio-helper ul{margin:.35rem 0;padding-left:1.2rem;color:#d0c9b8;font-size:.85rem}
+.live-audio-room :is(button,select,summary,input):focus-visible{outline:2px solid #00d4aa;outline-offset:3px}
+.live-audio-room #room-practice-frame{box-sizing:border-box;max-width:100%}
+@media(max-width:420px){.studio-signal-strip{gap:clamp(.8rem,8vw,1.5rem)}.studio-helper{gap:.55rem}.studio-helper>img{width:42px;height:42px}.live-audio-room{width:100%;margin:0 auto;padding:.85rem}.studio-card,.studio-panel{padding:.8rem}}

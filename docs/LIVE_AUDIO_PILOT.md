@@ -58,6 +58,29 @@ Never enable automatic egress/recording in the hosting project. This code reques
 
 ## Separate private rehearsal
 
+The practice client guides the artist through wallet consent, **Start my
+microphone**, browser permission and the input meter. The local meter is not
+proof of network delivery: the separate delivery indicator uses the independent
+worker's packet/decoded-audio evidence for the invited artist. The operator's
+own mic does not light the artist's delivery indicator. Listening alone is
+silent. For hearing their own performance, recommend the interface's direct
+headphone monitor first. An optional **Hear my input** browser monitor is
+headphones-only, defaults off, starts quietly and may introduce noticeable
+delay. Never enable both direct and browser monitoring. Browser monitoring
+connects only the captured local input to the local audio output; it does not
+replay the network feed, record, or prove what listeners receive. Both practice
+and booked backstage provide the same controls. Stop/reconnect, wallet change,
+expiry and page exit reset browser monitoring to off; it never restarts itself.
+Permission errors stay visible during state polling;
+Stop audio stops capture and resets the meter. Consent controls return after
+expiry or wallet change.
+
+The room's DBusker portrait and expandable help are a static guide to input,
+headphones and delivery checks, not a connected AI agent or a claim that the
+operator is present. The stable room link transitions to booked backstage at
+T-70 with fresh wallet authorization; neither self-monitoring nor practice
+passes the two operator-confirmed Friday soundchecks.
+
 ### Wallet-linked practice before show day
 
 The invitation and Profile card link to `live-room.html?booking=<id>` even

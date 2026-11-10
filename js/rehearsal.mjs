@@ -1,4 +1,6 @@
 import { loadLiveAudioSdk } from './live-audio-client.mjs';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261110-studio-monitor';
+import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 
 const el = id => document.getElementById(id);
 const service = String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
@@ -6,7 +8,38 @@ const initialId = new URL(location.href).searchParams.get('rehearsal') || '';
 const practiceBookingId = new URL(location.href).searchParams.get('booking') || '';
 const audio = el('audio');
 let session, room, localTrack, remoteTrack, generation = 0, disposed = false, polling = false, deadlineTimer;
-const status = text => { el('status').textContent = text; };
+let busy = false;
+const meter = createInputMeter({ level: el('mic-level'), state: el('mic-state'), note: el('meter-note') });
+const headphones = bindInputMonitor({
+  toggle: el('monitor-toggle'), volume: el('monitor-volume'), status: el('monitor-status'),
+  getTrack: () => localTrack,
+});
+const status = (text, error = false) => {
+  el('status').textContent = text;
+  el('status').dataset.error = String(error);
+};
+function renderControls() {
+  el('join').hidden = !!session || !initialId && !practiceBookingId;
+  el('create').hidden = !!session || !!practiceBookingId;
+  for (const id of ['create-room', 'join-room', 'devices', 'publish', 'listen', 'end']) el(id).disabled = busy;
+  el('input').disabled = busy || !!localTrack;
+  el('publish').disabled = busy || !!localTrack;
+  el('publish').textContent = localTrack ? 'Microphone is on' : 'Start my microphone';
+  el('leave').disabled = busy || !room;
+  el('mic-state').textContent = localTrack ? 'Microphone on' : 'Microphone off';
+  el('next-step').textContent = localTrack
+    ? 'Try a few notes. Watch your input level and the delivery check.'
+    : 'Choose your input, then start your microphone.';
+}
+function renderDelivery(fresh = false) {
+  const text = session?.role === 'owner'
+    ? fresh ? 'Artist connection: audio is reaching the room.' : 'Artist connection: waiting for their microphone.'
+    : !localTrack ? 'Delivery check: start your microphone first.'
+      : fresh ? '✓ Your audio is reaching the room. You can practise now.'
+        : 'Connecting your audio… If this continues, stop audio and try again.';
+  el('delivery').textContent = text;
+  el('delivery').dataset.fresh = String(fresh && !!session && (session.role === 'owner' || !!localTrack));
+}
 async function request(path, input, token, keepalive = false) {
   const timeout = path === 'session' || path === 'challenge' || input.action === 'end' ? 60000 : 10000;
   const response = await fetch(`${service}/api/private-rehearsal/${path}`, {
@@ -17,14 +50,28 @@ async function request(path, input, token, keepalive = false) {
   if (!response.ok) throw new Error(data.error || 'Private rehearsal unavailable');
   return data;
 }
-const action = fn => async () => { try { await fn(); } catch (error) { status(error.message || 'Private rehearsal unavailable'); } };
+const action = fn => async () => {
+  if (busy) return;
+  busy = true; renderControls();
+  try { await fn(); } catch (error) {
+    const message = error.name === 'NotAllowedError'
+      ? 'Microphone blocked. Allow microphone access in your browser site settings, then try Start my microphone again.'
+      : error.name === 'NotFoundError' ? 'No microphone found. Connect your microphone or audio interface, then find inputs again.'
+        : error.message || 'Private rehearsal unavailable';
+    status(message, true);
+  } finally { busy = false; renderControls(); }
+};
 async function disconnect(notify = false) {
   ++generation;
+  const authorization = session;
   const previous = room; room = null;
   localTrack?.stop(); localTrack = null;
+  await headphones.stop();
+  await meter.stop();
   remoteTrack?.detach(audio); remoteTrack = null; audio.pause(); audio.srcObject = null;
   await previous?.disconnect().catch(() => {});
-  if (notify && session) await request('control', { action: 'leave' }, session.token).catch(() => {});
+  renderControls(); renderDelivery();
+  if (notify && authorization) await request('control', { action: 'leave' }, authorization.token);
 }
 async function authorize(input) {
   if (!window.ethereum) throw new Error('A browser wallet is required');
@@ -47,24 +94,27 @@ async function authorize(input) {
   const authorized = await request('session', { challengeId: challenge.challengeId, signature });
   if (gen !== generation || disposed) return;
   session = authorized;
+  renderControls(); renderDelivery();
   const link = new URL('rehearsal.html', location.href);
   link.searchParams.set('rehearsal', authorized.state.id);
   el('invitation').textContent = authorized.role === 'owner' ? `Share this private invitation with the selected guest: ${link.href}` : 'Consent signed. This rehearsal is private.';
-  el('deadline').textContent = `Room deadline: ${new Date(authorized.state.expiresAt).toLocaleString()}. Wallet session ends: ${new Date(authorized.expiresAt).toLocaleString()}.`;
+  el('deadline').textContent = `Sign in again after ${new Date(authorized.expiresAt).toLocaleTimeString()}. Room closes ${new Date(authorized.state.expiresAt).toLocaleString()}.`;
   el('end').hidden = authorized.role !== 'owner'; el('controls').hidden = false;
   deadlineTimer = setTimeout(() => {
     const token = session?.token; session = null; el('controls').hidden = true;
     if (token) void request('control', { action: 'leave' }, token).catch(() => {});
     void disconnect();
-    status('Wallet session or room expired; audio stopped. Reauthorize if the room remains open.');
+    renderControls();
+    status('Your private session has ended; microphone stopped. Sign in again to keep practising.');
   }, Math.max(0, Math.min(authorized.expiresAt, authorized.state.expiresAt) - Date.now()));
-  status('Consent signed. Choose publish or listen. Nothing is sent to public radio.');
+  status("You're in. Next: Start my microphone, then allow your browser to use it.");
 }
 async function connect(publish) {
   await disconnect();
   const current = generation, authorization = session;
   if (!authorization) throw new Error('Sign consent first');
   const valid = () => current === generation && session === authorization && !disposed;
+  status(publish ? 'Opening your microphone… Allow access if your browser asks.' : 'Connecting to the other person…');
   const sdk = await loadLiveAudioSdk(service);
   if (!valid()) return;
   const grant = await request('control', { action: 'connect', publish }, authorization.token);
@@ -85,6 +135,8 @@ async function connect(publish) {
   next.on(sdk.RoomEvent.Disconnected, () => {
     if (room === next) {
       room = null; localTrack?.stop(); localTrack = null;
+      void headphones.stop();
+      void meter.stop(); renderControls(); renderDelivery();
       void request('control', { action: 'leave' }, authorization.token).catch(() => {});
       status('Audio disconnected. Reconnect or leave the room.');
     }
@@ -100,14 +152,17 @@ async function connect(publish) {
         echoCancellation: false, noiseSuppression: false, autoGainControl: false });
       if (!valid()) { capture.stop(); await next.disconnect(); return; }
       localTrack = capture;
+      meter.start(sdk, capture);
       await next.localParticipant.publishTrack(capture, { source: sdk.Track.Source.Microphone,
         dtx: false, red: true, audioPreset: { maxBitrate: 128000 }, forceStereo: true });
     }
     if (!valid()) { await next.disconnect(); return; }
     await next.startAudio();
-    status(publish ? 'Publishing and listening privately.' : 'Listening privately.');
+    renderControls(); renderDelivery();
+    status(publish ? 'Microphone on. Watch your input meter and the delivery check below.'
+      : 'Listening privately. Your microphone is off; alone in the room, you will hear silence.');
   } catch (error) {
-    if (valid()) await disconnect(true); else await next.disconnect().catch(() => {});
+    if (valid()) await disconnect(); else await next.disconnect().catch(() => {});
     throw error;
   }
 }
@@ -120,10 +175,14 @@ el('devices').onclick = action(async () => {
   const devices = await navigator.mediaDevices.enumerateDevices();
   el('input').replaceChildren(new Option('Default audio input', ''),
     ...devices.filter(d => d.kind === 'audioinput').map(d => new Option(d.label || 'Audio input', d.deviceId)));
+  status(localTrack ? 'Inputs found. Stop audio before changing your input.' : 'Inputs found. Choose yours, then Start my microphone.');
 });
 el('publish').onclick = action(() => connect(true));
 el('listen').onclick = action(() => connect(false));
-el('leave').onclick = action(async () => { await disconnect(true); status('Left private audio.'); });
+el('leave').onclick = action(async () => {
+  await disconnect(true);
+  status('Microphone off. To try again, choose Start my microphone.');
+});
 el('end').onclick = action(async () => {
   if (!window.confirm('End this private rehearsal for everyone?')) return;
   await request('control', { action: 'end', confirmed: true }, session?.token);
@@ -134,11 +193,11 @@ async function poll() {
   polling = true; const authorization = session;
   try {
     const state = await request('control', { action: 'state' }, authorization.token);
-    if (session === authorization) status(`${state.notice} · Guest receiver: ${state.privateAudioFresh ? 'fresh delivered audio' : 'no fresh delivery verified'}`);
+    if (session === authorization) renderDelivery(state.privateAudioFresh);
   } catch {
     if (session === authorization) {
       session = null; clearTimeout(deadlineTimer); el('controls').hidden = true; await disconnect();
-      status('Control unavailable or session ended; audio stopped.');
+      status('Connection lost or session ended; microphone stopped. Sign in again to retry.', true);
     }
   } finally { polling = false; }
 }
@@ -156,9 +215,9 @@ setInterval(() => { void poll(); }, 2000);
 el('join').hidden = !initialId && !practiceBookingId;
 if (practiceBookingId) {
   el('create').hidden = true;
-  el('join').querySelector('h2').textContent = 'Your private practice stage';
+  el('join').querySelector('h2').textContent = '1 · Your private practice stage';
   document.querySelector('h1').textContent = 'Make yourself at home';
-  document.querySelector('h1 + p').textContent = 'Try your microphone any day before backstage opens. Only your invited wallet and Jolly can enter. Private practice does not count as a Friday soundcheck.';
+  el('rehearsal-intro').textContent = 'Your mic, your music, no pressure. Try things out before Friday.';
 }
 if (!service) status('Private rehearsal unavailable: configure the worker first.');
 else {

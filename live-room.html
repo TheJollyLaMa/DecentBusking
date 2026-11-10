@@ -4,31 +4,46 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DecentBusking · Your stage</title>
-  <link rel="stylesheet" href="css/live-audio.css?v=20261110-wallet-practice">
+  <link rel="stylesheet" href="css/live-audio.css?v=20261110-studio-monitor">
   <script src="decent.config.js"></script>
 </head>
-<body class="live-audio-room">
+<body class="live-audio-room rehearsal-room">
   <header class="performer-room-header">
     <div id="room-on-air" class="room-on-air" role="status" aria-label="Broadcast status">OFF AIR</div>
     <p id="room-countdown">Checking your showtime…</p>
     <h1 id="room-welcome">Your Decent stage</h1>
     <a href="./">← Profile & radio</a>
   </header>
+  <div class="studio-signal-strip" aria-hidden="true"><span>♫</span><span>🎙</span><span>✦</span><span>♬</span><span>◉</span></div>
   <section id="room-practice" hidden>
-    <p>Your private corner to try things out. Nothing here goes on public radio.</p>
+    <p>Your private corner to try things out. Nothing here goes on public radio. This stable stage link opens backstage at T−70; fresh backstage wallet authorization and a new connection are required.</p>
     <iframe id="room-practice-frame" title="Private practice stage" allow="microphone" referrerpolicy="same-origin"></iframe>
   </section>
-  <section id="room-backstage">
+  <section id="room-backstage" class="studio-card">
   <p>Private T−60 / T−15 soundchecks. The public audience listens on the <a href="./">website radio</a>.
     No recording, video, payment or wallet transaction. Use headphones.</p>
+  <p class="studio-note">Practice and show day use this same stable stage link. Backstage opens at T−70 and requires fresh wallet authorization and reconnection. A real broadcast still needs both soundchecks and the operator to confirm and arm it.</p>
   <output id="room-status" role="status" aria-live="polite">Checking room availability…</output>
   <button id="room-authorize" type="button" disabled>Connect booking wallet</button>
-  <section id="room-controls" hidden>
+  <section id="room-controls" class="studio-panel" hidden>
     <p id="room-targets"></p>
+    <fieldset class="self-monitor">
+      <legend>Optional · hear your own input</legend>
+      <label class="monitor-toggle" for="room-monitor-toggle"><input id="room-monitor-toggle" type="checkbox" aria-describedby="room-monitor-warning"> Hear my input</label>
+      <label for="room-monitor-volume">Headphone monitor level</label>
+      <input id="room-monitor-volume" type="range" min="0" max="1" step="0.05" value="0.25">
+      <output id="room-monitor-status" role="status" aria-live="polite">Headphone monitor is off.</output>
+      <p id="room-monitor-warning" class="monitor-warning">Headphones only: use your interface's direct monitor when available. Do not enable direct monitoring and browser monitoring together. Browser monitoring has a delay and is not sent to the room.</p>
+    </fieldset>
     <fieldset id="room-publisher" hidden>
       <legend>Booked performer · one audio source</legend>
       <label>Microphone / audio interface <select id="room-input" aria-label="Audio input"><option value="">Default audio input</option></select></label>
       <button id="room-devices" type="button">Allow microphone and list inputs</button>
+      <div class="rehearsal-meter">
+        <label for="room-mic-level">Your input level <span id="room-mic-state">Microphone off</span></label>
+        <meter id="room-mic-level" min="0" max="1" value="0" aria-label="Local microphone input level"></meter>
+        <small id="room-meter-note">Local input only; this meter does not verify room delivery.</small>
+      </div>
       <button id="room-publish" type="button">Publish browser audio</button>
       <button id="room-stop" type="button">Stop microphone</button>
       <button id="room-obs" type="button">Create / replace private OBS input</button>
@@ -43,12 +58,28 @@
       <button id="room-arm" type="button">Arm scheduled radio handoff</button>
       <button id="room-cancel" type="button">Cancel live audio</button>
     </fieldset>
-    <audio id="room-audio" controls playsinline></audio>
-    <p>Verified transport audio, including intentional silence, keeps the feed healthy. A loss of verified delivery for
+    <section class="remote-listen" aria-label="Remote room listen">
+      <p><strong>Listen to remote room audio</strong><br>This plays other room audio; it is separate from optional headphones-only self-monitoring.</p>
+      <audio id="room-audio" controls playsinline></audio>
+    </section>
+    <p class="delivery-note">Verified transport audio, including intentional silence, keeps the feed healthy. A loss of verified delivery for
       60 seconds during the slot automatically cancels the broadcast. The guaranteed performer fee is unchanged.
       Discord live-audio parity is not enabled.</p>
   </section>
   </section>
-  <script type="module" src="js/live-audio-room.mjs?v=20261110-wallet-practice"></script>
+  <aside class="studio-helper" aria-label="DBusker's soundcheck tips">
+    <img src="img/D_Busker.jpeg" width="48" height="48" alt="DBusker">
+    <div><p><strong>DBusker's here to help</strong> <span>Your setup guide · not a live conversation.</span></p>
+      <details>
+        <summary>Quick soundcheck fixes</summary>
+        <ul>
+          <li>Wear headphones; browser self-monitoring can arrive late. Direct monitoring through your interface is usually best.</li>
+          <li>If no input appears, allow microphone access in browser site settings, then reload and choose your mic or interface.</li>
+          <li>A mic meter or local monitor does not confirm delivery. Wait for the room's verified delivery and operator checks.</li>
+        </ul>
+      </details>
+    </div>
+  </aside>
+  <script type="module" src="js/live-audio-room.mjs?v=20261110-studio-monitor"></script>
 </body>
 </html>

@@ -22,7 +22,7 @@ test('room module initializes practice, advances to backstage and fails closed o
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
-      hidden: false, disabled: true, textContent: '', src: '', classList: { toggle() {} },
+      hidden: false, disabled: true, textContent: '', src: '', classList: { toggle() {} }, addEventListener() {},
       removeAttribute(name) { this[name] = ''; },
     });
     return elements.get(id);
@@ -35,6 +35,8 @@ test('room module initializes practice, advances to backstage and fails closed o
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {} },
     Date: class extends Date { static now() { return time; } },
     URL, AbortSignal, TextEncoder, performerRoomSign,
+    bindInputMonitor: () => ({ stop: async () => {} }),
+    createInputMeter: () => ({ start() {}, stop: async () => {} }),
     setInterval(fn, ms) { intervals.push({ fn, ms }); },
     fetch: async url => ({ ok: true, json: async () => url.includes('/api/live-bookings')
       ? { bookings: [selected] } : liveState }),
