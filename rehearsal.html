@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DecentBusking · Private rehearsal</title>
-  <link rel="stylesheet" href="css/live-audio.css?v=20261110-studio-monitor">
+  <link rel="stylesheet" href="css/live-audio.css?v=20261110-entry-help">
   <script src="decent.config.js"></script>
 </head>
 <body class="live-audio-room rehearsal-room">
@@ -26,6 +26,11 @@
   </section>
   <section id="join" class="rehearsal-card">
     <h2>1 · Make yourself at home</h2>
+    <details class="room-entry-info">
+      <summary aria-label="Why sign to enter?">i</summary>
+      <p>Your wallet is your personal key to this private room. Signing proves you control the invited wallet and gives this browser a temporary audio pass, for up to 15 minutes. Only you and the operator can enter.</p>
+      <p>No gas, payment, token approval or booking acceptance. Your private key never leaves your wallet. This signature also confirms consent to private live audio—not recording or public broadcast. Sign again when your pass expires.</p>
+    </details>
     <p>Connect your invited wallet and sign to enter. No payment or transaction.</p>
     <button id="join-room" type="button" disabled>Sign consent and enter</button>
   </section>
@@ -86,6 +91,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/rehearsal.mjs?v=20261110-studio-monitor"></script>
+  <script type="module" src="js/rehearsal.mjs?v=20261110-entry-help"></script>
 </body>
 </html>

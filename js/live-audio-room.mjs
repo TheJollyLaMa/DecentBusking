@@ -106,6 +106,7 @@ function renderSign() {
       Date.now() < Date.parse(booking.startUtc) - 70 * 60_000;
     byId('room-practice').hidden = !practice;
     byId('room-backstage').hidden = !!practice;
+    byId('room-helper').hidden = !!practice;
     if (practice && !practiceMode) {
       const url = new URL('rehearsal.html', location.href);
       url.searchParams.set('booking', bookingId);
