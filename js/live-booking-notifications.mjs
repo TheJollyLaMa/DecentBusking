@@ -102,7 +102,7 @@ function startNotifications() {
    if (root.querySelector('#creator-profile-btn')) {
     renderLiveActionBadge(root.querySelector('.ankh-container'), counts.schedule.length + counts.profile.length, 'live-performance actions', true);
     renderLiveActionBadge(root.querySelector('#radio-schedule-btn'), counts.schedule.length, 'performance invitations to accept');
-    renderLiveActionBadge(root.querySelector('#creator-profile-btn'), counts.profile.length, 'performance payments to claim');
+    renderLiveActionBadge(root.querySelector('#creator-profile-btn'), counts.schedule.length + counts.profile.length, 'performance invitations or payments');
    }
    root.querySelectorAll('*').forEach(element => { if (element.shadowRoot) visit(element.shadowRoot); });
   };

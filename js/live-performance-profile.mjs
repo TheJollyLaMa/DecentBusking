@@ -1,5 +1,5 @@
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { LIVE_ESCROW_ABI, claimState, liveAcknowledgement, liveBookingRows, livePerformancePolicyText } from './live-bookings.mjs?v=20261108-live-audio-pilot';
+import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, claimState, liveAcknowledgement, liveBookingRows, livePerformancePolicyText } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261108-live-audio-pilot';
 
 export function liveReceiptEntry(bookings, wallet) {
@@ -119,6 +119,15 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
    article.innerHTML = liveBookingRows([b]);
    if (b.mode === 'phase1' && b.status === 'draft' && !b.cancelled) {
      article.append(renderPerformerBookingInvite({ booking: b, state, wallet, serviceUrl, ethers, fetchImpl }));
+   }
+   if (b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY && !b.cancelled && Date.parse(b.endUtc) > Date.now()) {
+     const directions = document.createElement('p');
+     directions.setAttribute('data-live-performer-directions', '');
+     const checkTime = minutes => new Intl.DateTimeFormat('en-US', {
+       timeZone: 'America/New_York', timeStyle: 'short',
+     }).format(new Date(Date.parse(b.startUtc) - minutes * 60_000));
+     directions.textContent = `Profile: review and accept → wait for confirmed escrow funding → open performer audio room → authorize your booked wallet, allow microphone and publish browser audio → private checks at ${checkTime(60)} and ${checkTime(15)} New York → ON-AIR only after both checks pass and the operator arms broadcast → claim here after approval or the review window, before the claim deadline. Keep the audio room open. Acceptance is a real agreement, not a payment or a simulated signature.`;
+     article.append(directions);
    }
    const roomUrl = liveAudioRoomUrl(b);
    if (roomUrl) {

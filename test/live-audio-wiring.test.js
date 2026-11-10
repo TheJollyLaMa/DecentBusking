@@ -31,8 +31,9 @@ function dom(t) {
     tag, children: [], attributes: {}, textContent: '', innerHTML: '',
     append(...children) { this.children.push(...children); },
     setAttribute(name, value) { this.attributes[name] = value; },
+    addEventListener() {},
   });
-  global.document = { createElement };
+  global.document = { createElement, createTextNode: text => ({ textContent: text }) };
   global.window = { _wallet: { address: wallet } };
   global.localStorage = { getItem: () => null };
   return createElement;
@@ -104,6 +105,44 @@ test('Profile omits room entries for unfunded, cancelled, ended and incompatible
   assert.equal(descendants(container).filter(node => node.tag === 'button').length, bookings.length);
 });
 
+test('withinthevacuum Profile invitation is wallet-scoped and cannot imply acceptance or funding', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t), container = createElement('section');
+  t.mock.method(Date, 'now', () => NOW);
+  const guest = '0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f';
+  global.window._wallet.address = guest;
+  const b = { ...booking(), id: 'within:2026-11-13', wallet: guest.toLowerCase(),
+    displayName: 'withinthevacuum', status: 'draft', acknowledged: false, stewardApproved: true,
+    additionalOffer: '', termsVersion: 'LIVE PERFORMANCE PILOT v1', termsUri: 'ipfs://bafyfixture',
+    termsHash: '0x' + 'ab'.repeat(32) };
+  const options = { container, wallet: guest, serviceUrl: 'https://worker.example',
+    ethers: { BrowserProvider() { throw new Error('Viewing must not request signatures'); } },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ escrowAddress: otherWallet, bookings: [
+      b, { ...b, id: 'wrong-wallet', wallet: otherWallet },
+    ] }) }) };
+  await renderLivePerformances(options);
+  assert.equal(container.children.length, 1);
+  assert.match(container.children[0].innerHTML, /Draft invitation/);
+  assert.doesNotMatch(container.children[0].innerHTML, /live-status">Funded|Outside performance escrow/);
+  let nodes = descendants(container);
+  assert.equal(nodes.filter(node => node.attributes?.['data-live-room']).length, 0);
+  const accept = nodes.find(node => node.textContent === 'Review and accept terms');
+  assert.equal(accept.disabled, true, 'explicit review checkbox required before signing');
+  assert.ok(nodes.some(node => /no payment or escrow transaction is submitted/.test(node.textContent)));
+  const directions = nodes.find(node => 'data-live-performer-directions' in (node.attributes || {})).textContent;
+  assert.match(directions, /review and accept → wait for confirmed escrow funding → open performer audio room/);
+  assert.match(directions, /8:00 PM and 8:45 PM New York → ON-AIR only after both checks pass/);
+  assert.match(directions, /claim here after approval or the review window/);
+  assert.doesNotMatch(directions, /task|token|Calendar/);
+  b.acknowledged = true;
+  const acceptedContainer = createElement('section');
+  await renderLivePerformances({ ...options, container: acceptedContainer });
+  nodes = descendants(acceptedContainer);
+  assert.match(acceptedContainer.children[0].innerHTML, /Accepted · awaiting funding/);
+  assert.ok(nodes.some(node => /no funds have been sent by this acceptance/.test(node.textContent)));
+  assert.equal(nodes.filter(node => node.attributes?.['data-live-room']).length, 0);
+});
+
 test('Admin wires an escaped operator link separately from all existing guaranteed-pilot actions', async () => {
   const [, , { renderLivePerformanceAdminBooking }] = await modules;
   const b = booking(), before = structuredClone(b);
@@ -137,15 +176,21 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
     assert.match(source, /live-audio\.mjs\?v=20261108-live-audio-pilot/);
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /live-performance-admin\.mjs\?v=20261108-live-audio-pilot/);
-  assert.match(html, /live-booking-notifications\.mjs\?v=20261108-live-audio-pilot/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261108-live-audio-pilot"/);
-  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261108-live-audio-pilot"/);
+  assert.match(html, /live-performance-admin\.mjs\?v=20261110-profile-invitation/);
+  assert.match(html, /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261110-profile-invitation"/);
+  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261110-profile-invitation"/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
-    './js/radio-schedule-ui.mjs?v=20261108-live-audio-pilot');
+    './js/radio-schedule-ui.mjs?v=20261110-profile-invitation');
   assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],
     './js/fund-display.mjs?v=20261108-live-audio-pilot');
+  for (const file of ['creator-profile.mjs', 'radio-schedule-ui.mjs']) {
+    assert.match(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'),
+      /live-performance-profile\.mjs\?v=20261110-profile-invitation/);
+  }
+  assert.match(fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8'),
+    /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);
 });
 
 test('production live audio reuses encrypted mirrored storage, never an ephemeral file path', () => {
