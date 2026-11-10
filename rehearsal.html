@@ -4,35 +4,88 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DecentBusking · Private rehearsal</title>
-  <link rel="stylesheet" href="css/live-audio.css?v=20261108-rehearsal">
+  <link rel="stylesheet" href="css/live-audio.css?v=20261110-studio-monitor">
   <script src="decent.config.js"></script>
 </head>
-<body class="live-audio-room">
-  <h1>Private audio rehearsal</h1>
-  <p>No public radio, booking, payment, recording or performance credit. The owner invites one wallet; both people must sign consent. Use headphones.</p>
-  <p>Room closure is best-effort while the worker is down: browsers stop at the deadline, and the worker deletes the room after recovery. LiveKit does not enforce that deadline on an already-connected client.</p>
-  <output id="status" role="status" aria-live="polite">Checking availability…</output>
-  <section id="create">
+<body class="live-audio-room rehearsal-room">
+  <header class="rehearsal-welcome">
+    <img src="img/D_Busker.jpeg" width="56" height="56" alt="DBusker, your friendly stage companion">
+    <div><p class="rehearsal-eyebrow">DECENTBUSKING · PRIVATE PRACTICE</p>
+      <h1>Your corner of the stage</h1>
+      <p id="rehearsal-intro">One invited wallet, one friendly host. Try things out, no pressure.</p>
+    </div>
+  </header>
+  <div class="studio-signal-strip" aria-hidden="true"><span>♫</span><span>🎙</span><span>✦</span><span>♬</span><span>◉</span></div>
+  <p class="rehearsal-private">✦ Private, not on radio · No recording · Use headphones</p>
+  <output id="status" class="rehearsal-status" role="status" aria-live="polite">Checking availability…</output>
+  <section id="create" class="rehearsal-card">
     <h2>Owner: create an invitation</h2>
     <label>Guest wallet <input id="guest" type="text" autocomplete="off" placeholder="0x…"></label>
     <label>Minutes (1–120) <input id="minutes" type="number" min="1" max="120" value="60"></label>
     <button id="create-room" type="button" disabled>Sign and create private rehearsal</button>
   </section>
-  <section id="join">
-    <h2>Guest or owner: join an invitation</h2>
+  <section id="join" class="rehearsal-card">
+    <h2>1 · Make yourself at home</h2>
+    <p>Connect your invited wallet and sign to enter. No payment or transaction.</p>
     <button id="join-room" type="button" disabled>Sign consent and enter</button>
   </section>
-  <section id="controls" hidden>
-    <p id="invitation"></p>
-    <p id="deadline"></p>
+  <section id="controls" class="rehearsal-card" hidden>
+    <h2>2 · Let's hear you</h2>
+    <p id="next-step">Choose your input, then start your microphone.</p>
     <label>Microphone / audio interface <select id="input"><option value="">Default audio input</option></select></label>
-    <button id="devices" type="button">Allow microphone and list inputs</button>
-    <button id="publish" type="button">Publish and listen</button>
-    <button id="listen" type="button">Listen only</button>
-    <button id="leave" type="button">Leave audio</button>
+    <button id="devices" class="rehearsal-secondary" type="button">Find my microphone / interface</button>
+    <div class="rehearsal-actions">
+      <button id="publish" class="rehearsal-primary" type="button">Start my microphone</button>
+      <button id="leave" class="rehearsal-secondary" type="button" disabled>Stop audio</button>
+    </div>
+    <div class="rehearsal-meter">
+      <label for="mic-level">Your input level <span id="mic-state">Microphone off</span></label>
+      <meter id="mic-level" min="0" max="1" value="0" aria-label="Local microphone input level"></meter>
+      <small id="meter-note">Local input only; the delivery check below verifies the connection.</small>
+    </div>
+    <p id="delivery" class="rehearsal-delivery" role="status" aria-live="polite">Delivery check: start your microphone first.</p>
+    <p class="rehearsal-hint">Hear yourself through your interface's direct monitor, or enable the optional headphone monitor below. The delivery check verifies what reaches the room; Jolly can listen when he joins.</p>
+    <fieldset class="self-monitor">
+      <legend>Optional · hear your own input</legend>
+      <label class="monitor-toggle" for="monitor-toggle"><input id="monitor-toggle" type="checkbox" aria-describedby="monitor-warning"> Hear my input</label>
+      <label for="monitor-volume">Headphone monitor level</label>
+      <input id="monitor-volume" type="range" min="0" max="1" step="0.05" value="0.25">
+      <output id="monitor-status" role="status" aria-live="polite">Headphone monitor is off.</output>
+      <p id="monitor-warning" class="monitor-warning">Headphones only: use your interface's direct monitor when available. Do not enable direct monitoring and browser monitoring together. Browser monitoring has a delay and is not sent to the room.</p>
+    </fieldset>
+    <details class="rehearsal-details">
+      <summary>Listen to the other person</summary>
+      <button id="listen" class="rehearsal-secondary" type="button">Listen only · mic off</button>
+      <audio id="audio" controls playsinline></audio>
+      <p>This is separate from hearing your own input: it plays the other person's remote audio. If you're practising alone, there is nobody else to hear.</p>
+    </details>
+    <details class="rehearsal-details">
+      <summary>Your session & help</summary>
+      <p id="invitation"></p>
+      <p id="deadline"></p>
+      <p>If access expires, sign in again. If the mic is blocked, allow microphone access in your browser's site settings, then retry. If your meter stays still, check the selected input and interface gain.</p>
+      <p>Use the same stable stage link for practice and show day. At T−70, backstage requires fresh wallet authorization and a new connection. A real show still needs both soundchecks and the operator's confirmation.</p>
+    </details>
     <button id="end" type="button" hidden>End rehearsal for everyone</button>
-    <audio id="audio" controls playsinline></audio>
   </section>
-  <script type="module" src="js/rehearsal.mjs?v=20261110-hosted-checkpoint"></script>
+  <details class="rehearsal-details rehearsal-footnote">
+    <summary>About this private room</summary>
+    <p>Practice does not accept a booking, move money or count as a Friday soundcheck.</p>
+    <p>Room closure is best-effort while the worker is down: browsers stop at the deadline, and the worker deletes the room after recovery. LiveKit does not enforce that deadline on an already-connected client.</p>
+  </details>
+  <aside class="studio-helper" aria-label="DBusker's soundcheck tips">
+    <img src="img/D_Busker.jpeg" width="48" height="48" alt="DBusker">
+    <div><p><strong>DBusker's here to help</strong> <span>Your setup guide · not a live conversation.</span></p>
+      <details>
+        <summary>Quick soundcheck fixes</summary>
+        <ul>
+          <li>Wear headphones; browser self-monitoring can arrive late. Direct monitoring through your interface is usually best.</li>
+          <li>If no input appears, allow microphone access in browser site settings, then reload and choose your mic or interface.</li>
+          <li>If the meter is quiet, check the interface input, cable and gain. The local meter is not proof of room delivery.</li>
+        </ul>
+      </details>
+    </div>
+  </aside>
+  <script type="module" src="js/rehearsal.mjs?v=20261110-studio-monitor"></script>
 </body>
 </html>

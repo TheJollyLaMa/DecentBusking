@@ -245,16 +245,17 @@ test('HTTP denies other origins and redacts errors without exposing public liste
 });
 
 test('browser mock signs owner invitation and publishes privately without a public-radio call', async t => {
-  const f = await fixture(), saved = new Map(), elements = new Map(), events = {}, calls = [];
+  const f = await fixture({ clock: { now: Date.now() } }), saved = new Map(), elements = new Map(), events = {}, calls = [], intervals = [];
   const keys = ['window', 'document', 'location', 'fetch', 'LivekitClient', 'setInterval'];
   for (const key of keys) saved.set(key, global[key]);
-  t.after(() => { for (const [key, value] of saved) {
+  t.after(async () => { events.pagehide?.(); await new Promise(setImmediate); for (const [key, value] of saved) {
     if (value === undefined) delete global[key]; else global[key] = value;
   } });
   for (const id of ['status', 'create', 'guest', 'minutes', 'create-room', 'join', 'join-room', 'controls',
-    'invitation', 'deadline', 'end', 'input', 'devices', 'publish', 'listen', 'leave', 'audio']) {
-    elements.set(id, { hidden: false, disabled: false, textContent: '', value: '',
-      pause() {}, play: async () => {}, replaceChildren() {} });
+    'invitation', 'deadline', 'end', 'input', 'devices', 'publish', 'listen', 'leave', 'audio',
+    'delivery', 'mic-state', 'mic-level', 'meter-note', 'next-step', 'monitor-toggle', 'monitor-volume', 'monitor-status']) {
+    elements.set(id, { hidden: false, disabled: false, textContent: '', value: '', dataset: {},
+      setAttribute() {}, addEventListener() {}, pause() {}, play: async () => {}, replaceChildren() {} });
   }
   elements.get('guest').value = guest.address; elements.get('minutes').value = '60';
   global.document = { getElementById: id => elements.get(id) };
@@ -264,7 +265,7 @@ test('browser mock signs owner invitation and publishes privately without a publ
       if (method === 'eth_requestAccounts') return [owner.address];
       return owner.signMessage(Buffer.from(params[0].slice(2), 'hex'));
     }, on() {} }, addEventListener(name, cb) { events[name] = cb; }, confirm: () => true };
-  global.setInterval = () => 1;
+  global.setInterval = (fn, ms) => { intervals.push({ fn, ms }); return 1; };
   class Room {
     constructor() { this.remoteParticipants = new Map(); this.localParticipant = { async publishTrack() {} }; }
     on() {} async connect() {} async disconnect() {} async startAudio() {}
@@ -272,6 +273,10 @@ test('browser mock signs owner invitation and publishes privately without a publ
   global.LivekitClient = { Room, RoomEvent: { TrackPublished: 'published', TrackSubscribed: 'subscribed',
     TrackUnsubscribed: 'unsubscribed', Disconnected: 'disconnected' },
   Track: { Kind: { Audio: 'audio' }, Source: { Microphone: 'microphone' } },
+  createAudioAnalyser(_track, options) {
+    assert.equal(options.cloneTrack, true, 'meter owns a clone so headphone routing cannot silence its input');
+    return { calculateVolume: () => .4, async cleanup() {} };
+  },
   async createLocalAudioTrack() { return { stop() {} }; } };
   global.fetch = async (url, opts = {}) => {
     calls.push(url);
@@ -288,10 +293,35 @@ test('browser mock signs owner invitation and publishes privately without a publ
   assert.equal(elements.get('create-room').disabled, false);
   await elements.get('create-room').onclick();
   assert.equal(elements.get('controls').hidden, false);
+  assert.equal(elements.get('create').hidden, true);
+  assert.match(elements.get('status').textContent, /Next: Start my microphone/);
+  assert.match(elements.get('delivery').textContent, /waiting for their microphone/);
   assert.match(elements.get('invitation').textContent, /rehearsal=/);
   await elements.get('publish').onclick();
-  assert.match(elements.get('status').textContent, /Publishing and listening privately/);
+  assert.match(elements.get('status').textContent, /Microphone on/);
+  assert.equal(elements.get('publish').disabled, true);
+  assert.equal(elements.get('leave').disabled, false);
+  assert.match(elements.get('next-step').textContent, /Try a few notes/);
+  intervals.find(entry => entry.ms === 100).fn();
+  assert.equal(elements.get('mic-level').value, .4);
+  f.monitors[0]({ samples: 1 });
+  intervals.find(entry => entry.ms === 2000).fn();
+  await new Promise(setImmediate);
+  assert.match(elements.get('delivery').textContent, /Artist connection: audio is reaching/);
+  assert.match(elements.get('status').textContent, /Microphone on/, 'poll does not replace action/error guidance');
   assert.ok(f.calls.some(c => c[0] === 'connect' && c[3] === true));
   assert.ok(calls.every(url => url.includes('/api/private-rehearsal/')));
+  global.LivekitClient.createLocalAudioTrack = async () => { const error = Error('Permission denied'); error.name = 'NotAllowedError'; throw error; };
+  await elements.get('publish').onclick();
+  assert.match(elements.get('status').textContent, /Microphone blocked.*browser site settings/);
+  assert.equal(elements.get('status').dataset.error, 'true');
+  intervals.find(entry => entry.ms === 2000).fn();
+  await new Promise(setImmediate);
+  assert.match(elements.get('status').textContent, /Microphone blocked/, 'poll must not hide a denied microphone');
+  assert.equal(elements.get('publish').disabled, false);
+  assert.equal(elements.get('mic-level').value, 0);
+  assert.equal(elements.get('mic-state').textContent, 'Microphone off');
+  await elements.get('leave').onclick();
+  assert.match(elements.get('status').textContent, /To try again/);
   events.pagehide();
 });
