@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const vm = require('node:vm');
 const start = Date.parse('2026-11-14T02:00:00Z');
 const b = { id: 'friday:invited', mode: 'phase1', payoutPolicy: 'pilot-guaranteed-v1', stewardApproved: true,
   status: 'draft', startUtc: new Date(start).toISOString(), endUtc: new Date(start + 1200000).toISOString() };
@@ -13,6 +15,51 @@ test('stable practice room link is available before acceptance but never authori
   }
   assert.equal(performerRoomUrl(b, start + 1200000), null);
   assert.deepEqual(b, before);
+});
+
+test('room module initializes practice, advances to backstage and fails closed on stale audio', async () => {
+  const { performerRoomSign } = await import('../js/performer-room.mjs');
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {
+      hidden: false, disabled: true, textContent: '', src: '', classList: { toggle() {} },
+      removeAttribute(name) { this[name] = ''; },
+    });
+    return elements.get(id);
+  };
+  let time = start - 86400000, selected = { ...b }, liveState;
+  const intervals = [];
+  const context = {
+    document: { getElementById: element },
+    location: { href: `https://example.test/live-room.html?booking=${encodeURIComponent(b.id)}` },
+    window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {} },
+    Date: class extends Date { static now() { return time; } },
+    URL, AbortSignal, TextEncoder, performerRoomSign,
+    setInterval(fn, ms) { intervals.push({ fn, ms }); },
+    fetch: async url => ({ ok: true, json: async () => url.includes('/api/live-bookings')
+      ? { bookings: [selected] } : liveState }),
+  };
+  const source = (await fs.readFile(require.resolve('../js/live-audio-room.mjs'), 'utf8'))
+    .replace(/^import .*;\n/gm, '');
+  vm.runInNewContext(source, context);
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  await settle();
+  assert.equal(element('room-practice').hidden, false);
+  assert.match(element('room-practice-frame').src, /rehearsal.html\?booking=friday%3Ainvited/);
+  assert.match(element('room-countdown').textContent, /Private practice/);
+  time = start - 70 * 60000;
+  intervals.find(entry => entry.ms === 1000).fn();
+  assert.equal(element('room-practice').hidden, true);
+  assert.equal(element('room-practice-frame').src, '');
+  selected = { ...b, status: 'funded', acknowledged: true };
+  liveState = { configured: true, bookingId: b.id, status: 'ON-AIR', phase: 'live', armed: true };
+  time = start;
+  intervals.find(entry => entry.ms === 10000).fn();
+  await settle();
+  assert.equal(element('room-on-air').textContent, 'ON AIR');
+  time += 12001;
+  intervals.find(entry => entry.ms === 1000).fn();
+  assert.equal(element('room-on-air').textContent, 'OFF AIR');
 });
 
 test('on-air sign requires fresh verified server state, exact booking and funded acceptance; clock alone never lights it', async () => {

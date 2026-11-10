@@ -14,6 +14,7 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
   verify = verifyMessage, checkpointTimeoutMs = 10_000, getBookings } = {}) {
   const owner = address(ownerWallet), challenges = new Map(), sessions = new Map(), frames = new Map();
   const monitoring = new Set(), connected = new Map();
+  let bookingSnapshot, bookingSnapshotAt = -Infinity;
   let state, failed = false, tail = Promise.resolve();
   const configured = !!owner && !!store && transport?.ready === true;
   const run = fn => { const task = tail.then(fn); tail = task.catch(() => {}); return task; };
@@ -21,9 +22,14 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
     endUtc: new Date(room.expiresAt).toISOString() });
   const lookup = id => state.rooms.find(room => room.id === id);
   const active = room => room && !room.endedAt && room.expiresAt > now();
-  async function practiceBooking(id, who) {
+  async function practiceBooking(id, who, allowCached = false) {
     if (!getBookings || typeof id !== 'string' || id.length > 100) throw new LiveAudioError('Practice booking unavailable');
-    const result = await getBookings();
+    if (!allowCached || !bookingSnapshot || now() - bookingSnapshotAt >= 10000) {
+      bookingSnapshot = undefined;
+      bookingSnapshot = await getBookings();
+      bookingSnapshotAt = now();
+    }
+    const result = bookingSnapshot;
     const b = (Array.isArray(result) ? result : result.bookings || []).find(item => item.id === id);
     if (!b || b.mode !== 'phase1' || b.payoutPolicy !== 'pilot-guaranteed-v1' || !b.stewardApproved ||
         b.cancelled || !['draft', 'funded'].includes(b.status) || !address(b.wallet) ||
@@ -137,6 +143,10 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
         } else if (input.action === 'join') {
           room = lookup(input.id);
           if (!active(room) || ![owner, room.guest].includes(who)) throw new LiveAudioError('Rehearsal invitation unavailable');
+          if (room.bookingId) {
+            await practiceBooking(room.bookingId, who);
+            practiceId = room.bookingId;
+          }
           kind = 'join';
         } else throw new LiveAudioError('Unknown rehearsal action');
         for (const [key, c] of challenges) if (c.expiresAt <= now()) challenges.delete(key);
@@ -184,7 +194,9 @@ export function createRehearsalService({ ownerWallet, transport, store, now = ()
       return run(async () => {
         await initialize(); await cleanup();
         const { s, room } = auth(token, origin);
-        if (room.bookingId && input.action !== 'leave' && input.action !== 'end') await practiceBooking(room.bookingId, s.wallet);
+        if (room.bookingId && input.action !== 'leave' && input.action !== 'end') {
+          await practiceBooking(room.bookingId, s.wallet, input.action === 'state');
+        }
         if (input.action === 'state') {
           if (connected.get(room.id)?.has(token)) connected.get(room.id).set(token, now());
           return publicState(room);

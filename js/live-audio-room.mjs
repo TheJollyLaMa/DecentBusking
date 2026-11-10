@@ -79,7 +79,8 @@ function render(state) {
     byId('room-obs-secret').textContent = '';
     void disconnect();
   }
-  function renderSign() {
+}
+function renderSign() {
     const sign = performerRoomSign(booking, broadcastState, Date.now(), observedAt);
     byId('room-on-air').textContent = sign.label;
     byId('room-on-air').classList.toggle('is-live', sign.live);
@@ -97,7 +98,7 @@ function render(state) {
     }
     practiceMode = !!practice;
   }
-  async function refreshBooking() {
+async function refreshBooking() {
     if (refreshing || disposed || !bookingId || !serviceUrl) return;
     refreshing = true;
     try {
@@ -131,7 +132,6 @@ function render(state) {
       status(error.message || 'Room unavailable; retry shortly.');
       renderSign();
     } finally { refreshing = false; }
-  }
 }
 byId('room-authorize').onclick = perform(async () => {
   if (!window.ethereum) throw new Error('A browser wallet is needed for backstage access');
