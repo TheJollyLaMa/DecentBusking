@@ -92,11 +92,46 @@ test('actual JukeLoop refuses late-prepared audio at the 9pm boundary even befor
   const prepared = await f.session._prepareNextPlayback();
   f.session._preparedNext = prepared;
   f.setNow(start + 3600_000);
+  f.session.setLiveAudioPolicy({ bookingId: 'booked', mode: 'live', armed: true,
+    startUtc: new Date(start + 3600_000).toISOString(), endUtc: new Date(start + 4800_000).toISOString() });
   await f.session._playNext();
   assert.equal(f.player.resource, undefined);
   assert.equal(f.snapshot().cursor, 0);
   assert.equal(f.session.getShowState().activeShow.type, 'live_performance');
   assert.equal(f.session.getShowState().topTenHype, null);
+});
+
+test('real JukeLoop cuts Top10 at lead-in, accepts only adverts, pauses for live, then returns to rotation', async t => {
+  const f = await fixture(t);
+  const { liveAudioPolicy } = await import('../js/live-audio.mjs');
+  const booking = { id: 'friday-fixture', startUtc: new Date(start + 3600_000).toISOString(),
+    endUtc: new Date(start + 4800_000).toISOString() };
+  const program = { leadInSeconds: 120, outroSeconds: 300 };
+  f.session._preparedNext = await f.session._prepareNextPlayback();
+  f.session.devertPlayback.nextMainRadioAd = async () => null;
+  f.session.djuke.nextPaid = async options => {
+    assert.equal(options.includeSongs, false, 'paid songs must remain queued through both breaks');
+    return null;
+  };
+  const at = ms => {
+    f.setNow(ms);
+    f.session.setLiveAudioPolicy(liveAudioPolicy({ armed: true }, booking, ms, program));
+  };
+  at(start + 3480_000);
+  assert.equal(f.session._preparedNext, null, 'preloaded chart audio is disposed at 8:58');
+  assert.equal(f.session.getShowState().activeShow.type, 'live_audio_ads');
+  assert.equal(await f.session._prepareNextPlayback(), null, 'no invented advert or replacement song');
+  assert.match(f.session.getPlaybackStatus().reason, /waiting for an eligible advert/);
+  at(start + 3600_000);
+  assert.equal(f.session.getShowState().activeShow.type, 'live_performance');
+  assert.equal(await f.session._prepareNextPlayback(), undefined);
+  at(start + 4800_000);
+  assert.equal(f.session.getShowState().activeShow.type, 'live_audio_ads');
+  assert.equal(await f.session._prepareNextPlayback(), null);
+  at(start + 5100_000);
+  assert.equal(f.session.getShowState().activeShow.type, 'normal_rotation');
+  assert.equal(f.session.getShowState().activeShow.unbookedLiveOccurrenceId, undefined);
+  assert.equal(f.snapshot().cursor, 0, 'unplayed chart/preload never counted as a play');
 });
 
 test('actual JukeLoop empty chart never falls back to non-chart music', async t => {

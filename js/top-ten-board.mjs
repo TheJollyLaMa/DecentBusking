@@ -3,7 +3,7 @@ import { renderUsdcAmount } from './fund-display.mjs?v=20261024-djuke-labels';
 import { weekNumberFromKey } from './payroll-week.mjs';
 import { rankTopTenSongs, previewTopTenSongPayroll } from './top-ten-prizes.mjs?v=20261017-wallet-forfeiture';
 import { saveChartSongToWatchlist } from './top-ten-playlist.mjs?v=20261030-ad-cutoff';
-import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261016-hype-bunny';
+import { mountTopTenFestival } from './top-ten-festival.mjs?v=20261110-live-program';
 import { fundBudgetFor } from './fund-budget.mjs?v=20261030-fund-refresh';
 
 export { rankTopTenSongs };
@@ -218,6 +218,26 @@ export function initTopTenBoard() {
   };
   const applyRadioState = radio => {
     if (!radio) return;
+    const policy = radio.liveAudio?.policy;
+    if (policy?.program && ['adverts', 'live', 'fault'].includes(policy.mode) &&
+        radio.serverTime < policy.program.endsAt) {
+      const remaining = policy.program.endsAt - radio.serverTime;
+      hypeDeadline = performance.now() + remaining;
+      clearTimeout(hypeEndTimer);
+      hypeEndTimer = setTimeout(endHype, remaining);
+      if (!festival) {
+        wasOpenBeforeHype = isOpen();
+        festival = mountTopTenFestival(panel, { readSpectrum: readRadioSpectrum });
+        syncFlights();
+      }
+      if (autoOpenedInstance !== policy.bookingId) {
+        autoOpenedInstance = policy.bookingId;
+        if (!isOpen()) open();
+      }
+      festival.update({ program: policy, liveStatus: radio.liveAudio.status });
+      if (lastReport) render(lastReport, radio.nowPlaying || null, lastWeekly);
+      return;
+    }
     const hype = radio.activeShow?.id === 'friday-top10-hype' ? radio.topTenHype : null;
     if (!hype) {
       if (radio.activeShow || performance.now() >= hypeDeadline) endHype();

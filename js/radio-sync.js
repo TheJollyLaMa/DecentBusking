@@ -816,7 +816,9 @@ function _radioPositionS() {
 }
 
 function _liveLabel() {
-  if (_liveAudioPolicy?.mode === 'adverts') return 'OFF-AIR · DVert cancellation recovery window';
+  if (_liveAudioPolicy?.mode === 'adverts') return _liveAudioPolicy.breakKind === 'lead-in'
+    ? 'Live show starts after this advert break' : _liveAudioPolicy.breakKind === 'outro'
+      ? 'Thanks for listening · Post-show adverts' : 'OFF-AIR · DVert cancellation recovery window';
   if (_radioState?.activeShow?.type === 'playlist_show') {
     const fallback = _radio?.playlistShow?.fallback ? _radioState.playlistShow?.fallbackReason : null;
     return `📻 ${_radioState.activeShow.label} · ${fallback ? `Normal rotation (${fallback}) · ` : ''}Vote up OR down!`;

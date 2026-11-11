@@ -24,13 +24,15 @@ export function createLiveAudioFileStore(path) {
 }
 
 export function createLiveAudioService({ getBookings, ownerWallet, transport, store, onPolicy = () => {},
-  onCancel, now = () => Date.now(), verify = verifyMessage, checkpointTimeoutMs = 10_000 } = {}) {
+  onCancel, now = () => Date.now(), verify = verifyMessage, checkpointTimeoutMs = 45_000, programs = {} } = {}) {
   const owner = address(ownerWallet);
   const challenges = new Map(), sessions = new Map(), frames = new Map(), reservations = new Map();
   const monitoring = new Set(), closed = new Set(), restoredAt = new Map(), closing = new Set(), notifying = new Set();
   let state = null, failed = false, tail = Promise.resolve(), bookings = [], checkedAt = -Infinity;
   let bookingRefresh, bookingsLoaded = false;
   const configured = !!owner && !!store && transport?.ready === true;
+  const policyFor = (record, b) => liveAudioPolicy(record, b, now(),
+    Object.hasOwn(programs, b.id) ? programs[b.id] : null);
   const run = fn => {
     const task = tail.then(fn);
     tail = task.catch(() => {});
@@ -101,7 +103,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
   }
   function recordFor(id) { return state?.rooms.find(r => r.bookingId === id); }
   function publicState(b, record, privateView = false) {
-    const policy = liveAudioPolicy(record, b, now());
+    const policy = policyFor(record, b);
     const currentFrame = frames.get(b.id) || 0;
     const phase = record?.cancelledAt ? 'cancelled'
       : now() >= Date.parse(b.endUtc) ? 'ended'
@@ -137,7 +139,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     await save(next);
     frames.delete(b.id);
     for (const [token, session] of sessions) if (session.bookingId === b.id) sessions.delete(token);
-    onPolicy(liveAudioPolicy(r, b, now()));
+    onPolicy(policyFor(r, b));
   }
   async function cleanup(b) {
     if (closed.has(b.id) || closing.has(b.id)) return;
@@ -210,8 +212,9 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         void cleanup(b);
         if (updated.cancelNoticePending) notifyCancellation(b, updated.reason);
       }
-      const policy = liveAudioPolicy(updated, b, now());
-      if (policy && (!activePolicy || policy.mode === 'live')) activePolicy = policy;
+      const policy = policyFor(updated, b);
+      if (policy && (!activePolicy || policy.mode === 'live' ||
+          activePolicy.mode === 'radio' && policy.mode !== 'radio')) activePolicy = policy;
     }
     onPolicy(activePolicy);
     return activePolicy;
@@ -311,9 +314,9 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       if (!configured || failed) return null;
       return run(async () => {
         await initialize(); await readBookings();
-        const live = bookings.findLast(item => liveAudioPolicy(recordFor(item.id), item, now())?.mode === 'live');
+        const live = bookings.findLast(item => policyFor(recordFor(item.id), item)?.mode === 'live');
         const b = live || bookings.find(item => {
-          const p = liveAudioPolicy(recordFor(item.id), item, now());
+          const p = policyFor(recordFor(item.id), item);
           return p && p.mode !== 'radio' || recordFor(item.id) && !recordFor(item.id).cancelledAt &&
             now() >= Date.parse(item.startUtc) - 15_000 && now() < Date.parse(item.startUtc);
         });

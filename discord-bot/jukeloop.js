@@ -1017,7 +1017,7 @@ export class JukeLoopSession {
     const show = this.getShowState().activeShow;
     if (show.type === 'live_performance') return { status: 'paused', ready: false, reason: show.label || 'Live performance' };
     if (show.type === 'live_audio_ads' && !this._nowPlaying?.audible) {
-      return { status: 'paused', ready: false, reason: 'DVert recovery window: waiting for an eligible advert; no delivery is being claimed' };
+      return { status: 'paused', ready: false, reason: `${show.label}: waiting for an eligible advert; no delivery is being claimed` };
     }
     const voice = this._voiceConnection?.getState();
     if (this._destroyed || (!this.websitePlayback && voice?.voiceConnected === false)) {

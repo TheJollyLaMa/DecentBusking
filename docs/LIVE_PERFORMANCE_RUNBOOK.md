@@ -1,5 +1,54 @@
 # Live Performance — operator runbook
 
+## Friday November 13 website-radio rehearsal
+
+The approved sequence for `friday-live-performance:2026-11-13:withinthevacuum`
+is below, all New York time (UTC is November 14):
+
+| Time | Website radio |
+| --- | --- |
+| 20:00 / 20:45 | Private T-60 / T-15 soundchecks; owner listens and marks each actual check |
+| 20:58–21:00 / 01:58–02:00 UTC | End remaining Top10 audio; eligible DVert advert lead-in |
+| 21:00–21:20 / 02:00–02:20 UTC | Same wallet-linked room becomes public **only after both checks and operator arm** |
+| 21:20–21:25 / 02:20–02:25 UTC | Close live admission/audio; eligible DVert outro |
+| 21:25 / 02:25 UTC | Regular radio; queued paid songs remain eligible, without a second unbooked-live advert break |
+
+Set `LIVE_AUDIO_PROGRAMS` to
+`{"friday-live-performance:2026-11-13:withinthevacuum":{"leadInSeconds":120,"outroSeconds":300}}`.
+Leave OBS and recording off. There is no Discord live-audio relay.
+Eligible adverts only: if none are available, report waiting, never play a song
+inside these breaks or fabricate delivery/impressions. Existing cancellation
+behavior is separate: a quiet fault slate, recovery adverts, then radio.
+A disconnected microphone is not a successful early finish; the existing
+60-second verified-delivery grace applies. The planned successful end is 21:20.
+
+The Top10 animated stage stays mounted through lead-in, actual live audio and
+outro. The live announcement requires fresh independent receiver evidence,
+not the clock. It links to the existing public creator profile (songs/albums)
+and shows the actual performer wallet with a Base explorer link; no invented
+artist biography, catalog, alternative tipping address or external links.
+
+Before Friday: verify accepted terms and actual escrow funding, hosted verified
+media checkpoint configuration, the deployed frontend/worker revisions, and
+eligible advert inventory. At 19:50 the practice iframe gives way to booked
+backstage: reconnect with a fresh wallet pass. Complete both real checks and
+arm while delivered audio is fresh, before 21:00. Test from a separate website
+listener with playback enabled; an autoplay-blocked browser needs a click.
+Reconfirm the artist's headphone/interface setup with them; synthetic test
+audio cannot establish their hardware, latency or performance readiness.
+After the original end, record the truthful result and approve the guaranteed
+full fee; incremental rehearsal scoring is **not** incremental on-chain pay.
+
+Reuse: adapt this repository's `liveAudioPolicy`, JukeLoop `live_audio_ads`
+selection, `mountTopTenFestival`, `open-creator-profile`, and the private
+rehearsal store's encrypted latest-readback pattern. No new donor service,
+recording, rights grant, Discord relay or shared-package extraction.
+Receiving tests cover exact boundaries, deferred paid songs, no-ad waiting,
+stage continuity/profile dispatch, checkpoint failure and isolated real LiveKit
+publisher → native PCM/RTP proof → public browser listener, loss/reconnect and
+booked-end admission closure. The isolated test uses generated fixture wallets,
+never the artist's signature or the real booking's Friday soundcheck state.
+
 Refs #210, Refs #223. **Booking/payment prototype build complete; live rehearsal still required.**
 
 **This runbook does not authorize escrow deposits, payouts, refunds, invitations or schedule changes.** Use a newly agreed future date and performer, not the expired October 23 offer. Do not run a second bot from a development worktree against production secrets.
