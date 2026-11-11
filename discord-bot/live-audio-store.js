@@ -60,19 +60,20 @@ export function liveAudioStateCodec(keyHex, { distinctFrom = [] } = {}) {
 }
 
 /**
- * Durable live-audio lifecycle store: encrypted, locally mirrored Pinata checkpoints.
+ * Durable live-audio lifecycle store: encrypted Pinata checkpoints, locally mirrored by default.
  * restore() resolves only an empty state when no checkpoint exists; any listing, gateway, decryption or schema
- * failure rejects so the service stays closed. save() resolves only after mirror and Pinata confirm the same CID.
+ * failure rejects so the service stays closed. Hosted mode instead verifies the latest encrypted readback.
  */
-export function createLiveAudioPinataStore({ storageKey, distinctFrom = [], checkpointMirror, pinataJwt, ...pinata } = {}) {
-  if (!checkpointMirror || typeof checkpointMirror.mirror !== 'function') {
+export function createLiveAudioPinataStore({ storageKey, distinctFrom = [], checkpointMirror, pinataJwt,
+  hostedVerified = false, ...pinata } = {}) {
+  if (!hostedVerified && (!checkpointMirror || typeof checkpointMirror.mirror !== 'function')) {
     throw new Error('Live audio state requires the existing checkpoint mirror');
   }
   const codec = liveAudioStateCodec(storageKey, { distinctFrom });
   const store = createPinataStateStore({ ...pinata, pinataJwt, name: LIVE_AUDIO_STATE_NAME, tags: LIVE_AUDIO_STATE_TAGS,
     // Never fall back to an older room checkpoint: it could reopen a cancelled room or forget checks/arming.
-    restoreLatestOnly: true, requireLocalMirror: true, ...codec,
-    beforeUpload: (bytes, options) => checkpointMirror.mirror(bytes, options) });
+    restoreLatestOnly: true, rejectAmbiguousLatest: true, requireLocalMirror: !hostedVerified, ...codec,
+    beforeUpload: hostedVerified ? undefined : (bytes, options) => checkpointMirror.mirror(bytes, options) });
   return {
     async restore() {
       const restored = await store.restore();
@@ -81,6 +82,12 @@ export function createLiveAudioPinataStore({ storageKey, distinctFrom = [], chec
     async save(value) {
       const uri = await store.save(validateLiveAudioState(value));
       if (!/^ipfs:\/\/\S+$/.test(uri || '')) throw new Error('Live audio checkpoint did not confirm');
+      if (hostedVerified) {
+        const restored = await store.restore();
+        if (store.getLatestSnapshotUri() !== uri || JSON.stringify(restored) !== JSON.stringify(value)) {
+          throw new Error('Latest live audio checkpoint was not verified');
+        }
+      }
       return uri;
     },
     close: () => store.close(),

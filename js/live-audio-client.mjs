@@ -16,7 +16,8 @@ export function loadLiveAudioSdk(serviceUrl) {
 export async function roomRequest(serviceUrl, path, input, token, fetchImpl = fetch) {
   const response = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/live-audio/${path}`, {
     method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify(input), signal: AbortSignal.timeout(10_000), cache: 'no-store',
+    body: JSON.stringify(input), signal: AbortSignal.timeout(
+      path === 'session' || ['check', 'arm', 'cancel'].includes(input.action) ? 60_000 : 10_000), cache: 'no-store',
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Live audio is unavailable');
@@ -42,9 +43,14 @@ export function createLiveAudioListener({ audio, serviceUrl, onStatus, sdkLoader
         report('Radio control connection lost; live audio stopped');
         return;
       }
-      const stats = await track?.getReceiverStats();
+      const stats = await track?.getRTCStatsReport();
       if (current !== generation || observedTrack !== track) return;
-      const count = Number(stats?.packetsReceived || 0);
+      let count = 0;
+      stats?.forEach(entry => {
+        if (entry.type === 'inbound-rtp' && (entry.kind || entry.mediaType) === 'audio') {
+          count += Number(entry.packetsReceived || 0);
+        }
+      });
       if (count > packets) lastPacketAt = now();
       packets = count;
       report();

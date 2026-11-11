@@ -151,7 +151,20 @@ export function mountTopTenFestival(panel, { readSpectrum = null } = {}) {
   progress.append(live, position, meterToggle);
   const note = element('p', 'hype-chart-explainer', 'Opening chart sets the play order. Your votes move the live ranks below.');
   const warning = element('p', 'hype-warning');
-  banner.append(info, infoText, eyebrow, title, subtitle, stage, progress, note, warning);
+  const artistCard = element('section', 'hype-live-artist');
+  artistCard.hidden = true;
+  const artistName = element('h4', '');
+  const profile = element('button', '', 'Artist profile · songs & albums');
+  profile.type = 'button';
+  let artistWallet = '';
+  profile.addEventListener('click', () => {
+    if (artistWallet) document.dispatchEvent(new CustomEvent('open-creator-profile', { detail: { address: artistWallet } }));
+  });
+  const tip = element('a', '', 'Tip wallet on Base');
+  tip.target = '_blank'; tip.rel = 'noopener noreferrer';
+  const address = element('p', '');
+  artistCard.append(artistName, profile, tip, address);
+  banner.append(info, infoText, eyebrow, title, subtitle, stage, progress, note, warning, artistCard);
   panel.querySelector('.top-ten-panel-heading').after(banner);
   panel.classList.add('is-hype-festival');
   document.body.classList.add('top-ten-festival-open');
@@ -159,7 +172,30 @@ export function mountTopTenFestival(panel, { readSpectrum = null } = {}) {
   document.addEventListener('visibilitychange', visibility);
   visibility();
   return {
-    update({ openingRank, encore = false, title: songTitle = '', status = 'ready', error = '', lateSnapshot = false, skipped = [] } = {}) {
+    update({ openingRank, encore = false, title: songTitle = '', status = 'ready', error = '', lateSnapshot = false,
+      skipped = [], program = null, liveStatus = 'OFF-AIR' } = {}) {
+      artistCard.hidden = !program;
+      if (program) {
+        const liveNow = program.mode === 'live' && liveStatus === 'ON-AIR';
+        artistWallet = /^0x[0-9a-f]{40}$/i.test(program.program.wallet || '') ? program.program.wallet : '';
+        artistName.textContent = program.program.artist || program.title;
+        profile.disabled = !artistWallet;
+        tip.hidden = !artistWallet;
+        if (artistWallet) tip.href = `https://basescan.org/address/${artistWallet}`;
+        address.textContent = artistWallet ? `Artist tip wallet: ${artistWallet}` : 'Artist wallet unavailable';
+        eyebrow.textContent = 'FRIDAY NIGHT · LIVE RADIO REHEARSAL';
+        subtitle.textContent = liveNow ? `Taking the stage: ${program.program.artist || program.title}` : program.breakKind === 'lead-in'
+          ? 'Top 10 has wrapped. A short advert break, then our live guest.'
+          : program.breakKind === 'outro' ? 'Thank you for the music. Adverts, then regular radio.'
+            : 'Waiting for verified live audio. The performer fee is unchanged.';
+        live.textContent = liveNow ? 'ON AIR' : program.mode === 'adverts' ? 'AD BREAK' : 'OFF AIR';
+        position.textContent = liveNow ? 'LIVE PERFORMANCE' : program.breakKind === 'lead-in' ? 'UP NEXT · LIVE'
+          : program.breakKind === 'outro' ? 'POST-SHOW' : 'CHECKING CONNECTION';
+        note.textContent = 'The stage stays open. Profile, songs, albums and the artist wallet are below.';
+        warning.textContent = program.reason || '';
+        return;
+      }
+      live.textContent = 'ON AIR';
       position.textContent = status === 'empty' ? 'OPENING CHART EMPTY' : status === 'unavailable' ? 'COUNTDOWN PAUSED'
         : status === 'preparing' ? 'PREPARING OPENING CHART'
         : encore ? 'ENCORE' : Number.isInteger(openingRank) ? `OPENING #${openingRank}` : 'COUNTING UP TO #1';

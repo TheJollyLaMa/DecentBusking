@@ -13,6 +13,32 @@ const booking = () => ({ id: 'existing-funded-booking', wallet: artist.address, 
   title: 'Private fixture', startUtc: new Date(START).toISOString(), endUtc: new Date(START + 20 * 60_000).toISOString(),
   status: 'funded', acknowledged: true, payoutPolicy: 'pilot-guaranteed-v1', amountUnits: '20000000' });
 
+test('approved program hits exact Top10/ad/live/ad/radio boundaries without altering booked time', async () => {
+  const { liveAudioPolicy, applyLiveAudioShow, parseLiveAudioPrograms } = await import('../js/live-audio.mjs');
+  const b = booking(), record = { armed: true, checks: {} }, end = Date.parse(b.endUtc);
+  const plan = { leadInSeconds: 120, outroSeconds: 300 };
+  const policy = at => liveAudioPolicy(record, b, at, plan);
+  assert.equal(policy(START - 120001), null);
+  assert.equal(policy(START - 120000).breakKind, 'lead-in');
+  assert.equal(policy(START - 1).mode, 'adverts');
+  assert.equal(policy(START).mode, 'live');
+  assert.equal(policy(end - 1).mode, 'live');
+  assert.equal(policy(end).breakKind, 'outro');
+  assert.equal(policy(end + 299999).mode, 'adverts');
+  assert.equal(policy(end + 300000).mode, 'radio');
+  assert.equal(applyLiveAudioShow({ type: 'weekly_top10' }, policy(START - 120000)).type, 'live_audio_ads');
+  assert.equal(applyLiveAudioShow({ type: 'normal_rotation', unbookedLiveOccurrenceId: 'weekly' },
+    policy(end + 300000)).unbookedLiveOccurrenceId, undefined, 'no second unbooked-live advert break');
+  const next = { type: 'live_performance', event: { id: 'other-booking' } };
+  assert.equal(applyLiveAudioShow(next, policy(end)), next, 'outro cannot displace another reserved performer');
+  assert.deepEqual(parseLiveAudioPrograms(JSON.stringify({ [b.id]: plan })), { [b.id]: plan });
+  for (const invalid of ['null', '[]', '{"b":{"leadInSeconds":-1,"outroSeconds":300}}',
+    '{"b":{"leadInSeconds":120,"outroSeconds":301.5}}', '{"b":{"leadInSeconds":120,"outroSeconds":300,"armed":true}}']) {
+    assert.throws(() => parseLiveAudioPrograms(invalid));
+  }
+  assert.equal(liveAudioPolicy({ ...record, cancelledAt: START, reason: 'failed' }, b, START, plan).mode, 'fault');
+});
+
 async function setup(options = {}) {
   const { createLiveAudioService } = await import('../discord-bot/live-audio.js');
   let time = START - 60 * 60_000, persisted = { version: 1, rooms: [] }, receiver;
@@ -432,7 +458,12 @@ test('website listener handles autoplay blocking, packet freshness and teardown 
     async play() { if (blocked) throw new Error('autoplay blocked'); this.paused = false; },
     pause() { this.paused = true; } };
   const track = { kind: 'audio', attach(target) { target.srcObject = {}; }, detach(target) { target.srcObject = null; },
-    async getReceiverStats() { return { packetsReceived: count }; } };
+    async getReceiverStats() { return { type: 'audio', bytesReceived: count * 100 }; },
+    async getRTCStatsReport() { return new Map([
+      ['audio', { type: 'inbound-rtp', kind: 'audio', packetsReceived: count, concealedSamples: 480000 }],
+      ['video', { type: 'inbound-rtp', kind: 'video', packetsReceived: Date.now() }],
+      ['outbound', { type: 'outbound-rtp', kind: 'audio', packetsReceived: Date.now() }],
+    ]); } };
   class Room extends EventEmitter {
     state = 'connecting'; remoteParticipants = new Map();
     async connect() { this.state = 'connected'; this.emit('subscribed', track, {}, { identity: 'booked-performer' }); }
@@ -449,7 +480,10 @@ test('website listener handles autoplay blocking, packet freshness and teardown 
   listener.update(state); await new Promise(setImmediate);
   assert.equal(statuses.at(-1).blocked, true);
   assert.equal(statuses.at(-1).status, 'RECONNECTING');
-  blocked = false; await listener.play(); count = 10;
+  blocked = false; await listener.play();
+  t.mock.timers.tick(1000); await new Promise(setImmediate);
+  assert.equal(statuses.at(-1).status, 'RECONNECTING', 'video, outbound and concealed samples are not inbound audio packets');
+  count = 10;
   t.mock.timers.tick(1000); await new Promise(setImmediate);
   assert.equal(statuses.at(-1).status, 'ON-AIR');
   t.mock.timers.tick(6000); await new Promise(setImmediate);

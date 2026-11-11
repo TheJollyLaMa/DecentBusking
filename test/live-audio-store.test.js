@@ -80,6 +80,20 @@ async function service(store, clock) {
   return { s, authorize, frame: () => receiver({ samples: 960 }) };
 }
 
+test('explicit hosted media lifecycle mode verifies encrypted latest state without requiring laptop mirror', async () => {
+  const { createLiveAudioPinataStore } = await import('../discord-bot/live-audio-store.js');
+  const pinata = fakePinata();
+  const store = createLiveAudioPinataStore({ storageKey: KEY, hostedVerified: true, pinataJwt: 'fixture',
+    fetchImpl: pinata.fetchImpl, gateway: 'https://gateway.example', log: { warn() {} } });
+  const value = { version: 1, rooms: [{ bookingId: booking.id, armed: true, checks: {} }] };
+  await store.save(value);
+  assert.deepEqual(await store.restore(), value);
+  assert.equal(pinata.uploads[0].includes(booking.id), false);
+  pinata.failGateway = true;
+  await assert.rejects(store.save({ version: 1, rooms: [] }), /restore failed/);
+  store.close();
+});
+
 test('live audio lifecycle survives restart through encrypted, mirrored Pinata state without secrets', async () => {
   const clock = { time: START - 60 * 60_000 };
   const first = await fixture();

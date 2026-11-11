@@ -3887,3 +3887,8 @@ decent-foot {
 .djuke-playlist-draft :focus-visible, .playlist-selector :focus-visible, .top-ten-watchlist-add:focus-visible { outline: 2px solid #a5ffba; outline-offset: 2px; }
 
 .creator-playlist-item [hidden] { display: none !important; }
+.hype-live-artist{padding:1rem;margin:.75rem 0;border:1px solid #f0c04066;border-radius:12px;background:#171025;color:#f0e6c8;overflow-wrap:anywhere}
+.hype-live-artist[hidden]{display:none}
+.hype-live-artist h4{margin:0 0 .65rem;color:#f0c040}
+.hype-live-artist button,.hype-live-artist a{display:inline-block;margin:.3rem;padding:.65rem;border:1px solid #91e2ce;border-radius:8px;color:#91e2ce;background:#101a18;font:inherit;cursor:pointer}
+.hype-live-artist p{font-size:.8rem}

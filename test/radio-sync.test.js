@@ -18,7 +18,7 @@ test('cached radio importers resolve to one cache-busted live-audio controller',
     assert.ok(references.length, file);
     for (const [, reference] of references) {
       const url = new URL(reference, `https://radio.example/js/${file}`).href;
-      assert.equal(imports.get(url) || url, 'https://radio.example/js/radio-sync.js?v=20261108-live-audio-pilot');
+      assert.equal(imports.get(url) || url, 'https://radio.example/js/radio-sync.js?v=20261110-live-program');
     }
   }
 });

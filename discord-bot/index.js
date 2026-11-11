@@ -2,6 +2,7 @@ import { createRadioAnnouncements, deserializeAnnouncements } from './radio-anno
 import { createCommunityReminder, deserializeCommunityReminders } from './community-reminder.js';
 import { createLiveBookings } from './live-bookings.js';
 import { createLiveAudioService } from './live-audio.js';
+import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
 import { createLiveAudioTransport } from './live-audio-transport.js';
 import { createRehearsalService } from './rehearsal.js';
@@ -1527,19 +1528,22 @@ async function main() {
     },
   });
   let liveAudioStore = null;
-  if (process.env.LIVE_AUDIO_STORAGE_KEY && config.pinataJwt && checkpointMirror) {
+  if (process.env.LIVE_AUDIO_STORAGE_KEY && config.pinataJwt &&
+      (checkpointMirror || process.env.LIVE_AUDIO_CHECKPOINT_MODE === 'hosted-verified')) {
     try {
       liveAudioStore = createLiveAudioPinataStore({
         storageKey: process.env.LIVE_AUDIO_STORAGE_KEY,
         distinctFrom: [process.env.CONTENT_REVIEW_STORAGE_KEY],
         checkpointMirror, ...config.checkpointStorage, pinataJwt: config.pinataJwt,
+        hostedVerified: process.env.LIVE_AUDIO_CHECKPOINT_MODE === 'hosted-verified',
         uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
       });
     } catch {
-      console.warn('[live-audio] Encrypted mirrored storage unavailable; media remains disabled.');
+      console.warn('[live-audio] Encrypted durable storage unavailable; media remains disabled.');
     }
   }
   const liveAudio = createLiveAudioService({
+    programs: parseLiveAudioPrograms(process.env.LIVE_AUDIO_PROGRAMS || '{}'),
     ownerWallet: config.mintOwnerWallet,
     getBookings: () => liveBookings.getState(),
     store: liveAudioStore,
