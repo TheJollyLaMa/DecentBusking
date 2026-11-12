@@ -196,6 +196,8 @@ export function createDevertQueueRuntime({ readState, store, contract, isCampaig
     },
     fail: runtime.fail,
     release: runtime.release,
+    hasPendingSelection: runtime.hasPendingSelection,
+    prepareForDeployment: runtime.prepareForDeployment,
     async prepareCampaignRemoval(campaignId) {
       const id = String(campaignId);
       removingCampaigns.add(id);
@@ -258,6 +260,9 @@ export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 1
   };
   return {
     async nextPaid({ allowBump = false, includeSongs = true } = {}) {
+      if (songs?.hasActivePlaylist?.()) {
+        return includeSongs ? select(songs, undefined, 'djuke') : null;
+      }
       if (adverts) {
         const ad = await select(adverts, { allowBump }, 'devert-queue');
         if (ad) return ad;
@@ -269,6 +274,25 @@ export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 1
     release(record, error) { return (record.kind === 'devert' ? adverts : songs).release(record, error); },
     retryMedia(record, error) { return songs.retryMedia(record, error); },
     hasPendingPlaylist() { return songs?.hasPendingPlaylist?.() === true; },
+    hasActivePlaylist() { return songs?.hasActivePlaylist?.() === true; },
+    getActivePlaylistBatchId() { return songs?.getActivePlaylistBatchId?.() ?? null; },
+    start(record) { return (record.kind === 'devert' ? adverts : songs).start?.(record); },
+    refreshPlaybackState(record) { return (record.kind === 'devert' ? adverts : songs).refreshPlaybackState?.(); },
+    hasPendingSelection() { return selecting.size > 0 || prepared.size > 0 ||
+      songs?.hasPendingSelection?.() === true || adverts?.hasPendingSelection?.() === true; },
+    async prepareForDeployment() {
+      if (songs?.hasActivePlaylist?.()) await songs.reconcile({ waitForSettlement: false });
+      if (!selecting.size) {
+        await songs?.prepareForDeployment?.();
+        await adverts?.prepareForDeployment?.();
+      }
+      for (const [runtime, selection] of prepared) {
+        if (selection.record.playlistBatchId !== undefined &&
+            selection.record.playlistBatchId === songs?.getActivePlaylistBatchId?.()) continue;
+        await runtime.release(selection.record, new Error('Deployment drain holds new paid starts'));
+        prepared.delete(runtime);
+      }
+    },
     hasPlaybackEvidence(record) { return record?.kind !== 'devert' && songs?.hasPlaybackEvidence?.(record) === true; },
     canPlay(record) { return (record.kind === 'devert' ? adverts : songs).canPlay(record); },
   };

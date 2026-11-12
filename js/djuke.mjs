@@ -417,7 +417,7 @@ export function initDjuke() {
       if (receiptStatus) receiptStatus.textContent = '';
       renderReceipts();
       const wallet = window._wallet?.address?.toLowerCase();
-      const queueKey = JSON.stringify([snapshot.contractAddress, requests, snapshot.playlistBatches, wallet, paymentsLive()]);
+      const queueKey = JSON.stringify([snapshot.contractAddress, requests, snapshot.playlistBatches, snapshot.activePlaylistBatchId, wallet, paymentsLive()]);
       if (queue.dataset.snapshot !== queueKey) {
         const scrollPositions = [...queue.querySelectorAll('.djuke-playlist-songs')].map(list => [list.dataset.batch, list.scrollTop]);
         const scrollTop = queue.scrollTop;
@@ -442,7 +442,9 @@ export function initDjuke() {
         for (const batch of snapshot.playlistBatches || []) {
           const item = node('li', undefined, 'djuke-playlist-queue');
           const details = node('div', undefined, 'djuke-request-details');
+          const active = batch.batchId === snapshot.activePlaylistBatchId;
           details.append(node('strong', playlistBatchProgress(batch).heading));
+          if (active) details.append(node('span', 'On air: later purchases play after this playlist.'));
           const songs = node('ol');
           songs.className = 'djuke-playlist-songs';
           songs.dataset.batch = batch.batchId;
@@ -459,7 +461,8 @@ export function initDjuke() {
           }
           details.append(songs);
           item.append(details);
-          queue.append(item);
+          if (active) queue.prepend(item);
+          else queue.append(item);
           songs.scrollTop = scrollPositions.find(([id]) => id === batch.batchId)?.[1] || 0;
         }
         queue.scrollTop = scrollTop;

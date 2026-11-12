@@ -271,6 +271,8 @@ export function createWorkerRequestHandler({
   onReviewedAlbumImport,
   creatorProfiles,
   getRadioState,
+  radioDeployment,
+  authorizeRadioDeployment,
   getRadioMediaUrl,
   getMediaGateways = async () => [],
   getRadioSchedule,
@@ -473,6 +475,18 @@ export function createWorkerRequestHandler({
         const { handleRehearsalRequest } = await import('./rehearsal-http.js');
         await handleRehearsalRequest(request, response, { service: rehearsal, allowedOrigins });
         return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/radio/deployment') {
+        if (!radioDeployment || !authorizeRadioDeployment) {
+          sendJson(response, 503, { error: 'Radio deployment handoff is not configured' }); return;
+        }
+        try {
+          authorizeRadioDeployment(String(request.headers.authorization || ''));
+        } catch {
+          sendJson(response, 403, { error: 'Radio deployment authorization failed' }); return;
+        }
+        const result = await radioDeployment(await readJson(request));
+        sendJson(response, 200, result); return;
       }
       if (requestUrl.pathname.startsWith('/api/live-audio/')) {
         const { handleLiveAudioRequest } = await import('./live-audio-http.js');
