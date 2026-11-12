@@ -17,7 +17,7 @@ test('DVert shares the USDC ABI without importing and initializing the DJuke dra
     'function approve(address, uint256) returns (bool)',
   ]);
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /djuke\.mjs\?v=20261107-review/);
+  assert.match(html, /djuke\.mjs\?v=20261112-playlist-continuity/);
   assert.match(html, /devert-site\.mjs\?v=20261107-review/);
   const adapter = fs.readFileSync(path.join(__dirname, '../js/devert-site.mjs'), 'utf8');
   assert.match(adapter, /devert-paid-queue\.mjs\?v=20261107-review/);
@@ -293,6 +293,7 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
       setAttribute(name, value) { this.attributes[name] = value; },
       getAttribute(name) { return this.attributes[name]; },
       append(...children) { this.children.push(...children); },
+      prepend(...children) { this.children.unshift(...children); },
       replaceChildren(...children) { this.children = children; },
       querySelectorAll() { return []; },
       addEventListener(name, callback) { (this.listeners[name] ||= []).push(callback); },
@@ -312,6 +313,7 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   let earningsFail = false;
   let catalogFail = false;
   let playlistReceipts = [];
+  let queueRequests = [], playlistBatches = [], activePlaylistBatchId = null;
   let queueReads = 0;
   let scheduled;
   let tracks = [{ trackId: 'a', songId: `0x${'a'.repeat(64)}`, title: 'First song', artist: 'Musician' }];
@@ -326,7 +328,8 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
         json: async () => ({ chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address, totalUnits: '1125000' }] }) };
       queueReads++;
       return { ok: !catalogFail, status: catalogFail ? 503 : 200,
-        json: async () => ({ contractAddress: address, paymentsEnabled: true, requests: [], tracks, playlistReceipts }) };
+        json: async () => ({ contractAddress: address, paymentsEnabled: true, requests: queueRequests, tracks,
+          playlistReceipts, playlistBatches, activePlaylistBatchId }) };
     },
   });
   const source = fs.readFileSync(path.join(__dirname, '../js/djuke.mjs'), 'utf8')
@@ -389,6 +392,15 @@ test('DJuke prompts only on a disconnected queue click, renders ENS payouts and 
   assert.equal(stopped, true);
   assert.equal(element('djuke-instructions').open, false);
   assert.equal(element('djuke-tab').getAttribute('aria-expanded'), 'true');
+  queueRequests = [{ requestId: 'later-single', trackId: 'later', title: 'Later purchase', playable: true }];
+  playlistBatches = [{ batchId: '5', name: 'Owned playlist', songs: [{ laneId: '1', title: 'Current song', status: 'playing' }] }];
+  activePlaylistBatchId = '5';
+  await click('djuke-refresh');
+  const queue = element('djuke-queue');
+  assert.match(queue.children[0].children[0].children[0].textContent, /Owned playlist/);
+  assert.match(queue.children[0].children[0].children[1].textContent, /later purchases play after/);
+  assert.equal(queue.children[1].dataset.djukeRequest, 'later-single', 'later purchases are visibly behind the owned batch');
+  queueRequests = []; playlistBatches = []; activePlaylistBatchId = null;
   earningsFail = true;
   await click('djuke-refresh');
   assert.equal(element('djuke-earners').children.length, 0);

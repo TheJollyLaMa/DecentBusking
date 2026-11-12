@@ -122,6 +122,7 @@ class DjukeCheckpointError extends Error {}
 export function createDjukePlaybackJournal({ restore, save, now = () => Date.now() }) {
   if (typeof restore !== 'function' || typeof save !== 'function') throw new Error('Durable DJuke checkpoint storage is required');
   let records = [];
+  let activePlaylistBatchId = null;
   let initialized = false;
   let task = Promise.resolve();
   const run = operation => {
@@ -130,16 +131,18 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
     return result;
   };
   const copy = value => structuredClone(value);
-  async function commit(next) {
+  async function commit(next, activeBatch = activePlaylistBatchId) {
     const fulfilled = next.filter(entry => entry.state === 'fulfilled');
     const kept = next.filter(entry => entry.state !== 'fulfilled' || fulfilled.indexOf(entry) >= fulfilled.length - 100);
     try {
-      const uri = await save({ schemaVersion: 1, records: copy(kept) });
+      const uri = await save({ schemaVersion: 1, records: copy(kept),
+        ...(activeBatch !== null ? { activePlaylistBatchId: activeBatch } : {}) });
       if (typeof uri !== 'string' || !uri.startsWith('ipfs://')) throw new Error('DJuke checkpoint was not durable');
     } catch (error) {
       throw new DjukeCheckpointError(error.message, { cause: error });
     }
     records = kept;
+    activePlaylistBatchId = activeBatch;
   }
   const requireReady = () => { if (!initialized) throw new Error('DJuke journal is not restored'); };
   const update = (requestId, change) => run(async () => {
@@ -155,6 +158,10 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
     initialize: () => run(async () => {
       const snapshot = await restore();
       if (snapshot && (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.records))) throw new Error('Invalid DJuke journal checkpoint');
+      if (snapshot?.activePlaylistBatchId !== undefined && !/^\d+$/.test(snapshot.activePlaylistBatchId)) {
+        throw new Error('Invalid active DJuke playlist batch');
+      }
+      activePlaylistBatchId = snapshot?.activePlaylistBatchId ?? null;
       const next = copy(snapshot?.records || []);
       const seen = new Set();
       for (const record of next) {
@@ -263,6 +270,12 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
       record.state = 'fulfilled';
     }),
     getState: () => { requireReady(); return copy(records); },
+    getActivePlaylistBatchId: () => { requireReady(); return activePlaylistBatchId; },
+    setActivePlaylistBatch: batchId => run(async () => {
+      requireReady();
+      if (batchId !== null && !/^\d+$/.test(batchId)) throw new Error('Invalid active DJuke playlist batch');
+      if (activePlaylistBatchId !== batchId) await commit(copy(records), batchId);
+    }),
   };
 }
 
@@ -379,9 +392,9 @@ export function createDjukeQueueReader({ rpcUrl, contractAddress, getPlaylist, p
   return read;
 }
 
-export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVerifiedRequests, selectRequest, refundPlaylistBatch,
+export function createDjukeRuntime({ readState, readPlaybackState = readState, journal, fulfill, getTrack, onVerifiedRequests, selectRequest, refundPlaylistBatch,
   preserveMissingRequest = () => false, canPlayRequest = () => true,
-  minAudibleMs = 30000, timeoutMs = 10000, log = console }) {
+  minAudibleMs = 30000, timeoutMs = 10000, playbackStateCacheMs = 0, log = console }) {
   let initialized = null;
   let settling = null;
   let claimSerial = Promise.resolve();
@@ -393,6 +406,14 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
   // Clean audible completions whose durable checkpoint is still in flight. They unlock the next lane's
   // playback but never settlement, which still requires the durable `played` record.
   const evidenced = new Set();
+  let playbackState = null, playbackStateAt = 0, playbackStateRead = null;
+  const verifiedPlaybackState = (force = false) => {
+    if (!force && playbackState && Date.now() - playbackStateAt < playbackStateCacheMs) return Promise.resolve(playbackState);
+    playbackStateRead ||= Promise.resolve().then(readPlaybackState).then(state => {
+      playbackState = state; playbackStateAt = Date.now(); return state;
+    }).catch(error => { playbackState = null; throw error; }).finally(() => { playbackStateRead = null; });
+    return playbackStateRead;
+  };
   const retainUpdate = (record, update) => {
     const existing = pendingUpdates.get(record.requestId);
     if (existing) return existing.run();
@@ -460,6 +481,15 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     if (onVerifiedRequests) Promise.resolve().then(() => onVerifiedRequests(state))
       .catch(error => log.warn(`[djuke] Confirmed-request hook deferred: ${error.message}`));
     await journal.synchronize(state.requests, { preserveMissing: record => preserveMissingRequest(record, state) });
+    const activeBatch = journal.getActivePlaylistBatchId();
+    if (activeBatch !== null) {
+      const records = journal.getState();
+      const remaining = state.requests.filter(request => request.playlistBatchId === activeBatch);
+      if (!remaining.some(request => !evidenced.has(request.requestId) &&
+          !records.some(saved => saved.requestId === request.requestId && ['played', 'fulfilled'].includes(saved.state)))) {
+        await journal.setActivePlaylistBatch(null);
+      }
+    }
     const settlement = settleSerial(state);
     if (waitForSettlement) await settlement;
     else settlement.catch(error => log.warn(`[djuke] Fulfillment deferred: ${error.message}`));
@@ -479,7 +509,9 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     const state = await reconcile({ waitForSettlement: false });
     const pending = journal.getState().filter(record => record.state === 'pending');
     const main = state.requests.filter(request => request.playlistLaneId === undefined && !request.moderationBlocked);
-    const eligible = main.length ? main : state.requests;
+    const activeBatch = journal.getActivePlaylistBatchId();
+    const eligible = activeBatch !== null ? state.requests.filter(request => request.playlistBatchId === activeBatch)
+      : main.length ? main : state.requests;
     const candidates = pending.filter(record => eligible.some(request => request.requestId === record.requestId));
     const head = selectRequest ? selectRequest(state, candidates, options)
       : candidates.sort((a, b) => eligible.findIndex(request => request.requestId === a.requestId) - eligible.findIndex(request => request.requestId === b.requestId))[0];
@@ -566,6 +598,30 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
       return retainUpdate(record, () => journal.fail(record.requestId, error?.message || String(error)));
     },
     retryMedia,
+    async start(record) {
+      await ready();
+      if (record.playlistBatchId !== undefined) {
+        const active = journal.getActivePlaylistBatchId();
+        if (active !== null && active !== record.playlistBatchId) throw new Error('Another paid playlist owns the radio');
+        await journal.setActivePlaylistBatch(record.playlistBatchId);
+      } else if (journal.getActivePlaylistBatchId() !== null) throw new Error('Paid playlist must finish before this purchase');
+    },
+    getActivePlaylistBatchId() { return restored ? journal.getActivePlaylistBatchId() : null; },
+    hasActivePlaylist() { return restored && journal.getActivePlaylistBatchId() !== null; },
+    hasPendingSelection() { return !!pendingClaim || !!settling || pendingUpdates.size > 0; },
+    async prepareForDeployment() {
+      if (!restored || journal.getActivePlaylistBatchId() !== null) return;
+      if (pendingClaim) {
+        const pending = pendingClaim;
+        const selection = await pending;
+        if (pendingClaim === pending) pendingClaim = null;
+        if (selection) await retainUpdate(selection.record, () =>
+          journal.fail(selection.record.requestId, 'Deployment drain holds new paid starts'));
+      }
+      for (const entry of pendingUpdates.values()) await entry.run();
+      if (settling) await settling;
+    },
+    refreshPlaybackState: () => verifiedPlaybackState(true),
     hasPendingPlaylist() {
       return restored && !playlistModerationBlocked && (pendingPlaylistCount > 0 ||
         journal.getState().some(record => record.playlistBatchId !== undefined && record.state !== 'fulfilled'));
@@ -574,9 +630,11 @@ export function createDjukeRuntime({ readState, journal, fulfill, getTrack, onVe
     async canPlay(record) {
       await ready();
       for (const [requestId, entry] of pendingUpdates) if (!evidenced.has(requestId)) await entry.run();
-      const state = await readState();
+      const state = await verifiedPlaybackState();
       const requests = state.requests;
-      const eligible = requests.some(request => request.playlistLaneId === undefined)
+      const activeBatch = journal.getActivePlaylistBatchId();
+      const eligible = activeBatch !== null ? requests.filter(request => request.playlistBatchId === activeBatch)
+        : requests.some(request => request.playlistLaneId === undefined)
         ? requests.filter(request => request.playlistLaneId === undefined) : requests;
       const request = eligible.find(request => request.requestId === record.requestId);
       if (request?.playlistLaneId !== undefined) {

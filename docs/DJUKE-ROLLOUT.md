@@ -1,5 +1,59 @@
 # DJuke and DNft rollout
 
+## Paid playlist continuity and safe worker updates
+
+Once a purchased playlist starts, its exact batch ID owns normal radio until
+every delivered lane in that batch finishes. New single-song purchases, other
+playlist batches, immediate paid adverts and ordinary advert breaks wait;
+preparing a future song is not evidence that an earlier song finished. Existing
+scheduled live/Top10 reservations and content-review restrictions still apply.
+The ownership marker is saved in the existing financial playback journal before
+first audio. Restart retains ownership and retries unfinished audio; it never
+invents a completed play, payout or new payment. Contract settlement remains
+separate: playlist fulfillment can wait for the contract's main-queue constraint.
+
+The existing prefetcher prepares the next actual paid recording while the
+current song plays and publishes it as `upNext`, including playlist position.
+The browser uses its existing one-file media preload. During an active batch,
+background verified queue reads keep the prepared song's authorization fresh
+(at most two seconds old); local completion evidence still gates earlier lanes.
+These are canonical queue/moderation reads, not event-journal writes: financial
+event reconciliation still runs during durable selection and settlement.
+There is no deliberate 2.5-second gap between paid playlist songs. Network,
+storage or media failures remain explicit; no system can promise zero latency
+when a dependency is unavailable. A missing required financial mirror must be
+restored, not bypassed or replaced by invented playback evidence.
+
+For the existing Render service, set **Pre-Deploy Command** to
+`node radio-predeploy.js` (service root remains `discord-bot`). It uses
+`RENDER_EXTERNAL_URL` (or `PUBLIC_WORKER_URL`) and the existing server-only
+checkpoint authorization. The predeploy command requests an exclusive leased
+drain at `POST /api/radio/deployment`. A currently playing paid playlist finishes
+normally; new paid starts wait in their original queues. Regular radio may
+continue. The command renews its lease while waiting and succeeds only when no
+paid audio, active batch, selection, completion or transition remains.
+Failed verification or a 25-minute wait fails the deployment rather than
+stopping the current purchase. A lost deployment releases its hold after two
+minutes while waiting. Once ready, the old worker holds new paid starts for up
+to 15 minutes to cover replacement startup; a failed deployment can explicitly
+cancel its own handoff. Never disable the gate to force an update through.
+
+Bootstrap this gate only while the older deployment has no paid audio or pending
+paid requests; the older version has no authenticated drain endpoint. After the
+first gate-aware release is live, configure and verify the Pre-Deploy Command
+before any further deployment. Automatic and manual deployments then use the
+same gate. Direct restart/kill, platform failure and emergency rollback are not
+graceful deployments: journal recovery protects purchases, not uninterrupted
+transport. This is a single-service drain, not a second production bot or a
+zero-downtime replacement for failed infrastructure.
+
+Reuse: adapt `createDjukePlaybackJournal`, `createDjukeRuntime`,
+`combinePaidQueues`, JukeLoop's existing prefetcher and browser `upNext` cache.
+The clean previous continuity work is already in main; unrelated dirty worktrees
+are untouched. Tests cover late singles/adverts, lock restore, preceding-lane
+evidence, preloaded next-song metadata, no intentional playlist gap, fresh
+preflight expiry/errors, authenticated deployment leases and fail-closed waits.
+
 ## Tonight's Songs Awaiting Your Vote runbook
 
 **Target: Thu October 22, 2026, 9–10pm America/New_York (EDT).** This is a

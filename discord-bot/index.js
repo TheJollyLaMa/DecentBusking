@@ -2,6 +2,7 @@ import { createRadioAnnouncements, deserializeAnnouncements } from './radio-anno
 import { createCommunityReminder, deserializeCommunityReminders } from './community-reminder.js';
 import { createLiveBookings } from './live-bookings.js';
 import { createLiveAudioService } from './live-audio.js';
+import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
 import { createLiveAudioTransport } from './live-audio-transport.js';
@@ -1344,6 +1345,8 @@ async function main() {
         return readDjukeState();
       },
       journal: createDjukePlaybackJournal(journalStore),
+      readPlaybackState: readDjukeState,
+      playbackStateCacheMs: 2000,
       fulfill: createDjukeFulfiller(new Contract(djukeAddress, DJUKE_ABI, fulfiller)),
       refundPlaylistBatch: playlistBatchJournal ? (() => {
         const contract = new Contract(djukeAddress, [...DJUKE_ABI, ...playlistBatchEventAbi()], fulfiller);
@@ -1610,7 +1613,13 @@ async function main() {
     alchemyWebhook,
     checkpointMirror,
     creatorProfiles,
-    getDjukeState: readDjukeState,
+    getDjukeState: readDjukeState ? async () => {
+      const state = await readDjukeState();
+      const activePlaylistBatchId = _djukeRuntime?.getActivePlaylistBatchId?.() ?? null;
+      return { ...state, activePlaylistBatchId, requests: activePlaylistBatchId === null ? state.requests
+        : [...state.requests.filter(request => request.playlistBatchId === activePlaylistBatchId),
+          ...state.requests.filter(request => request.playlistBatchId !== activePlaylistBatchId)] };
+    } : undefined,
     getDjukePlaylistGasQuote,
     getDjukePlaylistReadiness,
     getNftCatalog: async options => {
@@ -1780,6 +1789,11 @@ async function main() {
           .map(mapCreatorSplitUpdateRequest),
       )
         .sort((first, second) => Date.parse(first.requestedAt || 0) - Date.parse(second.requestedAt || 0));
+    },
+    radioDeployment: createRadioDeploymentGate({ getSession: getActiveJukeLoopSession }),
+    authorizeRadioDeployment: authorization => {
+      if (!checkpointMirror) throw new Error('Radio deployment authorization unavailable');
+      checkpointMirror.authorize(authorization);
     },
     getRadioState: async () => {
       const jukeLoopSession = getActiveJukeLoopSession();
