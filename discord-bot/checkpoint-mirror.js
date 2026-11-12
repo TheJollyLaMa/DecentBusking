@@ -17,6 +17,7 @@ export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 
   const jobs = new Map();
   const availabilityWaiters = new Set();
   const claimWaiters = new Set();
+  let offerSequence = 0;
   let lastPoll = null;
   const authenticate = authorization => {
     const actual = Buffer.from(authorization || '');
@@ -31,15 +32,17 @@ export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 
   };
   // Required journal checkpoints gate paid playback, so they are offered before best-effort mirrors.
   const nextJob = () => {
-    let optional = null;
+    let required = null, optional = null;
     for (const job of jobs.values()) {
-      if (job.required) return job;
-      optional ||= job;
+      if (job.required) {
+        if (!required || job.lastOffer < required.lastOffer) required = job;
+      } else if (!optional || job.lastOffer < optional.lastOffer) optional = job;
     }
-    return optional;
+    return required || optional;
   };
   const offer = job => {
     job.claimed = true;
+    job.lastOffer = ++offerSequence;
     return { jobId: job.jobId, expectedCid: job.expectedCid, contentBase64: job.contentBase64 };
   };
   const wakeClaimers = () => {
@@ -124,7 +127,7 @@ export function createCheckpointMirror({ secret, timeoutMs = 120000, maxBytes = 
           jobs.delete(jobId);
           reject(new Error('Local checkpoint mirror timed out; no Pinata upload attempted'));
         }, timeoutMs);
-        jobs.set(jobId, { jobId, key, required: required === true, claimed: false, expectedCid, contentBase64: snapshot, resolve, timer });
+        jobs.set(jobId, { jobId, key, required: required === true, claimed: false, lastOffer: 0, expectedCid, contentBase64: snapshot, resolve, timer });
         wakeClaimers();
       });
     },

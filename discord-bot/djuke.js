@@ -613,8 +613,9 @@ export function createDjukeRuntime({ readState, readPlaybackState = readState, j
       if (!restored || journal.getActivePlaylistBatchId() !== null) return;
       if (pendingClaim) {
         const pending = pendingClaim;
-        const selection = await pending;
-        if (pendingClaim === pending) pendingClaim = null;
+        let selection;
+        try { selection = await pending; }
+        finally { if (pendingClaim === pending) pendingClaim = null; }
         if (selection) await retainUpdate(selection.record, () =>
           journal.fail(selection.record.requestId, 'Deployment drain holds new paid starts'));
       }

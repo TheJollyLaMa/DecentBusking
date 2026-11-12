@@ -38,6 +38,30 @@ test('checkpoint mirror times out and rejects oversized jobs without publication
   assert.equal(bridge.status().pending, 0);
 });
 
+test('a rejected required checkpoint cannot starve another required paid journal or become an acknowledged success', async () => {
+  const { createCheckpointMirror } = await import('../discord-bot/checkpoint-mirror.js');
+  const bridge = createCheckpointMirror({ secret, timeoutMs: 200 });
+  const authorization = `Bearer ${secret}`;
+  bridge.claim(authorization);
+  const unsupported = bridge.mirror(Buffer.from('{"schema":1,"unsupported":true}'), { required: true });
+  const rejected = assert.rejects(unsupported, /timed out/);
+  const paid = bridge.mirror(Buffer.from('{"schemaVersion":1,"records":[]}'), { required: true });
+  const optional = bridge.mirror(Buffer.from('{"schemaVersion":1,"playlist":[]}'));
+  while (bridge.status().pending < 3) await new Promise(resolve => setImmediate(resolve));
+  const first = bridge.claim(authorization);
+  const second = bridge.claim(authorization);
+  assert.notEqual(first.jobId, second.jobId, 'unacknowledged first job does not monopolize required claims');
+  assert.match(Buffer.from(second.contentBase64, 'base64').toString(), /records/);
+  bridge.acknowledge(authorization, { jobId: second.jobId, cid: second.expectedCid, recursivePinned: true });
+  assert.equal(await paid, second.expectedCid);
+  assert.equal(bridge.claim(authorization).jobId, first.jobId, 'required jobs still precede optional snapshots');
+  assert.equal(bridge.status().required, 1, 'rejection is not an acknowledgment or discard');
+  await rejected;
+  const final = bridge.claim(authorization);
+  bridge.acknowledge(authorization, { jobId: final.jobId, cid: final.expectedCid, recursivePinned: true });
+  await optional;
+});
+
 for (const snapshot of [
   { schemaVersion: 1, playlist: [] },
   { schemaVersion: 1, records: [] },
