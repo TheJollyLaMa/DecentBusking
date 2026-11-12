@@ -1917,6 +1917,10 @@ export class JukeLoopSession {
     this._deploymentDrainUntil = until;
     clearTimeout(this._paidPollTimer);
     this._paidPollTimer = null;
+    if (!this._deploymentDraining()) {
+      if (this._preparedNext) this._schedulePaidPriorityCheck();
+      return { draining: false, ready: false };
+    }
     await this.djuke?.prepareForDeployment?.();
     const prepared = this._preparedNext;
     if (prepared?.paid && !this._paidStartAllowed(prepared.paid.record)) {

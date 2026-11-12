@@ -23,6 +23,10 @@ There is no deliberate 2.5-second gap between paid playlist songs. Network,
 storage or media failures remain explicit; no system can promise zero latency
 when a dependency is unavailable. A missing required financial mirror must be
 restored, not bypassed or replaced by invented playback evidence.
+Required mirror jobs are offered fairly within their priority class, so a client
+rejecting an unrelated unsupported checkpoint cannot starve the paid playback
+journal. Rejected jobs are never acknowledged or dropped as successful; they
+retain their normal explicit timeout and failure.
 
 For the existing Render service, set **Pre-Deploy Command** to
 `node radio-predeploy.js` (service root remains `discord-bot`). It uses

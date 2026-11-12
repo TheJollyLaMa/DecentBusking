@@ -89,3 +89,30 @@ test('deployment drain retains and releases a late underlying durable selection 
   assert.equal(queue.hasPendingSelection(), false);
   assert.equal(journal.getState()[0].state, 'pending', 'late reservation is released, never played or fulfilled');
 });
+
+test('cancelling a deployment releases its hold even when financial verification is unavailable', async () => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const player = new EventEmitter(); player.stop = () => {};
+  const session = new JukeLoopSession({ voiceChannel: { guild: { id: 'cancel-failed-drain' } }, client: {}, audioPlayer: player,
+    djuke: { prepareForDeployment: async () => { throw Error('Required mirror unavailable'); } } });
+  try {
+    session._deploymentDrainUntil = Date.now() + 120000;
+    assert.deepEqual(await session.drainForDeployment(0), { draining: false, ready: false });
+    assert.equal(session._paidStartAllowed({}), true);
+  } finally { session.destroy(); }
+});
+
+test('failed late verification remains an explicit error but cannot poison every later deployment attempt', async () => {
+  const { createDjukeRuntime, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
+  let rejectRead;
+  const read = new Promise((_resolve, reject) => { rejectRead = reject; });
+  const runtime = createDjukeRuntime({ timeoutMs: 1, readState: () => read,
+    journal: createDjukePlaybackJournal({ restore: async () => null, save: async () => 'ipfs://durable' }),
+    fulfill: async () => {}, getTrack: () => null, log: { warn() {} } });
+  await assert.rejects(runtime.nextPaid(), /timed out/);
+  const draining = runtime.prepareForDeployment();
+  rejectRead(Error('Required mirror unavailable'));
+  await assert.rejects(draining, /Required mirror unavailable/);
+  assert.equal(runtime.hasPendingSelection(), false);
+  await runtime.prepareForDeployment();
+});
