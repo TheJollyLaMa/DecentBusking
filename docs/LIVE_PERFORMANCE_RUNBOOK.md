@@ -15,7 +15,44 @@ is below, all New York time (UTC is November 14):
 
 Set `LIVE_AUDIO_PROGRAMS` to
 `{"friday-live-performance:2026-11-13:withinthevacuum":{"leadInSeconds":120,"outroSeconds":300}}`.
-Leave OBS and recording off. There is no Discord live-audio relay.
+Leave OBS off. There is no Discord live-audio relay.
+The accepted guaranteed-fee booking does not itself grant recording rights.
+Recording is separately opt-in: the performer must consciously check
+**Record this and play on the radio?** in backstage and confirm the wallet
+permission. Unchecked, declined or failed permission means no recording.
+The small **i** explains scheduled-set capture, public music/DNFT publication
+and radio replay, required music rights, and unchanged guaranteed pay.
+Never sign this permission for the performer or infer it from a soundcheck.
+
+For a consented set, recording uses the existing independent audio receiver;
+private practice and soundchecks are excluded. After the set, the finalized
+audio is submitted to the existing admin mint queue with the actual performer
+wallet. An admin still reviews and signs the real mint during the afterparty.
+Only a genuinely minted, permitted recording can replay, at a safe normal-radio
+boundary after the scheduled outro. A paid playlist or another protected show
+is not interrupted. Processing, upload or persistence errors remain visible:
+an unfinished recording is not a successfully submitted NFT.
+Set `LIVE_AUDIO_RECORDING_ENABLED=true` for the worker and confirm the unchecked
+option appears for the actual performer wallet. Segment uploads begin during
+the public set, not just at its end. A worker crash can lose up to the current
+30-second unpinned segment; interrupted or short results are marked partial in
+the mint queue. Review that title and listen before signing the mint. Processing
+errors are logged under `[live-recording]` and retried; do not re-submit a duplicate
+or bypass the deployment handoff while finalization is pending.
+
+Tonight's audience target is 90 public live listeners. Main-radio browsers
+currently join LiveKit for live audio even when they never open this room.
+LiveKit Free Build documents 100 total concurrent participants across the
+project, with separate usage allowances; this is not unlimited listener
+capacity. Reserved performer/operator/receiver seats and other rooms count.
+The [published participant pricing](https://livekit.com/pricing#participants)
+lists 5,000 WebRTC minutes and 50 GB downstream per month for Free Build.
+90 listeners for a 20-minute set consume about 1,800 listener-minutes before
+backstage, operator, receiver or other project usage. Check remaining allowance,
+not just the headline monthly allocation; free-plan exhaustion denies new use.
+Regular recorded radio uses hosted media, not LiveKit participant slots.
+HTTP/HLS public fan-out is tracked separately in
+[#331](https://github.com/TheJollyLaMa/DecentBusking/issues/331).
 Eligible adverts only: if none are available, report waiting, never play a song
 inside these breaks or fabricate delivery/impressions. Existing cancellation
 behavior is separate: a quiet fault slate, recovery adverts, then radio.

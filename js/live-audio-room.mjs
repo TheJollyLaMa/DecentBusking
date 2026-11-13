@@ -1,4 +1,6 @@
-import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs';
+import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261113-recording';
+import { liveRecordingConsentMessage } from './live-recording-consent.mjs?v=20261113-recording';
+import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261113-recording';
 import { performerRoomSign } from './performer-room.mjs?v=20261110-wallet-practice';
 import { bindInputMonitor } from './input-monitor.mjs?v=20261110-studio-monitor';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
@@ -19,6 +21,39 @@ const headphones = bindInputMonitor({
 });
 const status = message => { byId('room-status').textContent = message; };
 const command = input => roomRequest(serviceUrl, 'control', input, session?.token);
+const recordingOption = bindLiveRecordingOption({
+  container: byId('room-recording-option'), toggle: byId('room-recording-consent'), output: byId('room-recording-status'),
+  savePermission: async enabled => {
+    const authorization = session, performer = wallet;
+    if (!authorization || !performer || !window.ethereum || !booking) throw new Error('Connect your performer wallet before choosing recording.');
+    const issuedAt = Date.now();
+    const message = liveRecordingConsentMessage({ bookingId, wallet: performer, origin: location.origin, issuedAt, enabled });
+    const hex = `0x${Array.from(new TextEncoder().encode(message), byte => byte.toString(16).padStart(2, '0')).join('')}`;
+    const signature = await window.ethereum.request({ method: 'personal_sign', params: [hex, performer] });
+    if (session !== authorization || wallet !== performer || disposed) throw new Error('Wallet changed; recording permission was not saved.');
+    const state = await roomRequest(serviceUrl, 'control', {
+      action: 'recording-consent', enabled, issuedAt, signature,
+    }, authorization.token);
+    if (session !== authorization || wallet !== performer || disposed) throw new Error('Reconnect your performer wallet to check recording permission.');
+    render(state);
+    return { consented: state.recording?.consented, message: recordingMessage(state.recording) };
+  },
+});
+function recordingMessage(recording) {
+  if (recording?.error) return `Recording needs attention: ${recording.error}`;
+  if (recording?.status === 'submitted') return 'Your recording is ready for admin minting.';
+  if (['finalizing', 'uploading', 'processing'].includes(recording?.status)) return 'Preparing your live recording for admin minting...';
+  if (recording?.status === 'recording') return 'Recording your live set. Soundchecks stay private.';
+  return recording?.consented ? 'Your live set will be recorded. Soundchecks stay private.' : 'Recording is off.';
+}
+function renderRecording(state) {
+  recordingOption.update({
+    available: !!session && wallet?.toLowerCase() === booking?.wallet?.toLowerCase() && state?.recording?.available === true,
+    canChange: state?.recording?.canChange === true,
+    consented: state?.recording?.consented === true,
+    message: recordingMessage(state?.recording),
+  });
+}
 const perform = fn => async () => {
   try { await fn(); } catch (error) { status(error.message || 'Live audio is unavailable'); }
 };
@@ -87,6 +122,7 @@ async function connect(publish) {
 }
 function render(state) {
   broadcastState = state; observedAt = Date.now(); renderSign();
+  renderRecording(state);
   const fresh = state.privateAudioFresh ? 'Worker receiver verifies fresh delivered audio' : 'No fresh delivery verified';
   status(`${state.status} · ${state.phase} · ${fresh}\n${state.reason || 'Soundchecks are private until the armed slot starts.'}`);
   if (state.targets) byId('room-targets').textContent = `T−60: ${new Date(state.targets.t60).toLocaleString()} · T−15: ${new Date(state.targets.t15).toLocaleString()} · Checks: ${state.checks?.t60 ? 'T−60 passed' : 'T−60 pending'}, ${state.checks?.t15 ? 'T−15 passed' : 'T−15 pending'}`;
@@ -156,6 +192,7 @@ byId('room-authorize').onclick = perform(async () => {
   const generation = ++authGeneration;
   const current = () => generation === authGeneration && !disposed;
   session = null; byId('room-controls').hidden = true; byId('room-obs-secret').textContent = '';
+  renderRecording(null);
   await disconnect();
   const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
   if (!current()) return;
@@ -222,6 +259,7 @@ async function poll() {
 window.ethereum?.on?.('accountsChanged', () => {
   ++authGeneration;
   session = null; byId('room-controls').hidden = true; byId('room-obs-secret').textContent = '';
+  renderRecording(null);
   void disconnect(); status('Wallet changed; authorize this booking again');
 });
 window.addEventListener('pagehide', () => { disposed = true; ++authGeneration; session = null; void disconnect(); });

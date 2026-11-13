@@ -18,7 +18,8 @@ export function receivedAudioPackets(stats) {
 }
 
 export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = '', enabled = false,
-  ingressEnabled = false, roomClient, ingressClient, rtcLoader = () => import('@livekit/rtc-node'), now = () => Date.now() } = {}) {
+  ingressEnabled = false, listenerLimit = 10, roomClient, ingressClient, rtcLoader = () => import('@livekit/rtc-node'), now = () => Date.now() } = {}) {
+  if (!Number.isInteger(listenerLimit) || listenerLimit < 1 || listenerLimit > 90) throw Error('Live listener limit must be between 1 and 90');
   const ready = enabled && /^wss:\/\/[a-z0-9.-]+\.livekit\.cloud\/?$/i.test(url) && !!apiKey && !!apiSecret;
   const host = url.replace(/^wss:/, 'https:');
   const rooms = roomClient || (ready ? new RoomServiceClient(host, apiKey, apiSecret, { requestTimeout: 5 }) : null);
@@ -39,7 +40,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
   async function ensureRoom(booking) {
     requireReady();
     await rooms.createRoom({ name: roomName(booking), emptyTimeout: 60, departureTimeout: 20,
-      maxParticipants: booking.rehearsal === true ? 3 : 13,
+      maxParticipants: booking.rehearsal === true ? 3 : listenerLimit + 3,
       metadata: JSON.stringify({ purpose: booking.rehearsal === true ? 'DecentBusking private rehearsal' : 'DecentBusking audio pilot',
         bookingId: booking.id }) });
   }
@@ -47,7 +48,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
     const existing = await ingress.listIngress({ roomName: roomName(booking) });
     for (const item of existing) await ingress.deleteIngress(item.ingressId);
   }
-  async function monitor(booking, onFrame) {
+  async function monitor(booking, onFrame, onPcm) {
     requireReady();
     if (monitors.has(booking.id)) return;
     const state = { room: null, closed: false, readers: new Map(), decodedAt: 0, statsTimer: null,
@@ -77,6 +78,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
               // Zero-valued PCM is valid delivered silence, not a disconnection.
               if (frame.samplesPerChannel > 0 && frame.data?.length) {
                 state.decodedAt = now();
+                onPcm?.(frame);
                 if (!state.decodedLogged) {
                   state.decodedLogged = true;
                   console.info('[live-audio-receiver] First decoded audio frame');
@@ -137,7 +139,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
     await state.room?.disconnect().catch(() => {});
   }
   return {
-    ready, ingressEnabled: ready && ingressEnabled, ensureRoom, monitor,
+    ready, listenerLimit, ingressEnabled: ready && ingressEnabled, ensureRoom, monitor,
     publisherIdentity,
     async connect(booking, role) {
       await ensureRoom(booking);
@@ -155,7 +157,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
     async listener(booking) {
       requireReady();
       const participants = await rooms.listParticipants(roomName(booking));
-      if (participants.filter(p => p.identity.startsWith('listener:')).length >= 10) throw new LiveAudioError('The ten-listener pilot room is full');
+      if (participants.filter(p => p.identity.startsWith('listener:')).length >= listenerLimit) throw new LiveAudioError(`The ${listenerLimit}-listener live room is full`);
       return grant(booking, `listener:${randomUUID()}`);
     },
     async obs(booking) {

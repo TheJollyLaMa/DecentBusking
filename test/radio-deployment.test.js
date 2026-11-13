@@ -116,3 +116,17 @@ test('failed late verification remains an explicit error but cannot poison every
   assert.equal(runtime.hasPendingSelection(), false);
   await runtime.prepareForDeployment();
 });
+
+test('an active live recording blocks replacement even at an empty paid boundary', async () => {
+  const { createRadioDeploymentGate } = await import('../discord-bot/radio-deployment.js');
+  let recording = true;
+  const gate = createRadioDeploymentGate({
+    getSession: () => ({ drainForDeployment: async expiresAt => ({ ready: true, draining: expiresAt > 0, expiresAt }) }),
+    getLiveHandoff: () => ({ ready: !recording }),
+  });
+  const waiting = await gate({ action: 'drain', id: 'live-recording-release' });
+  assert.equal(waiting.ready, false);
+  assert.equal(waiting.liveRecordingPending, true);
+  recording = false;
+  assert.equal((await gate({ action: 'drain', id: 'live-recording-release' })).ready, true);
+});

@@ -22,7 +22,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DecentBusking · Your stage</title>
-  <link rel="stylesheet" href="css/live-audio.css?v=20261110-entry-help">
+  <link rel="stylesheet" href="css/live-audio.css?v=20261113-recording">
   <script src="decent.config.js"></script>
 </head>
 <body class="live-audio-room rehearsal-room">
@@ -45,7 +45,7 @@
     <p>No gas, payment, token approval or booking acceptance. Your private key stays in your wallet. Practice access and backstage access are separate: reconnect here for the scheduled soundchecks. Going on air still requires both checks and operator clearance.</p>
   </details>
   <p>Private T−60 / T−15 soundchecks. The public audience listens on the <a href="./">website radio</a>.
-    No recording, video, payment or wallet transaction. Use headphones.</p>
+    Soundchecks are not recorded. Recording your live set is optional below; no video, payment or wallet transaction. Use headphones.</p>
   <p class="studio-note">Practice and show day use this same stable stage link. Backstage opens at T−70 and requires fresh wallet authorization and reconnection. A real broadcast still needs both soundchecks and the operator to confirm and arm it.</p>
   <output id="room-status" role="status" aria-live="polite">Checking room availability…</output>
   <button id="room-authorize" type="button" disabled>Connect booking wallet</button>
@@ -61,6 +61,15 @@
     </fieldset>
     <fieldset id="room-publisher" hidden>
       <legend>Booked performer · one audio source</legend>
+      <div id="room-recording-option" class="room-recording-option" hidden>
+        <label for="room-recording-consent"><input id="room-recording-consent" type="checkbox" disabled> Record this and play on the radio?</label>
+        <details class="room-entry-info">
+          <summary aria-label="What does recording my set allow?">i</summary>
+          <p>Only your scheduled live set, not private practice or soundchecks. Checking this gives separate permission to record, publish the audio in the community music collection, mint its DNFT for your wallet, and replay it on DBusk Radio after admin minting. You confirm you can grant these rights for the music you perform.</p>
+          <p>Optional and unchecked by default. Your guaranteed fee does not change. Your wallet confirms this permission; no gas or token approval. Public IPFS audio and a minted DNFT cannot be recalled by unchecking later.</p>
+        </details>
+        <output id="room-recording-status" role="status" aria-live="polite">Recording is off.</output>
+      </div>
       <label>Microphone / audio interface <select id="room-input" aria-label="Audio input"><option value="">Default audio input</option></select></label>
       <button id="room-devices" type="button">Allow microphone and list inputs</button>
       <div class="rehearsal-meter">
@@ -104,6 +113,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/live-audio-room.mjs?v=20261110-entry-help"></script>
+  <script type="module" src="js/live-audio-room.mjs?v=20261113-recording"></script>
 </body>
 </html>

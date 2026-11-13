@@ -23,13 +23,13 @@ export function createLiveAudioFileStore(path) {
   };
 }
 
-export function createLiveAudioService({ getBookings, ownerWallet, transport, store, onPolicy = () => {},
+export function createLiveAudioService({ getBookings, ownerWallet, transport, store, recorder, onPolicy = () => {},
   onCancel, now = () => Date.now(), verify = verifyMessage, checkpointTimeoutMs = 45_000, programs = {} } = {}) {
   const owner = address(ownerWallet);
   const challenges = new Map(), sessions = new Map(), frames = new Map(), reservations = new Map();
   const monitoring = new Set(), closed = new Set(), restoredAt = new Map(), closing = new Set(), notifying = new Set();
   let state = null, failed = false, tail = Promise.resolve(), bookings = [], checkedAt = -Infinity;
-  let bookingRefresh, bookingsLoaded = false;
+  let bookingRefresh, bookingsLoaded = false, stopped = false;
   const configured = !!owner && !!store && transport?.ready === true;
   const policyFor = (record, b) => liveAudioPolicy(record, b, now(),
     Object.hasOwn(programs, b.id) ? programs[b.id] : null);
@@ -114,7 +114,8 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       status: phase === 'live' ? fresh ? 'ON-AIR' : 'RECONNECTING' : 'OFF-AIR',
       verifiedAudioAt: phase === 'live' && currentFrame ? new Date(currentFrame).toISOString() : null,
       reason: record?.reason || '', policy, ingressEnabled: transport.ingressEnabled,
-      listenerLimit: 10, discordParity: 'Website audio only; Discord live relay is not enabled',
+      listenerLimit: transport.listenerLimit || 10, discordParity: 'Website audio only; Discord live relay is not enabled',
+      ...(privateView && recorder ? { recording: recorder.status(b) } : {}),
       ...(privateView ? { checks: record?.checks || {}, privateAudioFresh: fresh,
         targets: { t60: new Date(Date.parse(b.startUtc) - 60 * 60_000).toISOString(),
           t15: new Date(Date.parse(b.startUtc) - 15 * 60_000).toISOString() } } : {}) };
@@ -125,10 +126,13 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     return session;
   }
   function startMonitor(b) {
-    if (monitoring.has(b.id) || closed.has(b.id)) return;
+    if (stopped || monitoring.has(b.id) || closed.has(b.id)) return;
     monitoring.add(b.id);
     void transport.monitor(b, frame => {
       if (!closed.has(b.id) && !recordFor(b.id)?.cancelledAt && frame.samples > 0) frames.set(b.id, now());
+    }, frame => {
+      if (recordFor(b.id)?.armed && !recordFor(b.id)?.cancelledAt &&
+          frames.get(b.id) && now() - frames.get(b.id) <= LIVE_AUDIO_FRESH_MS) recorder?.capture(b, frame);
     }).catch(() => {}).finally(() => monitoring.delete(b.id));
   }
   async function cancel(b, reason) {
@@ -160,6 +164,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
   async function tickInternal() {
     await initialize();
     await readBookings();
+    void recorder?.tick(bookings);
     const newRooms = bookings.filter(b => b.payoutPolicy === 'pilot-guaranteed-v1' && b.status === 'funded' &&
       b.acknowledged === true && !b.cancelled && !recordFor(b.id) &&
       now() >= Date.parse(b.startUtc) - START_EARLY_MS && now() < Date.parse(b.endUtc));
@@ -269,6 +274,11 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         if (command.action === 'state') return publicState(b, record, true);
         windowOpen(b);
         if (record.cancelledAt) throw new LiveAudioError('This room is cancelled');
+        if (command.action === 'recording-consent') {
+          if (!recorder) throw new LiveAudioError('Recording is not configured');
+          await recorder.consent(b, command, session.wallet, origin);
+          return publicState(b, recordFor(b.id), true);
+        }
         if (command.action === 'connect') {
           if (command.publish === true && session.wallet !== address(b.wallet)) {
             throw new LiveAudioError('Only the booked performer may publish audio');
@@ -332,13 +342,13 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
           throw new LiveAudioError('Public listening is unavailable; soundchecks are private');
         }
         for (const [id, at] of reservations) if (at <= now()) reservations.delete(id);
-        if (reservations.size >= 10) throw new LiveAudioError('Pilot listener admission busy; retry in 30 seconds');
+        if (reservations.size >= (transport.listenerLimit || 10)) throw new LiveAudioError('Live listener admission busy; retry in 30 seconds');
         const result = await transport.listener(b);
         reservations.set(opaque(), now() + 30_000);
         return result;
       });
     },
-    tick: () => run(tickInternal),
-    stop: () => transport?.stop?.(),
+    tick: () => stopped ? Promise.resolve(null) : run(tickInternal),
+    stop: async () => { stopped = true; await transport?.stop?.(); },
   };
 }

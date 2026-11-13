@@ -6,6 +6,7 @@ import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
 import { createLiveAudioTransport } from './live-audio-transport.js';
+import { createLiveRecorder, createLiveRecordingStore } from './live-recording.js';
 import { createRehearsalService } from './rehearsal.js';
 import { createRehearsalStore } from './rehearsal-store.js';
 // discord-bot/index.js
@@ -98,6 +99,7 @@ import {
   waitForRemotePersistence,
   addTrack,
   submitMediaTrack,
+  submitLiveRecording,
   getTrackId,
   getPlaylist,
   getPlaybackPlaylist,
@@ -1545,14 +1547,44 @@ async function main() {
       console.warn('[live-audio] Encrypted durable storage unavailable; media remains disabled.');
     }
   }
+  const recordingEnabled = process.env.LIVE_AUDIO_RECORDING_ENABLED === 'true';
+  const recordingStore = recordingEnabled && liveAudioStore ? createLiveRecordingStore({
+    ...config.checkpointStorage, storageKey: process.env.LIVE_AUDIO_STORAGE_KEY, pinataJwt: config.pinataJwt,
+    uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+  }) : null;
+  const recordingUpload = recordingStore ? createIpfsUploader({
+    provider: config.ipfsUploadProvider, pinataJwt: config.pinataJwt, pinataApiUrl: config.pinataApiUrl,
+    ipfsApiUrl: config.ipfsApiUrl,
+    fetchImpl: (url, options) => fetch(url, { ...options, signal: AbortSignal.timeout(60000) }),
+  }) : null;
+  const recorder = createLiveRecorder({
+    enabled: recordingEnabled, store: recordingStore, upload: recordingUpload,
+    download: async cid => {
+      const gateway = await discoverDedicatedGateway(config) || config.ipfsGateway;
+      const base = gateway.replace(/\/$/, '').replace(/\/ipfs$/, '');
+      const response = await fetch(`${base}/ipfs/${cid}`, { signal: AbortSignal.timeout(30000) });
+      if (!response.ok) throw new Error(`Recording segment download failed (${response.status})`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.length > 2880044) throw new Error('Recording segment exceeds size limit');
+      return bytes;
+    },
+    ingest: async recording => {
+      if (!playlistReady) throw new Error('Recording mint queue is waiting for durable playlist restore');
+      const artwork = await fs.promises.readFile(new URL('../img/D_Busker.jpeg', import.meta.url));
+      const artworkCid = (await recordingUpload(artwork, 'DBusker-community-artwork.jpeg', 'image/jpeg')).replace(/^ipfs:\/\//, '');
+      return submitLiveRecording({ ...recording, artworkCid });
+    },
+  });
+  if (recordingEnabled && !recorder.available) throw new Error('Recording enabled without durable storage');
   const liveAudio = createLiveAudioService({
     programs: parseLiveAudioPrograms(process.env.LIVE_AUDIO_PROGRAMS || '{}'),
     ownerWallet: config.mintOwnerWallet,
     getBookings: () => liveBookings.getState(),
-    store: liveAudioStore,
+    store: liveAudioStore, recorder,
     transport: createLiveAudioTransport({
       enabled: process.env.LIVE_AUDIO_ENABLED === 'true',
       ingressEnabled: process.env.LIVE_AUDIO_OBS_ENABLED === 'true',
+      listenerLimit: Number(process.env.LIVE_AUDIO_LISTENER_LIMIT || 10),
       url: process.env.LIVEKIT_URL || '', apiKey: process.env.LIVEKIT_API_KEY || '', apiSecret: process.env.LIVEKIT_API_SECRET || '',
     }),
     onPolicy: policy => {
@@ -1790,7 +1822,12 @@ async function main() {
       )
         .sort((first, second) => Date.parse(first.requestedAt || 0) - Date.parse(second.requestedAt || 0));
     },
-    radioDeployment: createRadioDeploymentGate({ getSession: getActiveJukeLoopSession }),
+    radioDeployment: createRadioDeploymentGate({ getSession: getActiveJukeLoopSession,
+      getLiveHandoff: async () => {
+        const current = await liveAudio.current();
+        return { ready: recorder.deploymentState().ready &&
+          !(current?.armed && ['preflight', 'live'].includes(current.phase)) };
+      } }),
     authorizeRadioDeployment: authorization => {
       if (!checkpointMirror) throw new Error('Radio deployment authorization unavailable');
       checkpointMirror.authorize(authorization);
@@ -2301,6 +2338,8 @@ async function main() {
     let exitCode = 0;
     discordAbort.abort();
     try {
+      await liveAudio.stop();
+      await recorder.flush();
       await Promise.all([waitForRemotePersistence(), fundStore?.flush(), earningsStore?.flush(),
         Promise.race([flushRpcUsage(), new Promise(resolve => setTimeout(resolve, 5000))]),
         discordDiagnostics.flush()]);

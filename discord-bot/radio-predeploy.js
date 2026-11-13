@@ -22,7 +22,8 @@ export async function waitForRadioDeployment({ serviceUrl, secret, id = randomUU
       return status;
     }
     log.info(`[radio-deploy] Waiting for protected paid playback${status.activePlaylistBatchId
-      ? ` in playlist ${status.activePlaylistBatchId}` : ''}; no audio was stopped.`);
+      ? ` in playlist ${status.activePlaylistBatchId}` : ''}${status.liveRecordingPending
+      ? ' and live performance recording' : ''}; no audio was stopped.`);
     await sleep(2000);
   }
   throw new Error('Radio handoff timed out; leave the current worker playing and retry deployment later');

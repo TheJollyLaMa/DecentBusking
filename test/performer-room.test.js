@@ -19,6 +19,7 @@ test('stable practice room link is available before acceptance but never authori
 
 test('room module initializes practice, advances to backstage and fails closed on stale audio', async () => {
   const { performerRoomSign } = await import('../js/performer-room.mjs');
+  const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
@@ -34,7 +35,7 @@ test('room module initializes practice, advances to backstage and fails closed o
     location: { href: `https://example.test/live-room.html?booking=${encodeURIComponent(b.id)}` },
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {} },
     Date: class extends Date { static now() { return time; } },
-    URL, AbortSignal, TextEncoder, performerRoomSign,
+    URL, AbortSignal, TextEncoder, performerRoomSign, bindLiveRecordingOption,
     bindInputMonitor: () => ({ stop: async () => {} }),
     createInputMeter: () => ({ start() {}, stop: async () => {} }),
     setInterval(fn, ms) { intervals.push({ fn, ms }); },
