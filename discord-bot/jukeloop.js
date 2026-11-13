@@ -48,6 +48,8 @@ import {
   getPlaybackPlaylist as getPlaylist,
   getWeeklyPlayHistory,
   restoreTrackTitles,
+  pendingLiveRecordingReplay,
+  completeLiveRecordingReplay,
 } from './playlist-store.js';
 import {
   defaultRadioSchedule,
@@ -1446,16 +1448,20 @@ export class JukeLoopSession {
       return null;
     }
 
+    const replayCandidate = activeShow.type === 'normal_rotation' && !paid && !devertAd && !playlistOwnsRadio && !options.skipLiveReplay
+      ? pendingLiveRecordingReplay() : null;
+    const liveReplay = replayCandidate?.trackId !== this._currentTrack?.trackId ? replayCandidate : null;
     // Nothing to play → wait and retry
-    if (!isHype && !playlistSelection && !paid && !devertAd && this._queue.length === 0) {
+    if (!isHype && !playlistSelection && !paid && !devertAd && !liveReplay && this._queue.length === 0) {
       this._sendPlaybackNotice('📭 The JukeLoop playlist is empty.\n' +
         (this.textChannel ? 'Post audio files (MP3, M4A, etc.) in <#' + this.textChannel.id + '> to add tracks!' : 'Waiting for playable recordings.'));
       return null;
     }
 
-    const track = hypeSelection ? hypeSelection.track : playlistSelection ? playlistSelection.track : paid ? paid.track : devertAd ? devertAd.track : this._queue[this._queueIndex];
-    const queueIndex = !hypeSelection && !playlistSelection && !paid && !devertAd ? this._queueIndex : null;
+    const track = hypeSelection ? hypeSelection.track : playlistSelection ? playlistSelection.track : paid ? paid.track : devertAd ? devertAd.track : liveReplay || this._queue[this._queueIndex];
+    const queueIndex = !hypeSelection && !playlistSelection && !paid && !devertAd && !liveReplay ? this._queueIndex : null;
     if (!this.isContentAllowed(track, !!devertAd || paid?.record.kind === 'devert')) {
+      if (liveReplay) return this._prepareNextPlayback(null, { ...options, skipLiveReplay: true });
       if (paid) {
         await this.djuke.release(paid.record, new Error('Recording blocked by content review; payment remains unresolved'));
         this._djukeCooldownUntil = Date.now() + PAID_FETCH_RETRY_MS;
@@ -1475,6 +1481,10 @@ export class JukeLoopSession {
     let url;
     try { url = await this._getFreshUrl(track); }
     catch (error) {
+      if (liveReplay) {
+        console.warn('[live-recording] Replay media deferred:', error.message);
+        return this._prepareNextPlayback(null, { ...options, skipLiveReplay: true });
+      }
       if (paid?.record.playlistBatchId !== undefined) {
         await this._retryPlaylistMedia(paid.record, error);
         return null;
@@ -1488,6 +1498,10 @@ export class JukeLoopSession {
       return null;
     }
     if (!url) {
+      if (liveReplay) {
+        console.warn('[live-recording] Replay media unavailable; keeping replay pending');
+        return this._prepareNextPlayback(null, { ...options, skipLiveReplay: true });
+      }
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
       if (hypeSelection) return this._skipHype(hypeSelection, 'The recording could not be fetched.', options);
       if (playlistSelection) {
@@ -1539,11 +1553,12 @@ export class JukeLoopSession {
         return null;
       }
       const resource = createAudioResource(stream, { inputType: StreamType.Raw });
-      return { track, paid, devertAd, queueIndex, url, resource, ffmpegProcess, completion, hype: hypeSelection, playlistShow: playlistSelection,
+      return { track, paid, devertAd, queueIndex, url, resource, ffmpegProcess, completion, liveReplay: !!liveReplay, hype: hypeSelection, playlistShow: playlistSelection,
         playlistShowContext: activeShow.type === 'playlist_show'
           ? { title: activeShow.label, instanceId: activeShow.instanceId, fallback: !playlistSelection && !devertAd } : null };
     } catch (err) {
       console.error('[jukeloop] Failed to prepare track:', err.message);
+      if (liveReplay) return this._prepareNextPlayback(null, { ...options, skipLiveReplay: true });
       if (hypeSelection) return this._skipHype(hypeSelection, err.message, options);
       if (playlistSelection) {
         await this._playlistShow.advance(playlistSelection, err.message);
@@ -1772,6 +1787,11 @@ export class JukeLoopSession {
       return false;
     }
     const show = this.getShowState().activeShow;
+    if (prepared.liveReplay && (show.type !== 'normal_rotation' || this.djuke?.hasActivePlaylist?.() ||
+        this.djuke?.hasPendingPlaylist?.())) {
+      this._disposePrepared(prepared, 'Recording replay waits for a safe normal-radio boundary');
+      return false;
+    }
     if (show.type === 'live_performance' || (show.type === 'live_audio_ads' && !prepared.devertAd)) {
       this._disposePrepared(prepared, 'Live audio handoff excludes this prepared recording');
       return false;
@@ -2121,6 +2141,7 @@ export class JukeLoopSession {
     if (completedPlay?.trackId?.startsWith('devert:')) return;
 
     if (trackRef && completedPlay?.trackId === trackRef.trackId) {
+      await completeLiveRecordingReplay(trackRef.trackId, completedPlay);
       const recorded = recordAudiblePlay(trackRef.trackId, completedPlay);
       if (recorded.counted) {
         console.log(`[jukeloop] Counted weekly play for "${trackRef.title}" (${recorded.week}, ${Math.round(completedPlay.audibleMs / 1000)}s audible).`);

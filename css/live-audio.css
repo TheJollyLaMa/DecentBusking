@@ -70,6 +70,11 @@
 .remote-listen{margin:1rem 0;padding:.75rem;border:1px solid #ffffff20;border-radius:12px}
 .remote-listen summary,.studio-helper summary{min-height:40px;padding:.3rem 0;color:#e5c76d;cursor:pointer}
 .delivery-note{color:#c8dfd7;font-size:.88rem}
+.room-recording-option{padding:.7rem .8rem;margin:0 0 .8rem;border:1px solid #72d7c266;border-radius:12px;background:#0d1718}
+.room-recording-option>label{display:inline-flex;align-items:center;gap:.55rem;min-height:44px;font-weight:650}
+.live-audio-room .room-recording-option input[type="checkbox"]{flex:none;width:1.2rem;min-height:1.2rem;height:1.2rem;margin:0;accent-color:#00d4aa}
+.room-recording-option .room-entry-info{margin:0 0 0 .35rem}
+.room-recording-option output{font-size:.82rem;color:#91e2ce}
 .studio-helper{display:flex;align-items:flex-start;gap:.75rem;box-sizing:border-box;min-width:0;margin:1rem 0;padding:.8rem;border:1px solid #f0c04044;border-radius:16px;background:#17111f}
 .studio-helper>img{flex:none;width:48px;height:48px;object-fit:cover;border:1px solid #f0c04088;border-radius:50%}
 .studio-helper>div{min-width:0}

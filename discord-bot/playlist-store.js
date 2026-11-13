@@ -190,6 +190,7 @@ export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, f
       (creatorSplits && JSON.stringify(existing.creatorSplits || [{ wallet: existing.mintRecipient, shareBps: 10000 }]) !== JSON.stringify(creatorSplits))) {
       throw new Error('This recording was already submitted with a different advert classification or DJuke split. Contact the owner to review it; existing payout settings were not changed.');
     }
+
     return existing;
   }
   const videoUrl = mediaType === 'video/mp4' ? `ipfs://${ipfsCid}` : '';
@@ -198,6 +199,39 @@ export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, f
     tipWallet: tipWallet || recipient, parentTokenId, isDevertAd, ...(creatorSplits ? { creatorSplits } : {}),
     mintStatus: 'requested', mintRecipient: recipient, mintRequestedAt: new Date().toISOString() });
   return _playlist.find(track => track.trackId === trackId);
+}
+
+export async function submitLiveRecording({ booking, cid, consent, durationSeconds, incomplete, artworkCid }) {
+  if (!booking?.id || !/^0x[0-9a-f]{40}$/i.test(booking.wallet || '') ||
+      consent?.enabled !== true || !consent.signature || !/^[a-zA-Z0-9]{20,120}$/.test(cid || '') ||
+      !(durationSeconds > 0) || !/^[a-zA-Z0-9]{20,120}$/.test(artworkCid || '')) throw Error('Invalid consented live recording');
+  const existing = _playlist.find(track => track.liveRecording?.bookingId === booking.id);
+  if (existing && existing.ipfsCid !== cid) throw Error('This performance already has a different recording; admin review required');
+  const track = existing || submitMediaTrack({ address: booking.wallet, title: `${booking.title || 'Live performance'}${incomplete ? ' (partial recording)' : ''}`,
+    artist: booking.displayName || booking.wallet, ipfsCid: cid, mediaType: 'audio/mpeg', filename: 'live-performance.mp3',
+    recipient: booking.wallet, tipWallet: booking.wallet, artworkCid });
+  if (!track.liveRecording) {
+    track.durationSeconds = durationSeconds;
+    track.liveRecording = { bookingId: booking.id, consentIssuedAt: consent.issuedAt, incomplete: !!incomplete,
+      replayAfter: Date.parse(booking.endUtc) + 300000, replayStatus: 'pending' };
+  }
+  _save(); await waitForRemotePersistence();
+  return track;
+}
+
+export function pendingLiveRecordingReplay(now = Date.now()) {
+  return getPlaybackPlaylist().find(track => track.liveRecording?.replayStatus === 'pending' &&
+    track.liveRecording.replayAfter <= now && track.mintStatus === 'minted' &&
+    isEligibleRadioMusic(track));
+}
+
+export async function completeLiveRecordingReplay(trackId, play) {
+  const track = _playlist.find(t => t.trackId === trackId);
+  if (!track?.liveRecording || play?.finished !== true || play.trackId !== trackId ||
+      !(play.audibleMs >= Math.max(1000, (track.durationSeconds * 1000) - 2000))) return;
+  track.liveRecording.replayStatus = 'played';
+  track.liveRecording.replayPlayId = play.playId;
+  _save(); await waitForRemotePersistence();
 }
 
 /**

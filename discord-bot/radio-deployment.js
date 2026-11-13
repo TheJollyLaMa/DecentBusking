@@ -1,4 +1,5 @@
-export function createRadioDeploymentGate({ getSession, now = () => Date.now(), leaseMs = 120000 } = {}) {
+export function createRadioDeploymentGate({ getSession, getLiveHandoff = () => ({ ready: true }),
+  now = () => Date.now(), leaseMs = 120000 } = {}) {
   let deploymentId = null, expiresAt = 0;
   return async ({ action, id }) => {
     if (!/^[a-zA-Z0-9:_-]{1,100}$/.test(id || '') || !['drain', 'cancel'].includes(action)) {
@@ -17,6 +18,10 @@ export function createRadioDeploymentGate({ getSession, now = () => Date.now(), 
     deploymentId = id;
     expiresAt = now() + leaseMs;
     let status = await session.drainForDeployment(expiresAt);
+    const liveHandoff = await getLiveHandoff();
+    if (!liveHandoff || typeof liveHandoff.ready !== 'boolean') throw new Error('Live recording handoff is not verified');
+    status = { ...status, ready: status.ready && liveHandoff.ready,
+      ...(liveHandoff.ready ? {} : { liveRecordingPending: true }) };
     if (status.ready) {
       expiresAt = now() + 15 * 60_000;
       status = await session.drainForDeployment(expiresAt);

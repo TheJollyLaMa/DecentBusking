@@ -56,7 +56,59 @@ Booking verification refreshes in the background rather than blocking the media 
 
 Once enabled, the worker prepares eligible funded pilot rooms at T−70, even if nobody opens backstage; a missed soundcheck cannot leave radio paused indefinitely. Stop/revoke an existing OBS input before disabling ingress configuration. Switching to browser publishing while ingress is enabled revokes the old OBS key.
 
-Never enable automatic egress/recording in the hosting project. This code requests no recording/egress. OBS video/crowd features are not implemented; configure only the required audio where the encoder permits, and do not assume hidden video is a privacy guarantee.
+Never enable project-wide automatic egress/recording. Consented scheduled-set
+recording uses the existing independent audio receiver and a separate affirmative
+performer permission, not the original guaranteed-fee booking. The backstage
+checkbox defaults off and its information explains public audio, DNFT minting
+and radio replay. No private practice, soundcheck or video is recorded.
+The owner reviews the finalized recording in the existing mint panel; only a
+real completed mint unlocks replay at a safe afterparty radio boundary.
+Enable this path with `LIVE_AUDIO_RECORDING_ENABLED=true` only after testing.
+The separate encrypted recording journal verifies the performer's wallet signature
+and binds consent to the booking, origin and timestamp. Revocation is a newer signed
+choice, not a change to the original booking or fee.
+
+Audio is copied from the existing 48 kHz mono receiver only during the armed
+scheduled slot with fresh packet evidence. Thirty-second WAV segments are pinned
+as they fill and checkpointed with verified encrypted readback. At most four
+segment uploads can queue; a failure stops capture explicitly, not the live show.
+Already public segments cannot be recalled. A crash can lose the current unpinned
+segment; restored/gapped/truncated recordings are labelled partial, never complete.
+At the end, ffmpeg (`FFMPEG_PATH`, otherwise `ffmpeg`, as for ordinary radio)
+streams the persisted segments into a 192 kbps MP3. Finalization retries from
+the durable manifest, and booking-keyed intake prevents duplicate mint candidates.
+The existing community DBusker artwork is used; mint recipient and tip wallet
+are the booked artist, not an operator or invented Discord account.
+
+The existing admin panel still requires a genuine owner-signed mint and verified
+chain reconciliation. A durable replay-pending marker prioritizes the recording
+only in normal rotation after the five-minute outro, behind paid requests and
+protected shows. Failed/short/interrupted plays remain pending. Deployments wait
+for an armed public handoff and active recording/finalization to become safe.
+
+Reuse decision: the receiving-app acceptance test is a separately consented live
+set reaching the existing admin mint queue, followed by verified-mint radio replay.
+The Canopy inventory and current Busking issues, PRs and worktrees were checked;
+this adapts Busking's `live-audio-transport.js` receiver,
+`rehearsal-store.js:createRehearsalStore` encrypted/readback pattern,
+`ipfs.js:createIpfsUploader`, and `playlist-store.js:submitMediaTrack`.
+These donors are in this same Apache-2.0 repository; no external source was copied.
+No shared package or new minting authority is introduced. Recording consent,
+bounded media storage and durable replay intent are new because the existing
+room/ingest path did not provide them. Tests include actual native PCM capture,
+a fully decoded twenty-minute MP3 fixture, restart/readback failure and paid/
+protected-show replay boundaries; a fixture is not a real artist's signature or mint.
+OBS video/crowd features are not implemented; configure only required audio
+where the encoder permits, and do not assume hidden video guarantees privacy.
+
+Public live listeners on the main-radio page currently use LiveKit individually.
+`LIVE_AUDIO_LISTENER_LIMIT` defaults to 10; tonight's explicit target is 90 with
+reserved performer/operator/receiver seats. The documented Free Build project
+cap is 100 simultaneous participants across all rooms, subject to separate
+monthly allowances. Recorded rotation does not use LiveKit. Public HTTP/HLS
+fan-out is a follow-up in
+[#331](https://github.com/TheJollyLaMa/DecentBusking/issues/331), not a tested
+integration or an unlimited audience claim.
 
 ## Separate private rehearsal
 
