@@ -204,6 +204,14 @@ test('stalled booking RPC cannot block the audio deadline; stale verification de
   assert.equal(f.cancellations.length, 1);
 });
 
+test('public room state exposes recording capability without disclosing performer consent', async () => {
+  const f = await setup({ recorder: { available: true, status: () => ({ consented: true }) } });
+  const state = await f.service.state(f.b.id);
+  assert.equal(state.recordingAvailable, true);
+  assert.equal(state.recording, undefined);
+  assert.equal(state.listenerLimit, 10);
+});
+
 test('cancellation recovery never replaces another explicitly reserved radio event', async () => {
   const { applyLiveAudioShow } = await import('../js/live-audio.mjs');
   const reserved = { id: 'next', type: 'live_performance', event: { id: 'next', title: 'Next performer' } };
