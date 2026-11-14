@@ -34,12 +34,13 @@
   </header>
   <div class="studio-signal-strip" aria-hidden="true"><span>♫</span><span>🎙</span><span>✦</span><span>♬</span><span>◉</span></div>
   <section id="room-practice" hidden>
-    <p>Your private corner to try things out. Nothing here goes on public radio. This stable stage link opens backstage at T−70; fresh backstage wallet authorization and a new connection are required.</p>
+    <p id="room-practice-directions">Private practice is available now. Use the button below to open it with MetaMask. This page switches to backstage before your soundchecks.</p>
     <p><a id="room-practice-direct" href="rehearsal.html" target="_blank" rel="noopener">Open private practice in its own tab (recommended for MetaMask)</a></p>
     <iframe id="room-practice-frame" title="Private practice stage" allow="microphone" referrerpolicy="same-origin"></iframe>
   </section>
   <section id="room-backstage" class="studio-card">
   <h2>Enter your backstage</h2>
+  <p id="room-entry-directions" class="studio-note">Performer: connect your booked wallet, choose your microphone/interface, then Publish browser audio. Operator: connect the owner wallet and Listen to private soundcheck.</p>
   <details class="room-entry-info">
     <summary aria-label="Why sign to enter backstage?">i</summary>
     <p>Your wallet is your personal key. Signing proves you control the booked performer or operator wallet and unlocks a temporary backstage audio session on this site.</p>
@@ -114,6 +115,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/live-audio-room.mjs?v=20261113-wallet-entry"></script>
+  <script type="module" src="js/live-audio-room.mjs?v=20261113-stage-entry"></script>
 </body>
 </html>

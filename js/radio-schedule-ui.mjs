@@ -2,6 +2,7 @@ import { isAdminWallet } from './admin-access.mjs';
 import { cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261024-programming-calendar';
 import { utcToNewYorkInput, newYorkInputToUtc, radioCalendarOccurrences, buildRadioCalendar, googleRadioCalendarUrl } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { renderPerformerBookingInvite } from './live-performance-profile.mjs?v=20261110-wallet-practice';
+import { performerRoomUrl } from './performer-room.mjs?v=20261110-wallet-practice';
 export { utcToNewYorkInput, newYorkInputToUtc };
 const TIME_ZONE = 'America/New_York';
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -117,6 +118,32 @@ export function performerBookingForOccurrence(bookings = [], eventId, wallet = '
     booking.mode === 'phase1' && booking.status === 'draft' && !booking.cancelled) || null;
 }
 
+export function liveEventStageBooking(bookings, event, now = Date.now()) {
+  if (!event || event.status === 'cancelled' || Date.parse(event.endUtc) <= now) return null;
+  return (Array.isArray(bookings) ? bookings : []).find(booking => booking.eventId === event.id &&
+    booking.status === 'funded' && booking.acknowledged === true &&
+    performerRoomUrl(booking, now)) || null;
+}
+
+export function renderLiveEventStageEntry(booking, now = Date.now()) {
+  const url = performerRoomUrl(booking, now);
+  if (!url) return null;
+  const entry = element('div', 'radio-stage-entry');
+  const link = element('a', 'payroll-btn', 'Open performer / operator stage');
+  link.href = url;
+  link.target = '_blank'; link.rel = 'noopener';
+  link.dataset.liveStage = booking.id;
+  const start = Date.parse(booking.startUtc);
+  const time = minutes => new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_ZONE, hour: 'numeric', minute: '2-digit',
+  }).format(new Date(start - minutes * 60000));
+  entry.append(link, element('p', '', `${now < start - 70 * 60000
+    ? `Private practice is available now. Backstage opens at ${time(70)}.`
+    : 'Backstage is open. Connect your booked performer wallet or the operator wallet.'} Soundchecks: ${time(60)} and ${time(15)} New York time.`),
+    element('small', '', 'Performer: connect your wallet, choose your microphone/interface, then Publish browser audio. Operator: connect the owner wallet and Listen to private soundcheck. Audience: listen on the main radio at showtime. This link alone grants no private-room access.'));
+  return entry;
+}
+
 export function partitionRadioScheduleEvents(events, now = Date.now()) {
   const upcoming = [];
   const archived = [];
@@ -165,6 +192,8 @@ function renderSchedule(payload, onCancel, bookingState = null) {
     }
     const invitedWallet = window._wallet?.address || '';
     const booking = performerBookingForOccurrence(bookingState?.bookings, event.id, invitedWallet);
+    const stageBooking = liveEventStageBooking(bookingState?.bookings, event, now);
+    if (stageBooking) row.append(renderLiveEventStageEntry(stageBooking, now));
     if (!cancelled && booking) row.append(renderPerformerBookingInvite({
       booking, wallet: invitedWallet, serviceUrl: window.DecentConfig?.ipfsUploadServiceUrl,
       ethers: window.ethers,
@@ -265,17 +294,14 @@ export function initRadioScheduleBoard() {
       currentPayload = payload;
       let bookingState = null;
       let bookingError = '';
-      const walletAddress = window._wallet?.address || '';
-      if (walletAddress) {
-        try {
-          const bookingsResponse = await fetch(`${service}/api/live-bookings`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
-          const bookingsPayload = await bookingsResponse.json();
-          if (!bookingsResponse.ok) throw new Error(bookingsPayload.error || `Booking invites unavailable (${bookingsResponse.status})`);
-          bookingState = bookingsPayload;
-        } catch (error) { bookingError = error.message; }
-      }
+      try {
+        const bookingsResponse = await fetch(`${service}/api/live-bookings`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+        const bookingsPayload = await bookingsResponse.json();
+        if (!bookingsResponse.ok) throw new Error(bookingsPayload.error || `Booking invites unavailable (${bookingsResponse.status})`);
+        bookingState = bookingsPayload;
+      } catch (error) { bookingError = error.message; }
       renderSchedule(payload, cancel, bookingState);
-      if (bookingError) status.textContent = `Schedule loaded, but wallet-specific booking invitations could not be checked: ${bookingError}`;
+      if (bookingError) status.textContent = `Schedule loaded, but stage links and wallet-specific invitations could not be checked: ${bookingError}. Open your existing stage link or retry.`;
       if (subscribe) {
         subscribe.hidden = !service || payload.ready === false;
       }

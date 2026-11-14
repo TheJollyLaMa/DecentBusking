@@ -53,6 +53,11 @@ practice tab for wallets that do not inject into frames. MetaMask account exposu
 during the initial connection is not treated as a mid-session wallet change.
 Entry displays connection, invitation-check and signature progress; subsequent
 account changes still invalidate authorization.
+The public Live Events card also exposes a stage button for the exact funded,
+acknowledged, compatible booking, even before a wallet is connected. It is a
+discovery link, not an authorization grant. It distinguishes performer/operator
+entry from audience listening and lists backstage and both soundcheck times in
+New York time; cancelled, ended and incompatible bookings expose no stage entry.
 The separate private rehearsal mode below requires no booking or payment and cannot arm
 public radio. Missing USDC is not permission to swap ETH, fund an escrow, transfer token 75
 or activate a broadcast.
