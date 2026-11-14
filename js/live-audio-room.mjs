@@ -10,7 +10,7 @@ const bookingId = new URL(location.href).searchParams.get('booking') || '';
 const serviceUrl = String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
 const audio = byId('room-audio');
 let session, wallet, room, localTrack, remoteTrack, polling = false, disposed = false;
-let authGeneration = 0, connectionGeneration = 0;
+let authGeneration = 0, connectionGeneration = 0, requestingAccounts = false;
 let booking, broadcastState, observedAt = 0, refreshing = false, practiceMode = false;
 const meter = createInputMeter({
   level: byId('room-mic-level'), state: byId('room-mic-state'), note: byId('room-meter-note'),
@@ -146,6 +146,7 @@ function renderSign() {
     if (practice && !practiceMode) {
       const url = new URL('rehearsal.html', location.href);
       url.searchParams.set('booking', bookingId);
+      byId('room-practice-direct').href = url.href;
       byId('room-practice-frame').src = url.href;
     } else if (!practice && practiceMode) {
       byId('room-practice-frame').removeAttribute('src');
@@ -189,17 +190,24 @@ async function refreshBooking() {
 }
 byId('room-authorize').onclick = perform(async () => {
   if (!window.ethereum) throw new Error('A browser wallet is needed for backstage access');
+  status('Opening MetaMask... Unlock your operator or performer wallet and approve connecting this site.');
   const generation = ++authGeneration;
   const current = () => generation === authGeneration && !disposed;
   session = null; byId('room-controls').hidden = true; byId('room-obs-secret').textContent = '';
   renderRecording(null);
   await disconnect();
-  const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+  let accounts;
+  requestingAccounts = true;
+  try { accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }); }
+  finally { requestingAccounts = false; }
   if (!current()) return;
   wallet = accounts[0];
+  if (!wallet) throw new Error('No wallet connected. Unlock MetaMask and select your operator or performer wallet.');
+  status('Checking your booking wallet...');
   const challenge = await roomRequest(serviceUrl, 'challenge', { bookingId, wallet });
   if (!current()) return;
   const hex = `0x${Array.from(new TextEncoder().encode(challenge.message), byte => byte.toString(16).padStart(2, '0')).join('')}`;
+  status('Confirm the backstage access signature in MetaMask. No transaction or gas.');
   const signature = await window.ethereum.request({ method: 'personal_sign', params: [hex, wallet] });
   if (!current()) return;
   const authorized = await roomRequest(serviceUrl, 'session', { challengeId: challenge.challengeId, signature });
@@ -257,6 +265,7 @@ async function poll() {
   finally { polling = false; }
 }
 window.ethereum?.on?.('accountsChanged', () => {
+  if (requestingAccounts) return;
   ++authGeneration;
   session = null; byId('room-controls').hidden = true; byId('room-obs-secret').textContent = '';
   renderRecording(null);
