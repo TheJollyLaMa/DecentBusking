@@ -79,6 +79,13 @@ on the next status poll. Public booking refreshes cannot erase private check
 display. The next-step banner gives the next check's New York time.
 Self-monitoring is directly visible in the performer's headphone controls;
 it requires publishing first and is not how the operator hears the artist.
+Use **Choose / list audio outputs**, then select the interface/headphones
+output. This routes browser self-monitoring and room listening, not the mic
+input or public broadcast. Practice has the same controls. Supported browsers
+use output permission/selection and `setSinkId`; otherwise the panel explicitly
+directs the artist to system sound output settings. If no outputs are exposed,
+allow microphone access/list inputs first. Output selection is retained while
+restarting the monitor in the same tab, not across page reloads.
 The operator can use speakers with their microphone off and ordinary radio
 muted, provided another nearby/voice-call microphone cannot feed them back.
 UI reuse: adapt the existing private rehearsal's primary buttons, input meter,

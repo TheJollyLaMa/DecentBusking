@@ -52,6 +52,10 @@
     <p class="rehearsal-hint">Hear yourself through your interface's direct monitor, or enable the optional headphone monitor below. The delivery check verifies what reaches the room; Jolly can listen when he joins.</p>
     <fieldset class="self-monitor">
       <legend>Optional · hear your own input</legend>
+      <button id="monitor-output-devices" type="button">Choose / list audio outputs</button>
+      <label for="monitor-output">Interface / headphones output</label>
+      <select id="monitor-output"><option value="">System default output</option></select>
+      <output id="monitor-output-status" role="status" aria-live="polite"></output>
       <label class="monitor-toggle" for="monitor-toggle"><input id="monitor-toggle" type="checkbox" aria-describedby="monitor-warning"> Hear my input</label>
       <label for="monitor-volume">Headphone monitor level</label>
       <input id="monitor-volume" type="range" min="0" max="1" step="0.05" value="0.25">
@@ -91,6 +95,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/rehearsal.mjs?v=20261113-wallet-entry"></script>
+  <script type="module" src="js/rehearsal.mjs?v=20261113-output-selection"></script>
 </body>
 </html>

@@ -26,6 +26,10 @@ async function fixture(options = {}) {
     }
     createMediaStreamSource(stream) { this.stream = stream; return this.source; }
     createGain() { return this.gainNode; }
+    async setSinkId(id) {
+      if (options.outputError) throw options.outputError;
+      this.sinkId = id;
+    }
     async resume() {
       if (options.resume) await options.resume(this);
       else this.state = 'running';
@@ -176,6 +180,69 @@ function control() {
     async emit(name) { await listeners[name](); },
   };
 }
+
+test('output routes before monitor audio connects, changes live and survives stop/start', async () => {
+  const f = await fixture();
+  await f.monitor.setOutput('interface-headphones');
+  await f.monitor.start({ mediaStreamTrack: f.track });
+  assert.equal(f.contexts[0].sinkId, 'interface-headphones');
+  await f.monitor.setOutput('second-output');
+  assert.equal(f.contexts[0].sinkId, 'second-output');
+  await f.monitor.stop();
+  await f.monitor.start({ mediaStreamTrack: f.track });
+  assert.equal(f.contexts[1].sinkId, 'second-output');
+  await f.monitor.setOutput('');
+  assert.equal(f.contexts[1].sinkId, '');
+  await assert.rejects(f.monitor.setOutput(null), /device ID/);
+  await f.monitor.stop();
+});
+
+test('output routing errors do not play silently on default or stop the input', async () => {
+  const f = await fixture({ outputError: Error('output denied') });
+  await f.monitor.setOutput('interface');
+  await assert.rejects(f.monitor.start({ mediaStreamTrack: f.track }), /output denied/);
+  assert.equal(f.contexts[0].gainNode.connections.length, 0);
+  assert.equal(f.contexts[0].closes, 1);
+  assert.equal(f.track.readyState, 'live');
+});
+
+test('binding selects permission-granted output for monitor and remote audio; denied choices stay explicit', async () => {
+  const f = await fixture();
+  const output = { ...control(), value: '', selectedOptions: [{ textContent: 'Interface headphones' }],
+    replaceChildren(...options) { this.options = options; } };
+  const outputDevices = control(), outputStatus = control(), toggle = control(), volume = control(), status = control();
+  let denied = false;
+  const audio = { async setSinkId(id) { this.sinkId = id; } };
+  const binding = f.bindInputMonitor({ toggle, volume, status, output, outputDevices, outputStatus, audio,
+    getTrack: () => ({ mediaStreamTrack: f.track }) }, {
+    AudioContext: f.AudioContext, MediaStream: f.MediaStream, document: { createElement: () => ({}) },
+    navigator: { mediaDevices: {
+      async selectAudioOutput() { if (denied) throw Error('permission denied'); return { deviceId: 'interface', label: 'Interface headphones', kind: 'audiooutput' }; },
+      async enumerateDevices() { return []; },
+    } },
+  });
+  await outputDevices.emit('click');
+  assert.equal(output.value, 'interface');
+  assert.equal(audio.sinkId, 'interface');
+  assert.match(outputStatus.textContent, /Output selected/);
+  toggle.checked = true; await toggle.emit('change');
+  assert.equal(f.contexts[0].sinkId, 'interface');
+  denied = true; await outputDevices.emit('click');
+  assert.match(outputStatus.textContent, /Output selection failed.*permission denied/);
+  assert.equal(audio.sinkId, 'interface');
+  assert.equal(output.disabled, false);
+  await binding.stop();
+});
+
+test('unsupported output selection directs users to system settings without claiming success', async () => {
+  const f = await fixture();
+  const output = control(), outputDevices = control(), outputStatus = control();
+  f.bindInputMonitor({ toggle: control(), volume: control(), status: control(), output, outputDevices, outputStatus,
+    getTrack: () => null }, { MediaStream: f.MediaStream });
+  assert.equal(output.disabled, true);
+  assert.equal(outputDevices.disabled, true);
+  assert.match(outputStatus.textContent, /cannot select an output.*sound output settings/);
+});
 
 async function bindingFixture(options = {}) {
   const f = await fixture(options);

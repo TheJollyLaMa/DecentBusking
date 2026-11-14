@@ -2,7 +2,7 @@ import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=2026111
 import { liveRecordingConsentMessage } from './live-recording-consent.mjs?v=20261113-recording';
 import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261113-recording';
 import { performerRoomSign } from './performer-room.mjs?v=20261110-wallet-practice';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261110-studio-monitor';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261113-output-selection';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 
 const byId = id => document.getElementById(id);
@@ -22,6 +22,7 @@ const meter = createInputMeter({
 const headphones = bindInputMonitor({
   toggle: byId('room-monitor-toggle'), volume: byId('room-monitor-volume'), status: byId('room-monitor-status'),
   getTrack: () => localTrack,
+  output: byId('room-output'), outputDevices: byId('room-output-devices'), outputStatus: byId('room-output-status'), audio,
 });
 const status = message => { byId('room-status').textContent = message; };
 const command = input => roomRequest(serviceUrl, 'control', input, session?.token);
