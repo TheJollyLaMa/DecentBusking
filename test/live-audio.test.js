@@ -84,6 +84,32 @@ test('live audio is fail-closed without explicit hosting and durable state', asy
   await assert.rejects(service.listener('anything'), /unavailable/);
 });
 
+test('live deployment handoff serializes verified bookings and blocks controls while the recorder is leased', async () => {
+  let paused = false, prepared = [];
+  const recorder = {
+    available: true, status: () => ({}), deploymentPaused: () => paused,
+    prepareDeployment: async lease => { prepared.push(lease); paused = true; return { ready: true }; },
+    cancelDeployment: id => { assert.equal(id, 'repair'); paused = false; },
+    tick() {},
+  };
+  const f = await setup({ recorder });
+  const auth = await f.authorize();
+  assert.equal((await f.service.prepareDeployment({ action: 'drain', id: 'repair', expiresAt: START - 55 * 60000 })).ready, true);
+  assert.deepEqual(prepared[0].bookings, [f.b]);
+  await assert.rejects(f.service.command(auth.token, { action: 'connect', publish: true }, ORIGIN), /controls paused/);
+  assert.equal((await f.service.command(auth.token, { action: 'state' }, ORIGIN)).configured, true);
+  await f.service.prepareDeployment({ action: 'cancel', id: 'repair', expiresAt: 0 });
+  assert.equal(paused, false);
+  await f.prepare();
+  assert.equal((await f.service.prepareDeployment({ action: 'drain', id: 'repair', expiresAt: START })).ready, false, 'Armed preflight refuses replacement');
+  assert.equal(prepared.length, 1);
+});
+
+test('deployment handoff fails explicitly when current booking verification fails', async () => {
+  const f = await setup({ getBookings: async () => { throw Error('fixture bookings offline'); } });
+  await assert.rejects(f.service.prepareDeployment({ action: 'drain', id: 'repair', expiresAt: START }), /bookings offline/);
+});
+
 test('healthy packet updates do not upload checkpoints; outage and recovery each persist once', async () => {
   const f = await setup();
   await f.prepare();

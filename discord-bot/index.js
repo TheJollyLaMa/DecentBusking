@@ -6,7 +6,7 @@ import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
 import { createLiveAudioTransport } from './live-audio-transport.js';
-import { createLiveRecorder, createLiveRecordingStore } from './live-recording.js';
+import { createLiveRecorder, createLiveRecordingStore, downloadRecordingSegment } from './live-recording.js';
 import { createRehearsalService } from './rehearsal.js';
 import { createRehearsalStore } from './rehearsal-store.js';
 // discord-bot/index.js
@@ -1558,15 +1558,10 @@ async function main() {
     fetchImpl: (url, options) => fetch(url, { ...options, signal: AbortSignal.timeout(60000) }),
   }) : null;
   const recorder = createLiveRecorder({
-    enabled: recordingEnabled, store: recordingStore, upload: recordingUpload,
+    enabled: recordingEnabled, store: recordingStore, upload: recordingUpload, resumeDelayMs: 180000,
     download: async cid => {
       const gateway = await discoverDedicatedGateway(config) || config.ipfsGateway;
-      const base = gateway.replace(/\/$/, '').replace(/\/ipfs$/, '');
-      const response = await fetch(`${base}/ipfs/${cid}`, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok) throw new Error(`Recording segment download failed (${response.status})`);
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (bytes.length > 2880044) throw new Error('Recording segment exceeds size limit');
-      return bytes;
+      return downloadRecordingSegment(cid, { gateway });
     },
     ingest: async recording => {
       if (!playlistReady) throw new Error('Recording mint queue is waiting for durable playlist restore');
@@ -1823,7 +1818,8 @@ async function main() {
         .sort((first, second) => Date.parse(first.requestedAt || 0) - Date.parse(second.requestedAt || 0));
     },
     radioDeployment: createRadioDeploymentGate({ getSession: getActiveJukeLoopSession,
-      getLiveHandoff: async () => {
+      getLiveHandoff: async lease => {
+        if (process.env.LIVE_RECORDING_DURABLE_HANDOFF_ENABLED !== 'false') return liveAudio.prepareDeployment(lease);
         const current = await liveAudio.current();
         return { ready: recorder.deploymentState().ready &&
           !(current?.armed && ['preflight', 'live'].includes(current.phase)) };

@@ -121,6 +121,195 @@ test('twenty-minute real PCM finalizes to a playable MP3 with measured duration 
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test('preserved consented recording retries an authenticated segment failure once without duplicate mint intake', async () => {
+  const { createLiveRecorder, downloadRecordingSegment } = await import('../discord-bot/live-recording.js');
+  const s = await setup();
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
+  const saved = structuredClone(s.state().recordings[0]);
+  let unauthorized = true, uploads = 0;
+  const recorder = createLiveRecorder({ ...s.args,
+    download: cid => downloadRecordingSegment(cid, {
+      gateway: 'https://recording.example/ipfs/?pinataGatewayToken=fixture-token',
+      fetchImpl: async url => {
+        const target = new URL(url);
+        assert.equal(target.searchParams.get('pinataGatewayToken'), 'fixture-token');
+        assert.equal(target.pathname, `/ipfs/${cid}`);
+        return unauthorized ? new Response('', { status: 401 }) : new Response(s.blobs.get(cid));
+      },
+    }),
+    encode: async (segments, download) => {
+      for (const segment of segments) assert.equal((await download(segment.cid)).length, segment.bytes + 44);
+      return Buffer.from('verified-encoded-fixture');
+    },
+    upload: async bytes => { uploads++; return s.args.upload(bytes); },
+  });
+  await recorder.initialize(); s.at(START + 20000);
+  await recorder.tick([booking]);
+  assert.equal(recorder.status(booking).status, 'processing');
+  assert.equal(s.submissions.length, 0);
+  assert.equal(uploads, 0);
+  assert.deepEqual(s.state().recordings[0].consent, saved.consent);
+  assert.deepEqual(s.state().recordings[0].segments, saved.segments);
+  assert.match(recorder.status(booking).error, /401/);
+  unauthorized = false;
+  await recorder.tick([booking]); await recorder.tick([booking]);
+  assert.equal(recorder.status(booking).status, 'submitted');
+  assert.equal(s.submissions.length, 1);
+  assert.equal(uploads, 1);
+  assert.equal(recorder.deploymentState().ready, true);
+});
+
+test('replacement recorder resumes a durable processing checkpoint without recapture or a second final upload', async () => {
+  const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
+  const s = await setup();
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
+  const preserved = structuredClone(s.state().recordings[0]);
+  let encodes = 0, uploads = 0;
+  const old = createLiveRecorder({ ...s.args,
+    encode: async () => { encodes++; return Buffer.from('encoded-before-handoff'); },
+    upload: async bytes => { uploads++; return s.args.upload(bytes); },
+    ingest: async () => { throw Error('Fixture mint intake unavailable'); },
+  });
+
+  await old.initialize(); s.at(START + 20000); await old.tick([booking]);
+  assert.equal(old.deploymentState().ready, false, 'Current gate must still block pending finalization');
+  assert.equal(s.state().recordings[0].status, 'processing');
+  assert.ok(s.state().recordings[0].result);
+  assert.deepEqual(s.state().recordings[0].consent, preserved.consent);
+  assert.deepEqual(s.state().recordings[0].segments, preserved.segments);
+  const replacement = createLiveRecorder({ ...s.args,
+    encode: async () => { throw Error('Already-checkpointed MP3 must not be re-encoded'); },
+    upload: async () => { throw Error('Already-checkpointed MP3 must not be uploaded again'); },
+  });
+  await replacement.initialize();
+  assert.equal(replacement.deploymentState().ready, false);
+  await replacement.tick([booking]); await replacement.tick([booking]);
+  assert.equal(replacement.deploymentState().ready, true);
+  assert.equal(s.submissions.length, 1);
+  assert.equal(encodes, 1); assert.equal(uploads, 1);
+});
+
+test('a finalization outage does not mark fully captured audio incomplete or block the next performer capture', async () => {
+  let fail = true;
+  const s = await setup({ encode: async () => {
+    if (fail) throw Error('fixture download outage');
+    return Buffer.from('encoded');
+  } });
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  for (let second = 0; second < 20; second++) {
+    s.at(START + second * 1000);
+    s.recorder.capture(booking, frame());
+    await s.recorder.flush();
+  }
+  s.at(START + 20000); await s.recorder.tick([booking]);
+  assert.match(s.recorder.status(booking).error, /download outage/);
+  fail = false;
+  await s.recorder.tick([booking]);
+  assert.equal(s.submissions[0].incomplete, false, 'Delivery failure is not missing captured audio');
+  assert.equal(s.recorder.status(booking).error, '');
+  const next = { ...booking, id: 'second-performer', startUtc: new Date(START + 30000).toISOString(),
+    endUtc: new Date(START + 50000).toISOString() };
+  await s.recorder.consent(next, await s.permission(true, artist, START + 20000, ORIGIN, next), artist.address, ORIGIN);
+  s.at(START + 30000); s.recorder.capture(next, frame()); await s.recorder.flush();
+  assert.equal(s.state().recordings.find(r => r.bookingId === next.id).segments.length, 1);
+});
+
+test('a replacement worker waits out deploy overlap before resuming a processing checkpoint', async () => {
+  const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
+  const s = await setup({ encode: async () => { throw Error('Previous worker download outage'); } });
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
+  s.at(START + 20000); await s.recorder.tick([booking]);
+  assert.equal(s.state().recordings[0].status, 'processing');
+  const replacement = createLiveRecorder({ ...s.args, resumeDelayMs: 180000, encode: async () => Buffer.from('encoded') });
+  await replacement.initialize();
+  await replacement.tick([booking]);
+  assert.equal(s.submissions.length, 0, 'Old worker may still be retrying during overlap');
+  s.at(START + 20000 + 180000); await replacement.tick([booking]);
+  assert.equal(s.submissions.length, 1);
+  assert.equal(s.state().recordings[0].status, 'submitted');
+  assert.equal(replacement.deploymentState().ready, true);
+});
+
+test('ended processing handoff verifies canonical readback, pauses retries, remains exclusive and resumes on cancel', async () => {
+  const s = await setup({ encode: async () => { throw Error('Fixture encode offline'); } });
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
+  s.at(START + 20000); await s.recorder.tick([booking]);
+  const before = structuredClone(s.state());
+  let reads = 0;
+  const restore = s.store.restore;
+  s.store.restore = async () => { reads++; return restore(); };
+  const lease = { id: 'repair-1', expiresAt: START + 20000 + 120000, bookings: [booking] };
+  assert.deepEqual(await s.recorder.prepareDeployment(lease), { ready: true, recordingCheckpointVerified: true });
+  assert.equal(reads, 1);
+  assert.equal(s.recorder.deploymentPaused(), true);
+  assert.equal(s.recorder.deploymentState().ready, false, 'Strict legacy completion state is not rewritten');
+  const errors = s.errors.length;
+  await s.recorder.tick([booking]); assert.equal(s.errors.length, errors);
+  assert.deepEqual(s.state(), before, 'No journal status rewrite to fake completion');
+  await assert.rejects(s.recorder.prepareDeployment({ ...lease, id: 'repair-2' }), /Another deployment/);
+  assert.throws(() => s.recorder.cancelDeployment('repair-2'), /Another deployment/);
+  await s.recorder.prepareDeployment({ ...lease, expiresAt: START + 20000 + 900000 });
+  assert.equal(reads, 2, 'Lease extension re-verifies readback');
+  s.recorder.cancelDeployment('repair-1');
+  assert.equal(s.recorder.deploymentPaused(), false);
+  await s.recorder.tick([booking]); assert.ok(s.errors.length > errors, 'Retries resume after cancellation');
+});
+
+test('recording handoff blocks active capture, in-flight encoding, unknown/changed bookings and imminent shows', async () => {
+  const s = await setup();
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
+  assert.deepEqual(await s.recorder.prepareDeployment({ id: 'repair', expiresAt: START + 120000, bookings: [booking] }), { ready: false });
+  s.at(START + 20000);
+  const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
+  const restarted = createLiveRecorder({ ...s.args, encode: async () => { throw Error('fixture'); } });
+  await restarted.initialize(); await restarted.tick([booking]);
+  const lease = { id: 'repair', expiresAt: START + 140000, bookings: [booking] };
+  assert.deepEqual(await restarted.prepareDeployment({ ...lease, bookings: [] }), { ready: false });
+  assert.deepEqual(await restarted.prepareDeployment({ ...lease, bookings: [{ ...booking, wallet: Wallet.createRandom().address }] }), { ready: false });
+  assert.deepEqual(await restarted.prepareDeployment({ ...lease, bookings: [booking, {
+    ...booking, id: 'next', acknowledged: true, status: 'funded',
+    startUtc: new Date(START + 60000).toISOString(), endUtc: new Date(START + 120000).toISOString(),
+  }] }), { ready: false });
+  await assert.rejects(restarted.prepareDeployment({ ...lease, bookings: [{ ...booking, status: 'funded', acknowledged: true, endUtc: 'invalid' }] }), /Booking times unavailable/);
+  assert.equal(restarted.deploymentPaused(), false);
+  let finish;
+  const busy = createLiveRecorder({ ...s.args, encode: () => new Promise(resolve => { finish = resolve; }) });
+  await busy.initialize();
+  const ticking = busy.tick([booking]);
+  while (!finish) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(await busy.prepareDeployment(lease), { ready: false });
+  finish(Buffer.from('fixture')); await ticking;
+});
+
+test('failed or expired recording readback never grants handoff, while lease expiry resumes canonical retry', async () => {
+  const s = await setup({ encode: async () => { throw Error('fixture encode'); } });
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
+  s.at(START + 20000); await s.recorder.tick([booking]);
+  const restore = s.store.restore;
+  const lease = { id: 'repair', expiresAt: START + 140000, bookings: [booking] };
+  s.store.restore = async () => ({ version: 1, recordings: [] });
+  await assert.rejects(s.recorder.prepareDeployment(lease), /does not match/);
+  assert.equal(s.recorder.deploymentPaused(), true, 'Failed verification stays paused until cancel or expiry');
+  s.recorder.cancelDeployment('repair'); s.store.restore = restore;
+  await s.recorder.prepareDeployment(lease);
+  s.at(lease.expiresAt + 1);
+  assert.equal(s.recorder.deploymentPaused(), false);
+  const errors = s.errors.length;
+  await s.recorder.tick([booking]); assert.ok(s.errors.length > errors);
+  await assert.rejects(s.recorder.prepareDeployment(lease), /Invalid recording deployment lease/);
+  s.store.restore = async () => {
+    s.at(START + 400000);
+    return restore();
+  };
+  await assert.rejects(s.recorder.prepareDeployment({ ...lease, expiresAt: START + 280000 }), /expired during verification/);
+});
+
 test('finalized recording uses existing mint requests, survives restore and only replays after genuine mint completion', async () => {
   const p = await import('../discord-bot/playlist-store.js');
   try {
