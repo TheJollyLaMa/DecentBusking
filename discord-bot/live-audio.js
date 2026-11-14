@@ -273,6 +273,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         const session = auth(token, origin), b = await findBooking(session.bookingId, !['state', 'cancel'].includes(command.action));
         const record = recordFor(b.id);
         if (command.action === 'state') return publicState(b, record, true);
+        if (recorder?.deploymentPaused?.()) throw new LiveAudioError('Live controls paused for a verified deployment handoff; try again after maintenance');
         windowOpen(b);
         if (record.cancelledAt) throw new LiveAudioError('This room is cancelled');
         if (command.action === 'recording-consent') {
@@ -349,6 +350,31 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         return result;
       });
     },
+    prepareDeployment: lease => run(async () => {
+      if (lease.action === 'cancel') {
+        recorder?.cancelDeployment(lease.id);
+        return { ready: false };
+      }
+      if (!configured || failed) throw new LiveAudioError('Live audio state unavailable for deployment handoff');
+      await initialize();
+      let timer, result;
+      try {
+        result = await Promise.race([
+          Promise.resolve().then(getBookings),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new LiveAudioError('Booking handoff verification timed out')), checkpointTimeoutMs);
+          }),
+        ]);
+      } finally { clearTimeout(timer); }
+      const currentBookings = Array.isArray(result) ? result : result?.bookings;
+      if (!Array.isArray(currentBookings)) throw new LiveAudioError('Current bookings unavailable for deployment handoff');
+      if (state.rooms.some(r => {
+        const b = currentBookings.find(b => b.id === r.bookingId);
+        return r.armed && !r.cancelledAt && (!b || !Number.isFinite(Date.parse(b.endUtc)) || Date.parse(b.endUtc) > now());
+      })) return { ready: false };
+      if (!recorder?.prepareDeployment) throw new LiveAudioError('Durable recording handoff is unavailable');
+      return recorder.prepareDeployment({ ...lease, bookings: currentBookings });
+    }),
     tick: () => stopped ? Promise.resolve(null) : run(tickInternal),
     stop: async () => { stopped = true; await transport?.stop?.(); },
   };

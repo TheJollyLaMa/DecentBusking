@@ -197,6 +197,29 @@ Resolve a verified durable recording handoff in a separately reviewed change
 or obtain an explicit maintenance plan; do not bypass the strict gate, restart
 the worker casually, revoke consent, or delete preserved segments to get past it.
 
+An ended recording no longer blocks backend deployment. The durable handoff is
+on by default (`LIVE_RECORDING_DURABLE_HANDOFF_ENABLED=false` restores the
+legacy strict gate). The authenticated deployment lease pauses canonical
+recording retries and live controls, verifies a fresh booking read and the
+signed journal readback, and refuses active/armed or imminent shows,
+missing/changed bookings, buffered audio, active producers/encoding and
+unverifiable checkpoints. Cancellation or expiry resumes the recorder without
+changing consent, segments or processing status. The paid playlist/ad drain
+remains mandatory and independently gates readiness.
+Download/encode/intake failures remain visible but are not treated as missing
+captured frames; a successful retry clears the delivery error.
+
+The replacement worker waits three minutes after startup before resuming a
+`processing` recording, so a replaced worker still retrying during deploy
+overlap cannot overwrite the new result. The finished recording then appears
+in the Admin mint queue for the performer's wallet; it replays on radio after
+the owner mints it.
+
+The first show's recording was stuck behind the pre-fix worker, which could
+not run this handoff. It was released by a one-time deploy that skipped the
+pre-deploy check while the paid drain lease was held manually; that bootstrap
+is not needed again.
+
 ### First-night supporter encore
 
 After the first show the steward separately approved one existing v1.0.0

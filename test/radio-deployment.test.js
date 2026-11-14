@@ -52,6 +52,44 @@ test('predeploy command waits for real drain readiness and fails closed on unava
     deploymentId: 'release', draining: true, expiresAt: now + 120000, ready: false }) }), /timed out/);
 });
 
+test('deployment gate extends and cancels the same recording lease without overriding paid readiness', async () => {
+  const { createRadioDeploymentGate } = await import('../discord-bot/radio-deployment.js');
+  let time = 1000, paidReady = false, recordingReady = true;
+  const leases = [];
+  const session = { drainForDeployment: async expiresAt => ({ draining: expiresAt > 0, ready: paidReady, expiresAt }) };
+  const gate = createRadioDeploymentGate({ getSession: () => session, now: () => time,
+    getLiveHandoff: async lease => { leases.push(lease); return { ready: recordingReady }; } });
+  assert.equal((await gate({ action: 'drain', id: 'repair' })).ready, false, 'Durable recording does not bypass paid playback');
+  assert.equal(leases.length, 1);
+  paidReady = true;
+  assert.equal((await gate({ action: 'drain', id: 'repair' })).ready, true);
+  assert.deepEqual(leases.at(-1), { action: 'drain', id: 'repair', expiresAt: time + 900000 });
+  recordingReady = false;
+  assert.equal((await gate({ action: 'drain', id: 'repair' })).ready, false);
+  await gate({ action: 'cancel', id: 'repair' });
+  assert.deepEqual(leases.at(-1), { action: 'cancel', id: 'repair', expiresAt: 0 });
+});
+
+test('deployment rechecks extended recording proof and releases paid holds even if live cancellation fails', async () => {
+  const { createRadioDeploymentGate } = await import('../discord-bot/radio-deployment.js');
+  const paidLeases = [];
+  let checks = 0;
+  const gate = createRadioDeploymentGate({ now: () => 1000,
+    getSession: () => ({ drainForDeployment: async expiresAt => {
+      paidLeases.push(expiresAt); return { ready: true };
+    } }),
+    getLiveHandoff: async ({ action }) => {
+      if (action === 'cancel') throw Error('fixture cancellation failure');
+      checks++;
+      return checks === 1 ? { ready: true, recordingCheckpointVerified: true } : { ready: false };
+    } });
+  const status = await gate({ action: 'drain', id: 'repair' });
+  assert.equal(status.ready, false, 'Initial proof cannot authorize a failed extended lease');
+  assert.equal(status.recordingCheckpointVerified, undefined);
+  await assert.rejects(gate({ action: 'cancel', id: 'repair' }), /cancellation failure/);
+  assert.equal(paidLeases.at(-1), 0, 'Live cancellation error must not strand paid playback');
+});
+
 test('deployment endpoint requires server authorization and does not expand public radio permissions', async () => {
   const { createWorkerRequestHandler } = await import('../discord-bot/ipfs-worker.js');
   let called = 0;
