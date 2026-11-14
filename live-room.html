@@ -52,6 +52,13 @@
   <button id="room-authorize" class="rehearsal-primary" type="button" disabled>Connect booking wallet</button>
   <section id="room-controls" class="studio-panel" hidden>
     <p id="room-targets" class="studio-note"></p>
+    <fieldset class="room-role-card">
+      <legend>🎧 Audio output · where you listen</legend>
+      <button id="room-output-devices" type="button">Choose / list audio outputs</button>
+      <label for="room-output">Interface / headphones output</label>
+      <select id="room-output"><option value="">System default output</option></select>
+      <output id="room-output-status" role="status" aria-live="polite"></output>
+    </fieldset>
     <fieldset id="room-publisher" class="room-role-card" hidden>
       <legend>Performer · send your sound</legend>
       <div class="room-visual-flow" aria-label="Choose input, publish audio, operator listens">
@@ -151,6 +158,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/live-audio-room.mjs?v=20261113-guided-stage"></script>
+  <script type="module" src="js/live-audio-room.mjs?v=20261113-output-selection"></script>
 </body>
 </html>

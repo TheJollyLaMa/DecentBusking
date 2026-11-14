@@ -7,11 +7,14 @@
  * start(localTrack, volume = 0.25) resolves true when connected, false if
  * superseded/stopped. setVolume(volume) accepts finite numbers from 0 to 1.
  * stop() disconnects immediately and resolves when its AudioContext is closed.
+ * setOutput(deviceId) routes monitoring to that output and retains the choice
+ * across stop/start. An empty ID means the system default.
  * Await start()/stop() and surface failures to the user.
  */
 export function createInputMonitor(environment = globalThis) {
   let generation = 0;
   let active = null;
+  let outputId = '';
 
   function validateVolume(volume) {
     if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
@@ -65,6 +68,11 @@ export function createInputMonitor(environment = globalThis) {
       session.source = session.context.createMediaStreamSource(new MediaStream([track]));
       session.gain = session.context.createGain();
       session.gain.gain.value = volume;
+      if (outputId) {
+        if (typeof session.context.setSinkId !== 'function') throw new Error('Output selection is unsupported. Choose your interface in system sound settings.');
+        await session.context.setSinkId(outputId);
+        if (request !== generation) return false;
+      }
       await session.context.resume();
       if (request !== generation) return false;
       if (session.context.state !== 'running') {
@@ -88,7 +96,19 @@ export function createInputMonitor(environment = globalThis) {
     if (active?.gain) active.gain.gain.value = volume;
   }
 
-  return { start, setVolume, stop };
+  async function setOutput(deviceId) {
+    if (typeof deviceId !== 'string') throw new TypeError('Audio output must be a device ID.');
+    const session = active;
+    if (session) {
+      if (typeof session.context.setSinkId !== 'function') throw new Error('Output selection is unsupported. Choose your interface in system sound settings.');
+      await session.context.setSinkId(deviceId);
+      if (active !== session) return false;
+    }
+    outputId = deviceId;
+    return true;
+  }
+
+  return { start, setVolume, setOutput, stop };
 }
 
 /**
@@ -98,7 +118,7 @@ export function createInputMonitor(environment = globalThis) {
  * Call/await stop() on every disconnect and before replacing the input.
  * stop() retains listeners so the same controls can be used after reconnecting.
  */
-export function bindInputMonitor({ toggle, volume, status, getTrack }, environment = globalThis) {
+export function bindInputMonitor({ toggle, volume, status, getTrack, output, outputDevices, outputStatus, audio }, environment = globalThis) {
   const monitor = createInputMonitor(environment);
   let revision = 0;
   const offMessage = 'Monitor off. Headphones required to avoid feedback; direct interface monitoring is recommended.';
@@ -153,6 +173,63 @@ export function bindInputMonitor({ toggle, volume, status, getTrack }, environme
     const request = revision;
     try { monitor.setVolume(Number(volume.value)); } catch (error) { await fail(error, request); }
   });
+
+  if (output && outputDevices && outputStatus) {
+    const AudioContext = environment.AudioContext || environment.webkitAudioContext;
+    const devices = environment.navigator?.mediaDevices;
+    const supported = typeof AudioContext?.prototype?.setSinkId === 'function' &&
+      (!audio || typeof audio.setSinkId === 'function') && typeof devices?.enumerateDevices === 'function';
+    output.disabled = !supported;
+    outputDevices.disabled = !supported;
+    outputStatus.textContent = supported ? 'Output: system default. Choose your interface/headphones below.'
+      : 'This browser cannot select an output. Choose your interface in your computer’s sound output settings.';
+    let selectedOutput = '', changing = false;
+    async function changeOutput(id) {
+      if (audio) await audio.setSinkId(id);
+      try {
+        const applied = await monitor.setOutput(id);
+        if (!applied) throw new Error('Monitor changed during output selection. Choose the output again.');
+      } catch (error) {
+        if (audio) {
+          try { await audio.setSinkId(selectedOutput); }
+          catch (rollbackError) { throw new AggregateError([error, rollbackError], 'Output routing failed; previous listening output could not be restored.'); }
+        }
+        throw error;
+      }
+      selectedOutput = id;
+      const label = output.selectedOptions[0]?.textContent || 'Selected output';
+      outputStatus.textContent = `Output selected: ${label}. Applies to headphone monitor and room listening, not microphone input.`;
+    }
+    async function choose(fn) {
+      if (changing) return;
+      changing = true; output.disabled = true; outputDevices.disabled = true;
+      outputStatus.textContent = 'Choosing audio output…';
+      try { await fn(); }
+      catch (error) {
+        output.value = selectedOutput;
+        outputStatus.textContent = `Output selection failed: ${error.message}. Check browser permission or use system sound settings.`;
+      } finally { changing = false; output.disabled = false; outputDevices.disabled = false; }
+    }
+    output.addEventListener('change', () => choose(() => changeOutput(output.value)));
+    outputDevices.addEventListener('click', () => choose(async () => {
+      const granted = typeof devices.selectAudioOutput === 'function' ? await devices.selectAudioOutput() : null;
+      const available = (await devices.enumerateDevices()).filter(device => device.kind === 'audiooutput' && device.deviceId);
+      if (granted && !available.some(device => device.deviceId === granted.deviceId)) available.push(granted);
+      if (!available.length) throw new Error('No audio outputs exposed. Allow microphone access/list inputs first, then try again.');
+      const option = (value, text) => {
+        const node = environment.document.createElement('option');
+        node.value = value; node.textContent = text; return node;
+      };
+      output.replaceChildren(option('', 'System default output'),
+        ...available.map((device, index) => option(device.deviceId, device.label || `Audio output ${index + 1}`)));
+      output.value = granted?.deviceId || selectedOutput;
+      if (granted) await changeOutput(granted.deviceId);
+      else {
+        if (output.value !== selectedOutput) throw new Error('Your selected output is no longer available. Choose another output.');
+        outputStatus.textContent = 'Outputs listed. Choose your interface/headphones from the selector.';
+      }
+    }));
+  }
 
   return { stop };
 }
