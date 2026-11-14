@@ -108,6 +108,13 @@ indexes it. The artist still claims from Profile: approval is not payment
 received. Pending approval hashes persist and retries reconcile before sending;
 upload and transaction failures remain visible in the booking card.
 Legacy/prorated and manual review tools remain under advanced booking actions.
+The performer's post-show **Your next step** card is above the collapsed
+earnings section, not buried inside it. Waiting for owner approval, ready to
+claim, pending and confirmed-paid states are distinct. A prominent claim button
+appears only when eligible (or to reconcile a saved pending hash); agreement
+and receipt details stay collapsed. Payment cards load independently of the
+earnings RPC and update from existing booking notifications without replacing
+an in-progress claim. A manual payment-status refresh is also available.
 Reuse: existing `createBrowserIpfsUploader`, `LIVE_ESCROW_ABI`, transaction
 hash storage convention and event indexer; no contract or worker deployment.
 

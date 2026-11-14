@@ -239,18 +239,49 @@ export function renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, e
  invitation.append(button, status);
  return invitation;
 }
-export async function renderLivePerformances({ container, wallet, serviceUrl, ethers, onReceipt = () => {}, fetchImpl = fetch }) {
+export async function renderLivePerformances({ container, wallet, serviceUrl, ethers, onReceipt = () => {}, fetchImpl = fetch, bookingState }) {
  if (!container || !serviceUrl) return;
- const response = await fetchImpl(`${serviceUrl.replace(/\/$/,'')}/api/live-bookings`, { cache:'no-store' });
- if (!response.ok) throw new Error('Live performance bookings unavailable');
- const state = await response.json();
+ let state = bookingState;
+ if (!state) {
+   const response = await fetchImpl(`${serviceUrl.replace(/\/$/,'')}/api/live-bookings`, { cache:'no-store' });
+   if (!response.ok) throw new Error('Live performance bookings unavailable');
+   state = await response.json();
+ }
  const bookings = state.bookings.filter(b => b.wallet.toLowerCase() === wallet.toLowerCase());
- container.innerHTML = bookings.length ? '' : '<p>No bookings for this wallet.</p>';
+ container.innerHTML = '';
  for (const b of bookings) {
    const compact = b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY && b.stewardApproved &&
      !b.cancelled && Date.parse(b.status === 'funded' ? b.endUtc : b.startUtc) > Date.now() && ['draft', 'funded'].includes(b.status);
    const article = compact ? renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, ethers, fetchImpl }) : document.createElement('div');
-   if (!compact) article.innerHTML = liveBookingRows([b]);
+   const afterparty = b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY &&
+     (Date.parse(b.endUtc) <= Date.now() || ['approved', 'paid'].includes(b.status));
+   const connected = window._wallet?.address || '';
+   const claim = claimState(b, state.escrowAddress, connected);
+   const pendingHash = connected.toLowerCase() === b.wallet.toLowerCase() && !['paid', 'refunded'].includes(b.status)
+     ? localStorage.getItem(`live-claim:${b.id}`) : null;
+   let nextStatus;
+   if (afterparty) {
+     article.className = 'live-performer-next';
+     article.setAttribute('data-live-next-step', b.id);
+     article.setAttribute('data-action-needed', String(claim.enabled || !!pendingHash));
+     const title = document.createElement('h3');
+     title.textContent = b.status === 'paid' ? '✓ Your performance fee is paid'
+       : pendingHash ? 'Your next step · check your claim'
+         : claim.enabled ? 'Your next step · claim your fee' : 'Your set is finished · thank you!';
+     const amount = document.createElement('p');
+     amount.className = 'live-performer-fee';
+     amount.textContent = `$${(Number(b.status === 'paid' ? b.paidUnits || b.approvedUnits || b.amountUnits : b.approvedUnits || b.amountUnits) / 1e6).toFixed(2)} USDC · Base`;
+     nextStatus = document.createElement('output');
+     nextStatus.setAttribute('role', 'status');
+     nextStatus.setAttribute('aria-live', 'polite');
+     nextStatus.textContent = b.status === 'paid' ? 'Confirmed on-chain. No payment action needed.'
+       : pendingHash ? 'Your transaction is saved. Check it below; do not send a second claim.'
+         : claim.enabled ? 'Ready for you. Claim to your booked wallet; a little Base ETH is needed for gas.'
+           : b.status === 'funded' && Date.now() <= Date.parse(b.claimDeadline) &&
+             Date.now() < Date.parse(b.endUtc) + b.reviewWindow * 1000 ? 'Jolly’s next step: approve your guaranteed fee. Nothing for you to sign yet.'
+             : claim.label;
+     article.append(title, amount, nextStatus);
+   } else if (!compact) article.innerHTML = liveBookingRows([b]);
    if (!compact && b.mode === 'phase1' && b.status === 'draft' && !b.cancelled) {
      article.append(renderPerformerBookingInvite({ booking: b, state, wallet, serviceUrl, ethers, fetchImpl }));
    }
@@ -276,12 +307,16 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
      article.append(entry);
    }
    const button = document.createElement('button');
-   const connected = window._wallet?.address || '';
-   const claim = claimState(b, state.escrowAddress, connected);
-   const pendingHash = localStorage.getItem(`live-claim:${b.id}`);
-   button.type = 'button'; button.disabled = !claim.enabled; button.textContent = pendingHash ? `Reconcile claim: ${pendingHash.slice(0,10)}…` : claim.label;
+   let refresh;
+   button.type = 'button'; button.disabled = !claim.enabled && !pendingHash;
+   button.className = afterparty ? 'live-performer-claim' : '';
+   const amount = (Number(b.approvedUnits || b.amountUnits) / 1e6).toFixed(2);
+   button.textContent = pendingHash ? 'Check pending claim' : afterparty && claim.enabled ? `Claim $${amount} USDC` : claim.label;
    button.onclick = async () => {
      button.disabled = true;
+     if (refresh) refresh.disabled = true;
+     article.setAttribute('data-live-claim-busy', 'true');
+     if (nextStatus) nextStatus.textContent = 'Opening your wallet on Base…';
      try {
        const provider = new ethers.BrowserProvider(window.ethereum);
        const signer = await provider.getSigner();
@@ -289,9 +324,11 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        const previous = localStorage.getItem(`live-claim:${b.id}`);
        if (previous) {
          const receipt = await provider.getTransactionReceipt(previous);
-         if (!receipt) { button.textContent = `Claim still pending: ${previous}`; return; }
+         if (!receipt) { button.textContent = 'Check pending claim'; button.disabled = false; if (nextStatus) nextStatus.textContent = `Still pending: ${previous}. Do not send again.`; return; }
          localStorage.removeItem(`live-claim:${b.id}`);
          button.textContent = receipt.status === 1 ? 'Previous claim confirmed; refresh indexed receipt' : 'Previous claim reverted; refresh before retrying';
+         if (nextStatus) nextStatus.textContent = receipt.status === 1 ? 'Previous transaction confirmed. Refresh payment status for the indexed payment receipt.'
+           : 'Previous transaction reverted. Refresh payment status before retrying.';
          document.dispatchEvent(new CustomEvent('live-booking-claim-updated'));
          return;
        }
@@ -299,14 +336,41 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        const tx = await contract.claim(ethers.id(b.id));
        localStorage.setItem(`live-claim:${b.id}`,tx.hash);
        button.textContent = `Claim pending: ${tx.hash}`;
-       await tx.wait(2);
+       if (nextStatus) nextStatus.textContent = `Claim submitted. Waiting for confirmation: ${tx.hash}`;
+       const receipt = await tx.wait(2);
+       if (receipt?.status !== 1) throw new Error('Claim did not confirm successfully');
        button.textContent = 'Claim confirmed; refresh for indexed receipt';
+       if (nextStatus) nextStatus.textContent = '✓ Claim confirmed on Base. Refresh payment status for the indexed receipt.';
        announcePaymentCelebration({ chainId:8453, txHash:tx.hash, amountText:String(Number(b.approvedUnits || b.amountUnits)/1e6), assetText:'USDC', summary:'Live performance claim confirmed', txLabel:'Claim confirmed' });
        localStorage.removeItem(`live-claim:${b.id}`);
        document.dispatchEvent(new CustomEvent('live-booking-claim-updated'));
-     } catch (error) { button.textContent = `${error.shortMessage || error.message}. Refresh to reconcile before retrying.`; }
+     } catch (error) {
+       const message = `${error.shortMessage || error.message}. Refresh payment status to reconcile before retrying.`;
+       if (nextStatus) { nextStatus.textContent = message; button.textContent = 'Claim needs attention'; }
+       else button.textContent = message;
+     } finally {
+       article.setAttribute('data-live-claim-busy', 'false');
+       if (refresh) refresh.disabled = false;
+     }
    };
-   if (!compact || claim.enabled || pendingHash) article.append(button);
+   if (afterparty) {
+     if (claim.enabled || pendingHash) article.append(button);
+     refresh = document.createElement('button');
+     refresh.type = 'button'; refresh.className = 'live-performer-refresh';
+     refresh.textContent = 'Refresh payment status';
+     refresh.onclick = async () => {
+       if (article.getAttribute('data-live-claim-busy') === 'true') return;
+       refresh.disabled = true;
+       try { await renderLivePerformances({ container, wallet, serviceUrl, ethers, onReceipt, fetchImpl }); }
+       catch (error) { nextStatus.textContent = `Payment status unavailable: ${error.message}`; refresh.disabled = false; }
+     };
+     article.append(refresh);
+     const details = document.createElement('details');
+     details.className = 'live-performer-details';
+     const summary = document.createElement('summary'); summary.textContent = 'Agreement & receipts';
+     const contents = document.createElement('div'); contents.innerHTML = liveBookingRows([b]);
+     details.append(summary, contents); article.append(details);
+   } else if (!compact || claim.enabled || pendingHash) article.append(button);
    container.append(article);
  }
  const receipt = liveReceiptEntry(bookings, wallet);
