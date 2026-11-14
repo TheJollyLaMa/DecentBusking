@@ -54,7 +54,10 @@ const action = fn => async () => {
   if (busy) return;
   busy = true; renderControls();
   try { await fn(); } catch (error) {
-    const message = error.name === 'NotAllowedError'
+    const message = error.code === -32002
+      ? 'MetaMask already has a pending request. Open the MetaMask extension and finish or reject it, then try again.'
+      : error.code === 4001 ? 'Wallet request declined. Click Sign consent and enter when you are ready.'
+      : error.name === 'NotAllowedError'
       ? 'Microphone blocked. Allow microphone access in your browser site settings, then try Start my microphone again.'
       : error.name === 'NotFoundError' ? 'No microphone found. Connect your microphone or audio interface, then find inputs again.'
         : error.message || 'Private rehearsal unavailable';

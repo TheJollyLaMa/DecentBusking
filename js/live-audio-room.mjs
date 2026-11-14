@@ -55,7 +55,12 @@ function renderRecording(state) {
   });
 }
 const perform = fn => async () => {
-  try { await fn(); } catch (error) { status(error.message || 'Live audio is unavailable'); }
+  try { await fn(); } catch (error) {
+    status(error.code === -32002
+      ? 'MetaMask already has a pending request. Open the extension and finish or reject it, then try again.'
+      : error.code === 4001 ? 'Wallet request declined. Connect booking wallet again when you are ready.'
+        : error.message || 'Live audio is unavailable');
+  }
 };
 
 async function disconnect() {

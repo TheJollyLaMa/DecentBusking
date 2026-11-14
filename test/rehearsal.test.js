@@ -329,5 +329,9 @@ test('browser mock signs owner invitation and publishes privately without a publ
   assert.equal(elements.get('mic-state').textContent, 'Microphone off');
   await elements.get('leave').onclick();
   assert.match(elements.get('status').textContent, /To try again/);
+  global.window.ethereum.request = async () => { const error = Error('request pending'); error.code = -32002; throw error; };
+  await elements.get('create-room').onclick();
+  assert.match(elements.get('status').textContent, /MetaMask already has a pending request/);
+  assert.equal(elements.get('status').dataset.error, 'true');
   events.pagehide();
 });
