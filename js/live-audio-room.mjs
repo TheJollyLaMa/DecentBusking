@@ -12,6 +12,10 @@ const audio = byId('room-audio');
 let session, wallet, room, localTrack, remoteTrack, polling = false, disposed = false;
 let authGeneration = 0, connectionGeneration = 0, requestingAccounts = false;
 let booking, broadcastState, observedAt = 0, refreshing = false, practiceMode = false;
+let actionPending = false;
+let activeAction = null;
+const actionButtons = ['room-authorize', 'room-devices', 'room-publish', 'room-stop', 'room-monitor',
+  'room-check60', 'room-check15', 'room-arm', 'room-obs', 'room-cancel'];
 const meter = createInputMeter({
   level: byId('room-mic-level'), state: byId('room-mic-state'), note: byId('room-meter-note'),
 });
@@ -54,12 +58,34 @@ function renderRecording(state) {
     message: recordingMessage(state?.recording),
   });
 }
-const perform = fn => async () => {
-  try { await fn(); } catch (error) {
-    status(error.code === -32002
+function actionStatus(message, state) {
+  const output = byId('room-action-status');
+  output.hidden = !message;
+  output.setAttribute('data-state', state);
+  output.textContent = message;
+}
+const perform = (fn, pending = 'Working…', success = 'Done.') => async event => {
+  if (actionPending) return;
+  actionPending = true;
+  activeAction = event?.currentTarget?.id;
+  actionStatus(pending, 'pending');
+  for (const id of actionButtons) byId(id).disabled = true;
+  renderFlow();
+  try {
+    const result = await fn();
+    if (result === false) throw new Error('Connection changed. Reconnect your wallet/audio and try again.');
+    actionStatus(success, 'success');
+  } catch (error) {
+    actionStatus(error.code === -32002
       ? 'MetaMask already has a pending request. Open the extension and finish or reject it, then try again.'
       : error.code === 4001 ? 'Wallet request declined. Connect booking wallet again when you are ready.'
-        : error.message || 'Live audio is unavailable');
+        : error.message || 'Live audio is unavailable', 'error');
+  } finally {
+    actionPending = false;
+    activeAction = null;
+    for (const id of actionButtons) byId(id).disabled = false;
+    byId('room-authorize').disabled = !!session || !booking || !broadcastState?.configured || practiceMode;
+    renderFlow();
   }
 };
 
@@ -69,17 +95,19 @@ async function disconnect() {
   await headphones.stop();
   await meter.stop();
   remoteTrack?.detach(audio); remoteTrack = null; audio.pause(); audio.srcObject = null;
+  byId('room-listen-status').textContent = 'Not connected to performer audio.';
   const previous = room; room = null;
   await previous?.disconnect().catch(() => {});
 }
 async function connect(publish) {
   await disconnect();
+  byId('room-listen-status').textContent = publish ? 'Connecting your microphone…' : 'Connecting to the performer…';
   const generation = connectionGeneration, authorization = session;
   const current = () => generation === connectionGeneration && authorization === session && !disposed;
   const sdk = await loadLiveAudioSdk(serviceUrl);
-  if (!current()) return;
+  if (!current()) return false;
   const grant = await command({ action: 'connect', publish });
-  if (!current()) return;
+  if (!current()) return false;
   const next = new sdk.Room({ adaptiveStream: false, dynacast: false });
   room = next;
   const subscribe = (publication, participant) => {
@@ -89,35 +117,49 @@ async function connect(publish) {
   next.on(sdk.RoomEvent.TrackSubscribed, (track, _publication, participant) => {
     if (room !== next || participant.identity !== grant.publisherIdentity || track.kind !== sdk.Track.Kind.Audio) return;
     remoteTrack?.detach(audio); remoteTrack = track; track.attach(audio);
-    void audio.play().catch(() => status('Tap the audio Play control to hear the private feed'));
+    byId('room-listen-status').textContent = 'Performer audio received. Starting playback…';
+    void audio.play().then(() => {
+      if (room === next) byId('room-listen-status').textContent = 'Playing performer audio · private until showtime.';
+    }).catch(() => {
+      if (room === next) byId('room-listen-status').textContent = 'Audio received. Tap ▶ on the player below to hear it.';
+    });
+  });
+  next.on(sdk.RoomEvent.TrackUnsubscribed, track => {
+    if (room === next && remoteTrack === track) {
+      track.detach(audio); remoteTrack = null;
+      byId('room-listen-status').textContent = 'Performer audio stopped. Waiting for them to publish again.';
+    }
   });
   next.on(sdk.RoomEvent.Disconnected, () => {
     if (room === next) {
       room = null; localTrack?.stop(); localTrack = null;
       void headphones.stop();
       void meter.stop();
+      byId('room-listen-status').textContent = 'Disconnected. Click Listen to private soundcheck to reconnect.';
       status('RECONNECTING — reconnect this input; the live 60-second deadline still applies');
     }
   });
   try {
     await next.connect(grant.url, grant.token, { autoSubscribe: false });
-    if (!current()) { await next.disconnect(); return; }
+    if (!current()) { await next.disconnect(); return false; }
     if (publish) {
       const capture = await sdk.createLocalAudioTrack({
         deviceId: byId('room-input').value || undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false,
       });
-      if (!current()) { capture.stop(); await next.disconnect(); return; }
+      if (!current()) { capture.stop(); await next.disconnect(); return false; }
       localTrack = capture;
       meter.start(sdk, capture);
       await next.localParticipant.publishTrack(capture, { source: sdk.Track.Source.Microphone,
         dtx: false, red: true, audioPreset: { maxBitrate: 128000 }, forceStereo: true });
-      if (!current()) { capture.stop(); await next.disconnect(); return; }
+      if (!current()) { capture.stop(); await next.disconnect(); return false; }
       status('Browser audio published privately. Public radio opens only after the owner arms the scheduled slot.');
     } else {
       for (const participant of next.remoteParticipants.values()) {
         for (const publication of participant.trackPublications.values()) subscribe(publication, participant);
       }
       await next.startAudio();
+      if (!current() || room !== next) return false;
+      if (!remoteTrack) byId('room-listen-status').textContent = 'Connected · waiting for the performer to Publish browser audio.';
     }
   } catch (error) {
     if (current()) await disconnect();
@@ -129,14 +171,57 @@ function render(state) {
   broadcastState = state; observedAt = Date.now(); renderSign();
   renderRecording(state);
   const fresh = state.privateAudioFresh ? 'Worker receiver verifies fresh delivered audio' : 'No fresh delivery verified';
-  status(`${state.status} · ${state.phase} · ${fresh}\n${state.reason || 'Soundchecks are private until the armed slot starts.'}`);
-  if (state.targets) byId('room-targets').textContent = `T−60: ${new Date(state.targets.t60).toLocaleString()} · T−15: ${new Date(state.targets.t15).toLocaleString()} · Checks: ${state.checks?.t60 ? 'T−60 passed' : 'T−60 pending'}, ${state.checks?.t15 ? 'T−15 passed' : 'T−15 pending'}`;
-  byId('room-obs').disabled = !state.ingressEnabled;
-  byId('room-arm').disabled = !state.checks?.t60 || !state.checks?.t15 || state.armed;
+  status(`${fresh}${state.reason ? ` · ${state.reason}` : ''}`);
+  byId('room-targets').textContent = state.armed ? 'Scheduled handoff armed. Keep performer audio connected.' : 'Soundchecks stay private. Keep the publishing tab open.';
+  renderFlow();
   if (['cancelled', 'ended', 'unavailable'].includes(state.phase)) {
     byId('room-obs-secret').textContent = '';
     void disconnect();
   }
+}
+function stageTime(minutes = 0) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit',
+  }).format(new Date(Date.parse(booking.startUtc) - minutes * 60000));
+}
+function renderFlow() {
+  if (!booking) return;
+  const state = broadcastState;
+  const stale = !state || Date.now() - observedAt > 12000;
+  const beforeStart = Date.parse(booking.startUtc) - (state?.serverTime
+    ? state.serverTime + Date.now() - observedAt : Date.now());
+  const closed = ['cancelled', 'ended', 'unavailable'].includes(state?.phase) || beforeStart <= 0;
+  for (const [check, minutes] of [['t60', 60], ['t15', 15]]) {
+    const suffix = check.slice(1), passed = !!state?.checks?.[check];
+    const inWindow = check === 't60' ? beforeStart >= 40 * 60000 && beforeStart <= 70 * 60000
+      : beforeStart > 0 && beforeStart <= 25 * 60000;
+    byId(`room-time${suffix}`).textContent = `${stageTime(minutes)} New York`;
+    byId(`room-step${suffix}`).setAttribute('data-state', passed ? 'passed' : 'pending');
+    const saving = actionPending && activeAction === `room-check${suffix}`;
+    byId(`room-step${suffix}-status`).textContent = saving ? 'Saving your check… up to 60 seconds'
+      : passed ? '✓ PASSED · saved' : closed ? 'Check window closed'
+      : inWindow ? 'Ready · hear voice and music, then confirm' : `Waiting · ${stageTime(minutes)} check`;
+    byId(`room-check${suffix}`).textContent = saving ? 'Saving…'
+      : passed ? `✓ T−${minutes} check passed` : `I heard the T−${minutes} check`;
+    byId(`room-check${suffix}`).disabled = actionPending || !session || stale || passed || closed || !inWindow;
+  }
+  byId('room-time-start').textContent = `${stageTime()} New York`;
+  byId('room-step-arm').setAttribute('data-state', state?.armed ? 'passed' : 'pending');
+  const arming = actionPending && activeAction === 'room-arm';
+  byId('room-step-arm-status').textContent = arming ? 'Saving radio handoff… up to 60 seconds'
+    : state?.armed ? '✓ ARMED · scheduled handoff saved'
+    : closed ? 'Scheduled arming closed' : 'Both checks + fresh delivered audio required';
+  byId('room-arm').textContent = arming ? 'Saving…'
+    : state?.armed ? '✓ Radio handoff armed' : 'Arm scheduled radio handoff';
+  byId('room-arm').disabled = actionPending || !session || stale || !state?.checks?.t60 || !state?.checks?.t15 ||
+    !state?.privateAudioFresh || !!state?.armed || closed;
+  byId('room-obs').disabled = actionPending || !state?.ingressEnabled;
+  byId('room-next-step').textContent = state?.phase === 'cancelled' ? 'Broadcast cancelled. Performer fee unchanged.'
+    : state?.phase === 'ended' ? 'Scheduled set ended.'
+      : state?.armed ? `All cleared. Keep audio connected for ${stageTime()} radio.`
+        : !state?.checks?.t60 ? 'Step 1 · Listen, then confirm the first soundcheck.'
+          : !state?.checks?.t15 ? `✓ First check saved. Next: final soundcheck at ${stageTime(15)} New York.`
+            : '✓ Both checks saved. Arm the scheduled radio handoff.';
 }
 function renderSign() {
     const sign = performerRoomSign(booking, broadcastState, Date.now(), observedAt);
@@ -149,7 +234,9 @@ function renderSign() {
         timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit',
       }).format(new Date(start - minutes * 60000));
       byId('room-practice-directions').textContent = `Private practice is available now. Open it in its own tab below and connect your invited performer or operator wallet. Return to this stage at ${time(70)} for backstage. Soundchecks: ${time(60)} and ${time(15)} New York time.`;
-      byId('room-entry-directions').textContent = `Soundchecks: ${time(60)} and ${time(15)} New York time. Performer: connect your booked wallet, choose your microphone/interface, then Publish browser audio. Operator: connect the owner wallet and Listen to private soundcheck.`;
+      byId('room-entry-directions').textContent = session ? ''
+        : `Connect your performer or operator wallet. Soundchecks: ${time(60)} and ${time(15)} New York.`;
+      byId('room-entry-directions').hidden = !!session;
     }
     const practice = booking && !booking.cancelled && ['draft', 'funded'].includes(booking.status) &&
       Date.now() < Date.parse(booking.startUtc) - 70 * 60_000;
@@ -165,6 +252,7 @@ function renderSign() {
       byId('room-practice-frame').removeAttribute('src');
     }
     practiceMode = !!practice;
+    renderFlow();
   }
 async function refreshBooking() {
     if (refreshing || disposed || !bookingId || !serviceUrl) return;
@@ -191,8 +279,9 @@ async function refreshBooking() {
         cache: 'no-store', signal: AbortSignal.timeout(10000) });
       const liveState = await liveResponse.json();
       if (!liveResponse.ok || !liveState.configured) throw new Error(liveState.error || 'Live audio hosting unavailable');
-      broadcastState = liveState; observedAt = Date.now(); renderSign();
-      byId('room-authorize').disabled = false;
+      if (!session) { broadcastState = liveState; observedAt = Date.now(); }
+      renderSign();
+      byId('room-authorize').disabled = actionPending || !!session;
       if (!session) status('Backstage is ready. Connect your invited wallet to soundcheck.');
     } catch (error) {
       broadcastState = null; observedAt = 0;
@@ -213,33 +302,36 @@ byId('room-authorize').onclick = perform(async () => {
   requestingAccounts = true;
   try { accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }); }
   finally { requestingAccounts = false; }
-  if (!current()) return;
+  if (!current()) return false;
   wallet = accounts[0];
   if (!wallet) throw new Error('No wallet connected. Unlock MetaMask and select your operator or performer wallet.');
   status('Checking your booking wallet...');
   const challenge = await roomRequest(serviceUrl, 'challenge', { bookingId, wallet });
-  if (!current()) return;
+  if (!current()) return false;
   const hex = `0x${Array.from(new TextEncoder().encode(challenge.message), byte => byte.toString(16).padStart(2, '0')).join('')}`;
   status('Confirm the backstage access signature in MetaMask. No transaction or gas.');
   const signature = await window.ethereum.request({ method: 'personal_sign', params: [hex, wallet] });
-  if (!current()) return;
+  if (!current()) return false;
   const authorized = await roomRequest(serviceUrl, 'session', { challengeId: challenge.challengeId, signature });
-  if (!current()) return;
+  if (!current()) return false;
   session = authorized;
   byId('room-controls').hidden = false;
   byId('room-publisher').hidden = !(session.canPublish ?? session.role === 'publisher');
   byId('room-owner').hidden = session.role !== 'owner';
+  byId('room-operator-listen').hidden = session.role !== 'owner';
   render(session.state);
-});
+}, 'Connecting wallet · finish the MetaMask prompts…', '✓ Backstage unlocked. Follow your controls below.');
 byId('room-devices').onclick = perform(async () => {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   stream.getTracks().forEach(track => track.stop());
   const devices = await navigator.mediaDevices.enumerateDevices();
   byId('room-input').replaceChildren(new Option('Default audio input', ''),
     ...devices.filter(device => device.kind === 'audioinput').map(device => new Option(device.label || 'Audio input', device.deviceId)));
-});
-byId('room-publish').onclick = perform(() => connect(true));
-byId('room-monitor').onclick = perform(() => connect(false));
+}, 'Waiting for microphone permission…', 'Inputs ready. Choose your mic/interface, then Publish browser audio.');
+byId('room-publish').onclick = perform(() => connect(true), 'Publishing microphone…',
+  '✓ Microphone published. Ask the operator to confirm they hear your voice and music.');
+byId('room-monitor').onclick = perform(() => connect(false), 'Connecting to private soundcheck…',
+  '✓ Listening connection opened. Check the audio status and player below.');
 byId('room-stop').onclick = perform(async () => { await disconnect(); status('Microphone stopped. During a live slot, 60 seconds without audio cancels the broadcast.'); });
 byId('room-obs').onclick = perform(async () => {
   const authorization = session;
@@ -252,12 +344,20 @@ for (const [id, check] of [['room-check60', 't60'], ['room-check15', 't15']]) {
   byId(id).onclick = perform(async () => {
     if (!remoteTrack || audio.paused) throw new Error('Listen to the private feed before confirming');
     render(await command({ action: 'check', check, confirmed: true }));
-  });
+  }, `Saving T−${check.slice(1)} soundcheck… Please wait (up to 60 seconds).`,
+  `✓ T−${check.slice(1)} soundcheck PASSED · saved.`);
 }
-byId('room-arm').onclick = perform(async () => render(await command({ action: 'arm' })));
+byId('room-arm').onclick = perform(async () => render(await command({ action: 'arm' })),
+  'Saving scheduled radio handoff… Please wait (up to 60 seconds).', '✓ Radio handoff ARMED · saved.');
 byId('room-cancel').onclick = perform(async () => {
   if (!window.confirm('Cancel this live broadcast? The guaranteed performer fee remains unchanged.')) return;
   render(await command({ action: 'cancel', confirmed: true }));
+});
+audio.addEventListener('play', () => {
+  if (remoteTrack) byId('room-listen-status').textContent = 'Playing performer audio · private until showtime.';
+});
+audio.addEventListener('pause', () => {
+  if (remoteTrack) byId('room-listen-status').textContent = 'Playback paused. Tap ▶ to listen before confirming.';
 });
 async function poll() {
   if (!session || polling || disposed) return;
