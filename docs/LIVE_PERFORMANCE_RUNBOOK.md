@@ -77,7 +77,7 @@ Saving shows progress (up to 60 seconds); green **PASSED · saved** / **ARMED**
 cards confirm durable success. Errors remain visible instead of disappearing
 on the next status poll. Public booking refreshes cannot erase private check
 display. The next-step banner gives the next check's New York time.
-Self-monitoring is tucked under the performer's optional headphone controls;
+Self-monitoring is directly visible in the performer's headphone controls;
 it requires publishing first and is not how the operator hears the artist.
 The operator can use speakers with their microphone off and ordinary radio
 muted, provided another nearby/voice-call microphone cannot feed them back.

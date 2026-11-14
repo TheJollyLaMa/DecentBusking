@@ -17,6 +17,18 @@ test('stable practice room link is available before acceptance but never authori
   assert.deepEqual(b, before);
 });
 
+test('performer headphone monitor is directly visible, not hidden in collapsed help', async () => {
+  const html = await fs.readFile(require.resolve('../live-room.html'), 'utf8');
+  const publisher = html.slice(html.indexOf('<fieldset id="room-publisher"'), html.indexOf('<section class="remote-listen"'));
+  const monitor = publisher.slice(publisher.indexOf('<fieldset class="self-monitor">'), publisher.indexOf('id="room-recording-option"'));
+  assert.match(monitor, /Your headphone monitor/);
+  assert.match(monitor, /id="room-monitor-toggle"/);
+  assert.match(monitor, /id="room-monitor-volume"/);
+  assert.match(monitor, /id="room-monitor-status"/);
+  assert.doesNotMatch(monitor, /<\/details>/);
+  assert.doesNotMatch(publisher.slice(0, publisher.indexOf('<fieldset class="self-monitor">')), /<details/);
+});
+
 test('room module initializes practice, advances to backstage and fails closed on stale audio', async () => {
   const { performerRoomSign } = await import('../js/performer-room.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
