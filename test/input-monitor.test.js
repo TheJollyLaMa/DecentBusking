@@ -16,8 +16,11 @@ async function fixture(options = {}) {
     };
   }
   class AudioContext {
-    constructor() {
+    constructor(settings) {
+      this.settings = settings;
       this.state = 'suspended';
+      this.baseLatency = options.baseLatency;
+      this.outputLatency = options.outputLatency;
       this.destination = {};
       this.source = node();
       this.gainNode = { ...node(), gain: { value: 1 } };
@@ -53,6 +56,8 @@ test('off by default; starts only the supplied track at a safe local gain', asyn
   assert.equal(c.gainNode.gain.value, 0.25);
   assert.deepEqual(c.source.connections, [c.gainNode]);
   assert.deepEqual(c.gainNode.connections, [c.destination]);
+  assert.deepEqual(c.settings, { latencyHint: 'interactive' });
+  assert.equal(c.gainNode.channelCountMode, 'max');
   f.monitor.setVolume(0);
   assert.equal(c.gainNode.gain.value, 0);
   f.monitor.setVolume(1);
@@ -206,6 +211,44 @@ test('output routing errors do not play silently on default or stop the input', 
   assert.equal(f.track.readyState, 'live');
 });
 
+test('centered mono averages a stereo source locally and retains the selected mix across stop/start', async () => {
+  const f = await fixture();
+  f.monitor.setMix('mono');
+  assert.equal(f.contexts.length, 0);
+  await f.monitor.start({ mediaStreamTrack: f.track });
+  const c = f.contexts[0];
+  assert.equal(c.gainNode.channelCount, 1);
+  assert.equal(c.gainNode.channelCountMode, 'explicit');
+  assert.equal(c.gainNode.channelInterpretation, 'speakers');
+  assert.equal(c.gainNode.gain.value, 0.25, 'Downmix does not raise the monitor volume');
+  f.monitor.setMix('stereo');
+  assert.equal(c.gainNode.channelCountMode, 'max');
+  assert.equal(c.gainNode.channelCount, 2);
+  assert.equal(c.closes, 0, 'Changing the mix does not restart audio');
+  assert.deepEqual(c.stream.tracks, [f.track], 'The publishing track is not replaced');
+  assert.equal(f.track.readyState, 'live');
+  for (const value of ['', 'left', undefined, null, 1]) assert.throws(() => f.monitor.setMix(value), /Choose Stereo/);
+  assert.equal(c.gainNode.channelCountMode, 'max');
+  f.monitor.setMix('mono');
+  await f.monitor.stop();
+  await f.monitor.start({ mediaStreamTrack: f.track });
+  assert.equal(f.contexts[1].gainNode.channelCount, 1);
+  await f.monitor.stop();
+});
+
+test('latency reports only available browser output estimates, never an invented round trip', async () => {
+  const f = await fixture({ baseLatency: 0.01, outputLatency: 0.02 });
+  assert.equal(f.monitor.outputLatencyMs(), null);
+  await f.monitor.start({ mediaStreamTrack: f.track });
+  assert.equal(f.monitor.outputLatencyMs(), 30);
+  for (const value of [undefined, null, NaN, Infinity, -0.01]) {
+    f.contexts[0].outputLatency = value;
+    assert.equal(f.monitor.outputLatencyMs(), null);
+  }
+  await f.monitor.stop();
+  assert.equal(f.monitor.outputLatencyMs(), null);
+});
+
 test('binding selects permission-granted output for monitor and remote audio; denied choices stay explicit', async () => {
   const f = await fixture();
   const output = { ...control(), value: '', selectedOptions: [{ textContent: 'Interface headphones' }],
@@ -246,12 +289,12 @@ test('unsupported output selection directs users to system settings without clai
 
 async function bindingFixture(options = {}) {
   const f = await fixture(options);
-  const toggle = control(), volume = control(), status = control();
+  const toggle = control(), volume = control(), status = control(), mix = control();
   let current = null;
   const binding = f.bindInputMonitor({
-    toggle, volume, status, getTrack: () => current,
+    toggle, volume, mix, status, getTrack: () => current,
   }, { AudioContext: f.AudioContext, MediaStream: f.MediaStream });
-  return { ...f, binding, toggle, volume, status, setTrack(track) { current = track; } };
+  return { ...f, binding, toggle, volume, mix, status, setTrack(track) { current = track; } };
 }
 
 test('binding defaults off with headphone confirmation and missing mic guidance', async () => {
@@ -274,6 +317,7 @@ test('binding uses current input, wires volume and supports awaitable stop/recon
   f.toggle.checked = true;
   await f.toggle.emit('change');
   assert.match(f.status.textContent, /monitor on/);
+  assert.match(f.status.textContent, /latency estimate unavailable/);
   f.volume.value = '0.6';
   await f.volume.emit('input');
   assert.equal(f.contexts[0].gainNode.gain.value, 0.6);
@@ -288,6 +332,26 @@ test('binding uses current input, wires volume and supports awaitable stop/recon
   f.toggle.checked = false;
   await f.toggle.emit('change');
   assert.equal(f.contexts[1].closes, 1);
+});
+
+test('binding changes local mix without restarting and labels estimated latency honestly', async () => {
+  const f = await bindingFixture({ baseLatency: 0.01, outputLatency: 0.005 });
+  assert.equal(f.mix.value, 'stereo');
+  f.mix.value = 'mono'; await f.mix.emit('change');
+  assert.equal(f.contexts.length, 0, 'Choosing the mix does not turn monitoring on');
+  f.setTrack({ mediaStreamTrack: f.track });
+  f.toggle.checked = true; await f.toggle.emit('change');
+  assert.match(f.status.textContent, /centered mono.*local only/);
+  assert.match(f.status.textContent, /about 15 ms.*input\/capture delay is extra/);
+  assert.match(f.status.textContent, /echo or delay.*off.*direct interface monitoring/);
+  f.mix.value = 'stereo'; await f.mix.emit('change');
+  assert.match(f.status.textContent, /stereo/);
+  assert.equal(f.contexts.length, 1);
+  assert.equal(f.contexts[0].closes, 0);
+  f.mix.value = 'invalid'; await f.mix.emit('change');
+  assert.equal(f.toggle.checked, false);
+  assert.match(f.status.textContent, /Input monitor error: Choose Stereo/);
+  assert.equal(f.track.readyState, 'live');
 });
 
 test('binding surfaces start and volume errors and resets checkbox', async () => {
@@ -321,6 +385,23 @@ test('binding stop during start prevents stale status and checkbox updates', asy
   assert.equal(f.toggle.checked, false);
   assert.match(f.status.textContent, /Monitor off/);
   assert.deepEqual(f.contexts[0].source.connections, []);
+});
+
+test('backstage and practice expose and bind the same opt-in mix with refreshed module URLs', async () => {
+  const { readFile } = require('node:fs/promises');
+  for (const [page, module, id] of [
+    ['live-room.html', 'live-audio-room.mjs', 'room-monitor-mix'],
+    ['rehearsal.html', 'rehearsal.mjs', 'monitor-mix'],
+  ]) {
+    const html = await readFile(require.resolve(`../${page}`), 'utf8');
+    const source = await readFile(require.resolve(`../js/${module}`), 'utf8');
+    assert.ok(html.includes(`id="${id}"`));
+    assert.match(html, /value="mono">Centered mono/);
+    assert.ok(source.includes(`mix: ${page === 'live-room.html' ? 'byId' : 'el'}('${id}')`));
+    const version = source.match(/input-monitor\.mjs\?v=([^']+)/)?.[1];
+    assert.ok(version);
+    assert.ok(html.includes(`src="js/${module}?v=${version}"`), 'Entry and shared monitor cache versions advance together');
+  }
 });
 
 test('a late resume rejection after stop is cancellation, not a reconnect or UI error', async () => {

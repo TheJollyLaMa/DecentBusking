@@ -86,11 +86,40 @@ use output permission/selection and `setSinkId`; otherwise the panel explicitly
 directs the artist to system sound output settings. If no outputs are exposed,
 allow microphone access/list inputs first. Output selection is retained while
 restarting the monitor in the same tab, not across page reloads.
+**Headphone mix** has explicit Stereo and Centered mono choices in both rooms.
+Stereo remains the default; Centered mono averages a two-channel input into
+both ears without summing it at double gain, and leaves mono input at its
+existing level. It changes only browser monitoring, never the published track
+or recording. The choice survives monitor stop/start in the same page.
+This cannot center an interface's own direct-monitor output.
+
+Choose one monitoring path: direct interface monitoring with **Hear my input**
+off, or browser monitoring with headphones and interface direct monitoring off.
+Browser monitoring requests interactive latency and reports the browser's
+output estimate when available; this excludes input/capture delay and is not
+a measured round trip. Turning it off does not stop the published microphone.
+The public radio is a delayed return, not a performance monitor. When browser
+publishing starts, backstage advertises a short-lived local notice containing
+only the booking ID and expiry, scoped to that worker. The main site radio in
+the same origin/browser suppresses that booking's public live feed, with an
+explicit **Your return is muted** message; the artist's publishing connection
+and other listeners are unchanged. Stop/disconnect releases the notice; a
+crashed tab expires after 90 seconds without renewal.
+Keep the publishing tab awake; prolonged browser suspension can expire that
+local notice. This is not proof that every other playback device is muted.
+This does not reach other devices, different browser profiles, Discord voice,
+or cross-origin embeds. Mute those returns manually. If browser storage is
+blocked, the room and radio explicitly warn that automatic protection is
+unavailable. The notice is a local UX aid, not authentication or a server lock.
+For #340, compare direct-only, browser-only and off on the actual interface;
+record the device, browser, output route and whether the symptom is delay,
+doubling, feedback, distortion or missing sound. Do not declare hardware
+performance readiness from layout tests or the browser's latency estimate.
 The operator can use speakers with their microphone off and ordinary radio
 muted, provided another nearby/voice-call microphone cannot feed them back.
 UI reuse: adapt the existing private rehearsal's primary buttons, input meter,
-and collapsible help from `rehearsal.html` and `css/live-audio.css`; keep
-`bindInputMonitor` and the existing wallet/control protocol unchanged. No new
+and collapsible help from `rehearsal.html` and `css/live-audio.css`; reuse
+`bindInputMonitor` and preserve the existing wallet/control protocol. No new
 service or shared extraction. Operator/performer browser fixtures cover mobile
 and desktop layout, save progress/errors, and durable completion display.
 Reconfirm the artist's headphone/interface setup with them; synthetic test

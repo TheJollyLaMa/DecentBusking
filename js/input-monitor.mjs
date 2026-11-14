@@ -9,12 +9,36 @@
  * stop() disconnects immediately and resolves when its AudioContext is closed.
  * setOutput(deviceId) routes monitoring to that output and retains the choice
  * across stop/start. An empty ID means the system default.
+ * setMix('stereo' | 'mono') changes only the local headphone mix.
  * Await start()/stop() and surface failures to the user.
  */
 export function createInputMonitor(environment = globalThis) {
   let generation = 0;
   let active = null;
   let outputId = '';
+  let mix = 'stereo';
+
+  function configureMix(gain) {
+    gain.channelCount = mix === 'mono' ? 1 : 2;
+    gain.channelCountMode = mix === 'mono' ? 'explicit' : 'max';
+    // Speaker downmix averages stereo L/R; mono input retains its level.
+    gain.channelInterpretation = 'speakers';
+  }
+
+  function setMix(value) {
+    if (!['stereo', 'mono'].includes(value)) throw new TypeError('Choose Stereo or Centered mono for headphone monitoring.');
+    const previous = mix;
+    mix = value;
+    try { if (active?.gain) configureMix(active.gain); }
+    catch (error) { mix = previous; throw error; }
+  }
+
+  function outputLatencyMs() {
+    const context = active?.context;
+    if (context?.state !== 'running' ||
+        ![context.baseLatency, context.outputLatency].every(value => Number.isFinite(value) && value >= 0)) return null;
+    return Math.round((context.baseLatency + context.outputLatency) * 1000);
+  }
 
   function validateVolume(volume) {
     if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
@@ -62,12 +86,13 @@ export function createInputMonitor(environment = globalThis) {
     const request = generation;
     await closing;
     if (request !== generation) return false;
-    const session = { context: new AudioContext(), source: null, gain: null, cleanup: null };
+    const session = { context: new AudioContext({ latencyHint: 'interactive' }), source: null, gain: null, cleanup: null };
     active = session;
     try {
       session.source = session.context.createMediaStreamSource(new MediaStream([track]));
       session.gain = session.context.createGain();
       session.gain.gain.value = volume;
+      configureMix(session.gain);
       if (outputId) {
         if (typeof session.context.setSinkId !== 'function') throw new Error('Output selection is unsupported. Choose your interface in system sound settings.');
         await session.context.setSinkId(outputId);
@@ -108,7 +133,7 @@ export function createInputMonitor(environment = globalThis) {
     return true;
   }
 
-  return { start, setVolume, setOutput, stop };
+  return { start, setVolume, setOutput, setMix, outputLatencyMs, stop };
 }
 
 /**
@@ -118,21 +143,33 @@ export function createInputMonitor(environment = globalThis) {
  * Call/await stop() on every disconnect and before replacing the input.
  * stop() retains listeners so the same controls can be used after reconnecting.
  */
-export function bindInputMonitor({ toggle, volume, status, getTrack, output, outputDevices, outputStatus, audio }, environment = globalThis) {
+export function bindInputMonitor({ toggle, volume, mix, status, getTrack, output, outputDevices, outputStatus, audio }, environment = globalThis) {
   const monitor = createInputMonitor(environment);
   let revision = 0;
-  const offMessage = 'Monitor off. Headphones required to avoid feedback; direct interface monitoring is recommended.';
+  let monitoring = false;
+  const offMessage = 'Monitor off (browser). Use direct interface monitoring if available. Turning this off does not stop your microphone or broadcast.';
   toggle.checked = false;
   toggle.setAttribute('aria-label', 'I am wearing headphones: enable browser input monitoring');
   volume.min = '0';
   volume.max = '1';
   volume.step = '0.01';
   volume.value = '0.25';
+  if (mix) mix.value = 'stereo';
   status.setAttribute('role', 'status');
   status.textContent = offMessage;
 
+  function showMonitoring() {
+    if (!monitoring) return;
+    const latency = monitor.outputLatencyMs();
+    status.textContent = `Headphone monitor on · ${mix?.value === 'mono' ? 'centered mono' : 'stereo'} · local only. ${
+      latency === null ? 'Browser output latency estimate unavailable.'
+        : `Browser-reported output delay: about ${latency} ms (input/capture delay is extra).`
+    } If you hear echo or delay, turn Hear my input off and use direct interface monitoring instead.`;
+  }
+
   async function stop() {
     const request = ++revision;
+    monitoring = false;
     toggle.checked = false;
     status.textContent = offMessage;
     try { await monitor.stop(); } catch (error) {
@@ -164,7 +201,8 @@ export function bindInputMonitor({ toggle, volume, status, getTrack, output, out
       status.textContent = 'Starting headphone monitor…';
       const started = await monitor.start(track, Number(volume.value));
       if (request === revision && started) {
-        status.textContent = 'Headphone monitor on (browser latency). Direct interface monitoring is recommended.';
+        monitoring = true;
+        showMonitoring();
       }
     } catch (error) { await fail(error, request); }
   });
@@ -172,6 +210,14 @@ export function bindInputMonitor({ toggle, volume, status, getTrack, output, out
   volume.addEventListener('input', async () => {
     const request = revision;
     try { monitor.setVolume(Number(volume.value)); } catch (error) { await fail(error, request); }
+  });
+
+  mix?.addEventListener('change', async () => {
+    const request = revision;
+    try {
+      monitor.setMix(mix.value);
+      showMonitoring();
+    } catch (error) { await fail(error, request); }
   });
 
   if (output && outputDevices && outputStatus) {
@@ -197,6 +243,7 @@ export function bindInputMonitor({ toggle, volume, status, getTrack, output, out
         throw error;
       }
       selectedOutput = id;
+      showMonitoring();
       const label = output.selectedOptions[0]?.textContent || 'Selected output';
       outputStatus.textContent = `Output selected: ${label}. Applies to headphone monitor and room listening, not microphone input.`;
     }

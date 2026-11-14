@@ -10,6 +10,7 @@ import { sendRadioVote as sharedRadioVote, radioListenerId, radioMediaUrl, readR
 import { createRadioAdTransition } from './radio-ad-transition.mjs?v=20261030-ad-cutoff';
 import { DEVERT_MAX_AD_SECONDS } from './devert-scheduler.mjs';
 import { createLiveAudioListener, createLiveAudioFaultSlate } from './live-audio-client.mjs';
+import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
 
 const POLL_MS = 8_000;
 const FADE_IN_MS = 600;
@@ -20,6 +21,8 @@ const GATEWAY_RETRY_TIMEOUT_MS = 5_000;
 const RADIO_LOAD_MAX_ATTEMPTS = 3;
 const RADIO_LOAD_RETRY_MS = 15_000;
 let _liveAudioListener = null, _liveAudioActive = false, _liveAudioPolicy = null;
+let _publisherPresence = null, _stopPublisherWatch = null, _liveReturnSuppressed = false, _liveReturnProtectionError = '';
+const SELF_RETURN_MESSAGE = 'Your public live return is muted while you publish from this browser. Use your headphone/direct monitor; other listeners still hear you.';
 let _liveFaultSlate = null, _lastLiveFault = null;
 // After a song ends, poll quickly so the next one starts right after the JukeLoop changeover gap.
 const HANDOFF_POLL_MS = 750;
@@ -558,12 +561,17 @@ export function initRadioSync() {
   _playBtn = document.getElementById('now-playing-play-btn');
   _radioBtn = document.getElementById('now-playing-radio-btn');
   if (!_audio || !_radioUrl()) return;
+  _publisherPresence = createLivePublisherPresence({ serviceUrl: _radioUrl().replace(/\/api\/radio$/, '') });
+  _stopPublisherWatch?.();
+  _stopPublisherWatch = _publisherPresence.watch(() => {
+    if (_radioState?.liveAudio) _applyLiveAudioState(_radioState.liveAudio);
+  });
   _liveAudioListener = createLiveAudioListener({
     audio: _audioPlayer, serviceUrl: _radioUrl().replace(/\/api\/radio$/, ''),
     onStatus: ({ status, blocked, reason }) => {
-      if (!_liveAudioActive || _liveAudioPolicy?.mode !== 'live') return;
+      if (!_liveAudioActive || _liveAudioPolicy?.mode !== 'live' || _liveReturnSuppressed) return;
       _setLabel(`${status === 'ON-AIR' ? '🔴' : '⏳'} ${status} · Live audio`);
-      _setActivity(reason || (status === 'ON-AIR' ? 'Live audio through the website radio'
+      _setActivity(_liveReturnProtectionError || reason || (status === 'ON-AIR' ? 'Live audio through the website radio'
         : 'Retrying the live feed. Cancellation follows 60 seconds without verified audio.'));
       _playBtn?.classList.toggle('hidden', !blocked);
     },
@@ -764,6 +772,8 @@ function _applyLiveAudioState(state) {
   _liveAudioPolicy = state?.policy || null;
   const active = ['live', 'fault'].includes(_liveAudioPolicy?.mode) && _mode !== 'archive' && _devertListenMode !== 'ads-only';
   if (!active) {
+    _liveReturnSuppressed = false;
+    _liveReturnProtectionError = '';
     if (_liveAudioActive) {
       _liveAudioActive = false;
       void _liveAudioListener?.disconnect();
@@ -787,6 +797,22 @@ function _applyLiveAudioState(state) {
   _radio = null;
   _renderSponsorTag(null);
   _renderVoting();
+  _liveReturnSuppressed = false;
+  _liveReturnProtectionError = '';
+  if (_liveAudioPolicy.mode === 'live') {
+    try { _liveReturnSuppressed = _publisherPresence?.isPublishing(state.bookingId) === true; }
+    catch {
+      _liveReturnProtectionError = 'Automatic self-return protection is unavailable. If you are performing, mute this radio manually.';
+    }
+  }
+  if (_liveReturnSuppressed) {
+    void _liveAudioListener?.disconnect();
+    _setLabel('LIVE · Your return is muted');
+    _setTrack(_liveAudioPolicy.title, 'Local performer protection');
+    _setActivity(SELF_RETURN_MESSAGE);
+    _playBtn?.classList.add('hidden');
+    return true;
+  }
   if (_liveAudioPolicy.mode === 'fault') {
     void _liveAudioListener?.disconnect();
     _setLabel('OFF-AIR · Live performance cancelled');
@@ -807,6 +833,7 @@ function _applyLiveAudioState(state) {
       _setActivity('The private checks did not arm this slot. Waiting for the 60-second cancellation deadline.');
     }
     _liveAudioListener?.update(state);
+    if (_liveReturnProtectionError) _setActivity(_liveReturnProtectionError);
   }
   return true;
 }
@@ -1503,6 +1530,7 @@ function _stopAudio() {
 
 async function _unlock() {
   if (_liveAudioActive) {
+    if (_liveReturnSuppressed) { _setActivity(SELF_RETURN_MESSAGE); return; }
     try { await _liveAudioListener?.play(); } catch { _setActivity('Tap Play again when the live audio connection is ready'); }
     return;
   }

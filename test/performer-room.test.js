@@ -25,6 +25,9 @@ test('performer headphone monitor is directly visible, not hidden in collapsed h
   assert.match(monitor, /id="room-monitor-toggle"/);
   assert.match(monitor, /id="room-monitor-volume"/);
   assert.match(monitor, /id="room-monitor-status"/);
+  assert.match(monitor, /id="room-monitor-mix"/);
+  assert.match(monitor, /value="mono">Centered mono/);
+  assert.match(monitor, /does not change the broadcast/);
   assert.doesNotMatch(monitor, /<\/details>/);
   assert.doesNotMatch(publisher.slice(0, publisher.indexOf('<fieldset class="self-monitor">')), /<details/);
 });
@@ -50,6 +53,7 @@ test('room module initializes practice, advances to backstage and fails closed o
     Date: class extends Date { static now() { return time; } },
     URL, AbortSignal, TextEncoder, performerRoomSign, bindLiveRecordingOption,
     bindInputMonitor: () => ({ stop: async () => {} }),
+    createLivePublisherPresence: () => ({ start: () => true, stop() {} }),
     createInputMeter: () => ({ start() {}, stop: async () => {} }),
     setInterval(fn, ms) { intervals.push({ fn, ms }); },
     fetch: async url => ({ ok: true, json: async () => url.includes('/api/live-bookings')
@@ -113,6 +117,7 @@ test('guided operator flow shows pending saves, persistent errors and saved chec
     Date: class extends Date { static now() { return time; } },
     URL, AbortSignal, TextEncoder, performerRoomSign, bindLiveRecordingOption,
     bindInputMonitor: () => ({ stop: async () => {} }),
+    createLivePublisherPresence: () => ({ start: () => true, stop() {} }),
     createInputMeter: () => ({ start() {}, stop: async () => {} }),
     loadLiveAudioSdk: async () => ({ Room, RoomEvent: { TrackPublished: 'published', TrackSubscribed: 'subscribed',
       TrackUnsubscribed: 'unsubscribed', Disconnected: 'disconnected' }, Track: { Kind: { Audio: 'audio' } } }),
@@ -188,4 +193,83 @@ test('on-air sign requires fresh verified server state, exact booking and funded
     assert.equal(performerRoomSign(eligible, { ...state, ...change }, start, start).live, false);
   }
   assert.equal(performerRoomSign(eligible, state, start + 1200000, start + 1200000).live, false);
+});
+
+test('publisher protects the return before publication and releases it on stop, track end, disconnection or publication failure', async t => {
+  const { performerRoomSign } = await import('../js/performer-room.mjs');
+  const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
+  const source = (await fs.readFile(require.resolve('../js/live-audio-room.mjs'), 'utf8')).replace(/^import .*;\n/gm, '');
+  for (const outcome of ['stop', 'ended', 'disconnected', 'failed-publish', 'storage-denied']) {
+    await t.test(outcome, async () => {
+      const elements = new Map(), handlers = {}, order = [];
+      let publishing = false, stopped = false, ended;
+      const element = id => {
+        if (!elements.has(id)) elements.set(id, { id, value: '', textContent: '', classList: { toggle() {} },
+          addEventListener() {}, setAttribute() {}, removeAttribute() {}, pause() {} });
+        return elements.get(id);
+      };
+      const capture = { stop() { stopped = true; },
+        mediaStreamTrack: { addEventListener(name, fn) { assert.equal(name, 'ended'); ended = fn; } } };
+      class Room {
+        remoteParticipants = new Map();
+        localParticipant = { async publishTrack(track, options) {
+          order.push('publish');
+          assert.equal(track, capture);
+          assert.equal(options.forceStereo, true, 'Headphone mix must not change the broadcast');
+          if (outcome === 'failed-publish') throw Error('Publication failed');
+        } };
+        on(name, fn) { handlers[name] = fn; }
+        async connect() {}
+        async disconnect() {}
+      }
+      const context = {
+        document: { getElementById: element }, location: { href: `https://example.test/live-room.html?booking=${b.id}` },
+        window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {},
+          ethereum: { on() {}, async request({ method }) { return method === 'eth_requestAccounts' ? [b.wallet] : 'signature'; } } },
+        Date: class extends Date { static now() { return start - 60000; } },
+        URL, AbortSignal, TextEncoder, performerRoomSign, bindLiveRecordingOption,
+        bindInputMonitor: () => ({ stop: async () => {} }),
+        createInputMeter: () => ({ start() {}, stop: async () => {} }),
+        createLivePublisherPresence: ({ onError }) => ({
+          start(id) {
+            assert.equal(id, b.id);
+            order.push('protect');
+            if (outcome === 'storage-denied') { onError(Error('Storage denied')); return false; }
+            publishing = true; return true;
+          },
+          stop() { publishing = false; return true; },
+        }),
+        loadLiveAudioSdk: async () => ({ Room, createLocalAudioTrack: async () => capture,
+          RoomEvent: { Disconnected: 'disconnected' }, Track: { Source: { Microphone: 'microphone' } } }),
+        roomRequest: async (_url, path) => path === 'challenge' ? { message: 'challenge', challengeId: 'fixture' }
+          : path === 'session' ? { token: 'fixture-token', role: 'performer', canPublish: true, state: { configured: true } }
+            : { url: 'fixture', token: 'fixture', publisherIdentity: 'performer' },
+        setInterval() {},
+        fetch: async url => ({ ok: true, json: async () => url.includes('/api/live-bookings')
+          ? { bookings: [{ ...b, status: 'funded', acknowledged: true }] }
+          : { configured: true, bookingId: b.id, phase: 'preflight' } }),
+      };
+      vm.runInNewContext(source, context);
+      const click = id => element(id).onclick({ currentTarget: element(id) });
+      await new Promise(resolve => setImmediate(resolve));
+      await click('room-authorize');
+      await click('room-publish');
+      assert.deepEqual(order, ['protect', 'publish']);
+      if (outcome === 'failed-publish') {
+        assert.match(element('room-action-status').textContent, /Publication failed/);
+      } else if (outcome === 'storage-denied') {
+        assert.equal(stopped, false, 'Protection failure must not discard the microphone publication');
+        assert.match(element('room-return-status').textContent, /protection is unavailable/);
+        await click('room-stop');
+      } else {
+        assert.equal(publishing, true);
+        assert.match(element('room-return-status').textContent, /live return is muted/);
+        if (outcome === 'stop') await click('room-stop');
+        if (outcome === 'ended') ended();
+        if (outcome === 'disconnected') handlers.disconnected();
+      }
+      assert.equal(publishing, false);
+      assert.match(element('room-return-status').textContent, /protection is off/);
+    });
+  }
 });
