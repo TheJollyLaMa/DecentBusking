@@ -143,6 +143,14 @@ function renderSign() {
     byId('room-on-air').textContent = sign.label;
     byId('room-on-air').classList.toggle('is-live', sign.live);
     byId('room-countdown').textContent = sign.detail;
+    if (booking) {
+      const start = Date.parse(booking.startUtc);
+      const time = minutes => new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit',
+      }).format(new Date(start - minutes * 60000));
+      byId('room-practice-directions').textContent = `Private practice is available now. Open it in its own tab below and connect your invited performer or operator wallet. Return to this stage at ${time(70)} for backstage. Soundchecks: ${time(60)} and ${time(15)} New York time.`;
+      byId('room-entry-directions').textContent = `Soundchecks: ${time(60)} and ${time(15)} New York time. Performer: connect your booked wallet, choose your microphone/interface, then Publish browser audio. Operator: connect the owner wallet and Listen to private soundcheck.`;
+    }
     const practice = booking && !booking.cancelled && ['draft', 'funded'].includes(booking.status) &&
       Date.now() < Date.parse(booking.startUtc) - 70 * 60_000;
     byId('room-practice').hidden = !practice;

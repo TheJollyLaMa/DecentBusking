@@ -51,11 +51,13 @@ test('room module initializes practice, advances to backstage and fails closed o
   assert.equal(element('room-helper').hidden, true, 'embedded practice owns the sole visible DBusker help');
   assert.match(element('room-practice-frame').src, /rehearsal.html\?booking=friday%3Ainvited/);
   assert.equal(element('room-practice-direct').href, element('room-practice-frame').src);
+  assert.match(element('room-practice-directions').textContent, /7:50 PM.*8:00 PM and 8:45 PM New York/);
   assert.match(element('room-countdown').textContent, /Private practice/);
   time = start - 70 * 60000;
   intervals.find(entry => entry.ms === 1000).fn();
   assert.equal(element('room-practice').hidden, true);
   assert.equal(element('room-helper').hidden, false, 'backstage shows the outer guide after removing practice');
+  assert.match(element('room-entry-directions').textContent, /Operator: connect the owner wallet and Listen to private soundcheck/);
   assert.equal(element('room-practice-frame').src, '');
   selected = { ...b, status: 'funded', acknowledged: true };
   liveState = { configured: true, bookingId: b.id, status: 'ON-AIR', phase: 'live', armed: true };

@@ -12,6 +12,23 @@ const FRIDAY_LIVE_START_STANDARD_TIME = new Date('2026-11-07T02:00:00Z').getTime
 const SATURDAY = new Date('2026-10-10T12:00:00Z').getTime();
 const UPCOMING = new Date('2026-10-10T13:00:00Z').getTime();
 
+test('public event offers the exact funded stage without a connected wallet and excludes ended or incompatible rooms', async () => {
+  const { liveEventStageBooking } = await import('../js/radio-schedule-ui.mjs');
+  const now = Date.parse('2026-11-14T00:36:00Z');
+  const event = { id: 'friday-live-performance:2026-11-13', endUtc: '2026-11-14T02:20:00Z' };
+  const booking = { id: `${event.id}:artist`, eventId: event.id, wallet: `0x${'1'.repeat(40)}`,
+    mode: 'phase1', payoutPolicy: 'pilot-guaranteed-v1', stewardApproved: true, status: 'funded', acknowledged: true,
+    startUtc: '2026-11-14T02:00:00Z', endUtc: event.endUtc };
+  assert.equal(liveEventStageBooking([booking], event, now), booking);
+  for (const change of [{ eventId: 'other' }, { status: 'draft' }, { acknowledged: false }, { cancelled: true },
+    { mode: 'phase0' }, { payoutPolicy: 'other' }, { stewardApproved: false }]) {
+    assert.equal(liveEventStageBooking([{ ...booking, ...change }], event, now), null);
+  }
+  assert.equal(liveEventStageBooking([booking], { ...event, status: 'cancelled' }, now), null);
+  assert.equal(liveEventStageBooking([booking], event, Date.parse(event.endUtc)), null);
+  assert.equal(liveEventStageBooking(null, event, now), null);
+});
+
 function track(id, votes = 0, plays = 0) {
   return { trackId: id, title: `Track ${id}`, votes, plays, uploader: 'Artist', enabled: true };
 }

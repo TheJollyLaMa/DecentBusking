@@ -282,11 +282,11 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   assert.match(html, /live-performance-admin\.mjs\?v=20261110-profile-invitation/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);
   assert.match(html, /src="js\/creator-profile\.mjs\?v=20261110-wallet-practice"/);
-  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261110-wallet-practice"/);
+  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261113-stage-entry"/);
   assert.match(html, /live-performance\.css\?v=20261110-invitation-card/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
-    './js/radio-schedule-ui.mjs?v=20261110-wallet-practice');
+    './js/radio-schedule-ui.mjs?v=20261113-stage-entry');
   assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],
     './js/fund-display.mjs?v=20261108-live-audio-pilot');
   for (const file of ['creator-profile.mjs', 'radio-schedule-ui.mjs']) {
