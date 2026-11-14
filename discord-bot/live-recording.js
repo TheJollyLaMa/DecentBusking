@@ -8,12 +8,50 @@ import { verifyMessage } from 'ethers';
 import { liveRecordingConsentMessage } from '../js/live-recording-consent.mjs';
 import { createPinataStateStore } from './ipfs-state.js';
 import { LiveAudioError } from './live-audio-errors.js';
+import { buildGatewayUrl } from './mint-sync.js';
 
 const RATE = 48000, BYTES_PER_SECOND = RATE * 2;
 const AAD = Buffer.from('dbusk-live-recording-state-v1');
 const safeCid = value => typeof value === 'string' && /^[a-zA-Z0-9]{20,120}$/.test(value);
 const keysOnly = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).every(key => keys.includes(key));
+
+export async function downloadRecordingSegment(cid, { gateway, fetchImpl = fetch } = {}) {
+  if (!safeCid(cid)) throw Error('Invalid recording segment CID');
+  const base = new URL(gateway);
+  if (base.protocol !== 'https:' || base.username || base.password || base.hash) throw Error('Invalid recording gateway');
+  base.pathname = `${base.pathname.replace(/\/$/, '').replace(/\/ipfs$/, '')}/ipfs/`;
+  let response;
+  try {
+    response = await fetchImpl(buildGatewayUrl(base.toString(), cid), {
+      signal: AbortSignal.timeout(30000), redirect: 'error',
+    });
+  } catch {
+    // Do not persist fetch errors that may include gateway credentials in the URL.
+    throw Error('Recording segment download failed (network, timeout or redirect)');
+  }
+  if (!response.ok) throw Error(`Recording segment download failed (${response.status})`);
+  if (!response.body) throw Error('Recording segment download returned no body');
+  const limit = BYTES_PER_SECOND * 30 + 44;
+  const reader = response.body.getReader();
+  const chunks = [];
+  let length = 0;
+  try {
+    if (Number(response.headers.get('content-length')) > limit) throw Error('Recording segment exceeds size limit');
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > limit) throw Error('Recording segment exceeds size limit');
+      chunks.push(Buffer.from(value));
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    if (error.message === 'Recording segment exceeds size limit') throw error;
+    throw Error('Recording segment download failed while reading body');
+  } finally { reader.releaseLock(); }
+  return Buffer.concat(chunks, length);
+}
 
 export function validateRecordingState(state) {
   if (!keysOnly(state, ['version', 'recordings']) || state.version !== 1 ||

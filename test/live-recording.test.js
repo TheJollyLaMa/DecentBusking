@@ -121,6 +121,45 @@ test('twenty-minute real PCM finalizes to a playable MP3 with measured duration 
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test('preserved consented recording retries an authenticated segment failure once without duplicate mint intake', async () => {
+  const { createLiveRecorder, downloadRecordingSegment } = await import('../discord-bot/live-recording.js');
+  const s = await setup();
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
+  const saved = structuredClone(s.state().recordings[0]);
+  let unauthorized = true, uploads = 0;
+  const recorder = createLiveRecorder({ ...s.args,
+    download: cid => downloadRecordingSegment(cid, {
+      gateway: 'https://recording.example/ipfs/?pinataGatewayToken=fixture-token',
+      fetchImpl: async url => {
+        const target = new URL(url);
+        assert.equal(target.searchParams.get('pinataGatewayToken'), 'fixture-token');
+        assert.equal(target.pathname, `/ipfs/${cid}`);
+        return unauthorized ? new Response('', { status: 401 }) : new Response(s.blobs.get(cid));
+      },
+    }),
+    encode: async (segments, download) => {
+      for (const segment of segments) assert.equal((await download(segment.cid)).length, segment.bytes + 44);
+      return Buffer.from('verified-encoded-fixture');
+    },
+    upload: async bytes => { uploads++; return s.args.upload(bytes); },
+  });
+  await recorder.initialize(); s.at(START + 20000);
+  await recorder.tick([booking]);
+  assert.equal(recorder.status(booking).status, 'processing');
+  assert.equal(s.submissions.length, 0);
+  assert.equal(uploads, 0);
+  assert.deepEqual(s.state().recordings[0].consent, saved.consent);
+  assert.deepEqual(s.state().recordings[0].segments, saved.segments);
+  assert.match(recorder.status(booking).error, /401/);
+  unauthorized = false;
+  await recorder.tick([booking]); await recorder.tick([booking]);
+  assert.equal(recorder.status(booking).status, 'submitted');
+  assert.equal(s.submissions.length, 1);
+  assert.equal(uploads, 1);
+  assert.equal(recorder.deploymentState().ready, true);
+});
+
 test('finalized recording uses existing mint requests, survives restore and only replays after genuine mint completion', async () => {
   const p = await import('../discord-bot/playlist-store.js');
   try {

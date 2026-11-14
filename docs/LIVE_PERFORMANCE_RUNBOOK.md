@@ -174,6 +174,29 @@ participation-gift proposal, not the guaranteed $20 cash fee. The gift remains
 outside the USDC escrow. An admin approval or success animation is not an NFT
 transfer; reconcile inventory and the actual transfer receipt separately.
 
+### Recording gateway recovery
+
+Recording segment downloads must place the CID in the URL path while
+preserving a dedicated gateway's `pinataGatewayToken` query. Reuse
+`buildGatewayUrl` through `downloadRecordingSegment`; string concatenation
+after a token query produces a malformed request and can return HTTP 401.
+Never forward the Pinata API JWT to a media gateway. Downloads reject
+redirects, time out at 30 seconds, and enforce the 30-second PCM WAV size
+limit while streaming. Persisted errors omit token-bearing URLs.
+
+Recovery belongs to the canonical recorder: its preserved consent, ordered
+segments, verified PCM, result checkpoint and mint intake remain authoritative.
+Do not overwrite the recording journal or perform parallel ingestion from
+a separate local recovery process. A read-only segment probe is not recovery
+or mint/replay completion.
+
+The existing production deployment gate blocks replacement while a consented
+recording is recording/processing, including failed finalization. A repair to
+that worker cannot be declared deployable just because paid queues are empty.
+Resolve a verified durable recording handoff in a separately reviewed change
+or obtain an explicit maintenance plan; do not bypass the strict gate, restart
+the worker casually, revoke consent, or delete preserved segments to get past it.
+
 ### First-night supporter encore
 
 After the first show the steward separately approved one existing v1.0.0

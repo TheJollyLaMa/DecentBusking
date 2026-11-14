@@ -6,7 +6,7 @@ import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
 import { createLiveAudioTransport } from './live-audio-transport.js';
-import { createLiveRecorder, createLiveRecordingStore } from './live-recording.js';
+import { createLiveRecorder, createLiveRecordingStore, downloadRecordingSegment } from './live-recording.js';
 import { createRehearsalService } from './rehearsal.js';
 import { createRehearsalStore } from './rehearsal-store.js';
 // discord-bot/index.js
@@ -1561,12 +1561,7 @@ async function main() {
     enabled: recordingEnabled, store: recordingStore, upload: recordingUpload,
     download: async cid => {
       const gateway = await discoverDedicatedGateway(config) || config.ipfsGateway;
-      const base = gateway.replace(/\/$/, '').replace(/\/ipfs$/, '');
-      const response = await fetch(`${base}/ipfs/${cid}`, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok) throw new Error(`Recording segment download failed (${response.status})`);
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (bytes.length > 2880044) throw new Error('Recording segment exceeds size limit');
-      return bytes;
+      return downloadRecordingSegment(cid, { gateway });
     },
     ingest: async recording => {
       if (!playlistReady) throw new Error('Recording mint queue is waiting for durable playlist restore');
