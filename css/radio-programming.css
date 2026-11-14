@@ -1,6 +1,12 @@
 #admin-modal { width: min(1500px, 97vw); max-height: 96vh; }
 #admin-modal-inner { padding: clamp(12px, 2vw, 28px); min-width: 0; }
 #admin-modal-inner > * { min-width: 0; }
+.radio-stage-entry { display: grid; gap: 10px; min-width: 0; margin: 12px 0; }
+.radio-stage-entry a[data-live-stage] { display: flex; align-items: center; justify-content: center; box-sizing: border-box; min-height: 48px; width: 100%; padding: 14px 18px; border: 2px solid #b9f49b; border-radius: 12px; background: #b9f49b; color: #10241b; font: 800 1rem/1.3 system-ui, sans-serif; text-align: center; text-decoration: none; white-space: normal; cursor: pointer; box-shadow: 0 3px 12px #0005; }
+.radio-stage-entry a[data-live-stage]:hover { background: #d4ffc1; border-color: #d4ffc1; color: #10241b; }
+.radio-stage-entry a[data-live-stage]:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.radio-stage-entry p { margin: 0; line-height: 1.5; }
+.radio-stage-entry small { line-height: 1.5; }
 .radio-programming-calendar { --calendar-line: #425268; --calendar-soft: #202c3c; color: #eef4fb; background: #131d2c; border: 1px solid #40536b; border-radius: 22px; padding: 20px; margin: 16px 0; font-family: system-ui, sans-serif; }
 .radio-calendar-toolbar, .radio-calendar-presets, .radio-calendar-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
 .radio-calendar-title { font-size: 1.3rem; font-weight: 750; margin-right: auto; }
