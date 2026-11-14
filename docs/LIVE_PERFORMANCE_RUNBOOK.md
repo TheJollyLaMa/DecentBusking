@@ -197,6 +197,26 @@ Resolve a verified durable recording handoff in a separately reviewed change
 or obtain an explicit maintenance plan; do not bypass the strict gate, restart
 the worker casually, revoke consent, or delete preserved segments to get past it.
 
+The opt-in `LIVE_RECORDING_DURABLE_HANDOFF_ENABLED=true` path provides a
+canonical ended-recording handoff on workers that already contain the code.
+It is disabled by default and does not change the legacy completion guard.
+The authenticated deployment lease pauses canonical recording retries and
+live controls, verifies a fresh booking read and byte-for-byte signed journal
+readback, and refuses active/armed or imminent shows, missing/changed bookings,
+buffered audio, active producers/encoding and unverifiable checkpoints.
+Cancellation or expiry resumes the recorder without changing consent,
+segments or processing status. Lease extension rechecks readback. The paid
+playlist/ad drain remains mandatory and independently gates readiness.
+Download/encode/intake failures remain visible but are not treated as missing
+captured frames; a successful retry clears the delivery error and preserves
+the complete/incomplete classification of the actual captured performance.
+
+This is not a bootstrap mechanism for the older deployed worker, which cannot
+acknowledge the new handoff. Do not enable the flag expecting it to hot-patch
+that worker or bypass its predeploy response. Release requires a separately
+reviewed operational solution for the old worker; both repair and handoff PRs
+remain unmerged until that solution is approved.
+
 ### First-night supporter encore
 
 After the first show the steward separately approved one existing v1.0.0

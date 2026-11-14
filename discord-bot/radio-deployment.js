@@ -12,19 +12,26 @@ export function createRadioDeploymentGate({ getSession, getLiveHandoff = () => (
     if (!session) throw new Error('Radio worker is not ready for deployment handoff');
     if (action === 'cancel') {
       expiresAt = 0; deploymentId = null;
-      await session.drainForDeployment(0);
+      try { await getLiveHandoff({ action, id, expiresAt: 0 }); }
+      finally { await session.drainForDeployment(0); }
       return { draining: false, ready: false };
     }
     deploymentId = id;
     expiresAt = now() + leaseMs;
     let status = await session.drainForDeployment(expiresAt);
-    const liveHandoff = await getLiveHandoff();
+    const liveHandoff = await getLiveHandoff({ action, id, expiresAt });
     if (!liveHandoff || typeof liveHandoff.ready !== 'boolean') throw new Error('Live recording handoff is not verified');
     status = { ...status, ready: status.ready && liveHandoff.ready,
+      ...(liveHandoff.recordingCheckpointVerified === true ? { recordingCheckpointVerified: true } : {}),
       ...(liveHandoff.ready ? {} : { liveRecordingPending: true }) };
     if (status.ready) {
       expiresAt = now() + 15 * 60_000;
       status = await session.drainForDeployment(expiresAt);
+      const extended = await getLiveHandoff({ action, id, expiresAt });
+      if (!extended || typeof extended.ready !== 'boolean') throw new Error('Live recording handoff extension is not verified');
+      status = { ...status, ready: status.ready && extended.ready,
+        ...(extended.recordingCheckpointVerified === true ? { recordingCheckpointVerified: true } : {}),
+        ...(extended.ready ? {} : { liveRecordingPending: true }) };
     }
     return { ...status, deploymentId };
   };

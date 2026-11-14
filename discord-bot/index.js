@@ -1818,7 +1818,8 @@ async function main() {
         .sort((first, second) => Date.parse(first.requestedAt || 0) - Date.parse(second.requestedAt || 0));
     },
     radioDeployment: createRadioDeploymentGate({ getSession: getActiveJukeLoopSession,
-      getLiveHandoff: async () => {
+      getLiveHandoff: async lease => {
+        if (process.env.LIVE_RECORDING_DURABLE_HANDOFF_ENABLED === 'true') return liveAudio.prepareDeployment(lease);
         const current = await liveAudio.current();
         return { ready: recorder.deploymentState().ready &&
           !(current?.armed && ['preflight', 'live'].includes(current.phase)) };
