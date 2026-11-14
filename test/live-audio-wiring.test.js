@@ -171,7 +171,7 @@ test('Admin wires an escaped operator link separately from all existing guarante
   assert.match(html, /Guaranteed pilot fee/);
   assert.match(html, /Separate offer &lt;not markup&gt;/);
   const actions = [...html.matchAll(/data-live-action="([^"]+)"/g)].map(([, action]) => action);
-  assert.deepEqual(actions, ['agreement', 'acknowledge', 'schedule', 'fund', 'reconcile', 'review', 'settle', 'cancel']);
+  assert.deepEqual(actions, ['release', 'agreement', 'acknowledge', 'schedule', 'fund', 'reconcile', 'review', 'settle', 'cancel']);
   assert.deepEqual(b, before);
   for (const change of [{ status: 'draft' }, { acknowledged: false }, { cancelled: true },
     { endUtc: new Date(NOW).toISOString() }, { payoutPolicy: undefined }]) {
@@ -272,6 +272,39 @@ test('funded invitation stays compact during the show and offers only the author
   assert.equal(nodes.filter(node => node.tag === 'button').length, 0);
 });
 
+test('post-show performer card makes claim the primary action and keeps agreement details collapsed', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t), container = createElement('section');
+  t.mock.method(Date, 'now', () => Date.parse('2026-11-14T02:40:00Z'));
+  const b = { ...booking(), id: 'performer:claim', status: 'approved', approvedUnits: '20000000' };
+  await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+    bookingState: { bookings: [b], escrowAddress: otherWallet } });
+  const article = container.children[0], nodes = descendants(article);
+  assert.equal(article.className, 'live-performer-next');
+  assert.equal(article.attributes['data-action-needed'], 'true');
+  assert.match(nodes.find(node => node.tag === 'h3').textContent, /Your next step.*claim/);
+  const claim = nodes.find(node => node.className === 'live-performer-claim');
+  assert.equal(claim.textContent, 'Claim $20.00 USDC');
+  assert.equal(claim.disabled, false);
+  const details = nodes.find(node => node.className === 'live-performer-details');
+  assert.equal(details.tag, 'details');
+  assert.equal(details.attributes.open, undefined);
+});
+
+test('post-show waiting card gives ownership of next step without a disabled claim button or false payment', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t), container = createElement('section');
+  const b = { ...booking(), status: 'funded', endUtc: new Date(Date.now() - 60000).toISOString() };
+  await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+    bookingState: { bookings: [b], escrowAddress: otherWallet } });
+  const nodes = descendants(container);
+  assert.equal(nodes.filter(node => node.className === 'live-performer-claim').length, 0);
+  assert.match(nodes.find(node => node.tag === 'output').textContent, /Jolly’s next step.*Nothing for you to sign/);
+  const creatorSource = fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8');
+  assert.match(creatorSource, /insertBefore\(livePerformances, earningsDisclosure\)/);
+  assert.match(creatorSource, /livePaymentLoad = loadLivePayments\(check\)/);
+});
+
 test('Profile/Admin and index preserve live-audio-pilot cache references', async () => {
   for (const file of ['live-performance-profile.mjs', 'live-performance-admin.mjs']) {
     const source = fs.readFileSync(path.join(__dirname, '../js', file), 'utf8');
@@ -279,22 +312,24 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
     assert.match(source, /live-audio\.mjs\?v=20261108-live-audio-pilot/);
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /live-performance-admin\.mjs\?v=20261110-profile-invitation/);
-  assert.match(html, /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261110-wallet-practice"/);
+  assert.match(html, /live-performance-admin\.mjs\?v=20261113-one-action-release/);
+  assert.match(html, /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261113-one-action-release"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261113-stage-entry"/);
-  assert.match(html, /live-performance\.css\?v=20261110-invitation-card/);
+  assert.match(html, /live-performance\.css\?v=20261113-one-action-release/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
     './js/radio-schedule-ui.mjs?v=20261113-stage-entry');
   assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],
     './js/fund-display.mjs?v=20261108-live-audio-pilot');
-  for (const file of ['creator-profile.mjs', 'radio-schedule-ui.mjs']) {
+  for (const file of ['radio-schedule-ui.mjs']) {
     assert.match(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'),
       /live-performance-profile\.mjs\?v=20261110-wallet-practice/);
   }
+  assert.match(fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8'),
+    /live-performance-profile\.mjs\?v=20261113-one-action-release/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8'),
-    /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);
+    /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
 });
 
 test('production live audio reuses encrypted mirrored storage, never an ephemeral file path', () => {

@@ -7,8 +7,9 @@ import {
 import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
 import { utcToNewYorkInput } from './radio-calendar.mjs';
 import { isAdminWallet } from './admin-access.mjs';
-import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261110-profile-invitation';
+import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261113-one-action-release';
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261108-live-audio-pilot';
+import { guaranteedReleaseState, releaseGuaranteedEscrow } from './live-escrow-release.mjs?v=20261113-one-action-release';
 
 const routerAbi = [
  'function funds(bytes32) view returns (string metadataUri,bool active,bool exists)',
@@ -97,7 +98,8 @@ function render() {
   const bookings = state.bookings.filter(b => bookingGroup(b) === group);
   const labels = { draft:'📨 Invitations & drafts', upcoming:'🗓 Upcoming performances', active:'🔴 In progress',
    completed:'📚 Completed performances', cancelled:'❌ Canceled performances' };
-  return `<details class="live-booking-group"${group === 'draft' ? ' open' : ''}><summary>${labels[group]} (${bookings.length})</summary>${bookings.length
+  const releaseDue = bookings.some(b => { const release = guaranteedReleaseState(b); return release && !release.disabled; });
+  return `<details class="live-booking-group"${group === 'draft' || releaseDue ? ' open' : ''}><summary>${labels[group]} (${bookings.length})</summary>${bookings.length
    ? bookings.map(b => renderLivePerformanceAdminBooking(b)).join('')
    : '<p class="live-booking-empty">No bookings in this group.</p>'}</details>`;
  }).join('');
@@ -105,7 +107,18 @@ function render() {
 export function renderLivePerformanceAdminBooking(b, now = Date.now()) {
  const roomUrl = liveAudioRoomUrl(b, now);
  const room = roomUrl ? `<p><a data-live-room="operator" href="${escapeLive(roomUrl)}">Open operator audio room</a><br><small>This link does not grant access. Authorize with the configured owner wallet; publishing remains performer-only. Hosting may be unavailable. Private checks open at T−70 minutes.</small></p>` : '';
- return `${liveBookingRows([b])}${room}<div data-live-actions="${escapeLive(b.id)}"><details class="live-booking-actions"><summary>🛠️ Booking actions</summary><div>${bookingActionButtons(b)}</div></details></div>`;
+ const release = guaranteedReleaseState(b, now);
+ const pending = typeof localStorage !== 'undefined' && localStorage.getItem(`live-pending:${b.id}:approve`);
+ const releaseCard = release ? `<section class="live-release-card" aria-label="Guaranteed performer fee">
+  <h3>Guaranteed performer fee · $${(Number(b.amountUnits) / 1e6).toFixed(2)} USDC</h3>
+  <p>Base escrow → ${escapeLive(b.displayName || 'Performer')}<br><small>${escapeLive(b.wallet)}</small></p>
+  <button type="button" class="live-release-primary" data-live-action="release"${release.disabled && !pending ? ' disabled' : ''}>${escapeLive(pending ? 'Check pending escrow release' : release.label)}</button>
+  <p>${escapeLive(release.detail)}</p>
+  <p>Clicking release publishes a minimal public fee report. Confirm the wallet upload signature and escrow approval transaction; never share your private key.</p>
+  <a data-live-release-report${b.reportUri ? ` href="https://gateway.pinata.cloud/ipfs/${escapeLive(b.reportUri.replace(/^ipfs:\/\//, ''))}" target="_blank" rel="noopener"` : ' hidden'}>Read public fee report</a>
+  <output data-live-release-status role="status" aria-live="polite"></output>
+  </section>` : '';
+ return `${liveBookingRows([b])}${room}<div data-live-actions="${escapeLive(b.id)}">${releaseCard}<details class="live-booking-actions"><summary>${release ? 'Advanced · booking & manual review' : '🛠️ Booking actions'}</summary><div>${bookingActionButtons(b)}</div></details></div>`;
 }
 function bookingActionButtons(b) {
  const pilot = b.payoutPolicy === LIVE_PILOT_POLICY;
@@ -155,6 +168,29 @@ async function review(b, bps, cancellation = false) {
  await command({ action:'decision', id:b.id, payoutBps:bps, liveMusicMinutes, verifiedSeconds, verifiedStart, reason, reportUri, reportHash, remainderDisposition, cancellation });
 }
 async function action(name, b) {
+ if (name === 'release') {
+   const w = await wallet();
+   const result = await releaseGuaranteedEscrow({
+     booking: b, escrowAddress: state.escrowAddress, wallet: w, storage: localStorage,
+     serviceUrl: base(), origin: location.origin,
+     onProgress: message => {
+       section.querySelector('[data-live-status]').textContent = message;
+       const card = [...section.querySelectorAll('[data-live-actions]')].find(node => node.dataset.liveActions === b.id);
+       const output = card?.querySelector('[data-live-release-status]');
+       if (output) { output.textContent = message; output.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+     },
+   });
+   document.dispatchEvent(new CustomEvent('live-booking-transaction-updated'));
+   const success = `Full fee approved on Base (${result.txHash}). Performer can claim from Profile; this is not payment received.`;
+   try { state = await api(); render(); }
+   catch (error) { return `${success} Booking refresh unavailable: ${error.message}. Do not send again.`; }
+   const card = [...section.querySelectorAll('[data-live-actions]')].find(node => node.dataset.liveActions === b.id);
+   const button = card?.querySelector('[data-live-action="release"]');
+   if (button) { button.disabled = true; button.textContent = 'Approved · performer can claim'; }
+   const report = card?.querySelector('[data-live-release-report]');
+   if (report) { report.href = `https://gateway.pinata.cloud/ipfs/${result.reportUri.replace(/^ipfs:\/\//, '')}`; report.hidden = false; report.target = '_blank'; report.rel = 'noopener'; }
+   return success;
+ }
  if (['agreement', 'acknowledge', 'fund'].includes(name) && Date.parse(b.startUtc) <= Date.now()) {
    throw new Error('This invitation has expired; prepare a new booking and obtain fresh performer acceptance. Do not fund the old date.');
  }
@@ -239,16 +275,23 @@ async function action(name, b) {
    if (reasonUri) await transaction(b, 'cancel', w => new w.ethers.Contract(state.escrowAddress, LIVE_ESCROW_ABI, w.signer).cancel(w.ethers.id(b.id), reasonUri));
  }
 }
-async function guarded(fn) {
+async function guarded(fn, bookingId) {
  if (busy) return;
  busy = true;
+ const controls = [...section.querySelectorAll('[data-live-action]')].map(button => [button, button.disabled]);
+ for (const [button] of controls) button.disabled = true;
+ const feedback = message => {
+  section.querySelector('[data-live-status]').textContent = message;
+  const card = [...section.querySelectorAll('[data-live-actions]')].find(node => node.dataset.liveActions === bookingId);
+  const output = card?.querySelector('[data-live-release-status]');
+  if (output) { output.textContent = message; output.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+ };
  try {
   const result = await fn();
-  section.querySelector('[data-live-status]').textContent = typeof result === 'string'
-   ? result : 'Action completed. Refresh to verify the latest booking state.';
+  feedback(typeof result === 'string' ? result : 'Action completed. Refresh to verify the latest booking state.');
  }
- catch (error) { section.querySelector('[data-live-status]').textContent = `${error.shortMessage || error.message}. Refresh/reconcile before retrying; submitted transactions may still be pending.`; }
- finally { busy = false; }
+ catch (error) { feedback(`${error.shortMessage || error.message}. Refresh/reconcile before retrying; submitted transactions may still be pending.`); }
+ finally { busy = false; for (const [button, disabled] of controls) button.disabled = disabled; }
 }
 function mount() {
  const parent = document.getElementById('admin-live-performance-slot');
@@ -259,9 +302,10 @@ function mount() {
  <div class="live-performance-admin-content">
  <p>${LIVE_NOTICE}</p><p data-live-capability></p>
  <ol class="live-performance-flow"><li>📝 Review the offer and pinned terms.</li><li>📨 Add the date to the community calendar; only the invited wallet can accept.</li><li>✅ Acceptance appears here. Funding is always a separate owner action.</li><li>🎙️ After the show, review the actual coverage under this booking's agreed payment policy.</li></ol>
+ <details class="live-create-details"><summary>➕ Prepare a new performance invitation</summary>
  <aside class="live-performance-offer" data-live-offer><strong>💵 Current offer: $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6} USDC</strong><span>🗓 ${LIVE_PERFORMANCE_AIRTIME_MINUTES}-minute calendar event</span><span>🎵 ${LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES} live-music minutes earns the full fee; shorter sets are prorated, capped at $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6}.</span><span>🚫 No live performance earns $0.</span></aside>
  <p class="live-performance-draft-note">Legacy v2 terms are pinned. The guaranteed audio pilot requires a NEW reviewed agreement pin and fingerprint; never reuse v2. Each performer and date requires fresh acceptance before funding.</p>
- <details class="live-create-details" open><summary>➕ Prepare a performance invitation</summary><form data-live-create>
+ <form data-live-create>
  <label>Offer policy<select name="payoutPolicy"><option value="">Legacy v2: prorated live minutes</option><option value="${LIVE_PILOT_POLICY}">Audio pilot: guaranteed $20, rehearsal ladder only</option></select></label>
  ${field('performer','Performer wallet or ENS')}${field('displayName','Name shown on the calendar')}<label>Discord name (optional, with consent)<input name="discordHandle"></label>${field('title','Show title','Friday Live Performance')}
  ${field('startLocal','Start time (America/New_York)',nextFridayLiveStart(),'datetime-local')}
@@ -345,7 +389,7 @@ function mount() {
    await command({ action:'create', id, booking });
    return `Invitation draft saved for ${booking.displayName || booking.wallet}. It is not funded or listed on the community calendar yet.`;
  }); };
- section.onclick = event => { const button = event.target.closest('[data-live-action]'); if (!button) return; const id = button.closest('[data-live-actions]').dataset.liveActions; guarded(() => action(button.dataset.liveAction,state.bookings.find(b=>b.id===id))); };
+ section.onclick = event => { const button = event.target.closest('[data-live-action]'); if (!button || button.disabled) return; const id = button.closest('[data-live-actions]').dataset.liveActions; guarded(() => action(button.dataset.liveAction,state.bookings.find(b=>b.id===id)), id); };
  window.ethereum?.on?.('accountsChanged', () => { accountRevision++; });
  window.ethereum?.on?.('chainChanged', () => { accountRevision++; });
  guarded(async () => { state = await api(); render(); });

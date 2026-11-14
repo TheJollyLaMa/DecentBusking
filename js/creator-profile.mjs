@@ -1,4 +1,4 @@
-import { renderLivePerformances } from './live-performance-profile.mjs?v=20261110-wallet-practice';
+import { renderLivePerformances } from './live-performance-profile.mjs?v=20261113-one-action-release';
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
@@ -865,7 +865,27 @@ export function initCreatorProfile() {
   const earningsList = dialog.querySelector('[data-earnings-list]');
   const livePerformances = document.createElement('section');
   livePerformances.className = 'creator-live-performances';
-  earningsList?.parentElement?.append(livePerformances);
+  const earningsDisclosure = dialog.querySelector('[data-profile-earnings]');
+  earningsDisclosure?.parentElement?.insertBefore(livePerformances, earningsDisclosure);
+  let liveRevision = 0;
+  let livePaymentLoad;
+  const loadLivePayments = async (check, bookingState) => {
+    if (livePerformances.querySelector('[data-live-claim-busy="true"]')) return;
+    const generation = ++liveRevision, target = address;
+    const contents = document.createElement('div');
+    try {
+      let liveReceipt;
+      await renderLivePerformances({ container: contents, wallet: target,
+        serviceUrl: config().ipfsUploadServiceUrl || '', ethers: window.ethers, bookingState,
+        onReceipt: entry => { liveReceipt = entry; } });
+      if (check === revision && generation === liveRevision && target === address &&
+          !livePerformances.querySelector('[data-live-claim-busy="true"]')) livePerformances.replaceChildren(contents);
+      return liveReceipt;
+    } catch (error) {
+      if (check === revision && generation === liveRevision &&
+          !livePerformances.querySelector('[data-live-claim-busy="true"]')) livePerformances.textContent = `Live payment status unavailable: ${error.message}`;
+    }
+  };
   const link = (href, text) => Object.assign(document.createElement('a'), { href, textContent: text, target: '_blank', rel: 'noopener noreferrer' });
   const renderEarnings = (entries, note) => {
     if (!earningsList) return;
@@ -917,17 +937,8 @@ export function initCreatorProfile() {
       if (check !== revision) return;
       const merged = mergeLedgerReceipts(result.viewEntries, result.logs.entries);
       renderEarnings([...merged.viewEntries, ...result.logs.entries], [merged.note, result.note].filter(Boolean).join(' '));
-      const liveTarget = document.createElement('div');
-      let liveReceipt;
-      try {
-        await renderLivePerformances({ container: liveTarget, wallet: address,
-          serviceUrl: window.DecentConfig?.ipfsUploadServiceUrl || '', ethers: window.ethers,
-          onReceipt: entry => { liveReceipt = entry; } });
-        if (check === revision) {
-          livePerformances.replaceChildren(liveTarget);
-          if (liveReceipt) renderEarnings([...merged.viewEntries, ...result.logs.entries, liveReceipt], [merged.note, result.note].filter(Boolean).join(' '));
-        }
-      } catch { if (check === revision) livePerformances.textContent = 'Live performance bookings temporarily unavailable.'; }
+      const liveReceipt = await livePaymentLoad;
+      if (check === revision && liveReceipt) renderEarnings([...merged.viewEntries, ...result.logs.entries, liveReceipt], [merged.note, result.note].filter(Boolean).join(' '));
 
     } finally { publicProvider.destroy(); }
   };
@@ -956,6 +967,8 @@ export function initCreatorProfile() {
     clearDiscordLinkTimers();
     discordLinkExpiryAt = 0;
     const check = ++revision;
+    livePerformances.replaceChildren();
+    livePaymentLoad = loadLivePayments(check);
     if (!dialog.open) dialog.showModal();
     document.dispatchEvent(new CustomEvent('creator-profile-view-changed', { detail: { address } }));
     display();
@@ -1545,6 +1558,9 @@ export function initCreatorProfile() {
     await loadAlbum();
   }));
   document.addEventListener('open-creator-profile', event => { run(() => open(event.detail)); });
+  document.addEventListener('live-booking-state-updated', event => {
+    if (dialog.open && address) void loadLivePayments(revision, event.detail.state);
+  });
   document.addEventListener('wallet-connected', event => {
     revision++;
     setControls();
