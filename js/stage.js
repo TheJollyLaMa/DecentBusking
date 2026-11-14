@@ -2,16 +2,21 @@
 // Hat (tip) + Guitar Case (mint) interactions and the now-playing banner.
 
 import { openMintModal } from './mint.js?v=20261030-ad-cutoff';
-import { initRadioSync, playArchiveTrack } from './radio-sync.js?v=20261030-ad-cutoff';
+import { initRadioSync, playArchiveTrack, getRadioStateSnapshot } from './radio-sync.js?v=20261030-ad-cutoff';
+import { readLiveTipTarget } from './live-tip-target.mjs?v=20261114-live-direction';
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { resolveNowPlayingNFT } from './space.js?v=20261030-ad-cutoff';
-import { nftArtistLabel } from './nft-loader.js?v=20261012-paging';
+import { nftArtistLabel, nftIdentity } from './nft-loader.js?v=20261012-paging';
+import { TIP_ABI, createTipContext, verifyAttributedTipReceipt } from './tip-protocol.mjs';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, getCreatorWatchlistState, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261030-ad-cutoff';
 
 let _tipPlayingTrack = null;
 let _tipHistory = [];
 let _tipSelectionIndex = -1;
 let _tipSnapshot = null;
+let _tipLiveTrack = null;
+let _tipPending = null;
+let _tipSourceMode = 'radio';
 let _tipLookupGeneration = 0;
 let _tipBusy = false;
 let _tipSelectionState = 'idle';
@@ -25,6 +30,7 @@ const _tipHistoryLimit = 12;
 
 // ── Public API ────────────────────────────────────────────────────────────
 export function initStage() {
+  document.addEventListener('radio-source-mode-change', event => { _tipSourceMode = event.detail; });
   document.addEventListener('dbusk-now-playing', (event) => {
     _recordTipPlayingTrack(event.detail);
     _watchlistTrack = event.detail ? { ...event.detail } : null;
@@ -142,7 +148,7 @@ function _bindHat() {
     if (!modal) return;
     const wasHidden = modal.classList.contains('hidden');
     modal.classList.remove('hidden');
-    if (!wasHidden || _tipBusy || _tipSelectionState === 'sent') {
+    if (!wasHidden || _tipBusy || _tipPending || _tipSelectionState === 'sent') {
       _renderTipState();
       return;
     }
@@ -150,6 +156,40 @@ function _bindHat() {
       ++_tipLookupGeneration;
       _tipSelectionState = 'idle';
       _tipSelectionMessage = '';
+    }
+    const serviceUrl = window.DecentConfig?.ipfsUploadServiceUrl;
+    if (serviceUrl && _tipSourceMode !== 'archive' && _tipPlayingTrack?.source !== 'archive') {
+      const generation = ++_tipLookupGeneration;
+      _tipLiveTrack = null;
+      _tipSnapshot = null;
+      _tipSelectionState = 'loading';
+      _tipSelectionMessage = 'Verifying the current broadcast and tip recipient...';
+      _renderTipWallet('');
+      _renderTipState();
+      try {
+        const known = getRadioStateSnapshot()?.liveAudio;
+        const expectedBookingId = known?.phase === 'live' && known.policy?.mode === 'live' ? known.bookingId : undefined;
+        const target = await readLiveTipTarget({ serviceUrl, expectedBookingId });
+        if (generation !== _tipLookupGeneration) return;
+        if (target) {
+          _tipLiveTrack = { source: 'live', bookingId: target.bookingId, artist: target.artist, title: target.title };
+          _tipSnapshot = Object.freeze({ ...target, trackKey: _tipTrackKey(_tipLiveTrack),
+            ..._tipRoute({ source: 'live', bookingId: target.bookingId }) });
+          _tipSelectionState = 'ready';
+          _tipSelectionMessage = '';
+          _renderTipWallet(target.wallet);
+          _renderTipState();
+          return;
+        }
+        _tipSelectionState = 'idle';
+        _tipSelectionMessage = '';
+      } catch (error) {
+        if (generation !== _tipLookupGeneration) return;
+        _tipSelectionState = 'error';
+        _tipSelectionMessage = `Could not verify the current tip recipient: ${error.message}`;
+        _renderTipState();
+        return;
+      }
     }
     const latestIndex = _tipHistory.length - 1;
     if (latestIndex < 0) {
@@ -192,7 +232,12 @@ function _renderTipWallet(wallet) {
 function _closeTipModal() {
   ++_tipLookupGeneration;
   document.getElementById('tip-modal')?.classList.add('hidden');
-  if (!_tipBusy) _tipSnapshot = null;
+  if (!_tipBusy && !_tipPending) {
+    _tipSnapshot = null;
+    _tipLiveTrack = null;
+    _tipSelectionState = 'idle';
+    _tipSelectionMessage = '';
+  }
 }
 
 // ── Guitar Case (mint) ────────────────────────────────────────────────────
@@ -267,7 +312,7 @@ function _bindTipModal() {
 }
 
 function _stepTipHistory(direction) {
-  if (_tipBusy) return;
+  if (_tipBusy || _tipPending || _tipLiveTrack) return;
   const nextIndex = _tipSelectionIndex + direction;
   if (nextIndex < 0 || nextIndex >= _tipHistory.length) return;
   return _selectTipHistoryEntry(nextIndex);
@@ -287,8 +332,11 @@ async function _handleSendTip() {
     return;
   }
 
-  const amount = parseFloat(amountInput?.value);
-  if (!amount || amount <= 0) {
+  let amountWei;
+  try {
+    amountWei = _tipPending?.amountWei ?? ethers.parseEther(String(amountInput?.value || '').trim());
+    if (amountWei <= 0n) throw new Error('Tip amount must be positive');
+  } catch {
     _showStatus('tip-status', '⚠️ Enter a valid tip amount.', true);
     return;
   }
@@ -305,43 +353,81 @@ async function _handleSendTip() {
     _showStatus('tip-status', '⏳ Waiting for MetaMask…');
 
     const signer = window._wallet?.signer;
-    if (!signer) {
+    if (!signer && !_tipPending) {
       _tipSelectionState = 'ready';
       _tipSelectionMessage = '🦊 Please connect your wallet via the header first.';
       _showStatus('tip-status', '🦊 Please connect your wallet via the header first.', true);
       return;
     }
 
-    const chainId = Number((await signer.provider.getNetwork()).chainId);
-    if (chainId !== (cfg.chainId || 8453)) {
-      _tipSelectionState = 'ready';
-      _tipSelectionMessage = `⚠️ Switch MetaMask to ${cfg.chainName || 'Base Mainnet'} (chain ID ${cfg.chainId || 8453}).`;
-      _showStatus('tip-status', `⚠️ Switch MetaMask to ${cfg.chainName || 'Base Mainnet'} (chain ID ${cfg.chainId || 8453}).`, true);
+    const provider = _tipPending?.provider || signer.provider;
+    const chainId = Number((await provider.getNetwork()).chainId);
+    const expectedChain = tip.chainId || cfg.chainId || 8453;
+    if (chainId !== expectedChain) {
+      _tipSelectionState = _tipPending ? 'pending' : 'ready';
+      _tipSelectionMessage = `⚠️ Switch MetaMask to ${tip.chainName || cfg.chainName || 'Base Mainnet'} (chain ID ${expectedChain}).`;
+      _showStatus('tip-status', _tipSelectionMessage, true);
       return;
     }
 
-    const amountWei = ethers.parseEther(String(amount));
-    const tx = await signer.sendTransaction({
-      to: tip.wallet,
-      value: amountWei,
-    });
-    _showStatus('tip-status', 'Tip submitted. Waiting for on-chain confirmation...');
-    const receipt = await tx.wait();
-    if (receipt?.status !== 1) throw new Error('Tip was not confirmed successfully');
+    let receipt;
+    if (_tipPending) {
+      receipt = await provider.getTransactionReceipt(_tipPending.txHash);
+    } else {
+      const intent = { ...tip, recipient: tip.wallet, amountWei: amountWei.toString() };
+      let tx;
+      if (tip.routerAddress) {
+        intent.payer = await signer.getAddress();
+        if (await provider.getCode(tip.routerAddress) === '0x') throw new Error('The configured tip contract is not deployed on this chain');
+        const context = createTipContext(intent);
+        const contract = new ethers.Contract(tip.routerAddress, TIP_ABI, signer);
+        tx = await contract.tip(tip.wallet, context.sourceKind, context.contextRef, { value: amountWei, chainId: expectedChain });
+      } else {
+        tx = await signer.sendTransaction({ to: tip.wallet, value: amountWei, chainId: expectedChain });
+      }
+      _tipPending = { provider, txHash: tx.hash, intent, amountWei };
+      _tipSelectionState = 'pending';
+      _showStatus('tip-status', 'Tip submitted. Waiting for on-chain confirmation...');
+      try {
+        receipt = await tx.wait();
+      } catch (error) {
+        if (error.code !== 'TRANSACTION_REPLACED' || error.receipt?.status !== 1) throw error;
+        if (error.cancelled) {
+          _tipPending = null;
+          throw new Error('The wallet cancelled or replaced this tip. Check the replacement transaction before trying again.');
+        }
+        receipt = error.receipt;
+        _tipPending.txHash = receipt.hash;
+      }
+    }
+    if (receipt?.status === 0) {
+      _tipPending = null;
+      throw new Error('Tip was not confirmed successfully');
+    }
+    if (receipt?.status !== 1) throw new Error('Tip confirmation is still pending');
+    if (tip.routerAddress) {
+      if (receipt.hash?.toLowerCase() !== _tipPending.txHash.toLowerCase()) throw new Error('Receipt does not match the submitted tip transaction');
+      verifyAttributedTipReceipt({ receipt, routerAddress: tip.routerAddress, intent: _tipPending.intent, ethers });
+    }
+    const txHash = receipt.hash || _tipPending.txHash;
+    _tipPending = null;
     _tipSelectionState = 'sent';
-    _tipSelectionMessage = `✅ Tip confirmed for ${tip.artist} — ${tip.title}. TX: ${_shortAddr(tx.hash)}`;
+    _tipSelectionMessage = `✅ Tip confirmed for ${tip.artist} — ${tip.title}. ${tip.routerAddress ? 'DecentBusking source recorded on-chain. ' : ''}TX: ${_shortAddr(txHash)}`;
     _showStatus('tip-status', _tipSelectionMessage);
     announcePaymentCelebration({
       chainId,
-      txHash: receipt.hash || tx.hash,
+      txHash,
       amountText: ethers.formatEther(amountWei),
       assetText: 'ETH',
       summary: `Tip to ${tip.artist} for ${tip.title} (${_shortAddr(tip.wallet)})`,
       txLabel: 'Tip confirmed',
     });
   } catch (err) {
-    _tipSelectionState = 'ready';
-    _tipSelectionMessage = `❌ ${err.message || 'Transaction failed'}`;
+    if (err.receipt?.status === 0) _tipPending = null;
+    _tipSelectionState = _tipPending ? 'pending' : 'ready';
+    _tipSelectionMessage = _tipPending
+      ? `Tip submitted (${_tipPending.txHash}), not yet verified: ${err.message}. Recheck this payment; do not send it again.`
+      : `❌ ${err.message || 'Transaction failed'}`;
     _showStatus('tip-status', _tipSelectionMessage, true);
   } finally {
     _tipBusy = false;
@@ -350,8 +436,25 @@ async function _handleSendTip() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+function _tipRoute({ source, bookingId, nft }) {
+  const cfg = window.DecentConfig || {};
+  const routerAddress = cfg.tipRouterAddress ?? '';
+  const chainId = cfg.chainId || 8453;
+  if (typeof routerAddress !== 'string' || (routerAddress &&
+      (!/^0x[0-9a-fA-F]{40}$/.test(routerAddress) || /^0x0{40}$/i.test(routerAddress)))) {
+    throw new Error('Tip attribution is configured with an invalid contract; direct fallback is disabled');
+  }
+  if (routerAddress && chainId !== 8453) throw new Error('DecentBusking tip attribution is Base-only');
+  const nftId = routerAddress && source !== 'live' ? nftIdentity(nft) : undefined;
+  if (nftId && nft.chainId !== undefined && nft.chainId !== chainId) throw new Error('The recording identity belongs to another chain');
+  const route = { source, bookingId, nftId, routerAddress, chainId, chainName: cfg.chainName || 'Base Mainnet' };
+  if (routerAddress) createTipContext(route);
+  return route;
+}
+
 function _tipTrackKey(track = {}) {
   return [
+    track.bookingId || '',
     track.playId || '',
     track.trackId || '',
     track.audioUrl || '',
@@ -394,10 +497,12 @@ function _recordTipPlayingTrack(detail) {
 }
 
 function _selectedTipEntry() {
+  if (_tipLiveTrack) return { key: _tipTrackKey(_tipLiveTrack), track: _tipLiveTrack };
   return _tipHistory[_tipSelectionIndex] || null;
 }
 
 function _tipHistoryLabel() {
+  if (_tipLiveTrack) return 'Live performer · recipient locked for this tip';
   if (_tipSelectionIndex < 0 || !_tipHistory.length) return '';
   const position = `${_tipSelectionIndex + 1} of ${_tipHistory.length}`;
   if (_tipSelectionIndex === _tipHistory.length - 1) return `Played song ${position} · Current song`;
@@ -411,14 +516,15 @@ function _syncTipNavState() {
   const hasSelection = _tipSelectionIndex >= 0 && _tipSelectionIndex < _tipHistory.length;
   const atStart = !hasSelection || _tipSelectionIndex <= 0;
   const atEnd = !hasSelection || _tipSelectionIndex >= _tipHistory.length - 1;
-  if (prevBtn) prevBtn.disabled = _tipBusy || atStart;
-  if (nextBtn) nextBtn.disabled = _tipBusy || atEnd;
+  if (prevBtn) prevBtn.disabled = _tipBusy || !!_tipPending || !!_tipLiveTrack || atStart;
+  if (nextBtn) nextBtn.disabled = _tipBusy || !!_tipPending || !!_tipLiveTrack || atEnd;
 }
 
 function _renderTipState() {
   const sendBtn = document.getElementById('tip-send-btn');
   const entry = _selectedTipEntry();
-  const track = entry?.track || _tipPlayingTrack;
+  const track = (_tipBusy || _tipPending || _tipSelectionState === 'sent') && _tipSnapshot
+    ? _tipSnapshot : entry?.track || _tipPlayingTrack;
   const hasSelection = Boolean(track);
   const artistEl = document.getElementById('tip-artist');
   const songEl = document.getElementById('tip-song');
@@ -426,7 +532,22 @@ function _renderTipState() {
   if (artistEl) artistEl.textContent = track?.artist || 'Unknown artist';
   if (songEl) songEl.textContent = track?.title || 'No song playing';
   if (positionEl) positionEl.textContent = _tipHistoryLabel();
+  const routeEl = document.getElementById('tip-route');
+  if (routeEl) routeEl.textContent = _tipSnapshot?.routerAddress
+    ? `100% to the artist via the DecentBusking tip contract. On-chain source: ${_tipSnapshot.source === 'live' ? 'live performance' : _tipSnapshot.source === 'archive' ? 'archive recording' : 'radio recording'}.`
+    : 'Legacy direct ETH tip. No DecentBusking source is recorded on-chain until the tip contract is enabled.';
+  if (sendBtn) sendBtn.textContent = _tipPending ? 'Recheck tip' : '💸 Send Tip';
   _syncTipNavState();
+  if (_tipSelectionState === 'loading') {
+    _showStatus('tip-status', _tipSelectionMessage || 'Looking up this song\'s tip wallet...');
+    if (sendBtn) sendBtn.disabled = true;
+    return;
+  }
+  if (_tipSelectionState === 'error') {
+    if (sendBtn) sendBtn.disabled = true;
+    _showStatus('tip-status', _tipSelectionMessage, true);
+    return;
+  }
   if (!hasSelection) {
     _tipSnapshot = null;
     _tipSelectionState = 'idle';
@@ -440,13 +561,8 @@ function _renderTipState() {
     if (sendBtn) sendBtn.disabled = true;
     return;
   }
-  if (_tipSelectionState === 'loading') {
-    _showStatus('tip-status', _tipSelectionMessage || 'Looking up this song\'s tip wallet...');
-    if (sendBtn) sendBtn.disabled = true;
-    return;
-  }
-  if (_tipSelectionState === 'error') {
-    if (sendBtn) sendBtn.disabled = true;
+  if (_tipPending) {
+    if (sendBtn) sendBtn.disabled = false;
     _showStatus('tip-status', _tipSelectionMessage, true);
     return;
   }
@@ -475,7 +591,7 @@ function _renderTipState() {
 
 async function _selectTipHistoryEntry(index, { openModal = false } = {}) {
   const modal = document.getElementById('tip-modal');
-  if (index < 0 || index >= _tipHistory.length || _tipBusy) return;
+  if (index < 0 || index >= _tipHistory.length || _tipBusy || _tipPending) return;
   _tipSelectionIndex = index;
   if (openModal && modal) modal.classList.remove('hidden');
   const entry = _selectedTipEntry();
@@ -503,12 +619,13 @@ async function _selectTipHistoryEntry(index, { openModal = false } = {}) {
     }
     track.nft = nft;
     _tipHistory[index] = { ...entry, track };
-    _tipSnapshot = {
+    _tipSnapshot = Object.freeze({
       wallet,
       artist: nftArtistLabel(nft),
       title: track.title || nft.name || nft.title || 'Unknown song',
       trackKey: _tipTrackKey(track),
-    };
+      ..._tipRoute({ source: track.source === 'archive' ? 'archive' : 'radio', nft }),
+    });
     document.getElementById('tip-artist').textContent = _tipSnapshot.artist;
     document.getElementById('tip-song').textContent = _tipSnapshot.title;
     _renderTipWallet(wallet);

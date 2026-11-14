@@ -37,9 +37,11 @@ function element() {
   };
 }
 
-function setup({ resolve = async () => null, receipt = async () => ({ status: 1 }), chainId = 8453n } = {}) {
+function setup({ resolve = async () => null, receipt = async () => ({ status: 1 }), chainId = 8453n,
+  liveTarget = async () => null, radioState = null, serviceUrl = '', routerAddress = '',
+  protocol = {}, pendingReceipt = receipt, contractCode = '0x01', ethersImpl } = {}) {
   const ids = ['hat-btn', 'tip-modal', 'tip-to-label', 'tip-artist', 'tip-song', 'tip-status',
-    'tip-track-position', 'tip-prev-btn', 'tip-next-btn', 'tip-send-btn', 'tip-cancel-btn', 'tip-amount'];
+    'tip-track-position', 'tip-prev-btn', 'tip-next-btn', 'tip-send-btn', 'tip-cancel-btn', 'tip-amount', 'tip-route'];
   const elements = Object.fromEntries(ids.map(id => [id, element()]));
   const listeners = new Map();
   const document = {
@@ -49,11 +51,14 @@ function setup({ resolve = async () => null, receipt = async () => ({ status: 1 
   };
   const transfers = [];
   const celebrations = [];
+  const contractTips = [];
   const context = vm.createContext({
-    console, document, setTimeout,
-    window: { ethereum: {}, _currentBuskerWallet: walletB, DecentConfig: {},
+    console, document, setTimeout, ...protocol,
+    window: { ethereum: {}, _currentBuskerWallet: walletB, DecentConfig: { ipfsUploadServiceUrl: serviceUrl, tipRouterAddress: routerAddress },
       _wallet: { signer: {
-        provider: { getNetwork: async () => ({ chainId }) },
+        getAddress: async () => walletB,
+        provider: { getNetwork: async () => ({ chainId }), getCode: async () => contractCode,
+          getTransactionReceipt: pendingReceipt },
         sendTransaction: async transfer => {
           transfers.push(transfer);
           return { hash: `0x${'34'.repeat(32)}`, wait: receipt };
@@ -61,18 +66,198 @@ function setup({ resolve = async () => null, receipt = async () => ({ status: 1 
       } },
     },
     ethers: { parseEther: amount => { assert.equal(amount, '0.01'); return 10n ** 16n; },
-      formatEther: () => '0.01' },
+      formatEther: () => '0.01', ...ethersImpl,
+      Contract: class {
+        constructor(address) {
+          this.tip = async (...args) => {
+            contractTips.push({ address, args });
+            return { hash: `0x${'34'.repeat(32)}`, wait: receipt };
+          };
+        }
+      } },
     announcePaymentCelebration: detail => celebrations.push(detail),
     resolveNowPlayingNFT: resolve,
+    readLiveTipTarget: liveTarget,
+    getRadioStateSnapshot: () => radioState,
     nftArtistLabel: nft => nft.artistName || nft.artist || 'Unknown artist',
+    nftIdentity: nft => {
+      if (!nft?.contractAddress || !Number.isSafeInteger(nft.tokenId)) throw new Error('Invalid NFT identity');
+      return `${nft.chainId || 8453}:${nft.contractAddress.toLowerCase()}:${nft.tokenId}`;
+    },
     initRadioSync() {}, openMintModal() {},
   });
   vm.runInContext(`${source}\ninitStage();`, context);
-  return { elements, transfers, celebrations, context,
+  return { elements, transfers, contractTips, celebrations, context,
+    mode: detail => listeners.get('radio-source-mode-change')({ detail }),
     play: detail => listeners.get('dbusk-now-playing')({ detail }),
     stop: () => listeners.get('dbusk-now-playing-stopped')(),
   };
 }
+
+test('live, radio and archive tips use the contract with frozen source, recipient, chain and exact wei', async () => {
+  const protocol = await import('../js/tip-protocol.mjs');
+  const ethersImpl = require('../discord-bot/node_modules/ethers');
+  const routerAddress = `0x${'cd'.repeat(20)}`, collection = `0x${'ef'.repeat(20)}`;
+  for (const source of ['live', 'radio', 'archive']) {
+    const sourceContext = source === 'live' ? { source, bookingId: 'friday:fixture' }
+      : { source, nftId: `8453:${collection}:80` };
+    const expected = protocol.createTipContext(sourceContext);
+    const encoded = new ethersImpl.Interface(protocol.TIP_ABI).encodeEventLog('TipSent', [
+      walletB, walletA, ethersImpl.id(expected.contextRef), expected.sourceKind, 10000000000000001n, expected.contextRef,
+    ]);
+    const { elements, play, contractTips, transfers, context, celebrations } = setup({
+      protocol, ethersImpl, routerAddress,
+      serviceUrl: source === 'live' ? 'https://worker.test' : '',
+      liveTarget: async () => ({ wallet: walletA, artist: 'Artist A', title: 'Live set', bookingId: 'friday:fixture' }),
+      receipt: async () => ({ status: 1, hash: `0x${'34'.repeat(32)}`, logs: [{ ...encoded, address: routerAddress, index: 0 }] }),
+    });
+    play({ ...songA, source: source === 'live' ? 'radio' : source, nft: { ...songA.nft, contractAddress: collection, tokenId: 80 } });
+    await elements['hat-btn'].click();
+    elements['tip-amount'].value = '0.010000000000000001';
+    context.window.DecentConfig.tipRouterAddress = walletB;
+    context.window.DecentConfig.chainId = 1;
+    play(songB);
+    await elements['tip-send-btn'].click();
+    assert.equal(transfers.length, 0);
+    assert.equal(contractTips.length, 1);
+    assert.equal(contractTips[0].address, routerAddress);
+    assert.equal(contractTips[0].args[0], walletA);
+    assert.equal(contractTips[0].args[1], expected.sourceKind);
+    assert.equal(contractTips[0].args[2], expected.contextRef);
+    assert.equal(contractTips[0].args[3].value, 10000000000000001n);
+    assert.equal(contractTips[0].args[3].chainId, 8453);
+    assert.match(elements['tip-status'].textContent, /source recorded on-chain/);
+    assert.equal(celebrations.length, 1);
+  }
+});
+
+test('invalid attribution configuration and missing recording identity never silently use a direct transfer', async () => {
+  const protocol = await import('../js/tip-protocol.mjs');
+  for (const routerAddress of ['bad-router', `0x${'0'.repeat(40)}`, 0, `0x${'cd'.repeat(20)}`]) {
+    const { elements, play, transfers, contractTips } = setup({ protocol, routerAddress });
+    play(songA);
+    await elements['hat-btn'].click();
+    assert.match(elements['tip-status'].textContent, /invalid contract|Invalid NFT identity/i);
+    await elements['tip-send-btn'].click();
+    assert.equal(transfers.length + contractTips.length, 0);
+  }
+});
+
+test('unverified contract receipts and interrupted waits only recheck the submitted tip, including after modal close', async () => {
+  const protocol = await import('../js/tip-protocol.mjs');
+  const ethersImpl = require('../discord-bot/node_modules/ethers');
+  const routerAddress = `0x${'cd'.repeat(20)}`;
+  const context = protocol.createTipContext({ source: 'live', bookingId: 'show' });
+  const encoded = new ethersImpl.Interface(protocol.TIP_ABI).encodeEventLog('TipSent', [
+    walletB, walletA, ethersImpl.id(context.contextRef), context.sourceKind, 10n ** 16n, context.contextRef,
+  ]);
+  for (const receipt of [async () => { throw Error('RPC offline'); }, async () => ({ status: 1, hash: `0x${'34'.repeat(32)}`, logs: [] })]) {
+    const { elements, play, transfers, contractTips, celebrations } = setup({
+      protocol, ethersImpl, routerAddress, receipt, serviceUrl: 'https://worker.test',
+      liveTarget: async () => ({ wallet: walletA, artist: 'Artist A', title: 'Set A', bookingId: 'show' }),
+      pendingReceipt: async () => ({ status: 1, hash: `0x${'34'.repeat(32)}`, logs: [{ ...encoded, address: routerAddress, index: 3 }] }),
+    });
+    await elements['hat-btn'].click();
+    await elements['tip-send-btn'].click();
+    assert.match(elements['tip-status'].textContent, /not yet verified/);
+    assert.equal(celebrations.length, 0);
+    elements['tip-cancel-btn'].click();
+    play(songB);
+    await elements['hat-btn'].click();
+    assert.equal(elements['tip-song'].textContent, 'Set A');
+    assert.equal(elements['tip-send-btn'].textContent, 'Recheck tip');
+    await elements['tip-send-btn'].click();
+    assert.equal(transfers.length, 0);
+    assert.equal(contractTips.length, 1);
+    assert.equal(celebrations.length, 1);
+  }
+});
+
+test('live hat replaces the last recorded artist with the freshly verified performer and freezes that recipient', async () => {
+  let lookups = 0;
+  const { elements, play, stop, transfers, context } = setup({
+    serviceUrl: 'https://worker.test',
+    radioState: { liveAudio: { phase: 'live', bookingId: 'show', policy: { mode: 'live' } } },
+    liveTarget: async options => {
+      lookups++;
+      assert.equal(options.expectedBookingId, 'show');
+      return { bookingId: 'show', wallet: walletB, artist: 'Live artist', title: 'Live set' };
+    },
+  });
+  play(songA); stop();
+  await elements['hat-btn'].click();
+  assert.equal(lookups, 1);
+  assert.equal(elements['tip-to-label'].title, walletB);
+  assert.match(elements['tip-track-position'].textContent, /Live performer.*locked/);
+  assert.equal(elements['tip-prev-btn'].disabled, true);
+  play(songA);
+  context.window.DecentConfig.chainId = 1;
+  await elements['tip-send-btn'].click();
+  assert.equal(transfers.length, 1);
+  assert.equal(transfers[0].to, walletB, 'Neither another track nor configuration change can redirect the prepared tip');
+});
+
+test('live-target lookup failure is visible and cannot fall back to recorded history or an arbitrary busker wallet', async () => {
+  for (const history of [false, true]) {
+    const { elements, play, stop, transfers } = setup({
+      serviceUrl: 'https://worker.test',
+      liveTarget: async () => { throw Error('Live booking verification is stale'); },
+    });
+    if (history) { play(songA); stop(); }
+    await elements['hat-btn'].click();
+    assert.equal(elements['tip-send-btn'].disabled, true);
+    assert.match(elements['tip-status'].textContent, /Live booking verification is stale/);
+    await elements['tip-send-btn'].click();
+    assert.equal(transfers.length, 0);
+  }
+});
+
+test('closing a pending live lookup cannot replace a later verified performer', async () => {
+  let finishOld, calls = 0;
+  const { elements } = setup({
+    serviceUrl: 'https://worker.test',
+    liveTarget: async () => ++calls === 1 ? new Promise(resolve => { finishOld = resolve; })
+      : { bookingId: 'second', wallet: walletB, artist: 'Second artist', title: 'Second set' },
+  });
+  const first = elements['hat-btn'].click();
+  elements['tip-cancel-btn'].click();
+  await elements['hat-btn'].click();
+  finishOld({ bookingId: 'first', wallet: walletA, artist: 'First artist', title: 'First set' });
+  await first;
+  assert.equal(elements['tip-to-label'].title, walletB);
+  assert.equal(elements['tip-artist'].textContent, 'Second artist');
+});
+
+test('archive selection and confirmed ordinary radio retain their existing NFT tip flow', async () => {
+  let liveReads = 0;
+  const { elements, mode, play, stop } = setup({
+    serviceUrl: 'https://worker.test', resolve: async () => songA.nft,
+    liveTarget: async () => { liveReads++; return null; },
+  });
+  mode('archive'); play(songA);
+  await elements['hat-btn'].click();
+  assert.equal(liveReads, 0);
+  assert.equal(elements['tip-to-label'].title, walletA);
+  elements['tip-cancel-btn'].click();
+  stop(); mode('radio');
+  play({ ...songA, source: 'radio', nft: null });
+  await elements['hat-btn'].click();
+  assert.equal(liveReads, 1);
+  assert.equal(elements['tip-to-label'].title, walletA);
+});
+
+test('all cached stage importers resolve to the live-tip controller', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const imports = JSON.parse(html.match(/<script type="importmap">\s*([\s\S]*?)<\/script>/)[1]).imports;
+  for (const file of ['main.js', 'space.js', 'nft-card.js']) {
+    const importer = fs.readFileSync(path.join(__dirname, '../js', file), 'utf8');
+    const references = [...importer.matchAll(/['"](\.\/stage\.js[^'"]*)['"]/g)];
+    assert.ok(references.length);
+    for (const [, reference] of references) {
+      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261114-live-direction');
+    }
+  }
+});
 
 test('footer NFT lookup failures report verification errors and recover on retry', async () => {
   const status = element();

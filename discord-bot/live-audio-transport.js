@@ -30,7 +30,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
   const requireReady = () => { if (!ready) throw new LiveAudioError('Live audio hosting is not configured'); };
   async function grant(booking, identity, publish = false, subscribe = !publish) {
     requireReady();
-    const remaining = Math.floor((Date.parse(booking.endUtc) - now()) / 1000);
+    const remaining = Math.floor(((booking.broadcast?.accessUntil ?? Date.parse(booking.endUtc)) - now()) / 1000);
     if (remaining <= 0) throw new LiveAudioError('This live room has reached its booked end');
     const token = new AccessToken(apiKey, apiSecret, { identity, ttl: Math.min(30, remaining) });
     token.addGrant({ roomJoin: true, room: roomName(booking), canPublish: publish,

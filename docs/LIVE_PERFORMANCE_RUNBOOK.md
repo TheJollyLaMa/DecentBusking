@@ -1,5 +1,216 @@
 # Live Performance — operator runbook
 
+## Production desk: live-session coordination
+
+The Admin booking card's **Open production desk** link opens
+`producer-room.html?booking=…`. Its roster is the public booking schedule, **not**
+a private access grant. Select a booking and sign with the existing configured
+owner wallet. Each selected room needs its own pass; unexpired passes stay only
+in that tab's memory and clear on wallet change, expiry or page exit. No new
+engineer/staff role is enabled.
+
+The desk separates the canonical public radio act from the selected private
+room. It never automatically plays public radio or opens the operator microphone.
+Selecting/listening never changes the program; only explicit server-enabled
+allocated-stage commands can do so. **Listen to selected room** disconnects the old private subscription
+before opening the next. Mute public radio in other tabs/devices; use headphones.
+Use **Open full soundcheck room** for the existing actual check/arm workflow.
+Private practice remains separately authorized in its existing rehearsal room.
+
+Owner and performer share one booking-private text thread using their existing
+backstage passes. The owner can cue **another song** or **wrap up after this
+song**, and notify the next performer of a possible delay or standby. The
+performer can acknowledge a cue, report ready/not ready, notify the owner that
+they are not playing, and declare their set
+finished. Acknowledgment is not musical completion, schedule-change consent,
+payment approval or an instruction to cut the feed. Standby acknowledgment is
+optional and does not gate owner notifications. **Not playing this slot** first
+marks the performer not ready, then sends a private notice; neither action
+cancels the booking or waives the original guaranteed fee. If either save fails,
+the panel shows the failure rather than claiming both succeeded.
+
+Messages, cues, readiness and presence are memory-only, bounded live-session
+state. The panel displays server-reported retention and expiry. A worker restart,
+booking end/cancellation or session expiry clears access/history; reconnect and
+confirm readiness after a reset. There is no saved transcript or offline delivery.
+Do not put secrets in the thread. Lost responses are not automatically resent:
+**Retry same action** reuses the command ID in the same session epoch; after a
+reset, review current state instead. Presence only reflects performer heartbeats,
+not audio delivery. A stale direction service disables sending without stopping
+the performer's microphone.
+
+The **advisory direction card** never extends airtime, cuts the broadcast or takes
+an act live. Use the separate allocated-stage controls below, only when the worker
+returns their capabilities. [#343](https://github.com/TheJollyLaMa/DecentBusking/issues/343)
+still needs the integrated two-act/device rehearsal and release verification;
+an “another song” cue alone is never permission to play past the authorized end.
+Original contract times and guaranteed fees remain unchanged. Audience
+feedback panels are explicitly unavailable until a verified event contract is
+connected—no simulated reactions, paid tips or healthy-audio claims.
+
+### Explicit allocated-stage controls
+
+1. Authorize the current booking with the existing owner wallet, then **Enable
+   allocated-stage control**. This can adopt a currently live contracted set.
+   Unallocated bookings retain their legacy automatic scheduling.
+2. In the desk, select the exact next act and **Reserve and notify selected next
+   act**. The owner must separately authorize that next booking; the current
+   room's pass cannot grant access to it. This slice coordinates the current and
+   selected next act only, not an all-night schedule or third-booking cascade.
+   Bump notices do not require the artist's acknowledgment or consent, but the
+   delayed artist chooses **decline**, a positive short duration no longer than
+   the contract, or the full contracted length from the actual delayed start.
+   All choices retain the original guarantee.
+3. Real checks use the effective planned start; existing passed checks remain
+   real checks, not retroactive credit. Both checks, fresh delivered audio,
+   performer choice/readiness and the owner's explicit take are required.
+   Arming an allocated stage confirms readiness; it is not an automatic take.
+4. **Authorize additional encore** records extra minutes, capped cumulatively
+   at ten per allocated set. If a next act is paired, its separate owner pass is
+   required again before a bump. Read the server-confirmed effective times; the
+   immutable original start/end and financial terms are shown separately.
+5. The performer's **My allocated set is finished** is the durable declaration
+   required for a normal producer ending. An advisory finished note is not a
+   substitute. **Force cut** is explicitly interrupted, never a successful
+   curtain call. The owner may **Take this selected act live** only after the
+   predecessor has ended and the backend verifies checks, timing, choice,
+   readiness, audio and protected-paid-program boundaries.
+6. Existing passes retain their original expiration. Use **Refresh allocated
+   booking pass · keep microphone on** for the new bounded access window;
+   this does not stop or republish the microphone. Stale/failed commands disable
+   controls and never claim success. An uncertain durable result can be retried
+   with the same command ID rather than submitting another extension.
+   After the original end, Profile checks pending/unknown allocations against a
+   fresh exact-booking public audio snapshot before offering **Return to allocated
+   backstage**. This also works when the original fee is already approved/paid.
+   The link does not grant access or prove public playback; authorize the booked
+   wallet in the room, and do not open a second publishing microphone. A failed,
+   stale, expired or mismatched lookup offers a status refresh instead of claiming
+   the set finished. Original contract times, receipts and claim rights stay separate.
+7. Admin's actual-stage completion is separate from fee approval/claim. A
+   pending or unknown allocated completion blocks new review/release workflows,
+   not truthful reconciliation of an already-submitted transaction. The
+   original guarantee, on-chain review window and claim deadline remain
+   unchanged. A priority invitation flag is follow-up only—not an automatically
+   accepted, funded or scheduled booking.
+8. **Quiet endings (#343).** Ask the performer to keep the microphone on until the
+   producer ends the set. If a set the performer declared finished goes quiet and
+   nobody ends it, the server closes it after about a minute as the normal
+   producer-finished ending, timed at the later of the declaration and the last
+   audio. That is never an audio-loss cancellation, so no fault slate or
+   recovery-ads window runs. If the producer's **End** lands more than five
+   seconds after the audio stopped, the recording is flagged incomplete and its
+   radio title gains "(partial recording)", because the recorder compares captured
+   seconds with the set's actual window. An approved encore withdraws the finished
+   declaration, so a silent room is again treated as an audio fault. Evidence:
+   `node --test test/night-simulation.test.js` replays a two-act night on a fake
+   clock; it is a simulation of this server's state machine, not a live-audio test.
+
+Backstage/monitoring/consent/fee regressions (the original 102-test selection,
+now including Profile re-entry cases):
+
+```bash
+node --test test/{live-broadcast-controls,live-direction-ui,private-room-listener,producer-room,performer-room,input-monitor,live-publisher-presence,live-audio-wiring,live-recording-option,live-recording-room,live-recording-consent,live-escrow-release}.test.js
+```
+
+The reproducible **Profile-only** browser harness is
+`test/browser/live-profile-reentry.html`. Serve the repository locally and use
+**Run browser checks** at 390px and 1280px. Its nine mocked cases cover waiting,
+live, approved/paid, stale/offline/expired/mismatched state and forced ending;
+it neither connects a wallet nor publishes audio or proves a real live show.
+Earlier inline room/producer browser checks did not persist a reusable harness.
+
+New recording opt-ins explicitly sign **permission v2** for this booking's
+authorized on-air set, including an authorized delayed start, the artist's chosen
+short/full set and at most ten minutes of producer-approved encore. This
+permission neither grants extra airtime nor changes the original fee/terms.
+Private practice and soundchecks remain excluded. Existing checked v1 permission
+still covers **only the original scheduled set**. Its visible **Update recording
+permission for delay / encore** action requires a fresh performer signature and
+an explicit v2 server confirmation. Declined, unavailable or legacy-only responses
+never widen the previous permission. Published IPFS audio cannot be recalled.
+
+Reuse: the desk and shared direction card adapt this repository's
+`live-audio-room.mjs` listener/action patterns, `roomRequest`, booking links and
+`live-audio.css` at `0cae70d` (monitoring PR #354). Canopy's curated offers/needs
+did not identify a directly suitable production-chat donor in the scoped review;
+no external/private source was copied. The local mono monitor and public
+self-return protection are unchanged. Validate two isolated booking threads,
+wallet changes, stale/offline state and room switching before a live rehearsal.
+
+## Attributed native ETH tips (#355; release gate)
+
+The feature branch routes live, radio-recording and archive-recording tips through
+the dedicated DecentBusking tip contract **only when configured**. It forwards
+100% of the tip to the selected artist; wallet gas is additional. This is not the
+USDC payroll router, a supporter gift, custody, or a new fee. Until enabled, the
+hat explicitly labels the existing direct-transfer route as having no on-chain
+DecentBusking attribution. A broken configured route never falls back to it.
+
+The `TipSent` event binds sender, recipient, exact native wei, source kind and
+context. Canonical references are `decentbusking:live:<bookingId>` and
+`decentbusking:radio:<chain>:<collection>:<tokenId>` (or `archive` instead of
+`radio`). Source kinds are 0/1/2 respectively. The contract route proves use of
+the protocol, **not which browser page was open or that a performance happened**.
+Caller labels alone never establish verified artist/source earnings.
+
+The separate `/api/tips/ledger?wallet=<address>&offset=0&limit=25` read API verifies
+successful receipts, two Base confirmations, canonical blocks and exact events.
+Event identity includes chain, contract, transaction and log index; repeated tips
+are not deduplicated by show or recording. Live recipients are checked against
+`bookings(keccak256(bookingId))` at the receipt block. Recording identity, existence
+and tip wallet are checked using the allowlisted NFT's URI/metadata at that block,
+not today's owner or a caller-selected wallet. Unavailable or mismatched source
+proof stays explicitly unverified, separate from attributed totals. Self-transfers
+are not counted as earnings. The Profile's collapsed **Native ETH tips** section
+shows precise ETH amounts and transaction/log proofs without changing USDC totals.
+
+Release order, with separate operator approval:
+
+1. Review/test/deploy and verify the immutable Base tip contract; record its
+   address and exact deployment block. **Done 2026-11-14, separately from this app
+   change:** `0xAa0207731e9F836273634F7B08cE87FfAA125183`, deployment block
+   `57465793`, source verified on BaseScan (exact match); details are in the
+   DecentMarket `DEPLOYMENTS.md`. No deployment is performed by this change.
+2. Set worker `TIP_ROUTER_ADDRESS` and `TIP_START_BLOCK`, retaining the existing
+   `LIVE_PERFORMANCE_ESCROW_ADDRESS` and configured NFT collections. The indexer
+   checks code at the deployment block and the preceding block so it cannot silently
+   start after early tips. Historical state reads must work on the selected RPC.
+   Do this early: the ledger must read every block since deployment (about 432,000
+   a day) before it is caught up. A poll reads up to 20,000 blocks (measured on
+   2026-11-14: the first 19,600 blocks took 5 seconds on public endpoints only), so
+   each day of delay adds minutes, not hours.
+3. Verify the ledger is ready, caught up and not restoring proof entries.
+   IPFS checkpoints use `decentbusking-tip-ledger.json`; chain replay from deployment
+   remains the recovery source. Reorganizations invalidate/rebuild the affected
+   ledger. RPC/source/checkpoint errors remain visible, never fake zero earnings.
+   **Rehearsed 2026-11-14** with three real tips on Base (0.000012 ETH in total,
+   from the deployer to the admin wallet): radio #12 and archive #11 verified, a
+   tip labelled as an invented live show refused, and the real ledger ready and
+   caught up about 7 seconds after start on public endpoints only. Transactions
+   and numbers are in DecentMarket `DEPLOYMENTS.md` and issue #355. Still unproven:
+   a real live-show tip to a booked performer, the site's tip button, the
+   interrupted-tip recheck, and the render worker's own settings and RPC.
+4. Only then set public `tipRouterAddress` and refresh the frontend cache version.
+   Rehearse a live tip, radio tip, archive tip and interrupted confirmation.
+   Once submitted, **Recheck tip** reads that transaction; it does not send again.
+   This local pending state does not survive a page reload: check the wallet or
+   ledger before making another payment after reloading.
+
+Old direct transfers cannot acquire these events retroactively. Wallet/explorer
+activity may still display internal ETH transfers; inspect the branded contract
+event or the app ledger for context. No shared paid-tip celebration accepts a
+browser's success assertion; audience-wide delivery remains a separate integration.
+
+Reuse decision: adapt ArtFi's `ArtFiSettlementRouter.sol` native-forward/reference
+event pattern at `843e770fafb9ca701e35c8d4f509cd005f32b77d`, not its custody,
+payroll roles, allowlist or once-per-work-reference restriction. The app reuses
+`nftIdentity`, the shared escrow ABI, RPC router and checkpoint mechanisms, and
+adapts `payment-ledger.js` receipt/canonicality checks at
+`a256c8e31dd524ac1cba32e966c844d0cac79b46` into a separate native-tip ledger.
+Acceptance tests are `tip-protocol`, `tip-ledger`, `tip-ledger-ui`, `stage-tip`
+and `live-tip-target`; mocked browser checks do not certify production deployment.
+
 ## Friday November 13 website-radio rehearsal
 
 The approved sequence for `friday-live-performance:2026-11-13:withinthevacuum`

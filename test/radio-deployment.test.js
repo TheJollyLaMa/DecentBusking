@@ -3,6 +3,66 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const http = require('node:http');
 
+test('producer take waits only for current paid work, retains prepared purchases and never auto-takes', async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const player = new EventEmitter(); player.state = { status: 'idle' }; player.stop = () => {};
+  let active = null, pending = false, releases = 0, applied = 0;
+  const session = new JukeLoopSession({ client: {}, audioPlayer: player, websitePlayback: true,
+    djuke: { hasActivePlaylist: () => active !== null, getActivePlaylistBatchId: () => active,
+      hasPendingSelection: () => pending, hasPendingPlaylist: () => true,
+      release: async () => { releases++; } } });
+  t.after(() => session.destroy());
+  session._currentPaid = { requestId: 'already-playing' };
+  await assert.rejects(session.withBroadcastHandoff(async () => { applied++; }), /current paid/);
+  assert.equal(applied, 0);
+  assert.equal(session._paidStartAllowed({ requestId: 'new-request' }), false);
+  active = 'active-batch';
+  assert.equal(session._paidStartAllowed({ playlistBatchId: active }), true, 'ongoing paid playlist may finish');
+  active = null; session._currentPaid = null; pending = true;
+  await assert.rejects(session.withBroadcastHandoff(async () => { applied++; }), /current paid/);
+  pending = false;
+  session._preparedNext = { paid: { record: { requestId: 'prepared-only' } } };
+  await session.withBroadcastHandoff(async () => { applied++; });
+  assert.equal(releases, 1);
+  assert.equal(applied, 1, 'queued purchases do not have to disappear');
+  assert.equal(session._paidStartAllowed({}), true);
+  await assert.rejects(session.withBroadcastHandoff(async () => { throw Error('checkpoint failed'); }), /checkpoint failed/);
+  assert.equal(session._paidStartAllowed({}), true, 'failure releases the short admission hold');
+});
+
+test('waiting allocation projections do not interrupt currently purchased playlist playback', async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const player = new EventEmitter(); player.state = { status: 'playing' };
+  let stops = 0;
+  player.stop = () => { stops++; };
+  const session = new JukeLoopSession({ client: {}, audioPlayer: player, websitePlayback: true,
+    djuke: { hasActivePlaylist: () => true, getActivePlaylistBatchId: () => 'purchased-batch', release: async () => {} } });
+  t.after(() => session.destroy());
+  session._resolveShow = () => ({ id: 'normal-rotation', type: 'normal_rotation' });
+  session._syncScheduledShow = () => {};
+  session._currentPaid = { requestId: 'paid-song', playlistBatchId: 'purchased-batch' };
+  session.setLiveAudioPolicy({ bookingId: 'reserved-next', mode: 'adverts', controlled: true, breakKind: 'waiting' });
+  assert.equal(stops, 0);
+  assert.equal(session._currentPaid.requestId, 'paid-song');
+});
+
+test('failed prepared paid release cannot leave a playable stale reservation or stop current normal audio', async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const player = new EventEmitter(); player.state = { status: 'playing' }; player.stop = () => {};
+  let applies = 0, starts = 0, releases = 0;
+  const session = new JukeLoopSession({ client: {}, audioPlayer: player, websitePlayback: true,
+    djuke: { release: async () => { releases++; throw Error('durable paid journal unavailable'); } } });
+  t.after(() => session.destroy());
+  session._started = true;
+  session._playNext = async () => { starts++; };
+  session._preparedNext = { paid: { record: { requestId: 'retain-durably' } } };
+  await assert.rejects(session.withBroadcastHandoff(async () => { applies++; }), /journal unavailable/);
+  assert.equal(applies, 0);
+  assert.equal(releases, 1, 'release retains the purchase through the existing durable DJuke retry queue');
+  assert.equal(session._preparedNext, null);
+  assert.equal(starts, 0, 'failed control does not replace currently playing music');
+});
+
 test('deployment handoff is leased, exclusive, expires safely and never stops the playing batch', async () => {
   const { createRadioDeploymentGate } = await import('../discord-bot/radio-deployment.js');
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');

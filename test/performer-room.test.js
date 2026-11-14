@@ -14,6 +14,8 @@ test('stable practice room link is available before acceptance but never authori
     assert.equal(performerRoomUrl({ ...b, ...change }, start - 1), null);
   }
   assert.equal(performerRoomUrl(b, start + 1200000), null);
+  assert.equal(performerRoomUrl({ ...b, status: 'paid', broadcastCompletion: { known: true, pending: true } }, start + 1200001),
+    'live-room.html?booking=friday%3Ainvited', 'Allocated discovery link still requires separate current authorization');
   assert.deepEqual(b, before);
 });
 
@@ -33,7 +35,7 @@ test('performer headphone monitor is directly visible, not hidden in collapsed h
 });
 
 test('room module initializes practice, advances to backstage and fails closed on stale audio', async () => {
-  const { performerRoomSign } = await import('../js/performer-room.mjs');
+  const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
   const elements = new Map();
   const element = id => {
@@ -51,8 +53,11 @@ test('room module initializes practice, advances to backstage and fails closed o
     location: { href: `https://example.test/live-room.html?booking=${encodeURIComponent(b.id)}` },
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {} },
     Date: class extends Date { static now() { return time; } },
-    URL, AbortSignal, TextEncoder, performerRoomSign, bindLiveRecordingOption,
+    URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
+    LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
     bindInputMonitor: () => ({ stop: async () => {} }),
+    bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
+    bindLiveBroadcastControls: () => ({ update() {}, dispose() {} }),
     createLivePublisherPresence: () => ({ start: () => true, stop() {} }),
     createInputMeter: () => ({ start() {}, stop: async () => {} }),
     setInterval(fn, ms) { intervals.push({ fn, ms }); },
@@ -88,7 +93,7 @@ test('room module initializes practice, advances to backstage and fails closed o
 });
 
 test('guided operator flow shows pending saves, persistent errors and saved check/arm states across public refresh', async () => {
-  const { performerRoomSign } = await import('../js/performer-room.mjs');
+  const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
   const elements = new Map();
   const element = id => {
@@ -115,8 +120,11 @@ test('guided operator flow shows pending saves, persistent errors and saved chec
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {},
       ethereum: { on() {}, async request({ method }) { return method === 'eth_requestAccounts' ? ['0xowner'] : 'fixture-signature'; } } },
     Date: class extends Date { static now() { return time; } },
-    URL, AbortSignal, TextEncoder, performerRoomSign, bindLiveRecordingOption,
+    URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
+    LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
     bindInputMonitor: () => ({ stop: async () => {} }),
+    bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
+    bindLiveBroadcastControls: () => ({ update() {}, dispose() {} }),
     createLivePublisherPresence: () => ({ start: () => true, stop() {} }),
     createInputMeter: () => ({ start() {}, stop: async () => {} }),
     loadLiveAudioSdk: async () => ({ Room, RoomEvent: { TrackPublished: 'published', TrackSubscribed: 'subscribed',
@@ -196,13 +204,19 @@ test('on-air sign requires fresh verified server state, exact booking and funded
 });
 
 test('publisher protects the return before publication and releases it on stop, track end, disconnection or publication failure', async t => {
-  const { performerRoomSign } = await import('../js/performer-room.mjs');
+  const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
   const source = (await fs.readFile(require.resolve('../js/live-audio-room.mjs'), 'utf8')).replace(/^import .*;\n/gm, '');
-  for (const outcome of ['stop', 'ended', 'disconnected', 'failed-publish', 'storage-denied']) {
+  for (const outcome of ['stop', 'ended', 'disconnected', 'failed-publish', 'storage-denied', 'allocated-original-end']) {
     await t.test(outcome, async () => {
       const elements = new Map(), handlers = {}, order = [];
-      let publishing = false, stopped = false, ended;
+      let publishing = false, stopped = false, ended, time = start - 60000, broadcastBinding;
+      const intervals = [], performer = `0x${'12'.repeat(20)}`;
+      const audioState = () => outcome === 'allocated-original-end' ? {
+        configured: true, bookingId: b.id, phase: 'live', armed: true, status: 'ON-AIR', serverTime: time,
+        broadcast: { allocationId: 'allocation-a', revision: 1, phase: 'live', actualStartedAt: start,
+          authorizedEndAt: start + 1800000, accessUntil: start + 1800000 },
+      } : { configured: true, bookingId: b.id, phase: 'preflight' };
       const element = id => {
         if (!elements.has(id)) elements.set(id, { id, value: '', textContent: '', classList: { toggle() {} },
           addEventListener() {}, setAttribute() {}, removeAttribute() {}, pause() {} });
@@ -225,10 +239,13 @@ test('publisher protects the return before publication and releases it on stop, 
       const context = {
         document: { getElementById: element }, location: { href: `https://example.test/live-room.html?booking=${b.id}` },
         window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {},
-          ethereum: { on() {}, async request({ method }) { return method === 'eth_requestAccounts' ? [b.wallet] : 'signature'; } } },
-        Date: class extends Date { static now() { return start - 60000; } },
-        URL, AbortSignal, TextEncoder, performerRoomSign, bindLiveRecordingOption,
+          ethereum: { on() {}, async request({ method }) { return method === 'eth_requestAccounts' ? [performer] : 'signature'; } } },
+        Date: class extends Date { static now() { return time; } },
+        URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
+        LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
         bindInputMonitor: () => ({ stop: async () => {} }),
+        bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
+        bindLiveBroadcastControls: options => { broadcastBinding = options; return { update() {}, dispose() {} }; },
         createInputMeter: () => ({ start() {}, stop: async () => {} }),
         createLivePublisherPresence: ({ onError }) => ({
           start(id) {
@@ -242,12 +259,13 @@ test('publisher protects the return before publication and releases it on stop, 
         loadLiveAudioSdk: async () => ({ Room, createLocalAudioTrack: async () => capture,
           RoomEvent: { Disconnected: 'disconnected' }, Track: { Source: { Microphone: 'microphone' } } }),
         roomRequest: async (_url, path) => path === 'challenge' ? { message: 'challenge', challengeId: 'fixture' }
-          : path === 'session' ? { token: 'fixture-token', role: 'performer', canPublish: true, state: { configured: true } }
+          : path === 'session' ? { token: 'fixture-token', role: 'performer', canPublish: true,
+            expiresAt: time < start + 1200000 ? start + 1200000 : start + 1800000, state: audioState() }
             : { url: 'fixture', token: 'fixture', publisherIdentity: 'performer' },
-        setInterval() {},
+        setInterval(fn, ms) { intervals.push({ fn, ms }); },
         fetch: async url => ({ ok: true, json: async () => url.includes('/api/live-bookings')
-          ? { bookings: [{ ...b, status: 'funded', acknowledged: true }] }
-          : { configured: true, bookingId: b.id, phase: 'preflight' } }),
+          ? { bookings: [{ ...b, wallet: performer, status: outcome === 'allocated-original-end' && time >= start + 1200000 ? 'approved' : 'funded', acknowledged: true }] }
+          : audioState() }),
       };
       vm.runInNewContext(source, context);
       const click = id => element(id).onclick({ currentTarget: element(id) });
@@ -267,9 +285,46 @@ test('publisher protects the return before publication and releases it on stop, 
         if (outcome === 'stop') await click('room-stop');
         if (outcome === 'ended') ended();
         if (outcome === 'disconnected') handlers.disconnected();
+        if (outcome === 'allocated-original-end') {
+          time = start + 1200001;
+          intervals.find(entry => entry.ms === 10000).fn();
+          await new Promise(resolve => setImmediate(resolve));
+          assert.equal(stopped, false, 'Original contract end cannot stop a verified allocated publication');
+          assert.equal(publishing, true);
+          assert.equal(element('room-on-air').textContent, 'ON AIR');
+          const renewed = await broadcastBinding.onReconnect();
+          assert.equal(renewed.expiresAt, start + 1800000);
+          assert.equal(stopped, false, 'Allocated pass renewal must not tear down the microphone');
+          assert.deepEqual(order, ['protect', 'publish'], 'Renewal must not republish or change return protection');
+          await click('room-stop');
+        }
       }
       assert.equal(publishing, false);
       assert.match(element('room-return-status').textContent, /protection is off/);
     });
+
   }
+});
+
+test('allocated sign needs a fresh bounded actual live allocation, never original clock or advisory choice', async () => {
+  const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
+  const now = start + 1200001;
+  const booking = { ...b, status: 'paid', acknowledged: true };
+  const state = { configured: true, bookingId: b.id, phase: 'live', armed: true, status: 'ON-AIR', serverTime: now,
+    broadcast: { allocationId: 'allocation-a', phase: 'live', actualStartedAt: start,
+      authorizedEndAt: now + 10000, accessUntil: now + 20000 } };
+  assert.equal(performerAllocationAccess(booking, state, now, now), true);
+  assert.equal(performerRoomSign(booking, state, now, now).live, true);
+  assert.equal(performerRoomSign(booking, state, now, now - 12001).live, false);
+  for (const changed of [
+    { ...state, bookingId: 'other' },
+    { ...state, broadcast: { ...state.broadcast, phase: 'waiting' } },
+    { ...state, broadcast: { ...state.broadcast, actualStartedAt: null } },
+    { ...state, broadcast: { ...state.broadcast, authorizedEndAt: now - 1 } },
+    { ...state, broadcast: { ...state.broadcast, accessUntil: now - 1 } },
+  ]) assert.equal(performerRoomSign(booking, changed, now, now).live, false);
+  const ended = performerRoomSign(booking, { ...state, broadcast: { ...state.broadcast, phase: 'ended', endReason: 'operator-cut' } }, now, now);
+  assert.equal(ended.live, false);
+  assert.match(ended.detail, /operator-cut/);
+  assert.doesNotMatch(ended.detail, /successful|Thank you/);
 });

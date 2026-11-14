@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>DecentBusking · Production desk</title>
+  <link rel="stylesheet" href="css/live-audio.css?v=20261114-allocated-stage">
+  <script src="decent.config.js"></script>
+</head>
+<body class="live-audio-room rehearsal-room guided-stage producer-desk">
+  <header class="performer-room-header">
+    <h1>Production desk</h1>
+    <p>Owner-only direction · one private booking at a time</p>
+    <a href="./">← Profile &amp; radio</a>
+  </header>
+  <section class="studio-card" aria-labelledby="desk-program-title">
+    <h2 id="desk-program-title">Public radio · separate from your private listen</h2>
+    <output id="desk-program" role="status">Checking the public program…</output>
+    <p id="desk-next" class="studio-note"></p>
+    <p class="studio-note">This desk never plays public radio automatically. Cues do not authorize extra airtime. Only server-enabled allocated-stage controls below can change effective timing or take a selected act live; original contract times and fees remain unchanged.</p>
+  </section>
+  <div class="desk-layout">
+    <section class="studio-card" aria-labelledby="desk-roster-title">
+      <h2 id="desk-roster-title">Booked rooms</h2>
+      <p class="studio-note">Public schedule only. Selecting a name does not grant private access.</p>
+      <label for="desk-booking">Select a booking</label>
+      <select id="desk-booking" disabled><option value="">Loading bookings…</option></select>
+      <button id="desk-refresh" type="button">Refresh schedule</button>
+      <output id="desk-roster-status" role="status"></output>
+    </section>
+    <section class="studio-card" aria-labelledby="desk-selected">
+      <h2 id="desk-selected">Select a private room</h2>
+      <p id="desk-schedule" class="studio-note"></p>
+      <button id="desk-authorize" class="rehearsal-primary" type="button" disabled>Connect owner wallet for this booking</button>
+      <output id="desk-auth-status" role="status" aria-live="polite">Private controls require a separate booking-scoped wallet signature.</output>
+      <p><a id="desk-full-room" hidden>Open full soundcheck room</a></p>
+      <section id="desk-broadcast-controls" aria-label="Selected allocated stage timing"></section>
+      <section class="remote-listen" aria-label="Selected private audio">
+        <h3>Listen privately · selected room only</h3>
+        <p class="studio-note">Your microphone is never opened. Mute ordinary radio in other tabs/devices. Use headphones and select your output in system sound settings. Your own input monitor belongs in your performer room.</p>
+        <div class="room-action-row">
+          <button id="desk-listen" type="button" disabled>Listen to selected room</button>
+          <button id="desk-stop" type="button">Stop private listening</button>
+        </div>
+        <output id="desk-listen-status" role="status" aria-live="polite">Private listening is off.</output>
+        <audio id="desk-audio" controls playsinline></audio>
+      </section>
+      <section id="desk-direction" aria-label="Selected booking direction"></section>
+      <section class="direction-feedback" aria-label="Audience feedback">
+        <h3>Audience feedback</h3>
+        <p>Audience reactions, verified tip celebrations and audio-problem reports are unavailable in this desk. No reports is not proof that listeners can hear.</p>
+      </section>
+    </section>
+  </div>
+  <script type="module" src="js/producer-room.mjs?v=20261114-allocated-stage"></script>
+</body>
+</html>

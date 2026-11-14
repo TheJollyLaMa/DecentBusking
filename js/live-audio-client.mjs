@@ -1,4 +1,4 @@
-import { listenerAudioStatus } from './live-audio.mjs';
+import { listenerAudioStatus } from './live-audio.mjs?v=20261114-allocated-stage';
 
 let sdkPromise;
 export function loadLiveAudioSdk(serviceUrl) {
@@ -17,10 +17,16 @@ export async function roomRequest(serviceUrl, path, input, token, fetchImpl = fe
   const response = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/live-audio/${path}`, {
     method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(input), signal: AbortSignal.timeout(
-      path === 'session' || ['check', 'arm', 'cancel', 'recording-consent'].includes(input.action) ? 60_000 : 10_000), cache: 'no-store',
+      path === 'session' || input.action?.startsWith('broadcast-') ||
+      ['check', 'arm', 'cancel', 'recording-consent'].includes(input.action) ? 60_000 : 10_000), cache: 'no-store',
   });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'Live audio is unavailable');
+  if (!response.ok) {
+    const error = new Error(result.error || 'Live audio is unavailable');
+    error.status = response.status;
+    error.code = result.code;
+    throw error;
+  }
   return result;
 }
 

@@ -12,6 +12,44 @@ const booking = { id: 'existing-funded-booking', wallet: artist.address, title: 
   status: 'funded', acknowledged: true, payoutPolicy: 'pilot-guaranteed-v1' };
 const SECRETS = ['private-grant-fixture', 'fixture-stream-key', 'whip.example'];
 
+test('durable allocation and command receipts survive encrypted restore while private additions fail closed', async () => {
+  const { liveAudioStateCodec, validateLiveAudioState } = await import('../discord-bot/live-audio-store.js');
+  const allocation = { id: 'allocation:one', revision: 3, plannedStartAt: START, startedAt: START,
+    endedAt: null, endReason: null, durationMs: 1200000, encoreMs: 600000, choice: 'contracted',
+    choiceAt: null, previousBookingId: null, nextBookingId: null, delayNotifiedAt: null,
+    finishedId: null, finishedAt: null, priorityFollowup: false };
+  const state = { version: 1, rooms: [{ bookingId: booking.id, armed: true, checks: {}, allocation,
+    broadcastCommands: [{ id: 'durable-command', hash: 'a'.repeat(64) }] }] };
+  const codec = liveAudioStateCodec(KEY), envelope = codec.serialize(state);
+  assert.equal(JSON.stringify(envelope).includes('allocation:one'), false);
+  assert.deepEqual(codec.deserialize(envelope), state);
+  for (const change of [{ encoreMs: 600001 }, { messages: ['private'] }, { nextToken: 'private-pass' },
+    { durationMs: 0 }, { revision: -1 }, { endReason: 'producer-finished' }]) {
+    const invalid = structuredClone(state); Object.assign(invalid.rooms[0].allocation, change);
+    assert.throws(() => validateLiveAudioState(invalid), /Invalid live broadcast allocation/);
+  }
+  const duplicate = structuredClone(state);
+  duplicate.rooms.push({ ...structuredClone(state.rooms[0]), bookingId: 'another-act' });
+  assert.throws(() => validateLiveAudioState(duplicate), /Multiple active/);
+  const tokenReceipt = structuredClone(state);
+  tokenReceipt.rooms[0].broadcastCommands[0].nextToken = 'private-pass';
+  assert.throws(() => validateLiveAudioState(tokenReceipt), /command receipts/);
+});
+
+test('invalid file-store allocation is never installed in service memory after a failed initialize', async () => {
+  const { createLiveAudioService } = await import('../discord-bot/live-audio.js');
+  let restores = 0;
+  const s = createLiveAudioService({ ownerWallet: owner.address, getBookings: async () => [booking],
+    transport: { ready: true, stop: async () => {} },
+    store: { restore: async () => { restores++; return { version: 1, rooms: [{ bookingId: booking.id,
+      armed: true, checks: {}, allocation: { id: 'invalid' } }] }; } } });
+  await assert.rejects(s.tick(), /Invalid live broadcast allocation/);
+  await assert.rejects(s.tick(), /Invalid live broadcast allocation/);
+  assert.equal(restores, 2);
+  assert.equal(s.completionState(booking.id).known, false);
+  await s.stop();
+});
+
 function fakePinata() {
   const files = [], uploads = [];
   let serial = 0, failGateway = false;

@@ -1,10 +1,12 @@
-import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261113-recording';
-import { liveRecordingConsentMessage } from './live-recording-consent.mjs?v=20261113-recording';
-import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261113-recording';
-import { performerRoomSign } from './performer-room.mjs?v=20261110-wallet-practice';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261114-monitor-mix';
+import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
+import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from './live-recording-consent.mjs?v=20261114-allocated-stage';
+import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261114-allocated-stage';
+import { performerRoomSign, performerAllocationAccess } from './performer-room.mjs?v=20261114-allocated-stage';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261114-allocated-stage';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
+import { bindLiveDirection } from './live-direction.mjs?v=20261114-allocated-stage';
+import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261114-allocated-stage';
 
 const byId = id => document.getElementById(id);
 const bookingId = new URL(location.href).searchParams.get('booking') || '';
@@ -26,6 +28,31 @@ const headphones = bindInputMonitor({
   getTrack: () => localTrack,
   output: byId('room-output'), outputDevices: byId('room-output-devices'), outputStatus: byId('room-output-status'), audio,
 });
+const direction = bindLiveDirection({
+  container: byId('room-direction'), serviceUrl, bookingId,
+  onReconnect: reauthorizeRoom,
+});
+const broadcastControls = bindLiveBroadcastControls({
+  container: byId('room-broadcast-controls'), serviceUrl, bookingId,
+  getBooking: () => booking, getSession: () => session,
+  onReconnect: reauthorizeRoom, onState: render, pollState: false,
+});
+async function reauthorizeRoom() {
+    const authorization = session, performer = wallet, generation = authGeneration;
+    if (!authorization || !performer || !window.ethereum) throw new Error('Connect your booking wallet first.');
+    const valid = () => !disposed && session === authorization && wallet === performer && authGeneration === generation;
+    const challenge = await roomRequest(serviceUrl, 'challenge', { bookingId, wallet: performer });
+    if (!valid()) throw new Error('Wallet changed. Reconnect this booking.');
+    const hex = `0x${Array.from(new TextEncoder().encode(challenge.message), byte => byte.toString(16).padStart(2, '0')).join('')}`;
+    const signature = await window.ethereum.request({ method: 'personal_sign', params: [hex, performer] });
+    if (!valid()) throw new Error('Wallet changed. Reconnect this booking.');
+    const authorized = await roomRequest(serviceUrl, 'session', { challengeId: challenge.challengeId, signature });
+    if (!valid()) throw new Error('Wallet changed. Reconnect this booking.');
+    session = authorized;
+    direction.setSession(authorized);
+    render(authorized.state);
+    return authorized;
+}
 const status = message => { byId('room-status').textContent = message; };
 const publisherPresence = createLivePublisherPresence({ serviceUrl, onError: () => {
   byId('room-return-status').textContent = 'Automatic radio-return protection is unavailable. Mute the public radio in every other tab/device before performing.';
@@ -37,34 +64,55 @@ function releaseReturnProtection() {
 const command = input => roomRequest(serviceUrl, 'control', input, session?.token);
 const recordingOption = bindLiveRecordingOption({
   container: byId('room-recording-option'), toggle: byId('room-recording-consent'), output: byId('room-recording-status'),
+  renew: byId('room-recording-renew'), scopeOutput: byId('room-recording-scope'),
+  requiredVersion: LIVE_RECORDING_ALLOCATED_CONSENT_VERSION,
   savePermission: async enabled => {
     const authorization = session, performer = wallet;
     if (!authorization || !performer || !window.ethereum || !booking) throw new Error('Connect your performer wallet before choosing recording.');
     const issuedAt = Date.now();
-    const message = liveRecordingConsentMessage({ bookingId, wallet: performer, origin: location.origin, issuedAt, enabled });
+    const consentVersion = LIVE_RECORDING_ALLOCATED_CONSENT_VERSION;
+    const message = liveRecordingConsentMessage({ bookingId, wallet: performer, origin: location.origin, issuedAt, enabled, version: consentVersion });
     const hex = `0x${Array.from(new TextEncoder().encode(message), byte => byte.toString(16).padStart(2, '0')).join('')}`;
     const signature = await window.ethereum.request({ method: 'personal_sign', params: [hex, performer] });
     if (session !== authorization || wallet !== performer || disposed) throw new Error('Wallet changed; recording permission was not saved.');
     const state = await roomRequest(serviceUrl, 'control', {
-      action: 'recording-consent', enabled, issuedAt, signature,
+      action: 'recording-consent', enabled, issuedAt, signature, consentVersion,
     }, authorization.token);
     if (session !== authorization || wallet !== performer || disposed) throw new Error('Reconnect your performer wallet to check recording permission.');
     render(state);
-    return { consented: state.recording?.consented, message: recordingMessage(state.recording) };
+    return { consented: state.recording?.consented, consentVersion: state.recording?.consentVersion,
+      message: recordingMessage(state.recording) };
   },
 });
 function recordingMessage(recording) {
   if (recording?.error) return `Recording needs attention: ${recording.error}`;
   if (recording?.status === 'submitted') return 'Your recording is ready for admin minting.';
   if (['finalizing', 'uploading', 'processing'].includes(recording?.status)) return 'Preparing your live recording for admin minting...';
-  if (recording?.status === 'recording') return 'Recording your live set. Soundchecks stay private.';
-  return recording?.consented ? 'Your live set will be recorded. Soundchecks stay private.' : 'Recording is off.';
+  if (recording?.status === 'recording') return recording.consentVersion === LIVE_RECORDING_ALLOCATED_CONSENT_VERSION
+    ? 'Recording your authorized on-air set. Soundchecks stay private.'
+    : 'Recording only within the original scheduled-set permission. Expanded capture is not authorized.';
+  return recording?.consented ? recording.consentVersion === LIVE_RECORDING_ALLOCATED_CONSENT_VERSION
+    ? 'Recording permission v2 saved for the authorized on-air set. Soundchecks stay private.'
+    : 'Original scheduled-set permission saved; delay or encore capture needs an explicit update.' : 'Recording is off.';
 }
 function renderRecording(state) {
+  const recording = state?.recording;
+  const version = recording?.consentVersion || LIVE_RECORDING_CONSENT_VERSION;
+  const allocated = version === LIVE_RECORDING_ALLOCATED_CONSENT_VERSION;
+  const scopeMessage = !recording?.consented
+    ? 'Recording is off. A new opt-in requests permission for this booking’s authorized on-air set, including an authorized delay, your chosen short/full set and up to ten minutes of producer-approved encore. It does not authorize extra airtime.'
+    : allocated
+      ? 'Permission v2: this booking’s authorized on-air set, including delay, your chosen short/full set and up to ten minutes of producer-approved encore. Private practice and soundchecks are excluded. Your original guaranteed fee and booking terms are unchanged.'
+      : version === LIVE_RECORDING_CONSENT_VERSION
+        ? 'Legacy permission v1: only the original scheduled live set. Delayed or encore capture is not covered. Use Update recording permission to explicitly approve the expanded scope.'
+        : 'Recording permission version is unrecognized. Expanded capture is not confirmed; refresh or explicitly update your permission.';
   recordingOption.update({
     available: !!session && wallet?.toLowerCase() === booking?.wallet?.toLowerCase() && state?.recording?.available === true,
     canChange: state?.recording?.canChange === true,
     consented: state?.recording?.consented === true,
+    needsRenewal: recording?.consented === true && !allocated,
+    scopeMessage: `${scopeMessage}${recording?.consented && !allocated && !recording.canChange
+      ? ' Updating permission is currently unavailable; the existing scope remains unchanged.' : ''}`,
     message: recordingMessage(state?.recording),
   });
 }
@@ -78,13 +126,13 @@ const perform = (fn, pending = 'Working…', success = 'Done.') => async event =
   if (actionPending) return;
   actionPending = true;
   activeAction = event?.currentTarget?.id;
-  actionStatus(pending, 'pending');
+  actionStatus(typeof pending === 'function' ? pending() : pending, 'pending');
   for (const id of actionButtons) byId(id).disabled = true;
   renderFlow();
   try {
     const result = await fn();
     if (result === false) throw new Error('Connection changed. Reconnect your wallet/audio and try again.');
-    actionStatus(success, 'success');
+    actionStatus(typeof success === 'function' ? success() : success, 'success');
   } catch (error) {
     actionStatus(error.code === -32002
       ? 'MetaMask already has a pending request. Open the extension and finish or reject it, then try again.'
@@ -187,12 +235,16 @@ async function connect(publish) {
 }
 function render(state) {
   broadcastState = state; observedAt = Date.now(); renderSign();
+  broadcastControls.update(state);
   renderRecording(state);
   const fresh = state.privateAudioFresh ? 'Worker receiver verifies fresh delivered audio' : 'No fresh delivery verified';
   status(`${fresh}${state.reason ? ` · ${state.reason}` : ''}`);
-  byId('room-targets').textContent = state.armed ? 'Scheduled handoff armed. Keep performer audio connected.' : 'Soundchecks stay private. Keep the publishing tab open.';
+  byId('room-targets').textContent = state.broadcast
+    ? 'Allocated stage: use the effective timing and explicit take/end controls below. Advisory cues do not change airtime.'
+    : state.armed ? 'Scheduled handoff armed. Keep performer audio connected.' : 'Soundchecks stay private. Keep the publishing tab open.';
   renderFlow();
   if (['cancelled', 'ended', 'unavailable'].includes(state.phase)) {
+    direction.setSession(null);
     byId('room-obs-secret').textContent = '';
     void disconnect();
   }
@@ -200,13 +252,17 @@ function render(state) {
 function stageTime(minutes = 0) {
   return new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit',
-  }).format(new Date(Date.parse(booking.startUtc) - minutes * 60000));
+  }).format(new Date(stageStartAt() - minutes * 60000));
+}
+function stageStartAt() {
+  const planned = broadcastState?.broadcast?.plannedStartAt;
+  return Number.isFinite(planned) ? planned : Date.parse(booking.startUtc);
 }
 function renderFlow() {
   if (!booking) return;
   const state = broadcastState;
   const stale = !state || Date.now() - observedAt > 12000;
-  const beforeStart = Date.parse(booking.startUtc) - (state?.serverTime
+  const beforeStart = stageStartAt() - (state?.serverTime
     ? state.serverTime + Date.now() - observedAt : Date.now());
   const closed = ['cancelled', 'ended', 'unavailable'].includes(state?.phase) || beforeStart <= 0;
   for (const [check, minutes] of [['t60', 60], ['t15', 15]]) {
@@ -227,15 +283,20 @@ function renderFlow() {
   byId('room-step-arm').setAttribute('data-state', state?.armed ? 'passed' : 'pending');
   const arming = actionPending && activeAction === 'room-arm';
   byId('room-step-arm-status').textContent = arming ? 'Saving radio handoff… up to 60 seconds'
-    : state?.armed ? '✓ ARMED · scheduled handoff saved'
+    : state?.armed ? state.broadcast ? '✓ ARMED · allocated readiness saved; explicit Take live still required' : '✓ ARMED · scheduled handoff saved'
     : closed ? 'Scheduled arming closed' : 'Both checks + fresh delivered audio required';
   byId('room-arm').textContent = arming ? 'Saving…'
-    : state?.armed ? '✓ Radio handoff armed' : 'Arm scheduled radio handoff';
+    : state?.armed ? state.broadcast ? '✓ Allocated readiness armed' : '✓ Radio handoff armed'
+      : state?.broadcast ? 'Arm allocated-stage readiness' : 'Arm scheduled radio handoff';
   byId('room-arm').disabled = actionPending || !session || stale || !state?.checks?.t60 || !state?.checks?.t15 ||
     !state?.privateAudioFresh || !!state?.armed || closed;
   byId('room-obs').disabled = actionPending || !state?.ingressEnabled;
   byId('room-next-step').textContent = state?.phase === 'cancelled' ? 'Broadcast cancelled. Performer fee unchanged.'
-    : state?.phase === 'ended' ? 'Scheduled set ended.'
+    : state?.phase === 'ended' ? 'Broadcast ended. Original guaranteed fee unchanged.'
+      : state?.broadcast ? state.broadcast.phase === 'waiting'
+        ? state.armed ? `Checks cleared. Await the artist’s set choice and owner’s explicit Take live at or after ${stageTime()} New York.`
+          : `Complete both real checks before the effective planned start, ${stageTime()} New York. Arming does not automatically take this allocated act live.`
+        : 'Allocated stage is live. Use the separate authorized timing and durable finish controls.'
       : state?.armed ? `All cleared. Keep audio connected for ${stageTime()} radio.`
         : !state?.checks?.t60 ? 'Step 1 · Listen, then confirm the first soundcheck.'
           : !state?.checks?.t15 ? `✓ First check saved. Next: final soundcheck at ${stageTime(15)} New York.`
@@ -247,7 +308,7 @@ function renderSign() {
     byId('room-on-air').classList.toggle('is-live', sign.live);
     byId('room-countdown').textContent = sign.detail;
     if (booking) {
-      const start = Date.parse(booking.startUtc);
+      const start = stageStartAt();
       const time = minutes => new Intl.DateTimeFormat('en-US', {
         timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit',
       }).format(new Date(start - minutes * 60000));
@@ -284,20 +345,25 @@ async function refreshBooking() {
         throw new Error('Open the room from your performance invitation');
       }
       booking = selected;
+      byId('room-producer-desk').href = `producer-room.html?booking=${encodeURIComponent(bookingId)}`;
       byId('room-welcome').textContent = `${booking.displayName || 'Your'} · your Decent stage`;
       renderSign();
       if (practiceMode) return;
-      if (booking.status !== 'funded' || !booking.acknowledged || booking.cancelled || Date.parse(booking.endUtc) <= Date.now()) {
-        byId('room-authorize').disabled = true;
-        if (session) { session = null; byId('room-controls').hidden = true; await disconnect(); }
-        status('Backstage opens after acceptance and confirmed escrow funding, from 70 minutes before your set.');
-        return;
-      }
       const liveResponse = await fetch(`${serviceUrl}/api/live-audio/state?bookingId=${encodeURIComponent(bookingId)}`, {
         cache: 'no-store', signal: AbortSignal.timeout(10000) });
       const liveState = await liveResponse.json();
       if (!liveResponse.ok || !liveState.configured) throw new Error(liveState.error || 'Live audio hosting unavailable');
-      if (!session) { broadcastState = liveState; observedAt = Date.now(); }
+      const allocated = performerAllocationAccess(booking, liveState, Date.now(), Date.now());
+      if ((!allocated && (booking.status !== 'funded' || Date.parse(booking.endUtc) <= Date.now())) || !booking.acknowledged || booking.cancelled) {
+        broadcastState = liveState; observedAt = Date.now(); renderSign();
+        byId('room-authorize').disabled = true;
+        if (session) { session = null; direction.setSession(null); broadcastControls.update(null); byId('room-controls').hidden = true; await disconnect(); }
+        status('Backstage requires accepted funded terms and a current scheduled or explicitly allocated access window.');
+        return;
+      }
+      if (!session || session.expiresAt <= Date.now()) {
+        broadcastState = liveState; observedAt = Date.now(); broadcastControls.update(liveState);
+      }
       renderSign();
       byId('room-authorize').disabled = actionPending || !!session;
       if (!session) status('Backstage is ready. Connect your invited wallet to soundcheck.');
@@ -314,6 +380,8 @@ byId('room-authorize').onclick = perform(async () => {
   const generation = ++authGeneration;
   const current = () => generation === authGeneration && !disposed;
   session = null; byId('room-controls').hidden = true; byId('room-obs-secret').textContent = '';
+  direction.setSession(null);
+  broadcastControls.update(null);
   renderRecording(null);
   await disconnect();
   let accounts;
@@ -333,10 +401,12 @@ byId('room-authorize').onclick = perform(async () => {
   const authorized = await roomRequest(serviceUrl, 'session', { challengeId: challenge.challengeId, signature });
   if (!current()) return false;
   session = authorized;
+  direction.setSession(authorized);
   byId('room-controls').hidden = false;
   byId('room-publisher').hidden = !(session.canPublish ?? session.role === 'publisher');
   byId('room-owner').hidden = session.role !== 'owner';
   byId('room-operator-listen').hidden = session.role !== 'owner';
+  byId('room-producer-desk').hidden = session.role !== 'owner';
   render(session.state);
 }, 'Connecting wallet · finish the MetaMask prompts…', '✓ Backstage unlocked. Follow your controls below.');
 byId('room-devices').onclick = perform(async () => {
@@ -366,7 +436,10 @@ for (const [id, check] of [['room-check60', 't60'], ['room-check15', 't15']]) {
   `✓ T−${check.slice(1)} soundcheck PASSED · saved.`);
 }
 byId('room-arm').onclick = perform(async () => render(await command({ action: 'arm' })),
-  'Saving scheduled radio handoff… Please wait (up to 60 seconds).', '✓ Radio handoff ARMED · saved.');
+  () => broadcastState?.broadcast ? 'Saving allocated-stage readiness… Please wait (up to 60 seconds).'
+    : 'Saving scheduled radio handoff… Please wait (up to 60 seconds).',
+  () => broadcastState?.broadcast ? '✓ Allocated readiness ARMED · saved. The owner must explicitly take this selected act live.'
+    : '✓ Radio handoff ARMED · saved.');
 byId('room-cancel').onclick = perform(async () => {
   if (!window.confirm('Cancel this live broadcast? The guaranteed performer fee remains unchanged.')) return;
   render(await command({ action: 'cancel', confirmed: true }));
@@ -390,7 +463,7 @@ async function poll() {
       if (!response.ok) throw new Error();
       const state = await response.json();
       if (!['cancelled', 'ended', 'unavailable'].includes(state.phase)) throw new Error();
-      render(state); session = null;
+      render(state); session = null; direction.setSession(null);
     } catch { status('Room authorization/control unavailable — reconnect the booking wallet'); }
   }
   finally { polling = false; }
@@ -399,10 +472,12 @@ window.ethereum?.on?.('accountsChanged', () => {
   if (requestingAccounts) return;
   ++authGeneration;
   session = null; byId('room-controls').hidden = true; byId('room-obs-secret').textContent = '';
+  direction.setSession(null);
+  broadcastControls.update(null);
   renderRecording(null);
   void disconnect(); status('Wallet changed; authorize this booking again');
 });
-window.addEventListener('pagehide', () => { disposed = true; ++authGeneration; session = null; void disconnect(); });
+window.addEventListener('pagehide', () => { disposed = true; ++authGeneration; session = null; direction.dispose(); broadcastControls.dispose(); void disconnect(); });
 setInterval(() => { void poll(); }, 2000);
 setInterval(renderSign, 1000);
 setInterval(() => { void refreshBooking(); }, 10000);

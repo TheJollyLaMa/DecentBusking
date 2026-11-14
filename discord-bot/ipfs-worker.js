@@ -294,6 +294,7 @@ export function createWorkerRequestHandler({
   getRadioHistory,
   getWeeklyPayflow,
   getPaymentLedger,
+  getTipLedger,
   getFunds,
   liveBookings,
   liveAudio,
@@ -1099,6 +1100,20 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/api/payroll/ledger') {
         if (!getPaymentLedger) throw new Error('Payment ledger is not configured');
         sendJson(response, 200, await getPaymentLedger(), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/tips/ledger') {
+        if (!getTipLedger) { sendJson(response, 503, { error: 'Tip ledger is not configured' }, '*', 'no-store'); return; }
+        const result = await getTipLedger({
+          wallet: requestUrl.searchParams.get('wallet') || undefined,
+          offset: Number(requestUrl.searchParams.get('offset') || 0),
+          limit: Number(requestUrl.searchParams.get('limit') || 100),
+        });
+        if (!result.ready) {
+          sendJson(response, 503, { ...result, error: result.lastError || 'Tip ledger is restoring or unavailable' }, '*', 'no-store');
+          return;
+        }
+        sendJson(response, 200, result, '*', 'no-store');
         return;
       }
       if (requestUrl.pathname === '/api/live-bookings/acknowledge' && request.method === 'POST') {

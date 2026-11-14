@@ -33,11 +33,10 @@ function integer(value, min, max, label) {
 }
 
 export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', escrowStartBlock = 0, ensResolver,
-  restore = async () => null, save, getSchedule, saveSchedule, confirmations = 2, now = Date.now }) {
+  restore = async () => null, save, getSchedule, saveSchedule, confirmations = 2, now = Date.now,
+  getBroadcastCompletion = () => null }) {
   if (escrowAddress && (!addressPattern.test(escrowAddress) || /^0x0{40}$/i.test(escrowAddress))) throw new Error('Invalid live escrow address');
-  const escrow = escrowAddress ? new Contract(escrowAddress, [
-    'function bookings(bytes32) view returns ((address performer,address funder,uint256 amount,uint256 payoutAmount,uint64 showStart,uint64 showEnd,uint64 claimDeadline,uint32 reviewWindow,uint32 cancellationWindow,uint16 killFeeBps,bytes32 termsHash,uint8 status))',
-  ], provider) : null;
+  const escrow = escrowAddress ? new Contract(escrowAddress, LIVE_ESCROW_ABI, provider) : null;
   let state = { schemaVersion: 1, revision: 0, bookings: [], escrowScannedThrough: null };
   let initialized;
   let queue = Promise.resolve();
@@ -263,6 +262,10 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
           if (command.txAction === 'payout' && (!b.decision || b.mode !== 'phase0')) throw new Error('Phase 0 payment requires a recorded completion decision');
           await reconcile(next, b, command.txAction, command.txHash);
         } else if (action === 'decision') {
+          const completion = getBroadcastCompletion(b.id);
+          if (completion && (completion.known !== true || completion.pending)) {
+            throw new Error('Actual broadcast completion is not verified; the guaranteed fee and original claim clocks are unchanged');
+          }
           const pilot = b.payoutPolicy === LIVE_PILOT_POLICY;
           const cancellation = !pilot && command.cancellation === true && b.cancelled;
           if (b.status !== 'funded' || !cancellation && ((!pilot && b.cancelled) || now() < Date.parse(b.endUtc))) throw new Error('Review requires a funded completed show or cancelled booking');
@@ -333,6 +336,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
   function publicState() {
     return { ...clone(state), ready: true, escrowAddress, escrowConfigured: !!escrowAddress, notice: 'Earmarked, NOT escrowed. Phase 0 admin can recoverFund.',
       bookings: state.bookings.map(({ acknowledgements, discordHandle, ...b }) => ({ ...clone(b),
+        broadcastCompletion: getBroadcastCompletion(b.id),
         acknowledged: !!acknowledgements, acknowledgedAt: acknowledgements?.at || null })) };
   }
   async function getState() { return run(async () => { await initialize(); await indexEscrow(); return publicState(); }); }

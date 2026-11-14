@@ -1,4 +1,4 @@
-import { renderLivePerformances } from './live-performance-profile.mjs?v=20261114-performer-encore';
+import { renderLivePerformances } from './live-performance-profile.mjs?v=20261114-allocated-stage';
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
@@ -15,6 +15,7 @@ import { getCreatorWatchlistState, removeCreatorWatchlist, syncCreatorWatchlist 
 import { groupWatchlistByArtist } from './djuke-playlists.mjs?v=20261030-ad-cutoff';
 import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readContractEarnings, scanLogEarnings,
   summarizeEarnings, verifyGroupedEarningsProofs } from './creator-earnings.mjs?v=20261023-djuke-v05';
+import { renderTipLedger } from './tip-ledger-ui.mjs';
 
 import { renderWallet } from './wallet-label.mjs';
 
@@ -867,6 +868,8 @@ export function initCreatorProfile() {
   livePerformances.className = 'creator-live-performances';
   const earningsDisclosure = dialog.querySelector('[data-profile-earnings]');
   earningsDisclosure?.parentElement?.insertBefore(livePerformances, earningsDisclosure);
+  const tipReceipts = document.createElement('section');
+  earningsDisclosure?.parentElement?.insertBefore(tipReceipts, earningsDisclosure);
   let liveRevision = 0;
   let livePaymentLoad;
   const loadLivePayments = async (check, bookingState) => {
@@ -969,6 +972,8 @@ export function initCreatorProfile() {
     const check = ++revision;
     livePerformances.replaceChildren();
     livePaymentLoad = loadLivePayments(check);
+    renderTipLedger({ container: tipReceipts, config: config(), address: target, ethers: window.ethers,
+      isCurrent: () => check === revision && target === address });
     if (!dialog.open) dialog.showModal();
     document.dispatchEvent(new CustomEvent('creator-profile-view-changed', { detail: { address } }));
     display();

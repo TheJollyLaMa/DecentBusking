@@ -238,6 +238,139 @@ test('public room state exposes recording capability without disclosing performe
   assert.equal(state.listenerLimit, 10);
 });
 
+test('canonical public performer is independent of program configuration and booking freshness is not response freshness', async t => {
+  const b = { ...booking(), displayName: 'Canonical artist' };
+  let mode = 'healthy', verified;
+  const f = await setup({ getBookings: () => {
+    if (mode === 'failed') return Promise.reject(new Error('private RPC details'));
+    if (mode === 'malformed') return Promise.resolve({ unavailable: true });
+    if (mode === 'unready') return Promise.resolve({ ready: false, bookings: [b] });
+    return Promise.resolve({ bookings: [b] });
+  } });
+  t.after(() => f.service.stop());
+  const first = await f.service.state(b.id);
+  verified = first.bookingVerification.verifiedAt;
+  assert.deepEqual(first.performer, { wallet: artist.address.toLowerCase(), artist: 'Canonical artist', title: b.title });
+  assert.deepEqual(first.bookingVerification, { fresh: true, verifiedAt: verified });
+  assert.equal(first.policy, null);
+  f.at(verified + 1000);
+  assert.equal((await f.service.state(b.id)).bookingVerification.verifiedAt, verified);
+  mode = 'failed';
+  f.at(verified + 11000);
+  let current = await f.service.state(b.id);
+  assert.deepEqual(current.bookingVerification, { fresh: false, verifiedAt: verified });
+  assert.equal(current.phase, 'preflight', 'metadata failure does not change audio policy');
+  assert.doesNotMatch(JSON.stringify(current), /private RPC details/);
+  mode = 'malformed';
+  await new Promise(resolve => setImmediate(resolve));
+  current = await f.service.state(b.id);
+  assert.deepEqual(current.bookingVerification, { fresh: false, verifiedAt: verified });
+  mode = 'unready';
+  await new Promise(resolve => setImmediate(resolve));
+  current = await f.service.state(b.id);
+  assert.deepEqual(current.bookingVerification, { fresh: false, verifiedAt: verified });
+  mode = 'healthy';
+  await new Promise(resolve => setImmediate(resolve));
+  current = await f.service.state(b.id);
+  assert.deepEqual(current.bookingVerification, { fresh: true, verifiedAt: verified + 11000 });
+  b.cancelled = true;
+  f.at(verified + 22000);
+  assert.equal((await f.service.state(b.id)).bookingVerification.fresh, false, 'a freshly read cancelled booking cannot authorize a tip');
+});
+
+test('stalled booking refresh makes live tip verification unavailable without stopping healthy audio', async t => {
+  const b = booking();
+  let stalled = false;
+  const f = await setup({ getBookings: () => stalled ? new Promise(() => {}) : Promise.resolve({ bookings: [b] }) });
+  t.after(() => f.service.stop());
+  await f.prepare();
+  f.at(START); f.frame(960); await f.service.tick();
+  assert.equal((await f.service.current()).bookingVerification.fresh, true);
+  stalled = true;
+  f.at(START + 31000); f.frame(960); await f.service.tick();
+  const state = await f.service.current();
+  assert.equal(state.phase, 'live');
+  assert.equal(state.status, 'ON-AIR');
+  assert.equal(state.policy.mode, 'live');
+  assert.deepEqual(state.bookingVerification, { fresh: false, verifiedAt: START });
+  assert.equal(f.cancellations.length, 0);
+});
+
+test('private direction uses existing scoped sessions and never enters public state, checkpoints or broadcast policy', async t => {
+  const f = await setup();
+  t.after(() => f.service.stop());
+  const operator = await f.prepare(), performer = await f.authorize(artist);
+  assert.equal(operator.expiresAt, Date.parse(f.b.endUtc));
+  f.at(START); f.frame(960); await f.service.tick();
+  const initial = await f.service.command(operator.token, { action: 'direction-state' }, ORIGIN);
+  const before = f.persisted();
+  const input = { action: 'direction-message', commandId: 'private-message-one',
+    epoch: initial.epoch, text: 'PRIVATE-MESSAGE-MUST-NOT-LEAK' };
+  assert.equal((await f.service.command(operator.token, input, ORIGIN)).applied, true);
+  assert.equal((await f.service.command(operator.token, input, ORIGIN)).applied, false);
+  const artistState = await f.service.command(performer.token, { action: 'direction-state' }, ORIGIN);
+  assert.equal(artistState.messages[0].text, input.text);
+  assert.deepEqual(f.persisted(), before);
+  const publicViews = [await f.service.state(f.b.id), await f.service.current(), f.persisted(), f.policies];
+  assert.doesNotMatch(JSON.stringify(publicViews), /PRIVATE-MESSAGE|performerPresence|direction-|acknowledgedAt|memory-only/);
+  await assert.rejects(f.service.command(operator.token, { action: 'direction-state', bookingId: 'another-booking' }, ORIGIN),
+    e => e.status === 403);
+  await assert.rejects(f.service.command(operator.token, { action: 'direction-state' }, 'https://other.example'),
+    e => e.status === 401);
+  await assert.rejects(f.service.command('not-a-session', { action: 'direction-state' }, ORIGIN),
+    e => e.status === 401);
+  await f.service.listener(f.b.id);
+  assert.equal((await f.service.current()).status, 'ON-AIR');
+  f.at(START + 6000); await f.service.tick();
+  assert.doesNotMatch(JSON.stringify(f.persisted()), /PRIVATE-MESSAGE/);
+  f.at(START + 60000); await f.service.tick();
+  assert.equal(f.cancellations.length, 1, 'private coordination cannot hold the audio-loss fallback');
+  await assert.rejects(f.service.command(performer.token, { action: 'direction-state' }, ORIGIN), e => e.status === 401);
+});
+
+test('private direction does not wait behind pending lifecycle persistence', async t => {
+  const f = await setup();
+  t.after(() => f.service.stop());
+  const operator = await f.prepare();
+  const save = f.store.save;
+  let release, timer;
+  f.store.save = async value => { await new Promise(resolve => { release = resolve; }); await save(value); };
+  const cancelling = f.service.command(operator.token, { action: 'cancel', confirmed: true }, ORIGIN);
+  await new Promise(resolve => setImmediate(resolve));
+  try {
+    const state = await Promise.race([
+      f.service.command(operator.token, { action: 'direction-state' }, ORIGIN),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Private polling queued behind checkpoint')), 1000); }),
+    ]);
+    assert.equal(state.bookingId, f.b.id);
+  } finally {
+    clearTimeout(timer); release(); await cancelling;
+  }
+});
+
+test('private direction sessions and contents do not survive restart or booked-end expiry', async t => {
+  const f = await setup();
+  t.after(() => f.service.stop());
+  const operator = await f.authorize();
+  const state = await f.service.command(operator.token, { action: 'direction-state' }, ORIGIN);
+  await f.service.command(operator.token, { action: 'direction-message',
+    commandId: 'restart-message', epoch: state.epoch, text: 'Session only' }, ORIGIN);
+  const { createLiveAudioService } = await import('../discord-bot/live-audio.js');
+  const restarted = createLiveAudioService(f.base);
+  t.after(() => restarted.stop());
+  await assert.rejects(restarted.command(operator.token, { action: 'direction-state' }, ORIGIN), e => e.status === 401);
+  const challenge = await restarted.challenge({ bookingId: f.b.id, wallet: owner.address }, ORIGIN);
+  const auth = await restarted.authorize({ challengeId: challenge.challengeId,
+    signature: await owner.signMessage(challenge.message) }, ORIGIN);
+  const next = await restarted.command(auth.token, { action: 'direction-state', cursor: state.cursor }, ORIGIN);
+  assert.notEqual(next.epoch, state.epoch);
+  assert.equal(next.resetRequired, true);
+  assert.deepEqual(next.messages, []);
+  f.at(Date.parse(f.b.endUtc));
+  await assert.rejects(restarted.command(auth.token, { action: 'direction-state' }, ORIGIN), e => e.status === 401);
+  assert.equal((await restarted.state(f.b.id)).phase, 'ended');
+});
+
 test('cancellation recovery never replaces another explicitly reserved radio event', async () => {
   const { applyLiveAudioShow } = await import('../js/live-audio.mjs');
   const reserved = { id: 'next', type: 'live_performance', event: { id: 'next', title: 'Next performer' } };
@@ -252,7 +385,8 @@ test('the website and scheduler both prefer the next live booking over a previou
   const f = await setup({ getBookings: async () => ({ bookings: [b, next] }) });
   await f.store.save({ version: 1, rooms: [
     { bookingId: b.id, armed: false, checks: {}, cancelledAt: START + 19 * 60_000, reason: 'Prior cancellation' },
-    { bookingId: next.id, armed: true, checks: { t60: 'checked', t15: 'checked' } },
+    { bookingId: next.id, armed: true, checks: { t60: new Date(START - 40 * 60_000).toISOString(),
+      t15: new Date(START + 5 * 60_000).toISOString() } },
   ] });
   f.at(START + 20 * 60_000 + 1000);
   await f.service.tick();
@@ -405,6 +539,13 @@ test('HTTP room routes require allowed origins, keep private grants no-store, an
     configured: true, listener: async () => { throw new Error('upstream rejected token secret-abcd'); },
   });
   assert.doesNotMatch(failed.body, /secret-abcd/);
+  const { LiveDirectionError } = await import('../discord-bot/live-direction.js');
+  const expired = await call('/api/live-audio/control', 'POST', ORIGIN, { action: 'direction-state' }, {
+    configured: true, command: async () => { throw new LiveDirectionError('DIRECTION_AUTH_EXPIRED', 'Room authorization expired', 401); },
+  });
+  assert.equal(expired.status, 401);
+  assert.deepEqual(JSON.parse(expired.body), { error: 'Room authorization expired', code: 'DIRECTION_AUTH_EXPIRED' });
+  assert.equal(expired.headers['cache-control'], 'no-store');
   const preflight = await call('/api/live-audio/control', 'OPTIONS', ORIGIN);
   assert.match(preflight.headers['access-control-allow-headers'], /authorization/);
 });
