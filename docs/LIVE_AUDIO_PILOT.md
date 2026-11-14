@@ -48,6 +48,11 @@ approval. Calendar deployment uses its own ignored `.env` in the Calendar
 feature worktree; the two applications do not share keys or credentials.
 
 Friday's funded room cannot be used for an earlier rehearsal: access opens at Friday T−70.
+Before backstage opens, the stable link embeds private practice and offers a direct
+practice tab for wallets that do not inject into frames. MetaMask account exposure
+during the initial connection is not treated as a mid-session wallet change.
+Entry displays connection, invitation-check and signature progress; subsequent
+account changes still invalidate authorization.
 The separate private rehearsal mode below requires no booking or payment and cannot arm
 public radio. Missing USDC is not permission to swap ETH, fund an escrow, transfer token 75
 or activate a broadcast.

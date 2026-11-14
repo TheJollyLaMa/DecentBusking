@@ -260,11 +260,17 @@ test('browser mock signs owner invitation and publishes privately without a publ
   elements.get('guest').value = guest.address; elements.get('minutes').value = '60';
   global.document = { getElementById: id => elements.get(id) };
   global.location = { href: 'https://radio.example/rehearsal.html' };
+  let accountChanged;
   global.window = { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example' },
     ethereum: { async request({ method, params }) {
-      if (method === 'eth_requestAccounts') return [owner.address];
+      if (method === 'eth_requestAccounts') {
+        assert.match(elements.get('status').textContent, /Opening MetaMask/);
+        accountChanged?.([owner.address]);
+        return [owner.address];
+      }
       return owner.signMessage(Buffer.from(params[0].slice(2), 'hex'));
-    }, on() {} }, addEventListener(name, cb) { events[name] = cb; }, confirm: () => true };
+    }, on(name, callback) { if (name === 'accountsChanged') accountChanged = callback; } },
+    addEventListener(name, cb) { events[name] = cb; }, confirm: () => true };
   global.setInterval = (fn, ms) => { intervals.push({ fn, ms }); return 1; };
   class Room {
     constructor() { this.remoteParticipants = new Map(); this.localParticipant = { async publishTrack() {} }; }
@@ -323,5 +329,9 @@ test('browser mock signs owner invitation and publishes privately without a publ
   assert.equal(elements.get('mic-state').textContent, 'Microphone off');
   await elements.get('leave').onclick();
   assert.match(elements.get('status').textContent, /To try again/);
+  global.window.ethereum.request = async () => { const error = Error('request pending'); error.code = -32002; throw error; };
+  await elements.get('create-room').onclick();
+  assert.match(elements.get('status').textContent, /MetaMask already has a pending request/);
+  assert.equal(elements.get('status').dataset.error, 'true');
   events.pagehide();
 });

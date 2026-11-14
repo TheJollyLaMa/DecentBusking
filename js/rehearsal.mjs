@@ -8,7 +8,7 @@ const initialId = new URL(location.href).searchParams.get('rehearsal') || '';
 const practiceBookingId = new URL(location.href).searchParams.get('booking') || '';
 const audio = el('audio');
 let session, room, localTrack, remoteTrack, generation = 0, disposed = false, polling = false, deadlineTimer;
-let busy = false;
+let busy = false, requestingAccounts = false;
 const meter = createInputMeter({ level: el('mic-level'), state: el('mic-state'), note: el('meter-note') });
 const headphones = bindInputMonitor({
   toggle: el('monitor-toggle'), volume: el('monitor-volume'), status: el('monitor-status'),
@@ -54,7 +54,10 @@ const action = fn => async () => {
   if (busy) return;
   busy = true; renderControls();
   try { await fn(); } catch (error) {
-    const message = error.name === 'NotAllowedError'
+    const message = error.code === -32002
+      ? 'MetaMask already has a pending request. Open the MetaMask extension and finish or reject it, then try again.'
+      : error.code === 4001 ? 'Wallet request declined. Click Sign consent and enter when you are ready.'
+      : error.name === 'NotAllowedError'
       ? 'Microphone blocked. Allow microphone access in your browser site settings, then try Start my microphone again.'
       : error.name === 'NotFoundError' ? 'No microphone found. Connect your microphone or audio interface, then find inputs again.'
         : error.message || 'Private rehearsal unavailable';
@@ -74,7 +77,8 @@ async function disconnect(notify = false) {
   if (notify && authorization) await request('control', { action: 'leave' }, authorization.token);
 }
 async function authorize(input) {
-  if (!window.ethereum) throw new Error('A browser wallet is required');
+  if (!window.ethereum) throw new Error('MetaMask is unavailable in this room. Open the private practice room in its own tab, unlock MetaMask, and reload.');
+  status('Opening MetaMask... Unlock your wallet and approve connecting this site.');
   const current = ++generation;
   const previousToken = session?.token; session = null;
   el('controls').hidden = true; clearTimeout(deadlineTimer);
@@ -83,14 +87,21 @@ async function authorize(input) {
   if (current + 1 !== gen || disposed) return;
   if (previousToken) await request('control', { action: 'leave' }, previousToken).catch(() => {});
   if (gen !== generation || disposed) return;
-  const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+  let accounts;
+  requestingAccounts = true;
+  try { accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }); }
+  finally { requestingAccounts = false; }
   if (gen !== generation || disposed || current + 1 !== gen) return;
   const wallet = accounts[0];
+  if (!wallet) throw new Error('No wallet connected. Unlock MetaMask and select your invited or operator wallet.');
+  status('Checking your wallet invitation...');
   const challenge = await request('challenge', { ...input, wallet });
   if (gen !== generation || disposed) return;
   const hex = `0x${Array.from(new TextEncoder().encode(challenge.message), b => b.toString(16).padStart(2, '0')).join('')}`;
+  status('Confirm the private-room signature in MetaMask. No transaction or gas.');
   const signature = await window.ethereum.request({ method: 'personal_sign', params: [hex, wallet] });
   if (gen !== generation || disposed) return;
+  status('Verifying your signature and opening the private room...');
   const authorized = await request('session', { challengeId: challenge.challengeId, signature });
   if (gen !== generation || disposed) return;
   session = authorized;
@@ -202,6 +213,7 @@ async function poll() {
   } finally { polling = false; }
 }
 window.ethereum?.on?.('accountsChanged', () => {
+  if (requestingAccounts) return;
   const token = session?.token; session = null; clearTimeout(deadlineTimer); el('controls').hidden = true;
   if (token) void request('control', { action: 'leave' }, token).catch(() => {});
   void disconnect(); status('Wallet changed; sign consent again.');
