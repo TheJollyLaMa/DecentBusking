@@ -160,6 +160,36 @@ test('preserved consented recording retries an authenticated segment failure onc
   assert.equal(recorder.deploymentState().ready, true);
 });
 
+test('replacement recorder resumes a durable processing checkpoint without recapture or a second final upload', async () => {
+  const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
+  const s = await setup();
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
+  const preserved = structuredClone(s.state().recordings[0]);
+  let encodes = 0, uploads = 0;
+  const old = createLiveRecorder({ ...s.args,
+    encode: async () => { encodes++; return Buffer.from('encoded-before-handoff'); },
+    upload: async bytes => { uploads++; return s.args.upload(bytes); },
+    ingest: async () => { throw Error('Fixture mint intake unavailable'); },
+  });
+  await old.initialize(); s.at(START + 20000); await old.tick([booking]);
+  assert.equal(old.deploymentState().ready, false, 'Current gate must still block pending finalization');
+  assert.equal(s.state().recordings[0].status, 'processing');
+  assert.ok(s.state().recordings[0].result);
+  assert.deepEqual(s.state().recordings[0].consent, preserved.consent);
+  assert.deepEqual(s.state().recordings[0].segments, preserved.segments);
+  const replacement = createLiveRecorder({ ...s.args,
+    encode: async () => { throw Error('Already-checkpointed MP3 must not be re-encoded'); },
+    upload: async () => { throw Error('Already-checkpointed MP3 must not be uploaded again'); },
+  });
+  await replacement.initialize();
+  assert.equal(replacement.deploymentState().ready, false);
+  await replacement.tick([booking]); await replacement.tick([booking]);
+  assert.equal(replacement.deploymentState().ready, true);
+  assert.equal(s.submissions.length, 1);
+  assert.equal(encodes, 1); assert.equal(uploads, 1);
+});
+
 test('finalized recording uses existing mint requests, survives restore and only replays after genuine mint completion', async () => {
   const p = await import('../discord-bot/playlist-store.js');
   try {
