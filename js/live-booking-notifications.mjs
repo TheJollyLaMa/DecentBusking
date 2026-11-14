@@ -17,7 +17,7 @@ export function liveBookingActions(state, wallet, owner, now = Date.now(), pendi
     if (['draft', 'failed'].includes(b.status) && b.acknowledged && Date.parse(b.startUtc) > now) label = 'Performer accepted: fund booking';
     else if (b.status === 'funded' && now >= Date.parse(b.endUtc) &&
              now < Date.parse(b.endUtc) + b.reviewWindow * 1000) {
-     label = b.decision ? 'Submit recorded payment decision' : pilot ? 'Review rehearsal and approve guaranteed pilot fee' : 'Review performance and record live minutes';
+     label = pilot ? 'Release full guaranteed pilot fee from escrow' : b.decision ? 'Submit recorded payment decision' : 'Review performance and record live minutes';
     }
    }
    if (label) actions.admin.push({ id: b.id, label });

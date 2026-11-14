@@ -171,7 +171,7 @@ test('Admin wires an escaped operator link separately from all existing guarante
   assert.match(html, /Guaranteed pilot fee/);
   assert.match(html, /Separate offer &lt;not markup&gt;/);
   const actions = [...html.matchAll(/data-live-action="([^"]+)"/g)].map(([, action]) => action);
-  assert.deepEqual(actions, ['agreement', 'acknowledge', 'schedule', 'fund', 'reconcile', 'review', 'settle', 'cancel']);
+  assert.deepEqual(actions, ['release', 'agreement', 'acknowledge', 'schedule', 'fund', 'reconcile', 'review', 'settle', 'cancel']);
   assert.deepEqual(b, before);
   for (const change of [{ status: 'draft' }, { acknowledged: false }, { cancelled: true },
     { endUtc: new Date(NOW).toISOString() }, { payoutPolicy: undefined }]) {
@@ -279,11 +279,11 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
     assert.match(source, /live-audio\.mjs\?v=20261108-live-audio-pilot/);
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /live-performance-admin\.mjs\?v=20261110-profile-invitation/);
-  assert.match(html, /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);
+  assert.match(html, /live-performance-admin\.mjs\?v=20261113-one-action-release/);
+  assert.match(html, /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
   assert.match(html, /src="js\/creator-profile\.mjs\?v=20261110-wallet-practice"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261113-stage-entry"/);
-  assert.match(html, /live-performance\.css\?v=20261110-invitation-card/);
+  assert.match(html, /live-performance\.css\?v=20261113-one-action-release/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
     './js/radio-schedule-ui.mjs?v=20261113-stage-entry');
@@ -294,7 +294,7 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
       /live-performance-profile\.mjs\?v=20261110-wallet-practice/);
   }
   assert.match(fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8'),
-    /live-booking-notifications\.mjs\?v=20261110-profile-invitation/);
+    /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
 });
 
 test('production live audio reuses encrypted mirrored storage, never an ephemeral file path', () => {

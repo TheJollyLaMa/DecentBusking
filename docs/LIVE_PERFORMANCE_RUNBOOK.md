@@ -97,6 +97,19 @@ Reconfirm the artist's headphone/interface setup with them; synthetic test
 audio cannot establish their hardware, latency or performance readiness.
 After the original end, record the truthful result and approve the guaranteed
 full fee; incremental rehearsal scoring is **not** incremental on-chain pay.
+For guaranteed phase1 bookings, Admin → Live Performance now offers one primary
+**Release full $20.00 from escrow** action after the booked end. It pins a
+minimal full-fee report using the existing owner-authorized IPFS uploader,
+checks the exact on-chain booking/terms and Base review window, simulates the
+approval, then asks the owner to sign the approval transaction. It does not
+require manual report URIs or a rehearsal score/off-chain decision first.
+Contract approval is the canonical decision; the existing event scanner
+indexes it. The artist still claims from Profile: approval is not payment
+received. Pending approval hashes persist and retries reconcile before sending;
+upload and transaction failures remain visible in the booking card.
+Legacy/prorated and manual review tools remain under advanced booking actions.
+Reuse: existing `createBrowserIpfsUploader`, `LIVE_ESCROW_ABI`, transaction
+hash storage convention and event indexer; no contract or worker deployment.
 
 Reuse: adapt this repository's `liveAudioPolicy`, JukeLoop `live_audio_ads`
 selection, `mountTopTenFestival`, `open-creator-profile`, and the private

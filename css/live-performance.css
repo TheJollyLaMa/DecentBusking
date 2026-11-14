@@ -90,3 +90,10 @@
  .live-performance-flow { grid-template-columns: 1fr; }
  .live-performance-approval { grid-column: auto; }
 }
+.live-release-card{margin:1rem 0;padding:1.25rem;border:2px solid #91e2ce;border-radius:16px;background:#10241b;color:#f0e6c8;overflow-wrap:anywhere}
+.live-release-card h3{margin:0 0 .75rem;color:#b9f49b}
+.live-release-card p{line-height:1.5}
+.live-release-card .live-release-primary{box-sizing:border-box;width:100%;min-height:52px;padding:1rem;border:2px solid #b9f49b;border-radius:12px;background:#b9f49b;color:#10241b;font:800 1rem/1.3 system-ui;cursor:pointer}
+.live-release-card .live-release-primary:disabled{opacity:.65;cursor:default}
+.live-release-card .live-release-primary:focus-visible{outline:3px solid white;outline-offset:3px}
+.live-release-card output{display:block;white-space:pre-wrap;font-weight:700;color:#fff;padding:.75rem 0}
