@@ -71,6 +71,21 @@ eligible advert inventory. At 19:50 the practice iframe gives way to booked
 backstage: reconnect with a fresh wallet pass. Complete both real checks and
 arm while delivered audio is fresh, before 21:00. Test from a separate website
 listener with playback enabled; an autoplay-blocked browser needs a click.
+Backstage separates performer publishing from operator listening. The operator
+sees three large clearance cards: first check, final check, scheduled handoff.
+Saving shows progress (up to 60 seconds); green **PASSED · saved** / **ARMED**
+cards confirm durable success. Errors remain visible instead of disappearing
+on the next status poll. Public booking refreshes cannot erase private check
+display. The next-step banner gives the next check's New York time.
+Self-monitoring is tucked under the performer's optional headphone controls;
+it requires publishing first and is not how the operator hears the artist.
+The operator can use speakers with their microphone off and ordinary radio
+muted, provided another nearby/voice-call microphone cannot feed them back.
+UI reuse: adapt the existing private rehearsal's primary buttons, input meter,
+and collapsible help from `rehearsal.html` and `css/live-audio.css`; keep
+`bindInputMonitor` and the existing wallet/control protocol unchanged. No new
+service or shared extraction. Operator/performer browser fixtures cover mobile
+and desktop layout, save progress/errors, and durable completion display.
 Reconfirm the artist's headphone/interface setup with them; synthetic test
 audio cannot establish their hardware, latency or performance readiness.
 After the original end, record the truthful result and approve the guaranteed

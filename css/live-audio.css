@@ -75,6 +75,35 @@
 .live-audio-room .room-recording-option input[type="checkbox"]{flex:none;width:1.2rem;min-height:1.2rem;height:1.2rem;margin:0;accent-color:#00d4aa}
 .room-recording-option .room-entry-info{margin:0 0 0 .35rem}
 .room-recording-option output{font-size:.82rem;color:#91e2ce}
+.guided-stage #room-status,.room-action-status{padding:.8rem 1rem;margin:1rem 0;border-left:4px solid #72d7c2;border-radius:8px;background:#0d1718}
+.room-action-status[data-state="pending"]{border-color:#f0c040;color:#f0c040}
+.room-action-status[data-state="error"]{border-color:#ffaba0;color:#ffd2ca;background:#351821}
+.room-action-status[data-state="success"]{border-color:#91e2ce;color:#b9f49b}
+.guided-stage .room-role-card{min-width:0;padding:1rem;margin:1.5rem 0;border:1px solid #72d7c255;border-radius:16px}
+.room-role-card legend{padding:0 .5rem;font-weight:750;color:#91e2ce}
+.room-visual-flow{display:flex;align-items:center;justify-content:space-around;gap:.5rem;margin:.5rem 0 1.5rem;text-align:center;font-size:.85rem}
+.room-visual-flow b{display:block;font-size:1.8rem}
+.room-action-row{display:flex;flex-wrap:wrap;gap:.75rem;margin:.75rem 0}
+.guided-stage button{min-height:48px;white-space:normal}
+.guided-stage .rehearsal-primary{background:#b9f49b;color:#10241b;border-color:#b9f49b}
+.guided-stage .remote-listen{padding:1rem;margin:1.5rem 0;border-color:#72d7c288;background:#0d1718}
+.guided-stage .remote-listen h3{margin:0 0 .75rem}
+.guided-stage #room-monitor{width:100%;margin:.5rem 0}
+.guided-stage #room-listen-status{margin:.75rem 0;color:#c8dfd7}
+.room-next-step{padding:1rem;border:1px solid #f0c04066;border-radius:12px;color:#f0e6c8;background:#f0c0400b;font-weight:650}
+.room-check-flow{display:grid;gap:1rem;list-style:none;margin:1rem 0;padding:0}
+.room-check-flow li{display:flex;align-items:flex-start;gap:.8rem;padding:1rem;border:1px solid #ffffff30;border-radius:14px;background:#100c19}
+.room-check-flow li>div{flex:1;min-width:0}
+.room-check-flow h3{margin:0 0 .5rem;font-size:1rem}
+.room-check-flow h3 small{display:block;margin-top:.25rem;color:#c8dfd7;font-weight:400}
+.room-step-icon{display:flex;flex:none;align-items:center;justify-content:center;width:2.2rem;height:2.2rem;border:2px solid #806d69;border-radius:50%;font-weight:800}
+.room-check-flow output{margin:.5rem 0 .8rem;color:#d0c9b8}
+.room-check-flow button{width:100%;margin:0}
+.room-check-flow li[data-state="passed"]{border:2px solid #91e2ce;background:#10241b}
+.room-check-flow li[data-state="passed"] .room-step-icon{border-color:#91e2ce;color:#10241b;background:#b9f49b}
+.room-check-flow li[data-state="passed"] output{color:#b9f49b;font-size:1.1rem;font-weight:800}
+.guided-stage button:disabled{opacity:.65}
+@media(max-width:420px){.guided-stage .studio-panel{padding:.6rem}.guided-stage .room-role-card{padding:.7rem}.room-check-flow li{padding:.75rem;gap:.6rem}.room-action-row button{flex:1}}
 .studio-helper{display:flex;align-items:flex-start;gap:.75rem;box-sizing:border-box;min-width:0;margin:1rem 0;padding:.8rem;border:1px solid #f0c04044;border-radius:16px;background:#17111f}
 .studio-helper>img{flex:none;width:48px;height:48px;object-fit:cover;border:1px solid #f0c04088;border-radius:50%}
 .studio-helper>div{min-width:0}
