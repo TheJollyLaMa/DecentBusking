@@ -80,11 +80,17 @@
       <fieldset class="self-monitor">
         <legend>🎧 Your headphone monitor</legend>
         <label class="monitor-toggle" for="room-monitor-toggle"><input id="room-monitor-toggle" type="checkbox" aria-describedby="room-monitor-warning"> Hear my input</label>
+        <label for="room-monitor-mix">Headphone mix · does not change the broadcast</label>
+        <select id="room-monitor-mix">
+          <option value="stereo">Stereo · separate L / R</option>
+          <option value="mono">Centered mono · both ears</option>
+        </select>
         <label for="room-monitor-volume">Headphone monitor level</label>
         <input id="room-monitor-volume" type="range" min="0" max="1" step="0.05" value="0.25">
         <output id="room-monitor-status" role="status" aria-live="polite">Headphone monitor is off.</output>
-        <p id="room-monitor-warning" class="monitor-warning">Publish browser audio first, then check Hear my input. Headphones only. If your interface already monitors directly, leave this off. Browser monitoring is delayed and stays local.</p>
+        <p id="room-monitor-warning" class="monitor-warning">Publish first. Use headphones and choose one monitor: your interface directly (recommended, Hear my input off), or this browser (interface direct monitoring off). Centered mono mixes mono/stereo input locally; it cannot change your interface's direct-monitor routing. If you hear echo, delay or feedback, uncheck Hear my input. Your microphone keeps broadcasting.</p>
       </fieldset>
+      <output id="room-return-status" class="studio-note" role="status" aria-live="polite">While performing, mute the public radio on other tabs/devices to avoid hearing your delayed live return.</output>
       <div id="room-recording-option" class="room-recording-option" hidden>
         <label for="room-recording-consent"><input id="room-recording-consent" type="checkbox" disabled> Record this and play on the radio?</label>
         <details class="room-entry-info">
@@ -158,6 +164,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/live-audio-room.mjs?v=20261113-output-selection"></script>
+  <script type="module" src="js/live-audio-room.mjs?v=20261114-monitor-mix"></script>
 </body>
 </html>

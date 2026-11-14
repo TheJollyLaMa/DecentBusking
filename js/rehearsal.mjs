@@ -1,5 +1,5 @@
 import { loadLiveAudioSdk } from './live-audio-client.mjs';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261113-output-selection';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261114-monitor-mix';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 
 const el = id => document.getElementById(id);
@@ -12,6 +12,7 @@ let busy = false, requestingAccounts = false;
 const meter = createInputMeter({ level: el('mic-level'), state: el('mic-state'), note: el('meter-note') });
 const headphones = bindInputMonitor({
   toggle: el('monitor-toggle'), volume: el('monitor-volume'), status: el('monitor-status'),
+  mix: el('monitor-mix'),
   getTrack: () => localTrack,
   output: el('monitor-output'), outputDevices: el('monitor-output-devices'), outputStatus: el('monitor-output-status'), audio,
 });

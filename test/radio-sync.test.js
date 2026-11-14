@@ -18,7 +18,7 @@ test('cached radio importers resolve to one cache-busted live-audio controller',
     assert.ok(references.length, file);
     for (const [, reference] of references) {
       const url = new URL(reference, `https://radio.example/js/${file}`).href;
-      assert.equal(imports.get(url) || url, 'https://radio.example/js/radio-sync.js?v=20261110-live-program');
+      assert.equal(imports.get(url) || url, 'https://radio.example/js/radio-sync.js?v=20261114-monitor-mix');
     }
   }
 });
@@ -32,6 +32,7 @@ function radioSyncSource() {
   const shared = fs.readFileSync(path.join(__dirname, '../js/radio-client.mjs'), 'utf8')
     .replace(/export /g, '').replace('function sendRadioVote(', 'function sharedRadioVote(');
   return `const DEVERT_MAX_AD_SECONDS = 120;
+    const createLivePublisherPresence = () => ({ isPublishing() { return false; }, watch() { return () => {}; } });
     const createLiveAudioListener = () => ({ update() {}, disconnect() { return Promise.resolve(); }, play() {} });
     const createLiveAudioFaultSlate = () => ({ play() {}, stop() {} });
     \n${formatter}\n${shared}\n${source}`;
@@ -61,6 +62,73 @@ test('live audio handoff stops the current website recording and invalidates pre
   assert.equal(context.result.loaded, null);
   assert.equal(context.result.radio, null);
   assert.ok(context.result.token > 0);
+});
+
+test('on-air transition suppresses the local performer return, including Play, while other listeners still connect', async () => {
+  const audio = { paused: false, volume: 0.1, pause() { this.paused = true; }, removeAttribute() {}, load() {} };
+  const context = vm.createContext({ console, audio, performance: { now: () => 0 }, clearTimeout() {}, setTimeout() { return 1; } });
+  vm.runInContext(`${radioSyncSource()}
+    let publishing = true;
+    _audio = audio; _audioPlayer = audio; _radioMuted = false; _radioVolume = 0.1;
+    _mode = 'radio'; _broadcastNowPlayingStopped = () => {}; _notifyRadioSourceMode = () => {};
+    _renderSponsorTag = () => {}; _renderVoting = () => {}; _setTrack = () => {};
+    _setLabel = value => { globalThis.label = value; }; _setActivity = value => { globalThis.activity = value; };
+    globalThis.connects = 0; globalThis.disconnects = 0; globalThis.plays = 0;
+    _publisherPresence = { isPublishing: bookingId => publishing && bookingId === 'show' };
+    _liveAudioListener = { update() { connects++; }, disconnect() { disconnects++; return Promise.resolve(); }, play() { plays++; } };
+    const live = { bookingId: 'show', phase: 'live', armed: true, policy: { mode: 'live', title: 'Show' } };
+    globalThis.sync = () => _applyLiveAudioState(live);
+    globalThis.setPublishing = value => { publishing = value; };
+    globalThis.unlock = _unlock;
+    sync();
+  `, context);
+  assert.equal(context.connects, 0, 'The delayed public feed must not auto-start in the publishing browser');
+  assert.equal(context.disconnects, 1);
+  assert.match(context.label, /Your return is muted/);
+  assert.match(context.activity, /other listeners still hear you/);
+  await context.unlock();
+  assert.equal(context.plays, 0, 'Play cannot accidentally reopen the feedback path');
+  context.setPublishing(false); context.sync();
+  assert.equal(context.connects, 1, 'Ordinary listeners and a stopped publisher can receive the live feed');
+  context.setPublishing(true); context.sync();
+  assert.equal(context.connects, 1, 'Starting publication while already listening suppresses the return');
+  assert.equal(audio.paused, true);
+});
+
+test('self-return protection preserves archive, faults, outro and the next performer, and displays storage failures', () => {
+  const audio = { paused: false, pause() { this.paused = true; }, removeAttribute() {}, load() {} };
+  const context = vm.createContext({ console, audio, performance: { now: () => 0 }, clearTimeout() {}, setTimeout() { return 1; } });
+  vm.runInContext(`${radioSyncSource()}
+    _audio = audio; _audioPlayer = audio; _mode = 'radio';
+    _broadcastNowPlayingStopped = () => {}; _notifyRadioSourceMode = () => {};
+    _renderSponsorTag = () => {}; _renderVoting = () => {}; _setTrack = () => {};
+    _setLabel = () => {}; _setActivity = value => { globalThis.activity = value; };
+    globalThis.connects = 0; globalThis.slates = 0;
+    _publisherPresence = { isPublishing: id => id === 'show' };
+    _liveAudioListener = { update() { connects++; }, disconnect() { return Promise.resolve(); } };
+    _liveFaultSlate = { play() { slates++; }, stop() {} };
+    const live = { bookingId: 'show', phase: 'live', armed: true, policy: { mode: 'live' } };
+    _mode = 'archive';
+    globalThis.archiveActive = _applyLiveAudioState(live);
+    _mode = 'radio';
+    _applyLiveAudioState(live);
+    globalThis.suppressed = _liveReturnSuppressed;
+    _applyLiveAudioState({ ...live, bookingId: 'next-show' });
+    globalThis.nextSuppressed = _liveReturnSuppressed;
+    _applyLiveAudioState({ ...live, policy: { mode: 'fault', cancelledAt: 1 } });
+    globalThis.faultSuppressed = _liveReturnSuppressed;
+    globalThis.outroActive = _applyLiveAudioState({ ...live, policy: { mode: 'adverts', breakKind: 'outro' } });
+    _publisherPresence.isPublishing = () => { throw Error('Storage denied'); };
+    _applyLiveAudioState(live);
+  `, context);
+  assert.equal(context.archiveActive, false);
+  assert.equal(context.suppressed, true);
+  assert.equal(context.nextSuppressed, false);
+  assert.equal(context.slates, 1);
+  assert.equal(context.faultSuppressed, false);
+  assert.equal(context.outroActive, false);
+  assert.equal(context.connects, 2, 'Only the next performer and the explicitly warned storage-failure listener connect');
+  assert.match(context.activity, /protection is unavailable.*mute this radio manually/);
 });
 
 function adClockHarness() {

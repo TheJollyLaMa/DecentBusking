@@ -57,10 +57,15 @@
       <select id="monitor-output"><option value="">System default output</option></select>
       <output id="monitor-output-status" role="status" aria-live="polite"></output>
       <label class="monitor-toggle" for="monitor-toggle"><input id="monitor-toggle" type="checkbox" aria-describedby="monitor-warning"> Hear my input</label>
+      <label for="monitor-mix">Headphone mix · local only</label>
+      <select id="monitor-mix">
+        <option value="stereo">Stereo · separate L / R</option>
+        <option value="mono">Centered mono · both ears</option>
+      </select>
       <label for="monitor-volume">Headphone monitor level</label>
       <input id="monitor-volume" type="range" min="0" max="1" step="0.05" value="0.25">
       <output id="monitor-status" role="status" aria-live="polite">Headphone monitor is off.</output>
-      <p id="monitor-warning" class="monitor-warning">Headphones only: use your interface's direct monitor when available. Do not enable direct monitoring and browser monitoring together. Browser monitoring has a delay and is not sent to the room.</p>
+      <p id="monitor-warning" class="monitor-warning">Use headphones and choose one monitor: your interface directly (recommended, Hear my input off), or this browser (interface direct monitoring off). Centered mono mixes mono/stereo input locally; it cannot change your interface's direct-monitor routing. If you hear echo, delay or feedback, uncheck Hear my input. Your microphone keeps sending to the room.</p>
     </fieldset>
     <details class="rehearsal-details">
       <summary>Listen to the other person</summary>
@@ -95,6 +100,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/rehearsal.mjs?v=20261113-output-selection"></script>
+  <script type="module" src="js/rehearsal.mjs?v=20261114-monitor-mix"></script>
 </body>
 </html>

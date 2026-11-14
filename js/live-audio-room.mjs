@@ -2,8 +2,9 @@ import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=2026111
 import { liveRecordingConsentMessage } from './live-recording-consent.mjs?v=20261113-recording';
 import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261113-recording';
 import { performerRoomSign } from './performer-room.mjs?v=20261110-wallet-practice';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261113-output-selection';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261114-monitor-mix';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
+import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
 
 const byId = id => document.getElementById(id);
 const bookingId = new URL(location.href).searchParams.get('booking') || '';
@@ -21,10 +22,18 @@ const meter = createInputMeter({
 });
 const headphones = bindInputMonitor({
   toggle: byId('room-monitor-toggle'), volume: byId('room-monitor-volume'), status: byId('room-monitor-status'),
+  mix: byId('room-monitor-mix'),
   getTrack: () => localTrack,
   output: byId('room-output'), outputDevices: byId('room-output-devices'), outputStatus: byId('room-output-status'), audio,
 });
 const status = message => { byId('room-status').textContent = message; };
+const publisherPresence = createLivePublisherPresence({ serviceUrl, onError: () => {
+  byId('room-return-status').textContent = 'Automatic radio-return protection is unavailable. Mute the public radio in every other tab/device before performing.';
+} });
+function releaseReturnProtection() {
+  if (publisherPresence.stop()) byId('room-return-status').textContent =
+    'Not publishing from this room. Automatic local radio-return protection is off.';
+}
 const command = input => roomRequest(serviceUrl, 'control', input, session?.token);
 const recordingOption = bindLiveRecordingOption({
   container: byId('room-recording-option'), toggle: byId('room-recording-consent'), output: byId('room-recording-status'),
@@ -93,6 +102,7 @@ const perform = (fn, pending = 'Working…', success = 'Done.') => async event =
 async function disconnect() {
   ++connectionGeneration;
   localTrack?.stop(); localTrack = null;
+  releaseReturnProtection();
   await headphones.stop();
   await meter.stop();
   remoteTrack?.detach(audio); remoteTrack = null; audio.pause(); audio.srcObject = null;
@@ -134,6 +144,7 @@ async function connect(publish) {
   next.on(sdk.RoomEvent.Disconnected, () => {
     if (room === next) {
       room = null; localTrack?.stop(); localTrack = null;
+      releaseReturnProtection();
       void headphones.stop();
       void meter.stop();
       byId('room-listen-status').textContent = 'Disconnected. Click Listen to private soundcheck to reconnect.';
@@ -149,6 +160,12 @@ async function connect(publish) {
       });
       if (!current()) { capture.stop(); await next.disconnect(); return false; }
       localTrack = capture;
+      const protectedReturn = publisherPresence.start(bookingId);
+      capture.mediaStreamTrack?.addEventListener('ended', () => {
+        if (localTrack === capture) releaseReturnProtection();
+      }, { once: true });
+      if (protectedReturn) byId('room-return-status').textContent =
+        'Your public live return is muted in this site’s other tabs while you publish. Use your headphone/direct monitor. Mute radio on other devices or embedded sites yourself.';
       meter.start(sdk, capture);
       await next.localParticipant.publishTrack(capture, { source: sdk.Track.Source.Microphone,
         dtx: false, red: true, audioPreset: { maxBitrate: 128000 }, forceStereo: true });

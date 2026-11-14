@@ -253,7 +253,7 @@ test('browser mock signs owner invitation and publishes privately without a publ
   } });
   for (const id of ['status', 'create', 'guest', 'minutes', 'create-room', 'join', 'join-room', 'controls',
     'invitation', 'deadline', 'end', 'input', 'devices', 'publish', 'listen', 'leave', 'audio',
-    'delivery', 'mic-state', 'mic-level', 'meter-note', 'next-step', 'monitor-toggle', 'monitor-volume', 'monitor-status']) {
+    'delivery', 'mic-state', 'mic-level', 'meter-note', 'next-step', 'monitor-toggle', 'monitor-volume', 'monitor-mix', 'monitor-status']) {
     elements.set(id, { hidden: false, disabled: false, textContent: '', value: '', dataset: {},
       setAttribute() {}, addEventListener() {}, pause() {}, play: async () => {}, replaceChildren() {} });
   }
