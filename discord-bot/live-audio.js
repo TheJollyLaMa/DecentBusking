@@ -413,8 +413,14 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
           }
           const baseline = record.armed ? lossSince || now() : start;
           const rejoinProbe = record.armed && restoredAt.has(b.id) && now() - restoredAt.get(b.id) < LIVE_AUDIO_FRESH_MS;
-          if ((!allocation || allocation.startedAt) && ((now() >= start && !fresh && !rejoinProbe && now() - baseline >= LIVE_AUDIO_GRACE_MS) ||
-              (!record.armed && now() - start >= LIVE_AUDIO_GRACE_MS))) {
+          const quiet = now() >= start && !fresh && !rejoinProbe && now() - baseline >= LIVE_AUDIO_GRACE_MS;
+          if (record.armed && allocation?.startedAt && allocation.finishedAt && quiet) {
+            // The performer declared the set finished and then went quiet: a normal ending, not an audio fault.
+            const next = clone(state);
+            endAllocation(next, b, Math.max(lossSince, allocation.finishedAt), 'producer-finished');
+            await save(next);
+            direction.forget(b.id); recorder?.stopCapture?.(mediaBooking(b));
+          } else if ((!allocation || allocation.startedAt) && (quiet || (!record.armed && now() - start >= LIVE_AUDIO_GRACE_MS))) {
             await cancel(b, record.armed
               ? 'Live performance cancelled: no verified delivered audio for 60 seconds. Performer fee is unchanged.'
               : 'Live performance cancelled: the slot was not armed within 60 seconds. Performer fee is unchanged.');

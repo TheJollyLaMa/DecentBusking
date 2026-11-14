@@ -365,10 +365,10 @@ test('Admin separates allocated completion from original fee and preserves recon
     broadcastCompletion: { known: true, pending: false, actualEndedAt: NOW, endReason: 'operator-cut', priorityFollowup: true } });
   assert.match(interrupted, /Interrupted by an owner cut/);
   assert.match(interrupted, /not a new booking/);
-  assert.doesNotMatch(interrupted, /producer confirmed the song-boundary ending/);
+  assert.doesNotMatch(interrupted, /Performer finished at the song-boundary ending/);
   const completed = renderLiveBroadcastCompletion({ ...b,
     broadcastCompletion: { known: true, pending: false, actualEndedAt: NOW, endReason: 'producer-finished' } });
-  assert.match(completed, /producer confirmed the song-boundary ending/);
+  assert.match(completed, /Performer finished at the song-boundary ending/);
 });
 
 test('one-button invitation preserves exact wallet consent and explicit failure states', async t => {

@@ -93,6 +93,18 @@ connected—no simulated reactions, paid tips or healthy-audio claims.
    original guarantee, on-chain review window and claim deadline remain
    unchanged. A priority invitation flag is follow-up only—not an automatically
    accepted, funded or scheduled booking.
+8. **Quiet endings (#343).** Ask the performer to keep the microphone on until the
+   producer ends the set. If a set the performer declared finished goes quiet and
+   nobody ends it, the server closes it after about a minute as the normal
+   producer-finished ending, timed at the later of the declaration and the last
+   audio. That is never an audio-loss cancellation, so no fault slate or
+   recovery-ads window runs. If the producer's **End** lands more than five
+   seconds after the audio stopped, the recording is flagged incomplete and its
+   radio title gains "(partial recording)", because the recorder compares captured
+   seconds with the set's actual window. An approved encore withdraws the finished
+   declaration, so a silent room is again treated as an audio fault. Evidence:
+   `node --test test/night-simulation.test.js` replays a two-act night on a fake
+   clock; it is a simulation of this server's state machine, not a live-audio test.
 
 Backstage/monitoring/consent/fee regressions (the original 102-test selection,
 now including Profile re-entry cases):

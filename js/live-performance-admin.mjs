@@ -126,7 +126,7 @@ export function renderLivePerformanceAdminBooking(b, now = Date.now()) {
 export function renderLiveBroadcastCompletion(b) {
  if (!Object.hasOwn(b, 'broadcastCompletion')) return '';
  const completion = b.broadcastCompletion;
- const reasons = { 'producer-finished': 'Performer finished; producer confirmed the song-boundary ending.',
+ const reasons = { 'producer-finished': 'Performer finished at the song-boundary ending.',
   'operator-cut': 'Interrupted by an owner cut.', 'authorization-expired': 'Authorized airtime expired.',
   'audio-loss': 'Interrupted after audio loss.', declined: 'Performer declined this slot.', 'not-ready': 'Performer was not ready for this slot.' };
  const detail = completion?.known !== true ? 'Stage completion is unavailable. New review/release actions are paused until it can be verified.'

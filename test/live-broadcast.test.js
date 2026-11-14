@@ -230,6 +230,35 @@ test('verified audio loss still cancels an allocated act after sixty seconds and
   assert.equal(f.bookings[0].amountUnits, '20000000');
 });
 
+test('a set the performer declared finished closes as the normal ending when its audio goes quiet, never as an audio-loss cancellation', async t => {
+  const f = await fixture(t), a = await f.authorize(), pa = await f.authorize('artist-a', A);
+  await f.send(a, 'enable');
+  await f.send(pa, 'finished');
+  f.at(START + 6 * MIN); f.feed('artist-a'); await f.service.tick();
+  assert.equal((await f.service.state('artist-a')).broadcast.phase, 'live', 'the finished note does not stop the microphone or the broadcast');
+  f.at(START + 6.5 * MIN); await f.service.tick();
+  assert.equal((await f.service.state('artist-a')).broadcast.phase, 'live', 'thirty quiet seconds are tolerated');
+  f.at(START + 7 * MIN); await f.service.tick();
+  const ended = (await f.service.state('artist-a')).broadcast;
+  assert.equal(ended.endReason, 'producer-finished');
+  assert.equal(ended.actualEndedAt, START + 6 * MIN, 'the set ended when its audio stopped, not when the silence was noticed');
+  assert.equal(f.cancellations.length, 0);
+  assert.equal(f.service.completionState('artist-a').pending, false);
+  assert.equal(f.service.completionState('artist-a').endReason, 'producer-finished');
+  assert.equal(f.bookings[0].amountUnits, '20000000');
+});
+
+test('an approved encore withdraws the finished declaration, so a silent room is an audio fault again', async t => {
+  const f = await fixture(t), a = await f.authorize(), b = await f.authorize('artist-b'), pa = await f.authorize('artist-a', A);
+  await f.send(a, 'enable');
+  await f.send(a, 'reserve-next', { nextBookingId: 'artist-b', nextToken: b.token, expectedNextRevision: 0 });
+  await f.send(pa, 'finished');
+  await f.send(a, 'encore', { additionalMs: 5 * MIN, nextToken: b.token });
+  f.at(START + 6 * MIN); await f.service.tick();
+  assert.equal((await f.service.state('artist-a')).broadcast.endReason, 'audio-loss');
+  assert.equal(f.cancellations.length, 1);
+});
+
 test('production wiring preserves legacy schedule cancellation but never treats allocated audio loss as financial cancellation', async () => {
   const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../discord-bot/index.js'), 'utf8');
   const callback = source.match(/onCancel: (\(booking, reason\) => [\s\S]*?),\n\s+}\);/);
