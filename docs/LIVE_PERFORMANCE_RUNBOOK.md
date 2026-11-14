@@ -174,6 +174,45 @@ participation-gift proposal, not the guaranteed $20 cash fee. The gift remains
 outside the USDC escrow. An admin approval or success animation is not an NFT
 transfer; reconcile inventory and the actual transfer receipt separately.
 
+### First-night supporter encore
+
+After the first show the steward separately approved one existing v1.0.0
+supporter dNFT (Base v0.2 collection, token 75) as a discretionary thank-you to
+withinthevacuum. That booking's additional-offer field is blank: this is not
+proof that the earlier conditional gift offer was signed or satisfied.
+
+Profile includes **Your Decent encore**, a persistent, booking/wallet-scoped
+presentation with the collectible's verified metadata artwork, front/back
+control and an explicit Open action. It never requests a signature, purchases
+an edition, mints a recording, or blocks the USDC claim. Opening it reuses the
+existing non-blocking cosmic effect and respects reduced motion.
+
+A read-only Base `balanceOf` at a confirmation block distinguishes currently
+held, not held and unavailable. Holding is not proof of the sender, the gift
+transfer receipt, or performance payment. Recheck with **Check gift in wallet**;
+there is no new background timer. The dedication remains viewable even if the
+token is later transferred away. Verify the treasury withdrawal receipt
+separately before saying the gift was delivered.
+
+Market's `DecentEscrow_v001.withdrawNFT` can send an ERC-1155 directly from the
+treasury, but does not reserve editions by booking or reduce listing quantity.
+Reconcile remaining listings after any withdrawal of listed stock. The
+deployed `LivePerformanceEscrow` is USDC-only, has no ERC-1155 receiver or gift
+mapping, and is not upgradeable. Never send the supporter NFT to that contract.
+Booking-linked gift custody/release for next week is tracked in
+[DecentMarket #78](https://github.com/TheJollyLaMa/DecentMarket/issues/78);
+deployment needs explicit approval and must not strand earned cash claims.
+
+Reuse decision: adapt the MIT-licensed Market contract's existing custody
+semantics, not its buyer flow; use Busking's `getBaseReadProvider`,
+`celebrateLiveInvitation` and Profile booking renderer for this read-only
+showcase. Source inspected: Market `DecentEscrow_v001.sol` in the local
+feature/pinner-allocation worktree and `LivePerformanceEscrow.sol` at
+`094b4ac` (unrelated working changes left untouched). Metadata artwork is
+the public token-75 URI `ipfs://QmZroFCEhaKoctVqW682Uzv5i6WWiQtuWvTAYkQBYfH6TD`,
+not new commemorative art or a new mint. Canopy's agency map was consulted as
+a lead; no speculative cross-repo extraction or public inventory update.
+
 ### Prep calendar and reuse
 
 [DecentCalendar](https://thejollylama.github.io/DecentCalendar/) is a separate

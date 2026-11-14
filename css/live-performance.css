@@ -111,3 +111,23 @@
 .live-performer-next :is(button,summary):focus-visible{outline:3px solid #f0c040;outline-offset:3px}
 @keyframes live-next-arrive{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @media(prefers-reduced-motion:reduce){.live-performer-next{animation:none}}
+.live-encore{box-sizing:border-box;margin:1.2rem 0;padding:clamp(1rem,4vw,1.6rem);border:1px solid #e6ca8c80;border-radius:22px;background:radial-gradient(ellipse at 85% 0,#8247e533,transparent 65%),#171025;color:#f0e6c8;overflow-wrap:anywhere}
+.live-encore h3{margin:.4rem 0 1rem;font:400 clamp(1.6rem,5vw,2.1rem)/1.2 Georgia,serif;color:#f3d996}
+.live-encore p{line-height:1.6}
+.live-encore .live-encore-eyebrow{font-size:.75rem;letter-spacing:.07em;color:#91e2ce}
+.live-encore-reveal{margin:1.2rem 0;border:1px solid #e6ca8c55;border-radius:16px;overflow:hidden}
+.live-encore-reveal>summary{padding:1.1rem;cursor:pointer;color:#f3d996;font-weight:700;min-height:48px;box-sizing:border-box}
+.live-encore-reveal[open]>summary{border-bottom:1px solid #e6ca8c33}
+.live-encore-presentation{padding:1rem;text-align:center;animation:live-encore-open .55s ease-out}
+.live-encore-presentation h4{font:400 1.25rem/1.4 Georgia,serif;color:#f3d996}
+.live-encore-art{display:block;width:100%;max-width:330px;height:auto;min-height:140px;margin:0 auto 1rem;border-radius:14px;box-shadow:0 12px 35px #0008}
+.live-encore .live-encore-note{font-size:.8rem;color:#c5c1d5}
+.live-encore output{display:block;margin:1rem 0;line-height:1.6;font-size:.9rem;white-space:pre-wrap}
+.live-encore[data-gift-state="held"] output{color:#b9f49b}
+.live-encore button{min-height:44px;padding:.65rem 1rem;border:1px solid #91e2ce88;border-radius:10px;background:#91e2ce10;color:#91e2ce;font:600 .85rem/1.3 system-ui;cursor:pointer}
+.live-encore button:disabled{opacity:.6;cursor:default}
+.live-encore-links{display:flex;flex-wrap:wrap;gap:.5rem 1rem;margin-top:1rem;font-size:.8rem}
+.live-encore-links a{color:#e6ca8c;min-height:32px}
+.live-encore :is(button,summary,a):focus-visible{outline:3px solid #f0c040;outline-offset:3px}
+@keyframes live-encore-open{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.live-encore-presentation{animation:none}}

@@ -2,6 +2,7 @@ import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, claimState, liveAcknowledgement, liveBookingRows, livePerformancePolicyText } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261108-live-audio-pilot';
 import { performerRoomUrl } from './performer-room.mjs?v=20261110-wallet-practice';
+import { renderPerformerGift } from './performer-gift.mjs?v=20261114-performer-encore';
 
 function secretPyramid() {
  const image = document.createElement('img');
@@ -372,6 +373,9 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
      details.append(summary, contents); article.append(details);
    } else if (!compact || claim.enabled || pendingHash) article.append(button);
    container.append(article);
+   const gift = renderPerformerGift({ booking: b, wallet, ethers, config: window.DecentConfig,
+     onReveal: () => celebrateLiveInvitation() });
+   if (gift) container.append(gift);
  }
  const receipt = liveReceiptEntry(bookings, wallet);
  if (receipt) onReceipt(receipt);

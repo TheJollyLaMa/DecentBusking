@@ -1,4 +1,4 @@
-import { renderLivePerformances } from './live-performance-profile.mjs?v=20261113-one-action-release';
+import { renderLivePerformances } from './live-performance-profile.mjs?v=20261114-performer-encore';
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
