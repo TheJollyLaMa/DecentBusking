@@ -31,6 +31,7 @@ function dom(t) {
     tag, children: [], attributes: {}, textContent: '', innerHTML: '',
     append(...children) { this.children.push(...children); },
     setAttribute(name, value) { this.attributes[name] = value; },
+    getAttribute(name) { return this.attributes[name]; },
     addEventListener(name, callback) { this.listeners ||= {}; this.listeners[name] = callback; },
     style: { setProperty() {} },
     remove() { this.removed = true; },
@@ -107,6 +108,169 @@ test('Profile omits room entries for unfunded, cancelled, ended and incompatible
   assert.equal(descendants(container).filter(node => node.tag === 'button').length, bookings.length);
 });
 
+const reentryTime = Date.parse('2026-11-14T02:25:00Z');
+const allocatedBooking = (status = 'funded') => ({ ...booking(), status,
+  ...(status === 'paid' ? { paidUnits: '20000000', transactions: {
+    PerformancePaid: { hash: '0x' + 'ab'.repeat(32), blockNumber: 12345 },
+  } } : {}),
+  broadcastCompletion: { known: true, pending: true, actualEndedAt: null } });
+const allocatedState = (b, phase = 'live') => ({
+  bookingId: b.id, configured: true, serverTime: reentryTime,
+  bookingVerification: { fresh: true, verifiedAt: reentryTime },
+  phase: phase === 'waiting' ? 'preflight' : 'live',
+  broadcast: { allocationId: 'fixture-allocation', revision: 2, phase,
+    accessUntil: reentryTime + 40 * 60000 },
+});
+
+for (const status of ['funded', 'approved', 'paid']) {
+  for (const phase of ['waiting', 'live']) {
+    test(`Profile re-enters the verified ${phase} allocation after original end with ${status} fee status`, async t => {
+      const [, { renderLivePerformances }] = await modules;
+      const createElement = dom(t), container = createElement('section'), requests = [], receipts = [];
+      t.mock.method(Date, 'now', () => reentryTime);
+      const b = allocatedBooking(status), before = structuredClone(b);
+      await renderLivePerformances({
+        container, wallet, serviceUrl: 'https://worker.example/',
+        bookingState: { bookings: [b, { ...b, id: 'other-booking', wallet: otherWallet }], escrowAddress: otherWallet },
+        onReceipt: receipt => receipts.push(receipt),
+        ethers: { BrowserProvider() { throw new Error('Rendering must not authorize'); } },
+        fetchImpl: async (url, options) => {
+          requests.push({ url, options });
+          return { ok: true, json: async () => allocatedState(b, phase) };
+        },
+      });
+      const nodes = descendants(container), text = nodes.map(node => node.textContent).join(' ');
+      assert.equal(requests.length, 1, 'Only this wallet’s pending allocation is checked');
+      const requested = new URL(requests[0].url);
+      assert.equal(requested.pathname, '/api/live-audio/state');
+      assert.equal(requested.searchParams.get('bookingId'), b.id);
+      assert.equal(requests[0].options.cache, 'no-store');
+      assert.ok(requests[0].options.signal instanceof AbortSignal);
+      assert.match(nodes.find(node => node.tag === 'h3').textContent, /Return to your allocated backstage/);
+      const link = nodes.find(node => node.attributes?.['data-live-room'] === 'performer');
+      assert.equal(link.textContent, 'Return to allocated backstage');
+      assert.equal(new URL(link.href, 'https://radio.example').searchParams.get('booking'), b.id);
+      assert.equal(link.target, undefined);
+      assert.match(text, /Original contract times and guaranteed fee are unchanged/);
+      assert.doesNotMatch(text, /Your set is finished|Private checks open at T−70/);
+      assert.match(text, /does not itself grant private access or prove public playback/);
+      assert.match(text, /Never open a second publishing microphone/);
+      assert.match(text, /Refresh stage & payment status/);
+      if (status === 'paid') {
+        assert.match(text, /Confirmed on-chain\. No payment action needed/);
+        assert.equal(receipts.length, 1);
+        assert.equal(receipts[0].transactions[0].hash, b.transactions.PerformancePaid.hash);
+        assert.equal(receipts[0].units, 20000000n);
+      }
+      if (status === 'approved') assert.equal(nodes.find(node => node.tag === 'button' && /^Claim/.test(node.textContent)).disabled, false);
+      assert.deepEqual(b, before, 'Neither contract times nor financial status are widened');
+    });
+  }
+}
+
+test('Profile resolves unknown allocated completion from exact fresh state, not invented extended dates', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t), container = createElement('section');
+  t.mock.method(Date, 'now', () => reentryTime);
+  const b = { ...allocatedBooking(), broadcastCompletion: { known: false, pending: null } };
+  await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+    bookingState: { bookings: [b], escrowAddress: otherWallet },
+    fetchImpl: async () => ({ ok: true, json: async () => allocatedState(b, 'waiting') }) });
+  assert.equal(descendants(container).filter(node => node.attributes?.['data-live-room']).length, 1);
+  assert.equal(b.endUtc, booking().endUtc);
+});
+
+test('Profile never treats unavailable, stale, wrong-booking or expired allocation data as re-entry authority', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t);
+  t.mock.method(Date, 'now', () => reentryTime);
+  const b = allocatedBooking(), valid = allocatedState(b);
+  const invalid = [
+    { ...valid, bookingId: 'another-booking' },
+    { ...valid, configured: false },
+    { ...valid, bookingVerification: { fresh: false, verifiedAt: reentryTime } },
+    { ...valid, bookingVerification: { fresh: true, verifiedAt: null } },
+    { ...valid, bookingVerification: { fresh: true, verifiedAt: reentryTime - 30001 } },
+    { ...valid, phase: 'unavailable' },
+    { ...valid, broadcast: null },
+    { ...valid, broadcast: { ...valid.broadcast, allocationId: null } },
+    { ...valid, broadcast: { ...valid.broadcast, accessUntil: reentryTime } },
+    { ...valid, broadcast: { ...valid.broadcast, accessUntil: Number.MAX_VALUE } },
+    { ...valid, broadcast: { ...valid.broadcast, phase: 'unknown' } },
+  ];
+  for (const result of [...invalid, 'http-error', 'network-error']) {
+    const container = createElement('section');
+    await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+      bookingState: { bookings: [b], escrowAddress: otherWallet },
+      fetchImpl: async () => {
+        if (result === 'network-error') throw new Error('offline');
+        return { ok: result !== 'http-error', json: async () => result };
+      } });
+    const nodes = descendants(container), text = nodes.map(node => node.textContent).join(' ');
+    assert.equal(nodes.filter(node => node.attributes?.['data-live-room']).length, 0, JSON.stringify(result));
+    assert.match(nodes.find(node => node.tag === 'h3').textContent, /Check your allocated stage status/);
+    assert.doesNotMatch(text, /Your set is finished/);
+    assert.match(text, /original guaranteed fee and claim rights are unchanged/);
+  }
+});
+
+test('Profile terminal allocated states have no re-entry link and forced endings are not graceful success', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t);
+  t.mock.method(Date, 'now', () => reentryTime);
+  for (const endReason of ['producer-finished', 'operator-cut', 'authorization-expired', 'audio-loss', 'declined', 'not-ready', null]) {
+    const container = createElement('section'), b = allocatedBooking();
+    const state = { ...allocatedState(b), phase: 'ended',
+      broadcast: { ...allocatedState(b).broadcast, phase: 'ended', endReason, actualEndedAt: reentryTime } };
+    await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+      bookingState: { bookings: [b], escrowAddress: otherWallet },
+      fetchImpl: async () => ({ ok: true, json: async () => state }) });
+    const nodes = descendants(container), title = nodes.find(node => node.tag === 'h3').textContent;
+    assert.equal(nodes.filter(node => node.attributes?.['data-live-room']).length, 0);
+    assert.match(title, endReason === 'producer-finished' ? /Your set is finished/ : /original guaranteed fee unchanged/);
+  }
+});
+
+test('re-entry lookup skips cancelled, incompatible, historical-complete and other non-candidate bookings', async () => {
+  const { resolvePerformerReentry } = await import('../js/performer-room.mjs');
+  const b = allocatedBooking();
+  const changes = [
+    { cancelled: true }, { acknowledged: false }, { status: 'draft' }, { status: 'refunded' },
+    { mode: 'phase0' }, { payoutPolicy: 'unknown' }, { startUtc: 'invalid' }, { endUtc: 'invalid' },
+    { broadcastCompletion: undefined }, { broadcastCompletion: { known: true, pending: false } },
+    { endUtc: new Date(reentryTime + 60000).toISOString() },
+  ];
+  for (const change of changes) assert.deepEqual(await resolvePerformerReentry({ ...b, ...change }, {
+    serviceUrl: 'https://worker.example', now: () => reentryTime,
+    fetchImpl() { throw new Error('An irrelevant booking must not be fetched'); },
+  }), { status: 'none' });
+});
+
+test('unavailable allocated stage never blocks reconciling an already-submitted performer claim', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t), container = createElement('section'), b = allocatedBooking(), removed = [];
+  t.mock.method(Date, 'now', () => reentryTime);
+  const savedHash = '0x' + 'ab'.repeat(32);
+  global.localStorage = {
+    getItem: key => key === `live-claim:${b.id}` ? savedHash : null,
+    removeItem: key => removed.push(key),
+  };
+  class BrowserProvider {
+    async getSigner() { return { getAddress: async () => wallet }; }
+    async getNetwork() { return { chainId: 8453n }; }
+    async getTransactionReceipt(hash) { assert.equal(hash, savedHash); return { status: 1 }; }
+  }
+  await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+    bookingState: { bookings: [b], escrowAddress: otherWallet },
+    ethers: { BrowserProvider, Contract() { throw new Error('Never send a second claim'); } },
+    fetchImpl: async () => { throw new Error('offline'); } });
+  const nodes = descendants(container), claim = nodes.find(node => node.textContent === 'Check pending claim');
+  assert.equal(claim.disabled, false);
+  await claim.onclick();
+  assert.match(claim.textContent, /Previous claim confirmed/);
+  assert.deepEqual(removed, [`live-claim:${b.id}`]);
+});
+
 test('withinthevacuum Profile invitation is wallet-scoped and cannot imply acceptance or funding', async t => {
   const [, { renderLivePerformances }] = await modules;
   const createElement = dom(t), container = createElement('section');
@@ -168,6 +332,11 @@ test('Admin wires an escaped operator link separately from all existing guarante
   assert.match(html, /configured owner wallet; publishing remains performer-only/);
   assert.match(html, /does not grant access/);
   assert.match(html, /Hosting may be unavailable/);
+  const desk = html.match(/<a data-live-desk href="([^"]+)">Open production desk<\/a>/);
+  assert.ok(desk);
+  assert.equal(new URL(desk[1], 'https://radio.example/').pathname, '/producer-room.html');
+  assert.equal(new URL(desk[1], 'https://radio.example/').searchParams.get('booking'), b.id);
+  assert.match(html, /cues do not extend the booking/);
   assert.match(html, /Guaranteed pilot fee/);
   assert.match(html, /Separate offer &lt;not markup&gt;/);
   const actions = [...html.matchAll(/data-live-action="([^"]+)"/g)].map(([, action]) => action);
@@ -179,6 +348,27 @@ test('Admin wires an escaped operator link separately from all existing guarante
   }
   const source = fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8');
   assert.match(source, /bookings\.map\(b => renderLivePerformanceAdminBooking\(b\)\)/);
+});
+
+test('Admin separates allocated completion from original fee and preserves reconciliation', async () => {
+  const [, , { renderLivePerformanceAdminBooking, renderLiveBroadcastCompletion }] = await modules;
+  const b = { ...booking(), stewardApproved: true, endUtc: new Date(NOW - 1).toISOString(),
+    broadcastCompletion: { known: true, pending: true, actualEndedAt: null } };
+  const html = renderLivePerformanceAdminBooking(b, NOW);
+  assert.match(html, /allocated stage is not finished/);
+  assert.match(html, /data-live-desk/);
+  assert.match(html, /data-live-action="release" disabled/);
+  assert.match(html, /data-live-action="review" disabled/);
+  assert.match(html, /data-live-action="settle" disabled/);
+  assert.doesNotMatch(html.match(/<button[^>]*data-live-action="reconcile"[^>]*>/)[0], /disabled/);
+  const interrupted = renderLiveBroadcastCompletion({ ...b,
+    broadcastCompletion: { known: true, pending: false, actualEndedAt: NOW, endReason: 'operator-cut', priorityFollowup: true } });
+  assert.match(interrupted, /Interrupted by an owner cut/);
+  assert.match(interrupted, /not a new booking/);
+  assert.doesNotMatch(interrupted, /producer confirmed the song-boundary ending/);
+  const completed = renderLiveBroadcastCompletion({ ...b,
+    broadcastCompletion: { known: true, pending: false, actualEndedAt: NOW, endReason: 'producer-finished' } });
+  assert.match(completed, /producer confirmed the song-boundary ending/);
 });
 
 test('one-button invitation preserves exact wallet consent and explicit failure states', async t => {
@@ -309,27 +499,46 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   for (const file of ['live-performance-profile.mjs', 'live-performance-admin.mjs']) {
     const source = fs.readFileSync(path.join(__dirname, '../js', file), 'utf8');
     assert.match(source, /live-bookings\.mjs\?v=20261108-live-audio-pilot/);
-    assert.match(source, /live-audio\.mjs\?v=20261108-live-audio-pilot/);
+    assert.match(source, /live-audio\.mjs\?v=20261114-allocated-stage/);
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /live-performance-admin\.mjs\?v=20261113-one-action-release/);
+  assert.match(html, /live-performance-admin\.mjs\?v=20261114-allocated-stage/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261114-performer-encore"/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261114-tip-provenance"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261113-stage-entry"/);
   assert.match(html, /live-performance\.css\?v=20261114-performer-encore/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
+  assert.equal(map.imports['./js/live-bookings.mjs?v=20261108-live-audio-pilot'],
+    './js/live-bookings.mjs?v=20261114-tip-provenance');
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
     './js/radio-schedule-ui.mjs?v=20261113-stage-entry');
   assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],
     './js/fund-display.mjs?v=20261108-live-audio-pilot');
   for (const file of ['radio-schedule-ui.mjs']) {
     assert.match(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'),
-      /live-performance-profile\.mjs\?v=20261110-wallet-practice/);
+      /live-performance-profile\.mjs\?v=20261114-allocated-stage/);
   }
   assert.match(fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8'),
-    /live-performance-profile\.mjs\?v=20261114-performer-encore/);
+    /live-performance-profile\.mjs\?v=20261114-allocated-stage/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8'),
     /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
+});
+
+test('standalone backstage entries consistently version allocated-stage helper imports without relying on index import maps', () => {
+  for (const file of ['live-audio-room.mjs', 'producer-room.mjs', 'live-direction.mjs',
+    'private-room-listener.mjs', 'live-broadcast-controls.mjs']) {
+    const source = fs.readFileSync(path.join(__dirname, '../js', file), 'utf8');
+    assert.match(source, /live-audio-client\.mjs\?v=20261114-allocated-stage/);
+    assert.doesNotMatch(source, /20261114-direction|20261114-allocated-consent/);
+  }
+  assert.match(fs.readFileSync(path.join(__dirname, '../js/live-audio-client.mjs'), 'utf8'),
+    /live-audio\.mjs\?v=20261114-allocated-stage/);
+  for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
+    const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
+    assert.ok(source.includes(`${entry}?v=20261114-allocated-stage`));
+    assert.match(source, /live-audio\.css\?v=20261114-allocated-stage/);
+    assert.doesNotMatch(source, /20261114-direction/);
+  }
 });
 
 test('production live audio reuses encrypted mirrored storage, never an ephemeral file path', () => {

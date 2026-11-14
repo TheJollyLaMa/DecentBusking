@@ -213,7 +213,7 @@ export async function submitLiveRecording({ booking, cid, consent, durationSecon
   if (!track.liveRecording) {
     track.durationSeconds = durationSeconds;
     track.liveRecording = { bookingId: booking.id, consentIssuedAt: consent.issuedAt, incomplete: !!incomplete,
-      replayAfter: Date.parse(booking.endUtc) + 300000, replayStatus: 'pending' };
+      replayAfter: booking.broadcast?.outroEndsAt ?? Date.parse(booking.endUtc) + 300000, replayStatus: 'pending' };
   }
   _save(); await waitForRemotePersistence();
   return track;

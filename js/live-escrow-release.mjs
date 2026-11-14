@@ -1,10 +1,14 @@
-import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY } from './live-bookings.mjs?v=20261108-live-audio-pilot';
+import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY } from './live-bookings.mjs?v=20261114-tip-provenance';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 
-const BOOKING_ABI = 'function bookings(bytes32) view returns ((address performer,address funder,uint256 amount,uint256 payoutAmount,uint64 showStart,uint64 showEnd,uint64 claimDeadline,uint32 reviewWindow,uint32 cancellationWindow,uint16 killFeeBps,bytes32 termsHash,uint8 status))';
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 const pendingKey = id => `live-pending:${id}:approve`;
 const reportKey = id => `live-release-report:${id}`;
+
+export function liveBroadcastCompletionPending(b) {
+  return Object.hasOwn(b, 'broadcastCompletion') &&
+    (b.broadcastCompletion?.known !== true || b.broadcastCompletion?.pending !== false);
+}
 
 export function guaranteedReleaseState(b, now = Date.now()) {
   if (b.mode !== 'phase1' || b.payoutPolicy !== LIVE_PILOT_POLICY) return null;
@@ -14,6 +18,9 @@ export function guaranteedReleaseState(b, now = Date.now()) {
   if (now < Date.parse(b.endUtc)) return { label: 'Available after the set', disabled: true, detail: 'The booked end must pass before escrow approval.' };
   if (now >= Date.parse(b.claimDeadline)) return { label: 'Claim deadline passed', disabled: true, detail: 'Review the contract state; do not send a duplicate payment.' };
   if (now >= Date.parse(b.endUtc) + b.reviewWindow * 1000) return { label: 'Performer can claim full fee', disabled: true, detail: 'The review window ended. Ask the performer to claim from Profile; no owner approval required.' };
+  if (liveBroadcastCompletionPending(b)) return { label: b.broadcastCompletion?.known
+    ? 'Waiting for allocated stage completion' : 'Stage completion unavailable', disabled: true,
+    detail: 'New completion/release actions wait for verified actual stage completion. Your original guaranteed fee and contract claim/review times are unchanged; reconcile any existing transaction instead of sending another.' };
   return { label: `Release full $${(Number(b.amountUnits) / 1e6).toFixed(2)} from escrow`, disabled: false,
     detail: 'Automatically prepares a public full-fee report, then asks your wallet to approve escrow release. Performer claims afterward. No manual report link or rehearsal score required.' };
 }
@@ -32,7 +39,7 @@ export async function releaseGuaranteedEscrow({ booking, escrowAddress, wallet, 
   serviceUrl, origin, onProgress = () => {}, uploadReport, contract: suppliedContract }) {
   const { ethers, signer, address, provider, check } = wallet;
   await check();
-  const contract = suppliedContract || new ethers.Contract(escrowAddress, [...LIVE_ESCROW_ABI, BOOKING_ABI], signer);
+  const contract = suppliedContract || new ethers.Contract(escrowAddress, LIVE_ESCROW_ABI, signer);
   const bookingId = ethers.id(booking.id);
   const progress = message => onProgress(message);
   const savedHash = storage.getItem(pendingKey(booking.id));

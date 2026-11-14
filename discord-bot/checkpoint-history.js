@@ -102,7 +102,7 @@ export function createWeeklyHistory({ name, tags, timeZone, read, list, upload, 
 
 export function stateHistoryEvents(kind, value, previous, observedAt) {
   const paidPlayback = kind === 'djuke-journal' || kind.startsWith('devert-paid');
-  const fields = kind === 'payment-ledger' ? ['entries'] : kind === 'fund-ledger' ? ['sources', 'payouts'] :
+  const fields = kind === 'payment-ledger' || kind === 'tip-ledger' ? ['entries'] : kind === 'fund-ledger' ? ['sources', 'payouts'] :
     kind === 'earnings-index' ? ['items'] : paidPlayback ? ['records'] :
       kind === 'devert-main-radio' || kind.startsWith('devert-main-radio-') ? ['impressions', 'adVotes', 'paidPlays'] : [];
   const identity = entry => entry.txHash ? `${entry.txHash}:${entry.logIndex}` :

@@ -12,6 +12,184 @@ The bot holds **no on-chain private key**. An authorized owner reviews the queue
 
 The website named-playlist library is separate from Discord `/radio` and `/jukebox`; saved copies pin a revision and attribution. Named radio checkout is not enabled until a compatible DJuke deployment and batch-aware worker are configured. See the [playlist rollout and settlement rules](../docs/DJUKE-PLAYLISTS.md).
 
+## Private live direction foundation
+
+The existing `/api/live-audio/challenge`, `/session`, and `/control` routes
+authorize only the configured owner and exact booked performer. The session
+response includes fixed `expiresAt` (epoch milliseconds): the original booking
+end for legacy passes, or the explicitly signed allocated access bound for new
+passes. No separate engineer role, production registry or group-chat authority is
+created. See [live hosting and recording prerequisites](../docs/LIVE_AUDIO_PILOT.md).
+
+Authenticated `/control` accepts these booking-scoped actions:
+
+| Action | Role / payload |
+| --- | --- |
+| `direction-state` | Either participant; optional `cursor: {epoch, sequence}` |
+| `direction-cue` | Owner; `kind: another-song` or `wrap-up` |
+| `direction-notify-delay` | Owner; `status: possible-delay`, `stand-by`, or `clear` |
+| `direction-acknowledge-cue` | Performer; `cueId` |
+| `direction-acknowledge-delay` | Performer; `noticeId` |
+| `direction-readiness` | Performer; boolean `ready` |
+| `direction-finished` | Performer; declaration after booked start, not a broadcast cut |
+| `direction-heartbeat` | Performer presence only |
+| `direction-message` | Either participant; plain `text` |
+
+The token selects the booking; a supplied mismatched booking ID is rejected.
+Mutations require the current `epoch`; all except heartbeat require a unique
+`commandId` (8–100 letters, digits, colon, underscore or hyphen). All except
+heartbeat/message also require `expectedRevision`. Message and heartbeat traffic
+does not change the room revision. Repeated identical commands are deduplicated
+for the room lifetime; reused IDs with different commands and stale revisions
+fail with HTTP 409. Messages cannot impersonate sender roles.
+
+`direction-state` returns the snapshot directly; mutations return
+`{commandId, applied, state}`. The snapshot includes `serverTime`, `epoch`,
+`bookingId`, `revision`, exact `capabilities`, `performerPresence`, `readiness`,
+`cue`, `finished`, `delay`, `messages`, `cursor`, `resetRequired`, `chat`, and
+`limits`. All instants are epoch milliseconds. Null means unknown/not declared.
+Message sequence/cursors are per booking; a lost cursor or changed epoch
+requires clearing/reconciling the client view, never automatically resending.
+Errors retain the existing `error` string and add a direction-specific `code`.
+
+This is **memory-only session communication**, not durable private chat:
+last 100 messages, 500 UTF-16 units per message, at most 30 minutes' retention,
+and complete removal at authorized session end, cancellation, stop or restart. Per-wallet
+limits are 120 requests, 20 messages and 30 coordination changes per minute;
+each room accepts at most 512 deduplicated commands and at most 32 rooms exist.
+Bounds are returned in `chat`/`limits`, including recommended 3-second polling
+and 15-second performer heartbeats. Presence expires after 30 seconds; readiness
+after 60 seconds without renewal. Heartbeats extend only an already-fresh
+readiness declaration, never revive an expired one. Cues expire after two
+minutes; all deadlines are clipped to the current authorized session bound. Delay notices
+remain until superseded/end and provide no invented start estimate.
+
+Only authenticated performer heartbeats establish performer presence; desk
+polling does not. A cue acknowledgement is not a finished declaration.
+Acknowledging a delay is a receipt, **not artist consent required for a producer
+delay**. Artist participation/shortened/full-set choices use the separate durable
+allocation commands below. Private content is excluded from public radio state, all
+checkpoints/IPFS uploads, Discord announcements and logs. Coordination neither
+queues lifecycle persistence nor changes the audio-loss watchdog.
+
+Direction `capabilities.endBroadcast` and `takeLive` remain false. Another-song
+cues and advisory finished declarations do not change airtime. Time-changing
+commands have their own durable revision and explicit capabilities.
+
+The existing public radio response's `liveAudio` state adds a uniform
+`performer: {wallet, artist, title}`, independent of optional programming, and
+`bookingVerification: {fresh, verifiedAt}`. Verification uses the last successful
+booking lookup, not response time: failed/malformed reads, ineligible bookings
+or age over 30 seconds make `fresh` false. Audio phase/status and fallback are
+unchanged. New live tipping must use a fresh `/api/radio` read, a canonical
+live/armed booking and `bookingVerification.fresh`, then freeze the payment
+target; cached recordings or caller-selected rooms are not payment authority.
+
+Reuse: adapts this repository's owner/performer challenge, scoped session and
+HTTP error/redaction patterns from monitoring baseline `0cae70d`. Existing
+encrypted lifecycle storage is extended only with allocation facts and bounded
+command receipts; it intentionally does not store chat.
+
+### Durable current/next broadcast allocation
+
+The existing authenticated `/control` endpoint additionally accepts:
+
+| Action | Role / payload |
+| --- | --- |
+| `broadcast-enable` | Owner; opt this booking into bounded effective timing |
+| `broadcast-reserve-next` | Owner; `nextBookingId`, separate exact next-booking owner `nextToken`, `expectedNextRevision` |
+| `broadcast-encore` | Owner; positive integer `additionalMs`, and paired next-booking `nextToken` when applicable |
+| `broadcast-choice` | Exact performer; `choice: decline`, `short`, or `full`; positive `durationMs` only for short |
+| `broadcast-finished` | Exact performer; durable declaration, not a cut |
+| `broadcast-end` | Owner; `confirmed: true`, `mode: normal` or `operator-cut`; normal requires durable performer finished |
+| `broadcast-take` | Target booking owner; `confirmed: true`; explicit choice, fresh readiness/audio, passed checks and safe paid boundary required |
+
+Every mutation requires `commandId` (same 8–100-character alphabet) and
+`expectedRevision: state.broadcast?.revision || 0`. This is **not** the private
+direction revision or epoch. Responses are `{commandId, applied, state}`.
+At most 128 SHA-256 command receipts per booking survive encrypted restore;
+identical retries return `applied: false`, and changed/stale requests fail.
+Raw tokens are never checkpointed. Authorization is rechecked before applying
+the decision; a current-room pass does not authorize arbitrary other bookings.
+
+Public `broadcast` is null for legacy bookings, otherwise:
+`allocationId`, `revision`, `phase` (waiting/live/ended), `plannedStartAt`,
+`actualStartedAt`, `effectiveSetEndAt`, `authorizedEndAt`, `actualEndedAt`,
+`endReason`, `allocatedDurationMs`, `encoreMs`, `remainingEncoreMs`, `accessUntil`.
+Instants are epoch milliseconds. Private `broadcastControl` additionally exposes
+choice, previous/next booking IDs, delay-notification timestamp, finished
+declaration and priority-follow-up evidence. Exact `broadcastCapabilities`
+are `enable`, `reserveNext`, `grantEncore`, `chooseSet`, `declareFinished`,
+`endBroadcast`, `takeLive`. Direction snapshots also include timing/capabilities.
+
+There is no automatic take or encore. The maximum cumulative encore is
+**600000ms per allocated effective set**. A delayed full set starts its contracted
+duration at actual take and retains its own ten-minute encore allowance.
+Only the current act and explicitly selected next act are supported; a
+third-booking conflict is rejected, not silently cascaded. Producer bumps create
+a durable per-booking delay notice; receipt/acknowledgement is not required
+consent. The artist independently chooses decline/short/full and cannot be
+forced to remain. `priorityFollowup` records a producer-delayed shortened set,
+not a funded next-week booking or automatic invitation.
+
+Original booking start/end, fee, review and claim clocks are never rewritten.
+Guaranteed pilot payment remains full regardless of microphone availability,
+producer delay or short/declined performance. New decision/release workflows
+wait for known actual completion; saved transaction reconciliation and original
+contract claims are not moved. `broadcastCompletion` is computed public
+workflow metadata, not an amendment to the signed booking journal.
+Allocated audio-loss outcomes remain in the broadcast journal instead of
+issuing a financial/schedule cancellation; legacy cancellation behavior stays
+unchanged.
+
+Old wallet passes keep their exact issued expiry. Reconnect signs the allocation
+ID and a bound of effective start + at least original contracted duration +
+ten minutes + one minute of access grace. Renewing a pass need not stop an
+existing publication. Waiting is bounded, never automatically on-air; once
+taken, the original 60-second verified-audio-loss safeguard still applies.
+Arming an allocated room signals readiness only; private checks use its planned
+start and do not fabricate missed checks. End reasons are `producer-finished`,
+`operator-cut`, `authorization-expired`, `audio-loss`, `declined`, `not-ready`.
+Only the first means the performer declared completion and the owner ended
+normally.
+
+Producer handoffs finish the current paid item/active playlist and verify pending
+selection/bookkeeping, not every queued purchase. A busy take request holds
+**new** paid admission for at most 60 seconds while the producer retries.
+Prepared paid work is durably returned through existing DJuke release/retry
+handling, never deleted or marked played. A failure releases the control hold,
+does not replace current normal audio, and never automatically takes a performer.
+Actual end starts the configured outro; later explicit take may supersede it
+at a safe boundary. Replay eligibility uses actual-end outro and still requires
+real mint completion and safe normal rotation. Deployment blocks nonterminal
+allocations even beyond original end and verifies pending recording handoff.
+Checkpoint failure closes room passes and live receivers without marking a
+successful finish or deleting purchases. The watchdog retains the fault/advert
+fallback and retries canonical restore only after any late write and receiver
+cleanup settle. Verified recovery requires fresh wallet passes and fresh audio;
+it cannot reopen a durable terminal allocation. Unverifiable storage remains
+explicitly unavailable, not an implicit permission to take another act.
+
+### Recording scope for allocated sets
+
+`recording-consent` accepts `consentVersion`. Omitted means unchanged
+`dbusk-live-recording-v1` scheduled-only permission. V1 never captures outside
+original scheduled time. Explicit performer-signed `dbusk-live-recording-v2`
+permits this booking's allocated on-air delay/short/full set and approved encore,
+never private practice or soundchecks. Unknown versions and mismatched signatures
+fail. Private recording status returns `consentVersion`, `consentScope`
+(`scheduled-set`/`allocated-set`), `scopeLimited` and `canChange`; enabled=true
+renewal is allowed before finalization, including an active allocated encore.
+Permission is not silently widened.
+
+Actual broadcast end releases capture promptly. Final encode/upload/intake runs
+outside the capture/consent queue; bounded waits retain the same in-flight work
+for retry rather than launching duplicate finalizers. Durable results and
+booking-scoped mint intake deduplicate completion. An outage leaves an explicit
+processing/error state, not a false successful recording or a blocked next
+microphone. Journal/readback verification still gates replacement-worker
+handoff. Forced, lost or deadline-ended sets are not labelled graceful complete.
+
 ---
 
 ## Quick Start
@@ -938,6 +1116,36 @@ Admin previews the queued image and supports PNG/JPEG/WebP/GIF uploads up to 10 
 `GET /api/payroll/ledger` exposes verified Base payments and IPFS snapshot status. Allowed browser origins can submit a transaction hash to `POST /api/payroll/reconcile`; the worker accepts only successful, canonical, twice-confirmed `PayrollPaid` events from the configured router and DecentBusking repository namespace. No signing key is held by the bot. A 15-second comparator discovers new events, rechecks saved proofs and retries pending backups. Tagged payment snapshots are retained independently of playlist snapshots. Radio state advertises this endpoint for DJuke/DBusk consumers.
 
 Optional server variables: `PAYROLL_START_BLOCK` specifies historical scan coverage (default: startup head minus 2,000 unless restoring); `PAYROLL_ARCHIVE_RPC_URL` selects an archive-capable Base endpoint for weekly closing-balance checks (defaults to `https://mainnet.base.org`); `JUKELOOP_PAYROLL_RECOVERY_CID` accepts a comma-separated list overriding the one-time archived playlist checkpoints used to recover weekly counters; `PINATA_GATEWAY_TOKEN` is a server-only access key for a restricted Pinata gateway; `PAYROLL_GITHUB_TOKEN` is an owner credential with Actions-write permission for automatic dispatch of verified repo-dev ledger updates. Never put credentials in browser configuration. Without `PAYROLL_GITHUB_TOKEN`, the GitHub ledger workflow remains manual. See [payroll procedures](../docs/PAYROLL.md) for confirmation, backup, history and batch limitations.
+
+### Native tip provenance (#355; opt-in release)
+
+`TIP_ROUTER_ADDRESS` enables a **separate**, read-only Base tip indexer.
+`TIP_START_BLOCK` must be the exact deployment block, not a recent scan window.
+Keep the configured NFT collections and `LIVE_PERFORMANCE_ESCROW_ADDRESS`:
+receipt-time state reads verify which artist belongs to each recording/booking.
+The worker holds no tip signing key, takes no tip fee and never mixes native wei
+with USDC payroll units.
+
+`GET /api/tips/ledger?wallet=<address>&offset=0&limit=25` returns up to 100 records
+per page, exact native amounts, source verification, catch-up/recovery status and
+transaction/log identities. Two confirmations and canonical receipts are required;
+unknown caller labels do not count as attributed earnings. Errors return unavailable
+states, not invented earnings. Checkpoints use `decentbusking-tip-ledger.json`
+and the existing mirror/history mechanisms; deployment-to-head chain replay is
+the recovery source. Empty-chain cursor backups are paced to five minutes.
+
+Catch-up speed: Base makes about 432,000 blocks a day. Each pass reads up to
+1,000 blocks and one poll runs up to 20 passes (20,000 blocks), so a full day of
+backlog drains in about 22 polls instead of the hours a single pass per poll
+would need. `caughtUp` is true only when the cursor reaches the chain head; until
+then the Profile says totals are incomplete. A failed pass keeps the progress of
+earlier passes and the next poll resumes there.
+
+Deploy/verify the contract and bring this worker ledger fully up before enabling
+public `tipRouterAddress`. With that browser field empty, existing direct tips
+remain explicitly labelled unattributed. There is no automatic direct fallback
+from an enabled but broken contract route. See the [release checklist and proof
+limits](../docs/LIVE_PERFORMANCE_RUNBOOK.md#attributed-native-eth-tips-355-release-gate).
 
 ### Setting up JukeLoop
 

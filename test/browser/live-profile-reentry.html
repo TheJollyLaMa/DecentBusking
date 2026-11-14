@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="../../">
+  <title>Allocated Profile re-entry browser fixture</title>
+  <link rel="stylesheet" href="../../css/live-performance.css">
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; padding: 16px; max-width: 850px; background: #151922; color: #eee; overflow-wrap: anywhere; }
+    button, a { min-height: 44px; }
+    a { color: #a8caff; }
+    button { padding: 10px; font: inherit; }
+    nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    pre { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Profile backstage re-entry</h1>
+  <p>Local mocked backend only. No wallet signing, transactions, audio publication or live-show verification.</p>
+  <nav aria-label="Fixture cases">
+    <button type="button" data-case="waiting">Delayed waiting</button>
+    <button type="button" data-case="paid">Extended and paid</button>
+    <button type="button" data-case="stale">Stale evidence</button>
+    <button type="button" data-case="ended">Forced ending</button>
+    <button type="button" id="run-checks">Run browser checks</button>
+  </nav>
+  <main id="profile"></main>
+  <pre id="results" role="status" aria-live="polite"></pre>
+  <script type="module">
+    import { renderLivePerformances } from '../../js/live-performance-profile.mjs?v=20261114-allocated-stage';
+    const wallet = `0x${'11'.repeat(20)}`, escrowAddress = `0x${'22'.repeat(20)}`;
+    const container = document.querySelector('#profile'), output = document.querySelector('#results');
+    window._wallet = { address: wallet };
+    window.DecentConfig = {};
+
+    async function renderCase(scenario = 'waiting') {
+      const now = Date.now();
+      const booking = {
+        id: 'browser-fixture:allocated /?&', eventId: 'browser-fixture', title: 'Fixture performance',
+        displayName: 'Fixture performer', wallet, mode: 'phase1', payoutPolicy: 'pilot-guaranteed-v1',
+        acknowledged: true, stewardApproved: true, status: scenario === 'paid' ? 'paid' : scenario === 'approved' ? 'approved' : 'funded',
+        startUtc: new Date(now - 25 * 60000).toISOString(), endUtc: new Date(now - 5 * 60000).toISOString(),
+        claimDeadline: new Date(now + 86400000).toISOString(), reviewWindow: 86400, airtimeMinutes: 20,
+        amountUnits: '20000000', paidUnits: scenario === 'paid' ? '20000000' : undefined,
+        transactions: scenario === 'paid' ? {
+          PerformancePaid: { hash: `0x${'ab'.repeat(32)}`, blockNumber: 12345 },
+        } : {}, additionalOffer: '',
+        broadcastCompletion: { known: true, pending: true, actualEndedAt: null },
+      };
+      const state = {
+        bookingId: scenario === 'wrong-booking' ? 'someone-else' : booking.id,
+        configured: true, serverTime: now, phase: scenario === 'waiting' ? 'preflight' : 'live',
+        bookingVerification: { fresh: scenario !== 'stale', verifiedAt: now },
+        broadcast: {
+          allocationId: 'browser-fixture-allocation', revision: 1, phase: scenario === 'waiting' ? 'waiting' : 'live',
+          accessUntil: now + (scenario === 'expired' ? -1000 : 40 * 60000),
+        },
+      };
+      if (scenario === 'ended') {
+        state.phase = 'ended';
+        state.broadcast.phase = 'ended';
+        state.broadcast.endReason = 'operator-cut';
+        state.broadcast.actualEndedAt = now;
+      }
+      const before = JSON.stringify(booking), requests = [];
+      await renderLivePerformances({
+        container, wallet, serviceUrl: 'https://fixture.invalid',
+        bookingState: { bookings: [booking], escrowAddress },
+        ethers: { BrowserProvider() { throw new Error('Fixture forbids wallet operations'); } },
+        fetchImpl: async (url, options) => {
+          requests.push({ url, cache: options?.cache });
+          if (scenario === 'offline') throw new Error('Fixture offline');
+          if (url.endsWith('/api/live-bookings')) return { ok: true, json: async () => ({ bookings: [booking], escrowAddress }) };
+          if (url !== `https://fixture.invalid/api/live-audio/state?bookingId=${encodeURIComponent(booking.id)}`) {
+            throw new Error('Unexpected fixture request');
+          }
+          return { ok: true, json: async () => state };
+        },
+      });
+      window.__profileFixture = { scenario, booking, requests, unchanged: before === JSON.stringify(booking) };
+      return window.__profileFixture;
+    }
+
+    window.runProfileReentryFixtures = async () => {
+      const results = [];
+      for (const scenario of ['waiting', 'live', 'approved', 'paid', 'stale', 'offline', 'expired', 'wrong-booking', 'ended']) {
+        const fixture = await renderCase(scenario);
+        const link = container.querySelector('[data-live-room="performer"]');
+        const active = ['waiting', 'live', 'approved', 'paid'].includes(scenario);
+        const title = container.querySelector('h3')?.textContent || '';
+        const text = container.textContent;
+        const checks = {
+          expectedLink: Boolean(link) === active,
+          exactBooking: !link || new URL(link.href).searchParams.get('booking') === fixture.booking.id,
+          roomPath: !link || new URL(link.href).pathname === '/live-room.html',
+          sameTab: !link || !link.target,
+          correctHeading: active ? title.includes('Return to your allocated backstage')
+            : scenario === 'ended' ? title.includes('Your stage ended') : title.includes('Check your allocated stage status'),
+          noPrematureFinish: !text.includes('Your set is finished'),
+          financialTruth: scenario !== 'paid' || text.includes('Confirmed on-chain. No payment action needed.'),
+          contractUnchanged: fixture.unchanged,
+          exactFreshRequest: fixture.requests.length === 1 && fixture.requests[0].cache === 'no-store',
+          noHorizontalOverflow: document.documentElement.scrollWidth <= window.innerWidth,
+        };
+        if (Object.values(checks).some(value => !value)) throw new Error(`${scenario}: ${JSON.stringify(checks)}`);
+        results.push({ scenario, checks });
+      }
+      await renderCase('waiting');
+      output.textContent = `PASS: ${results.length} mocked Profile cases at ${window.innerWidth}px.`;
+      return { width: window.innerWidth, results, liveShowVerified: false };
+    };
+    document.querySelectorAll('[data-case]').forEach(button => button.addEventListener('click', () => renderCase(button.dataset.case)));
+    document.querySelector('#run-checks').addEventListener('click', async () => {
+      try { await window.runProfileReentryFixtures(); } catch (error) { output.textContent = error.message; }
+    });
+    await renderCase();
+    window.__profileFixtureReady = true;
+  </script>
+</body>
+</html>

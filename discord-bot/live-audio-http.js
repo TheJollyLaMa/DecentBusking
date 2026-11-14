@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { LiveAudioError } from './live-audio-errors.js';
+import { LiveDirectionError } from './live-direction.js';
 
 let clientScript;
 async function body(request) {
@@ -48,7 +49,9 @@ export async function handleLiveAudioRequest(request, response, { service, allow
     else send(404, { error: 'Unknown room route' });
   } catch (error) {
     // Never return provider errors: they can contain stream keys, tokens or signed URLs.
-    send(400, { error: error instanceof LiveAudioError ? error.message : 'Live audio request unavailable; retry or contact the operator' });
+    send(error instanceof LiveDirectionError ? error.status : 400,
+      { error: error instanceof LiveAudioError ? error.message : 'Live audio request unavailable; retry or contact the operator',
+        ...(error instanceof LiveDirectionError ? { code: error.code } : {}) });
   }
   return true;
 }

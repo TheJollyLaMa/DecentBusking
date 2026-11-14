@@ -1090,6 +1090,11 @@ export class JukeLoopSession {
     if (key === this._liveAudioPolicyKey) return;
     this._liveAudioPolicyKey = key;
     const nextShow = this._resolveShow();
+    if (policy?.controlled && previousShow.type === nextShow.type && previousShow.id === nextShow.id &&
+        nextShow.type !== 'live_performance') {
+      this._syncScheduledShow();
+      return;
+    }
     if (previousShow.event?.id && previousShow.event.id === nextShow.event?.id &&
         previousShow.event.id !== policy?.eventId) {
       this._syncScheduledShow();
@@ -1322,7 +1327,7 @@ export class JukeLoopSession {
     const { projectedMusicSinceAd = null } = options;
     const playlistOwnsRadio = this.djuke?.hasActivePlaylist?.() === true;
     const allowAds = options.allowAds !== false && !playlistOwnsRadio;
-    if (this._destroyed) return null;
+    if (this._destroyed || this._broadcastHandoff) return null;
     await this._ensureMainRadioAdState();
     this._pendingDevertAds = this._pendingDevertAds.filter(ad => !this.devertPlayback?.isCampaignRemoved?.(ad.campaignId));
     if (this._preparedDevertAd && this.devertPlayback?.isCampaignRemoved?.(this._preparedDevertAd.campaignId)) {
@@ -1369,7 +1374,7 @@ export class JukeLoopSession {
       (!!(this._preparedDevertAd || this._pendingDevertAds.length) && !this._breakAwaitingUnlock));
     // Only immediate adverts and DJuke songs buy an extra break between ordinary slots.
     let paid = isHype || activeShow.type === 'playlist_show' ? null : forcedPaid;
-    if (!paid && !fallbackBreak && this.djuke && (!this._deploymentDraining() || playlistOwnsRadio) &&
+    if (!paid && !fallbackBreak && this.djuke && ((!this._deploymentDraining() && !(this._broadcastRequestedUntil > Date.now())) || playlistOwnsRadio) &&
         activeShow.type !== 'playlist_show' && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
       paid = await this.djuke.nextPaid({ allowBump: normalSlotDue, ...(cancellationAds ? { includeSongs: false } : {}) });
       if (paid && !this._paidStartAllowed(paid.record)) {
@@ -1930,7 +1935,45 @@ export class JukeLoopSession {
   _paidStartAllowed(record) {
     const active = this.djuke?.getActivePlaylistBatchId?.() ?? null;
     if (active !== null) return record.playlistBatchId === active;
-    return !this._deploymentDraining();
+    return !this._deploymentDraining() && !this._broadcastHandoff && !(this._broadcastRequestedUntil > Date.now());
+  }
+
+  async withBroadcastHandoff(apply) {
+    const busy = () => this._currentPaid || this.djuke?.hasActivePlaylist?.() ||
+      this.djuke?.getActivePlaylistBatchId?.() != null || this._prepareTask || this._transitionTask ||
+      this._paidCompletionTask || this._paidBookkeepingTask || this.djuke?.hasPendingSelection?.() ||
+      this._changeoverPrepared?.paid;
+    if (this._destroyed || this._broadcastHandoff || this._deploymentDraining()) {
+      throw new Error('Broadcast handoff waits for the active paid item and in-flight selection, not queued purchases');
+    }
+    this._broadcastRequestedUntil = Date.now() + 60000;
+    if (busy()) throw new Error('Finish the current paid item; new paid starts are held for sixty seconds while the producer retries');
+    this._broadcastHandoff = true;
+    clearTimeout(this._paidPollTimer); this._paidPollTimer = null;
+    try {
+      const prepared = this._preparedNext;
+      if (prepared?.paid) {
+        this._preparedNext = null;
+        this._disposePrepared({ ...prepared, paid: null });
+        let timer;
+        try {
+          await Promise.race([
+            this.djuke.release(prepared.paid.record, new Error('Producer broadcast handoff retains this paid request')),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Paid handoff verification timed out')), 5000); }),
+          ]);
+        } finally { clearTimeout(timer); }
+      }
+      if (busy()) throw new Error('Paid playback changed during broadcast handoff');
+      return await apply();
+    } finally {
+      this._broadcastHandoff = false;
+      this._broadcastRequestedUntil = 0;
+      if (this._preparedNext) this._schedulePaidPriorityCheck();
+      if (this._started && this.player.state.status === AudioPlayerStatus.Idle &&
+          this._resolveShow().type !== 'live_performance') {
+        void this._playNext().catch(() => {});
+      }
+    }
   }
 
   async drainForDeployment(until) {

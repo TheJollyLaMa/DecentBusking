@@ -73,6 +73,25 @@ test('pending approval retries reconcile only; confirmed retry does not upload o
   assert.equal(f.counts.uploaded, 0);
 });
 
+test('allocated pending or unknown completion blocks new workflow but never erases a confirmed chain result', async t => {
+  for (const completion of [{ known: true, pending: true }, { known: false, pending: false }, null]) {
+    const f = await fixture(t);
+    f.booking.broadcastCompletion = completion;
+    assert.equal(f.guaranteedReleaseState(f.booking).disabled, true);
+    await assert.rejects(f.release(), /verified actual stage completion/);
+    assert.equal(f.counts.sent, 0);
+    assert.equal(f.counts.uploaded, 0);
+    f.values.set(`live-pending:${f.booking.id}:approve`, txHash);
+    const result = await f.release();
+    assert.equal(result.approved, true);
+    assert.equal(f.counts.sent, 0);
+    f.booking.status = 'approved';
+    assert.match(f.guaranteedReleaseState(f.booking).label, /performer can claim/);
+    f.booking.status = 'paid';
+    assert.equal(f.guaranteedReleaseState(f.booking).label, 'Payment claimed');
+  }
+});
+
 test('reverted pending approval is explicit and never automatically resubmits', async t => {
   const f = await fixture(t);
   f.values.set(`live-pending:${f.booking.id}:approve`, txHash);

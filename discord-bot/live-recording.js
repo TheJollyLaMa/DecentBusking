@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { verifyMessage } from 'ethers';
-import { liveRecordingConsentMessage } from '../js/live-recording-consent.mjs';
+import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from '../js/live-recording-consent.mjs';
+import { liveBroadcastEnd, liveBroadcastStart } from '../js/live-broadcast.mjs';
 import { createPinataStateStore } from './ipfs-state.js';
 import { LiveAudioError } from './live-audio-errors.js';
 import { buildGatewayUrl } from './mint-sync.js';
@@ -60,9 +61,9 @@ export function validateRecordingState(state) {
   for (const r of state.recordings) {
     if (!keysOnly(r, ['bookingId', 'wallet', 'consent', 'segments', 'status', 'interrupted', 'result', 'trackId', 'error']) ||
         typeof r.bookingId !== 'string' || ids.has(r.bookingId) || !/^0x[0-9a-f]{40}$/i.test(r.wallet || '') ||
-        !keysOnly(r.consent, ['enabled', 'issuedAt', 'signature', 'origin']) ||
+        !keysOnly(r.consent, ['enabled', 'issuedAt', 'signature', 'origin', 'version']) ||
         typeof r.consent?.enabled !== 'boolean' || !Number.isSafeInteger(r.consent.issuedAt) ||
-        typeof r.consent.signature !== 'string' || !Array.isArray(r.segments) || r.segments.length > 360 ||
+        typeof r.consent.signature !== 'string' || !Array.isArray(r.segments) || r.segments.length > 500 ||
         r.segments.some(s => !keysOnly(s, ['cid', 'bytes']) || !safeCid(s.cid) || !Number.isSafeInteger(s.bytes) || s.bytes <= 0 ||
           s.bytes > BYTES_PER_SECOND * 30 || s.bytes % 2 !== 0) ||
         !['waiting', 'recording', 'processing', 'submitted', 'revoked', 'empty'].includes(r.status) ||
@@ -72,7 +73,7 @@ export function validateRecordingState(state) {
         (r.result && (!keysOnly(r.result, ['cid', 'durationSeconds']) || !safeCid(r.result.cid) ||
           !Number.isFinite(r.result.durationSeconds) || r.result.durationSeconds <= 0))) throw Error('Invalid recording journal');
     const message = liveRecordingConsentMessage({ bookingId: r.bookingId, wallet: r.wallet,
-      origin: r.consent.origin, issuedAt: r.consent.issuedAt, enabled: r.consent.enabled });
+      origin: r.consent.origin, issuedAt: r.consent.issuedAt, enabled: r.consent.enabled, version: r.consent.version });
     if (verifyMessage(message, r.consent.signature).toLowerCase() !== r.wallet.toLowerCase()) throw Error('Invalid recording permission signature');
     ids.add(r.bookingId);
   }
@@ -122,8 +123,8 @@ export function pcmWav(pcm) {
   return Buffer.concat([header, pcm]);
 }
 
-export async function encodeRecording(segments, download) {
-  const dir = await mkdtemp(join(tmpdir(), 'dbusk-recording-'));
+export async function encodeRecording(segments, download, { workDirectory = tmpdir() } = {}) {
+  const dir = await mkdtemp(join(workDirectory, 'dbusk-recording-'));
   const output = join(dir, 'performance.mp3');
   const child = spawn(process.env.FFMPEG_PATH || 'ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 's16le', '-ar', String(RATE),
     '-ac', '1', '-i', 'pipe:0', '-c:a', 'libmp3lame', '-b:a', '192k', '-y', output], { stdio: ['pipe', 'ignore', 'pipe'] });
@@ -157,23 +158,41 @@ export async function encodeRecording(segments, download) {
 }
 
 export function createLiveRecorder({ enabled = false, store, upload, download, ingest,
-  encode = encodeRecording, now = () => Date.now(), log = console, segmentSeconds = 30, resumeDelayMs = 0 } = {}) {
+  encode = encodeRecording, now = () => Date.now(), log = console, segmentSeconds = 30, resumeDelayMs = 0,
+  finalizationTimeoutMs = 120000 } = {}) {
   if (!Number.isInteger(segmentSeconds) || segmentSeconds < 1 || segmentSeconds > 30) throw Error('Invalid recording segment length');
   const available = enabled && !!store && !!upload && !!download && !!ingest;
-  let state, initializing, tail = Promise.resolve(), working = false, buffered = 0, captureError = '', finalizationError = '';
+  let state, initializing, tail = Promise.resolve(), working = false, buffered = 0;
+  const captureErrors = new Map(), finalizationErrors = new Map(), finalizationTasks = new Map();
+  let initializationError = '';
   let chunks = [], bytes = 0, activeId, lastFrameAt = 0;
   let deployment = null, preparingDeployment = false;
   // A replaced worker may still be retrying during deploy overlap; let it exit before resuming its checkpoint.
   const resumeAt = now() + resumeDelayMs;
   const deploymentPaused = () => preparingDeployment || !!(deployment && deployment.expiresAt > now());
   const record = id => state?.recordings.find(r => r.bookingId === id);
-  const serial = (fn, { captureFailure = true } = {}) => {
+  const serial = (fn, { captureFailure = true, bookingId = activeId } = {}) => {
     const task = tail.then(fn); tail = task.catch(error => {
-      if (captureFailure) captureError = error.message;
+      if (captureFailure && bookingId) captureErrors.set(bookingId, error.message);
       log.error('[live-recording]', error.message);
     }); return task;
   };
   const save = async next => { await store.save(validateRecordingState(next)); state = next; };
+  async function boundedFinalization(bookingId, step, work) {
+    const key = `${bookingId}:${step}`;
+    let task = finalizationTasks.get(key);
+    if (!task) {
+      task = Promise.resolve().then(work);
+      finalizationTasks.set(key, task);
+      task.catch(() => { if (finalizationTasks.get(key) === task) finalizationTasks.delete(key); });
+    }
+    let timer;
+    try {
+      return await Promise.race([task, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Recording finalization timed out; retry remains pending')), finalizationTimeoutMs);
+      })]);
+    } finally { clearTimeout(timer); }
+  }
   async function initialize() {
     if (!available) return;
     initializing ||= Promise.resolve().then(() => store.restore()).then(async restored => {
@@ -184,7 +203,8 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
         r.interrupted = true; r.status = 'waiting'; changed = true;
       }
       if (changed) await save(next);
-    }).catch(error => { initializing = null; throw error; });
+      initializationError = '';
+    }).catch(error => { initializing = null; initializationError = 'Recording journal verification is unavailable'; throw error; });
     return initializing;
   }
   function flush() {
@@ -202,10 +222,14 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
         target.segments.push({ cid, bytes: pcm.length });
         target.status = 'recording'; await save(next);
       } finally { buffered--; }
-    });
+    }, { bookingId: id });
+  }
+  function stopCapture(booking) {
+    if (activeId !== booking.id) return;
+    flush(); activeId = null; lastFrameAt = 0;
   }
   return {
-    available, initialize,
+    available, initialize, stopCapture,
     deploymentPaused,
     cancelDeployment(id) {
       if (deployment && deployment.expiresAt > now() && deployment.id !== id) throw Error('Another deployment holds the recording handoff');
@@ -224,27 +248,27 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       if (preparingDeployment || deployment && deployment.expiresAt > now() && deployment.id !== id) {
         throw Error('Another deployment holds the recording handoff');
       }
-      if (working || buffered || bytes || activeId) return { ready: false };
+      if (working || buffered || bytes || activeId || finalizationTasks.size) return { ready: false };
       if (bookings.some(b => b.acknowledged && ['funded', 'approved'].includes(b.status) &&
           (!Number.isFinite(Date.parse(b.startUtc)) || !Number.isFinite(Date.parse(b.endUtc))))) {
         throw Error('Booking times unavailable for recording handoff');
       }
       if (bookings.some(b => b.acknowledged && ['funded', 'approved'].includes(b.status) &&
-          !b.cancelled && Date.parse(b.endUtc) > now() && Date.parse(b.startUtc) < expiresAt)) {
+          !b.cancelled && liveBroadcastEnd(b) > now() && liveBroadcastStart(b) < expiresAt)) {
         return { ready: false };
       }
       const pending = state.recordings.filter(r => r.consent.enabled && ['waiting', 'recording', 'processing'].includes(r.status));
       if (pending.some(r => {
         const b = bookings.find(b => b.id === r.bookingId);
         return !b || b.wallet?.toLowerCase() !== r.wallet.toLowerCase() ||
-          !Number.isFinite(Date.parse(b.endUtc)) || Date.parse(b.endUtc) > now() ||
+          !Number.isFinite(liveBroadcastEnd(b)) || liveBroadcastEnd(b) > now() ||
           r.status === 'recording' || !r.segments.length;
       })) return { ready: false };
       preparingDeployment = true;
       deployment = { id, expiresAt };
       try {
         await tail;
-        if (working || buffered || bytes || activeId) return { ready: false };
+        if (working || buffered || bytes || activeId || finalizationTasks.size) return { ready: false };
         const restored = validateRecordingState(await store.restore());
         if (JSON.stringify(restored) !== JSON.stringify(state)) throw Error('Recording handoff checkpoint does not match the canonical recorder');
         if (expiresAt <= now()) throw Error('Recording handoff lease expired during verification');
@@ -253,9 +277,12 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
     },
     status(booking) {
       const r = record(booking.id);
+      const consentVersion = r?.consent.version || LIVE_RECORDING_CONSENT_VERSION;
       return { available, consented: r?.consent.enabled === true,
-        canChange: available && !deploymentPaused() && now() < Date.parse(booking.endUtc) && !['processing', 'submitted'].includes(r?.status),
-        status: r?.status || 'waiting', error: captureError || finalizationError || r?.error || '',
+        consentVersion, consentScope: consentVersion === LIVE_RECORDING_ALLOCATED_CONSENT_VERSION ? 'allocated-set' : 'scheduled-set',
+        scopeLimited: !!booking.broadcast && consentVersion !== LIVE_RECORDING_ALLOCATED_CONSENT_VERSION,
+        canChange: available && !deploymentPaused() && now() < liveBroadcastEnd(booking) && !['processing', 'submitted'].includes(r?.status),
+        status: r?.status || 'waiting', error: initializationError || captureErrors.get(booking.id) || finalizationErrors.get(booking.id) || r?.error || '',
         ...(r?.trackId ? { trackId: r.trackId } : {}) };
     },
     async consent(booking, input, wallet, origin) {
@@ -263,9 +290,10 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       if (deploymentPaused()) throw new LiveAudioError('Recording controls paused for a verified deployment handoff');
       await initialize();
       if (wallet.toLowerCase() !== booking.wallet.toLowerCase() || typeof input.enabled !== 'boolean' ||
-          now() >= Date.parse(booking.endUtc) || Math.abs(now() - input.issuedAt) > 300000 ||
+          now() >= liveBroadcastEnd(booking) || Math.abs(now() - input.issuedAt) > 300000 ||
           input.issuedAt > now() + 30000 || input.issuedAt <= (record(booking.id)?.consent.issuedAt || 0)) throw new LiveAudioError('Recording permission expired or does not match the performer');
-      const message = liveRecordingConsentMessage({ bookingId: booking.id, wallet, origin, issuedAt: input.issuedAt, enabled: input.enabled });
+      const version = input.consentVersion === undefined ? LIVE_RECORDING_CONSENT_VERSION : input.consentVersion;
+      const message = liveRecordingConsentMessage({ bookingId: booking.id, wallet, origin, issuedAt: input.issuedAt, enabled: input.enabled, version });
       if (verifyMessage(message, input.signature).toLowerCase() !== booking.wallet.toLowerCase()) throw new LiveAudioError('Recording signature does not match the performer');
       // Stop accepting frames immediately while revocation is being persisted.
       if (!input.enabled) { activeId = null; chunks = []; bytes = 0; }
@@ -279,25 +307,28 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
           r = { bookingId: booking.id, wallet: booking.wallet.toLowerCase(), segments: [], status: 'waiting' };
           next.recordings.push(r);
         }
-        r.consent = { enabled: input.enabled, issuedAt: input.issuedAt, signature: input.signature, origin };
+        r.consent = { enabled: input.enabled, issuedAt: input.issuedAt, signature: input.signature, origin, version };
         r.status = input.enabled ? 'waiting' : 'revoked'; await save(next);
-        captureError = '';
-      });
+        captureErrors.delete(booking.id);
+      }, { bookingId: booking.id });
     },
     capture(booking, frame) {
       const r = record(booking.id), at = now();
       if (!available || !r?.consent.enabled || !['waiting', 'recording'].includes(r.status) ||
-          at < Date.parse(booking.startUtc) || at >= Date.parse(booking.endUtc) || captureError) return;
+          booking.broadcast && !booking.broadcast.actualStartedAt ||
+          at < liveBroadcastStart(booking) || at >= liveBroadcastEnd(booking) || captureErrors.has(booking.id)) return;
+      if (r.consent.version !== LIVE_RECORDING_ALLOCATED_CONSENT_VERSION &&
+          (at < Date.parse(booking.startUtc) || at >= Date.parse(booking.endUtc))) return;
       if (deploymentPaused()) {
-        captureError = 'Unexpected live capture during recording deployment handoff';
-        log.error('[live-recording]', captureError);
+        captureErrors.set(booking.id, 'Unexpected live capture during recording deployment handoff');
+        log.error('[live-recording]', captureErrors.get(booking.id));
         return;
       }
       if (frame.sampleRate !== RATE || frame.channels !== 1 || !(frame.data instanceof Int16Array)) {
-        captureError = 'Unexpected recording audio format'; log.error('[live-recording]', captureError); return;
+        captureErrors.set(booking.id, 'Unexpected recording audio format'); log.error('[live-recording]', captureErrors.get(booking.id)); return;
       }
-      if (buffered >= 4) { captureError = 'Recording upload backlog exceeded; capture stopped'; log.error('[live-recording]', captureError); return; }
-      if (activeId && activeId !== booking.id) { captureError = 'Another live recording is active'; log.error('[live-recording]', captureError); return; }
+      if (buffered >= 4) { captureErrors.set(booking.id, 'Recording upload backlog exceeded; capture stopped'); log.error('[live-recording]', captureErrors.get(booking.id)); return; }
+      if (activeId && activeId !== booking.id) { captureErrors.set(booking.id, 'Another live recording is active'); log.error('[live-recording]', captureErrors.get(booking.id)); return; }
       activeId = booking.id;
       if (lastFrameAt && at - lastFrameAt > 2000) r.interrupted = true;
       lastFrameAt = at;
@@ -313,36 +344,50 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
         for (const booking of bookings) {
           let r = record(booking.id);
           if (!r || !r.consent.enabled || ['submitted', 'empty'].includes(r.status)) continue;
-          if (now() < Date.parse(booking.endUtc) && !booking.cancelled) continue;
+          if (now() < liveBroadcastEnd(booking) && !booking.cancelled) continue;
           if (r.status === 'processing' && now() < resumeAt) continue;
-          if (activeId === booking.id) { flush(); activeId = null; lastFrameAt = 0; }
+          stopCapture(booking);
           await tail;
           r = record(booking.id);
           if (!r.segments.length) {
             const next = structuredClone(state); next.recordings.find(r => r.bookingId === booking.id).status = 'empty';
             await serial(() => save(next)); continue;
           }
-          await serial(async () => {
-            let next = structuredClone(state), target = next.recordings.find(r => r.bookingId === booking.id);
-            target.status = 'processing'; target.error = captureError || finalizationError || target.error || ''; await save(next);
+          try {
+            await serial(async () => {
+              const next = structuredClone(state), target = next.recordings.find(r => r.bookingId === booking.id);
+              target.status = 'processing'; target.error = captureErrors.get(booking.id) || finalizationErrors.get(booking.id) || target.error || ''; await save(next);
+            }, { captureFailure: false, bookingId: booking.id });
             r = record(booking.id);
             let result = r.result;
             if (!result) {
-              const audio = await encode(r.segments, download);
-              const uri = await upload(audio, 'live-performance.mp3', 'audio/mpeg');
+              const audio = await boundedFinalization(booking.id, 'encode', () => encode(r.segments, download));
+              const uri = await boundedFinalization(booking.id, 'upload', () => upload(audio, 'live-performance.mp3', 'audio/mpeg'));
               result = { cid: uri.replace(/^ipfs:\/\//, ''), durationSeconds: r.segments.reduce((n, s) => n + s.bytes, 0) / BYTES_PER_SECOND };
               if (!safeCid(result.cid)) throw Error('Invalid finalized recording CID');
-              next = structuredClone(state); next.recordings.find(r => r.bookingId === booking.id).result = result; await save(next);
+              await serial(async () => {
+                const next = structuredClone(state); next.recordings.find(r => r.bookingId === booking.id).result = result; await save(next);
+              }, { captureFailure: false, bookingId: booking.id });
+              finalizationTasks.delete(`${booking.id}:encode`);
+              finalizationTasks.delete(`${booking.id}:upload`);
             }
-            const track = await ingest({ booking, ...result, consent: r.consent,
-              incomplete: !!(r.interrupted || captureError || result.durationSeconds < (Date.parse(booking.endUtc) - Date.parse(booking.startUtc)) / 1000 - 5) });
-            next = structuredClone(state); target = next.recordings.find(r => r.bookingId === booking.id);
-            target.status = 'submitted'; target.trackId = track.trackId; target.error = ''; await save(next);
-            finalizationError = '';
-          }, { captureFailure: false });
+            const track = await boundedFinalization(booking.id, 'ingest', () => ingest({ booking, ...result, consent: r.consent,
+              incomplete: !!(r.interrupted || captureErrors.has(booking.id) ||
+                booking.broadcast && booking.broadcast.endReason !== 'producer-finished' ||
+                result.durationSeconds < (liveBroadcastEnd(booking) - liveBroadcastStart(booking)) / 1000 - 5) }));
+            await serial(async () => {
+              const next = structuredClone(state), target = next.recordings.find(r => r.bookingId === booking.id);
+              target.status = 'submitted'; target.trackId = track.trackId; target.error = ''; await save(next);
+            }, { captureFailure: false, bookingId: booking.id });
+            finalizationTasks.delete(`${booking.id}:ingest`);
+            finalizationErrors.delete(booking.id);
+          } catch (error) {
+            finalizationErrors.set(booking.id, error.message);
+            log.error('[live-recording] Finalization deferred:', error.message);
+          }
         }
       } catch (error) {
-        finalizationError = error.message; log.error('[live-recording] Finalization deferred:', error.message);
+        log.error('[live-recording] Finalization deferred:', error.message);
       } finally { working = false; }
     },
     deploymentState() { return { ready: (!available || !!state) && !working && !buffered && !bytes &&

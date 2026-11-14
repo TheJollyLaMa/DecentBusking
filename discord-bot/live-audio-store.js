@@ -1,11 +1,12 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { createPinataStateStore } from './ipfs-state.js';
+import { validateLiveAllocation } from '../js/live-broadcast.mjs';
 
 export const LIVE_AUDIO_STATE_NAME = 'decentbusking-live-audio-encrypted.json';
 export const LIVE_AUDIO_STATE_TAGS = Object.freeze({ app: 'decentbusking', kind: 'live-audio-encrypted', schema: '1' });
 const SCHEMA = 'encrypted-live-audio-v1';
 const AAD = Buffer.from('dbusk-live-audio-state-v1');
-const ROOM_KEYS = new Set(['bookingId', 'armed', 'checks', 'lastVerifiedAt', 'lossSince', 'cancelledAt', 'reason', 'cancelNoticePending']);
+const ROOM_KEYS = new Set(['bookingId', 'armed', 'checks', 'lastVerifiedAt', 'lossSince', 'cancelledAt', 'reason', 'cancelNoticePending', 'allocation', 'broadcastCommands']);
 const CHECK_KEYS = new Set(['t60', 't15']);
 const MAX_ROOMS = 500;
 
@@ -29,7 +30,17 @@ export function validateLiveAudioState(state) {
         (room.cancelNoticePending !== undefined && typeof room.cancelNoticePending !== 'boolean')) {
       throw new Error('Invalid live audio checkpoint');
     }
+    if (room.allocation !== undefined) validateLiveAllocation(room.allocation);
+    if (room.broadcastCommands !== undefined && (!Array.isArray(room.broadcastCommands) || room.broadcastCommands.length > 128 ||
+        room.broadcastCommands.some(c => !c || Object.keys(c).some(k => !['id', 'hash'].includes(k)) ||
+          !/^[a-zA-Z0-9:_-]{8,100}$/.test(c.id || '') || !/^[a-f0-9]{64}$/.test(c.hash || '')) ||
+        new Set(room.broadcastCommands.map(c => c.id)).size !== room.broadcastCommands.length)) {
+      throw new Error('Invalid live broadcast command receipts');
+    }
     seen.add(room.bookingId);
+  }
+  if (state.rooms.filter(r => r.allocation?.startedAt && !r.allocation.endedAt && !r.cancelledAt).length > 1) {
+    throw new Error('Multiple active broadcast allocations');
   }
   return state;
 }

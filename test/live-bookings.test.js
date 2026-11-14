@@ -41,6 +41,26 @@ async function fixture(options = {}) {
  return { service, exec, create, ack, funding, provider, cfg, shared, stored:()=>stored, schedule:()=>schedule,
    time:value=>{clock=value;}, receipt:value=>{receipt=value;}, head:value=>{head=value;} };
 }
+test('actual allocated completion gates new decisions without changing fee or original financial clocks', async()=>{
+  let completion={known:true,pending:true,actualEndedAt:null};
+  const f=await fixture({getBroadcastCompletion:()=>completion});
+  const result=await f.create(); await f.ack(); f.funding();
+  const b=result.bookings[0];
+  await f.exec({action:'transaction',id:b.id,txAction:'funding',txHash});
+  f.time(Date.parse(b.endUtc)+1000);
+  const command={action:'decision',id:b.id,payoutBps:10000,reason:'Full agreed fee',reportUri:'ipfs://bafyreport',
+   reportHash:id('truthful report'),remainderDisposition:'No remainder'};
+  await assert.rejects(f.exec(command),/Actual broadcast completion/);
+  const before=(await f.service.getState()).bookings[0];
+  assert.equal(before.amountUnits,b.amountUnits);
+  assert.equal(before.endUtc,b.endUtc);
+  assert.equal(before.claimDeadline,b.claimDeadline);
+  assert.equal(before.broadcastCompletion.pending,true);
+  completion={known:true,pending:false,actualEndedAt:Date.parse(b.endUtc)+1000,endReason:'producer-finished'};
+  const after=await f.exec(command);
+  assert.equal(after.bookings[0].approvedUnits,b.amountUnits);
+  assert.equal(f.stored().bookings[0].broadcastCompletion,undefined,'live metadata never rewrites the signed booking journal');
+});
 test('ENS booking, immutable per-booking terms, duplicate occurrence and restart recovery',async()=>{
  const f=await fixture(); const result=await f.create();
  assert.equal(result.bookings[0].wallet,performer.address.toLowerCase());
@@ -229,6 +249,36 @@ const pilotInput = () => ({
  airtimeMinutes:20, endUtc:'2026-10-24T01:20:00Z', reviewWindow:86400, cancellationWindow:28800,
  killFeeBps:10000, claimDeadline:'2026-10-28T01:20:00Z', discordHandle:'',
  additionalOffer:'Four $10 prep tasks, paid separately; one supporter gift for participation, not contingent on technical success.',
+});
+test('producer-delayed decline and shortened set retain full guarantee and the original review/claim clocks',async()=>{
+ for(const endReason of ['declined','producer-finished']) {
+  let completion={known:true,pending:true,actualEndedAt:null};
+  const f=await fixture({escrowAddress:owner.address,escrowStartBlock:100,getBroadcastCompletion:()=>completion});
+  await f.create(pilotInput(),`live:delayed-${endReason}`); await f.ack();
+  const snapshot=structuredClone(f.stored()), b=snapshot.bookings[0];
+  b.status='funded';
+  const original={startUtc:b.startUtc,endUtc:b.endUtc,amountUnits:b.amountUnits,
+   reviewWindow:b.reviewWindow,claimDeadline:b.claimDeadline,termsHash:b.termsHash};
+  const {createLiveBookings}=await import('../discord-bot/live-bookings.js');
+  const service=createLiveBookings({...f.cfg,restore:async()=>snapshot});
+  const decision={action:'decision',id:b.id,revision:snapshot.revision,payoutBps:10000,
+   verifiedSeconds:endReason==='declined'?0:600,verifiedStart:endReason!=='declined',
+   reason:'Producer delay; guaranteed cash unchanged',reportUri:'ipfs://delayreport',remainderDisposition:'None'};
+  f.time(Date.parse(b.endUtc)+15*60000);
+  await assert.rejects(service.execute(decision),/Actual broadcast completion/);
+  const {claimState}=await import('../js/live-bookings.mjs');
+  assert.equal(claimState({...b,broadcastCompletion:completion},owner.address,b.wallet,
+   Date.parse(b.endUtc)+b.reviewWindow*1000).enabled,true,'original contract claim is never extended or forfeited');
+  completion={known:true,pending:false,actualEndedAt:Date.parse(b.endUtc)+15*60000,endReason,
+   priorityFollowup:endReason!=='declined'};
+  await assert.rejects(service.execute({...decision,payoutBps:0}),/guarantees the full fee/);
+  const paid=(await service.execute(decision)).bookings[0];
+  assert.equal(paid.approvedUnits,'20000000');
+  assert.equal(paid.remainderUnits,'0');
+  assert.notEqual(paid.cancelled,true);
+  assert.deepEqual(Object.fromEntries(Object.keys(original).map(key=>[key,paid[key]])),original);
+  assert.equal(f.stored().bookings[0].broadcastCompletion,undefined);
+ }
 });
 test('pilot rehearsal has all ten rungs, exact 75% completion and no invented start',async()=>{
  const {liveRehearsalPayoutBps}=await import('../js/live-bookings.mjs');

@@ -2109,6 +2109,7 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 
 #tip-status {
   font-size: 0.85rem;
+  overflow-wrap: anywhere;
   min-height: 1.2rem;
   margin-bottom: 0.75rem;
   color: var(--teal);

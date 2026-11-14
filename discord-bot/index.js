@@ -45,6 +45,8 @@ import http from 'http';
 import fs from 'node:fs';
 import { Contract, Interface, Wallet, id } from 'ethers';
 import { createPaymentLedger, verifyRepositoryPayment } from './payment-ledger.js';
+import { createTipLedger } from './tip-ledger.js';
+import { createHistoricalTipBookingReader, createTipContextResolver } from './tip-context.js';
 import { BUDGET_MODES, DEFAULT_MONTHLY_CU_BUDGET, baseRpcEndpointsFromEnv, createRpcRouter } from './rpc-router.js';
 import { createRpcProxy } from './rpc-proxy.js';
 import { createAlchemyWebhook } from './alchemy-webhook.js';
@@ -1048,6 +1050,39 @@ async function main() {
   comparePayments();
   setInterval(budgetPaced(comparePayments), 15_000).unref();
 
+  let tipLedger = null, tipLedgerReady = false, tipLedgerTask = null, tipConfigurationError = '';
+  if (process.env.TIP_ROUTER_ADDRESS) {
+    try {
+      const tipProvider = getRpcRouter().provider('logs', 'native-tip-ledger');
+      const tipStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage,
+        pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl,
+        gateway: config.ipfsGateway, name: 'decentbusking-tip-ledger.json',
+        tags: { app: 'decentbusking', kind: 'tip-ledger', schema: '1' },
+        serialize: value => value, deserialize: (value, uri) => ({ ...value, snapshotUri: uri }),
+        beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined }) : null;
+      tipLedger = createTipLedger({ provider: tipProvider, routerAddress: process.env.TIP_ROUTER_ADDRESS,
+        startBlock: /^[0-9]+$/.test(process.env.TIP_START_BLOCK || '') ? Number(process.env.TIP_START_BLOCK) : undefined,
+        maxWindowsPerRun: 20,
+        restore: tipStore?.restore, save: tipStore?.save,
+        resolveContext: createTipContextResolver({ provider: tipProvider,
+          collections: config.nftContractAddresses || [config.nftContractAddress],
+          readLiveBooking: createHistoricalTipBookingReader({ provider: tipProvider,
+            escrowAddress: process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS || '' }) }) });
+      const compareTips = () => {
+        if (!tipLedgerTask) tipLedgerTask = (tipLedgerReady ? tipLedger.compare() : tipLedger.initialize())
+          .then(() => { tipLedgerReady = true; })
+          .catch(error => console.warn('[tip-ledger]', error.shortMessage || error.message))
+          .finally(() => { tipLedgerTask = null; });
+        return tipLedgerTask;
+      };
+      compareTips();
+      setInterval(budgetPaced(compareTips), 15000).unref();
+    } catch (error) {
+      tipConfigurationError = 'Tip ledger configuration is invalid; contact the operator';
+      console.error('[tip-ledger] Configuration:', error.message);
+    }
+  }
+
   const payflowStore = config.pinataJwt ? createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
     uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
     name: 'decentbusking-weekly-payflow.json', tags: { app: 'decentbusking', kind: 'weekly-payflow', schema: '1' },
@@ -1519,6 +1554,7 @@ async function main() {
     serialize: value => value, deserialize: value => value,
     beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined }) : null;
   const liveBookings = createLiveBookings({ provider: paymentProvider, ownerWallet: config.mintOwnerWallet,
+    getBroadcastCompletion: id => process.env.LIVE_AUDIO_ENABLED === 'true' ? liveAudio.completionState(id) : null,
     escrowAddress: process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS || '',
     escrowStartBlock: Number(process.env.LIVE_PERFORMANCE_ESCROW_START_BLOCK || 0), ensResolver: createEnsResolver(),
     restore: liveBookingStore ? liveBookingStore.restore : undefined, save: liveBookingStore ? liveBookingStore.save : undefined,
@@ -1572,6 +1608,11 @@ async function main() {
   });
   if (recordingEnabled && !recorder.available) throw new Error('Recording enabled without durable storage');
   const liveAudio = createLiveAudioService({
+    withBroadcastHandoff: apply => {
+      const session = getActiveJukeLoopSession();
+      if (!session) throw new Error('Radio handoff is unavailable');
+      return session.withBroadcastHandoff(apply);
+    },
     programs: parseLiveAudioPrograms(process.env.LIVE_AUDIO_PROGRAMS || '{}'),
     ownerWallet: config.mintOwnerWallet,
     getBookings: () => liveBookings.getState(),
@@ -1586,7 +1627,8 @@ async function main() {
       config.liveAudioPolicy = policy;
       getActiveJukeLoopSession()?.setLiveAudioPolicy(policy);
     },
-    onCancel: (booking, reason) => liveBookings.execute({ action: 'cancel', id: booking.id, reason, confirm: true }),
+    onCancel: (booking, reason) => booking.broadcast ? Promise.resolve()
+      : liveBookings.execute({ action: 'cancel', id: booking.id, reason, confirm: true }),
   });
   let rehearsalStore = null;
   if (process.env.PRIVATE_REHEARSAL_ENABLED === 'true' && process.env.LIVE_AUDIO_STORAGE_KEY && config.pinataJwt) {
@@ -1820,6 +1862,8 @@ async function main() {
     radioDeployment: createRadioDeploymentGate({ getSession: getActiveJukeLoopSession,
       getLiveHandoff: async lease => {
         if (process.env.LIVE_RECORDING_DURABLE_HANDOFF_ENABLED !== 'false') return liveAudio.prepareDeployment(lease);
+        const broadcast = liveAudio.broadcastDeploymentState();
+        if (process.env.LIVE_AUDIO_ENABLED === 'true' && (!broadcast.known || broadcast.pending)) return { ready: false };
         const current = await liveAudio.current();
         return { ready: recorder.deploymentState().ready &&
           !(current?.armed && ['preflight', 'live'].includes(current.phase)) };
@@ -1851,6 +1895,7 @@ async function main() {
       }
       return {
         liveAudio: await liveAudio.current().catch(() => ({ configured: false, phase: 'unavailable', status: 'OFF-AIR',
+          performer: null, bookingVerification: { fresh: false, verifiedAt: null },
           reason: 'Live room control state is unavailable', policy: config.liveAudioPolicy || null })),
         ...buildRadioState({
           nowPlaying,
@@ -1990,6 +2035,12 @@ async function main() {
     getPaymentLedger: () => ({ ...paymentLedger.getState(), ready: paymentLedgerReady,
       payrollAnnouncements: payrollReporter.getState(),
       repositorySync: process.env.PAYROLL_GITHUB_TOKEN ? repositorySyncError || 'automatic dispatch configured' : 'manual GitHub ledger workflow; PAYROLL_GITHUB_TOKEN not configured' }),
+    getTipLedger: options => {
+      if (!tipLedger) return { configured: false, ready: false,
+        lastError: tipConfigurationError || 'Tip contract attribution is not configured' };
+      const state = tipLedger.getState(options);
+      return { ...state, ready: tipLedgerReady && state.ready };
+    },
     reconcilePayment: async txHash => {
       if (!paymentLedgerReady) throw new Error('Payment ledger is restoring; retry shortly');
       return paymentLedger.reconcile(txHash);

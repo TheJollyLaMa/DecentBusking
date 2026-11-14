@@ -8,8 +8,8 @@ import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261025-community-
 import { utcToNewYorkInput } from './radio-calendar.mjs';
 import { isAdminWallet } from './admin-access.mjs';
 import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261113-one-action-release';
-import { liveAudioRoomUrl } from './live-audio.mjs?v=20261108-live-audio-pilot';
-import { guaranteedReleaseState, releaseGuaranteedEscrow } from './live-escrow-release.mjs?v=20261113-one-action-release';
+import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
+import { guaranteedReleaseState, releaseGuaranteedEscrow, liveBroadcastCompletionPending } from './live-escrow-release.mjs?v=20261114-allocated-stage';
 
 const routerAbi = [
  'function funds(bytes32) view returns (string metadataUri,bool active,bool exists)',
@@ -95,9 +95,10 @@ function render() {
    ? `✅ ${accepted.map(b => `${b.displayName || b.wallet} accepted${b.acknowledgedAt ? ` at ${new Date(b.acknowledgedAt).toLocaleString()}` : ''}`).join(', ')}. Review the booking, then choose “Fund booking” to send the separate escrow payment. Acceptance did not move funds.`
    : '';
  rows.innerHTML = ['draft','upcoming','active','completed','cancelled'].map(group => {
-  const bookings = state.bookings.filter(b => bookingGroup(b) === group);
+  const bookings = state.bookings.filter(b => (b.broadcastCompletion?.known && b.broadcastCompletion.pending &&
+    !b.cancelled && Date.parse(b.startUtc) <= Date.now() ? 'active' : bookingGroup(b)) === group);
   const labels = { draft:'📨 Invitations & drafts', upcoming:'🗓 Upcoming performances', active:'🔴 In progress',
-   completed:'📚 Completed performances', cancelled:'❌ Canceled performances' };
+   completed:'📚 Past contract windows & completed performances', cancelled:'❌ Canceled performances' };
   const releaseDue = bookings.some(b => { const release = guaranteedReleaseState(b); return release && !release.disabled; });
   return `<details class="live-booking-group"${group === 'draft' || releaseDue ? ' open' : ''}><summary>${labels[group]} (${bookings.length})</summary>${bookings.length
    ? bookings.map(b => renderLivePerformanceAdminBooking(b)).join('')
@@ -105,8 +106,10 @@ function render() {
  }).join('');
 }
 export function renderLivePerformanceAdminBooking(b, now = Date.now()) {
- const roomUrl = liveAudioRoomUrl(b, now);
- const room = roomUrl ? `<p><a data-live-room="operator" href="${escapeLive(roomUrl)}">Open operator audio room</a><br><small>This link does not grant access. Authorize with the configured owner wallet; publishing remains performer-only. Hosting may be unavailable. Private checks open at T−70 minutes.</small></p>` : '';
+ const roomUrl = liveAudioRoomUrl(b, now) || (b.broadcastCompletion?.known && b.broadcastCompletion?.pending &&
+   b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY && b.stewardApproved && b.acknowledged && !b.cancelled
+   ? `live-room.html?booking=${encodeURIComponent(b.id)}` : null);
+ const room = roomUrl ? `<p><a data-live-room="operator" href="${escapeLive(roomUrl)}">Open operator audio room</a> · <a data-live-desk href="producer-room.html?booking=${encodeURIComponent(b.id)}">Open production desk</a><br><small>This link does not grant access. Authorize with the configured owner wallet; publishing remains performer-only. Hosting may be unavailable. Private checks open at T−70 minutes. Desk passes and private messages are live-session only; cues do not extend the booking.</small></p>` : '';
  const release = guaranteedReleaseState(b, now);
  const pending = typeof localStorage !== 'undefined' && localStorage.getItem(`live-pending:${b.id}:approve`);
  const releaseCard = release ? `<section class="live-release-card" aria-label="Guaranteed performer fee">
@@ -118,7 +121,22 @@ export function renderLivePerformanceAdminBooking(b, now = Date.now()) {
   <a data-live-release-report${b.reportUri ? ` href="https://gateway.pinata.cloud/ipfs/${escapeLive(b.reportUri.replace(/^ipfs:\/\//, ''))}" target="_blank" rel="noopener"` : ' hidden'}>Read public fee report</a>
   <output data-live-release-status role="status" aria-live="polite"></output>
   </section>` : '';
- return `${liveBookingRows([b])}${room}<div data-live-actions="${escapeLive(b.id)}">${releaseCard}<details class="live-booking-actions"><summary>${release ? 'Advanced · booking & manual review' : '🛠️ Booking actions'}</summary><div>${bookingActionButtons(b)}</div></details></div>`;
+ return `${liveBookingRows([b])}${renderLiveBroadcastCompletion(b)}${room}<div data-live-actions="${escapeLive(b.id)}">${releaseCard}<details class="live-booking-actions"><summary>${release ? 'Advanced · booking & manual review' : '🛠️ Booking actions'}</summary><div>${bookingActionButtons(b)}</div></details></div>`;
+}
+export function renderLiveBroadcastCompletion(b) {
+ if (!Object.hasOwn(b, 'broadcastCompletion')) return '';
+ const completion = b.broadcastCompletion;
+ const reasons = { 'producer-finished': 'Performer finished; producer confirmed the song-boundary ending.',
+  'operator-cut': 'Interrupted by an owner cut.', 'authorization-expired': 'Authorized airtime expired.',
+  'audio-loss': 'Interrupted after audio loss.', declined: 'Performer declined this slot.', 'not-ready': 'Performer was not ready for this slot.' };
+ const detail = completion?.known !== true ? 'Stage completion is unavailable. New review/release actions are paused until it can be verified.'
+  : completion.pending ? 'The allocated stage is not finished. The original contract end is not proof of actual completion.'
+    : Number.isFinite(completion.actualEndedAt)
+      ? `Actual stage ended ${new Date(completion.actualEndedAt).toISOString()}. ${reasons[completion.endReason] || 'Ending reason not provided.'}`
+      : 'No allocated-stage completion is reported; the original contract workflow remains in effect.';
+ return `<section class="live-stage-completion" aria-label="Actual stage completion"><h3>Actual stage completion · separate from payment</h3>
+  <p>${escapeLive(detail)}</p><p>Original guaranteed fee, signed start/end and contract review/claim times are unchanged. A delay, shortened set, decline or interrupted broadcast does not forfeit the guarantee. Existing confirmed chain transactions remain valid; reconcile them rather than sending duplicates.</p>
+  ${completion?.priorityFollowup === true ? '<p>Priority invitation follow-up requested. This is not a new booking, performer acceptance or funding.</p>' : ''}</section>`;
 }
 function bookingActionButtons(b) {
  const pilot = b.payoutPolicy === LIVE_PILOT_POLICY;
@@ -134,7 +152,8 @@ function bookingActionButtons(b) {
   ['financialCancel','🧾 Reconcile cancellation payment'],
  ];
  return actions.filter(([action]) => !pilot || !['financialCancel', 'recover', 'createFund'].includes(action))
-  .map(([action, label]) => `<button type="button" data-live-action="${action}">${label}</button>`).join('');
+  .map(([action, label]) => `<button type="button" data-live-action="${action}"${liveBroadcastCompletionPending(b) &&
+    ['review', 'full', 'partial', 'withhold', 'settle'].includes(action) ? ' disabled' : ''}>${label}</button>`).join('');
 }
 async function review(b, bps, cancellation = false) {
  let liveMusicMinutes;
@@ -168,6 +187,9 @@ async function review(b, bps, cancellation = false) {
  await command({ action:'decision', id:b.id, payoutBps:bps, liveMusicMinutes, verifiedSeconds, verifiedStart, reason, reportUri, reportHash, remainderDisposition, cancellation });
 }
 async function action(name, b) {
+ if (liveBroadcastCompletionPending(b) && ['review', 'full', 'partial', 'withhold', 'settle'].includes(name)) {
+   throw new Error('Wait for verified actual stage completion before a new review/release workflow. Original guarantees and claim deadlines are unchanged; existing transactions can still be reconciled.');
+ }
  if (name === 'release') {
    const w = await wallet();
    const result = await releaseGuaranteedEscrow({

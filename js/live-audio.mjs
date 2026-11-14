@@ -1,3 +1,5 @@
+import { liveBroadcastTiming } from './live-broadcast.mjs';
+
 export const LIVE_AUDIO_GRACE_MS = 60_000;
 export const LIVE_AUDIO_FRESH_MS = 5_000;
 export const LIVE_AUDIO_SLATE_MS = 5_000;
@@ -38,6 +40,24 @@ export function liveAudioPolicy(record, booking, now = Date.now(), program = nul
     slateEndsAt: record.cancelledAt + LIVE_AUDIO_SLATE_MS,
     advertsEndAt: record.cancelledAt + LIVE_AUDIO_SLATE_MS + LIVE_AUDIO_ADS_MS };
   }
+  const allocated = liveBroadcastTiming(booking, record);
+  if (allocated) {
+    const finish = allocated.actualEndedAt ?? (allocated.actualStartedAt ? allocated.authorizedEndAt : null);
+    const outroEnd = finish === null ? null : finish + (allocated.actualStartedAt ? (program?.outroSeconds ?? 300) * 1000 : 0);
+    const directed = { ...common, controlled: true,
+      endUtc: new Date(allocated.authorizedEndAt).toISOString(),
+      ...(program ? { program: { ...common.program,
+        endsAt: (allocated.actualEndedAt ?? allocated.authorizedEndAt) + program.outroSeconds * 1000 } } : {}) };
+    if (finish !== null && now >= finish) {
+      return { ...directed, mode: now < outroEnd ? 'adverts' : 'radio',
+        ...(now < outroEnd ? { breakKind: 'outro', advertsEndAt: outroEnd } : {}) };
+    }
+    if (allocated.actualStartedAt && now >= allocated.actualStartedAt) return { ...directed, mode: 'live', armed: !!record.armed };
+    if (now >= start) return { ...directed, mode: 'adverts', breakKind: 'waiting',
+      advertsEndAt: allocated.accessUntil };
+    if (program && now >= start - program.leadInSeconds * 1000) return { ...directed, mode: 'adverts', breakKind: 'lead-in', advertsEndAt: start };
+    return null;
+  }
   if (program && now >= start - program.leadInSeconds * 1000 && now < start) {
     return { ...common, mode: 'adverts', breakKind: 'lead-in', advertsEndAt: start };
   }
@@ -59,7 +79,11 @@ export function listenerAudioStatus({ phase, serverStatus, connected, playing, l
 
 export function applyLiveAudioShow(show, policy) {
   if (!policy) return show;
-  if (policy.mode !== 'live' && show.event?.id && show.event.id !== policy.eventId) return show;
+  if (policy.mode !== 'live' && show.event?.id && show.event.id !== policy.eventId &&
+      !(policy.controlled && policy.controlledEventIds?.includes(show.event.id))) return show;
+  if (policy.controlled && policy.breakKind === 'waiting') {
+    return show.type === 'live_performance' ? { id: 'normal-rotation', type: 'normal_rotation', label: 'Waiting for producer take' } : show;
+  }
   if (policy.breakKind === 'outro' && show.type === 'playlist_show') return show;
   if (policy.program && policy.mode === 'radio' && show.type !== 'live_performance' && !show.unbookedLiveOccurrenceId) return show;
   if (policy.mode === 'live' || policy.mode === 'fault') {

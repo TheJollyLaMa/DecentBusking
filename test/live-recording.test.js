@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const { Wallet } = require('../discord-bot/node_modules/ethers');
 const { createHash } = require('node:crypto');
 const { mkdtemp, rm, writeFile } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { spawnSync } = require('node:child_process');
-const playlistDir = require('node:fs').mkdtempSync(join(tmpdir(), 'dbusk-recording-playlist-'));
+const playlistDir = join(__dirname, `.live-recording-fixtures-${process.pid}`);
+require('node:fs').mkdirSync(playlistDir, { recursive: true });
 process.env.JUKELOOP_PLAYLIST_PATH = join(playlistDir, 'playlist.json');
 test.after(() => rm(playlistDir, { recursive: true, force: true }));
 
@@ -107,9 +107,10 @@ test('twenty-minute real PCM finalizes to a playable MP3 with measured duration 
   const pcm = Buffer.alloc(48000 * 2 * 30);
   for (let n = 0; n < pcm.length / 2; n++) pcm.writeInt16LE(Math.round(Math.sin(n / 48000 * 440 * 2 * Math.PI) * 4000), n * 2);
   const wav = pcmWav(pcm), start = Date.now();
-  const result = await encodeRecording(Array.from({ length: 40 }, () => ({ cid: 'fixture', bytes: pcm.length })), async () => wav);
+  const result = await encodeRecording(Array.from({ length: 40 }, () => ({ cid: 'fixture', bytes: pcm.length })),
+    async () => wav, { workDirectory: playlistDir });
   const elapsedMs = Date.now() - start;
-  const dir = await mkdtemp(join(tmpdir(), 'dbusk-encode-test-'));
+  const dir = await mkdtemp(join(playlistDir, 'dbusk-encode-test-'));
   try {
     const file = join(dir, 'fixture.mp3'); await writeFile(file, result);
     const probe = spawnSync(process.env.FFMPEG_PATH || 'ffmpeg', ['-hide_banner', '-i', file, '-f', 'null', '-'], { encoding: 'utf8' });

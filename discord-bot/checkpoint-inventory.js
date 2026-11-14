@@ -8,6 +8,7 @@ const CHECKPOINT_NAMES = new Set([
   'decentbusking-devert-main-radio.json', 'decentbusking-devert-removals.json',
   'decentbusking-creator-profiles.json', 'decentbusking-artwork-updates.json',
   'decentbusking-rpc-usage.json', 'decentbusking-payment-ledger.json',
+  'decentbusking-tip-ledger.json',
   'decentbusking-weekly-payflow.json', 'decentbusking-fund-ledger.json',
   'decentbusking-earnings-index.json', 'decentbusking-djuke-journal.json',
   'decentbusking-live-schedule.json',
