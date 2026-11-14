@@ -314,9 +314,9 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /live-performance-admin\.mjs\?v=20261113-one-action-release/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261113-one-action-release"/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261114-performer-encore"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261113-stage-entry"/);
-  assert.match(html, /live-performance\.css\?v=20261113-one-action-release/);
+  assert.match(html, /live-performance\.css\?v=20261114-performer-encore/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
     './js/radio-schedule-ui.mjs?v=20261113-stage-entry');
@@ -327,7 +327,7 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
       /live-performance-profile\.mjs\?v=20261110-wallet-practice/);
   }
   assert.match(fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8'),
-    /live-performance-profile\.mjs\?v=20261113-one-action-release/);
+    /live-performance-profile\.mjs\?v=20261114-performer-encore/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8'),
     /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
 });
