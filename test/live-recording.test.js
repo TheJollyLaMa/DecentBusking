@@ -173,30 +173,6 @@ test('replacement recorder resumes a durable processing checkpoint without recap
     ingest: async () => { throw Error('Fixture mint intake unavailable'); },
   });
 
-  test('a finalization outage does not mark fully captured audio incomplete or block the next performer capture', async () => {
-    let fail = true;
-    const s = await setup({ encode: async () => {
-      if (fail) throw Error('fixture download outage');
-      return Buffer.from('encoded');
-    } });
-    await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
-    for (let second = 0; second < 20; second++) {
-      s.at(START + second * 1000);
-      s.recorder.capture(booking, frame());
-      await s.recorder.flush();
-    }
-    s.at(START + 20000); await s.recorder.tick([booking]);
-    assert.match(s.recorder.status(booking).error, /download outage/);
-    fail = false;
-    await s.recorder.tick([booking]);
-    assert.equal(s.submissions[0].incomplete, false, 'Delivery failure is not missing captured audio');
-    assert.equal(s.recorder.status(booking).error, '');
-    const next = { ...booking, id: 'second-performer', startUtc: new Date(START + 30000).toISOString(),
-      endUtc: new Date(START + 50000).toISOString() };
-    await s.recorder.consent(next, await s.permission(true, artist, START + 20000, ORIGIN, next), artist.address, ORIGIN);
-    s.at(START + 30000); s.recorder.capture(next, frame()); await s.recorder.flush();
-    assert.equal(s.state().recordings.find(r => r.bookingId === next.id).segments.length, 1);
-  });
   await old.initialize(); s.at(START + 20000); await old.tick([booking]);
   assert.equal(old.deploymentState().ready, false, 'Current gate must still block pending finalization');
   assert.equal(s.state().recordings[0].status, 'processing');
@@ -213,6 +189,48 @@ test('replacement recorder resumes a durable processing checkpoint without recap
   assert.equal(replacement.deploymentState().ready, true);
   assert.equal(s.submissions.length, 1);
   assert.equal(encodes, 1); assert.equal(uploads, 1);
+});
+
+test('a finalization outage does not mark fully captured audio incomplete or block the next performer capture', async () => {
+  let fail = true;
+  const s = await setup({ encode: async () => {
+    if (fail) throw Error('fixture download outage');
+    return Buffer.from('encoded');
+  } });
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  for (let second = 0; second < 20; second++) {
+    s.at(START + second * 1000);
+    s.recorder.capture(booking, frame());
+    await s.recorder.flush();
+  }
+  s.at(START + 20000); await s.recorder.tick([booking]);
+  assert.match(s.recorder.status(booking).error, /download outage/);
+  fail = false;
+  await s.recorder.tick([booking]);
+  assert.equal(s.submissions[0].incomplete, false, 'Delivery failure is not missing captured audio');
+  assert.equal(s.recorder.status(booking).error, '');
+  const next = { ...booking, id: 'second-performer', startUtc: new Date(START + 30000).toISOString(),
+    endUtc: new Date(START + 50000).toISOString() };
+  await s.recorder.consent(next, await s.permission(true, artist, START + 20000, ORIGIN, next), artist.address, ORIGIN);
+  s.at(START + 30000); s.recorder.capture(next, frame()); await s.recorder.flush();
+  assert.equal(s.state().recordings.find(r => r.bookingId === next.id).segments.length, 1);
+});
+
+test('a replacement worker waits out deploy overlap before resuming a processing checkpoint', async () => {
+  const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
+  const s = await setup({ encode: async () => { throw Error('Previous worker download outage'); } });
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
+  s.at(START + 20000); await s.recorder.tick([booking]);
+  assert.equal(s.state().recordings[0].status, 'processing');
+  const replacement = createLiveRecorder({ ...s.args, resumeDelayMs: 180000, encode: async () => Buffer.from('encoded') });
+  await replacement.initialize();
+  await replacement.tick([booking]);
+  assert.equal(s.submissions.length, 0, 'Old worker may still be retrying during overlap');
+  s.at(START + 20000 + 180000); await replacement.tick([booking]);
+  assert.equal(s.submissions.length, 1);
+  assert.equal(s.state().recordings[0].status, 'submitted');
+  assert.equal(replacement.deploymentState().ready, true);
 });
 
 test('ended processing handoff verifies canonical readback, pauses retries, remains exclusive and resumes on cancel', async () => {

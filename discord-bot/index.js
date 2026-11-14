@@ -1558,7 +1558,7 @@ async function main() {
     fetchImpl: (url, options) => fetch(url, { ...options, signal: AbortSignal.timeout(60000) }),
   }) : null;
   const recorder = createLiveRecorder({
-    enabled: recordingEnabled, store: recordingStore, upload: recordingUpload,
+    enabled: recordingEnabled, store: recordingStore, upload: recordingUpload, resumeDelayMs: 180000,
     download: async cid => {
       const gateway = await discoverDedicatedGateway(config) || config.ipfsGateway;
       return downloadRecordingSegment(cid, { gateway });
@@ -1819,7 +1819,7 @@ async function main() {
     },
     radioDeployment: createRadioDeploymentGate({ getSession: getActiveJukeLoopSession,
       getLiveHandoff: async lease => {
-        if (process.env.LIVE_RECORDING_DURABLE_HANDOFF_ENABLED === 'true') return liveAudio.prepareDeployment(lease);
+        if (process.env.LIVE_RECORDING_DURABLE_HANDOFF_ENABLED !== 'false') return liveAudio.prepareDeployment(lease);
         const current = await liveAudio.current();
         return { ready: recorder.deploymentState().ready &&
           !(current?.armed && ['preflight', 'live'].includes(current.phase)) };

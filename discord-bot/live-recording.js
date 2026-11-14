@@ -157,12 +157,14 @@ export async function encodeRecording(segments, download) {
 }
 
 export function createLiveRecorder({ enabled = false, store, upload, download, ingest,
-  encode = encodeRecording, now = () => Date.now(), log = console, segmentSeconds = 30 } = {}) {
+  encode = encodeRecording, now = () => Date.now(), log = console, segmentSeconds = 30, resumeDelayMs = 0 } = {}) {
   if (!Number.isInteger(segmentSeconds) || segmentSeconds < 1 || segmentSeconds > 30) throw Error('Invalid recording segment length');
   const available = enabled && !!store && !!upload && !!download && !!ingest;
   let state, initializing, tail = Promise.resolve(), working = false, buffered = 0, captureError = '', finalizationError = '';
   let chunks = [], bytes = 0, activeId, lastFrameAt = 0;
   let deployment = null, preparingDeployment = false;
+  // A replaced worker may still be retrying during deploy overlap; let it exit before resuming its checkpoint.
+  const resumeAt = now() + resumeDelayMs;
   const deploymentPaused = () => preparingDeployment || !!(deployment && deployment.expiresAt > now());
   const record = id => state?.recordings.find(r => r.bookingId === id);
   const serial = (fn, { captureFailure = true } = {}) => {
@@ -312,6 +314,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
           let r = record(booking.id);
           if (!r || !r.consent.enabled || ['submitted', 'empty'].includes(r.status)) continue;
           if (now() < Date.parse(booking.endUtc) && !booking.cancelled) continue;
+          if (r.status === 'processing' && now() < resumeAt) continue;
           if (activeId === booking.id) { flush(); activeId = null; lastFrameAt = 0; }
           await tail;
           r = record(booking.id);
