@@ -37,6 +37,8 @@ test('performer headphone monitor is directly visible, not hidden in collapsed h
 test('room module initializes practice, advances to backstage and fails closed on stale audio', async () => {
   const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
+  const { afterpartyRows } = await import('../js/live-afterparty.mjs');
+  const { renderAfterpartyChecklist } = await import('../js/live-afterparty-view.mjs');
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
@@ -54,6 +56,7 @@ test('room module initializes practice, advances to backstage and fails closed o
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {} },
     Date: class extends Date { static now() { return time; } },
     URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
+    afterpartyRows, renderAfterpartyChecklist,
     LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
     bindInputMonitor: () => ({ stop: async () => {} }),
     bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
@@ -95,6 +98,8 @@ test('room module initializes practice, advances to backstage and fails closed o
 test('guided operator flow shows pending saves, persistent errors and saved check/arm states across public refresh', async () => {
   const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
+  const { afterpartyRows } = await import('../js/live-afterparty.mjs');
+  const { renderAfterpartyChecklist } = await import('../js/live-afterparty-view.mjs');
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, { id, hidden: false, disabled: true, textContent: '',
@@ -121,6 +126,7 @@ test('guided operator flow shows pending saves, persistent errors and saved chec
       ethereum: { on() {}, async request({ method }) { return method === 'eth_requestAccounts' ? ['0xowner'] : 'fixture-signature'; } } },
     Date: class extends Date { static now() { return time; } },
     URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
+    afterpartyRows, renderAfterpartyChecklist,
     LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
     bindInputMonitor: () => ({ stop: async () => {} }),
     bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
@@ -206,6 +212,8 @@ test('on-air sign requires fresh verified server state, exact booking and funded
 test('publisher protects the return before publication and releases it on stop, track end, disconnection or publication failure', async t => {
   const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
+  const { afterpartyRows } = await import('../js/live-afterparty.mjs');
+  const { renderAfterpartyChecklist } = await import('../js/live-afterparty-view.mjs');
   const source = (await fs.readFile(require.resolve('../js/live-audio-room.mjs'), 'utf8')).replace(/^import .*;\n/gm, '');
   for (const outcome of ['stop', 'ended', 'disconnected', 'failed-publish', 'storage-denied', 'allocated-original-end']) {
     await t.test(outcome, async () => {
@@ -242,6 +250,7 @@ test('publisher protects the return before publication and releases it on stop, 
           ethereum: { on() {}, async request({ method }) { return method === 'eth_requestAccounts' ? [performer] : 'signature'; } } },
         Date: class extends Date { static now() { return time; } },
         URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
+        afterpartyRows, renderAfterpartyChecklist,
         LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
         bindInputMonitor: () => ({ stop: async () => {} }),
         bindLiveDirection: () => ({ setSession() {}, dispose() {} }),

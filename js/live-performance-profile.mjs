@@ -3,6 +3,8 @@ import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, claimState, liveAcknowledgement, li
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
 import { performerRoomUrl, resolvePerformerReentry } from './performer-room.mjs?v=20261114-allocated-stage';
 import { renderPerformerGift } from './performer-gift.mjs?v=20261114-performer-encore';
+import { afterpartyRows, completionFacts } from './live-afterparty.mjs?v=20261115-afterparty';
+import { renderAfterpartyChecklist } from './live-afterparty-view.mjs?v=20261115-afterparty';
 
 function secretPyramid() {
  const image = document.createElement('img');
@@ -253,7 +255,7 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
  for (const b of bookings) {
    const reentry = await resolvePerformerReentry(b, { serviceUrl, fetchImpl });
    const stagePending = ['active', 'unavailable'].includes(reentry.status);
-   const endReason = reentry.endReason || b.broadcastCompletion?.endReason;
+   const completion = completionFacts(b, reentry);
    const compact = b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY && b.stewardApproved &&
      !stagePending && !b.cancelled && Date.parse(b.status === 'funded' ? b.endUtc : b.startUtc) > Date.now() && ['draft', 'funded'].includes(b.status);
    const article = compact ? renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, ethers, fetchImpl }) : document.createElement('div');
@@ -273,8 +275,9 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        : b.status === 'paid' ? '✓ Your performance fee is paid'
        : pendingHash ? 'Your next step · check your claim'
          : claim.enabled ? 'Your next step · claim your fee'
-           : (reentry.status === 'ended' || endReason) && endReason !== 'producer-finished'
-             ? 'Your stage ended · original guaranteed fee unchanged' : 'Your set is finished · thank you!';
+           : completion.state === 'verified' && completion.endReason !== 'producer-finished'
+             ? 'Your stage ended · original guaranteed fee unchanged'
+             : completion.state === 'verified' ? 'Your set is finished · thank you!' : 'Your performance status';
      const amount = document.createElement('p');
      amount.className = 'live-performer-fee';
      amount.textContent = `$${(Number(b.status === 'paid' ? b.paidUnits || b.approvedUnits || b.amountUnits : b.approvedUnits || b.amountUnits) / 1e6).toFixed(2)} USDC · Base`;
@@ -303,6 +306,11 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        article.append(stageStatus);
      }
      article.append(amount, nextStatus);
+     const verifiedReentry = ['active', 'ended'].includes(reentry.status) ? reentry : null;
+     const checklist = renderAfterpartyChecklist(afterpartyRows(b, {
+       audience: 'performer', now: Date.now(), reentry: verifiedReentry,
+     }), { documentRef: document });
+     if (checklist) article.append(checklist);
    } else if (!compact) article.innerHTML = liveBookingRows([b]);
    if (!compact && b.mode === 'phase1' && b.status === 'draft' && !b.cancelled) {
      article.append(renderPerformerBookingInvite({ booking: b, state, wallet, serviceUrl, ethers, fetchImpl }));

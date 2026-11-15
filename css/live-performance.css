@@ -12,6 +12,10 @@
 .live-performance-admin input, .live-performance-admin select { width: 100%; min-width: 0; box-sizing: border-box; padding: .65rem; border: 1px solid #64796f; border-radius: 6px; background: #151712; color: #f6efdd; font: inherit; }
 .live-performance-admin input[type="checkbox"] { width: auto; padding: 0; }
 .live-performance-admin button { margin: .25rem; padding: .55rem .75rem; border-radius: 6px; }
+.live-afterparty-checklist { margin: .8rem 0; padding: .8rem; border: 1px solid #91e2ce66; border-radius: 10px; }
+.live-afterparty-checklist li { margin: .5rem 0; }
+.live-afterparty-checklist li[data-state="unknown"], .live-afterparty-checklist li[data-state="attention"] { color: #ffd28b; }
+.live-afterparty-next { font-weight: 700; }
 .live-performance-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .6rem; margin: 0; padding: 0; list-style: none; }
 .live-performance-flow li, .live-performance-offer { padding: .8rem; border: 1px solid #ffffff20; border-radius: 8px; background: #ffffff08; line-height: 1.5; }
 .live-performance-offer { display: grid; gap: .4rem; border-color: #f5cf6644; }

@@ -481,6 +481,59 @@ test('post-show performer card makes claim the primary action and keeps agreemen
   assert.equal(details.attributes.open, undefined);
 });
 
+test('admin afterparty separates confirmed completion, approval, payment and recording facts', async () => {
+  const [, , { renderLivePerformanceAdminBooking }] = await modules;
+  const now = Date.parse('2026-11-14T03:00:00Z');
+  const b = { ...booking(), broadcastCompletion: {
+    known: true, pending: false, actualEndedAt: now - 60_000, endReason: 'producer-finished',
+  }, recordingRelease: { known: true, state: 'mint-requested' } };
+  const html = renderLivePerformanceAdminBooking(b, now);
+  assert.match(html, /Set finished/);
+  assert.match(html, /Waiting for approval/);
+  assert.match(html, /Not paid yet/);
+  assert.match(html, /Submitted · waiting for the mint/);
+  assert.match(html, /Release the full guaranteed fee/);
+  assert.match(html, /data-live-release-checks/);
+  assert.equal((html.match(/data-live-action="release"/g) || []).length, 1);
+  assert.doesNotMatch(html, /Payment confirmed/);
+});
+
+test('an already-approved escrow without a report URI updates the admin card without inventing a report link', async () => {
+  const [, , { applyConfirmedRelease }] = await modules;
+  const button = {}, report = { hidden: true };
+  const card = { querySelector: selector => selector.includes('data-live-action') ? button : report };
+  assert.doesNotThrow(() => applyConfirmedRelease(card, { outcome: 'approved', source: 'chain-state' }));
+  assert.equal(button.disabled, true);
+  assert.match(button.textContent, /performer can claim/);
+  assert.equal(report.hidden, true);
+  applyConfirmedRelease(card, { reportUri: 'ipfs://bafkreitestpublicreport' });
+  assert.equal(report.hidden, false);
+  assert.equal(report.href, 'https://gateway.pinata.cloud/ipfs/bafkreitestpublicreport');
+});
+
+test('performer afterparty uses a verified early stage ending when the booking snapshot is pending', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t), container = createElement('section');
+  const now = Date.parse('2026-11-14T03:00:00Z');
+  t.mock.method(Date, 'now', () => now);
+  const b = { ...booking(), broadcastCompletion: { known: true, pending: true } };
+  await renderLivePerformances({
+    container, wallet, serviceUrl: 'https://worker.example/',
+    bookingState: { bookings: [b], escrowAddress: otherWallet },
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        bookingId: b.id, configured: true, phase: 'ended', serverTime: now,
+        bookingVerification: { fresh: true, verifiedAt: now },
+        broadcast: { phase: 'ended', endReason: 'producer-finished' },
+      }),
+    }),
+  });
+  const checklist = descendants(container.children[0]).find(node => node.className === 'live-afterparty-checklist');
+  assert.ok(checklist);
+  assert.match(descendants(checklist).find(node => node.tag === 'strong').textContent, /Show: Set finished/);
+});
+
 test('post-show waiting card gives ownership of next step without a disabled claim button or false payment', async t => {
   const [, { renderLivePerformances }] = await modules;
   const createElement = dom(t), container = createElement('section');
@@ -490,6 +543,8 @@ test('post-show waiting card gives ownership of next step without a disabled cla
   const nodes = descendants(container);
   assert.equal(nodes.filter(node => node.className === 'live-performer-claim').length, 0);
   assert.match(nodes.find(node => node.tag === 'output').textContent, /Jolly’s next step.*Nothing for you to sign/);
+  assert.match(nodes.find(node => node.tag === 'h3').textContent, /Your performance status/);
+  assert.ok(nodes.some(node => /Show: Finish not verified/.test(node.textContent)));
   const creatorSource = fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8');
   assert.match(creatorSource, /insertBefore\(livePerformances, earningsDisclosure\)/);
   assert.match(creatorSource, /livePaymentLoad = loadLivePayments\(check\)/);
@@ -502,24 +557,24 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
     assert.match(source, /live-audio\.mjs\?v=20261114-allocated-stage/);
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /live-performance-admin\.mjs\?v=20261114-allocated-stage/);
+  assert.match(html, /live-performance-admin\.mjs\?v=20261115-afterparty/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261114-tip-provenance"/);
-  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261113-stage-entry"/);
-  assert.match(html, /live-performance\.css\?v=20261114-performer-encore/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261115-afterparty"/);
+  assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261115-afterparty"/);
+  assert.match(html, /live-performance\.css\?v=20261115-afterparty/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/live-bookings.mjs?v=20261108-live-audio-pilot'],
     './js/live-bookings.mjs?v=20261114-tip-provenance');
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
-    './js/radio-schedule-ui.mjs?v=20261113-stage-entry');
+    './js/radio-schedule-ui.mjs?v=20261115-afterparty');
   assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],
     './js/fund-display.mjs?v=20261108-live-audio-pilot');
   for (const file of ['radio-schedule-ui.mjs']) {
     assert.match(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'),
-      /live-performance-profile\.mjs\?v=20261114-allocated-stage/);
+      /live-performance-profile\.mjs\?v=20261115-afterparty/);
   }
   assert.match(fs.readFileSync(path.join(__dirname, '../js/creator-profile.mjs'), 'utf8'),
-    /live-performance-profile\.mjs\?v=20261114-allocated-stage/);
+    /live-performance-profile\.mjs\?v=20261115-afterparty/);
   assert.match(fs.readFileSync(path.join(__dirname, '../js/live-performance-admin.mjs'), 'utf8'),
     /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
 });
@@ -535,8 +590,8 @@ test('standalone backstage entries consistently version allocated-stage helper i
     /live-audio\.mjs\?v=20261114-allocated-stage/);
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
-    assert.ok(source.includes(`${entry}?v=20261114-allocated-stage`));
-    assert.match(source, /live-audio\.css\?v=20261114-allocated-stage/);
+    assert.ok(source.includes(`${entry}?v=${html === 'live-room.html' ? '20261115-afterparty' : '20261114-allocated-stage'}`));
+    assert.match(source, /live-audio\.css\?v=20261115-afterparty/);
     assert.doesNotMatch(source, /20261114-direction/);
   }
 });

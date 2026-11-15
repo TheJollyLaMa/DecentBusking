@@ -2,11 +2,13 @@ import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=2026111
 import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from './live-recording-consent.mjs?v=20261114-allocated-stage';
 import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261114-allocated-stage';
 import { performerRoomSign, performerAllocationAccess } from './performer-room.mjs?v=20261114-allocated-stage';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261114-allocated-stage';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261115-afterparty';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
 import { bindLiveDirection } from './live-direction.mjs?v=20261114-allocated-stage';
 import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261114-allocated-stage';
+import { afterpartyRows } from './live-afterparty.mjs?v=20261115-afterparty';
+import { renderAfterpartyChecklist } from './live-afterparty-view.mjs?v=20261115-afterparty';
 
 const byId = id => document.getElementById(id);
 const bookingId = new URL(location.href).searchParams.get('booking') || '';
@@ -237,6 +239,7 @@ function render(state) {
   broadcastState = state; observedAt = Date.now(); renderSign();
   broadcastControls.update(state);
   renderRecording(state);
+  renderAfterparty(state);
   const fresh = state.privateAudioFresh ? 'Worker receiver verifies fresh delivered audio' : 'No fresh delivery verified';
   status(`${fresh}${state.reason ? ` · ${state.reason}` : ''}`);
   byId('room-targets').textContent = state.broadcast
@@ -248,6 +251,32 @@ function render(state) {
     byId('room-obs-secret').textContent = '';
     void disconnect();
   }
+}
+function renderAfterparty(state) {
+  const container = byId('room-afterparty');
+  if (!container || !booking) return;
+  const now = Number.isFinite(state?.serverTime) ? state.serverTime : Date.now();
+  const show = ['ended', 'cancelled'].includes(state?.phase) || Date.parse(booking.endUtc) <= now ||
+    ['approved', 'paid'].includes(booking.status);
+  const clear = () => {
+    if (typeof container.replaceChildren === 'function') container.replaceChildren();
+    else { container.textContent = ''; container.innerHTML = ''; }
+  };
+  if (!show) { container.hidden = true; clear(); return; }
+  const record = state?.recording;
+  const recordingRelease = record?.available === true ? {
+    known: record.status === 'empty' || record.status === 'submitted' || ['recording', 'processing'].includes(record.status) ||
+      record.status === 'waiting' && !record.consented,
+    state: record.status === 'submitted' ? 'mint-requested'
+      : record.status === 'empty' || record.status === 'waiting' && !record.consented ? 'none'
+        : ['recording', 'processing'].includes(record.status) ? 'processing' : 'unknown',
+    ...(record.trackId ? { trackId: record.trackId } : {}),
+  } : booking.recordingRelease;
+  const source = recordingRelease ? { ...booking, recordingRelease } : booking;
+  const checklist = renderAfterpartyChecklist(afterpartyRows(source, { audience: 'performer', now }), { documentRef: document });
+  container.hidden = !checklist;
+  clear();
+  if (checklist) container.append?.(checklist);
 }
 function stageTime(minutes = 0) {
   return new Intl.DateTimeFormat('en-US', {
@@ -332,6 +361,7 @@ function renderSign() {
     }
     practiceMode = !!practice;
     renderFlow();
+    renderAfterparty(broadcastState);
   }
 async function refreshBooking() {
     if (refreshing || disposed || !bookingId || !serviceUrl) return;

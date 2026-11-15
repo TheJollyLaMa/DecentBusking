@@ -5,6 +5,10 @@
 .live-audio-room fieldset{margin:1rem 0;border:1px solid #a87c36}
 .live-audio-room output{display:block;white-space:pre-wrap;overflow-wrap:anywhere}
 .live-audio-room audio{width:100%}
+.live-audio-room .live-afterparty-checklist{margin:1rem 0;padding:.75rem;border:1px solid #72d7c288;border-radius:12px;background:#0d1718}
+.live-audio-room .live-afterparty-checklist li{margin:.5rem 0}
+.live-audio-room .live-afterparty-checklist li[data-state="unknown"],.live-audio-room .live-afterparty-checklist li[data-state="attention"]{color:#ffd28b}
+.live-audio-room .live-afterparty-next{font-weight:700}
 .live-audio-room [hidden]{display:none}
 .performer-room-header{text-align:center;margin-bottom:1.5rem}
 .performer-room-header a,.live-audio-room a{color:#f0c040}
