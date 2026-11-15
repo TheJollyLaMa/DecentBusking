@@ -9,7 +9,8 @@ import { utcToNewYorkInput } from './radio-calendar.mjs';
 import { isAdminWallet } from './admin-access.mjs';
 import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261113-one-action-release';
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
-import { guaranteedReleaseState, releaseGuaranteedEscrow, liveBroadcastCompletionPending } from './live-escrow-release.mjs?v=20261114-allocated-stage';
+import { afterpartyRows } from './live-afterparty.mjs?v=20261115-afterparty';
+import { guaranteedReleaseState, guidedGuaranteedRelease, liveBroadcastCompletionPending } from './live-escrow-release.mjs?v=20261115-afterparty';
 
 const routerAbi = [
  'function funds(bytes32) view returns (string metadataUri,bool active,bool exists)',
@@ -32,10 +33,27 @@ export function nextFridayLiveStart(now = Date.now()) {
  return value;
 }
 const field = (name, label, value = '', type = 'text') => `<label>${label} <input name="${name}" type="${type}" value="${escapeLive(value)}" required></label>`;
+function renderAfterpartyStatus(b, now) {
+ if (b.mode !== 'phase1' || b.payoutPolicy !== LIVE_PILOT_POLICY) return '';
+ const rows = afterpartyRows(b, { audience: 'admin', now });
+ return `<details class="live-afterparty-checklist" open><summary>Show, fee and recording status</summary><ol>${rows.map(row =>
+  `<li data-state="${escapeLive(row.state)}"><strong>${escapeLive(row.label)}: ${escapeLive(row.text)}</strong>${row.detail ? `<p>${escapeLive(row.detail)}</p>` : ''}${row.next ? `<p class="live-afterparty-next">Next: ${escapeLive(row.next)}</p>` : ''}${row.links.map(link =>
+   `<a href="${escapeLive(link.href)}" target="_blank" rel="noopener noreferrer">${escapeLive(link.label)}</a>`).join('')}</li>`).join('')}</ol></details>`;
+}
 let state;
 let busy = false;
 let section;
 let accountRevision = 0;
+const pendingReleaseHashes = new Map();
+export function applyConfirmedRelease(card, result) {
+ const button = card?.querySelector('[data-live-action="release"]');
+ if (button) { button.disabled = true; button.textContent = 'Approved · performer can claim'; }
+ const report = card?.querySelector('[data-live-release-report]');
+ if (report && /^ipfs:\/\/[a-zA-Z0-9]+$/.test(result.reportUri || '')) {
+  report.href = `https://gateway.pinata.cloud/ipfs/${result.reportUri.slice('ipfs://'.length)}`;
+  report.hidden = false; report.target = '_blank'; report.rel = 'noopener';
+ }
+}
 async function api(body) {
  const response = await fetch(`${base()}/api/live-bookings`, body ? { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) } : { cache:'no-store' });
  const result = await response.json();
@@ -115,13 +133,14 @@ export function renderLivePerformanceAdminBooking(b, now = Date.now()) {
  const releaseCard = release ? `<section class="live-release-card" aria-label="Guaranteed performer fee">
   <h3>Guaranteed performer fee · $${(Number(b.amountUnits) / 1e6).toFixed(2)} USDC</h3>
   <p>Base escrow → ${escapeLive(b.displayName || 'Performer')}<br><small>${escapeLive(b.wallet)}</small></p>
-  <button type="button" class="live-release-primary" data-live-action="release"${release.disabled && !pending ? ' disabled' : ''}>${escapeLive(pending ? 'Check pending escrow release' : release.label)}</button>
+  <button type="button" class="live-release-primary" data-live-action="release"${release.disabled && !pending ? ' disabled' : ''}>${escapeLive(pending ? 'Check pending escrow release' : release.disabled ? release.label : 'Release the full guaranteed fee')}</button>
   <p>${escapeLive(release.detail)}</p>
   <p>Clicking release publishes a minimal public fee report. Confirm the wallet upload signature and escrow approval transaction; never share your private key.</p>
+  <ol data-live-release-checks aria-label="Guaranteed fee release checks"></ol>
   <a data-live-release-report${b.reportUri ? ` href="https://gateway.pinata.cloud/ipfs/${escapeLive(b.reportUri.replace(/^ipfs:\/\//, ''))}" target="_blank" rel="noopener"` : ' hidden'}>Read public fee report</a>
   <output data-live-release-status role="status" aria-live="polite"></output>
   </section>` : '';
- return `${liveBookingRows([b])}${renderLiveBroadcastCompletion(b)}${room}<div data-live-actions="${escapeLive(b.id)}">${releaseCard}<details class="live-booking-actions"><summary>${release ? 'Advanced · booking & manual review' : '🛠️ Booking actions'}</summary><div>${bookingActionButtons(b)}</div></details></div>`;
+ return `${liveBookingRows([b])}${renderLiveBroadcastCompletion(b)}${renderAfterpartyStatus(b, now)}${room}<div data-live-actions="${escapeLive(b.id)}">${releaseCard}<details class="live-booking-actions"><summary>${release ? 'Advanced · booking & manual review' : '🛠️ Booking actions'}</summary><div>${bookingActionButtons(b)}</div></details></div>`;
 }
 export function renderLiveBroadcastCompletion(b) {
  if (!Object.hasOwn(b, 'broadcastCompletion')) return '';
@@ -192,25 +211,52 @@ async function action(name, b) {
  }
  if (name === 'release') {
    const w = await wallet();
-   const result = await releaseGuaranteedEscrow({
-     booking: b, escrowAddress: state.escrowAddress, wallet: w, storage: localStorage,
+   const card = [...section.querySelectorAll('[data-live-actions]')].find(node => node.dataset.liveActions === b.id);
+   const output = card?.querySelector('[data-live-release-status]');
+   const progress = message => {
+     section.querySelector('[data-live-status]').textContent = message;
+     if (output) output.textContent = message;
+   };
+   const network = await w.provider.getNetwork();
+   const result = await guidedGuaranteedRelease({
+     booking: b, escrowAddress: state.escrowAddress,
+     session: { wallet: w, facts: { checked: true, chainId: Number(network.chainId), wallet: { address: w.address, admin: true } } },
+     storage: localStorage,
      serviceUrl: base(), origin: location.origin,
-     onProgress: message => {
-       section.querySelector('[data-live-status]').textContent = message;
-       const card = [...section.querySelectorAll('[data-live-actions]')].find(node => node.dataset.liveActions === b.id);
-       const output = card?.querySelector('[data-live-release-status]');
-       if (output) { output.textContent = message; output.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+     knownHash: pendingReleaseHashes.get(b.id) || null,
+     onProgress: progress,
+     onState: event => {
+       if (['submitted', 'unknown'].includes(event.type) && event.hash) pendingReleaseHashes.set(b.id, event.hash);
+       if (event.type === 'confirmed' || event.type === 'failed' && event.kind === 'replaced') pendingReleaseHashes.delete(b.id);
+       if (event.type === 'preflight') {
+         const checks = card?.querySelector('[data-live-release-checks]');
+         if (checks) checks.innerHTML = event.preflight.rows.map(row =>
+           `<li data-state="${escapeLive(row.status)}"><strong>${escapeLive(row.label)}:</strong> ${escapeLive(row.detail)}${row.next ? ` Next: ${escapeLive(row.next)}` : ''}</li>`).join('');
+         progress(event.preflight.summary);
+       } else if (event.type === 'submitted') {
+         const button = card?.querySelector('[data-live-action="release"]');
+         if (button) button.textContent = 'Check pending escrow release';
+       } else if (event.type === 'confirmed') {
+         progress('Full fee approved on Base. The performer can claim from Profile; this is not payment received.');
+       } else if (event.type === 'unknown') {
+         progress(`${event.message || 'The result could not be verified.'} Do not send again; re-check the transaction.`);
+       } else if (event.type === 'failed') {
+         progress(`${event.message || 'The release did not complete.'} Re-check before retrying.`);
+       }
      },
    });
+   if (result.outcome !== 'approved') {
+     if (result.outcome === 'reverted') pendingReleaseHashes.delete(b.id);
+     return result.preflight?.summary || result.error?.message || `Release status: ${result.outcome}. Re-check before retrying.`;
+   }
    document.dispatchEvent(new CustomEvent('live-booking-transaction-updated'));
-   const success = `Full fee approved on Base (${result.txHash}). Performer can claim from Profile; this is not payment received.`;
+   const success = result.txHash
+     ? `Full fee approved on Base (${result.txHash}). Performer can claim from Profile; this is not payment received.`
+     : 'Full fee approval is already confirmed on Base. Performer can claim from Profile; this is not payment received.';
    try { state = await api(); render(); }
    catch (error) { return `${success} Booking refresh unavailable: ${error.message}. Do not send again.`; }
-   const card = [...section.querySelectorAll('[data-live-actions]')].find(node => node.dataset.liveActions === b.id);
-   const button = card?.querySelector('[data-live-action="release"]');
-   if (button) { button.disabled = true; button.textContent = 'Approved · performer can claim'; }
-   const report = card?.querySelector('[data-live-release-report]');
-   if (report) { report.href = `https://gateway.pinata.cloud/ipfs/${result.reportUri.replace(/^ipfs:\/\//, '')}`; report.hidden = false; report.target = '_blank'; report.rel = 'noopener'; }
+   const updatedCard = [...section.querySelectorAll('[data-live-actions]')].find(node => node.dataset.liveActions === b.id);
+   applyConfirmedRelease(updatedCard, result);
    return success;
  }
  if (['agreement', 'acknowledge', 'fund'].includes(name) && Date.parse(b.startUtc) <= Date.now()) {
@@ -253,7 +299,8 @@ async function action(name, b) {
      : new w.ethers.Contract(state.escrowAddress, LIVE_ESCROW_ABI, w.signer).createBooking(w.ethers.id(b.id), b.wallet, b.amountUnits, Date.parse(b.startUtc)/1000, Date.parse(b.endUtc)/1000, Date.parse(b.claimDeadline)/1000, b.termsHash, b.termsUri, b.reviewWindow, b.cancellationWindow, b.killFeeBps));
  } else if (name === 'reconcile') {
    const txAction = prompt('Action: funding / payout / recovery / approve / claim / reject / cancel', 'funding');
-   const txHash = prompt('Base transaction hash', localStorage.getItem(`live-pending:${b.id}:${txAction}`) || b.transactions[txAction]?.hash || '');
+   const savedHash = localStorage.getItem(`live-pending:${b.id}:${txAction}`);
+   const txHash = prompt('Base transaction hash', (/^0x[0-9a-fA-F]{64}$/.test(savedHash || '') ? savedHash : '') || b.transactions[txAction]?.hash || '');
    if (txHash) await command({ action:'transaction', id:b.id, txAction, txHash });
  } else if (name === 'full') await review(b, 10000);
  else if (name === 'partial') { const percentage = Number(prompt('How much of the agreed fee should be paid? Enter a percentage from 1 to 99.')); if (Number.isInteger(percentage) && percentage > 0 && percentage < 100) await review(b, percentage * 100); }

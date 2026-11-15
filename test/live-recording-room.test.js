@@ -7,6 +7,8 @@ test('room explicitly signs and submits v2 on new opt-in and legacy renewal, wit
   const consent = await import('../js/live-recording-consent.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
   const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
+  const { afterpartyRows } = await import('../js/live-afterparty.mjs');
+  const { renderAfterpartyChecklist } = await import('../js/live-afterparty-view.mjs');
   const source = (await fs.readFile(require.resolve('../js/live-audio-room.mjs'), 'utf8')).replace(/^import .*;\n/gm, '');
   const now = Date.parse('2026-11-14T02:00:00Z'), wallet = `0x${'12'.repeat(20)}`;
   for (const legacy of [false, true]) {
@@ -22,7 +24,8 @@ test('room explicitly signs and submits v2 on new opt-in and legacy renewal, wit
     const state = { bookingId: booking.id, configured: true, phase: 'live', armed: true, status: 'ON-AIR',
       recording: { available: true, canChange: true, consented: legacy } };
     const context = {
-      ...consent, bindLiveRecordingOption, performerRoomSign, performerAllocationAccess, URL, AbortSignal, TextEncoder,
+      ...consent, bindLiveRecordingOption, performerRoomSign, performerAllocationAccess, afterpartyRows, renderAfterpartyChecklist,
+      URL, AbortSignal, TextEncoder,
       Date: class extends Date { static now() { return now; } },
       document: { getElementById: el }, location: { href: 'https://fixture.test/live-room.html?booking=booking-a', origin: 'https://fixture.test' },
       window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {},
