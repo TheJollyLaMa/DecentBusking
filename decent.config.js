@@ -74,9 +74,9 @@ window.DecentConfig = {
 
   // Currency
   tokenSymbol: "ETH",
-  // Enable only after the Base tip contract and its worker ledger are verified.
-  // Empty preserves explicitly labelled legacy direct tips; failures never fall back.
-  tipRouterAddress: "",
+  // DecentBusking tip contract on Base (source-verified; the worker ledger reads its TipSent events).
+  // Empty restores explicitly labelled legacy direct tips; failures never fall back.
+  tipRouterAddress: "0xAa0207731e9F836273634F7B08cE87FfAA125183",
 
   // Optional — right-ankh Uniswap link
   uniswapUrl: "",                                    // TODO: add Uniswap pool URL if desired
