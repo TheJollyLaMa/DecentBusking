@@ -18,9 +18,13 @@ export const PROMOTIONS_ROUTER_ABI = [
   'function setContributorApproved(address,bytes32,bool)',
   'function payout(bytes32,address,address,uint256,bytes32,bytes32,bytes32,string,bytes32)',
 ];
+export const PROMOTION_ACTIVITY_WINDOWS = [
+  { id: 'current-week', label: 'Current New York payroll week' },
+  { id: 'offer-window', label: 'During this offer after registration' },
+];
 export const PROMOTION_TEMPLATES = [
   { id: 'album', title: 'Bring your album', criteria: 'Bring an album with the stated minimum number of original tracks and rights to publish. Supply approved radio catalog and qualifying delivery evidence for admin review.' },
-  { id: 'referral', title: 'Referral rush', criteria: 'Bring two new promotion participants. Both must register your invite before voting and each cast a signed song vote this New York week. Final identity and evidence review is required.' },
+  { id: 'referral', title: 'Referral rush', criteria: 'Bring the stated number of new promotion participants. Each must register your invite before casting a signed song vote in the selected activity window. Final identity and evidence review is required.' },
   { id: 'sponsor', title: 'Sponsor scout', criteria: 'Introduce a new advertiser. Supply the purchaser wallet, campaign ID and confirmed DVert purchase transaction. Admin checks eligibility and refund/dispute status.' },
   { id: 'buddy', title: 'Bring a band buddy', criteria: 'Help a new musician complete onboarding and publish an approved recording. Supply the musician and recording references; no duplicate reward for the same work.' },
   { id: 'sponsor-match', title: 'First sponsor match', criteria: 'A capped match to the selected artist fund after a sponsor’s first qualifying contribution. Fund contributions are not refundable ad purchases. Draft only until a fund-to-fund settlement path is verified.' },

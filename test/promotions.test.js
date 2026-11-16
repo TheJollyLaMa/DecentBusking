@@ -14,6 +14,7 @@ const epoch = Date.parse('2026-10-30T18:00:00Z');
 const input = (extra = {}) => ({ template: 'album', title: 'Bring an album', criteria: 'Approved album with delivery proof',
   terms: 'One reward, public rights, encrypted evidence, admin review, no stacking. Disputes reviewed by steward.',
   rewardUnits: '10000000', budgetUnits: '10000000', maxAwards: 1, minOriginalTracks: 3, minPurchaseUnits: '5000000',
+  requiredReferrals: 2, activityWindow: 'current-week',
   startsAt: '2026-10-30T17:00:00Z', endsAt: '2026-11-06T18:00:00Z',
   claimDeadline: '2026-11-13T18:00:00Z', ...extra });
 
@@ -158,12 +159,42 @@ test('referral qualification needs two registered new wallets voting this New Yo
   await f.exec({ action: 'vote', campaignId: c.id, playId: 'live-song', voterId: 'browser_carol_0000', vote: 1 }, carol);
   const claim = await f.claim(c);
   assert.deepEqual(new Set(claim.qualification.wallets), new Set([bob.address.toLowerCase(), carol.address.toLowerCase()]));
+  assert.ok(claim.qualification.activity.every(vote => vote.playId === 'live-song' && vote.at && vote.week === claim.qualification.week));
   f.setTime(Date.parse('2026-11-02T05:00:00Z'));
   await assert.rejects(f.exec({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Reviewed people and evidence' }), /this New York week/);
   await f.exec({ action: 'vote', campaignId: c.id, playId: 'new-song', voterId: 'browser_bob_000000', vote: 1 }, bob);
   await f.exec({ action: 'vote', campaignId: c.id, playId: 'new-song', voterId: 'browser_carol_0000', vote: -1 }, carol);
   const approved = await f.exec({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Reviewed' });
   assert.equal(approved.claims[0].status, 'approved');
+  assert.ok(approved.claims[0].qualification.activity.every(vote => vote.playId === 'new-song'));
+  const { createPromotions } = await import('../discord-bot/promotions.js');
+  const corrupt = structuredClone(f.stored());
+  corrupt.claims[0].qualification.activity[0].playId = 'forged';
+  await assert.rejects(createPromotions({ ...f.cfg, restore: async () => corrupt }).publicState(), /checkpoint/);
+});
+test('referral count and activity window are editable, published, and enforced at review', async () => {
+  const f = await fixture();
+  await assert.rejects(f.create(input({ template: 'referral', requiredReferrals: 1 })), /referral/);
+  await assert.rejects(f.create(input({ template: 'referral', activityWindow: 'unknown' })), /activity window/);
+  const c = await f.create(input({ template: 'referral', requiredReferrals: 3, activityWindow: 'offer-window',
+    endsAt: '2026-11-13T18:00:00Z', claimDeadline: '2026-11-20T18:00:00Z' }));
+  await f.publish(c); await f.join(c, alice);
+  for (const [person, browser] of [[bob, 'browser_bob_000000'], [carol, 'browser_carol_0000'], [dave, 'browser_dave_00000']]) {
+    await f.join(c, person, alice.address);
+    await f.exec({ action: 'vote', campaignId: c.id, playId: 'song', voterId: browser, vote: 1 }, person);
+    if (person === carol) await assert.rejects(f.claim(c), /3 registered referrals/);
+  }
+  f.setTime(Date.parse('2026-11-02T05:00:00Z'));
+  const participation = (await f.view(alice)).participation[0];
+  assert.equal(participation.activeThisWeek, 0);
+  assert.equal(participation.activeDuringOffer, 3);
+  const claim = await f.claim(c);
+  assert.equal(claim.qualification.wallets.length, 3);
+  assert.equal(claim.qualification.window, 'offer-window');
+  await f.exec({ action: 'review', claimId: claim.id, decision: 'approved', reason: 'Reviewed people and activity' });
+  assert.equal((await f.view()).claims[0].status, 'approved');
+  await assert.rejects(f.exec({ action: 'save', campaignId: c.id,
+    campaign: input({ template: 'referral', requiredReferrals: 2, activityWindow: 'current-week' }) }), /immutable/);
 });
 test('activity and referral counts are scoped to each offer, including later registrations', async () => {
   const f = await fixture();

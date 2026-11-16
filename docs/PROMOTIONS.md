@@ -21,6 +21,11 @@ database on the same host and filesystem. SQLite WAL is not a multi-host
 replicated database. Node must support `node:sqlite`; some supported Node 22
 releases require `NODE_OPTIONS=--experimental-sqlite`.
 
+Coordinate rollout: keep promotions disabled until storage is provisioned,
+deploy the worker and confirm its `/api/promotions` response first, then deploy
+the matching frontend. Do not mix worker versions or independent journals for
+the same offers.
+
 Only for a new, empty installation, set both environment variables securely and
 initialize the database on the persistent volume:
 
@@ -69,9 +74,10 @@ scout, band-buddy onboarding, first-sponsor match, and village listening
 session. The steward edits the title, criteria, rights/privacy/dispute/refund
 terms, reward, budget, award cap, dedicated source, dates, and deadline. Album
 offers require an explicit minimum original-track count; sponsor scout requires
-a minimum paid DVert purchase. The steward verifies album rights, approval and
-radio delivery, buddy onboarding, and listening-session evidence manually.
-Default amounts are examples, not promises.
+a minimum paid DVert purchase. Referral offers set a required count from 2–100
+and choose the current New York payroll week or the offer window. The steward
+verifies album rights, approval and radio delivery, buddy onboarding, and
+listening-session evidence manually. Default amounts are examples, not promises.
 
 **First-sponsor match is draft-only.** Its draft records the selected artist
 fund, match amount, cap, minimum contribution and dedicated source, but cannot
@@ -103,13 +109,17 @@ Self-referrals are rejected. The admin can correct an attribution with a signed
 reason and audit trail, but cannot alter evidence supporting a reserved or paid
 reward. The participant view shows counts for the current offer.
 
-For referral rush, two distinct registered referees must each have an accepted,
-wallet-signed **song vote in that offer during the current New York payroll
-week**, both at claim submission and approval. Either vote direction qualifies.
-The vote must occur after registration through the offer panel; ads and ordinary
-anonymous or other-offer votes are not retroactively attributed. If the browser
-already voted on that play, wait for the next song. Approved qualification is
-frozen for payment. Weekly boundaries use New York time and DST.
+For referral rush, the configured number of distinct registered referees
+(default two) must each have an accepted, wallet-signed **song vote in that
+offer**, both at claim submission and approval. The default window is the
+current New York payroll week; the steward can instead choose any vote during
+the offer after registration. Either vote direction qualifies. The vote must
+occur through the offer panel; ads and ordinary anonymous or other-offer votes
+are not retroactively attributed. If the browser already voted on that play,
+wait for the next song. Approved qualification is frozen for payment. Weekly
+boundaries use New York time and DST; offer-window activity remains eligible
+for review after the offer closes. The admin can inspect the selected wallets,
+play IDs, vote times and weeks supporting the recorded qualification.
 
 A vote is activity, not proof of listening time or a unique person. Browser IDs
 are hashed and one browser cannot qualify multiple wallets, but multi-wallet or
@@ -129,10 +139,11 @@ refunds or disputes require human resolution under those published terms; they
 are not automatically detected or clawed back.
 
 Claim/evidence and attribution details are available to the claimant wallet and
-the admin, not public offer views. Do not submit sensitive personal information.
-Base payout recipients, amounts and transactions are public. Encryption protects
-stored records, not data visible to an authorized operator or a compromised
-worker.
+the admin, not public offer views. Qualifying referral wallets, play IDs and
+vote times are also visible to the referrer whose claim they support. Do not
+submit sensitive personal information. Base payout recipients, amounts and
+transactions are public. Encryption protects stored records, not data visible
+to an authorized operator or a compromised worker.
 
 ## Poster-first Discord
 

@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:
 import { Contract, Interface, id, verifyMessage, isAddress } from 'ethers';
 import { PAYMENT_EVENT_ABI } from './payment-ledger.js';
 import { currentPayrollPeriod } from '../js/payroll-week.mjs';
-import { PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, PROMOTION_TEMPLATES,
+import { PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS,
   isPromotionsFund, promotionAnnouncementDraft, promotionAuthorization, promotionWorkReference } from '../js/promotions.mjs';
 
 const address = value => {
@@ -57,6 +57,8 @@ function validateCheckpoint(value) {
     text(c.title, 'Checkpoint title', 100); text(c.criteria, 'Checkpoint criteria'); text(c.terms, 'Checkpoint terms');
     units(c.rewardUnits); units(c.budgetUnits);
     if (c.template === 'album' && (!Number.isSafeInteger(c.minOriginalTracks) || c.minOriginalTracks < 1 || c.minOriginalTracks > 1000) ||
+        c.template === 'referral' && (!Number.isSafeInteger(c.requiredReferrals) || c.requiredReferrals < 2 || c.requiredReferrals > 100 ||
+          !PROMOTION_ACTIVITY_WINDOWS.some(window => window.id === c.activityWindow)) ||
         c.template === 'sponsor' && !/^[1-9]\d{0,14}$/.test(c.minPurchaseUnits || '') ||
         c.template === 'sponsor-match' && (c.status !== 'draft' && c.status !== 'archived' ||
           !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(c.matchTargetFund || '') ||
@@ -91,6 +93,8 @@ function validateCheckpoint(value) {
   if (value.members.some(m => m.referrer && !members.has(`${m.campaignId}:${m.referrer}`))) fail();
   const participantClaims = new Set(), heldWallets = new Set(), heldSubjects = new Set(), transactionHashes = new Set();
   const reservations = new Map();
+  const voteKey = (campaignId, wallet, week, playId, at) => JSON.stringify([campaignId, wallet, week, playId, at]);
+  const recordedVotes = new Set(value.votes.map(v => voteKey(v?.campaignId, v?.wallet, v?.week, v?.playId, v?.at)));
   for (const c of value.claims) {
     const campaign = campaigns.get(c?.campaignId);
     const participant = `${c?.campaignId}:${c?.wallet}`;
@@ -109,9 +113,14 @@ function validateCheckpoint(value) {
     }
     if (campaign.template === 'buddy' && (!validWallet(c.subjectWallet) || c.subjectWallet === c.wallet)) fail();
     if (campaign.template === 'referral' && (!c.qualification || !/^NY-\d{4}-\d{2}-\d{2}$/.test(c.qualification.week || '') ||
-        !Array.isArray(c.qualification.wallets) || c.qualification.wallets.length !== 2 ||
+        c.qualification.window !== campaign.activityWindow || !Array.isArray(c.qualification.wallets) ||
+        c.qualification.wallets.length !== campaign.requiredReferrals ||
         c.qualification.wallets.some(w => !validWallet(w) || w === c.wallet || !members.has(`${c.campaignId}:${w}`)) ||
-        new Set(c.qualification.wallets).size !== 2)) fail();
+        new Set(c.qualification.wallets).size !== campaign.requiredReferrals ||
+        !Array.isArray(c.qualification.activity) || c.qualification.activity.length !== campaign.requiredReferrals ||
+        c.qualification.activity.some((v, index) => !v || v.wallet !== c.qualification.wallets[index] ||
+          campaign.activityWindow === 'current-week' && v.week !== c.qualification.week ||
+          !recordedVotes.has(voteKey(c.campaignId, v.wallet, v.week, v.playId, v.at))))) fail();
     if (campaign.template === 'sponsor' && (!/^0x[0-9a-f]{64}$/.test(c.purchaseHash || '') ||
         !validWallet(c.purchaser) || c.purchaser === c.wallet || !/^\d{1,30}$/.test(c.advertId || '') ||
         !c.qualification || c.qualification.purchaseHash !== c.purchaseHash || c.qualification.purchaser !== c.purchaser ||
@@ -306,29 +315,42 @@ export function createPromotions({ restore, save, provider, routerAddress, owner
       throw new Error('This musician already has a buddy-onboarding claim');
     }
   }
-  function referralEvidence(next, claim) {
+  function referralEvidence(next, claim, campaign) {
     const week = currentPayrollPeriod(now()).week;
     const joins = next.members.filter(m => m.campaignId === claim.campaignId && m.referrer === claim.wallet);
-    const active = new Set(next.votes.filter(v => v.week === week).map(v => `${v.campaignId}:${v.wallet}`));
-    const qualified = joins.filter(m => active.has(`${m.campaignId}:${m.wallet}`));
-    if (qualified.length < 2) throw new Error('Two registered referrals must each vote on a song this New York week');
-    return { week, wallets: qualified.slice(0, 2).map(m => m.wallet) };
+    const active = new Map(next.votes.filter(v => v.campaignId === campaign.id &&
+      (campaign.activityWindow === 'offer-window' || v.week === week)).map(v => [v.wallet, v]));
+    const qualified = joins.filter(m => active.has(m.wallet));
+    if (qualified.length < campaign.requiredReferrals) {
+      const count = campaign.requiredReferrals === 2 ? 'Two' : campaign.requiredReferrals;
+      const window = campaign.activityWindow === 'current-week' ? 'this New York week' : 'during this offer';
+      throw new Error(`${count} registered referrals must each vote on a song ${window}`);
+    }
+    const wallets = qualified.slice(0, campaign.requiredReferrals).map(m => m.wallet);
+    const activity = wallets.map(wallet => {
+      const { playId, at, week: voteWeek } = active.get(wallet);
+      return { wallet, playId, at, week: voteWeek };
+    });
+    return { week, window: campaign.activityWindow, wallets, activity };
   }
   async function snapshot(wallet, admin) {
     const campaigns = state.campaigns.filter(c => admin || c.status !== 'draft' && c.status !== 'archived').map(c => summary(c, admin));
     const week = currentPayrollPeriod(now()).week;
     const active = new Set(state.votes.filter(v => v.week === week).map(v => `${v.campaignId}:${v.wallet}`));
+    const activeDuringOffer = new Set(state.votes.map(v => `${v.campaignId}:${v.wallet}`));
     const referralCounts = new Map();
     for (const member of state.members) {
       if (member.referrer !== wallet) continue;
-      const count = referralCounts.get(member.campaignId) || { registered: 0, activeThisWeek: 0 };
+      const count = referralCounts.get(member.campaignId) || { registered: 0, activeThisWeek: 0, activeDuringOffer: 0 };
       count.registered++;
       if (active.has(`${member.campaignId}:${member.wallet}`)) count.activeThisWeek++;
+      if (activeDuringOffer.has(`${member.campaignId}:${member.wallet}`)) count.activeDuringOffer++;
       referralCounts.set(member.campaignId, count);
     }
     const participation = wallet ? state.members.filter(m => m.wallet === wallet).map(member => {
       return { campaignId: member.campaignId, week, voted: active.has(`${member.campaignId}:${member.wallet}`),
-        ...(referralCounts.get(member.campaignId) || { registered: 0, activeThisWeek: 0 }) };
+        votedDuringOffer: activeDuringOffer.has(`${member.campaignId}:${member.wallet}`),
+        ...(referralCounts.get(member.campaignId) || { registered: 0, activeThisWeek: 0, activeDuringOffer: 0 }) };
     }) : [];
     const fundSlugs = admin ? [...new Set([PROMOTIONS_FUND, ...state.campaigns.map(c => c.fund)])] : [];
     const funds = await Promise.all(fundSlugs.map(async slug => {
@@ -490,6 +512,14 @@ export function createPromotions({ restore, save, provider, routerAddress, owner
               throw new Error('Album offers need a minimum of 1–1000 original tracks');
             }
             qualification = { minOriginalTracks: input.minOriginalTracks };
+          } else if (input.template === 'referral') {
+            if (!Number.isSafeInteger(input.requiredReferrals) || input.requiredReferrals < 2 || input.requiredReferrals > 100) {
+              throw new Error('Set the required referral count between 2 and 100');
+            }
+            if (!PROMOTION_ACTIVITY_WINDOWS.some(window => window.id === input.activityWindow)) {
+              throw new Error('Choose a supported referral activity window');
+            }
+            qualification = { requiredReferrals: input.requiredReferrals, activityWindow: input.activityWindow };
           } else if (input.template === 'sponsor') {
             qualification = { minPurchaseUnits: units(input.minPurchaseUnits) };
           } else if (input.template === 'sponsor-match') {
@@ -554,7 +584,7 @@ export function createPromotions({ restore, save, provider, routerAddress, owner
           if (next.claims.some(c => c.campaignId === campaign.id && c.wallet === wallet)) throw new Error('One claim per participant per campaign');
           const claim = { id: randomUUID(), campaignId: campaign.id, wallet, fund: campaign.fund, amountUnits: campaign.rewardUnits,
             status: 'submitted', evidence: text(command.evidence, 'Evidence'), createdAt: at, termsVersion: campaign.version, history: [] };
-          if (campaign.template === 'referral') claim.qualification = referralEvidence(next, claim);
+          if (campaign.template === 'referral') claim.qualification = referralEvidence(next, claim, campaign);
           if (campaign.template === 'sponsor') await setSponsorEvidence(next, claim, campaign, command);
           if (campaign.template === 'buddy') setBuddySubject(next, claim, command);
           next.claims.push(claim);
@@ -589,7 +619,7 @@ export function createPromotions({ restore, save, provider, routerAddress, owner
                 !['approved', 'rejected', 'needs-evidence'].includes(command.decision)) throw new Error('Claim is not reviewable');
             const reason = text(command.reason, 'Review reason');
             if (command.decision === 'approved') {
-              if (campaign.template === 'referral') claim.qualification = referralEvidence(next, claim);
+              if (campaign.template === 'referral') claim.qualification = referralEvidence(next, claim, campaign);
               if (campaign.template === 'sponsor') {
                 if (command.confirmNewAdvertiser !== true || command.confirmRefundAndDisputeReview !== true) {
                   throw new Error('Review new-advertiser, refund and attribution-dispute eligibility before approval');

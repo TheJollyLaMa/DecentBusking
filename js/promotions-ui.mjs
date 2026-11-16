@@ -1,4 +1,4 @@
-import { PROMOTION_TEMPLATES, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
+import { PROMOTION_TEMPLATES, PROMOTION_ACTIVITY_WINDOWS, PROMOTIONS_FUND, PROMOTIONS_USDC, PROMOTIONS_ROUTER_ABI, isPromotionsFund,
   promotionAuthorization, promotionWorkReference, promotionMoney, promotionUnits, promotionLink } from './promotions.mjs';
 import { newYorkInputToUtc, utcToNewYorkInput } from './radio-calendar.mjs';
 import { radioListenerId } from './radio-client.mjs';
@@ -52,12 +52,13 @@ export function promotionInputToUtc(value) {
 }
 const field = (name, label, type = 'text', value = '') =>
   `<label>${label}<input name="${name}" type="${type}" value="${escape(value)}" required></label>`;
-const termsNotice = 'Rewards require evidence and admin approval. Promotionals is earmarked, not escrowed. Wallets/browsers are not proof of unique humans. Activity means a signed song vote this New York week, not a positive vote or verified listening time.';
+const termsNotice = 'Rewards require evidence and admin approval. Promotionals is earmarked, not escrowed. Wallets/browsers are not proof of unique humans. Activity means a signed song vote in the stated window, not a positive vote or verified listening time. Qualifying referral wallets, play IDs and vote times are visible to the admin and the referrer.';
 function campaignCard(c) {
   return `<h3>${escape(c.title)}</h3><p><strong>${money(c.rewardUnits)}</strong> per approved award · ${escape(c.status)} · ${c.remainingAwards} awards available</p>
     <p>${c.template === 'sponsor-match' ? `Match destination: ${escape(c.matchTargetFund || '')}; draft only.` : 'Reward recipient: claimant wallet.'}
     Funding: ${escape(c.fund)}; one award per wallet.</p>
     ${c.template === 'album' ? `<p>Minimum original tracks: ${c.minOriginalTracks}</p>` : ''}
+    ${c.template === 'referral' ? `<p>Required referrals: ${c.requiredReferrals} · activity: ${escape(PROMOTION_ACTIVITY_WINDOWS.find(w => w.id === c.activityWindow)?.label || 'unavailable')}</p>` : ''}
     ${c.template === 'sponsor' ? `<p>Minimum confirmed DVert purchase: ${money(c.minPurchaseUnits)}</p>` : ''}
     <p>${escape(c.criteria)}</p><p class="promotion-terms">${escape(c.terms)}</p>
     <p>${date(c.startsAt)} – ${date(c.endsAt)}<br>Claim by ${date(c.claimDeadline)}</p>`;
@@ -146,6 +147,10 @@ export function mountAdminPromotions(root) {
           ${field('maxAwards', 'Maximum awards (one per participant)', 'number', '5')}
           ${field('fund', 'Dedicated promotional funding source', 'text', PROMOTIONS_FUND)}
           <div data-promo-album>${field('minOriginalTracks', 'Minimum original tracks', 'number', '3')}</div>
+          <div data-promo-referral>
+            ${field('requiredReferrals', 'Required qualified referrals (2–100)', 'number', '2')}
+            <label>Referral activity window<select name="activityWindow">${PROMOTION_ACTIVITY_WINDOWS.map(w => `<option value="${w.id}">${escape(w.label)}</option>`).join('')}</select></label>
+          </div>
           <div data-promo-sponsor-terms>${field('minPurchase', 'Minimum eligible DVert purchase (USDC)', 'text', '5')}</div>
           <div data-promo-match-terms>
             ${field('matchTargetFund', 'Chosen artist fund slug', 'text', 'dbusk-playback')}
@@ -166,12 +171,13 @@ export function mountAdminPromotions(root) {
   function templateFields() {
     for (const [selector, active] of [
       ['[data-promo-album]', input('template').value === 'album'],
+      ['[data-promo-referral]', input('template').value === 'referral'],
       ['[data-promo-sponsor-terms]', input('template').value === 'sponsor'],
       ['[data-promo-match-terms]', input('template').value === 'sponsor-match'],
     ]) {
       const section = root.querySelector(selector);
       section.hidden = !active;
-      section.querySelectorAll('input').forEach(el => { el.disabled = !active; });
+      section.querySelectorAll('input, select').forEach(el => { el.disabled = !active; });
     }
   }
   function template() {
@@ -218,7 +224,10 @@ export function mountAdminPromotions(root) {
       <p>${escape(c.wallet)} · ${money(c.amountUnits)} · ${escape(c.fund)} · <strong>${escape(c.status)}</strong></p>
       <p class="promotion-terms">${escape(c.evidence)}</p>
       ${c.subjectWallet ? `<p>Musician helped: ${escape(c.subjectWallet)}</p>` : ''}
-      ${c.qualification ? `<p>${escape(JSON.stringify(c.qualification))}</p>` : ''}
+      ${c.qualification?.activity ? `<p>Referral evidence · ${escape(c.qualification.window)} · assessment week ${escape(c.qualification.week)}</p><ul>
+        ${c.qualification.activity.map(v => `<li>${escape(v.wallet)} · play ${escape(v.playId)} · ${escape(v.at)} · ${escape(v.week)}</li>`).join('')}</ul>`
+      : c.qualification ? `<p>${escape(JSON.stringify(c.qualification))}</p>` : ''}
+      ${c.purchaseHash ? `<a href="https://basescan.org/tx/${escape(c.purchaseHash)}" target="_blank" rel="noopener">DVert purchase proof</a>` : ''}
       ${c.history.map(h => `<p>${escape(h.at)} · ${escape(h.reviewer)} · ${escape(h.action)}: ${escape(h.reason)}</p>`).join('')}
       <label>Review note (required)<input data-promo-reason maxlength="2000"></label>
       ${state.campaigns.find(p => p.id === c.campaignId)?.template === 'sponsor' ? `
@@ -275,6 +284,8 @@ export function mountAdminPromotions(root) {
         rewardUnits: promotionUnits(input('reward').value), budgetUnits: promotionUnits(input('budget').value),
         maxAwards: Number(input('maxAwards').value), fund: input('fund').value.trim(),
         ...(input('template').value === 'album' ? { minOriginalTracks: Number(input('minOriginalTracks').value) } : {}),
+        ...(input('template').value === 'referral' ? { requiredReferrals: Number(input('requiredReferrals').value),
+          activityWindow: input('activityWindow').value } : {}),
         ...(input('template').value === 'sponsor' ? { minPurchaseUnits: promotionUnits(input('minPurchase').value) } : {}),
         ...(input('template').value === 'sponsor-match' ? { matchTargetFund: input('matchTargetFund').value.trim(),
           minContributionUnits: promotionUnits(input('minContribution').value) } : {}),
@@ -308,6 +319,8 @@ export function mountAdminPromotions(root) {
           input('reward').value = String(Number(campaign.rewardUnits) / 1e6);
           input('budget').value = String(Number(campaign.budgetUnits) / 1e6);
           if (campaign.minOriginalTracks) input('minOriginalTracks').value = campaign.minOriginalTracks;
+          if (campaign.requiredReferrals) input('requiredReferrals').value = campaign.requiredReferrals;
+          if (campaign.activityWindow) input('activityWindow').value = campaign.activityWindow;
           if (campaign.minPurchaseUnits) input('minPurchase').value = String(Number(campaign.minPurchaseUnits) / 1e6);
           if (campaign.matchTargetFund) input('matchTargetFund').value = campaign.matchTargetFund;
           if (campaign.minContributionUnits) input('minContribution').value = String(Number(campaign.minContributionUnits) / 1e6);
@@ -396,7 +409,7 @@ export function mountPublicPromotion() {
       <label><input type="checkbox" data-promo-accept> I accept the displayed offer terms and activity recording; payment recipients and amounts are public.</label>
       <button type="button" data-promo-join>Register for this offer</button>
       <button type="button" data-promo-invite>Copy my referral invite</button>
-      <p>Listen using the radio bar. Cast a wallet-signed vote on the current song to count as active this week. Both directions qualify; anonymous past votes cannot be attributed retroactively. If you already voted on this play, wait for the next song.</p>
+      <p>Listen using the radio bar. Cast a wallet-signed vote on a current song in this offer; see its activity window above. Both directions qualify; anonymous past votes cannot be attributed retroactively. If you already voted on this play, wait for the next song.</p>
       <button type="button" data-promo-vote="1">Vote up on current song</button>
       <button type="button" data-promo-vote="-1">Vote down on current song</button>
       <form data-promo-claim>
@@ -428,7 +441,7 @@ export function mountPublicPromotion() {
     const member = privateState.members.find(m => m.campaignId === campaignId && m.wallet === privateState.viewerWallet);
     const activity = privateState.participation.find(item => item.campaignId === campaignId);
     overlay.querySelector('[data-promo-activity]').textContent = member
-      ? `Registered · ${activity.week} · ${activity.voted ? 'Song vote recorded after registration' : 'No qualifying vote recorded after registration'} · Referrals for this offer: ${activity.registered} registered, ${activity.activeThisWeek} active this week`
+      ? `Registered · ${activity.week} · ${activity.voted ? 'Song vote recorded this week' : 'No song vote recorded this week'} · Referrals for this offer: ${activity.registered} registered, ${activity.activeThisWeek} active this week, ${activity.activeDuringOffer} active during this offer`
       : 'Not registered for this offer.';
     overlay.querySelector('[data-promo-ref]').disabled = !!member;
     overlay.querySelector('[data-promo-join]').disabled = !!member;
