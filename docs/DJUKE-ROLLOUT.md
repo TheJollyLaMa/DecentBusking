@@ -385,6 +385,75 @@ the contract's `pauseRequests` stops new purchases while queued plays still sett
 
 ## DeVert Advertising
 
+### Backend weekly advert competition (#351; disabled by default)
+
+The playback journal's `adVoteLedger` checkpoints up/down/net campaign totals and
+accepted-vote receipts atomically with the existing vote journal. Receipts retain
+the acceptance time and radio play identity, but replace the voter identifier
+with a deterministic hash of play + voter for retry deduplication. These hashes
+are pseudonymous, not anonymous. Receipts are not subject to the 2,000 raw-vote
+retention cap; period reports and lifetime rotation scores therefore survive raw
+vote pruning and restarts. Existing report callers retain their period callback.
+
+Migration checkpoints only provable retained votes and labels the ledger
+`history: retained-history-only`. It cannot recover votes previously discarded.
+Failed checkpoints reject the operation without accepting a vote or clearing its
+retry; invalid ledger totals fail restoration rather than silently resetting.
+The cumulative receipt set grows with accepted votes and must not be pruned
+without a replacement durable deduplication/history store.
+
+`DEVERT_COMPETITION_ENABLED=true` explicitly enables backend reconciliation.
+Leave it unset/false until a separately approved rollout: this change does not
+enable live rewards. Approved policy:
+
+- Score is up minus down, while preserving all three counts.
+- Weeks run Monday 00:00 to Monday 00:00 `America/New_York`, using the payroll
+  calendar. Spring/fall DST weeks can be 167/169 hours.
+- Only a strictly positive highest net score wins; every tied first-place advert
+  wins. Empty and all-nonpositive weeks grant nothing.
+- Identity is lowercased advertiser wallet plus **exact** IPFS media URI.
+  Renewal campaign IDs and title changes do not reset totals. Different wallets
+  or different URI strings remain separate adverts.
+- Reward-week votes count normally, so consecutive rewards are allowed.
+
+The same durable journal stores identity-level lifetime/weekly totals, frozen
+weekly rankings, grants keyed by source week + advert identity, and a recovery
+cursor. A grant always names the immediately following calendar week; delayed
+recovery never moves expired rewards forward. Closure and every tied grant are
+one checkpoint, so persistence failure cannot partially award a week. Recovery
+runs at startup, before selection and on the existing worker retry timer,
+independently of worker ETH balance. Each pass recovers at most 100 weeks.
+Missing historical identity metadata blocks that week's close rather than
+guessing or awarding a partial ranking. Historical campaign reads use the
+confirmed snapshot block; previously discarded votes remain unavailable.
+
+Rewards enter only the existing ordinary radio/VertLoop scheduling paths, behind
+paid candidates and paid request priorities. They do not buy a contract seat,
+promise airtime, or bypass music/show spacing. Selection and transition-time
+checks enforce the exact grant interval, current pause/removal/moderation, and a
+resolvable media record. A removed source identity is not silently restored by a
+renewal. Free plays carry an explicit reward marker through queued-ad restore
+and are checkpointed separately; they never fulfill a paid request, call
+`recordCampaignPlay`, or fabricate paid impressions/payments. Website-only
+VertLoop remains a media clock and records no broadcast impression, free or paid.
+
+Operators can inspect `getAdvertCompetitionStatus()` for `ready`, `retryable`,
+and `lastError`, and the competition journal's `unresolved` list for missing
+campaign references. Failed closes log retryable warnings and retain the prior
+cursor/votes/grants. Restore corruptions fail closed; restore verified state
+through existing admin recovery, never clear votes or shift grant dates to
+recover. The existing admin/moderator authority is unchanged. No new UI,
+leaderboard, vote control, announcement or notification is added.
+Do not roll back to a writer that accepts raw votes without maintaining the
+receipt ledger; use a verified compatible journal/recovery plan first.
+
+Reuse decision: adapted `recordMainRadioAdVote`, retained summaries, journal
+commit/restore and the existing queue planner from `discord-bot/devert-playback.js`
+and `js/devert-scheduler.mjs` at `c9856d0`; reused the DST-aware
+`js/payroll-week.mjs` calendar. The limited Canopy agency-map advert search
+provided no additional donor. This is an in-repo Apache-2.0 adaptation, not a
+new voting service or a contract/campaign extension.
+
 The deployed and unpaused `DeVert_v0_1` contract implements seven-day campaign
 purchases, a 5 USDC minimum, 0.01 USDC minimum overbids for seated
 slots, and 45% Playback / 45% Top 10 / 8% Pinners / 2% Repo-dev settlement. A

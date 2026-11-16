@@ -42,6 +42,8 @@ function harness({
   workerMinBalanceWei = 0n,
   save = async () => 'ipfs://journal',
   resolveCampaignMedia = () => null,
+  competitionEnabled = false,
+  readCampaign,
 } = {}) {
   const recorded = new Set();
   const musicBatches = [];
@@ -71,7 +73,7 @@ function harness({
   const state = { schemaVersion: 1, musicWeekId: null, pendingMusicPlayIds: [], seenMusicPlayIds: [], impressions: [] };
   let saves = 0;
   const runtime = null;
-  return { contract, recorded, musicBatches, impressionCalls, state, resolveCampaignMedia, get saves() { return saves; },
+  return { contract, recorded, musicBatches, impressionCalls, state, resolveCampaignMedia, competitionEnabled, readCampaign, get saves() { return saves; },
     workerAddress, workerMinBalanceWei, setPaused(next) { paused = next; }, setBalance(next) { balance = next; }, setSave(fn) { save = fn; }, save: async snapshot => { saves++; await save(snapshot); Object.assign(state, snapshot); return 'ipfs://journal'; },
     readCampaigns: async () => ({ chainId: 8453, paused, snapshotAt: new Date(NOW).toISOString(), weekId: WEEK_ID,
       campaigns, market: { slots, seated: Math.min(slots, campaigns.length), lowestSeatedOfferUnits: campaigns[0]?.offerUnits || '0', mainRadioImpressions: impressions } }),
@@ -83,7 +85,8 @@ async function makeRuntime(fixture) {
   const runtime = createDevertPlaybackRuntime({ contract: fixture.contract, provider: fixture.contract.runner.provider,
     restore: async () => fixture.state.schemaVersion === 1 ? structuredClone(fixture.state) : null,
     save: fixture.save, readCampaigns: fixture.readCampaigns, now: () => fixture.now ?? NOW, resolveCampaignMedia: fixture.resolveCampaignMedia,
-    workerAddress: fixture.workerAddress, workerMinBalanceWei: fixture.workerMinBalanceWei });
+    workerAddress: fixture.workerAddress, workerMinBalanceWei: fixture.workerMinBalanceWei,
+    competitionEnabled: fixture.competitionEnabled, readCampaign: fixture.readCampaign });
   await runtime.initialize();
   return runtime;
 }
@@ -445,6 +448,292 @@ test('advert vote tallies carry across plays and into weekly history without vot
   assert.equal(restored.getMainRadioAdVoteSummary('x', '1').campaign.plays, 3);
   assert.deepEqual(withAdvertTallies([{ week: 'w' }], { getMainRadioAdvertTallies: () => { throw new Error('not ready'); } })
     .map(report => report.adverts), [null]);
+});
+
+test('accepted advert receipts preserve totals, report weeks and deduplication after raw pruning and restart', async () => {
+  const { currentPayrollPeriod } = await import('../js/payroll-week.mjs');
+  const fixture = harness();
+  const original = { campaignId: '1', radioPlayId: 'old-play', voterId: 'listener-browser-0001', vote: -1,
+    recordedAt: '2026-11-02T04:59:59.999Z' };
+  fixture.state.adVotes = [original, ...Array.from({ length: 1999 }, (_, index) => ({
+    campaignId: '2', radioPlayId: `new-play-${index}`, voterId: 'listener-browser-0001', vote: 1,
+    recordedAt: '2026-11-02T05:00:00.000Z',
+  }))];
+  fixture.now = Date.parse('2026-11-02T05:00:00.001Z');
+  const runtime = await makeRuntime(fixture);
+  assert.equal(fixture.state.adVoteLedger.history, 'retained-history-only');
+  assert.ok(!JSON.stringify(fixture.state.adVoteLedger).includes(original.voterId));
+  await runtime.recordMainRadioAdVote({ ...original, campaignId: '2', radioPlayId: 'newest-play', vote: 1 });
+  assert.equal(fixture.state.adVotes.length, 2000);
+  assert.ok(!fixture.state.adVotes.some(entry => entry.radioPlayId === original.radioPlayId));
+  const restored = await makeRuntime(fixture);
+  assert.deepEqual(await restored.recordMainRadioAdVote({ ...original, campaignId: '2', vote: 1 }),
+    { campaignId: '1', radioPlayId: 'old-play', vote: -1, duplicate: true });
+  assert.deepEqual(restored.getMainRadioAdVoteSummary(original.radioPlayId), { up: 0, down: 1, net: -1 });
+  assert.deepEqual(restored.getState().adVoteLedger.totals,
+    [{ campaignId: '1', up: 0, down: 1, net: -1 }, { campaignId: '2', up: 2000, down: 0, net: 2000 }]);
+  assert.deepEqual(restored.getMainRadioAdvertTallies(at => currentPayrollPeriod(at).week)
+    .map(({ period, campaignId, up, down, net }) => ({ period, campaignId, up, down, net })), [
+    { period: 'NY-2026-10-26', campaignId: '1', up: 0, down: 1, net: -1 },
+    { period: 'NY-2026-11-02', campaignId: '2', up: 2000, down: 0, net: 2000 },
+  ]);
+});
+
+test('failed advert receipt persistence leaves both tallies and duplicate keys retryable', async () => {
+  const fixture = harness();
+  const runtime = await makeRuntime(fixture);
+  const before = runtime.getState();
+  const vote = { campaignId: '1', radioPlayId: 'failure-play', voterId: 'listener-browser-0001', vote: 1 };
+  fixture.setSave(async () => { throw new Error('checkpoint unavailable'); });
+  await assert.rejects(runtime.recordMainRadioAdVote(vote), /checkpoint unavailable/);
+  assert.deepEqual(runtime.getState(), before);
+  fixture.setSave(async () => 'ipfs://journal');
+  assert.equal((await runtime.recordMainRadioAdVote(vote)).duplicate, false);
+  assert.equal((await runtime.recordMainRadioAdVote(vote)).duplicate, true);
+  assert.deepEqual(runtime.getState().adVoteLedger.totals, [{ campaignId: '1', up: 1, down: 0, net: 1 }]);
+});
+
+test('advert ledger migration must checkpoint successfully and corrupt totals never silently reset', async () => {
+  const fixture = harness();
+  fixture.state.adVotes = [{ campaignId: '1', radioPlayId: 'retained-play', voterId: 'listener-browser-0001', vote: 1,
+    recordedAt: new Date(NOW).toISOString() }];
+  fixture.setSave(async () => { throw new Error('migration unavailable'); });
+  await assert.rejects(makeRuntime(fixture), /migration unavailable/);
+  assert.equal(fixture.state.adVoteLedger, undefined);
+  fixture.setSave(async () => 'ipfs://journal');
+  const runtime = await makeRuntime(fixture);
+  assert.equal(runtime.getMainRadioAdVoteSummary('retained-play', '1').campaign.up, 1);
+  fixture.state.adVoteLedger.totals[0].up = 0;
+  await assert.rejects(makeRuntime(fixture), /totals do not match/);
+  assert.equal(fixture.state.adVoteLedger.receipts.length, 1);
+});
+
+function competitionFixture(campaigns = [campaign('1')], options = {}) {
+  const fixture = harness({ campaigns, competitionEnabled: true,
+    resolveCampaignMedia: () => ({ filename: 'ad.mp3', mediaType: 'audio/mpeg' }), ...options });
+  fixture.now = Date.parse('2026-11-01T12:00:00Z');
+  const read = fixture.readCampaigns;
+  fixture.readCampaigns = async () => ({ ...await read(), snapshotAt: new Date(fixture.now).toISOString() });
+  return fixture;
+}
+
+const advertVote = (campaignId, play = `vote-${campaignId}`, vote = 1) => ({
+  campaignId, radioPlayId: play, voterId: 'listener-browser-0001', vote,
+});
+
+test('all tied positive net winners receive exactly the DST-aware next week, with separate free accounting', async () => {
+  const fixture = competitionFixture([campaign('1'), campaign('2'), campaign('3')]);
+  const runtime = await makeRuntime(fixture);
+  for (const campaignId of ['1', '2']) await runtime.recordMainRadioAdVote(advertVote(campaignId));
+  await runtime.recordMainRadioAdVote(advertVote('3', 'down', -1));
+  fixture.now = Date.parse('2026-11-02T05:00:00Z');
+  await Promise.all([runtime.reconcileAdvertCompetition(), runtime.reconcileAdvertCompetition()]);
+  const state = runtime.getState().competition;
+  assert.equal(state.closedWeeks.length, 1);
+  assert.equal(state.closedWeeks[0].winners.length, 2);
+  assert.equal(Date.parse(state.closedWeeks[0].endAt) - Date.parse(state.closedWeeks[0].startAt), 169 * 3600000);
+  assert.deepEqual(state.grants.map(({ rewardWeek, startAt, endAt }) => ({ rewardWeek, startAt, endAt })), [
+    { rewardWeek: 'NY-2026-11-02', startAt: '2026-11-02T05:00:00.000Z', endAt: '2026-11-09T05:00:00.000Z' },
+    { rewardWeek: 'NY-2026-11-02', startAt: '2026-11-02T05:00:00.000Z', endAt: '2026-11-09T05:00:00.000Z' },
+  ]);
+  const ads = await runtime.nextMainRadioAd({ count: 4 });
+  assert.deepEqual(new Set(ads.map(ad => ad.campaignId)), new Set(['1', '2']));
+  const ad = ads[0];
+  assert.equal(await runtime.canPlayCampaign(ad.campaignId, ad), true);
+  const play = { ...ad, radioPlayId: 'free-audible', startedAt: fixture.now, audibleMs: 30000 };
+  fixture.now += 30000;
+  await runtime.recordCompetitionAdvertPlay(play);
+  await runtime.recordCompetitionAdvertPlay(play);
+  assert.equal(runtime.getState().competition.plays.length, 1);
+  assert.equal(runtime.getState().impressions.length, 0);
+  assert.equal(runtime.getState().paidPlays.length, 0);
+  assert.equal(fixture.impressionCalls.length, 0);
+  await assert.rejects(runtime.recordCampaignImpression(play), /separate competition accounting/);
+  await assert.rejects(runtime.recordPaidAdvertPlay(play), /cannot be counted as paid/);
+  const restarted = await makeRuntime(fixture);
+  assert.equal(restarted.getState().competition.grants.length, 2);
+  assert.equal(restarted.getState().competition.plays.length, 1);
+  fixture.now = Date.parse('2026-11-09T05:00:00Z');
+  assert.equal(await restarted.canPlayCampaign(ad.campaignId, ad), false);
+  assert.deepEqual(await restarted.nextMainRadioAd({ count: 4 }), []);
+});
+
+test('renewals share wallet plus exact URI totals and reward-week votes may earn a consecutive reward', async () => {
+  const original = campaign('1');
+  const renewed = campaign('2', { audioURI: original.audioURI, title: 'Renewed title' });
+  const fixture = competitionFixture([original, renewed, campaign('3')]);
+  const runtime = await makeRuntime(fixture);
+  await runtime.recordMainRadioAdVote(advertVote('1'));
+  await runtime.recordMainRadioAdVote(advertVote('2'));
+  await runtime.recordMainRadioAdVote(advertVote('3'));
+  fixture.now = Date.parse('2026-11-02T05:00:00Z');
+  await runtime.reconcileAdvertCompetition();
+  assert.equal(runtime.getState().competition.grants.length, 1);
+  assert.equal(runtime.getState().competition.closedWeeks[0].ranking[0].net, 2);
+  await runtime.recordMainRadioAdVote(advertVote('2', 'reward-week-vote'));
+  fixture.now = Date.parse('2026-11-09T05:00:00Z');
+  await runtime.reconcileAdvertCompetition();
+  const grants = runtime.getState().competition.grants;
+  assert.equal(grants.length, 2);
+  assert.equal(grants[0].advertId, grants[1].advertId);
+  assert.deepEqual(grants.map(grant => grant.rewardWeek), ['NY-2026-11-02', 'NY-2026-11-09']);
+  assert.equal(runtime.getState().competition.lifetimeTotals.find(row => row.advertId === grants[0].advertId).up, 3);
+});
+
+test('delayed recovery never shifts an expired reward, and empty or nonpositive weeks award nothing', async () => {
+  const fixture = competitionFixture();
+  const runtime = await makeRuntime(fixture);
+  await runtime.recordMainRadioAdVote(advertVote('1'));
+  fixture.now = Date.parse('2026-11-16T05:00:00Z');
+  await runtime.reconcileAdvertCompetition();
+  assert.deepEqual(runtime.getState().competition.grants.map(grant => grant.rewardWeek), ['NY-2026-11-02']);
+  assert.equal(await runtime.nextMainRadioAd(), null);
+  await runtime.recordMainRadioAdVote(advertVote('1', 'negative', -1));
+  await runtime.recordMainRadioAdVote(advertVote('1', 'zero'));
+  fixture.now = Date.parse('2026-11-23T05:00:00Z');
+  await runtime.reconcileAdvertCompetition();
+  assert.equal(runtime.getState().competition.closedWeeks.at(-1).ranking[0].net, 0);
+  assert.equal(runtime.getState().competition.grants.length, 1);
+  assert.equal(runtime.getState().competition.closedWeeks.find(week => week.week === 'NY-2026-11-09').winners.length, 0);
+});
+
+test('closure checkpoint failures are visible and retryable without duplicate or partially granted rewards', async () => {
+  const fixture = competitionFixture();
+  const runtime = await makeRuntime(fixture);
+  await runtime.recordMainRadioAdVote(advertVote('1'));
+  fixture.now = Date.parse('2026-11-02T05:00:00Z');
+  fixture.setSave(async () => { throw new Error('closure checkpoint unavailable'); });
+  await assert.rejects(runtime.reconcileAdvertCompetition(), /closure checkpoint unavailable/);
+  assert.equal(runtime.getState().competition.grants.length, 0);
+  assert.equal(runtime.getAdvertCompetitionStatus().retryable, true);
+  assert.match(runtime.getAdvertCompetitionStatus().lastError, /closure checkpoint unavailable/);
+  fixture.setSave(async () => 'ipfs://journal');
+  await runtime.reconcileAdvertCompetition();
+  assert.equal(runtime.getAdvertCompetitionStatus().ready, true);
+  assert.equal(runtime.getState().competition.grants.length, 1);
+  const ad = await runtime.nextMainRadioAd();
+  const play = { ...ad, radioPlayId: 'retryable-free-play', startedAt: fixture.now, audibleMs: 30000 };
+  fixture.now += 30000;
+  fixture.setSave(async () => { throw new Error('free receipt checkpoint unavailable'); });
+  await assert.rejects(runtime.recordCompetitionAdvertPlay(play), /free receipt checkpoint unavailable/);
+  assert.equal(runtime.getState().competition.plays.length, 0);
+  fixture.setSave(async () => 'ipfs://journal');
+  await runtime.recordCompetitionAdvertPlay(play);
+  assert.equal(runtime.getState().competition.plays.length, 1);
+});
+
+test('spring DST uses a 167-hour source week and nonpositive weeks never win', async () => {
+  const fixture = competitionFixture();
+  fixture.now = Date.parse('2027-03-14T12:00:00Z');
+  const runtime = await makeRuntime(fixture);
+  await runtime.recordMainRadioAdVote(advertVote('1', 'spring-down', -1));
+  fixture.now = Date.parse('2027-03-15T04:00:00Z');
+  await runtime.reconcileAdvertCompetition();
+  const week = runtime.getState().competition.closedWeeks.at(-1);
+  assert.equal(Date.parse(week.endAt) - Date.parse(week.startAt), 167 * 3600000);
+  assert.equal(week.ranking[0].net, -1);
+  assert.equal(week.winners.length, 0);
+  assert.equal(runtime.getState().competition.grants.length, 0);
+});
+
+test('reward grants themselves honor spring and fall DST instead of adding seven fixed UTC days', async () => {
+  for (const [voteAt, closeAt, endAt, hours] of [
+    ['2027-03-07T12:00:00Z', '2027-03-08T05:00:00Z', '2027-03-15T04:00:00.000Z', 167],
+    ['2026-10-25T12:00:00Z', '2026-10-26T04:00:00Z', '2026-11-02T05:00:00.000Z', 169],
+  ]) {
+    const fixture = competitionFixture();
+    fixture.now = Date.parse(voteAt);
+    const runtime = await makeRuntime(fixture);
+    await runtime.recordMainRadioAdVote(advertVote('1'));
+    fixture.now = Date.parse(closeAt);
+    await runtime.reconcileAdvertCompetition();
+    const [grant] = runtime.getState().competition.grants;
+    assert.equal(grant.endAt, endAt);
+    assert.equal(Date.parse(grant.endAt) - Date.parse(grant.startAt), hours * 3600000);
+  }
+});
+
+test('corrupt or duplicated reward grants fail restore instead of extending eligibility', async () => {
+  const fixture = competitionFixture();
+  const runtime = await makeRuntime(fixture);
+  await runtime.recordMainRadioAdVote(advertVote('1'));
+  fixture.now = Date.parse('2026-11-02T05:00:00Z');
+  await runtime.reconcileAdvertCompetition();
+  const valid = structuredClone(fixture.state);
+  fixture.state.competition.grants[0].endAt = '2026-11-16T05:00:00.000Z';
+  await assert.rejects(makeRuntime(fixture), /Invalid advert competition reward grant/);
+  Object.assign(fixture.state, structuredClone(valid));
+  fixture.state.competition.grants.push(structuredClone(fixture.state.competition.grants[0]));
+  await assert.rejects(makeRuntime(fixture), /Invalid advert competition reward grant/);
+});
+
+test('advert identity ignores wallet case but never merges another wallet or an altered exact media URI', async () => {
+  const { advertIdentity } = await import('../discord-bot/advert-competition.js');
+  const original = campaign('1', { advertiser: `0x${'a'.repeat(40)}` });
+  assert.equal(advertIdentity(original), advertIdentity({ ...original, advertiser: `0x${'A'.repeat(40)}` }));
+  assert.notEqual(advertIdentity(original), advertIdentity({ ...original, advertiser: address('2') }));
+  assert.notEqual(advertIdentity(original), advertIdentity({ ...original, audioURI: `${original.audioURI}/audio.mp3` }));
+});
+
+test('missing historical identity blocks closure until verified metadata becomes available', async () => {
+  let available = false;
+  const fixture = competitionFixture([], { readCampaign: async () => available ? campaign('1') : null });
+  fixture.state.adVotes = [{ ...advertVote('1'), recordedAt: new Date(fixture.now).toISOString() }];
+  const runtime = await makeRuntime(fixture);
+  fixture.now = Date.parse('2026-11-02T05:00:00Z');
+  await runtime.reconcileAdvertCompetition();
+  assert.equal(runtime.getAdvertCompetitionStatus().retryable, true);
+  assert.equal(runtime.getState().competition.grants.length, 0);
+  available = true;
+  await runtime.reconcileAdvertCompetition();
+  assert.equal(runtime.getAdvertCompetitionStatus().ready, true);
+  assert.equal(runtime.getState().competition.grants.length, 1);
+});
+
+test('startup recovers missed weeks from verified historical media even with no worker gas or current campaigns', async () => {
+  const fixture = competitionFixture([], { balance: 0n, workerMinBalanceWei: 1n,
+    readCampaign: async campaignId => campaign(campaignId) });
+  fixture.state.adVotes = [{ ...advertVote('1'), recordedAt: new Date(fixture.now).toISOString() }];
+  fixture.now = Date.parse('2026-11-16T05:00:00Z');
+  const runtime = await makeRuntime(fixture);
+  assert.equal(runtime.getAdvertCompetitionStatus().ready, true);
+  assert.deepEqual(runtime.getState().competition.grants.map(grant => grant.rewardWeek), ['NY-2026-11-02']);
+  assert.equal(await runtime.nextMainRadioAd(), null);
+  assert.equal(fixture.impressionCalls.length, 0);
+});
+
+test('rewards respect removal, valid media, pause and existing paid campaign priority', async () => {
+  const campaigns = [campaign('1')];
+  let mediaValid = true;
+  const fixture = competitionFixture(campaigns, { slots: 1,
+    resolveCampaignMedia: () => mediaValid ? { mediaType: 'audio/mpeg' } : null });
+  const runtime = await makeRuntime(fixture);
+  await runtime.recordMainRadioAdVote(advertVote('1'));
+  fixture.now = Date.parse('2026-11-02T05:00:00Z');
+  await runtime.reconcileAdvertCompetition();
+  mediaValid = false;
+  assert.equal(await runtime.nextMainRadioAd(), null);
+  mediaValid = true;
+  campaigns[0].removed = true;
+  assert.equal(await runtime.nextMainRadioAd(), null);
+  campaigns[0].removed = false;
+  fixture.setPaused(true);
+  assert.equal(await runtime.nextMainRadioAd(), null);
+  fixture.setPaused(false);
+  campaigns.push(campaign('2', { startedAt: new Date(fixture.now - 1000).toISOString(),
+    expiresAt: new Date(fixture.now + 86400000).toISOString() }));
+  const paid = await runtime.nextMainRadioAd();
+  assert.equal(paid.campaignId, '2');
+  assert.equal(paid.competitionReward, undefined);
+  const ads = await runtime.nextMainRadioAd({ count: 2 });
+  assert.equal(ads[0].campaignId, '2');
+  assert.equal(ads[1].campaignId, '1');
+  assert.ok(ads[1].competitionReward);
+  campaigns[1].title = 'Paid campaign changed';
+  fixture.setSave(async () => { throw new Error('competition catalog checkpoint unavailable'); });
+  const paidDuringFailure = await runtime.nextMainRadioAd({ count: 2 });
+  assert.deepEqual(paidDuringFailure.map(ad => ad.campaignId), ['2']);
+  assert.equal(runtime.getAdvertCompetitionStatus().retryable, true);
 });
 
 test('AdLoop queue includes active unseated campaigns and ranks DJuke boosts before prior loop plays', async () => {

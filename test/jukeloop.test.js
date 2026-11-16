@@ -732,6 +732,31 @@ test('JukeLoop player errors discard the active DeVert ad before an Idle event c
   session.destroy();
 });
 
+test('JukeLoop routes an audible competition advert only to free accounting', async () => {
+  const { createJukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const freePlays = [];
+  const session = createJukeLoopSession('competition-accounting', {
+    voiceChannel: { guild: { id: 'competition-accounting' } }, textChannel: {}, client: {},
+    devertPlayback: {
+      recordCompetitionAdvertPlay: async play => freePlays.push(play),
+      recordCampaignImpression: () => assert.fail('free play must not record a paid contract impression'),
+      recordPaidAdvertPlay: () => assert.fail('free play must not count as a purchased play'),
+    },
+  });
+  session._destroyed = true;
+  const competitionReward = { advertId: 'advert', sourceWeek: 'NY-2026-10-26', rewardWeek: 'NY-2026-11-02' };
+  session._currentDevertAd = { campaignId: '42', mainRadio: true, competitionReward };
+  session._nowPlaying = { playId: 'free:42', trackId: 'devert:42', audible: true, startedAt: Date.now() - 35000 };
+  try {
+    session.player.emit('idle');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(freePlays.length, 1);
+    assert.equal(freePlays[0].competitionReward, competitionReward);
+    assert.equal(freePlays[0].mainRadio, true);
+    assert.ok(freePlays[0].audibleMs >= 35000);
+  } finally { session.destroy(); }
+});
+
 test('JukeLoop builds canonical IPFS gateway URLs and cumulative rating messages', async () => {
   const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'jukeloop.js'));
   const {
@@ -1032,6 +1057,7 @@ test('JukeLoop restores a queued main-radio ad after restart and surfaces the la
     pendingDevertAds: [{
       campaignId: '8',
       mainRadio: true,
+      competitionReward: { advertId: 'advert', sourceWeek: 'NY-2026-10-26', rewardWeek: 'NY-2026-11-02' },
       track: { trackId: 'devert:8', title: 'Next Ad', uploader: 'Advertiser', messageId: 'next-message', channelId: 'ad-channel' },
     }],
     failedDevertCampaigns: [],
@@ -1082,6 +1108,8 @@ test('JukeLoop restores a queued main-radio ad after restart and surfaces the la
     assert.equal(saved.length, 1);
     assert.equal(saved[0].preparedDevertAd, null, 'a started ad is cleared so a restart does not replay it');
     assert.deepEqual(saved[0].pendingDevertAds.map(ad => ad.campaignId), ['8']);
+    assert.deepEqual(saved[0].pendingDevertAds[0].competitionReward,
+      { advertId: 'advert', sourceWeek: 'NY-2026-10-26', rewardWeek: 'NY-2026-11-02' });
     assert.equal(saved[0].lastSkip.reason, 'ad file could not be fetched');
   } finally {
     session.destroy();

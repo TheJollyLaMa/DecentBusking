@@ -68,7 +68,8 @@ import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, verifyDjukePlaylistWorker, DJUKE_ABI, DJUKE_PLAYLIST_WORKER_ABI } from './djuke.js';
 import { createDevertQueueReader, createDevertQueueRuntime, createDevertQueueCatalogSync, combinePaidQueues } from './devert-queue.js';
 import { devertQueueAbi } from '../js/devert-queue.mjs';
-import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, resolveDevertSchedulerPrivateKey } from './devert.js';
+import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, normalizeDevertCampaign,
+  resolveDevertSchedulerPrivateKey } from './devert.js';
 import { createDevertPlaybackRuntime, initializeDevertPlaybackWithRetry, withAdvertTallies } from './devert-playback.js';
 import { startDevertLoopWorker, startDevertWebsiteLoopWorker } from './devert-loop.js';
 import { DISCORD_REST_OPTIONS, loginDiscordClient, recoverDiscordConnection, watchDiscordSession } from './discord-login.js';
@@ -725,10 +726,24 @@ async function main() {
       deserialize: value => value });
     _devertPlaybackRuntime = createDevertPlaybackRuntime({ contract, provider: scheduler.provider,
       restore: journalStore.restore, save: journalStore.save, readCampaigns: readDevertState,
+      competitionEnabled: process.env.DEVERT_COMPETITION_ENABLED === 'true',
+      readCampaign: async (campaignId, snapshot) => {
+        const campaign = normalizeDevertCampaign(campaignId,
+          await contract.getCampaign(BigInt(campaignId), { blockTag: snapshot.blockNumber }),
+          snapshot.weekId, { allowHistorical: true });
+        if ((await scheduler.provider.getBlock(snapshot.blockNumber))?.hash !== snapshot.blockHash) {
+          throw new Error('Historical advert campaign snapshot is not canonical');
+        }
+        _contentCampaigns.set(String(campaignId), campaign);
+        const moderationBlocked = _contentReview?.apply(campaign).contentReview.scope === 'all-radio';
+        return { ...campaign, moderationBlocked,
+          removed: devertRemovals.isRemoved(campaignId) || moderationBlocked };
+      },
       workerAddress: scheduler.address, workerMinBalanceWei,
       resolveCampaignMedia: (campaign, cid) => resolveDevertCampaignMedia(campaign, cid, {
         playlist: getPlaybackPlaylist(), nfts: (_nftCatalog || []).map(nft => _contentReview ? _contentReview.apply(nft) : nft),
-      }), isCampaignRemoved: campaignId => campaignContentBlocked(campaignId) ||
+      }), isCampaignRemoved: (campaignId, campaign) => campaignContentBlocked(campaignId) ||
+        !!(_contentReview && campaign && !radioContentAllowed(_contentReview.apply(campaign), true)) ||
         (devertRemovals ? devertRemovals.isRemoved(campaignId) : false) });
     _devertPlaybackInitialization = initializeDevertPlaybackWithRetry({
       initialize: () => _devertPlaybackRuntime.initialize(),

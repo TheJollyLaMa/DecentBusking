@@ -1,6 +1,9 @@
 import { id, isAddress } from 'ethers';
 import { planDevertQueues } from '../js/devert-scheduler.mjs';
 import { DEFAULT_WORKER_MIN_BALANCE_WEI, readWorkerGasState } from '../js/worker-gas.mjs';
+import { advertIdentity, competitionCandidates, competitionGrant, reconcileAdvertCompetition,
+  validateAdvertCompetition } from './advert-competition.js';
+import { currentPayrollPeriod } from '../js/payroll-week.mjs';
 
 const SCHEMA_VERSION = 1;
 
@@ -8,6 +11,54 @@ function voteTally(votes) {
   const up = votes.filter(entry => entry.vote === 1).length;
   const down = votes.filter(entry => entry.vote === -1).length;
   return { up, down, net: up - down };
+}
+
+function advertVoteKey({ radioPlayId, voterId }) {
+  return id(`devert-accepted-vote:${JSON.stringify([radioPlayId, voterId])}`);
+}
+
+function advertVoteTotals(receipts) {
+  const totals = new Map();
+  for (const receipt of receipts) {
+    if (!totals.has(receipt.campaignId)) totals.set(receipt.campaignId, { campaignId: receipt.campaignId, up: 0, down: 0, net: 0 });
+    const row = totals.get(receipt.campaignId);
+    if (receipt.vote === 1) row.up++;
+    else row.down++;
+    row.net += receipt.vote;
+  }
+  return [...totals.values()];
+}
+
+function migrateAdvertVoteLedger(adVotes, accountingStartedAt) {
+  const receipts = adVotes.map(({ voterId, ...entry }) => ({ ...entry, key: advertVoteKey({ ...entry, voterId }) }));
+  return { schemaVersion: 1, history: 'retained-history-only', accountingStartedAt,
+    receipts, totals: advertVoteTotals(receipts) };
+}
+
+function validateAdvertVoteLedger(ledger, adVotes) {
+  if (!ledger || ledger.schemaVersion !== 1 || ledger.history !== 'retained-history-only' ||
+    !Number.isFinite(Date.parse(ledger.accountingStartedAt)) || !Array.isArray(ledger.receipts) ||
+    !Array.isArray(ledger.totals)) throw new Error('Invalid DeVert advert vote ledger');
+  const receipts = new Map();
+  for (const entry of ledger.receipts) {
+    if (!entry || !/^0x[0-9a-f]{64}$/.test(entry.key) || receipts.has(entry.key) ||
+      typeof entry.campaignId !== 'string' || !/^\d+$/.test(entry.campaignId) ||
+      typeof entry.radioPlayId !== 'string' || !entry.radioPlayId || !Number.isFinite(Date.parse(entry.recordedAt)) ||
+      entry.vote !== 1 && entry.vote !== -1 || Object.hasOwn(entry, 'voterId')) {
+      throw new Error('Invalid DeVert accepted advert vote receipt');
+    }
+    receipts.set(entry.key, entry);
+  }
+  for (const entry of adVotes) {
+    const receipt = receipts.get(advertVoteKey(entry));
+    if (!receipt || receipt.campaignId !== String(entry.campaignId) || receipt.radioPlayId !== entry.radioPlayId ||
+      receipt.vote !== entry.vote || receipt.recordedAt !== entry.recordedAt) {
+      throw new Error('DeVert advert vote ledger does not cover retained votes');
+    }
+  }
+  if (JSON.stringify(ledger.totals) !== JSON.stringify(advertVoteTotals(ledger.receipts))) {
+    throw new Error('DeVert advert vote totals do not match accepted receipts');
+  }
 }
 
 /** Group retained main-radio ad plays and votes by period and campaign; voter IDs are never returned. */
@@ -105,11 +156,15 @@ function validateJournal(value) {
   for (const entry of adVotes) {
     if (!entry || !/^\d+$/.test(String(entry.campaignId)) || typeof entry.radioPlayId !== 'string' || !entry.radioPlayId ||
       typeof entry.voterId !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(entry.voterId) ||
-      entry.vote !== 1 && entry.vote !== -1) throw new Error('Invalid DeVert radio ad vote');
+      entry.vote !== 1 && entry.vote !== -1 || !Number.isFinite(Date.parse(entry.recordedAt))) throw new Error('Invalid DeVert radio ad vote');
     const key = `${entry.radioPlayId}:${entry.voterId}`;
     if (voteKeys.has(key)) throw new Error('Duplicate DeVert radio ad vote');
     voteKeys.add(key);
   }
+  if (value.adVoteLedger !== undefined) validateAdvertVoteLedger(value.adVoteLedger, adVotes);
+  if (value.competition !== undefined) validateAdvertCompetition(value.competition);
+  if (value.competition?.plays.some(play => [...value.impressions, ...(value.paidPlays || [])]
+    .some(entry => entry.radioPlayId === play.radioPlayId))) throw new Error('Free advert play overlaps paid accounting');
   const paidPlays = value.paidPlays || [];
   const paidPlayIds = new Set();
   for (const entry of paidPlays) {
@@ -123,7 +178,7 @@ function validateJournal(value) {
 export function createDevertPlaybackRuntime({ contract, provider = contract?.runner?.provider, restore, save,
   readCampaigns, resolveCampaignMedia = () => null, isCampaignRemoved = () => false, now = () => Date.now(), minimumAudibleMs = MIN_AUDIBLE_MS, log = console,
   workerAddress, workerMinBalanceWei = DEFAULT_WORKER_MIN_BALANCE_WEI, workerDailyBurnWei = WORKER_GAS_DAILY_BURN_WEI, workerGasReader = readWorkerGasState,
-  workerGasCheckMs = WORKER_GAS_CHECK_MS }) {
+  workerGasCheckMs = WORKER_GAS_CHECK_MS, competitionEnabled = false, readCampaign }) {
   if (!contract || typeof restore !== 'function' || typeof save !== 'function' || typeof readCampaigns !== 'function') {
     throw new Error('DeVert playback requires a contract and durable journal store');
   }
@@ -138,6 +193,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
   let insufficientFundsBalanceWei = null;
   const workerWallet = workerAddress && isAddress(workerAddress) ? workerAddress : null;
   const vertLoopNextRetryAtByCampaign = new Map();
+  let competitionStatus = { enabled: competitionEnabled, ready: false, lastError: null, retryable: false };
 
   const run = operation => {
     const result = queue.then(operation);
@@ -151,6 +207,34 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
     journal = validated;
   };
   const requireReady = () => { if (!initialized) throw new Error('DeVert playback journal is not initialized'); };
+
+  const refreshCompetition = async () => {
+    if (!competitionEnabled) return false;
+    try {
+      const snapshot = await readCampaigns();
+      const next = await reconcileAdvertCompetition({ state: journal.competition, receipts: journal.adVoteLedger.receipts,
+        snapshot, readCampaign, now: now() });
+      if (JSON.stringify(next) !== JSON.stringify(journal.competition)) await commit({ ...journal, competition: next });
+      const blocked = next.nextWeek < currentPayrollPeriod(now()).week;
+      const previousError = competitionStatus.lastError;
+      competitionStatus = { enabled: true, ready: !blocked, retryable: blocked,
+        lastError: blocked ? (next.unresolved.some(row => row.week === next.nextWeek)
+          ? `Week ${next.nextWeek}: campaign identity unavailable` : 'Weekly recovery still in progress') : null };
+      if (competitionStatus.lastError && competitionStatus.lastError !== previousError) {
+        log.warn(`[devert] Advert competition recovery pending; retryable: ${competitionStatus.lastError}`);
+      }
+      return true;
+    } catch (error) {
+      competitionStatus = { enabled: true, ready: false, retryable: true, lastError: error.message };
+      log.warn(`[devert] Advert competition recovery failed; retryable: ${error.message}`);
+      throw error;
+    }
+  };
+  const freeCandidates = snapshot => competitionEnabled && competitionStatus.ready
+    ? competitionCandidates({ state: journal.competition, snapshot, now: now(), isCampaignRemoved, resolveCampaignMedia }) : [];
+  const freeAd = ({ campaign, grant }, mainRadio) => ({ campaignId: campaign.campaignId, mainRadio,
+    competitionReward: { advertId: grant.advertId, sourceWeek: grant.sourceWeek, rewardWeek: grant.rewardWeek },
+    track: campaignTrack(campaign, mainRadio ? 'main-radio' : 'devert-loop') });
 
   const warnWorkerGas = state => {
     if (!state || state.checkedAt <= workerGasWarningAt) return;
@@ -372,6 +456,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
 
   const retryDeferredWork = async () => {
     if (!initialized) return false;
+    await refreshCompetition().catch(() => {});
     const force = Boolean(workerGasState?.lowBalance || workerGasState?.unavailable);
     const state = await refreshWorkerGasState({ force });
     if (!state || state.unavailable || state.lowBalance) return false;
@@ -407,10 +492,13 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
 
   return {
     isCampaignRemoved,
-    async canPlayCampaign(campaignId) {
+    async canPlayCampaign(campaignId, { competitionReward } = {}) {
       requireReady();
       if (isCampaignRemoved(campaignId)) return false;
       const snapshot = await readCampaigns();
+      if (competitionReward) return freeCandidates(snapshot).some(candidate => candidate.campaign.campaignId === String(campaignId) &&
+        candidate.grant.advertId === competitionReward.advertId && candidate.grant.sourceWeek === competitionReward.sourceWeek &&
+        candidate.grant.rewardWeek === competitionReward.rewardWeek);
       return snapshot.chainId === 8453 && !snapshot.paused && snapshot.campaigns.some(campaign =>
         campaign.campaignId === String(campaignId) && !campaign.removed &&
         Date.parse(campaign.startedAt) <= now() && now() < Date.parse(campaign.expiresAt));
@@ -418,6 +506,9 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
     initialize: () => run(async () => {
       const restored = await restore();
       journal = restored ? validateJournal(restored) : emptyJournal();
+      if (!journal.adVoteLedger) {
+        await commit({ ...journal, adVoteLedger: migrateAdvertVoteLedger(journal.adVotes, new Date(now()).toISOString()) });
+      }
       hydrateVertLoopRetryState();
       initialized = true;
       startRetryTimer();
@@ -440,48 +531,56 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       await retryDeferredWork();
       return true;
     }),
-    async nextMainRadioAd({ excludeCampaignIds = [], count = 1 } = {}) {
+    nextMainRadioAd: ({ excludeCampaignIds = [], count = 1 } = {}) => run(async () => {
       requireReady();
+      await refreshCompetition().catch(() => {});
       await retryPendingImpressions({ force: Boolean(workerGasState?.lowBalance || workerGasState?.unavailable) });
       const snapshot = await readCampaigns();
-      if (snapshot.chainId !== 8453 || snapshot.paused || !Array.isArray(snapshot.campaigns) ||
-        snapshot.market.mainRadioImpressions >= snapshot.market.slots) return null;
+      if (snapshot.chainId !== 8453 || snapshot.paused || !Array.isArray(snapshot.campaigns)) return null;
       const at = Date.parse(snapshot.snapshotAt);
       const plan = planDevertQueues({ campaigns: snapshot.campaigns,
         completedSongPlays: snapshot.market.slots * MUSIC_PLAYS_PER_MAIN_AD, now: at });
       const excluded = new Set(excludeCampaignIds.map(String));
       const voteScores = new Map();
-      for (const entry of journal.adVotes) {
-        voteScores.set(entry.campaignId, (voteScores.get(entry.campaignId) || 0) + entry.vote);
-      }
+      for (const entry of journal.adVoteLedger.totals) voteScores.set(entry.campaignId, entry.net);
       const limit = Number.isSafeInteger(count) && count > 0 ? count : 1;
-      const campaigns = plan.mainRadio.filter(item => !item.removed && !excluded.has(item.campaignId))
+      const campaigns = (snapshot.market.mainRadioImpressions >= snapshot.market.slots ? [] : plan.mainRadio)
+        .filter(item => !item.removed && !excluded.has(item.campaignId))
         .sort((first, second) => Number(second.djukeBoosts || 0) - Number(first.djukeBoosts || 0) ||
           Number((second.mainRadioPlays || 0) === 0) - Number((first.mainRadioPlays || 0) === 0) ||
           (voteScores.get(second.campaignId) || 0) - (voteScores.get(first.campaignId) || 0))
         .slice(0, limit);
-      if (limit === 1) {
-        const [campaign] = campaigns;
-        return campaign ? { campaignId: campaign.campaignId, mainRadio: true, track: campaignTrack(campaign, 'main-radio') } : null;
+      const selected = campaigns.map(campaign => ({ campaignId: campaign.campaignId, mainRadio: true,
+        track: campaignTrack(campaign, 'main-radio') }));
+      const paidIdentities = new Set(campaigns.map(advertIdentity));
+      for (const candidate of freeCandidates(snapshot)) {
+        if (selected.length >= limit) break;
+        if (!excluded.has(candidate.campaign.campaignId) && !paidIdentities.has(candidate.grant.advertId)) selected.push(freeAd(candidate, true));
       }
-      return campaigns.map(campaign => ({ campaignId: campaign.campaignId, mainRadio: true, track: campaignTrack(campaign, 'main-radio') }));
-    },
+      if (limit === 1) {
+        return selected[0] || null;
+      }
+      return selected;
+    }),
     getMainRadioAdVoteSummary: (radioPlayId, campaignId) => {
       requireReady();
-      const summary = voteTally(journal.adVotes.filter(entry => entry.radioPlayId === radioPlayId));
+      const summary = voteTally(journal.adVoteLedger.receipts.filter(entry => entry.radioPlayId === radioPlayId));
       if (!/^\d+$/.test(String(campaignId ?? ''))) return summary;
-      const [campaign] = summarizeMainRadioAdverts({ adVotes: journal.adVotes, impressions: journal.impressions,
+      const [campaign] = summarizeMainRadioAdverts({ adVotes: journal.adVoteLedger.receipts, impressions: journal.impressions,
         paidPlays: journal.paidPlays, periodOf: () => 'all-time' }).filter(row => row.campaignId === String(campaignId));
       const { period, ...totals } = campaign || { campaignId: String(campaignId), plays: 0, up: 0, down: 0, net: 0 };
       return { ...summary, campaign: totals };
     },
     getMainRadioAdvertTallies: periodOf => {
       requireReady();
-      return summarizeMainRadioAdverts({ adVotes: journal.adVotes, impressions: journal.impressions,
+      return summarizeMainRadioAdverts({ adVotes: journal.adVoteLedger.receipts, impressions: journal.impressions,
         paidPlays: journal.paidPlays, periodOf });
     },
-    recordPaidAdvertPlay: ({ campaignId, radioPlayId, audibleMs }) => run(async () => {
+    recordPaidAdvertPlay: ({ campaignId, radioPlayId, audibleMs, competitionReward }) => run(async () => {
       requireReady();
+      if (competitionReward || journal.competition?.plays.some(play => play.radioPlayId === radioPlayId)) {
+        throw new Error('Free advert playback cannot be counted as paid');
+      }
       if (!Number.isSafeInteger(audibleMs) || audibleMs < minimumAudibleMs) return false;
       if (!/^\d+$/.test(String(campaignId)) || typeof radioPlayId !== 'string' || !radioPlayId) throw new Error('Invalid DeVert paid advert play');
       if (journal.paidPlays.some(entry => entry.radioPlayId === radioPlayId)) return true;
@@ -495,14 +594,20 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
           typeof voterId !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(voterId) || (vote !== 1 && vote !== -1)) {
         throw new Error('Invalid DeVert radio ad vote');
       }
-      const existing = journal.adVotes.find(entry => entry.radioPlayId === radioPlayId && entry.voterId === voterId);
+      const key = advertVoteKey({ radioPlayId, voterId });
+      const existing = journal.adVoteLedger.receipts.find(entry => entry.key === key);
       if (existing) return { campaignId: existing.campaignId, radioPlayId, vote: existing.vote, duplicate: true };
       const entry = { campaignId: String(campaignId), radioPlayId, voterId, vote, recordedAt: new Date(now()).toISOString() };
-      await commit({ ...journal, adVotes: [...journal.adVotes, entry].slice(-MAX_SAVED_IDS) });
+      const receipts = [...journal.adVoteLedger.receipts, { key, campaignId: entry.campaignId,
+        radioPlayId, vote, recordedAt: entry.recordedAt }];
+      await commit({ ...journal, adVotes: [...journal.adVotes, entry].slice(-MAX_SAVED_IDS),
+        adVoteLedger: { ...journal.adVoteLedger, receipts, totals: advertVoteTotals(receipts) } });
+      await refreshCompetition().catch(() => {});
       return { campaignId: entry.campaignId, radioPlayId, vote, duplicate: false };
     }),
-    async nextDevertLoopAd({ excludeCampaignIds = [] } = {}) {
+    nextDevertLoopAd: ({ excludeCampaignIds = [] } = {}) => run(async () => {
       requireReady();
+      await refreshCompetition().catch(() => {});
       await retryPendingImpressions({ force: Boolean(workerGasState?.lowBalance || workerGasState?.unavailable) });
       const snapshot = await readCampaigns();
       if (snapshot.chainId !== 8453 || snapshot.paused || !Array.isArray(snapshot.campaigns)) return null;
@@ -516,11 +621,41 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
         Number(first.devertPlays || 0) - Number(second.devertPlays || 0) ||
         (BigInt(second.offerUnits) > BigInt(first.offerUnits) ? 1 : BigInt(second.offerUnits) < BigInt(first.offerUnits) ? -1 :
           String(first.campaignId).localeCompare(String(second.campaignId))));
-      return campaign[0] ? { campaignId: String(campaign[0].campaignId), mainRadio: false,
-        track: campaignTrack(campaign[0], 'devert-loop') } : null;
-    },
-    recordCampaignImpression: ({ campaignId, radioPlayId, mainRadio, audibleMs }) => run(async () => {
+      if (campaign[0]) return { campaignId: String(campaign[0].campaignId), mainRadio: false,
+        track: campaignTrack(campaign[0], 'devert-loop') };
+      const candidate = freeCandidates(snapshot).find(item => !excluded.has(item.campaign.campaignId));
+      return candidate ? freeAd(candidate, false) : null;
+    }),
+    recordCompetitionAdvertPlay: ({ campaignId, radioPlayId, mainRadio, audibleMs, startedAt, competitionReward }) => run(async () => {
       requireReady();
+      if (!competitionEnabled) throw new Error('Advert competition is disabled');
+      if (!Number.isSafeInteger(audibleMs) || audibleMs < minimumAudibleMs) return false;
+      if (typeof radioPlayId !== 'string' || !radioPlayId || typeof mainRadio !== 'boolean') throw new Error('Invalid free advert play');
+      if (journal.impressions.some(play => play.radioPlayId === radioPlayId) ||
+        journal.paidPlays.some(play => play.radioPlayId === radioPlayId)) throw new Error('Free advert play overlaps paid accounting');
+      const existing = journal.competition?.plays.find(play => play.radioPlayId === radioPlayId && play.mainRadio === mainRadio);
+      if (existing) {
+        if (existing.campaignId !== String(campaignId) || existing.advertId !== competitionReward?.advertId ||
+          existing.sourceWeek !== competitionReward?.sourceWeek ||
+          !competitionGrant(journal.competition, competitionReward, Date.parse(existing.startedAt))) {
+          throw new Error('Conflicting free advert play identity');
+        }
+        return true;
+      }
+      const start = typeof startedAt === 'number' ? startedAt : Date.parse(startedAt);
+      const campaign = journal.competition?.catalog.find(item => item.campaignId === String(campaignId));
+      if (!Number.isFinite(start) || start > now() || !competitionGrant(journal.competition, competitionReward, start) ||
+        !campaign || advertIdentity(campaign) !== competitionReward.advertId) throw new Error('Free advert grant unavailable for this play');
+      const play = { campaignId: String(campaignId), radioPlayId, mainRadio, advertId: competitionReward.advertId,
+        sourceWeek: competitionReward.sourceWeek, startedAt: new Date(start).toISOString(), recordedAt: new Date(now()).toISOString() };
+      await commit({ ...journal, competition: { ...journal.competition, plays: [...journal.competition.plays, play] } });
+      return true;
+    }),
+    recordCampaignImpression: ({ campaignId, radioPlayId, mainRadio, audibleMs, competitionReward }) => run(async () => {
+      requireReady();
+      if (competitionReward || journal.competition?.plays.some(play => play.radioPlayId === radioPlayId)) {
+        throw new Error('Free advert playback must use separate competition accounting');
+      }
       if (!Number.isSafeInteger(audibleMs) || audibleMs < minimumAudibleMs) return false;
       if (!/^\d+$/.test(String(campaignId)) || typeof radioPlayId !== 'string' || !radioPlayId) throw new Error('Invalid DeVert impression identity');
       const impressionId = id(`devert-impression:${campaignId}:${radioPlayId}:${mainRadio ? 'main' : 'broadcast'}`);
@@ -542,6 +677,8 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       return true;
     }),
     getState: () => { requireReady(); return structuredClone(journal); },
+    reconcileAdvertCompetition: () => run(async () => { requireReady(); await refreshCompetition(); return structuredClone(competitionStatus); }),
+    getAdvertCompetitionStatus: () => structuredClone(competitionStatus),
     getWorkerGasState: async () => structuredClone(await refreshWorkerGasState()),
   };
 }

@@ -61,7 +61,11 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
       const audibleMs = now() - completed.startedAt;
       if (audibleMs >= minimumAudibleMs) {
         try {
-          await playback.recordCampaignImpression({ campaignId: completed.campaignId,
+          if (completed.competitionReward) {
+            await playback.recordCompetitionAdvertPlay({ campaignId: completed.campaignId,
+              competitionReward: completed.competitionReward, startedAt: completed.startedAt,
+              radioPlayId: completed.radioPlayId, mainRadio: false, audibleMs });
+          } else await playback.recordCampaignImpression({ campaignId: completed.campaignId,
             radioPlayId: completed.radioPlayId, mainRadio: false, audibleMs });
         } catch (error) {
           failedCampaigns.set(completed.campaignId, now() + 5 * 60_000);
@@ -101,7 +105,7 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
     if (playback.isCampaignRemoved?.(ad.campaignId)) { scheduleNext(1_000); return; }
     if (playback.canPlayCampaign) {
       try {
-        if (!await playback.canPlayCampaign(ad.campaignId)) { scheduleNext(1_000); return; }
+        if (!await playback.canPlayCampaign(ad.campaignId, { competitionReward: ad.competitionReward })) { scheduleNext(1_000); return; }
       } catch (error) {
         log.warn('[devert-loop] Campaign availability check failed:', error.message);
         scheduleNext(retryMs);
@@ -114,6 +118,7 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
     child = streamFactory(url);
     const mediaType = ad.track.mediaType || (ad.track.videoUrl ? 'video/mp4' : '');
     current = { campaignId: ad.campaignId, radioPlayId, title: ad.track.title,
+      ...(ad.competitionReward ? { competitionReward: ad.competitionReward } : {}),
       ipfsCid: ad.track.ipfsCid, mediaType,
       videoUrl: ad.track.videoUrl || (mediaType === 'video/mp4' ? `ipfs://${ad.track.ipfsCid}` : ''),
       startedAt: timestamp, audible: false };

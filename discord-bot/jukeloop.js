@@ -137,6 +137,7 @@ function normalizeMainRadioAd(ad) {
   return {
     campaignId: String(ad.campaignId),
     mainRadio: ad.mainRadio === true,
+    ...(ad.competitionReward ? { competitionReward: structuredClone(ad.competitionReward) } : {}),
     track: structuredClone(ad.track),
   };
 }
@@ -915,8 +916,12 @@ export class JukeLoopSession {
           this._persistMainRadioAdState();
         }
         if (this.devertPlayback && this._currentPaid?.kind !== 'devert') {
-          const durableRecord = this._currentDevertAd
-            ? this.devertPlayback.recordCampaignImpression({ campaignId: this._currentDevertAd.campaignId,
+          const durableRecord = this._currentDevertAd?.competitionReward
+            ? this.devertPlayback.recordCompetitionAdvertPlay({ campaignId: this._currentDevertAd.campaignId,
+                competitionReward: this._currentDevertAd.competitionReward, startedAt: this._completedPlay.startedAt,
+                radioPlayId: this._nowPlaying.playId, mainRadio: this._currentDevertAd.mainRadio,
+                audibleMs: this._completedPlay.audibleMs })
+            : this._currentDevertAd ? this.devertPlayback.recordCampaignImpression({ campaignId: this._currentDevertAd.campaignId,
                 radioPlayId: this._nowPlaying.playId, mainRadio: this._currentDevertAd.mainRadio,
                 audibleMs: this._completedPlay.audibleMs })
             : this.devertPlayback.recordCompletedMusicPlay({ playId: this._nowPlaying.playId,
@@ -2048,7 +2053,9 @@ export class JukeLoopSession {
           prepared = await this._prepareNextPlayback(null, { allowAds: false });
         }
         if (prepared?.devertAd && !prepared.devertAd.paidRequest && this.devertPlayback?.canPlayCampaign &&
-          !await this.devertPlayback.canPlayCampaign(prepared.devertAd.campaignId)) {
+          !await this.devertPlayback.canPlayCampaign(prepared.devertAd.campaignId, {
+            competitionReward: prepared.devertAd.competitionReward,
+          })) {
           this._disposePrepared(prepared, 'Campaign expired or removed before playback');
           this._preparedDevertAd = null;
           await this._persistMainRadioAdState();
