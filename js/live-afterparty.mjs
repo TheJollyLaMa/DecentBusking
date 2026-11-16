@@ -86,7 +86,8 @@ export function releasePreview(booking) {
 export function completionFacts(booking, reentry = null) {
   const record = booking?.broadcastCompletion;
   if (reentry?.status === 'ended') {
-    return { state: 'verified', endReason: reentry.endReason ?? null, endedAt: Number.isFinite(record?.actualEndedAt) ? record.actualEndedAt : null };
+    return { state: 'verified', endReason: reentry.endReason ?? null,
+      endedAt: Number.isFinite(reentry.endedAt) ? reentry.endedAt : Number.isFinite(record?.actualEndedAt) ? record.actualEndedAt : null };
   }
   if (record?.known === true && record.pending === false && Number.isFinite(record.actualEndedAt)) {
     return { state: 'verified', endReason: record.endReason ?? null, endedAt: record.actualEndedAt };
@@ -386,7 +387,7 @@ function completionRow(b, reentry, audience) {
   return row('completion', 'Show', 'unknown', 'Finish not verified', `${detail} Payment is unaffected.`, 'Check again later; your payment status below is independent.', { facts });
 }
 
-function approvalRow(b, now, audience) {
+function approvalRow(b, now, audience, completion) {
   const timing = releaseTiming(b, now), report = ipfsLink(b.reportUri);
   const admin = audience === 'admin';
   if (b.status === 'approved' || b.status === 'paid') {
@@ -396,7 +397,11 @@ function approvalRow(b, now, audience) {
   }
   if (b.status === 'refunded') return row('approval', 'Escrow approval', 'attention', 'Refunded · no payout approved', 'The escrow returned the funds to the funder.', 'Contact Jolly if you expected a payout.');
   if (b.status !== 'funded') return row('approval', 'Escrow approval', 'info', 'Not funded', 'No funded escrow exists for this booking, so there is nothing to approve.', admin ? 'Fund the booking before the show.' : 'Nothing to do yet.');
-  if (timing.phase === 'before-end') return row('approval', 'Escrow approval', 'pending', 'Waiting for the show to end', `Approval opens after ${formatEt(timing.end)}.`, admin ? 'Come back after the set.' : 'Nothing for you to sign.');
+  if (timing.phase === 'before-end') return completion?.state === 'verified'
+    ? row('approval', 'Escrow approval', 'pending', 'Waiting for the original booked end',
+      `The stage ended, but the original contract opens approval after ${formatEt(timing.end)}.`,
+      admin ? 'Come back after the booked end.' : 'Nothing for you to sign.')
+    : row('approval', 'Escrow approval', 'pending', 'Waiting for the show to end', `Approval opens after ${formatEt(timing.end)}.`, admin ? 'Come back after the set.' : 'Nothing for you to sign.');
   if (timing.phase === 'review-window') {
     return row('approval', 'Escrow approval', 'pending', 'Waiting for approval',
       admin ? 'The review window is open.' : 'Jolly approves your guaranteed fee after the set.',
@@ -463,14 +468,14 @@ export function afterpartyRows(booking, { audience = 'performer', now = Date.now
   if (audience === 'public') {
     return [completion.state === 'verified' && completion.celebrate ? completion : null, radio.state === 'verified' ? radio : null].filter(Boolean);
   }
-  return [completion, approvalRow(booking, now, audience), paymentRow(booking, now, audience), recording, radio, giftRow()];
+  return [completion, approvalRow(booking, now, audience, completion.facts), paymentRow(booking, now, audience), recording, radio, giftRow()];
 }
 
 export function afterpartyMilestones(booking, rows) {
   const name = booking.displayName || 'The performer';
   return rows.filter(item => item.celebrate && item.state === 'verified').map(item => {
     if (item.id === 'completion') {
-      return { id: `curtain:${booking.id}:${item.facts.endedAt ?? 'verified'}`, kind: 'completion', bookingId: booking.id, title: 'Curtain call', subtitle: `${name}’s set is finished.`, evidence: { endedAt: item.facts.endedAt } };
+      return { id: `curtain:${booking.id}`, kind: 'completion', bookingId: booking.id, title: 'Curtain call', subtitle: `${name}’s set is finished.`, evidence: { endedAt: item.facts.endedAt } };
     }
     if (item.id === 'payment') return { id: `payment:${booking.id}:${item.txHash}`, kind: 'payment', bookingId: booking.id, title: 'Payment confirmed', subtitle: usdcText(booking.paidUnits || booking.approvedUnits || booking.amountUnits), evidence: { txHash: item.txHash, chainId: BASE_CHAIN_ID } };
     return { id: `release:${booking.id}:${item.trackId}`, kind: 'radio-release', bookingId: booking.id, title: 'On the radio', subtitle: `${booking.title || 'The live recording'} is out.`, evidence: { trackId: item.trackId, tokenId: item.tokenId } };
@@ -494,9 +499,16 @@ function storedMilestones(storage) {
     return Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   } catch { return []; }
 }
-export function milestoneSeen(id, storage = globalThis.localStorage) { return memory.has(id) || storedMilestones(storage).includes(id); }
+function defaultMilestoneStorage() {
+  try { return globalThis.localStorage; }
+  catch (error) {
+    console.warn('[afterparty] milestone storage unavailable:', error?.message);
+    return null;
+  }
+}
+export function milestoneSeen(id, storage = defaultMilestoneStorage()) { return memory.has(id) || storedMilestones(storage).includes(id); }
 export function resetAfterpartyMilestones() { memory.clear(); }
-export function celebrateAfterparty(milestone, { storage = globalThis.localStorage, replay = false } = {}) {
+export function celebrateAfterparty(milestone, { storage = defaultMilestoneStorage(), replay = false } = {}) {
   if (!milestone?.id || typeof milestone.id !== 'string') return { celebrated: false, reason: 'no-id' };
   const fresh = !milestoneSeen(milestone.id, storage);
   if (!fresh && !replay) return { celebrated: false, reason: 'already-seen' };

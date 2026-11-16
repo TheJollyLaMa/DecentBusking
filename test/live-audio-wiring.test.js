@@ -30,6 +30,7 @@ function dom(t) {
   const createElement = tag => ({
     tag, children: [], attributes: {}, textContent: '', innerHTML: '',
     append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; },
     setAttribute(name, value) { this.attributes[name] = value; },
     getAttribute(name) { return this.attributes[name]; },
     addEventListener(name, callback) { this.listeners ||= {}; this.listeners[name] = callback; },
@@ -234,7 +235,8 @@ test('Profile terminal allocated states have no re-entry link and forced endings
   for (const endReason of ['producer-finished', 'operator-cut', 'authorization-expired', 'audio-loss', 'declined', 'not-ready', null]) {
     const container = createElement('section'), b = allocatedBooking();
     const state = { ...allocatedState(b), phase: 'ended',
-      broadcast: { ...allocatedState(b).broadcast, phase: 'ended', endReason, actualEndedAt: reentryTime } };
+      broadcast: { ...allocatedState(b).broadcast, phase: 'ended', endReason,
+        actualStartedAt: reentryTime - 600000, actualEndedAt: reentryTime } };
     await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
       bookingState: { bookings: [b], escrowAddress: otherWallet },
       fetchImpl: async () => ({ ok: true, json: async () => state }) });
@@ -242,6 +244,83 @@ test('Profile terminal allocated states have no re-entry link and forced endings
     assert.equal(nodes.filter(node => node.attributes?.['data-live-room']).length, 0);
     assert.match(title, endReason === 'producer-finished' ? /Your set is finished/ : /original guaranteed fee unchanged/);
   }
+});
+
+test('Profile does not celebrate inconsistent, stale or wrong-booking successful-ending claims', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t);
+  t.mock.method(Date, 'now', () => reentryTime);
+  const b = allocatedBooking();
+  const valid = { ...allocatedState(b), phase: 'ended', broadcast: {
+    ...allocatedState(b).broadcast, phase: 'ended', endReason: 'producer-finished',
+    actualStartedAt: reentryTime - 600000, actualEndedAt: reentryTime - 1000,
+  } };
+  for (const state of [
+    { ...valid, bookingId: 'other' },
+    { ...valid, bookingVerification: { fresh: false, verifiedAt: reentryTime } },
+    { ...valid, bookingVerification: { fresh: true, verifiedAt: reentryTime - 30001 } },
+    { ...valid, phase: 'cancelled' },
+    { ...valid, broadcast: { ...valid.broadcast, phase: 'live' } },
+    { ...valid, broadcast: { ...valid.broadcast, allocationId: null } },
+    { ...valid, broadcast: { ...valid.broadcast, actualStartedAt: null } },
+    { ...valid, broadcast: { ...valid.broadcast, actualEndedAt: null } },
+    { ...valid, broadcast: { ...valid.broadcast, actualStartedAt: reentryTime } },
+    { ...valid, broadcast: { ...valid.broadcast, actualEndedAt: reentryTime + 1 } },
+  ]) {
+    const container = createElement('section');
+    const activate = await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+      bookingState: { bookings: [b], escrowAddress: otherWallet },
+      fetchImpl: async () => ({ ok: true, json: async () => state }) });
+    activate();
+    const nodes = descendants(container);
+    assert.equal(nodes.some(node => node.className === 'live-curtain-call'), false, JSON.stringify(state));
+    assert.doesNotMatch(nodes.map(node => node.textContent).join(' '), /Your set is finished/);
+  }
+});
+
+test('Profile shows a replayable curtain call only for the connected performer’s verified finish', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const model = await import('../js/live-afterparty.mjs?v=20261116-curtain');
+  const createElement = dom(t), container = createElement('section'), storage = new Map(), events = [];
+  t.mock.method(Date, 'now', () => Date.parse('2026-11-14T02:10:00Z'));
+  global.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
+  global.document.dispatchEvent = event => events.push(event);
+  model.resetAfterpartyMilestones();
+  t.after(() => model.resetAfterpartyMilestones());
+  const finished = { known: true, pending: false, actualEndedAt: Date.now() - 60000, endReason: 'producer-finished' };
+  const b = { ...booking(), broadcastCompletion: finished };
+  const render = async value => {
+    container.children = [];
+    const activate = await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+      bookingState: { bookings: [value], escrowAddress: otherWallet } });
+    activate();
+  };
+  await render(b);
+  let curtain = descendants(container).find(node => node.className === 'live-curtain-call');
+  assert.ok(curtain, 'an early verified finish is visible before the original end');
+  assert.equal(curtain.open, true);
+  assert.match(descendants(curtain).find(node => node.tag === 'h3').textContent, /Fixture performer/);
+  assert.ok(descendants(container).some(node => /Approval opens after the original booked end/.test(node.textContent)));
+  assert.equal(descendants(container).some(node => node.attributes?.['data-live-room'] === 'performer'), false);
+  assert.equal(descendants(container).some(node => node.attributes?.['data-live-performer-directions'] === ''), false);
+  assert.equal(events.filter(event => event.type === 'afterparty-celebration').length, 1);
+  await render(b);
+  curtain = descendants(container).find(node => node.className === 'live-curtain-call');
+  assert.notEqual(curtain.open, true, 'refresh keeps the option to replay without repeating automatically');
+  assert.equal(events.filter(event => event.type === 'afterparty-celebration').length, 1);
+  for (const change of [
+    { broadcastCompletion: { ...finished, endReason: 'operator-cut' } },
+    { broadcastCompletion: { ...finished, endReason: 'audio-loss' } },
+    { broadcastCompletion: { ...finished, endReason: 'declined' } },
+    { broadcastCompletion: { known: true, pending: false, actualEndedAt: null, endReason: 'producer-finished' } },
+    { cancelled: true },
+  ]) {
+    await render({ ...b, ...change });
+    assert.equal(descendants(container).some(node => node.className === 'live-curtain-call'), false, JSON.stringify(change));
+  }
+  global.window._wallet.address = otherWallet;
+  await render(b);
+  assert.equal(descendants(container).some(node => node.className === 'live-curtain-call'), false, 'a stale Profile render cannot celebrate for another connected wallet');
 });
 
 test('re-entry lookup skips cancelled, incompatible, historical-complete and other non-candidate bookings', async () => {
@@ -627,7 +706,7 @@ test('performer afterparty uses a verified early stage ending when the booking s
   const now = Date.parse('2026-11-14T03:00:00Z');
   t.mock.method(Date, 'now', () => now);
   const b = { ...booking(), broadcastCompletion: { known: true, pending: true } };
-  await renderLivePerformances({
+  const activate = await renderLivePerformances({
     container, wallet, serviceUrl: 'https://worker.example/',
     bookingState: { bookings: [b], escrowAddress: otherWallet },
     fetchImpl: async () => ({
@@ -635,13 +714,16 @@ test('performer afterparty uses a verified early stage ending when the booking s
       json: async () => ({
         bookingId: b.id, configured: true, phase: 'ended', serverTime: now,
         bookingVerification: { fresh: true, verifiedAt: now },
-        broadcast: { phase: 'ended', endReason: 'producer-finished' },
+        broadcast: { allocationId: 'fixture-allocation', phase: 'ended', endReason: 'producer-finished',
+          actualStartedAt: now - 600000, actualEndedAt: now - 60000 },
       }),
     }),
   });
   const checklist = descendants(container.children[0]).find(node => node.className === 'live-afterparty-checklist');
   assert.ok(checklist);
   assert.match(descendants(checklist).find(node => node.tag === 'strong').textContent, /Show: Set finished/);
+  assert.ok(descendants(container).some(node => node.className === 'live-curtain-call'));
+  activate();
 });
 
 test('post-show waiting card gives ownership of next step without a disabled claim button or false payment', async t => {
@@ -669,12 +751,12 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /live-performance-admin\.mjs\?v=20261115-afterparty/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261115-afterparty"/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261116-curtain"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261115-afterparty"/);
   assert.match(html, /live-performance\.css\?v=20261115-afterparty/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/live-performance-profile.mjs?v=20261115-afterparty'],
-    './js/live-performance-profile.mjs?v=20261116-claim-evidence');
+    './js/live-performance-profile.mjs?v=20261116-curtain');
   assert.equal(map.imports['./js/live-bookings.mjs?v=20261108-live-audio-pilot'],
     './js/live-bookings.mjs?v=20261114-tip-provenance');
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
@@ -702,7 +784,7 @@ test('standalone backstage entries consistently version allocated-stage helper i
     /live-audio\.mjs\?v=20261114-allocated-stage/);
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
-    assert.ok(source.includes(`${entry}?v=${html === 'live-room.html' ? '20261116-feedback' : '20261115-listener-feedback'}`));
+    assert.ok(source.includes(`${entry}?v=${html === 'live-room.html' ? '20261116-curtain' : '20261115-listener-feedback'}`));
     assert.match(source, /live-audio\.css\?v=20261116-booth/);
     assert.doesNotMatch(source, /20261114-direction/);
   }

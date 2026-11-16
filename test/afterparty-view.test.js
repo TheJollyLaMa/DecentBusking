@@ -1,14 +1,51 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { renderAfterpartyChecklist } = require('../js/live-afterparty-view.mjs');
+const { renderAfterpartyChecklist, renderCurtainCall } = require('../js/live-afterparty-view.mjs');
 
 const makeDocument = () => ({
   createElement(tag) {
     return {
       tag, children: [], attributes: {}, textContent: '', append(...children) { this.children.push(...children); },
+      replaceChildren(...children) { this.children = children; },
       setAttribute(name, value) { this.attributes[name] = value; },
+      focus() { this.focused = true; },
     };
   },
+});
+
+test('curtain call opens once, can be dismissed and explicitly replayed, and renders names as text', () => {
+  const milestone = { id: 'curtain:booking', kind: 'completion', subtitle: '<Artist>’s set is finished.' };
+  let seen = false;
+  const calls = [];
+  const celebrate = (item, { replay }) => {
+    calls.push({ item, replay });
+    const celebrated = !seen || replay;
+    seen = true;
+    return { celebrated };
+  };
+  const options = { documentRef: makeDocument(), celebrate };
+  const firstView = renderCurtainCall(milestone, options);
+  const first = firstView.element;
+  assert.notEqual(first.open, true, 'building an offscreen card does not spend the celebration');
+  firstView.activate();
+  assert.equal(first.open, true);
+  assert.equal(descendants(first).find(node => node.tag === 'h3').textContent, milestone.subtitle);
+  const announcement = descendants(first).find(node => node.attributes.role === 'status');
+  assert.equal(announcement.attributes['aria-live'], 'polite');
+  assert.equal(announcement.textContent, `Curtain call: ${milestone.subtitle}`);
+  const replay = descendants(first).find(node => node.textContent === 'Replay celebration');
+  const dismiss = descendants(first).find(node => node.textContent === 'Dismiss');
+  dismiss.onclick();
+  assert.equal(first.open, false);
+  assert.equal(first.children[0].focused, true);
+  replay.onclick();
+  assert.equal(first.open, true);
+  assert.deepEqual(calls.map(call => call.replay), [false, true]);
+  const returningView = renderCurtainCall(milestone, options);
+  returningView.activate();
+  const returning = returningView.element;
+  assert.notEqual(returning.open, true, 'a refresh does not automatically replay the celebration');
+  assert.equal(renderCurtainCall({ ...milestone, kind: 'payment' }, options), null);
 });
 const descendants = node => [node, ...(node.children || []).flatMap(descendants)];
 

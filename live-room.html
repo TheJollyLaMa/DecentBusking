@@ -24,6 +24,7 @@
   <title>DecentBusking · Your stage</title>
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth">
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback">
+  <link rel="stylesheet" href="css/live-afterparty.css?v=20261116-curtain">
   <script src="decent.config.js"></script>
 </head>
 <body class="live-audio-room rehearsal-room guided-stage">
@@ -51,6 +52,7 @@
   <output id="room-status" role="status" aria-live="polite">Checking room availability…</output>
   <output id="room-action-status" class="room-action-status" role="status" aria-live="polite" hidden></output>
   <button id="room-authorize" class="rehearsal-primary" type="button" disabled>Connect booking wallet</button>
+  <div id="room-curtain" hidden></div>
   <section id="room-controls" class="studio-panel" hidden>
     <p id="room-targets" class="studio-note"></p>
     <section id="room-broadcast-controls" aria-label="Allocated stage timing"></section>
@@ -202,6 +204,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/live-audio-room.mjs?v=20261116-feedback"></script>
+  <script type="module" src="js/live-audio-room.mjs?v=20261116-curtain"></script>
 </body>
 </html>

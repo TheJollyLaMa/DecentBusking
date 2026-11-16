@@ -94,6 +94,9 @@ test('approval and payment rows follow the escrow status and clock, and each sta
   const performer = await rowsFor(booking(), { audience: 'performer' }), admin = await rowsFor(booking(), { audience: 'admin' });
   assert.match(performer.approval.next, /Nothing for you to sign/);
   assert.match(admin.approval.next, /guided release above/);
+  const early = await rowsFor(booking({ broadcastCompletion: finished }), { now: END - 30000, audience: 'performer' });
+  assert.equal(early.approval.text, 'Waiting for the original booked end');
+  assert.match(early.approval.detail, /stage ended.*original contract opens approval/);
   const paid = await rowsFor(booking({ status: 'paid', transactions: { PerformancePaid: { hash: txHash } } }), { audience: 'performer' });
   assert.deepEqual(paid.payment.links, [{ label: 'View transaction on BaseScan', href: `https://basescan.org/tx/${txHash}` }]);
   assert.equal(paid.payment.celebrate, true);
@@ -202,11 +205,16 @@ test('milestones exist only for verified facts and carry their evidence in a sta
   const all = milestones({ status: 'paid', paidUnits: '20000000', transactions: { PerformancePaid: { hash: txHash } }, broadcastCompletion: finished,
     recordingRelease: { known: true, state: 'aired', trackId: 'track-1', tokenId: '7' } });
   assert.deepEqual(all.map(item => item.kind), ['completion', 'payment', 'radio-release']);
-  assert.deepEqual(all.map(item => item.id), [`curtain:${booking().id}:${END - 60000}`, `payment:${booking().id}:${txHash}`, `release:${booking().id}:track-1`]);
+  assert.deepEqual(all.map(item => item.id), [`curtain:${booking().id}`, `payment:${booking().id}:${txHash}`, `release:${booking().id}:track-1`]);
   assert.equal(all[1].subtitle, '$20.00 USDC');
   assert.deepEqual(all[1].evidence, { txHash, chainId: 8453 });
   assert.match(all[2].subtitle, /Friday fixture is out/);
   assert.equal(new Set(all.map(item => item.id)).size, 3);
+  const b = booking();
+  const reentered = afterpartyMilestones(b, afterpartyRows(b, {
+    now: NOW, reentry: { status: 'ended', endReason: 'producer-finished' },
+  }));
+  assert.equal(reentered[0].id, all[0].id, 'a later known end time does not create another curtain call');
 });
 
 function celebrationHarness() {
@@ -253,6 +261,23 @@ test('a milestone celebrates once, replays on request, and survives broken stora
   assert.equal(JSON.parse(many.store.get(AFTERPARTY_SEEN_KEY)).length, 120, 'the stored list is bounded');
   restore();
   resetAfterpartyMilestones();
+});
+
+test('a denied localStorage getter does not block a celebration or the rest of the page', async t => {
+  const { celebrateAfterparty, resetAfterpartyMilestones } = await model();
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('access denied'); } });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else delete globalThis.localStorage;
+    resetAfterpartyMilestones();
+  });
+  const warnings = [];
+  t.mock.method(console, 'warn', (...args) => warnings.push(args));
+  resetAfterpartyMilestones();
+  assert.deepEqual(celebrateAfterparty({ id: 'curtain:storage-denied' }), { celebrated: true, fresh: true });
+  assert.deepEqual(celebrateAfterparty({ id: 'curtain:storage-denied' }), { celebrated: false, reason: 'already-seen' });
+  assert.match(warnings[0][0], /milestone storage unavailable/);
 });
 
 test('a failing celebrator never breaks the page, and the default announces a DOM event with reduced-motion state', async t => {

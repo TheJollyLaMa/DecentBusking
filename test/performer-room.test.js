@@ -60,7 +60,7 @@ test('booth setup is shown to every performer before publishing, and operators g
 });
 
 test('room module initializes practice, advances to backstage and fails closed on stale audio', async () => {
-  const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
+  const { performerRoomSign, performerAllocationAccess, verifiedPerformerFinish } = await import('../js/performer-room.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
   const { afterpartyRows } = await import('../js/live-afterparty.mjs');
   const { renderAfterpartyChecklist } = await import('../js/live-afterparty-view.mjs');
@@ -80,7 +80,7 @@ test('room module initializes practice, advances to backstage and fails closed o
     location: { href: `https://example.test/live-room.html?booking=${encodeURIComponent(b.id)}` },
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {} },
     Date: class extends Date { static now() { return time; } },
-    URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
+    URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, verifiedPerformerFinish, bindLiveRecordingOption,
     afterpartyRows, renderAfterpartyChecklist,
     LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
     bindInputMonitor: () => ({ stop: async () => {} }), bindBoothSetup: () => ({ ready: () => true, problem: () => '' }), SHOW_MODES: ['direct', 'unplugged'],
@@ -123,7 +123,7 @@ test('room module initializes practice, advances to backstage and fails closed o
 });
 
 test('guided operator flow shows pending saves, persistent errors and saved check/arm states across public refresh', async () => {
-  const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
+  const { performerRoomSign, performerAllocationAccess, verifiedPerformerFinish } = await import('../js/performer-room.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
   const { afterpartyRows } = await import('../js/live-afterparty.mjs');
   const { renderAfterpartyChecklist } = await import('../js/live-afterparty-view.mjs');
@@ -152,7 +152,7 @@ test('guided operator flow shows pending saves, persistent errors and saved chec
     window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {},
       ethereum: { on() {}, async request({ method }) { return method === 'eth_requestAccounts' ? ['0xowner'] : 'fixture-signature'; } } },
     Date: class extends Date { static now() { return time; } },
-    URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
+    URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, verifiedPerformerFinish, bindLiveRecordingOption,
     afterpartyRows, renderAfterpartyChecklist,
     LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
     bindInputMonitor: () => ({ stop: async () => {} }), bindBoothSetup: () => ({ ready: () => true, problem: () => '' }), SHOW_MODES: ['direct', 'unplugged'],
@@ -239,7 +239,7 @@ test('on-air sign requires fresh verified server state, exact booking and funded
 });
 
 test('publisher protects the return before publication and releases it on stop, track end, disconnection or publication failure', async t => {
-  const { performerRoomSign, performerAllocationAccess } = await import('../js/performer-room.mjs');
+  const { performerRoomSign, performerAllocationAccess, verifiedPerformerFinish } = await import('../js/performer-room.mjs');
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
   const { afterpartyRows } = await import('../js/live-afterparty.mjs');
   const { renderAfterpartyChecklist } = await import('../js/live-afterparty-view.mjs');
@@ -279,7 +279,7 @@ test('publisher protects the return before publication and releases it on stop, 
         window: { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.test' }, addEventListener() {},
           ethereum: { on() {}, async request({ method }) { return method === 'eth_requestAccounts' ? [performer] : 'signature'; } } },
         Date: class extends Date { static now() { return time; } },
-        URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
+        URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, verifiedPerformerFinish, bindLiveRecordingOption,
         afterpartyRows, renderAfterpartyChecklist,
         LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
         bindInputMonitor: () => ({ stop: async () => {} }), bindBoothSetup, SHOW_MODES,
@@ -376,4 +376,96 @@ test('allocated sign needs a fresh bounded actual live allocation, never origina
   assert.equal(ended.live, false);
   assert.match(ended.detail, /operator-cut/);
   assert.doesNotMatch(ended.detail, /successful|Thank you/);
+});
+
+test('stage curtain requires the booked performer and a fresh, exact, successfully ended allocation', async () => {
+  const { performerRoomSign, performerAllocationAccess, verifiedPerformerFinish } = await import('../js/performer-room.mjs');
+  const { afterpartyRows, afterpartyMilestones } = await import('../js/live-afterparty.mjs');
+  const { renderCurtainCall } = await import('../js/live-afterparty-view.mjs');
+  const elements = new Map(), ethereumHandlers = {}, celebrations = [];
+  let latestRows;
+  const createElement = tag => ({
+    tag, children: [], hidden: false, textContent: '', classList: { toggle() {} },
+    append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; },
+    setAttribute() {}, removeAttribute() {}, addEventListener() {}, pause() {},
+  });
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, createElement('div'));
+    return elements.get(id);
+  };
+  element('room-curtain').hidden = true;
+  const context = {
+    document: { getElementById: element, createElement },
+    location: { href: 'https://example.test/live-room.html?booking=fixture' },
+    window: { DecentConfig: {}, addEventListener() {}, ethereum: { on(event, handler) { ethereumHandlers[event] = handler; } } },
+    URL, TextEncoder, AbortSignal, performerRoomSign, performerAllocationAccess, verifiedPerformerFinish,
+    afterpartyRows, afterpartyMilestones, renderCurtainCall,
+    renderAfterpartyChecklist: rows => { latestRows = rows; return createElement('details'); },
+    celebrateAfterparty: (milestone, options) => { celebrations.push({ milestone, options }); return { celebrated: true }; },
+    bindLiveRecordingOption: () => ({ update() {} }),
+    LIVE_RECORDING_CONSENT_VERSION: 'v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'v2',
+    bindInputMonitor: () => ({ stop: async () => {} }),
+    bindBoothSetup: () => ({ ready: () => true }), SHOW_MODES: [],
+    bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
+    bindLiveFeedbackRoom: () => ({}), bindTogether: primary => primary,
+    bindLiveBroadcastControls: () => ({ update() {}, dispose() {} }),
+    createLivePublisherPresence: () => ({ stop: () => false }),
+    createInputMeter: () => ({ stop: async () => {} }), setInterval() {},
+  };
+  const source = (await fs.readFile(require.resolve('../js/live-audio-room.mjs'), 'utf8')).replace(/^import .*;\n/gm, '');
+  vm.runInNewContext(`${source}\nglobalThis.testCurtain = {
+    set(value, address, authorization) { booking = value; wallet = address; session = authorization; },
+    render: renderCurtain, renderAfterparty,
+  };`, context);
+  const performer = `0x${'12'.repeat(20)}`;
+  const booked = { ...b, status: 'funded', acknowledged: true, wallet: performer, displayName: 'Fixture performer',
+    broadcastCompletion: { known: true, pending: true } };
+  const auth = { role: 'publisher', canPublish: true };
+  const state = { configured: true, bookingId: b.id, phase: 'ended', serverTime: start + 900000,
+    bookingVerification: { fresh: true, verifiedAt: start + 899000 },
+    broadcast: { allocationId: 'allocation-a', phase: 'ended', actualStartedAt: start,
+      actualEndedAt: start + 890000, endReason: 'producer-finished' } };
+  for (const [booking, wallet, session] of [
+    [booked, performer, null], [booked, performer, { role: 'owner', canPublish: false }],
+    [booked, `0x${'34'.repeat(20)}`, auth], [{ ...booked, cancelled: true }, performer, auth],
+    [{ ...booked, acknowledged: false }, performer, auth],
+  ]) {
+    context.testCurtain.set(booking, wallet, session);
+    context.testCurtain.render(state);
+  }
+  context.testCurtain.set(booked, performer, auth);
+  for (const invalid of [
+    { ...state, bookingId: 'other' },
+    { ...state, phase: 'cancelled' },
+    { ...state, bookingVerification: { fresh: false, verifiedAt: start + 899000 } },
+    { ...state, bookingVerification: { fresh: true, verifiedAt: start + 800000 } },
+    { ...state, broadcast: { ...state.broadcast, phase: 'live' } },
+    ...['operator-cut', 'audio-loss', 'declined', 'not-ready', 'authorization-expired'].map(endReason =>
+      ({ ...state, broadcast: { ...state.broadcast, endReason } })),
+    { ...state, broadcast: { ...state.broadcast, allocationId: null } },
+    { ...state, broadcast: { ...state.broadcast, actualStartedAt: null } },
+    { ...state, broadcast: { ...state.broadcast, actualEndedAt: null } },
+    { ...state, broadcast: { ...state.broadcast, actualStartedAt: start + 895000 } },
+    { ...state, broadcast: { ...state.broadcast, actualEndedAt: start + 901000 } },
+  ]) context.testCurtain.render(invalid);
+  assert.equal(celebrations.length, 0);
+  assert.equal(element('room-curtain').hidden, true);
+  context.testCurtain.renderAfterparty({ ...state, bookingId: 'other' });
+  assert.equal(latestRows[0].state, 'pending', 'an unrelated state cannot replace the booking snapshot');
+  context.testCurtain.renderAfterparty(state);
+  assert.equal(latestRows[0].text, 'Set finished ✓', 'fresh stage evidence reconciles the stale booking snapshot');
+  context.testCurtain.render(state);
+  const curtain = element('room-curtain').children[0];
+  assert.equal(element('room-curtain').hidden, false);
+  assert.equal(curtain.open, true);
+  assert.equal(celebrations.length, 1);
+  context.testCurtain.render(state);
+  assert.equal(element('room-curtain').children[0], curtain, 'polling preserves the interactive card');
+  assert.equal(celebrations.length, 1);
+  ethereumHandlers.accountsChanged();
+  assert.equal(element('room-curtain').hidden, true);
+  assert.equal(element('room-curtain').children.length, 0);
+  context.testCurtain.render(state);
+  assert.equal(celebrations.length, 1, 'a wallet change clears and deauthorizes the curtain');
 });

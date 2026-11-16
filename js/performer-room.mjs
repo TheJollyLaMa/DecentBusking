@@ -18,6 +18,24 @@ export function performerAllocationAccess(booking, state, now = Date.now(), obse
     state.broadcast.accessUntil > serverNow);
 }
 
+export function verifiedPerformerStageBooking(booking, state) {
+  const verifiedAt = state?.bookingVerification?.verifiedAt;
+  return !!(booking?.id && state?.bookingId === booking.id && state.configured &&
+    state.bookingVerification?.fresh === true && Number.isFinite(verifiedAt) &&
+    Number.isFinite(state.serverTime) && verifiedAt <= state.serverTime &&
+    state.serverTime - verifiedAt <= 30000);
+}
+
+export function verifiedPerformerFinish(booking, state) {
+  const broadcast = state?.broadcast;
+  return !!(verifiedPerformerStageBooking(booking, state) && state.phase === 'ended' &&
+    broadcast?.phase === 'ended' && broadcast.endReason === 'producer-finished' &&
+    typeof broadcast.allocationId === 'string' && broadcast.allocationId.length > 0 &&
+    Number.isSafeInteger(broadcast.actualStartedAt) && broadcast.actualStartedAt > 0 &&
+    Number.isSafeInteger(broadcast.actualEndedAt) && broadcast.actualEndedAt > 0 &&
+    broadcast.actualStartedAt <= broadcast.actualEndedAt && broadcast.actualEndedAt <= state.serverTime);
+}
+
 export async function resolvePerformerReentry(booking, { serviceUrl, fetchImpl = fetch, now = () => Date.now() }) {
   const completion = booking?.broadcastCompletion;
   const eligible = booking?.id && booking.mode === 'phase1' && booking.payoutPolicy === 'pilot-guaranteed-v1' &&
@@ -31,9 +49,7 @@ export async function resolvePerformerReentry(booking, { serviceUrl, fetchImpl =
     });
     if (!response.ok) throw new Error('Stage state unavailable');
     const state = await response.json(), observedAt = now();
-    if (state?.bookingId !== booking.id || !state.configured || state.bookingVerification?.fresh !== true ||
-        !Number.isFinite(state.bookingVerification?.verifiedAt) || !Number.isFinite(state.serverTime) ||
-        state.bookingVerification.verifiedAt > state.serverTime || state.serverTime - state.bookingVerification.verifiedAt > 30000) {
+    if (!verifiedPerformerStageBooking(booking, state)) {
       throw new Error('Stage booking verification is unavailable');
     }
     if (performerAllocationAccess(booking, state, observedAt, observedAt)) {
@@ -41,7 +57,11 @@ export async function resolvePerformerReentry(booking, { serviceUrl, fetchImpl =
         broadcast: state.broadcast, observedAt };
     }
     if (state.broadcast?.phase === 'ended' || ['cancelled', 'ended'].includes(state.phase)) {
-      return { status: 'ended', endReason: state.broadcast?.endReason || null };
+      if (state.broadcast?.endReason === 'producer-finished' && !verifiedPerformerFinish(booking, state)) {
+        throw new Error('Successful stage ending is unavailable');
+      }
+      return { status: 'ended', endReason: state.broadcast?.endReason || null,
+        endedAt: Number.isFinite(state.broadcast?.actualEndedAt) ? state.broadcast.actualEndedAt : null };
     }
     throw new Error('No current bounded allocation could be verified');
   } catch {
