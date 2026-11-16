@@ -167,6 +167,18 @@
       "contributorGithub": "TheJollyLaMa",
       "amount": "0.2",
       "role": "idea-originator"
+    },
+    {
+      "issueRef": "TheJollyLaMa/DecentBusking#301",
+      "currency": "USDC",
+      "fund": "dbusk-repo-dev",
+      "queuedAt": "2026-11-16T20:13:09.543Z",
+      "queuedBy": "TheJollyLaMa",
+      "prNumber": 372,
+      "contributor": "0x807061DF657A7697c04045dA7d16D941861cAABc",
+      "contributorGithub": "TheJollyLaMa",
+      "amount": "10",
+      "retroactive": true
     }
   ],
   "settled": [
