@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
+const { verifiedRecording } = require('./helpers/verified-recording');
 
 const FRIDAY_LIVE = Date.parse('2026-10-30T21:01:00-04:00');
 const occurrenceId = 'friday-live-performance:2026-10-30';
@@ -35,7 +36,7 @@ async function setup(t, campaigns = [], options = {}, mockClock = true) {
     },
     ...options,
   });
-  session._queue = [{ trackId: 'music', title: 'Next song', filename: 'song.mp3' }];
+  session._queue = [verifiedRecording({ trackId: 'music', title: 'Next song', filename: 'song.mp3' })];
   session._getFreshUrl = async track => `https://media.example/${track.trackId}`;
   session._announcePrepared = async () => {};
   session._primeNext = () => {};

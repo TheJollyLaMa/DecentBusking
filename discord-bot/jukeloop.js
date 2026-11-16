@@ -50,18 +50,22 @@ import {
   restoreTrackTitles,
   pendingLiveRecordingReplay,
   completeLiveRecordingReplay,
+  updateTrackDuration,
 } from './playlist-store.js';
 import {
   defaultRadioSchedule,
   resolveActiveShow,
   rankRotationTracks,
   rankWeeklyTopTenTracks,
+  nextProtectedLiveStart,
 } from '../js/radio-schedule.mjs';
 import { mediaTypeFor, isDiscordAttachmentWithinLimit } from './media.js';
 import { createPlaylistShow } from './playlist-show.js';
 import { playlistTrackReason, radioPlaylistDefinition } from '../js/radio-playlists.mjs';
 import { createTopTenHype } from './top-ten-hype.js';
 import { bufferRadioMedia } from './radio-media-buffer.js';
+import { createDurationBackfill } from './media-duration.js';
+import { recordingDurationReason, verifiedRecordingDuration, recordingMediaIdentity } from '../js/radio-duration.mjs';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -239,6 +243,12 @@ export function buildRadioState({ nowPlaying, upNext = null, playlist, now = Dat
     }));
   return {
     serverTime: now,
+    recordingDurations: playlist.filter(track => !track.isDevertAd).reduce((counts, track) => {
+      const seconds = verifiedRecordingDuration(track);
+      counts[seconds === null ? 'unresolved' : seconds > 600 ? 'longForm' : 'ordinary']++;
+      if (seconds === null && track.durationProbe?.status === 'failed') counts.failed++;
+      return counts;
+    }, { ordinary: 0, longForm: 0, unresolved: 0, failed: 0 }),
     playback,
     activeShow,
     topTenHype,
@@ -771,7 +781,7 @@ export class JukeLoopSession {
     constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback,
       schedule, livePerformanceEvents, audioPlayer, createStream, mainRadioAdStateStore, restoreMainRadioAdState, saveMainRadioAdState,
       topTenHype, topTenHypeStore, playlistShow, playlistShowStore, isContentAllowed = () => true,
-      audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS, websitePlayback = false }) {
+      audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS, websitePlayback = false, durationBackfill }) {
     this.websitePlayback = websitePlayback;
     this.isContentAllowed = isContentAllowed;
     this._discordOutputsAttached = false;
@@ -788,6 +798,12 @@ export class JukeLoopSession {
     this._topTenHype = topTenHype || createTopTenHype({ store: topTenHypeStore });
     this._hypeNotice = null;
     this._playlistShow = playlistShow || createPlaylistShow({ store: playlistShowStore });
+    this._durationBackfill = durationBackfill || createDurationBackfill({
+      getTracks: getPlaylist, resolveUrl: track => this._getFreshUrl(track), save: updateTrackDuration,
+    });
+    this._currentLongFormSelection = null;
+    this._longFormCompletionTask = null;
+    this._pendingLongFormCompletion = null;
     this._mainRadioAdStateStore = mainRadioAdStateStore || null;
     this._restoreMainRadioAdState = restoreMainRadioAdState || this._mainRadioAdStateStore?.restore || null;
     this._saveMainRadioAdState = saveMainRadioAdState || this._mainRadioAdStateStore?.save || null;
@@ -1018,6 +1034,7 @@ export class JukeLoopSession {
     this._scheduleWatcher = setInterval(() => {
       this._syncScheduledShow();
       this._checkPlaybackHealth();
+      this._durationBackfill.run().catch(error => console.error('[radio-duration] Backfill unavailable:', error.message));
     }, 1_000);
     this._scheduleWatcher.unref?.();
     this._refreshQueue();
@@ -1191,7 +1208,8 @@ export class JukeLoopSession {
       }
       const enteringOrLeavingTopTen = previousShowKey &&
         (previousShowKey.startsWith('weekly_top10:') || show.type === 'weekly_top10');
-      if (this._started && enteringOrLeavingTopTen && this.player.state.status !== AudioPlayerStatus.Idle) {
+      if (this._started && enteringOrLeavingTopTen && !this._currentLongFormSelection &&
+          this.player.state.status !== AudioPlayerStatus.Idle) {
         this._activeAudio?.completion.interrupt('scheduled_handoff');
         this.player.stop(true);
       }
@@ -1226,7 +1244,22 @@ export class JukeLoopSession {
       this._queue = getWeightedShuffledPlaylist();
     }
 
+    this._queue = this._queue.filter(track => !recordingDurationReason(track));
     this._queueIndex = 0;
+  }
+
+  _durationAdmissionReason(track, { longForm = false } = {}) {
+    const current = getPlaylist().find(entry => entry.trackId === track?.trackId) || track;
+    if (recordingMediaIdentity(current) !== recordingMediaIdentity(track)) return 'Recording media changed after preparation';
+    const reason = recordingDurationReason(current, { longForm });
+    if (reason) return reason;
+    if (longForm) {
+      const start = nextProtectedLiveStart({ schedule: this.schedule, livePerformanceEvents: this.livePerformanceEvents });
+      if (start !== null && Date.now() + verifiedRecordingDuration(current) * 1000 + CHANGEOVER_GAP_MS > start) {
+        return 'Full recording will not fit before the next protected live event';
+      }
+    }
+    return null;
   }
 
   _ensureTopTenHype(show) {
@@ -1470,6 +1503,24 @@ export class JukeLoopSession {
 
     const track = hypeSelection ? hypeSelection.track : playlistSelection ? playlistSelection.track : paid ? paid.track : devertAd ? devertAd.track : liveReplay || this._queue[this._queueIndex];
     const queueIndex = !hypeSelection && !playlistSelection && !paid && !devertAd && !liveReplay ? this._queueIndex : null;
+    const longForm = !!playlistSelection &&
+      radioPlaylistDefinition(playlistSelection.playlistId, playlistSelection.playlistDefinition).selector === 'long-form';
+    const durationReason = !devertAd && paid?.record.kind !== 'devert'
+      ? this._durationAdmissionReason(track, { longForm }) : null;
+    if (durationReason) {
+      console.warn('[radio-duration] Playback deferred:', track?.trackId, durationReason);
+      if (paid) {
+        await this.djuke.release(paid.record, new Error(durationReason));
+        this._djukeCooldownUntil = Date.now() + PAID_FETCH_RETRY_MS;
+        this._playlistRetryReason = durationReason;
+        return null;
+      }
+      if (hypeSelection) return this._skipHype(hypeSelection, durationReason, options);
+      if (playlistSelection) await this._playlistShow.advance(playlistSelection, durationReason);
+      else if (liveReplay) return this._prepareNextPlayback(null, { ...options, skipLiveReplay: true });
+      else this._queueIndex++;
+      return this._prepareNextPlayback(null, options);
+    }
     if (!this.isContentAllowed(track, !!devertAd || paid?.record.kind === 'devert')) {
       if (liveReplay) return this._prepareNextPlayback(null, { ...options, skipLiveReplay: true });
       if (paid) {
@@ -1491,6 +1542,11 @@ export class JukeLoopSession {
     let url;
     try { url = await this._getFreshUrl(track); }
     catch (error) {
+      if (longForm) {
+        console.warn('[radio-duration] Long-form media lookup deferred:', error.message);
+        await this._playlistShow.defer(playlistSelection, 'Long-form recording media temporarily unavailable');
+        return this._prepareNextPlayback(null, options);
+      }
       if (liveReplay) {
         console.warn('[live-recording] Replay media deferred:', error.message);
         return this._prepareNextPlayback(null, { ...options, skipLiveReplay: true });
@@ -1515,7 +1571,8 @@ export class JukeLoopSession {
       console.warn(`[jukeloop] Could not fetch URL for "${track.title}" (${track.messageId}), skipping.`);
       if (hypeSelection) return this._skipHype(hypeSelection, 'The recording could not be fetched.', options);
       if (playlistSelection) {
-        await this._playlistShow.advance(playlistSelection, 'The recording could not be fetched');
+        if (longForm) await this._playlistShow.defer(playlistSelection, 'Long-form recording could not be fetched; retry pending');
+        else await this._playlistShow.advance(playlistSelection, 'The recording could not be fetched');
         return this._prepareNextPlayback(null, options);
       }
       if (devertAd && !devertAd.paidRequest) {
@@ -1564,6 +1621,7 @@ export class JukeLoopSession {
       }
       const resource = createAudioResource(stream, { inputType: StreamType.Raw });
       return { track, paid, devertAd, queueIndex, url, resource, ffmpegProcess, completion, liveReplay: !!liveReplay, hype: hypeSelection, playlistShow: playlistSelection,
+        longForm,
         playlistShowContext: activeShow.type === 'playlist_show'
           ? { title: activeShow.label, instanceId: activeShow.instanceId, fallback: !playlistSelection && !devertAd } : null };
     } catch (err) {
@@ -1571,7 +1629,8 @@ export class JukeLoopSession {
       if (liveReplay) return this._prepareNextPlayback(null, { ...options, skipLiveReplay: true });
       if (hypeSelection) return this._skipHype(hypeSelection, err.message, options);
       if (playlistSelection) {
-        await this._playlistShow.advance(playlistSelection, err.message);
+        if (longForm) await this._playlistShow.defer(playlistSelection, 'Long-form recording audio preparation failed; retry pending');
+        else await this._playlistShow.advance(playlistSelection, err.message);
         return this._prepareNextPlayback(null, options);
       }
       if (devertAd && !devertAd.paidRequest) {
@@ -1718,6 +1777,7 @@ export class JukeLoopSession {
   }
 
   _primeNext() {
+    if (this._currentLongFormSelection || this._longFormCompletionTask || this._pendingLongFormCompletion) return;
     if (this._destroyed || this._preparedNext || this._prepareTask) return;
     clearTimeout(this._primeRetryTimer);
     this._primeRetryTimer = null;
@@ -1797,6 +1857,16 @@ export class JukeLoopSession {
       return false;
     }
     const show = this.getShowState().activeShow;
+    if (!prepared.devertAd && prepared.paid?.record.kind !== 'devert') {
+      const designated = show.type === 'playlist_show' && prepared.playlistShow?.instanceId === show.instanceId &&
+        radioPlaylistDefinition(show.playlistId, show.playlistDefinition).selector === 'long-form';
+      const reason = this._durationAdmissionReason(prepared.track, { longForm: !!prepared.longForm && designated });
+      if (reason || prepared.longForm && !designated) {
+        console.warn('[radio-duration] Prepared playback rejected:', reason || 'Long-form programming changed');
+        this._disposePrepared(prepared, reason || 'Long-form programming changed');
+        return false;
+      }
+    }
     if (prepared.liveReplay && (show.type !== 'normal_rotation' || this.djuke?.hasActivePlaylist?.() ||
         this.djuke?.hasPendingPlaylist?.())) {
       this._disposePrepared(prepared, 'Recording replay waits for a safe normal-radio boundary');
@@ -1831,6 +1901,7 @@ export class JukeLoopSession {
     this._currentDevertAd = prepared.devertAd;
     if (prepared.devertAd && !prepared.devertAd.paidRequest) this._breakAwaitingUnlock = false;
     this._currentTrack = prepared.track;
+    this._currentLongFormSelection = prepared.longForm ? prepared.playlistShow : null;
     this._announcementMsg = null;
     this._announcementContext = null;
     if (prepared.queueIndex !== null && prepared.queueIndex === this._queueIndex) this._queueIndex++;
@@ -2015,6 +2086,8 @@ export class JukeLoopSession {
       const epoch = this._preparationEpoch;
       try {
         if (this._audioCompletionTask) await this._audioCompletionTask;
+        if (this._longFormCompletionTask) await this._longFormCompletionTask;
+        await this._completePendingLongForm();
         if (this._paidCompletionTask) await this._paidCompletionTask;
         if (this._prepareTask) await this._prepareTask;
         prepared = this._preparedNext;
@@ -2116,7 +2189,7 @@ export class JukeLoopSession {
             const reason = () => playlistTrackReason(getPlaylist().find(track => track.trackId === selection.trackId),
               definition, Date.parse(selection.capturedAt));
             const skipReason = reason();
-            await this._playlistShow.advance(selection, skipReason);
+            if (!prepared.longForm || skipReason) await this._playlistShow.advance(selection, skipReason);
             const afterCheckpoint = reason() || (this._destroyed || epoch !== this._preparationEpoch ||
               this.getShowState().activeShow.instanceId !== selection.instanceId ? 'Scheduled handoff reached before audio started' : null);
             if (skipReason || afterCheckpoint) {
@@ -2145,6 +2218,13 @@ export class JukeLoopSession {
     return transition;
   }
 
+  async _completePendingLongForm() {
+    const pending = this._pendingLongFormCompletion;
+    if (!pending) return;
+    await this._playlistShow.complete(pending.selection, pending.playId);
+    if (this._pendingLongFormCompletion === pending) this._pendingLongFormCompletion = null;
+  }
+
   /**
    * Read 👍 / 👎 counts from the last "Now Playing" message and persist them.
    * Called automatically when the next track is about to start.
@@ -2154,6 +2234,8 @@ export class JukeLoopSession {
     const completedPlay = this._completedPlay;
     this._completedPlay = null;
     const paidRecord = this._currentPaid;
+    const longFormSelection = this._currentLongFormSelection;
+    this._currentLongFormSelection = null;
     this._currentPaid = null;
     const msgRef   = this._announcementMsg;
     const announcementContext = this._announcementContext;
@@ -2163,21 +2245,38 @@ export class JukeLoopSession {
     this._currentTrack    = null;
     this._announcementContext = null;
 
-    if (completedPlay?.completion) {
-      const media = await completedPlay.completion;
-      delete completedPlay.completion;
-      completedPlay.finished = media.finished;
-      completedPlay.media = media;
-      console.log('[jukeloop] Audio completion:', JSON.stringify({
-        playId: completedPlay.playId, trackId: completedPlay.trackId,
-        requestId: paidRecord?.requestId || null, attempt: paidRecord?.attempts || null,
-        audibleMs: completedPlay.audibleMs, ...media,
-      }));
-      if (media.finished && completedPlay.countAdOnCompletion) {
-        this._musicSinceAd = 0;
-        this._musicPlayCount++;
-        this._persistMainRadioAdState();
+    const finish = async () => {
+      if (completedPlay?.completion) {
+        const media = await completedPlay.completion;
+        delete completedPlay.completion;
+        completedPlay.finished = media.finished;
+        completedPlay.media = media;
+        console.log('[jukeloop] Audio completion:', JSON.stringify({
+          playId: completedPlay.playId, trackId: completedPlay.trackId,
+          requestId: paidRecord?.requestId || null, attempt: paidRecord?.attempts || null,
+          audibleMs: completedPlay.audibleMs, ...media,
+        }));
+        if (media.finished && completedPlay.countAdOnCompletion) {
+          this._musicSinceAd = 0;
+          this._musicPlayCount++;
+          this._persistMainRadioAdState();
+        }
       }
+      if (longFormSelection && trackRef && completedPlay?.trackId === trackRef.trackId) {
+        const seconds = verifiedRecordingDuration(trackRef);
+        if (seconds !== null && completedPlay.finished === true && completedPlay.audibleMs >= seconds * 1000 - 2000) {
+          this._pendingLongFormCompletion = { selection: longFormSelection, playId: completedPlay.playId };
+          await this._completePendingLongForm();
+        }
+      }
+    };
+    if (longFormSelection) {
+      const task = finish().catch(error => console.warn('[radio-duration] Completion checkpoint deferred:', error.message));
+      this._longFormCompletionTask = task;
+      try { await task; }
+      finally { if (this._longFormCompletionTask === task) this._longFormCompletionTask = null; }
+    } else if (completedPlay?.completion) {
+      await finish();
     }
 
     if (paidRecord?.kind === 'devert' && this.djuke) {
@@ -2402,6 +2501,7 @@ export class JukeLoopSession {
   /** Stop all playback and disconnect from the voice channel. */
   destroy() {
     this._destroyed = true;
+    this._durationBackfill.close();
     clearTimeout(this._adCutoffTimer);
     this._adCutoffTimer = null;
     this._mediaAbort.abort();

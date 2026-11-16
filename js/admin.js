@@ -6,7 +6,7 @@
 // The panel is opened by dispatching a custom "open-admin" DOM event (wired up
 // from header-admin-inject.js).  It follows the same architecture as payroll.js.
 
-import { renderPlaylistShowPreview } from './admin-radio-playlists.mjs';
+import { renderPlaylistShowPreview } from './admin-radio-playlists.mjs?v=20261116-longform';
 import { fetchMintQueue, clearMintQueueAuthorization, resolveMintArtwork, resolveBatchMintArtwork, mintPreparedProductsBatch, splitMintBatches, PRODUCT_BATCH_ABI } from './admin-mint-queue.js?v=20261011-batch-artwork-default';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { reportMintCompletion } from './mint-reconciliation.js';
@@ -15,8 +15,8 @@ import { completeArtworkUpdateRequest, rejectArtworkUpdateRequest } from './artw
 import { completeCreatorSplitProposal, fetchCreatorSplitProposal, rejectCreatorSplitProposal } from './creator-split-proposal.mjs?v=20261025-song-splits';
 import { isAdminWallet } from './admin-access.mjs';
 import { buildRadioScheduleAuthorizationMessage, newYorkInputToUtc, utcToNewYorkInput } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
-import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261024-programming-calendar';
-import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261024-calendar-fit';
+import { defaultRadioSchedule, upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, cancelLivePerformanceEvent } from './radio-schedule.mjs?v=20261116-longform';
+import { mountRadioProgrammingCalendar } from './radio-programming-calendar.mjs?v=20261116-longform';
 import { renderAdminRadioAnnouncements, requestRadioAnnouncement } from './admin-radio-announcements.mjs';
 import { removeDevertCampaign } from './devert-campaigns.mjs';
 import { renderWallet } from './wallet-label.mjs';

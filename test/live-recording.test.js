@@ -379,6 +379,7 @@ test('recording journal is encrypted, readback-verified, rejects token fields an
 });
 
 test('automatic replay selects only safe normal rotation, yields to paid songs and survives failed media', async t => {
+  const { verifiedRecording } = require('./helpers/verified-recording');
   const { EventEmitter } = require('node:events');
   const { PassThrough } = require('node:stream');
   const p = await import('../discord-bot/playlist-store.js');
@@ -395,7 +396,7 @@ test('automatic replay selects only safe normal rotation, yields to paid songs a
   session.getShowState = () => ({ activeShow: show });
   session._getFreshUrl = async () => 'https://fixture.example/recording.mp3';
   session._sendPlaybackNotice = () => {};
-  session._queue = [{ trackId: 'ordinary-song', title: 'Ordinary music' }];
+  session._queue = [verifiedRecording({ trackId: 'ordinary-song', title: 'Ordinary music' })];
   try {
     p.loadPlaylist([]); p.configureRemotePersistence(async () => {});
     const track = await p.submitLiveRecording({ booking, cid: 'c'.repeat(46), artworkCid: 'b'.repeat(46),
@@ -408,7 +409,7 @@ test('automatic replay selects only safe normal rotation, yields to paid songs a
     assert.notEqual((await session._prepareNextPlayback()).track.trackId, track.trackId, 'active playlist owns the lane');
     assert.equal(session._startPrepared(replay), false, 'late paid playlist cannot be preempted by a prefetched replay');
     activePlaylist = false;
-    paid = { record: { requestId: 'paid-song', kind: 'song' }, track: { trackId: 'paid-song', title: 'Paid song' } };
+    paid = { record: { requestId: 'paid-song', kind: 'song' }, track: verifiedRecording({ trackId: 'paid-song', title: 'Paid song' }) };
     assert.equal((await session._prepareNextPlayback()).track.trackId, 'paid-song');
     paid = null; show = { type: 'weekly_top10', id: 'top10' };
     assert.notEqual((await session._prepareNextPlayback()).track.trackId, track.trackId);

@@ -7,6 +7,7 @@ const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { pathToFileURL } = require('node:url');
 const vm = require('node:vm');
+const { verifiedRecording } = require('./helpers/verified-recording');
 
 test.beforeEach(t => {
   const realNow = Date.now.bind(Date);
@@ -104,7 +105,7 @@ test('failed media preparation cannot wait on a stuck Discord skip notice', asyn
     streams.forEach(stream => stream.destroy());
   });
   session._getFreshUrl = async track => `https://media.example/${track.trackId}`;
-  session._queue = [{ trackId: 'broken', title: 'Broken stream' }, { trackId: 'working', title: 'Working stream' }];
+  session._queue = [{ trackId: 'broken', title: 'Broken stream' }, { trackId: 'working', title: 'Working stream' }].map(track => verifiedRecording(track));
   await session._playNext();
   assert.equal(session._nowPlaying.trackId, 'working', 'music starts without waiting for Discord');
   assert.equal(processes[0].killed, true, 'timed-out FFmpeg is terminated');
@@ -124,7 +125,7 @@ test('missing media skips ahead even when Discord never acknowledges the warning
     createStream: () => ({ stream, ffmpegProcess: process }),
   });
   t.after(() => { session.destroy(); stream.destroy(); });
-  session._queue = [{ trackId: 'missing', title: 'Missing' }, { trackId: 'available', title: 'Available' }];
+  session._queue = [{ trackId: 'missing', title: 'Missing' }, { trackId: 'available', title: 'Available' }].map(track => verifiedRecording(track));
   session._getFreshUrl = async track => track.trackId === 'missing' ? null : 'https://media.example/available';
   const prepared = await session._prepareNextPlayback();
   assert.equal(prepared.track.trackId, 'available');
@@ -281,7 +282,7 @@ test('real audio frames advance from an ad back to music without a Discord voice
   const musicStream = new PassThrough();
   musicStream.end(Buffer.alloc(48000 * 2 * 2));
   session._preparedNext = {
-    track: { trackId: 'music-after-ad', title: 'Music returns', ipfsCid: 'music' },
+    track: verifiedRecording({ trackId: 'music-after-ad', title: 'Music returns', ipfsCid: 'music' }),
     resource: voice.createAudioResource(musicStream, { inputType: voice.StreamType.Raw }),
     ffmpegProcess: { exitCode: 0, kill() { musicStream.destroy(); } }, queueIndex: null,
   };
@@ -1182,7 +1183,7 @@ test('JukeLoop rechecks overdue adverts before starting prefetched music without
 
 test('paid DJuke requests still let the queued main-radio ad play next', async () => {
   const { createJukeLoopSession } = await import('../discord-bot/jukeloop.js');
-  const nextPaid = [{ track: { trackId: 'paid:1', title: 'Paid Song', uploader: 'Buyer', messageId: 'paid-message', channelId: 'paid-channel' },
+  const nextPaid = [{ track: verifiedRecording({ trackId: 'paid:1', title: 'Paid Song', uploader: 'Buyer', messageId: 'paid-message', channelId: 'paid-channel' }),
     record: { requestId: 'request-1' } }, null];
   let adCalls = 0;
   const session = createJukeLoopSession('main-radio-paid', {
@@ -1471,7 +1472,7 @@ test('an unfetchable paid request stays queued while free rotation keeps the rad
   const sent = [];
   const failed = [];
   let paidChecks = 0;
-  const paidTrack = { trackId: 'album:paid', title: 'Paid Song', ipfsCid: 'bafy-paid' };
+  const paidTrack = verifiedRecording({ trackId: 'album:paid', title: 'Paid Song', ipfsCid: 'bafy-paid' });
   const session = new JukeLoopSession({
     voiceChannel: { guild: { id: 'djuke-unfetchable-test' } },
     textChannel: { send: async message => { sent.push(message.content); return {}; } },
@@ -1482,7 +1483,7 @@ test('an unfetchable paid request stays queued while free rotation keeps the rad
     },
   });
   t.after(() => session.destroy());
-  session._queue = [{ trackId: 'regular-track', title: 'Regular Track' }];
+  session._queue = [verifiedRecording({ trackId: 'regular-track', title: 'Regular Track' })];
   session._queueIndex = 0;
   session._getFreshUrl = async track => {
     if (track.trackId === 'regular-track') throw new Error('stop after selection');
@@ -1664,12 +1665,12 @@ test('JukeLoop prepares the next paid request and starts it before prior-play bo
   const completionPending = new Promise(resolve => { finishCompletion = resolve; });
   const firstPaid = { id: 'paid-1' };
   const secondPaid = { id: 'paid-2' };
-  const paidTrack = {
+  const paidTrack = verifiedRecording({
     trackId: 'paid-track-2',
     title: 'Paid Track Two',
     uploader: 'Paid Artist',
     messageId: 'paid-message-2',
-  };
+  });
   let paidPicks = 0;
   const session = new JukeLoopSession({
     voiceChannel: { guild: { id: 'djuke-gap-test' } },
@@ -1887,7 +1888,7 @@ test('JukeLoop selects a due advert during the unlocking song and keeps it queue
       session._persistMainRadioAdState = async () => {};
       session._sleep = async () => {};
       session._startPrepared = value => { started.push(value); return true; };
-      session._queue = [{ trackId: 'music-next', title: 'Music Next', ipfsCid: 'bafy-music' }];
+      session._queue = [verifiedRecording({ trackId: 'music-next', title: 'Music Next', ipfsCid: 'bafy-music' })];
       session._queueIndex = 0;
       session._musicSinceAd = DEVERT_SONGS_PER_MAIN_AD - 1;
       try {
@@ -1934,7 +1935,7 @@ test('JukeLoop selects a due advert during the unlocking song and keeps it queue
       session._getFreshUrl = async track => `https://media.example/${track.trackId}`;
       session._persistMainRadioAdState = async () => {};
       session._sleep = async () => {};
-      session._queue = [{ trackId: 'music-next', title: 'Music Next', ipfsCid: 'bafy-music' }];
+      session._queue = [verifiedRecording({ trackId: 'music-next', title: 'Music Next', ipfsCid: 'bafy-music' })];
       session._queueIndex = 0;
       return session;
     };
