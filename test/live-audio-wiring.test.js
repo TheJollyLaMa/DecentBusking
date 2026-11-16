@@ -261,7 +261,11 @@ test('re-entry lookup skips cancelled, incompatible, historical-complete and oth
 
 test('unavailable allocated stage never blocks reconciling an already-submitted performer claim', async t => {
   const [, { renderLivePerformances }] = await modules;
-  const createElement = dom(t), container = createElement('section'), b = allocatedBooking(), removed = [];
+  const { LIVE_ESCROW_ABI } = await import('../js/live-bookings.mjs');
+  const { Interface, id } = require('../discord-bot/node_modules/ethers');
+  const createElement = dom(t), container = createElement('section'), b = { ...allocatedBooking(), termsHash: id('terms') }, removed = [];
+  const iface = new Interface(LIVE_ESCROW_ABI);
+  const log = { ...iface.encodeEventLog('PerformancePaid', [id(b.id), wallet, 20000000n, b.termsHash]), address: otherWallet };
   t.mock.method(Date, 'now', () => reentryTime);
   const savedHash = '0x' + 'ab'.repeat(32);
   global.localStorage = {
@@ -271,17 +275,110 @@ test('unavailable allocated stage never blocks reconciling an already-submitted 
   class BrowserProvider {
     async getSigner() { return { getAddress: async () => wallet }; }
     async getNetwork() { return { chainId: 8453n }; }
-    async getTransactionReceipt(hash) { assert.equal(hash, savedHash); return { status: 1 }; }
+    async getTransactionReceipt(hash) { assert.equal(hash, savedHash); return { status: 1, blockNumber: 100, logs: [log] }; }
+    async getBlockNumber() { return 101; }
   }
   await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
     bookingState: { bookings: [b], escrowAddress: otherWallet },
-    ethers: { BrowserProvider, Contract() { throw new Error('Never send a second claim'); } },
+    ethers: { BrowserProvider, Interface, id, Contract() { throw new Error('Never send a second claim'); } },
     fetchImpl: async () => { throw new Error('offline'); } });
   const nodes = descendants(container), claim = nodes.find(node => node.textContent === 'Check pending claim');
   assert.equal(claim.disabled, false);
   await claim.onclick();
   assert.match(claim.textContent, /Previous claim confirmed/);
   assert.deepEqual(removed, [`live-claim:${b.id}`]);
+});
+
+test('a saved claim waits for confirmations and retains its hash when payment evidence does not match', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const { LIVE_ESCROW_ABI } = await import('../js/live-bookings.mjs');
+  const { Interface, id } = require('../discord-bot/node_modules/ethers');
+  const createElement = dom(t), b = { ...allocatedBooking(), termsHash: id('terms') }, hash = '0x' + 'ab'.repeat(32);
+  const iface = new Interface(LIVE_ESCROW_ABI);
+  const log = { ...iface.encodeEventLog('PerformancePaid', [id('another booking'), wallet, 20000000n, b.termsHash]), address: otherWallet };
+  t.mock.method(Date, 'now', () => reentryTime);
+  for (const [head, expected] of [[100, /two Base confirmations/], [101, /payment event could not be verified/]]) {
+    const container = createElement('section'), removed = [];
+    global.localStorage = { getItem: key => key === `live-claim:${b.id}` ? hash : null, removeItem: key => removed.push(key) };
+    class BrowserProvider {
+      async getSigner() { return { getAddress: async () => wallet }; }
+      async getNetwork() { return { chainId: 8453n }; }
+      async getTransactionReceipt() { return { status: 1, blockNumber: 100, logs: [log] }; }
+      async getBlockNumber() { return head; }
+    }
+    await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+      bookingState: { bookings: [b], escrowAddress: otherWallet },
+      ethers: { BrowserProvider, Interface, id, Contract() { throw new Error('Never send a second claim'); } },
+      fetchImpl: async () => { throw new Error('offline'); } });
+    const nodes = descendants(container), claim = nodes.find(node => node.textContent === 'Check pending claim');
+    await claim.onclick();
+    assert.match(nodes.find(node => node.tag === 'output').textContent, expected);
+    assert.deepEqual(removed, []);
+  }
+});
+
+test('Profile celebrates a new claim only when its confirmed receipt proves the exact performance payment', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const { LIVE_ESCROW_ABI } = await import('../js/live-bookings.mjs');
+  const { Interface, id } = require('../discord-bot/node_modules/ethers');
+  const { resetPaymentCelebrationState } = await import('../js/payment-celebration.mjs');
+  const createElement = dom(t), hash = '0x' + 'ab'.repeat(32), termsHash = id('terms');
+  t.mock.method(Date, 'now', () => reentryTime);
+  const iface = new Interface(LIVE_ESCROW_ABI);
+  const event = (changes = {}) => {
+    const values = { bookingId: id(booking().id), performer: wallet, amount: 20000000n, termsHash, ...changes };
+    return { ...iface.encodeEventLog('PerformancePaid', [values.bookingId, values.performer, values.amount, values.termsHash]),
+      address: otherWallet };
+  };
+  const cases = [
+    { name: 'matching event', logs: [event()], verified: true },
+    { name: 'other booking', logs: [event({ bookingId: id('other') })] },
+    { name: 'other performer', logs: [event({ performer: otherWallet })] },
+    { name: 'wrong amount', logs: [event({ amount: 19999999n })] },
+    { name: 'wrong terms', logs: [event({ termsHash: id('other terms') })] },
+    { name: 'other escrow', logs: [{ ...event(), address: wallet }] },
+    { name: 'duplicate events', logs: [event(), event()] },
+    { name: 'missing event', logs: [] },
+    { name: 'reverted transaction', logs: [event()], receiptStatus: 0 },
+    { name: 'missing agreement fingerprint', logs: [event()], termsHash: '' },
+    { name: 'invalid expected amount', logs: [event()], approvedUnits: 'invalid' },
+  ];
+  for (const scenario of cases) {
+    resetPaymentCelebrationState();
+    const storage = new Map(), container = createElement('section');
+    global.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value),
+      removeItem: key => storage.delete(key) };
+    const b = { ...booking(), status: 'approved', approvedUnits: '20000000', termsHash,
+      ...(scenario.termsHash !== undefined ? { termsHash: scenario.termsHash } : {}),
+      ...(scenario.approvedUnits !== undefined ? { approvedUnits: scenario.approvedUnits } : {}) };
+    class BrowserProvider {
+      async getSigner() { return { getAddress: async () => wallet }; }
+      async getNetwork() { return { chainId: 8453n }; }
+    }
+    class Contract {
+      async claim(bookingHash) {
+        assert.equal(bookingHash, id(b.id));
+        return { hash, wait: async confirmations => {
+          assert.equal(confirmations, 2);
+          return { status: scenario.receiptStatus ?? 1, logs: scenario.logs };
+        } };
+      }
+    }
+    await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+      bookingState: { bookings: [b], escrowAddress: otherWallet }, ethers: { BrowserProvider, Contract, Interface, id } });
+    const claim = descendants(container).find(node => node.className === 'live-performer-claim');
+    assert.ok(claim, scenario.name);
+    await claim.onclick();
+    assert.equal(storage.has('decentbusking:payment-celebrations:v1'), !!scenario.verified, scenario.name);
+    assert.equal(storage.has(`live-claim:${b.id}`), !scenario.verified, scenario.name);
+    if (scenario.verified) assert.match(claim.textContent, /Claim confirmed/);
+    else if (scenario.receiptStatus === 0) assert.match(claim.textContent, /Claim needs attention/, scenario.name);
+    else {
+      assert.match(claim.textContent, /evidence needs review/, scenario.name);
+      assert.match(descendants(container).find(node => node.tag === 'output').textContent, /do not send another claim/i);
+    }
+  }
+  resetPaymentCelebrationState();
 });
 
 test('withinthevacuum Profile invitation is wallet-scoped and cannot imply acceptance or funding', async t => {
@@ -576,6 +673,8 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261115-afterparty"/);
   assert.match(html, /live-performance\.css\?v=20261115-afterparty/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
+  assert.equal(map.imports['./js/live-performance-profile.mjs?v=20261115-afterparty'],
+    './js/live-performance-profile.mjs?v=20261116-claim-evidence');
   assert.equal(map.imports['./js/live-bookings.mjs?v=20261108-live-audio-pilot'],
     './js/live-bookings.mjs?v=20261114-tip-provenance');
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],

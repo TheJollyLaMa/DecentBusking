@@ -439,6 +439,11 @@ appears only when eligible (or to reconcile a saved pending hash); agreement
 and receipt details stay collapsed. Payment cards load independently of the
 earnings RPC and update from existing booking notifications without replacing
 an in-progress claim. A manual payment-status refresh is also available.
+The claim celebration requires two Base confirmations and one matching escrow
+`PerformancePaid` event for the booking, performer, agreement and expected
+amount. If the transaction succeeds but that event cannot be verified, the
+saved claim hash is retained for reconciliation; refresh the payment status
+and do not submit another claim.
 Reuse: existing `createBrowserIpfsUploader`, `LIVE_ESCROW_ABI`, transaction
 hash storage convention and event indexer; no contract or worker deployment.
 
