@@ -14,7 +14,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'node:crypto';
 import { isEligibleRadioMusic } from '../js/radio-playlists.mjs';
-import { recordingDurationProof, recordingMediaIdentity, recordingDurationReason } from '../js/radio-duration.mjs';
+import { recordingDurationProof, recordingSampleRangeProof, recordingMediaIdentity, recordingDurationReason } from '../js/radio-duration.mjs';
 import { currentPayrollPeriod, payrollPeriodFromKey, payrollPeriods } from '../js/payroll-week.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -257,6 +257,81 @@ export async function submitLiveRecordingRelease({ booking, release, source, con
     },
   };
   track.durationVerification = recordingDurationProof(track, track.durationSeconds, 'live-capture');
+  addTrack(track);
+  await waitForRemotePersistence();
+  return _playlist.find(entry => entry.trackId === trackId);
+}
+
+export async function submitCatalogRecordingRelease({ booking, release, source, catalogSource }) {
+  const wallet = catalogSource?.artistWallet;
+  const walletLower = wallet?.toLowerCase();
+  const sourceIdentity = catalogSource?.nftId;
+  if (!booking?.id || !/^0x[0-9a-f]{40}$/i.test(wallet || '') ||
+      walletLower !== booking.wallet?.toLowerCase() ||
+      !/^8453:0x[0-9a-f]{40}:\d{1,20}$/i.test(sourceIdentity || '') ||
+      !/^0x[0-9a-f]{40}$/i.test(catalogSource?.contractAddress || '') ||
+      !Number.isSafeInteger(catalogSource?.tokenId) || catalogSource.tokenId < 0 ||
+      sourceIdentity !== `8453:${catalogSource.contractAddress.toLowerCase()}:${catalogSource.tokenId}` ||
+      !/^[a-zA-Z0-9]{20,120}$/.test(catalogSource.sourceCid || '') ||
+      !Array.isArray(source?.segments) || source.segments.length < 1 || source.segments.length > 500 ||
+      source.cid !== catalogSource.sourceCid || source.sampleRate !== 48000 ||
+      !Number.isSafeInteger(source.durationSamples) || source.durationSamples <= 0 ||
+      !release || !/^[a-f0-9]{64}$/.test(release.releaseId || '') ||
+      !['full', 'split'].includes(release.choice) || !/^[a-zA-Z0-9]{20,120}$/.test(release.cid || '') ||
+      release.sourceCid !== catalogSource.sourceCid ||
+      !Number.isSafeInteger(release.startSample) || !Number.isSafeInteger(release.endSample) ||
+      release.startSample < 0 || release.endSample > source.durationSamples ||
+      release.durationSamples !== release.endSample - release.startSample ||
+      !Number.isSafeInteger(release.trackNumber) || release.trackNumber < 1 ||
+      typeof release.approvalSignature !== 'string' || release.approvalSignature.length > 1000 ||
+      !/^[a-f0-9]{64}$/.test(release.approvalMessageHash || '') ||
+      !Number.isSafeInteger(release.approvedAt) || release.incomplete === true ||
+      release.parentReleaseId !== undefined && !/^[a-f0-9]{64}$/.test(release.parentReleaseId)) {
+    throw Error('Invalid artist-approved catalog recording release');
+  }
+  const trackId = `catalog:${sourceIdentity}:${release.releaseId}`;
+  const mediaType = release.choice === 'full' ? catalogSource.mediaType : 'audio/mpeg';
+  const extension = ({ 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/wav': 'wav',
+    'audio/ogg': 'ogg', 'audio/flac': 'flac', 'audio/aac': 'aac', 'audio/webm': 'weba' })[mediaType];
+  if (!extension) throw Error('Unsupported catalog recording release media type');
+  const existing = _playlist.find(track => track.trackId === trackId);
+  if (existing) {
+    if (existing.ipfsCid !== release.cid || existing.mintRecipient?.toLowerCase() !== walletLower ||
+        existing.catalogRecording?.sourceNftId !== sourceIdentity ||
+        existing.catalogRecording?.sourceCid !== source.cid ||
+        existing.catalogRecording?.startSample !== release.startSample ||
+        existing.catalogRecording?.endSample !== release.endSample ||
+        existing.catalogRecording?.parentReleaseId !== release.parentReleaseId) {
+      throw Error('This catalog release ID already refers to different immutable media');
+    }
+    _save();
+    await waitForRemotePersistence();
+    return existing;
+  }
+  const track = {
+    attachmentId: trackId, source: 'catalog-recording', uploaderId: `wallet:${walletLower}`,
+    uploader: catalogSource.artistName || wallet, title: release.title, artist: wallet,
+    ipfsCid: release.cid, mediaType, filename: `catalog-${release.releaseId.slice(0, 20)}.${extension}`,
+    pinStatus: 'pinned', artworkCid: catalogSource.artworkCid || undefined, mintStatus: 'requested',
+    mintRecipient: wallet, mintRequestedAt: new Date().toISOString(), tipWallet: wallet,
+    durationSamples: release.durationSamples, durationSeconds: release.durationSamples / source.sampleRate,
+    sampleRate: source.sampleRate, albumId: `catalog:${sourceIdentity}`, albumTitle: release.albumTitle,
+    trackNumber: release.trackNumber,
+    catalogRecording: {
+      sourceNftId: sourceIdentity, sourceChainId: catalogSource.chainId,
+      sourceContractAddress: catalogSource.contractAddress, sourceTokenId: catalogSource.tokenId,
+      sourceCid: source.cid, sourceDurationSamples: source.durationSamples, sourceSampleRate: source.sampleRate,
+      outputCid: release.cid, startSample: release.startSample, endSample: release.endSample,
+      durationSamples: release.durationSamples,
+      ...(release.parentReleaseId ? { parentReleaseId: release.parentReleaseId } : {}),
+      artistApproval: { signature: release.approvalSignature, messageHash: release.approvalMessageHash,
+        issuedAt: release.approvedAt },
+    },
+  };
+  track.durationVerification = recordingSampleRangeProof(track, {
+    sourceCid: source.cid, startSample: release.startSample, endSample: release.endSample,
+    sampleRate: source.sampleRate,
+  });
   addTrack(track);
   await waitForRemotePersistence();
   return _playlist.find(entry => entry.trackId === trackId);

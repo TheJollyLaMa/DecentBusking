@@ -470,3 +470,53 @@ test('automatic replay selects only safe normal rotation, yields to paid songs a
     session.destroy(); streams.forEach(stream => stream.destroy()); p.configureRemotePersistence(null);
   }
 });
+
+test('catalog release retains source identity, artist-only defaults and exact sample-range duration', async () => {
+  const { verifiedRecordingDuration, recordingDurationReason } = await import('../js/radio-duration.mjs');
+  const p = await import('../discord-bot/playlist-store.js');
+  const nftId = `8453:0x${'1'.repeat(40)}:7`;
+  const sourceCid = 'a'.repeat(46), artistWallet = `0x${'2'.repeat(40)}`;
+  const catalogSource = {
+    nftId, chainId: 8453, contractAddress: `0x${'1'.repeat(40)}`, tokenId: 7,
+    artistWallet, sourceCid, mediaType: 'audio/wav', tipWallet: `0x${'3'.repeat(40)}`,
+  };
+  const durationSamples = 28_800_048;
+  const common = {
+    booking: { id: 'catalog-release-test', wallet: artistWallet },
+    catalogSource,
+    source: { cid: sourceCid, segments: [
+      ...Array.from({ length: 20 }, (_, index) => ({ cid: String(index).padEnd(46, 'd'), bytes: 2_880_000 })),
+      { cid: 'x'.repeat(46), bytes: 96 },
+    ],
+      sampleRate: 48_000, durationSamples },
+  };
+  p.loadPlaylist([]); p.configureRemotePersistence(async () => {});
+  try {
+    const full = await p.submitCatalogRecordingRelease({ ...common, release: {
+      releaseId: 'e'.repeat(64), choice: 'full', cid: sourceCid, sourceCid,
+      title: 'Untouched full recording', albumTitle: 'Original album', trackNumber: 1,
+      startSample: 0, endSample: durationSamples, durationSamples,
+      approvalSignature: 'fixture', approvalMessageHash: 'f'.repeat(64), approvedAt: Date.now(),
+    } });
+    assert.equal(full.mediaType, 'audio/wav');
+    assert.match(full.filename, /\.wav$/);
+    assert.equal(full.tipWallet, artistWallet, 'catalog collaborator tip metadata is not inferred');
+    assert.equal(full.mintRecipient, artistWallet);
+    assert.equal(full.parentTokenId, undefined, 'no royalty-chain parent is inferred from the source NFT');
+    assert.equal(full.catalogRecording.sourceCid, sourceCid);
+    assert.equal(verifiedRecordingDuration(full), durationSamples / 48_000);
+    assert.equal(recordingDurationReason(full), 'Recording over 10 minutes waits for designated long-form hours');
+    assert.equal(recordingDurationReason(full, { longForm: true }), null);
+
+    const cut = await p.submitCatalogRecordingRelease({ ...common, release: {
+      releaseId: 'a'.repeat(64), choice: 'split', cid: 'b'.repeat(46), sourceCid,
+      title: 'Named cut', albumTitle: 'Original album', trackNumber: 1,
+      startSample: 0, endSample: 48_000, durationSamples: 48_000,
+      approvalSignature: 'fixture', approvalMessageHash: 'f'.repeat(64), approvedAt: Date.now(),
+    } });
+    assert.equal(cut.mediaType, 'audio/mpeg');
+    assert.match(cut.filename, /\.mp3$/);
+    assert.equal(verifiedRecordingDuration(cut), 1);
+    assert.equal(cut.catalogRecording.sourceNftId, nftId);
+  } finally { p.configureRemotePersistence(null); }
+});

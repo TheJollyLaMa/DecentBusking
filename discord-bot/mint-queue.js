@@ -47,6 +47,7 @@ export function buildTrackMetadata(track, registeredBy, now = new Date()) {
         sampleRate: track.sampleRate } : {}),
     ...(track.albumId ? { album: { id: track.albumId, title: track.albumTitle, trackNumber: track.trackNumber } } : {}),
     ...(track.liveRecording ? { liveRecording: track.liveRecording } : {}),
+    ...(track.catalogRecording ? { catalogRecording: track.catalogRecording } : {}),
     registeredBy,
     mintedAt: now.toISOString(),
   };

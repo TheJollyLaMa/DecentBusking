@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DecentBusking · Recording release room</title>
+  <title>DecentBusking · Recording editor</title>
   <link rel="stylesheet" href="css/live-recording-edit.css">
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
   <script src="decent.config.js"></script>
@@ -11,14 +11,14 @@
 <body class="recording-edit-page">
   <main class="recording-edit-shell">
     <header>
-      <a href="./">← Profile & radio</a>
-      <p class="recording-edit-eyebrow">YOUR PERFORMANCE · YOUR RELEASE CHOICE</p>
-      <h1>Live recording room</h1>
-      <p>Preview the preserved original already covered by your recording consent. Keep it as one release, divide it into songs, or decide later. Each release needs your explicit approval before it enters the admin mint queue. IPFS audio is public; this page does not turn it into a private recording.</p>
+      <a id="recording-edit-back" href="./">← Profile & radio</a>
+      <p class="recording-edit-eyebrow">YOUR RECORDING · YOUR RELEASE CHOICE</p>
+      <h1 id="recording-edit-heading">Recording editor</h1>
+      <p id="recording-edit-intro">Preview the preserved original. Keep it as one release, divide it into named cuts, or decide later. Each release needs your explicit approval before it enters the admin mint queue. IPFS audio is public; this editor does not make it private.</p>
     </header>
     <section class="recording-edit-card">
-      <p id="recording-edit-status" role="status" aria-live="polite">Connect the wallet booked for this performance to check its authenticated recording journal.</p>
-      <button id="recording-edit-connect" type="button">Connect booked performer wallet</button>
+      <p id="recording-edit-status" role="status" aria-live="polite">Connect the authorized artist wallet to check the recording source and its durable edit journal.</p>
+      <button id="recording-edit-connect" type="button">Connect authorized artist wallet</button>
     </section>
     <section id="recording-edit-workspace" class="recording-edit-card" hidden>
       <h2 id="recording-edit-title">Recording preview</h2>
@@ -32,7 +32,7 @@
         <input id="recording-edit-album-title" maxlength="120" autocomplete="off">
       </div>
       <div id="recording-edit-songs" class="recording-edit-songs"></div>
-      <button id="recording-edit-add-song" type="button">Add song</button>
+      <button id="recording-edit-add-song" type="button">Add cut</button>
       <p class="recording-edit-note">Song exports are MP3 at 192 kb/s, limited to 30 minutes and 45 MB each. Boundaries are measured against the canonical 48 kHz source sample count. Short edge fades and −1 dB headroom reduce clicks and clipping; the original stays unchanged.</p>
       <div class="recording-edit-actions">
         <button id="recording-edit-save" type="button">Save split draft</button>

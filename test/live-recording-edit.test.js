@@ -4,7 +4,8 @@ const { Wallet } = require('../discord-bot/node_modules/ethers');
 const { createHash } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { liveRecordingConsentMessage } = require('../js/live-recording-consent.mjs');
-const { recordingReleaseApprovalMessage, validateRecordingDraft } = require('../js/live-recording-edit.mjs');
+const { catalogRecordingAuthorizationMessage, catalogRecordingReleaseApprovalMessage,
+  recordingReleaseApprovalMessage, validateCatalogRecordingDraft, validateRecordingDraft } = require('../js/live-recording-edit.mjs');
 
 const ORIGIN = 'https://radio.example';
 const performer = Wallet.createRandom(), owner = Wallet.createRandom(), sourceCid = 'a'.repeat(46);
@@ -77,6 +78,131 @@ test('split drafts use exact sample boundaries and reject empty, overlapping, du
     [{ title: 'One', startSample: 0, endSample: 48_001 }],
   ]) assert.throws(() => validateRecordingDraft({ ...splitDraft(), songs }, 48_000));
   assert.throws(() => validateRecordingDraft({ ...splitDraft(), songs: [] }, 48_000));
+});
+
+test('catalog cuts require artist-bound NFT source evidence, three named cuts and separate approval', async () => {
+  const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
+  const nftId = `8453:0x${'1'.repeat(40)}:7`;
+  const catalogSource = {
+    nftId, chainId: 8453, contractAddress: `0x${'1'.repeat(40)}`, tokenId: 7,
+    artistWallet: performer.address.toLowerCase(), sourceCid, title: 'L'.repeat(200), mediaType: 'audio/mpeg',
+  };
+  const nonce = 'b'.repeat(64), expiresAt = Date.now() + 120_000;
+  const authMessage = catalogRecordingAuthorizationMessage({
+    nftId, wallet: performer.address, origin: ORIGIN, nonce, expiresAt, sourceCid,
+  });
+  const authorization = { origin: ORIGIN, nonce, expiresAt, signature: await performer.signMessage(authMessage) };
+  const stored = { version: 1, recordings: [] }, submissions = [], releases = new Map();
+  let releaseNumber = 0;
+  const recorder = createLiveRecorder({
+    enabled: true,
+    store: { restore: async () => structuredClone(stored), save: async next => { stored.recordings = next.recordings; } },
+    upload: async () => `ipfs://${String(++releaseNumber).padEnd(46, 'c')}`,
+    download: async () => Buffer.alloc(576_000),
+    decodeSource: async () => ({ sourceSamples: 288_000,
+      segments: [{ cid: 'd'.repeat(46), bytes: 576_000, waveform: [[-.5, .5]] }] }),
+    encodeRange: async () => Buffer.from('encoded catalog cut'),
+    submitRelease: async ({ release }) => {
+      submissions.push(release);
+      const trackId = `catalog-fixture:${release.releaseId}`;
+      releases.set(trackId, { mintStatus: 'requested' });
+      return { trackId };
+    },
+    getRelease: trackId => releases.get(trackId) || null,
+    now: Date.now,
+  });
+  await recorder.initialize();
+  const edit = await recorder.prepareCatalogEdit(catalogSource, authorization);
+  assert.equal(edit.available, true);
+  assert.equal(edit.sourceType, 'catalog');
+  assert.equal(edit.catalogSource.nftId, nftId);
+  assert.equal(edit.draft.songs.length, 3);
+  assert.equal(edit.draft.albumTitle.length, 120);
+  assert.ok(edit.draft.songs.every(song => song.title.length <= 100));
+  assert.deepEqual(validateCatalogRecordingDraft(edit.draft, edit.sourceSamples), edit.draft);
+  await assert.rejects(recorder.prepareCatalogEdit({ ...catalogSource, sourceCid: 'e'.repeat(46) }, authorization),
+    /authorization is invalid/);
+  await assert.rejects(recorder.saveCatalogEdit(catalogSource, edit.draft, owner.address), /Only the artist may edit/);
+
+  const shortDraft = { ...edit.draft, revision: 1, songs: edit.draft.songs.slice(0, 2) };
+  await recorder.saveCatalogEdit(catalogSource, shortDraft, performer.address);
+  const issuedAt = Date.now();
+  const shortApproval = catalogRecordingReleaseApprovalMessage({
+    nftId, wallet: performer.address, origin: ORIGIN, sourceCid, sourceSamples: edit.sourceSamples,
+    choice: 'split', draft: shortDraft, issuedAt,
+  });
+  await assert.rejects(recorder.approveCatalogEdit(catalogSource, {
+    choice: 'split', issuedAt, signature: await performer.signMessage(shortApproval),
+  }, performer.address, ORIGIN), /three or four named cuts/);
+  assert.equal(submissions.length, 0);
+
+  const validDraft = { ...edit.draft, revision: 2, songs: edit.draft.songs.map((song, index) => ({
+    ...song, title: `Named cut ${index + 1}`,
+  })) };
+  await recorder.saveCatalogEdit(catalogSource, validDraft, performer.address);
+  const fullAt = Date.now();
+  const approval = catalogRecordingReleaseApprovalMessage({
+    nftId, wallet: performer.address, origin: ORIGIN, sourceCid, sourceSamples: edit.sourceSamples,
+    choice: 'full', draft: validDraft, issuedAt: fullAt,
+  });
+  const full = await recorder.approveCatalogEdit(catalogSource, {
+    choice: 'full', issuedAt: fullAt, signature: await performer.signMessage(approval),
+  }, performer.address, ORIGIN);
+  assert.equal(full.releases.filter(release => release.choice === 'full').length, 1);
+  assert.equal(full.releases[0].cid, sourceCid, 'the source remains unchanged for a separately approved full-set release');
+  assert.equal(submissions.length, 1);
+  releases.get(full.releases[0].trackId).mintStatus = 'minted';
+
+  const splitAt = Date.now();
+  const splitApproval = catalogRecordingReleaseApprovalMessage({
+    nftId, wallet: performer.address, origin: ORIGIN, sourceCid, sourceSamples: edit.sourceSamples,
+    choice: 'split', draft: validDraft, issuedAt: splitAt,
+  });
+  const result = await recorder.approveCatalogEdit(catalogSource, {
+    choice: 'split', issuedAt: splitAt, signature: await performer.signMessage(splitApproval),
+  }, performer.address, ORIGIN);
+  const cuts = result.releases.filter(release => release.choice === 'split');
+  assert.equal(cuts.length, 3);
+  assert.ok(cuts.every(release => release.status === 'queued' && release.parentReleaseId === full.releases[0].releaseId));
+  assert.equal(submissions.length, 4);
+  assert.ok(submissions.every(release => release.approvalSignature));
+});
+
+test('catalog source decoding uses bounded PCM segments and exact sample counts', async () => {
+  const { createLiveRecorder, pcmWav } = await import('../discord-bot/live-recording.js');
+  const nftId = `8453:0x${'2'.repeat(40)}:8`, catalogCid = 'f'.repeat(46);
+  const catalogSource = {
+    nftId, chainId: 8453, contractAddress: `0x${'2'.repeat(40)}`, tokenId: 8,
+    artistWallet: performer.address.toLowerCase(), sourceCid: catalogCid,
+    title: 'Synthetic WAV', mediaType: 'audio/wav',
+  };
+  const nonce = 'c'.repeat(64), expiresAt = Date.now() + 120_000;
+  const authMessage = catalogRecordingAuthorizationMessage({
+    nftId, wallet: performer.address, origin: ORIGIN, nonce, expiresAt, sourceCid: catalogCid,
+  });
+  const uploaded = [];
+  const recorder = createLiveRecorder({
+    enabled: true,
+    store: { restore: async () => ({ version: 1, recordings: [] }), save: async () => {} },
+    upload: async bytes => {
+      uploaded.push(Buffer.from(bytes));
+      return `ipfs://${'d'.repeat(46)}`;
+    },
+    download: async () => Buffer.alloc(96_000),
+    downloadSource: async () => new Response(pcmWav(Buffer.alloc(48_000 * 2 * 6)), {
+      status: 200, headers: { 'content-type': 'audio/wav' },
+    }),
+    submitRelease: async () => ({ trackId: 'unused' }),
+  });
+  await recorder.initialize();
+  const result = await recorder.prepareCatalogEdit(catalogSource, {
+    origin: ORIGIN, nonce, expiresAt, signature: await performer.signMessage(authMessage),
+  });
+  assert.equal(result.available, true);
+  assert.equal(result.sourceSamples, 48_000 * 6);
+  assert.equal(result.sampleRate, 48_000);
+  assert.equal(uploaded.length, 1);
+  assert.equal(result.waveform.at(-1).endSample, 48_000 * 6);
 });
 
 test('defer creates no release; full set and split tracks can coexist idempotently', async () => {

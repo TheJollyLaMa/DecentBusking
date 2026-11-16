@@ -84,6 +84,62 @@ test('live audio is fail-closed without explicit hosting and durable state', asy
   await assert.rejects(service.listener('anything'), /unavailable/);
 });
 
+test('catalog source decoding does not hold the serialized live-audio watchdog queue', async t => {
+  let markDecodeStarted, finishDecode;
+  const decodeStarted = new Promise(resolve => { markDecodeStarted = resolve; });
+  const decoding = new Promise(resolve => { finishDecode = resolve; });
+  let lookupGate, markLookupStarted, finishLookup;
+  const source = { nftId: `8453:0x${'1'.repeat(40)}:7`, chainId: 8453,
+    contractAddress: `0x${'1'.repeat(40)}`, tokenId: 7, artistWallet: artist.address.toLowerCase(),
+    sourceCid: 'a'.repeat(46), title: 'Catalog fixture', mediaType: 'audio/mpeg' };
+  const recorder = { available: true, prepareCatalogEdit: async () => {
+    markDecodeStarted(); return decoding;
+  }, catalogEditState: async () => ({ available: true }) };
+  const f = await setup({ recorder, resolveCatalogRecording: async () => {
+    if (lookupGate) { markLookupStarted(); return lookupGate; }
+    return source;
+  } });
+  t.after(() => f.service.stop());
+  let blocked = false;
+  const challenge = await f.service.challenge({
+    nftId: source.nftId, wallet: artist.address, scope: 'catalog-recording-edit',
+  }, ORIGIN);
+  const authorization = f.service.authorize({ challengeId: challenge.challengeId,
+    signature: await artist.signMessage(challenge.message) }, ORIGIN);
+  await decodeStarted;
+  let timeout;
+  try {
+    await Promise.race([
+      f.service.current(),
+      new Promise((_, reject) => { timeout = setTimeout(() => { blocked = true; reject(Error('watchdog queue blocked')); }, 500); }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+    finishDecode({ available: true });
+    const session = await authorization;
+    const lookupStarted = new Promise(resolve => { markLookupStarted = resolve; });
+    lookupGate = new Promise(resolve => { finishLookup = resolve; });
+    const stateRequest = f.service.command(session.token, {
+      action: 'catalog-recording-edit-state',
+    }, ORIGIN);
+    await lookupStarted;
+    let watchdogTimeout;
+    try {
+      await Promise.race([
+        f.service.current(),
+        new Promise((_, reject) => {
+          watchdogTimeout = setTimeout(() => { blocked = true; reject(Error('watchdog queue blocked by catalog lookup')); }, 500);
+        }),
+      ]);
+    } finally {
+      clearTimeout(watchdogTimeout);
+      finishLookup(source);
+      await stateRequest;
+    }
+  }
+  assert.equal(blocked, false);
+});
+
 test('live deployment handoff serializes verified bookings and blocks controls while the recorder is leased', async () => {
   let paused = false, prepared = [];
   const recorder = {

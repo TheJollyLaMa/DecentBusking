@@ -6,7 +6,8 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { verifyMessage } from 'ethers';
 import { LIVE_RECORDING_MAX_SONGS, LIVE_RECORDING_MAX_SONG_SAMPLES, LIVE_RECORDING_SAMPLE_RATE,
-  recordingReleaseApprovalMessage, recordingSourceSamples, validateRecordingDraft } from '../js/live-recording-edit.mjs';
+  catalogRecordingAuthorizationMessage, catalogRecordingReleaseApprovalMessage, recordingReleaseApprovalMessage,
+  recordingSourceSamples, validateCatalogRecordingDraft, validateRecordingDraft } from '../js/live-recording-edit.mjs';
 import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from '../js/live-recording-consent.mjs';
 import { liveBroadcastEnd, liveBroadcastStart } from '../js/live-broadcast.mjs';
 import { createPinataStateStore } from './ipfs-state.js';
@@ -14,10 +15,120 @@ import { LiveAudioError } from './live-audio-errors.js';
 import { buildGatewayUrl } from './mint-sync.js';
 
 const RATE = LIVE_RECORDING_SAMPLE_RATE, BYTES_PER_SECOND = RATE * 2;
+const CATALOG_SOURCE_MAX_BYTES = 100 * 1024 * 1024;
+const CATALOG_SOURCE_MAX_SAMPLES = RATE * 60 * 120;
+const CATALOG_SEGMENT_BYTES = BYTES_PER_SECOND * 30;
 const AAD = Buffer.from('dbusk-live-recording-state-v1');
 const safeCid = value => typeof value === 'string' && /^[a-zA-Z0-9]{20,120}$/.test(value);
 const keysOnly = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).every(key => keys.includes(key));
+const safeAddress = value => /^0x[0-9a-f]{40}$/i.test(value || '');
+const catalogBookingId = nftId => `catalog-${createHash('sha256').update(nftId).digest('hex')}`;
+const catalogBooking = source => ({ id: catalogBookingId(source.nftId), wallet: source.artistWallet,
+  title: source.title, displayName: source.artistName || source.artistWallet, artworkCid: source.artworkCid });
+
+function validateCatalogSource(source) {
+  if (!source || !keysOnly(source, ['nftId', 'chainId', 'contractAddress', 'tokenId', 'artistWallet', 'artistName',
+    'sourceCid', 'title', 'mediaType', 'tipWallet', 'artworkCid', 'authorization']) ||
+      source.chainId !== 8453 || !/^8453:0x[0-9a-f]{40}:\d{1,20}$/i.test(source.nftId || '') ||
+      !/^0x[0-9a-f]{40}$/i.test(source.contractAddress || '') ||
+      !Number.isSafeInteger(source.tokenId) || source.tokenId < 0 ||
+      source.nftId.toLowerCase() !== `8453:${source.contractAddress.toLowerCase()}:${source.tokenId}` ||
+      !safeAddress(source.artistWallet) || !safeCid(source.sourceCid) ||
+      typeof source.title !== 'string' || !source.title.trim() || source.title.length > 200 ||
+      typeof source.mediaType !== 'string' || !source.mediaType.startsWith('audio/') ||
+      source.tipWallet !== undefined && !safeAddress(source.tipWallet) ||
+      source.artworkCid !== undefined && !safeCid(source.artworkCid) ||
+      !keysOnly(source.authorization, ['origin', 'nonce', 'expiresAt', 'signature']) ||
+      typeof source.authorization.origin !== 'string' || !Number.isSafeInteger(source.authorization.expiresAt) ||
+      !/^[a-f0-9]{64}$/i.test(source.authorization.nonce || '') ||
+      typeof source.authorization.signature !== 'string' || source.authorization.signature.length > 1000) {
+    throw Error('Catalog recording source is unavailable or unsupported');
+  }
+  const message = catalogRecordingAuthorizationMessage({
+    nftId: source.nftId, wallet: source.artistWallet, origin: source.authorization.origin,
+    nonce: source.authorization.nonce, expiresAt: source.authorization.expiresAt, sourceCid: source.sourceCid,
+  });
+  if (verifyMessage(message, source.authorization.signature).toLowerCase() !== source.artistWallet.toLowerCase()) {
+    throw Error('Catalog recording edit authorization is invalid');
+  }
+  return source;
+}
+
+async function decodeCatalogRecording(source, { downloadSource, upload, timeoutMs = 180_000 }) {
+  if (typeof downloadSource !== 'function') throw Error('Catalog recording source download is unavailable');
+  const response = await downloadSource(source.sourceCid);
+  if (!response?.ok || !response.body) throw Error(`Original catalog recording is unavailable${response?.status ? ` (${response.status})` : ''}`);
+  const declaredLength = Number(response.headers?.get?.('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > CATALOG_SOURCE_MAX_BYTES) {
+    throw Error('Original recording exceeds the 100 MB processing limit');
+  }
+  const child = spawn(process.env.FFMPEG_PATH || 'ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-xerror',
+    '-i', 'pipe:0', '-map', '0:a:0', '-vn', '-ac', '1', '-ar', String(RATE), '-f', 's16le', 'pipe:1'],
+  { stdio: ['pipe', 'pipe', 'pipe'] });
+  let diagnostics = '', inputError, inputBytes = 0, outputBytes = 0;
+  const segments = [];
+  child.stderr.on('data', chunk => { diagnostics = (diagnostics + chunk).slice(-2000); });
+  child.stdin.on('error', error => { inputError = error; });
+  const exited = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', code => code === 0 ? resolve() : reject(Error(
+      `Original recording decode failed (${code}): ${diagnostics || 'unsupported or invalid audio'}`)));
+  });
+  exited.catch(() => {});
+  const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
+  const input = (async () => {
+    for await (const chunk of response.body) {
+      inputBytes += chunk.byteLength;
+      if (inputBytes > CATALOG_SOURCE_MAX_BYTES) throw Error('Original recording exceeds the 100 MB processing limit');
+      if (inputError) throw inputError;
+      if (!child.stdin.write(chunk)) await Promise.race([
+        once(child.stdin, 'drain'), exited.then(() => { throw Error('Decoder stopped before the source download completed'); }),
+      ]);
+    }
+    child.stdin.end();
+  })();
+  const output = (async () => {
+    let current = Buffer.alloc(CATALOG_SEGMENT_BYTES), filled = 0, segmentIndex = 0;
+    for await (const chunk of child.stdout) {
+      let offset = 0;
+      while (offset < chunk.length) {
+        const take = Math.min(CATALOG_SEGMENT_BYTES - filled, chunk.length - offset);
+        chunk.copy(current, filled, offset, offset + take);
+        filled += take; offset += take; outputBytes += take;
+        if (outputBytes > CATALOG_SOURCE_MAX_SAMPLES * 2) throw Error('Decoded recording exceeds the 120-minute processing limit');
+        if (filled === CATALOG_SEGMENT_BYTES) {
+          const uri = await upload(pcmWav(current), `catalog-${source.tokenId}-${segmentIndex++}.wav`, 'audio/wav');
+          const cid = uri.replace(/^ipfs:\/\//, '');
+          if (!safeCid(cid)) throw Error('Invalid decoded recording segment CID');
+          segments.push({ cid, bytes: current.length, waveform: waveformFor(current) });
+          current = Buffer.alloc(CATALOG_SEGMENT_BYTES); filled = 0;
+        }
+      }
+    }
+    if (filled) {
+      if (filled % 2 !== 0) throw Error('Decoded recording ended on an invalid sample boundary');
+      const pcm = current.subarray(0, filled);
+      const uri = await upload(pcmWav(pcm), `catalog-${source.tokenId}-${segmentIndex}.wav`, 'audio/wav');
+      const cid = uri.replace(/^ipfs:\/\//, '');
+      if (!safeCid(cid)) throw Error('Invalid decoded recording segment CID');
+      segments.push({ cid, bytes: pcm.length, waveform: waveformFor(pcm) });
+    }
+  })();
+  try {
+    await Promise.all([input, output, exited]);
+  } catch (error) {
+    if (child.exitCode === null) child.kill('SIGTERM');
+    await Promise.allSettled([input, output, exited]);
+    throw error;
+  } finally { clearTimeout(timer); }
+  const sourceSamples = outputBytes / 2;
+  if (!Number.isSafeInteger(sourceSamples) || sourceSamples < RATE * 3 / 2 ||
+      sourceSamples > CATALOG_SOURCE_MAX_SAMPLES || !segments.length || segments.length > 500) {
+    throw Error('Original recording must contain 1.5 seconds to 120 minutes of measurable audio');
+  }
+  return { segments, sourceSamples };
+}
 function waveformFor(pcm, limit = 120) {
   const samples = pcm.length / 2, bins = Math.min(samples, limit), points = [];
   for (let bin = 0; bin < bins; bin++) {
@@ -75,12 +186,23 @@ export function validateRecordingState(state) {
       !Array.isArray(state.recordings) || state.recordings.length > 200) throw Error('Invalid recording journal');
   const ids = new Set();
   for (const r of state.recordings) {
-    if (!keysOnly(r, ['bookingId', 'wallet', 'consent', 'segments', 'status', 'interrupted', 'incomplete', 'result', 'trackId', 'error',
+    const catalog = r?.catalogSource;
+    const isCatalog = catalog !== undefined;
+    const consentValid = isCatalog ? r.consent === undefined :
+      keysOnly(r.consent, ['enabled', 'issuedAt', 'signature', 'origin', 'version']) &&
+      typeof r.consent?.enabled === 'boolean' && Number.isSafeInteger(r.consent.issuedAt) &&
+      typeof r.consent.signature === 'string';
+    const catalogValid = !isCatalog || (() => {
+      try {
+        validateCatalogSource(catalog);
+        return catalog.artistWallet.toLowerCase() === String(r.wallet || '').toLowerCase() &&
+          r.result?.cid === catalog.sourceCid;
+      } catch { return false; }
+    })();
+    if (!keysOnly(r, ['bookingId', 'wallet', 'consent', 'catalogSource', 'segments', 'status', 'interrupted', 'incomplete', 'result', 'trackId', 'error',
       'draft', 'releaseChoice', 'releaseApproval', 'releases']) ||
         typeof r.bookingId !== 'string' || ids.has(r.bookingId) || !/^0x[0-9a-f]{40}$/i.test(r.wallet || '') ||
-        !keysOnly(r.consent, ['enabled', 'issuedAt', 'signature', 'origin', 'version']) ||
-        typeof r.consent?.enabled !== 'boolean' || !Number.isSafeInteger(r.consent.issuedAt) ||
-        typeof r.consent.signature !== 'string' || !Array.isArray(r.segments) || r.segments.length > 500 ||
+        !consentValid || !catalogValid || !Array.isArray(r.segments) || r.segments.length > 500 ||
         r.segments.some(s => !keysOnly(s, ['cid', 'bytes', 'waveform']) || !safeCid(s.cid) || !Number.isSafeInteger(s.bytes) || s.bytes <= 0 ||
           s.bytes > BYTES_PER_SECOND * 30 || s.bytes % 2 !== 0 ||
           s.waveform !== undefined && (!Array.isArray(s.waveform) || s.waveform.length > 120 ||
@@ -96,7 +218,8 @@ export function validateRecordingState(state) {
           r.result.durationSamples !== undefined && (!Number.isSafeInteger(r.result.durationSamples) || r.result.durationSamples <= 0) ||
           r.result.sampleRate !== undefined && r.result.sampleRate !== RATE)) ||
         (r.draft !== undefined && !r.result) ||
-        (r.draft !== undefined && validateRecordingDraft(r.draft, recordingSourceSamples(r.segments)) === null) ||
+        (r.draft !== undefined && (isCatalog ? validateCatalogRecordingDraft : validateRecordingDraft)
+          (r.draft, recordingSourceSamples(r.segments)) === null) ||
         (r.releaseChoice !== undefined && !['deferred', 'full', 'split'].includes(r.releaseChoice)) ||
         (r.releaseApproval !== undefined && (!keysOnly(r.releaseApproval, ['choice', 'issuedAt', 'signature', 'messageHash']) ||
           !['defer', 'full', 'split'].includes(r.releaseApproval.choice) || !Number.isSafeInteger(r.releaseApproval.issuedAt) ||
@@ -107,7 +230,7 @@ export function validateRecordingState(state) {
             'endSample', 'sourceCid', 'cid', 'durationSamples', 'trackId', 'status', 'error', 'approvalMessageHash',
             'approvalSignature', 'approvedAt', 'incomplete', 'parentReleaseId']) ||
             typeof release.releaseId !== 'string' || !/^[a-f0-9]{64}$/.test(release.releaseId) ||
-            !['full', 'split'].includes(release.choice) || typeof release.title !== 'string' || release.title.length > 100 ||
+            !['full', 'split'].includes(release.choice) || typeof release.title !== 'string' || release.title.length > 120 ||
             typeof release.albumTitle !== 'string' || release.albumTitle.length > 120 ||
             !Number.isSafeInteger(release.trackNumber) || release.trackNumber < 1 ||
             !Number.isSafeInteger(release.startSample) || !Number.isSafeInteger(release.endSample) ||
@@ -121,9 +244,11 @@ export function validateRecordingState(state) {
             typeof release.approvalSignature !== 'string' || release.approvalSignature.length > 1000 ||
             !Number.isSafeInteger(release.approvedAt) || typeof release.incomplete !== 'boolean' ||
             release.parentReleaseId !== undefined && !/^[a-f0-9]{64}$/.test(release.parentReleaseId))))) throw Error('Invalid recording journal');
-    const message = liveRecordingConsentMessage({ bookingId: r.bookingId, wallet: r.wallet,
-      origin: r.consent.origin, issuedAt: r.consent.issuedAt, enabled: r.consent.enabled, version: r.consent.version });
-    if (verifyMessage(message, r.consent.signature).toLowerCase() !== r.wallet.toLowerCase()) throw Error('Invalid recording permission signature');
+    if (!isCatalog) {
+      const message = liveRecordingConsentMessage({ bookingId: r.bookingId, wallet: r.wallet,
+        origin: r.consent.origin, issuedAt: r.consent.issuedAt, enabled: r.consent.enabled, version: r.consent.version });
+      if (verifyMessage(message, r.consent.signature).toLowerCase() !== r.wallet.toLowerCase()) throw Error('Invalid recording permission signature');
+    }
     ids.add(r.bookingId);
   }
   return state;
@@ -269,14 +394,15 @@ export async function encodeRecordingRange(segments, download, startSample, endS
 }
 
 export function createLiveRecorder({ enabled = false, store, upload, download, ingest, submitRelease = ingest,
-  encode = encodeRecording, encodeRange = encodeRecordingRange, getRelease = () => null,
+  encode = encodeRecording, encodeRange = encodeRecordingRange, downloadSource,
+  decodeSource = decodeCatalogRecording, getRelease = () => null,
   now = () => Date.now(), log = console, segmentSeconds = 30, resumeDelayMs = 0,
   finalizationTimeoutMs = 120000 } = {}) {
   if (!Number.isInteger(segmentSeconds) || segmentSeconds < 1 || segmentSeconds > 30) throw Error('Invalid recording segment length');
   const available = enabled && !!store && !!upload && !!download && !!submitRelease;
   let state, initializing, tail = Promise.resolve(), working = false, buffered = 0;
   const captureErrors = new Map(), finalizationErrors = new Map(), finalizationTasks = new Map();
-  const editTasks = new Map();
+  const editTasks = new Map(), catalogEditTasks = new Map(), catalogApprovalTasks = new Map();
   let initializationError = '';
   let chunks = [], bytes = 0, activeId, lastFrameAt = 0;
   let deployment = null, preparingDeployment = false;
@@ -284,6 +410,12 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
   const resumeAt = now() + resumeDelayMs;
   const deploymentPaused = () => preparingDeployment || !!(deployment && deployment.expiresAt > now());
   const record = id => state?.recordings.find(r => r.bookingId === id);
+  const canEditRecord = r => !!r && (r.catalogSource
+    ? r.catalogSource.artistWallet.toLowerCase() === r.wallet.toLowerCase()
+    : r.consent?.enabled === true);
+  const normalizeDraft = (r, draft, sourceSamples) => r.catalogSource
+    ? validateCatalogRecordingDraft(draft, sourceSamples)
+    : validateRecordingDraft(draft, sourceSamples);
   const serial = (fn, { captureFailure = true, bookingId = activeId } = {}) => {
     const task = tail.then(fn); tail = task.catch(error => {
       if (captureFailure && bookingId) captureErrors.set(bookingId, error.message);
@@ -298,14 +430,20 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
   };
   function editState(booking) {
     const r = record(booking.id), sourceSamples = sourceFor(r);
-    if (!r || !r.result || !sourceSamples || !r.consent.enabled || !['ready', 'submitted'].includes(r.status)) {
+    if (!r || !r.result || !sourceSamples || !canEditRecord(r) || !['ready', 'submitted'].includes(r.status)) {
       return { available: false, status: r?.status || 'waiting', error: r?.error || '' };
     }
-    const albumTitle = booking.title || 'Live performance';
-    const draft = r.draft || { revision: 0, albumTitle, songs: [{
-      title: `${albumTitle} - Track 1`, startSample: 0,
-      endSample: Math.min(sourceSamples, LIVE_RECORDING_MAX_SONG_SAMPLES),
-    }] };
+    const albumTitle = String(r.catalogSource?.title || booking.title || 'Live performance').slice(0, 120);
+    const trackTitle = albumTitle.slice(0, 80).trimEnd();
+    const cutCount = r.catalogSource
+      ? Math.min(4, Math.max(3, Math.ceil(sourceSamples / LIVE_RECORDING_MAX_SONG_SAMPLES)))
+      : 1;
+    const songs = Array.from({ length: cutCount }, (_, index) => {
+      const startSample = Math.floor(index * sourceSamples / cutCount);
+      const endSample = Math.floor((index + 1) * sourceSamples / cutCount);
+      return { title: `${trackTitle} - Track ${index + 1}`.slice(0, 100), startSample, endSample };
+    });
+    const draft = r.draft || { revision: 0, albumTitle, songs };
     let sampleStart = 0;
     const waveform = [];
     for (const segment of r.segments) {
@@ -319,9 +457,15 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
     }
     return {
       available: true, bookingId: booking.id, wallet: r.wallet, status: r.status,
+      sourceType: r.catalogSource ? 'catalog' : 'live',
+      ...(r.catalogSource ? { catalogSource: {
+        nftId: r.catalogSource.nftId, chainId: r.catalogSource.chainId,
+        contractAddress: r.catalogSource.contractAddress, tokenId: r.catalogSource.tokenId,
+        artistWallet: r.catalogSource.artistWallet, title: r.catalogSource.title,
+      } } : {}),
       sourceCid: r.result.cid, sourceSamples, sampleRate: RATE,
       durationSeconds: sourceSamples / RATE, incomplete: r.incomplete === true,
-      consent: { version: r.consent.version, issuedAt: r.consent.issuedAt },
+      ...(r.consent ? { consent: { version: r.consent.version, issuedAt: r.consent.issuedAt } } : {}),
       decision: r.releaseChoice || 'undecided', draft, waveform,
       releases: (r.releases || []).map(release => ({ ...release, status: releaseMintStatus(release) })),
     };
@@ -367,7 +511,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
         const current = record(booking.id);
         const queued = await boundedFinalization(booking.id, `edit-queue:${releaseId}`, () => submitRelease({ booking, release: { ...release, cid },
           source: { cid: current.result.cid, segments: current.segments, sampleRate: RATE,
-            durationSamples: sourceFor(current) },
+            durationSamples: sourceFor(current) }, catalogSource: current.catalogSource,
           consent: current.consent, incomplete: current.incomplete === true }));
         finalizationTasks.delete(`${booking.id}:edit-queue:${releaseId}`);
         if (!queued?.trackId) throw Error('Recording release was not added to the mint queue');
@@ -389,14 +533,20 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
     await initialize();
     const r = record(booking.id), sourceSamples = sourceFor(r);
     if (!r || !r.result || !sourceSamples || r.wallet.toLowerCase() !== String(wallet || '').toLowerCase() ||
-        r.wallet.toLowerCase() !== booking.wallet.toLowerCase() || !r.consent.enabled ||
+        r.wallet.toLowerCase() !== booking.wallet.toLowerCase() || !canEditRecord(r) ||
         !['ready', 'submitted'].includes(r.status)) throw Error('Recording is not available for performer approval');
     if (!Number.isSafeInteger(issuedAt) || Math.abs(now() - issuedAt) > 300000 || issuedAt > now() + 30000) {
       throw Error('Recording approval expired; review and sign again');
     }
-    const draft = choice === 'defer' ? null : validateRecordingDraft(r.draft || editState(booking).draft, sourceSamples);
-    const message = recordingReleaseApprovalMessage({ bookingId: booking.id, wallet: r.wallet, origin,
-      sourceCid: r.result.cid, sourceSamples, choice, draft, issuedAt, incomplete: r.incomplete === true });
+    const draft = choice === 'defer' ? null : normalizeDraft(r, r.draft || editState(booking).draft, sourceSamples);
+    if (r.catalogSource && choice === 'split' && (draft.songs.length < 3 || draft.songs.length > 4)) {
+      throw Error('Approve three or four named cuts for a catalog split');
+    }
+    const message = r.catalogSource
+      ? catalogRecordingReleaseApprovalMessage({ nftId: r.catalogSource.nftId, wallet: r.wallet, origin,
+        sourceCid: r.result.cid, sourceSamples, choice, draft, issuedAt })
+      : recordingReleaseApprovalMessage({ bookingId: booking.id, wallet: r.wallet, origin,
+        sourceCid: r.result.cid, sourceSamples, choice, draft, issuedAt, incomplete: r.incomplete === true });
     if (verifyMessage(message, signature).toLowerCase() !== r.wallet.toLowerCase()) {
       throw Error('Recording approval signature does not match the booked performer');
     }
@@ -415,6 +565,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       : draft.songs.map((song, index) => ({ ...song, albumTitle: draft.albumTitle, trackNumber: index + 1 }));
     const releasePlans = plans.map(plan => {
       const planHash = createHash('sha256').update(JSON.stringify({ bookingId: booking.id, sourceCid: r.result.cid,
+        ...(r.catalogSource ? { nftId: r.catalogSource.nftId } : {}),
         choice, title: plan.title, albumTitle: plan.albumTitle, trackNumber: plan.trackNumber,
         startSample: plan.startSample, endSample: plan.endSample })).digest('hex');
       const fullReleases = (r.releases || []).filter(item => item.choice === 'full');
@@ -448,6 +599,59 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
     for (const plan of releasePlans) await processRelease(booking, plan.releaseId);
     return editState(booking);
   }
+  async function prepareCatalogEdit(input, authorization) {
+    if (!available) throw new LiveAudioError('Catalog recording editing is unavailable');
+    await initialize();
+    if (deploymentPaused()) throw new LiveAudioError('Catalog recording editing is paused for a verified deployment handoff');
+    const source = validateCatalogSource({ ...input, authorization });
+    const existing = catalogEditTasks.get(source.nftId);
+    if (existing) return existing;
+    const task = (async () => {
+      const booking = catalogBooking(source);
+      const current = record(booking.id);
+      if (current) {
+        if (!current.catalogSource || current.catalogSource.sourceCid !== source.sourceCid ||
+            current.catalogSource.artistWallet.toLowerCase() !== source.artistWallet.toLowerCase()) {
+          throw new LiveAudioError('This NFT identity is already linked to a different source; refresh the verified catalog item');
+        }
+        await serial(async () => {
+          const next = structuredClone(state);
+          const target = next.recordings.find(item => item.bookingId === booking.id);
+          target.catalogSource.authorization = source.authorization;
+          await save(next);
+        }, { captureFailure: false, bookingId: booking.id });
+        return editState(booking);
+      }
+      const decoded = await decodeSource(source, { downloadSource, upload, timeoutMs: finalizationTimeoutMs * 3 });
+      const nextRecord = {
+        bookingId: booking.id, wallet: source.artistWallet.toLowerCase(), catalogSource: source,
+        segments: decoded.segments, status: 'ready',
+        result: { cid: source.sourceCid, durationSamples: decoded.sourceSamples, sampleRate: RATE,
+          durationSeconds: decoded.sourceSamples / RATE },
+        releaseChoice: 'deferred',
+      };
+      await serial(async () => {
+        const next = structuredClone(state);
+        if (next.recordings.some(item => item.bookingId === booking.id)) {
+          throw new LiveAudioError('This catalog recording was prepared in another session; reload its draft');
+        }
+        next.recordings.push(nextRecord);
+        await save(next);
+      }, { captureFailure: false, bookingId: booking.id });
+      return editState(booking);
+    })();
+    catalogEditTasks.set(source.nftId, task);
+    try { return await task; }
+    finally { catalogEditTasks.delete(source.nftId); }
+  }
+  const catalogSourceMatches = (stored, current) => !!stored && !!current &&
+    stored.nftId.toLowerCase() === current.nftId.toLowerCase() &&
+    stored.sourceCid === current.sourceCid &&
+    stored.artistWallet.toLowerCase() === current.artistWallet.toLowerCase() &&
+    stored.chainId === current.chainId && stored.contractAddress.toLowerCase() === current.contractAddress.toLowerCase() &&
+    stored.tokenId === current.tokenId && stored.title === current.title &&
+    stored.artistName === current.artistName && stored.mediaType === current.mediaType &&
+    stored.artworkCid === current.artworkCid;
   async function boundedFinalization(bookingId, step, work) {
     const key = `${bookingId}:${step}`;
     let task = finalizationTasks.get(key);
@@ -518,7 +722,8 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       if (preparingDeployment || deployment && deployment.expiresAt > now() && deployment.id !== id) {
         throw Error('Another deployment holds the recording handoff');
       }
-      if (working || buffered || bytes || activeId || finalizationTasks.size || editTasks.size) return { ready: false };
+      if (working || buffered || bytes || activeId || finalizationTasks.size || editTasks.size ||
+          catalogEditTasks.size || catalogApprovalTasks.size) return { ready: false };
       if (bookings.some(b => b.acknowledged && ['funded', 'approved'].includes(b.status) &&
           (!Number.isFinite(Date.parse(b.startUtc)) || !Number.isFinite(Date.parse(b.endUtc))))) {
         throw Error('Booking times unavailable for recording handoff');
@@ -527,7 +732,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
           !b.cancelled && liveBroadcastEnd(b) > now() && liveBroadcastStart(b) < expiresAt)) {
         return { ready: false };
       }
-      const pending = state.recordings.filter(r => r.consent.enabled && ['waiting', 'recording', 'processing'].includes(r.status));
+      const pending = state.recordings.filter(r => r.consent?.enabled && ['waiting', 'recording', 'processing'].includes(r.status));
       if (pending.some(r => {
         const b = bookings.find(b => b.id === r.bookingId);
         return !b || b.wallet?.toLowerCase() !== r.wallet.toLowerCase() ||
@@ -538,7 +743,8 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       deployment = { id, expiresAt };
       try {
         await tail;
-        if (working || buffered || bytes || activeId || finalizationTasks.size || editTasks.size) return { ready: false };
+        if (working || buffered || bytes || activeId || finalizationTasks.size || editTasks.size ||
+            catalogEditTasks.size || catalogApprovalTasks.size) return { ready: false };
         const restored = validateRecordingState(await store.restore());
         if (JSON.stringify(restored) !== JSON.stringify(state)) throw Error('Recording handoff checkpoint does not match the canonical recorder');
         if (expiresAt <= now()) throw Error('Recording handoff lease expired during verification');
@@ -562,16 +768,54 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       await initialize();
       return editState(booking);
     },
+    prepareCatalogEdit,
+    async catalogEditState(source) {
+      if (!available) throw new LiveAudioError('Catalog recording editing is unavailable');
+      await initialize();
+      const booking = catalogBooking(source), current = record(booking.id);
+      if (!catalogSourceMatches(current?.catalogSource, source)) {
+        throw new LiveAudioError('Catalog source changed or its durable edit journal is unavailable; reopen from the verified catalog');
+      }
+      return editState(booking);
+    },
+    async saveCatalogEdit(source, draft, wallet) {
+      await initialize();
+      const booking = catalogBooking(source), current = record(booking.id);
+      if (!catalogSourceMatches(current?.catalogSource, source) ||
+          current.wallet.toLowerCase() !== String(wallet || '').toLowerCase()) {
+        throw new LiveAudioError('Only the artist may edit the verified catalog source');
+      }
+      return this.saveEdit(booking, draft, wallet);
+    },
+    async approveCatalogEdit(source, command, wallet, origin) {
+      if (!available) throw new LiveAudioError('Catalog recording editing is unavailable');
+      if (deploymentPaused()) throw new LiveAudioError('Catalog recording editing is paused for a verified deployment handoff');
+      await initialize();
+      const booking = catalogBooking(source), current = record(booking.id);
+      if (!catalogSourceMatches(current?.catalogSource, source) ||
+          current.wallet.toLowerCase() !== String(wallet || '').toLowerCase()) {
+        throw new LiveAudioError('Only the artist may approve releases from the verified catalog source');
+      }
+      if (deploymentPaused()) throw new LiveAudioError('Catalog recording editing is paused for a verified deployment handoff');
+      const existing = catalogApprovalTasks.get(source.nftId);
+      if (existing) return existing;
+      const task = approveEdit(booking, command, wallet, origin);
+      catalogApprovalTasks.set(source.nftId, task);
+      try { return await task; }
+      finally { catalogApprovalTasks.delete(source.nftId); }
+    },
     async saveEdit(booking, draft, wallet) {
       if (!available || deploymentPaused()) throw new LiveAudioError('Recording editing is unavailable');
       await initialize();
       const current = record(booking.id), sourceSamples = sourceFor(current);
       if (!current || current.wallet.toLowerCase() !== String(wallet || '').toLowerCase() ||
-          current.wallet.toLowerCase() !== booking.wallet.toLowerCase() || !current.consent.enabled ||
+          current.wallet.toLowerCase() !== booking.wallet.toLowerCase() || !canEditRecord(current) ||
           !current.result || !['ready', 'submitted'].includes(current.status)) {
-        throw new LiveAudioError('Only the booked performer can edit a finalized consented recording');
+        throw new LiveAudioError(current?.catalogSource
+          ? 'Only the artist can edit this verified catalog recording'
+          : 'Only the booked performer can edit this finalized recording');
       }
-      const normalized = validateRecordingDraft(draft, sourceSamples);
+      const normalized = normalizeDraft(current, draft, sourceSamples);
       await serial(async () => {
         const next = structuredClone(state), target = next.recordings.find(item => item.bookingId === booking.id);
         const expectedRevision = (target.draft?.revision ?? 0) + 1;
@@ -688,8 +932,10 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
         log.error('[live-recording] Finalization deferred:', error.message);
       } finally { working = false; }
     },
-    deploymentState() { return { ready: (!available || !!state) && !working && !buffered && !bytes && !editTasks.size &&
-      !(state?.recordings.some(r => r.consent.enabled && ['recording', 'processing'].includes(r.status))) }; },
+    deploymentState() { return { ready: (!available || !!state) && !working && !buffered && !bytes &&
+      !editTasks.size && !catalogEditTasks.size &&
+      !catalogApprovalTasks.size &&
+      !(state?.recordings.some(r => r.consent?.enabled && ['recording', 'processing'].includes(r.status))) }; },
     async flush() { flush(); await tail; },
   };
 }
