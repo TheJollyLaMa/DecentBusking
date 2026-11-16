@@ -6,6 +6,8 @@ import { ensureLocalRecursivePin } from './ipfs.js';
 import { validatePlaylistShowSnapshot } from './playlist-show.js';
 import { validateHypeSnapshot } from './top-ten-hype.js';
 import { deserializeAnnouncements } from './radio-announcements.js';
+import { validatePromotionCheckpoint } from './promotions.js';
+import { validateCalendarRewardCheckpoint } from './calendar-rewards.js';
 
 export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiUrl = 'http://127.0.0.1:5001', fetchImpl = fetch }) {
   const remote = new URL(serviceUrl);
@@ -48,8 +50,15 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
         Array.isArray(batch.laneIds) && batch.laneIds.length === batch.songIds.length &&
         batch.laneIds.every(id => typeof id === 'string' && /^\d+$/.test(id)));
     let scheduledCheckpoint = false;
+    if (snapshot.schema === 1 && Array.isArray(snapshot.entries)) {
+      validateCalendarRewardCheckpoint(snapshot);
+      scheduledCheckpoint = true;
+    }
     if (snapshot.schemaVersion === 1) {
-      if (Array.isArray(snapshot.occurrences)) {
+      if (Array.isArray(snapshot.campaigns)) {
+        validatePromotionCheckpoint(snapshot);
+        scheduledCheckpoint = true;
+      } else if (Array.isArray(snapshot.occurrences)) {
         validatePlaylistShowSnapshot(snapshot);
         scheduledCheckpoint = true;
       } else if ('instanceId' in snapshot) {

@@ -58,6 +58,8 @@ test('separate worker processes cannot both commit the same promotions revision'
   first.send('go');
   second.send('go');
   assert.deepEqual((await Promise.all(results)).sort(), ['PROMOTIONS_STALE', 'saved']);
+  await Promise.all(workers.map(worker => worker.exitCode !== null || worker.signalCode !== null
+    ? Promise.resolve() : new Promise(resolve => worker.once('exit', resolve))));
   const { DatabaseSync } = await import('node:sqlite');
   const database = new DatabaseSync(file);
   const saved = JSON.parse(database.prepare('SELECT state FROM promotions_state WHERE id = 1').get().state);

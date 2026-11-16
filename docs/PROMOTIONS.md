@@ -224,6 +224,15 @@ the transactional SQLite fence for atomic reservations; plaintext Pinata
 checkpoints provide public records and restart/disaster recovery. Pinata
 credentials remain server-side, unlike the public records. This is not a
 multi-host settlement service.
+
+Run the local checkpoint client from the same release as the worker.
+`checkpoint-mirror-client.js` validates public promotions records using
+`validatePromotionCheckpoint` and existing calendar-reward journals using
+`validateCalendarRewardCheckpoint`. An older client can reject a supported
+journal and hold required checkpoints, including a radio-safe deployment drain.
+Update/restart the client rather than bypassing CID validation, recursive pin
+verification or the radio handoff. This changes neither reward eligibility nor
+transaction authorization.
 DVert purchase semantics were checked against DecentMarket
 `contracts/DeVert_v0.1.sol` at `394169b348d17e29486672a2cb2f2c0efe48f2ce`;
 no donor contract or third-party source was copied.
