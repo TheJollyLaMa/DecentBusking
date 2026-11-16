@@ -1,4 +1,4 @@
-import { Contract, Transaction, getAddress, keccak256, id } from 'ethers';
+import { Contract, Interface, Transaction, getAddress, keccak256, id } from 'ethers';
 import { SPONSORED_WORKER_MIN_BALANCE_WEI } from '../js/worker-gas.mjs';
 
 export const CALENDAR_REWARD_ABI = [
@@ -18,6 +18,29 @@ const WORKER_CAP = TOTAL_CAP - SETUP_RESERVE;
 const PER_SEND_CAP = 100_000_000_000_000n;
 const L1_RESERVE = 10_000_000_000_000n;
 
+export function validateCalendarRewardCheckpoint(snapshot) {
+  if (snapshot?.schema !== 1 || getAddress(snapshot.address) !== snapshot.address ||
+      getAddress(snapshot.worker) !== snapshot.worker || !/^\d+$/.test(snapshot.cursor) ||
+      !Array.isArray(snapshot.entries) || snapshot.entries.filter(entry => entry.status === 'pending').length > 1) {
+    throw new Error('Invalid reward checkpoint.');
+  }
+  const abi = new Interface(CALENDAR_REWARD_ABI);
+  for (const entry of snapshot.entries) {
+    const tx = Transaction.from(entry.rawTransaction);
+    const decoded = abi.parseTransaction({ data: tx.data });
+    if (!['pending','confirmed','failed'].includes(entry.status) || tx.chainId !== 8453n ||
+        tx.from?.toLowerCase() !== snapshot.worker.toLowerCase() || tx.to !== snapshot.address || tx.value !== 0n ||
+        decoded?.name !== 'award' || String(decoded.args[0]) !== entry.appointmentId ||
+        entry.hash !== tx.hash || !/^[1-9]\d*$/.test(entry.appointmentId) ||
+        BigInt(entry.feeCapWei) !== tx.gasLimit * (tx.maxFeePerGas ?? tx.gasPrice) + L1_RESERVE ||
+        BigInt(entry.feeCapWei) > PER_SEND_CAP) throw new Error('Invalid reward journal transaction; manual reconciliation required.');
+  }
+  if (new Set(snapshot.entries.map(entry => entry.hash)).size !== snapshot.entries.length ||
+      snapshot.entries.reduce((sum, entry) => sum + BigInt(entry.feeCapWei), 0n) > WORKER_CAP) {
+    throw new Error('Reward journal exceeds gas cap or repeats transactions.');
+  }
+}
+
 export function createCalendarRewardWorker({ provider, signer, coordinator, address, runtimeCodeHash, restore, save,
   minimumReserveWei = SPONSORED_WORKER_MIN_BALANCE_WEI,
   contract = new Contract(address, CALENDAR_REWARD_ABI, provider),
@@ -33,16 +56,6 @@ export function createCalendarRewardWorker({ provider, signer, coordinator, addr
     if (!/^ipfs:\/\//.test(uri || '')) throw new Error('Reward checkpoint did not confirm; nothing newly broadcast.');
     state = value;
   };
-  const validateEntry = entry => {
-    const tx = Transaction.from(entry.rawTransaction);
-    const decoded = contract.interface.parseTransaction({data:tx.data});
-    if (!['pending','confirmed','failed'].includes(entry.status) || tx.chainId !== 8453n ||
-        tx.from?.toLowerCase() !== signer.address.toLowerCase() || tx.to !== address || tx.value !== 0n ||
-        decoded?.name !== 'award' || String(decoded.args[0]) !== entry.appointmentId ||
-        entry.hash !== tx.hash || !/^[1-9]\d*$/.test(entry.appointmentId) ||
-        BigInt(entry.feeCapWei) !== tx.gasLimit * (tx.maxFeePerGas ?? tx.gasPrice) + L1_RESERVE ||
-        BigInt(entry.feeCapWei) > PER_SEND_CAP) throw new Error('Invalid reward journal transaction; manual reconciliation required.');
-  };
   async function verify() {
     if (state && now()-verifiedAt < 300000) return;
     if (BigInt(await provider.send('eth_chainId', [])) !== 8453n ||
@@ -55,12 +68,8 @@ export function createCalendarRewardWorker({ provider, signer, coordinator, addr
     if (!state) {
       const loaded = await restore();
       const initial = loaded ?? {schema:1,address,worker:signer.address,cursor:'0',entries:[]};
-      if (initial.schema !== 1 || initial.address !== address || initial.worker !== signer.address ||
-          !/^\d+$/.test(initial.cursor) || !Array.isArray(initial.entries) ||
-          initial.entries.filter(entry=>entry.status==='pending').length > 1) throw new Error('Invalid reward checkpoint.');
-      initial.entries.forEach(validateEntry);
-      if (new Set(initial.entries.map(entry=>entry.hash)).size !== initial.entries.length ||
-          initial.entries.reduce((sum,entry)=>sum+BigInt(entry.feeCapWei),0n) > WORKER_CAP) throw new Error('Reward journal exceeds gas cap or repeats transactions.');
+      if (initial.address !== address || initial.worker !== signer.address) throw new Error('Invalid reward checkpoint.');
+      validateCalendarRewardCheckpoint(initial);
       state = initial;
       const pending = state.entries.find(entry=>entry.status==='pending');
       if (pending) coordinator.block(signer,pending.hash);
@@ -133,7 +142,7 @@ export function createCalendarRewardWorker({ provider, signer, coordinator, addr
           value:0n,chainId:8453,nonce,gasLimit,maxFeePerGas,maxPriorityFeePerGas:fees.maxPriorityFeePerGas ?? 0n});
         const rawTransaction = await signer.signTransaction(transaction);
         const entry = {appointmentId:String(cursor),rawTransaction,hash:keccak256(rawTransaction),feeCapWei:String(feeCap),status:'pending'};
-        validateEntry(entry);
+        validateCalendarRewardCheckpoint({...state,entries:[...state.entries,entry]});
         await commit({...state,cursor:String(cursor+1n),entries:[...state.entries,entry]});
         coordinator.block(signer,entry.hash);
         const tx = await provider.broadcastTransaction(rawTransaction);

@@ -2,6 +2,25 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const secret = 'test-only-checkpoint-mirror-secret-32bytes';
 
+test('calendar checkpoint validation binds signed transactions to the worker, contract, award and gas cap', async () => {
+  const { Wallet, Interface, keccak256 } = require('../discord-bot/node_modules/ethers');
+  const { validateCalendarRewardCheckpoint, CALENDAR_REWARD_ABI } = await import('../discord-bot/calendar-rewards.js');
+  const worker = Wallet.createRandom();
+  const address = `0x${'1'.repeat(40)}`;
+  const rawTransaction = await worker.signTransaction({ to: address, value: 0n, chainId: 8453,
+    nonce: 0, gasLimit: 50000n, maxFeePerGas: 100000000n, maxPriorityFeePerGas: 1000000n,
+    data: new Interface(CALENDAR_REWARD_ABI).encodeFunctionData('award', [1n]) });
+  const entry = { appointmentId: '1', rawTransaction, hash: keccak256(rawTransaction),
+    feeCapWei: '15000000000000', status: 'pending' };
+  const snapshot = { schema: 1, address, worker: worker.address, cursor: '2', entries: [entry] };
+  validateCalendarRewardCheckpoint(snapshot);
+  for (const change of [{ appointmentId: '2' }, { feeCapWei: '1' }, { hash: `0x${'0'.repeat(64)}` }]) {
+    assert.throws(() => validateCalendarRewardCheckpoint({ ...snapshot, entries: [{ ...entry, ...change }] }), /Invalid reward journal/);
+  }
+  assert.throws(() => validateCalendarRewardCheckpoint({ ...snapshot, worker: Wallet.createRandom().address }), /Invalid reward journal/);
+  assert.throws(() => validateCalendarRewardCheckpoint({ ...snapshot, entries: [entry, entry] }), /Invalid reward checkpoint/);
+});
+
 test('checkpoint mirror requires authenticated polling and exact CID acknowledgment', async () => {
   const { createCheckpointMirror, checkpointContentCid } = await import('../discord-bot/checkpoint-mirror.js');
   let now = 1000;
@@ -70,6 +89,8 @@ for (const snapshot of [
   { schemaVersion: 2, nextBlock: 100, batches: [{ batchId: '0', status: 'pending',
     songIds: [`0x${'a'.repeat(64)}`], laneIds: ['0'] }] },
   { schemaVersion: 1, revision: 0, bookings: [], escrowScannedThrough: null },
+  { schemaVersion: 1, revision: 0, campaigns: [], claims: [], members: [], votes: [] },
+  { schema: 1, address: `0x${'1'.repeat(40)}`, worker: `0x${'2'.repeat(40)}`, cursor: '0', entries: [] },
   { schemaVersion: 1, revision: 1, bookings: [{ id: 'friday-live', wallet: `0x${'a'.repeat(40)}` }], escrowScannedThrough: 100 },
   { schemaVersion: 1, occurrences: [] },
   { schemaVersion: 1, deliveries: {}, requests: {} },
@@ -113,7 +134,9 @@ test('Mac client rejects unsupported or invalid playback journals before importi
     { schemaVersion: 1, revision: 0, bookings: [{}], escrowScannedThrough: null },
     { schemaVersion: 1, occurrences: [{}] },
     { schemaVersion: 1, deliveries: {}, requests: { broken: {} } },
-    { schemaVersion: 1, instanceId: 'invalid' }]) {
+    { schemaVersion: 1, instanceId: 'invalid' },
+    { schemaVersion: 1, revision: 0, campaigns: [{}], claims: [], members: [], votes: [] },
+    { schema: 1, address: `0x${'1'.repeat(40)}`, worker: `0x${'2'.repeat(40)}`, cursor: '-1', entries: [] }]) {
     const bytes = Buffer.from(JSON.stringify(snapshot));
     const cid = await checkpointContentCid(bytes);
     const poll = createLocalCheckpointMirrorClient({ serviceUrl: 'https://worker.example', secret,
