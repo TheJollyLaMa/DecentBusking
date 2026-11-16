@@ -298,6 +298,7 @@ export function createWorkerRequestHandler({
   getFunds,
   liveBookings,
   liveAudio,
+  liveFeedback,
   rehearsal,
   getEarnings,
   getDjukeTopEarners,
@@ -488,6 +489,11 @@ export function createWorkerRequestHandler({
         }
         const result = await radioDeployment(await readJson(request));
         sendJson(response, 200, result); return;
+      }
+      if (requestUrl.pathname === '/api/live-audio/feedback') {
+        const { handleLiveFeedbackRequest } = await import('./live-feedback.js');
+        await handleLiveFeedbackRequest(request, response, { feedback: liveFeedback, allowedOrigins: [...radioOrigins] });
+        return;
       }
       if (requestUrl.pathname.startsWith('/api/live-audio/')) {
         const { handleLiveAudioRequest } = await import('./live-audio-http.js');

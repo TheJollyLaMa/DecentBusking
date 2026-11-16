@@ -23,6 +23,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DecentBusking · Your stage</title>
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth">
+  <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback">
   <script src="decent.config.js"></script>
 </head>
 <body class="live-audio-room rehearsal-room guided-stage">
@@ -55,10 +56,6 @@
     <section id="room-broadcast-controls" aria-label="Allocated stage timing"></section>
     <p><a href="producer-room.html" id="room-producer-desk" hidden>Production desk · reserve and authorize the next booking</a></p>
     <section id="room-direction" aria-label="Booking-private production direction"></section>
-    <section class="direction-feedback" aria-label="Audience feedback">
-      <h3>Audience feedback</h3>
-      <p>Live audience reactions and verified tip celebrations are unavailable here. Audio-problem reports are not connected; no reports is not proof of healthy audio.</p>
-    </section>
     <fieldset class="room-role-card">
       <legend>🎧 Audio output · where you listen</legend>
       <button id="room-output-devices" type="button">Choose / list audio outputs</button>
@@ -96,6 +93,7 @@
         <button id="room-publish" class="rehearsal-primary" type="button">Publish browser audio</button>
         <button id="room-stop" type="button">Stop microphone</button>
       </div>
+      <div id="room-feedback-visuals" class="feedback-live-display" hidden></div>
       <div class="rehearsal-meter">
         <label for="room-mic-level">Your input level <span id="room-mic-state">Microphone off</span></label>
         <meter id="room-mic-level" min="0" max="1" value="0" aria-label="Local microphone input level"></meter>
@@ -181,6 +179,7 @@
         <p>The guaranteed performer fee remains unchanged.</p>
       </details>
     </fieldset>
+    <section id="room-listener-signals" aria-label="Audience feedback"></section>
     <details class="rehearsal-details"><summary>Connection & broadcast rules</summary>
     <p class="delivery-note">Keep the publishing tab open. Soundchecks stay private. Unallocated armed rooms use the scheduled handoff; an explicitly allocated stage needs the owner's separate Take live after the performer chooses their set and real checks pass. Original contract times are not the effective-stage clock. Verified transport audio, including intentional silence, keeps the feed healthy. A loss of verified delivery for
       60 seconds during the slot automatically cancels the broadcast. The guaranteed performer fee is unchanged.
@@ -203,6 +202,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/live-audio-room.mjs?v=20261116-booth"></script>
+  <script type="module" src="js/live-audio-room.mjs?v=20261116-feedback"></script>
 </body>
 </html>

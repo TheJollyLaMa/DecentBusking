@@ -90,6 +90,55 @@ HTTP error/redaction patterns from monitoring baseline `0cae70d`. Existing
 encrypted lifecycle storage is extended only with allocation facts and bounded
 command receipts; it intentionally does not store chat.
 
+## Anonymous live audience feedback
+
+`POST /api/live-audio/feedback` accepts only `{signal, bookingId, clientId}`:
+`signal` is `applause`, `love`, `encore` or `audio-problem`; `clientId` is a
+fresh anonymous browser-generated token, not a wallet. The route allows the
+configured public radio origins as well as `IPFS_ALLOWED_ORIGINS`, without
+expanding access to private room, upload or admin routes. An armed canonical
+show, fresh booking verification and its actual effective time window are
+required; audio reconnecting does not prevent an audio-problem report.
+
+Only a current exact-booking performer or owner pass may call `/control` with
+`{action:"feedback-snapshot"}`. Its bounded snapshot contains 30-second and
+two-minute signal/browser counts, approximate rate-limited counts, up to 120
+recent reaction events, and verified-tip status. It contains no client IDs,
+IP addresses, sender wallets or transaction hashes. This read-only path does
+not queue a checkpoint or alter audio, program, fees or payments. Listener
+identifiers are HMAC-hashed with a process-local key; feedback is memory-only
+and set data is dropped at end/change/cancellation or restart. Events expire
+after 10 seconds, reports after two minutes; idle hashed client records expire
+after 130 seconds and source records after 60 seconds, with a cleanup sweep
+within another 10 seconds. The latest anonymous signal time is retained for
+the set. There are no persisted reactions or opt-in identity attribution.
+
+The default limits are one signal per browser every two seconds, 12 per
+browser/minute, 60 per network/minute and 600 globally/minute, with at most
+5,000 browser and 5,000 network records. IPv6 addresses are grouped by /64.
+These are abuse bounds, not a guarantee of unique people. HTTP 429 includes
+retry guidance; offline, stale and changed-booking states fail explicitly.
+
+Verified tip totals require the native-tip indexer to be ready and checked
+within 60 seconds. Only canonical, successful, two-confirmation, source-verified
+live-router events for the exact performer, booking and effective show window
+are included; self-tips and unverified or pending entries are excluded. The
+total covers all qualifying tips, while the last 20 are the maximum supplied
+for private notifications. Partial indexing/source verification is labelled;
+a stale, rebuilding or unavailable ledger is not reported as zero.
+
+`LIVE_FEEDBACK_TRUSTED_PROXY_HOPS` is an integer from 0 to 5, default `1`.
+It chooses the client address from the right side of `X-Forwarded-For`; `0`
+uses the socket peer. **Verify the actual deployment's proxy chain and header
+handling before release.** Use `0` for a directly exposed local worker. A wrong
+value can make network limits ineffective or group unrelated listeners. Invalid
+values log a warning and fall back to `1`; the default is not evidence that a
+particular deployment is correctly configured.
+
+The [operator runbook](../docs/LIVE_PERFORMANCE_RUNBOOK.md#anonymous-listener-feedback-and-verified-tip-notices-341)
+records privacy, audio-safety and real-show release checks. Deploy matching
+worker and site versions only with the normal owner-approved safe handoff.
+
 ### Durable current/next broadcast allocation
 
 The existing authenticated `/control` endpoint additionally accepts:
@@ -227,6 +276,8 @@ cp .env.example .env
 | `PINATA_JWT`                 | Pinata    | Server-only Pinata JWT; never expose it in browser code |
 | `PUBLIC_WORKER_URL`          | Pinata    | Public URL of this Render service |
 | `IPFS_ALLOWED_ORIGINS`       | Pinata    | Comma-separated browser origins allowed to request upload URLs (for example: `https://thejollylama.github.io,https://decentbusking.com,https://www.decentbusking.com,http://localhost:4173,http://127.0.0.1:4173`) |
+| `RADIO_ALLOWED_ORIGINS`      | ❌        | Additional public radio vote and anonymous live-feedback origins; does not grant private-room or upload access |
+| `LIVE_FEEDBACK_TRUSTED_PROXY_HOPS` | ❌  | Trusted proxy hops, 0–5 (default `1`); verify the actual proxy chain before enabling feedback, and use `0` for a direct local worker |
 | `MINT_OWNER_WALLET`          | Pinata    | Base admin wallet allowed to authorize browser uploads |
 | `PINATA_API_URL`             | ❌        | Direct upload API; defaults to Pinata v3 |
 | `PINATA_SIGN_URL`            | ❌        | Signed upload API; defaults to Pinata v3 |

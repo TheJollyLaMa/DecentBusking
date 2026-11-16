@@ -209,13 +209,15 @@ test('shared card keeps private text as text, role-gates actions and handles sta
   assert.equal(container.children.length, 0);
 });
 
-test('desk and performer surfaces keep audience placeholders truthful and have no transition controls', async () => {
+test('desk and performer surfaces bind audience feedback without adding transition controls', async () => {
   for (const file of ['live-room.html', 'producer-room.html']) {
     const html = await fs.readFile(require.resolve(`../${file}`), 'utf8');
     assert.match(html, /Audience feedback/);
-    assert.match(html, /unavailable/);
+    assert.match(html, /id="(?:room|desk)-listener-signals"/);
     assert.doesNotMatch(html, /onclick=|autoplay|end-broadcast|take-live/);
   }
+  const feedback = await fs.readFile(require.resolve('../js/live-feedback.mjs'), 'utf8');
+  assert.match(feedback, /Listener feedback is unavailable; reconnecting/);
   const html = await fs.readFile(require.resolve('../producer-room.html'), 'utf8');
   assert.match(html, /Selecting a name does not grant private access/);
   assert.match(html, /Your microphone is never opened/);

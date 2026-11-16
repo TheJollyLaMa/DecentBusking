@@ -43,6 +43,19 @@ function dom(t) {
 }
 const descendants = node => [node, ...(node.children || []).flatMap(descendants)];
 
+test('audience feedback follows essential performer and operator audio controls', () => {
+  const performer = fs.readFileSync(path.join(__dirname, '../live-room.html'), 'utf8');
+  const producer = fs.readFileSync(path.join(__dirname, '../producer-room.html'), 'utf8');
+  for (const id of ['room-publish', 'room-stop', 'room-monitor-toggle', 'room-monitor', 'room-arm', 'room-cancel']) {
+    assert.ok(performer.indexOf(`id="${id}"`) < performer.indexOf('id="room-listener-signals"'), id);
+  }
+  assert.ok(performer.indexOf('id="room-publish"') < performer.indexOf('id="room-feedback-visuals"'));
+  assert.ok(performer.indexOf('id="room-feedback-visuals"') < performer.indexOf('id="room-monitor-toggle"'));
+  for (const id of ['desk-listen', 'desk-stop']) {
+    assert.ok(producer.indexOf(`id="${id}"`) < producer.indexOf('id="desk-listener-signals"'), id);
+  }
+});
+
 test('room links are encoded and offered only for eligible funded pilot bookings', async () => {
   const [{ liveAudioRoomUrl }] = await modules;
   const b = booking();
@@ -590,7 +603,7 @@ test('standalone backstage entries consistently version allocated-stage helper i
     /live-audio\.mjs\?v=20261114-allocated-stage/);
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
-    assert.ok(source.includes(`${entry}?v=${html === 'live-room.html' ? '20261116-booth' : '20261114-allocated-stage'}`));
+    assert.ok(source.includes(`${entry}?v=${html === 'live-room.html' ? '20261116-feedback' : '20261115-listener-feedback'}`));
     assert.match(source, /live-audio\.css\?v=20261116-booth/);
     assert.doesNotMatch(source, /20261114-direction/);
   }
