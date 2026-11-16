@@ -878,11 +878,14 @@ export function initCreatorProfile() {
     const contents = document.createElement('div');
     try {
       let liveReceipt;
-      await renderLivePerformances({ container: contents, wallet: target,
+      const activateCurtains = await renderLivePerformances({ container: contents, wallet: target,
         serviceUrl: config().ipfsUploadServiceUrl || '', ethers: window.ethers, bookingState,
         onReceipt: entry => { liveReceipt = entry; } });
       if (check === revision && generation === liveRevision && target === address &&
-          !livePerformances.querySelector('[data-live-claim-busy="true"]')) livePerformances.replaceChildren(contents);
+          !livePerformances.querySelector('[data-live-claim-busy="true"]')) {
+        livePerformances.replaceChildren(contents);
+        activateCurtains?.();
+      }
       return liveReceipt;
     } catch (error) {
       if (check === revision && generation === liveRevision &&
@@ -1568,6 +1571,7 @@ export function initCreatorProfile() {
   });
   document.addEventListener('wallet-connected', event => {
     revision++;
+    livePerformances.querySelectorAll('.live-curtain-call').forEach(curtain => curtain.remove());
     setControls();
     if (dialog.open && viewingOwnProfile) void run(() => open({}));
     else if (dialog.open) display();
@@ -1577,7 +1581,11 @@ export function initCreatorProfile() {
     if (button) run(() => open({ address: button.dataset.creator, albumId: button.dataset.album }));
   });
   document.getElementById('djuke-profile')?.addEventListener('click', () => { run(() => open({})); });
-  document.addEventListener('wallet-disconnected', () => { revision++; setControls(); });
+  document.addEventListener('wallet-disconnected', () => {
+    revision++;
+    livePerformances.querySelectorAll('.live-curtain-call').forEach(curtain => curtain.remove());
+    setControls();
+  });
   const linkedProposal = new URLSearchParams(window.location.search).get('splitProposal');
   if (linkedProposal) {
     if (window._wallet?.address) void run(() => open({}));

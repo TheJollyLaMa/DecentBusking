@@ -444,6 +444,19 @@ The claim celebration requires two Base confirmations and one matching escrow
 amount. If the transaction succeeds but that event cannot be verified, the
 saved claim hash is retained for reconciliation; refresh the payment status
 and do not submit another claim.
+After a verified `producer-finished` allocated set, the booked performer sees
+a private curtain call in their stage room or Profile. It opens once per
+booking in that browser when local storage is available (otherwise once per
+page session), supports dismissal and explicit replay, and respects
+reduced-motion preferences. A cancelled, interrupted or unverified ending
+does not trigger it. Changing wallets clears the stage display; reconnect the
+booked wallet to view the Profile card. This is not proof of payment,
+recording, minting or radio replay; those statuses remain separate.
+Curtain-call reuse: the existing `afterpartyRows`, `afterpartyMilestones` and
+`celebrateAfterparty` helpers supply verified completion and persisted
+deduplication; the existing performer stage-verification check is shared with
+Profile. Focused performer-room and Profile tests cover fresh exact-booking
+evidence, wrong wallets, interruptions, refresh and replay.
 Reuse: existing `createBrowserIpfsUploader`, `LIVE_ESCROW_ABI`, transaction
 hash storage convention and event indexer; no contract or worker deployment.
 

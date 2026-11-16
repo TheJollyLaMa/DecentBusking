@@ -1,10 +1,10 @@
 import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, claimState, liveAcknowledgement, liveBookingRows, livePerformancePolicyText } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
-import { performerRoomUrl, resolvePerformerReentry } from './performer-room.mjs?v=20261114-allocated-stage';
+import { performerRoomUrl, resolvePerformerReentry } from './performer-room.mjs?v=20261116-curtain';
 import { renderPerformerGift } from './performer-gift.mjs?v=20261114-performer-encore';
-import { afterpartyRows, completionFacts, formatUsdc, parseUnits, verifyPaidReceipt } from './live-afterparty.mjs?v=20261115-afterparty';
-import { renderAfterpartyChecklist } from './live-afterparty-view.mjs?v=20261115-afterparty';
+import { afterpartyRows, afterpartyMilestones, celebrateAfterparty, completionFacts, formatUsdc, parseUnits, verifyPaidReceipt } from './live-afterparty.mjs?v=20261116-curtain';
+import { renderAfterpartyChecklist, renderCurtainCall } from './live-afterparty-view.mjs?v=20261116-curtain';
 
 function secretPyramid() {
  const image = document.createElement('img');
@@ -251,16 +251,18 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
    state = await response.json();
  }
  const bookings = state.bookings.filter(b => b.wallet.toLowerCase() === wallet.toLowerCase());
+ const curtains = [];
  container.innerHTML = '';
  for (const b of bookings) {
    const reentry = await resolvePerformerReentry(b, { serviceUrl, fetchImpl });
    const stagePending = ['active', 'unavailable'].includes(reentry.status);
    const completion = completionFacts(b, reentry);
    const compact = b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY && b.stewardApproved &&
-     !stagePending && !b.cancelled && Date.parse(b.status === 'funded' ? b.endUtc : b.startUtc) > Date.now() && ['draft', 'funded'].includes(b.status);
+     !stagePending && completion.state !== 'verified' && !b.cancelled &&
+     Date.parse(b.status === 'funded' ? b.endUtc : b.startUtc) > Date.now() && ['draft', 'funded'].includes(b.status);
    const article = compact ? renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, ethers, fetchImpl }) : document.createElement('div');
    const afterparty = !stagePending && b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY &&
-     (Date.parse(b.endUtc) <= Date.now() || ['approved', 'paid'].includes(b.status));
+     (completion.state === 'verified' || Date.parse(b.endUtc) <= Date.now() || ['approved', 'paid'].includes(b.status));
    const connected = window._wallet?.address || '';
    const claim = claimState(b, state.escrowAddress, connected);
    const pendingHash = connected.toLowerCase() === b.wallet.toLowerCase() && !['paid', 'refunded'].includes(b.status)
@@ -290,7 +292,10 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
            : stagePending && b.status === 'funded' && Date.now() <= Date.parse(b.claimDeadline)
              ? 'Stage completion is still pending or unverified. New producer release waits for its verified ending; your original guaranteed fee and on-chain claim windows are unchanged.'
            : b.status === 'funded' && Date.now() <= Date.parse(b.claimDeadline) &&
-             Date.now() < Date.parse(b.endUtc) + b.reviewWindow * 1000 ? 'Jolly’s next step: approve your guaranteed fee. Nothing for you to sign yet.'
+             Date.now() < Date.parse(b.endUtc) + b.reviewWindow * 1000
+             ? completion.state === 'verified' && Date.now() < Date.parse(b.endUtc)
+               ? 'The stage ended. Approval opens after the original booked end; nothing for you to sign yet.'
+               : 'Jolly’s next step: approve your guaranteed fee. Nothing for you to sign yet.'
              : claim.label;
      article.append(title);
      if (stagePending) {
@@ -307,15 +312,22 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
      }
      article.append(amount, nextStatus);
      const verifiedReentry = ['active', 'ended'].includes(reentry.status) ? reentry : null;
-     const checklist = renderAfterpartyChecklist(afterpartyRows(b, {
+     const rows = afterpartyRows(b, {
        audience: 'performer', now: Date.now(), reentry: verifiedReentry,
-     }), { documentRef: document });
+     });
+     const milestone = !stagePending && !b.cancelled && connected.toLowerCase() === b.wallet.toLowerCase()
+       ? afterpartyMilestones(b, rows).find(item => item.kind === 'completion') : null;
+     const curtain = renderCurtainCall(milestone, { documentRef: document, celebrate: (item, options) =>
+       window._wallet?.address?.toLowerCase() === b.wallet.toLowerCase()
+         ? celebrateAfterparty(item, options) : { celebrated: false, reason: 'wallet-changed' } });
+     if (curtain) { article.append(curtain.element); curtains.push(curtain); }
+     const checklist = renderAfterpartyChecklist(rows, { documentRef: document });
      if (checklist) article.append(checklist);
    } else if (!compact) article.innerHTML = liveBookingRows([b]);
    if (!compact && b.mode === 'phase1' && b.status === 'draft' && !b.cancelled) {
      article.append(renderPerformerBookingInvite({ booking: b, state, wallet, serviceUrl, ethers, fetchImpl }));
    }
-   if (!compact && !stagePending && b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY && !b.cancelled && Date.parse(b.endUtc) > Date.now()) {
+   if (!compact && !stagePending && completion.state !== 'verified' && b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY && !b.cancelled && Date.parse(b.endUtc) > Date.now()) {
      const directions = document.createElement('p');
      directions.setAttribute('data-live-performer-directions', '');
      const checkTime = minutes => new Intl.DateTimeFormat('en-US', {
@@ -324,7 +336,7 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
      directions.textContent = `Profile: review and accept → wait for confirmed escrow funding → open performer audio room → authorize your booked wallet, allow microphone and publish browser audio → private checks at ${checkTime(60)} and ${checkTime(15)} New York → ON-AIR only after both checks pass and the operator arms broadcast → claim here after approval or the review window, before the claim deadline. Keep the audio room open. Acceptance is a real agreement, not a payment or a simulated signature.`;
      article.append(directions);
    }
-   const roomUrl = reentry.url || liveAudioRoomUrl(b);
+   const roomUrl = completion.state === 'verified' ? null : reentry.url || liveAudioRoomUrl(b);
    if (roomUrl) {
      const entry = document.createElement('p');
      const link = document.createElement('a');
@@ -421,7 +433,7 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
      refresh.onclick = async () => {
        if (article.getAttribute('data-live-claim-busy') === 'true') return;
        refresh.disabled = true;
-       try { await renderLivePerformances({ container, wallet, serviceUrl, ethers, onReceipt, fetchImpl }); }
+       try { const activateCurtains = await renderLivePerformances({ container, wallet, serviceUrl, ethers, onReceipt, fetchImpl }); activateCurtains?.(); }
        catch (error) { nextStatus.textContent = `${stagePending ? 'Stage/payment' : 'Payment'} status unavailable: ${error.message}`; refresh.disabled = false; }
      };
      article.append(refresh);
@@ -438,4 +450,5 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
  }
  const receipt = liveReceiptEntry(bookings, wallet);
  if (receipt) onReceipt(receipt);
+ return () => curtains.forEach(curtain => curtain.activate());
 }

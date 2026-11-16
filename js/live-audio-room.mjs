@@ -1,7 +1,7 @@
 import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
 import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from './live-recording-consent.mjs?v=20261114-allocated-stage';
 import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261114-allocated-stage';
-import { performerRoomSign, performerAllocationAccess } from './performer-room.mjs?v=20261114-allocated-stage';
+import { performerRoomSign, performerAllocationAccess, verifiedPerformerFinish } from './performer-room.mjs?v=20261116-curtain';
 import { bindInputMonitor } from './input-monitor.mjs?v=20261116-feedback';
 import { bindBoothSetup, SHOW_MODES } from './booth-setup.mjs?v=20261116-feedback';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
@@ -9,8 +9,8 @@ import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=202
 import { bindLiveDirection } from './live-direction.mjs?v=20261114-allocated-stage';
 import { bindLiveFeedbackRoom, bindTogether } from './live-feedback.mjs?v=20261115-listener-feedback';
 import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261114-allocated-stage';
-import { afterpartyRows } from './live-afterparty.mjs?v=20261115-afterparty';
-import { renderAfterpartyChecklist } from './live-afterparty-view.mjs?v=20261115-afterparty';
+import { afterpartyRows, afterpartyMilestones, celebrateAfterparty } from './live-afterparty.mjs?v=20261116-curtain';
+import { renderAfterpartyChecklist, renderCurtainCall } from './live-afterparty-view.mjs?v=20261116-curtain';
 
 const byId = id => document.getElementById(id);
 const bookingId = new URL(location.href).searchParams.get('booking') || '';
@@ -21,6 +21,7 @@ let authGeneration = 0, connectionGeneration = 0, requestingAccounts = false;
 let booking, broadcastState, observedAt = 0, refreshing = false, practiceMode = false;
 let actionPending = false;
 let activeAction = null;
+let curtainId = null;
 const actionButtons = ['room-authorize', 'room-devices', 'room-publish', 'room-stop', 'room-monitor',
   'room-check60', 'room-check15', 'room-arm', 'room-obs', 'room-cancel'];
 const meter = createInputMeter({
@@ -255,6 +256,7 @@ function render(state) {
   broadcastControls.update(state);
   renderRecording(state);
   renderAfterparty(state);
+  renderCurtain(state);
   const fresh = state.privateAudioFresh ? 'Worker receiver verifies fresh delivered audio' : 'No fresh delivery verified';
   status(`${fresh}${state.reason ? ` · ${state.reason}` : ''}`);
   byId('room-targets').textContent = state.broadcast
@@ -266,6 +268,26 @@ function render(state) {
     byId('room-obs-secret').textContent = '';
     void disconnect();
   }
+}
+function renderCurtain(state) {
+  if (!session || !wallet || !booking || booking.cancelled || booking.acknowledged !== true ||
+      wallet.toLowerCase() !== booking.wallet?.toLowerCase() || !(session.canPublish ?? session.role === 'publisher') ||
+      state?.phase !== 'ended' || !verifiedPerformerFinish(booking, state)) return;
+  const source = { ...booking, broadcastCompletion: { known: true, pending: false,
+    actualEndedAt: state.broadcast.actualEndedAt, endReason: state.broadcast.endReason } };
+  const milestone = afterpartyMilestones(source, afterpartyRows(source, { audience: 'performer' }))
+    .find(item => item.kind === 'completion');
+  if (!milestone || milestone.id === curtainId) return;
+  const container = byId('room-curtain');
+  if (!container) return;
+  const curtain = renderCurtainCall(milestone, { documentRef: document, celebrate: (item, options) =>
+    !container.hidden && wallet?.toLowerCase() === booking?.wallet?.toLowerCase()
+      ? celebrateAfterparty(item, options) : { celebrated: false, reason: 'wallet-changed' } });
+  if (!curtain) return;
+  container.replaceChildren(curtain.element);
+  container.hidden = false;
+  curtainId = milestone.id;
+  curtain.activate();
 }
 function renderAfterparty(state) {
   const container = byId('room-afterparty');
@@ -287,7 +309,9 @@ function renderAfterparty(state) {
         : ['recording', 'processing'].includes(record.status) ? 'processing' : 'unknown',
     ...(record.trackId ? { trackId: record.trackId } : {}),
   } : booking.recordingRelease;
-  const source = recordingRelease ? { ...booking, recordingRelease } : booking;
+  const source = { ...booking, ...(recordingRelease ? { recordingRelease } : {}),
+    ...(verifiedPerformerFinish(booking, state) ? { broadcastCompletion: { known: true, pending: false,
+      actualEndedAt: state.broadcast.actualEndedAt, endReason: state.broadcast.endReason } } : {}) };
   const checklist = renderAfterpartyChecklist(afterpartyRows(source, { audience: 'performer', now }), { documentRef: document });
   container.hidden = !checklist;
   clear();
@@ -401,6 +425,7 @@ async function refreshBooking() {
       const allocated = performerAllocationAccess(booking, liveState, Date.now(), Date.now());
       if ((!allocated && (booking.status !== 'funded' || Date.parse(booking.endUtc) <= Date.now())) || !booking.acknowledged || booking.cancelled) {
         broadcastState = liveState; observedAt = Date.now(); renderSign();
+        renderCurtain(liveState);
         byId('room-authorize').disabled = true;
         if (session) { session = null; direction.setSession(null); broadcastControls.update(null); byId('room-controls').hidden = true; await disconnect(); }
         status('Backstage requires accepted funded terms and a current scheduled or explicitly allocated access window.');
@@ -521,6 +546,7 @@ window.ethereum?.on?.('accountsChanged', () => {
   if (requestingAccounts) return;
   ++authGeneration;
   session = null; byId('room-controls').hidden = true; byId('room-obs-secret').textContent = '';
+  byId('room-curtain').hidden = true; byId('room-curtain').replaceChildren(); curtainId = null;
   direction.setSession(null);
   broadcastControls.update(null);
   renderRecording(null);

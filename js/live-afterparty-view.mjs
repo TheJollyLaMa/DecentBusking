@@ -36,3 +36,42 @@ export function renderAfterpartyChecklist(rows, { documentRef = globalThis.docum
   section.append(summary, list);
   return section;
 }
+
+export function renderCurtainCall(milestone, { documentRef = globalThis.document, celebrate } = {}) {
+  if (milestone?.kind !== 'completion' || !milestone.id || !documentRef?.createElement ||
+      typeof celebrate !== 'function') return null;
+  const section = documentRef.createElement('details');
+  section.className = 'live-curtain-call';
+  const summary = documentRef.createElement('summary');
+  summary.textContent = 'Your curtain call';
+  const announcement = documentRef.createElement('output');
+  announcement.className = 'live-curtain-announcement';
+  announcement.setAttribute('role', 'status');
+  announcement.setAttribute('aria-live', 'polite');
+  const greeting = documentRef.createElement('h3');
+  greeting.textContent = milestone.subtitle;
+  const detail = documentRef.createElement('p');
+  detail.textContent = 'Thank you for the music. Check your Profile for your separate fee and recording status.';
+  const flourish = documentRef.createElement('div');
+  flourish.className = 'live-curtain-flourish';
+  flourish.setAttribute('aria-hidden', 'true');
+  const replay = documentRef.createElement('button');
+  replay.type = 'button';
+  replay.textContent = 'Replay celebration';
+  const dismiss = documentRef.createElement('button');
+  dismiss.type = 'button';
+  dismiss.textContent = 'Dismiss';
+  const play = replayRequested => {
+    const result = celebrate(milestone, { replay: replayRequested });
+    if (!result.celebrated) return;
+    section.open = true;
+    announcement.textContent = `Curtain call: ${milestone.subtitle}`;
+    const decoration = documentRef.createElement('span');
+    decoration.textContent = '✦  ♫  ✧';
+    flourish.replaceChildren(decoration);
+  };
+  replay.onclick = () => play(true);
+  dismiss.onclick = () => { section.open = false; summary.focus(); };
+  section.append(summary, announcement, flourish, greeting, detail, replay, dismiss);
+  return { element: section, activate: () => play(false) };
+}
