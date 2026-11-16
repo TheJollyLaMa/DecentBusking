@@ -44,7 +44,8 @@ function pinata(time) {
       const form = options.body;
       if (failures.archiveUpload && form.get('group_id') === 'archive') return new Response('{}', { status: 503 });
       const snapshot = JSON.parse(await form.get('file').text());
-      const cid = `cid${require('node:crypto').createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')}`;
+      const { checkpointContentCid } = await import('../discord-bot/checkpoint-mirror.js');
+      const cid = await checkpointContentCid(new TextEncoder().encode(JSON.stringify(snapshot)));
       const file = { id: `file-${uploads.length}`, cid, name: form.get('name'), group_id: form.get('group_id'),
         keyvalues: JSON.parse(form.get('keyvalues')), created_at: new Date(time.now()).toISOString() };
       uploads.push({ ...file, snapshot });
@@ -214,6 +215,27 @@ test('corrupt weekly readback never authorizes deletion of the source daily data
   await assert.rejects(guarded.save({ count: 2 }), /verification failed/);
   assert.equal(api.deletes.length, 0);
   assert.ok(api.files.some(file => file.group_id === 'live' && file.keyvalues.checkpointDay === '2026-10-12'));
+});
+
+test('a daily copy that does not match its content address is never archived or expired', async t => {
+  const { createPinataStateStore } = await import('../discord-bot/ipfs-state.js');
+  const { store, time, api, options } = await setup(t, '2026-10-12T16:00:00Z', { archiveGroupId: 'archive' });
+  await store.save({ count: 1 });
+  const dailyCid = api.uploads[0].cid;
+  store.close();
+  time.jump('2026-10-20T16:00:00Z');
+  const tampered = createPinataStateStore({ ...options, fetchImpl: async (url, init) => {
+    const response = await api.fetchImpl(url, init);
+    if (!url.includes(`/ipfs/${dailyCid}`)) return response;
+    const content = await response.json();
+    content.count = -1;
+    return new Response(JSON.stringify(content));
+  } });
+  t.after(() => tampered.close());
+  await assert.rejects(tampered.save({ count: 2 }), /does not match its CID/);
+  assert.equal(api.uploads.filter(file => file.group_id === 'archive').length, 0);
+  assert.equal(api.deletes.length, 0);
+  assert.ok(api.files.some(file => file.cid === dailyCid));
 });
 
 test('same-day event activity survives batching, restart, unchanged totals, and idempotent retries', async t => {
@@ -424,7 +446,7 @@ test('required local mirror failures still block new critical writes under daily
     requireLocalMirror: true,
     beforeUpload: async bytes => {
       if (offline) throw new Error('Mirror offline');
-      confirmedCid = `cid${require('node:crypto').createHash('sha256').update(bytes).digest('hex')}`;
+      confirmedCid = await (await import('../discord-bot/checkpoint-mirror.js')).checkpointContentCid(bytes);
       return confirmedCid;
     },
   });
