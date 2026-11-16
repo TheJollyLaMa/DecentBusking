@@ -9,9 +9,22 @@ export async function waitForRadioDeployment({ serviceUrl, secret, id = randomUU
   }
   const deadline = now() + timeoutMs;
   while (now() < deadline) {
-    const response = await fetchImpl(`${serviceUrl}/api/radio/deployment`, {
-      method: 'POST', headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'drain', id }), signal: AbortSignal.timeout(60000), redirect: 'error' });
+    let response;
+    try {
+      response = await fetchImpl(`${serviceUrl}/api/radio/deployment`, {
+        method: 'POST', headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'drain', id }), signal: AbortSignal.timeout(60000), redirect: 'error' });
+    } catch (error) {
+      log.info(`[radio-deploy] Radio handoff check did not answer (${error.name || 'network error'}); retrying, no audio was stopped.`);
+      await sleep(5000);
+      continue;
+    }
+    // A slow drain can outlast the platform proxy; the gateway error is not the worker refusing.
+    if ([502, 503, 504].includes(response.status)) {
+      log.info(`[radio-deploy] Radio handoff gateway returned ${response.status}; retrying, no audio was stopped.`);
+      await sleep(5000);
+      continue;
+    }
     if (!response.ok) throw new Error(`Radio handoff refused (${response.status}); deployment must not restart paid playback`);
     const status = await response.json();
     if (status.deploymentId !== id || !status.draining || !(status.expiresAt > now())) {
