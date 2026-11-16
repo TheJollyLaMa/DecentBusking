@@ -1,8 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { verifiedRecording } = require('./helpers/verified-recording');
 const START = Date.parse('2026-10-23T01:00:00Z');
 const ID = 'songs-awaiting-your-vote';
-const song = (trackId, extra = {}) => ({ trackId, title: trackId, likes: 0, dislikes: 0, ...extra });
+const song = (trackId, extra = {}) => verifiedRecording({ trackId, title: trackId, likes: 0, dislikes: 0, ...extra });
 const event = (extra = {}) => ({ id: 'tonight', type: 'playlist_show', playlistId: ID, title: 'Songs Awaiting Your Vote',
   startUtc: new Date(START).toISOString(), endUtc: new Date(START + 3600_000).toISOString(), ...extra });
 async function setup(catalog = [song('a'), song('b'), song('c')]) {
@@ -17,6 +18,50 @@ async function setup(catalog = [song('a'), song('b'), song('c')]) {
   const runner = createPlaylistShow({ store, now: () => START, random: () => 0 });
   return { runner, show, catalog, store, createPlaylistShow, value: () => value, writes: () => writes };
 }
+
+test('duration routing is strict at 600 seconds and rejects unverified, conflicting and stale media durations', async () => {
+  const { previewRadioPlaylist, playlistTrackReason, radioPlaylistDefinition } = await import('../js/radio-playlists.mjs');
+  const ordinary = radioPlaylistDefinition(ID);
+  const catalog = [599.999, 600, 600.001, 1200].map(seconds => song(String(seconds), { durationSeconds: seconds }));
+  const invalid = [
+    { trackId: 'unchecked', durationSeconds: 30, likes: 0, dislikes: 0 },
+    song('conflict', { durationSeconds: 600, durationMs: 600001 }),
+    song('nan', { durationSeconds: NaN }), song('infinite', { durationSeconds: Infinity }),
+    song('nan-ms', { durationMs: NaN, durationSeconds: 180 }),
+    song('string-ms', { durationMs: '180000', durationSeconds: 180 }),
+    song('zero', { durationSeconds: 0 }), song('negative', { durationSeconds: -1 }),
+    { ...song('stale'), ipfsCid: 'replaced-media' },
+  ];
+  assert.deepEqual(previewRadioPlaylist(ID, [...catalog, ...invalid]).tracks.map(t => t.trackId), ['599.999', '600']);
+  assert.deepEqual(previewRadioPlaylist('long-form-hour', [...catalog, ...invalid]).tracks.map(t => t.trackId), ['600.001', '1200']);
+  for (const track of invalid) assert.match(playlistTrackReason(track, ordinary), /Unknown/);
+});
+
+test('long-form queue retries unfinished playback after restart and advances only on a durable completion', async () => {
+  const f = await setup([song('full-set', { durationSeconds: 1200 })]);
+  const show = { ...f.show, playlistId: 'long-form-hour' };
+  const selection = await f.runner.next(show, f.catalog);
+  assert.equal(f.value().occurrences[0].cursor, 0);
+  const restarted = f.createPlaylistShow({ store: f.store, now: () => START + 60000 });
+  assert.equal((await restarted.next(show, f.catalog)).trackId, selection.trackId);
+  await restarted.complete(selection, 'verified-full-play');
+  await restarted.complete(selection, 'verified-full-play');
+  assert.equal(f.value().occurrences[0].cursor, 1);
+  assert.equal(await restarted.next(show, f.catalog), null);
+});
+
+test('long-form missing-media deferral preserves its position and retry deadline across restart', async () => {
+  const f = await setup([song('full-set', { durationSeconds: 1200 })]);
+  const show = { ...f.show, playlistId: 'long-form-hour' };
+  const selection = await f.runner.next(show, f.catalog);
+  await f.runner.defer(selection, 'Media unavailable; retry pending');
+  const restarted = f.createPlaylistShow({ store: f.store, now: () => START + 59999 });
+  assert.equal(await restarted.next(show, f.catalog), null);
+  assert.match(restarted.publicState(show).fallbackReason, /Media unavailable/);
+  const ready = f.createPlaylistShow({ store: f.store, now: () => START + 60000 });
+  assert.equal((await ready.next(show, f.catalog)).trackId, selection.trackId);
+  assert.equal(f.value().occurrences[0].cursor, 0);
+});
 
 test('no-votes-ever uses separate all-time human totals: 0/0 only, excluding net-zero, unknown, ads and unapproved', async () => {
   const { previewRadioPlaylist } = await import('../js/radio-playlists.mjs');
@@ -125,13 +170,14 @@ test('admin preview shows rule, matching count, duration/unknown totals and prot
   const { previewRadioPlaylist } = await import('../js/radio-playlists.mjs');
   const { defaultRadioSchedule } = await import('../js/radio-schedule.mjs');
   const { renderPlaylistShowPreview } = await import('../js/admin-radio-playlists.mjs');
-  const payload = { playlistDefinitions: [previewRadioPlaylist(ID, [song('a', { durationMs: 7200000 }), song('unknown', { likes: null })])],
+  const payload = { playlistDefinitions: [previewRadioPlaylist(ID, Array.from({ length: 13 }, (_, index) =>
+    song(`a-${index}`, { durationMs: 600000 })).concat(song('unknown', { likes: null })))],
     schedule: defaultRadioSchedule(), events: [] };
   renderPlaylistShowPreview(payload);
   const output = elements['admin-radio-playlist-preview'].textContent;
   assert.match(output, /upvotes = 0 AND downvotes = 0/);
-  assert.match(output, /1 matching tracks/);
-  assert.match(output, /estimated 120 minutes/);
+  assert.match(output, /13 matching tracks/);
+  assert.match(output, /estimated 130 minutes/);
   assert.match(output, /1 tracks excluded/);
   assert.match(output, /exceeds this slot/);
   assert.match(output, /Friday Top 10/);

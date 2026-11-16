@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
+const { verifiedRecording } = require('./helpers/verified-recording');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -19,7 +20,7 @@ test('all 12 paid songs beat rotation with production head-only reads and checkp
   let refunds = 0;
   const runtime = createDjukeRuntime({ journal, timeoutMs: 2, minAudibleMs: 1,
     readState: async () => ({ requests: structuredClone(requests.slice(0, 1)), playlistPending: requests.length }),
-    getTrack: trackId => ({ trackId, title: trackId }),
+    getTrack: trackId => verifiedRecording({ trackId, title: trackId }),
     fulfill: async ({ playlistLaneId }) => { requests = requests.filter(item => item.playlistLaneId !== playlistLaneId); },
     refundPlaylistBatch: async () => { refunds++; }, log: { warn() {} } });
   await runtime.reconcile();
@@ -35,7 +36,7 @@ test('all 12 paid songs beat rotation with production head-only reads and checkp
     },
   });
   t.after(() => session.destroy());
-  session._queue = [{ trackId: 'ordinary', title: 'Must wait for the purchased playlist' }];
+  session._queue = [verifiedRecording({ trackId: 'ordinary', title: 'Must wait for the purchased playlist' })];
   session._getFreshUrl = async track => `https://media.example/${track.trackId}`;
   const delivered = [];
   for (let i = 0; i < 12; i++) {
@@ -172,7 +173,7 @@ test('actual JukeLoop preloads an owned playlist while audio plays, without sele
   const session = new JukeLoopSession({ voiceChannel: { guild: { id: 'exclusive-prefetch' } }, client: {}, schedule: [],
     audioPlayer: player, djuke: { hasActivePlaylist: () => true, getActivePlaylistBatchId: () => '5',
       hasPendingPlaylist: () => true, release: async () => {}, nextPaid: async () => ({ record: { playlistBatchId: '5', playlistLaneId: '2',
-        playlist: { batchId: '5', position: 2 } }, track: { trackId: 'paid-next', title: 'Paid next', ipfsCid: 'fixture' } }) },
+        playlist: { batchId: '5', position: 2 } }, track: verifiedRecording({ trackId: 'paid-next', title: 'Paid next', ipfsCid: 'fixture' }) }) },
     devertPlayback: { recordCompletedMusicPlay: async () => {},
       nextMainRadioAd: async () => { throw Error('Must not interrupt playlist'); } },
     createStream: () => { const stream = new PassThrough(); stream.write(Buffer.alloc(100));

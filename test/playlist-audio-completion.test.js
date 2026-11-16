@@ -4,6 +4,7 @@ const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { createServer } = require('node:http');
 const fs = require('node:fs');
+const { verifiedRecording } = require('./helpers/verified-recording');
 
 async function decodedFixture({ bytes = 192000, code = null, end = true } = {}) {
   const { monitorAudioCompletion } = await import('../discord-bot/jukeloop.js');
@@ -95,7 +96,7 @@ test('a scheduled stop releases the reservation without consuming media retries'
   session._getFreshUrl = async () => 'https://media.example/song';
   const record = { requestId: 'playlist:1', playlistBatchId: '0', playlistLaneId: '1',
     trackId: 'paid', payer: `0x${'1'.repeat(40)}`, amountUnits: '250000' };
-  const prepared = await session._prepareNextPlayback({ record, track: { trackId: 'paid', title: 'Paid song' } });
+  const prepared = await session._prepareNextPlayback({ record, track: verifiedRecording({ trackId: 'paid', title: 'Paid song' }) });
   session._startPrepared(prepared);
   const now = Date.now();
   session.setLivePerformanceEvents([{ id: 'live', title: 'Live rehearsal',
@@ -184,7 +185,7 @@ test('twelve real player EOFs settle once in order, with incident media optional
   const all = new Promise((resolve, reject) => { resolveAll = resolve; rejectAll = reject; });
   const runtime = createDjukeRuntime({ journal, minAudibleMs: 1,
     readState: async () => ({ requests: structuredClone(requests), playlistPending: requests.length }),
-    getTrack: trackId => ({ trackId, title: trackId }),
+    getTrack: trackId => verifiedRecording({ trackId, title: trackId }),
     fulfill: async ({ playlistLaneId }) => {
       if (playlistLaneId === '0') await settlementGate;
       deliveries.push(playlistLaneId);
@@ -258,7 +259,7 @@ test('a severed paid preload spends one preparation retry, never starts partial 
   let requests = [request], deliveries = 0, refunds = 0;
   const journal = createDjukePlaybackJournal({ restore: async () => null, save: async () => 'ipfs://checkpoint' });
   const runtime = createDjukeRuntime({ journal, minAudibleMs: 1, readState: async () => ({ requests }),
-    getTrack: trackId => ({ trackId, title: trackId }),
+    getTrack: trackId => verifiedRecording({ trackId, title: trackId }),
     fulfill: async () => { deliveries++; requests = []; },
     refundPlaylistBatch: async () => { refunds++; } });
   let finished;

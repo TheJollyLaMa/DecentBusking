@@ -1,10 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
+const { verifiedRecording } = require('./helpers/verified-recording');
 const NOW = Date.parse('2026-10-26T16:00:00Z');
 const WEEK = 'NY-2026-10-26';
 const PREVIOUS = 'NY-2026-10-19';
-const track = (id, current, previous, plays = 1) => ({ trackId: id, title: id, likes: 0, dislikes: 0,
+const track = (id, current, previous, plays = 1) => verifiedRecording({ trackId: id, title: id, likes: 0, dislikes: 0,
   payrollVotes: { [WEEK]: current, [PREVIOUS]: previous }, payrollPlays: { [WEEK]: plays } });
 const program = extra => ({ id: 'program-test', title: 'Our hour', playlistId: 'rising-stars',
   weekday: 2, startMinuteLocal: 630, startDateLocal: '2026-11-03', announce: true, ...extra });

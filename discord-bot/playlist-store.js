@@ -14,6 +14,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'node:crypto';
 import { isEligibleRadioMusic } from '../js/radio-playlists.mjs';
+import { recordingDurationProof, recordingMediaIdentity, recordingDurationReason } from '../js/radio-duration.mjs';
 import { currentPayrollPeriod, payrollPeriodFromKey, payrollPeriods } from '../js/payroll-week.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -204,7 +205,7 @@ export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, f
 export async function submitLiveRecording({ booking, cid, consent, durationSeconds, incomplete, artworkCid }) {
   if (!booking?.id || !/^0x[0-9a-f]{40}$/i.test(booking.wallet || '') ||
       consent?.enabled !== true || !consent.signature || !/^[a-zA-Z0-9]{20,120}$/.test(cid || '') ||
-      !(durationSeconds > 0) || !/^[a-zA-Z0-9]{20,120}$/.test(artworkCid || '')) throw Error('Invalid consented live recording');
+      !Number.isFinite(durationSeconds) || !(durationSeconds > 0) || !/^[a-zA-Z0-9]{20,120}$/.test(artworkCid || '')) throw Error('Invalid consented live recording');
   const existing = _playlist.find(track => track.liveRecording?.bookingId === booking.id);
   if (existing && existing.ipfsCid !== cid) throw Error('This performance already has a different recording; admin review required');
   const track = existing || submitMediaTrack({ address: booking.wallet, title: `${booking.title || 'Live performance'}${incomplete ? ' (partial recording)' : ''}`,
@@ -212,6 +213,7 @@ export async function submitLiveRecording({ booking, cid, consent, durationSecon
     recipient: booking.wallet, tipWallet: booking.wallet, artworkCid });
   if (!track.liveRecording) {
     track.durationSeconds = durationSeconds;
+    track.durationVerification = recordingDurationProof(track, durationSeconds, 'live-capture');
     track.liveRecording = { bookingId: booking.id, consentIssuedAt: consent.issuedAt, incomplete: !!incomplete,
       replayAfter: booking.broadcast?.outroEndsAt ?? Date.parse(booking.endUtc) + 300000, replayStatus: 'pending' };
   }
@@ -222,7 +224,22 @@ export async function submitLiveRecording({ booking, cid, consent, durationSecon
 export function pendingLiveRecordingReplay(now = Date.now()) {
   return getPlaybackPlaylist().find(track => track.liveRecording?.replayStatus === 'pending' &&
     track.liveRecording.replayAfter <= now && track.mintStatus === 'minted' &&
-    isEligibleRadioMusic(track));
+    isEligibleRadioMusic(track) && !recordingDurationReason(track));
+}
+
+export function updateTrackDuration(trackId, result) {
+  const track = _playlist.find(entry => entry.trackId === trackId);
+  if (!track) throw new Error('Duration probe recording no longer exists');
+  if (recordingMediaIdentity(track) !== result.identity) throw new Error('Recording media changed during duration probing');
+  if (result.status === 'verified') {
+    track.durationVerification = recordingDurationProof(track, result.seconds, 'ffmpeg-decode');
+    track.durationSeconds = result.seconds;
+    if (track.durationMs !== undefined) track.durationMs = result.seconds * 1000;
+  }
+  track.durationProbe = { status: result.status, attempts: result.attempts,
+    ...(result.nextAttemptAt ? { nextAttemptAt: result.nextAttemptAt } : {}),
+    ...(result.error ? { error: result.error } : {}) };
+  _save({ routine: true });
 }
 
 export async function completeLiveRecordingReplay(trackId, play) {
@@ -768,7 +785,7 @@ export function getWeight(track) {
  * @returns {TrackEntry[]}
  */
 export function getWeightedShuffledPlaylist(now = Date.now()) {
-  const eligible = getPlaybackPlaylist().filter(isEligibleRadioMusic);
+  const eligible = getPlaybackPlaylist().filter(track => isEligibleRadioMusic(track) && !recordingDurationReason(track));
   if (eligible.length === 0) return [];
 
   // Build mutable candidate array with weights

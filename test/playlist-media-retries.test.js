@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
+const { verifiedRecording } = require('./helpers/verified-recording');
 
 async function fixture() {
   const { createDjukeRuntime, createDjukePlaybackJournal } = await import('../discord-bot/djuke.js');
@@ -14,7 +15,7 @@ async function fixture() {
     const journal = createDjukePlaybackJournal(store);
     const runtime = createDjukeRuntime({ journal,
       readState: async () => ({ requests, playlistPending: requests.length }),
-      getTrack: trackId => ({ trackId, title: 'Third playlist song' }),
+      getTrack: trackId => verifiedRecording({ trackId, title: 'Third playlist song' }),
       fulfill: async () => { settlements++; requests = []; },
       refundPlaylistBatch: async batchId => { assert.equal(batchId, '1'); refunds++; requests = []; },
       log: { warn() {} } });

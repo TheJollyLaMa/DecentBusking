@@ -545,6 +545,9 @@ actual minutes. A nonexistent **one-off** start is rejected instead of guessed.
 
 Built-in presets:
 
+- **Long-form Hour**: verified recordings strictly longer than 600 seconds;
+  shuffled, with completion-based durable progress. No recurring hour is
+  enabled automatically; schedule one using the existing calendar.
 - **Top 10 Hour**: up to ten tracks with votes/qualified plays this New York
   payroll week, ranked by net score, then plays.
 - **0 Votes / Songs Awaiting Your Vote**: known all-time human upvotes and
@@ -555,7 +558,7 @@ Built-in presets:
   claim of daily steady growth: daily vote history is not available.
 
 Preset rules are maintained in code with the operator; there is no front-end
-rule builder. The three built-in presets are ready to schedule. The model
+rule builder. The four built-in presets are ready to schedule. The model
 retains support for named, allowlisted selectors/rankings and song limits for
 future code-managed presets. No executable code is accepted. Existing shows
 retain their embedded rule revision when a saved preset changes.
@@ -563,6 +566,61 @@ The opening pool/order and cursor are durable; additions do not refill an
 already-opened show. Empty/exhausted pools and unavailable checkpoint storage
 fall back to normal rotation with an explicit public reason, rather than
 claiming to fill a whole hour with unavailable qualifying music.
+
+#### Verified durations and long-form boundaries
+
+Exactly 600 seconds remains ordinary music; 600.001 seconds is long-form.
+Display rounding never determines eligibility. Duration evidence is bound to
+the current IPFS CID/Discord attachment. Canonical live captures retain their
+capture evidence; uploads, imports and legacy catalog entries are measured by
+fully decoding audio with the same `FFMPEG_PATH`/`ffmpeg` binary already needed
+for playback. No separate ffprobe installation is required. Decoded PCM is
+counted and discarded, never broadcast or retained in memory as a whole file.
+Each probe has a two-minute deadline; URL lookup plus probing is bounded to
+150 seconds. Backfill processes two recordings serially per batch without
+blocking already-eligible playback. Failures retry after one minute, backing
+off to an hour, and persist their attempt/error state in the existing playlist
+checkpoint. `/api/radio` includes `recordingDurations` ordinary, long-form,
+unresolved and failed counts. Unknown, corrupt, non-finite, conflicting or
+changed-media evidence is never treated as a short song.
+
+Long recordings cannot enter ordinary shuffle, charts/themes, ordinary
+fallbacks, new ordinary DJuke checkout, or immediate live-recording replay.
+A newly minted twenty-minute set waits for a designated long-form hour,
+including its first replay. With no scheduled hour it stays in the catalog,
+not deleted or implicitly scheduled. Existing paid long/unknown requests stay
+unfulfilled and reserved for later resolution; they are not discarded,
+refunded or marked delivered by this routing change. New paid long-form
+scheduling is not offered. Resolve those existing obligations explicitly
+before accepting more requests that depend on the held lane.
+
+A long recording already started finishes intact past the slot's end, even
+across an ordinary/chart boundary; no new long recording starts after the slot.
+Before starting, the player checks the next protected live event and requires
+room for the complete piece plus the normal changeover gap. If it cannot fit,
+that occurrence records a skip and uses verified ordinary music instead.
+An empty/exhausted long-form pool also uses ordinary music. Missing media or
+failed preparation retains the long-form queue position with a durable
+one-minute retry deadline while ordinary music fills the gap. If no eligible
+ordinary music exists either, the public fallback/empty state remains explicit
+and the player retries; unavailable audio is not represented as a filled hour.
+
+Long-form cursors advance only after clean, sufficiently complete audio and a
+confirmed completion checkpoint. A checkpoint failure blocks reselection and
+retries the same completion, rather than replaying the finished set. Interrupted
+sets remain unfinished. After a process crash without a confirmed completion,
+an unfinished item may restart from the beginning; exactly-once physical audio
+delivery across that uncertainty is not claimed. A new live booking can still
+preempt playback if it is added after a piece has already started.
+
+Reuse decision (#352): adapted Busking's `createPlaylistShow`, playlist store,
+canonical recording capture and existing New York programming calendar at
+`c9856d0`; no second player or storage service. The Canopy inventory and clean
+older long-form worktree were checked as leads; no implementation was found
+in that inspected scope. Receiving-app coverage includes strict decoded
+599.999/600/600.001/1200-second boundaries, a minted twenty-minute set, protected
+live-event fit, cached reclassification, restart/media retries, completion
+checkpoint failure, paid holds and ordinary paid/ad playback regressions.
 
 Schedule schema 3 is retained. `weeklySchedule` optionally includes `presets`,
 `programs`, and default-show `reminders`; old schedules remain readable. Deploy
