@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { CID } from 'multiformats/cid';
+import { checkpointContentCid } from './checkpoint-mirror.js';
 import { createWeeklyHistory, stateHistoryEvents, WEEKLY_HISTORY_POLICY } from './checkpoint-history.js';
 
 const STATE_FILE_NAME = 'decentbusking-jukeloop-state.json';
@@ -356,7 +359,7 @@ export function createPinataStateStore({
 
   async function upload(bytes, fileName, keyvalues, targetGroup) {
     const form = new FormData();
-    form.append('file', new Blob([bytes], { type: 'application/json' }), fileName);
+    form.append('file', new Blob(Array.isArray(bytes) ? bytes : [bytes], { type: 'application/json' }), fileName);
     form.append('network', 'public');
     form.append('name', fileName);
     form.append('keyvalues', JSON.stringify(keyvalues));
@@ -370,7 +373,7 @@ export function createPinataStateStore({
     return cid;
   }
 
-  async function readHistory(cid) {
+  async function readHistory(cid, { digest = false, verifiedBytes = false } = {}) {
     const failures = [];
     for (const { base, accessToken } of await restoreGateways()) {
       const url = new URL(`${base.replace(/\/(ipfs\/?)?$/, '')}/ipfs/${cid}`);
@@ -378,7 +381,15 @@ export function createPinataStateStore({
       try {
         const response = await fetchImpl(url.toString(), { signal: AbortSignal.timeout(RESTORE_REQUEST_TIMEOUT_MS) });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return await response.json();
+        if (verifiedBytes) {
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          if (await checkpointContentCid(bytes) !== CID.parse(cid).toV1().toString()) throw new Error('content does not match its CID');
+          return bytes;
+        }
+        if (!digest) return new Uint8Array(await response.arrayBuffer());
+        const hash = createHash('sha256');
+        for await (const chunk of response.body) hash.update(chunk);
+        return hash.digest('hex');
       } catch (error) {
         failures.push(`${base}: ${error.message}`);
       }
@@ -396,12 +407,14 @@ export function createPinataStateStore({
   }
 
   const archiveWeeks = archiveGroupId ? createWeeklyHistory({ name, tags, timeZone: CHECKPOINT_TIME_ZONE,
-    read: readHistory,
+    readBytes: readHistory,
+    readVerifiedBytes: cid => readHistory(cid, { verifiedBytes: true }),
+    readDigest: cid => readHistory(cid, { digest: true }),
     list: fileName => listSnapshots(100, { fileName, group: archiveGroupId, allPages: true,
       matches: file => file.name === fileName && file.group_id === archiveGroupId &&
         file.keyvalues?.app === tags.app && file.keyvalues?.kind === `${tags.kind}-history` &&
         file.keyvalues?.schema === tags.schema && file.keyvalues?.historyPolicy === WEEKLY_HISTORY_POLICY }),
-    upload: (fileName, archive, week) => upload(new TextEncoder().encode(JSON.stringify(archive)), fileName,
+    upload: (fileName, archiveChunks, week) => upload(archiveChunks, fileName,
       { ...tags, kind: `${tags.kind}-history`, historyPolicy: WEEKLY_HISTORY_POLICY, week }, archiveGroupId),
     remove: removeFile,
   }) : null;
