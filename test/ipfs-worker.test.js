@@ -182,6 +182,24 @@ test('DeVert campaign snapshot is public read-only data and stays unavailable un
   });
 });
 
+test('DeVert exposes current competition readiness without publishing internal recovery errors', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  let status = { enabled: true, ready: false, retryable: true, lastError: 'Internal provider diagnostic' };
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: [], ownerWallet: Wallet.createRandom().address,
+    getDevertState: async () => ({ campaigns: [] }),
+    getDevertCompetitionStatus: () => status,
+  });
+  await withServer(handler, async base => {
+    const recovering = await (await fetch(`${base}/api/devert`)).json();
+    assert.deepEqual(recovering.competition, { enabled: true, ready: false, retryable: true, recoveryPending: true });
+    assert.ok(!JSON.stringify(recovering).includes(status.lastError));
+    status = { enabled: true, ready: true, retryable: false, lastError: null };
+    const ready = await (await fetch(`${base}/api/devert`)).json();
+    assert.deepEqual(ready.competition, { enabled: true, ready: true, retryable: false, recoveryPending: false });
+  });
+});
+
 test('ad library is publicly readable from the connected wallet address', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const owner = Wallet.createRandom();

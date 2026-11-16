@@ -439,7 +439,15 @@ VertLoop remains a media clock and records no broadcast impression, free or paid
 
 Operators can inspect `getAdvertCompetitionStatus()` for `ready`, `retryable`,
 and `lastError`, and the competition journal's `unresolved` list for missing
-campaign references. Failed closes log retryable warnings and retain the prior
+campaign references. The public `/api/devert` snapshot includes `competition`
+flags (`enabled`, `ready`, `retryable`, `recoveryPending`) but not internal error
+text. Startup logs confirm validated accepted-receipt, paid-play and free-play
+counts after durable journal recovery. Before enabling rewards, deploy with the
+flag disabled, verify this validation log and the focused accounting tests,
+then set `DEVERT_COMPETITION_ENABLED=true` using the protected deployment flow.
+Verify `enabled: true`, `ready: true`, `recoveryPending: false` on the deployed
+API; an enabled flag alone is not activation evidence.
+Failed closes log retryable warnings and retain the prior
 cursor/votes/grants. Restore corruptions fail closed; restore verified state
 through existing admin recovery, never clear votes or shift grant dates to
 recover. The existing admin/moderator authority is unchanged. No new UI,

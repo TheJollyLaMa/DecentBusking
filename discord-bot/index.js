@@ -749,9 +749,10 @@ async function main() {
         (devertRemovals ? devertRemovals.isRemoved(campaignId) : false) });
     _devertPlaybackInitialization = initializeDevertPlaybackWithRetry({
       initialize: () => _devertPlaybackRuntime.initialize(),
-    }).then(() => {
+    }).then(journal => {
       devertSchedulerReady = true;
       console.log(`[devert] Durable scheduler journal ready; scheduler ${scheduler.address}.`);
+      console.log(`[devert] Advert vote ledger validated; ${journal.adVoteLedger.receipts.length} accepted receipts, ${journal.paidPlays.length} paid plays, ${journal.competition?.plays.length || 0} free plays.`);
     });
   } else if (process.env.DEVERT_CONTRACT_ADDRESS) {
     console.warn('[devert] Campaign reads are configured, but audio scheduling is disabled until a DeVert/DJuke worker key and PINATA_JWT are available.');
@@ -1989,6 +1990,10 @@ async function main() {
         (track.messageId ? session._getFreshUrl({ ...track, ipfsCid: null }) : null);
     },
     getDevertState: readDevertState,
+    getDevertCompetitionStatus: () => _devertPlaybackRuntime?.getAdvertCompetitionStatus() ?? {
+      enabled: process.env.DEVERT_COMPETITION_ENABLED === 'true',
+      ready: false, retryable: true, lastError: 'Advert playback runtime is unavailable',
+    },
     getDevertQueue: readDevertQueue,
     removeDevertCampaign: devertRemovals ? async payload => {
       const removal = await devertRemovals.remove(payload);

@@ -283,6 +283,7 @@ export function createWorkerRequestHandler({
   getDjukePlaylistGasQuote,
   getDjukePlaylistReadiness,
   getDevertState,
+  getDevertCompetitionStatus,
   getDevertQueue,
   removeDevertCampaign,
   contentReview,
@@ -1044,7 +1045,12 @@ export function createWorkerRequestHandler({
           sendJson(response, 404, { error: 'DeVert is not deployed or configured' }, '*');
           return;
         }
-        sendJson(response, 200, await getDevertState(), '*');
+        const snapshot = await getDevertState();
+        const status = getDevertCompetitionStatus?.();
+        sendJson(response, 200, { ...snapshot,
+          ...(status ? { competition: { enabled: status.enabled, ready: status.ready,
+            retryable: status.retryable, recoveryPending: Boolean(status.lastError) } } : {}),
+        }, '*');
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/devert/remove') {
