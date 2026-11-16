@@ -3,7 +3,7 @@ import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, claimState, liveAcknowledgement, li
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
 import { performerRoomUrl, resolvePerformerReentry } from './performer-room.mjs?v=20261114-allocated-stage';
 import { renderPerformerGift } from './performer-gift.mjs?v=20261114-performer-encore';
-import { afterpartyRows, completionFacts } from './live-afterparty.mjs?v=20261115-afterparty';
+import { afterpartyRows, completionFacts, formatUsdc, parseUnits, verifyPaidReceipt } from './live-afterparty.mjs?v=20261115-afterparty';
 import { renderAfterpartyChecklist } from './live-afterparty-view.mjs?v=20261115-afterparty';
 
 function secretPyramid() {
@@ -354,10 +354,36 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        const provider = new ethers.BrowserProvider(window.ethereum);
        const signer = await provider.getSigner();
        if ((await provider.getNetwork()).chainId !== 8453n || (await signer.getAddress()).toLowerCase() !== b.wallet.toLowerCase()) throw new Error('Connect performer wallet on Base');
+       const amountUnits = b.approvedUnits ?? b.amountUnits;
+       const verifiedPayment = receipt => parseUnits(amountUnits) !== null && /^0x[0-9a-f]{64}$/i.test(b.termsHash || '') &&
+         verifyPaidReceipt({ receipt, escrowAddress: state.escrowAddress, iface: new ethers.Interface(LIVE_ESCROW_ABI),
+           bookingHash: ethers.id(b.id), performer: b.wallet, amountUnits, termsHash: b.termsHash }).ok;
+       const celebrate = hash => announcePaymentCelebration({ chainId:8453, txHash:hash, amountText:formatUsdc(amountUnits),
+         assetText:'USDC', summary:'Live performance claim confirmed', txLabel:'Claim confirmed' });
+       const evidenceNeedsReview = () => {
+         button.textContent = 'Claim evidence needs review';
+         if (nextStatus) nextStatus.textContent = 'The transaction succeeded, but its payment event could not be verified for this booking. Refresh payment status; do not send another claim.';
+       };
        const previous = localStorage.getItem(`live-claim:${b.id}`);
        if (previous) {
          const receipt = await provider.getTransactionReceipt(previous);
          if (!receipt) { button.textContent = 'Check pending claim'; button.disabled = false; if (nextStatus) nextStatus.textContent = `Still pending: ${previous}. Do not send again.`; return; }
+         if (receipt.status === 1) {
+           const head = await provider.getBlockNumber();
+           if (!Number.isSafeInteger(receipt.blockNumber) || !Number.isSafeInteger(head) || head - receipt.blockNumber < 1) {
+             button.textContent = 'Check pending claim';
+             button.disabled = false;
+             if (nextStatus) nextStatus.textContent = 'Waiting for two Base confirmations. Do not send another claim.';
+             return;
+           }
+           if (!verifiedPayment(receipt)) { evidenceNeedsReview(); return; }
+           celebrate(previous);
+         } else if (receipt.status !== 0) {
+           button.textContent = 'Check pending claim';
+           button.disabled = false;
+           if (nextStatus) nextStatus.textContent = 'Claim receipt is unavailable or unclear. Do not send another claim.';
+           return;
+         }
          localStorage.removeItem(`live-claim:${b.id}`);
          button.textContent = receipt.status === 1 ? 'Previous claim confirmed; refresh indexed receipt' : 'Previous claim reverted; refresh before retrying';
          if (nextStatus) nextStatus.textContent = receipt.status === 1 ? 'Previous transaction confirmed. Refresh payment status for the indexed payment receipt.'
@@ -372,9 +398,10 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        if (nextStatus) nextStatus.textContent = `Claim submitted. Waiting for confirmation: ${tx.hash}`;
        const receipt = await tx.wait(2);
        if (receipt?.status !== 1) throw new Error('Claim did not confirm successfully');
+       if (!verifiedPayment(receipt)) { evidenceNeedsReview(); return; }
        button.textContent = 'Claim confirmed; refresh for indexed receipt';
        if (nextStatus) nextStatus.textContent = '✓ Claim confirmed on Base. Refresh payment status for the indexed receipt.';
-       announcePaymentCelebration({ chainId:8453, txHash:tx.hash, amountText:String(Number(b.approvedUnits || b.amountUnits)/1e6), assetText:'USDC', summary:'Live performance claim confirmed', txLabel:'Claim confirmed' });
+       celebrate(tx.hash);
        localStorage.removeItem(`live-claim:${b.id}`);
        document.dispatchEvent(new CustomEvent('live-booking-claim-updated'));
      } catch (error) {
