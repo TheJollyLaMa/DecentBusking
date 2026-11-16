@@ -90,6 +90,7 @@ import { createEnsResolver } from './ens-resolver.js';
 import { createDevertRemovals } from './devert-removals.js';
 import { createContentReview, contentReviewCodec } from './content-review.js';
 import { contentCid, radioContentAllowed } from '../js/content-review.mjs';
+import { recordingDurationReason } from '../js/radio-duration.mjs';
 import { ensureCheckpointGroups } from './checkpoint-groups.js';
 import { createMintTransactionVerifier, createArtworkUpdateTransactionVerifier, createWorkerRequestHandler } from './ipfs-worker.js';
 import { buildMintEmbed, buildMintRequestComponents } from './embed.js';
@@ -1242,11 +1243,12 @@ async function main() {
   const quoteSigner = supportsDjukeAlbumsAndGas(process.env.DJUKE_CONTRACT_VERSION) && process.env.DJUKE_FULFILLER_PRIVATE_KEY
     ? new Wallet(process.env.DJUKE_FULFILLER_PRIVATE_KEY, getRpcRouter().provider('critical', 'djuke-gas-quote')) : null;
   const requireReviewedSongs = songIds => {
-    if (!_contentReview) return;
     const tracks = new Map(getPlaybackPlaylist().map(track => [id(track.trackId).toLowerCase(), track]));
     for (const songId of songIds) {
       const track = tracks.get(String(songId).toLowerCase());
       if (!track || !radioContentAllowed(track)) throw new Error('Recording is not eligible for radio checkout; refresh or contact the admin');
+      const reason = recordingDurationReason(track);
+      if (reason) throw new Error(`Recording is not eligible for ordinary DJuke checkout: ${reason}`);
     }
   };
   const readDjukeGasQuote = quoteSigner ? createDjukeGasQuoteReader({ provider: quoteSigner.provider, signer: quoteSigner,
@@ -1336,12 +1338,11 @@ async function main() {
   }) : undefined;
   const readDjukeState = readDjukeQueueState ? Object.assign(async () => {
     const snapshot = await readDjukeQueueState();
-    if (!_contentReview) return snapshot;
     const tracks = new Map(getPlaybackPlaylist().map(track => [id(track.trackId).toLowerCase(), track]));
     return { ...snapshot,
       tracks: snapshot.tracks.filter(entry => {
         const track = tracks.get(entry.songId.toLowerCase());
-        return track && radioContentAllowed(track);
+        return track && radioContentAllowed(track) && !recordingDurationReason(track);
       }),
       requests: snapshot.requests.map(request => {
       const track = tracks.get(request.songId.toLowerCase());

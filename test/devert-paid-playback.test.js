@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
+const { verifiedRecording } = require('./helpers/verified-recording');
 
 async function tierSession(t, tier, name) {
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
@@ -35,7 +36,7 @@ async function tierSession(t, tier, name) {
   t.after(() => session.destroy());
   session._getFreshUrl = async track => `https://media.example/${track.trackId}`;
   session._persistMainRadioAdState = async () => {};
-  session._queue = [{ trackId: 'ordinary-music', title: 'Music' }];
+  session._queue = [verifiedRecording({ trackId: 'ordinary-music', title: 'Music' })];
   session._queueIndex = 0;
   return { session, calls, paid, ordinary, player, inputs };
 }

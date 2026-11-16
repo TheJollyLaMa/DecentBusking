@@ -5,6 +5,7 @@ const { PassThrough } = require('node:stream');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { verifiedRecording } = require('./helpers/verified-recording');
 
 const start = Date.parse('2026-10-17T00:00:00Z');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'top-ten-hype-'));
@@ -19,7 +20,7 @@ async function fixture(t, count = 3) {
   t.mock.method(Date, 'now', () => now);
   const { JukeLoopSession, buildRadioState, buildNowPlayingMessage } = await import('../discord-bot/jukeloop.js');
   const { loadPlaylist } = await import('../discord-bot/playlist-store.js');
-  const playlist = Array.from({ length: count }, (_, index) => ({
+  const playlist = Array.from({ length: count }, (_, index) => verifiedRecording({
     trackId: `song-${index}`, title: `Song ${index}`, uploader: 'Artist', filename: 'song.mp3',
     ipfsCid: `cid-${index}`, payrollVotes: { 'NY-2026-10-12': count - index },
   }));

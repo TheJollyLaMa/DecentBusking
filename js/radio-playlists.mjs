@@ -1,7 +1,12 @@
 import { currentPayrollPeriod, payrollPeriods } from './payroll-week.mjs';
+import { recordingDurationReason, verifiedRecordingDuration } from './radio-duration.mjs';
 
 // Definitions are reusable; calendar events reference a rule, never a mutable track list.
 export const RADIO_PLAYLISTS = Object.freeze([
+  Object.freeze({ id: 'long-form-hour', title: 'Long-form Hour',
+    revision: 1, selector: 'long-form', ranking: 'shuffle', limit: 0,
+    rule: 'Verified recordings strictly longer than 10 minutes, played intact.',
+    invitation: 'Settle in for a full performance. Listen and vote on the website.' }),
   Object.freeze({ id: 'songs-awaiting-your-vote', title: 'Songs Awaiting Your Vote',
     revision: 1, selector: 'no-votes-ever', rule: 'All-time human upvotes = 0 AND downvotes = 0 (site + Discord).',
     invitation: 'Vote up OR down — help these songs find their place in the rotation.' }),
@@ -16,14 +21,15 @@ export const RADIO_PLAYLISTS = Object.freeze([
 export function validateRadioPreset(value) {
   if (!value || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(value.id || '') ||
     typeof value.title !== 'string' || !value.title.trim() || value.title.length > 100 ||
-    !['no-votes-ever', 'weekly-chart', 'weekly-growth'].includes(value.selector) ||
+    !['no-votes-ever', 'weekly-chart', 'weekly-growth', 'long-form'].includes(value.selector) ||
     !['shuffle', 'weekly-score', 'weekly-growth'].includes(value.ranking) ||
     !Number.isInteger(value.limit) || value.limit < 0 || value.limit > 100 ||
     !Number.isInteger(value.revision) || value.revision < 1) throw new Error('Invalid radio preset');
   return { id: value.id, title: value.title.trim(), revision: value.revision, selector: value.selector,
     ranking: value.ranking, limit: value.limit,
     rule: ({ 'no-votes-ever': 'No human votes ever.', 'weekly-chart': 'Current payroll-week votes and plays.',
-      'weekly-growth': 'Positive weekly net score, improving over the previous week; votes recorded in both weeks.' })[value.selector],
+      'weekly-growth': 'Positive weekly net score, improving over the previous week; votes recorded in both weeks.',
+      'long-form': 'Verified recordings strictly longer than 10 minutes, played intact.' })[value.selector],
     invitation: 'Listen and vote on the DecentBusking website.' };
 }
 
@@ -47,6 +53,9 @@ export function isEligibleRadioMusic(track) {
 
 export function playlistTrackReason(track, definition, now = Date.now()) {
   if (!isEligibleRadioMusic(track)) return 'Recording is no longer eligible or available';
+  const durationReason = recordingDurationReason(track, { longForm: definition.selector === 'long-form' });
+  if (durationReason) return durationReason;
+  if (definition.selector === 'long-form') return null;
   const week = currentPayrollPeriod(now).week;
   if (definition.selector === 'weekly-chart') {
     const votes = Number(track.payrollVotes?.[week]);
@@ -86,7 +95,7 @@ export function previewRadioPlaylist(id, catalog, { definition: customDefinition
   }
   if (definition.limit) tracks = tracks.slice(0, definition.limit);
   const unknownCount = eligible.filter(track => playlistTrackReason(track, definition, now)?.startsWith('Unknown')).length;
-  const durations = tracks.map(track => Number(track.durationMs) || Number(track.durationSeconds) * 1000);
+  const durations = tracks.map(track => verifiedRecordingDuration(track) * 1000);
   return { ...definition, count: tracks.length, unknownCount,
     estimatedDurationMs: durations.every(value => Number.isFinite(value) && value > 0) ? durations.reduce((a, b) => a + b, 0) : null,
     tracks: tracks.map(track => ({ trackId: track.trackId, title: track.title, artist: track.uploader })) };

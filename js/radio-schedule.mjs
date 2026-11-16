@@ -1,4 +1,4 @@
-import { radioPlaylistDefinition, validateRadioPreset } from './radio-playlists.mjs?v=20261024-programming-calendar';
+import { RADIO_PLAYLISTS, radioPlaylistDefinition, validateRadioPreset } from './radio-playlists.mjs?v=20261116-longform';
 import { radioCalendarOccurrences } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { currentPayrollPeriod, PAYROLL_TIME_ZONE } from './payroll-week.mjs';
 
@@ -90,7 +90,7 @@ export function validateWeeklyScheduleOverrides(overrides = {}) {
       if (!Array.isArray(slot) || slot.length > 30) throw new Error('At most 30 custom presets are supported');
       result.presets = slot.map(validateRadioPreset);
       if (new Set(result.presets.map(item => item.id)).size !== slot.length ||
-        result.presets.some(item => ['songs-awaiting-your-vote', 'top10-hour', 'rising-stars'].includes(item.id))) {
+        result.presets.some(item => RADIO_PLAYLISTS.some(preset => preset.id === item.id))) {
         throw new Error('Preset IDs must be unique and cannot replace built-in presets');
       }
       continue;
@@ -342,6 +342,14 @@ export function resolveActiveShow({ now = Date.now(), schedule = defaultRadioSch
   const fallback = (schedule || []).find(show => show.type === 'normal_rotation') || { id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation', priority: 10 };
   const cancelled = live.find(event => event.status === 'cancelled' && Date.parse(event.startUtc) <= now && now < Date.parse(event.endUtc));
   return { ...fallback, type: 'normal_rotation', ...(cancelled ? { cancelledOccurrenceId: cancelled.id } : {}) };
+}
+
+export function nextProtectedLiveStart({ now = Date.now(), schedule = defaultRadioSchedule(), livePerformanceEvents = [] } = {}) {
+  const occurrences = radioCalendarOccurrences({ schedule, events: livePerformanceEvents },
+    { now, days: 8, pastDays: 0 });
+  const starts = occurrences.filter(event => event.type === 'live_performance' && event.status !== 'cancelled' &&
+    Date.parse(event.endUtc) > now).map(event => Date.parse(event.startUtc));
+  return starts.length ? Math.min(...starts) : null;
 }
 
 function chooseAdCampaigns(adCampaigns, showType, count = 1) {
