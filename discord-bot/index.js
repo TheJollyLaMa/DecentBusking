@@ -1649,7 +1649,9 @@ async function main() {
   }
   const rehearsal = createRehearsalService({
     ownerWallet: config.mintOwnerWallet, store: rehearsalStore,
-    getBookings: () => liveBookings.getState(),
+    // Defaults: thejollylama.eth and decentagency.eth.
+    engineerWallets: (process.env.REHEARSAL_ENGINEER_WALLETS ||
+      '0x807061DF657A7697c04045dA7d16D941861cAABc,0xcAeEd8422fB5682C298B7F0971906d446fFd4e7a').split(',').map(w => w.trim()),
     transport: createLiveAudioTransport({
       enabled: process.env.PRIVATE_REHEARSAL_ENABLED === 'true',
       url: process.env.LIVEKIT_URL || '', apiKey: process.env.LIVEKIT_API_KEY || '', apiSecret: process.env.LIVEKIT_API_SECRET || '',

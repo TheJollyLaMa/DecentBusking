@@ -35,6 +35,7 @@
 .rehearsal-card{padding:clamp(.85rem,3vw,1.3rem);margin:.8rem 0;border:1px solid #f0c04044;border-radius:18px;background:linear-gradient(145deg,#24162d,#100c19);box-shadow:0 12px 30px #0003}
 .rehearsal-card h2{margin:0 0 .6rem;color:#f0c040;font:400 1.4rem Georgia,serif}
 .rehearsal-card p{margin:.65rem 0}
+.rehearsal-people h3{margin:.9rem 0 .3rem;font-size:1rem;color:#f0c040}.rehearsal-people pre{margin:0;white-space:pre-wrap;font:inherit;line-height:1.5}#engineer-tools{margin-top:.5rem}
 .rehearsal-room button{min-height:44px;margin:.25rem 0;padding:.65rem 1rem;border:1px solid #b8922a;border-radius:999px;background:#33233d;color:#f0e6c8;cursor:pointer}
 .rehearsal-room button:disabled{opacity:.5;cursor:default}
 .rehearsal-room .rehearsal-primary{background:#f0c040;color:#171025;font-weight:750}

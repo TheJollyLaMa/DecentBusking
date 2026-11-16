@@ -35,12 +35,13 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
     const token = new AccessToken(apiKey, apiSecret, { identity, ttl: Math.min(30, remaining) });
     token.addGrant({ roomJoin: true, room: roomName(booking), canPublish: publish,
       canPublishSources: publish ? [TrackSource.MICROPHONE] : [], canSubscribe: subscribe, canPublishData: false });
-    return { url, token: await token.toJwt(), publisherIdentity: publisherIdentity(booking) };
+    return { url, token: await token.toJwt(), ...(booking.rehearsal === true ? {} : { publisherIdentity: publisherIdentity(booking) }) };
   }
   async function ensureRoom(booking) {
     requireReady();
     await rooms.createRoom({ name: roomName(booking), emptyTimeout: 60, departureTimeout: 20,
-      maxParticipants: booking.rehearsal === true ? 3 : listenerLimit + 3,
+      // Shared rehearsal: up to six people plus the independent delivery receiver.
+      maxParticipants: booking.rehearsal === true ? 8 : listenerLimit + 3,
       metadata: JSON.stringify({ purpose: booking.rehearsal === true ? 'DecentBusking private rehearsal' : 'DecentBusking audio pilot',
         bookingId: booking.id }) });
   }
@@ -51,8 +52,9 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
   async function monitor(booking, onFrame, onPcm) {
     requireReady();
     if (monitors.has(booking.id)) return;
-    const state = { room: null, closed: false, readers: new Map(), decodedAt: 0, statsTimer: null,
+    const state = { room: null, closed: false, readers: new Map(), decodedAt: 0, decodedBy: new Map(), statsTimer: null,
       decodedLogged: false, statsLogged: false };
+    const isSource = identity => booking.rehearsal === true ? identity.startsWith('rehearsal:') : identity === publisherIdentity(booking);
     monitors.set(booking.id, state);
     try {
       await ensureRoom(booking);
@@ -61,13 +63,13 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
       const room = new Room();
       state.room = room;
       const subscribe = (publication, participant) => {
-        if (participant.identity === publisherIdentity(booking) && publication.kind === TrackKind.KIND_AUDIO) {
+        if (isSource(participant.identity) && publication.kind === TrackKind.KIND_AUDIO) {
           publication.setSubscribed(true);
         }
       };
       room.on('trackPublished', subscribe);
       room.on('trackSubscribed', (track, publication, participant) => {
-        if (state.closed || participant.identity !== publisherIdentity(booking) || track.kind !== TrackKind.KIND_AUDIO) return;
+        if (state.closed || !isSource(participant.identity) || track.kind !== TrackKind.KIND_AUDIO) return;
         const reader = new AudioStream(track, { sampleRate: 48000, numChannels: 1 }).getReader();
         state.readers.set(publication.sid, reader);
         void (async () => {
@@ -77,7 +79,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
               if (done) break;
               // Zero-valued PCM is valid delivered silence, not a disconnection.
               if (frame.samplesPerChannel > 0 && frame.data?.length) {
-                state.decodedAt = now();
+                state.decodedAt = now(); state.decodedBy.set(participant.identity, state.decodedAt);
                 onPcm?.(frame);
                 if (!state.decodedLogged) {
                   state.decodedLogged = true;
@@ -118,7 +120,9 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
               publisherKinds: (stats.publisherStats || []).map(entry => entry.stats?.case),
             }));
           }
-          if (!state.closed && next > packets && now() - state.decodedAt < 2000) onFrame({ samples: 1 });
+          if (!state.closed && next > packets && now() - state.decodedAt < 2000) {
+            onFrame({ samples: 1, sources: [...state.decodedBy].filter(([, at]) => now() - at < 2000).map(([id]) => id) });
+          }
           packets = next;
         } catch { /* Transport counters, not amplitude or concealed frames, establish freshness. */ }
         finally { checking = false; }
@@ -148,11 +152,13 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
     },
     async rehearsalConnect(booking, wallet, publish) {
       await ensureRoom(booking);
-      const identity = wallet.toLowerCase() === booking.wallet.toLowerCase()
-        ? publisherIdentity(booking) : `rehearsal-owner:${wallet.toLowerCase()}`;
-      const otherIdentity = wallet.toLowerCase() === booking.wallet.toLowerCase()
-        ? `rehearsal-owner:${booking.owner.toLowerCase()}` : publisherIdentity(booking);
-      return { ...(await grant(booking, identity, publish, true)), otherIdentity };
+      const identity = `rehearsal:${wallet.toLowerCase()}`;
+      return { ...(await grant(booking, identity, publish, true)), identity };
+    },
+    async rehearsalRemove(booking, wallet) {
+      requireReady();
+      try { await rooms.removeParticipant(roomName(booking), `rehearsal:${wallet.toLowerCase()}`); }
+      catch (error) { if (error.code !== 'not_found' && error.status !== 404) throw error; }
     },
     async listener(booking) {
       requireReady();

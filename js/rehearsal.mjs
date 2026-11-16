@@ -1,15 +1,15 @@
 import { loadLiveAudioSdk } from './live-audio-client.mjs';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261116-booth';
-import { bindBoothSetup } from './booth-setup.mjs?v=20261116-booth';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261116-shared-room';
+import { bindBoothSetup } from './booth-setup.mjs?v=20261116-shared-room';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 
 const el = id => document.getElementById(id);
 const service = String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
-const initialId = new URL(location.href).searchParams.get('rehearsal') || '';
 const practiceBookingId = new URL(location.href).searchParams.get('booking') || '';
 const audio = el('audio');
-let session, room, localTrack, remoteTrack, generation = 0, disposed = false, polling = false, deadlineTimer;
+let session, room, localTrack, generation = 0, disposed = false, polling = false, deadlineTimer;
 let busy = false, requestingAccounts = false;
+const remote = new Map();
 const meter = createInputMeter({ level: el('mic-level'), state: el('mic-state'), note: el('meter-note') });
 const headphones = bindInputMonitor({
   toggle: el('monitor-toggle'), volume: el('monitor-volume'), status: el('monitor-status'),
@@ -29,9 +29,8 @@ const status = (text, error = false) => {
   el('status').dataset.error = String(error);
 };
 function renderControls() {
-  el('join').hidden = !!session || !initialId && !practiceBookingId;
-  el('create').hidden = !!session || !!practiceBookingId;
-  for (const id of ['create-room', 'join-room', 'devices', 'publish', 'listen', 'end']) el(id).disabled = busy;
+  el('join').hidden = !!session;
+  for (const id of ['join-room', 'devices', 'publish', 'listen', 'end', 'remove']) el(id).disabled = busy;
   el('input').disabled = busy || !!localTrack;
   el('publish').disabled = busy || !!localTrack || !booth.ready();
   el('publish').textContent = localTrack ? 'Microphone is on' : 'Start my microphone';
@@ -43,13 +42,32 @@ function renderControls() {
       : 'Set up your booth first: choose how you will hear yourself and turn the radio off.';
 }
 function renderDelivery(fresh = false) {
-  const text = session?.role === 'owner'
-    ? fresh ? 'Artist connection: audio is reaching the room.' : 'Artist connection: waiting for their microphone.'
-    : !localTrack ? 'Delivery check: start your microphone first.'
-      : fresh ? '✓ Your audio is reaching the room. You can practise now.'
-        : 'Connecting your audio… If this continues, stop audio and try again.';
+  const text = !localTrack ? 'Delivery check: start your microphone first.'
+    : fresh ? '✓ Your audio is reaching the room. You can practise now.'
+      : 'Connecting your audio… If this continues, stop audio and try again.';
   el('delivery').textContent = text;
-  el('delivery').dataset.fresh = String(fresh && !!session && (session.role === 'owner' || !!localTrack));
+  el('delivery').dataset.fresh = String(fresh && !!session && !!localTrack);
+}
+function renderPeople(state) {
+  const list = state?.people || [];
+  el('people').textContent = list.length
+    ? list.map(p => `${p.you ? 'You' : p.label}${p.role === 'engineer' ? ' · engineer' : ''}${p.audioFresh ? ' · 🎙 sending' : p.connected ? ' · connected' : ' · signed in'}`).join('\n')
+    : 'Nobody else is here yet.';
+  const removable = list.filter(p => !p.you && p.role !== 'engineer');
+  el('engineer-tools').hidden = session?.role !== 'engineer';
+  const chosen = el('remove-who').value;
+  el('remove-who').replaceChildren(new Option('Choose someone…', ''), ...removable.map(p => new Option(p.label, p.wallet)));
+  el('remove-who').value = removable.some(p => p.wallet === chosen) ? chosen : '';
+}
+function dropRemote(identity) {
+  const entry = remote.get(identity);
+  if (!entry) return;
+  entry.track.detach(entry.element); entry.element.remove?.(); remote.delete(identity);
+}
+function syncOutputs() {
+  for (const { element } of remote.values()) {
+    if (audio.sinkId !== undefined && element.sinkId !== audio.sinkId) void element.setSinkId?.(audio.sinkId).catch(() => {});
+  }
 }
 async function request(path, input, token, keepalive = false) {
   const timeout = path === 'session' || path === 'challenge' || input.action === 'end' ? 60000 : 10000;
@@ -82,7 +100,7 @@ async function disconnect(notify = false) {
   localTrack?.stop(); localTrack = null;
   await headphones.stop();
   await meter.stop();
-  remoteTrack?.detach(audio); remoteTrack = null; audio.pause(); audio.srcObject = null;
+  for (const identity of [...remote.keys()]) dropRemote(identity);
   await previous?.disconnect().catch(() => {});
   renderControls(); renderDelivery();
   if (notify && authorization) await request('control', { action: 'leave' }, authorization.token);
@@ -104,32 +122,30 @@ async function authorize(input) {
   finally { requestingAccounts = false; }
   if (gen !== generation || disposed || current + 1 !== gen) return;
   const wallet = accounts[0];
-  if (!wallet) throw new Error('No wallet connected. Unlock MetaMask and select your invited or operator wallet.');
-  status('Checking your wallet invitation...');
+  if (!wallet) throw new Error('No wallet connected. Unlock MetaMask and choose a wallet.');
+  status('Preparing your sign-in...');
   const challenge = await request('challenge', { ...input, wallet });
   if (gen !== generation || disposed) return;
   const hex = `0x${Array.from(new TextEncoder().encode(challenge.message), b => b.toString(16).padStart(2, '0')).join('')}`;
-  status('Confirm the private-room signature in MetaMask. No transaction or gas.');
+  status('Confirm the rehearsal-room signature in MetaMask. No transaction or gas.');
   const signature = await window.ethereum.request({ method: 'personal_sign', params: [hex, wallet] });
   if (gen !== generation || disposed) return;
-  status('Verifying your signature and opening the private room...');
+  status('Verifying your signature and opening the rehearsal room...');
   const authorized = await request('session', { challengeId: challenge.challengeId, signature });
   if (gen !== generation || disposed) return;
   session = authorized;
-  renderControls(); renderDelivery();
+  renderControls(); renderDelivery(); renderPeople(authorized.state);
   const link = new URL('rehearsal.html', location.href);
-  link.searchParams.set('rehearsal', authorized.state.id);
-  el('invitation').textContent = authorized.role === 'owner' ? `Share this private invitation with the selected guest: ${link.href}` : 'Consent signed. This rehearsal is private.';
-  el('deadline').textContent = `Sign in again after ${new Date(authorized.expiresAt).toLocaleTimeString()}. Room closes ${new Date(authorized.state.expiresAt).toLocaleString()}.`;
-  el('end').hidden = authorized.role !== 'owner'; el('controls').hidden = false;
+  el('invitation').textContent = `Signed in${authorized.role === 'engineer' ? ' as an engineer' : ''}. Invite bandmates with ${link.origin}${link.pathname}. If this page closes, open that link and sign in again to rejoin.`;
+  el('deadline').textContent = `This session closes by ${new Date(authorized.state.expiresAt).toLocaleString()}, or sooner when everyone leaves.`;
+  el('end').hidden = authorized.role !== 'engineer'; el('controls').hidden = false;
   deadlineTimer = setTimeout(() => {
-    const token = session?.token; session = null; el('controls').hidden = true;
-    if (token) void request('control', { action: 'leave' }, token).catch(() => {});
+    session = null; el('controls').hidden = true;
     void disconnect();
     renderControls();
-    status('Your private session has ended; microphone stopped. Sign in again to keep practising.');
-  }, Math.max(0, Math.min(authorized.expiresAt, authorized.state.expiresAt) - Date.now()));
-  status("You're in. Next: Start my microphone, then allow your browser to use it.");
+    status('This rehearsal session reached its time limit; microphone stopped. Sign in again to start a new one.');
+  }, Math.max(0, authorized.state.expiresAt - Date.now()));
+  status("You're in. Next: set up your booth, then Start my microphone.");
 }
 async function connect(publish) {
   await disconnect();
@@ -142,17 +158,22 @@ async function connect(publish) {
   const grant = await request('control', { action: 'connect', publish }, authorization.token);
   if (!valid()) return;
   const next = new sdk.Room({ adaptiveStream: false, dynacast: false }); room = next;
+  const bandmate = identity => identity.startsWith('rehearsal:') && identity !== grant.identity;
   const subscribe = (publication, participant) => {
-    if (participant.identity === grant.otherIdentity && publication.kind === sdk.Track.Kind.Audio) publication.setSubscribed(true);
+    if (bandmate(participant.identity) && publication.kind === sdk.Track.Kind.Audio) publication.setSubscribed(true);
   };
   next.on(sdk.RoomEvent.TrackPublished, subscribe);
   next.on(sdk.RoomEvent.TrackSubscribed, (track, _publication, participant) => {
-    if (room !== next || participant.identity !== grant.otherIdentity || track.kind !== sdk.Track.Kind.Audio) return;
-    remoteTrack?.detach(audio); remoteTrack = track; track.attach(audio);
-    void audio.play().catch(() => status('Tap Play to hear the private feed.'));
+    if (room !== next || !bandmate(participant.identity) || track.kind !== sdk.Track.Kind.Audio) return;
+    dropRemote(participant.identity);
+    const element = track.attach();
+    el('remote-audio').append(element);
+    remote.set(participant.identity, { track, element });
+    syncOutputs();
+    void element.play?.().catch(() => status('Tap Listen only to hear the rest of the room.'));
   });
-  next.on(sdk.RoomEvent.TrackUnsubscribed, track => {
-    if (track === remoteTrack) { track.detach(audio); remoteTrack = null; }
+  next.on(sdk.RoomEvent.TrackUnsubscribed, (track, _publication, participant) => {
+    if (remote.get(participant.identity)?.track === track) dropRemote(participant.identity);
   });
   next.on(sdk.RoomEvent.Disconnected, () => {
     if (room === next) {
@@ -182,15 +203,13 @@ async function connect(publish) {
     await next.startAudio();
     renderControls(); renderDelivery();
     status(publish ? 'Microphone on. Watch your input meter and the delivery check below.'
-      : 'Listening privately. Your microphone is off; alone in the room, you will hear silence.');
+      : 'Listening to the room. Your microphone is off; if nobody is playing, you will hear silence.');
   } catch (error) {
     if (valid()) await disconnect(); else await next.disconnect().catch(() => {});
     throw error;
   }
 }
-el('create-room').onclick = action(() => authorize({ action: 'create', guest: el('guest').value.trim(), minutes: Number(el('minutes').value) }));
-el('join-room').onclick = action(() => authorize(practiceBookingId
-  ? { action: 'practice', bookingId: practiceBookingId } : { action: 'join', id: initialId }));
+el('join-room').onclick = action(() => authorize({ action: 'enter' }));
 el('devices').onclick = action(async () => {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   stream.getTracks().forEach(track => track.stop());
@@ -210,38 +229,43 @@ el('leave').onclick = action(async () => {
   status('Microphone off. To try again, choose Start my microphone.');
 });
 el('end').onclick = action(async () => {
-  if (!window.confirm('End this private rehearsal for everyone?')) return;
+  if (!window.confirm('Close this rehearsal session for everyone? Anyone can sign in again to start a new one.')) return;
   await request('control', { action: 'end', confirmed: true }, session?.token);
-  session = null; clearTimeout(deadlineTimer); el('controls').hidden = true; await disconnect(); status('Rehearsal ended.');
+  session = null; clearTimeout(deadlineTimer); el('controls').hidden = true; await disconnect(); status('Rehearsal session closed for everyone.');
+});
+el('remove').onclick = action(async () => {
+  const wallet = el('remove-who').value;
+  if (!wallet) throw new Error('Choose who to remove first.');
+  if (!window.confirm('Remove this person from the current session? They cannot rejoin until it closes.')) return;
+  renderPeople(await request('control', { action: 'remove', wallet }, session?.token));
+  status('Removed from this session.');
 });
 async function poll() {
   if (!session || polling || disposed) return;
   polling = true; const authorization = session;
   try {
     const state = await request('control', { action: 'state' }, authorization.token);
-    if (session === authorization) renderDelivery(state.privateAudioFresh);
+    if (session === authorization) { renderDelivery(state.privateAudioFresh); renderPeople(state); syncOutputs(); }
   } catch {
     if (session === authorization) {
       session = null; clearTimeout(deadlineTimer); el('controls').hidden = true; await disconnect();
-      status('Connection lost or session ended; microphone stopped. Sign in again to retry.', true);
+      status('Connection lost or session closed; microphone stopped. Sign in again to rejoin the room.', true);
     }
   } finally { polling = false; }
 }
 window.ethereum?.on?.('accountsChanged', () => {
   if (requestingAccounts) return;
   const token = session?.token; session = null; clearTimeout(deadlineTimer); el('controls').hidden = true;
-  if (token) void request('control', { action: 'leave' }, token).catch(() => {});
-  void disconnect(); status('Wallet changed; sign consent again.');
+  if (token) void request('control', { action: 'exit' }, token).catch(() => {});
+  void disconnect(); status('Wallet changed; sign in again.');
 });
 window.addEventListener('pagehide', () => {
   disposed = true; const token = session?.token; session = null; clearTimeout(deadlineTimer);
-  if (token) void request('control', { action: 'leave' }, token, true).catch(() => {});
+  if (token) void request('control', { action: 'exit' }, token, true).catch(() => {});
   void disconnect();
 });
 setInterval(() => { void poll(); }, 2000);
-el('join').hidden = !initialId && !practiceBookingId;
 if (practiceBookingId) {
-  el('create').hidden = true;
   el('join').querySelector('h2').textContent = '1 · Your private practice stage';
   document.querySelector('h1').textContent = 'Make yourself at home';
   el('rehearsal-intro').textContent = 'Your mic, your music, no pressure. Try things out before Friday.';
@@ -252,7 +276,7 @@ else {
     const response = await fetch(`${service}/api/private-rehearsal/status`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
     const state = await response.json();
     if (!response.ok || !state.configured) throw new Error('Private rehearsal hosting is not enabled.');
-    el('create-room').disabled = false; el('join-room').disabled = false;
+    el('join-room').disabled = false;
     status('Private rehearsal is available. Signing does not send a transaction.');
   } catch (error) { status(error.message || 'Private rehearsal unavailable.'); }
 }
