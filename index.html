@@ -751,6 +751,7 @@
       </details>
       <div id="admin-live-performance-slot"></div>
       <details id="admin-content-review" class="admin-tool-section hidden"></details>
+      <details id="admin-promotions" class="admin-tool-section hidden"></details>
       <details id="admin-devert-campaigns" class="admin-tool-section hidden">
         <summary><span>📣 DVert</span><small>Advert campaigns and moderation</small></summary>
         <p>Remove an advert from main radio and VertLoop. No refund; the paid term remains unchanged.</p>
@@ -945,7 +946,7 @@
   </div>
 
   <!-- Override about-modal BEFORE CDN header so DecentBusking listings are shown -->
-  <script type="module" src="js/components/about-override.js?v=20261112-base-supporter"></script>
+  <script type="module" src="js/components/about-override.js?v=20261116-promotions"></script>
 
   <!-- Override right-ankh BEFORE CDN header so the OMMM token code never runs -->
   <script type="module" src="js/components/header-right-ankh-override.js?v=20261025-header-compat"></script>
@@ -964,18 +965,19 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261030-ad-cutoff"></script>
+  <script type="module" src="js/main.js?v=20261116-promotions"></script>
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261115-afterparty">
   <script type="module" src="js/live-booking-notifications.mjs?v=20261113-one-action-release"></script>
   <script type="module" src="js/live-performance-admin.mjs?v=20261115-afterparty"></script>
-  <script type="module" src="js/admin.js?v=20261025-song-splits"></script>
+  <link rel="stylesheet" href="css/promotions.css?v=20261116-promotions">
+  <script type="module" src="js/admin.js?v=20261116-promotions"></script>
   <link rel="stylesheet" href="css/content-review.css?v=20261107-flags">
   <script type="module" src="js/content-review-ui.mjs?v=20261107-flags"></script>
 
   <link rel="stylesheet" href="css/payroll-workspace.css?v=20261019-payroll-workspace">
-  <script type="module" src="js/payroll.js?v=20261110-profile-invitation"></script>
+  <script type="module" src="js/payroll.js?v=20261116-promotions"></script>
   <script type="module" src="js/radio-history.js?v=20261029-tally-sections"></script>
   <script type="module" src="js/radio-schedule-ui.mjs?v=20261115-afterparty"></script>
   <link rel="stylesheet" href="css/fund-tour.css?v=20261019-fund-tour">
@@ -993,7 +995,7 @@
   <script type="module" src="js/panel-equalizers.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/top-ten-live-meter.mjs?v=20261025-seamless-handoff"></script>
   <script type="module">
-    import { initPayroll } from './js/payroll.js?v=20261110-profile-invitation';
+    import { initPayroll } from './js/payroll.js?v=20261116-promotions';
     document.addEventListener('DOMContentLoaded', initPayroll);
   </script>
   <script type="module">

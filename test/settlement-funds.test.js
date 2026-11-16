@@ -50,7 +50,7 @@ test('fund selector uses only this app configured radio and repository allocatio
   assert.deepEqual(configuredSettlementFunds({ radioFunds: { playback: 'dbusk-playback', topTen: 'dbusk-top10' }, fundSlug: 'dbusk-repo-dev', pinnerFundSlug: 'dbusk-pinners' })
     .map(fund => fund.slug), ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners']);
   assert.deepEqual(configuredSettlementFunds(payrollAssets).map(fund => fund.slug),
-    ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners', 'dbusk-live-performers']);
+    ['dbusk-playback', 'dbusk-top10', 'dbusk-repo-dev', 'dbusk-pinners', 'dbusk-live-performers', 'dbusk-promotionals']);
   assert.equal(configuredSettlementFunds({ fundSlug: 'wrong#slug' }).length, 0);
   assert.equal(resolveSettlementFundSlug('__custom_fund__', 'dmtv-referrals', { fundSlug: 'dbusk-repo-dev' }), 'dmtv-referrals');
   assert.equal(resolveSettlementFundSlug('dmtv-referrals', '', {}, ['dmtv-referrals']), 'dmtv-referrals');

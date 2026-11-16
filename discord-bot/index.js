@@ -10,6 +10,9 @@ import { createLiveAudioTransport } from './live-audio-transport.js';
 import { createLiveRecorder, createLiveRecordingStore, downloadRecordingSegment } from './live-recording.js';
 import { createRehearsalService } from './rehearsal.js';
 import { createRehearsalStore } from './rehearsal-store.js';
+import { createPromotions } from './promotions.js';
+import { createPromotionStore } from './promotions-store.js';
+import { createPromotionAnnouncements } from './promotion-announcements.js';
 // discord-bot/index.js
 // DecentBusking Discord Bot — entry point
 //
@@ -1681,8 +1684,38 @@ async function main() {
     void tick();
     setInterval(() => { void tick(); }, 1000).unref();
   }
+  let promotions;
+  if (process.env.PROMOTIONS_STORAGE_PATH) {
+    try {
+      const checkpoint = createPinataStateStore({ ...config.checkpointStorage,
+        pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+        name: 'decentbusking-promotions-state.json',
+        tags: { app: 'decentbusking', kind: 'promotions-state', schema: '1' },
+        restoreLatestOnly: true, rejectAmbiguousLatest: true,
+        serialize: value => value, deserialize: value => value,
+        beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined });
+      const promotionsStore = await createPromotionStore({ file: process.env.PROMOTIONS_STORAGE_PATH,
+        checkpoint });
+      promotions = createPromotions({ restore: promotionsStore.restore, save: promotionsStore.save,
+        getCheckpointUri: promotionsStore.getCheckpointUri,
+        provider: paymentProvider, routerAddress: payrollAssets.routerAddress, ownerWallet: config.mintOwnerWallet,
+        devertContractAddress: process.env.DEVERT_CONTRACT_ADDRESS,
+        siteUrl: config.siteUrl,
+        announcements: createPromotionAnnouncements({ channelId: config.announceChannelId,
+          getClient: () => config.getDiscordClient?.() || client,
+          canAnnounce: () => discordDiagnostics.bot('dbusker').notBefore() <= Date.now() }),
+        voteOnRadio: async vote => {
+          const playing = getJukeLoopNowPlaying();
+          if (!playing || playing.isDevert || playing.playId !== vote.playId) throw new Error('A current song, not an advert, is required');
+          return submitJukeLoopVote(vote);
+        } });
+    } catch (error) {
+      console.warn(`[promotions] Disabled until public Pinata checkpoints and the persistent journal are ready: ${error.message}`);
+    }
+  }
   const requestHandler = createWorkerRequestHandler({
     contentReview: _contentReview,
+    promotions,
     getMediaGateways: async () => [await discoverDedicatedGateway(config) || config.ipfsGateway],
     radioAnnouncements,
     liveBookings,
