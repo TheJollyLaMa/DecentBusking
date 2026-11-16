@@ -201,22 +201,67 @@ export function submitMediaTrack({ address, title, artist, ipfsCid, mediaType, f
   return _playlist.find(track => track.trackId === trackId);
 }
 
-export async function submitLiveRecording({ booking, cid, consent, durationSeconds, incomplete, artworkCid }) {
-  if (!booking?.id || !/^0x[0-9a-f]{40}$/i.test(booking.wallet || '') ||
-      consent?.enabled !== true || !consent.signature || !/^[a-zA-Z0-9]{20,120}$/.test(cid || '') ||
-      !(durationSeconds > 0) || !/^[a-zA-Z0-9]{20,120}$/.test(artworkCid || '')) throw Error('Invalid consented live recording');
-  const existing = _playlist.find(track => track.liveRecording?.bookingId === booking.id);
-  if (existing && existing.ipfsCid !== cid) throw Error('This performance already has a different recording; admin review required');
-  const track = existing || submitMediaTrack({ address: booking.wallet, title: `${booking.title || 'Live performance'}${incomplete ? ' (partial recording)' : ''}`,
-    artist: booking.displayName || booking.wallet, ipfsCid: cid, mediaType: 'audio/mpeg', filename: 'live-performance.mp3',
-    recipient: booking.wallet, tipWallet: booking.wallet, artworkCid });
-  if (!track.liveRecording) {
-    track.durationSeconds = durationSeconds;
-    track.liveRecording = { bookingId: booking.id, consentIssuedAt: consent.issuedAt, incomplete: !!incomplete,
-      replayAfter: booking.broadcast?.outroEndsAt ?? Date.parse(booking.endUtc) + 300000, replayStatus: 'pending' };
+export async function submitLiveRecordingRelease({ booking, release, source, consent, incomplete }) {
+  const wallet = booking?.wallet;
+  const walletLower = wallet?.toLowerCase();
+  if (!booking?.id || !/^0x[0-9a-f]{40}$/i.test(wallet || '') ||
+      consent?.enabled !== true || !consent.signature || !source || !/^[a-zA-Z0-9]{20,120}$/.test(source.cid || '') ||
+      !Array.isArray(source.segments) || source.segments.length < 1 || source.segments.length > 500 ||
+      !Number.isSafeInteger(source.durationSamples) || source.durationSamples <= 0 ||
+      source.sampleRate !== 48000 || !release || !/^[a-f0-9]{64}$/.test(release.releaseId || '') ||
+      !['full', 'split'].includes(release.choice) || !/^[a-zA-Z0-9]{20,120}$/.test(release.cid || '') ||
+      !/^[a-zA-Z0-9]{20,120}$/.test(release.sourceCid || '') || release.sourceCid !== source.cid ||
+      !Number.isSafeInteger(release.startSample) || !Number.isSafeInteger(release.endSample) ||
+      release.startSample < 0 || release.endSample <= release.startSample ||
+      release.durationSamples !== release.endSample - release.startSample ||
+      !Number.isSafeInteger(release.trackNumber) || release.trackNumber < 1 ||
+      typeof release.approvalSignature !== 'string' || release.approvalSignature.length > 1000 ||
+      !/^[a-f0-9]{64}$/.test(release.approvalMessageHash || '') ||
+      !Number.isSafeInteger(release.approvedAt) || typeof incomplete !== 'boolean') {
+    throw Error('Invalid performer-approved live recording release');
   }
-  _save(); await waitForRemotePersistence();
-  return track;
+  const trackId = `live:${booking.id}:${release.releaseId}`;
+  const existing = _playlist.find(track => track.trackId === trackId);
+  if (existing) {
+    if (existing.ipfsCid !== release.cid || existing.mintRecipient?.toLowerCase() !== walletLower ||
+        existing.liveRecording?.sourceCid !== source.cid ||
+        existing.liveRecording?.startSample !== release.startSample ||
+        existing.liveRecording?.endSample !== release.endSample) {
+      throw Error('This recording release ID already refers to different immutable media');
+    }
+    _save();
+    await waitForRemotePersistence();
+    return existing;
+  }
+  const track = {
+    attachmentId: trackId, source: 'live-recording', uploaderId: `wallet:${walletLower}`,
+    uploader: booking.displayName || wallet, title: release.title, artist: booking.displayName || wallet,
+    ipfsCid: release.cid, mediaType: 'audio/mpeg', filename: `live-${release.releaseId.slice(0, 20)}.mp3`,
+    pinStatus: 'pinned', artworkCid: booking.artworkCid || undefined, mintStatus: 'requested',
+    mintRecipient: wallet, mintRequestedAt: new Date().toISOString(), tipWallet: wallet,
+    durationSamples: release.durationSamples, durationSeconds: release.durationSamples / source.sampleRate,
+    sampleRate: source.sampleRate, albumId: booking.id, albumTitle: release.albumTitle,
+    trackNumber: release.trackNumber,
+    liveRecording: {
+      bookingId: booking.id, releaseId: release.releaseId, choice: release.choice,
+      sourceCid: source.cid, sourceDurationSamples: source.durationSamples, sourceSampleRate: source.sampleRate,
+      sourceSegments: source.segments.map(segment => ({ cid: segment.cid, bytes: segment.bytes })),
+      outputCid: release.cid, startSample: release.startSample, endSample: release.endSample,
+      durationSamples: release.durationSamples, consentVersion: consent.version,
+      consentIssuedAt: consent.issuedAt, performerApproval: { signature: release.approvalSignature,
+        messageHash: release.approvalMessageHash, issuedAt: release.approvedAt },
+      incomplete, derivativeOf: release.parentReleaseId || source.cid,
+      replayAfter: booking.broadcast?.outroEndsAt ?? Date.parse(booking.endUtc) + 300000,
+      replayStatus: release.choice === 'full' ? 'pending' : 'not-requested',
+    },
+  };
+  addTrack(track);
+  await waitForRemotePersistence();
+  return _playlist.find(entry => entry.trackId === trackId);
+}
+
+export function getTrackById(trackId) {
+  return _playlist.find(track => track.trackId === trackId) || null;
 }
 
 export function pendingLiveRecordingReplay(now = Date.now()) {

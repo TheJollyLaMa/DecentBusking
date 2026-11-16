@@ -114,10 +114,11 @@ function stageGate(booking) {
 function recordingFacts(booking) {
   const record = booking?.recordingRelease;
   if (!record || record.known !== true) return { state: 'unknown' };
-  return { ...record, state: ['none', 'processing', 'mint-requested', 'minted', 'airing', 'aired'].includes(record.state) ? record.state : 'unknown' };
+  return { ...record, state: ['none', 'processing', 'performer-review', 'mint-requested', 'minted', 'airing', 'aired'].includes(record.state) ? record.state : 'unknown' };
 }
 const RECORDING_WORDS = { unknown: 'Recording state is unavailable; nothing is assumed.', none: 'No recording has been submitted for this show.',
-  processing: 'The recording is being prepared.', 'mint-requested': 'The recording was submitted and is waiting for its mint.',
+  processing: 'The recording is being prepared.', 'performer-review': 'The recording is ready for performer preview and release choice; nothing has entered the mint queue.',
+  'mint-requested': 'The performer approved this release; it is waiting for admin mint review.',
   minted: 'The recording is minted; radio replay is not confirmed yet.', airing: 'The recording is playing on the radio now.',
   aired: 'The recording has played on the radio.' };
 

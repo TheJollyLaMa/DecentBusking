@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { Wallet } = require('../discord-bot/node_modules/ethers');
 const { createHash } = require('node:crypto');
 const { join } = require('node:path');
+const { liveRecordingRelease } = require('./helpers/live-recording-release.js');
 const fixtureDirectory = join(__dirname, `.live-broadcast-recording-fixtures-${process.pid}`);
 require('node:fs').mkdirSync(fixtureDirectory, { recursive: true });
 process.env.JUKELOOP_PLAYLIST_PATH = join(fixtureDirectory, 'playlist.json');
@@ -14,13 +15,14 @@ const pcm = () => ({ sampleRate: 48000, channels: 1, data: new Int16Array(48000)
 async function fixture(options = {}) {
   const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
   const consent = await import('../js/live-recording-consent.mjs');
+  const { recordingReleaseApprovalMessage } = await import('../js/live-recording-edit.mjs');
   let time = START - 1000, saved = { version: 1, recordings: [] };
   const blobs = [], submissions = [], errors = [];
   const store = { restore: async () => structuredClone(saved), save: async s => { saved = structuredClone(s); } };
   const args = { enabled: true, store, now: () => time, segmentSeconds: 1,
     upload: async (bytes, name) => { blobs.push({ bytes, name }); return `ipfs://${createHash('sha256').update(bytes).digest('hex')}`; },
     download: async () => Buffer.from('unused'), encode: async () => Buffer.from('final audio'),
-    ingest: async value => { submissions.push(value); return { trackId: `track:${value.booking.id}` }; },
+    ingest: async value => { submissions.push(value); return { trackId: `track:${value.booking.id}:${value.release.releaseId}` }; },
     log: { error: (...args) => errors.push(args.join(' ')) }, ...options };
   const recorder = createLiveRecorder(args);
   await recorder.initialize();
@@ -36,8 +38,16 @@ async function fixture(options = {}) {
       bookingId: b.id, wallet: b.wallet, origin: ORIGIN, issuedAt: time, enabled, ...(version === undefined ? {} : { version }),
     })),
   });
+  const approve = async (choice = 'full', target = recorder) => {
+    const edit = await target.editState(booking), issuedAt = time, draft = choice === 'defer' ? null : edit.draft;
+    const message = recordingReleaseApprovalMessage({ bookingId: booking.id, wallet: booking.wallet,
+      origin: ORIGIN, sourceCid: edit.sourceCid, sourceSamples: edit.sourceSamples,
+      choice, draft, issuedAt, incomplete: edit.incomplete });
+    const signature = await performer.signMessage(message);
+    return target.approveEdit(booking, { choice, issuedAt, signature }, performer.address, ORIGIN);
+  };
   return { recorder, args, booking, permission, blobs, submissions, errors, store,
-    v1: consent.LIVE_RECORDING_CONSENT_VERSION, v2: consent.LIVE_RECORDING_ALLOCATED_CONSENT_VERSION,
+    v1: consent.LIVE_RECORDING_CONSENT_VERSION, v2: consent.LIVE_RECORDING_ALLOCATED_CONSENT_VERSION, approve,
     at: n => { time = n; }, saved: () => structuredClone(saved) };
 }
 
@@ -75,9 +85,12 @@ test('V2 cannot be inferred from a V1 signature, invalid version or private wait
   assert.equal(f.blobs.length, 0);
 });
 
-test('actual end finalizes once and retry reuses the durable result rather than uploading a second recording', async () => {
-  let attempts = 0;
-  const f = await fixture({ ingest: async () => { if (++attempts === 1) throw Error('mint queue offline'); return { trackId: 'one-track' }; } });
+test('actual end finalizes once without mint intake; performer approval queues the durable source once', async () => {
+  let encodes = 0;
+  const f = await fixture({ encode: async () => {
+    if (++encodes === 1) throw Error('encoder offline');
+    return Buffer.from('final audio');
+  } });
   await f.recorder.consent(f.booking, await f.permission(f.booking, f.v2), performer.address, ORIGIN);
   f.at(START + 11000); f.recorder.capture(f.booking, pcm()); await f.recorder.flush();
   f.at(START + 21000); await f.recorder.tick([f.booking]);
@@ -87,9 +100,12 @@ test('actual end finalizes once and retry reuses the durable result rather than 
   assert.equal(f.recorder.status(f.booking).status, 'processing');
   assert.equal(f.recorder.status(f.booking).canChange, false);
   await f.recorder.tick([f.booking]); await f.recorder.tick([f.booking]);
-  assert.equal(attempts, 2);
+  assert.equal(encodes, 2);
   assert.equal(f.blobs.filter(b => b.name === 'live-performance.mp3').length, 1);
-  assert.equal(f.recorder.status(f.booking).status, 'submitted');
+  assert.equal(f.submissions.length, 0, 'completed capture is held for performer release choice');
+  await f.approve();
+  assert.equal(f.submissions.length, 1);
+  assert.equal(f.recorder.status(f.booking).status, 'ready');
 });
 
 test('a stuck prior finalizer cannot hold the next performer consent or capture queue', async () => {
@@ -129,7 +145,7 @@ test('finalization timeout is explicit and leaves a retryable journal, not a loc
   assert.equal(f.recorder.deploymentState().ready, false);
 });
 
-test('late mint intake success after timeout is reconciled once without a duplicate intake', async () => {
+test('late mint intake success after an approval timeout is reconciled without a duplicate request', async () => {
   let resolveIntake, intakes = 0;
   const f = await fixture({ ingest: () => { intakes++; return new Promise(resolve => { resolveIntake = resolve; }); },
     finalizationTimeoutMs: 10 });
@@ -137,11 +153,15 @@ test('late mint intake success after timeout is reconciled once without a duplic
   f.at(START + 11000); f.recorder.capture(f.booking, pcm()); await f.recorder.flush();
   f.booking.broadcast.actualEndedAt = START + 12000; f.booking.broadcast.endReason = 'producer-finished';
   f.at(START + 12000); await f.recorder.tick([f.booking]);
-  assert.equal(f.recorder.status(f.booking).status, 'processing');
-  resolveIntake({ trackId: 'late-once' });
-  await f.recorder.tick([f.booking]);
+  assert.equal(f.recorder.status(f.booking).status, 'ready');
+  assert.equal(intakes, 0, 'capture finalization does not call the mint queue');
+  await assert.rejects(f.approve(), /timed out/);
   assert.equal(intakes, 1);
-  assert.equal(f.recorder.status(f.booking).trackId, 'late-once');
+  resolveIntake({ trackId: 'late-once' });
+  await new Promise(resolve => setImmediate(resolve));
+  const recovered = await f.approve();
+  assert.equal(intakes, 1);
+  assert.equal(recovered.releases[0].trackId, 'late-once');
 });
 
 test('allocated recording replay waits for actual-end outro, not the original financial end', async () => {
@@ -150,17 +170,19 @@ test('allocated recording replay waits for actual-end outro, not the original fi
   try {
     let saved;
     p.loadPlaylist([]); p.configureRemotePersistence(async s => { saved = structuredClone(s); });
-    const input = { booking: { ...f.booking, broadcast: { ...f.booking.broadcast, outroEndsAt: START + 700000 } },
-      cid: 'a'.repeat(46), artworkCid: 'b'.repeat(46), consent: { enabled: true, signature: 'private-consent-proof', issuedAt: START - 1000 },
-      durationSeconds: 20, incomplete: false };
-    const track = await p.submitLiveRecording(input);
+    const input = liveRecordingRelease({ booking: { ...f.booking, broadcast: { ...f.booking.broadcast, outroEndsAt: START + 700000 } },
+      cid: 'a'.repeat(46), consent: { enabled: true, signature: 'private-consent-proof', issuedAt: START - 1000 },
+      durationSeconds: 20 });
+    const track = await p.submitLiveRecordingRelease(input);
     p.completeTrackMint(track.trackId, { tokenId: '1001', txHash: 'verified-fixture', contractAddress: performer.address });
     await p.waitForRemotePersistence(); p.loadPlaylist(saved);
     assert.equal(p.pendingLiveRecordingReplay(START + 320000), undefined);
     assert.equal(p.pendingLiveRecordingReplay(START + 699999), undefined);
     assert.equal(p.pendingLiveRecordingReplay(START + 700000).trackId, track.trackId);
-    await p.submitLiveRecording(input);
+    await p.submitLiveRecordingRelease(input);
     assert.equal(p.getPlaylist().length, 1);
-    assert.doesNotMatch(JSON.stringify(saved), /private-consent-proof|consentVersion|signature/);
+    assert.doesNotMatch(JSON.stringify(saved), /private-consent-proof/);
+    assert.equal(saved[0].liveRecording.consentVersion, 'dbusk-live-recording-v2');
+    assert.equal(saved[0].liveRecording.performerApproval.signature, 'fixture-performer-approval');
   } finally { p.configureRemotePersistence(null); p.loadPlaylist([]); }
 });
