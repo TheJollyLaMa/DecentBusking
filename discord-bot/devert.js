@@ -69,7 +69,7 @@ function asSafeNumber(value, label) {
   return number;
 }
 
-function normalizeCampaign(campaignId, raw, weekId) {
+export function normalizeDevertCampaign(campaignId, raw, weekId, { allowHistorical = false } = {}) {
   if (!raw || typeof raw !== 'object' || !isAddress(raw.advertiser) || ZERO_ADDRESS.test(raw.advertiser) ||
     typeof raw.title !== 'string' || !raw.title.trim() || raw.title.length > 160 ||
     typeof raw.audioURI !== 'string' || !raw.audioURI.startsWith('ipfs://')) {
@@ -79,7 +79,7 @@ function normalizeCampaign(campaignId, raw, weekId) {
   const expiresAt = asSafeNumber(raw.expiresAt, 'campaign expiry');
   const recordWeek = asSafeNumber(raw.weekId, 'campaign week');
   if (expiresAt <= startedAt || expiresAt - startedAt > SECONDS_PER_WEEK ||
-    recordWeek > weekId || weekId - recordWeek > 1) {
+    recordWeek > weekId || !allowHistorical && weekId - recordWeek > 1) {
     throw new Error('Invalid DeVert campaign terms');
   }
   const offerUnits = BigInt(raw.offerUnits);
@@ -150,7 +150,7 @@ export function createDevertCampaignReader({ contractAddress, provider, contract
     const campaigns = [];
     for (let offset = 0; offset < ids.length; offset += READ_CONCURRENCY) {
       const batch = await Promise.all(ids.slice(offset, offset + READ_CONCURRENCY).map(async id =>
-        normalizeCampaign(id, await devert.getCampaign(id, options), weekId)));
+        normalizeDevertCampaign(id, await devert.getCampaign(id, options), weekId)));
       campaigns.push(...batch);
     }
     const market = normalizeMarket(marketRaw);

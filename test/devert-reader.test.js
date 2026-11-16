@@ -84,6 +84,17 @@ function campaign(overrides = {}) {
   };
 }
 
+test('historical competition identity reads relax only campaign age, never media or paid terms', async () => {
+  const { normalizeDevertCampaign } = await import('../discord-bot/devert.js');
+  const old = campaign({ weekId: BigInt(WEEK_ID - 10) });
+  assert.throws(() => normalizeDevertCampaign('1', old, WEEK_ID), /campaign terms/);
+  assert.equal(normalizeDevertCampaign('1', old, WEEK_ID, { allowHistorical: true }).campaignId, '1');
+  assert.throws(() => normalizeDevertCampaign('1', { ...old, audioURI: 'https://unsafe.example/ad.mp3' },
+    WEEK_ID, { allowHistorical: true }), /Invalid DeVert campaign/);
+  assert.throws(() => normalizeDevertCampaign('1', { ...old, paidUnits: 0n },
+    WEEK_ID, { allowHistorical: true }), /campaign payment/);
+});
+
 function fakeContract({ record = campaign() } = {}) {
   return {
     campaignWeek: async timestamp => BigInt(Math.floor(Number(timestamp) / (7 * 24 * 60 * 60))),

@@ -260,6 +260,40 @@ test('AdLoop exposes the live play and records only completed audible non-main i
   controller.stop();
 });
 
+test('VertLoop rechecks the reward marker and records free completion without a paid impression', async () => {
+  const { createDevertLoopController } = await import('../discord-bot/devert-loop.js');
+  const player = new EventEmitter();
+  player.play = () => {};
+  const competitionReward = { advertId: 'advert', sourceWeek: 'NY-2026-10-26', rewardWeek: 'NY-2026-11-02' };
+  const freePlays = [];
+  let now = 10000;
+  const controller = createDevertLoopController({
+    player, voiceChannel: { name: 'test' },
+    playback: {
+      nextDevertLoopAd: async () => ({ campaignId: '17', competitionReward, track: { title: 'Free ad', ipfsCid: 'bafy-ad' } }),
+      canPlayCampaign: async (campaignId, options) => {
+        assert.equal(campaignId, '17');
+        assert.deepEqual(options.competitionReward, competitionReward);
+        return true;
+      },
+      recordCompetitionAdvertPlay: async play => freePlays.push(play),
+      recordCampaignImpression: () => assert.fail('no paid impression for a competition reward'),
+    },
+    resolveAdUrl: async () => 'https://media.example/ad', createStream: () => ({ stdout: {}, kill() {} }),
+    createResource: stream => stream, now: () => now,
+    setTimer: () => ({ unref() {} }), clearTimer() {}, log: { log() {}, warn() {}, error() {} },
+  });
+  await controller.start();
+  player.emit('stateChange', { status: 'buffering' }, { status: 'playing' });
+  now += 35000;
+  player.emit('idle');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(freePlays.length, 1);
+  assert.deepEqual(freePlays[0], { campaignId: '17', competitionReward, startedAt: 10000,
+    radioPlayId: 'devert-loop:17:10000', mainRadio: false, audibleMs: 35000 });
+  controller.stop();
+});
+
 test('VertLoop FFmpeg caps an ad output at 120 seconds', () => {
   const fs = require('node:fs');
   const vm = require('node:vm');
