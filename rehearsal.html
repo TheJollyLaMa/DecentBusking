@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DecentBusking · Private rehearsal</title>
-  <link rel="stylesheet" href="css/live-audio.css?v=20261110-entry-help">
+  <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth">
   <script src="decent.config.js"></script>
 </head>
 <body class="live-audio-room rehearsal-room">
@@ -36,7 +36,25 @@
   </section>
   <section id="controls" class="rehearsal-card" hidden>
     <h2>2 · Let's hear you</h2>
-    <p id="next-step">Choose your input, then start your microphone.</p>
+    <p id="next-step">Set up your booth, choose your input, then start your microphone.</p>
+    <fieldset id="booth" class="booth-setup">
+      <legend>🎧 Booth setup · required before your mic starts</legend>
+      <ol class="booth-steps">
+        <li>Plug your headphones into your <b>audio interface</b>, not the computer.</li>
+        <li>Turn the interface's <b>direct monitor</b> on. You hear yourself instantly, with no delay.</li>
+        <li>Put effects in your interface or mixer, before the browser, so listeners hear them too.</li>
+        <li><b>Turn the radio off</b> on every other tab, phone and speaker. It runs seconds behind you and sounds doubled.</li>
+      </ol>
+      <label for="booth-mode">How will you hear yourself?</label>
+      <select id="booth-mode">
+        <option value="">Choose how you will hear yourself…</option>
+        <option value="direct">Headphones in my interface · direct monitor on (recommended)</option>
+        <option value="unplugged">No headphones · unplugged</option>
+        <option value="browser">Browser monitor · delayed, practice only</option>
+      </select>
+      <label class="booth-confirm" for="booth-radio-off"><input id="booth-radio-off" type="checkbox"> The radio is off on every other tab, phone and device</label>
+      <output id="booth-status" role="status" aria-live="polite">Choose how you will hear yourself, then confirm the radio is off everywhere else.</output>
+    </fieldset>
     <label>Microphone / audio interface <select id="input"><option value="">Default audio input</option></select></label>
     <button id="devices" class="rehearsal-secondary" type="button">Find my microphone / interface</button>
     <div class="rehearsal-actions">
@@ -49,9 +67,9 @@
       <small id="meter-note">Local input only; the delivery check below verifies the connection.</small>
     </div>
     <p id="delivery" class="rehearsal-delivery" role="status" aria-live="polite">Delivery check: start your microphone first.</p>
-    <p class="rehearsal-hint">Hear yourself through your interface's direct monitor, or enable the optional headphone monitor below. The delivery check verifies what reaches the room; Jolly can listen when he joins.</p>
+    <p class="rehearsal-hint">The delivery check verifies what reaches the room; Jolly can listen when he joins. Hosts: before they play, ask which booth setup they chose. Shows allow only headphones in the interface with direct monitor on, or unplugged; both keep Hear my input off. The browser monitor is a practice-only experiment. Make sure no radio is playing near them.</p>
     <fieldset class="self-monitor">
-      <legend>Optional · hear your own input</legend>
+      <legend>Browser monitor · delayed, practice only</legend>
       <button id="monitor-output-devices" type="button">Choose / list audio outputs</button>
       <label for="monitor-output">Interface / headphones output</label>
       <select id="monitor-output"><option value="">System default output</option></select>
@@ -65,7 +83,7 @@
       <label for="monitor-volume">Headphone monitor level</label>
       <input id="monitor-volume" type="range" min="0" max="1" step="0.05" value="0.25">
       <output id="monitor-status" role="status" aria-live="polite">Headphone monitor is off.</output>
-      <p id="monitor-warning" class="monitor-warning">Use headphones and choose one monitor: your interface directly (recommended, Hear my input off), or this browser (interface direct monitoring off). Centered mono mixes mono/stereo input locally; it cannot change your interface's direct-monitor routing. If you hear echo, delay or feedback, uncheck Hear my input. Your microphone keeps sending to the room.</p>
+      <p id="monitor-warning" class="monitor-warning">Your headphone monitor belongs in your interface. Hear my input works only when Booth setup says Browser monitor. That choice is for practice only, and shows keep it off. It arrives late, so turn the interface's direct monitor off, start your mic first, then use headphones. Centered mono mixes mono/stereo input locally; it cannot change your interface's direct-monitor routing. If you hear echo, delay or feedback, uncheck Hear my input. Your microphone keeps sending to the room.</p>
     </fieldset>
     <details class="rehearsal-details">
       <summary>Listen to the other person</summary>
@@ -93,13 +111,15 @@
       <details>
         <summary>Quick soundcheck fixes</summary>
         <ul>
-          <li>Wear headphones; browser self-monitoring can arrive late. Direct monitoring through your interface is usually best.</li>
+          <li>Hear yourself through your interface: headphones in the interface, direct monitor on, Hear my input off.</li>
+          <li>Hearing yourself twice or late? The radio or browser monitor is playing somewhere. Turn it off; your mic keeps sending.</li>
+          <li>Headphones won't fit the interface? Use a 3.5 mm to ¼-inch stereo adapter.</li>
           <li>If no input appears, allow microphone access in browser site settings, then reload and choose your mic or interface.</li>
           <li>If the meter is quiet, check the interface input, cable and gain. The local meter is not proof of room delivery.</li>
         </ul>
       </details>
     </div>
   </aside>
-  <script type="module" src="js/rehearsal.mjs?v=20261114-monitor-mix"></script>
+  <script type="module" src="js/rehearsal.mjs?v=20261116-booth"></script>
 </body>
 </html>

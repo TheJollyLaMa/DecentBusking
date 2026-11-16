@@ -70,6 +70,19 @@
 .live-audio-room .self-monitor input[type="checkbox"]{flex:none;width:1.2rem;min-height:1.2rem;height:1.2rem;margin:0;accent-color:#00d4aa}
 .live-audio-room .self-monitor input[type="range"]{display:block;width:100%;height:2rem;min-height:2rem;margin:.25rem 0;accent-color:#00d4aa}
 .live-audio-room .self-monitor output{color:#91e2ce;font-size:.85rem}
+.live-audio-room .booth-setup{box-sizing:border-box;min-width:0;margin:1rem 0;padding:.9rem;border:2px solid #ffcf6e;border-radius:14px;background:#1d1708}
+.booth-setup legend{padding:0 .35rem;color:#ffd98a;font-weight:750}
+.booth-steps{margin:.25rem 0 .75rem;padding-left:1.3rem;color:#f0e6c8;line-height:1.45}
+.booth-steps li{margin:.3rem 0}
+.live-audio-room .booth-setup select{width:100%;margin:.3rem 0 .6rem}
+.live-audio-room .booth-confirm{display:flex;align-items:center;gap:.6rem;min-height:44px;color:#f0e6c8;font-weight:650}
+.live-audio-room .booth-confirm input{flex:none;width:1.2rem;height:1.2rem;min-height:1.2rem;margin:0;accent-color:#ffcf6e}
+.booth-setup output{display:block;margin-top:.4rem;color:#ffd98a;font-size:.88rem;line-height:1.4}
+.booth-setup output[data-ready="true"]{color:#91e2ce}
+.booth-operator{margin:.5rem 0 1rem;padding:.7rem .9rem;border:1px solid #ffcf6e88;border-radius:12px;background:#1d1708}
+.booth-operator h3{margin:0 0 .3rem;font-size:1rem;color:#ffd98a}
+.booth-operator ul{margin:0;padding-left:1.2rem;color:#f0e6c8;line-height:1.45}
+.self-monitor input:disabled+*,.self-monitor label:has(input:disabled){opacity:.55}
 .monitor-warning{margin:.5rem 0 0;color:#dbcba7;font-size:.82rem;line-height:1.45}
 .remote-listen{margin:1rem 0;padding:.75rem;border:1px solid #ffffff20;border-radius:12px}
 .remote-listen summary,.studio-helper summary{min-height:40px;padding:.3rem 0;color:#e5c76d;cursor:pointer}

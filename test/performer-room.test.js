@@ -23,7 +23,7 @@ test('performer headphone monitor is directly visible, not hidden in collapsed h
   const html = await fs.readFile(require.resolve('../live-room.html'), 'utf8');
   const publisher = html.slice(html.indexOf('<fieldset id="room-publisher"'), html.indexOf('<section class="remote-listen"'));
   const monitor = publisher.slice(publisher.indexOf('<fieldset class="self-monitor">'), publisher.indexOf('id="room-recording-option"'));
-  assert.match(monitor, /Your headphone monitor/);
+  assert.match(monitor, /Browser monitor · not used on air/);
   assert.match(monitor, /id="room-monitor-toggle"/);
   assert.match(monitor, /id="room-monitor-volume"/);
   assert.match(monitor, /id="room-monitor-status"/);
@@ -32,6 +32,31 @@ test('performer headphone monitor is directly visible, not hidden in collapsed h
   assert.match(monitor, /does not change the broadcast/);
   assert.doesNotMatch(monitor, /<\/details>/);
   assert.doesNotMatch(publisher.slice(0, publisher.indexOf('<fieldset class="self-monitor">')), /<details/);
+});
+
+test('booth setup is shown to every performer before publishing, and operators get the booth check', async () => {
+  for (const [file, prefix, publish] of [['live-room.html', 'room-', 'room-publish'], ['rehearsal.html', '', 'publish']]) {
+    const html = await fs.readFile(require.resolve(`../${file}`), 'utf8');
+    const booth = html.indexOf(`id="${prefix}booth"`);
+    assert.ok(booth > 0 && booth < html.indexOf(`id="${publish}"`), `${file}: booth setup precedes the mic button`);
+    const card = html.slice(booth, html.indexOf('</fieldset>', booth));
+    assert.match(card, /headphones into your <b>audio interface<\/b>/);
+    assert.match(card, /<b>direct monitor<\/b> on/);
+    assert.match(card, /<b>Turn the radio off<\/b>/);
+    for (const value of ['direct', 'unplugged']) assert.match(card, new RegExp(`<option value="${value}"`));
+    if (file === 'live-room.html') assert.doesNotMatch(card, /<option value="browser"/, 'shows never offer the delayed browser monitor');
+    else assert.match(card, /<option value="browser">Browser monitor · delayed, practice only/);
+    assert.match(card, new RegExp(`id="${prefix}booth-radio-off" type="checkbox"`));
+    assert.doesNotMatch(card, /<details/, 'booth steps are never hidden in collapsed help');
+  }
+  const live = await fs.readFile(require.resolve('../live-room.html'), 'utf8');
+  const operator = live.slice(live.indexOf('<fieldset id="room-owner"'), live.indexOf('id="room-check60"'));
+  assert.match(operator, /Booth check · before T−60/);
+  assert.match(operator, /headphones in the interface with direct monitor on<\/b>, or <b>unplugged<\/b>/);
+  assert.match(operator, /Hear my input stays off/);
+  assert.match(operator, /doubled or echoing/);
+  const desk = await fs.readFile(require.resolve('../producer-room.html'), 'utf8');
+  assert.match(desk, /headphones in the interface with direct monitor on, or unplugged/);
 });
 
 test('room module initializes practice, advances to backstage and fails closed on stale audio', async () => {
@@ -58,7 +83,7 @@ test('room module initializes practice, advances to backstage and fails closed o
     URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
     afterpartyRows, renderAfterpartyChecklist,
     LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
-    bindInputMonitor: () => ({ stop: async () => {} }),
+    bindInputMonitor: () => ({ stop: async () => {} }), bindBoothSetup: () => ({ ready: () => true, problem: () => '' }), SHOW_MODES: ['direct', 'unplugged'],
     bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
     bindLiveBroadcastControls: () => ({ update() {}, dispose() {} }),
     createLivePublisherPresence: () => ({ start: () => true, stop() {} }),
@@ -128,7 +153,7 @@ test('guided operator flow shows pending saves, persistent errors and saved chec
     URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
     afterpartyRows, renderAfterpartyChecklist,
     LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
-    bindInputMonitor: () => ({ stop: async () => {} }),
+    bindInputMonitor: () => ({ stop: async () => {} }), bindBoothSetup: () => ({ ready: () => true, problem: () => '' }), SHOW_MODES: ['direct', 'unplugged'],
     bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
     bindLiveBroadcastControls: () => ({ update() {}, dispose() {} }),
     createLivePublisherPresence: () => ({ start: () => true, stop() {} }),
@@ -214,6 +239,7 @@ test('publisher protects the return before publication and releases it on stop, 
   const { bindLiveRecordingOption } = await import('../js/live-recording-option.mjs');
   const { afterpartyRows } = await import('../js/live-afterparty.mjs');
   const { renderAfterpartyChecklist } = await import('../js/live-afterparty-view.mjs');
+  const { bindBoothSetup, SHOW_MODES } = await import('../js/booth-setup.mjs');
   const source = (await fs.readFile(require.resolve('../js/live-audio-room.mjs'), 'utf8')).replace(/^import .*;\n/gm, '');
   for (const outcome of ['stop', 'ended', 'disconnected', 'failed-publish', 'storage-denied', 'allocated-original-end']) {
     await t.test(outcome, async () => {
@@ -226,8 +252,8 @@ test('publisher protects the return before publication and releases it on stop, 
           authorizedEndAt: start + 1800000, accessUntil: start + 1800000 },
       } : { configured: true, bookingId: b.id, phase: 'preflight' };
       const element = id => {
-        if (!elements.has(id)) elements.set(id, { id, value: '', textContent: '', classList: { toggle() {} },
-          addEventListener() {}, setAttribute() {}, removeAttribute() {}, pause() {} });
+        if (!elements.has(id)) elements.set(id, { id, value: '', textContent: '', classList: { toggle() {} }, listeners: {},
+          addEventListener(name, fn) { this.listeners[name] = fn; }, setAttribute() {}, removeAttribute() {}, pause() {} });
         return elements.get(id);
       };
       const capture = { stop() { stopped = true; },
@@ -252,7 +278,7 @@ test('publisher protects the return before publication and releases it on stop, 
         URL, AbortSignal, TextEncoder, performerRoomSign, performerAllocationAccess, bindLiveRecordingOption,
         afterpartyRows, renderAfterpartyChecklist,
         LIVE_RECORDING_CONSENT_VERSION: 'dbusk-live-recording-v1', LIVE_RECORDING_ALLOCATED_CONSENT_VERSION: 'dbusk-live-recording-v2',
-        bindInputMonitor: () => ({ stop: async () => {} }),
+        bindInputMonitor: () => ({ stop: async () => {} }), bindBoothSetup, SHOW_MODES,
         bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
         bindLiveBroadcastControls: options => { broadcastBinding = options; return { update() {}, dispose() {} }; },
         createInputMeter: () => ({ start() {}, stop: async () => {} }),
@@ -280,6 +306,14 @@ test('publisher protects the return before publication and releases it on stop, 
       const click = id => element(id).onclick({ currentTarget: element(id) });
       await new Promise(resolve => setImmediate(resolve));
       await click('room-authorize');
+      assert.equal(element('room-publish').disabled, true, 'booth setup gates publishing');
+      await click('room-publish');
+      assert.deepEqual(order, [], 'an unready booth never opens or publishes the mic');
+      assert.match(element('room-action-status').textContent, /Booth setup: choose how you will hear yourself/);
+      element('room-booth-mode').value = 'direct';
+      element('room-booth-radio-off').checked = true;
+      element('room-booth-mode').listeners.change();
+      assert.equal(element('room-publish').disabled, false);
       await click('room-publish');
       assert.deepEqual(order, ['protect', 'publish']);
       if (outcome === 'failed-publish') {
