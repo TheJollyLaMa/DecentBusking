@@ -5,6 +5,7 @@ const { createHash } = require('node:crypto');
 const { mkdtemp, rm, writeFile } = require('node:fs/promises');
 const { join } = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { liveRecordingRelease } = require('./helpers/live-recording-release.js');
 const playlistDir = join(__dirname, `.live-recording-fixtures-${process.pid}`);
 require('node:fs').mkdirSync(playlistDir, { recursive: true });
 process.env.JUKELOOP_PLAYLIST_PATH = join(playlistDir, 'playlist.json');
@@ -19,6 +20,7 @@ const frame = () => ({ sampleRate: 48000, channels: 1, data: new Int16Array(4800
 async function setup(options = {}) {
   const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
   const { liveRecordingConsentMessage } = await import('../js/live-recording-consent.mjs');
+  const { recordingReleaseApprovalMessage } = await import('../js/live-recording-edit.mjs');
   let time = START - 1000, state = { version: 1, recordings: [] }, submissions = [];
   const blobs = new Map(), errors = [];
   const store = { restore: async () => structuredClone(state), save: async next => { state = structuredClone(next); } };
@@ -27,16 +29,24 @@ async function setup(options = {}) {
     blobs.set(cid, Buffer.from(bytes)); return `ipfs://${cid}`;
   };
   const args = { enabled: true, store, upload, download: async cid => blobs.get(cid),
-    ingest: async value => { submissions.push(value); return { trackId: 'fixture-track' }; },
+    ingest: async value => { submissions.push(value); return { trackId: `fixture:${value.release.releaseId}` }; },
     encode: async () => Buffer.from('encoded-fixture'), segmentSeconds: 1, now: () => time,
     log: { error: (...args) => errors.push(args.join(' ')) }, ...options };
   const recorder = createLiveRecorder(args);
+  const approve = async (choice = 'full', signer = artist, target = recorder) => {
+    const edit = await target.editState(booking), issuedAt = time, draft = choice === 'defer' ? null : edit.draft;
+    const message = recordingReleaseApprovalMessage({ bookingId: booking.id, wallet: booking.wallet,
+      origin: ORIGIN, sourceCid: edit.sourceCid, sourceSamples: edit.sourceSamples,
+      choice, draft, issuedAt, incomplete: edit.incomplete });
+    const signature = await signer.signMessage(message);
+    return target.approveEdit(booking, { choice, issuedAt, signature }, signer.address, ORIGIN);
+  };
   const permission = async (enabled = true, signer = artist, issuedAt = time, origin = ORIGIN, b = booking) => ({
     enabled, issuedAt, signature: await signer.signMessage(liveRecordingConsentMessage({
       bookingId: b.id, wallet: b.wallet, origin, issuedAt, enabled })),
   });
   await recorder.initialize();
-  return { recorder, args, permission, blobs, errors, submissions, store,
+  return { recorder, args, permission, blobs, errors, submissions, store, approve,
     at: value => { time = value; }, state: () => state };
 }
 
@@ -58,9 +68,14 @@ test('recording is off by default, excludes private audio and requires exact per
   assert.equal(s.recorder.deploymentState().ready, false);
   s.at(START + 20000); s.recorder.capture(booking, frame());
   await s.recorder.tick([booking]);
-  assert.equal(s.submissions.length, 1); assert.equal(s.submissions[0].durationSeconds, 1);
+  assert.equal(s.submissions.length, 0, 'finalization does not create a mint request');
+  assert.equal(s.recorder.status(booking).status, 'ready');
+  assert.equal(s.recorder.status(booking).editAvailable, true);
+  const releaseState = await s.approve('full');
+  assert.equal(s.submissions.length, 1);
+  assert.equal(s.submissions[0].source.durationSamples, 48000);
   assert.equal(s.submissions[0].incomplete, true);
-  assert.equal(s.recorder.status(booking).status, 'submitted');
+  assert.equal(releaseState.releases[0].choice, 'full');
   assert.equal(s.recorder.deploymentState().ready, true);
   await s.recorder.tick([booking]); assert.equal(s.submissions.length, 1);
 });
@@ -96,9 +111,10 @@ test('failed consent persistence captures nothing; failed finalization retries w
   } });
   await restarted.initialize();
   s.at(START + 20000);
-  await restarted.tick([booking]); assert.equal(restarted.status(booking).status, 'processing');
-  assert.equal(restarted.deploymentState().ready, false);
-  await restarted.tick([booking]); await restarted.tick([booking]);
+  await restarted.tick([booking]); assert.equal(restarted.status(booking).status, 'ready');
+  assert.equal(restarted.deploymentState().ready, true);
+  await assert.rejects(s.approve('full', artist, restarted), /playlist unavailable/);
+  await s.approve('full', artist, restarted);
   assert.equal(attempts, 2); assert.equal(s.submissions.length, 1); assert.equal(s.submissions[0].incomplete, true);
 });
 
@@ -155,13 +171,14 @@ test('preserved consented recording retries an authenticated segment failure onc
   assert.match(recorder.status(booking).error, /401/);
   unauthorized = false;
   await recorder.tick([booking]); await recorder.tick([booking]);
-  assert.equal(recorder.status(booking).status, 'submitted');
+  assert.equal(recorder.status(booking).status, 'ready');
+  await s.approve('full', artist, recorder);
   assert.equal(s.submissions.length, 1);
   assert.equal(uploads, 1);
   assert.equal(recorder.deploymentState().ready, true);
 });
 
-test('replacement recorder resumes a durable processing checkpoint without recapture or a second final upload', async () => {
+test('replacement recorder preserves the original and only queues the full set after performer approval', async () => {
   const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
   const s = await setup();
   await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
@@ -171,22 +188,26 @@ test('replacement recorder resumes a durable processing checkpoint without recap
   const old = createLiveRecorder({ ...s.args,
     encode: async () => { encodes++; return Buffer.from('encoded-before-handoff'); },
     upload: async bytes => { uploads++; return s.args.upload(bytes); },
-    ingest: async () => { throw Error('Fixture mint intake unavailable'); },
+    ingest: async () => { throw Error('No mint intake is allowed before explicit approval'); },
   });
 
   await old.initialize(); s.at(START + 20000); await old.tick([booking]);
-  assert.equal(old.deploymentState().ready, false, 'Current gate must still block pending finalization');
-  assert.equal(s.state().recordings[0].status, 'processing');
+  assert.equal(old.deploymentState().ready, true);
+  assert.equal(s.state().recordings[0].status, 'ready');
   assert.ok(s.state().recordings[0].result);
   assert.deepEqual(s.state().recordings[0].consent, preserved.consent);
   assert.deepEqual(s.state().recordings[0].segments, preserved.segments);
   const replacement = createLiveRecorder({ ...s.args,
+    ingest: async value => {
+      s.submissions.push(value);
+      return { trackId: `fixture:${value.release.releaseId}` };
+    },
     encode: async () => { throw Error('Already-checkpointed MP3 must not be re-encoded'); },
     upload: async () => { throw Error('Already-checkpointed MP3 must not be uploaded again'); },
   });
   await replacement.initialize();
-  assert.equal(replacement.deploymentState().ready, false);
-  await replacement.tick([booking]); await replacement.tick([booking]);
+  assert.equal(replacement.deploymentState().ready, true);
+  await s.approve('full', artist, replacement);
   assert.equal(replacement.deploymentState().ready, true);
   assert.equal(s.submissions.length, 1);
   assert.equal(encodes, 1); assert.equal(uploads, 1);
@@ -208,6 +229,8 @@ test('a finalization outage does not mark fully captured audio incomplete or blo
   assert.match(s.recorder.status(booking).error, /download outage/);
   fail = false;
   await s.recorder.tick([booking]);
+  assert.equal(s.submissions.length, 0, 'successful finalization still waits for performer approval');
+  await s.approve('full');
   assert.equal(s.submissions[0].incomplete, false, 'Delivery failure is not missing captured audio');
   assert.equal(s.recorder.status(booking).error, '');
   const next = { ...booking, id: 'second-performer', startUtc: new Date(START + 30000).toISOString(),
@@ -229,8 +252,10 @@ test('a replacement worker waits out deploy overlap before resuming a processing
   await replacement.tick([booking]);
   assert.equal(s.submissions.length, 0, 'Old worker may still be retrying during overlap');
   s.at(START + 20000 + 180000); await replacement.tick([booking]);
+  assert.equal(s.submissions.length, 0, 'Resumed capture is only staged for the performer');
+  await s.approve('full', artist, replacement);
   assert.equal(s.submissions.length, 1);
-  assert.equal(s.state().recordings[0].status, 'submitted');
+  assert.equal(s.state().recordings[0].status, 'ready');
   assert.equal(replacement.deploymentState().ready, true);
 });
 
@@ -316,14 +341,16 @@ test('finalized recording uses existing mint requests, survives restore and only
   try {
     let remote;
     p.loadPlaylist([]); p.configureRemotePersistence(async state => { remote = structuredClone(state); });
-    const input = { booking, cid: 'a'.repeat(46), artworkCid: 'b'.repeat(46),
+    const input = liveRecordingRelease({ booking, cid: 'a'.repeat(46),
       consent: { enabled: true, signature: 'fixture-proof-kept-in-encrypted-journal', issuedAt: START - 1000 },
-      durationSeconds: 20, incomplete: false };
-    const track = await p.submitLiveRecording(input);
+      durationSeconds: 20 });
+    const track = await p.submitLiveRecordingRelease(input);
     assert.equal(p.getMintRequests().length, 1); assert.equal(track.mintRecipient, artist.address);
     assert.equal(track.tipWallet, artist.address);
+    assert.equal(track.albumId, booking.id); assert.equal(track.trackNumber, 1);
+    assert.equal(track.liveRecording.replayStatus, 'pending');
     assert.equal(p.pendingLiveRecordingReplay(START + 400000), undefined);
-    await p.submitLiveRecording(input); assert.equal(p.getMintRequests().length, 1);
+    await p.submitLiveRecordingRelease(input); assert.equal(p.getMintRequests().length, 1);
     p.completeTrackMint(track.trackId, { tokenId: '999', txHash: 'verified-fixture', contractAddress: artist.address });
     await p.waitForRemotePersistence(); p.loadPlaylist(remote);
     assert.equal(p.pendingLiveRecordingReplay(START + 319999), undefined, 'outro is protected');
@@ -336,6 +363,27 @@ test('finalized recording uses existing mint requests, survives restore and only
     p.loadPlaylist(remote);
     assert.equal(p.pendingLiveRecordingReplay(START + 400000), undefined);
   } finally { p.configureRemotePersistence(null); }
+});
+
+test('a repeated approved release retries remote queue persistence before claiming it queued', async () => {
+  const p = await import('../discord-bot/playlist-store.js');
+  let attempts = 0, remote;
+  p.loadPlaylist([]);
+  p.configureRemotePersistence(async state => {
+    if (++attempts === 1) throw Error('fixture remote checkpoint unavailable');
+    remote = structuredClone(state);
+  });
+  const input = liveRecordingRelease({ booking, cid: 'b'.repeat(46),
+    consent: { enabled: true, signature: 'fixture-proof-kept-in-encrypted-journal', issuedAt: START - 1000 },
+    durationSeconds: 20 });
+  try {
+    await assert.rejects(p.submitLiveRecordingRelease(input), /fixture remote checkpoint unavailable/);
+    assert.equal(p.getMintRequests().length, 1, 'local candidate is idempotently retained while remote storage recovers');
+    const retried = await p.submitLiveRecordingRelease(input);
+    assert.equal(retried.mintStatus, 'requested');
+    assert.equal(attempts, 2);
+    assert.equal(remote.filter(track => track.trackId === retried.trackId).length, 1);
+  } finally { p.configureRemotePersistence(null); p.loadPlaylist([]); }
 });
 
 test('recording journal is encrypted, readback-verified, rejects token fields and restores signed consent', async () => {
@@ -399,8 +447,8 @@ test('automatic replay selects only safe normal rotation, yields to paid songs a
   session._queue = [verifiedRecording({ trackId: 'ordinary-song', title: 'Ordinary music' })];
   try {
     p.loadPlaylist([]); p.configureRemotePersistence(async () => {});
-    const track = await p.submitLiveRecording({ booking, cid: 'c'.repeat(46), artworkCid: 'b'.repeat(46),
-      consent: { enabled: true, signature: 'fixture', issuedAt: START - 1000 }, durationSeconds: 20, incomplete: false });
+    const track = await p.submitLiveRecordingRelease(liveRecordingRelease({ booking, cid: 'c'.repeat(46),
+      consent: { enabled: true, signature: 'fixture', issuedAt: START - 1000 }, durationSeconds: 20 }));
     p.completeTrackMint(track.trackId, { tokenId: '1000', txHash: 'verified-fixture' });
     const replay = await session._prepareNextPlayback();
     assert.equal(replay.track.trackId, track.trackId); assert.equal(replay.liveReplay, true);

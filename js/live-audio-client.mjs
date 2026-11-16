@@ -16,9 +16,10 @@ export function loadLiveAudioSdk(serviceUrl) {
 export async function roomRequest(serviceUrl, path, input, token, fetchImpl = fetch) {
   const response = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/live-audio/${path}`, {
     method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify(input), signal: AbortSignal.timeout(
-      path === 'session' || input.action?.startsWith('broadcast-') ||
-      ['check', 'arm', 'cancel', 'recording-consent'].includes(input.action) ? 60_000 : 10_000), cache: 'no-store',
+    body: JSON.stringify(input),         signal: AbortSignal.timeout(
+      ['recording-edit-save', 'recording-edit-approve'].includes(input.action) ? 180_000
+        : path === 'session' || input.action?.startsWith('broadcast-') ||
+          ['check', 'arm', 'cancel', 'recording-consent'].includes(input.action) ? 60_000 : 10_000), cache: 'no-store',
   });
   const result = await response.json();
   if (!response.ok) {

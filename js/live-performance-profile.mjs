@@ -311,6 +311,17 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        article.append(stageStatus);
      }
      article.append(amount, nextStatus);
+     if (afterparty && !b.cancelled) {
+       const editRoom = document.createElement('p');
+       const editLink = document.createElement('a');
+       editLink.href = `recording-edit.html?booking=${encodeURIComponent(b.id)}`;
+       editLink.textContent = '🎛 Review your live recording';
+       editLink.setAttribute('data-recording-edit', b.id);
+       const note = document.createElement('small');
+       note.textContent = 'If you opted in, preview the original and choose a full-set release, split-song releases, or decide later. Nothing enters the mint queue until you approve each release.';
+       editRoom.append(editLink, document.createElement('br'), note);
+       article.append(editRoom);
+     }
      const verifiedReentry = ['active', 'ended'].includes(reentry.status) ? reentry : null;
      const rows = afterpartyRows(b, {
        audience: 'performer', now: Date.now(), reentry: verifiedReentry,

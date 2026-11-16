@@ -8,7 +8,7 @@ async function body(request) {
   let text = '';
   for await (const chunk of request) {
     text += chunk;
-    if (Buffer.byteLength(text) > 8192) throw new Error('Room request is too large');
+    if (Buffer.byteLength(text) > 32 * 1024) throw new Error('Room request is too large');
   }
   return JSON.parse(text || '{}');
 }

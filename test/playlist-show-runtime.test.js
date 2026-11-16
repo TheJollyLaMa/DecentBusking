@@ -84,12 +84,13 @@ test('a minted twenty-minute live set waits for long-form programming and record
   const p = await import('../discord-bot/playlist-store.js');
   p.configureRemotePersistence(async () => {});
   t.after(() => p.configureRemotePersistence(null));
-  const track = await p.submitLiveRecording({
+  const { liveRecordingRelease } = require('./helpers/live-recording-release');
+  const track = await p.submitLiveRecordingRelease(liveRecordingRelease({
     booking: { id: 'full-live-set', title: 'Twenty-minute set', wallet: `0x${'1'.repeat(40)}`,
       endUtc: new Date(START - 600000).toISOString() },
     cid: 'c'.repeat(46), artworkCid: 'a'.repeat(46), durationSeconds: 1200, incomplete: false,
     consent: { enabled: true, signature: 'fixture', issuedAt: START - 2000000 },
-  });
+  }));
   p.completeTrackMint(track.trackId, { tokenId: '1001', txHash: 'verified-fixture' });
   assert.equal(p.pendingLiveRecordingReplay(), undefined);
   assert.deepEqual(p.getWeightedShuffledPlaylist(), []);
