@@ -10,10 +10,13 @@ export function validateRehearsalState(value) {
       !Array.isArray(value.rooms) || value.rooms.length > 100) throw new Error('Invalid rehearsal checkpoint');
   const ids = new Set();
   for (const room of value.rooms) {
-    if (!room || Object.keys(room).some(k => !['id', 'guest', 'bookingId', 'expiresAt', 'endedAt'].includes(k)) ||
+    // guest and bookingId are legacy fields from owner-invited rooms; shared rooms omit them.
+    if (!room || Object.keys(room).some(k => !['id', 'guest', 'bookingId', 'removed', 'expiresAt', 'endedAt'].includes(k)) ||
         room.bookingId !== undefined && (typeof room.bookingId !== 'string' || !/^[a-z0-9:_-]{1,100}$/.test(room.bookingId)) ||
         !/^rehearsal:[0-9a-f]{64}$/.test(room.id || '') || ids.has(room.id) ||
-        !/^0x[0-9a-f]{40}$/.test(room.guest || '') || !Number.isSafeInteger(room.expiresAt) ||
+        room.guest !== undefined && !/^0x[0-9a-f]{40}$/.test(room.guest) ||
+        room.removed !== undefined && (!Array.isArray(room.removed) || room.removed.length > 64 ||
+          room.removed.some(w => !/^0x[0-9a-f]{40}$/.test(w))) || !Number.isSafeInteger(room.expiresAt) ||
         room.expiresAt < 0 || !Number.isSafeInteger(room.endedAt) || room.endedAt < 0) throw new Error('Invalid rehearsal checkpoint');
     ids.add(room.id);
   }

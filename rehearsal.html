@@ -3,36 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DecentBusking · Private rehearsal</title>
-  <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth">
+  <title>DecentBusking · Rehearsal room</title>
+  <link rel="stylesheet" href="css/live-audio.css?v=20261116-shared-room">
   <script src="decent.config.js"></script>
 </head>
 <body class="live-audio-room rehearsal-room">
   <header class="rehearsal-welcome">
     <img src="img/D_Busker.jpeg" width="56" height="56" alt="DBusker, your friendly stage companion">
-    <div><p class="rehearsal-eyebrow">DECENTBUSKING · PRIVATE PRACTICE</p>
-      <h1>Your corner of the stage</h1>
-      <p id="rehearsal-intro">One invited wallet, one friendly host. Try things out, no pressure.</p>
+    <div><p class="rehearsal-eyebrow">DECENTBUSKING · REHEARSAL ROOM</p>
+      <h1>The rehearsal room</h1>
+      <p id="rehearsal-intro">A shared practice room that belongs to nobody. Bring your band, and an engineer may drop in. No pressure.</p>
     </div>
   </header>
   <div class="studio-signal-strip" aria-hidden="true"><span>♫</span><span>🎙</span><span>✦</span><span>♬</span><span>◉</span></div>
   <p class="rehearsal-private">✦ Private, not on radio · No recording · Use headphones</p>
   <output id="status" class="rehearsal-status" role="status" aria-live="polite">Checking availability…</output>
-  <section id="create" class="rehearsal-card">
-    <h2>Owner: create an invitation</h2>
-    <label>Guest wallet <input id="guest" type="text" autocomplete="off" placeholder="0x…"></label>
-    <label>Minutes (1–120) <input id="minutes" type="number" min="1" max="120" value="60"></label>
-    <button id="create-room" type="button" disabled>Sign and create private rehearsal</button>
-  </section>
   <section id="join" class="rehearsal-card">
     <h2>1 · Make yourself at home</h2>
     <details class="room-entry-info">
       <summary aria-label="Why sign to enter?">i</summary>
-      <p>Your wallet is your personal key to this private room. Signing proves you control the invited wallet and gives this browser a temporary audio pass, for up to 15 minutes. Only you and the operator can enter.</p>
-      <p>No gas, payment, token approval or booking acceptance. Your private key never leaves your wallet. This signature also confirms consent to private live audio—not recording or public broadcast. Sign again when your pass expires.</p>
+      <p>Anyone with this link can sign in with any wallet and join whoever is already practising. Up to six people at a time. Signing proves you control the wallet and gives this browser a pass that stays valid while this page is open.</p>
+      <p>No gas, payment, token approval or booking acceptance. Your private key never leaves your wallet. This signature also confirms consent to private live audio with whoever is in the room—not recording or public broadcast.</p>
+      <p>Lost this page? Open the same link and sign in again. You land back in the running session. Nobody owns the room; engineers can remove someone or close the session.</p>
     </details>
-    <p>Connect your invited wallet and sign to enter. No payment or transaction.</p>
-    <button id="join-room" type="button" disabled>Sign consent and enter</button>
+    <p>Sign in with any wallet to enter. No payment or transaction.</p>
+    <button id="join-room" type="button" disabled>Sign in and enter the room</button>
   </section>
   <section id="controls" class="rehearsal-card" hidden>
     <h2>2 · Let's hear you</h2>
@@ -67,7 +62,16 @@
       <small id="meter-note">Local input only; the delivery check below verifies the connection.</small>
     </div>
     <p id="delivery" class="rehearsal-delivery" role="status" aria-live="polite">Delivery check: start your microphone first.</p>
-    <p class="rehearsal-hint">The delivery check verifies what reaches the room; Jolly can listen when he joins. Hosts: before they play, ask which booth setup they chose. Shows allow only headphones in the interface with direct monitor on, or unplugged; both keep Hear my input off. The browser monitor is a practice-only experiment. Make sure no radio is playing near them.</p>
+    <section class="rehearsal-people" aria-label="Who's in the room">
+      <h3>Who's here</h3>
+      <pre id="people" role="status" aria-live="polite">Nobody else is here yet.</pre>
+      <div id="engineer-tools" hidden>
+        <label for="remove-who">Engineer: remove someone from this session</label>
+        <select id="remove-who"><option value="">Choose someone…</option></select>
+        <button id="remove" class="rehearsal-secondary" type="button">Remove</button>
+      </div>
+    </section>
+    <p class="rehearsal-hint">The delivery check verifies what reaches the room. Bandmates hear each other over the internet, so expect a short delay between players. Hosts: before they play, ask which booth setup they chose. Shows allow only headphones in the interface with direct monitor on, or unplugged; both keep Hear my input off. The browser monitor is a practice-only experiment. Make sure no radio is playing near them.</p>
     <fieldset class="self-monitor">
       <legend>Browser monitor · delayed, practice only</legend>
       <button id="monitor-output-devices" type="button">Choose / list audio outputs</button>
@@ -86,24 +90,25 @@
       <p id="monitor-warning" class="monitor-warning">Your headphone monitor belongs in your interface. Hear my input works only when Booth setup says Browser monitor. That choice is for practice only, and shows keep it off. It arrives late, so turn the interface's direct monitor off, start your mic first, then use headphones. Centered mono mixes mono/stereo input locally; it cannot change your interface's direct-monitor routing. If you hear echo, delay or feedback, uncheck Hear my input. Your microphone keeps sending to the room.</p>
     </fieldset>
     <details class="rehearsal-details">
-      <summary>Listen to the other person</summary>
+      <summary>Listen to the room</summary>
       <button id="listen" class="rehearsal-secondary" type="button">Listen only · mic off</button>
-      <audio id="audio" controls playsinline></audio>
-      <p>This is separate from hearing your own input: it plays the other person's remote audio. If you're practising alone, there is nobody else to hear.</p>
+      <audio id="audio" hidden playsinline></audio>
+      <div id="remote-audio"></div>
+      <p>Starting your microphone also plays everyone else in the room. Listen only plays them without sending your mic. This is separate from hearing your own input. If you're alone, there is nobody else to hear.</p>
     </details>
     <details class="rehearsal-details">
       <summary>Your session & help</summary>
       <p id="invitation"></p>
       <p id="deadline"></p>
-      <p>If access expires, sign in again. If the mic is blocked, allow microphone access in your browser's site settings, then retry. If your meter stays still, check the selected input and interface gain.</p>
+      <p>If your pass ends, sign in again; you rejoin the same session. If the mic is blocked, allow microphone access in your browser's site settings, then retry. If your meter stays still, check the selected input and interface gain.</p>
       <p>Use the same stable stage link for practice and show day. At T−70, backstage requires fresh wallet authorization and a new connection. A real show still needs both soundchecks and the operator's confirmation.</p>
     </details>
-    <button id="end" type="button" hidden>End rehearsal for everyone</button>
+    <button id="end" type="button" hidden>Engineer: close this session for everyone</button>
   </section>
   <details class="rehearsal-details rehearsal-footnote">
     <summary>About this private room</summary>
     <p>Practice does not accept a booking, move money or count as a Friday soundcheck.</p>
-    <p>Room closure is best-effort while the worker is down: browsers stop at the deadline, and the worker deletes the room after recovery. LiveKit does not enforce that deadline on an already-connected client.</p>
+    <p>A session opens when the first person signs in and closes when everyone has left, after four hours, or when an engineer closes it. Closure is best-effort while the worker is down: browsers stop at the deadline, and the worker deletes the room after recovery.</p>
   </details>
   <aside class="studio-helper" aria-label="DBusker's soundcheck tips">
     <img src="img/D_Busker.jpeg" width="48" height="48" alt="DBusker">
@@ -120,6 +125,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/rehearsal.mjs?v=20261116-booth"></script>
+  <script type="module" src="js/rehearsal.mjs?v=20261116-shared-room"></script>
 </body>
 </html>

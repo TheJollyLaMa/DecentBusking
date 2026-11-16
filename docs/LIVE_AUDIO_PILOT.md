@@ -153,13 +153,9 @@ separately from booking acceptance or financial authorization.
 
 The invitation and Profile card link to `live-room.html?booking=<id>` even
 before acceptance/funding. That URL grants no access. Before T-70 it embeds
-the existing private rehearsal client with the booking reference. The worker
-verifies the live booking and signed wallet (only performer or configured
-operator) before creating/rejoining a private room. Practice uses no financial
-signature, radio arming or soundcheck credit. The per-wallet session lasts at
-most 15 minutes; reauthorize for another session, with rooms capped at two hours.
-There remains one private rehearsal at a time; a closing room can take 35 seconds
-to clear. Provider failure/restart cleanup limitations below still apply.
+the shared rehearsal room (below); the booking reference only changes the welcome
+text. Practice uses no financial signature, radio arming or soundcheck credit.
+A closing session can take 35 seconds to clear before a new one opens. Provider failure/restart cleanup limitations below still apply.
 Private checkpoints retain encrypted latest-state readback verification. Their
 bounded 45-second write deadline allows the storage helper's 15-second gateway
 attempts to finish; consent/end requests allow 60 seconds, while ordinary audio
@@ -199,21 +195,28 @@ It requires the existing owner wallet, allowed website origin, LiveKit URL/key/s
 Pinata JWT, and dedicated `LIVE_AUDIO_STORAGE_KEY`; `LIVE_AUDIO_ENABLED` and
 `LIVE_AUDIO_OBS_ENABLED` can remain false. Confirm the free LiveKit participant quota and
 disable egress/recording in the project; the rehearsal requests neither recording nor OBS.
-Only one rehearsal at a time, two humans plus the worker receiver, for at most 120 minutes.
+### Shared rehearsal room
 
-Only the configured owner may create an invitation: open `/rehearsal.html`, enter the
-confirmed guest wallet and a duration, connect the owner wallet and sign the displayed
-origin-bound message. Share the resulting invitation privately. The guest opens it,
-connects the invited wallet, and signs the explicit consent message. Neither signature
-is a transaction or authorizes payment. Each may select an input, publish and listen, or
-listen only. Use headphones. The worker receiver verifies the guest's incoming audio;
-that indication is not proof the owner heard it. Stop or leave when finished; the owner
-can end for everyone. Browser wallet sessions expire after 15 minutes or at the room
-deadline, whichever is earlier. A new signature is required; if all participants leave
-or stop heartbeating for 30 seconds the room ends. Closing the page stops browser audio.
+The rehearsal room belongs to nobody. Anyone with `/rehearsal.html` signs in with
+any wallet and lands in the one running session; the first sign-in opens it. Up to
+six people (plus the worker receiver) practise together and hear each other, with
+normal internet delay between players. The signature is origin-bound consent to private
+live audio with whoever is in the room; it is not a transaction or payment.
+
+- **Lost page:** open the same link and sign in again. You rejoin the running session.
+- **Passes** stay valid while the page checks in. An abandoned page loses access after
+  five idle minutes. **Stop audio** keeps you signed in; closing the page signs you out.
+- **Sessions** close when everyone has left, after four hours, after a worker restart,
+  or when an engineer closes them. Signing in afterwards starts a new session.
+- **Engineers** (`REHEARSAL_ENGINEER_WALLETS`, comma-separated; default
+  thejollylama.eth and decentagency.eth, plus `MINT_OWNER_WALLET`) can remove someone
+  for the rest of that session, or close it for everyone. An engineer is not the owner.
+- **Delivery check** is per person: the worker receiver confirms each person's audio
+  reaches the room. It is not proof that anyone heard it.
 
 The lifecycle checkpoint is AES-GCM encrypted on Pinata with an allowlist of room ID,
-guest wallet, expiry and ended time; no media, tokens, signatures or credentials are
+expiry, ended time and wallets removed from that session (legacy rooms may also hold a
+guest wallet or booking ID); no media, tokens, signatures or credentials are
 stored. It has a distinct name and authenticated-data domain and does not require the
 local mirror, allowing unattended hosted operation. Saves require a successful latest
 listing and authenticated read-back; listing, latest-read, integrity, or save failure
