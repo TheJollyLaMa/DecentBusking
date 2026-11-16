@@ -172,6 +172,46 @@ test('owner control does not grant publishing; only the booking wallet can reque
   assert.equal((await f.service.command(performer.token, { action: 'connect', publish: true }, ORIGIN)).role, 'publisher');
 });
 
+test('recording edit pass is after-set, booking-wallet-only and cannot grant owner room or mint authority', async () => {
+  const calls = [];
+  const recorder = {
+    available: true, deploymentPaused: () => false,
+    status: () => ({ status: 'ready' }),
+    editState: async () => ({ available: true, sourceCid: 'a'.repeat(46), sourceSamples: 48_000 }),
+    saveEdit: async (_booking, draft, wallet) => { calls.push({ action: 'save', draft, wallet }); return { saved: true }; },
+    approveEdit: async (_booking, input, wallet, origin) => {
+      calls.push({ action: 'approve', input, wallet, origin }); return { queued: true };
+    },
+  };
+  const f = await setup({ recorder });
+  const ownerPass = await f.authorize(owner);
+  await assert.rejects(f.service.command(ownerPass.token, { action: 'recording-edit-state' }, ORIGIN), /performer recording edit authorization/);
+  f.at(START + 21 * 60_000);
+  await assert.rejects(f.service.challenge({ bookingId: f.b.id, wallet: owner.address, scope: 'recording-edit' }, ORIGIN), /booked performer/);
+  await assert.rejects(f.service.challenge({ bookingId: f.b.id, wallet: stranger.address, scope: 'recording-edit' }, ORIGIN), /Only this booking/);
+  const challenge = await f.service.challenge({ bookingId: f.b.id, wallet: artist.address, scope: 'recording-edit' }, ORIGIN);
+  const pass = await f.service.authorize({ challengeId: challenge.challengeId,
+    signature: await artist.signMessage(challenge.message) }, ORIGIN);
+  assert.equal(pass.role, 'performer');
+  assert.equal(pass.state.sourceCid, 'a'.repeat(46));
+  assert.deepEqual(await f.service.command(pass.token, { action: 'recording-edit-state' }, ORIGIN), pass.state);
+  await f.service.command(pass.token, { action: 'recording-edit-save', draft: { revision: 1 } }, ORIGIN);
+  await f.service.command(pass.token, { action: 'recording-edit-approve', choice: 'defer', issuedAt: START,
+    signature: 'performer-signature' }, ORIGIN);
+  assert.equal(calls[0].wallet, artist.address.toLowerCase());
+  assert.equal(calls[1].wallet, artist.address.toLowerCase());
+  assert.equal(calls[1].origin, ORIGIN);
+  await assert.rejects(f.service.command(pass.token, { action: 'arm' }, ORIGIN), /permits only/);
+  for (let index = 0; index < 128; index++) {
+    await f.service.challenge({ bookingId: f.b.id, wallet: artist.address, scope: 'recording-edit' }, ORIGIN);
+  }
+  await assert.rejects(f.service.challenge({ bookingId: f.b.id, wallet: artist.address, scope: 'recording-edit' }, ORIGIN),
+    /Too many room challenges/);
+  f.at(START + 21 * 60_000 + 121_000);
+  f.b.cancelled = true;
+  await assert.rejects(f.service.challenge({ bookingId: f.b.id, wallet: artist.address, scope: 'recording-edit' }, ORIGIN), /active/);
+});
+
 test('listener feedback reaches authorized performer and owner without changing live controls', async t => {
   const { createLiveFeedback } = await import('../discord-bot/live-feedback.js');
   let f, time = START;

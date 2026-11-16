@@ -42,6 +42,11 @@ export function buildTrackMetadata(track, registeredBy, now = new Date()) {
     creator: track.recipient,
     tipWallet: track.tipWallet || track.recipient,
     ...(track.parentTokenId > 0 ? { parentTokenId: track.parentTokenId, royaltyChain: { parentTokenId: track.parentTokenId } } : {}),
+    ...(Number.isSafeInteger(track.durationSamples) && Number.isSafeInteger(track.sampleRate)
+      ? { durationSamples: track.durationSamples, durationSeconds: track.durationSamples / track.sampleRate,
+        sampleRate: track.sampleRate } : {}),
+    ...(track.albumId ? { album: { id: track.albumId, title: track.albumTitle, trackNumber: track.trackNumber } } : {}),
+    ...(track.liveRecording ? { liveRecording: track.liveRecording } : {}),
     registeredBy,
     mintedAt: now.toISOString(),
   };

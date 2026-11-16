@@ -86,15 +86,32 @@ Already public segments cannot be recalled. A crash can lose the current unpinne
 segment; restored/gapped/truncated recordings are labelled partial, never complete.
 At the end, ffmpeg (`FFMPEG_PATH`, otherwise `ffmpeg`, as for ordinary radio)
 streams the persisted segments into a 192 kbps MP3. Finalization retries from
-the durable manifest, and booking-keyed intake prevents duplicate mint candidates.
+the durable manifest, but does not create a mint request. The booked performer
+can open **Review your live recording** from Profile after the set, preview the
+preserved original, save a split draft or decide later, and explicitly approve
+either a full-set or split-song release. Split boundaries use exact canonical
+48 kHz source samples; each server export is limited to 30 minutes and 45 MB.
+Approval is a wallet signature, not a transaction. The encrypted journal retains
+the source CID, consent, approval, exports and release-to-queue state so a failed
+export or queue handoff can be retried without changing the original bytes or
+duplicating an accepted release. Source audio and exports on public IPFS are
+public, not private. Every approved release independently enters the existing
+admin mint queue; owner review and a genuine mint signature remain separate.
 The existing community DBusker artwork is used; mint recipient and tip wallet
 are the booked artist, not an operator or invented Discord account.
 
+Full-set and split-song releases may coexist when separately approved. After a
+mint, a later cut is a new immutable release linked to the existing full set;
+no token or source is edited in place. The booked performer remains artist,
+royalty receiver and tip wallet under existing defaults. No collaborator split
+is inferred or added.
+
 The existing admin panel still requires a genuine owner-signed mint and verified
-chain reconciliation. A durable replay-pending marker prioritizes the recording
-only in normal rotation after the five-minute outro, behind paid requests and
-protected shows. Failed/short/interrupted plays remain pending. Deployments wait
-for an armed public handoff and active recording/finalization to become safe.
+chain reconciliation. A durable replay-pending marker prioritizes the approved
+full-set recording only in normal rotation after the five-minute outro, behind
+paid requests and protected shows. Split tracks do not auto-replay.
+Failed/short/interrupted plays remain pending. Deployments wait for an armed
+public handoff and active recording/finalization to become safe.
 
 Reuse decision: the receiving-app acceptance test is a separately consented live
 set reaching the existing admin mint queue, followed by verified-mint radio replay.

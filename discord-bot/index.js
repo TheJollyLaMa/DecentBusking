@@ -106,7 +106,8 @@ import {
   waitForRemotePersistence,
   addTrack,
   submitMediaTrack,
-  submitLiveRecording,
+  submitLiveRecordingRelease,
+  getTrackById,
   getTrackId,
   getPlaylist,
   getPlaybackPlaylist,
@@ -1600,15 +1601,16 @@ async function main() {
   }) : null;
   const recorder = createLiveRecorder({
     enabled: recordingEnabled, store: recordingStore, upload: recordingUpload, resumeDelayMs: 180000,
-    download: async cid => {
-      const gateway = await discoverDedicatedGateway(config) || config.ipfsGateway;
-      return downloadRecordingSegment(cid, { gateway });
-    },
-    ingest: async recording => {
+    submitRelease: async release => {
       if (!playlistReady) throw new Error('Recording mint queue is waiting for durable playlist restore');
       const artwork = await fs.promises.readFile(new URL('../img/D_Busker.jpeg', import.meta.url));
       const artworkCid = (await recordingUpload(artwork, 'DBusker-community-artwork.jpeg', 'image/jpeg')).replace(/^ipfs:\/\//, '');
-      return submitLiveRecording({ ...recording, artworkCid });
+      return submitLiveRecordingRelease({ ...release, booking: { ...release.booking, artworkCid } });
+    },
+    getRelease: getTrackById,
+    download: async cid => {
+      const gateway = await discoverDedicatedGateway(config) || config.ipfsGateway;
+      return downloadRecordingSegment(cid, { gateway });
     },
   });
   if (recordingEnabled && !recorder.available) throw new Error('Recording enabled without durable storage');

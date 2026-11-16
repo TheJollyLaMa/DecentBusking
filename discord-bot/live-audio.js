@@ -136,6 +136,10 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       throw new LiveAudioError('Live audio requires this acknowledged, funded, uncancelled guaranteed-pilot booking');
     }
   }
+  function recordingReleaseEligible(b) {
+    return !!(b && !b.cancelled && b.acknowledged === true && b.payoutPolicy === 'pilot-guaranteed-v1' &&
+      ['funded', 'approved', 'paid'].includes(b.status) && now() >= liveBroadcastEnd(mediaBooking(b)));
+  }
   function windowOpen(b) {
     funded(b);
     const broadcast = liveBroadcastTiming(b, recordFor(b.id));
@@ -456,15 +460,31 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
   }
   return {
     get configured() { return configured && !failed; },
-    async challenge({ bookingId, wallet }, origin) {
+    async challenge({ bookingId, wallet, scope = 'room' }, origin) {
       return run(async () => {
         await initialize();
         const b = await findBooking(bookingId, true);
         const who = address(wallet);
         if (!who || (who !== owner && who !== address(b.wallet))) throw new LiveAudioError('Only this booking performer or configured owner may enter backstage');
-        windowOpen(b);
-        for (const [key, c] of challenges) if (c.expiresAt <= now()) challenges.delete(key);
+        for (const [key, challenge] of challenges) if (challenge.expiresAt <= now()) challenges.delete(key);
         if (challenges.size >= 128) throw new LiveAudioError('Too many room challenges; retry shortly');
+        if (scope === 'recording-edit') {
+          if (who !== address(b.wallet) || !recordingReleaseEligible(b)) {
+            throw new LiveAudioError('Only the booked performer on an active, acknowledged recording booking may edit or approve releases');
+          }
+          const edit = await recorder?.editState(mediaBooking(b));
+          if (!edit?.available) throw new LiveAudioError('This booking has no finalized recording ready for performer review');
+          const id = opaque(), expiresAt = now() + 120_000;
+          const message = ['DecentBusking live recording edit authorization', `Booking: ${b.id}`, `Wallet: ${who}`,
+            `Origin: ${origin}`, `Nonce: ${id}`, `Expires: ${new Date(expiresAt).toISOString()}`,
+            `Source CID: ${edit.sourceCid}`, `Source samples: ${edit.sourceSamples}`,
+            'This pass allows only this booked performer to edit and approve distinct recording releases.',
+            'No owner mint signature, token mutation, payment, collaborator royalty, or transaction is authorized.'].join('\n');
+          challenges.set(id, { bookingId, who, origin, message, expiresAt, scope });
+          return { challengeId: id, message };
+        }
+        if (scope !== 'room') throw new LiveAudioError('Unknown live audio authorization scope');
+        windowOpen(b);
         const id = opaque(), expiresAt = now() + 120_000;
         const broadcast = liveBroadcastTiming(b, recordFor(b.id));
         const accessUntil = broadcast?.accessUntil ?? Date.parse(b.endUtc);
@@ -486,6 +506,18 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         if (address(verify(c.message, signature)) !== c.who) throw new LiveAudioError('Room signature does not match the booking wallet');
         challenges.delete(challengeId);
         const b = await findBooking(c.bookingId, true);
+        if (c.scope === 'recording-edit') {
+          if (c.who !== address(b.wallet) || !recordingReleaseEligible(b)) {
+            throw new LiveAudioError('Only the booked performer on an active, acknowledged recording booking may edit or approve releases');
+          }
+          const state = await recorder?.editState(mediaBooking(b));
+          if (!state?.available) throw new LiveAudioError('This recording is no longer available for editing');
+          const token = opaque(), expiresAt = now() + 15 * 60_000;
+          for (const [key, session] of sessions) if (session.expiresAt <= now()) sessions.delete(key);
+          if (sessions.size >= 32) throw new LiveAudioError('Room session limit reached');
+          sessions.set(token, { bookingId: b.id, wallet: c.who, role: 'performer', scope: 'recording-edit', origin, expiresAt });
+          return { token, role: 'performer', expiresAt, state };
+        }
         windowOpen(b);
         const currentAllocation = liveBroadcastTiming(b, recordFor(b.id));
         if ((currentAllocation?.allocationId || null) !== c.allocationId) throw new LiveAudioError('Allocation changed; sign its current room scope');
@@ -516,6 +548,28 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       return run(async () => {
         await initialize();
         const session = auth(token, origin), b = await findBooking(session.bookingId, !['state', 'cancel'].includes(command.action));
+        if (session.scope === 'recording-edit') {
+          if (session.wallet !== address(b.wallet) || !recordingReleaseEligible(b) ||
+              !['recording-edit-state', 'recording-edit-save', 'recording-edit-approve'].includes(command.action)) {
+            throw new LiveAudioError('This pass permits only the booked performer’s recording edit actions');
+          }
+          if (recorder?.deploymentPaused?.()) throw new LiveAudioError('Recording editing is paused for a verified deployment handoff');
+          if (command.action === 'recording-edit-state') {
+            if (Object.keys(command).some(key => key !== 'action')) throw new LiveAudioError('Invalid recording edit request');
+            return recorder.editState(mediaBooking(b));
+          }
+          if (command.action === 'recording-edit-save') {
+            if (Object.keys(command).some(key => !['action', 'draft'].includes(key))) throw new LiveAudioError('Invalid recording edit request');
+            return recorder.saveEdit(mediaBooking(b), command.draft, session.wallet);
+          }
+          if (Object.keys(command).some(key => !['action', 'choice', 'issuedAt', 'signature'].includes(key))) {
+            throw new LiveAudioError('Invalid recording approval request');
+          }
+          return recorder.approveEdit(mediaBooking(b), command, session.wallet, origin);
+        }
+        if (typeof command.action === 'string' && command.action.startsWith('recording-edit-')) {
+          throw new LiveAudioError('A performer recording edit authorization is required');
+        }
         const record = recordFor(b.id);
         if (command.action === 'state') return { ...publicState(b, record, true), broadcastCapabilities: broadcastCapabilities(b, session) };
         if (recorder?.deploymentPaused?.()) throw new LiveAudioError('Live controls paused for a verified deployment handoff; try again after maintenance');

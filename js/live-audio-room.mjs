@@ -103,8 +103,10 @@ const recordingOption = bindLiveRecordingOption({
 });
 function recordingMessage(recording) {
   if (recording?.error) return `Recording needs attention: ${recording.error}`;
-  if (recording?.status === 'submitted') return 'Your recording is ready for admin minting.';
-  if (['finalizing', 'uploading', 'processing'].includes(recording?.status)) return 'Preparing your live recording for admin minting...';
+  if (['ready', 'submitted'].includes(recording?.status)) {
+    return 'Your recording is ready. Open Live performances in Profile to preview and choose full set, split songs, or decide later. Nothing enters the mint queue until you approve it.';
+  }
+  if (['finalizing', 'uploading', 'processing'].includes(recording?.status)) return 'Preparing your live recording for private performer review...';
   if (recording?.status === 'recording') return recording.consentVersion === LIVE_RECORDING_ALLOCATED_CONSENT_VERSION
     ? 'Recording your authorized on-air set. Soundchecks stay private.'
     : 'Recording only within the original scheduled-set permission. Expanded capture is not authorized.';
@@ -302,9 +304,10 @@ function renderAfterparty(state) {
   if (!show) { container.hidden = true; clear(); return; }
   const record = state?.recording;
   const recordingRelease = record?.available === true ? {
-    known: record.status === 'empty' || record.status === 'submitted' || ['recording', 'processing'].includes(record.status) ||
+    known: record.status === 'empty' || ['ready', 'submitted'].includes(record.status) || ['recording', 'processing'].includes(record.status) ||
       record.status === 'waiting' && !record.consented,
     state: record.status === 'submitted' ? 'mint-requested'
+      : record.status === 'ready' ? 'performer-review'
       : record.status === 'empty' || record.status === 'waiting' && !record.consented ? 'none'
         : ['recording', 'processing'].includes(record.status) ? 'processing' : 'unknown',
     ...(record.trackId ? { trackId: record.trackId } : {}),

@@ -1,0 +1,127 @@
+.recording-edit-page {
+  min-height: 100vh;
+  margin: 0;
+  padding: clamp(1rem, 3vw, 2.5rem);
+  color: #f5f2e9;
+  background: radial-gradient(ellipse at top, #292544, #11131c 58%);
+  font: 1rem/1.5 system-ui, sans-serif;
+}
+
+.recording-edit-shell {
+  width: min(100%, 980px);
+  margin: 0 auto;
+}
+
+.recording-edit-shell a { color: #d7c6ff; }
+.recording-edit-shell h1 { margin: .2rem 0; font-size: clamp(2rem, 6vw, 3.5rem); }
+.recording-edit-eyebrow { margin: 2rem 0 0; color: #d1aefb; font-size: .8rem; letter-spacing: .12em; }
+.recording-edit-card {
+  margin: 1.25rem 0;
+  padding: clamp(1rem, 3vw, 1.75rem);
+  border: 1px solid #736a8d;
+  border-radius: 1.2rem;
+  background: rgb(25 26 38 / 94%);
+  box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 22%);
+}
+
+.recording-edit-card button,
+.recording-edit-card input {
+  min-height: 2.7rem;
+  max-width: 100%;
+  font: inherit;
+}
+
+.recording-edit-card button {
+  margin: .35rem .4rem .35rem 0;
+  padding: .55rem .9rem;
+  border: 1px solid #bca3e9;
+  border-radius: .65rem;
+  color: #181520;
+  background: #d9c8ff;
+  cursor: pointer;
+}
+
+.recording-edit-card button:disabled { cursor: not-allowed; opacity: .55; }
+.recording-edit-card button:focus-visible,
+.recording-edit-card input:focus-visible,
+.recording-edit-shell a:focus-visible {
+  outline: 3px solid #ffe18d;
+  outline-offset: 3px;
+}
+
+#recording-edit-audio { width: 100%; margin: .7rem 0; }
+#recording-edit-waveform {
+  display: block;
+  width: 100%;
+  height: clamp(130px, 24vw, 230px);
+  border: 1px solid #514961;
+  border-radius: .65rem;
+  background: #13131b;
+}
+
+.recording-edit-muted { color: #c3bdce; }
+.recording-edit-note {
+  padding: .75rem 1rem;
+  border-left: 3px solid #bca3e9;
+  color: #e2dce9;
+  background: rgb(255 255 255 / 4%);
+}
+
+.recording-edit-album {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(14rem, 2fr);
+  align-items: center;
+  gap: .75rem;
+  margin: 1rem 0;
+}
+
+.recording-edit-album input,
+.recording-edit-song input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: .4rem .55rem;
+  border: 1px solid #8b809e;
+  border-radius: .45rem;
+  color: #17151c;
+  background: #fff;
+}
+
+.recording-edit-song {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #514961;
+  border-radius: .8rem;
+  background: rgb(255 255 255 / 3%);
+}
+
+.recording-edit-song-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .75rem;
+}
+
+.recording-edit-song-grid label { display: grid; gap: .35rem; }
+.recording-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin: 1rem 0 1.5rem;
+}
+
+#recording-edit-defer { color: #211b2b; background: #d9d3e1; }
+#recording-edit-split { color: #fff; background: #574277; }
+#recording-edit-full { color: #162017; background: #b6e0bf; }
+
+#recording-edit-releases { padding-left: 1.5rem; }
+#recording-edit-releases li { margin: .6rem 0; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .recording-edit-album,
+  .recording-edit-song-grid { grid-template-columns: 1fr; }
+  .recording-edit-actions { display: grid; }
+  .recording-edit-actions button { width: 100%; margin: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}
