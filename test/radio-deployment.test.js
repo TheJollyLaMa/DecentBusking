@@ -106,6 +106,17 @@ test('predeploy command waits for real drain readiness and fails closed on unava
   } });
   assert.equal(result.ready, true); assert.equal(attempts, 3);
   await assert.rejects(waitForRadioDeployment({ ...options, fetchImpl: async () => new Response('', { status: 404 }) }), /refused/);
+  await assert.rejects(waitForRadioDeployment({ ...options, fetchImpl: async () => new Response('', { status: 403 }) }), /refused/);
+  let flaky = 0;
+  const recovered = await waitForRadioDeployment({ ...options, fetchImpl: async () => {
+    flaky += 1;
+    if (flaky === 1) return new Response('', { status: 502 });
+    if (flaky === 2) throw Object.assign(new Error('timed out'), { name: 'TimeoutError' });
+    return Response.json({ deploymentId: 'release', draining: true, expiresAt: now + 120000, ready: true });
+  } });
+  assert.equal(recovered.ready, true); assert.equal(flaky, 3);
+  await assert.rejects(waitForRadioDeployment({ ...options, timeoutMs: 20000,
+    fetchImpl: async () => new Response('', { status: 504 }) }), /timed out/);
   await assert.rejects(waitForRadioDeployment({ ...options, fetchImpl: async () => Response.json({
     deploymentId: 'other', draining: true, expiresAt: now + 120000, ready: true }) }), /lease is not verified/);
   await assert.rejects(waitForRadioDeployment({ ...options, timeoutMs: 1, fetchImpl: async () => Response.json({
