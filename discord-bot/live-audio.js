@@ -29,7 +29,7 @@ export function createLiveAudioFileStore(path) {
 
 export function createLiveAudioService({ getBookings, ownerWallet, transport, store, recorder, onPolicy = () => {},
   onCancel, now = () => Date.now(), verify = verifyMessage, checkpointTimeoutMs = 45_000, programs = {},
-  withBroadcastHandoff } = {}) {
+  withBroadcastHandoff, feedback } = {}) {
   const owner = address(ownerWallet);
   const challenges = new Map(), sessions = new Map(), frames = new Map(), reservations = new Map();
   const direction = createLiveDirection({ now });
@@ -186,6 +186,22 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     const session = sessions.get(token);
     if (!session || session.origin !== origin || session.expiresAt <= now()) throw new LiveAudioError('Room authorization expired; reconnect your wallet');
     return session;
+  }
+  function feedbackCommand(token, input, origin) {
+    if (!configured || failed || stopped || !feedback) {
+      throw new LiveDirectionError('FEEDBACK_UNAVAILABLE', 'Listener feedback is unavailable', 503);
+    }
+    let session;
+    try { session = auth(token, origin); }
+    catch { throw new LiveDirectionError('FEEDBACK_AUTH_EXPIRED', 'Room authorization expired; reconnect your wallet', 401); }
+    if (input.action !== 'feedback-snapshot' || Object.keys(input).some(key => key !== 'action')) {
+      throw new LiveDirectionError('FEEDBACK_INVALID', 'Invalid listener feedback request', 400);
+    }
+    try { return feedback.snapshot(session.bookingId); }
+    catch (error) {
+      console.warn('[live-feedback] Private feedback snapshot unavailable:', error?.name || 'Error');
+      throw new LiveDirectionError('FEEDBACK_UNAVAILABLE', 'Listener feedback is unavailable; retry shortly', 503);
+    }
   }
   async function directionCommand(token, input, origin) {
     if (!configured || failed || stopped) throw new LiveDirectionError('DIRECTION_UNAVAILABLE', 'Private direction is unavailable', 503);
@@ -494,6 +510,9 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       if (typeof command?.action === 'string' && command.action.startsWith('direction-')) {
         return directionCommand(token, command, origin);
       }
+      if (typeof command?.action === 'string' && command.action.startsWith('feedback-')) {
+        return feedbackCommand(token, command, origin);
+      }
       return run(async () => {
         await initialize();
         const session = auth(token, origin), b = await findBooking(session.bookingId, !['state', 'cancel'].includes(command.action));
@@ -565,6 +584,16 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         });
         return b ? publicState(b, recordFor(b.id)) : null;
       });
+    },
+    feedbackState() {
+      if (!configured || failed || stopped || !state || !bookingVerification().fresh) {
+        throw new LiveAudioError('Live booking verification is unavailable');
+      }
+      const policy = canonicalPolicy();
+      if (policy?.mode !== 'live') return null;
+      const b = bookings.find(item => item.id === policy.bookingId);
+      if (!b || !bookingVerification(b).fresh) throw new LiveAudioError('Live booking verification is unavailable');
+      return publicState(b, recordFor(b.id));
     },
     async listener(bookingId) {
       return run(async () => {

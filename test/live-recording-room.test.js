@@ -36,6 +36,8 @@ test('room explicitly signs and submits v2 on new opt-in and legacy renewal, wit
         } } },
       bindInputMonitor: () => ({ stop: async () => {} }), bindBoothSetup: () => ({ ready: () => true, problem: () => '' }), SHOW_MODES: ['direct', 'unplugged'],
       bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
+      bindLiveFeedbackRoom: () => ({ setSession() {}, dispose() {} }),
+      bindTogether: primary => primary,
       bindLiveBroadcastControls: () => ({ update() {}, dispose() {} }),
       createLivePublisherPresence: () => ({ start() {}, stop() {} }),
       createInputMeter: () => ({ start() {}, stop: async () => {} }),

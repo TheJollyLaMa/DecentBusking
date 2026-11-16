@@ -20,8 +20,8 @@ async function fixture(options = {}) {
     },
   };
   function add({ hash = ethers.id('tip'), blockNumber = 2, index = 0, amount = 5n,
-    contextRef = 'decentbusking:live:show', from = sender, sourceKind = 0 } = {}) {
-    const encoded = iface.encodeEventLog('TipSent', [from, recipient, ethers.id(contextRef), sourceKind, amount, contextRef]);
+    contextRef = 'decentbusking:live:show', from = sender, to = recipient, sourceKind = 0 } = {}) {
+    const encoded = iface.encodeEventLog('TipSent', [from, to, ethers.id(contextRef), sourceKind, amount, contextRef]);
     const log = { ...encoded, address: router, index, transactionHash: hash, blockNumber };
     state.logs.push(log);
     const receipt = state.receipts.get(hash) || { status: 1, hash, blockNumber, blockHash: block(blockNumber).hash, logs: [] };
@@ -52,6 +52,70 @@ test('ledger verifies canonical receipts, keeps repeat tips by event identity, a
   assert.equal(ledger.getState().total, 3);
   assert.equal(ledger.getState({ wallet: sender }).attributedWei, '0');
   assert.throws(() => ledger.getState({ limit: 101 }), /Invalid tip ledger page/);
+});
+
+test('live tip feedback uses only confirmed exact-booking and recipient facts within the effective show', async () => {
+  const base = 1794600000000;
+  const clock = { at: base + 100_000 };
+  const pending = ethers.id('pending-source');
+  let sourceAvailable = false;
+  const { ledger, add, state } = await fixture({ now: () => clock.at, resolveContext: async event =>
+    event.txHash === pending && !sourceAvailable ? { status: 'unavailable' } : { status: 'verified' } });
+  add({ hash: ethers.id('good-a'), blockNumber: 3, amount: 10n });
+  add({ hash: ethers.id('good-b'), blockNumber: 4, amount: 17n });
+  add({ hash: pending, blockNumber: 5, amount: 23n });
+  add({ hash: ethers.id('too-early'), blockNumber: 2, amount: 100n });
+  add({ hash: ethers.id('too-late'), blockNumber: 9, amount: 100n });
+  add({ hash: ethers.id('wrong-show'), blockNumber: 6, contextRef: 'decentbusking:live:another-show' });
+  add({ hash: ethers.id('wrong-recipient'), blockNumber: 6, to: collection });
+  add({ hash: ethers.id('self-tip'), blockNumber: 6, from: recipient });
+  add({ hash: ethers.id('radio-tip'), blockNumber: 6, sourceKind: 1,
+    contextRef: `decentbusking:radio:8453:${collection}:80` });
+  const scope = { bookingId: 'show', recipient, startedAt: base + 3000, endsAt: base + 8000 };
+  assert.deepEqual(ledger.getLiveTips(scope), { ready: false });
+  await ledger.initialize();
+  let result = ledger.getLiveTips(scope);
+  assert.equal(result.ready, true);
+  assert.equal(result.complete, false);
+  assert.equal(result.count, 2);
+  assert.equal(result.totalWei, '27');
+  assert.deepEqual(result.entries.map(entry => entry.amountWei), ['10', '17']);
+  assert.ok(result.entries.every(entry => !Object.hasOwn(entry, 'sender') && !Object.hasOwn(entry, 'recipient')));
+  sourceAvailable = true;
+  await ledger.compare();
+  result = ledger.getLiveTips(scope);
+  assert.equal(result.complete, true);
+  assert.equal(result.count, 3);
+  assert.equal(result.totalWei, '50');
+  assert.equal(ledger.getLiveTips({ ...scope, endsAt: base + 4000 }).count, 1);
+  assert.equal(ledger.getLiveTips({ ...scope, bookingId: 'other-show' }).count, 0);
+  clock.at += 60_001;
+  assert.deepEqual(ledger.getLiveTips(scope), { ready: false });
+  await ledger.compare();
+  assert.equal(ledger.getLiveTips(scope).count, 3);
+  state.epoch++;
+  state.logs = [];
+  state.receipts.clear();
+  await ledger.compare();
+  assert.equal(ledger.getLiveTips(scope).count, 0);
+});
+
+test('live tip feedback totals all verified tips while bounding notices and rejecting invalid scope', async () => {
+  const base = 1794600000000, clock = { at: base + 100_000 };
+  const { ledger, add } = await fixture({ now: () => clock.at });
+  for (let index = 0; index < 125; index++) {
+    add({ hash: ethers.id(`live-bulk-${index}`), blockNumber: 4, index, amount: 1n });
+  }
+  await ledger.initialize();
+  const scope = { bookingId: 'show', recipient, startedAt: base + 3000, endsAt: base + 8000 };
+  const result = ledger.getLiveTips(scope);
+  assert.equal(result.count, 125);
+  assert.equal(result.totalWei, '125');
+  assert.equal(result.entries.length, 20);
+  assert.equal(new Set(result.entries.map(entry => entry.eventKey)).size, 20);
+  assert.throws(() => ledger.getLiveTips({ ...scope, recipient: sender.slice(0, -1) }), /scope/);
+  assert.throws(() => ledger.getLiveTips({ ...scope, limit: 21 }), /scope/);
+  assert.throws(() => ledger.getLiveTips({ ...scope, bookingId: '<show>' }), /booking/);
 });
 
 test('one confirmation, reverted receipts, wrong chain and noncanonical blocks never become earnings', async () => {

@@ -44,9 +44,64 @@ an act live. Use the separate allocated-stage controls below, only when the work
 returns their capabilities. [#343](https://github.com/TheJollyLaMa/DecentBusking/issues/343)
 still needs the integrated two-act/device rehearsal and release verification;
 an “another song” cue alone is never permission to play past the authorized end.
-Original contract times and guaranteed fees remain unchanged. Audience
-feedback panels are explicitly unavailable until a verified event contract is
-connected—no simulated reactions, paid tips or healthy-audio claims.
+Original contract times and guaranteed fees remain unchanged.
+
+### Anonymous listener feedback and verified tip notices (#341)
+
+With the matching site and worker versions, a guest can send applause, love,
+encore or **Can't hear** from the radio footer during the currently verified,
+armed live set. No wallet, sign-in or free-text message is required. Controls
+disable when the live state is stale or unavailable, and disappear in archive
+mode or after the effective set ends. Signals are advisory: an encore request
+never extends airtime, and a report never cancels a show or changes payment.
+
+The performer room and the owner-authorized production desk show anonymous
+counts for the last 30 seconds and two minutes, plus browser counts and an
+audio-problem warning. A browser is not a verified person; refreshes, shared
+networks, dropped requests and limits can affect the count. An empty report is
+**not proof that listeners can hear**: independently listen to the public
+return. If the private pass, booking verification or feedback service goes
+stale, the panel says so and does not change microphone, monitoring or
+broadcast controls. The performer can turn off the small floating reactions
+and tip notices beside the publish controls; the detailed panel follows the
+audio controls. The visual strip cannot intercept input, and reduced-motion
+settings show static notices. The owner desk receives counts without a public
+overlay. Longer amounts that cannot fit in the compact notice are replaced
+with “Tip received”; the detailed panel shows the exact latest confirmed tip
+and verified set total.
+
+Tip notices and the set's ETH total come from the separate native-tip ledger,
+not the browser's payment assertion. Only successfully confirmed, canonical
+Base router events with verified source, exact booking and performer recipient,
+and a timestamp inside the effective live window qualify. Self-tips, pending,
+reverted, mismatched and old direct transfers are not shown as verified.
+The ledger may lag or be unavailable while indexing, rebuilding after a reorg,
+or verifying a source; **so far** means the total may be incomplete. A room's
+first snapshot establishes a baseline rather than replaying older notices;
+only up to 20 recent tip entries are used for notifications. These are brief
+“tip received” notices, not listener-authored notes. Existing tip routing and
+the guaranteed performer fee are unchanged.
+
+Signals and their per-browser/network rate-limit identifiers are held only in
+worker memory, with no identity opt-in, durable transcript, IPFS checkpoint or
+Discord publication. The display has no wallet or network addresses. Recent
+events expire after 10 seconds, counts cover at most two minutes, and idle
+hashed browser records expire after 130 seconds with a cleanup sweep at most
+10 seconds later. The latest anonymous signal time remains for the current set.
+All set-specific feedback is cleared when that set ends, changes, is cancelled
+or the worker restarts; rate-limit records may remain briefly to enforce limits.
+Defaults are two seconds between signals and 12 per browser/minute, 60 per
+network/minute and 600 globally/minute. Shared networks and IPv6 /64 grouping
+can limit several listeners together.
+
+Before any release, confirm the actual trusted reverse-proxy topology and set
+`LIVE_FEEDBACK_TRUSTED_PROXY_HOPS` accordingly; see the
+[worker configuration](../discord-bot/README.md#anonymous-live-audience-feedback).
+Never merge or deploy during a live show without the separate owner approval and
+safe handoff. Local tests and a mocked browser are not a real performer or
+live-tip test. Keep #341 open until a guest and authorized performer/operator
+exercise the flow in a real show, including a real verified tip and public-audio
+check.
 
 ### Explicit allocated-stage controls
 
@@ -199,8 +254,9 @@ Release order, with separate operator approval:
 
 Old direct transfers cannot acquire these events retroactively. Wallet/explorer
 activity may still display internal ETH transfers; inspect the branded contract
-event or the app ledger for context. No shared paid-tip celebration accepts a
-browser's success assertion; audience-wide delivery remains a separate integration.
+event or the app ledger for context. The private performer notice above does not
+accept a browser's success assertion; public audience-wide tip celebrations
+remain a separate integration.
 
 Reuse decision: adapt ArtFi's `ArtFiSettlementRouter.sol` native-forward/reference
 event pattern at `843e770fafb9ca701e35c8d4f509cd005f32b77d`, not its custody,

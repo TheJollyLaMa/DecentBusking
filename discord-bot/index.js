@@ -2,6 +2,7 @@ import { createRadioAnnouncements, deserializeAnnouncements } from './radio-anno
 import { createCommunityReminder, deserializeCommunityReminders } from './community-reminder.js';
 import { createLiveBookings } from './live-bookings.js';
 import { createLiveAudioService } from './live-audio.js';
+import { createLiveFeedback, parseTrustedProxyHops } from './live-feedback.js';
 import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
@@ -1607,7 +1608,13 @@ async function main() {
     },
   });
   if (recordingEnabled && !recorder.available) throw new Error('Recording enabled without durable storage');
+  const liveFeedback = createLiveFeedback({
+    resolveState: () => liveAudio.feedbackState(),
+    readLiveTips: options => tipLedger && tipLedgerReady ? tipLedger.getLiveTips(options) : null,
+    limits: { trustedProxyHops: parseTrustedProxyHops(process.env.LIVE_FEEDBACK_TRUSTED_PROXY_HOPS) },
+  });
   const liveAudio = createLiveAudioService({
+    feedback: liveFeedback,
     withBroadcastHandoff: apply => {
       const session = getActiveJukeLoopSession();
       if (!session) throw new Error('Radio handoff is unavailable');
@@ -1667,7 +1674,7 @@ async function main() {
       ticking = true;
       try { await liveAudio.tick(); }
       catch { console.warn('[live-audio] Room state/receiver unavailable; inspect hosting and durable storage.'); }
-      finally { ticking = false; }
+      finally { ticking = false; liveFeedback.sync(); }
     };
     void tick();
     setInterval(() => { void tick(); }, 1000).unref();
@@ -1678,6 +1685,7 @@ async function main() {
     radioAnnouncements,
     liveBookings,
     liveAudio,
+    liveFeedback,
     rehearsal,
     alchemyWebhook,
     checkpointMirror,
@@ -2384,6 +2392,7 @@ async function main() {
     console.log(`[jukebox-bot] ${signal} received; flushing IPFS state checkpoint.`);
     let exitCode = 0;
     discordAbort.abort();
+    liveFeedback.close();
     try {
       await liveAudio.stop();
       await recorder.flush();

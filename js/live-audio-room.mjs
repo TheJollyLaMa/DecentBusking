@@ -2,11 +2,12 @@ import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=2026111
 import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from './live-recording-consent.mjs?v=20261114-allocated-stage';
 import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261114-allocated-stage';
 import { performerRoomSign, performerAllocationAccess } from './performer-room.mjs?v=20261114-allocated-stage';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261116-booth';
-import { bindBoothSetup, SHOW_MODES } from './booth-setup.mjs?v=20261116-booth';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261116-feedback';
+import { bindBoothSetup, SHOW_MODES } from './booth-setup.mjs?v=20261116-feedback';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
 import { bindLiveDirection } from './live-direction.mjs?v=20261114-allocated-stage';
+import { bindLiveFeedbackRoom, bindTogether } from './live-feedback.mjs?v=20261115-listener-feedback';
 import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261114-allocated-stage';
 import { afterpartyRows } from './live-afterparty.mjs?v=20261115-afterparty';
 import { renderAfterpartyChecklist } from './live-afterparty-view.mjs?v=20261115-afterparty';
@@ -42,10 +43,11 @@ function renderBoothGate() {
   byId('room-publish').disabled = !booth.ready();
 }
 renderBoothGate();
-const direction = bindLiveDirection({
+const direction = bindTogether(bindLiveDirection({
   container: byId('room-direction'), serviceUrl, bookingId,
   onReconnect: reauthorizeRoom,
-});
+}), bindLiveFeedbackRoom({ container: byId('room-listener-signals'), stageContainer: byId('room-feedback-visuals'),
+  serviceUrl, bookingId, performer: true }));
 const broadcastControls = bindLiveBroadcastControls({
   container: byId('room-broadcast-controls'), serviceUrl, bookingId,
   getBooking: () => booking, getSession: () => session,

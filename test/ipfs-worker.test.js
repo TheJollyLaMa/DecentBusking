@@ -70,6 +70,40 @@ test('widget radio origins can preflight/vote without expanding authenticated AP
     });
 });
 
+test('public radio origins can send anonymous live feedback but cannot access private room routes', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const origin = 'https://dbusk.decentagency.eth.limo', submissions = [];
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: ['https://busking.example'], radioAllowedOrigins: [origin],
+    ownerWallet: Wallet.createRandom().address,
+    liveFeedback: {
+      limits: { maxBodyBytes: 1024, trustedProxyHops: 0 },
+      submit(input) { submissions.push(input); return { ok: true, signal: input.signal, bookingId: input.bookingId }; },
+    },
+  });
+  await withServer(handler, async base => {
+    const url = `${base}/api/live-audio/feedback`;
+    const body = JSON.stringify({ signal: 'applause', bookingId: 'show-a', clientId: 'anonymous_listener_1' });
+    const headers = { origin, 'content-type': 'application/json' };
+    const preflight = await fetch(url, { method: 'OPTIONS', headers });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('access-control-allow-origin'), origin);
+    const accepted = await fetch(url, { method: 'POST', headers, body });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.headers.get('access-control-allow-origin'), origin);
+    assert.equal(submissions.length, 1);
+    for (const deniedOrigin of ['https://untrusted.example', 'null', '']) {
+      const denied = await fetch(url, { method: 'POST', headers: { ...headers, origin: deniedOrigin }, body });
+      assert.equal(denied.status, 403);
+      assert.equal(denied.headers.get('access-control-allow-origin'), null);
+    }
+    const privateRoom = await fetch(`${base}/api/live-audio/control`, { method: 'OPTIONS', headers });
+    assert.equal(privateRoom.status, 403);
+    assert.equal(privateRoom.headers.get('access-control-allow-origin'), null);
+    assert.equal(submissions.length, 1);
+  });
+});
+
 test('DJuke top earners endpoint returns indexed payouts or an explicit unavailable response', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const data = { chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address: Wallet.createRandom().address, totalUnits: '225000' }] };

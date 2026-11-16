@@ -40,6 +40,8 @@ async function fixture() {
       return path === 'challenge' ? { challengeId: input.bookingId, message: 'Booking fixture' }
         : { role: 'owner', token: `${input.challengeId}-pass`, expiresAt: 800000, state: { bookingId: input.challengeId } };
     },
+    bindLiveFeedbackRoom: () => ({ setSession() {}, dispose() {} }),
+    bindTogether: primary => primary,
     bindLiveDirection: options => {
       const binding = { options, session: null, disposed: false,
         setSession(session) { this.session = session; options.onState(session ? { bookingId: options.bookingId } : null); },

@@ -172,6 +172,39 @@ test('owner control does not grant publishing; only the booking wallet can reque
   assert.equal((await f.service.command(performer.token, { action: 'connect', publish: true }, ORIGIN)).role, 'publisher');
 });
 
+test('listener feedback reaches authorized performer and owner without changing live controls', async t => {
+  const { createLiveFeedback } = await import('../discord-bot/live-feedback.js');
+  let f, time = START;
+  const feedback = createLiveFeedback({ resolveState: () => f.service.feedbackState(), now: () => time });
+  f = await setup({ feedback });
+  t.after(async () => { feedback.close(); await f.service.stop(); });
+  const ownerPass = await f.prepare();
+  const performerPass = await f.authorize(artist);
+  f.at(START); f.frame(960); await f.service.tick();
+  const before = f.persisted();
+  feedback.submit({ signal: 'applause', bookingId: f.b.id, clientId: 'anonymous_listener_1' }, { peer: '192.0.2.1' });
+  const performerView = await f.service.command(performerPass.token, { action: 'feedback-snapshot' }, ORIGIN);
+  const ownerView = await f.service.command(ownerPass.token, { action: 'feedback-snapshot' }, ORIGIN);
+  assert.equal(performerView.windows.short.counts.applause, 1);
+  assert.equal(ownerView.events[0].signal, 'applause');
+  assert.deepEqual(f.persisted(), before);
+  assert.equal((await f.service.state(f.b.id)).policy.mode, 'live');
+  await assert.rejects(f.service.command(ownerPass.token, { action: 'feedback-snapshot' }, 'https://other.example'),
+    error => error.status === 401);
+  await assert.rejects(f.service.command(ownerPass.token, { action: 'feedback-snapshot', bookingId: 'other' }, ORIGIN),
+    error => error.status === 400);
+  time += 6000; f.at(time);
+  assert.equal(f.service.feedbackState().status, 'RECONNECTING');
+  feedback.submit({ signal: 'audio-problem', bookingId: f.b.id, clientId: 'anonymous_listener_2' }, { peer: '192.0.2.2' });
+  assert.equal((await f.service.command(ownerPass.token, { action: 'feedback-snapshot' }, ORIGIN))
+    .windows.short.counts['audio-problem'], 1);
+  await f.service.command(ownerPass.token, { action: 'cancel', confirmed: true }, ORIGIN);
+  await assert.rejects(f.service.command(performerPass.token, { action: 'feedback-snapshot' }, ORIGIN),
+    error => error.status === 401);
+  feedback.sync();
+  assert.equal(feedback.inspect().bookingBound, false);
+});
+
 test('private T−60/T−15 checks need fresh receiver audio, correct windows and owner confirmation', async () => {
   const f = await setup(), auth = await f.authorize();
   await assert.rejects(f.service.listener(f.b.id), /soundchecks are private/);

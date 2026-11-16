@@ -6,6 +6,7 @@
   <meta name="robots" content="noindex">
   <title>DecentBusking · Production desk</title>
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth">
+  <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback">
   <script src="decent.config.js"></script>
 </head>
 <body class="live-audio-room rehearsal-room guided-stage producer-desk">
@@ -47,12 +48,9 @@
         <audio id="desk-audio" controls playsinline></audio>
       </section>
       <section id="desk-direction" aria-label="Selected booking direction"></section>
-      <section class="direction-feedback" aria-label="Audience feedback">
-        <h3>Audience feedback</h3>
-        <p>Audience reactions, verified tip celebrations and audio-problem reports are unavailable in this desk. No reports is not proof that listeners can hear.</p>
-      </section>
+      <section id="desk-listener-signals" aria-label="Audience feedback"></section>
     </section>
   </div>
-  <script type="module" src="js/producer-room.mjs?v=20261114-allocated-stage"></script>
+  <script type="module" src="js/producer-room.mjs?v=20261115-listener-feedback"></script>
 </body>
 </html>

@@ -1,9 +1,11 @@
 import * as ethers from 'ethers';
-import { TIP_ABI, decodeTipReceipt } from '../js/tip-protocol.mjs';
+import { TIP_ABI, TIP_SOURCE_KINDS, createTipContext, decodeTipReceipt } from '../js/tip-protocol.mjs';
 
 const HASH = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const iface = new ethers.Interface(TIP_ABI);
+const LIVE_TIP_NOTICE_LIMIT = 20;
+const LIVE_TIP_FRESH_MS = 60_000;
 
 export function createTipLedger({ provider, routerAddress, startBlock, resolveContext,
   restore = async () => null, save, now = Date.now, maxWindowsPerRun = 1,
@@ -18,6 +20,7 @@ export function createTipLedger({ provider, routerAddress, startBlock, resolveCo
   let initialized = false, scannedThrough = startBlock - 1, anchorHash = null;
   let head = null, lastCheckedAt = null, lastError = '', snapshotUri = '', lastSavedAt = null;
   let dirty = false, comparisonOffset = 0, task = Promise.resolve();
+  let liveTips = new Map(), liveIndexReady = false;
   const run = operation => {
     const result = task.then(operation);
     task = result.catch(() => {});
@@ -78,6 +81,19 @@ export function createTipLedger({ provider, routerAddress, startBlock, resolveCo
     lastSavedAt = now();
     dirty = false;
   }
+  function rebuildLiveTips() {
+    const next = new Map();
+    for (const [key, entry] of entries) {
+      if (entry.context?.source !== 'live' || typeof entry.context.bookingId !== 'string') continue;
+      const booking = next.get(entry.context.bookingId) || [];
+      booking.push({ key, entry });
+      next.set(entry.context.bookingId, booking);
+    }
+    for (const booking of next.values()) {
+      booking.sort((a, b) => a.entry.blockNumber - b.entry.blockNumber || a.entry.logIndex - b.entry.logIndex);
+    }
+    liveTips = next;
+  }
   async function compareNow() {
     try {
       if (Number((await provider.getNetwork()).chainId) !== 8453) throw new Error('Tip ledger is Base-only');
@@ -128,9 +144,12 @@ export function createTipLedger({ provider, routerAddress, startBlock, resolveCo
   }
   // Base makes about 432,000 blocks a day, so one 1,000-block window per poll would take hours to reach the head.
   async function compareWindows() {
-    let state = await compareNow();
-    for (let windows = 1; windows < maxWindowsPerRun && scannedThrough < head - 1; windows += 1) state = await compareNow();
-    return state;
+    liveIndexReady = false;
+    let result = await compareNow();
+    for (let windows = 1; windows < maxWindowsPerRun && scannedThrough < head - 1; windows += 1) result = await compareNow();
+    rebuildLiveTips();
+    liveIndexReady = true;
+    return result;
   }
   async function initialize() {
     return run(async () => {
@@ -173,6 +192,32 @@ export function createTipLedger({ provider, routerAddress, startBlock, resolveCo
       }
     });
   }
+  function getLiveTips({ bookingId, recipient, startedAt, endsAt, limit = LIVE_TIP_NOTICE_LIMIT } = {}) {
+    createTipContext({ source: 'live', bookingId });
+    if (!ADDRESS.test(recipient || '') || /^0x0{40}$/i.test(recipient) ||
+        !Number.isSafeInteger(startedAt) || !Number.isSafeInteger(endsAt) || startedAt <= 0 || endsAt <= startedAt ||
+        !Number.isSafeInteger(limit) || limit < 1 || limit > LIVE_TIP_NOTICE_LIMIT) {
+      throw new Error('Invalid live tip feedback scope');
+    }
+    const checkedAt = Date.parse(lastCheckedAt || ''), time = now();
+    const ready = initialized && liveIndexReady && !lastError && Number.isFinite(checkedAt) &&
+      time >= checkedAt && time - checkedAt <= LIVE_TIP_FRESH_MS;
+    if (!ready) return { ready: false };
+    const matching = (liveTips.get(bookingId) || []).filter(({ entry }) => {
+      const paidAt = Date.parse(entry.paidAt);
+      return entry.sourceKind === TIP_SOURCE_KINDS.live && entry.context?.bookingId === bookingId &&
+        entry.recipient?.toLowerCase() === recipient.toLowerCase() && entry.sender !== entry.recipient &&
+        Number.isFinite(paidAt) && paidAt >= startedAt && paidAt < endsAt && paidAt <= time;
+    });
+    const verified = matching.filter(({ entry }) => entry.chainVerified === true && entry.sourceVerification?.status === 'verified');
+    const totalWei = verified.reduce((total, { entry }) => total + BigInt(entry.amountWei), 0n);
+    const complete = head !== null && scannedThrough >= head - 1 &&
+      !matching.some(({ entry }) => !entry.chainVerified || entry.sourceVerification?.status === 'unavailable');
+    return { ready: true, checkedAt: lastCheckedAt, complete, count: verified.length, totalWei: totalWei.toString(),
+      entries: verified.slice(-limit).map(({ key, entry }) => ({
+        eventKey: key, amountWei: entry.amountWei, paidAt: Date.parse(entry.paidAt),
+      })) };
+  }
   function getState({ wallet, offset = 0, limit = 100 } = {}) {
     if (wallet && !ADDRESS.test(wallet)) throw new Error('Invalid tip wallet filter');
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
@@ -197,5 +242,5 @@ export function createTipLedger({ provider, routerAddress, startBlock, resolveCo
   return { initialize, compare: () => run(() => {
     if (!initialized) throw new Error('Tip ledger is not initialized');
     return compareWindows();
-  }), getState };
+  }), getState, getLiveTips };
 }

@@ -26,6 +26,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css?v=20261114-tip-provenance" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
+  <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
   <script type="importmap">
     {"imports":{
       "./js/radio-sync.js?v=20261030-ad-cutoff":"./js/radio-sync.js?v=20261114-monitor-mix",
@@ -620,6 +621,7 @@
           <button id="now-playing-play-btn" class="hidden" title="Tune in" aria-label="Tune in">▶ Tune in</button>
           <button id="now-playing-radio-btn" class="hidden" title="Return to radio" aria-label="Return to radio">📻 Radio</button>
         </div>
+        <div id="live-feedback" class="live-feedback" hidden></div>
       </div>
       <span id="radio-activity" role="status" aria-live="polite" hidden></span>
     </footer>
@@ -991,6 +993,10 @@
   <script type="module">
     import { initPayroll } from './js/payroll.js?v=20261110-profile-invitation';
     document.addEventListener('DOMContentLoaded', initPayroll);
+  </script>
+  <script type="module">
+    import { mountLiveFeedback } from './js/live-feedback.mjs?v=20261115-listener-feedback';
+    mountLiveFeedback();
   </script>
 
   <dialog id="creator-profile" aria-labelledby="creator-profile-title">
