@@ -1685,15 +1685,19 @@ async function main() {
     setInterval(() => { void tick(); }, 1000).unref();
   }
   let promotions;
-  if (process.env.PROMOTIONS_STORAGE_KEY || process.env.PROMOTIONS_STORAGE_PATH) {
+  if (process.env.PROMOTIONS_STORAGE_PATH) {
     try {
-      if ([process.env.CONTENT_REVIEW_STORAGE_KEY, process.env.LIVE_AUDIO_STORAGE_KEY]
-        .some(key => key && key.toLowerCase() === process.env.PROMOTIONS_STORAGE_KEY?.toLowerCase())) {
-        throw new Error('Promotions storage requires a separate key');
-      }
+      const checkpoint = createPinataStateStore({ ...config.checkpointStorage,
+        pinataJwt: config.pinataJwt, uploadUrl: config.pinataApiUrl,
+        name: 'decentbusking-promotions-state.json',
+        tags: { app: 'decentbusking', kind: 'promotions-state', schema: '1' },
+        restoreLatestOnly: true, rejectAmbiguousLatest: true,
+        serialize: value => value, deserialize: value => value,
+        beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined });
       const promotionsStore = await createPromotionStore({ file: process.env.PROMOTIONS_STORAGE_PATH,
-        keyHex: process.env.PROMOTIONS_STORAGE_KEY });
+        checkpoint });
       promotions = createPromotions({ restore: promotionsStore.restore, save: promotionsStore.save,
+        getCheckpointUri: promotionsStore.getCheckpointUri,
         provider: paymentProvider, routerAddress: payrollAssets.routerAddress, ownerWallet: config.mintOwnerWallet,
         devertContractAddress: process.env.DEVERT_CONTRACT_ADDRESS,
         siteUrl: config.siteUrl,
@@ -1706,7 +1710,7 @@ async function main() {
           return submitJukeLoopVote(vote);
         } });
     } catch (error) {
-      console.warn(`[promotions] Disabled until encrypted persistent storage is repaired: ${error.message}`);
+      console.warn(`[promotions] Disabled until public Pinata checkpoints and the persistent journal are ready: ${error.message}`);
     }
   }
   const requestHandler = createWorkerRequestHandler({

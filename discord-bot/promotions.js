@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Contract, Interface, id, verifyMessage, isAddress } from 'ethers';
 import { PAYMENT_EVENT_ABI } from './payment-ledger.js';
 import { currentPayrollPeriod } from '../js/payroll-week.mjs';
@@ -39,7 +39,7 @@ const paymentInterface = new Interface([
 const routerInterface = new Interface(PROMOTIONS_ROUTER_ABI);
 const lower = value => String(value || '').toLowerCase();
 
-function validateCheckpoint(value) {
+export function validatePromotionCheckpoint(value) {
   const fail = () => { throw new Error('Invalid promotions checkpoint; restore a verified backup before accepting writes'); };
   const validDate = date => typeof date === 'string' && Number.isFinite(Date.parse(date));
   const validId = id => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id);
@@ -164,29 +164,9 @@ function validateCheckpoint(value) {
   }
 }
 
-export function promotionCheckpointCodec(keyHex) {
-  if (!/^[a-f0-9]{64}$/i.test(keyHex || '')) throw new Error('PROMOTIONS_STORAGE_KEY must be 32 random bytes in hex; retain it for recovery');
-  const key = Buffer.from(keyHex, 'hex');
-  return {
-    serialize(value) {
-      const iv = randomBytes(12);
-      const cipher = createCipheriv('aes-256-gcm', key, iv);
-      cipher.setAAD(Buffer.from('decentbusking-promotions-v1'));
-      const bytes = Buffer.concat([cipher.update(JSON.stringify(value)), cipher.final()]);
-      return { schema: 'encrypted-promotions-v1', iv: iv.toString('hex'),
-        tag: cipher.getAuthTag().toString('hex'), data: bytes.toString('base64') };
-    },
-    deserialize(value) {
-      if (value?.schema !== 'encrypted-promotions-v1') throw new Error('Invalid encrypted promotions checkpoint');
-      const cipher = createDecipheriv('aes-256-gcm', key, Buffer.from(value.iv, 'hex'));
-      cipher.setAAD(Buffer.from('decentbusking-promotions-v1'));
-      cipher.setAuthTag(Buffer.from(value.tag, 'hex'));
-      return JSON.parse(Buffer.concat([cipher.update(Buffer.from(value.data, 'base64')), cipher.final()]).toString());
-    },
-  };
-}
+const validateCheckpoint = validatePromotionCheckpoint;
 
-export function createPromotions({ restore, save, provider, routerAddress, ownerWallet,
+export function createPromotions({ restore, save, getCheckpointUri = () => '', provider, routerAddress, ownerWallet,
   voteOnRadio, readFunding, announcements, siteUrl, devertContractAddress = '', now = Date.now, verifySignature = verifyMessage }) {
   const owner = address(ownerWallet);
   const router = new Contract(routerAddress, PROMOTIONS_ROUTER_ABI, provider);
@@ -201,7 +181,7 @@ export function createPromotions({ restore, save, provider, routerAddress, owner
     return result;
   };
   const initialize = () => initialization ||= (async () => {
-    if (!restore || !save) throw new Error('Promotions encrypted storage is not configured');
+    if (!restore || !save) throw new Error('Promotions public checkpoint storage is not configured');
     const value = await restore();
     if (value) {
       validateCheckpoint(value);
@@ -228,7 +208,7 @@ export function createPromotions({ restore, save, provider, routerAddress, owner
     next.revision = state.revision + 1;
     try {
       const uri = await save(structuredClone(next), state.revision);
-      if (!/^(?:sqlite|ipfs):\/\//.test(uri || '')) throw new Error('Durable storage receipt missing');
+      if (!/^ipfs:\/\//.test(uri || '')) throw new Error('Public IPFS storage receipt missing');
       state = next;
     } catch (error) {
       if (error.code === 'PROMOTIONS_STALE') {
@@ -360,8 +340,10 @@ export function createPromotions({ restore, save, provider, routerAddress, owner
     const defaultFund = funds.find(fund => fund.slug === PROMOTIONS_FUND);
     return structuredClone({ revision: state.revision, viewerWallet: wallet, campaigns, fundSlug: PROMOTIONS_FUND, routerAddress,
       funds, fundBalanceUnits: defaultFund?.balanceUnits ?? null, fundingError: defaultFund?.error || '', storageError: fault,
-      claims: state.claims.filter(c => admin || c.wallet === wallet),
-      members: state.members.filter(m => admin || m.wallet === wallet),
+      checkpointUri: getCheckpointUri(),
+      claims: state.claims,
+      members: state.members,
+      votes: state.votes,
       participation,
       activity: wallet ? { week, voted: state.votes.some(v => v.wallet === wallet && v.week === week) } : null,
     });
@@ -419,8 +401,9 @@ export function createPromotions({ restore, save, provider, routerAddress, owner
     async publicState() {
       return run(async () => {
         await refresh();
-        return { campaigns: state.campaigns.filter(c => !['draft', 'archived'].includes(c.status)).map(c => summary(c)),
-          notice: 'Rewards require evidence and admin approval. Budgets are earmarked, not escrowed. No unique-human or guaranteed-listening claim.' };
+        return structuredClone({ ...state, campaigns: state.campaigns.map(c => summary(c, true)),
+          checkpointUri: getCheckpointUri(),
+          notice: 'All promotion records, including drafts, evidence, referral links, activity and review notes, are public and checkpointed to IPFS. Do not submit secrets or personal information about others. Drafts are not live offers. Rewards require admin approval; budgets are earmarked, not escrowed.' });
       });
     },
     async execute(body, origin) {

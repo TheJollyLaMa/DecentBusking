@@ -52,7 +52,7 @@ export function promotionInputToUtc(value) {
 }
 const field = (name, label, type = 'text', value = '') =>
   `<label>${label}<input name="${name}" type="${type}" value="${escape(value)}" required></label>`;
-const termsNotice = 'Rewards require evidence and admin approval. Promotionals is earmarked, not escrowed. Wallets/browsers are not proof of unique humans. Activity means a signed song vote in the stated window, not a positive vote or verified listening time. Qualifying referral wallets, play IDs and vote times are visible to the admin and the referrer.';
+const termsNotice = 'All promotion records are public, including drafts, wallet/referrer links, submitted evidence, activity, review notes and payment receipts. Records are stored on public IPFS; do not submit secrets or personal information about others. Public copies may persist permanently. Rewards require evidence and admin approval. Promotionals is earmarked, not escrowed. Wallets/browsers are not proof of unique humans. Activity means a signed song vote in the stated window, not a positive vote or verified listening time.';
 function campaignCard(c) {
   return `<h3>${escape(c.title)}</h3><p><strong>${money(c.rewardUnits)}</strong> per approved award · ${escape(c.status)} · ${c.remainingAwards} awards available</p>
     <p>${c.template === 'sponsor-match' ? `Match destination: ${escape(c.matchTargetFund || '')}; draft only.` : 'Reward recipient: claimant wallet.'}
@@ -62,6 +62,26 @@ function campaignCard(c) {
     ${c.template === 'sponsor' ? `<p>Minimum confirmed DVert purchase: ${money(c.minPurchaseUnits)}</p>` : ''}
     <p>${escape(c.criteria)}</p><p class="promotion-terms">${escape(c.terms)}</p>
     <p>${date(c.startsAt)} – ${date(c.endsAt)}<br>Claim by ${date(c.claimDeadline)}</p>`;
+}
+export function publicPromotionRecords(state, campaignId) {
+  if (!state?.campaigns.some(c => c.id === campaignId)) return '';
+  const claims = (state.claims || []).filter(c => c.campaignId === campaignId);
+  const members = (state.members || []).filter(m => m.campaignId === campaignId);
+  const votes = (state.votes || []).filter(v => v.campaignId === campaignId);
+  const uri = state.checkpointUri;
+  const checkpoint = /^ipfs:\/\/[a-zA-Z0-9]+$/.test(uri || '')
+    ? `<a href="https://dweb.link/ipfs/${escape(uri.slice(7))}" target="_blank" rel="noopener">Public IPFS recovery snapshot</a>` : '';
+  return `<section aria-label="Public promotion records"><h3>Public records</h3>
+    <p>${members.length} registered participants · ${claims.length} claims. ${checkpoint}</p>
+    ${claims.map(c => `<article class="promotion-card">
+      <p>${escape(c.wallet)} · ${money(c.amountUnits)} · <strong>${escape(c.status)}</strong></p>
+      <p class="promotion-terms">${escape(c.evidence)}</p>
+      ${(c.history || []).map(h => `<p>${escape(h.at)} · ${escape(h.reviewer)} · ${escape(h.action)}: ${escape(h.reason)}</p>`).join('')}
+      ${c.status === 'paid' && /^0x[0-9a-f]{64}$/i.test(c.txHash || '') ? `<a href="https://basescan.org/tx/${escape(c.txHash)}" target="_blank" rel="noopener">Confirmed payment receipt</a>` : ''}
+    </article>`).join('') || '<p>No claims submitted.</p>'}
+    <details><summary>Evidence, referrals and activity audit data (public)</summary>
+      <pre class="promotion-terms">${escape(JSON.stringify({ claims, members, votes }, null, 2))}</pre>
+    </details></section>`;
 }
 export async function payPromotion({ claim, snapshot, command, status, storage = localStorage, sponsorReviewConfirmed = false }) {
   const w = await wallet();
@@ -184,7 +204,7 @@ export function mountAdminPromotions(root) {
     const t = PROMOTION_TEMPLATES.find(t => t.id === input('template').value);
     input('title').value = t.title;
     input('criteria').value = t.criteria;
-    input('terms').value = 'One award per participant. No self-referrals or reward stacking. Admin reviews identity, rights, evidence and disputes before approval. No guaranteed payout. Only wallet-signed song votes recorded through this promotion qualify as activity. No positive-vote requirement. Wallet/evidence records are encrypted; reviewed payment recipient, amount and transaction are public on Base. Do not submit private personal data.';
+    input('terms').value = 'One award per participant. No self-referrals or reward stacking. Admin reviews identity, rights, evidence and disputes before approval. No guaranteed payout. Only wallet-signed song votes recorded through this promotion qualify as activity. No positive-vote requirement. All promotion records, evidence, referral links and review notes are public on IPFS; copies may persist permanently. Do not submit secrets or personal information about others.';
     templateFields();
   }
   function reset() {
@@ -399,6 +419,7 @@ export function mountPublicPromotion() {
   overlay.className = 'promotion-dialog';
   overlay.innerHTML = `<button type="button" data-promo-close>Close</button><h2>Invites &amp; Promotions</h2>
     <p>${termsNotice}</p><p role="status" data-promo-status></p><div data-promo-offer></div>
+    <div data-promo-public-records></div>
     <p>Close this panel to use the radio; choose Return to promotion to come back.</p>
     <button type="button" data-promo-connect>Connect wallet</button>
     <button type="button" data-promo-refresh>Refresh offer</button>
@@ -406,14 +427,14 @@ export function mountPublicPromotion() {
     <div data-promo-member hidden>
       <p data-promo-activity></p>
       <label>Invited by (wallet, optional; fixed at registration)<input data-promo-ref value="${escape(params.get('ref') || '')}"></label>
-      <label><input type="checkbox" data-promo-accept> I accept the displayed offer terms and activity recording; payment recipients and amounts are public.</label>
+      <label><input type="checkbox" data-promo-accept> I accept the displayed offer terms and public IPFS publication of my wallet, referral links, evidence, activity and reviews. I will not submit secrets or personal information about others.</label>
       <button type="button" data-promo-join>Register for this offer</button>
       <button type="button" data-promo-invite>Copy my referral invite</button>
       <p>Listen using the radio bar. Cast a wallet-signed vote on a current song in this offer; see its activity window above. Both directions qualify; anonymous past votes cannot be attributed retroactively. If you already voted on this play, wait for the next song.</p>
       <button type="button" data-promo-vote="1">Vote up on current song</button>
       <button type="button" data-promo-vote="-1">Vote down on current song</button>
       <form data-promo-claim>
-        <label>Evidence / catalog or event references (no private personal information)<textarea name="evidence" maxlength="2000" required></textarea></label>
+        <label>Public evidence / catalog or event references (no secrets or others' personal information)<textarea name="evidence" maxlength="2000" required></textarea></label>
         <div data-promo-sponsor hidden>
           ${field('purchaser', 'Advert purchaser wallet')}
           ${field('advertId', 'DVert campaign ID')}
@@ -430,16 +451,17 @@ export function mountPublicPromotion() {
   const status = overlay.querySelector('[data-promo-status]');
   const memberPanel = overlay.querySelector('[data-promo-member]');
   let state;
-  let privateState;
+  let participantState;
   let busy = false;
   let generation = 0;
   function render() {
     const campaign = state?.campaigns.find(c => c.id === campaignId && !['draft', 'archived'].includes(c.status));
     overlay.querySelector('[data-promo-offer]').innerHTML = campaign ? campaignCard(campaign) : '<p>This offer is not published or does not exist.</p>';
-    memberPanel.hidden = !privateState || !campaign;
-    if (!privateState || !campaign) return;
-    const member = privateState.members.find(m => m.campaignId === campaignId && m.wallet === privateState.viewerWallet);
-    const activity = privateState.participation.find(item => item.campaignId === campaignId);
+    overlay.querySelector('[data-promo-public-records]').innerHTML = publicPromotionRecords(state, campaignId);
+    memberPanel.hidden = !participantState || !campaign;
+    if (!participantState || !campaign) return;
+    const member = participantState.members.find(m => m.campaignId === campaignId && m.wallet === participantState.viewerWallet);
+    const activity = participantState.participation.find(item => item.campaignId === campaignId);
     overlay.querySelector('[data-promo-activity]').textContent = member
       ? `Registered · ${activity.week} · ${activity.voted ? 'Song vote recorded this week' : 'No song vote recorded this week'} · Referrals for this offer: ${activity.registered} registered, ${activity.activeThisWeek} active this week, ${activity.activeDuringOffer} active during this offer`
       : 'Not registered for this offer.';
@@ -451,15 +473,15 @@ export function mountPublicPromotion() {
     const buddy = overlay.querySelector('[data-promo-buddy]');
     buddy.hidden = campaign.template !== 'buddy';
     buddy.querySelectorAll('input').forEach(el => { el.required = !buddy.hidden; el.disabled = buddy.hidden; });
-    const claims = privateState.claims.filter(c => c.campaignId === campaignId && c.wallet === privateState.viewerWallet);
+    const claims = participantState.claims.filter(c => c.campaignId === campaignId && c.wallet === participantState.viewerWallet);
     overlay.querySelector('[data-promo-my-claims]').innerHTML = claims.map(c => `<p>${escape(c.status)} · ${money(c.amountUnits)}</p>
       ${c.history.map(h => `<p>${escape(h.action)}: ${escape(h.reason)}</p>`).join('')}
       ${c.status === 'needs-evidence' ? `<button type="button" data-promo-evidence="${c.id}">Update evidence from the form above</button>` : ''}
       ${c.status === 'paid' ? `<a href="https://basescan.org/tx/${escape(c.txHash)}">Payment proof</a>` : ''}`).join('');
   }
   async function command(c) {
-    privateState = await signed({ ...c, campaignId });
-    state = privateState;
+    participantState = await signed({ ...c, campaignId });
+    state = participantState;
     render();
   }
   async function guard(fn) {
@@ -492,7 +514,7 @@ export function mountPublicPromotion() {
       }
       if (target.matches('[data-promo-invite]')) {
         const w = await wallet();
-        if (!privateState?.members.some(m => m.campaignId === campaignId && m.wallet === w.address.toLowerCase())) throw new Error('Register first');
+        if (!participantState?.members.some(m => m.campaignId === campaignId && m.wallet === w.address.toLowerCase())) throw new Error('Register first');
         return navigator.clipboard.writeText(promotionLink(campaignId, w.address));
       }
       if (target.dataset.promoVote) {
@@ -515,7 +537,7 @@ export function mountPublicPromotion() {
   });
   const clear = () => {
     generation++;
-    privateState = null;
+    participantState = null;
     overlay.querySelector('form').reset();
     overlay.querySelector('[data-promo-accept]').checked = false;
     overlay.querySelector('[data-promo-activity]').textContent = '';

@@ -12,7 +12,7 @@ const blockHash = '0x' + '12'.repeat(32);
 const origin = 'https://busking.example';
 const epoch = Date.parse('2026-10-30T18:00:00Z');
 const input = (extra = {}) => ({ template: 'album', title: 'Bring an album', criteria: 'Approved album with delivery proof',
-  terms: 'One reward, public rights, encrypted evidence, admin review, no stacking. Disputes reviewed by steward.',
+  terms: 'One reward, public evidence and activity on IPFS, admin review, no stacking. Disputes reviewed by steward.',
   rewardUnits: '10000000', budgetUnits: '10000000', maxAwards: 1, minOriginalTracks: 3, minPurchaseUnits: '5000000',
   requiredReferrals: 2, activityWindow: 'current-week',
   startsAt: '2026-10-30T17:00:00Z', endsAt: '2026-11-06T18:00:00Z',
@@ -50,15 +50,18 @@ async function fixture(options = {}) {
     stored: () => stored, setTime: t => { clock = t; }, setBalance: b => { balance = b; },
     setReceipt: r => { receipt = r ? { blockHash, ...r } : r; }, setTransaction: tx => { transaction = tx; } };
 }
-test('drafts stay private; published claims are wallet-scoped and recover after restart', async () => {
+test('drafts, evidence and attribution are public without a wallet and recover after restart', async () => {
   const f = await fixture();
   const c = await f.create();
-  assert.equal((await f.service.publicState()).campaigns.length, 0);
+  assert.equal((await f.service.publicState()).campaigns[0].status, 'draft');
   await f.publish(c); await f.join(c); const claim = await f.claim(c);
-  assert.equal((await f.view(bob)).claims.length, 0);
+  assert.equal((await f.view(bob)).claims[0].id, claim.id);
   const publicState = await f.service.publicState();
-  assert.equal(publicState.claims, undefined);
-  assert.equal(publicState.campaigns[0].evidence, undefined);
+  assert.equal(publicState.claims[0].evidence, claim.evidence);
+  assert.equal(publicState.members[0].wallet, alice.address.toLowerCase());
+  assert.match(publicState.notice, /public.*IPFS/);
+  publicState.claims[0].evidence = 'Changed outside the service';
+  assert.equal((await f.service.publicState()).claims[0].evidence, claim.evidence);
   const { createPromotions } = await import('../discord-bot/promotions.js');
   const restarted = createPromotions({ ...f.cfg, restore: async () => f.stored() });
   assert.equal((await restarted.execute(await f.body({ action: 'view' }, alice), origin)).claims[0].id, claim.id);
@@ -493,7 +496,7 @@ test('Discord requires an exact owner preview, journals before send, and suppres
     preview: { ...preview, link: 'https://evil.example/' } }), /preview changed/);
   const sent = await f.exec({ action: 'send-discord', campaignId: c.id, preview });
   assert.equal(sent.campaigns[0].announcement.status, 'sent');
-  assert.equal((await f.service.publicState()).campaigns[0].announcement, undefined);
+  assert.equal((await f.service.publicState()).campaigns[0].announcement.status, 'sent');
   assert.equal((await f.exec({ action: 'send-discord', campaignId: c.id, preview })).announcementDuplicate, true);
   assert.equal(sends, 1);
 });
@@ -535,36 +538,28 @@ test('Discord poster delivery disables mentions and obeys cooldown', async () =>
   cooldown = true;
   await assert.rejects(service.send(draft, pending), /cooldown/);
 });
-test('private checkpoint uses authenticated encryption, rejects wrong keys/tampering, and no wallet plaintext', async () => {
-  const { promotionCheckpointCodec } = await import('../discord-bot/promotions.js');
-  const codec = promotionCheckpointCodec('11'.repeat(32));
-  const data = { wallet: alice.address, evidence: 'private evidence' };
-  const encoded = codec.serialize(data);
-  assert.doesNotMatch(JSON.stringify(encoded), /private evidence/);
-  assert.deepEqual(codec.deserialize(encoded), data);
-  assert.throws(() => promotionCheckpointCodec('bad'), /32 random/);
-  assert.throws(() => promotionCheckpointCodec('22'.repeat(32)).deserialize(encoded));
-  assert.throws(() => codec.deserialize({ ...encoded, tag: '00'.repeat(16) }));
-});
 test('durable storage serializes competing services and recovers reservations after restart', async t => {
   const fs = require('node:fs');
   const path = require('node:path');
   const { randomUUID } = require('node:crypto');
   const { initializePromotionStore, createPromotionStore } = await import('../discord-bot/promotions-store.js');
   const file = path.join(__dirname, `.promotions-${randomUUID()}.sqlite`);
-  const keyHex = '31'.repeat(32);
+  let remote = null;
+  const checkpoint = { restore: async () => structuredClone(remote),
+    getLatestSnapshotUri: () => 'ipfs://public-checkpoint',
+    save: async value => { remote = structuredClone(value); return 'ipfs://public-checkpoint'; } };
   const opened = [];
   t.after(() => {
     for (const store of opened) store.close();
     for (const suffix of ['', '-wal', '-shm']) fs.rmSync(file + suffix, { force: true });
   });
-  await assert.rejects(createPromotionStore({ file, keyHex }));
+  await assert.rejects(createPromotionStore({ file, checkpoint }));
   assert.equal(fs.existsSync(file), false);
-  await initializePromotionStore({ file, keyHex });
-  await assert.rejects(initializePromotionStore({ file, keyHex }), /exist/i);
-  await assert.rejects(createPromotionStore({ file, keyHex: '32'.repeat(32) }));
-  const first = await createPromotionStore({ file, keyHex });
-  const second = await createPromotionStore({ file, keyHex });
+  await initializePromotionStore({ file });
+  await assert.rejects(initializePromotionStore({ file }), /exist/i);
+  await assert.rejects(createPromotionStore({ file }), /Pinata/);
+  const first = await createPromotionStore({ file, checkpoint });
+  const second = await createPromotionStore({ file, checkpoint });
   opened.push(first, second);
   const a = await fixture({ restore: first.restore, save: first.save });
   const b = await fixture({ restore: second.restore, save: second.save });
@@ -581,17 +576,15 @@ test('durable storage serializes competing services and recovers reservations af
   const after = await b.view();
   assert.equal(after.claims.filter(claim => claim.status === 'approved').length, 1);
   assert.equal(after.campaigns[0].remainingAwards, 0);
-  const restartedStore = await createPromotionStore({ file, keyHex });
+  const restartedStore = await createPromotionStore({ file, checkpoint });
   opened.push(restartedStore);
   const restarted = await fixture({ restore: restartedStore.restore, save: restartedStore.save });
   assert.equal((await restarted.view()).claims.filter(claim => claim.status === 'approved').length, 1);
-  for (const suffix of ['', '-wal']) {
-    const bytes = fs.existsSync(file + suffix) ? fs.readFileSync(file + suffix) : Buffer.alloc(0);
-    assert.equal(bytes.includes(Buffer.from(alice.address.toLowerCase())), false);
-    assert.equal(bytes.includes(Buffer.from('Catalog and approved delivery proof')), false);
-  }
+  assert.equal(remote.claims.filter(c => c.status === 'approved').length, 1);
+  assert.ok(JSON.stringify(remote).includes(alice.address.toLowerCase()));
+  assert.ok(JSON.stringify(remote).includes('Catalog and approved delivery proof'));
 });
-test('HTTP public listing omits claimant data, private operations require allowed origin, unavailable is explicit', async () => {
+test('HTTP public listing includes claimant data without signing; mutations still require allowed origin', async () => {
   const http = require('node:http');
   const { createWorkerRequestHandler } = await import('../discord-bot/ipfs-worker.js');
   const f = await fixture(); const c = await f.create(); await f.publish(c); await f.join(c); await f.claim(c);
@@ -601,14 +594,14 @@ test('HTTP public listing omits claimant data, private operations require allowe
     const url = `http://127.0.0.1:${server.address().port}/api/promotions`;
     const result = await fetch(url);
     assert.equal(result.headers.get('cache-control'), 'no-store');
-    assert.equal((await result.json()).claims, undefined);
+    assert.equal((await result.json()).claims[0].wallet, alice.address.toLowerCase());
     const denied = await fetch(url, { method: 'POST', headers: { origin: 'https://evil.example', 'Content-Type': 'application/json' },
       body: JSON.stringify(await f.body({ action: 'view' })) });
     assert.equal(denied.status, 400);
     const allowed = await fetch(url, { method: 'POST', headers: { origin, 'Content-Type': 'application/json' },
       body: JSON.stringify(await f.body({ action: 'view' }, bob)) });
     assert.equal(allowed.status, 200);
-    assert.deepEqual((await allowed.json()).claims, []);
+    assert.equal((await allowed.json()).claims[0].wallet, alice.address.toLowerCase());
     server.removeAllListeners('request');
     server.on('request', createWorkerRequestHandler({ ownerWallet: owner.address, allowedOrigins: [origin] }));
     const unavailable = await fetch(url);

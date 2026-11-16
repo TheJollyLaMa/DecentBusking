@@ -11,7 +11,7 @@
 }
 .promotion-dialog::backdrop { background: #000b; }
 .promotion-card { border: 1px solid #617383; border-radius: 10px; padding: 14px; margin: 14px 0; overflow-wrap: anywhere; }
-.promotion-terms { white-space: pre-wrap; }
+.promotion-terms { white-space: pre-wrap; overflow-wrap: anywhere; }
 #admin-promotions label, .promotion-dialog label { display: block; margin: 10px 0; }
 #admin-promotions input:not([type="checkbox"]), #admin-promotions textarea, #admin-promotions select,
 .promotion-dialog input:not([type="checkbox"]), .promotion-dialog textarea {

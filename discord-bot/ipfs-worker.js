@@ -534,7 +534,7 @@ export function createWorkerRequestHandler({
       }
       if (requestUrl.pathname === '/api/promotions' && ['GET', 'POST'].includes(request.method)) {
         response.setHeader('Cache-Control', 'no-store');
-        if (!promotions) throw new Error('Promotions unavailable: configure encrypted promotions storage before creating offers');
+        if (!promotions) throw new Error('Promotions unavailable: configure public Pinata checkpoints and the persistent journal before creating offers');
         if (request.method === 'GET') {
           sendJson(response, 200, await promotions.publicState(), '*');
         } else {

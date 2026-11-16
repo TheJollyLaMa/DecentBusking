@@ -149,6 +149,26 @@ test('ambiguous and nonexistent New York wall times cannot silently change campa
   assert.throws(() => promotionInputToUtc('2026-11-01T01:30'), /occurs twice/);
   assert.throws(() => promotionInputToUtc('2026-03-08T02:30'), /does not exist/);
 });
+
+test('public audit records show evidence, attribution, review and receipts with escaped untrusted content', async () => {
+  const { publicPromotionRecords } = await import('../js/promotions-ui.mjs');
+  const result = publicPromotionRecords({
+    campaigns: [{ id: 'offer-1' }], checkpointUri: 'ipfs://bafypublic',
+    claims: [{ campaignId: 'offer-1', wallet: '<wallet>', amountUnits: '10000000', status: 'paid',
+      evidence: '<script>private-looking but public evidence</script>', txHash,
+      history: [{ at: '2026-11-16', reviewer: owner, action: 'approved', reason: 'Reviewed rights' }] }],
+    members: [{ campaignId: 'offer-1', wallet: 'referee', referrer: 'referrer' }],
+    votes: [{ campaignId: 'offer-1', playId: 'song', wallet: 'referee' }],
+  }, 'offer-1');
+  assert.match(result, /public evidence/);
+  assert.match(result, /referrer/);
+  assert.match(result, /song/);
+  assert.match(result, /Reviewed rights/);
+  assert.match(result, new RegExp(`basescan.org/tx/${txHash}`));
+  assert.match(result, /dweb.link\/ipfs\/bafypublic/);
+  assert.doesNotMatch(result, /<script>|<wallet>/);
+  assert.match(result, /&lt;script&gt;/);
+});
 test('money preserves six-decimal amounts and invite links keep the deployment subpath', async () => {
   const { promotionUnits, promotionMoney, promotionLink, PROMOTION_TEMPLATES } = await import('../js/promotions.mjs');
   assert.equal(promotionUnits('10.000001'), '10000001');

@@ -6,50 +6,59 @@ any offer. An actual funded pilot requires separate steward authorization.
 
 ## Storage and deployment
 
-Promotions is optional and fails closed unless both server-only settings exist:
+All promotion data is public, using DecentBusking's existing Pinata account and
+checkpoint schema. **No promotions encryption key or private backup location is
+needed.** Do not reuse or remove encryption keys belonging to unrelated features.
 
-- `PROMOTIONS_STORAGE_KEY`: a dedicated 32-byte cryptographically random key
-  encoded as 64 hex characters. Back it up privately, separately from the
-  database. Do not reuse a wallet, Pinata, content-review, or live-audio secret.
-- `PROMOTIONS_STORAGE_PATH`: an explicitly initialized SQLite file on a durable,
-  private volume attached to the worker host, outside the public web root.
+Promotions requires the existing server-side `PINATA_JWT` and
+`PROMOTIONS_STORAGE_PATH`, an explicitly initialized SQLite journal on the
+approved persistent single-host volume. SQLite is retained for atomic budget
+reservations and cross-process write fencing, not secrecy. Pinata alone cannot
+compare-and-swap concurrent reservations. Keep the journal outside the web root;
+public API/snapshots expose records, not live database/WAL files or credentials.
 
-Provision the persistent volume before enabling promotions. An ephemeral
-filesystem, including a free hosting tier without persistent storage, is not
-sufficient. Use one worker; any additional local processes must use the *same*
-database on the same host and filesystem. SQLite WAL is not a multi-host
-replicated database. Node must support `node:sqlite`; some supported Node 22
-releases require `NODE_OPTIONS=--experimental-sqlite`.
+Use one worker; additional local processes must use the *same* journal on the
+same host and filesystem. Never run independent journals or multiple hosts for
+the same campaigns. SQLite WAL is not a replicated database. Node must support
+`node:sqlite`; some supported Node 22 releases require
+`NODE_OPTIONS=--experimental-sqlite`.
 
 Coordinate rollout: keep promotions disabled until storage is provisioned,
 deploy the worker and confirm its `/api/promotions` response first, then deploy
 the matching frontend. Do not mix worker versions or independent journals for
 the same offers.
 
-Only for a new, empty installation, set both environment variables securely and
-initialize the database on the persistent volume:
+Set the journal path on the approved volume and initialize a new file only once:
 
 ```sh
 node discord-bot/promotions-store.js init "$PROMOTIONS_STORAGE_PATH"
 ```
 
-Initialization refuses to overwrite an existing file. Never reinitialize a
-missing or damaged financial journal to bypass an error. The database holds one
-AES-256-GCM encrypted state with transactional, revision-checked writes,
-SQLite WAL, and full synchronization. Campaigns, claims, attribution, activity,
-review notes, and announcement/payment recovery state are **not** automatically
-backed up to Pinata or the checkpoint mirror.
+Initialization refuses to overwrite an existing file. Every successful mutation
+pins a plaintext `schemaVersion: 1` snapshot containing the revision, campaigns,
+claims, members and votes as `decentbusking-promotions-state.json`, tagged
+`app=decentbusking`, `kind=promotions-state`, `schema=1`. It uses
+`createPinataStateStore`, existing checkpoint groups/retention, and the existing
+optional local mirror. A transaction first saves a pending publication, fencing
+all other writes. After Pinata acknowledges the public CID, a conditional update
+commits the local state and receipt. No new
+Pinata credentials, data-encryption keys or private backup service is required.
 
-Back up the current database regularly and before/after financial actions; for
-a running SQLite instance use its online backup API (for example
-`sqlite3 "$PROMOTIONS_STORAGE_PATH" ".backup promotions-backup.sqlite"`) and
-move the resulting encrypted backup to private durable storage. A raw copy of
-the main file alone while WAL is active may omit recent writes. Retain the key
-separately. Test backup decryption and integrity in an isolated environment.
-Restoring an older backup can lose reservations or payment/Discord journals:
-stop writes and reconcile all offers, wallet history, Base receipts and Discord
-delivery before resuming. Missing storage, wrong keys, invalid records, and
-uncertain writes stop promotions rather than treating history as empty.
+Startup verifies the latest Pinata snapshot against the local revision. An
+acknowledged remote snapshot ahead of the local state is restored before accepting
+requests. A pending publication is either reconciled to that exact snapshot or
+republished unchanged before writes resume. Missing, older, inconsistent, ambiguous or unreadable
+remote state stops startup rather than silently falling back to an older
+financial snapshot. An uncertain upload locks the service until restart and
+reconciliation; no payment prompt or Discord send follows a failed checkpoint.
+
+For disaster recovery, stop every writer, preserve the old journal and WAL,
+and verify the latest public snapshot and its CID. Initialize a *new* journal
+path and start the worker; it restores that snapshot before enabling operations.
+Inspect all pending payment and Discord records, wallet history and Base
+receipts before resuming. Never seed an empty journal to bypass missing pins.
+Existing encrypted prototype databases are not silently migrated or published:
+preserve them and arrange an explicit verified export if any exist.
 
 ## Funding and offers
 
@@ -138,12 +147,20 @@ policy before approval **and again before payment**. Later cancellations,
 refunds or disputes require human resolution under those published terms; they
 are not automatically detected or clawed back.
 
-Claim/evidence and attribution details are available to the claimant wallet and
-the admin, not public offer views. Qualifying referral wallets, play IDs and
-vote times are also visible to the referrer whose claim they support. Do not
-submit sensitive personal information. Base payout recipients, amounts and
-transactions are public. Encryption protects stored records, not data visible
-to an authorized operator or a compromised worker.
+**Public-data policy:** drafts (not live offers), archived campaigns, budgets,
+claim evidence, wallets, referral relationships, hashed browser/activity records,
+review reasons, payment preparation and receipts are publicly readable through
+`GET /api/promotions` without connecting or signing. Offer pages show public
+claims/reviews and expandable attribution/activity audit records, with a link to
+the full IPFS recovery snapshot. The participation signature personalizes the
+view; it is not a privacy boundary. Mutations still require the correct wallet,
+origin, timestamp and command signature, with admin-only review/payment controls.
+
+The form discloses public IPFS publication before registration and submission.
+Submit only rights-cleared public evidence/references; never submit secrets,
+credentials or personal information about others. Anyone may retain public
+copies permanently; editing a claim or unpinning does not retract those copies.
+No existing private moderation or rehearsal records are included in these pins.
 
 ## Poster-first Discord
 
@@ -193,16 +210,20 @@ retry. A wrong or unknown hash may require operator investigation.
 
 ## Reuse and verification
 
-Need: bounded campaigns, private qualification evidence, and owner-reviewed
+Need: bounded campaigns, public qualification evidence, and owner-reviewed
 rewards. Adapted DecentBusking PR #302 commit `0442609`, under the same Apache
 2.0 repository license, plus the existing
 `js/settlement-funds.mjs` fund controls,
 `discord-bot/live-bookings.js` review/receipt patterns,
 `discord-bot/jukeloop.js::submitJukeLoopVote`,
 `js/radio-client.mjs::radioListenerId`, and
-`js/payroll-week.mjs::currentPayrollPeriod`. The older PR's Pinata checkpoint
-approach was replaced because it cannot atomically reserve across processes;
-the receiving worker uses an encrypted transactional SQLite journal instead.
+`js/payroll-week.mjs::currentPayrollPeriod`. Public persistence adapts
+`discord-bot/ipfs-state.js::createPinataStateStore` and the live-booking Pinata
+wiring at DecentBusking commit `4c89498` (Apache-2.0). The receiving worker retains
+the transactional SQLite fence for atomic reservations; plaintext Pinata
+checkpoints provide public records and restart/disaster recovery. Pinata
+credentials remain server-side, unlike the public records. This is not a
+multi-host settlement service.
 DVert purchase semantics were checked against DecentMarket
 `contracts/DeVert_v0.1.sol` at `394169b348d17e29486672a2cb2f2c0efe48f2ce`;
 no donor contract or third-party source was copied.
@@ -216,8 +237,16 @@ funds, receipts, Discord and signed fixture wallets:
 ```sh
 node --test test/promotions-store.test.js test/promotions.test.js \
   test/promotions-ui.test.js test/settlement-funds.test.js \
-  test/ipfs-worker.test.js test/tutorial.test.js
+  test/ipfs-worker.test.js test/ipfs-state.test.js test/tutorial.test.js
 ```
+
+Public-Pinata revision verification: **163 tests passed**. Includes competing
+worker reservations, upload-response loss, crash-before-upload recovery,
+cross-process pending-publication fencing, public unauthenticated evidence,
+and unchanged mutation/payment authorization. A local browser fixture confirmed
+public evidence/referral audit data without a wallet and no horizontal overflow
+at a 390px viewport. Pinata, payment and Discord operations in these checks were
+fixtures, not live integrations.
 
 These tests do not spend money, send Discord messages, or broadcast audio. A
 steward-authorized live pilot must separately record campaign ID, published
