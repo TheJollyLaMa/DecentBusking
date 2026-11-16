@@ -14,6 +14,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'node:crypto';
 import { isEligibleRadioMusic } from '../js/radio-playlists.mjs';
+import { recordingDurationProof, recordingMediaIdentity, recordingDurationReason } from '../js/radio-duration.mjs';
 import { currentPayrollPeriod, payrollPeriodFromKey, payrollPeriods } from '../js/payroll-week.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -255,6 +256,7 @@ export async function submitLiveRecordingRelease({ booking, release, source, con
       replayStatus: release.choice === 'full' ? 'pending' : 'not-requested',
     },
   };
+  track.durationVerification = recordingDurationProof(track, track.durationSeconds, 'live-capture');
   addTrack(track);
   await waitForRemotePersistence();
   return _playlist.find(entry => entry.trackId === trackId);
@@ -267,7 +269,22 @@ export function getTrackById(trackId) {
 export function pendingLiveRecordingReplay(now = Date.now()) {
   return getPlaybackPlaylist().find(track => track.liveRecording?.replayStatus === 'pending' &&
     track.liveRecording.replayAfter <= now && track.mintStatus === 'minted' &&
-    isEligibleRadioMusic(track));
+    isEligibleRadioMusic(track) && !recordingDurationReason(track));
+}
+
+export function updateTrackDuration(trackId, result) {
+  const track = _playlist.find(entry => entry.trackId === trackId);
+  if (!track) throw new Error('Duration probe recording no longer exists');
+  if (recordingMediaIdentity(track) !== result.identity) throw new Error('Recording media changed during duration probing');
+  if (result.status === 'verified') {
+    track.durationVerification = recordingDurationProof(track, result.seconds, 'ffmpeg-decode');
+    track.durationSeconds = result.seconds;
+    if (track.durationMs !== undefined) track.durationMs = result.seconds * 1000;
+  }
+  track.durationProbe = { status: result.status, attempts: result.attempts,
+    ...(result.nextAttemptAt ? { nextAttemptAt: result.nextAttemptAt } : {}),
+    ...(result.error ? { error: result.error } : {}) };
+  _save({ routine: true });
 }
 
 export async function completeLiveRecordingReplay(trackId, play) {
@@ -813,7 +830,7 @@ export function getWeight(track) {
  * @returns {TrackEntry[]}
  */
 export function getWeightedShuffledPlaylist(now = Date.now()) {
-  const eligible = getPlaybackPlaylist().filter(isEligibleRadioMusic);
+  const eligible = getPlaybackPlaylist().filter(track => isEligibleRadioMusic(track) && !recordingDurationReason(track));
   if (eligible.length === 0) return [];
 
   // Build mutable candidate array with weights

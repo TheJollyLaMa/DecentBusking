@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { verifiedRecording } = require('./helpers/verified-recording');
 
 const storeModule = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'playlist-store.js')).href;
 const reportModule = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'weekly-play-report.js')).href;
@@ -99,7 +100,7 @@ test('first-week track gets one extra spaced slot and consumes its bonus only af
     { trackId: 'new', addedAt: '2026-10-04T00:00:00Z', likes: 0, dislikes: 0, plays: 0 },
     { trackId: 'old-a', addedAt: '2026-09-01T00:00:00Z', likes: 0, dislikes: 0, plays: 0 },
     { trackId: 'old-b', addedAt: '2026-09-01T00:00:00Z', likes: 0, dislikes: 0, plays: 0 },
-  ]);
+  ].map(track => verifiedRecording(track)));
   const originalRandom = Math.random;
   Math.random = () => 0;
   try {

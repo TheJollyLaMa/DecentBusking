@@ -4,6 +4,7 @@ const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
+const { verifiedRecording } = require('./helpers/verified-recording');
 const runtimeRoot = path.join(__dirname, '..', '.test-runtime');
 fs.mkdirSync(runtimeRoot, { recursive: true });
 const runtimeDir = fs.mkdtempSync(path.join(runtimeRoot, 'playlist-show-'));
@@ -13,13 +14,13 @@ const START = Date.parse('2026-10-23T01:00:00Z');
 const event = { id: 'tonight', type: 'playlist_show', playlistId: 'songs-awaiting-your-vote', title: 'Songs Awaiting Your Vote',
   startUtc: new Date(START).toISOString(), endUtc: new Date(START + 3600_000).toISOString() };
 
-async function fixture(t, { count = 2, voted = false, store: customStore, showEvent = event } = {}) {
+async function fixture(t, { count = 2, voted = false, store: customStore, showEvent = event, seconds = 180 } = {}) {
   let now = START;
   t.mock.method(Date, 'now', () => now);
   const { JukeLoopSession, buildRadioState, buildNowPlayingMessage, synchronizeDiscordRating } = await import('../discord-bot/jukeloop.js');
   const { loadPlaylist, getPlaylist, applySiteVote, applyRating } = await import('../discord-bot/playlist-store.js');
-  const tracks = Array.from({ length: count }, (_, index) => ({ trackId: `song-${index}`, title: `Song ${index}`,
-    uploader: 'Artist', filename: 'song.mp3', ipfsCid: `cid-${index}`, likes: voted ? 1 : 0, dislikes: 0 }));
+  const tracks = Array.from({ length: count }, (_, index) => verifiedRecording({ trackId: `song-${index}`, title: `Song ${index}`,
+    uploader: 'Artist', filename: 'song.mp3', ipfsCid: `cid-${index}`, likes: voted ? 1 : 0, dislikes: 0 }, seconds));
   loadPlaylist(tracks);
   let value = null;
   const store = customStore || { restore: async () => value, save: async next => { value = structuredClone(next); return 'ipfs://snapshot'; } };
@@ -42,9 +43,128 @@ async function fixture(t, { count = 2, voted = false, store: customStore, showEv
   session._announcePrepared = async () => {};
   session._sendPlaybackNotice = () => {};
   t.after(() => { session.destroy(); loadPlaylist([]); });
-  return { session, tracks, player, heard, getPlaylist, applySiteVote, applyRating, buildRadioState, buildNowPlayingMessage, synchronizeDiscordRating,
+  return { session, tracks, player, heard, getPlaylist, loadPlaylist, applySiteVote, applyRating, buildRadioState, buildNowPlayingMessage, synchronizeDiscordRating,
     value: () => value, stops: () => stops, paidCalls: () => paidCalls, adCalls: () => adCalls, setNow: value => { now = value; } };
 }
+
+test('a long recording finishes past its slot and Top10 boundary; completion, not admission, advances its durable queue', async t => {
+  const f = await fixture(t, { seconds: 1200, showEvent: { ...event, playlistId: 'long-form-hour' } });
+  f.setNow(START + 3599_000);
+  await f.session._playNext();
+  assert.equal(f.heard.length, 1);
+  assert.equal(f.value().occurrences[0].cursor, 0, 'admission is not completion');
+  f.session._primeNext();
+  assert.equal(f.session._preparedNext, null, 'unfinished long recording cannot prefetch itself');
+  f.setNow(START + 3601_000);
+  f.session._started = true;
+  f.session._syncScheduledShow();
+  f.session.setSchedule([{ id: 'later-chart', type: 'weekly_top10', weekday: 5, startHourUtc: 0, endHourUtc: 23 }]);
+  assert.equal(f.stops(), 0, 'the clock and ordinary chart handoff do not truncate the long recording');
+  const trackId = f.session._currentTrack.trackId;
+  f.session._completedPlay = { playId: 'full-set-finished', trackId, audibleMs: 1200000, finished: true };
+  await f.session._collectReactions();
+  assert.equal(f.value().occurrences[0].cursor, 1);
+  assert.equal(f.value().occurrences[0].lastCompleted.trackId, trackId);
+});
+
+test('long recordings that cannot finish before a protected live event yield to short fallback without losing attribution', async t => {
+  const f = await fixture(t, { seconds: 1200, showEvent: { ...event, playlistId: 'long-form-hour' } });
+  f.loadPlaylist([...f.getPlaylist(), verifiedRecording({ trackId: 'short-fallback', title: 'Short fallback', likes: 1, dislikes: 0 }, 60)]);
+  f.session.setLivePerformanceEvents([{ ...event, playlistId: 'long-form-hour' },
+    { id: 'booked-live', type: 'live_performance', title: 'Booked artist',
+      startUtc: new Date(START + 600000).toISOString(), endUtc: new Date(START + 1800000).toISOString() }]);
+  await f.session._playNext();
+  assert.deepEqual(f.heard, ['short-fallback']);
+  assert.equal(f.paidCalls(), 0);
+  assert.ok(f.value().occurrences[0].skipped.every(entry => /protected live event/.test(entry.reason)));
+});
+
+test('a minted twenty-minute live set waits for long-form programming and records replay only after complete playback', async t => {
+  const f = await fixture(t, { count: 0 });
+  const p = await import('../discord-bot/playlist-store.js');
+  p.configureRemotePersistence(async () => {});
+  t.after(() => p.configureRemotePersistence(null));
+  const { liveRecordingRelease } = require('./helpers/live-recording-release');
+  const track = await p.submitLiveRecordingRelease(liveRecordingRelease({
+    booking: { id: 'full-live-set', title: 'Twenty-minute set', wallet: `0x${'1'.repeat(40)}`,
+      endUtc: new Date(START - 600000).toISOString() },
+    cid: 'c'.repeat(46), artworkCid: 'a'.repeat(46), durationSeconds: 1200, incomplete: false,
+    consent: { enabled: true, signature: 'fixture', issuedAt: START - 2000000 },
+  }));
+  p.completeTrackMint(track.trackId, { tokenId: '1001', txHash: 'verified-fixture' });
+  assert.equal(p.pendingLiveRecordingReplay(), undefined);
+  assert.deepEqual(p.getWeightedShuffledPlaylist(), []);
+  await f.session._playNext();
+  assert.deepEqual(f.heard, [], 'ordinary themed show cannot select the long recording');
+  f.session.setLivePerformanceEvents([{ ...event, id: 'long-live-set', playlistId: 'long-form-hour' }]);
+  await f.session._playNext();
+  assert.deepEqual(f.heard, [track.trackId]);
+  assert.equal(track.liveRecording.replayStatus, 'pending');
+  f.session._completedPlay = { playId: 'finished-live-set', trackId: track.trackId, audibleMs: 1200000, finished: true };
+  await f.session._collectReactions();
+  assert.equal(track.liveRecording.replayStatus, 'played');
+  assert.equal(track.mintRecipient, `0x${'1'.repeat(40)}`);
+  assert.equal(track.tokenId, '1001');
+});
+
+test('long-form handoff waits for durable completion, retries a failed checkpoint and never restarts the just-finished set', async t => {
+  let value, release, fail = true;
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  const f = await fixture(t, { seconds: 1200, showEvent: { ...event, playlistId: 'long-form-hour' },
+    store: { restore: async () => value, save: async next => {
+      if (next.occurrences[0].cursor === 1 && fail) {
+        await gate;
+        fail = false;
+        throw new Error('Completion checkpoint unavailable');
+      }
+      value = structuredClone(next);
+      return 'ipfs://checkpoint';
+    } } });
+  f.session._sleep = async () => {};
+  f.session.devertPlayback.recordCompletedMusicPlay = async () => {};
+  await f.session._playNext();
+  const first = f.heard[0];
+  f.session._nowPlaying.audible = true;
+  f.session._announcementMsg = { fetch: () => new Promise(() => {}) };
+  f.session._activeAudio = { resource: f.player.resource,
+    completion: { finish: async () => ({ finished: true, reason: 'clean_eof' }), interrupt() {} } };
+  f.setNow(START + 1200000);
+  f.player.state.status = 'idle';
+  f.player.emit('idle');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.heard, [first], 'no next selection while completion checkpoint is pending');
+  release();
+  await f.session._transitionTask;
+  assert.equal(value.occurrences[0].cursor, 1);
+  assert.equal(f.heard.length, 2);
+  assert.notEqual(f.heard[1], first);
+});
+
+test('missing long-form media uses short fallback while preserving the durable retry position', async t => {
+  const f = await fixture(t, { seconds: 1200, showEvent: { ...event, playlistId: 'long-form-hour' } });
+  f.loadPlaylist([...f.getPlaylist(), verifiedRecording({ trackId: 'short-fallback', title: 'Short fallback', likes: 1, dislikes: 0 }, 60)]);
+  f.session._getFreshUrl = async track => track.trackId === 'short-fallback' ? 'https://example.test/short' : null;
+  await f.session._playNext();
+  assert.deepEqual(f.heard, ['short-fallback']);
+  assert.equal(f.value().occurrences[0].cursor, 0);
+  assert.match(f.session.getShowState().playlistShow.fallbackReason, /could not be fetched/);
+});
+
+test('prepared music is revalidated after reclassification, and old paid long recordings are held rather than failed or paid', async t => {
+  const f = await fixture(t);
+  const prepared = await f.session._prepareNextPlayback();
+  const current = f.getPlaylist().find(track => track.trackId === prepared.track.trackId);
+  Object.assign(current, verifiedRecording(current, 1200));
+  assert.equal(f.session._startPrepared(prepared), false);
+  assert.deepEqual(f.heard, []);
+  f.session.setLivePerformanceEvents([]);
+  let releases = 0;
+  f.session.djuke = { release: async () => { releases++; },
+    fail: async () => { throw new Error('Already-paid requests must not be discarded'); } };
+  assert.equal(await f.session._prepareNextPlayback({ record: { requestId: 'legacy-paid' }, track: current }), null);
+  assert.equal(releases, 1);
+});
 
 test('custom ranked rules reach actual audio playback and keep their opening order', async t => {
   const { validateRadioPreset } = await import('../js/radio-playlists.mjs');

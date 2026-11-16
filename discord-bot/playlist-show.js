@@ -11,7 +11,12 @@ export function validatePlaylistShowSnapshot(value) {
       !Array.isArray(state.tracks) || state.tracks.length > 10000 || state.tracks.some(track => !track?.trackId || typeof track.trackId !== 'string') ||
       new Set(state.tracks.map(track => track.trackId)).size !== state.tracks.length ||
       !Number.isSafeInteger(state.cursor) || state.cursor < 0 || state.cursor > state.tracks.length ||
-      !Array.isArray(state.skipped) || state.skipped.some(item => !state.tracks.some(track => track.trackId === item.trackId) || typeof item.reason !== 'string')) {
+      !Array.isArray(state.skipped) || state.skipped.some(item => !state.tracks.some(track => track.trackId === item.trackId) || typeof item.reason !== 'string') ||
+      (state.deferred !== undefined && (!state.tracks.some(track => track.trackId === state.deferred?.trackId) ||
+        typeof state.deferred.reason !== 'string' || !Number.isSafeInteger(state.deferred.retryAt))) ||
+      (state.lastCompleted !== undefined && (!state.tracks.some(track => track.trackId === state.lastCompleted?.trackId) ||
+        typeof state.lastCompleted.playId !== 'string' || !state.lastCompleted.playId ||
+        !Number.isFinite(Date.parse(state.lastCompleted.at))))) {
       throw new Error('Invalid playlist-show occurrence');
     }
     ids.add(state.instanceId);
@@ -80,6 +85,7 @@ export function createPlaylistShow({ store, now = () => Date.now(), random = Mat
     async next(show, catalog) {
       await api.ensure(show, catalog);
       let state = find(show.instanceId);
+      if (state.deferred?.retryAt > now()) return null;
       while (state.cursor < state.tracks.length) {
         const entry = state.tracks[state.cursor];
         const track = catalog.find(item => item.trackId === entry.trackId);
@@ -103,6 +109,26 @@ export function createPlaylistShow({ store, now = () => Date.now(), random = Mat
         await save({ ...snapshot, occurrences: snapshot.occurrences.map(item => item === state ? next : item) });
       });
     },
+    complete(selection, playId) {
+      return exclusive(async () => {
+        const state = find(selection.instanceId);
+        if (!state || typeof playId !== 'string' || !playId) throw new Error('Invalid completed long-form play');
+        if (state.lastCompleted?.playId === playId) return;
+        if (state.cursor !== selection.cursor || state.tracks[state.cursor]?.trackId !== selection.trackId) {
+          throw new Error('Long-form queue position changed before completion');
+        }
+        await save({ ...snapshot, occurrences: snapshot.occurrences.map(item => item !== state ? item :
+          { ...state, cursor: state.cursor + 1, lastCompleted: { playId, trackId: selection.trackId, at: new Date(now()).toISOString() } }) });
+      });
+    },
+    defer(selection, reason) {
+      return exclusive(async () => {
+        const state = find(selection.instanceId);
+        if (!state || state.cursor !== selection.cursor) throw new Error('Playlist-show position changed');
+        await save({ ...snapshot, occurrences: snapshot.occurrences.map(item => item !== state ? item :
+          { ...state, deferred: { trackId: selection.trackId, reason, retryAt: now() + 60_000 } }) });
+      });
+    },
     recordSkip(selection, reason) {
       return exclusive(async () => {
         const state = find(selection.instanceId);
@@ -115,7 +141,8 @@ export function createPlaylistShow({ store, now = () => Date.now(), random = Mat
       if (show.type !== 'playlist_show') return null;
       const state = find(show.instanceId);
       const fallbackReason = error || (!state ? 'Preparing opening snapshot' : !state.tracks.length ? 'Empty eligible pool' :
-        state.cursor >= state.tracks.length ? 'Eligible pool exhausted' : null);
+        state.cursor >= state.tracks.length ? 'Eligible pool exhausted' :
+          state.deferred?.retryAt > now() ? state.deferred.reason : null);
       return { ...(state ? structuredClone(state) : { instanceId: show.instanceId, tracks: [] }),
         lateSnapshot: state ? Date.parse(state.capturedAt) - Date.parse(state.startAt) > 15_000 : false,
         status: fallbackReason ? 'normal_rotation' : 'ready', fallbackReason,
