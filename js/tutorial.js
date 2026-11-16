@@ -1164,6 +1164,7 @@ function _cancelAutoLaunch() {
 }
 
 function _autoLaunch() {
+  if (new URLSearchParams(window.location?.search || '').has('promotion')) return;
   const requested = new URLSearchParams(window.location?.search || '').get('tutorial');
   if (requested === 'payroll') return;
   if (requested === 'splits') {
