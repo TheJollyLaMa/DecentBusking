@@ -304,6 +304,34 @@ existing level. It changes only browser monitoring, never the published track
 or recording. The choice survives monitor stop/start in the same page.
 This cannot center an interface's own direct-monitor output.
 
+**Booth rule (required in both rooms).** A performer hears themselves locally,
+never through the radio. Before the mic can start, both rooms show a **Booth
+setup** card: headphones into the audio interface, interface direct monitor on,
+effects in the interface or mixer before the browser (so the radio hears them),
+and the radio off on every other tab, phone and speaker. The performer must
+choose how they will hear themselves and confirm the radio is off; Publish /
+Start my microphone stays disabled until both are set.
+
+Only two setups are allowed on air, and the backstage room offers only these:
+**Headphones in my interface · direct monitor on** (recommended) or **No
+headphones · unplugged**. Both keep **Hear my input** off, and the backstage
+room locks it. The private practice room also offers **Browser monitor ·
+delayed, practice only** so performers can experiment; only that choice enables
+Hear my input, and switching away stops browser monitoring without stopping the
+mic. Choices are kept for that tab only, so a reload mid-show does not block
+reconnecting. The choice is a self-declaration: it is not sent to the server and
+the operator cannot see it, so confirm it out loud.
+
+**Operator booth check, before T−60** (also shown in the operator card and the
+production desk):
+1. Ask which setup they chose: headphones in the interface with direct monitor
+   on, or unplugged with no headphones. Anything else is not ready for air.
+2. Hear my input is off. The backstage room locks it for shows.
+3. No radio is playing on any device near them (or near your mic).
+4. Listen for doubled or echoing sound. If you hear it, stop and fix the booth
+   before passing the check. Radio delay of several seconds is expected and fine;
+   delay in the performer's own headphones is not.
+
 Choose one monitoring path: direct interface monitoring with **Hear my input**
 off, or browser monitoring with headphones and interface direct monitoring off.
 Browser monitoring requests interactive latency and reports the browser's

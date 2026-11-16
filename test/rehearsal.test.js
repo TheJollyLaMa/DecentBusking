@@ -253,9 +253,10 @@ test('browser mock signs owner invitation and publishes privately without a publ
   } });
   for (const id of ['status', 'create', 'guest', 'minutes', 'create-room', 'join', 'join-room', 'controls',
     'invitation', 'deadline', 'end', 'input', 'devices', 'publish', 'listen', 'leave', 'audio',
-    'delivery', 'mic-state', 'mic-level', 'meter-note', 'next-step', 'monitor-toggle', 'monitor-volume', 'monitor-mix', 'monitor-status']) {
-    elements.set(id, { hidden: false, disabled: false, textContent: '', value: '', dataset: {},
-      setAttribute() {}, addEventListener() {}, pause() {}, play: async () => {}, replaceChildren() {} });
+    'delivery', 'mic-state', 'mic-level', 'meter-note', 'next-step', 'monitor-toggle', 'monitor-volume', 'monitor-mix', 'monitor-status',
+    'booth-mode', 'booth-radio-off', 'booth-status']) {
+    elements.set(id, { hidden: false, disabled: false, textContent: '', value: '', dataset: {}, listeners: {},
+      setAttribute() {}, addEventListener(name, fn) { this.listeners[name] = fn; }, pause() {}, play: async () => {}, replaceChildren() {} });
   }
   elements.get('guest').value = guest.address; elements.get('minutes').value = '60';
   global.document = { getElementById: id => elements.get(id) };
@@ -303,6 +304,19 @@ test('browser mock signs owner invitation and publishes privately without a publ
   assert.match(elements.get('status').textContent, /Next: Start my microphone/);
   assert.match(elements.get('delivery').textContent, /waiting for their microphone/);
   assert.match(elements.get('invitation').textContent, /rehearsal=/);
+  assert.equal(elements.get('publish').disabled, true, 'booth setup gates the microphone');
+  assert.match(elements.get('next-step').textContent, /Set up your booth first/);
+  assert.equal(elements.get('monitor-toggle').disabled, true, 'Hear my input needs the browser fallback');
+  await elements.get('publish').onclick();
+  assert.match(elements.get('status').textContent, /Booth setup: choose how you will hear yourself/);
+  assert.ok(!f.calls.some(c => c[0] === 'connect' && c[3] === true), 'an unready booth never publishes');
+  elements.get('booth-mode').value = 'direct';
+  elements.get('booth-mode').listeners.change();
+  assert.equal(elements.get('publish').disabled, true);
+  elements.get('booth-radio-off').checked = true;
+  elements.get('booth-radio-off').listeners.change();
+  assert.equal(elements.get('publish').disabled, false);
+  assert.match(elements.get('booth-status').textContent, /Booth ready/);
   await elements.get('publish').onclick();
   assert.match(elements.get('status').textContent, /Microphone on/);
   assert.equal(elements.get('publish').disabled, true);

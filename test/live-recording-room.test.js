@@ -34,7 +34,7 @@ test('room explicitly signs and submits v2 on new opt-in and legacy renewal, wit
           signed.push(Buffer.from(params[0].slice(2), 'hex').toString('utf8'));
           return 'fixture-signature';
         } } },
-      bindInputMonitor: () => ({ stop: async () => {} }),
+      bindInputMonitor: () => ({ stop: async () => {} }), bindBoothSetup: () => ({ ready: () => true, problem: () => '' }), SHOW_MODES: ['direct', 'unplugged'],
       bindLiveDirection: () => ({ setSession() {}, dispose() {} }),
       bindLiveBroadcastControls: () => ({ update() {}, dispose() {} }),
       createLivePublisherPresence: () => ({ start() {}, stop() {} }),

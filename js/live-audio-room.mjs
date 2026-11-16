@@ -2,7 +2,8 @@ import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=2026111
 import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from './live-recording-consent.mjs?v=20261114-allocated-stage';
 import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261114-allocated-stage';
 import { performerRoomSign, performerAllocationAccess } from './performer-room.mjs?v=20261114-allocated-stage';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261115-afterparty';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261116-booth';
+import { bindBoothSetup, SHOW_MODES } from './booth-setup.mjs?v=20261116-booth';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
 import { bindLiveDirection } from './live-direction.mjs?v=20261114-allocated-stage';
@@ -30,6 +31,17 @@ const headphones = bindInputMonitor({
   getTrack: () => localTrack,
   output: byId('room-output'), outputDevices: byId('room-output-devices'), outputStatus: byId('room-output-status'), audio,
 });
+const sessionStore = (() => { try { return window.sessionStorage; } catch { return null; } })();
+const booth = bindBoothSetup({
+  mode: byId('room-booth-mode'), radioOff: byId('room-booth-radio-off'), status: byId('room-booth-status'),
+  monitorToggle: byId('room-monitor-toggle'), onMonitorDisallowed: () => headphones.stop(),
+  onChange: () => { if (!actionPending) renderBoothGate(); },
+  storage: sessionStore, key: 'dbusk-booth-setup:live-room', modes: SHOW_MODES,
+});
+function renderBoothGate() {
+  byId('room-publish').disabled = !booth.ready();
+}
+renderBoothGate();
 const direction = bindLiveDirection({
   container: byId('room-direction'), serviceUrl, bookingId,
   onReconnect: reauthorizeRoom,
@@ -144,6 +156,7 @@ const perform = (fn, pending = 'Working…', success = 'Done.') => async event =
     actionPending = false;
     activeAction = null;
     for (const id of actionButtons) byId(id).disabled = false;
+    renderBoothGate();
     byId('room-authorize').disabled = !!session || !booking || !broadcastState?.configured || practiceMode;
     renderFlow();
   }
@@ -446,7 +459,11 @@ byId('room-devices').onclick = perform(async () => {
   byId('room-input').replaceChildren(new Option('Default audio input', ''),
     ...devices.filter(device => device.kind === 'audioinput').map(device => new Option(device.label || 'Audio input', device.deviceId)));
 }, 'Waiting for microphone permission…', 'Inputs ready. Choose your mic/interface, then Publish browser audio.');
-byId('room-publish').onclick = perform(() => connect(true), 'Publishing microphone…',
+byId('room-publish').onclick = perform(() => {
+  const problem = booth.problem();
+  if (problem) throw new Error(problem);
+  return connect(true);
+}, 'Publishing microphone…',
   '✓ Microphone published. Ask the operator to confirm they hear your voice and music.');
 byId('room-monitor').onclick = perform(() => connect(false), 'Connecting to private soundcheck…',
   '✓ Listening connection opened. Check the audio status and player below.');

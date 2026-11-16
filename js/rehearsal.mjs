@@ -1,5 +1,6 @@
 import { loadLiveAudioSdk } from './live-audio-client.mjs';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261114-monitor-mix';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261116-booth';
+import { bindBoothSetup } from './booth-setup.mjs?v=20261116-booth';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 
 const el = id => document.getElementById(id);
@@ -16,6 +17,13 @@ const headphones = bindInputMonitor({
   getTrack: () => localTrack,
   output: el('monitor-output'), outputDevices: el('monitor-output-devices'), outputStatus: el('monitor-output-status'), audio,
 });
+const booth = bindBoothSetup({
+  mode: el('booth-mode'), radioOff: el('booth-radio-off'), status: el('booth-status'),
+  monitorToggle: el('monitor-toggle'), onMonitorDisallowed: () => headphones.stop(),
+  onChange: () => renderControls(),
+  storage: (() => { try { return window.sessionStorage; } catch { return null; } })(), key: 'dbusk-booth-setup:rehearsal',
+});
+el('publish').disabled = !booth.ready();
 const status = (text, error = false) => {
   el('status').textContent = text;
   el('status').dataset.error = String(error);
@@ -25,13 +33,14 @@ function renderControls() {
   el('create').hidden = !!session || !!practiceBookingId;
   for (const id of ['create-room', 'join-room', 'devices', 'publish', 'listen', 'end']) el(id).disabled = busy;
   el('input').disabled = busy || !!localTrack;
-  el('publish').disabled = busy || !!localTrack;
+  el('publish').disabled = busy || !!localTrack || !booth.ready();
   el('publish').textContent = localTrack ? 'Microphone is on' : 'Start my microphone';
   el('leave').disabled = busy || !room;
   el('mic-state').textContent = localTrack ? 'Microphone on' : 'Microphone off';
   el('next-step').textContent = localTrack
     ? 'Try a few notes. Watch your input level and the delivery check.'
-    : 'Choose your input, then start your microphone.';
+    : booth.ready() ? 'Choose your input, then start your microphone.'
+      : 'Set up your booth first: choose how you will hear yourself and turn the radio off.';
 }
 function renderDelivery(fresh = false) {
   const text = session?.role === 'owner'
@@ -190,7 +199,11 @@ el('devices').onclick = action(async () => {
     ...devices.filter(d => d.kind === 'audioinput').map(d => new Option(d.label || 'Audio input', d.deviceId)));
   status(localTrack ? 'Inputs found. Stop audio before changing your input.' : 'Inputs found. Choose yours, then Start my microphone.');
 });
-el('publish').onclick = action(() => connect(true));
+el('publish').onclick = action(() => {
+  const problem = booth.problem();
+  if (problem) throw new Error(problem);
+  return connect(true);
+});
 el('listen').onclick = action(() => connect(false));
 el('leave').onclick = action(async () => {
   await disconnect(true);

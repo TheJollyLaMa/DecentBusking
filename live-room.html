@@ -22,7 +22,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DecentBusking · Your stage</title>
-  <link rel="stylesheet" href="css/live-audio.css?v=20261115-afterparty">
+  <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth">
   <script src="decent.config.js"></script>
 </head>
 <body class="live-audio-room rehearsal-room guided-stage">
@@ -73,6 +73,23 @@
         <span><b aria-hidden="true">♫</b> Publish</span><span aria-hidden="true">→</span>
         <span><b aria-hidden="true">👂</b> Operator hears</span>
       </div>
+      <fieldset id="room-booth" class="booth-setup">
+        <legend>🎧 Booth setup · required before you publish</legend>
+        <ol class="booth-steps">
+          <li>Plug your headphones into your <b>audio interface</b>, not the computer.</li>
+          <li>Turn the interface's <b>direct monitor</b> on. You hear yourself instantly, with no delay.</li>
+          <li>Put effects in your interface or mixer, before the browser, so the radio hears them too.</li>
+          <li><b>Turn the radio off</b> on every other tab, phone and speaker. The radio runs seconds behind you; hearing it while you play sounds doubled.</li>
+        </ol>
+        <label for="room-booth-mode">How will you hear yourself?</label>
+        <select id="room-booth-mode">
+          <option value="">Choose how you will hear yourself…</option>
+          <option value="direct">Headphones in my interface · direct monitor on (recommended)</option>
+          <option value="unplugged">No headphones · unplugged</option>
+        </select>
+        <label class="booth-confirm" for="room-booth-radio-off"><input id="room-booth-radio-off" type="checkbox"> The radio is off on every other tab, phone and device</label>
+        <output id="room-booth-status" role="status" aria-live="polite">Choose how you will hear yourself, then confirm the radio is off everywhere else.</output>
+      </fieldset>
       <label>Microphone / audio interface <select id="room-input" aria-label="Audio input"><option value="">Default audio input</option></select></label>
       <button id="room-devices" type="button">Allow microphone and list inputs</button>
       <div class="room-action-row">
@@ -85,7 +102,7 @@
         <small id="room-meter-note">Local input only; this meter does not verify room delivery.</small>
       </div>
       <fieldset class="self-monitor">
-        <legend>🎧 Your headphone monitor</legend>
+        <legend>🎧 Browser monitor · not used on air</legend>
         <label class="monitor-toggle" for="room-monitor-toggle"><input id="room-monitor-toggle" type="checkbox" aria-describedby="room-monitor-warning"> Hear my input</label>
         <label for="room-monitor-mix">Headphone mix · does not change the broadcast</label>
         <select id="room-monitor-mix">
@@ -95,7 +112,7 @@
         <label for="room-monitor-volume">Headphone monitor level</label>
         <input id="room-monitor-volume" type="range" min="0" max="1" step="0.05" value="0.25">
         <output id="room-monitor-status" role="status" aria-live="polite">Headphone monitor is off.</output>
-        <p id="room-monitor-warning" class="monitor-warning">Publish first. Use headphones and choose one monitor: your interface directly (recommended, Hear my input off), or this browser (interface direct monitoring off). Centered mono mixes mono/stereo input locally; it cannot change your interface's direct-monitor routing. If you hear echo, delay or feedback, uncheck Hear my input. Your microphone keeps broadcasting.</p>
+        <p id="room-monitor-warning" class="monitor-warning">Hear my input stays off for shows: browser monitoring arrives late. Hear yourself through your interface's direct monitor, or play unplugged. You can try the browser monitor in the private practice room.</p>
       </fieldset>
       <output id="room-return-status" class="studio-note" role="status" aria-live="polite">While performing, mute the public radio on other tabs/devices to avoid hearing your delayed live return.</output>
       <div id="room-recording-option" class="room-recording-option" hidden>
@@ -130,6 +147,15 @@
     <fieldset id="room-owner" class="room-role-card" hidden>
       <legend>Operator · clear the stage</legend>
       <p id="room-next-step" class="room-next-step" role="status" aria-live="polite">Listen first, then confirm each real check.</p>
+      <div class="booth-operator">
+        <h3>🎧 Booth check · before T−60</h3>
+        <ul>
+          <li>Ask which booth setup they chose. Only two are allowed on air: <b>headphones in the interface with direct monitor on</b>, or <b>unplugged</b> with no headphones.</li>
+          <li>Hear my input stays off. This room locks it for shows.</li>
+          <li>The radio is off on every device near them, and on yours if your speakers can reach a mic.</li>
+          <li>Listen for doubled or echoing sound. If you hear it, stop and fix the booth before checking.</li>
+        </ul>
+      </div>
       <ol class="room-check-flow" aria-label="Soundcheck and broadcast clearance">
         <li id="room-step60" data-state="pending">
           <span class="room-step-icon" aria-hidden="true">1</span>
@@ -168,13 +194,15 @@
       <details>
         <summary>Quick soundcheck fixes</summary>
         <ul>
-          <li>Wear headphones; browser self-monitoring can arrive late. Direct monitoring through your interface is usually best.</li>
+          <li>Hear yourself through your interface: headphones in the interface, direct monitor on, Hear my input off.</li>
+          <li>Hearing yourself twice or late? The radio or browser monitor is playing somewhere. Turn it off; your mic keeps sending.</li>
+          <li>Headphones won't fit the interface? Use a 3.5 mm to ¼-inch stereo adapter.</li>
           <li>If no input appears, allow microphone access in browser site settings, then reload and choose your mic or interface.</li>
           <li>A mic meter or local monitor does not confirm delivery. Wait for the room's verified delivery and operator checks.</li>
         </ul>
       </details>
     </div>
   </aside>
-  <script type="module" src="js/live-audio-room.mjs?v=20261115-afterparty"></script>
+  <script type="module" src="js/live-audio-room.mjs?v=20261116-booth"></script>
 </body>
 </html>
