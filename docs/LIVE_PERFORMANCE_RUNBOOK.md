@@ -284,9 +284,15 @@ resulting recording is partial. Consent, release approval, pay and escrow/claim
 rules remain unchanged.
 
 Release requires the [reader-first and mirror checks](LIVE_AUDIO_PILOT.md#producer-recovery-358--local-only--undeployed):
-first deploy compatible readers with `LIVE_AUDIO_RECOVERY_ENABLED` unset/false;
-later, with separate approval, explicitly set `LIVE_AUDIO_GRACE_MS=15000` and
-enable recovery writes. Old decrypted readers reject the optional recovery
+first deploy compatible readers with `LIVE_AUDIO_RECOVERY_ENABLED` unset/false
+and explicitly retain `LIVE_AUDIO_GRACE_MS=60000`. The default is 15000 even with
+recovery writes disabled, so omitting the override changes the watchdog before
+producer controls exist. This temporary override is only for reader-only rollout.
+Later, after reader/restore verification, compatible controls and separate
+approval, activate both settings together: `LIVE_AUDIO_GRACE_MS=15000` and
+`LIVE_AUDIO_RECOVERY_ENABLED=true`. Initial unarmed automatic slots retain their
+separate 60-second allowance regardless of the lost-audio grace setting.
+Old decrypted readers reject the optional recovery
 field; the current local mirror client already rejects encrypted live lifecycle
 envelopes, so retain approved hosted-verified storage or approve a separate
 mirror reader upgrade. Never erase the hold journal or bypass

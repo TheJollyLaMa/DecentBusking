@@ -16,6 +16,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
 const address = value => /^0x[0-9a-f]{40}$/i.test(value || '') ? value.toLowerCase() : '';
 const opaque = () => randomBytes(32).toString('hex');
 const START_EARLY_MS = 70 * 60_000;
+const INITIAL_ARM_ALLOWANCE_MS = 60_000;
 
 export function createLiveAudioWatchdogTick({ liveAudio, liveFeedback, log = createRepeatLog() }) {
   let ticking = false;
@@ -659,18 +660,18 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
           }
           const baseline = record.armed ? lossSince || now() : start;
           const rejoinProbe = record.armed && restoredAt.has(b.id) && now() - restoredAt.get(b.id) < LIVE_AUDIO_FRESH_MS;
-          const quiet = expired || now() >= start && !fresh && !rejoinProbe && now() >=
-            (record.recovery?.deadline ?? baseline + graceMs);
+          const quiet = record.armed && (expired || now() >= start && !fresh && !rejoinProbe && now() >=
+            (record.recovery?.deadline ?? baseline + graceMs));
           if (record.armed && allocation?.startedAt && allocation.finishedAt && quiet) {
             // The performer declared the set finished and then went quiet: a normal ending, not an audio fault.
             const next = clone(state);
             endAllocation(next, b, Math.max(lossSince, allocation.finishedAt), 'producer-finished');
             await save(next);
             direction.forget(b.id); recorder?.stopCapture?.(mediaBooking(b));
-          } else if ((!allocation || allocation.startedAt) && (quiet || (!record.armed && now() - start >= graceMs))) {
+          } else if ((!allocation || allocation.startedAt) && (quiet || (!record.armed && now() - start >= INITIAL_ARM_ALLOWANCE_MS))) {
             await cancel(b, record.armed
               ? `Live performance cancelled: authorized audio recovery deadline expired (${graceMs / 1000} seconds plus any explicit producer hold). Performer fee is unchanged.`
-              : `Live performance cancelled: the slot was not armed within ${graceMs / 1000} seconds. Performer fee is unchanged.`);
+              : `Live performance cancelled: the slot was not armed within ${INITIAL_ARM_ALLOWANCE_MS / 1000} seconds. Performer fee is unchanged.`);
           } else startMonitor(b);
         }
       }

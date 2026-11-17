@@ -227,12 +227,13 @@ test('packets arriving during the public-listener suspension cannot leak private
 });
 
 test('reader-first writer gate leaves old checkpoints unchanged; explicit grace override remains available', async t => {
-  const f = await fixture(t, { recoveryEnabled: false, graceMs: 20000 });
+  const f = await fixture(t, { recoveryEnabled: false, graceMs: 60000 });
   await f.drop();
   await assert.rejects(f.command(f.owner, 'recovery-hold', { additionalMs: 1000 }), e => e.status === 503);
   assert.equal(f.room().recovery, undefined);
-  f.at(START + 19999); await f.tick(); assert.equal(f.room().cancelledAt, undefined);
-  f.at(START + 20000); await f.tick(); assert.equal(f.room().cancelledAt, START + 20000);
+  f.at(START + 15000); await f.tick(); assert.equal(f.room().cancelledAt, undefined);
+  f.at(START + 59999); await f.tick(); assert.equal(f.room().cancelledAt, undefined);
+  f.at(START + 60000); await f.tick(); assert.equal(f.room().cancelledAt, START + 60000);
 });
 
 test('a hold cannot extend protected authorized airtime, and the producer countdown is capped at that end', async t => {

@@ -615,14 +615,24 @@ test('cancelled room persists the bounded slate, ten-minute ad window and origin
   f.at(START + 20 * 60_000); assert.equal((await f.service.state(f.b.id)).policy, null);
 });
 
-test('a funded pilot with missed soundchecks still cancels after fifteen seconds instead of leaving radio paused', async () => {
-  const f = await setup();
-  f.at(START + 15_000);
-  await f.service.tick();
-  assert.equal(f.persisted().rooms.length, 1);
-  assert.equal(f.cancellations.length, 1);
-  assert.match(f.cancellations[0].reason, /not armed within 15 seconds/);
-  assert.equal((await f.service.state(f.b.id)).policy.mode, 'fault');
+test('initial unarmed automatic slots retain sixty seconds independently of lost-audio recovery grace', async () => {
+  for (const graceMs of [undefined, 2000, 60_000]) {
+    const f = await setup({ graceMs });
+    for (const offset of [15_000, 59_999]) {
+      f.at(START + offset);
+      await f.service.tick();
+      assert.equal(f.cancellations.length, 0, `initial arming remains open at ${offset}ms with grace ${graceMs}`);
+      assert.equal(f.persisted().rooms[0].cancelledAt, undefined);
+    }
+    f.at(START + 60_000);
+    await f.service.tick();
+    assert.equal(f.cancellations.length, 1);
+    assert.equal(f.persisted().rooms[0].cancelledAt, START + 60_000);
+    assert.match(f.cancellations[0].reason, /not armed within 60 seconds/);
+    assert.equal((await f.service.state(f.b.id)).policy.mode, 'fault');
+    await f.service.tick();
+    assert.equal(f.cancellations.length, 1);
+  }
 });
 
 test('restart does not invent healthy audio or reset an expired disconnect deadline', async () => {

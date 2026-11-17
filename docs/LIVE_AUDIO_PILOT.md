@@ -397,7 +397,8 @@ Server **ON-AIR** requires fresh decoded audio **and advancing received RTP pack
 **#358 policy, UNDEPLOYED:** an unfinished live set gets **15 seconds** to recover
 verified delivered audio, unless the producer explicitly grants extra time. At
 the authorized deadline it follows the existing irreversible cancellation path.
-An unarmed automatic slot also expires after the configured grace. A durable,
+An unarmed automatic slot retains its separate **60-second initial-arm
+allowance**, independent of `LIVE_AUDIO_GRACE_MS`. A durable,
 observed loss deadline survives restart **without an extra rejoin extension**.
 A previously healthy checkpoint is not proof of when packets stopped during an
 unobserved process gap: the existing bounded receiver probe and new observed
@@ -449,8 +450,13 @@ partial. Publication still needs the existing performer release approval.
 
 **Reader and mirror compatibility / deployment blocker:**
 
-1. Deploy compatible readers first with recovery writes disabled. Old version-1
-   rooms without `recovery` restore unchanged. Optional `recovery` has only
+1. Deploy compatible readers first with recovery writes disabled
+   (`LIVE_AUDIO_RECOVERY_ENABLED` unset/false) and explicitly retain
+   `LIVE_AUDIO_GRACE_MS=60000` for this reader-only phase. The code defaults to
+   15000 even when recovery writes are disabled: omitting this override would
+   activate the shorter lost-audio watchdog before producer controls are enabled.
+   The temporary 60000 value is a rollout safeguard, not the final #358 policy.
+   Old version-1 rooms without `recovery` restore unchanged. Optional `recovery` has only
    validated `revision`, `usedMs` (0–60000), `graceMs`, `deadline` and `filler`.
    It shares the existing bounded broadcast command receipts. Tokens, messages,
    ingress and financial records are not added to this journal.
@@ -458,16 +464,20 @@ partial. Publication still needs the existing performer release approval.
    The older strict decrypted room allowlist **rejects** the new optional field.
    After enabling writes, rollback must retain a compatible reader; never delete
    recovery facts or restore an older checkpoint to make rollback work.
-3. Explicitly checked current `checkpoint-mirror-client.js`: its allowlist
+3. Explicitly checked repository `checkpoint-mirror-client.js`: its allowlist
    rejects **both existing and new encrypted live-audio envelopes**, before any
-   Kubo import. This patch does not silently widen that deployed contract.
+   Kubo import. The running mirror's source and current hosted-mode configuration
+   were not inspected; this is source-contract evidence, not deployment evidence.
    Retain an already approved `LIVE_AUDIO_CHECKPOINT_MODE=hosted-verified`
    lifecycle configuration (latest encrypted CID/content readback), or obtain a
    separately approved reader-first mirror upgrade before using mirrored mode.
    Other financial/paid journals keep all existing mirror requirements.
-4. Only after reader/restore verification and separate deployment approval,
-   explicitly configure `LIVE_AUDIO_GRACE_MS=15000` and enable recovery writes.
+4. Only after reader/restore verification, compatible producer controls and
+   separate deployment approval, activate both settings together:
+   `LIVE_AUDIO_GRACE_MS=15000` and `LIVE_AUDIO_RECOVERY_ENABLED=true`.
    Existing recording-frame-time reader-first rollout remains separate.
+   `radio-predeploy.js` protects playback/recording drain boundaries; it does not
+   verify compatible readers or replace these reader-first checks.
 
 **Nothing here is deployed. Render build capacity is exhausted; deployment is
 BLOCKED.** Do not bypass `node radio-predeploy.js`. No restart, environment
