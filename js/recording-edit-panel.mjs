@@ -13,6 +13,8 @@ export function initRecordingEditPanel({ document = globalThis.document, window 
   let returnFocus, closing = false, closeTimeout, openingTimeout, searchTimer;
   let pendingNavigation, pendingRequestId = '', frameRequestId = '', frameReady = false, sourceKey = '';
   let address = '', eligible = false, nextOffset = null, songs = [], listAbort, requestVersion = 0;
+  let closeCompletion;
+  function settleClose(ok) { closeCompletion?.(ok); closeCompletion = null; }
 
   function setOpen(open) {
     panel.classList.toggle('is-open', open);
@@ -23,6 +25,7 @@ export function initRecordingEditPanel({ document = globalThis.document, window 
     document.dispatchEvent(new window.CustomEvent('recording-editor-toggled', { detail: { open } }));
     if (open) closeButton.focus();
     else {
+      settleClose(true);
       clearTimeout(closeTimeout);
       closing = false;
       returnFocus?.focus?.();
@@ -115,6 +118,7 @@ export function initRecordingEditPanel({ document = globalThis.document, window 
       pendingNavigation = null;
       pendingRequestId = '';
       closeButton.disabled = false;
+      settleClose(false);
       status.textContent = 'The studio has not confirmed the draft save. Keep it open and retry closing after the current action finishes.';
     }, 10000);
   }
@@ -162,6 +166,13 @@ export function initRecordingEditPanel({ document = globalThis.document, window 
     if (!frameReady) { clearFrame(); setOpen(false); return; }
     requestFlush();
   });
+  document.addEventListener('decentbusking:close-recording-editor', event => {
+    if (typeof event.detail?.complete !== 'function') return;
+    if (!panel.classList.contains('is-open')) { event.detail.complete(true); return; }
+    if (closing) { event.detail.complete(false); return; }
+    closeCompletion = event.detail.complete;
+    closeButton.click();
+  });
   search.addEventListener('input', () => {
     listAbort?.abort();
     requestVersion++;
@@ -194,6 +205,7 @@ export function initRecordingEditPanel({ document = globalThis.document, window 
     pendingRequestId = '';
     closing = false;
     if (event.data.type === 'decentbusking:recording-draft-flush-failed') {
+      settleClose(false);
       pendingNavigation = null;
       status.textContent = 'The draft could not be saved. Keep the studio open and retry.';
     } else if (pendingNavigation) {

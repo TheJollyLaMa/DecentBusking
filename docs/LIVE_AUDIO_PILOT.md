@@ -116,7 +116,9 @@ attributed artist wallet (not a current ERC-721 holder lookup) is the edit
 authority. Catalog audio must be a directly addressed IPFS file, at most 100 MB
 and 120 minutes, and must decode successfully into bounded 48 kHz mono segments.
 The draft starts with three or four named cuts, can be adjusted to three or four,
-and autosaves to the existing encrypted recording journal. Closing or switching
+and autosaves **on this browser/device**, scoped to wallet, NFT/booking and source
+CID. Local drafts are not synchronized across devices; blocked/full site storage
+is an explicit error and prevents a successful close/switch flush. Closing or switching
 the panel flushes pending edits before it hides or replaces the room. A full-set
 approval and a cut approval are separate wallet signatures; only approved cuts
 are exported as new MP3 releases. Existing NFT/source media are unchanged, the
@@ -126,12 +128,34 @@ The right-edge Studio tab is shown after the connected header wallet is verified
 as the credited artist/creator of at least one editable catalog song NFT. Its
 search and pagination show only that wallet's artist-attributed audio, not tokens
 it merely holds or collaborator credits. NFT-card **Edit / split** still opens
-the panel. Embedded authorization reuses the header signer without another
-wallet connection; scoped access and publication signatures remain mandatory.
-Wallet changes clear the panel and discard stale catalog/session responses.
+the panel. It reuses the header wallet without another connection or opening
+signature. Preview, cut editing, draft saving and “decide later” are unsigned.
+Only final full-set/cut confirmation requests **one publication signature**;
+artist proof, exact source/sample count, origin, revision, choice and cut contents
+are verified before any derivative upload or journal write. Existing v1 approval
+messages and deterministic release IDs are retained; identical pending retries
+reuse the signed approval and cannot create duplicate releases. Existing scoped
+access routes remain compatible with older clients.
+Wallet changes clear the panel and discard stale preview/signature responses.
 The standalone room remains compatible, but the panel has no dedicated-room link.
 
-Visible loading covers room authorization, waveform preparation and original
+`recording-preview` exposes only verified public source analysis and a revision
+counter, not previous server drafts, consent signatures or release history.
+Catalog analysis streams bounded 48 kHz PCM without pinning chunks or saving the
+journal. Before decoding, the original is streamed to a private, bounded
+temporary file (100 MB maximum), then removed on success or failure. MP4/M4A
+files can store metadata after their audio; decoding a non-seekable input pipe
+fails for these otherwise valid recordings. Both preview and approved
+publication use the seekable file, with network input protocols disabled in
+the decoder. There is one concurrent analysis, a 15-second new-analysis admission
+interval and a four-entry/ten-minute memory cache; new analysis pauses during
+live capture/deployment. Signed publication uses the existing encrypted journal,
+bounded exports and independent admin mint queue. Gateway download preserves
+configured access-token queries and can fall back to another gateway for the
+same immutable CID; diagnostics contain host/status or classified error codes,
+never provider URLs, tokens or raw exceptions.
+
+Visible loading covers source checks, waveform preparation and original
 audio metadata. Preview failures and slow loads offer a retry without altering
 the saved draft. Waveform boundaries support pointer/touch dragging, arrow keys,
 Shift-arrow one-second steps and Home/End. Shared cuts move both adjacent song
@@ -143,8 +167,19 @@ inside the panel instead of floating over the editing controls.
 Studio polish reuse: adapt the existing Busking editor/model, catalog paging,
 header wallet and DBusker host at `3de791a0b61d9bc751bf181d00917f5e80b3bd69`;
 no separate editor or assistant instance is introduced. Receiving-app checks
-cover creator-only discovery, stale wallet/search results, durable close/switch
+cover creator-only discovery, stale wallet/search results, local close/switch
 flushes, shared-cut sample bounds and longer catalog save/approval responses.
+Unsigned-flow repair adapts those same `e092966` modules and the existing v1
+publication proof rather than introducing a second editor or approval protocol.
+Tests exercise trailing-metadata MP4 decoding without writes, no-write preview,
+one-signature confirmation, wrong artist/origin,
+restored proofs, idempotent retries and explicit local-storage failures. A real
+artist's final confirmation and production mint are not established by fixtures.
+
+Release the backend reader/routes first, verify the hosted unsigned preview, and
+only then publish the new editor assets. Legacy editor routes stay available.
+Once a new publication proof has entered the journal, rollback must retain the
+new proof reader; an older worker cannot validate that authorization variant.
 
 The existing admin panel still requires a genuine owner-signed mint and verified
 chain reconciliation. A durable replay-pending marker prioritizes the approved
@@ -210,9 +245,11 @@ separately from booking acceptance or financial authorization.
 
 The invitation and Profile card link to `live-room.html?booking=<id>` even
 before acceptance/funding. That URL grants no access. Before T-70 it embeds
-the shared rehearsal room (below); the booking reference only changes the welcome
+the private rehearsal client (below); a host must have accepted a live invitation
+or be an administrator. The booking reference only changes the welcome
 text. Practice uses no financial signature, radio arming or soundcheck credit.
-A closing session can take 35 seconds to clear before a new one opens. Provider failure/restart cleanup limitations below still apply.
+Closing-room tombstones do not block other independent rehearsals. Provider
+failure/restart cleanup limitations below still apply.
 Private checkpoints retain encrypted latest-state readback verification. Their
 bounded 45-second write deadline allows the storage helper's 15-second gateway
 attempts to finish; consent/end requests allow 60 seconds, while ordinary audio
@@ -252,27 +289,40 @@ It requires the existing owner wallet, allowed website origin, LiveKit URL/key/s
 Pinata JWT, and dedicated `LIVE_AUDIO_STORAGE_KEY`; `LIVE_AUDIO_ENABLED` and
 `LIVE_AUDIO_OBS_ENABLED` can remain false. Confirm the free LiveKit participant quota and
 disable egress/recording in the project; the rehearsal requests neither recording nor OBS.
-### Shared rehearsal room
+### Independent DHearse rehearsal rooms
 
-The rehearsal room belongs to nobody. Anyone with `/rehearsal.html` signs in with
-any wallet and lands in the one running session; the first sign-in opens it. Up to
-six people (plus the worker receiver) practise together and hear each other, with
-normal internet delay between players. The signature is origin-bound consent to private
-live audio with whoever is in the room; it is not a transaction or payment.
+Administrators/engineers and wallets with **any previously accepted live invitation**
+can start a separate room, without a current booking, funding or show window.
+Cancelled/completed accepted invitations still qualify. Server-side eligibility
+uses the persisted booking acknowledgement, not NFT ownership or a claimed role;
+unavailable history produces an explicit error. The header wallet's DHearse tab
+uses the same check. `/rehearsal.html` is not a global shared room.
 
-- **Lost page:** open the same link and sign in again. You rejoin the running session.
+Each creation allocates a different random 256-bit rehearsal ID. The private
+invitation is `rehearsal.html#room=<id>`: the fragment avoids ordinary URL/referrer
+logging, and the page sets `no-referrer`. Treat this unguessable ID as an invite
+capability. It is not listed by public status/eligibility APIs. Any wallet holding
+the link can sign room-, action-, origin- and nonce-bound consent, including
+bandmates without bookings. There is no walletless or synchronized remote-band mode.
+Each room has up to six people plus its independent receiver; existing overall
+64-pass and 100-checkpoint-room limits remain. Provider project quotas can reject
+additional connections; this is not a new tested audience-capacity claim.
+
+- **Lost page:** open that rehearsal's invitation and sign again while it is active.
 - **Passes** stay valid while the page checks in. An abandoned page loses access after
   five idle minutes. **Stop audio** keeps you signed in; closing the page signs you out.
 - **Sessions** close when everyone has left, after four hours, after a worker restart,
-  or when an engineer closes them. Signing in afterwards starts a new session.
+  or when its host/an engineer closes it. Old links then expire; an eligible host
+  starts another rehearsal with a new link.
 - **Engineers** (`REHEARSAL_ENGINEER_WALLETS`, comma-separated; default
   thejollylama.eth and decentagency.eth, plus `MINT_OWNER_WALLET`) can remove someone
-  for the rest of that session, or close it for everyone. An engineer is not the owner.
+  for the rest of that room, or close it for everyone. The room's host has those
+  controls in their own room only. Guests cannot manage rooms.
 - **Delivery check** is per person: the worker receiver confirms each person's audio
   reaches the room. It is not proof that anyone heard it.
 
 The lifecycle checkpoint is AES-GCM encrypted on Pinata with an allowlist of room ID,
-expiry, ended time and wallets removed from that session (legacy rooms may also hold a
+host wallet, expiry, ended time and wallets removed from that session (legacy rooms may also hold a
 guest wallet or booking ID); no media, tokens, signatures or credentials are
 stored. It has a distinct name and authenticated-data domain and does not require the
 local mirror, allowing unattended hosted operation. Saves require a successful latest
@@ -295,6 +345,32 @@ explicitly accepted; no claim of provider-enforced cleanup is made.
 Validation uses mocked browser transport and signed test wallets; it does not demonstrate
 real audio, consent by the invited person, or an actual room. Live listening requires
 both people to participate after deployment and enablement.
+
+The right-side stack is Archive, creator-only Studio, eligible-host DHearse and an
+image-based BigNuten placeholder. Its tabs mirror the left-side tabs: 44px wide,
+6px outer corners, aligned stack tops and the same compact mobile sizing.
+The same rehearsal client runs in the side panel
+using the header signer, and in a popout. Closing/switching waits for microphone
+shutdown acknowledgement; moving to a popout stops embedded audio first and passes
+only the private invitation. During that handoff the previous idle pass is retained
+for at most five minutes so the room does not close before the new page signs in.
+If audio shutdown succeeds but server sign-out cannot be confirmed, the panel
+closes with an explicit warning about that five-minute idle expiry, not a false
+claim that the server session ended.
+Wallet changes stop/unload the embedded room. Studio draft-flush failure blocks a
+panel switch; slow/failed room shutdown keeps the rehearsal visible for retry.
+Opening embedded DHearse mutes this tab's main radio, without automatically unmuting
+it on exit; booth confirmation still covers every other tab/device.
+
+Reuse: adapt this repository's `rehearsal.js`, `rehearsal-store.js`, `rehearsal.mjs`
+and editor/Archive drawers at `e092966`; no second audio transport is introduced.
+BigNuten is only an honest placeholder, with no health data, storage or sync.
+Its unmodified `img/BigNuten.png` comes from `BigNuten_Vanilla` image commit
+`4e48373`; the donor's `d2e0d4e` NOTICE specifies **CC BY 4.0 for artwork**
+(Apache-2.0 covers code). The artwork license and NOTICE are shipped beside the
+image and the placeholder visibly credits The Jolly LaMa / A Decent Agency.
+Local tests cover isolated invitations, historic eligibility, per-room privileges,
+shutdown acknowledgements and popout transfer. These are not a real band rehearsal.
 
 ## Private room and controls
 

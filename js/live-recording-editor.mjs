@@ -1,4 +1,4 @@
-import { roomRequest } from './live-audio-client.mjs?v=20261116-studio-polish';
+import { roomRequest } from './live-audio-client.mjs?v=20261117-unsigned-studio';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { catalogRecordingReleaseApprovalMessage, recordingReleaseApprovalMessage,
   moveRecordingBoundary, recordingBoundaryRange, validateCatalogRecordingDraft, validateRecordingDraft } from './live-recording-edit.mjs?v=20261116-studio-polish';
@@ -14,8 +14,8 @@ const status = byId('recording-edit-status');
 const workspace = byId('recording-edit-workspace');
 const audio = byId('recording-edit-audio');
 const canvas = byId('recording-edit-waveform');
-let session, signer, wallet = '', state, draft, busy = false, generation = 0, previewEnd = 0;
-let dirty = false, editVersion = 0, saveTimer, saveInFlight;
+let signer, wallet = '', state, draft, busy = false, generation = 0, previewEnd = 0;
+let dirty = false, saveTimer, pendingPublication;
 let mediaPending = false, mediaTimer, activeDrag = null;
 
 const report = message => {
@@ -27,7 +27,7 @@ if (embedded) {
   document.body.classList.add('recording-edit-embedded');
 }
 if (!catalogMode) {
-  status.textContent = 'Connect the wallet booked for this performance to check its authenticated recording journal.';
+  status.textContent = 'Connect the booked performer wallet to preview and edit without signing.';
   byId('recording-edit-connect').textContent = 'Connect booked performer wallet';
   byId('recording-edit-intro').textContent = 'Preview the preserved original already covered by your recording consent. Keep it as one release, divide it into songs, or decide later. Each release needs your explicit approval before it enters the admin mint queue.';
 }
@@ -39,7 +39,7 @@ if (catalogMode) {
 
 function markDraftChanged() {
   dirty = true;
-  editVersion++;
+  pendingPublication = null;
   clearTimeout(saveTimer);
   saveTimer = null;
   if (activeDrag) return;
@@ -269,7 +269,9 @@ function renderReleases() {
   list.replaceChildren();
   if (!state.releases.length) {
     const item = document.createElement('li');
-    item.textContent = 'No release has been approved or queued.';
+    item.textContent = state.previewOnly
+      ? 'Unsigned preview does not load previous private drafts or release history. Final confirmation returns the release journal.'
+      : 'No release has been approved or queued.';
     list.append(item);
     return;
   }
@@ -300,7 +302,7 @@ function renderState(next) {
     : state.incomplete ? 'Original recording preview · partial capture' : 'Original recording preview';
   byId('recording-edit-facts').textContent = `${state.durationSeconds.toFixed(3)}s · ${state.sourceSamples.toLocaleString()} mono samples at ${state.sampleRate} Hz · source CID ${state.sourceCid}.${state.catalogSource ? ` · NFT ${state.catalogSource.nftId}` : ''}`;
   byId('recording-edit-rights').textContent = catalogMode
-    ? 'This edit is authorized by the artist wallet recorded in the verified NFT catalog, and is bound to this NFT identity and source CID. The original token and source audio remain unchanged. A full-set release and cut releases require separate approvals; minting still requires independent admin review. No collaborator split is inferred.'
+    ? 'Only the credited artist can confirm publication. Preview and local editing need no signature. The original NFT and audio remain unchanged; full-set and cut releases need separate final approvals and independent admin mint review. No collaborator split is inferred.'
     : state.incomplete
     ? 'This capture is marked partial/interrupted. The original source has already been stored on public IPFS under your recording consent; it remains unchanged. Every release approval signature states that this capture is incomplete.'
     : 'The original recording and its source CIDs remain unchanged. After minting, edits are linked new releases—not changes to an existing token. The booked performer wallet remains the artist, royalty receiver and tip wallet; no collaborator split is inferred.';
@@ -324,7 +326,9 @@ function renderState(next) {
     ? 'Approve 3–4 named cuts for mint review' : 'Approve split songs for mint review';
   renderSongs();
   renderReleases();
-  report(state.decision === 'deferred'
+  byId('recording-edit-save').textContent = 'Save draft on this device';
+  report(state.previewOnly ? 'Original loaded. Preview and edit without signing. Drafts stay on this device; only final publication confirmation asks for a signature.'
+    : state.decision === 'deferred'
     ? 'Your last choice was “decide later.” No release is submitted until you approve it here.'
     : 'Recording loaded from the durable journal. The original audio is public on IPFS under your recording consent; no new song export or mint request is created until you approve a release.');
 }
@@ -367,57 +371,44 @@ async function connect() {
   }
   wallet = (await signer.getAddress()).toLowerCase();
   if (generation !== generationAtStart) throw new Error('Wallet changed; select the recording again.');
-  report('Checking the artist and original recording…');
-  const challenge = await roomRequest(serviceUrl, 'challenge', catalogMode
-    ? { nftId: catalogNftId, wallet, scope: 'catalog-recording-edit' }
-    : { bookingId, wallet, scope: 'recording-edit' });
-  if (generation !== generationAtStart) throw new Error('Wallet changed; reconnect to the booked performer account.');
-  report('Authorize access to this recording in your wallet. This is a signature, not a transaction.');
-  const signature = await signer.signMessage(challenge.message);
-  if (generation !== generationAtStart) throw new Error('Wallet changed; reconnect to the booked performer account.');
-  report('Loading the recording and building its waveform. Longer songs can take a little while…');
-  const authorized = await roomRequest(serviceUrl, 'session', { challengeId: challenge.challengeId, signature });
+  report('Loading the original recording and waveform. No signature is needed to edit…');
+  const preview = await roomRequest(serviceUrl, 'recording-preview',
+    { ...(catalogMode ? { nftId: catalogNftId } : { bookingId }), wallet });
   if (generation !== generationAtStart) throw new Error('Wallet changed; select the recording again.');
-  if (authorized.role !== 'performer') {
-    throw new Error(catalogMode ? 'Only the artist wallet recorded in this NFT may open its edit room.'
-      : 'Only the booked performer can open this edit room.');
+  if (!preview.available || preview.wallet?.toLowerCase() !== wallet || !preview.previewOnly ||
+      !Number.isSafeInteger(preview.journalRevision) || preview.journalRevision < 0) {
+    throw new Error('The original recording preview is unavailable. Retry without signing.');
   }
-  session = authorized;
-  renderState(session.state);
+  const key = draftStorageKey(preview);
+  let saved;
+  try { saved = window.localStorage.getItem(key); }
+  catch { throw new Error('This browser blocked local draft storage. Allow site storage and retry; no signature or publication was requested.'); }
+  if (saved) {
+    const stored = JSON.parse(saved);
+    if (stored.schema !== 1) throw new Error('This saved draft uses an unsupported format. Keep it for recovery before starting a new draft.');
+    preview.draft = (catalogMode ? validateCatalogRecordingDraft : validateRecordingDraft)(stored.draft, preview.sourceSamples);
+  }
+  renderState(preview);
+}
+
+function draftStorageKey(recording = state) {
+  return `decentbusking:recording-draft:v1:${wallet}:${catalogNftId || bookingId}:${recording.sourceCid}`;
 }
 
 async function saveDraft({ quiet = false } = {}) {
   clearTimeout(saveTimer);
   saveTimer = null;
   if (!dirty) return state;
-  if (saveInFlight) {
-    await saveInFlight;
-    return dirty ? saveDraft({ quiet }) : state;
-  }
-  if (!session?.token || !state?.available) throw new Error('Reconnect the authorized wallet before saving this draft.');
-  const version = editVersion;
-  const saveGeneration = generation;
+  if (!signer || !state?.available) throw new Error('Reconnect the header wallet before saving this draft.');
   const next = (catalogMode ? validateCatalogRecordingDraft : validateRecordingDraft)(
     { ...structuredClone(draft), revision: state.draft.revision + 1 }, state.sourceSamples);
-  report(quiet ? 'Autosaving this durable split draft…' : 'Saving this durable split draft…');
-  const action = catalogMode ? 'catalog-recording-edit-save' : 'recording-edit-save';
-  saveInFlight = roomRequest(serviceUrl, 'control', { action, draft: next }, session.token)
-    .then(saved => {
-      if (generation !== saveGeneration) throw new Error('Wallet changed; the previous draft is not being opened.');
-      state = saved;
-      if (editVersion === version && !activeDrag) {
-        renderState(saved);
-        report('Draft saved durably. No audio export or mint request was created.');
-      } else {
-        dirty = true;
-        if (!saveTimer && !activeDrag) saveTimer = setTimeout(() => {
-          void saveDraft({ quiet: true }).catch(error => report(error.message || 'Draft autosave failed; keep this editor open and retry.'));
-        }, 800);
-      }
-      return saved;
-    })
-    .finally(() => { saveInFlight = null; });
-  return saveInFlight;
+  try { window.localStorage.setItem(draftStorageKey(), JSON.stringify({ schema: 1, draft: next })); }
+  catch { throw new Error('This draft could not be saved on this device. Keep the studio open and allow site storage or free space before retrying.'); }
+  state = { ...state, draft: next };
+  draft = structuredClone(next);
+  dirty = false;
+  if (!quiet) report('Draft saved on this device. No signature, export or mint request was created.');
+  return state;
 }
 
 async function approve(choice) {
@@ -429,29 +420,35 @@ async function approve(choice) {
       throw new Error('A catalog split needs three or four named cuts. Add or remove cuts before approval.');
     }
     if (dirty) await saveDraft();
-    const approvalDraft = choice === 'defer' ? null : state.draft;
-    const issuedAt = Date.now();
-    const message = catalogMode
-      ? catalogRecordingReleaseApprovalMessage({ nftId: state.catalogSource.nftId, wallet, origin: location.origin,
-        sourceCid: state.sourceCid, sourceSamples: state.sourceSamples, choice, draft: approvalDraft, issuedAt })
-      : recordingReleaseApprovalMessage({ bookingId, wallet, origin: location.origin,
-        sourceCid: state.sourceCid, sourceSamples: state.sourceSamples, choice, draft: approvalDraft,
-        issuedAt, incomplete: state.incomplete });
-    report(choice === 'defer' ? 'Confirm “decide later” in your wallet…' : 'Review the complete release choice in your wallet. No transaction is being requested…');
-    const signature = await signer.signMessage(message);
+    if (choice === 'defer') {
+      report('Your draft stays on this device. No signature, export or mint request was created.');
+      return;
+    }
+    const approvalDraft = (catalogMode ? validateCatalogRecordingDraft : validateRecordingDraft)(
+      { ...draft, revision: state.journalRevision + 1 }, state.sourceSamples);
+    const proposal = { ...(catalogMode ? { nftId: catalogNftId } : { bookingId }), wallet,
+      sourceCid: state.sourceCid, sourceSamples: state.sourceSamples, choice, draft: approvalDraft };
+    const fingerprint = JSON.stringify(proposal);
+    if (!pendingPublication || pendingPublication.fingerprint !== fingerprint ||
+        Date.now() - pendingPublication.command.issuedAt > 240000) {
+      const issuedAt = Date.now();
+      const message = catalogMode
+        ? catalogRecordingReleaseApprovalMessage({ ...proposal, origin: location.origin, issuedAt })
+        : recordingReleaseApprovalMessage({ ...proposal, origin: location.origin, issuedAt, incomplete: state.incomplete });
+      report('Confirm the finished edit in your wallet. This single signature approves publication, not a mint or payment transaction…');
+      const signature = await signer.signMessage(message);
+      if (generation !== actionGeneration) throw new Error('Wallet changed; the edit was not submitted.');
+      pendingPublication = { fingerprint, command: { ...proposal, issuedAt, signature } };
+    }
     if (generation !== actionGeneration || wallet.toLowerCase() !== (await signer.getAddress()).toLowerCase()) {
       throw new Error('Wallet changed; the approval was not submitted.');
     }
-    report(choice === 'defer' ? 'Saving your deferred decision…' : 'Preparing bounded MP3 release(s). If this request times out, refresh the journal before retrying.');
-    const result = await roomRequest(serviceUrl, 'control', {
-      action: catalogMode ? 'catalog-recording-edit-approve' : 'recording-edit-approve',
-      choice, issuedAt, signature,
-    }, session.token);
+    report('Submitting the signed edit and preparing bounded releases. Retrying an unchanged confirmation reuses this approval and cannot duplicate a release.');
+    const result = await roomRequest(serviceUrl, 'recording-publish', pendingPublication.command);
     if (generation !== actionGeneration) throw new Error('Wallet changed; select the recording again to check the release journal.');
-    renderState(result);
-    report(choice === 'defer'
-      ? 'Saved. Nothing was exported or added to the mint queue; return here to resume.'
-      : 'Your approved release(s) are queued for separate admin mint review. The original source is preserved.');
+    pendingPublication = null;
+    renderState({ ...result, journalRevision: result.draft.revision });
+    report('Your confirmed release(s) are queued for separate admin mint review. The original NFT and audio remain unchanged.');
   } catch (error) {
     report(error.message || 'Recording release action failed; reload the durable journal before retrying.');
   } finally { setBusy(false); }
@@ -510,7 +507,7 @@ audio.addEventListener('error', () => {
 window.addEventListener('resize', drawWaveform);
 window.addEventListener('pagehide', () => { audio.pause(); });
 function invalidateWallet() {
-  generation++; session = null; signer = null; wallet = ''; state = null; draft = null;
+  generation++; signer = null; wallet = ''; state = null; draft = null; pendingPublication = null;
   dirty = false; clearTimeout(saveTimer);
   activeDrag = null;
   audio.pause();

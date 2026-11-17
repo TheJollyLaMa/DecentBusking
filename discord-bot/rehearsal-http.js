@@ -24,7 +24,8 @@ export async function handleRehearsalRequest(request, response, { service, allow
       if (Buffer.byteLength(text) > 8192) throw new Error('Request too large');
     }
     const input = JSON.parse(text || '{}');
-    if (url.pathname === '/api/private-rehearsal/challenge') send(200, await service.challenge(input, origin));
+    if (url.pathname === '/api/private-rehearsal/eligibility') send(200, await service.eligibility(input.wallet));
+    else if (url.pathname === '/api/private-rehearsal/challenge') send(200, await service.challenge(input, origin));
     else if (url.pathname === '/api/private-rehearsal/session') send(200, await service.authorize(input, origin));
     else if (url.pathname === '/api/private-rehearsal/control') {
       const token = String(request.headers.authorization || '').replace(/^Bearer\s+/i, '');

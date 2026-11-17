@@ -210,6 +210,119 @@ test('catalog cuts require artist-bound NFT source evidence, three named cuts an
   assert.ok(submissions.every(release => release.approvalSignature));
 });
 
+test('unsigned catalog preview makes no writes; one final signature binds cuts, survives restore and cannot duplicate releases', async () => {
+  const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
+  const source = { nftId: `8453:0x${'1'.repeat(40)}:9`, chainId: 8453,
+    contractAddress: `0x${'1'.repeat(40)}`, tokenId: 9, artistWallet: performer.address.toLowerCase(),
+    sourceCid, title: 'Public original', mediaType: 'audio/mpeg' };
+  let state = { version: 1, recordings: [] }, writes = 0, uploads = 0, decodes = 0;
+  const submitted = [], tracks = new Map();
+  const options = { enabled: true,
+    store: { restore: async () => structuredClone(state), save: async next => { writes++; state = structuredClone(next); } },
+    upload: async () => { uploads++; return `ipfs://${'d'.repeat(46)}`; },
+    download: async () => Buffer.alloc(576_000),
+    decodeSource: async (_source, { previewOnly, upload }) => {
+      decodes++;
+      if (previewOnly) assert.equal(upload, undefined);
+      else await upload(Buffer.from('decoded PCM'));
+      return { sourceSamples: 288_000, segments: [{ cid: 'd'.repeat(46), bytes: 576_000, waveform: [[-.5, .5]] }] };
+    },
+    encodeRange: async () => Buffer.from('encoded cut'),
+    submitRelease: async ({ release }) => {
+      submitted.push(release);
+      const trackId = `unsigned:${release.releaseId}`;
+      tracks.set(trackId, { mintStatus: 'requested' });
+      return { trackId };
+    },
+    getRelease: id => tracks.get(id) || null,
+  };
+  const recorder = createLiveRecorder(options);
+  const preview = await recorder.previewCatalogEdit(source);
+  assert.equal(preview.journalRevision, 0);
+  assert.equal(writes, 0);
+  assert.equal(uploads, 0);
+  assert.equal(submitted.length, 0);
+  await recorder.previewCatalogEdit(source);
+  assert.equal(decodes, 1, 'read-only analysis is cached');
+  const draft = { ...preview.draft, revision: 1, albumTitle: 'Artist final edit' };
+  const command = { choice: 'split', sourceCid, sourceSamples: preview.sourceSamples, draft, issuedAt: Date.now() };
+  command.signature = await performer.signMessage(catalogRecordingReleaseApprovalMessage({
+    ...command, nftId: source.nftId, wallet: performer.address, origin: ORIGIN,
+  }));
+  await assert.rejects(recorder.publishCatalogEdit(source, { ...command, draft: { ...draft, albumTitle: 'Changed' } },
+    performer.address, ORIGIN), /Only the credited artist/);
+  await assert.rejects(recorder.publishCatalogEdit(source, command, owner.address, ORIGIN), /invalid or expired/);
+  await assert.rejects(recorder.publishCatalogEdit(source, command, performer.address, 'https://other.example'),
+    /Only the credited artist/);
+  const resign = async changes => {
+    const updated = { ...command, ...changes };
+    updated.signature = await performer.signMessage(catalogRecordingReleaseApprovalMessage({
+      ...updated, nftId: source.nftId, wallet: performer.address, origin: ORIGIN,
+    }));
+    return updated;
+  };
+  await assert.rejects(recorder.publishCatalogEdit(source,
+    await resign({ sourceSamples: command.sourceSamples + 48000 }), performer.address, ORIGIN), /original recording changed/);
+  await assert.rejects(recorder.publishCatalogEdit(source,
+    await resign({ draft: { ...draft, revision: 3 } }), performer.address, ORIGIN), /Another edit changed the journal/);
+  assert.equal(writes, 0);
+  assert.equal(uploads, 0);
+  const result = await recorder.publishCatalogEdit(source, command, performer.address, ORIGIN);
+  assert.equal(result.releases.length, 3);
+  assert.ok(result.releases.every(release => release.status === 'queued'));
+  assert.equal(submitted.length, 3);
+  assert.equal(state.recordings[0].catalogSource.authorization.kind, 'publication');
+  await recorder.publishCatalogEdit(source, command, performer.address, ORIGIN);
+  assert.equal(submitted.length, 3, 'identical signed retries must reuse queued releases');
+  const restored = createLiveRecorder(options);
+  await restored.initialize();
+  const anonymousPreview = await restored.previewCatalogEdit(source);
+  assert.equal(anonymousPreview.journalRevision, 1);
+  assert.equal(anonymousPreview.draft.albumTitle, source.title, 'private saved drafts are not exposed by previews');
+  assert.deepEqual(anonymousPreview.releases, []);
+  await restored.publishCatalogEdit(source, command, performer.address, ORIGIN);
+  assert.equal(submitted.length, 3);
+});
+
+test('gateway source download preserves gateway tokens, falls back on denial and redacts network failures', async () => {
+  const { fetchCatalogRecordingSource } = await import('../discord-bot/live-recording.js');
+  const urls = [], warnings = [];
+  const result = await fetchCatalogRecordingSource(sourceCid, {
+    gateways: ['https://private.example/ipfs/?pinataGatewayToken=fixture-secret', 'https://public.example'],
+    fetchImpl: async (url, options) => {
+      urls.push(new URL(url));
+      assert.equal(options.redirect, 'error');
+      return urls.length === 1 ? new Response('denied', { status: 401 }) : new Response('audio');
+    },
+    log: { warn: (...args) => warnings.push(args.join(' ')) },
+  });
+  assert.equal(await result.text(), 'audio');
+  assert.equal(urls[0].searchParams.get('pinataGatewayToken'), 'fixture-secret');
+  assert.equal(urls[1].pathname, `/ipfs/${sourceCid}`);
+  assert.ok(warnings.some(line => line.includes('401')));
+  assert.ok(warnings.every(line => !line.includes('fixture-secret')));
+  await assert.rejects(fetchCatalogRecordingSource(sourceCid, {
+    gateways: ['https://private.example/ipfs/?token=fixture-secret'],
+    fetchImpl: async () => { throw Error('provider URL contains fixture-secret'); },
+    log: { warn: (...args) => warnings.push(args.join(' ')) },
+  }), /could not be downloaded/);
+  assert.ok(warnings.every(line => !line.includes('fixture-secret')));
+});
+
+test('live recordings also accept a single final approval without an access session', async () => {
+  const f = await fixture();
+  const preview = await f.recorder.previewEdit(booking);
+  assert.equal(preview.previewOnly, true);
+  const command = { choice: 'split', sourceCid, sourceSamples: preview.sourceSamples, draft: splitDraft(), issuedAt: Date.now() };
+  command.signature = await performer.signMessage(recordingReleaseApprovalMessage({
+    ...command, bookingId: booking.id, wallet: performer.address, origin: ORIGIN, incomplete: false,
+  }));
+  const result = await f.recorder.publishEdit(booking, command, performer.address, ORIGIN);
+  assert.equal(result.releases.length, 2);
+  await f.recorder.publishEdit(booking, command, performer.address, ORIGIN);
+  assert.equal(f.submitted.length, 2);
+});
+
 test('catalog source decoding uses bounded PCM segments and exact sample counts', async () => {
   const { createLiveRecorder, pcmWav } = await import('../discord-bot/live-recording.js');
   const nftId = `8453:0x${'2'.repeat(40)}:8`, catalogCid = 'f'.repeat(46);
@@ -237,6 +350,11 @@ test('catalog source decoding uses bounded PCM segments and exact sample counts'
     submitRelease: async () => ({ trackId: 'unused' }),
   });
   await recorder.initialize();
+  const preview = await recorder.previewCatalogEdit(catalogSource);
+  assert.equal(preview.sourceSamples, 48_000 * 6);
+  assert.equal(preview.previewOnly, true);
+  assert.ok(preview.waveform.length > 0);
+  assert.equal(uploaded.length, 0, 'unsigned waveform analysis must not upload decoded PCM');
   const result = await recorder.prepareCatalogEdit(catalogSource, {
     origin: ORIGIN, nonce, expiresAt, signature: await performer.signMessage(authMessage),
   });
@@ -245,6 +363,38 @@ test('catalog source decoding uses bounded PCM segments and exact sample counts'
   assert.equal(result.sampleRate, 48_000);
   assert.equal(uploaded.length, 1);
   assert.equal(result.waveform.at(-1).endSample, 48_000 * 6);
+});
+
+test('unsigned catalog preview decodes an MP4 with trailing metadata without uploads or journal writes', async t => {
+  const { mkdtemp, readFile, rm } = require('node:fs/promises');
+  const { tmpdir } = require('node:os');
+  const { join } = require('node:path');
+  const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
+  const dir = await mkdtemp(join(tmpdir(), 'dbusk-mp4-test-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const inputPath = join(dir, 'trailing-metadata.m4a');
+  const encoded = spawnSync(process.env.FFMPEG_PATH || 'ffmpeg', ['-hide_banner', '-loglevel', 'error',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=6',
+    '-c:a', 'aac', '-b:a', '192k', '-f', 'mp4', inputPath]);
+  assert.equal(encoded.status, 0, encoded.stderr.toString());
+  const bytes = await readFile(inputPath);
+  assert.ok(bytes.indexOf('moov') > bytes.indexOf('mdat') + 32768, 'metadata must require seeking outside the input buffer');
+  const source = { nftId: `8453:0x${'2'.repeat(40)}:9`, chainId: 8453,
+    contractAddress: `0x${'2'.repeat(40)}`, tokenId: 9, artistWallet: performer.address.toLowerCase(),
+    sourceCid, title: 'Trailing metadata', mediaType: 'audio/mp4' };
+  let uploads = 0, writes = 0;
+  const recorder = createLiveRecorder({ enabled: true,
+    store: { restore: async () => ({ version: 1, recordings: [] }), save: async () => { writes++; } },
+    upload: async () => { uploads++; return `ipfs://${'d'.repeat(46)}`; },
+    download: async () => Buffer.alloc(0), downloadSource: async () => new Response(bytes),
+    submitRelease: async () => assert.fail('preview must not publish'),
+  });
+  const result = await recorder.previewCatalogEdit(source);
+  assert.equal(result.previewOnly, true);
+  assert.ok(result.sourceSamples >= 48_000 * 6 && result.sourceSamples <= 48_000 * 6 + 1024);
+  assert.ok(result.waveform.some(bin => bin.min < 0 && bin.max > 0));
+  assert.equal(uploads, 0);
+  assert.equal(writes, 0);
 });
 
 test('defer creates no release; full set and split tracks can coexist idempotently', async () => {

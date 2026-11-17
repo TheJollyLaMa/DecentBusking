@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261116-studio-polish" />
+  <link rel="stylesheet" href="css/styles.css?v=20261117-matched-tabs" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
   <link rel="stylesheet" href="css/live-afterparty.css?v=20261116-curtain" />
@@ -397,11 +397,24 @@
   </dialog>
 
   <!-- DNFT archive drawer -->
-  <button id="dnft-archive-toggle" type="button" aria-controls="dnft-list" aria-expanded="false" aria-label="Open music archive">
-    <span aria-hidden="true">♫</span>
-    <span>Archive</span>
-    <span id="dnft-list-count-badge" aria-hidden="true"></span>
-  </button>
+  <nav id="right-side-tabs" aria-label="Archive and creative rooms">
+    <button id="dnft-archive-toggle" type="button" aria-controls="dnft-list" aria-expanded="false" aria-label="Open music archive">
+      <span class="right-tab-art archive-crate" aria-hidden="true">🗃️<span>♫</span></span>
+      <span>Archive</span><span id="dnft-list-count-badge" aria-hidden="true"></span>
+    </button>
+    <button id="recording-edit-tab" type="button" aria-label="Open your recording studio" aria-controls="recording-edit-panel" aria-expanded="false" hidden>
+      <span class="right-tab-art studio-console" aria-hidden="true"><span class="studio-reel">💿</span><span class="studio-faders">🎚️✂️</span></span>
+      <span>Studio</span>
+    </button>
+    <button id="rehearsal-tab" type="button" aria-label="Open DHearse rehearsal room" aria-controls="rehearsal-panel" aria-expanded="false" hidden>
+      <span class="right-tab-art rehearsal-stage" aria-hidden="true">🎭<span>🎙️</span></span><span>DHearse</span>
+    </button>
+    <button id="bignuten-tab" type="button" aria-label="Open BigNuten preview" aria-controls="bignuten-panel" aria-expanded="false">
+      <img src="img/BigNuten.png" alt="" width="44" height="44"><span>BigNuten</span>
+    </button>
+  </nav>
+  <p id="right-panel-status" role="status" aria-live="polite"></p>
+  <button id="rehearsal-access-retry" type="button" hidden>Retry DHearse access check</button>
   <button id="dnft-list-backdrop" class="hidden" type="button" aria-label="Close music archive"></button>
   <aside id="dnft-list" aria-label="DecentBusking music archive" aria-hidden="true">
     <div id="dnft-list-header">
@@ -430,9 +443,6 @@
       ⚡ Show All Now
     </button>
   </aside>
-  <button id="recording-edit-tab" type="button" aria-label="Open your recording studio" aria-controls="recording-edit-panel" aria-expanded="false" hidden>
-    <span aria-hidden="true">🎛️<br>✂️🎧</span><span>Studio</span>
-  </button>
   <aside id="recording-edit-panel" aria-label="Recording editor" aria-hidden="true" inert>
     <div class="recording-edit-panel-heading">
       <h2>🎛️ Your studio</h2>
@@ -448,6 +458,29 @@
     </section>
     <div id="recording-edit-opening" role="status" hidden><span aria-hidden="true">🎚️</span><p>Opening your recording studio…</p></div>
     <iframe id="recording-edit-frame" title="Recording editing room" src="about:blank" hidden></iframe>
+  </aside>
+  <aside id="rehearsal-panel" class="right-utility-panel" aria-label="DHearse private rehearsal" aria-hidden="true" inert>
+    <div class="recording-edit-panel-heading">
+      <h2>🎭 DHearse · your practice stage</h2>
+      <button id="rehearsal-popout" type="button" aria-label="Move rehearsal to a popout window" title="Move rehearsal to a popout window">↗</button>
+      <button id="rehearsal-panel-close" type="button" aria-label="Close rehearsal and stop audio">✕</button>
+    </div>
+    <iframe id="rehearsal-frame" title="Private rehearsal room" src="about:blank" allow="microphone; autoplay" referrerpolicy="no-referrer"></iframe>
+  </aside>
+  <aside id="bignuten-panel" class="right-utility-panel" aria-label="BigNuten preview" aria-hidden="true" inert>
+    <div class="recording-edit-panel-heading">
+      <h2>BigNuten · room to grow</h2>
+      <button id="bignuten-panel-close" type="button" aria-label="Close BigNuten preview">✕</button>
+    </div>
+    <div class="bignuten-preview">
+      <img src="img/BigNuten.png" alt="BigNuten" width="220" height="220" loading="lazy">
+      <p class="bignuten-orbit" aria-hidden="true">🌱 · ✦ · 🌿</p>
+      <h3>A little space between sets.</h3>
+      <p>BigNuten has a home here. Its tools are not connected yet.</p>
+      <p>No tracking, health information or cross-app synchronization is enabled in this placeholder.</p>
+      <a href="https://github.com/TheJollyLaMa/BigNuten_Vanilla" target="_blank" rel="noopener noreferrer">Meet the BigNuten project ↗</a>
+      <p class="bignuten-art-credit">Unmodified artwork: The Jolly LaMa / A Decent Agency · <a href="img/BigNuten.LICENSE.txt" target="_blank" rel="noopener noreferrer">CC BY 4.0</a> · <a href="img/BigNuten.NOTICE.txt" target="_blank" rel="noopener noreferrer">Notice</a></p>
+    </div>
   </aside>
 
   <!-- Timeline Navigation Controls -->
@@ -984,7 +1017,7 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261116-studio-polish"></script>
+  <script type="module" src="js/main.js?v=20261117-right-rooms"></script>
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261115-afterparty">
