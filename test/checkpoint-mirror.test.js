@@ -83,6 +83,10 @@ test('a rejected required checkpoint cannot starve another required paid journal
 
 for (const snapshot of [
   { schemaVersion: 1, playlist: [] },
+  { schemaVersion: 1, playlist: [{ trackId: 'live:show:release',
+    liveRecording: { bookingId: 'show', radioRelease: {
+      firstPlayId: 'first-play', firstStartedAt: 1000, playId: 'retry-play', startedAt: 2000,
+    } } }] },
   { schemaVersion: 1, records: [] },
   { schemaVersion: 1, records: [{ requestId: '8453:queue:0', state: 'playing' }] },
   { schemaVersion: 2, nextBlock: 100, batches: [] },

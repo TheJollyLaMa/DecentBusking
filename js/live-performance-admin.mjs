@@ -9,7 +9,7 @@ import { utcToNewYorkInput } from './radio-calendar.mjs';
 import { isAdminWallet } from './admin-access.mjs';
 import { publishLiveBookingState } from './live-booking-notifications.mjs?v=20261113-one-action-release';
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
-import { afterpartyRows } from './live-afterparty.mjs?v=20261115-afterparty';
+import { afterpartyRows } from './live-afterparty.mjs?v=20261117-release-party';
 import { guaranteedReleaseState, guidedGuaranteedRelease, liveBroadcastCompletionPending } from './live-escrow-release.mjs?v=20261115-afterparty';
 
 const routerAbi = [
@@ -163,6 +163,10 @@ function bookingActionButtons(b) {
   ? [['review','🎙️ Record live minutes & calculate payout']]
   : [['full','✅ Approve full payment'], ['partial','🧮 Set a partial payment'], ['withhold','⛔ Withhold / reject payment']];
  const actions = [
+  ...(b.broadcastCompletion?.known === true && b.broadcastCompletion?.pending === false &&
+    Number.isFinite(b.broadcastCompletion?.actualEndedAt) &&
+    b.broadcastCompletion?.priorityFollowup === true && !b.priorityInvitation
+    ? [['priorityInvite','Prepare next-week priority invitation']] : []),
   ['agreement','📨 Copy agreement text'], ['acknowledge','✅ Record performer acceptance (legacy)'],
   ['schedule','🗓 Add / retry calendar listing'], ['createFund','🏦 Create community fund'],
   ['fund','💵 Fund this booking'], ['reconcile','🔎 Check a pending transaction'],
@@ -206,6 +210,21 @@ async function review(b, bps, cancellation = false) {
  await command({ action:'decision', id:b.id, payoutBps:bps, liveMusicMinutes, verifiedSeconds, verifiedStart, reason, reportUri, reportHash, remainderDisposition, cancellation });
 }
 async function action(name, b) {
+ if (name === 'priorityInvite') {
+   if (b.priorityInvitation) throw new Error('Use the existing follow-up invitation; do not prepare another');
+   const form = section.querySelector('[data-live-create]');
+   form.elements.payoutPolicy.value = LIVE_PILOT_POLICY;
+   form.elements.payoutPolicy.dispatchEvent(new Event('change'));
+   form.elements.performer.value = b.wallet;
+   form.elements.displayName.value = b.displayName || '';
+   form.elements.title.value = b.title || 'Friday Live Performance';
+   form.elements.startLocal.value = nextFridayLiveStart();
+   form.elements.airtimeMinutes.value = b.airtimeMinutes || 20;
+   form.elements.priorityFor.value = b.id;
+   section.querySelector('.live-create-details').open = true;
+   form.scrollIntoView({ block: 'nearest' });
+   return 'Priority invitation prepared in the form only. Review the date and fresh terms, then save. Nothing was sent, accepted or funded.';
+ }
  if (liveBroadcastCompletionPending(b) && ['review', 'full', 'partial', 'withhold', 'settle'].includes(name)) {
    throw new Error('Wait for verified actual stage completion before a new review/release workflow. Original guarantees and claim deadlines are unchanged; existing transactions can still be reconciled.');
  }
@@ -374,7 +393,7 @@ function mount() {
  <details class="live-create-details"><summary>➕ Prepare a new performance invitation</summary>
  <aside class="live-performance-offer" data-live-offer><strong>💵 Current offer: $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6} USDC</strong><span>🗓 ${LIVE_PERFORMANCE_AIRTIME_MINUTES}-minute calendar event</span><span>🎵 ${LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES} live-music minutes earns the full fee; shorter sets are prorated, capped at $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6}.</span><span>🚫 No live performance earns $0.</span></aside>
  <p class="live-performance-draft-note">Legacy v2 terms are pinned. The guaranteed audio pilot requires a NEW reviewed agreement pin and fingerprint; never reuse v2. Each performer and date requires fresh acceptance before funding.</p>
- <form data-live-create>
+ <form data-live-create><input name="priorityFor" type="hidden" value="">
  <label>Offer policy<select name="payoutPolicy"><option value="">Legacy v2: prorated live minutes</option><option value="${LIVE_PILOT_POLICY}">Audio pilot: guaranteed $20, rehearsal ladder only</option></select></label>
  ${field('performer','Performer wallet or ENS')}${field('displayName','Name shown on the calendar')}<label>Discord name (optional, with consent)<input name="discordHandle"></label>${field('title','Show title','Friday Live Performance')}
  ${field('startLocal','Start time (America/New_York)',nextFridayLiveStart(),'datetime-local')}
@@ -454,8 +473,10 @@ function mount() {
    delete booking.killFeePercent;
    if (booking.payoutPolicy === LIVE_PILOT_POLICY) delete booking.fullPayoutLiveMinutes;
    else { delete booking.payoutPolicy; delete booking.additionalOffer; }
+   if (!booking.priorityFor) delete booking.priorityFor;
    const id = `${eventId}:${crypto.randomUUID()}`;
    await command({ action:'create', id, booking });
+   form.elements.priorityFor.value = '';
    return `Invitation draft saved for ${booking.displayName || booking.wallet}. It is not funded or listed on the community calendar yet.`;
  }); };
  section.onclick = event => { const button = event.target.closest('[data-live-action]'); if (!button || button.disabled) return; const id = button.closest('[data-live-actions]').dataset.liveActions; guarded(() => action(button.dataset.liveAction,state.bookings.find(b=>b.id===id)), id); };

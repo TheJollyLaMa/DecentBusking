@@ -49,6 +49,7 @@ import {
   getWeeklyPlayHistory,
   restoreTrackTitles,
   pendingLiveRecordingReplay,
+  startLiveRecordingReplay,
   completeLiveRecordingReplay,
   updateTrackDuration,
 } from './playlist-store.js';
@@ -589,8 +590,9 @@ export async function submitJukeLoopVote({ playId, voterId, vote }, saveVote = a
 }
 
 /** The track currently audible in any JukeLoop voice session, or null. */
-export function getJukeLoopNowPlaying() {
+export function getJukeLoopNowPlaying({ websiteOnly = false } = {}) {
   for (const session of _sessions.values()) {
+    if (websiteOnly && !session.websitePlayback) continue;
     if (session._nowPlaying) return { ...session._nowPlaying };
   }
   return null;
@@ -888,6 +890,10 @@ export class JukeLoopSession {
       ) {
         this._nowPlaying.startedAt = Date.now();
         this._nowPlaying.audible = true;
+        if (this.websitePlayback && this._currentTrack?.liveRecording) {
+          void startLiveRecordingReplay(this._currentTrack.trackId, { ...this._nowPlaying })
+            .catch(error => console.warn('[live-recording] Radio start checkpoint deferred:', error.message));
+        }
         if (this._currentDevertAd) {
           const playId = this._nowPlaying.playId;
           this._adCutoffTimer = setTimeout(() => this._finishAdvertAtLimit(playId), DEVERT_MAX_AD_SECONDS * 1000);

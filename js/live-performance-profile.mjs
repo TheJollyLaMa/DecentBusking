@@ -3,8 +3,8 @@ import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, claimState, liveAcknowledgement, li
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
 import { performerRoomUrl, resolvePerformerReentry } from './performer-room.mjs?v=20261116-curtain';
 import { renderPerformerGift } from './performer-gift.mjs?v=20261114-performer-encore';
-import { afterpartyRows, afterpartyMilestones, celebrateAfterparty, completionFacts, formatUsdc, parseUnits, verifyPaidReceipt } from './live-afterparty.mjs?v=20261116-curtain';
-import { renderAfterpartyChecklist, renderCurtainCall } from './live-afterparty-view.mjs?v=20261116-curtain';
+import { afterpartyRows, afterpartyMilestones, celebrateAfterparty, completionFacts, formatUsdc, parseUnits, verifyPaidReceipt } from './live-afterparty.mjs?v=20261117-release-party';
+import { renderAfterpartyChecklist, renderCurtainCall, renderRecordingReleaseParty } from './live-afterparty-view.mjs?v=20261117-release-party';
 
 function secretPyramid() {
  const image = document.createElement('img');
@@ -332,6 +332,14 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        window._wallet?.address?.toLowerCase() === b.wallet.toLowerCase()
          ? celebrateAfterparty(item, options) : { celebrated: false, reason: 'wallet-changed' } });
      if (curtain) { article.append(curtain.element); curtains.push(curtain); }
+     if (connected.toLowerCase() === b.wallet.toLowerCase()) {
+       for (const release of afterpartyMilestones(b, rows).filter(item => item.kind === 'radio-release')) {
+         const party = renderRecordingReleaseParty(release, { documentRef: document, celebrate: (item, options) =>
+           window._wallet?.address?.toLowerCase() === b.wallet.toLowerCase()
+             ? celebrateAfterparty(item, options) : { celebrated: false, reason: 'wallet-changed' } });
+         if (party) { article.append(party.element); curtains.push(party); }
+       }
+     }
      const checklist = renderAfterpartyChecklist(rows, { documentRef: document });
      if (checklist) article.append(checklist);
    } else if (!compact) article.innerHTML = liveBookingRows([b]);

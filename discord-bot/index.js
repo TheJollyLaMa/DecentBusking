@@ -111,6 +111,7 @@ import {
   addTrack,
   submitMediaTrack,
   submitLiveRecordingRelease,
+  liveRecordingReleaseState,
   submitCatalogRecordingRelease,
   getTrackById,
   getTrackId,
@@ -1581,6 +1582,8 @@ async function main() {
     beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined }) : null;
   const liveBookings = createLiveBookings({ provider: paymentProvider, ownerWallet: config.mintOwnerWallet,
     getBroadcastCompletion: id => process.env.LIVE_AUDIO_ENABLED === 'true' ? liveAudio.completionState(id) : null,
+    getRecordingRelease: b => playlistReady
+      ? liveRecordingReleaseState(b.id, getJukeLoopNowPlaying({ websiteOnly: true })) : { known: false },
     escrowAddress: process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS || '',
     escrowStartBlock: Number(process.env.LIVE_PERFORMANCE_ESCROW_START_BLOCK || 0), ensResolver: createEnsResolver(),
     restore: liveBookingStore ? liveBookingStore.restore : undefined, save: liveBookingStore ? liveBookingStore.save : undefined,

@@ -61,6 +61,42 @@ test('actual allocated completion gates new decisions without changing fee or or
   assert.equal(after.bookings[0].approvedUnits,b.amountUnits);
   assert.equal(f.stored().bookings[0].broadcastCompletion,undefined,'live metadata never rewrites the signed booking journal');
 });
+test('priority follow-up reuses real invitations with verified eligibility, immutable original terms and duplicate protection', async () => {
+  const f = await fixture({ getBroadcastCompletion: () => ({ known: true, pending: false,
+    actualEndedAt: when - 1000, priorityFollowup: true }) });
+  const original = (await f.create()).bookings[0];
+  const future = { ...input(), priorityFor: original.id, eventId: 'friday-live-performance:2026-10-30',
+    startUtc: '2026-10-31T01:00:00Z', endUtc: '2026-10-31T02:00:00Z' };
+  await assert.rejects(f.create({ ...future, performer: outsider.address }, 'priority:wrong-wallet'), /verified priority follow-up/);
+  let result = await f.create(future, 'priority:next-week');
+  assert.equal(result.bookings[0].priorityInvitation.state, 'prepared');
+  const next = result.bookings[1];
+  assert.equal(next.status, 'draft');
+  assert.equal(next.acknowledged, false);
+  await assert.rejects(f.create(future, 'priority:duplicate-retry'), /already prepared/);
+  result = await f.exec({ action: 'acknowledge', id: next.id, stewardApproved: true,
+    performerSignature: await performer.signMessage(f.shared.liveAcknowledgement(next)) });
+  assert.equal(result.bookings[0].priorityInvitation.state, 'accepted');
+  assert.equal(result.bookings[1].status, 'draft', 'acceptance is not funding');
+  f.funding();
+  result = await f.exec({ action: 'transaction', id: next.id, txAction: 'funding', txHash });
+  assert.equal(result.bookings[0].priorityInvitation.state, 'funded');
+  assert.equal(result.bookings[0].status, 'draft', 'funding the next invitation never pays or changes the original booking');
+  assert.equal(result.bookings[0].amountUnits, original.amountUnits);
+  assert.equal(result.bookings[0].startUtc, original.startUtc);
+  assert.equal(result.bookings[0].claimDeadline, original.claimDeadline);
+});
+
+test('recording release projections are read-only and unavailable pipeline state is not persisted as success', async () => {
+  let release = { known: false };
+  const f = await fixture({ getRecordingRelease: () => release });
+  const original = (await f.create()).bookings[0];
+  assert.deepEqual(original.recordingRelease, { known: false });
+  release = { known: true, state: 'minted', trackId: 'exact-recording', tokenId: '7' };
+  assert.deepEqual((await f.service.getState()).bookings[0].recordingRelease, release);
+  assert.equal(f.stored().bookings[0].recordingRelease, undefined);
+  assert.equal(f.stored().bookings[0].status, 'draft');
+});
 test('ENS booking, immutable per-booking terms, duplicate occurrence and restart recovery',async()=>{
  const f=await fixture(); const result=await f.create();
  assert.equal(result.bookings[0].wallet,performer.address.toLowerCase());

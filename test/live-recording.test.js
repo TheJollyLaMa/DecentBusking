@@ -467,6 +467,91 @@ test('finalized recording uses existing mint requests, survives restore and only
     await p.completeLiveRecordingReplay(track.trackId, { trackId: track.trackId, playId: 'real-completion', finished: true, audibleMs: 20000 });
     p.loadPlaylist(remote);
     assert.equal(p.pendingLiveRecordingReplay(START + 400000), undefined);
+    assert.equal(p.liveRecordingReleaseState(booking.id).state, 'minted', 'the older receipt does not distinguish public website and private playback');
+    assert.equal(p.liveRecordingReleaseState(booking.id).firstStartedAt, undefined, 'legacy completion never invents a start time');
+  } finally { p.configureRemotePersistence(null); }
+});
+
+test('release facts stay private until mint, then require a durable audible start and retain the first milestone across retries', async () => {
+  const p = await import('../discord-bot/playlist-store.js');
+  let saved;
+  try {
+    p.loadPlaylist([]);
+    p.configureRemotePersistence(async state => { saved = structuredClone(state); });
+    const track = await p.submitLiveRecordingRelease(liveRecordingRelease({ booking, cid: 'd'.repeat(46),
+      consent: { enabled: true, signature: 'private-consent-proof', issuedAt: START - 1000 }, durationSeconds: 20 }));
+    assert.deepEqual(p.liveRecordingReleaseState(booking.id), { known: false });
+    p.completeTrackMint(track.trackId, { tokenId: '51', txHash: 'verified-fixture', contractAddress: artist.address });
+    await p.waitForRemotePersistence();
+    assert.equal(p.liveRecordingReleaseState(booking.id).state, 'minted');
+    const play = { trackId: track.trackId, playId: 'first-real-play', startedAt: START + 400000, audible: true };
+    await p.startLiveRecordingReplay(track.trackId, { ...play, audible: false });
+    assert.equal(p.liveRecordingReleaseState(booking.id, play).state, 'minted', 'preparation is not audible playback');
+    await p.startLiveRecordingReplay(track.trackId, play);
+    assert.equal(p.liveRecordingReleaseState(booking.id, play).state, 'airing');
+    await p.completeLiveRecordingReplay(track.trackId, { ...play, endedAt: play.startedAt + 1000,
+      finished: false, audibleMs: 1000 });
+    p.loadPlaylist(saved);
+    assert.equal(p.liveRecordingReleaseState(booking.id).state, 'retrying');
+    const retry = { ...play, playId: 'retry-play', startedAt: play.startedAt + 60000 };
+    await p.startLiveRecordingReplay(track.trackId, retry);
+    assert.equal(p.liveRecordingReleaseState(booking.id, retry).firstPlayId, play.playId);
+    await p.completeLiveRecordingReplay(track.trackId, { ...retry, endedAt: retry.startedAt + 20000,
+      finished: true, audibleMs: 20000 });
+    p.loadPlaylist(saved);
+    const result = p.liveRecordingReleaseState(booking.id);
+    assert.equal(result.state, 'aired');
+    assert.equal(result.firstPlayId, play.playId);
+    assert.equal(result.title, track.title);
+    assert.ok(!JSON.stringify(result).includes('private-consent-proof'));
+    assert.equal(result.releases[0].contractAddress, artist.address);
+  } finally { p.configureRemotePersistence(null); }
+});
+
+test('a failed radio-start checkpoint cannot certify an aired milestone, and a later successful retry repairs it', async () => {
+  const p = await import('../discord-bot/playlist-store.js');
+  try {
+    p.loadPlaylist([]);
+    p.configureRemotePersistence(async () => {});
+    const track = await p.submitLiveRecordingRelease(liveRecordingRelease({ booking, cid: 'e'.repeat(46),
+      consent: { enabled: true, signature: 'private-proof', issuedAt: START - 1000 }, durationSeconds: 20 }));
+    p.completeTrackMint(track.trackId, { tokenId: '52', txHash: 'verified-fixture' });
+    await p.waitForRemotePersistence();
+    const play = { trackId: track.trackId, playId: 'real-play', startedAt: START + 400000, audible: true };
+    p.configureRemotePersistence(async () => { throw new Error('fixture checkpoint unavailable'); });
+    await assert.rejects(p.startLiveRecordingReplay(track.trackId, play), /checkpoint unavailable/);
+    assert.equal(p.liveRecordingReleaseState(booking.id, play).state, 'minted');
+    assert.equal(p.liveRecordingReleaseState(booking.id, play).playbackKnown, false);
+    p.configureRemotePersistence(async () => {});
+    await p.startLiveRecordingReplay(track.trackId, play);
+    assert.equal(p.liveRecordingReleaseState(booking.id, play).state, 'airing');
+  } finally { p.configureRemotePersistence(null); }
+});
+
+test('an earlier start checkpoint cannot certify a newer in-flight radio attempt', async () => {
+  const p = await import('../discord-bot/playlist-store.js');
+  const writes = [];
+  try {
+    p.loadPlaylist([]);
+    p.configureRemotePersistence(async () => {});
+    const track = await p.submitLiveRecordingRelease(liveRecordingRelease({ booking, cid: 'f'.repeat(46),
+      consent: { enabled: true, signature: 'private-proof', issuedAt: START - 1000 }, durationSeconds: 20 }));
+    p.completeTrackMint(track.trackId, { tokenId: '53', txHash: 'verified-fixture' });
+    await p.waitForRemotePersistence();
+    p.configureRemotePersistence(() => new Promise(resolve => writes.push(resolve)));
+    const play = { trackId: track.trackId, playId: 'first-play', startedAt: START + 400000, audible: true };
+    const first = p.startLiveRecordingReplay(track.trackId, play);
+    await new Promise(setImmediate);
+    const retry = { ...play, playId: 'newer-play', startedAt: play.startedAt + 1000 };
+    const second = p.startLiveRecordingReplay(track.trackId, retry);
+    writes[0]();
+    await first;
+    await new Promise(setImmediate);
+    assert.equal(p.liveRecordingReleaseState(booking.id, retry).state, 'minted');
+    writes[1]();
+    await second;
+    assert.equal(p.liveRecordingReleaseState(booking.id, retry).state, 'airing');
+    assert.equal(p.liveRecordingReleaseState(booking.id, retry).firstPlayId, play.playId);
   } finally { p.configureRemotePersistence(null); }
 });
 

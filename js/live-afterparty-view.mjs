@@ -75,3 +75,55 @@ export function renderCurtainCall(milestone, { documentRef = globalThis.document
   section.append(summary, announcement, flourish, greeting, detail, replay, dismiss);
   return { element: section, activate: () => play(false) };
 }
+
+export function renderRecordingReleaseParty(milestone, { documentRef = globalThis.document, celebrate } = {}) {
+  if (milestone?.kind !== 'radio-release' || !milestone.id || !milestone.evidence?.trackId ||
+      !['airing', 'aired', 'interrupted', 'retrying'].includes(milestone.state) ||
+      typeof celebrate !== 'function' || !documentRef?.createElement) return null;
+  const section = documentRef.createElement('section');
+  section.className = 'live-release-party';
+  section.setAttribute('aria-label', 'Your recording release party');
+  const heading = documentRef.createElement('h3');
+  heading.textContent = milestone.title;
+  const name = documentRef.createElement('p');
+  name.className = 'live-release-title';
+  name.textContent = milestone.subtitle;
+  const detail = documentRef.createElement('output');
+  detail.setAttribute('role', 'status');
+  detail.setAttribute('aria-live', 'polite');
+  const states = { airing: 'Verified radio playback started for this exact recording.',
+    aired: 'This recording completed its verified radio replay.',
+    interrupted: 'Playback started, but completion is unverified.',
+    retrying: 'Playback was interrupted; the retry waits for a safe radio slot.' };
+  detail.textContent = `${states[milestone.state] || 'This recording reached radio.'}${milestone.partial ? ' This is a partial recording, not a complete set.' : ''} Payment and show completion are separate.`;
+  const flourish = documentRef.createElement('div');
+  flourish.className = 'live-curtain-flourish';
+  flourish.setAttribute('aria-hidden', 'true');
+  const links = documentRef.createElement('p');
+  const addLink = (href, label) => {
+    const link = documentRef.createElement('a');
+    link.href = href; link.textContent = label;
+    link.target = '_blank'; link.rel = 'noopener noreferrer';
+    links.append(link);
+  };
+  addLink('index.html#radio', 'Open DBusk Radio');
+  const { contractAddress, tokenId } = milestone.evidence;
+  if (/^0x[0-9a-f]{40}$/i.test(contractAddress || '') && /^\d+$/.test(String(tokenId))) {
+    addLink(`https://basescan.org/nft/${contractAddress}/${tokenId}`, 'View your recording NFT');
+    addLink(`https://basescan.org/token/${contractAddress}`, 'View the collection');
+  }
+  const replay = documentRef.createElement('button');
+  replay.type = 'button'; replay.textContent = 'Replay release celebration';
+  const dismiss = documentRef.createElement('button');
+  dismiss.type = 'button'; dismiss.textContent = 'Dismiss celebration';
+  const play = requested => {
+    if (!celebrate(milestone, { replay: requested }).celebrated) return;
+    const stars = documentRef.createElement('span');
+    stars.textContent = '✦  ♫  ✧  ♫  ✦';
+    flourish.replaceChildren(stars);
+  };
+  replay.onclick = () => play(true);
+  dismiss.onclick = () => { flourish.replaceChildren(); replay.focus(); };
+  section.append(heading, name, flourish, detail, links, replay, dismiss);
+  return { element: section, activate: () => play(false) };
+}

@@ -114,13 +114,16 @@ function stageGate(booking) {
 function recordingFacts(booking) {
   const record = booking?.recordingRelease;
   if (!record || record.known !== true) return { state: 'unknown' };
-  return { ...record, state: ['none', 'processing', 'performer-review', 'mint-requested', 'minted', 'airing', 'aired'].includes(record.state) ? record.state : 'unknown' };
+  return { ...record, state: ['none', 'processing', 'failed', 'performer-review', 'mint-requested', 'minted', 'airing', 'aired',
+    'interrupted', 'retrying'].includes(record.state) ? record.state : 'unknown' };
 }
 const RECORDING_WORDS = { unknown: 'Recording state is unavailable; nothing is assumed.', none: 'No recording has been submitted for this show.',
   processing: 'The recording is being prepared.', 'performer-review': 'The recording is ready for performer preview and release choice; nothing has entered the mint queue.',
   'mint-requested': 'The performer approved this release; it is waiting for admin mint review.',
+  failed: 'Recording preparation needs attention; payment is unchanged.',
   minted: 'The recording is minted; radio replay is not confirmed yet.', airing: 'The recording is playing on the radio now.',
-  aired: 'The recording has played on the radio.' };
+  aired: 'The recording has played on the radio.', interrupted: 'Playback started; completion is unverified.',
+  retrying: 'Playback was interrupted; its retry waits for a safe radio slot.' };
 
 // ── Preflight: every blocking row must pass before a signature is requested ─
 export function releasePreflight({ booking, facts = {}, now = Date.now() }) {
@@ -444,21 +447,50 @@ function recordingRows(b, audience) {
   } else if (r.state === 'processing') {
     recording = row('recording', 'Recording', 'pending', 'Recording is being prepared', 'The stage pipeline is processing the capture.', 'Check again shortly.');
     radio = row('radio', 'Radio release', 'pending', 'Waiting for the mint', 'Radio release comes after the recording is submitted and minted.', '');
+  } else if (r.state === 'performer-review' || r.state === 'failed') {
+    recording = row('recording', 'Recording', r.state === 'failed' ? 'attention' : 'pending',
+      r.state === 'failed' ? 'Recording preparation needs attention' : 'Ready for your release decision',
+      'Nothing is minted or aired by this step. Your guaranteed fee is unchanged.',
+      r.state === 'failed' ? 'Contact the operator or retry from the editing room.' : 'Preview the recording and approve a full or split release when ready.');
+    radio = row('radio', 'Radio release', 'pending', 'Nothing released to radio yet',
+      'A recording needs your release approval, confirmed mint and actual radio playback.', '');
   } else if (r.state === 'mint-requested') {
     recording = row('recording', 'Recording', 'pending', 'Submitted · waiting for the mint', `Nothing is automatic.${partial}`, admin ? 'Approve it in Admin › mint queue (owner-signed).' : 'Nothing for you to sign. This updates when the mint confirms.');
     radio = row('radio', 'Radio release', 'pending', 'Waiting for the mint', 'Radio release comes after the mint.', '');
   } else {
     recording = row('recording', 'Recording', 'verified', `Minted${r.tokenId != null ? ` as token #${r.tokenId}` : ''}`, `Confirmed minted.${partial}`, '', { links: [nft].filter(Boolean) });
-    if (r.state === 'minted') {
+    if (r.state === 'interrupted' || r.state === 'retrying') {
+      radio = row('radio', 'Radio release', 'attention', r.state === 'retrying'
+        ? 'Playback interrupted · waiting to retry' : 'Playback started · completion unverified',
+      'This recording really started on radio, but a complete replay is not verified. A restart is not a second release milestone.',
+      r.state === 'retrying' ? 'The replay waits for a safe radio slot; paid queues and scheduled shows keep their priority.' : 'Check again for the next verified playback.',
+      { celebrate: !!r.firstPlayId, trackId: r.trackId, links: [nft].filter(Boolean) });
+    } else if (r.state === 'minted') {
       radio = row('radio', 'Radio release', 'pending', 'Not played on the radio yet',
-        `Minting alone does not mean it aired. It plays in a normal rotation slot${Number.isFinite(r.replayAfter) ? ` after ${formatEt(r.replayAfter)}` : ''}.`, admin ? 'If it stays pending long after that, check the radio queue.' : 'Nothing to do. Tune in later.');
+        r.replayRequested === false
+          ? 'Minting alone does not mean it aired. This split release has no reserved automatic replay; ordinary rotation or an eligible DJuke request may play it.'
+          : `Minting alone does not mean it aired. It plays in a normal rotation slot${Number.isFinite(r.replayAfter) ? ` after ${formatEt(r.replayAfter)}` : ''}.`, admin ? 'If it stays pending long after that, check the radio queue.' : 'Nothing to do. Tune in later.');
     } else {
       const live = r.state === 'airing';
       radio = row('radio', 'Radio release', 'verified', live ? 'On the radio now ✓' : 'Played on the radio ✓', live ? 'The radio is playing this exact recording right now.' : 'The radio played this exact recording to the end.', '',
         { celebrate: !!r.trackId, trackId: r.trackId || null, tokenId: r.tokenId ?? null, links: [nft].filter(Boolean) });
     }
   }
+  if (Array.isArray(r.releases)) radio.releases = r.releases;
   return [recording, radio];
+}
+
+function priorityRow(b) {
+  const c = b.broadcastCompletion;
+  if (c?.known !== true || c.pending !== false || !Number.isFinite(c.actualEndedAt) || c.priorityFollowup !== true) return null;
+  const invitation = b.priorityInvitation;
+  const words = { prepared: 'Invitation prepared · delivery unverified', accepted: 'Performer accepted the new invitation',
+    funded: 'New booking funding confirmed', cancelled: 'Follow-up invitation cancelled' };
+  return row('priority', 'Next-week priority invitation', invitation?.state === 'funded' ? 'verified' : 'pending',
+    words[invitation?.state] || 'Priority invitation follow-up pending',
+    'This is a separate invitation opportunity, not an automatic slot, signature or funding. The original guaranteed fee and claim dates are unchanged.',
+    invitation ? 'Review the linked invitation and its separate acceptance/funding status.' : 'Ask the producer to prepare your next invitation.',
+    { bookingId: invitation?.bookingId || null });
 }
 
 const giftRow = () => row('gift', 'Supporter gift', 'info', 'Separate from your fee', 'The thank-you collectible is tracked on its own. Its delivery never delays, reduces or blocks the cash payment.', '');
@@ -469,17 +501,32 @@ export function afterpartyRows(booking, { audience = 'performer', now = Date.now
   if (audience === 'public') {
     return [completion.state === 'verified' && completion.celebrate ? completion : null, radio.state === 'verified' ? radio : null].filter(Boolean);
   }
-  return [completion, approvalRow(booking, now, audience, completion.facts), paymentRow(booking, now, audience), recording, radio, giftRow()];
+  const delay = booking.broadcastCompletion;
+  if (delay?.known === true && delay.pending === false &&
+      (delay.actualStartedAt > Date.parse(booking.startUtc) || delay.plannedStartAt > Date.parse(booking.startUtc))) {
+    completion.detail += ` Producer-delayed slot: ${delay.endReason === 'declined' ? 'declined'
+      : delay.choice === 'short' ? 'shortened set' : delay.choice === 'full' ? 'full-duration choice' : 'actual outcome shown above'}. Original guaranteed fee and contract claim dates are unchanged.`;
+  }
+  return [completion, approvalRow(booking, now, audience, completion.facts), paymentRow(booking, now, audience),
+    recording, radio, giftRow(), priorityRow(booking)].filter(Boolean);
 }
 
 export function afterpartyMilestones(booking, rows) {
   const name = booking.displayName || 'The performer';
-  return rows.filter(item => item.celebrate && item.state === 'verified').map(item => {
+  return rows.filter(item => item.celebrate && ['verified', 'attention'].includes(item.state)).flatMap(item => {
     if (item.id === 'completion') {
       return { id: `curtain:${booking.id}`, kind: 'completion', bookingId: booking.id, title: 'Curtain call', subtitle: `${name}’s set is finished.`, evidence: { endedAt: item.facts.endedAt } };
     }
     if (item.id === 'payment') return { id: `payment:${booking.id}:${item.txHash}`, kind: 'payment', bookingId: booking.id, title: 'Payment confirmed', subtitle: usdcText(booking.paidUnits || booking.approvedUnits || booking.amountUnits), evidence: { txHash: item.txHash, chainId: BASE_CHAIN_ID } };
-    return { id: `release:${booking.id}:${item.trackId}`, kind: 'radio-release', bookingId: booking.id, title: 'On the radio', subtitle: `${booking.title || 'The live recording'} is out.`, evidence: { trackId: item.trackId, tokenId: item.tokenId } };
+    const releases = item.releases || [{ trackId: item.trackId, tokenId: item.tokenId, title: booking.title, state: 'airing' }];
+    return releases.filter(r => r.trackId && (r.firstPlayId || !item.releases) &&
+      ['airing', 'aired', 'interrupted', 'retrying'].includes(r.state)).map(r => ({
+      id: `release:${booking.id}:${r.trackId}`, kind: 'radio-release', bookingId: booking.id,
+      title: 'Your recording reached DBusk Radio', subtitle: r.title || 'The live recording',
+      state: r.state, partial: r.partial === true,
+      evidence: { trackId: r.trackId, tokenId: r.tokenId, contractAddress: r.contractAddress,
+        firstPlayId: r.firstPlayId, firstStartedAt: r.firstStartedAt },
+    }));
   });
 }
 

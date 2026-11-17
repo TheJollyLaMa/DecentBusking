@@ -34,7 +34,7 @@ function integer(value, min, max, label) {
 
 export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', escrowStartBlock = 0, ensResolver,
   restore = async () => null, save, getSchedule, saveSchedule, confirmations = 2, now = Date.now,
-  getBroadcastCompletion = () => null }) {
+  getBroadcastCompletion = () => null, getRecordingRelease = () => null }) {
   if (escrowAddress && (!addressPattern.test(escrowAddress) || /^0x0{40}$/i.test(escrowAddress))) throw new Error('Invalid live escrow address');
   const escrow = escrowAddress ? new Contract(escrowAddress, LIVE_ESCROW_ABI, provider) : null;
   let state = { schemaVersion: 1, revision: 0, bookings: [], escrowScannedThrough: null };
@@ -189,6 +189,17 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
         const resolved = addressPattern.test(performer) ? performer : await ensResolver.resolveName(performer);
         const wallet = lower(typeof resolved === 'string' ? resolved : resolved?.address);
         if (!addressPattern.test(wallet) || /^0x0{40}$/i.test(wallet)) throw new Error('Performer wallet/ENS could not be resolved');
+        if (input.priorityFor !== undefined) {
+          const previous = next.bookings.find(item => item.id === input.priorityFor);
+          const completion = previous && getBroadcastCompletion(previous.id);
+          if (!previous || previous.wallet !== wallet || completion?.known !== true ||
+              completion.pending !== false || !Number.isFinite(completion.actualEndedAt) || completion.priorityFollowup !== true) {
+            throw new Error('A verified priority follow-up for this performer is required');
+          }
+          if (next.bookings.some(item => item.priorityFor === previous.id)) {
+            throw new Error('Priority invitation already prepared; use the existing invitation instead');
+          }
+        }
         const start = Date.parse(input.startUtc), end = Date.parse(input.endUtc);
         if (!Number.isFinite(start) || !Number.isFinite(end) || start <= now() || end <= start || end - start > 4 * 3600_000) throw new Error('Invalid future show slot');
         const eventId = required(input.eventId, 'Dated occurrence ID', 100);
@@ -233,6 +244,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
         if (pilot && (reviewWindow !== 86400 || cancellationWindow !== 28800 || killFeeBps !== 10000 ||
             claimDeadline !== end + 4 * 86400_000)) throw new Error('Pilot terms require 24-hour review, eight-hour cancellation window, 100% late kill fee and three further days to claim');
         b = { id: bookingId, wallet, ens: addressPattern.test(performer) ? '' : performer,
+          ...(input.priorityFor ? { priorityFor: input.priorityFor } : {}),
           displayName: required(input.displayName, 'Display name', 80), discordHandle: input.discordHandle ? required(input.discordHandle, 'Discord handle', 80) : '',
           eventId, title: required(input.title, 'Show title', 80), startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(),
           amountUnits: amount, asset: 'USDC', chainId: 8453, mode, termsVersion: required(input.termsVersion, 'Terms version', 80),
@@ -337,6 +349,13 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
     return { ...clone(state), ready: true, escrowAddress, escrowConfigured: !!escrowAddress, notice: 'Earmarked, NOT escrowed. Phase 0 admin can recoverFund.',
       bookings: state.bookings.map(({ acknowledgements, discordHandle, ...b }) => ({ ...clone(b),
         broadcastCompletion: getBroadcastCompletion(b.id),
+        recordingRelease: getRecordingRelease(b),
+        priorityInvitation: (() => {
+          const invitation = state.bookings.find(item => item.priorityFor === b.id);
+          return invitation ? { bookingId: invitation.id, state: invitation.cancelled ? 'cancelled'
+            : ['funded', 'approved', 'paid'].includes(invitation.status) ? 'funded'
+              : invitation.acknowledgements ? 'accepted' : 'prepared' } : null;
+        })(),
         acknowledged: !!acknowledgements, acknowledgedAt: acknowledgements?.at || null })) };
   }
   async function getState() { return run(async () => { await initialize(); await indexEscrow(); return publicState(); }); }

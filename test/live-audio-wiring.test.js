@@ -278,9 +278,38 @@ test('Profile does not celebrate inconsistent, stale or wrong-booking successful
   }
 });
 
+test('Profile release parties require the connected performer and a real minted recording playback', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const createElement = dom(t), container = createElement('section');
+  t.mock.method(Date, 'now', () => reentryTime);
+  const release = { known: true, state: 'airing', trackId: 'exact-song', title: 'The exact released song',
+    tokenId: '19', firstPlayId: 'verified-radio-start', firstStartedAt: reentryTime - 1000 };
+  const b = { ...booking(), broadcastCompletion: { known: true, pending: false,
+    actualEndedAt: reentryTime - 60000, endReason: 'audio-loss' },
+    recordingRelease: { ...release, releases: [release] } };
+  const render = async () => {
+    container.children = [];
+    const activate = await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
+      bookingState: { bookings: [b], escrowAddress: otherWallet } });
+    activate();
+    return descendants(container);
+  };
+  let nodes = await render();
+  assert.ok(nodes.some(node => node.className === 'live-release-party'));
+  assert.ok(nodes.some(node => node.textContent === release.title));
+  assert.equal(nodes.some(node => node.className === 'live-curtain-call'), false, 'a real partial release is not a successful show');
+  global.window._wallet.address = otherWallet;
+  nodes = await render();
+  assert.equal(nodes.some(node => node.className === 'live-release-party'), false);
+  global.window._wallet.address = wallet;
+  b.recordingRelease = { ...release, state: 'minted', releases: [{ ...release, state: 'minted', firstPlayId: undefined }] };
+  nodes = await render();
+  assert.equal(nodes.some(node => node.className === 'live-release-party'), false, 'minting is not airing');
+});
+
 test('Profile shows a replayable curtain call only for the connected performer’s verified finish', async t => {
   const [, { renderLivePerformances }] = await modules;
-  const model = await import('../js/live-afterparty.mjs?v=20261116-curtain');
+  const model = await import('../js/live-afterparty.mjs?v=20261117-release-party');
   const createElement = dom(t), container = createElement('section'), storage = new Map(), events = [];
   t.mock.method(Date, 'now', () => Date.parse('2026-11-14T02:10:00Z'));
   global.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
@@ -749,14 +778,14 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
     assert.match(source, /live-audio\.mjs\?v=20261114-allocated-stage/);
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /live-performance-admin\.mjs\?v=20261115-afterparty/);
+  assert.match(html, /live-performance-admin\.mjs\?v=20261117-release-party/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261116-curtain"/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261117-release-party"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261115-afterparty"/);
   assert.match(html, /live-performance\.css\?v=20261115-afterparty/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/live-performance-profile.mjs?v=20261115-afterparty'],
-    './js/live-performance-profile.mjs?v=20261116-curtain');
+    './js/live-performance-profile.mjs?v=20261117-release-party');
   assert.equal(map.imports['./js/live-bookings.mjs?v=20261108-live-audio-pilot'],
     './js/live-bookings.mjs?v=20261114-tip-provenance');
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
@@ -795,7 +824,7 @@ test('standalone backstage and main-page imports load compatible recovery helper
   }
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
-    assert.ok(source.includes(`${entry}?v=20261117-producer-recovery`));
+    assert.ok(source.includes(`${entry}?v=${html === 'live-room.html' ? '20261117-release-party' : '20261117-producer-recovery'}`));
     assert.match(source, /live-audio\.css\?v=20261116-booth/);
     assert.doesNotMatch(source, /20261114-direction/);
   }

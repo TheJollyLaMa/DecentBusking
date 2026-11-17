@@ -236,7 +236,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       reason: record?.reason || '', policy, ingressEnabled: transport.ingressEnabled,
       listenerLimit: transport.listenerLimit || 10, recordingAvailable: recorder?.available === true,
       discordParity: 'Website audio only; Discord live relay is not enabled',
-      ...(privateView && recorder ? { recording: recorder.status(mediaBooking(b)) } : {}),
+      ...(privateView && recorder ? { recording: recorder.status(mediaBooking(b)), recordingRelease: b.recordingRelease } : {}),
       ...(privateView ? { broadcastControl: record?.allocation ? {
         choice: record.allocation.choice, previousBookingId: record.allocation.previousBookingId,
         nextBookingId: record.allocation.nextBookingId, delayNotifiedAt: record.allocation.delayNotifiedAt,
@@ -1044,6 +1044,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       if (!state || failed) return { known: false, pending: true, actualEndedAt: null };
       const a = recordFor(bookingId)?.allocation;
       return a ? { known: true, pending: !a.endedAt, actualEndedAt: a.endedAt, endReason: a.endReason,
+        actualStartedAt: a.startedAt, plannedStartAt: a.plannedStartAt, choice: a.choice,
         priorityFollowup: a.priorityFollowup } : { known: true, pending: false, actualEndedAt: null };
     },
     broadcastDeploymentState() {

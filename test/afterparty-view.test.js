@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { renderAfterpartyChecklist, renderCurtainCall } = require('../js/live-afterparty-view.mjs');
+const { renderAfterpartyChecklist, renderCurtainCall, renderRecordingReleaseParty } = require('../js/live-afterparty-view.mjs');
 
 const makeDocument = () => ({
   createElement(tag) {
@@ -48,6 +48,31 @@ test('curtain call opens once, can be dismissed and explicitly replayed, and ren
   assert.equal(renderCurtainCall({ ...milestone, kind: 'payment' }, options), null);
 });
 const descendants = node => [node, ...(node.children || []).flatMap(descendants)];
+
+test('recording release party uses exact recording links, truthful interrupted status and explicit replay without taking focus', () => {
+  const doc = makeDocument();
+  const milestone = { kind: 'radio-release', id: 'release:show:song', title: 'Your recording reached DBusk Radio',
+    subtitle: '<Exact song title>', state: 'retrying', partial: true,
+    evidence: { trackId: 'song', contractAddress: `0x${'12'.repeat(20)}`, tokenId: '9' } };
+  const calls = [];
+  let seen = false;
+  const view = renderRecordingReleaseParty(milestone, { documentRef: doc, celebrate: (_, options) => {
+    calls.push(options.replay);
+    const celebrated = !seen || options.replay; seen = true;
+    return { celebrated };
+  } });
+  let nodes = descendants(view.element);
+  assert.ok(nodes.some(n => n.textContent === '<Exact song title>'));
+  assert.match(nodes.find(n => n.tag === 'output').textContent, /interrupted.*safe radio slot.*partial recording/);
+  assert.equal(nodes.filter(n => n.tag === 'a').length, 3);
+  assert.equal(nodes.some(n => n.focused), false);
+  view.activate();
+  nodes.find(n => n.textContent === 'Dismiss celebration').onclick();
+  assert.equal(nodes.find(n => n.textContent === 'Replay release celebration').focused, true);
+  nodes.find(n => n.textContent === 'Replay release celebration').onclick();
+  assert.deepEqual(calls, [false, true]);
+  assert.equal(renderRecordingReleaseParty({ ...milestone, kind: 'payment' }, { documentRef: doc }), null);
+});
 
 test('afterparty checklist renders text, next steps and verified evidence links without HTML injection', () => {
   const section = renderAfterpartyChecklist([

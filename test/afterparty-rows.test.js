@@ -18,6 +18,41 @@ const finished = { known: true, pending: false, actualEndedAt: END - 60000, endR
 const byId = rows => Object.fromEntries(rows.map(item => [item.id, item]));
 const rowsFor = async (b, options = {}) => byId((await model()).afterpartyRows(b, { now: NOW, ...options }));
 
+test('multiple recording releases celebrate only real playback and keep IDs through interrupted retries', async () => {
+  const { afterpartyRows, afterpartyMilestones } = await model();
+  const release = { known: true, state: 'airing', title: 'Actual first song', trackId: 'song-1',
+    tokenId: '7', firstPlayId: 'first-radio-play', firstStartedAt: NOW };
+  const b = booking({ recordingRelease: { ...release, releases: [release,
+    { ...release, state: 'minted', title: 'Not aired song', trackId: 'song-2', firstPlayId: undefined }] } });
+  const milestones = () => afterpartyMilestones(b, afterpartyRows(b));
+  assert.equal(milestones().length, 1);
+  assert.equal(milestones()[0].subtitle, 'Actual first song');
+  const id = milestones()[0].id;
+  b.recordingRelease.state = 'retrying';
+  b.recordingRelease.releases[0].state = 'retrying';
+  assert.equal(milestones()[0].id, id);
+  assert.equal(milestones()[0].state, 'retrying');
+});
+
+test('producer-delay outcomes and priority invitations never reduce or recertify the original fee', async () => {
+  for (const [choice, endReason, priorityFollowup] of [['short', 'producer-finished', true],
+    ['full', 'producer-finished', false], ['decline', 'declined', false]]) {
+    const b = booking({ broadcastCompletion: { ...finished, actualStartedAt: END - 300000,
+      plannedStartAt: END - 300000, choice, endReason, priorityFollowup } });
+    const rows = await rowsFor(b);
+    assert.match(rows.completion.detail, /Producer-delayed slot:.*Original guaranteed fee/);
+    assert.equal(rows.payment.text, 'Not paid yet');
+    assert.equal(!!rows.priority, priorityFollowup);
+    if (!priorityFollowup) continue;
+    assert.match(rows.priority.text, /pending/);
+    for (const state of ['prepared', 'accepted', 'funded', 'cancelled']) {
+      b.priorityInvitation = { state, bookingId: 'separate-invitation' };
+      assert.equal((await rowsFor(b)).priority.bookingId, 'separate-invitation');
+      assert.equal((await rowsFor(b)).payment.text, 'Not paid yet');
+    }
+  }
+});
+
 test('completion is verified only from the stage record or a live re-entry state, never from the clock', async () => {
   const { completionFacts, stageEndedSuccessfully } = await model();
   assert.deepEqual(completionFacts(booking({ broadcastCompletion: finished })), { state: 'verified', endReason: 'producer-finished', endedAt: END - 60000 });
@@ -137,10 +172,14 @@ test('recording and radio rows come only from the recording pipeline and radio f
     ['unrecognised state', { known: true, state: 'sparkly' }, ['unknown', 'Recording state unavailable'], ['unknown', 'Radio release unknown']],
     ['none', { known: true, state: 'none' }, ['info', 'No recording submitted yet'], ['info', 'Nothing to air yet']],
     ['processing', { known: true, state: 'processing' }, ['pending', 'Recording is being prepared'], ['pending', 'Waiting for the mint']],
+    ['performer review', { known: true, state: 'performer-review' }, ['pending', 'Ready for your release decision'], ['pending', 'Nothing released to radio yet']],
+    ['processing failed', { known: true, state: 'failed' }, ['attention', 'Recording preparation needs attention'], ['pending', 'Nothing released to radio yet']],
     ['mint requested', { known: true, state: 'mint-requested', partial: true }, ['pending', 'Submitted · waiting for the mint'], ['pending', 'Waiting for the mint']],
     ['minted', { known: true, state: 'minted', tokenId: '7', replayAfter: Date.parse('2026-11-15T02:00:00Z') }, ['verified', 'Minted as token #7'], ['pending', 'Not played on the radio yet']],
     ['airing', { known: true, state: 'airing', tokenId: '7', trackId: 'track-1' }, ['verified', 'Minted as token #7'], ['verified', 'On the radio now ✓']],
     ['aired', { known: true, state: 'aired', tokenId: '7', trackId: 'track-1' }, ['verified', 'Minted as token #7'], ['verified', 'Played on the radio ✓']],
+    ['interrupted', { known: true, state: 'interrupted', tokenId: '7', trackId: 'track-1', firstPlayId: 'first-play' }, ['verified', 'Minted as token #7'], ['attention', 'Playback started · completion unverified']],
+    ['retrying', { known: true, state: 'retrying', tokenId: '7', trackId: 'track-1', firstPlayId: 'first-play' }, ['verified', 'Minted as token #7'], ['attention', 'Playback interrupted · waiting to retry']],
   ];
   for (const [name, release, expectedRecording, expectedRadio] of cases) {
     const rows = await rec(release);
@@ -149,6 +188,7 @@ test('recording and radio rows come only from the recording pipeline and radio f
     for (const key of ['recording', 'radio']) if (['pending', 'unknown', 'info'].includes(rows[key].state)) assert.ok(rows[key].next !== undefined, `${name}: ${key} has a next field`);
   }
   assert.match((await rec({ known: true, state: 'minted', replayAfter: Date.parse('2026-11-15T02:00:00Z') })).radio.detail, /Minting alone does not mean it aired\. It plays in a normal rotation slot after Nov 14, 2026, 9:00 PM ET/);
+  assert.match((await rec({ known: true, state: 'minted', replayRequested: false })).radio.detail, /no reserved automatic replay/);
   assert.match((await rec({ known: true, state: 'mint-requested', partial: true })).recording.detail, /Nothing is automatic\. This is a partial recording/);
   const adminMint = await rowsFor(booking({ recordingRelease: { known: true, state: 'mint-requested' } }), { audience: 'admin' });
   assert.match(adminMint.recording.next, /Admin › mint queue \(owner-signed\)/);
@@ -208,7 +248,7 @@ test('milestones exist only for verified facts and carry their evidence in a sta
   assert.deepEqual(all.map(item => item.id), [`curtain:${booking().id}`, `payment:${booking().id}:${txHash}`, `release:${booking().id}:track-1`]);
   assert.equal(all[1].subtitle, '$20.00 USDC');
   assert.deepEqual(all[1].evidence, { txHash, chainId: 8453 });
-  assert.match(all[2].subtitle, /Friday fixture is out/);
+  assert.equal(all[2].subtitle, 'Friday fixture');
   assert.equal(new Set(all.map(item => item.id)).size, 3);
   const b = booking();
   const reentered = afterpartyMilestones(b, afterpartyRows(b, {
