@@ -25,8 +25,8 @@ Server-only environment names, deliberately without values:
 - `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — **never** browser config, repository files, shared screenshots or logs.
 - `LIVE_AUDIO_STORAGE_KEY` — dedicated 32-byte random hex AES-256-GCM key, privately backed up and never reused from content-review or signing keys. Production uses `createLiveAudioPinataStore`, not an ephemeral file path. Only lifecycle state is allowlisted; no media, tokens or stream keys are persisted. The default requires the checkpoint mirror. `LIVE_AUDIO_CHECKPOINT_MODE=hosted-verified` explicitly uses encrypted Pinata lifecycle checkpoints with verified latest-CID/content readback instead, adapting the private rehearsal store. Missing, ambiguous, unreadable or unverifiable latest state closes media controls. This media-only option changes **no financial, booking, payroll or paid-playback durability requirements**. Lifecycle writes have a bounded 45-second deadline; authorizing/checking/arming clients allow 60 seconds. Healthy packet timestamps stay in memory; only lifecycle transitions write checkpoints.
 - `LIVE_AUDIO_PROGRAMS` — optional JSON keyed by exact booking ID, with integer `leadInSeconds` and `outroSeconds` (0–600). This opts only the specified funded/accepted booking into scheduled advert breaks. It does not fund, arm, pass soundchecks or authorize recording. Invalid configuration stops startup.
-- **#358, UNDEPLOYED:** `LIVE_AUDIO_GRACE_MS=15000` selects the newly authorized 15-second recovery default explicitly. An existing `60000` override must not be mistaken for the new policy. The supported override is an integer 1–60000 ms. No environment changes are performed by this patch.
-- **#358, UNDEPLOYED:** `LIVE_AUDIO_RECOVERY_ENABLED=true` enables explicit producer recovery writes **only after the reader-first sequence below**. It defaults off. The shorter default watchdog does not depend on this control flag.
+- **#358:** `LIVE_AUDIO_GRACE_MS=15000` selects the authorized 15-second recovery default explicitly. An existing `60000` override must not be mistaken for the new policy. The supported override is an integer 1–60000 ms.
+- **#358:** `LIVE_AUDIO_RECOVERY_ENABLED=true` enables explicit producer recovery writes **only after the reader-first sequence below**. It defaults off. The shorter default watchdog does not depend on this control flag.
 - `LIVE_AUDIO_OBS_ENABLED=true` only after independently approving WHIP ingress availability/quota. Otherwise OBS is explicitly unavailable.
 - Browser listener freshness uses `RemoteTrack.getRTCStatsReport()` audio-only inbound RTP counters. LiveKit 2.23's summarized audio `getReceiverStats()` omits `packetsReceived`; neither bytes, video/outbound counters nor concealed samples substitute for received audio packets.
 - Existing owner wallet and allowed-origin configuration must match the website. Do not add a new hardcoded performer identity.
@@ -394,7 +394,7 @@ The index import map redirects the existing radio-controller import URL to one c
 
 Server **ON-AIR** requires fresh decoded audio **and advancing received RTP packets** at the independent worker receiver. Zero-amplitude music silence is valid; speaker activity/nonzero amplitude is not a health test. Browser ON-AIR additionally requires its own advancing audio packets and playing media. A connected socket or published track alone is insufficient. Autoplay blocking says to tap Play. Short failures show **RECONNECTING**.
 
-**#358 policy, UNDEPLOYED:** an unfinished live set gets **15 seconds** to recover
+**#358 policy:** an unfinished live set gets **15 seconds** to recover
 verified delivered audio, unless the producer explicitly grants extra time. At
 the authorized deadline it follows the existing irreversible cancellation path.
 An unarmed automatic slot retains its separate **60-second initial-arm
@@ -405,7 +405,7 @@ unobserved process gap: the existing bounded receiver probe and new observed
 grace still apply in that case, without claiming ON-AIR. Watchdog/checkpoint
 latency can delay the visible terminal transition; measure this on actual hosting.
 
-### Producer recovery (#358) — LOCAL ONLY / UNDEPLOYED
+### Producer recovery (#358)
 
 The production desk and full operator room share the existing signed,
 booking-scoped stage controls:
@@ -479,10 +479,12 @@ partial. Publication still needs the existing performer release approval.
    `radio-predeploy.js` protects playback/recording drain boundaries; it does not
    verify compatible readers or replace these reader-first checks.
 
-**Nothing here is deployed. Render build capacity is exhausted; deployment is
-BLOCKED.** Do not bypass `node radio-predeploy.js`. No restart, environment
-change, provider stream, real messages, payment, consent or recording was
-performed for these local checks.
+Do not bypass `node radio-predeploy.js`. Release and activation evidence belongs
+in #358; the local checks below are not real musician, provider-stream, message,
+payment, consent or recording tests. Under the owner's Friday sprint workflow,
+close delivered implementations after verified rollout, then file new issues
+for failures actually observed during the next live rehearsal. Closure is not
+a claim that an unperformed live check passed.
 
 Reuse decision: adapt the already integrated `planBroadcastCommand`,
 `createLiveDirection`, `withBroadcastHandoff`, `endAllocation`/`cancel`, and
@@ -528,7 +530,7 @@ The injected cancellation hook is `onCancel(booking, reason)`. Worker wiring inv
 - T−60/T−15 are private: an unauthenticated listener, wrong wallet, old signature and copied URL cannot hear backstage or publish/control.
 - Ten concurrent listeners plus performer/operator/receiver; late join, refresh, mute and autoplay prompt. Confirm no wallet is required to listen publicly.
 - Measure glass-to-glass latency; proposed pilot target is ≤5 seconds, not a measured capability claim.
-- Keep intentional silence for over sixty seconds: **no cancellation**. For the undeployed #358 policy, test outages just below and exactly at 15 seconds; hold explicitly, reconnect within the authorized window, and expire an unrecovered hold once. Test both immediate filler choices, safe return behind a paid song/advert, repeated requests/reconnect/restart preserving the one-minute cap, and actual ready/not-ready next-act advance. Real staging checks are **NOT RUN**.
+- Keep intentional silence for over sixty seconds: **no cancellation**. For #358, test outages just below and exactly at 15 seconds; hold explicitly, reconnect within the authorized window, and expire an unrecovered hold once. Test both immediate filler choices, safe return behind a paid song/advert, repeated requests/reconnect/restart preserving the one-minute cap, and actual ready/not-ready next-act advance. Real staging checks are **NOT RUN**.
 - Close/restart the worker, fail the checkpoint write, lose the hosting connection, block OBS, switch wallet and revoke source access. A total worker/hosting outage cannot deliver adverts; display unavailable rather than pretend recovery.
 - Verify radio → live → radio has no duplicate sound or stale source; paid DJuke stays queued; ads only run in the cancellation window or normal programming, with actual existing evidence/priority rules.
 - Inspect provider recording/egress and billing settings; verify no recordings or unauthorized spend. No real cloud stream, mic/OBS soundcheck, ten-listener load test or deployment has been completed by local unit tests.

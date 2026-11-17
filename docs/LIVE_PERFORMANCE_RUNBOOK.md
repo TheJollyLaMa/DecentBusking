@@ -265,7 +265,7 @@ real rehearsal and predeployment checks before relying on these measurements.
 8. **Quiet endings (#343).** Ask the performer to keep the microphone on until the
    producer ends the set. If a set the performer declared finished goes quiet and
    nobody ends it, the server closes it after the audio grace (15 seconds under
-   the **undeployed #358 policy**, previously about a minute) as the normal
+   the **#358 policy**, previously about a minute) as the normal
    producer-finished ending, timed at the later of the declaration and the last
    audio. That is never an audio-loss cancellation, so no fault slate or
    recovery-ads window runs. With legacy recording segments, if the producer's
@@ -281,7 +281,7 @@ real rehearsal and predeployment checks before relying on these measurements.
    `node --test test/night-simulation.test.js` replays a two-act night on a fake
    clock; it is a simulation of this server's state machine, not a live-audio test.
 
-### Producer recovery (#358) — UNDEPLOYED / deployment BLOCKED
+### Producer recovery (#358)
 
 The owner authorized **15 seconds** for an unfinished set to recover and at most
 **one additional minute cumulative per set**, explicitly granted by the producer.
@@ -315,7 +315,7 @@ early-taken audio before the original contracted start is excluded and any
 resulting recording is partial. Consent, release approval, pay and escrow/claim
 rules remain unchanged.
 
-Release requires the [reader-first and mirror checks](LIVE_AUDIO_PILOT.md#producer-recovery-358--local-only--undeployed):
+Release requires the [reader-first and mirror checks](LIVE_AUDIO_PILOT.md#producer-recovery-358):
 first deploy compatible readers with `LIVE_AUDIO_RECOVERY_ENABLED` unset/false
 and explicitly retain `LIVE_AUDIO_GRACE_MS=60000`. The default is 15000 even with
 recovery writes disabled, so omitting the override changes the watchdog before
@@ -328,7 +328,7 @@ Old decrypted readers reject the optional recovery
 field; the current local mirror client already rejects encrypted live lifecycle
 envelopes, so retain approved hosted-verified storage or approve a separate
 mirror reader upgrade. Never erase the hold journal or bypass
-`node radio-predeploy.js`. Render capacity blocks deployment. Real staging
+`node radio-predeploy.js`. Real staging
 audio/OBS/reconnect/messages/paid-boundary/recording checks are **NOT RUN**.
 
 Backstage/monitoring/consent/fee regressions (the original 102-test selection,
@@ -508,7 +508,7 @@ Eligible adverts only: if none are available, report waiting, never play a song
 inside these breaks or fabricate delivery/impressions. Existing cancellation
 behavior is separate: a quiet fault slate, recovery adverts, then radio.
 A disconnected microphone is not a successful early finish; the existing
-verified-delivery grace applies: the **undeployed #358 policy is 15 seconds**
+verified-delivery grace applies: the **#358 policy is 15 seconds**
 (plus only explicit bounded producer hold), superseding the older 60-second
 default. The planned successful end is 21:20.
 
@@ -647,7 +647,7 @@ evidence, wrong wallets, interruptions, refresh and replay.
 Reuse: existing `createBrowserIpfsUploader`, `LIVE_ESCROW_ABI`, transaction
 hash storage convention and event indexer; no contract or worker deployment.
 
-### Recording release parties and priority follow-up (#342, local / undeployed)
+### Recording release parties and priority follow-up (#342)
 
 The performer Profile now has a separate, replayable release-party card for
 each approved recording that actually starts on the public website radio.
@@ -694,8 +694,10 @@ Reuse: adapted this repository's `completeLiveRecordingReplay`, playlist
 checkpoint writer, `afterpartyRows`/`afterpartyMilestones`,
 `celebrateAfterparty`, performer Profile and existing signed invitation flow
 from the first-night integration, rather than adding a second payment/event
-service. Real musician, mint, radio and invitation rehearsals remain NOT RUN;
-deployment is still blocked separately from local implementation.
+service. Real musician, mint, radio and invitation rehearsals remain NOT RUN.
+Record verified deployment separately in #342. Delivered implementations can
+close without a claimed rehearsal pass; under the owner's Friday workflow,
+actual rehearsal failures become new issues for the following week's sprint.
 
 Local validation: 665 automated regression tests passed, including durable
 start/failure/concurrent-write handling, private-player exclusion, partial and
