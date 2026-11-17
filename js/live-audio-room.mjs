@@ -1,4 +1,4 @@
-import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
+import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261117-lease-recovery';
 import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from './live-recording-consent.mjs?v=20261114-allocated-stage';
 import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261114-allocated-stage';
 import { performerRoomSign, performerAllocationAccess, verifiedPerformerFinish } from './performer-room.mjs?v=20261116-curtain';
@@ -8,7 +8,7 @@ import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
 import { bindLiveDirection } from './live-direction.mjs?v=20261114-allocated-stage';
 import { bindLiveFeedbackRoom, bindTogether } from './live-feedback.mjs?v=20261115-listener-feedback';
-import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261114-allocated-stage';
+import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261117-producer-recovery';
 import { afterpartyRows, afterpartyMilestones, celebrateAfterparty } from './live-afterparty.mjs?v=20261116-curtain';
 import { renderAfterpartyChecklist, renderCurtainCall } from './live-afterparty-view.mjs?v=20261116-curtain';
 
@@ -107,6 +107,9 @@ function recordingMessage(recording) {
     return 'Your recording is ready. Open Live performances in Profile to preview and choose full set, split songs, or decide later. Nothing enters the mint queue until you approve it.';
   }
   if (['finalizing', 'uploading', 'processing'].includes(recording?.status)) return 'Preparing your live recording for private performer review...';
+  if (recording?.consented && recording.earlyCaptureExcluded) {
+    return 'Early airtime does not expand recording permission. Capture begins no earlier than the original scheduled start; any resulting recording is partial.';
+  }
   if (recording?.status === 'recording') return recording.consentVersion === LIVE_RECORDING_ALLOCATED_CONSENT_VERSION
     ? 'Recording your authorized on-air set. Soundchecks stay private.'
     : 'Recording only within the original scheduled-set permission. Expanded capture is not authorized.';
@@ -216,7 +219,7 @@ async function connect(publish) {
       void headphones.stop();
       void meter.stop();
       byId('room-listen-status').textContent = 'Disconnected. Click Listen to private soundcheck to reconnect.';
-      status('RECONNECTING — reconnect this input; the live 60-second deadline still applies');
+      status('RECONNECTING — reconnect this input; the server recovery deadline still applies (15 seconds by default; only the producer may grant a bounded hold)');
     }
   });
   try {
@@ -497,7 +500,7 @@ byId('room-publish').onclick = perform(() => {
   '✓ Microphone published. Ask the operator to confirm they hear your voice and music.');
 byId('room-monitor').onclick = perform(() => connect(false), 'Connecting to private soundcheck…',
   '✓ Listening connection opened. Check the audio status and player below.');
-byId('room-stop').onclick = perform(async () => { await disconnect(); status('Microphone stopped. During a live slot, 60 seconds without audio cancels the broadcast.'); });
+byId('room-stop').onclick = perform(async () => { await disconnect(); status('Microphone stopped. An unfinished live set ends at its server recovery deadline (15 seconds by default), unless the producer explicitly grants a bounded hold.'); });
 byId('room-obs').onclick = perform(async () => {
   const authorization = session;
   await disconnect();

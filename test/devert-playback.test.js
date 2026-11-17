@@ -292,9 +292,12 @@ test('main-radio impressions are never throttled by the VertLoop window', async 
   const fixture = harness();
   const runtime = await makeRuntime(fixture);
   await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'loop-1', mainRadio: false, audibleMs: 30_000 });
-  await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'main-1', mainRadio: true, audibleMs: 30_000 });
+  await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'main-1', mainRadio: true,
+    audibleMs: 30_000, expectedMs: 60_000 });
   await runtime.recordCampaignImpression({ campaignId: '17', radioPlayId: 'main-2', mainRadio: true, audibleMs: 30_000 });
   assert.deepEqual(fixture.impressionCalls.map(call => call.mainRadio), [false, true, true]);
+  assert.deepEqual(fixture.state.impressions.map(({ expectedMs, completionRatio, short }) =>
+    [expectedMs, completionRatio, short]), [[null, null, null], [60000, 0.5, true], [null, null, null]]);
 });
 
 test('DeVert ad tracks carry the verified advertiser address into playback state', async () => {
@@ -440,9 +443,13 @@ test('advert vote tallies carry across plays and into weekly history without vot
     [{ campaignId: '1', up: 2, down: 1, plays: 2, net: 1, title: 'Shop Local' }]]);
   assert.ok(!JSON.stringify(reports).includes('listener-browser'));
   assert.equal(await runtime.recordPaidAdvertPlay({ campaignId: '1', radioPlayId: 'devert-paid:9:1', audibleMs: 1000 }), false);
-  assert.equal(await runtime.recordPaidAdvertPlay({ campaignId: '1', radioPlayId: 'devert-paid:9:1', audibleMs: 60_000 }), true);
+  assert.equal(await runtime.recordPaidAdvertPlay({ campaignId: '1', radioPlayId: 'devert-paid:9:1',
+    audibleMs: 60_000, expectedMs: 60_000 }), true);
   assert.equal(await runtime.recordPaidAdvertPlay({ campaignId: '1', radioPlayId: 'devert-paid:9:1', audibleMs: 60_000 }), true);
   assert.equal(fixture.state.paidPlays.length, 1, 'paid advert plays are durable and idempotent');
+  assert.equal(fixture.state.paidPlays[0].expectedMs, 60000);
+  assert.equal(fixture.state.paidPlays[0].completionRatio, 1);
+  assert.equal(fixture.state.paidPlays[0].short, false);
   assert.equal(runtime.getMainRadioAdVoteSummary('devert-paid:9:1', '1').campaign.plays, 3);
   const restored = await makeRuntime(fixture);
   assert.equal(restored.getMainRadioAdVoteSummary('x', '1').campaign.plays, 3);
@@ -545,6 +552,9 @@ test('all tied positive net winners receive exactly the DST-aware next week, wit
   await runtime.recordCompetitionAdvertPlay(play);
   await runtime.recordCompetitionAdvertPlay(play);
   assert.equal(runtime.getState().competition.plays.length, 1);
+  assert.equal(runtime.getState().competition.plays[0].expectedMs, null);
+  assert.equal(runtime.getState().competition.plays[0].completionRatio, null);
+  assert.equal(runtime.getState().competition.plays[0].short, null);
   assert.equal(runtime.getState().impressions.length, 0);
   assert.equal(runtime.getState().paidPlays.length, 0);
   assert.equal(fixture.impressionCalls.length, 0);

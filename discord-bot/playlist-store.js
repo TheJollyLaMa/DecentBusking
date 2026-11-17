@@ -14,7 +14,8 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'node:crypto';
 import { isEligibleRadioMusic } from '../js/radio-playlists.mjs';
-import { recordingDurationProof, recordingSampleRangeProof, recordingMediaIdentity, recordingDurationReason } from '../js/radio-duration.mjs';
+import { recordingDurationProof, recordingSampleRangeProof, recordingMediaIdentity, recordingDurationReason,
+  expectedRecordingMs, radioCompletionDiagnostics } from '../js/radio-duration.mjs';
 import { currentPayrollPeriod, payrollPeriodFromKey, payrollPeriods } from '../js/payroll-week.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -700,7 +701,8 @@ export function reconcileRatings(events) {
 }
 
 /** Count one completed, audible play in its UTC week; retries are idempotent by playId. */
-export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audibleMs, firstWeekBonus = false, announcementId } = {}) {
+export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audibleMs, expectedMs,
+  firstWeekBonus = false, announcementId } = {}) {
   if (!playId || !Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return { counted: false, reason: 'invalid-event' };
   if (!Number.isFinite(audibleMs) || audibleMs < 0) return { counted: false, reason: 'under-30-seconds' };
   const track = _playlist.find((entry) => entry.trackId === trackId);
@@ -708,6 +710,7 @@ export function recordAudiblePlay(trackId, { playId, startedAt, endedAt, audible
   const event = { id: `play:${playId}`, type: 'play', trackId, playId,
     observedAt: new Date().toISOString(), occurredAt: new Date(endedAt).toISOString(),
     startedAt: new Date(startedAt).toISOString(), endedAt: new Date(endedAt).toISOString(), audibleMs,
+    ...radioCompletionDiagnostics(audibleMs, expectedMs === undefined ? expectedRecordingMs(track) : expectedMs),
     qualified: audibleMs >= MIN_WEEKLY_PLAY_MS, announcementId: announcementId || null };
   if (audibleMs < MIN_WEEKLY_PLAY_MS) {
     _save({ routine: true, events: [event] });

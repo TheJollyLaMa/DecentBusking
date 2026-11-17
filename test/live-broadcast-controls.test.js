@@ -144,3 +144,43 @@ test('absent capabilities never expose live timing mutation buttons', async () =
   assert.equal(f.find('Enable allocated-stage control').hidden, true);
   assert.match(f.text(), /Existing automatic scheduling/);
 });
+
+test('producer recovery displays a server-clock countdown and cumulative hold budget, separate from encore', async () => {
+  const f = await fixture({ capabilities: { recoveryHold: true, recoveryFiller: true, recoveryReturn: true } });
+  f.state({ ...f.stateValue, recovery: { enabled: true, revision: 3, graceMs: 15000,
+    deadline: NOW + 10000, usedMs: 45000, remainingMs: 15000, filler: 'radio' } });
+  assert.match(f.text(), /10s until authorized deadline/);
+  assert.match(f.text(), /used 45s; remaining 15s/);
+  f.control('Additional recovery seconds').value = '10';
+  await f.click('Grant explicit recovery hold');
+  assert.deepEqual(f.calls[0].input, {
+    action: 'broadcast-recovery-hold', commandId: 'command-1', expectedRevision: 3, additionalMs: 10000,
+  });
+  await f.click('Run commercials now · keep recovery deadline');
+  assert.equal(f.calls[1].input.mode, 'adverts');
+  assert.equal(f.calls[1].input.expectedRevision, 3);
+  assert.equal(Object.hasOwn(f.calls[1].input, 'deadline'), false);
+  f.time(NOW + 10000); f.tick();
+  assert.match(f.text(), /EXPIRED/);
+  assert.equal(f.find('Return recovered performer safely').disabled, true);
+});
+
+test('next-act controls preserve visible no-next, not-ready, stale and denied states without fake delivery', async () => {
+  const f = await fixture();
+  assert.match(f.text(), /No paired next act/);
+  assert.equal(f.find('Check paired next-act readiness').disabled, true);
+  f.state({ ...f.stateValue, broadcastControl: { nextBookingId: 'b' } });
+  f.handler(input => input.action === 'direction-state' ? {
+    bookingId: 'b', serverTime: NOW,
+    readiness: { ready: false, expiresAt: NOW + 60000 }, performerPresence: { expiresAt: NOW + 30000 },
+  } : f.stateValue);
+  await f.click('Check paired next-act readiness');
+  assert.match(f.text(), /not ready \/ needs help/);
+  assert.equal(f.calls.some(c => c.input.action === 'direction-message'), false);
+  f.time(NOW + 12001); f.tick();
+  assert.match(f.text(), /stale \/ expired/);
+  f.time(NOW); f.state(f.stateValue);
+  f.handler(() => { throw Object.assign(Error('Pass expired'), { status: 403 }); });
+  await f.click('Check paired next-act readiness');
+  assert.match(f.text(), /unavailable \/ denied \/ expired/);
+});

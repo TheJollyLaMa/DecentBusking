@@ -47,10 +47,13 @@ test('partial playlist audio is retried, not falsely settled even when more than
   const { runtime, journal } = f.make();
   const selection = await runtime.nextPaid();
   const result = await runtime.complete(selection.record, { playId: 'interrupted',
-    audibleMs: 120000, finished: false });
+    audibleMs: 120000, expectedMs: 180000, finished: false });
   assert.equal(result.retrying, true);
   assert.equal(journal.getState()[0].state, 'pending');
   assert.equal(journal.getState()[0].mediaFailures, 1);
+  assert.equal(journal.getState()[0].lastMedia.expectedMs, 180000);
+  assert.equal(journal.getState()[0].lastMedia.completionRatio, 2 / 3);
+  assert.equal(journal.getState()[0].lastMedia.short, true);
   assert.equal(f.settlements, 0);
   assert.equal(f.refunds, 0);
 });

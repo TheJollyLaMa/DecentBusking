@@ -15,6 +15,83 @@ test.beforeEach(t => {
   t.mock.method(Date, 'now', () => Date.parse('2026-10-17T12:00:00Z') + realNow() - startedAt);
 });
 
+test('every radio completion logs the playback-time duration snapshot and passes diagnostics to paid bookkeeping', async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const lines = [];
+  t.mock.method(console, 'log', (...args) => { if (args[0] === '[jukeloop] Audio completion:') lines.push(JSON.parse(args[1])); });
+  for (const [name, seconds, audibleMs, finished, short] of [
+    ['normal', 240, 240000, true, false],
+    ['truncated', 240, 221858, false, true],
+    ['unknown-ad', null, 35000, false, null],
+    ['without-media-evidence', 240, 240000, null, false],
+  ]) {
+    const completed = [];
+    const player = new EventEmitter();
+    player.state = { status: 'playing' };
+    player.play = () => {};
+    player.stop = () => {};
+    const session = new JukeLoopSession({ schedule: [], audioPlayer: player, client: {},
+      djuke: { complete: async (record, play) => completed.push(play) } });
+    t.after(() => session.destroy());
+    session._primeNext = () => {};
+    session._playNext = async () => {};
+    session._persistMainRadioAdState = async () => {};
+    session._announcePrepared = async () => {};
+    const track = seconds === null ? { trackId: `devert:${name}`, title: name, durationSeconds: 240 } :
+      verifiedRecording({ trackId: name, title: name }, seconds);
+    const resource = {};
+    assert.equal(session._startPrepared({ track, resource, queueIndex: null,
+      paid: { record: { requestId: name, ...(seconds === null ? { kind: 'devert', tier: 1 } : {}) } },
+      ...(seconds === null ? { devertAd: { paidRequest: true, campaignId: '1', track } } : {}),
+      ...(finished === null ? {} : { completion: {
+        interrupt() {},
+        finish: async () => ({ finished, reason: finished ? 'clean_eof' : 'audio_stream_incomplete' }),
+      } }),
+    }), true);
+    track.durationSeconds = 1; // Later metadata changes must not rewrite this play's expectation.
+    session._nowPlaying.audible = true;
+    session._nowPlaying.startedAt = Date.now() - audibleMs;
+    player.emit('idle', { resource });
+    await session._paidBookkeepingTask;
+    assert.equal(completed.length, 1);
+    const line = lines.at(-1);
+    assert.equal(line.trackId, track.trackId);
+    assert.equal(line.expectedMs, seconds === null ? null : seconds * 1000);
+    assert.equal(line.short, short);
+    assert.equal(line.completionRatio, seconds === null ? null : line.audibleMs / (seconds * 1000));
+    assert.equal(line.shortToleranceMs, 2000);
+    assert.equal(completed[0].expectedMs, line.expectedMs);
+    assert.equal(completed[0].completionRatio, line.completionRatio);
+    assert.equal(completed[0].short, line.short);
+  }
+  assert.equal(lines.length, 4);
+});
+
+test('durable weekly play events retain normal, truncated and unknown diagnostics without changing eligibility', async t => {
+  const storeUrl = pathToFileURL(path.join(__dirname, '../discord-bot/playlist-store.js'));
+  storeUrl.searchParams.set('test', 'completion-diagnostics');
+  const store = await import(storeUrl.href);
+  const history = [];
+  store.loadPlaylist([verifiedRecording({ trackId: 'measured', title: 'Measured' }, 240),
+    { trackId: 'unknown', title: 'Unknown', durationSeconds: 240 }]);
+  store.configureRemotePersistence(async (state, { events }) => { history.push(...events); });
+  t.after(() => store.configureRemotePersistence(null));
+  for (const [trackId, playId, audibleMs] of [
+    ['measured', 'normal', 240000], ['measured', 'truncated', 221858],
+    ['unknown', 'unknown', 35000], ['measured', 'below-tally', 1000],
+  ]) {
+    const result = store.recordAudiblePlay(trackId, { playId, startedAt: 0, endedAt: audibleMs, audibleMs });
+    assert.equal(result.counted, audibleMs >= 30000);
+  }
+  await store.waitForRemotePersistence();
+  const plays = history.filter(event => event.type === 'play');
+  assert.equal(plays.length, 4);
+  assert.deepEqual(plays.map(event => [event.expectedMs, event.completionRatio, event.short, event.qualified]), [
+    [240000, 1, false, true], [240000, 221858 / 240000, true, true],
+    [null, null, null, true], [240000, 1000 / 240000, true, false],
+  ]);
+});
+
 test('worker advert deadline stops at 120 seconds and cancels itself on Idle', async t => {
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
   let stopped = 0;

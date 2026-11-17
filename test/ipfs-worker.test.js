@@ -104,6 +104,23 @@ test('public radio origins can send anonymous live feedback but cannot access pr
   });
 });
 
+test('listener telemetry uses the public-listen origin policy, not the wider radio-origin policy', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const site = 'https://busking.example', widget = 'https://widget.example', inputs = [];
+  const handler = createWorkerRequestHandler({ allowedOrigins: [site], radioAllowedOrigins: [widget],
+    ownerWallet: Wallet.createRandom().address,
+    listenerTelemetry: { trustedProxyHops: 0, submit(input) { inputs.push(input); return { ok: true }; } } });
+  await withServer(handler, async base => {
+    const url = `${base}/api/live-audio/telemetry`, body = JSON.stringify({ event: 'connect' });
+    const call = origin => fetch(url, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body });
+    assert.equal((await call(widget)).status, 403);
+    const accepted = await call(site);
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.headers.get('cache-control'), 'no-store');
+    assert.equal(inputs.length, 1);
+  });
+});
+
 test('DJuke top earners endpoint returns indexed payouts or an explicit unavailable response', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const data = { chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address: Wallet.createRandom().address, totalUnits: '225000' }] };
@@ -1441,6 +1458,10 @@ test('public health check is readable from local and hosted dapp origins', async
   });
 
   await withServer(handler, async (baseUrl) => {
+    const head = await fetch(`${baseUrl}/health`, { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get('access-control-allow-origin'), '*');
+    assert.equal(await head.text(), '');
     const response = await fetch(`${baseUrl}/health`, {
       headers: { origin: 'http://localhost:4173' },
     });
@@ -1448,6 +1469,23 @@ test('public health check is readable from local and hosted dapp origins', async
     assert.equal(response.headers.get('access-control-allow-origin'), '*');
     assert.deepEqual(await response.json(), { ok: true, ipfsProvider: 'pinata' });
   });
+});
+test('public health includes actual RPC budget mode and totals', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const { createRpcRouter } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'rpc-router.js')).href);
+  for (const [monthCu, mode] of [[0, 'normal'], [26_959_717, 'conserve'], [54_000_000, 'critical-only'], [60_000_000, 'exhausted']]) {
+    const router = createRpcRouter({ paidUrls: ['https://example.invalid'], now: () => Date.UTC(2026, 10, 14),
+      monthlyCuBudget: 60_000_000, initialUsage: { month: '2026-11', monthCu } });
+    const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: '0x1111111111111111111111111111111111111111',
+      getRpcHealth: () => router.health() });
+    await withServer(handler, async baseUrl => {
+      const body = await (await fetch(`${baseUrl}/health`)).json();
+      assert.equal(body.rpc.budget.mode, mode);
+      assert.equal(body.rpc.budget.monthCu, monthCu);
+      assert.equal(body.rpc.budget.monthlyBudget, 60_000_000);
+      assert.equal(body.rpc.computeUnits.overBudget, mode === 'exhausted');
+    });
+  }
 });
 test('radio state is public and readable from any dapp origin', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
@@ -1561,11 +1599,120 @@ test('a truncated upstream radio stream cannot crash the worker or prevent the n
       assert.equal(healthy.status, 200);
       assert.deepEqual(await healthy.json(), { playback: { status: 'playing' } });
     });
-    assert.ok(warnings.some(message => message.includes('Upstream media stream failed')), 'upstream errors must be reported even after the listener disconnects');
+    assert.ok(warnings.some(message => message.includes('MEDIA_GATEWAY_ERROR')), 'upstream errors must be reported even after the response is destroyed');
   } finally {
     console.warn = originalWarn;
     await new Promise(resolve => upstream.close(resolve));
   }
+});
+
+test('repeat logs summarize per distinct incident and flush before recovery', async () => {
+  const { createRepeatLog } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'repeat-log.js')).href);
+  const lines = [];
+  const timers = new Set();
+  const logger = createRepeatLog({
+    log: { warn: line => lines.push(line), info: line => lines.push(line) },
+    setTimer: (callback, delay) => { assert.equal(delay, 60_000); const timer = { callback }; timers.add(timer); return timer; },
+    clearTimer: timer => timers.delete(timer),
+  });
+  logger.warn('room:unavailable', 'ROOM_STATE_UNAVAILABLE');
+  logger.warn('room:unavailable', 'ROOM_STATE_UNAVAILABLE');
+  logger.warn('room:unavailable', 'ROOM_STATE_UNAVAILABLE');
+  logger.warn('gateway:error', 'MEDIA_GATEWAY_ERROR');
+  assert.deepEqual(lines, ['ROOM_STATE_UNAVAILABLE', 'MEDIA_GATEWAY_ERROR']);
+  const [roomTimer] = timers;
+  timers.delete(roomTimer);
+  roomTimer.callback();
+  assert.equal(lines.at(-1), 'ROOM_STATE_UNAVAILABLE (repeated 2 times)');
+  logger.warn('room:unavailable', 'ROOM_STATE_UNAVAILABLE');
+  logger.recover('room:', 'ROOM_STATE_RECOVERED');
+  assert.deepEqual(lines.slice(-2), ['ROOM_STATE_UNAVAILABLE (repeated 1 times)', 'ROOM_STATE_RECOVERED']);
+  logger.recover('room:', 'ROOM_STATE_RECOVERED');
+  logger.warn('room:unavailable', 'ROOM_STATE_UNAVAILABLE');
+  assert.equal(lines.at(-1), 'ROOM_STATE_UNAVAILABLE');
+  assert.equal(lines.filter(line => line === 'ROOM_STATE_RECOVERED').length, 1);
+});
+
+test('local HTTP listener early close is distinct from gateway failures, timeout and recovery', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const { createRepeatLog } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'repeat-log.js')).href);
+  const lines = [];
+  let notifyClose;
+  const closed = new Promise(resolve => { notifyClose = resolve; });
+  let mode = 'client';
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: [], ownerWallet: '0x1111111111111111111111111111111111111111',
+    getRadioMediaUrl: async () => 'https://private.example/audio',
+    mediaGatewayTimeoutMs: 20,
+    mediaLog: createRepeatLog({ log: {
+      warn: line => { lines.push(line); if (line.includes('MEDIA_CLIENT_CLOSED')) notifyClose(); },
+      info: line => lines.push(line),
+    } }),
+    fetchImpl: async (url, { signal }) => {
+      if (mode === 'timeout') return new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+      if (mode === 'error') throw new Error('private upstream details');
+      if (mode === 'http') return new Response(null, { status: 503 });
+      if (mode === 'client') return new Response(new ReadableStream({
+        start(controller) { controller.enqueue(new Uint8Array([1, 2, 3])); },
+      }));
+      return new Response(new Uint8Array([1, 2, 3]));
+    },
+  });
+  await withServer(handler, async base => {
+    const url = `${base}/api/radio/media?cid=bafyrecording1234567890`;
+    await new Promise((resolve, reject) => {
+      http.get(url, response => {
+        response.once('data', () => { response.destroy(); resolve(); });
+      }).on('error', reject);
+    });
+    await closed;
+    assert.deepEqual(lines, ['[radio] MEDIA_CLIENT_CLOSED']);
+    mode = 'error';
+    assert.equal((await fetch(url)).status, 502);
+    assert.equal((await fetch(url)).status, 502);
+    assert.equal((await fetch(url)).status, 502);
+    mode = 'timeout';
+    assert.equal((await fetch(url)).status, 502);
+    mode = 'http';
+    assert.equal((await fetch(url)).status, 502);
+    assert.ok(lines.includes('[radio] MEDIA_GATEWAY_ERROR'));
+    assert.ok(lines.includes('[radio] MEDIA_GATEWAY_TIMEOUT'));
+    assert.ok(lines.includes('[radio] MEDIA_GATEWAY_HTTP status=503'));
+    mode = 'success';
+    assert.deepEqual([...new Uint8Array(await (await fetch(url)).arrayBuffer())], [1, 2, 3]);
+    assert.equal(lines.at(-2), '[radio] MEDIA_GATEWAY_ERROR (repeated 2 times)');
+    assert.equal(lines.at(-1), '[radio] MEDIA_GATEWAY_RECOVERED');
+    assert.ok(!lines.some(line => line.includes('private upstream details')));
+  });
+});
+
+test('local HTTP listener can close while gateway headers are pending', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const { createRepeatLog } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'repeat-log.js')).href);
+  const lines = [];
+  let started;
+  const waiting = new Promise(resolve => { started = resolve; });
+  let logged;
+  const closed = new Promise(resolve => { logged = resolve; });
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: [], ownerWallet: '0x1111111111111111111111111111111111111111',
+    getRadioMediaUrl: async () => 'https://private.example/audio',
+    mediaLog: createRepeatLog({ log: { warn: line => { lines.push(line); logged(); }, info: line => lines.push(line) } }),
+    fetchImpl: (url, { signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      started();
+    }),
+  });
+  await withServer(handler, async base => {
+    const request = http.get(`${base}/api/radio/media?cid=bafyrecording1234567890`);
+    request.on('error', () => {});
+    await waiting;
+    request.destroy();
+    await closed;
+    assert.deepEqual(lines, ['[radio] MEDIA_CLIENT_CLOSED']);
+  });
 });
 
 test('radio votes need no wallet but require an allowed origin', async () => {

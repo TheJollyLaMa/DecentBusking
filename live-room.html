@@ -184,7 +184,8 @@
     <section id="room-listener-signals" aria-label="Audience feedback"></section>
     <details class="rehearsal-details"><summary>Connection & broadcast rules</summary>
     <p class="delivery-note">Keep the publishing tab open. Soundchecks stay private. Unallocated armed rooms use the scheduled handoff; an explicitly allocated stage needs the owner's separate Take live after the performer chooses their set and real checks pass. Original contract times are not the effective-stage clock. Verified transport audio, including intentional silence, keeps the feed healthy. A loss of verified delivery for
-      60 seconds during the slot automatically cancels the broadcast. The guaranteed performer fee is unchanged.
+      15 seconds during an unfinished live slot ends the broadcast by default, unless the producer explicitly grants
+      bounded extra recovery time (at most one minute cumulative per set). The guaranteed performer fee is unchanged.
       Discord live-audio parity is not enabled.</p>
     </details>
   </section>
@@ -204,6 +205,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/live-audio-room.mjs?v=20261116-curtain"></script>
+  <script type="module" src="js/live-audio-room.mjs?v=20261117-producer-recovery"></script>
 </body>
 </html>

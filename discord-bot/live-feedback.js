@@ -51,7 +51,7 @@ function resolveLimits(overrides = {}) {
   return Object.freeze(limits);
 }
 
-function rateLimiter({ windowMs, limit, minIntervalMs = 0, maxKeys, ttlMs }) {
+export function rateLimiter({ windowMs, limit, minIntervalMs = 0, maxKeys, ttlMs }) {
   const entries = new Map();
   return {
     check(key, time) {
@@ -329,7 +329,7 @@ export function createLiveFeedback({ resolveState, readLiveTips = () => null, li
   };
 }
 
-function readBody(request, maxBytes) {
+export function readBody(request, maxBytes) {
   return new Promise((resolve, reject) => {
     const tooLarge = () => new FeedbackError(413, 'FEEDBACK_TOO_LARGE', 'Listener feedback request is too large');
     const declared = Number(request.headers?.['content-length']);

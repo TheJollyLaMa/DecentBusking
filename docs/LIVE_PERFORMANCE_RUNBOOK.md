@@ -1,5 +1,28 @@
 # Live Performance — operator runbook
 
+## First-night worker logs
+
+These are worker diagnostics, not listener counts or proof of audible playback.
+Identical codes (and HTTP statuses) log immediately on first occurrence, then
+summarize repeats every 60 seconds; recovery flushes pending counts first.
+Client closes are aggregated separately and are not gateway failures. The
+30-second gateway timeout covers response headers, not the full audio download.
+
+| Log | Meaning and operator action |
+| --- | --- |
+| `MEDIA_CLIENT_CLOSED` | Listener ended a download early; normal by itself. Investigate only alongside playback complaints. |
+| `MEDIA_GATEWAY_HTTP status=…` | Gateway rejected a media request; inspect provider status and limits. |
+| `MEDIA_GATEWAY_ERROR` | Gateway fetch or stream failed; check connectivity and provider health. |
+| `MEDIA_GATEWAY_TIMEOUT` | Gateway did not return headers in time; check provider latency. |
+| `MEDIA_GATEWAY_RECOVERED` | A later media response completed after a gateway failure; keep monitoring. |
+| `ROOM_STATE_UNAVAILABLE` | Live room state or receiver tick failed; inspect hosting and durable storage. |
+| `ROOM_STATE_RECOVERED` | A later room tick succeeded; independently verify the live return. |
+| `[rpc] Alchemy budget mode …` | Budget mode changed; inspect the GET `/health` RPC budget summary before operator action. |
+
+`HEAD /health` is a bodyless uptime check; GET `/health` supplies the existing
+provider and RPC summary. Deployment and real-staging verification are separate
+from local tests.
+
 ## Production desk: live-session coordination
 
 The Admin booking card's **Open production desk** link opens
@@ -103,6 +126,97 @@ live-tip test. Keep #341 open until a guest and authorized performer/operator
 exercise the flow in a real show, including a real verified tip and public-audio
 check.
 
+### Public listener telemetry and rehearsal evidence (#362 / #348)
+
+With matching site and worker code, select the **currently public** live booking
+and use its existing owner pass on the production desk. The telemetry panel
+reports observed active page connections, peak, reconnects in up to the last
+hour, and approximate time-to-first-audio histogram percentiles. Use **Export
+aggregate evidence** while the show is still live and the snapshot is fresh;
+the JSON contains aggregates only. There is no post-show retrieval: save the
+export before the public set ends. Another selected booking, stale verification,
+expired authorization, malformed responses, and network/service errors show
+unavailable, not a healthy zero. The observation start in the export is when
+this worker first observed the show, not necessarily its beginning. A worker
+restart resets the measurements. The last aggregate stays in memory until a
+different show is observed or the worker stops; it is not checkpointed.
+
+Counts are an estimate of participating pages, not unique people, actual
+capacity, or a full census. A tab with several tracked audio sources shares one
+lease; separate tabs/reloads do not. The browser sends connect only after its
+public room connects, and first audio only when playback is unpaused and
+unmuted with nonzero element volume and inbound audio packets advance. Duration
+starts before obtaining the listener grant, ends at the first qualifying stats
+check (normally one-second resolution), and is omitted after 120 seconds.
+The p50/p95 are upper bounds of fixed histogram buckets, not exact durations.
+Packets and element playback cannot establish that sound reached speakers or a
+person heard it; silent input, OS mute and device routing are not detected.
+Reconnects count completed page-level reconnections, not failed attempts.
+The last-hour number sums 60 one-minute buckets, omitting the oldest partial
+minute; reason totals are since observation start. Empty samples have unavailable
+percentiles. Independently monitor the public return.
+
+The page creates a random ID in memory only, and obtains an opaque telemetry
+token only alongside an admitted public listener grant. Neither is linked to a
+wallet, account or profile. Accepted event sequence and lease state, including
+the random page ID, token, last sequence, connection/first-audio flags, last
+activity time and short-lived leave tombstones, remain only in worker memory for
+45 seconds after issuance or the last accepted event/renewal, swept on a
+five-second timer subject to scheduler delays; at most 2,000 such records exist.
+They are not an event history. Heartbeats normally
+run every 15 seconds. After admission the page also holds a signed renewal
+capability in memory, bound to that random page ID and public-show lifecycle,
+valid until the earlier of the show end or four hours. The worker verifies it
+with a process-random secret without keeping a separate capability record.
+Renewal rotates the capability and can restore an expired observation without
+requesting another LiveKit seat or incrementing connects. On pagehide the page
+sends leave and clears its lease token; a restored page can renew if its source
+is still connected. The capability and source state remain in that page's
+memory only, not browser storage. A long-running active page renews near expiry;
+an expired capability, changed show or worker restart cannot be renewed, so
+observation remains unavailable until a new public listener grant; browser
+clock skew can also stop renewal early. No automatic extra room seat is opened.
+If a first
+connection arrives after its original lease expires, it can be observed through
+renewal but is conservatively omitted from the connect total.
+
+A missed leave, suspended tab or failed network request can under- or over-count
+until expiry or successful renewal. Renewal and reconnect reports are
+client-asserted: a bearer can renew after leaving, so renewal is not proof of
+a current LiveKit seat. While an active page has a valid capability, automatic
+background recovery retries one renewal operation every 30 seconds until the
+capability expires, with up to two HTTP attempts per operation. An uncertain
+failed reconnect is not replayed as a new event, so reconnect totals can
+under-count. Network/rate errors may leave the page unmeasured. A rapid
+replacement while the preceding leave is still pending can also be unmeasured
+rather than delay audio. No local storage, raw event history, audio, chat, user
+agent, wallet or IP is stored in telemetry records or exports. Unexpected
+failures produce generic, rate-limited worker/browser warnings without request
+identifiers or error details (at most one per minute per worker/browser module
+under a normal clock); playback is independent of telemetry.
+
+For rate limiting, the worker transiently normalizes the source network and
+holds only its process-random HMAC key (IPv6 grouped by /64), last-charge time
+and rolling hit times. Each hit expires from the rolling window after 60 seconds.
+An idle key is removed 60 seconds after its **last charged request**, on a
+subsequent request or the five-second cleanup sweep; scheduler delays can defer
+the sweep. A continuously active network key can remain until activity stops,
+the 2,000-key bound evicts it, or the worker stops, including across shows.
+The salt and all keys are memory-only and reset at worker restart. Defaults are
+300 events/network/minute and 6,000 globally/minute; rate limits and admission
+can drop real reports. The same
+trusted proxy configuration as feedback must match the actual deployment.
+Native HTTP, hosting and providers may still see source IPs in access logs;
+this feature does not configure or control those logs.
+
+Tokens and origin checks deter arbitrary event submission but do not prove
+unique humans, real hearing or prevent a client that can obtain public grants
+from inflating counts. Private rehearsals and soundchecks do not issue these
+public telemetry grants. Metrics do not affect attendance, credit, recording,
+payments or broadcast policy. Local simulated clients are not the #348 staging
+ramp or evidence of any listener capacity; complete the separately approved
+real rehearsal and predeployment checks before relying on these measurements.
+
 ### Explicit allocated-stage controls
 
 1. Authorize the current booking with the existing owner wallet, then **Enable
@@ -150,7 +264,8 @@ check.
    accepted, funded or scheduled booking.
 8. **Quiet endings (#343).** Ask the performer to keep the microphone on until the
    producer ends the set. If a set the performer declared finished goes quiet and
-   nobody ends it, the server closes it after about a minute as the normal
+   nobody ends it, the server closes it after the audio grace (15 seconds under
+   the **undeployed #358 policy**, previously about a minute) as the normal
    producer-finished ending, timed at the later of the declaration and the last
    audio. That is never an audio-loss cancellation, so no fault slate or
    recovery-ads window runs. With legacy recording segments, if the producer's
@@ -165,6 +280,56 @@ check.
    again treated as an audio fault. Evidence:
    `node --test test/night-simulation.test.js` replays a two-act night on a fake
    clock; it is a simulation of this server's state machine, not a live-audio test.
+
+### Producer recovery (#358) — UNDEPLOYED / deployment BLOCKED
+
+The owner authorized **15 seconds** for an unfinished set to recover and at most
+**one additional minute cumulative per set**, explicitly granted by the producer.
+This supersedes the older Friday 60-second default. Read the server countdown
+and remaining budget in the stage controls; a reconnect/reload/restart never
+replenishes it. **Grant explicit recovery hold** is separate from encore and
+cannot extend the set's existing authorized end or change guaranteed pay.
+
+Use **Run commercials now** or **Run radio now** rather than waiting in silence.
+These preserve the set until its current deadline; they are not cancellation
+and add no recovery time. The performer can reconnect privately. Only
+**Return recovered performer safely**, after real audio and fresh performer
+readiness, returns from filler at a safe paid-song/advert boundary. At expiry,
+the existing terminal cancellation/fault/advert/radio path runs once. A finished
+declaration still follows #343's normal ending; terminal cancellation cannot
+be undone.
+
+For the next act, open their booking from the roster or **Open paired next
+act**, authorize that exact owner scope, and use the existing private message,
+standby and readiness panel. Opening is not a sent message. No-next-act,
+not-ready, unavailable/denied and expired/stale status must stay honest.
+**Advance paired ready next act** explicitly ends the interrupted original set
+and takes the ready paired performer atomically, even before the original start,
+only with their actual fresh readiness, chosen participation, genuine checks,
+fresh audio, funding/authorization, protected schedules and safe paid boundary.
+It is never automatic; normal **Take** retains its original-start safeguard.
+
+Filler is not the artist's performance or completion evidence. Capture gaps
+remain interrupted/partial. Existing recording permissions are not expanded:
+early-taken audio before the original contracted start is excluded and any
+resulting recording is partial. Consent, release approval, pay and escrow/claim
+rules remain unchanged.
+
+Release requires the [reader-first and mirror checks](LIVE_AUDIO_PILOT.md#producer-recovery-358--local-only--undeployed):
+first deploy compatible readers with `LIVE_AUDIO_RECOVERY_ENABLED` unset/false
+and explicitly retain `LIVE_AUDIO_GRACE_MS=60000`. The default is 15000 even with
+recovery writes disabled, so omitting the override changes the watchdog before
+producer controls exist. This temporary override is only for reader-only rollout.
+Later, after reader/restore verification, compatible controls and separate
+approval, activate both settings together: `LIVE_AUDIO_GRACE_MS=15000` and
+`LIVE_AUDIO_RECOVERY_ENABLED=true`. Initial unarmed automatic slots retain their
+separate 60-second allowance regardless of the lost-audio grace setting.
+Old decrypted readers reject the optional recovery
+field; the current local mirror client already rejects encrypted live lifecycle
+envelopes, so retain approved hosted-verified storage or approve a separate
+mirror reader upgrade. Never erase the hold journal or bypass
+`node radio-predeploy.js`. Render capacity blocks deployment. Real staging
+audio/OBS/reconnect/messages/paid-boundary/recording checks are **NOT RUN**.
 
 Backstage/monitoring/consent/fee regressions (the original 102-test selection,
 now including Profile re-entry cases):
@@ -343,7 +508,9 @@ Eligible adverts only: if none are available, report waiting, never play a song
 inside these breaks or fabricate delivery/impressions. Existing cancellation
 behavior is separate: a quiet fault slate, recovery adverts, then radio.
 A disconnected microphone is not a successful early finish; the existing
-60-second verified-delivery grace applies. The planned successful end is 21:20.
+verified-delivery grace applies: the **undeployed #358 policy is 15 seconds**
+(plus only explicit bounded producer hold), superseding the older 60-second
+default. The planned successful end is 21:20.
 
 The Top10 animated stage stays mounted through lead-in, actual live audio and
 outro. The live announcement requires fresh independent receiver evidence,

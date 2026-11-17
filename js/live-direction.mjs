@@ -1,4 +1,4 @@
-import { roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
+import { roomRequest } from './live-audio-client.mjs?v=20261117-lease-recovery';
 
 const FRESH_MS = 12000;
 const actionCapability = {

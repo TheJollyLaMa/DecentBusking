@@ -1,10 +1,11 @@
-import { roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
+import { roomRequest } from './live-audio-client.mjs?v=20261117-lease-recovery';
 import { readRadioState, radioEndpoint } from './radio-client.mjs';
 import { bindLiveDirection } from './live-direction.mjs?v=20261114-allocated-stage';
 import { bindLiveFeedbackRoom, bindTogether } from './live-feedback.mjs?v=20261115-listener-feedback';
 import { createPrivateRoomListener } from './private-room-listener.mjs?v=20261114-allocated-stage';
-import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261114-allocated-stage';
+import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261117-producer-recovery';
 import { performerAllocationAccess } from './performer-room.mjs?v=20261114-allocated-stage';
+import { safeBindProducerListenerTelemetry } from './producer-listener-telemetry.mjs';
 
 const el = id => document.getElementById(id);
 const serviceUrl = String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
@@ -82,12 +83,14 @@ async function selectBooking(id) {
       if (current === generation) invalidate(reason || 'Private pass expired or was revoked. Reconnect the owner wallet for this booking.');
     },
     onState: state => { if (current === generation) { privateState = state; controls(); } },
-  }), bindLiveFeedbackRoom({ container: el('desk-listener-signals'), serviceUrl, bookingId: id }));
+  }), bindTogether(bindLiveFeedbackRoom({ container: el('desk-listener-signals'), serviceUrl, bookingId: id }),
+    safeBindProducerListenerTelemetry({ container: el('desk-listener-telemetry'), serviceUrl, bookingId: id })));
   direction.setSession(pass());
   broadcastControls = bindLiveBroadcastControls({
     container: el('desk-broadcast-controls'), serviceUrl, bookingId: id,
     getBooking: () => b, getSession: pass, getCandidates: () => bookings.filter(item => item.id !== id && !item.cancelled),
     getNextPass: target => ownerPass(target),
+    onOpenNext: target => { void selectBooking(target); },
     onReconnect: async () => {
       const authorized = await ownerPass(id, true);
       if (current !== generation) throw new Error('Selected room changed; reconnect that booking.');

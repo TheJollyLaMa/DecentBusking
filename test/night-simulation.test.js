@@ -22,7 +22,7 @@ const at = ms => `T${ms >= START ? '+' : '-'}${Math.floor(Math.abs(ms - START) /
 
 // Real production modules on a fake clock: the live-audio service (state machine, policy, admission), the real
 // recorder, the real JukeLoopSession radio. Only transport, storage, uploads and wall-clock time are doubles.
-async function night(t, { programs = { 'act-a': PROGRAM, 'act-b': PROGRAM } } = {}) {
+async function night(t, { programs = { 'act-a': PROGRAM, 'act-b': PROGRAM }, recovery = false } = {}) {
   const clock = { now: START - 75 * MIN };
   t.mock.method(Date, 'now', () => clock.now);
   const { createLiveAudioService } = await import('../discord-bot/live-audio.js');
@@ -53,6 +53,7 @@ async function night(t, { programs = { 'act-a': PROGRAM, 'act-b': PROGRAM } } = 
     session.setLivePerformanceEvents(world.bookings.map(b => ({ id: b.eventId, type: 'live_performance', title: b.title,
       startUtc: b.startUtc, endUtc: b.endUtc, status: 'scheduled' })));
     const recorder = createLiveRecorder({ enabled: true, segmentSeconds: 10, now: () => clock.now,
+      ...(recovery ? { persistFrameTimes: true, submitRelease: async () => { throw Error('A performer-approved release is required'); } } : {}),
       store: { restore: async () => structuredClone(world.journal), save: async value => { world.journal = structuredClone(value); } },
       upload: async (bytes, name) => {
         world.uploads.push({ name, bytes: bytes.length, at: clock.now });
@@ -70,13 +71,14 @@ async function night(t, { programs = { 'act-a': PROGRAM, 'act-b': PROGRAM } } = 
       monitor: async (b, frame, onPcm) => { receivers.set(b.id, { frame, pcm: onPcm }); },
       connect: async b => ({ expiresAt: b.broadcast?.accessUntil || Date.parse(b.endUtc) }),
       listener: async b => ({ bookingId: b.id, end: b.broadcast?.authorizedEndAt || Date.parse(b.endUtc) }),
+      suspendListeners: async () => {}, resumeListeners: () => {},
       close: async b => { world.closed.push({ id: b.id, at: clock.now }); }, stop: async () => {} };
     const service = createLiveAudioService({ getBookings: async () => ({ bookings: world.bookings }), ownerWallet: OWNER,
       store: { restore: async () => structuredClone(world.saved), save: async value => { world.saved = structuredClone(value); } },
-      transport, recorder, programs, now: () => clock.now, verify: (_message, signature) => signature,
+      transport, recorder, programs, recoveryEnabled: recovery, now: () => clock.now, verify: (_message, signature) => signature,
       onPolicy: policy => session.setLiveAudioPolicy(policy),
       onCancel: (b, reason) => world.cancellations.push({ id: b.id, reason }),
-      withBroadcastHandoff: apply => session.withBroadcastHandoff(apply) });
+      withBroadcastHandoff: (apply, safety) => session.withBroadcastHandoff(apply, safety) });
     proc = { receivers, session, recorder, service };
     processes.push(proc);
   }
@@ -130,12 +132,13 @@ async function night(t, { programs = { 'act-a': PROGRAM, 'act-b': PROGRAM } } = 
   const send = async (p, action, payload = {}) => {
     const s = await state(p);
     return proc.service.command(p.token, { action: `broadcast-${action}`, commandId: `desk-command-${++count}`,
-      expectedRevision: s.broadcast?.revision || 0, ...payload }, ORIGIN);
+      expectedRevision: action.startsWith('recovery-') ? s.recovery.revision : s.broadcast?.revision || 0, ...payload }, ORIGIN);
   };
   const direction = async (p, action, payload = {}) => {
     const s = await proc.service.command(p.token, { action: 'direction-state' }, ORIGIN);
-    return proc.service.command(p.token, { action: `direction-${action}`, epoch: s.epoch, commandId: `direction-${++count}`,
-      ...(action !== 'message' ? { expectedRevision: s.revision } : {}), ...payload }, ORIGIN);
+    return proc.service.command(p.token, { action: `direction-${action}`, epoch: s.epoch,
+      ...(action !== 'heartbeat' ? { commandId: `direction-${++count}` } : {}),
+      ...(!['message', 'heartbeat'].includes(action) ? { expectedRevision: s.revision } : {}), ...payload }, ORIGIN);
   };
   const allow = async (p, id) => {
     const wallet = wallets[id].address.toLowerCase(), issuedAt = clock.now;
@@ -407,10 +410,10 @@ test('the worker restarts mid-set: the stage and radio carry on, a deployment wa
   await soundNight(n);
 });
 
-test('a late publisher, a thirty-second blip and a ninety-second loss are each handled without dead air', async t => {
+test('a late publisher, a ten-second blip and a thirty-second loss follow the new fifteen-second policy', async t => {
   const n = await night(t); await upTo(n);
   await n.advance(START + 8 * MIN);
-  n.stop('act-a'); await n.advance(START + 8 * MIN + 30 * SEC); n.play('act-a');
+  n.stop('act-a'); await n.advance(START + 8 * MIN + 10 * SEC); n.play('act-a');
   await n.advance(START + 10 * MIN);
   const afterBlip = { live: n.timeline().at(-1), ended: n.room('act-a').allocation.endedAt };
   await n.finishAct('act-a', n.passes.ownerA, n.passes.artistA);
@@ -420,10 +423,10 @@ test('a late publisher, a thirty-second blip and a ninety-second loss are each h
   const waiting = n.timeline().at(-1);
   await n.takeLive('act-b', n.passes.ownerB, n.passes.artistB, START + 25 * MIN);
   await n.advance(START + 31 * MIN);
-  n.stop('act-b'); await n.advance(START + 31 * MIN + 90 * SEC);
+  n.stop('act-b'); await n.advance(START + 31 * MIN + 30 * SEC);
   const lost = n.room('act-b').allocation;
   await n.advance(START + 50 * MIN);
-  assert.deepEqual(afterBlip, { live: 'live:act-a', ended: null }, 'a thirty-second dropout does not end the set');
+  assert.deepEqual(afterBlip, { live: 'live:act-a', ended: null }, 'a ten-second dropout does not end the set');
   assert.match(early, /Take requires the chosen, ready, soundchecked performer and fresh verified audio/);
   assert.equal(waiting, 'radio:waiting', 'while act B is late the radio keeps playing');
   assert.equal(lost.endReason, 'audio-loss');
@@ -449,8 +452,8 @@ async function quietEnding(t, producerDelaySeconds) {
   return { n, ended };
 }
 
-test('the performer stops the microphone and the producer ends the set 20 seconds later: a normal ending', async t => {
-  const { n, ended } = await quietEnding(t, 20);
+test('the performer stops the microphone and the producer ends the set 10 seconds later: a normal ending', async t => {
+  const { n, ended } = await quietEnding(t, 10);
   assert.equal(ended, 'accepted');
   assert.equal(n.room('act-a').allocation.endReason, 'producer-finished');
   assert.deepEqual(n.world.cuts, []);
@@ -539,4 +542,82 @@ test('a double-clicked take is recognised: a retried command does nothing and a 
   await n.advance(START + 45 * MIN);
   assert.deepEqual(outcomes(n), [['act-a', false], ['act-b', false]]);
   await soundNight(n);
+});
+
+test('recovery rehearsal: commercials preserve the set, explicit return resumes real audio and the recording retains its gap', async t => {
+  const n = await night(t, { recovery: true }); await upTo(n);
+  await n.advance(START + 8 * MIN);
+  n.stop('act-a');
+  await n.advance(START + 8 * MIN + 6 * SEC, { step: SEC });
+  await n.send(n.passes.ownerA, 'recovery-hold', { additionalMs: 30000 });
+  const deadline = n.room('act-a').recovery.deadline;
+  await n.send(n.passes.ownerA, 'recovery-filler', { mode: 'adverts', confirmed: true });
+  assert.equal(n.showKey(n.proc.session.getShowState().activeShow), 'recovery:act-a');
+  assert.equal(n.room('act-a').allocation.endedAt, null);
+  n.play('act-a');
+  await n.advance(START + 8 * MIN + 12 * SEC);
+  assert.equal((await n.state(n.passes.ownerA)).phase, 'recovering', 'private recovered packets never return automatically from filler');
+  await n.direction(n.passes.artistA, 'readiness', { ready: true });
+  await n.direction(n.passes.artistA, 'heartbeat');
+  await n.send(n.passes.ownerA, 'recovery-return', { confirmed: true });
+  assert.equal(n.room('act-a').recovery.usedMs, 30000);
+  assert.equal(deadline, START + 8 * MIN + 45 * SEC);
+  await n.advance(START + 14 * MIN);
+  await n.finishAct('act-a', n.passes.ownerA, n.passes.artistA);
+  await n.advance(START + 19 * MIN);
+  await n.takeLive('act-b', n.passes.ownerB, n.passes.artistB, START + 20 * MIN);
+  await n.advance(START + 33 * MIN); await n.finishAct('act-b', n.passes.ownerB, n.passes.artistB);
+  await n.advance(START + 45 * MIN); await n.settle();
+  assert.deepEqual(n.world.violations, []);
+  assert.deepEqual(n.world.errors, []);
+  assert.equal(n.world.cancellations.length, 0);
+  const a = n.world.journal.recordings.find(r => r.bookingId === 'act-a');
+  const b = n.world.journal.recordings.find(r => r.bookingId === 'act-b');
+  assert.equal(a.status, 'ready'); assert.equal(a.incomplete, true); assert.equal(a.interrupted, true);
+  assert.equal(b.status, 'ready'); assert.equal(b.incomplete, false);
+  assert.ok(a.segments.some((segment, i) => i && segment.firstFrameAt - a.segments[i - 1].lastFrameAt > 2000),
+    'received segment timestamps retain the genuine interruption instead of manufacturing filler PCM');
+  assert.deepEqual(n.world.ingests, [], 'no automatic release or invented performance evidence from filler');
+  assert.equal(n.timeline().at(-1), 'radio');
+});
+
+test('recovery rehearsal: a held radio window expires once through the existing audio-loss terminal path', async t => {
+  const n = await night(t, { recovery: true }); await upTo(n);
+  await n.advance(START + 8 * MIN); n.stop('act-a');
+  await n.advance(START + 8 * MIN + 6 * SEC, { step: SEC });
+  await n.send(n.passes.ownerA, 'recovery-hold', { additionalMs: 60000 });
+  await n.send(n.passes.ownerA, 'recovery-filler', { mode: 'radio', confirmed: true });
+  const deadline = n.room('act-a').recovery.deadline;
+  assert.equal(n.proc.session.getShowState().activeShow.type, 'normal_rotation', 'radio plays before timeout, while recovery remains possible');
+  await n.advance(deadline - 1, { step: SEC });
+  assert.equal(n.room('act-a').allocation.endedAt, null);
+  await n.advance(deadline, { step: 1 });
+  assert.equal(n.room('act-a').allocation.endReason, 'audio-loss');
+  await n.advance(deadline + 6000, { step: SEC }); await n.settle();
+  assert.equal(n.world.cancellations.length, 1);
+  assert.equal(n.world.cancellations[0].id, 'act-a');
+  assert.deepEqual(n.world.violations, []);
+  assert.deepEqual(n.world.errors, []);
+  assert.match(await attempt(() => n.pass('act-a')), /closes|cancelled/);
+});
+
+test('recovery rehearsal: explicitly ready paired next act may advance early without overlapping or changing escrow', async t => {
+  const n = await night(t, { recovery: true }); await upTo(n);
+  await n.advance(START + 8 * MIN); n.stop('act-a');
+  await n.advance(START + 8 * MIN + 6 * SEC, { step: SEC });
+  n.play('act-b'); await n.advance(START + 8 * MIN + 8 * SEC, { step: SEC });
+  await n.direction(n.passes.artistB, 'readiness', { ready: true });
+  await n.direction(n.passes.artistB, 'heartbeat');
+  const next = await n.state(n.passes.ownerB);
+  await n.send(n.passes.ownerA, 'advance-next', { confirmed: true, nextToken: n.passes.ownerB.token,
+    expectedNextRevision: next.broadcast.revision });
+  await n.advance(START + 9 * MIN); await n.settle();
+  assert.equal(n.room('act-a').allocation.endReason, 'operator-cut');
+  assert.equal(n.room('act-a').allocation.endedAt, n.room('act-b').allocation.startedAt);
+  assert.equal(n.proc.session.getShowState().activeShow.event.id, 'friday-live:act-b');
+  assert.deepEqual(n.world.violations, []);
+  assert.equal(JSON.stringify(n.world.bookings), n.original);
+  assert.equal(n.world.cancellations.length, 0, 'existing operator-cut lifecycle does not settle or financially cancel twice');
+  assert.equal(n.world.journal.recordings.find(r => r.bookingId === 'act-b').segments.length, 0,
+    'early live readiness is not consent to capture pre-contract audio');
 });

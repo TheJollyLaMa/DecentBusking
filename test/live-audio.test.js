@@ -13,6 +13,32 @@ const booking = () => ({ id: 'existing-funded-booking', wallet: artist.address, 
   title: 'Private fixture', startUtc: new Date(START).toISOString(), endUtc: new Date(START + 20 * 60_000).toISOString(),
   status: 'funded', acknowledged: true, payoutPolicy: 'pilot-guaranteed-v1', amountUnits: '20000000' });
 
+test('live watchdog summarizes repeated startup failures and reports recovery', async () => {
+  const { createLiveAudioWatchdogTick } = await import('../discord-bot/live-audio.js');
+  const { createRepeatLog } = await import('../discord-bot/repeat-log.js');
+  const lines = [];
+  let timer, failing = true, syncs = 0;
+  const log = createRepeatLog({
+    log: { warn: line => lines.push(line), info: line => lines.push(line) },
+    setTimer: callback => { timer = callback; return 1; }, clearTimer: () => { timer = null; },
+  });
+  const tick = createLiveAudioWatchdogTick({
+    liveAudio: { tick: async () => { if (failing) throw new Error('private details'); } },
+    liveFeedback: { sync: () => { syncs++; } }, log,
+  });
+  for (let i = 0; i < 16; i++) await tick();
+  assert.equal(lines.length, 1);
+  timer();
+  assert.match(lines[1], /repeated 15 times/);
+  await tick();
+  failing = false;
+  await tick();
+  assert.match(lines[2], /repeated 1 times/);
+  assert.equal(lines[3], '[live-audio] ROOM_STATE_RECOVERED');
+  assert.equal(syncs, 18);
+  assert.ok(!lines.some(line => line.includes('private details')));
+});
+
 test('approved program hits exact Top10/ad/live/ad/radio boundaries without altering booked time', async () => {
   const { liveAudioPolicy, applyLiveAudioShow, parseLiveAudioPrograms } = await import('../js/live-audio.mjs');
   const b = booking(), record = { armed: true, checks: {} }, end = Date.parse(b.endUtc);
@@ -333,6 +359,28 @@ test('listener feedback reaches authorized performer and owner without changing 
   assert.equal(feedback.inspect().bookingBound, false);
 });
 
+test('telemetry grants require public admission and snapshots require the booking owner', async t => {
+  const { createListenerTelemetry } = await import('../discord-bot/live-listener-telemetry.js');
+  let f, time = START;
+  const listenerTelemetry = createListenerTelemetry({ resolveState: () => f.service.feedbackState(), now: () => time });
+  f = await setup({ listenerTelemetry });
+  t.after(async () => { listenerTelemetry.close(); await f.service.stop(); });
+  const ownerPass = await f.prepare(), performerPass = await f.authorize(artist);
+  const page = 'anonymous_page_123456789';
+  await assert.rejects(f.service.listener(f.b.id, page), /private/);
+  f.at(START); f.frame(960); await f.service.tick();
+  const before = f.persisted();
+  const grant = await f.service.listener(f.b.id, page);
+  assert.ok(grant.telemetryToken);
+  assert.match(grant.telemetryRenewal, /^[0-9]{1,16}\.[A-Za-z0-9_-]{43}$/);
+  listenerTelemetry.submit({ token: grant.telemetryToken, bookingId: f.b.id, sequence: 1, event: 'connect' }, '192.0.2.1');
+  assert.equal((await f.service.command(ownerPass.token, { action: 'telemetry-snapshot' }, ORIGIN)).current, 1);
+  await assert.rejects(f.service.command(performerPass.token, { action: 'telemetry-snapshot' }, ORIGIN), e => e.status === 403);
+  await assert.rejects(f.service.command(ownerPass.token, { action: 'telemetry-snapshot' }, 'https://other.example'), e => e.status === 401);
+  await assert.rejects(f.service.command(ownerPass.token, { action: 'telemetry-snapshot', bookingId: 'other' }, ORIGIN), e => e.status === 400);
+  assert.deepEqual(f.persisted(), before, 'telemetry never enters room checkpoints');
+});
+
 test('private T−60/T−15 checks need fresh receiver audio, correct windows and owner confirmation', async () => {
   const f = await setup(), auth = await f.authorize();
   await assert.rejects(f.service.listener(f.b.id), /soundchecks are private/);
@@ -349,22 +397,22 @@ test('private T−60/T−15 checks need fresh receiver audio, correct windows an
   assert.equal(publicView.verifiedAudioAt, null);
 });
 
-test('delivered silence is healthy, a short outage reconnects, and sixty seconds cancels exactly once', async () => {
+test('delivered silence is healthy, a short outage reconnects, and fifteen seconds cancels exactly once', async () => {
   const f = await setup(); await f.prepare();
   f.at(START); f.frame(960); await f.service.tick();
   assert.equal((await f.service.state(f.b.id)).status, 'ON-AIR');
   await f.service.listener(f.b.id);
   f.at(START + 6000);
   assert.equal((await f.service.state(f.b.id)).status, 'RECONNECTING');
-  f.at(START + 59_999); await f.service.tick();
+  f.at(START + 14_999); await f.service.tick();
   assert.equal(f.cancellations.length, 0);
   f.frame(960); await f.service.tick();
-  f.at(START + 119_998); await f.service.tick();
+  f.at(START + 29_998); await f.service.tick();
   assert.equal(f.cancellations.length, 0);
-  f.at(START + 119_999); await f.service.tick();
+  f.at(START + 29_999); await f.service.tick();
   assert.equal(f.cancellations.length, 1);
   assert.equal(f.cancellations[0].b.amountUnits, '20000000');
-  assert.match(f.cancellations[0].reason, /60 seconds.*fee is unchanged/);
+  assert.match(f.cancellations[0].reason, /15 seconds.*fee is unchanged/);
   assert.equal((await f.service.state(f.b.id)).policy.mode, 'fault');
   await f.service.tick(); assert.equal(f.cancellations.length, 1);
   await assert.rejects(f.service.listener(f.b.id), /unavailable/);
@@ -381,12 +429,13 @@ test('stalled booking RPC cannot block the audio deadline; stale verification de
   await f.prepare();
   f.at(START); f.frame(960); await f.service.tick();
   stalled = true;
-  f.at(START + 59_999); await f.service.tick();
+  f.at(START + 31_000); f.frame(960); await f.service.tick();
   const pendingCalls = calls;
   await assert.rejects(f.authorize(artist), /verification unavailable/);
   assert.equal(calls, pendingCalls, 'one in-flight booking refresh is shared');
+  f.at(START + 45_999); await f.service.tick();
   assert.equal(f.cancellations.length, 0);
-  f.at(START + 60_000); await f.service.tick();
+  f.at(START + 46_000); await f.service.tick();
   assert.equal((await f.service.state(b.id)).policy.mode, 'fault');
   assert.equal(f.cancellations.length, 1);
 });
@@ -567,32 +616,40 @@ test('cancelled room persists the bounded slate, ten-minute ad window and origin
   f.at(START + 20 * 60_000); assert.equal((await f.service.state(f.b.id)).policy, null);
 });
 
-test('a funded pilot with missed soundchecks still cancels after sixty seconds instead of leaving radio paused', async () => {
-  const f = await setup();
-  f.at(START + 60_000);
-  await f.service.tick();
-  assert.equal(f.persisted().rooms.length, 1);
-  assert.equal(f.cancellations.length, 1);
-  assert.match(f.cancellations[0].reason, /not armed within 60 seconds/);
-  assert.equal((await f.service.state(f.b.id)).policy.mode, 'fault');
+test('initial unarmed automatic slots retain sixty seconds independently of lost-audio recovery grace', async () => {
+  for (const graceMs of [undefined, 2000, 60_000]) {
+    const f = await setup({ graceMs });
+    for (const offset of [15_000, 59_999]) {
+      f.at(START + offset);
+      await f.service.tick();
+      assert.equal(f.cancellations.length, 0, `initial arming remains open at ${offset}ms with grace ${graceMs}`);
+      assert.equal(f.persisted().rooms[0].cancelledAt, undefined);
+    }
+    f.at(START + 60_000);
+    await f.service.tick();
+    assert.equal(f.cancellations.length, 1);
+    assert.equal(f.persisted().rooms[0].cancelledAt, START + 60_000);
+    assert.match(f.cancellations[0].reason, /not armed within 60 seconds/);
+    assert.equal((await f.service.state(f.b.id)).policy.mode, 'fault');
+    await f.service.tick();
+    assert.equal(f.cancellations.length, 1);
+  }
 });
 
 test('restart does not invent healthy audio or reset an expired disconnect deadline', async () => {
   const f = await setup(); await f.prepare();
   f.at(START); f.frame(960); await f.service.tick();
   f.at(START + 6000); await f.service.tick();
-  f.at(START + 60_000);
+  f.at(START + 15_000);
   const { createLiveAudioService } = await import('../discord-bot/live-audio.js');
   const restarted = createLiveAudioService(f.base);
   assert.equal((await restarted.state(f.b.id)).status, 'RECONNECTING');
   await restarted.tick();
-  assert.equal((await restarted.state(f.b.id)).status, 'RECONNECTING', 'receiver gets a bounded rejoin probe');
-  f.at(START + 65_000); await restarted.tick();
-  assert.equal((await restarted.state(f.b.id)).phase, 'cancelled');
+  assert.equal((await restarted.state(f.b.id)).phase, 'cancelled', 'a known durable deadline gets no restart extension');
   assert.equal(f.cancellations.length, 1);
 });
 
-test('a healthy checkpoint does not turn a short process restart into an invented sixty-second outage', async () => {
+test('a healthy checkpoint does not turn a short process restart into an invented outage', async () => {
   const f = await setup(); await f.prepare();
   f.at(START); f.frame(960); await f.service.tick();
   f.at(START + 60_000);
@@ -793,7 +850,7 @@ test('worker receiver requires decoded frames and advancing native publisher-lis
 test('website listener handles autoplay blocking, packet freshness and teardown with no live credentials', async t => {
   const { createLiveAudioListener } = await import('../js/live-audio-client.mjs');
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: START });
-  let blocked = true, count = 0;
+  let blocked = true, count = 0, audioReports = 0, joins = 0, leaves = 0;
   const statuses = [];
   const audio = { paused: true, srcObject: null,
     async play() { if (blocked) throw new Error('autoplay blocked'); this.paused = false; },
@@ -812,6 +869,8 @@ test('website listener handles autoplay blocking, packet freshness and teardown 
     async startAudio() {}
   }
   const listener = createLiveAudioListener({ audio, serviceUrl: 'https://worker.example', onStatus: s => statuses.push(s),
+    telemetry: { pageId: 'anonymous_page_123456789', join() { joins++; }, audio() { audioReports++; },
+      suspend() {}, resumed() {}, leave() { leaves++; } },
     sdkLoader: async () => ({ Room, Track: { Kind: { Audio: 'audio' } }, RoomEvent: {
       TrackPublished: 'published', TrackSubscribed: 'subscribed', TrackUnsubscribed: 'unsubscribed',
       Reconnecting: 'reconnecting', Disconnected: 'disconnected' } }),
@@ -819,18 +878,25 @@ test('website listener handles autoplay blocking, packet freshness and teardown 
   t.after(() => listener.disconnect());
   const state = { bookingId: 'b', phase: 'live', armed: true, status: 'ON-AIR' };
   listener.update(state); await new Promise(setImmediate);
+  assert.equal(joins, 1);
   assert.equal(statuses.at(-1).blocked, true);
   assert.equal(statuses.at(-1).status, 'RECONNECTING');
   blocked = false; await listener.play();
   t.mock.timers.tick(1000); await new Promise(setImmediate);
   assert.equal(statuses.at(-1).status, 'RECONNECTING', 'video, outbound and concealed samples are not inbound audio packets');
-  count = 10;
+  assert.equal(audioReports, 0);
+  audio.muted = true; count = 10;
   t.mock.timers.tick(1000); await new Promise(setImmediate);
   assert.equal(statuses.at(-1).status, 'ON-AIR');
+  assert.equal(audioReports, 0, 'muted playback is not first-audio evidence');
+  audio.muted = false; count = 20;
+  t.mock.timers.tick(1000); await new Promise(setImmediate);
+  assert.equal(audioReports, 1);
   t.mock.timers.tick(6000); await new Promise(setImmediate);
   assert.equal(statuses.at(-1).status, 'RECONNECTING');
   listener.update({ ...state, phase: 'cancelled' }); await new Promise(setImmediate);
   assert.equal(audio.paused, true); assert.equal(audio.srcObject, null);
+  assert.ok(leaves > 0);
 });
 
 test('a late token response cannot attach a previous booking after the radio has switched rooms', async t => {

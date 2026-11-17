@@ -220,10 +220,12 @@ test('durable decisions deduplicate across restart and expired authorization can
     commandId: 'after-deadline', expectedRevision: 2 }, ORIGIN), /already ended|expired/);
 });
 
-test('verified audio loss still cancels an allocated act after sixty seconds and never reports graceful success', async t => {
+test('verified audio loss cancels an allocated act at fifteen seconds and never reports graceful success', async t => {
   const f = await fixture(t), a = await f.authorize();
   await f.send(a, 'enable');
-  f.at(START + 6 * MIN); await f.service.tick();
+  f.at(START + 5 * MIN + 14999); await f.service.tick();
+  assert.equal(f.cancellations.length, 0);
+  f.at(START + 5 * MIN + 15000); await f.service.tick();
   assert.equal((await f.service.state('artist-a')).broadcast.endReason, 'audio-loss');
   assert.equal(f.cancellations.length, 1);
   assert.equal(f.cancellations[0][0].broadcast.endReason, 'audio-loss', 'server wiring can keep allocated broadcast and financial cancellation separate');
@@ -236,9 +238,9 @@ test('a set the performer declared finished closes as the normal ending when its
   await f.send(pa, 'finished');
   f.at(START + 6 * MIN); f.feed('artist-a'); await f.service.tick();
   assert.equal((await f.service.state('artist-a')).broadcast.phase, 'live', 'the finished note does not stop the microphone or the broadcast');
-  f.at(START + 6.5 * MIN); await f.service.tick();
-  assert.equal((await f.service.state('artist-a')).broadcast.phase, 'live', 'thirty quiet seconds are tolerated');
-  f.at(START + 7 * MIN); await f.service.tick();
+  f.at(START + 6 * MIN + 14999); await f.service.tick();
+  assert.equal((await f.service.state('artist-a')).broadcast.phase, 'live', 'the new fifteen-second grace has not expired');
+  f.at(START + 6 * MIN + 15000); await f.service.tick();
   const ended = (await f.service.state('artist-a')).broadcast;
   assert.equal(ended.endReason, 'producer-finished');
   assert.equal(ended.actualEndedAt, START + 6 * MIN, 'the set ended when its audio stopped, not when the silence was noticed');

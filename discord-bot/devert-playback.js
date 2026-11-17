@@ -4,6 +4,7 @@ import { DEFAULT_WORKER_MIN_BALANCE_WEI, readWorkerGasState } from '../js/worker
 import { advertIdentity, competitionCandidates, competitionGrant, reconcileAdvertCompetition,
   validateAdvertCompetition } from './advert-competition.js';
 import { currentPayrollPeriod } from '../js/payroll-week.mjs';
+import { radioCompletionDiagnostics } from '../js/radio-duration.mjs';
 
 const SCHEMA_VERSION = 1;
 
@@ -576,7 +577,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       return summarizeMainRadioAdverts({ adVotes: journal.adVoteLedger.receipts, impressions: journal.impressions,
         paidPlays: journal.paidPlays, periodOf });
     },
-    recordPaidAdvertPlay: ({ campaignId, radioPlayId, audibleMs, competitionReward }) => run(async () => {
+    recordPaidAdvertPlay: ({ campaignId, radioPlayId, audibleMs, expectedMs, competitionReward }) => run(async () => {
       requireReady();
       if (competitionReward || journal.competition?.plays.some(play => play.radioPlayId === radioPlayId)) {
         throw new Error('Free advert playback cannot be counted as paid');
@@ -584,7 +585,8 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       if (!Number.isSafeInteger(audibleMs) || audibleMs < minimumAudibleMs) return false;
       if (!/^\d+$/.test(String(campaignId)) || typeof radioPlayId !== 'string' || !radioPlayId) throw new Error('Invalid DeVert paid advert play');
       if (journal.paidPlays.some(entry => entry.radioPlayId === radioPlayId)) return true;
-      const entry = { campaignId: String(campaignId), radioPlayId, recordedAt: new Date(now()).toISOString() };
+      const entry = { campaignId: String(campaignId), radioPlayId, audibleMs,
+        ...radioCompletionDiagnostics(audibleMs, expectedMs), recordedAt: new Date(now()).toISOString() };
       await commit({ ...journal, paidPlays: [...journal.paidPlays, entry].slice(-MAX_SAVED_IDS) });
       return true;
     }),
@@ -626,7 +628,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       const candidate = freeCandidates(snapshot).find(item => !excluded.has(item.campaign.campaignId));
       return candidate ? freeAd(candidate, false) : null;
     }),
-    recordCompetitionAdvertPlay: ({ campaignId, radioPlayId, mainRadio, audibleMs, startedAt, competitionReward }) => run(async () => {
+    recordCompetitionAdvertPlay: ({ campaignId, radioPlayId, mainRadio, audibleMs, expectedMs, startedAt, competitionReward }) => run(async () => {
       requireReady();
       if (!competitionEnabled) throw new Error('Advert competition is disabled');
       if (!Number.isSafeInteger(audibleMs) || audibleMs < minimumAudibleMs) return false;
@@ -647,11 +649,12 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
       if (!Number.isFinite(start) || start > now() || !competitionGrant(journal.competition, competitionReward, start) ||
         !campaign || advertIdentity(campaign) !== competitionReward.advertId) throw new Error('Free advert grant unavailable for this play');
       const play = { campaignId: String(campaignId), radioPlayId, mainRadio, advertId: competitionReward.advertId,
+        audibleMs, ...radioCompletionDiagnostics(audibleMs, expectedMs),
         sourceWeek: competitionReward.sourceWeek, startedAt: new Date(start).toISOString(), recordedAt: new Date(now()).toISOString() };
       await commit({ ...journal, competition: { ...journal.competition, plays: [...journal.competition.plays, play] } });
       return true;
     }),
-    recordCampaignImpression: ({ campaignId, radioPlayId, mainRadio, audibleMs, competitionReward }) => run(async () => {
+    recordCampaignImpression: ({ campaignId, radioPlayId, mainRadio, audibleMs, expectedMs, competitionReward }) => run(async () => {
       requireReady();
       if (competitionReward || journal.competition?.plays.some(play => play.radioPlayId === radioPlayId)) {
         throw new Error('Free advert playback must use separate competition accounting');
@@ -669,6 +672,7 @@ export function createDevertPlaybackRuntime({ contract, provider = contract?.run
           if (hasPending || (vertLoopNextRetryAtByCampaign.get(key) || 0) > now()) return false;
         }
         entry = { impressionId, campaignId: String(campaignId), mainRadio: mainRadio === true, radioPlayId,
+          audibleMs, ...radioCompletionDiagnostics(audibleMs, expectedMs),
           recordedAt: new Date(now()).toISOString(), state: 'pending', nextRetryAt: mainRadio === true ? 0
             : Math.max(vertLoopNextRetryAtByCampaign.get(String(campaignId)) || 0, now()) };
         await commit({ ...journal, impressions: [...journal.impressions, entry].slice(-MAX_SAVED_IDS) });

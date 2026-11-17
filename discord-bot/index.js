@@ -1,8 +1,9 @@
 import { createRadioAnnouncements, deserializeAnnouncements } from './radio-announcements.js';
 import { createCommunityReminder, deserializeCommunityReminders } from './community-reminder.js';
 import { createLiveBookings } from './live-bookings.js';
-import { createLiveAudioService } from './live-audio.js';
+import { createLiveAudioService, createLiveAudioWatchdogTick } from './live-audio.js';
 import { createLiveFeedback, parseTrustedProxyHops } from './live-feedback.js';
+import { createListenerTelemetry } from './live-listener-telemetry.js';
 import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
@@ -1645,12 +1646,19 @@ async function main() {
     readLiveTips: options => tipLedger && tipLedgerReady ? tipLedger.getLiveTips(options) : null,
     limits: { trustedProxyHops: parseTrustedProxyHops(process.env.LIVE_FEEDBACK_TRUSTED_PROXY_HOPS) },
   });
+  const listenerTelemetry = createListenerTelemetry({
+    resolveState: () => liveAudio.feedbackState(),
+    trustedProxyHops: parseTrustedProxyHops(process.env.LIVE_FEEDBACK_TRUSTED_PROXY_HOPS),
+  });
   const liveAudio = createLiveAudioService({
     feedback: liveFeedback,
-    withBroadcastHandoff: apply => {
+    listenerTelemetry,
+    graceMs: Number(process.env.LIVE_AUDIO_GRACE_MS || 15000),
+    recoveryEnabled: process.env.LIVE_AUDIO_RECOVERY_ENABLED === 'true',
+    withBroadcastHandoff: (apply, options) => {
       const session = getActiveJukeLoopSession();
       if (!session) throw new Error('Radio handoff is unavailable');
-      return session.withBroadcastHandoff(apply);
+      return session.withBroadcastHandoff(apply, options);
     },
     programs: parseLiveAudioPrograms(process.env.LIVE_AUDIO_PROGRAMS || '{}'),
     ownerWallet: config.mintOwnerWallet,
@@ -1741,14 +1749,7 @@ async function main() {
     setInterval(() => { void tickRehearsal(); }, 1000).unref();
   }
   if (liveAudio.configured) {
-    let ticking = false;
-    const tick = async () => {
-      if (ticking) return;
-      ticking = true;
-      try { await liveAudio.tick(); }
-      catch { console.warn('[live-audio] Room state/receiver unavailable; inspect hosting and durable storage.'); }
-      finally { ticking = false; liveFeedback.sync(); }
-    };
+    const tick = createLiveAudioWatchdogTick({ liveAudio, liveFeedback });
     void tick();
     setInterval(() => { void tick(); }, 1000).unref();
   }
@@ -1789,6 +1790,7 @@ async function main() {
     liveBookings,
     liveAudio,
     liveFeedback,
+    listenerTelemetry,
     rehearsal,
     alchemyWebhook,
     checkpointMirror,
@@ -1932,7 +1934,7 @@ async function main() {
     rpcProvider: getRpcRouter().provider('read', 'worker-reads'),
     getRpcHealth: () => getRpcRouter().health(),
     rpcProxy: createRpcProxy({
-      request: (method, params) => getRpcRouter().request('fallback', method, params),
+      request: (method, params) => getRpcRouter().request('fallback', method, params, 'browser-proxy'),
       allowedContracts: [
         process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS,
         ...(config.nftContractAddresses || [config.nftContractAddress]),
@@ -2500,6 +2502,7 @@ async function main() {
     let exitCode = 0;
     discordAbort.abort();
     liveFeedback.close();
+    listenerTelemetry.close();
     try {
       await liveAudio.stop();
       await recorder.flush();

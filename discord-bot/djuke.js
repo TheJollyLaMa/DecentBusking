@@ -1,6 +1,7 @@
 import { Contract, JsonRpcProvider, id, isAddress } from 'ethers';
 import { quoteDjuke } from '../js/djuke.mjs';
 import { validateCreatorSplits } from '../js/submission-media.mjs';
+import { radioCompletionDiagnostics } from '../js/radio-duration.mjs';
 
 export const DJUKE_ABI = [
   'function headRequestId() view returns (uint256)',
@@ -254,7 +255,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
         else delete record.lastMedia;
       }
     }),
-    complete: (requestId, { playId, audibleMs, finished, trackId, revision }) => update(requestId, record => {
+    complete: (requestId, { playId, audibleMs, expectedMs, finished, trackId, revision }) => update(requestId, record => {
       if (record.state !== 'playing' || (trackId !== undefined && (record.trackId !== trackId || record.revision !== revision))) {
         throw new Error('DJuke request is not playing that recording');
       }
@@ -264,6 +265,7 @@ export function createDjukePlaybackJournal({ restore, save, now = () => Date.now
       record.state = 'played';
       record.playId = playId;
       record.audibleMs = audibleMs;
+      Object.assign(record, radioCompletionDiagnostics(audibleMs, expectedMs));
     }),
     confirmFulfilled: requestId => update(requestId, record => {
       if (record.state !== 'played') throw new Error('DJuke request has no completed playback');
@@ -576,7 +578,8 @@ export function createDjukeRuntime({ readState, readPlaybackState = readState, j
         const reason = !play ? 'audio_evidence_missing'
           : play.finished !== true ? play.media?.reason || 'audio_stream_incomplete' : 'insufficient_audible_time';
         return retryMedia(record, new Error(`Playlist recording did not finish audibly (${reason})`),
-          { ...play?.media, reason });
+          { ...play?.media, reason, audibleMs: play?.audibleMs ?? null,
+            ...radioCompletionDiagnostics(play?.audibleMs, play?.expectedMs) });
       }
       if (!play || play.audibleMs < minAudibleMs) {
         await retainUpdate(record, () => journal.fail(record.requestId, 'Paid play was not audible long enough'));
@@ -586,7 +589,8 @@ export function createDjukeRuntime({ readState, readPlaybackState = readState, j
       const started = Date.now();
       if (record.playlistBatchId !== undefined) evidenced.add(record.requestId);
       await retainUpdate(record, () => journal.complete(record.requestId, { playId: play.playId,
-        audibleMs: play.audibleMs, finished: true, trackId: record.trackId, revision: record.revision }));
+        audibleMs: play.audibleMs, expectedMs: play.expectedMs,
+        finished: true, trackId: record.trackId, revision: record.revision }));
       log.info?.(`[djuke] Playback checkpoint confirmed ${record.requestId}; checkpointMs=${Date.now() - started}`);
       readState().then(settleSerial).catch(error => log.warn(`[djuke] Fulfillment deferred: ${error.message}`));
     },

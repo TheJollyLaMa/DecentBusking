@@ -240,7 +240,8 @@ test('runtime plays paid requests first, retries short plays, and fulfills only 
   const request = { requestId: 'r0', chainRequestId: '0', songId: id('song'), revision: '0', trackId: 'song', playable: true };
   let state = { requests: [request] };
   const fulfilled = [];
-  const runtime = api.createDjukeRuntime({ readState: async () => state, journal: memoryJournal(api),
+  const journal = memoryJournal(api);
+  const runtime = api.createDjukeRuntime({ readState: async () => state, journal,
     fulfill: async args => { fulfilled.push(args); }, getTrack: trackId => ({ trackId, title: 'Song' }), log: { warn() {} } });
   const first = await runtime.nextPaid();
   assert.equal(first.track.trackId, 'song');
@@ -248,9 +249,12 @@ test('runtime plays paid requests first, retries short plays, and fulfills only 
   await runtime.complete(first.record, { playId: 'short', audibleMs: 5000 });
   const retry = await runtime.nextPaid();
   assert.equal(retry.record.attempts, 2);
-  await runtime.complete(retry.record, { playId: 'full', audibleMs: 180000 });
+  await runtime.complete(retry.record, { playId: 'full', audibleMs: 180000, expectedMs: 240000, finished: false });
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.deepEqual(fulfilled.map(entry => [entry.chainRequestId, entry.playId]), [['0', 'full']]);
+  assert.equal(journal.getState()[0].expectedMs, 240000);
+  assert.equal(journal.getState()[0].completionRatio, 0.75);
+  assert.equal(journal.getState()[0].short, true, 'diagnostic short must not change legacy single-song settlement');
   state = { requests: [] };
   assert.equal(await runtime.nextPaid(), null);
 });
@@ -516,6 +520,9 @@ test('durable playback journal retains failed requests and completed plays throu
   journal = createDjukePlaybackJournal(storage);
   await journal.initialize();
   assert.equal(journal.getState()[0].state, 'played');
+  assert.equal(journal.getState()[0].expectedMs, null);
+  assert.equal(journal.getState()[0].completionRatio, null);
+  assert.equal(journal.getState()[0].short, null);
   assert.equal(await journal.acquire(), null);
   await journal.confirmFulfilled('request-0');
   assert.equal((await journal.acquire()).requestId, 'request-1');

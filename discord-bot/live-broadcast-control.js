@@ -14,7 +14,7 @@ const fields = {
 };
 
 export function planBroadcastCommand({ state, booking, partner, bookings, command, wallet, owner,
-  now, audioFresh, ready, outroSeconds = () => 300 }) {
+  now, audioFresh, ready, outroSeconds = () => 300, earlyTake = false }) {
   if (!Object.hasOwn(fields, command.action) || Object.keys(command).some(k =>
     !['action', 'commandId', 'expectedRevision', ...fields[command.action]].includes(k)) ||
       !/^[a-zA-Z0-9:_-]{8,100}$/.test(command.commandId || '') ||
@@ -110,7 +110,7 @@ export function planBroadcastCommand({ state, booking, partner, bookings, comman
       break;
     case 'broadcast-take': {
       if (command.confirmed !== true || a.startedAt || !['contracted', 'short', 'full'].includes(a.choice) ||
-          now < Date.parse(booking.startUtc) || !room.armed || !room.checks.t60 || !room.checks.t15 ||
+          !earlyTake && now < Date.parse(booking.startUtc) || !room.armed || !room.checks.t60 || !room.checks.t15 ||
           !audioFresh || !ready) fail('Take requires the chosen, ready, soundchecked performer and fresh verified audio');
       if (a.previousBookingId) {
         const prior = next.rooms.find(r => r.bookingId === a.previousBookingId);

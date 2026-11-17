@@ -85,6 +85,23 @@ test('V2 cannot be inferred from a V1 signature, invalid version or private wait
   assert.equal(f.blobs.length, 0);
 });
 
+test('explicit early airtime never broadens existing V2 recording permission before the original start', async () => {
+  const f = await fixture({ persistFrameTimes: true });
+  f.booking.broadcast.actualStartedAt = START - 10000;
+  f.booking.broadcast.authorizedEndAt = START + 10000;
+  f.at(START - 11000);
+  await f.recorder.consent(f.booking, await f.permission(f.booking, f.v2), performer.address, ORIGIN);
+  f.at(START - 1000); f.recorder.capture(f.booking, pcm()); await f.recorder.flush();
+  assert.equal(f.blobs.length, 0);
+  assert.equal(f.recorder.status(f.booking).earlyCaptureExcluded, true);
+  f.at(START); f.recorder.capture(f.booking, pcm()); await f.recorder.flush();
+  assert.equal(f.blobs.length, 1);
+  f.booking.broadcast.actualEndedAt = START + 1000; f.booking.broadcast.endReason = 'producer-finished';
+  f.at(START + 1000); await f.recorder.tick([f.booking]);
+  assert.equal(f.saved().recordings[0].incomplete, true);
+  assert.equal(f.submissions.length, 0);
+});
+
 test('actual end finalizes once without mint intake; performer approval queues the durable source once', async () => {
   let encodes = 0;
   const f = await fixture({ encode: async () => {

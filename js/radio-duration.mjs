@@ -1,4 +1,23 @@
 export const LONG_FORM_SECONDS = 600;
+// Diagnostic only; matches the existing long-form/replay completion margin.
+export const RADIO_SHORT_TOLERANCE_MS = 2000;
+
+export function expectedRecordingMs(track) {
+  const seconds = verifiedRecordingDuration(track);
+  return seconds === null ? null : seconds * 1000;
+}
+
+export function radioCompletionDiagnostics(audibleMs, expectedMs) {
+  const expected = Number.isFinite(expectedMs) && expectedMs > 0 && expectedMs <= Number.MAX_SAFE_INTEGER
+    ? expectedMs : null;
+  const known = expected !== null && Number.isFinite(audibleMs) && audibleMs >= 0;
+  return {
+    expectedMs: expected,
+    completionRatio: known ? audibleMs / expected : null,
+    short: known ? expected - audibleMs > RADIO_SHORT_TOLERANCE_MS : null,
+    shortToleranceMs: RADIO_SHORT_TOLERANCE_MS,
+  };
+}
 
 export function recordingMediaIdentity(track) {
   return track?.ipfsCid ? `ipfs:${track.ipfsCid}` :
