@@ -88,6 +88,56 @@ test('paid DJuke runtime refunds an undeliverable playlist head through the batc
   assert.equal(journal.getState()[0].state, 'pending');
 });
 
+test('quiet playlist scan progress survives restart without checkpointing every short poll', async () => {
+  const { createDjukePlaylistBatchReconciler } = await import('../discord-bot/djuke-playlist-batches.js');
+  let snapshot, scans = 0, saves = 0, head = 5010;
+  const create = () => createDjukePlaylistBatchReconciler({
+    startBlock: 10, chunkSize: 1000, provider: { getBlockNumber: async () => head },
+    contract: { filters: new Proxy({}, { get: (_, name) => () => name }),
+      queryFilter: async () => { scans++; return []; } },
+    restore: async () => snapshot,
+    save: async state => { saves++; snapshot = structuredClone(state); return 'ipfs://quiet-progress'; },
+  });
+  const journal = create();
+  await journal.initialize();
+  await journal.reconcile();
+  assert.equal(snapshot.nextBlock, 5009);
+  assert.equal(saves, 2, 'one completed catch-up checkpoint, not one upload per empty range');
+  const restarted = create();
+  await restarted.initialize();
+  scans = 0;
+  await restarted.reconcile();
+  assert.equal(scans, 0, 'a replacement worker must not replay thousands of already verified quiet blocks');
+  head += 2;
+  await restarted.reconcile();
+  assert.equal(saves, 3, 'short quiet polls retain the existing no-upload behavior');
+});
+
+test('a failed quiet-cursor checkpoint cannot advance the durable reconciliation boundary', async () => {
+  const { createDjukePlaylistBatchReconciler } = await import('../discord-bot/djuke-playlist-batches.js');
+  let snapshot, rejectSave = false;
+  const ranges = [];
+  const journal = createDjukePlaylistBatchReconciler({
+    startBlock: 10, chunkSize: 1000, provider: { getBlockNumber: async () => 2010 },
+    contract: { filters: new Proxy({}, { get: (_, name) => () => name }),
+      queryFilter: async (_, from, to) => { ranges.push([from, to]); return []; } },
+    restore: async () => snapshot,
+    save: async state => {
+      if (rejectSave) throw new Error('Required mirror unavailable');
+      snapshot = structuredClone(state); return 'ipfs://quiet-progress';
+    },
+  });
+  await journal.initialize();
+  rejectSave = true;
+  await assert.rejects(journal.reconcile(), /Required mirror unavailable/);
+  assert.equal(snapshot.nextBlock, 10);
+  rejectSave = false;
+  ranges.length = 0;
+  await journal.reconcile();
+  assert.equal(ranges[0][0], 10);
+  assert.equal(snapshot.nextBlock, 2009);
+});
+
 test('legacy batch checkpoints replay exact receipt amounts and links without double counting refunds', async () => {
   const { createDjukePlaylistBatchReconciler } = await import('../discord-bot/djuke-playlist-batches.js');
   const payer = Wallet.createRandom().address;

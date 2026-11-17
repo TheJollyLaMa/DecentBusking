@@ -107,6 +107,13 @@ switch outside a protected show. To roll back, have the producer explicitly
 select `direct` only with the bounded direct-seat allowance verified, or stop
 the public broadcast. There is no automatic mass fallback.
 
+Quiet DJuke playlist event scans retain a durable cursor after at least one
+complete scan chunk of progress. Short empty polls still avoid uploads, but a
+replacement worker no longer needs to replay an indefinitely old quiet range.
+This uses the existing required-mirror checkpoint path; failed cursor writes
+remain errors and do not advance the durable boundary. The first catch-up from
+an older checkpoint must still complete before the safe deployment gate opens.
+
 The client uses native HLS only with a usable programme clock (`getStartDate`),
 otherwise the self-hosted pinned Hls.js bundle. Native playback capability
 alone is insufficient to identify the audible performer. The Hls.js initial
