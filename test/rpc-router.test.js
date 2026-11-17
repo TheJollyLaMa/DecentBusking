@@ -128,7 +128,7 @@ test('CU budget guard moves large log scans to public once the soft limit is hit
   assert.deepEqual(calls.map(call => call.url), [PAID, PAID]);
   await router.request('logs', 'eth_getLogs', [{ fromBlock: '0xfa1', toBlock: '0x1770' }]);
   assert.equal(calls.at(-1).url, PUBLIC);
-  assert.equal(router.health().computeUnits.overBudget, true);
+  assert.equal(router.health().computeUnits.overBudget, false);
   await router.request('critical', 'eth_call', [{ to: '0x9' }, 'latest']);
   assert.equal(calls.at(-1).url, PUBLIC, 'critical-tier reads also go public once over budget');
   await router.request('critical', 'eth_sendRawTransaction', ['0x01']);
@@ -141,7 +141,8 @@ test('router providers work as ethers providers', async () => {
   const router = createRpcRouter({ publicUrls: [PUBLIC], fetchImpl });
   const provider = router.provider('read', 'test-consumer');
   assert.equal(await provider.getBlockNumber(), 100);
-  assert.equal(router.provider('read'), provider);
+  assert.equal(router.provider('read', 'test-consumer'), provider);
+  assert.notEqual(router.provider('read', 'another-consumer'), provider);
   assert.match(router.describe(), /test-consumer=read/);
 });
 
@@ -220,12 +221,14 @@ test('an Alchemy spending-cap refusal switches to public-only until the probe wi
   const router = createRpcRouter({ publicUrls: [PUBLIC], paidUrls: [PAID], fetchImpl: paidCap, now: () => time });
   assert.deepEqual(await router.request('critical', 'eth_sendRawTransaction', ['0x03']), { result: '0xpublic' });
   assert.equal(router.mode(), BUDGET_MODES.exhausted);
+  assert.equal(router.health().computeUnits.overBudget, true);
   calls.length = 0;
   await router.request('critical', 'eth_sendRawTransaction', ['0x04']);
   assert.deepEqual(calls.map(call => call.url), [PUBLIC]);
   time += 31 * 60_000;
   capped = false;
   assert.equal(router.mode(), BUDGET_MODES.normal);
+  assert.equal(router.health().computeUnits.overBudget, false);
   assert.deepEqual(await router.request('critical', 'eth_sendRawTransaction', ['0x05']), { result: '0xpaid' });
 });
 
@@ -268,4 +271,116 @@ test('restoreUsage adds pre-restart spend to post-boot spend for the current mon
   assert.equal(router.restoreUsage({ month: '2026-09', monthCu: 999_999 }), false);
   assert.equal(router.restoreUsage({ month: '2026-10', monthCu: 700_000, day: '2026-10-20', dayCu: 40_000 }), true);
   assert.deepEqual(router.usageSnapshot(), { month: '2026-10', monthCu: 700_026, day: '2026-10-20', dayCu: 40_026 });
+});
+
+test('pacing dead band is stable, recovers on headroom, and never delays reserve or exhaustion', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  let time = Date.UTC(2026, 9, 16);
+  const { fetchImpl } = mockFetch({ [PAID]: () => ({ result: '0x1' }) });
+  const changes = [];
+  const router = createRpcRouter({ paidUrls: [PAID], fetchImpl, now: () => time, monthlyCuBudget: 1_000_000,
+    onModeChange: (mode, previous) => changes.push([previous, mode]) });
+  const target = router.health().budget.pacedTarget;
+  router.restoreUsage({ month: '2026-10', monthCu: target - 1 });
+  assert.equal(router.mode(), 'normal');
+  await router.request('critical', 'eth_call', [{ to: '0x1' }, 'latest']);
+  assert.equal(router.mode(), 'conserve');
+  for (let second = 0; second < 3600; second += 5) {
+    time += 5000;
+    assert.equal(router.mode(), 'conserve');
+  }
+  assert.deepEqual(changes, [['normal', 'conserve']], 'virtual hour is not a staging soak');
+  time += 7 * 60 * 60_000;
+  assert.equal(router.mode(), 'normal');
+  router.restoreUsage({ month: '2026-10', monthCu: 900_000 - router.health().budget.monthCu });
+  assert.equal(router.mode(), 'critical-only');
+  router.restoreUsage({ month: '2026-10', monthCu: 100_000 });
+  assert.equal(router.mode(), 'exhausted');
+  assert.equal(router.health().computeUnits.overBudget, true);
+  time = Date.UTC(2026, 10, 1);
+  assert.equal(router.mode(), 'normal');
+  assert.equal(router.health().budget.monthCu, 0);
+  assert.equal(router.health().computeUnits.overBudget, false);
+});
+
+test('pacing thresholds are exact and the dead band does not carry into a new month', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  let time = Date.UTC(2026, 9, 16);
+  const { fetchImpl } = mockFetch({ [PAID]: () => ({ result: '0x1' }) });
+  const router = createRpcRouter({ paidUrls: [PAID], fetchImpl, now: () => time, monthlyCuBudget: 3_100_000,
+    initialUsage: { month: '2026-10', monthCu: 1_440_000 } });
+  assert.equal(router.mode(), 'normal', 'exact pace line is normal');
+  await router.request('critical', 'eth_call', [{}, 'latest']);
+  assert.equal(router.mode(), 'conserve');
+  time += 6 * 60 * 60_000 + 24_959;
+  assert.equal(router.mode(), 'conserve', 'one millisecond before recovery');
+  time += 1;
+  assert.equal(router.mode(), 'normal', 'exact recovery line');
+
+  const second = createRpcRouter({ paidUrls: [PAID], fetchImpl, now: () => time, monthlyCuBudget: 3_100_000,
+    initialUsage: { month: '2026-10', monthCu: 1_500_000 } });
+  assert.equal(second.mode(), 'conserve');
+  time = Date.UTC(2026, 10, 1);
+  assert.equal(second.mode(), 'normal');
+});
+
+test('paid attempts attribute consumers and expose restored but unitemized daily usage', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  const time = Date.UTC(2026, 9, 20, 6);
+  const { fetchImpl } = mockFetch({ [PAID]: () => ({ result: '0x1' }) });
+  const router = createRpcRouter({ paidUrls: [PAID], fetchImpl, now: () => time,
+    initialUsage: { month: '2026-10', monthCu: 900, day: '2026-10-20', dayCu: 400 } });
+  await router.provider('read', 'screen-a').send('eth_getBalance', ['0x1', 'latest']);
+  await router.provider('read', 'screen-b').send('eth_getBalance', ['0x2', 'latest']);
+  const { budget, computeUnits } = router.health();
+  assert.equal(budget.monthCu, 938);
+  assert.equal(computeUnits.today, 438);
+  assert.deepEqual(computeUnits.todayByMethod, { eth_getBalance: 38 });
+  assert.deepEqual(computeUnits.todayByConsumer, { 'screen-a': 19, 'screen-b': 19 });
+  assert.equal(computeUnits.todayUnattributed, 400);
+});
+
+test('cached calls retain wallet and block distinctions while critical reads bypass them', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  const { fetchImpl, calls } = mockFetch({ [PAID]: () => ({ result: '0x01' }) });
+  const router = createRpcRouter({ paidUrls: [PAID], fetchImpl });
+  const call = (from, tag, kind = 'fallback') => router.request(kind, 'eth_call', [{ to: '0x1', from }, tag]);
+  await call('0xaaa', 'latest');
+  await call('0xaaa', 'latest');
+  await call('0xbbb', 'latest');
+  await call('0xaaa', '0x1');
+  await call('0xaaa', 'latest', 'read');
+  await call('0xaaa', 'latest', 'critical');
+  assert.equal(calls.length, 4);
+});
+
+test('browser-only screen cache respects parameters, expiration, errors and critical reads', async () => {
+  const { createRpcRouter } = await import(moduleUrl);
+  let time = 0;
+  let failing = false;
+  const { fetchImpl, calls } = mockFetch({ [PAID]: () => failing
+    ? ({ error: { code: 3, message: 'execution reverted' } }) : ({ result: '0x01' }) });
+  const router = createRpcRouter({ paidUrls: [PAID], fetchImpl, now: () => time });
+  const code = ['0xaaa', 'finalized'];
+  await router.request('fallback', 'eth_getCode', code);
+  await router.request('fallback', 'eth_getCode', code);
+  await router.request('fallback', 'eth_getCode', ['0xbbb', 'finalized']);
+  await router.request('critical', 'eth_getCode', code);
+  assert.equal(calls.length, 3);
+  time += 10_000;
+  failing = true;
+  assert.ok((await router.request('fallback', 'eth_getCode', code)).error);
+  assert.ok((await router.request('fallback', 'eth_getCode', code)).error);
+  assert.equal(calls.length, 5, 'errors are never cached');
+  failing = false;
+  await router.request('fallback', 'eth_getBlockByNumber', ['finalized', false]);
+  await router.request('fallback', 'eth_getBlockByNumber', ['finalized', false]);
+  time += 2000;
+  await router.request('fallback', 'eth_getBlockByNumber', ['finalized', false]);
+  assert.equal(calls.length, 7);
+  await router.request('fallback', 'eth_getCode', ['0xaaa', 'latest']);
+  await router.request('fallback', 'eth_getCode', ['0xaaa', 'latest']);
+  await router.request('fallback', 'eth_getBlockByNumber', ['latest', false]);
+  await router.request('fallback', 'eth_getBlockByNumber', ['latest', false]);
+  assert.equal(calls.length, 11, 'latest reads used by payment paths remain uncached');
 });

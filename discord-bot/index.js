@@ -1932,7 +1932,7 @@ async function main() {
     rpcProvider: getRpcRouter().provider('read', 'worker-reads'),
     getRpcHealth: () => getRpcRouter().health(),
     rpcProxy: createRpcProxy({
-      request: (method, params) => getRpcRouter().request('fallback', method, params),
+      request: (method, params) => getRpcRouter().request('fallback', method, params, 'browser-proxy'),
       allowedContracts: [
         process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS,
         ...(config.nftContractAddresses || [config.nftContractAddress]),

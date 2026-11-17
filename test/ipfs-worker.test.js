@@ -1449,6 +1449,23 @@ test('public health check is readable from local and hosted dapp origins', async
     assert.deepEqual(await response.json(), { ok: true, ipfsProvider: 'pinata' });
   });
 });
+test('public health includes actual RPC budget mode and totals', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const { createRpcRouter } = await import(pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'rpc-router.js')).href);
+  for (const [monthCu, mode] of [[0, 'normal'], [26_959_717, 'conserve'], [54_000_000, 'critical-only'], [60_000_000, 'exhausted']]) {
+    const router = createRpcRouter({ paidUrls: ['https://example.invalid'], now: () => Date.UTC(2026, 10, 14),
+      monthlyCuBudget: 60_000_000, initialUsage: { month: '2026-11', monthCu } });
+    const handler = createWorkerRequestHandler({ allowedOrigins: [], ownerWallet: '0x1111111111111111111111111111111111111111',
+      getRpcHealth: () => router.health() });
+    await withServer(handler, async baseUrl => {
+      const body = await (await fetch(`${baseUrl}/health`)).json();
+      assert.equal(body.rpc.budget.mode, mode);
+      assert.equal(body.rpc.budget.monthCu, monthCu);
+      assert.equal(body.rpc.budget.monthlyBudget, 60_000_000);
+      assert.equal(body.rpc.computeUnits.overBudget, mode === 'exhausted');
+    });
+  }
+});
 test('radio state is public and readable from any dapp origin', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const handler = createWorkerRequestHandler({

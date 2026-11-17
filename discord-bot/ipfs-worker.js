@@ -530,7 +530,7 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
         const rpc = getRpcHealth?.();
         sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured',
-          ...(rpc ? { rpc: { ...rpc.tiers, computeUnits: rpc.computeUnits } } : {}) }, '*');
+          ...(rpc ? { rpc: { ...rpc.tiers, budget: rpc.budget, computeUnits: rpc.computeUnits } } : {}) }, '*');
         return;
       }
       if (requestUrl.pathname === '/api/promotions' && ['GET', 'POST'].includes(request.method)) {

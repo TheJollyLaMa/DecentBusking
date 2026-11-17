@@ -144,7 +144,7 @@ export function createRpcRouter({
   const inflight = new Map();
   const cache = new Map();
   const consumers = {};
-  const usage = { day: '', dayCu: 0, minute: 0, minuteCu: 0, byMethod: {}, month: '', monthCu: 0 };
+  const usage = { day: '', dayCu: 0, minute: 0, minuteCu: 0, byMethod: {}, byConsumer: {}, month: '', monthCu: 0 };
   // Adds usage persisted before a restart to what this process has spent since booting. Call once per snapshot.
   function restoreUsage(snapshot) {
     if (!snapshot || typeof snapshot !== 'object') return false;
@@ -157,7 +157,7 @@ export function createRpcRouter({
     }
     const today = new Date(now()).toISOString().slice(0, 10);
     if (snapshot.day === today && Number.isFinite(snapshot.dayCu) && snapshot.dayCu > 0) {
-      if (usage.day !== today) Object.assign(usage, { day: today, dayCu: 0, byMethod: {} });
+      if (usage.day !== today) Object.assign(usage, { day: today, dayCu: 0, byMethod: {}, byConsumer: {} });
       usage.dayCu += snapshot.dayCu;
       changed = true;
     }
@@ -167,6 +167,7 @@ export function createRpcRouter({
   let requestId = 0;
   let exhaustedUntil = 0;
   let lastMode = null;
+  let lastModeMonth = '';
 
   function budget() {
     const time = now();
@@ -176,7 +177,7 @@ export function createRpcRouter({
     const dayCu = usage.day === today ? usage.dayCu : 0;
     if (!Number.isFinite(monthlyCuBudget)) {
       const mode = exhaustedUntil > time ? BUDGET_MODES.exhausted : dayCu >= dailyCuSoftLimit ? BUDGET_MODES.conserve : BUDGET_MODES.normal;
-      return { mode, monthCu, dayCu, monthlyBudget: null };
+      return { mode, month: window.key, monthCu, dayCu, monthlyBudget: null };
     }
     const spendable = monthlyCuBudget * (1 - reserveFraction);
     const elapsed = (time - window.start) / (window.end - window.start);
@@ -185,12 +186,16 @@ export function createRpcRouter({
     let mode = BUDGET_MODES.normal;
     if (exhaustedUntil > time || monthCu >= monthlyCuBudget) mode = BUDGET_MODES.exhausted;
     else if (monthCu >= spendable) mode = BUDGET_MODES.criticalOnly;
-    else if (monthCu > pacedTarget || dayCu >= dailyCuSoftLimit) mode = BUDGET_MODES.conserve;
+    // Enter at the existing pace line; require a quarter-day of headroom to leave.
+    else if (monthCu > pacedTarget || dayCu >= dailyCuSoftLimit ||
+      (lastMode === BUDGET_MODES.conserve && lastModeMonth === window.key &&
+        monthCu > Math.max(0, pacedTarget - spendable / window.days / 4))) mode = BUDGET_MODES.conserve;
     const elapsedMs = Math.max(time - window.start, 3_600_000);
     const projected = Math.round(monthCu / elapsedMs * (window.end - window.start));
     return {
       mode, monthCu, dayCu, monthlyBudget: monthlyCuBudget, reserve: Math.round(monthlyCuBudget * reserveFraction),
       pacedTarget: Math.round(pacedTarget), projectedMonthCu: projected,
+      paceRecoveryTarget: Math.round(Math.max(0, pacedTarget - spendable / window.days / 4)),
       dailyAllowance: Math.round(Math.max(0, spendable - monthCu) / Math.max(1, (window.end - time) / 86_400_000)),
       month: window.key,
     };
@@ -205,14 +210,15 @@ export function createRpcRouter({
         try { onModeChange(mode, previous); } catch { /* observer errors never block RPC */ }
       }
     }
+    lastModeMonth = monthWindow(now()).key;
     return mode;
   }
 
-  function chargeCu(method) {
+  function chargeCu(method, consumer) {
     const time = now();
     const day = new Date(time).toISOString().slice(0, 10);
     const minute = Math.floor(time / 60_000);
-    if (usage.day !== day) Object.assign(usage, { day, dayCu: 0, byMethod: {} });
+    if (usage.day !== day) Object.assign(usage, { day, dayCu: 0, byMethod: {}, byConsumer: {} });
     const month = day.slice(0, 7);
     if (usage.month !== month) Object.assign(usage, { month, monthCu: 0 });
     if (usage.minute !== minute) Object.assign(usage, { minute, minuteCu: 0 });
@@ -221,6 +227,7 @@ export function createRpcRouter({
     usage.minuteCu += cost;
     usage.monthCu += cost;
     usage.byMethod[method] = (usage.byMethod[method] || 0) + cost;
+    usage.byConsumer[consumer] = (usage.byConsumer[consumer] || 0) + cost;
   }
 
 
@@ -265,12 +272,12 @@ export function createRpcRouter({
     endpoint.lastError = String(message || '').slice(0, 160);
   }
 
-  async function attempt(endpoint, method, params, timeoutMs) {
+  async function attempt(endpoint, method, params, timeoutMs, consumer) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const started = now();
     endpoint.requests += 1;
-    if (endpoint.tier === 'paid') chargeCu(method);
+    if (endpoint.tier === 'paid') chargeCu(method, consumer);
     try {
       let response;
       try {
@@ -313,13 +320,13 @@ export function createRpcRouter({
     }
   }
 
-  async function dispatch(cls, method, params) {
+  async function dispatch(cls, method, params, consumer) {
     let lastError = null;
     let rangeError = null;
     let ambiguousSend = false;
     for (const endpoint of orderFor(cls, method, params)) {
       try {
-        const outcome = await attempt(endpoint, method, params, timeouts[cls] || timeouts.read);
+        const outcome = await attempt(endpoint, method, params, timeouts[cls] || timeouts.read, consumer);
         if (outcome.error && method === 'eth_sendRawTransaction' && ambiguousSend && ALREADY_SENT_TEXT.test(outcome.error.message || '')) {
           endpoint.ok += 1;
           return { result: keccak256(params[0]) };
@@ -356,36 +363,38 @@ export function createRpcRouter({
   }
 
   // A range error from every endpoint means the filter spans too many blocks or logs: split and merge.
-  async function getLogs(params) {
+  async function getLogs(params, consumer) {
     try {
-      return await dispatch('logs', 'eth_getLogs', params);
+      return await dispatch('logs', 'eth_getLogs', params, consumer);
     } catch (error) {
       const filter = params?.[0] || {};
       const from = parseBlock(filter.fromBlock);
       const to = parseBlock(filter.toBlock);
       if (error.kind !== 'range' || from == null || to == null || to - from + 1 <= minLogRange) throw error;
       const middle = from + Math.floor((to - from) / 2);
-      const left = await getLogs([{ ...filter, fromBlock: toHex(from), toBlock: toHex(middle) }]);
+      const left = await getLogs([{ ...filter, fromBlock: toHex(from), toBlock: toHex(middle) }], consumer);
       if (left.error) return left;
-      const right = await getLogs([{ ...filter, fromBlock: toHex(middle + 1), toBlock: toHex(to) }]);
+      const right = await getLogs([{ ...filter, fromBlock: toHex(middle + 1), toBlock: toHex(to) }], consumer);
       if (right.error) return right;
       return { result: [...(left.result || []), ...(right.result || [])] };
     }
   }
 
-  async function request(kind, method, params = []) {
+  async function request(kind, method, params = [], consumer = 'unattributed') {
     const cls = classify(method, kind);
     if (method === 'eth_chainId') return { result: toHex(chainId) };
     const key = cls === 'critical' ? null : `${method}:${JSON.stringify(params)}`;
-    const cacheMs = method === 'eth_blockNumber' ? 2000
-      : method === 'eth_call' && (cls === 'read' || cls === 'fallback') ? (currentMode() === BUDGET_MODES.normal ? readCacheMs : readCacheMs * 6) : 0;
+    const cacheMs = cls === 'critical' ? 0 : method === 'eth_blockNumber' ? 2000
+      : method === 'eth_call' && (cls === 'read' || cls === 'fallback') ? (currentMode() === BUDGET_MODES.normal ? readCacheMs : readCacheMs * 6)
+      : cls === 'fallback' && method === 'eth_getCode' && params[1] === 'finalized' ? readCacheMs
+      : cls === 'fallback' && method === 'eth_getBlockByNumber' && params[0] === 'finalized' && params[1] === false ? 2000 : 0;
     if (cacheMs) {
       const hit = cache.get(key);
       if (hit && hit.expiresAt > now()) return hit.value;
     }
     if (key && inflight.has(key)) return inflight.get(key);
-    const task = (method === 'eth_getLogs' ? getLogs(params) : dispatch(cls, method, params)).then(value => {
-      if (cacheMs && !value.error) {
+    const task = (method === 'eth_getLogs' ? getLogs(params, consumer) : dispatch(cls, method, params, consumer)).then(value => {
+      if (cacheMs && !value.error && value.result != null) {
         cache.set(key, { value, expiresAt: now() + cacheMs });
         if (cache.size > 2000) {
           const time = now();
@@ -403,17 +412,18 @@ export function createRpcRouter({
   }
 
   class TieredJsonRpcProvider extends JsonRpcProvider {
-    constructor(kind) {
+    constructor(kind, consumer) {
       const network = Network.from(chainId);
       super('http://127.0.0.1:0', network, { staticNetwork: network, batchMaxCount: 1 });
       this.rpcKind = kind;
+      this.rpcConsumer = consumer;
     }
 
     async _send(payload) {
       const list = Array.isArray(payload) ? payload : [payload];
       return Promise.all(list.map(async item => {
         try {
-          const outcome = await request(this.rpcKind, item.method, item.params);
+          const outcome = await request(this.rpcKind, item.method, item.params, this.rpcConsumer);
           return outcome.error ? { id: item.id, error: outcome.error } : { id: item.id, result: outcome.result };
         } catch (error) {
           return { id: item.id, error: { code: -32603, message: `All RPC endpoints failed: ${error.message}` } };
@@ -422,27 +432,33 @@ export function createRpcRouter({
     }
   }
 
-  const providers = {};
+  const providers = new Map();
   function provider(kind = 'read', consumer = '') {
     if (!['read', 'logs', 'critical'].includes(kind)) throw new Error(`Unknown RPC tier: ${kind}`);
     if (consumer) consumers[consumer] = kind;
-    providers[kind] ||= new TieredJsonRpcProvider(kind);
-    return providers[kind];
+    const key = `${kind}:${consumer}`;
+    if (!providers.has(key)) providers.set(key, new TieredJsonRpcProvider(kind, consumer || 'unattributed'));
+    return providers.get(key);
   }
 
   function health() {
     const time = now();
+    const mode = currentMode();
+    const today = usage.day === new Date(time).toISOString().slice(0, 10);
+    const itemized = today ? Object.values(usage.byMethod).reduce((sum, cu) => sum + cu, 0) : 0;
     return {
       chainId,
       tiers: { paid: paid.length, public: pub.length },
       consumers: { ...consumers },
       budget: budget(),
       computeUnits: {
-        today: usage.day === new Date(time).toISOString().slice(0, 10) ? usage.dayCu : 0,
+        today: today ? usage.dayCu : 0,
         lastMinute: usage.minute === Math.floor(time / 60_000) ? usage.minuteCu : 0,
         dailySoftLimit: Number.isFinite(dailyCuSoftLimit) ? dailyCuSoftLimit : null,
-        overBudget: currentMode() !== BUDGET_MODES.normal,
-        todayByMethod: usage.day === new Date(time).toISOString().slice(0, 10) ? { ...usage.byMethod } : {},
+        overBudget: mode === BUDGET_MODES.exhausted,
+        todayByMethod: today ? { ...usage.byMethod } : {},
+        todayByConsumer: today ? { ...usage.byConsumer } : {},
+        todayUnattributed: today ? Math.max(0, usage.dayCu - itemized) : 0,
       },
       endpoints: endpoints.map(endpoint => ({
         label: endpoint.label,
