@@ -9,8 +9,8 @@ import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=202
 import { bindLiveDirection } from './live-direction.mjs?v=20261114-allocated-stage';
 import { bindLiveFeedbackRoom, bindTogether } from './live-feedback.mjs?v=20261115-listener-feedback';
 import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261117-producer-recovery';
-import { afterpartyRows, afterpartyMilestones, celebrateAfterparty } from './live-afterparty.mjs?v=20261116-curtain';
-import { renderAfterpartyChecklist, renderCurtainCall } from './live-afterparty-view.mjs?v=20261116-curtain';
+import { afterpartyRows, afterpartyMilestones, celebrateAfterparty } from './live-afterparty.mjs?v=20261117-release-party';
+import { renderAfterpartyChecklist, renderCurtainCall } from './live-afterparty-view.mjs?v=20261117-release-party';
 
 const byId = id => document.getElementById(id);
 const bookingId = new URL(location.href).searchParams.get('booking') || '';
@@ -306,10 +306,11 @@ function renderAfterparty(state) {
   };
   if (!show) { container.hidden = true; clear(); return; }
   const record = state?.recording;
-  const recordingRelease = record?.available === true ? {
-    known: record.status === 'empty' || ['ready', 'submitted'].includes(record.status) || ['recording', 'processing'].includes(record.status) ||
-      record.status === 'waiting' && !record.consented,
-    state: record.status === 'submitted' ? 'mint-requested'
+  const publicRelease = state?.recordingRelease || booking.recordingRelease;
+  const recordingRelease = publicRelease?.known === true ? publicRelease : record?.available === true ? {
+    known: record.known !== false && (record.status === 'empty' || ['ready', 'submitted'].includes(record.status) ||
+      ['recording', 'processing'].includes(record.status) || record.status === 'waiting' && !record.consented || !!record.error),
+    state: record.error ? 'failed' : record.status === 'submitted' ? 'mint-requested'
       : record.status === 'ready' ? 'performer-review'
       : record.status === 'empty' || record.status === 'waiting' && !record.consented ? 'none'
         : ['recording', 'processing'].includes(record.status) ? 'processing' : 'unknown',

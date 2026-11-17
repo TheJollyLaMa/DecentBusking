@@ -75,6 +75,7 @@ let _remoteScheduler = null;
 let _remoteFlusher = null;
 let _pendingHistoryEvents = [];
 let _remoteSaveQueue = Promise.resolve();
+const _pendingRadioReleases = new Set();
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ function _normalizePlaylist(playlist) {
 
 /** Load the playlist from a restored snapshot or the local runtime cache. */
 export function loadPlaylist(restoredPlaylist = null) {
+  _pendingRadioReleases.clear();
   _pendingHistoryEvents = [];
   if (Array.isArray(restoredPlaylist)) {
     _playlist = _normalizePlaylist(restoredPlaylist);
@@ -348,6 +350,45 @@ export function pendingLiveRecordingReplay(now = Date.now()) {
     isEligibleRadioMusic(track) && !recordingDurationReason(track));
 }
 
+export function liveRecordingReleaseState(bookingId, nowPlaying = null) {
+  const releases = getPlaybackPlaylist().filter(track => track.liveRecording?.bookingId === bookingId &&
+    track.mintStatus === 'minted' && /^\d+$/.test(String(track.tokenId)) && isEligibleRadioMusic(track))
+    .map(track => {
+      const recording = track.liveRecording, play = recording.radioRelease;
+      const reference = track.nftReferences?.find(ref => ref.chainId === 8453 &&
+        /^0x[0-9a-f]{40}$/i.test(ref.contractAddress || '') && String(ref.tokenId) === String(track.tokenId));
+      const playbackKnown = !_pendingRadioReleases.has(track.trackId);
+      const airing = playbackKnown && play && nowPlaying?.audible === true &&
+        nowPlaying.trackId === track.trackId && nowPlaying.playId === play.playId;
+      const state = !play || !playbackKnown ? 'minted' : airing ? 'airing' : play.finished === true ? 'aired'
+        : recording.replayStatus === 'pending' ? 'retrying' : 'interrupted';
+      return { known: true, state, trackId: track.trackId, title: track.title, tokenId: String(track.tokenId),
+        ...(reference ? { contractAddress: reference.contractAddress, chainId: 8453 } : {}),
+        partial: recording.incomplete === true, replayAfter: recording.replayAfter,
+        replayRequested: recording.replayStatus !== 'not-requested', playbackKnown,
+        ...(play && playbackKnown ? { firstPlayId: play.firstPlayId, firstStartedAt: play.firstStartedAt,
+          playId: play.playId, startedAt: play.startedAt, endedAt: play.endedAt ?? null } : {}) };
+    });
+  const featured = releases.find(r => r.state === 'airing') || releases.find(r => r.firstPlayId) || releases[0];
+  return featured ? { ...featured, releases } : { known: false };
+}
+
+export async function startLiveRecordingReplay(trackId, play) {
+  const track = _playlist.find(t => t.trackId === trackId);
+  if (!track?.liveRecording || track.mintStatus !== 'minted' || play?.audible !== true ||
+      play.trackId !== trackId || typeof play.playId !== 'string' || !play.playId ||
+      !Number.isSafeInteger(play.startedAt) || play.startedAt <= 0) return;
+  const previous = track.liveRecording.radioRelease;
+  if (previous?.playId === play.playId && !_pendingRadioReleases.has(trackId)) return;
+  if (!_remoteSaver) throw new Error('Durable radio-release storage is unavailable');
+  const started = track.liveRecording.radioRelease = { firstPlayId: previous?.firstPlayId || play.playId,
+    firstStartedAt: previous?.firstStartedAt || play.startedAt, playId: play.playId, startedAt: play.startedAt };
+  _pendingRadioReleases.add(trackId);
+  _save();
+  await waitForRemotePersistence();
+  if (track.liveRecording.radioRelease === started) _pendingRadioReleases.delete(trackId);
+}
+
 export function updateTrackDuration(trackId, result) {
   const track = _playlist.find(entry => entry.trackId === trackId);
   if (!track) throw new Error('Duration probe recording no longer exists');
@@ -365,11 +406,22 @@ export function updateTrackDuration(trackId, result) {
 
 export async function completeLiveRecordingReplay(trackId, play) {
   const track = _playlist.find(t => t.trackId === trackId);
-  if (!track?.liveRecording || play?.finished !== true || play.trackId !== trackId ||
-      !(play.audibleMs >= Math.max(1000, (track.durationSeconds * 1000) - 2000))) return;
-  track.liveRecording.replayStatus = 'played';
-  track.liveRecording.replayPlayId = play.playId;
+  if (!track?.liveRecording || play?.trackId !== trackId || !play.playId) return;
+  const recording = track.liveRecording, previous = recording.radioRelease;
+  const expectedMs = play.expectedMs === undefined ? expectedRecordingMs(track) : play.expectedMs;
+  const completed = play.finished === true && Number.isFinite(expectedMs) &&
+    play.audibleMs >= Math.max(1000, expectedMs - 2000);
+  if (previous?.playId === play.playId && Number.isSafeInteger(play.endedAt)) {
+    recording.radioRelease = { ...previous, endedAt: play.endedAt, finished: completed };
+    _pendingRadioReleases.add(trackId);
+  }
+  if (completed) {
+    recording.replayStatus = 'played';
+    recording.replayPlayId = play.playId;
+  } else if (!previous) return;
+  const saved = recording.radioRelease;
   _save(); await waitForRemotePersistence();
+  if (recording.radioRelease === saved) _pendingRadioReleases.delete(trackId);
 }
 
 /**

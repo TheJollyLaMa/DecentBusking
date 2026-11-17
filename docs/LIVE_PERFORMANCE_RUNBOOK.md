@@ -643,8 +643,66 @@ Curtain-call reuse: the existing `afterpartyRows`, `afterpartyMilestones` and
 deduplication; the existing performer stage-verification check is shared with
 Profile. Focused performer-room and Profile tests cover fresh exact-booking
 evidence, wrong wallets, interruptions, refresh and replay.
+
 Reuse: existing `createBrowserIpfsUploader`, `LIVE_ESCROW_ABI`, transaction
 hash storage convention and event indexer; no contract or worker deployment.
+
+### Recording release parties and priority follow-up (#342, local / undeployed)
+
+The performer Profile now has a separate, replayable release-party card for
+each approved recording that actually starts on the public website radio.
+The exact song title and verified NFT/collection links remain distinct from
+show completion and cash payment. A partial recording is labelled partial.
+Minted, playing, completed, interrupted and waiting-to-retry states are not
+interchangeable; paid queues and scheduled shows still defer automatic replay.
+Split releases receive separate stable `release:booking:track` identifiers.
+Polling/reloads do not automatically repeat an already-seen celebration, while
+explicit replay remains available. The card does not autoplay audio, open a
+modal or move focus automatically; reduced motion uses static decoration.
+
+Only a public website player's actual `Playing` transition creates the first
+radio-start fact. Preparation and private Discord playback cannot do so.
+The existing playlist checkpoint stores the first play identity and latest
+attempt; a failed write cannot certify playback. Completed and interrupted
+attempts use the existing media completion evidence. Restarts preserve the
+first release identity rather than inventing another party; an unclosed play
+is not called completed. These additive playlist fields retain the existing
+checkpoint/mirror requirements and do not alter payment or replay eligibility.
+Older replay-completion receipts do not distinguish website and private
+playback, so they cannot retroactively certify a public airing or invent its
+start time. A later verified public start supplies that missing evidence.
+
+Public booking responses project only already-minted, radio-eligible recording
+metadata and public playback facts. Unpublished captures, consent, editing
+decisions, processing errors and approval signatures are not added to that
+response. Their status remains in the authorized stage/editor. An unavailable
+public projection remains unknown, never "minted" or "aired". Celebration UI
+is performer-only and is cleared on wallet changes. While their own Profile is
+open, a 15-second read refresh skips focused financial controls and busy claims;
+the timer stops when Profile closes.
+
+Producer-delay summaries retain the original guaranteed fee and financial
+dates. A verified shortened-set priority flag lets the producer prefill the
+existing invitation form for a future Friday. Prefill itself sends nothing;
+reviewed terms, saving, performer acceptance and funding remain separate.
+The booking service binds one follow-up to the original performer and rejects
+duplicate/retried invitations. Prepared means delivery is unverified; only a
+real acknowledgement says accepted, and only the existing funding evidence
+says funded. No new escrow, signature, next slot or payment is fabricated.
+
+Reuse: adapted this repository's `completeLiveRecordingReplay`, playlist
+checkpoint writer, `afterpartyRows`/`afterpartyMilestones`,
+`celebrateAfterparty`, performer Profile and existing signed invitation flow
+from the first-night integration, rather than adding a second payment/event
+service. Real musician, mint, radio and invitation rehearsals remain NOT RUN;
+deployment is still blocked separately from local implementation.
+
+Local validation: 665 automated regression tests passed, including durable
+start/failure/concurrent-write handling, private-player exclusion, partial and
+multiple releases, and separate invitation acceptance/funding. A synthetic
+browser preview passed at 375/768/1280px with no horizontal overflow, no initial
+focus theft, persisted deduplication, keyboard replay, dismissal and static
+reduced-motion decoration. This was not a real artist or production test.
 
 Reuse: adapt this repository's `liveAudioPolicy`, JukeLoop `live_audio_ads`
 selection, `mountTopTenFestival`, `open-creator-profile`, and the private

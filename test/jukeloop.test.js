@@ -92,6 +92,31 @@ test('durable weekly play events retain normal, truncated and unknown diagnostic
   ]);
 });
 
+test('only actual public website Playing events checkpoint a recording release, never private playback or preparation', async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const store = await import('../discord-bot/playlist-store.js');
+  const previous = structuredClone(store.getPlaylist());
+  t.after(() => { store.configureRemotePersistence(null); store.loadPlaylist(previous); });
+  const track = verifiedRecording({ trackId: 'live:release-342', title: 'Release fixture', mintStatus: 'minted',
+    tokenId: '342', liveRecording: { bookingId: 'release-342', replayStatus: 'pending' } }, 20);
+  store.loadPlaylist([track]);
+  store.configureRemotePersistence(async () => {});
+  for (const websitePlayback of [false, true]) {
+    const player = new EventEmitter();
+    player.state = { status: 'playing' }; player.stop = () => {};
+    const session = new JukeLoopSession({ websitePlayback, audioPlayer: player, client: {} });
+    t.after(() => { session._currentTrack = null; session._nowPlaying = null; session.destroy(); });
+    session._primeNext = () => {};
+    session._currentTrack = store.getPlaylist()[0];
+    session._nowPlaying = { trackId: track.trackId, playId: `342-${websitePlayback}`, startedAt: Date.now(), audible: false };
+    assert.equal(store.liveRecordingReleaseState('release-342').state, 'minted');
+    player.emit('stateChange', {}, { status: 'playing' });
+    await store.waitForRemotePersistence();
+    assert.equal(store.liveRecordingReleaseState('release-342', session._nowPlaying).state,
+      websitePlayback ? 'airing' : 'minted');
+  }
+});
+
 test('worker advert deadline stops at 120 seconds and cancels itself on Idle', async t => {
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
   let stopped = 0;

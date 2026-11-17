@@ -930,7 +930,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
     status(booking) {
       const r = record(booking.id);
       const consentVersion = r?.consent.version || LIVE_RECORDING_CONSENT_VERSION;
-      return { available, consented: r?.consent.enabled === true,
+      return { available, known: !!state && !initializationError, consented: r?.consent.enabled === true,
         consentVersion, consentScope: consentVersion === LIVE_RECORDING_ALLOCATED_CONSENT_VERSION ? 'allocated-set' : 'scheduled-set',
         scopeLimited: !!booking.broadcast && consentVersion !== LIVE_RECORDING_ALLOCATED_CONSENT_VERSION,
         earlyCaptureExcluded: !!booking.broadcast?.actualStartedAt && booking.broadcast.actualStartedAt < Date.parse(booking.startUtc),
