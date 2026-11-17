@@ -1,4 +1,4 @@
-import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
+import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261117-lease-recovery';
 
 // One receive-only connection. Selecting a room never publishes or changes radio.
 export function createPrivateRoomListener({ audio, serviceUrl, onStatus = () => {},

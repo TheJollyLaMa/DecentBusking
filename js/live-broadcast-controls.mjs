@@ -1,4 +1,4 @@
-import { roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
+import { roomRequest } from './live-audio-client.mjs?v=20261117-lease-recovery';
 
 export function broadcastTimes(booking, state) {
   return {

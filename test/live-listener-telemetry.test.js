@@ -9,15 +9,16 @@ const page = i => `page_${String(i).padStart(24, '0')}`;
 
 async function fixture(t, showDuration = 7_200_000) {
   const { createListenerTelemetry } = await import('../discord-bot/live-listener-telemetry.js');
-  let time = START + 1000, state = 'show-a';
+  let time = START + 1000, state = 'show-a', phase = 'live', mode = 'live';
   const telemetry = createListenerTelemetry({ now: () => time, resolveState: () => state && ({
-    configured: true, phase: 'live', armed: true, bookingId: state, serverTime: time,
+    configured: true, phase, armed: true, bookingId: state, serverTime: time,
     startUtc: new Date(START).toISOString(), endUtc: new Date(START + showDuration).toISOString(),
     performer: { wallet: `0x${'12'.repeat(20)}` }, bookingVerification: { fresh: true, verifiedAt: time },
-    policy: { mode: 'live', bookingId: state },
+    policy: { mode, bookingId: state },
   }) });
   t.after(() => telemetry.close());
   return { telemetry, at: value => { time = value; }, state: value => { state = value; },
+    phase: (value, policyMode = 'live') => { phase = value; mode = policyMode; },
     issue: i => telemetry.issue('show-a', page(i)),
     send: (token, sequence, event, extra = {}) => telemetry.submit({ token, bookingId: 'show-a', sequence, event, ...extra }, '192.0.2.10') };
 }
@@ -43,6 +44,27 @@ test('controlled 50-page ramp produces bounded aggregate count, peak, reconnects
   assert.equal(f.telemetry.snapshot('show-a').peak, 50);
   f.at(START + 3_601_000);
   assert.equal(f.telemetry.snapshot('show-a').reconnectsLastHour, 0);
+});
+
+test('producer recovery filler cannot submit performer audio observations; a returned set can renew', async t => {
+  const f = await fixture(t), token = f.issue(1);
+  f.send(token, 1, 'connect');
+  const renewal = { event: 'renew', bookingId: 'show-a', pageId: page(1),
+    renewal: f.telemetry.renewal('show-a', page(1)) };
+  for (const filler of ['adverts', 'radio']) {
+    f.phase('recovering', filler);
+    assert.throws(() => f.send(token, 2, 'first-audio', { durationMs: 1000 }), e => e.status === 503);
+    assert.throws(() => f.telemetry.renew(renewal, '192.0.2.10'), e => e.status === 503);
+    assert.throws(() => f.telemetry.snapshot('show-a'), e => e.status === 503);
+  }
+  f.at(START + 47_000);
+  f.phase('live');
+  assert.equal(f.telemetry.snapshot('show-a').current, 0);
+  f.telemetry.renew(renewal, '192.0.2.10');
+  const snapshot = f.telemetry.snapshot('show-a');
+  assert.equal(snapshot.current, 1);
+  assert.equal(snapshot.connects, 1);
+  assert.equal(snapshot.firstAudio.samples, 0);
 });
 
 test('grant, sequencing, duplicate, malformed and show boundaries fail closed', async t => {

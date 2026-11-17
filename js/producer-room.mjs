@@ -1,4 +1,4 @@
-import { roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
+import { roomRequest } from './live-audio-client.mjs?v=20261117-lease-recovery';
 import { readRadioState, radioEndpoint } from './radio-client.mjs';
 import { bindLiveDirection } from './live-direction.mjs?v=20261114-allocated-stage';
 import { bindLiveFeedbackRoom, bindTogether } from './live-feedback.mjs?v=20261115-listener-feedback';

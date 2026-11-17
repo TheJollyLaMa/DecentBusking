@@ -1,4 +1,4 @@
-import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
+import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261117-lease-recovery';
 import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from './live-recording-consent.mjs?v=20261114-allocated-stage';
 import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261114-allocated-stage';
 import { performerRoomSign, performerAllocationAccess, verifiedPerformerFinish } from './performer-room.mjs?v=20261116-curtain';

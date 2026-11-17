@@ -1,4 +1,4 @@
-import { roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
+import { roomRequest } from './live-audio-client.mjs?v=20261117-lease-recovery';
 
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const BOUNDS = [250, 500, 1000, 2000, 5000, 10_000, 30_000, 60_000, 120_000];

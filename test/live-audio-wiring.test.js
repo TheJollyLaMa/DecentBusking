@@ -773,15 +773,26 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
     /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
 });
 
-test('standalone backstage entries consistently version allocated-stage helper imports without relying on index import maps', () => {
+test('standalone backstage and main-page imports load compatible recovery helpers without stale cached clients', () => {
   for (const file of ['live-audio-room.mjs', 'producer-room.mjs', 'live-direction.mjs',
-    'private-room-listener.mjs', 'live-broadcast-controls.mjs']) {
+    'private-room-listener.mjs', 'live-broadcast-controls.mjs', 'producer-listener-telemetry.mjs']) {
     const source = fs.readFileSync(path.join(__dirname, '../js', file), 'utf8');
-    assert.match(source, /live-audio-client\.mjs\?v=20261114-allocated-stage/);
+    assert.match(source, /live-audio-client\.mjs\?v=20261117-lease-recovery/);
     assert.doesNotMatch(source, /20261114-direction|20261114-allocated-consent/);
   }
-  assert.match(fs.readFileSync(path.join(__dirname, '../js/live-audio-client.mjs'), 'utf8'),
-    /live-audio\.mjs\?v=20261114-allocated-stage/);
+  const client = fs.readFileSync(path.join(__dirname, '../js/live-audio-client.mjs'), 'utf8');
+  assert.match(client, /live-audio\.mjs\?v=20261117-producer-recovery/);
+  assert.match(client, /live-listener-telemetry\.mjs\?v=20261117-lease-recovery/);
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const { imports } = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
+  for (const suffix of ['', '?v=20261114-direction', '?v=20261114-allocated-stage']) {
+    assert.equal(imports[`./js/live-audio-client.mjs${suffix}`],
+      './js/live-audio-client.mjs?v=20261117-lease-recovery');
+  }
+  for (const suffix of ['', '?v=20261108-live-audio-pilot', '?v=20261114-allocated-stage']) {
+    assert.equal(imports[`./js/live-audio.mjs${suffix}`],
+      './js/live-audio.mjs?v=20261117-producer-recovery');
+  }
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
     assert.ok(source.includes(`${entry}?v=20261117-producer-recovery`));

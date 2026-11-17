@@ -1,4 +1,4 @@
-import { listenerAudioStatus } from './live-audio.mjs?v=20261114-allocated-stage';
+import { listenerAudioStatus } from './live-audio.mjs?v=20261117-producer-recovery';
 import { sharedPageListenerTelemetry, warnTelemetryUnavailable } from './live-listener-telemetry.mjs?v=20261117-lease-recovery';
 
 let sdkPromise;
