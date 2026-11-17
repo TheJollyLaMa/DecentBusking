@@ -122,6 +122,10 @@ bot event-loop stalls out of the audio clock. The parent forwards only the
 selected public source, with bounded in-flight messages; source age across the
 thread boundary and the PCM queue remains limited to one second. The encoder's
 own 500 ms scheduling-stall limit, private-room gates and protected tail remain.
+In-flight credits are decremented by the worker through a shared atomic counter,
+not by parent-loop acknowledgment callbacks. Otherwise a busy parent can falsely
+count already processed frames as backlogged. Limit failures include a bounded
+stage/count diagnostic, distinguishing IPC backlog, PCM size and source age.
 Public state is requested from the parent through the existing eight-second
 deadline, and worker errors explicitly make the broadcast unavailable.
 
@@ -227,6 +231,13 @@ Development evidence so far:
   The encoder is now isolated from the application's event loop; a real-thread
   regression blocks the parent for 650 ms while encoding continues, without
   increasing the encoder's safety threshold. Hosted verification must repeat.
+- The first threaded small rehearsal kept the audio clock alive but recorded
+  a slow CDN request (one eight-second metadata timeout, startup p95 5.501 s).
+  A fresh diagnostic measured startup p95 1.101 s and metadata p95 231 ms with
+  no request failures, but later reached `PCM_BUFFER_LIMIT` across a programme
+  transition. Neither run passed. The bridge now uses worker-owned atomic
+  credits and reports the precise limit stage; these changes require another
+  hosted continuity exercise rather than assuming every limit is network load.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
