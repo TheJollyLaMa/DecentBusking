@@ -1,5 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -101,12 +103,35 @@ async function decodeCatalogRecording(source, { downloadSource, upload, previewO
   if (!response?.ok || !response.body) throw Error(`Original catalog recording is unavailable${response?.status ? ` (${response.status})` : ''}`);
   const declaredLength = Number(response.headers?.get?.('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > CATALOG_SOURCE_MAX_BYTES) {
-    throw Error('Original recording exceeds the 100 MB processing limit');
+    await response.body.cancel();
+    throw new LiveAudioError('Original recording exceeds the 100 MB processing limit');
   }
+  const dir = await mkdtemp(join(tmpdir(), 'dbusk-catalog-'));
+  const inputPath = join(dir, 'original');
+  try {
+    let inputBytes = 0;
+    // MP4/M4A metadata may follow its audio; a pipe cannot seek back to decode it.
+    await pipeline(response.body, async function* (chunks) {
+      for await (const chunk of chunks) {
+        inputBytes += chunk.byteLength;
+        if (inputBytes > CATALOG_SOURCE_MAX_BYTES) {
+          throw new LiveAudioError('Original recording exceeds the 100 MB processing limit');
+        }
+        yield chunk;
+      }
+    }, createWriteStream(inputPath, { flags: 'wx', mode: 0o600 }), { signal: AbortSignal.timeout(timeoutMs) });
+    return await decodeCatalogFile(source, inputPath, { upload, previewOnly, timeoutMs });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function decodeCatalogFile(source, inputPath, { upload, previewOnly, timeoutMs }) {
   const child = spawn(process.env.FFMPEG_PATH || 'ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-xerror',
-    '-i', 'pipe:0', '-map', '0:a:0', '-vn', '-ac', '1', '-ar', String(RATE), '-f', 's16le', 'pipe:1'],
-  { stdio: ['pipe', 'pipe', 'pipe'] });
-  let diagnostics = '', inputError, inputBytes = 0, outputBytes = 0;
+    '-protocol_whitelist', 'file,pipe', '-i', inputPath, '-map', '0:a:0', '-vn',
+    '-ac', '1', '-ar', String(RATE), '-f', 's16le', 'pipe:1'],
+  { stdio: ['ignore', 'pipe', 'pipe'] });
+  let diagnostics = '', outputBytes = 0;
   const segments = [];
   let segmentIndex = 0;
   const retainSegment = async pcm => {
@@ -120,7 +145,6 @@ async function decodeCatalogRecording(source, { downloadSource, upload, previewO
     segments.push(segment);
   };
   child.stderr.on('data', chunk => { diagnostics = (diagnostics + chunk).slice(-2000); });
-  child.stdin.on('error', error => { inputError = error; });
   const exited = new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('close', code => code === 0 ? resolve() : reject(Error(
@@ -128,17 +152,6 @@ async function decodeCatalogRecording(source, { downloadSource, upload, previewO
   });
   exited.catch(() => {});
   const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
-  const input = (async () => {
-    for await (const chunk of response.body) {
-      inputBytes += chunk.byteLength;
-      if (inputBytes > CATALOG_SOURCE_MAX_BYTES) throw Error('Original recording exceeds the 100 MB processing limit');
-      if (inputError) throw inputError;
-      if (!child.stdin.write(chunk)) await Promise.race([
-        once(child.stdin, 'drain'), exited.then(() => { throw Error('Decoder stopped before the source download completed'); }),
-      ]);
-    }
-    child.stdin.end();
-  })();
   const output = (async () => {
     let current = Buffer.alloc(CATALOG_SEGMENT_BYTES), filled = 0;
     for await (const chunk of child.stdout) {
@@ -161,10 +174,10 @@ async function decodeCatalogRecording(source, { downloadSource, upload, previewO
     }
   })();
   try {
-    await Promise.all([input, output, exited]);
+    await Promise.all([output, exited]);
   } catch (error) {
     if (child.exitCode === null) child.kill('SIGTERM');
-    await Promise.allSettled([input, output, exited]);
+    await Promise.allSettled([output, exited]);
     throw error;
   } finally { clearTimeout(timer); }
   const sourceSamples = outputBytes / 2;

@@ -365,6 +365,38 @@ test('catalog source decoding uses bounded PCM segments and exact sample counts'
   assert.equal(result.waveform.at(-1).endSample, 48_000 * 6);
 });
 
+test('unsigned catalog preview decodes an MP4 with trailing metadata without uploads or journal writes', async t => {
+  const { mkdtemp, readFile, rm } = require('node:fs/promises');
+  const { tmpdir } = require('node:os');
+  const { join } = require('node:path');
+  const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
+  const dir = await mkdtemp(join(tmpdir(), 'dbusk-mp4-test-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const inputPath = join(dir, 'trailing-metadata.m4a');
+  const encoded = spawnSync(process.env.FFMPEG_PATH || 'ffmpeg', ['-hide_banner', '-loglevel', 'error',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=6',
+    '-c:a', 'aac', '-b:a', '192k', '-f', 'mp4', inputPath]);
+  assert.equal(encoded.status, 0, encoded.stderr.toString());
+  const bytes = await readFile(inputPath);
+  assert.ok(bytes.indexOf('moov') > bytes.indexOf('mdat') + 32768, 'metadata must require seeking outside the input buffer');
+  const source = { nftId: `8453:0x${'2'.repeat(40)}:9`, chainId: 8453,
+    contractAddress: `0x${'2'.repeat(40)}`, tokenId: 9, artistWallet: performer.address.toLowerCase(),
+    sourceCid, title: 'Trailing metadata', mediaType: 'audio/mp4' };
+  let uploads = 0, writes = 0;
+  const recorder = createLiveRecorder({ enabled: true,
+    store: { restore: async () => ({ version: 1, recordings: [] }), save: async () => { writes++; } },
+    upload: async () => { uploads++; return `ipfs://${'d'.repeat(46)}`; },
+    download: async () => Buffer.alloc(0), downloadSource: async () => new Response(bytes),
+    submitRelease: async () => assert.fail('preview must not publish'),
+  });
+  const result = await recorder.previewCatalogEdit(source);
+  assert.equal(result.previewOnly, true);
+  assert.ok(result.sourceSamples >= 48_000 * 6 && result.sourceSamples <= 48_000 * 6 + 1024);
+  assert.ok(result.waveform.some(bin => bin.min < 0 && bin.max > 0));
+  assert.equal(uploads, 0);
+  assert.equal(writes, 0);
+});
+
 test('defer creates no release; full set and split tracks can coexist idempotently', async () => {
   const f = await fixture();
   const deferred = await f.approve('defer', null);
