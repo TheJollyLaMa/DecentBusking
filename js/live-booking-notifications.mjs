@@ -1,4 +1,4 @@
-import { claimState, LIVE_PILOT_POLICY } from './live-bookings.mjs?v=20261108-live-audio-pilot';
+import { claimState, LIVE_PILOT_POLICY, LIVE_ASSET_VERSION } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { isAdminWallet } from './admin-access.mjs';
 
 export const LIVE_BOOKING_POLL_MS = 5 * 60 * 1000;
@@ -8,11 +8,15 @@ export function liveBookingActions(state, wallet, owner, now = Date.now(), pendi
  if (!wallet) return actions;
  for (const b of state.bookings || []) {
   const pending = pendingBookings.has(b.id) || Object.values(b.transactions || {}).some(tx => tx.status === 'pending');
-  if (b.mode === 'phase1' && state.escrowAddress && !pending &&
+  if (b.mode === 'phase1' && (b.escrowVersion === LIVE_ASSET_VERSION ? state.assetEscrowAddress : state.escrowAddress) && !pending &&
       wallet.toLowerCase() === owner?.toLowerCase()) {
    let label;
    const pilot = b.payoutPolicy === LIVE_PILOT_POLICY;
-   if (b.cancelled && b.status === 'funded' && !pilot) label = 'Reconcile cancellation payment';
+   if (b.escrowVersion === LIVE_ASSET_VERSION) {
+    if (b.status === 'draft' && b.acknowledged && !b.cancelled && Date.parse(b.startUtc) > now) label = 'Performer accepted: fund exact asset booking';
+    else if (b.giftStatus === 'approved') label = 'Release approved gift';
+    else if (b.status === 'funded' && now >= Date.parse(b.endUtc)) label = 'Review performance and approve fee/gift';
+   } else if (b.cancelled && b.status === 'funded' && !pilot) label = 'Reconcile cancellation payment';
    else if ((!b.cancelled || pilot && b.status === 'funded') && !['paid', 'refunded'].includes(b.status)) {
     if (['draft', 'failed'].includes(b.status) && b.acknowledged && Date.parse(b.startUtc) > now) label = 'Performer accepted: fund booking';
     else if (b.status === 'funded' && now >= Date.parse(b.endUtc) &&
@@ -25,7 +29,9 @@ export function liveBookingActions(state, wallet, owner, now = Date.now(), pendi
   if (b.wallet?.toLowerCase() !== wallet.toLowerCase() || b.mode !== 'phase1') continue;
   if (!pending && !b.cancelled && b.status === 'draft' && b.stewardApproved && !b.acknowledged &&
       Date.parse(b.startUtc) > now) actions.schedule.push({ id: b.id, label: 'Review and accept performance invitation' });
-  if (!pending && claimState(b, state.escrowAddress, wallet, now).enabled) {
+  const claimEscrow = b.escrowVersion === LIVE_ASSET_VERSION
+    ? (state.assetEscrowConfigured ? state.assetEscrowAddress : '') : state.escrowAddress;
+  if (!pending && claimState(b, claimEscrow, wallet, now).enabled) {
    actions.profile.push({ id: b.id, label: 'Claim live-performance payment' });
   }
  }
@@ -74,7 +80,7 @@ function startNotifications() {
  const actions = () => {
   const pending = new Set((state.bookings || []).filter(b =>
    localStorage.getItem(`live-claim:${b.id}`) ||
-   ['funding', 'approve', 'reject', 'cancel', 'recovery', 'payout', 'claim'].some(action => localStorage.getItem(`live-pending:${b.id}:${action}`))
+   ['funding', 'approve', 'reject', 'cancel', 'recovery', 'payout', 'claim', 'giftRelease', 'giftReturn', 'refund', 'fault', 'noShow', 'unperformed'].some(action => localStorage.getItem(`live-pending:${b.id}:${action}`))
   ).map(b => b.id));
   return liveBookingActions(state, window._wallet?.address,
    window.DecentConfig?.adminWalletAddress || '0x807061DF657A7697c04045dA7d16D941861cAABc', Date.now(), pending);

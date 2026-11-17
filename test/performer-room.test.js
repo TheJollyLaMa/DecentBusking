@@ -10,6 +10,7 @@ test('stable practice room link is available before acceptance but never authori
   const { performerRoomUrl } = await import('../js/performer-room.mjs');
   const before = structuredClone(b);
   assert.equal(performerRoomUrl(b, start - 86400000), 'live-room.html?booking=friday%3Ainvited');
+  assert.equal(performerRoomUrl({ ...b, payoutPolicy:'asset-guaranteed-v1' }, start - 86400000), 'live-room.html?booking=friday%3Ainvited');
   for (const change of [{ cancelled: true }, { stewardApproved: false }, { status: 'paid' }, { payoutPolicy: '' }]) {
     assert.equal(performerRoomUrl({ ...b, ...change }, start - 1), null);
   }
@@ -117,6 +118,10 @@ test('room module initializes practice, advances to backstage and fails closed o
   intervals.find(entry => entry.ms === 10000).fn();
   await settle();
   assert.equal(element('room-on-air').textContent, 'ON AIR');
+  selected = { ...selected, payoutPolicy: 'asset-guaranteed-v1' };
+  intervals.find(entry => entry.ms === 10000).fn();
+  await settle();
+  assert.equal(element('room-on-air').textContent, 'ON AIR', 'New asset terms must reach the actual backstage loader, not only its discovery link');
   time += 12001;
   intervals.find(entry => entry.ms === 1000).fn();
   assert.equal(element('room-on-air').textContent, 'OFF AIR');

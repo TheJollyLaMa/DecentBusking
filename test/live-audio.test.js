@@ -67,11 +67,11 @@ test('approved program hits exact Top10/ad/live/ad/radio boundaries without alte
 
 async function setup(options = {}) {
   const { createLiveAudioService } = await import('../discord-bot/live-audio.js');
-  let time = START - 60 * 60_000, persisted = { version: 1, rooms: [] }, receiver;
+  let time = START - 60 * 60_000, persisted = { version: 1, rooms: [] }, receiver, pcmReceiver;
   const b = booking(), policies = [], cancellations = [], closed = [];
   const transport = {
     ready: true, ingressEnabled: true,
-    monitor: async (_b, callback) => { receiver = callback; },
+    monitor: async (_b, callback, pcmCallback) => { receiver = callback; pcmReceiver = pcmCallback; },
     connect: async (_b, role) => ({ role, token: 'private-grant' }),
     obs: async () => ({ url: 'https://whip.example', streamKey: 'fixture-secret' }),
     listener: async () => ({ token: 'read-only-fixture' }),
@@ -98,7 +98,7 @@ async function setup(options = {}) {
     return auth;
   }
   return { service, authorize, prepare, transport, store, base, b, policies, cancellations, closed,
-    at: value => { time = value; }, frame: samples => receiver({ samples }),
+    at: value => { time = value; }, frame: samples => receiver({ samples }), pcm: frame => pcmReceiver(frame),
     persisted: () => structuredClone(persisted) };
 }
 
@@ -108,6 +108,17 @@ test('live audio is fail-closed without explicit hosting and durable state', asy
   assert.equal(service.configured, false);
   assert.equal((await service.state('anything')).status, 'OFF-AIR');
   await assert.rejects(service.listener('anything'), /unavailable/);
+});
+
+test('funded asset-version booking can authorize its exact performer without weakening funding gate', async t => {
+  let status = 'funded';
+  const f = await setup({ getBookings: async () => ({ bookings:[{ ...booking(), payoutPolicy:'asset-guaranteed-v1', status }] }) });
+  t.after(() => f.service.stop());
+  const auth = await f.authorize(artist);
+  assert.ok(auth.token);
+  status = 'unavailable';
+  f.at(START - 49 * 60_000);
+  await assert.rejects(f.authorize(artist), /funded|unavailable/);
 });
 
 test('catalog source decoding does not hold the serialized live-audio watchdog queue', async t => {
@@ -690,6 +701,42 @@ test('public listener admission is bounded at ten pending grants and never opens
   f.at(START); f.frame(960);
   for (let i = 0; i < 10; i++) await f.service.listener(f.b.id);
   await assert.rejects(f.service.listener(f.b.id), /admission busy/);
+});
+
+test('HLS admits 200 public telemetry sessions without spending any LiveKit listener seats', async t => {
+  let selected = false, calls = 0;
+  const f = await setup({ publicBroadcastState: () => ({ selected, status: 'ready' }) });
+  t.after(() => f.service.stop());
+  f.transport.listener = async () => { calls++; return {}; };
+  await f.prepare();
+  await assert.rejects(f.service.listener(f.b.id, undefined, 'hls'), /private/);
+  f.at(START); f.frame(960);
+  await assert.rejects(f.service.listener(f.b.id, undefined, 'hls'), /admission is unavailable/);
+  selected = true;
+  for (let i = 0; i < 200; i++) {
+    assert.deepEqual(await f.service.listener(f.b.id, undefined, 'hls'), { transport: 'hls' });
+  }
+  assert.equal(calls, 0);
+  for (let i = 0; i < 10; i++) await f.service.listener(f.b.id);
+  await assert.rejects(f.service.listener(f.b.id), /admission busy/);
+  assert.equal(calls, 10, 'the intentional direct fallback remains bounded independently');
+});
+
+test('public PCM reuses the independent receiver, excludes private checks, and does not require archive consent', async t => {
+  const frames = [];
+  const f = await setup({ onPublicFrame: (booking, frame) => frames.push({ booking, frame }) });
+  t.after(() => f.service.stop());
+  const ownerPass = await f.prepare();
+  const pcm = { samplesPerChannel: 960, channels: 1, sampleRate: 48000, data: new Int16Array(960) };
+  f.pcm(pcm);
+  assert.equal(frames.length, 0);
+  f.at(START); f.frame(960); f.pcm(pcm);
+  assert.equal(frames.length, 1);
+  assert.equal(frames[0].booking.id, f.b.id);
+  assert.equal(f.persisted().rooms[0].recordingConsent, undefined);
+  await f.service.command(ownerPass.token, { action: 'cancel', confirmed: true, reason: 'Operator ended fixture' }, ORIGIN);
+  f.pcm(pcm);
+  assert.equal(frames.length, 1);
 });
 
 test('file checkpoint round-trips only lifecycle metadata and survives service restart', async t => {

@@ -52,7 +52,7 @@ export function createLiveAudioFileStore(path) {
 export function createLiveAudioService({ getBookings, ownerWallet, transport, store, recorder, onPolicy = () => {},
   onCancel, now = () => Date.now(), verify = verifyMessage, checkpointTimeoutMs = 45_000, programs = {},
   withBroadcastHandoff, feedback, listenerTelemetry, resolveCatalogRecording, graceMs = LIVE_AUDIO_GRACE_MS,
-  recoveryEnabled = false } = {}) {
+  recoveryEnabled = false, onPublicFrame, publicBroadcastState = () => null } = {}) {
   if (!Number.isSafeInteger(graceMs) || graceMs < 1 || graceMs > MAX_LIVE_AUDIO_GRACE_MS) {
     throw new Error('LIVE_AUDIO_GRACE_MS must be an integer from 1 to 60000 (default 15000)');
   }
@@ -192,12 +192,12 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
   }
   function funded(b) {
     const validStatus = recordFor(b.id)?.allocation ? ['funded', 'approved', 'paid'].includes(b.status) : b.status === 'funded';
-    if (!validStatus || b.cancelled || b.acknowledged !== true || b.payoutPolicy !== 'pilot-guaranteed-v1') {
+    if (!validStatus || b.cancelled || b.acknowledged !== true || !['pilot-guaranteed-v1', 'asset-guaranteed-v1'].includes(b.payoutPolicy)) {
       throw new LiveAudioError('Live audio requires this acknowledged, funded, uncancelled guaranteed-pilot booking');
     }
   }
   function recordingReleaseEligible(b) {
-    return !!(b && !b.cancelled && b.acknowledged === true && b.payoutPolicy === 'pilot-guaranteed-v1' &&
+    return !!(b && !b.cancelled && b.acknowledged === true && ['pilot-guaranteed-v1', 'asset-guaranteed-v1'].includes(b.payoutPolicy) &&
       ['funded', 'approved', 'paid'].includes(b.status) && now() >= liveBroadcastEnd(mediaBooking(b)));
   }
   function windowOpen(b) {
@@ -210,7 +210,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
   function recordFor(id) { return state?.rooms.find(r => r.bookingId === id); }
   function bookingVerification(b) {
     const eligible = !b || !!address(b.wallet) && (recordFor(b.id)?.allocation ? ['funded', 'approved', 'paid'].includes(b.status) : b.status === 'funded') && !b.cancelled &&
-      b.acknowledged === true && b.payoutPolicy === 'pilot-guaranteed-v1' &&
+      b.acknowledged === true && ['pilot-guaranteed-v1', 'asset-guaranteed-v1'].includes(b.payoutPolicy) &&
       Number.isFinite(Date.parse(b.startUtc)) && Date.parse(b.endUtc) > Date.parse(b.startUtc);
     return { fresh: !!eligible && bookingsLoaded && !bookingVerificationFailed && now() >= checkedAt && now() - checkedAt <= 30_000,
       verifiedAt: bookingsLoaded ? checkedAt : null };
@@ -540,7 +540,10 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     }, frame => {
       if (recordFor(b.id)?.armed && !recordFor(b.id)?.cancelledAt && !recordFor(b.id)?.allocation?.endedAt &&
           !recordFor(b.id)?.recovery?.filler && !publicSuspensions.has(b.id) &&
-          frames.get(b.id) && now() - frames.get(b.id) <= LIVE_AUDIO_FRESH_MS) recorder?.capture(mediaBooking(b), frame);
+          frames.get(b.id) && now() - frames.get(b.id) <= LIVE_AUDIO_FRESH_MS) {
+        recorder?.capture(mediaBooking(b), frame);
+        if (policyFor(recordFor(b.id), b)?.mode === 'live') onPublicFrame?.(mediaBooking(b), frame);
+      }
     }).catch(() => {}).finally(() => monitoring.delete(b.id));
   }
   function endAllocation(next, b, endedAt, endReason) {
@@ -606,7 +609,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     await initialize();
     await readBookings();
     direction.prune(bookings.map(mediaBooking));
-    const newRooms = bookings.filter(b => b.payoutPolicy === 'pilot-guaranteed-v1' && b.status === 'funded' &&
+    const newRooms = bookings.filter(b => ['pilot-guaranteed-v1', 'asset-guaranteed-v1'].includes(b.payoutPolicy) && b.status === 'funded' &&
       b.acknowledged === true && !b.cancelled && !recordFor(b.id) &&
       now() >= Date.parse(b.startUtc) - START_EARLY_MS && now() < Date.parse(b.endUtc));
     if (newRooms.length) {
@@ -993,8 +996,9 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       if (!b || !bookingVerification(b).fresh) throw new LiveAudioError('Live booking verification is unavailable');
       return publicState(b, recordFor(b.id));
     },
-    async listener(bookingId, telemetryPageId) {
+    async listener(bookingId, telemetryPageId, mode = 'direct') {
       return run(async () => {
+        if (!['direct', 'hls'].includes(mode)) throw new LiveAudioError('Invalid public listener transport');
         await initialize();
         const b = await findBooking(bookingId, true), record = recordFor(b.id);
         funded(b);
@@ -1002,10 +1006,19 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
             now() < (liveBroadcastTiming(b, record)?.actualStartedAt ?? Date.parse(b.startUtc)) || now() >= liveBroadcastEnd(mediaBooking(b))) {
           throw new LiveAudioError('Public listening is unavailable; soundchecks are private');
         }
-        for (const [id, at] of reservations) if (at <= now()) reservations.delete(id);
-        if (reservations.size >= (transport.listenerLimit || 10)) throw new LiveAudioError('Live listener admission busy; retry in 30 seconds');
-        const result = await transport.listener(mediaBooking(b));
-        reservations.set(opaque(), now() + 30_000);
+        let result;
+        if (mode === 'hls') {
+          const broadcast = publicBroadcastState();
+          if (broadcast?.selected !== true || broadcast.status !== 'ready') {
+            throw new LiveAudioError('Public broadcast admission is unavailable');
+          }
+          result = { transport: 'hls' };
+        } else {
+          for (const [id, at] of reservations) if (at <= now()) reservations.delete(id);
+          if (reservations.size >= (transport.listenerLimit || 10)) throw new LiveAudioError('Live listener admission busy; retry in 30 seconds');
+          result = await transport.listener(mediaBooking(b));
+          reservations.set(opaque(), now() + 30_000);
+        }
         let telemetryToken, telemetryRenewal;
         try {
           telemetryToken = listenerTelemetry?.issue(bookingId, telemetryPageId);

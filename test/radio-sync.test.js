@@ -18,7 +18,7 @@ test('cached radio importers resolve to one cache-busted live-audio controller',
     assert.ok(references.length, file);
     for (const [, reference] of references) {
       const url = new URL(reference, `https://radio.example/js/${file}`).href;
-      assert.equal(imports.get(url) || url, 'https://radio.example/js/radio-sync.js?v=20261117-producer-recovery');
+      assert.equal(imports.get(url) || url, 'https://radio.example/js/radio-sync.js?v=20261117-public-hls');
     }
   }
 });
@@ -35,8 +35,56 @@ function radioSyncSource() {
     const createLivePublisherPresence = () => ({ isPublishing() { return false; }, watch() { return () => {}; } });
     const createLiveAudioListener = () => ({ update() {}, disconnect() { return Promise.resolve(); }, play() {} });
     const createLiveAudioFaultSlate = () => ({ play() {}, stop() {} });
+    const createPublicBroadcastListener = () => ({ update() {}, stop() {}, play() {} });
+    const getAudibleBroadcast = () => globalThis.audibleBroadcast || null;
     \n${formatter}\n${shared}\n${source}`;
 }
+
+test('public radio follows same-run CDN state and rediscovers origin after a failed or invalid snapshot', async () => {
+  const origin = 'https://api.example/api/radio', run = 'a'.repeat(32);
+  const stateUrl = `https://edge.example/hls/${run}/state.json`;
+  const requests = [], warnings = [];
+  let at = 0;
+  const readyState = { nowPlaying: null, serverTime: 1000, liveAudio: {}, publicBroadcast: {
+    selected: true, status: 'ready', url: `https://edge.example/hls/${run}/index.m3u8`, stateUrl,
+  } };
+  let response = readyState;
+  const context = vm.createContext({
+    URL, console: { warn: (...args) => warnings.push(args) },
+    performance: { now: () => at },
+    clearTimeout() {}, setTimeout() { return 1; },
+    fetch: async url => {
+      requests.push(url);
+      if (response instanceof Error) throw response;
+      return { ok: true, json: async () => response };
+    },
+  });
+  vm.runInContext(`${radioSyncSource()}
+    _radioUrl = () => ${JSON.stringify(origin)};
+    _setRadioState = state => { _radioState = state; };
+    _applyPublicBroadcastState = () => true;
+    _syncRadio = () => {}; _maybePreload = () => {}; _renderVoting = () => {};
+    _setActivity = () => {}; _refreshVoteNet = async () => {};
+    globalThis.poll = _poll;
+  `, context);
+  await context.poll();
+  await context.poll();
+  response = new Error('CDN unavailable');
+  await context.poll();
+  response = { nowPlaying: null, liveAudio: {}, publicBroadcast: {
+    selected: true, url: `https://edge.example/hls/${run}/index.m3u8`,
+    stateUrl: 'https://unapproved.example/state.json',
+  } };
+  await context.poll();
+  response = readyState;
+  await context.poll();
+  at = 13000;
+  await context.poll();
+  response = { nowPlaying: null, liveAudio: {}, publicBroadcast: { selected: false } };
+  await context.poll();
+  assert.deepEqual(requests, [origin, stateUrl, stateUrl, origin, origin, stateUrl, origin]);
+  assert.equal(warnings.length, 3);
+});
 
 test('live audio handoff stops the current website recording and invalidates preloads/takeovers before attaching', () => {
   const audio = { paused: false, muted: false, volume: 0.1, pause() { this.paused = true; }, removeAttribute() {}, load() {} };

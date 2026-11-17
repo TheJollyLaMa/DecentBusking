@@ -4,7 +4,7 @@ import { bindLiveDirection } from './live-direction.mjs?v=20261114-allocated-sta
 import { bindLiveFeedbackRoom, bindTogether } from './live-feedback.mjs?v=20261115-listener-feedback';
 import { createPrivateRoomListener } from './private-room-listener.mjs?v=20261114-allocated-stage';
 import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261117-producer-recovery';
-import { performerAllocationAccess } from './performer-room.mjs?v=20261114-allocated-stage';
+import { performerAllocationAccess } from './performer-room.mjs?v=20261117-booking-assets';
 import { safeBindProducerListenerTelemetry } from './producer-listener-telemetry.mjs';
 
 const el = id => document.getElementById(id);
@@ -174,7 +174,7 @@ async function refresh() {
       if (!response.ok) throw new Error('Schedule unavailable');
       const value = await response.json();
       if (!Array.isArray(value.bookings)) throw new Error('Schedule unavailable');
-      return value.bookings.filter(b => b?.id && b.mode === 'phase1' && b.payoutPolicy === 'pilot-guaranteed-v1' &&
+      return value.bookings.filter(b => b?.id && b.mode === 'phase1' && ['pilot-guaranteed-v1', 'asset-guaranteed-v1'].includes(b.payoutPolicy) &&
         b.stewardApproved && !b.cancelled && Number.isFinite(Date.parse(b.startUtc)) && Date.parse(b.endUtc) > Date.now() - 86400000)
         .sort((a, b) => Date.parse(a.startUtc) - Date.parse(b.startUtc));
     }),

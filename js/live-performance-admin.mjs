@@ -2,6 +2,7 @@ import {
  LIVE_FUND, LIVE_ROUTER, LIVE_USDC, LIVE_ESCROW_ABI, LIVE_NOTICE, LIVE_APPROVED_TERMS_V2,
  LIVE_PERFORMANCE_AIRTIME_MINUTES, LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES, LIVE_PERFORMANCE_FEE_UNITS,
  LIVE_PILOT_POLICY, LIVE_PILOT_TERMS_VERSION, LIVE_PILOT_COMPANION_OFFER, livePerformancePolicyText, liveRehearsalPayoutBps,
+ LIVE_ASSET_VERSION, LIVE_ASSET_POLICY, LIVE_ASSET_ESCROW_ABI, LIVE_ZERO_ADDRESS, assetBookingTerms, matchesAssetBooking, formatLiveAsset,
  liveAuthorization, liveAcknowledgement, liveBookingRows, livePerformancePayoutBps, bookingGroup, escapeLive, workReference,
 } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { newYorkInputToUtc } from './radio-schedule-ui.mjs?v=20261025-community-reminder';
@@ -20,6 +21,18 @@ const routerAbi = [
  'function payout(bytes32,address,address,uint256,bytes32,bytes32,bytes32,string,bytes32)',
 ];
 const erc20Abi = ['function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)'];
+const marketListingAbi = ['function nextListingId() view returns(uint256)',
+ 'function getListing(uint256) view returns ((address nftContract,uint256 tokenId,uint256 priceETH,address priceToken,uint256 priceAmount,uint256 available,bool active,string note))'];
+export async function assertGiftListingsDelisted(market, gift) {
+ const total = await market.nextListingId();
+ if (total > 2000n) throw new Error('Too many Market listings to verify safely; funding is unavailable');
+ for (let start = 0; start < Number(total); start += 20) {
+   const listings = await Promise.all(Array.from({ length:Math.min(20,Number(total)-start) }, (_,i) => market.getListing(start+i)));
+   if (listings.some(item => item.active && item.nftContract.toLowerCase() === gift.collection.toLowerCase() && item.tokenId === BigInt(gift.tokenId))) {
+     throw new Error('Delist every active Market listing for this exact edition and reconcile sold inventory before funding');
+   }
+ }
+}
 const base = () => String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
 export function nextFridayLiveStart(now = Date.now()) {
  const localDate = utcToNewYorkInput(new Date(now).toISOString()).slice(0, 10);
@@ -103,9 +116,14 @@ async function transaction(b, action, send) {
 }
 function render() {
  const rows = section.querySelector('[data-live-list]');
- section.querySelector('[data-live-capability]').textContent = state.escrowAddress
-  ? '🔒 Per-booking escrow is ready on Base. Check the exact offer before sending any funds.'
-  : '⚠️ Per-booking escrow is not configured. The community-fund option is earmarked, not protected escrow.';
+ const assetOption = section.querySelector('[name="payoutPolicy"] option[value="asset-guaranteed-v1"]');
+ if (assetOption) assetOption.disabled = !state.assetBookingCreationEnabled;
+ section.querySelector('[data-live-capability]').textContent = (state.escrowAddress
+  ? '🔒 Legacy USDC booking escrow is configured on Base.'
+  : '⚠️ Legacy booking escrow is not configured; community-fund money is only earmarked.') +
+  (state.assetBookingCreationEnabled ? ' Fixed-asset booking invitations are enabled; check exact terms before funding.'
+   : state.assetEscrowConfigured ? ' New asset invitations are disabled; existing assets remain available for reconciliation.'
+   : ' Fixed-asset bookings are unavailable.');
  const accepted = state.bookings.filter(b => b.acknowledged && b.status === 'draft' && !b.cancelled && Date.parse(b.startUtc) > Date.now());
  const notice = section.querySelector('[data-live-acceptance-notice]');
  notice.hidden = accepted.length === 0;
@@ -125,7 +143,7 @@ function render() {
 }
 export function renderLivePerformanceAdminBooking(b, now = Date.now()) {
  const roomUrl = liveAudioRoomUrl(b, now) || (b.broadcastCompletion?.known && b.broadcastCompletion?.pending &&
-   b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY && b.stewardApproved && b.acknowledged && !b.cancelled
+   b.mode === 'phase1' && [LIVE_PILOT_POLICY, LIVE_ASSET_POLICY].includes(b.payoutPolicy) && b.stewardApproved && b.acknowledged && !b.cancelled
    ? `live-room.html?booking=${encodeURIComponent(b.id)}` : null);
  const room = roomUrl ? `<p><a data-live-room="operator" href="${escapeLive(roomUrl)}">Open operator audio room</a> · <a data-live-desk href="producer-room.html?booking=${encodeURIComponent(b.id)}">Open production desk</a><br><small>This link does not grant access. Authorize with the configured owner wallet; publishing remains performer-only. Hosting may be unavailable. Private checks open at T−70 minutes. Desk passes and private messages are live-session only; cues do not extend the booking.</small></p>` : '';
  const release = guaranteedReleaseState(b, now);
@@ -158,6 +176,14 @@ export function renderLiveBroadcastCompletion(b) {
   ${completion?.priorityFollowup === true ? '<p>Priority invitation follow-up requested. This is not a new booking, performer acceptance or funding.</p>' : ''}</section>`;
 }
 function bookingActionButtons(b) {
+ if (b.escrowVersion === LIVE_ASSET_VERSION) return [
+  ['agreement','📨 Copy agreement text'], ['schedule','🗓 Add / retry calendar listing'],
+  ['fund','💵 Fund exact fee and reserve gift'], ['assetApprove','✅ Approve performance'],
+  ['giftRelease','🎁 Release approved gift'], ['assetFault','⚠️ Platform fault / cancellation'],
+  ['assetNoShow','No-show (review window)'], ['assetUnperformed','Return unperformed gift decision'],
+  ['assetRefund','Return refundable fee'], ['giftReturn','Return unearned gift'],
+  ['cancel','❌ Cancel schedule only'], ['reconcile','🔎 Check a pending transaction'],
+ ].map(([action,label]) => `<button type="button" data-live-action="${action}">${label}</button>`).join('');
  const pilot = b.payoutPolicy === LIVE_PILOT_POLICY;
  const reviewActions = pilot ? [['review','Record rehearsal & approve guaranteed fee']] : Number.isInteger(b.airtimeMinutes)
   ? [['review','🎙️ Record live minutes & calculate payout']]
@@ -210,6 +236,66 @@ async function review(b, bps, cancellation = false) {
  await command({ action:'decision', id:b.id, payoutBps:bps, liveMusicMinutes, verifiedSeconds, verifiedStart, reason, reportUri, reportHash, remainderDisposition, cancellation });
 }
 async function action(name, b) {
+ if (b.escrowVersion === LIVE_ASSET_VERSION && ['fund','assetApprove','giftRelease','assetFault','assetNoShow','assetUnperformed','assetRefund','giftReturn'].includes(name)) {
+   if (!state.assetEscrowConfigured || state.assetEscrowAddress?.toLowerCase() !== b.escrowAddress?.toLowerCase()) throw new Error('Exact asset escrow is unavailable; do not send a transaction');
+   const w = await wallet();
+   const contract = new w.ethers.Contract(b.escrowAddress, LIVE_ASSET_ESCROW_ABI, w.signer);
+   const bookingId = w.ethers.id(b.id);
+   if (name === 'fund') {
+     if (!b.acknowledged || b.cancelled || !['draft','failed'].includes(b.status)) throw new Error('Requires an accepted, unfunded invitation');
+     if (localStorage.getItem(`live-pending:${b.id}:funding`) || b.transactions.funding?.status === 'pending') throw new Error('Funding is pending; reconcile instead of resending');
+     if (Date.parse(b.startUtc) <= Date.now()) throw new Error('Invitation expired');
+     if (!confirm(`Fund ${formatLiveAsset(b.amountUnits,b.assetDecimals,b.assetSymbol)} on Base for ${b.wallet}? ${b.gift ? 'The exact gift will be transferred into booking custody. First delist ALL overlapping Market listings, reconcile sales, and withdraw unsold stock to this wallet. Do not continue if any listing remains active. ' : ''}Administrator recovery can defeat this guarantee.`)) return;
+     if (b.assetAddress.toLowerCase() !== LIVE_ZERO_ADDRESS) {
+       const token = new w.ethers.Contract(b.assetAddress, [...erc20Abi, 'function decimals() view returns(uint8)', 'function symbol() view returns(string)'], w.signer);
+       if (!await contract.approvedTokens(b.assetAddress) || Number(await token.decimals()) !== b.assetDecimals || await token.symbol() !== b.assetSymbol) throw new Error('Token approval or metadata changed; do not fund');
+       if (await token.allowance(w.address,b.escrowAddress) < BigInt(b.amountUnits)) {
+         const tx = await token.approve(b.escrowAddress,b.amountUnits); await tx.wait(2); await w.check();
+       }
+     }
+     if (b.gift) {
+       if (!state.giftTreasuryAddress || state.giftTreasuryAddress.toLowerCase() !== b.gift.treasury.toLowerCase()) throw new Error('Signed gift treasury is no longer configured');
+       const market = new w.ethers.Contract(b.gift.treasury,marketListingAbi,w.provider);
+       await assertGiftListingsDelisted(market,b.gift);
+       const nft = new w.ethers.Contract(b.gift.collection, ['function balanceOf(address,uint256) view returns(uint256)', 'function isApprovedForAll(address,address) view returns(bool)', 'function setApprovalForAll(address,bool)'], w.signer);
+       if (await nft.balanceOf(w.address,b.gift.tokenId) < BigInt(b.gift.quantity)) throw new Error('Funder does not hold the exact unlisted editions');
+       if (!await nft.isApprovedForAll(w.address,b.escrowAddress)) {
+         if (!confirm('Approve the asset escrow to transfer ALL your editions in this collection? Revoke this operator approval after funding if desired.')) return;
+         const tx = await nft.setApprovalForAll(b.escrowAddress,true); await tx.wait(2); await w.check();
+       }
+     }
+     await w.check();
+     if (Date.parse(b.startUtc) <= Date.now()) throw new Error('Invitation expired during approvals');
+     await transaction(b,'funding', async () => {
+       await w.check();
+       if (b.gift) await assertGiftListingsDelisted(new w.ethers.Contract(b.gift.treasury,marketListingAbi,w.provider),b.gift);
+       if (b.assetAddress.toLowerCase() !== LIVE_ZERO_ADDRESS && !await contract.approvedTokens(b.assetAddress)) throw new Error('Token is no longer approved');
+       return contract.createBooking(bookingId,assetBookingTerms(b),b.termsUri,
+         { value:b.assetAddress.toLowerCase() === LIVE_ZERO_ADDRESS ? b.amountUnits : 0 });
+     });
+     return;
+   }
+   if (!matchesAssetBooking(b,await contract.bookings(bookingId),w.address)) throw new Error('On-chain booking differs from the accepted terms or funder');
+   const methods = {
+     assetApprove:['approve','approvePerformance','Performance review report IPFS URI; approval enables independent producer-paid gift release'],
+     giftRelease:['giftRelease','releaseGift','Release the approved gift to the exact booked performer?'],
+     assetFault:['fault','platformFault','Platform fault/cancellation report IPFS URI (full fee remains guaranteed; unearned gift returns)'],
+     assetNoShow:['noShow','noShow','Performer no-show report IPFS URI (not for platform/rehearsal faults)'],
+     assetUnperformed:['unperformed','markUnperformedGift','Unperformed gift report IPFS URI (does not reduce vested fee)'],
+     assetRefund:['refund','refund','Return the refundable fee to the original funder?'],
+     giftReturn:['giftReturn','returnGift','Return the unearned gift to its signed treasury?'],
+   };
+   const [txAction, method, question] = methods[name];
+   if (localStorage.getItem(`live-pending:${b.id}:${txAction}`) || b.transactions[txAction]?.status === 'pending') throw new Error('Transaction pending; reconcile instead of resending');
+   const takesReport = ['assetApprove','assetFault','assetNoShow','assetUnperformed'].includes(name);
+   if (name === 'assetApprove' && liveBroadcastCompletionPending(b)) throw new Error('Actual broadcast completion is pending or unavailable; do not approve performance');
+   const reason = takesReport ? prompt(question) : null;
+   if (takesReport && !/^ipfs:\/\/[a-zA-Z0-9]+(?:\/[^\s]*)?$/.test(reason || '')) throw new Error('A pinned IPFS report is required');
+   if (!takesReport && !confirm(question)) return;
+   await w.check();
+   await transaction(b,txAction,async () => { await w.check(); return takesReport ? contract[method](bookingId,reason) : contract[method](bookingId); });
+   return;
+ }
  if (name === 'priorityInvite') {
    if (b.priorityInvitation) throw new Error('Use the existing follow-up invitation; do not prepare another');
    const form = section.querySelector('[data-live-create]');
@@ -317,7 +403,7 @@ async function action(name, b) {
    await transaction(b, 'funding', w => b.mode === 'phase0' ? new w.ethers.Contract(LIVE_ROUTER, routerAbi, w.signer).fundToken(w.ethers.id(LIVE_FUND), LIVE_USDC, b.amountUnits)
      : new w.ethers.Contract(state.escrowAddress, LIVE_ESCROW_ABI, w.signer).createBooking(w.ethers.id(b.id), b.wallet, b.amountUnits, Date.parse(b.startUtc)/1000, Date.parse(b.endUtc)/1000, Date.parse(b.claimDeadline)/1000, b.termsHash, b.termsUri, b.reviewWindow, b.cancellationWindow, b.killFeeBps));
  } else if (name === 'reconcile') {
-   const txAction = prompt('Action: funding / payout / recovery / approve / claim / reject / cancel', 'funding');
+   const txAction = prompt(b.escrowVersion === LIVE_ASSET_VERSION ? 'Action: funding / approve / claim / giftRelease / giftReturn / refund / fault / noShow / unperformed' : 'Action: funding / payout / recovery / approve / claim / reject / cancel', 'funding');
    const savedHash = localStorage.getItem(`live-pending:${b.id}:${txAction}`);
    const txHash = prompt('Base transaction hash', (/^0x[0-9a-fA-F]{64}$/.test(savedHash || '') ? savedHash : '') || b.transactions[txAction]?.hash || '');
    if (txHash) await command({ action:'transaction', id:b.id, txAction, txHash });
@@ -394,18 +480,26 @@ function mount() {
  <aside class="live-performance-offer" data-live-offer><strong>💵 Current offer: $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6} USDC</strong><span>🗓 ${LIVE_PERFORMANCE_AIRTIME_MINUTES}-minute calendar event</span><span>🎵 ${LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES} live-music minutes earns the full fee; shorter sets are prorated, capped at $${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6}.</span><span>🚫 No live performance earns $0.</span></aside>
  <p class="live-performance-draft-note">Legacy v2 terms are pinned. The guaranteed audio pilot requires a NEW reviewed agreement pin and fingerprint; never reuse v2. Each performer and date requires fresh acceptance before funding.</p>
  <form data-live-create><input name="priorityFor" type="hidden" value="">
- <label>Offer policy<select name="payoutPolicy"><option value="">Legacy v2: prorated live minutes</option><option value="${LIVE_PILOT_POLICY}">Audio pilot: guaranteed $20, rehearsal ladder only</option></select></label>
+ <label>Offer policy<select name="payoutPolicy"><option value="">Legacy v2: prorated live minutes</option><option value="${LIVE_PILOT_POLICY}">Audio pilot: guaranteed $20, rehearsal ladder only</option><option value="${LIVE_ASSET_POLICY}" disabled>Fixed asset fee / optional gift</option></select></label>
  ${field('performer','Performer wallet or ENS')}${field('displayName','Name shown on the calendar')}<label>Discord name (optional, with consent)<input name="discordHandle"></label>${field('title','Show title','Friday Live Performance')}
  ${field('startLocal','Start time (America/New_York)',nextFridayLiveStart(),'datetime-local')}
- <p class="live-performance-form-note">End time is calculated from the duration. Fee is $20 USDC on Base. Legacy v2 is fixed at 20 minutes; the pilot uses the agreed duration.</p>
+ <p class="live-performance-form-note" data-live-fee-note>End time is calculated from the duration. Fee is $20 USDC on Base. Legacy v2 is fixed at 20 minutes; the pilot uses the agreed duration.</p>
  <input name="fee" type="hidden" value="${Number(LIVE_PERFORMANCE_FEE_UNITS) / 1e6}"><label>Duration (minutes)<input name="airtimeMinutes" type="number" value="${LIVE_PERFORMANCE_AIRTIME_MINUTES}" min="11" max="59" step="1" required readonly></label>
+ <details data-live-asset-options hidden><summary>Fee asset & optional gift</summary>
+ <p>Exact quantity on Base, not a dollar conversion. The administrator can recover reserved or earned assets. No fee-on-transfer, rebasing or unusual tokens.</p>
+ <label>Asset<select name="assetChoice"><option value="usdc">USDC (default)</option><option value="eth">Base ETH</option><option value="token">Producer-approved ERC-20</option></select></label>
+ <label>Exact quantity<input name="assetAmount" value="20" inputmode="decimal"></label>
+ <label data-live-token-address hidden>Base ERC-20 contract<input name="assetAddress" placeholder="0x…"></label>
+ <label><input name="hasGift" type="checkbox"> Reserve an ERC-1155 gift at funding</label>
+ <div data-live-gift-fields hidden><label>Collection on Base<input name="giftCollection" placeholder="0x…"></label><label>Token ID<input name="giftTokenId" inputmode="numeric"></label><label>Quantity<input name="giftQuantity" value="1" inputmode="numeric"></label>
+ <p>The configured Market treasury is the signed return recipient. All overlapping listings must be delisted and reconciled before funding. Funding is not yet confirmed.</p></div></details>
  <input name="fullPayoutLiveMinutes" type="hidden" value="${LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES}">
  <label data-live-additional hidden>Additional pilot offer (public; NOT funded by performance escrow)<textarea name="additionalOffer" maxlength="1000" placeholder="Separate prep-task payments and supporter gift, including their conditions. No private notes."></textarea></label>
  <label>Payment handling<select name="mode"><option value="phase1">🔒 Protected booking escrow (recommended)</option><option value="phase0">🏦 Community fund (earmarked, not escrowed)</option></select></label>
  <label>Review period after the show (hours)<input name="reviewWindowHours" type="number" value="24" min="1" max="8760" step="1" required></label>
- <label>Late-cancellation notice (hours)<input name="cancellationWindowHours" type="number" value="8" min="0" max="8760" step="1" required></label>
- <label>Late-cancellation fee (%)<input name="killFeePercent" type="number" value="50" min="0" max="100" step="1" required></label>
- <p class="live-performance-form-note">The performer’s claim deadline is set automatically to three days after the review window closes.</p>
+ <label data-live-legacy-only>Late-cancellation notice (hours)<input name="cancellationWindowHours" type="number" value="8" min="0" max="8760" step="1" required></label>
+ <label data-live-legacy-only>Late-cancellation fee (%)<input name="killFeePercent" type="number" value="50" min="0" max="100" step="1" required></label>
+ <p class="live-performance-form-note" data-live-legacy-only>The performer’s claim deadline is set automatically to three days after the review window closes.</p>
  <details class="live-advanced-terms"><summary>📎 Pinned agreement details (advanced)</summary><p>Legacy v2 references are prefilled only for the legacy policy. The guaranteed audio pilot requires its own reviewed pin and fingerprint. Check the exact text before approving.</p>
  ${field('termsVersion','Agreement version',LIVE_APPROVED_TERMS_V2.version)}${field('termsUri','Pinned agreement IPFS link',LIVE_APPROVED_TERMS_V2.uri)}${field('termsHash','Agreement verification fingerprint',LIVE_APPROVED_TERMS_V2.hash)}</details>
  <label class="live-performance-approval"><input name="stewardApproved" type="checkbox"> I approve these exact pinned terms for this performer and date.</label>
@@ -415,26 +509,33 @@ function mount() {
  const form = section.querySelector('form');
  const updatePolicy = () => {
   const pilot = form.elements.payoutPolicy.value === LIVE_PILOT_POLICY;
-  form.elements.airtimeMinutes.readOnly = !pilot;
-  if (!pilot) form.elements.airtimeMinutes.value = LIVE_PERFORMANCE_AIRTIME_MINUTES;
+  const assets = form.elements.payoutPolicy.value === LIVE_ASSET_POLICY;
+  section.querySelector('[data-live-fee-note]').textContent = assets ? 'End time follows the duration. Set the exact asset quantity below.' : 'End time is calculated from the duration. Fee is $20 USDC on Base. Legacy v2 is fixed at 20 minutes; the pilot uses the agreed duration.';
+  form.elements.airtimeMinutes.readOnly = !pilot && !assets;
+  if (!pilot && !assets) form.elements.airtimeMinutes.value = LIVE_PERFORMANCE_AIRTIME_MINUTES;
   form.elements.mode.value = 'phase1';
-  form.elements.mode.querySelector('[value="phase0"]').disabled = pilot;
-  form.elements.killFeePercent.value = pilot ? '100' : '50';
+  form.elements.mode.querySelector('[value="phase0"]').disabled = pilot || assets;
+  form.elements.killFeePercent.value = assets ? '0' : pilot ? '100' : '50';
   for (const name of ['reviewWindowHours', 'cancellationWindowHours', 'killFeePercent']) form.elements[name].readOnly = pilot;
   form.elements.reviewWindowHours.value = '24';
-  form.elements.cancellationWindowHours.value = '8';
-  form.elements.termsVersion.value = pilot ? LIVE_PILOT_TERMS_VERSION : LIVE_APPROVED_TERMS_V2.version;
-  form.elements.termsUri.value = pilot ? '' : LIVE_APPROVED_TERMS_V2.uri;
-  form.elements.termsHash.value = pilot ? '' : LIVE_APPROVED_TERMS_V2.hash;
+  form.elements.cancellationWindowHours.value = assets ? '0' : '8';
+  form.elements.termsVersion.value = assets ? 'LIVE PERFORMANCE ASSETS v1' : pilot ? LIVE_PILOT_TERMS_VERSION : LIVE_APPROVED_TERMS_V2.version;
+  form.elements.termsUri.value = pilot || assets ? '' : LIVE_APPROVED_TERMS_V2.uri;
+  form.elements.termsHash.value = pilot || assets ? '' : LIVE_APPROVED_TERMS_V2.hash;
   form.elements.stewardApproved.checked = false;
   section.querySelector('[data-live-additional]').hidden = !pilot;
   if (pilot && !form.elements.additionalOffer.value.trim()) form.elements.additionalOffer.value = LIVE_PILOT_COMPANION_OFFER;
-  if (pilot) section.querySelector('.live-advanced-terms').open = true;
+  const assetOptions = section.querySelector('[data-live-asset-options]');
+  assetOptions.hidden = !assets;
+  assetOptions.open = assets;
+  section.querySelectorAll('[data-live-legacy-only]').forEach(element => { element.hidden = assets; });
+  if (pilot || assets) section.querySelector('.live-advanced-terms').open = true;
   updateOffer();
  };
  const updateOffer = () => {
   const pilot = form.elements.payoutPolicy.value === LIVE_PILOT_POLICY;
-  section.querySelector('[data-live-offer]').textContent = livePerformancePolicyText({
+  const assets = form.elements.payoutPolicy.value === LIVE_ASSET_POLICY;
+  section.querySelector('[data-live-offer]').textContent = assets ? 'Fixed exact Base asset quantity; full fee is guaranteed despite platform faults. Gift is optional and separately delivered.' : livePerformancePolicyText({
    payoutPolicy: pilot ? LIVE_PILOT_POLICY : undefined,
    airtimeMinutes: Number(form.elements.airtimeMinutes.value),
    fullPayoutLiveMinutes: LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES, amountUnits: LIVE_PERFORMANCE_FEE_UNITS,
@@ -442,6 +543,11 @@ function mount() {
  };
  form.elements.payoutPolicy.addEventListener('change', updatePolicy);
  form.elements.airtimeMinutes.addEventListener('input', updateOffer);
+ form.elements.assetChoice.addEventListener('change', () => {
+  section.querySelector('[data-live-token-address]').hidden = form.elements.assetChoice.value !== 'token';
+  form.elements.assetAmount.value = form.elements.assetChoice.value === 'usdc' ? '20' : '';
+ });
+ form.elements.hasGift.addEventListener('change', () => { section.querySelector('[data-live-gift-fields]').hidden = !form.elements.hasGift.checked; });
  section.querySelector('[data-live-refresh]').onclick = () => guarded(async () => {
   state = await api();
   render();
@@ -471,8 +577,31 @@ function mount() {
    delete booking.reviewWindowHours;
    delete booking.cancellationWindowHours;
    delete booking.killFeePercent;
-   if (booking.payoutPolicy === LIVE_PILOT_POLICY) delete booking.fullPayoutLiveMinutes;
+   if (booking.payoutPolicy === LIVE_ASSET_POLICY) {
+     if (!state.assetBookingCreationEnabled) throw new Error('New asset bookings are disabled or escrow is unavailable');
+     const w = await wallet();
+     const assetAddress = f.assetChoice === 'eth' ? LIVE_ZERO_ADDRESS : f.assetChoice === 'usdc' ? LIVE_USDC : f.assetAddress.trim();
+     if (!w.ethers.isAddress(assetAddress)) throw new Error('Enter a valid Base asset contract');
+     let decimals = 18, symbol = 'ETH';
+     if (assetAddress.toLowerCase() !== LIVE_ZERO_ADDRESS) {
+       const token = new w.ethers.Contract(assetAddress, ['function decimals() view returns(uint8)','function symbol() view returns(string)'], w.provider);
+       [decimals, symbol] = await Promise.all([token.decimals(),token.symbol()]);
+       decimals = Number(decimals);
+     }
+     if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36 || !/^[A-Za-z0-9._-]{1,16}$/.test(symbol)) throw new Error('Unsupported token metadata');
+     booking.escrowVersion = LIVE_ASSET_VERSION;
+     booking.assetAddress = assetAddress;
+     booking.assetDecimals = decimals;
+     booking.assetSymbol = symbol;
+     booking.amountUnits = w.ethers.parseUnits(f.assetAmount,decimals).toString();
+     if (f.hasGift === 'on') {
+       if (!state.giftTreasuryAddress) throw new Error('Gift treasury is not configured');
+       booking.gift = { collection:f.giftCollection, tokenId:f.giftTokenId, quantity:f.giftQuantity, treasury:state.giftTreasuryAddress };
+     }
+     delete booking.fullPayoutLiveMinutes;
+   } else if (booking.payoutPolicy === LIVE_PILOT_POLICY) delete booking.fullPayoutLiveMinutes;
    else { delete booking.payoutPolicy; delete booking.additionalOffer; }
+   for (const key of ['assetChoice','assetAmount','assetAddressInput','hasGift','giftCollection','giftTokenId','giftQuantity']) delete booking[key];
    if (!booking.priorityFor) delete booking.priorityFor;
    const id = `${eventId}:${crypto.randomUUID()}`;
    await command({ action:'create', id, booking });

@@ -784,8 +784,9 @@ export class JukeLoopSession {
     constructor({ voiceChannel, textChannel, client, ipfsGateway, onTerminalDisconnect, djuke, devertPlayback,
       schedule, livePerformanceEvents, audioPlayer, createStream, mainRadioAdStateStore, restoreMainRadioAdState, saveMainRadioAdState,
       topTenHype, topTenHypeStore, playlistShow, playlistShowStore, isContentAllowed = () => true,
-      audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS, websitePlayback = false, durationBackfill }) {
+      audioReadyTimeoutMs = NEXT_TRACK_READY_TIMEOUT_MS, websitePlayback = false, durationBackfill, publicBroadcast }) {
     this.websitePlayback = websitePlayback;
+    this.publicBroadcast = publicBroadcast;
     this.isContentAllowed = isContentAllowed;
     this._discordOutputsAttached = false;
     this._discordOutputsBlocked = false;
@@ -1966,6 +1967,18 @@ export class JukeLoopSession {
     } else if (prepared.devertAd && !prepared.devertAd.paidRequest) {
       this._preparedDevertAd = null;
       this._persistMainRadioAdState();
+    }
+    if (this.websitePlayback && this.publicBroadcast?.enabled && typeof prepared.resource.read === 'function') {
+      const read = prepared.resource.read.bind(prepared.resource);
+      const program = { ...this._nowPlaying,
+        protected: !!prepared.paid || !!prepared.devertAd };
+      prepared.resource.read = () => {
+        const packet = read();
+        if (packet && !this._destroyed && this._nowPlaying?.playId === playId) {
+          this.publicBroadcast.radioPacket(packet, program);
+        }
+        return packet;
+      };
     }
     this.player.play(prepared.resource);
     this._announcePrepared(prepared, playId)

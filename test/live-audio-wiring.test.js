@@ -65,6 +65,7 @@ test('room links are encoded and offered only for eligible funded pilot bookings
   assert.equal(url.searchParams.get('booking'), b.id);
   assert.equal(url.searchParams.size, 1);
   assert.equal(liveAudioRoomUrl(b, Date.parse(b.startUtc)), liveAudioRoomUrl(b, NOW));
+  assert.equal(liveAudioRoomUrl({ ...b, payoutPolicy:'asset-guaranteed-v1' }, NOW), liveAudioRoomUrl(b, NOW));
   for (const change of [
     { id: '' }, { mode: 'phase0' }, { payoutPolicy: undefined }, { status: 'draft' },
     { status: 'funding pending' }, { status: 'approved' }, { status: 'paid' },
@@ -778,16 +779,22 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
     assert.match(source, /live-audio\.mjs\?v=20261114-allocated-stage/);
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /live-performance-admin\.mjs\?v=20261117-release-party/);
-  assert.match(html, /live-booking-notifications\.mjs\?v=20261113-one-action-release/);
+  assert.match(html, /live-performance-admin\.mjs\?v=20261117-booking-assets/);
+  assert.match(html, /live-booking-notifications\.mjs\?v=20261117-booking-assets/);
   assert.match(html, /src="js\/creator-profile\.mjs\?v=20261117-release-party"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261115-afterparty"/);
-  assert.match(html, /live-performance\.css\?v=20261115-afterparty/);
+  assert.match(html, /live-performance\.css\?v=20261117-booking-assets/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/live-performance-profile.mjs?v=20261115-afterparty'],
-    './js/live-performance-profile.mjs?v=20261117-release-party');
+    './js/live-performance-profile.mjs?v=20261117-booking-assets');
   assert.equal(map.imports['./js/live-bookings.mjs?v=20261108-live-audio-pilot'],
-    './js/live-bookings.mjs?v=20261114-tip-provenance');
+    './js/live-bookings.mjs?v=20261117-booking-assets');
+  for (const suffix of ['20261110-wallet-practice', '20261114-allocated-stage', '20261116-curtain']) {
+    assert.equal(map.imports[`./js/performer-room.mjs?v=${suffix}`],
+      './js/performer-room.mjs?v=20261117-booking-assets');
+  }
+  assert.equal(map.imports['./js/live-booking-notifications.mjs?v=20261113-one-action-release'],
+    './js/live-booking-notifications.mjs?v=20261117-booking-assets');
   assert.equal(map.imports['./js/radio-schedule-ui.mjs?v=20261025-community-reminder'],
     './js/radio-schedule-ui.mjs?v=20261115-afterparty');
   assert.equal(map.imports['./js/fund-display.mjs?v=20261024-djuke-labels'],
@@ -820,11 +827,11 @@ test('standalone backstage and main-page imports load compatible recovery helper
   }
   for (const suffix of ['', '?v=20261108-live-audio-pilot', '?v=20261114-allocated-stage']) {
     assert.equal(imports[`./js/live-audio.mjs${suffix}`],
-      './js/live-audio.mjs?v=20261117-producer-recovery');
+      './js/live-audio.mjs?v=20261117-booking-assets');
   }
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
-    assert.ok(source.includes(`${entry}?v=${html === 'live-room.html' ? '20261117-release-party' : '20261117-producer-recovery'}`));
+    assert.ok(source.includes(`${entry}?v=20261117-booking-assets`));
     assert.match(source, /live-audio\.css\?v=20261116-booth/);
     assert.doesNotMatch(source, /20261114-direction/);
   }

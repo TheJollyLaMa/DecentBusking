@@ -7,3 +7,5 @@ agent-service/state.sqlite*
 .npm-cache/
 discord-bot/live-audio-state.json*
 discord-bot/.env.live-audio.local
+discord-bot/.env.public-broadcast.local
+.wrangler/

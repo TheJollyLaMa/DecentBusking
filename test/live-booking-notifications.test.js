@@ -99,7 +99,7 @@ test('booking and mint notification timers use five-minute checks, with no fifte
 });
 
 test('notification polling starts on connection, runs at five minutes, and ignores disconnected responses', async () => {
- const { claimState, LIVE_PILOT_POLICY } = await import('../js/live-bookings.mjs');
+ const { claimState, LIVE_PILOT_POLICY, LIVE_ASSET_VERSION } = await import('../js/live-bookings.mjs');
  const listeners = new Map();
  const timers = new Map();
  const requests = [];
@@ -119,7 +119,7 @@ test('notification polling starts on connection, runs at five minutes, and ignor
  };
  const window = { _wallet: {}, DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example', adminWalletAddress: owner } };
  const context = vm.createContext({
-  document, window, claimState, LIVE_PILOT_POLICY, isAdminWallet: () => false, localStorage: { getItem: () => null },
+  document, window, claimState, LIVE_PILOT_POLICY, LIVE_ASSET_VERSION, isAdminWallet: () => false, localStorage: { getItem: () => null },
   queueMicrotask, console, AbortSignal,
   MutationObserver: class { observe() {} },
   CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
@@ -152,7 +152,7 @@ test('notification polling starts on connection, runs at five minutes, and ignor
 });
 
 test('worker funding and booking badges aggregate only at admin anchors', async () => {
- const { claimState, LIVE_PILOT_POLICY } = await import('../js/live-bookings.mjs');
+ const { claimState, LIVE_PILOT_POLICY, LIVE_ASSET_VERSION } = await import('../js/live-bookings.mjs');
  const listeners = new Map(), badges = new Map();
  const target = () => ({
   classList: { add() {} }, querySelector() { return this.badge; },
@@ -178,7 +178,7 @@ test('worker funding and booking badges aggregate only at admin anchors', async 
  badges.set('.live-performance-admin-summary', bookingPanel);
  const context = vm.createContext({
   document, window: { _wallet: { address: owner }, DecentConfig: { adminWalletAddress: owner } },
-  claimState, LIVE_PILOT_POLICY, isAdminWallet: () => isAdmin, localStorage: { getItem: () => null },
+  claimState, LIVE_PILOT_POLICY, LIVE_ASSET_VERSION, isAdminWallet: () => isAdmin, localStorage: { getItem: () => null },
   queueMicrotask, console, MutationObserver: class { observe() {} },
   setInterval() {}, clearInterval() {},
   Date: class extends Date { static now() { return now; } },
@@ -204,7 +204,7 @@ test('worker funding and booking badges aggregate only at admin anchors', async 
 });
 
 test('the invited guest sees the existing invitation badge in Profile as well as Schedule, never another wallet', async () => {
- const { claimState, LIVE_PILOT_POLICY } = await import('../js/live-bookings.mjs');
+ const { claimState, LIVE_PILOT_POLICY, LIVE_ASSET_VERSION } = await import('../js/live-bookings.mjs');
  const guest = '0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f';
  const listeners = new Map(), targets = new Map();
  const target = () => ({
@@ -224,7 +224,7 @@ test('the invited guest sees the existing invitation badge in Profile as well as
  };
  const context = vm.createContext({
   document, window: { _wallet: { address: guest }, DecentConfig: {} },
-  claimState, LIVE_PILOT_POLICY, isAdminWallet: () => false, localStorage: { getItem: () => null },
+  claimState, LIVE_PILOT_POLICY, LIVE_ASSET_VERSION, isAdminWallet: () => false, localStorage: { getItem: () => null },
   queueMicrotask, console, MutationObserver: class { observe() {} },
   setInterval() {}, clearInterval() {},
   Date: class extends Date { static now() { return now; } },

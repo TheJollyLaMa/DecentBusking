@@ -1,0 +1,15 @@
+name = "decentbusking-broadcast"
+main = "broadcast-worker.mjs"
+compatibility_date = "2026-11-17"
+
+[[r2_buckets]]
+binding = "BROADCAST_BUCKET"
+bucket_name = "decentbusking-broadcast"
+
+[[ratelimits]]
+name = "BROADCAST_RATE_LIMITER"
+namespace_id = "331"
+simple = { limit = 24000, period = 60 }
+
+[triggers]
+crons = ["* * * * *"]

@@ -1,5 +1,5 @@
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, claimState, liveAcknowledgement, liveBookingRows, livePerformancePolicyText } from './live-bookings.mjs?v=20261108-live-audio-pilot';
+import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, LIVE_ASSET_VERSION, LIVE_ASSET_ESCROW_ABI, matchesAssetBooking, formatLiveAsset, claimState, liveAcknowledgement, liveBookingRows, livePerformancePolicyText } from './live-bookings.mjs?v=20261108-live-audio-pilot';
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
 import { performerRoomUrl, resolvePerformerReentry } from './performer-room.mjs?v=20261116-curtain';
 import { renderPerformerGift } from './performer-gift.mjs?v=20261114-performer-encore';
@@ -124,7 +124,7 @@ function pilotInvitationCard(b) {
 }
 
 export function liveReceiptEntry(bookings, wallet) {
- const paid = bookings.filter(b => b.mode === 'phase1' && b.wallet.toLowerCase() === wallet.toLowerCase() && BigInt(b.paidUnits || 0) > 0n);
+ const paid = bookings.filter(b => b.mode === 'phase1' && b.escrowVersion !== LIVE_ASSET_VERSION && b.wallet.toLowerCase() === wallet.toLowerCase() && BigInt(b.paidUnits || 0) > 0n);
  if (!paid.length) return null;
  return { kind:'live-performance', label:'Live performances', asset:'USDC', status:'paid', count:paid.length,
    units:paid.reduce((n,b) => n + BigInt(b.paidUnits),0n), transactions:paid.map(b => {
@@ -132,8 +132,37 @@ export function liveReceiptEntry(bookings, wallet) {
      return { title:b.title, hash:tx.hash, blockNumber:tx.blockNumber, units:b.paidUnits, url:`https://basescan.org/tx/${tx.hash}` };
    }) };
 }
+export function verifyAssetFeeReceipt(receipt, booking, ethers) {
+ if (receipt?.status !== 1 || String(receipt.to).toLowerCase() !== String(booking.escrowAddress).toLowerCase()) return false;
+ const iface = new ethers.Interface(LIVE_ASSET_ESCROW_ABI);
+ return (receipt.logs || []).some(log => {
+  if (String(log.address).toLowerCase() !== String(booking.escrowAddress).toLowerCase()) return false;
+  try {
+   const event = iface.parseLog(log);
+   return event?.name === 'FeeSettled' && event.args.bookingId === ethers.id(booking.id) &&
+    Number(event.args.status) === 3 && event.args.recipient.toLowerCase() === booking.wallet.toLowerCase() &&
+    event.args.amount === BigInt(booking.amountUnits);
+  } catch { return false; }
+ });
+}
+export function verifyAssetCancellationReceipt(receipt, booking, ethers) {
+ if (receipt?.status !== 1 || String(receipt.to).toLowerCase() !== String(booking.escrowAddress).toLowerCase()) return false;
+ const iface = new ethers.Interface(LIVE_ASSET_ESCROW_ABI);
+ return (receipt.logs || []).some(log => {
+  if (String(log.address).toLowerCase() !== String(booking.escrowAddress).toLowerCase()) return false;
+  try {
+   const event = iface.parseLog(log);
+   return event?.name === 'FeeDecision' && event.args.bookingId === ethers.id(booking.id) && Number(event.args.status) === 4;
+  } catch { return false; }
+ });
+}
+export async function assetReceiptCanonical(provider, receipt) {
+ if (!receipt?.blockHash || !Number.isSafeInteger(receipt.blockNumber)) return false;
+ return (await provider.getBlock(receipt.blockNumber))?.hash === receipt.blockHash;
+}
 export function renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, ethers, fetchImpl = fetch, now = Date.now() }) {
  const pilot = b.payoutPolicy === LIVE_PILOT_POLICY && b.stewardApproved;
+ const assets = b.escrowVersion === LIVE_ASSET_VERSION;
  const open = !b.cancelled && Date.parse(b.status === 'funded' ? b.endUtc : b.startUtc) > now;
  const invitation = pilot && open ? pilotInvitationCard(b) : document.createElement('section');
  if (!pilot || !open) invitation.className = 'live-booking-invite';
@@ -152,21 +181,21 @@ export function renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, e
    const eventTime = value => new Intl.DateTimeFormat('en-US', {
      timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short',
    }).format(new Date(value));
-   summary.textContent = `${b.title} · $${(Number(b.amountUnits) / 1e6).toFixed(2)} USDC · ${eventTime(b.startUtc)}–${eventTime(b.endUtc)} ET`;
+   summary.textContent = `${b.title} · ${assets ? formatLiveAsset(b.amountUnits,b.assetDecimals,b.assetSymbol) : `$${(Number(b.amountUnits) / 1e6).toFixed(2)} USDC`} · ${eventTime(b.startUtc)}–${eventTime(b.endUtc)} ET`;
    const termsLink = document.createElement('a');
    termsLink.href = `https://gateway.pinata.cloud/ipfs/${b.termsUri.replace(/^ipfs:\/\//, '')}`;
    termsLink.target = '_blank';
    termsLink.rel = 'noopener noreferrer';
    termsLink.textContent = `Open ${b.termsVersion}`;
    const policy = document.createElement('p');
-   policy.textContent = livePerformancePolicyText(b);
+   policy.textContent = assets ? 'The fixed fee is guaranteed despite platform/rehearsal faults. The administrator can recover reserved or earned assets; a gift is delivered only after a separate confirmed transfer.' : livePerformancePolicyText(b);
    const additional = document.createElement('p');
-   additional.textContent = b.additionalOffer ? `Outside performance escrow: ${b.additionalOffer}` : '';
+   additional.textContent = assets && b.gift ? `Optional gift: ${b.gift.quantity} × Base collection ${b.gift.collection}, token ${b.gift.tokenId}; return treasury ${b.gift.treasury}. Not reserved until funding confirms.` : b.additionalOffer ? `Outside performance escrow: ${b.additionalOffer}` : '';
    const technical = document.createElement('details');
    const technicalSummary = document.createElement('summary');
    technicalSummary.textContent = 'Technical verification details';
    const termsHash = document.createElement('code');
-   termsHash.textContent = b.termsHash;
+   termsHash.textContent = assets ? `Terms ${b.termsHash}; Base escrow ${b.escrowAddress}; asset ${b.assetAddress}; ${b.amountUnits} raw units; ${b.assetDecimals} decimals.` : b.termsHash;
    technical.append(technicalSummary, termsHash);
    invitation.append(summary, termsLink);
    if (policy.textContent) invitation.append(policy);
@@ -254,6 +283,7 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
  const curtains = [];
  container.innerHTML = '';
  for (const b of bookings) {
+   const assetVersion = b.escrowVersion === LIVE_ASSET_VERSION;
    const reentry = await resolvePerformerReentry(b, { serviceUrl, fetchImpl });
    const stagePending = ['active', 'unavailable'].includes(reentry.status);
    const completion = completionFacts(b, reentry);
@@ -264,11 +294,11 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
    const afterparty = !stagePending && b.mode === 'phase1' && b.payoutPolicy === LIVE_PILOT_POLICY &&
      (completion.state === 'verified' || Date.parse(b.endUtc) <= Date.now() || ['approved', 'paid'].includes(b.status));
    const connected = window._wallet?.address || '';
-   const claim = claimState(b, state.escrowAddress, connected);
+   const claim = claimState(b, assetVersion ? (state.assetEscrowConfigured ? state.assetEscrowAddress : '') : state.escrowAddress, connected);
    const pendingHash = connected.toLowerCase() === b.wallet.toLowerCase() && !['paid', 'refunded'].includes(b.status)
      ? localStorage.getItem(`live-claim:${b.id}`) : null;
    let nextStatus;
-   if (afterparty || stagePending) {
+   if ((afterparty || stagePending) && !assetVersion) {
      article.className = 'live-performer-next';
      article.setAttribute('data-live-next-step', b.id);
      article.setAttribute('data-action-needed', String(stagePending || claim.enabled || !!pendingHash));
@@ -386,11 +416,12 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        const signer = await provider.getSigner();
        if ((await provider.getNetwork()).chainId !== 8453n || (await signer.getAddress()).toLowerCase() !== b.wallet.toLowerCase()) throw new Error('Connect performer wallet on Base');
        const amountUnits = b.approvedUnits ?? b.amountUnits;
-       const verifiedPayment = receipt => parseUnits(amountUnits) !== null && /^0x[0-9a-f]{64}$/i.test(b.termsHash || '') &&
+       const verifiedPayment = receipt => assetVersion ? verifyAssetFeeReceipt(receipt,b,ethers) : parseUnits(amountUnits) !== null && /^0x[0-9a-f]{64}$/i.test(b.termsHash || '') &&
          verifyPaidReceipt({ receipt, escrowAddress: state.escrowAddress, iface: new ethers.Interface(LIVE_ESCROW_ABI),
            bookingHash: ethers.id(b.id), performer: b.wallet, amountUnits, termsHash: b.termsHash }).ok;
-       const celebrate = hash => announcePaymentCelebration({ chainId:8453, txHash:hash, amountText:formatUsdc(amountUnits),
-         assetText:'USDC', summary:'Live performance claim confirmed', txLabel:'Claim confirmed' });
+       const celebrate = hash => announcePaymentCelebration({ chainId:8453, txHash:hash,
+         amountText:assetVersion ? formatLiveAsset(amountUnits,b.assetDecimals,'').trim() : formatUsdc(amountUnits),
+         assetText:assetVersion ? b.assetSymbol : 'USDC', summary:'Live performance claim confirmed', txLabel:'Claim confirmed' });
        const evidenceNeedsReview = () => {
          button.textContent = 'Claim evidence needs review';
          if (nextStatus) nextStatus.textContent = 'The transaction succeeded, but its payment event could not be verified for this booking. Refresh payment status; do not send another claim.';
@@ -407,7 +438,7 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
              if (nextStatus) nextStatus.textContent = 'Waiting for two Base confirmations. Do not send another claim.';
              return;
            }
-           if (!verifiedPayment(receipt)) { evidenceNeedsReview(); return; }
+           if (!verifiedPayment(receipt) || assetVersion && !await assetReceiptCanonical(provider,receipt)) { evidenceNeedsReview(); return; }
            celebrate(previous);
          } else if (receipt.status !== 0) {
            button.textContent = 'Check pending claim';
@@ -422,14 +453,16 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
          document.dispatchEvent(new CustomEvent('live-booking-claim-updated'));
          return;
        }
-       const contract = new ethers.Contract(state.escrowAddress, LIVE_ESCROW_ABI, signer);
+       if (assetVersion && (!state.assetEscrowConfigured || state.assetEscrowAddress?.toLowerCase() !== b.escrowAddress?.toLowerCase())) throw new Error('Exact asset escrow is unavailable');
+       const contract = new ethers.Contract(assetVersion ? b.escrowAddress : state.escrowAddress, assetVersion ? LIVE_ASSET_ESCROW_ABI : LIVE_ESCROW_ABI, signer);
+       if (assetVersion && (!b.funder || !matchesAssetBooking(b,await contract.bookings(ethers.id(b.id)),b.funder))) throw new Error('On-chain booking differs from the accepted terms');
        const tx = await contract.claim(ethers.id(b.id));
        localStorage.setItem(`live-claim:${b.id}`,tx.hash);
        button.textContent = `Claim pending: ${tx.hash}`;
        if (nextStatus) nextStatus.textContent = `Claim submitted. Waiting for confirmation: ${tx.hash}`;
        const receipt = await tx.wait(2);
        if (receipt?.status !== 1) throw new Error('Claim did not confirm successfully');
-       if (!verifiedPayment(receipt)) { evidenceNeedsReview(); return; }
+       if (!verifiedPayment(receipt) || assetVersion && !await assetReceiptCanonical(provider,receipt)) { evidenceNeedsReview(); return; }
        button.textContent = 'Claim confirmed; refresh for indexed receipt';
        if (nextStatus) nextStatus.textContent = '✓ Claim confirmed on Base. Refresh payment status for the indexed receipt.';
        celebrate(tx.hash);
@@ -444,7 +477,7 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        if (refresh) refresh.disabled = false;
      }
    };
-   if (afterparty || stagePending) {
+   if ((afterparty || stagePending) && !assetVersion) {
      if (claim.enabled || pendingHash) article.append(button);
      refresh = document.createElement('button');
      refresh.type = 'button'; refresh.className = 'live-performer-refresh';
@@ -462,6 +495,46 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
      const contents = document.createElement('div'); contents.innerHTML = liveBookingRows([b]);
      details.append(summary, contents); article.append(details);
    } else if (!compact || claim.enabled || pendingHash) article.append(button);
+   if (assetVersion && !b.cancelled && b.status === 'funded' && Date.now() < Date.parse(b.startUtc) &&
+       connected.toLowerCase() === b.wallet.toLowerCase()) {
+     const cancel = document.createElement('button');
+     const saved = () => localStorage.getItem(`live-cancel:${b.id}`);
+     cancel.type = 'button';
+     cancel.textContent = saved() ? 'Check pending performer cancellation' : 'Cancel booking before start';
+     cancel.onclick = async () => {
+       cancel.disabled = true;
+       try {
+         const provider = new ethers.BrowserProvider(window.ethereum);
+         const signer = await provider.getSigner();
+         if ((await provider.getNetwork()).chainId !== 8453n || (await signer.getAddress()).toLowerCase() !== b.wallet.toLowerCase()) throw new Error('Connect the booked performer wallet on Base');
+         let hash = saved(), receipt;
+         if (hash) {
+           receipt = await provider.getTransactionReceipt(hash);
+           const head = await provider.getBlockNumber();
+           if (!receipt || !Number.isSafeInteger(receipt.blockNumber) || !Number.isSafeInteger(head) || head - receipt.blockNumber < 1) throw new Error('Cancellation is pending; do not send again');
+         } else {
+           if (!state.assetEscrowConfigured || state.assetEscrowAddress?.toLowerCase() !== b.escrowAddress?.toLowerCase()) throw new Error('Exact asset escrow is unavailable');
+           const contract = new ethers.Contract(b.escrowAddress,LIVE_ASSET_ESCROW_ABI,signer);
+           if (!b.funder || !matchesAssetBooking(b,await contract.bookings(ethers.id(b.id)),b.funder)) throw new Error('On-chain booking differs from the accepted terms');
+           if (!confirm('Cancel before the booked start? The fee becomes refundable and the unearned gift returns to its signed treasury in separate transactions.')) return;
+           const reason = prompt('Public cancellation reason as an IPFS URI');
+           if (!/^ipfs:\/\/[a-zA-Z0-9]+(?:\/[^\s]*)?$/.test(reason || '')) throw new Error('A pinned IPFS reason is required');
+           if ((await provider.getNetwork()).chainId !== 8453n || (await signer.getAddress()).toLowerCase() !== b.wallet.toLowerCase()) throw new Error('Wallet or chain changed; retry');
+           const tx = await contract.performerCancel(ethers.id(b.id),reason);
+           hash = tx.hash;
+           localStorage.setItem(`live-cancel:${b.id}`,hash);
+           receipt = await tx.wait(2);
+         }
+         if (receipt.status === 0) { localStorage.removeItem(`live-cancel:${b.id}`); throw new Error('Cancellation transaction reverted; refresh before retrying'); }
+         if (!verifyAssetCancellationReceipt(receipt,b,ethers) || !await assetReceiptCanonical(provider,receipt)) throw new Error('Cancellation receipt could not be verified; do not resend');
+         localStorage.removeItem(`live-cancel:${b.id}`);
+         cancel.textContent = 'Cancellation confirmed; refresh booking status';
+       } catch (error) {
+         cancel.textContent = `${error.shortMessage || error.message}. Refresh and reconcile before retrying.`;
+       } finally { cancel.disabled = false; }
+     };
+     article.append(cancel);
+   }
    container.append(article);
    const gift = renderPerformerGift({ booking: b, wallet, ethers, config: window.DecentConfig,
      onReveal: () => celebrateLiveInvitation() });

@@ -1,0 +1,219 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const ethers = require('../discord-bot/node_modules/ethers');
+const owner = ethers.Wallet.createRandom(), performer = ethers.Wallet.createRandom(), outsider = ethers.Wallet.createRandom();
+const escrow = '0x1111111111111111111111111111111111111111';
+const treasury = '0x2222222222222222222222222222222222222222';
+const collection = '0x3333333333333333333333333333333333333333';
+const token = '0x4444444444444444444444444444444444444444';
+const now = Date.parse('2026-10-22T12:00:00Z');
+const bookingId = 'live:asset:2026-10-23';
+
+async function fixture(enabled = true) {
+ const shared = await import('../js/live-bookings.mjs');
+ const { createLiveBookings } = await import('../discord-bot/live-bookings.js');
+ const iface = new ethers.Interface(shared.LIVE_ASSET_ESCROW_ABI);
+ let state, head = 99, epoch = 0, logs = [], receipts = new Map(), chain = 8453n, online = true;
+ const blockHash = n => ethers.id(`block:${epoch}:${n}`);
+ const provider = {
+  getNetwork:async () => ({ chainId:chain }), getCode:async () => online ? '0x01' : '0x',
+  getBlockNumber:async () => head, getBlock:async n => ({ hash:blockHash(n) }),
+  getLogs:async ({ fromBlock,toBlock }) => logs.filter(l => l.blockNumber >= fromBlock && l.blockNumber <= toBlock),
+  getTransactionReceipt:async hash => receipts.get(hash) || null,
+ };
+ const config = { provider, ownerWallet:owner.address, assetEscrowAddress:escrow,
+  assetEscrowStartBlock:100, assetBookingsEnabled:enabled, giftTreasuryAddress:treasury, now:() => now,
+  assetReader:async address => address === shared.LIVE_ZERO_ADDRESS
+   ? { decimals:18,symbol:'ETH',approved:true } : { decimals:6,symbol:'USDC',approved:address === token },
+  save:async value => { state = structuredClone(value); return 'ipfs://checkpoint'; },
+  restore:async () => state, getSchedule:async () => ({ ready:true,events:[],weeklySchedule:{} }),
+  saveSchedule:async () => {},
+ };
+ const service = createLiveBookings(config);
+ const input = { performer:performer.address, displayName:'Artist', title:'Set', eventId:'friday-live-performance:2026-10-23',
+  startUtc:'2026-10-24T01:00:00Z', endUtc:'2026-10-24T01:20:00Z', airtimeMinutes:20,
+  mode:'phase1', escrowVersion:shared.LIVE_ASSET_VERSION, payoutPolicy:shared.LIVE_ASSET_POLICY,
+  assetAddress:token, assetDecimals:6, assetSymbol:'USDC', amountUnits:'20000000',
+  gift:{ collection,tokenId:'75',quantity:'1',treasury },
+  termsVersion:'LIVE PERFORMANCE ASSETS v1', termsUri:'ipfs://assetterms', termsHash:ethers.id('fresh asset terms'),
+  stewardApproved:true, reviewWindow:3600, cancellationWindow:0, killFeeBps:0, claimDeadline:'2026-10-29T01:20:00Z',
+ };
+ async function exec(command) {
+  return service.execute({ ...command, revision:(await service.getState()).revision });
+ }
+ async function create(overrides = {}) { return exec({ action:'create',id:bookingId,booking:{...input,...overrides} }); }
+ async function acknowledge() {
+  const b = (await service.getState()).bookings[0];
+  return service.acknowledgePerformer({ id:bookingId,address:performer.address,signature:await performer.signMessage(shared.liveAcknowledgement(b)) });
+ }
+ function add(block, name, args, index = 0) {
+  const hash = ethers.id(`${epoch}:${block}:${name}:${index}`);
+  const data = iface.encodeEventLog(iface.getEvent(name), args);
+  const log = { ...data,address:escrow,blockNumber:block,index,transactionHash:hash };
+  logs.push(log);
+  receipts.set(hash,{ status:1,to:escrow,blockNumber:block,blockHash:blockHash(block),logs:[log] });
+  return hash;
+ }
+ return { shared,service,input,create,acknowledge,exec,add,provider,iface, state:() => state,
+  restart:enabled => createLiveBookings({ ...config,assetBookingsEnabled:enabled }),
+  head:n => { head = n; }, chain:n => { chain = n; }, online:v => { online = v; },
+  receipt:(hash,value) => { if (value) receipts.set(hash,value); else receipts.delete(hash); },
+  blockHash,
+  replace:() => { epoch++; logs = []; receipts = new Map(); } };
+}
+test('new terms require configured Base asset, exact decimals and signed wallet/edition/treasury', async () => {
+ const f = await fixture();
+ await assert.rejects(f.create({ assetDecimals:18 }), /decimals/);
+ await assert.rejects(f.create({ assetAddress:outsider.address }), /approved/);
+ await assert.rejects(f.create({ gift:{ ...f.input.gift,treasury:outsider.address } }), /gift/);
+ f.chain(1n); await assert.rejects(f.create(), /unavailable|Base/); f.chain(8453n);
+ const b = (await f.create()).bookings[0];
+ assert.match(f.shared.liveAcknowledgement(b), /20 USDC/);
+ assert.match(f.shared.liveAcknowledgement(b), /token ID: 75; quantity: 1/);
+ assert.match(f.shared.liveAcknowledgement(b), /administrator can recover/i);
+ const wrong = await performer.signMessage(f.shared.liveAcknowledgement({ ...b,amountUnits:'20000001' }));
+ await assert.rejects(f.service.acknowledgePerformer({id:bookingId,address:performer.address,signature:wrong}), /mismatch/);
+ await f.acknowledge();
+ const identity = await f.service.getBookingIdentity(bookingId);
+ assert.equal(identity.version,'assets-v1');
+ assert.equal(identity.terms.quantity,'1');
+});
+test('native ETH is fixed exact units and no gift is falsely reserved', async () => {
+ const f = await fixture();
+ const b = (await f.create({ assetAddress:f.shared.LIVE_ZERO_ADDRESS, assetDecimals:18, assetSymbol:'ETH',
+  amountUnits:'20000000000000000',gift:null })).bookings[0];
+ assert.match(f.shared.liveAcknowledgement(b), /0\.02 ETH/);
+ assert.equal(b.giftStatus,'none');
+ assert.equal(f.shared.formatLiveAsset(b.amountUnits,18,'ETH'),'0.02 ETH');
+});
+test('new asset invitations default off independently of an available escrow index', async () => {
+ const f = await fixture(false);
+ const state = await f.service.getState();
+ assert.equal(state.assetEscrowConfigured,true);
+ assert.equal(state.assetBookingCreationEnabled,false);
+ await assert.rejects(f.create(), /disabled/);
+});
+test('disabling new invitations leaves existing asset funding and indexing available', async () => {
+ const f = await fixture(); await f.create(); await f.acknowledge();
+ const b = (await f.service.getState()).bookings[0], t = f.shared.assetBookingTerms(b);
+ const disabled = f.restart(false);
+ let state = await disabled.getState();
+ assert.equal(state.assetBookingCreationEnabled,false);
+ const receipt = f.add(100,'Funded',[ethers.id(bookingId),b.wallet,owner.address,Object.values(t),b.termsUri]);
+ f.head(101); state = await disabled.getState();
+ assert.equal(state.bookings[0].status,'funded');
+ state = await disabled.execute({action:'transaction',id:bookingId,txAction:'funding',txHash:receipt,revision:state.revision});
+ assert.equal(state.bookings[0].transactions.funding.status,'confirmed');
+});
+test('funding, approval, paid fee and gift receipt index independently; reorg clears evidence', async () => {
+ const f = await fixture(); await f.create(); await f.acknowledge();
+ const b = (await f.service.getState()).bookings[0], t = f.shared.assetBookingTerms(b), key = ethers.id(bookingId);
+ const funded = f.add(100,'Funded',[key,b.wallet,owner.address,Object.values(t),b.termsUri]);
+ f.head(100);
+ let result = await f.exec({ action:'transaction',id:bookingId,txAction:'funding',txHash:funded });
+ assert.equal(result.bookings[0].status,'funding pending');
+ f.head(101); result = await f.service.getState();
+ assert.equal(result.bookings[0].status,'funded');
+ assert.equal(result.bookings[0].giftStatus,'reserved');
+ const approve = f.add(102,'FeeDecision',[key,2,'ipfs://report'],0);
+ f.add(102,'GiftDecision',[key,2,'ipfs://report'],1);
+ f.head(103); result = await f.service.getState();
+ assert.equal(result.bookings[0].status,'approved');
+ assert.equal(result.bookings[0].giftStatus,'approved');
+ assert.equal(result.bookings[0].paidUnits,undefined);
+ await f.exec({ action:'transaction',id:bookingId,txAction:'approve',txHash:approve });
+ f.add(104,'FeeSettled',[key,3,b.wallet,b.amountUnits]);
+ f.head(105); result = await f.service.getState();
+ assert.equal(result.bookings[0].status,'paid');
+ assert.equal(result.bookings[0].giftStatus,'approved');
+ assert.match(f.shared.liveBookingRows(result.bookings), /approved.*Approval is not delivery/);
+ f.add(106,'GiftSettled',[key,4,b.wallet,collection,75,1]);
+ f.head(107); result = await f.service.getState();
+ assert.equal(result.bookings[0].giftStatus,'received');
+ f.replace(); result = await f.service.getState();
+ assert.equal(result.bookings[0].status,'funding pending');
+ assert.equal(result.bookings[0].giftStatus,'not funded');
+ assert.equal(result.bookings[0].paidUnits,undefined);
+});
+test('mismatched funding receipt is rejected; index outages do not present asset custody as available', async () => {
+ const f = await fixture(); await f.create(); await f.acknowledge();
+ const b = (await f.service.getState()).bookings[0], t = f.shared.assetBookingTerms(b);
+ const bad = f.add(100,'Funded',[ethers.id(bookingId),b.wallet,owner.address,Object.values({...t,quantity:'2'}),b.termsUri]);
+ f.head(101);
+ await assert.rejects(f.exec({action:'transaction',id:bookingId,txAction:'funding',txHash:bad}), /unavailable|catching up|mismatch/);
+ const unavailable = (await f.service.getState()).bookings[0];
+ assert.equal(unavailable.status,'unavailable');
+ assert.equal(unavailable.giftStatus,'unavailable');
+ f.online(false);
+ assert.equal((await f.service.getState()).assetEscrowConfigured,false);
+});
+test('gift release stays pending or approved after rejection and can be independently retried', async () => {
+ const f = await fixture(); await f.create(); await f.acknowledge();
+ const b = (await f.service.getState()).bookings[0], key = ethers.id(bookingId), t = f.shared.assetBookingTerms(b);
+ f.add(100,'Funded',[key,b.wallet,owner.address,Object.values(t),b.termsUri]); f.head(101); await f.service.getState();
+ f.add(102,'FeeDecision',[key,2,'ipfs://report'],0); f.add(102,'GiftDecision',[key,2,'ipfs://report'],1);
+ f.head(103); await f.service.getState();
+ const hash = ethers.id('pending gift');
+ let result = await f.exec({action:'transaction',id:bookingId,txAction:'giftRelease',txHash:hash});
+ assert.equal(result.bookings[0].transactions.giftRelease.status,'pending');
+ assert.match(f.shared.liveBookingRows(result.bookings), /release pending; not yet received/);
+ f.receipt(hash,{status:0,to:escrow,blockNumber:103,blockHash:f.blockHash(103),logs:[]});
+ result = await f.exec({action:'transaction',id:bookingId,txAction:'giftRelease',txHash:hash});
+ assert.equal(result.bookings[0].giftStatus,'approved');
+ assert.equal(result.bookings[0].transactions.giftRelease.status,'reverted');
+ f.add(104,'FeeSettled',[key,3,b.wallet,b.amountUnits],0);
+ f.add(104,'GiftSettled',[key,4,b.wallet,collection,75,1],1);
+ f.head(105); result = await f.service.getState();
+ assert.equal(result.bookings[0].status,'paid');
+ assert.equal(result.bookings[0].giftStatus,'received');
+});
+test('fault returns the gift without reducing the fee, and administrator recovery is explicit', async () => {
+ const f = await fixture(); await f.create(); await f.acknowledge();
+ const b = (await f.service.getState()).bookings[0], key = ethers.id(bookingId), t = f.shared.assetBookingTerms(b);
+ f.add(100,'Funded',[key,b.wallet,owner.address,Object.values(t),b.termsUri]); f.head(101); await f.service.getState();
+ f.add(102,'FeeDecision',[key,2,'ipfs://fault'],0);
+ f.add(102,'GiftDecision',[key,3,'ipfs://fault'],1);
+ f.head(103); let result = await f.service.getState();
+ assert.equal(result.bookings[0].status,'approved');
+ assert.equal(result.bookings[0].giftStatus,'returning');
+ f.add(104,'GiftSettled',[key,5,treasury,collection,75,1],0);
+ f.add(104,'Recovery',[key,outsider.address,true,false,'ipfs://recovery'],1);
+ f.head(105); result = await f.service.getState();
+ assert.equal(result.bookings[0].status,'recovered');
+ assert.equal(result.bookings[0].giftStatus,'returned');
+ assert.equal(f.shared.claimState(result.bookings[0],escrow,performer.address,Date.parse(b.endUtc)+1000).enabled,false);
+ assert.match(f.shared.liveBookingRows(result.bookings), /recovered · not paid/i);
+});
+test('on-chain performer cancellation updates the calendar and does not invent a gift return', async () => {
+ const f = await fixture(); await f.create(); await f.acknowledge();
+ const b = (await f.service.getState()).bookings[0], key = ethers.id(bookingId), t = f.shared.assetBookingTerms(b);
+ f.add(100,'Funded',[key,b.wallet,owner.address,Object.values(t),b.termsUri]); f.head(101); await f.service.getState();
+ f.add(102,'FeeDecision',[key,4,'ipfs://cancel'],0);
+ f.add(102,'GiftDecision',[key,3,'ipfs://cancel'],1);
+ f.head(103);
+ const state = await f.service.getState(), canceled = state.bookings[0];
+ assert.equal(canceled.status,'refunding');
+ assert.equal(canceled.giftStatus,'returning');
+ assert.equal(canceled.cancelled,true);
+ assert.equal(canceled.scheduleStatus,'synced');
+ assert.doesNotMatch(f.shared.liveBookingRows([canceled]), /Gift: returned/);
+});
+test('listing preflight and receipt proof reject wrong inventory and recipient', async () => {
+ const f = await fixture();
+ const { assertGiftListingsDelisted } = await import('../js/live-performance-admin.mjs');
+ const { verifyAssetFeeReceipt, verifyAssetCancellationReceipt, assetReceiptCanonical } = await import('../js/live-performance-profile.mjs');
+ const gift = f.input.gift;
+ const listing = { active:true,nftContract:collection,tokenId:75n };
+ await assert.rejects(assertGiftListingsDelisted({nextListingId:async()=>1n,getListing:async()=>listing},gift), /Delist/);
+ await assertGiftListingsDelisted({nextListingId:async()=>1n,getListing:async()=>({...listing,active:false})},gift);
+ await f.create(); const b = (await f.service.getState()).bookings[0];
+ const event = f.iface.encodeEventLog(f.iface.getEvent('FeeSettled'),[ethers.id(b.id),3,b.wallet,b.amountUnits]);
+ const receipt = {status:1,to:escrow,logs:[{...event,address:escrow}]};
+ assert.equal(verifyAssetFeeReceipt(receipt,b,ethers),true);
+ assert.equal(verifyAssetFeeReceipt(receipt,{...b,wallet:outsider.address},ethers),false);
+ assert.equal(verifyAssetFeeReceipt({...receipt,to:token},b,ethers),false);
+ assert.equal(await assetReceiptCanonical({getBlock:async()=>({hash:'canonical'})},{blockNumber:1,blockHash:'old'}),false);
+ assert.equal(await assetReceiptCanonical({getBlock:async()=>({hash:'canonical'})},{blockNumber:1,blockHash:'canonical'}),true);
+ const cancel = f.iface.encodeEventLog(f.iface.getEvent('FeeDecision'),[ethers.id(b.id),4,'ipfs://cancel']);
+ assert.equal(verifyAssetCancellationReceipt({status:1,to:escrow,logs:[{...cancel,address:escrow}]},b,ethers),true);
+});

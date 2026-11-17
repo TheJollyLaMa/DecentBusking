@@ -8,6 +8,8 @@ import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
 import { createLiveAudioTransport } from './live-audio-transport.js';
+import { createPublicBroadcast, createBroadcastUploader, createBroadcastStateReader } from './public-broadcast.js';
+import { createRadioResourceMetrics } from './radio-resource-metrics.js';
 import { createLiveRecorder, createLiveRecordingStore, downloadRecordingSegment, fetchCatalogRecordingSource } from './live-recording.js';
 import { createRehearsalService } from './rehearsal.js';
 import { createRehearsalStore } from './rehearsal-store.js';
@@ -1077,6 +1079,7 @@ async function main() {
   comparePayments();
   setInterval(budgetPaced(comparePayments), 15_000).unref();
 
+  let liveBookings;
   let tipLedger = null, tipLedgerReady = false, tipLedgerTask = null, tipConfigurationError = '';
   if (process.env.TIP_ROUTER_ADDRESS) {
     try {
@@ -1094,7 +1097,14 @@ async function main() {
         resolveContext: createTipContextResolver({ provider: tipProvider,
           collections: config.nftContractAddresses || [config.nftContractAddress],
           readLiveBooking: createHistoricalTipBookingReader({ provider: tipProvider,
-            escrowAddress: process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS || '' }) }) });
+            escrowAddress: process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS || '',
+            ...(process.env.LIVE_PERFORMANCE_ASSET_ESCROW_ADDRESS ? {
+              assetEscrowAddress: process.env.LIVE_PERFORMANCE_ASSET_ESCROW_ADDRESS,
+              resolveBookingIdentity: id => {
+                if (!liveBookings) throw new Error('Booking identity service is not ready');
+                return liveBookings.getBookingIdentity(id);
+              },
+            } : {}) }) }) });
       const compareTips = () => {
         if (!tipLedgerTask) tipLedgerTask = (tipLedgerReady ? tipLedger.compare() : tipLedger.initialize())
           .then(() => { tipLedgerReady = true; })
@@ -1580,12 +1590,16 @@ async function main() {
     tags: { app: 'decentbusking', kind: 'live-bookings', schema: '1' },
     serialize: value => value, deserialize: value => value,
     beforeUpload: checkpointMirror ? (bytes, options) => checkpointMirror.mirror(bytes, options) : undefined }) : null;
-  const liveBookings = createLiveBookings({ provider: paymentProvider, ownerWallet: config.mintOwnerWallet,
+  liveBookings = createLiveBookings({ provider: paymentProvider, ownerWallet: config.mintOwnerWallet,
     getBroadcastCompletion: id => process.env.LIVE_AUDIO_ENABLED === 'true' ? liveAudio.completionState(id) : null,
     getRecordingRelease: b => playlistReady
       ? liveRecordingReleaseState(b.id, getJukeLoopNowPlaying({ websiteOnly: true })) : { known: false },
     escrowAddress: process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS || '',
     escrowStartBlock: Number(process.env.LIVE_PERFORMANCE_ESCROW_START_BLOCK || 0), ensResolver: createEnsResolver(),
+    assetEscrowAddress: process.env.LIVE_PERFORMANCE_ASSET_ESCROW_ADDRESS || '',
+    assetEscrowStartBlock: Number(process.env.LIVE_PERFORMANCE_ASSET_ESCROW_START_BLOCK || 0),
+    assetBookingsEnabled: process.env.LIVE_PERFORMANCE_ASSET_BOOKINGS_ENABLED === 'true',
+    giftTreasuryAddress: process.env.LIVE_PERFORMANCE_GIFT_TREASURY_ADDRESS || '',
     restore: liveBookingStore ? liveBookingStore.restore : undefined, save: liveBookingStore ? liveBookingStore.save : undefined,
     getSchedule: () => ({ events: livePerformanceEvents, weeklySchedule: liveWeeklySchedule, ready: liveScheduleReady }),
     saveSchedule: async ({ events, weeklySchedule }) => {
@@ -1597,6 +1611,23 @@ async function main() {
       updateJukeLoopRadioSchedule({ events, schedule: defaultRadioSchedule(weeklySchedule) });
     },
   });
+  const broadcastMode = process.env.PUBLIC_BROADCAST_MODE || 'direct';
+  if (!['direct', 'preview', 'public'].includes(broadcastMode)) throw new Error('Invalid PUBLIC_BROADCAST_MODE');
+  const publicBroadcast = createPublicBroadcast({
+    enabled: broadcastMode !== 'direct',
+    ...(broadcastMode !== 'direct' ? { uploader: createBroadcastUploader({
+      baseUrl: process.env.PUBLIC_BROADCAST_EDGE_URL,
+      token: process.env.PUBLIC_BROADCAST_UPLOAD_TOKEN,
+    }) } : {}),
+  });
+  config.publicBroadcast = publicBroadcast;
+  await publicBroadcast.start();
+  const radioResources = createRadioResourceMetrics();
+  const radioResourceTimer = setInterval(() => {
+    void radioResources.sample().then(sample => console.info('[radio-resources]', JSON.stringify(sample)))
+      .catch(() => console.error('[radio-resources] SAMPLE_FAILED'));
+  }, 60000);
+  radioResourceTimer.unref();
   let liveAudioStore = null;
   if (process.env.LIVE_AUDIO_STORAGE_KEY && config.pinataJwt &&
       (checkpointMirror || process.env.LIVE_AUDIO_CHECKPOINT_MODE === 'hosted-verified')) {
@@ -1713,8 +1744,11 @@ async function main() {
     }),
     onPolicy: policy => {
       config.liveAudioPolicy = policy;
+      publicBroadcast.setPolicy(policy);
       getActiveJukeLoopSession()?.setLiveAudioPolicy(policy);
     },
+    onPublicFrame: (booking, frame) => publicBroadcast.liveFrame(booking, frame),
+    publicBroadcastState: () => ({ ...publicBroadcast.snapshot(), selected: broadcastMode === 'public' }),
     onCancel: (booking, reason) => booking.broadcast ? Promise.resolve()
       : liveBookings.execute({ action: 'cancel', id: booking.id, reason, confirm: true }),
   });
@@ -1785,6 +1819,53 @@ async function main() {
       console.warn(`[promotions] Disabled until public Pinata checkpoints and the persistent journal are ready: ${error.message}`);
     }
   }
+  const readPublicRadioState = createBroadcastStateReader(async () => {
+    const jukeLoopSession = getActiveJukeLoopSession();
+    let paidQueue = null;
+    if (readDevertQueue) {
+      try {
+        paidQueue = await readDevertQueue();
+      } catch (error) {
+        console.warn('[devert-queue] Radio queue status unavailable:', error.message);
+        paidQueue = { unavailable: true, reason: 'Paid advert queue could not be verified' };
+      }
+    }
+    const mainRadioAdCountdown = jukeLoopSession ? await jukeLoopSession.getMainRadioAdCountdown(Date.now(), paidQueue) : null;
+    const nowPlaying = getJukeLoopNowPlaying();
+    let adVotes = null;
+    if (nowPlaying?.isDevert) {
+      try {
+        adVotes = _devertPlaybackRuntime?.getMainRadioAdVoteSummary(nowPlaying.playId, nowPlaying.campaignId) ?? null;
+      } catch (error) {
+        console.warn('[devert-playback] Advert vote tally unavailable:', error.message);
+      }
+    }
+    return {
+      publicBroadcast: { ...publicBroadcast.snapshot(), selected: broadcastMode === 'public' },
+      liveAudio: await liveAudio.current().catch(() => ({ configured: false, phase: 'unavailable', status: 'OFF-AIR',
+        performer: null, bookingVerification: { fresh: false, verifiedAt: null },
+        reason: 'Live room control state is unavailable', policy: config.liveAudioPolicy || null })),
+      ...buildRadioState({
+        nowPlaying,
+        playback: jukeLoopSession?.getPlaybackStatus() || { status: 'offline', ready: false, reason: discordOfflineReason },
+        adVotes,
+        upNext: getJukeLoopUpNext(),
+        playlist: getPlaylist(),
+        mainRadioAdCountdown,
+        ...jukeLoopSession?.getShowState(),
+      }),
+      paymentLedger: {
+        endpoint: '/api/payroll/ledger',
+        snapshotUri: paymentLedger.getState().snapshotUri,
+        lastCheckedAt: paymentLedger.getState().lastCheckedAt,
+        ready: paymentLedgerReady,
+      },
+      discord: { ready: client?.isReady() === true, reason: client?.isReady() ? null : discordOfflineReason,
+        communityReminder: communityReminder.getStatus(),
+        diagnostics: discordDiagnostics.report() },
+    };
+  }, { ttlMs: broadcastMode === 'public' ? 1000 : 0 });
+  publicBroadcast.setStateReader(readPublicRadioState);
   const requestHandler = createWorkerRequestHandler({
     contentReview: _contentReview,
     promotions,
@@ -1936,10 +2017,12 @@ async function main() {
     rpcUrl: config.baseRpcUrl,
     rpcProvider: getRpcRouter().provider('read', 'worker-reads'),
     getRpcHealth: () => getRpcRouter().health(),
+    getRadioResources: () => ({ ...radioResources.snapshot(), broadcast: publicBroadcast.snapshot() }),
     rpcProxy: createRpcProxy({
       request: (method, params) => getRpcRouter().request('fallback', method, params, 'browser-proxy'),
       allowedContracts: [
         process.env.LIVE_PERFORMANCE_ESCROW_ADDRESS,
+        process.env.LIVE_PERFORMANCE_ASSET_ESCROW_ADDRESS,
         ...(config.nftContractAddresses || [config.nftContractAddress]),
         process.env.DJUKE_CONTRACT_ADDRESS || '0x5d07489163feBCdB39C9F579CCC36dff5A067FF9',
         process.env.DEVERT_CONTRACT_ADDRESS || '0x135Cbc573F87637158eb3186C87c584fb0B34CD9',
@@ -1977,6 +2060,7 @@ async function main() {
     },
     radioDeployment: createRadioDeploymentGate({ getSession: getActiveJukeLoopSession,
       getLiveHandoff: async lease => {
+        if (lease.action !== 'cancel' && publicBroadcast.pendingDrain()) return { ready: false };
         if (process.env.LIVE_RECORDING_DURABLE_HANDOFF_ENABLED !== 'false') return liveAudio.prepareDeployment(lease);
         const broadcast = liveAudio.broadcastDeploymentState();
         if (process.env.LIVE_AUDIO_ENABLED === 'true' && (!broadcast.known || broadcast.pending)) return { ready: false };
@@ -1988,51 +2072,7 @@ async function main() {
       if (!checkpointMirror) throw new Error('Radio deployment authorization unavailable');
       checkpointMirror.authorize(authorization);
     },
-    getRadioState: async () => {
-      const jukeLoopSession = getActiveJukeLoopSession();
-      let paidQueue = null;
-      if (readDevertQueue) {
-        try {
-          paidQueue = await readDevertQueue();
-        } catch (error) {
-          console.warn('[devert-queue] Radio queue status unavailable:', error.message);
-          paidQueue = { unavailable: true, reason: 'Paid advert queue could not be verified' };
-        }
-      }
-      const mainRadioAdCountdown = jukeLoopSession ? await jukeLoopSession.getMainRadioAdCountdown(Date.now(), paidQueue) : null;
-      const nowPlaying = getJukeLoopNowPlaying();
-      let adVotes = null;
-      if (nowPlaying?.isDevert) {
-        try {
-          adVotes = _devertPlaybackRuntime?.getMainRadioAdVoteSummary(nowPlaying.playId, nowPlaying.campaignId) ?? null;
-        } catch (error) {
-          console.warn('[devert-playback] Advert vote tally unavailable:', error.message);
-        }
-      }
-      return {
-        liveAudio: await liveAudio.current().catch(() => ({ configured: false, phase: 'unavailable', status: 'OFF-AIR',
-          performer: null, bookingVerification: { fresh: false, verifiedAt: null },
-          reason: 'Live room control state is unavailable', policy: config.liveAudioPolicy || null })),
-        ...buildRadioState({
-          nowPlaying,
-          playback: jukeLoopSession?.getPlaybackStatus() || { status: 'offline', ready: false, reason: discordOfflineReason },
-          adVotes,
-          upNext: getJukeLoopUpNext(),
-          playlist: getPlaylist(),
-          mainRadioAdCountdown,
-          ...jukeLoopSession?.getShowState(),
-        }),
-        paymentLedger: {
-          endpoint: '/api/payroll/ledger',
-          snapshotUri: paymentLedger.getState().snapshotUri,
-          lastCheckedAt: paymentLedger.getState().lastCheckedAt,
-          ready: paymentLedgerReady,
-        },
-        discord: { ready: client?.isReady() === true, reason: client?.isReady() ? null : discordOfflineReason,
-          communityReminder: communityReminder.getStatus(),
-          diagnostics: discordDiagnostics.report() },
-      };
-    },
+    getRadioState: readPublicRadioState,
     getRadioMediaUrl: async cid => {
       const session = getActiveJukeLoopSession();
       if (!session) return null;
@@ -2508,6 +2548,9 @@ async function main() {
     listenerTelemetry.close();
     try {
       await liveAudio.stop();
+      clearInterval(radioResourceTimer);
+      radioResources.stop();
+      await publicBroadcast.stop();
       await recorder.flush();
       await Promise.all([waitForRemotePersistence(), fundStore?.flush(), earningsStore?.flush(),
         Promise.race([flushRpcUsage(), new Promise(resolve => setTimeout(resolve, 5000))]),
@@ -3010,6 +3053,7 @@ async function startWebsiteRadio(client, config) {
     await discoverDedicatedGateway(config);
     const session = createJukeLoopSession('website-radio', {
       websitePlayback: true,
+      publicBroadcast: config.publicBroadcast,
       client: config.getDiscordClient?.() || client,
       ipfsGateway: config.ipfsGateway,
       djuke: _radioPaidQueues,

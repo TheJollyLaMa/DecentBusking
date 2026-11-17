@@ -837,6 +837,44 @@ Booking-linked gift custody/release for next week is tracked in
 [DecentMarket #78](https://github.com/TheJollyLaMa/DecentMarket/issues/78);
 deployment needs explicit approval and must not strand earned cash claims.
 
+An experimental separate Market asset escrow and its feature-gated booking,
+Admin, Profile and historical-tip integration are **undeployed**. Continue
+using the legacy USDC path and the manually reconciled gift procedure above.
+Do not treat a token balance, acceptance or producer approval as proof of
+funding, payment or gift delivery. The new contract explicitly permits
+administrator recovery of reserved or earned assets. Security review, an
+independently reviewed solution to the immutable Market listing limitation,
+and explicit deployment approval are mandatory before use.
+
+The new version signs the exact Base fee asset, quantity and decimals,
+performer, contract, booking and optional edition and return treasury. It is a
+fixed quantity, not a dollar conversion. After a confirmed reservation, a
+producer can separately approve the performance and pay gas to release the
+gift; the performer independently claims the fee. Rejected transfers remain
+retryable. Performer cancellation/no-show returns an unearned gift; platform
+faults retain the full fee. Recovery appears as recovered, not paid. No gift
+expiry is automatic. Asset history must be caught up and canonical before
+new controls are enabled; failure is shown as unavailable.
+
+After review and explicit authorization only, configure the verified
+`LIVE_PERFORMANCE_ASSET_ESCROW_ADDRESS`, its exact
+`LIVE_PERFORMANCE_ASSET_ESCROW_START_BLOCK` and the verified
+`LIVE_PERFORMANCE_GIFT_TREASURY_ADDRESS` on the worker. Deploy compatible
+client and worker first; then `LIVE_PERFORMANCE_ASSET_BOOKINGS_ENABLED=true`
+enables new invitations. It defaults off. For rollback set that flag false
+but retain the asset address/start block and settlement controls for existing
+bookings; retain the legacy escrow configuration separately. The historical
+tip reader uses the stored exact contract version and terms at the tip block,
+never a legacy fallback for a new-version booking. Listener timing remains
+independent.
+
+Before any gift funding, Admin checks all matching treasury listings are
+inactive and requires editions physically in the funding wallet. The Market
+withdrawal itself does not update listings: delist all overlapping listings
+and reconcile confirmed sales before withdrawing. The UI check is not atomic,
+can be bypassed by direct contract calls, and cannot stop a later relisting.
+Do not deploy until that limitation has been safely addressed.
+
 Reuse decision: adapt the MIT-licensed Market contract's existing custody
 semantics, not its buyer flow; use Busking's `getBaseReadProvider`,
 `celebrateLiveInvitation` and Profile booking renderer for this read-only

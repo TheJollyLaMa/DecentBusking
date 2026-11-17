@@ -1,6 +1,8 @@
 import { liveAuthorization } from '../js/live-bookings.mjs';
 import { AbiCoder, Contract, Interface, JsonRpcProvider, keccak256, toUtf8Bytes, verifyMessage, verifyTypedData } from 'ethers';
 import { Readable } from 'node:stream';
+import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
 import { finished, pipeline } from 'node:stream/promises';
 import { createRepeatLog } from './repeat-log.js';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
@@ -20,6 +22,7 @@ import {
 } from '../js/creator-splits.mjs';
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
+let hlsClientScript;
 async function readMediaProbe(response) {
   if (!response.ok || !response.body) {
     await response.body?.cancel();
@@ -272,6 +275,7 @@ export function createWorkerRequestHandler({
   onReviewedAlbumImport,
   creatorProfiles,
   getRadioState,
+  getRadioResources,
   radioDeployment,
   authorizeRadioDeployment,
   getRadioMediaUrl,
@@ -545,6 +549,7 @@ export function createWorkerRequestHandler({
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
         const rpc = getRpcHealth?.();
         sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured',
+          ...(getRadioResources ? { radioResources: getRadioResources() } : {}),
           ...(rpc ? { rpc: { ...rpc.tiers, budget: rpc.budget, computeUnits: rpc.computeUnits } } : {}) }, '*');
         return;
       }
@@ -612,6 +617,13 @@ export function createWorkerRequestHandler({
         const value = requestUrl.searchParams.get('cid') || '';
         if (!value || value.length > 160) throw new Error('Enter a valid image file CID');
         sendJson(response, 200, { cid: normalizeMediaCid(value) }, '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/radio/hls-client.js') {
+        hlsClientScript ||= await readFile(createRequire(import.meta.url).resolve('hls.js'));
+        response.writeHead(200, { 'content-type': 'application/javascript', 'cache-control': 'public, max-age=3600',
+          'access-control-allow-origin': '*', 'x-content-type-options': 'nosniff' });
+        response.end(hlsClientScript);
         return;
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/radio') {

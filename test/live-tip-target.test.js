@@ -44,3 +44,19 @@ test('confirmed non-live modes preserve recorded tipping; network errors remain 
   }
   await assert.rejects(read({}, { fetchImpl: async () => ({ ok: false, status: 503 }) }), /HTTP 503/);
 });
+
+test('buffered tips bind the audible act, not the next studio act or the previous recording', async () => {
+  const program = { at: 1000, playId: 'live:show', bookingId: 'show', live: true, performer: live.performer };
+  const state = { serverTime: 25000, liveAudio: { ...live, bookingId: 'next-show',
+    performer: { ...live.performer, wallet: `0x${'34'.repeat(20)}` } },
+  publicBroadcast: { selected: true, programHistory: [program,
+    { at: 20000, playId: 'next-show', bookingId: 'next-show', live: true, performer: live.performer }] } };
+  const audibleBroadcast = { at: 12000, observedAt: 25000, program };
+  assert.deepEqual(await read(state, { audibleBroadcast, expectedBookingId: 'show' }),
+    { bookingId: 'show', ...live.performer });
+  await assert.rejects(read(state, { audibleBroadcast, expectedBookingId: 'next-show' }), /changed/);
+  await assert.rejects(read(state, { audibleBroadcast: null }), /timing is unavailable/);
+  await assert.rejects(read({ ...state, serverTime: 150000 }, { audibleBroadcast }), /timing is unavailable/);
+  await assert.rejects(read(state, { audibleBroadcast: { ...audibleBroadcast,
+    program: { ...program, playId: 'invented' } } }), /changed/);
+});

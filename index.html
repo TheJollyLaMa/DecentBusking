@@ -30,24 +30,32 @@
   <link rel="stylesheet" href="css/live-afterparty.css?v=20261117-release-party" />
   <script type="importmap">
     {"imports":{
-      "./js/radio-sync.js?v=20261030-ad-cutoff":"./js/radio-sync.js?v=20261117-producer-recovery",
+      "./js/radio-sync.js?v=20261030-ad-cutoff":"./js/radio-sync.js?v=20261117-public-hls",
+      "./js/live-tip-target.mjs?v=20261114-live-direction":"./js/live-tip-target.mjs?v=20261117-public-hls",
       "./js/stage.js?v=20261030-ad-cutoff":"./js/stage.js?v=20261114-live-direction",
       "./js/live-audio-client.mjs":"./js/live-audio-client.mjs?v=20261117-lease-recovery",
       "./js/live-audio-client.mjs?v=20261114-direction":"./js/live-audio-client.mjs?v=20261117-lease-recovery",
       "./js/live-audio-client.mjs?v=20261114-allocated-stage":"./js/live-audio-client.mjs?v=20261117-lease-recovery",
-      "./js/live-audio.mjs":"./js/live-audio.mjs?v=20261117-producer-recovery",
-      "./js/live-audio.mjs?v=20261108-live-audio-pilot":"./js/live-audio.mjs?v=20261117-producer-recovery",
-      "./js/live-audio.mjs?v=20261114-allocated-stage":"./js/live-audio.mjs?v=20261117-producer-recovery",
-      "./js/live-performance-profile.mjs?v=20261110-wallet-practice":"./js/live-performance-profile.mjs?v=20261117-release-party",
-      "./js/live-performance-profile.mjs?v=20261114-performer-encore":"./js/live-performance-profile.mjs?v=20261117-release-party",
-      "./js/live-performance-profile.mjs?v=20261114-allocated-stage":"./js/live-performance-profile.mjs?v=20261117-release-party",
-      "./js/live-performance-profile.mjs?v=20261115-afterparty":"./js/live-performance-profile.mjs?v=20261117-release-party",
-      "./js/live-performance-profile.mjs?v=20261116-claim-evidence":"./js/live-performance-profile.mjs?v=20261117-release-party",
-      "./js/live-performance-profile.mjs?v=20261116-curtain":"./js/live-performance-profile.mjs?v=20261117-release-party",
+      "./js/live-audio.mjs":"./js/live-audio.mjs?v=20261117-booking-assets",
+      "./js/live-audio.mjs?v=20261108-live-audio-pilot":"./js/live-audio.mjs?v=20261117-booking-assets",
+      "./js/live-audio.mjs?v=20261114-allocated-stage":"./js/live-audio.mjs?v=20261117-booking-assets",
+      "./js/live-audio.mjs?v=20261117-producer-recovery":"./js/live-audio.mjs?v=20261117-booking-assets",
+      "./js/live-performance-profile.mjs?v=20261110-wallet-practice":"./js/live-performance-profile.mjs?v=20261117-booking-assets",
+      "./js/live-performance-profile.mjs?v=20261114-performer-encore":"./js/live-performance-profile.mjs?v=20261117-booking-assets",
+      "./js/live-performance-profile.mjs?v=20261114-allocated-stage":"./js/live-performance-profile.mjs?v=20261117-booking-assets",
+      "./js/live-performance-profile.mjs?v=20261115-afterparty":"./js/live-performance-profile.mjs?v=20261117-booking-assets",
+      "./js/live-performance-profile.mjs?v=20261116-claim-evidence":"./js/live-performance-profile.mjs?v=20261117-booking-assets",
+      "./js/live-performance-profile.mjs?v=20261116-curtain":"./js/live-performance-profile.mjs?v=20261117-booking-assets",
+      "./js/live-performance-profile.mjs?v=20261117-release-party":"./js/live-performance-profile.mjs?v=20261117-booking-assets",
       "./js/live-afterparty.mjs?v=20261115-afterparty":"./js/live-afterparty.mjs?v=20261117-release-party",
       "./js/live-afterparty.mjs?v=20261116-curtain":"./js/live-afterparty.mjs?v=20261117-release-party",
-      "./js/live-bookings.mjs":"./js/live-bookings.mjs?v=20261114-tip-provenance",
-      "./js/live-bookings.mjs?v=20261108-live-audio-pilot":"./js/live-bookings.mjs?v=20261114-tip-provenance",
+      "./js/live-bookings.mjs":"./js/live-bookings.mjs?v=20261117-booking-assets",
+      "./js/live-bookings.mjs?v=20261108-live-audio-pilot":"./js/live-bookings.mjs?v=20261117-booking-assets",
+      "./js/live-bookings.mjs?v=20261114-tip-provenance":"./js/live-bookings.mjs?v=20261117-booking-assets",
+      "./js/live-booking-notifications.mjs?v=20261113-one-action-release":"./js/live-booking-notifications.mjs?v=20261117-booking-assets",
+      "./js/performer-room.mjs?v=20261110-wallet-practice":"./js/performer-room.mjs?v=20261117-booking-assets",
+      "./js/performer-room.mjs?v=20261114-allocated-stage":"./js/performer-room.mjs?v=20261117-booking-assets",
+      "./js/performer-room.mjs?v=20261116-curtain":"./js/performer-room.mjs?v=20261117-booking-assets",
       "./js/radio-schedule-ui.mjs?v=20261025-community-reminder":"./js/radio-schedule-ui.mjs?v=20261115-afterparty",
       "./js/fund-display.mjs?v=20261024-djuke-labels":"./js/fund-display.mjs?v=20261108-live-audio-pilot"
     }}
@@ -1025,9 +1033,9 @@
   <script type="module" src="js/main.js?v=20261117-right-rooms"></script>
 
   <!-- Admin role-grant panel -->
-  <link rel="stylesheet" href="css/live-performance.css?v=20261115-afterparty">
-  <script type="module" src="js/live-booking-notifications.mjs?v=20261113-one-action-release"></script>
-  <script type="module" src="js/live-performance-admin.mjs?v=20261117-release-party"></script>
+  <link rel="stylesheet" href="css/live-performance.css?v=20261117-booking-assets">
+  <script type="module" src="js/live-booking-notifications.mjs?v=20261117-booking-assets"></script>
+  <script type="module" src="js/live-performance-admin.mjs?v=20261117-booking-assets"></script>
   <link rel="stylesheet" href="css/promotions.css?v=20261116-promotions">
   <script type="module" src="js/admin.js?v=20261116-longform"></script>
   <link rel="stylesheet" href="css/content-review.css?v=20261107-flags">
