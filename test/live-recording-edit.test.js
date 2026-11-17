@@ -5,13 +5,55 @@ const { createHash } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { liveRecordingConsentMessage } = require('../js/live-recording-consent.mjs');
 const { catalogRecordingAuthorizationMessage, catalogRecordingReleaseApprovalMessage,
-  recordingReleaseApprovalMessage, validateCatalogRecordingDraft, validateRecordingDraft } = require('../js/live-recording-edit.mjs');
+  canEditCatalogRecording, moveRecordingBoundary, recordingReleaseApprovalMessage,
+  validateCatalogRecordingDraft, validateRecordingDraft } = require('../js/live-recording-edit.mjs');
 
 const ORIGIN = 'https://radio.example';
 const performer = Wallet.createRandom(), owner = Wallet.createRandom(), sourceCid = 'a'.repeat(46);
 const booking = { id: 'release-room-test', wallet: performer.address, title: 'After the rain',
   status: 'paid', acknowledged: true, payoutPolicy: 'pilot-guaranteed-v1', cancelled: false,
   startUtc: new Date(1_700_000_000_000).toISOString(), endUtc: new Date(1_700_001_200_000).toISOString() };
+
+test('dragging a shared cut moves both songs, clamps minimum length and preserves a valid draft', () => {
+  const rate = 48_000;
+  const draft = { revision: 1, albumTitle: 'Studio', songs: [
+    { title: 'One', startSample: 0, endSample: 10 * rate },
+    { title: 'Two', startSample: 10 * rate, endSample: 20 * rate },
+    { title: 'Three', startSample: 20 * rate, endSample: 30 * rate },
+  ] };
+  const moved = moveRecordingBoundary(draft, 30 * rate, 0, 'endSample', 15 * rate + .3);
+  assert.equal(moved.songs[0].endSample, 15 * rate);
+  assert.equal(moved.songs[1].startSample, 15 * rate);
+  assert.equal(draft.songs[0].endSample, 10 * rate);
+  assert.doesNotThrow(() => validateCatalogRecordingDraft(moved, 30 * rate));
+  const clamped = moveRecordingBoundary(moved, 30 * rate, 0, 'endSample', 30 * rate);
+  assert.equal(clamped.songs[0].endSample, 19.5 * rate);
+  assert.equal(clamped.songs[1].endSample - clamped.songs[1].startSample, .5 * rate);
+  assert.doesNotThrow(() => validateCatalogRecordingDraft(clamped, 30 * rate));
+});
+
+test('independent cut edges cannot cross neighbors, exceed export bounds or leave source audio', () => {
+  const rate = 48_000;
+  const draft = { revision: 1, albumTitle: 'Studio', songs: [
+    { title: 'One', startSample: 0, endSample: 10 * rate },
+    { title: 'Two', startSample: 20 * rate, endSample: 30 * rate },
+  ] };
+  const moved = moveRecordingBoundary(draft, 40 * rate, 1, 'startSample', -1000);
+  assert.equal(moved.songs[1].startSample, 10 * rate);
+  assert.equal(moved.songs[0].endSample, 10 * rate);
+  const long = { ...draft, songs: [{ title: 'Long song', startSample: 0, endSample: 60 * rate }] };
+  assert.equal(moveRecordingBoundary(long, 3600 * rate, 0, 'endSample', 3600 * rate).songs[0].endSample, 1800 * rate);
+  assert.throws(() => moveRecordingBoundary(draft, 40 * rate, 0, 'endSample', NaN), /Invalid recording cut/);
+});
+
+test('studio access follows credited audio artists, not holders or collaborator-only credits', () => {
+  const nft = { artist: performer.address, creator: owner.address, owner: owner.address,
+    contractAddress: `0x${'1'.repeat(40)}`, tokenId: 1, audioUrl: `ipfs://${sourceCid}`, mediaType: 'audio/mpeg' };
+  assert.equal(canEditCatalogRecording(nft, performer.address), true);
+  assert.equal(canEditCatalogRecording(nft, owner.address), false);
+  assert.equal(canEditCatalogRecording({ ...nft, creatorSplits: [{ wallet: owner.address }] }, owner.address), false);
+  assert.equal(canEditCatalogRecording({ ...nft, mediaType: 'video/mp4' }, performer.address), false);
+});
 
 function splitDraft(revision = 1) {
   return { revision, albumTitle: 'After the rain', songs: [

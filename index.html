@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261114-tip-provenance" />
+  <link rel="stylesheet" href="css/styles.css?v=20261116-studio-polish" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
   <link rel="stylesheet" href="css/live-afterparty.css?v=20261116-curtain" />
@@ -430,13 +430,24 @@
       ⚡ Show All Now
     </button>
   </aside>
+  <button id="recording-edit-tab" type="button" aria-label="Open your recording studio" aria-controls="recording-edit-panel" aria-expanded="false" hidden>
+    <span aria-hidden="true">🎛️<br>✂️🎧</span><span>Studio</span>
+  </button>
   <aside id="recording-edit-panel" aria-label="Recording editor" aria-hidden="true" inert>
     <div class="recording-edit-panel-heading">
-      <h2>Recording editor</h2>
-      <a id="recording-edit-dedicated" href="recording-edit.html" target="_blank" rel="noopener noreferrer">Open dedicated room</a>
+      <h2>🎛️ Your studio</h2>
+      <div id="recording-edit-companion"></div>
       <button id="recording-edit-panel-close" type="button" aria-label="Close recording editor">✕</button>
     </div>
-    <iframe id="recording-edit-frame" title="Recording editing room" src="about:blank"></iframe>
+    <section class="recording-edit-library" aria-label="Your song NFTs">
+      <label for="recording-edit-search">Find one of your songs</label>
+      <input id="recording-edit-search" type="search" placeholder="Search your songs…" autocomplete="off">
+      <p id="recording-edit-library-status" role="status" aria-live="polite"></p>
+      <ul id="recording-edit-library"></ul>
+      <button id="recording-edit-more" type="button" hidden>More songs</button>
+    </section>
+    <div id="recording-edit-opening" role="status" hidden><span aria-hidden="true">🎚️</span><p>Opening your recording studio…</p></div>
+    <iframe id="recording-edit-frame" title="Recording editing room" src="about:blank" hidden></iframe>
   </aside>
 
   <!-- Timeline Navigation Controls -->
@@ -973,7 +984,7 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261116-promotions"></script>
+  <script type="module" src="js/main.js?v=20261116-studio-polish"></script>
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261115-afterparty">

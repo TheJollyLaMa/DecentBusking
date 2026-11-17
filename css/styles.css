@@ -1577,13 +1577,39 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 #dnft-list-items::-webkit-scrollbar { width: 4px; }
 #dnft-list-items::-webkit-scrollbar-thumb { background: var(--gold-dim); border-radius: 2px; }
 
+:root { --recording-editor-width: min(560px, calc(100vw - 44px)); }
+#recording-edit-tab {
+  position: fixed;
+  right: 0;
+  top: calc(var(--header-height, 112px) + 140px);
+  z-index: 121;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 5px;
+  width: 44px;
+  min-height: 86px;
+  padding: 6px 2px;
+  border: 1px solid #a491c5;
+  border-right: 0;
+  border-radius: 7px 0 0 7px;
+  background: #241e32;
+  color: #eee3ff;
+  cursor: pointer;
+  transition: right var(--transition);
+}
+#recording-edit-tab[hidden] { display: none; }
+#recording-edit-tab span:first-child { font-size: 17px; }
+#recording-edit-tab span:last-child { font: 700 .66rem var(--font-body); }
+body.recording-edit-open #recording-edit-tab { right: var(--recording-editor-width); }
 #recording-edit-panel {
   position: fixed;
   right: 0;
-  top: calc(var(--header-height, 112px) + 102px);
+  top: calc(var(--header-height, 112px) + 12px);
   bottom: calc(var(--radio-footer-height, 96px) + 12px);
-  width: min(520px, calc(100vw - 20px));
-  z-index: 90;
+  width: var(--recording-editor-width);
+  z-index: 120;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1621,11 +1647,6 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
   text-transform: uppercase;
 }
 
-.recording-edit-panel-heading a {
-  color: var(--text-dim);
-  font: 0.72rem var(--font-body);
-}
-
 .recording-edit-panel-heading button {
   width: 30px;
   height: 30px;
@@ -1642,6 +1663,28 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
   min-height: 0;
   border: 0;
   background: #080612;
+}
+#recording-edit-panel [hidden] { display: none; }
+.recording-edit-library { padding: .6rem .8rem; border-bottom: 1px solid var(--panel-border); }
+.recording-edit-library label { display: block; color: var(--text-dim); font-size: .75rem; margin-bottom: .35rem; }
+.recording-edit-library input {
+  box-sizing: border-box; width: 100%; padding: .6rem; border: 1px solid #736086;
+  border-radius: 6px; background: #151121; color: var(--text);
+}
+#recording-edit-library-status { margin: .4rem 0; color: var(--text-dim); font-size: .72rem; }
+#recording-edit-library { list-style: none; padding: 0; margin: 0; max-height: 120px; overflow-y: auto; }
+#recording-edit-library button, #recording-edit-more {
+  width: 100%; padding: .5rem; border: 0; border-radius: 4px; background: #231b32;
+  color: #e5dcf4; text-align: left; cursor: pointer; margin: 2px 0;
+}
+#recording-edit-library button:hover { background: #3a2c50; }
+#recording-edit-panel:has(iframe:not([hidden])) #recording-edit-library { max-height: 72px; }
+#recording-edit-opening { flex: 1; display: grid; place-content: center; padding: 1rem; text-align: center; color: #e0c9ff; }
+#recording-edit-opening > span { font-size: 2rem; }
+#recording-edit-panel button:focus-visible, #recording-edit-tab:focus-visible,
+#recording-edit-panel input:focus-visible { outline: 2px solid #c5a5f2; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  #recording-edit-panel, #recording-edit-tab { transition: none; }
 }
 
 .dnft-list-item {

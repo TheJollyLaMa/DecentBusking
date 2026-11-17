@@ -6,6 +6,54 @@ export const LIVE_RECORDING_MAX_SONGS = 50;
 const validTitle = (value, limit) => typeof value === 'string' &&
   value.trim().length > 0 && value.trim().length <= limit && !/[\u0000-\u001f\u007f]/.test(value);
 
+export function canEditCatalogRecording(nft = {}, walletAddress = '') {
+  const wallet = String(walletAddress || '').toLowerCase();
+  const artist = /^0x[0-9a-f]{40}$/i.test(nft.artist || '')
+    ? String(nft.artist).toLowerCase() : String(nft.creator || '').toLowerCase();
+  const source = String(nft.audioUrl || nft.animation_url || '');
+  const cid = source.match(/^ipfs:\/\/([^/?#]+)$/i)?.[1] ||
+    source.match(/^https:\/\/[^/]+\/ipfs\/([^/?#]+)$/i)?.[1] || '';
+  return /^0x[0-9a-f]{40}$/.test(wallet) && artist === wallet &&
+    (nft.chainId ?? 8453) === 8453 &&
+    /^0x[0-9a-f]{40}$/i.test(nft.contractAddress || '') &&
+    nft.tokenId !== undefined && nft.tokenId !== null && nft.tokenId !== '' &&
+    Number.isSafeInteger(Number(nft.tokenId)) && Number(nft.tokenId) >= 0 &&
+    /^[a-zA-Z0-9]{20,120}$/.test(cid) &&
+    String(nft.mediaType || 'audio/mpeg').startsWith('audio/');
+}
+
+export function recordingBoundaryRange(draft, totalSamples, index, key) {
+  const song = draft?.songs?.[index];
+  if (!song || !Number.isSafeInteger(index) || index < 0 || !['startSample', 'endSample'].includes(key) ||
+      !Number.isSafeInteger(totalSamples) || totalSamples <= 0 ||
+      !draft.songs.every(track => Number.isSafeInteger(track.startSample) && Number.isSafeInteger(track.endSample) &&
+        track.startSample >= 0 && track.endSample >= track.startSample && track.endSample <= totalSamples)) {
+    throw Error('Recording boundaries are unavailable');
+  }
+  const previous = draft.songs[index - 1], next = draft.songs[index + 1];
+  const paired = key === 'endSample' && next?.startSample === song.endSample;
+  const min = key === 'startSample'
+    ? Math.max(previous?.endSample || 0, song.endSample - LIVE_RECORDING_MAX_SONG_SAMPLES)
+    : Math.max(song.startSample + LIVE_RECORDING_MIN_RELEASE_SAMPLES,
+      paired ? next.endSample - LIVE_RECORDING_MAX_SONG_SAMPLES : 0);
+  const max = key === 'startSample'
+    ? song.endSample - LIVE_RECORDING_MIN_RELEASE_SAMPLES
+    : Math.min(paired ? next.endSample - LIVE_RECORDING_MIN_RELEASE_SAMPLES : next?.startSample ?? totalSamples,
+      song.startSample + LIVE_RECORDING_MAX_SONG_SAMPLES, totalSamples);
+  if (min > max) throw Error('Correct the surrounding song boundaries before moving this cut');
+  return { min, max, paired };
+}
+
+export function moveRecordingBoundary(draft, totalSamples, index, key, sample) {
+  if (!Number.isFinite(sample)) throw Error('Invalid recording cut position');
+  const range = recordingBoundaryRange(draft, totalSamples, index, key);
+  const next = structuredClone(draft);
+  const value = Math.max(range.min, Math.min(range.max, Math.round(sample)));
+  next.songs[index][key] = value;
+  if (range.paired) next.songs[index + 1].startSample = value;
+  return next;
+}
+
 export function recordingSourceSamples(segments) {
   if (!Array.isArray(segments) || !segments.length) throw Error('Recording source is unavailable');
   const bytes = segments.reduce((total, segment) => {

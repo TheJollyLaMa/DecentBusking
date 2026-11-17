@@ -123,8 +123,9 @@ test('archive retries transient RPC errors instead of silently dropping a track'
 
 test('NFT details open an accessible dialog with artwork and escaped metadata without another audio player', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/nft-card.js'), 'utf8')
-    .replace(/^import .*;$/gm, '').replace(/export /g, '');
+    .replace(/^(?:import .*|export \{.*\} from .*);$/gm, '').replace(/export /g, '');
   const { buildNftShareUrl } = await import(loaderUrl);
+  const { canEditCatalogRecording } = await import('../js/live-recording-edit.mjs');
   const classes = new Set(['hidden']);
   const events = [];
   const shareCalls = [];
@@ -198,6 +199,7 @@ test('NFT details open an accessible dialog with artwork and escaped metadata wi
       location: { href: 'https://busking.example/app/?foo=bar' } },
     URL,
     buildNftShareUrl,
+    canEditCatalogRecording,
     CustomEvent: class CustomEvent {
       constructor(type, init = {}) { this.type = type; this.detail = init.detail; this.cancelable = Boolean(init.cancelable); this.defaultPrevented = false; }
       preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
