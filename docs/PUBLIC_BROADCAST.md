@@ -129,6 +129,15 @@ stage/count diagnostic, distinguishing IPC backlog, PCM size and source age.
 Public state is requested from the parent through the existing eight-second
 deadline, and worker errors explicitly make the broadcast unavailable.
 
+Preview mode additionally samples the parent CPU at 10 ms for at most ten
+resource windows. Only windows with an event-loop maximum above 500 ms log
+`[radio-cpu-stall]`: a top-ten aggregate of module-relative file, function, line
+and sampled time, never a raw profile, payload, credential or absolute path.
+Direct/public modes do not start this diagnostic. Health reports the measured
+event-loop maximum alongside p99, since a rare multi-second pause can be hidden
+by an otherwise healthy percentile. Sampling is diagnostic overhead, not proof
+that a particular function caused a pause.
+
 The client uses native HLS only with a usable programme clock (`getStartDate`),
 otherwise the self-hosted pinned Hls.js bundle. Native playback capability
 alone is insufficient to identify the audible performer. The Hls.js initial
@@ -238,6 +247,18 @@ Development evidence so far:
   transition. Neither run passed. The bridge now uses worker-owned atomic
   credits and reports the precise limit stage; these changes require another
   hosted continuity exercise rather than assuming every limit is network load.
+- The atomic-credit release's next 200/600 attempt stopped after 187.85 observed
+  seconds, not ten minutes. All 200 initially decoded, but startup p95 3.200 s
+  missed its limit and audible delay p95 23.477 s exceeded the target.
+  Metadata p95 was 1.077 s; CPU max 35.4%, memory max 65.7%, event-loop p99
+  67.6 ms, with no request/metadata/HTTP 5xx failures before the safety stop.
+  The new diagnostic established an actual PCM queue overflow: 192,000 bytes
+  queued plus a 3,840-byte incoming frame, not an IPC-credit failure.
+  Programme history also showed a gap and return within the same recording,
+  not solely a song transition. A contemporaneous request took 1.944 s, but
+  its duration alone does not establish a blocking function. The unchanged
+  one-second queue limit remains; parent CPU/max-delay diagnostics investigate
+  the producer rather than silently dropping audio or raising the limit.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container

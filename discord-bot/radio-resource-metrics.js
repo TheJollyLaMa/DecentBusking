@@ -1,5 +1,63 @@
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { readFile } from 'node:fs/promises';
+import { Session } from 'node:inspector';
+
+export function summarizeRadioCpuProfile(profile) {
+  const nodes = new Map(profile.nodes.map(node => [node.id, node]));
+  const parents = new Map();
+  for (const node of profile.nodes) for (const child of node.children || []) parents.set(child, node.id);
+  const root = new URL('.', import.meta.url).href, totals = new Map();
+  for (const [index, id] of (profile.samples || []).entries()) {
+    let node = nodes.get(id);
+    const runtimeName = ['(idle)', '(garbage collector)', '(program)'].includes(node?.callFrame.functionName)
+      ? node.callFrame.functionName : '(runtime)';
+    while (node && !node.callFrame.url.startsWith(root)) node = nodes.get(parents.get(node.id));
+    const frame = node?.callFrame;
+    const file = frame ? frame.url.slice(root.length).slice(0, 200) : '(runtime)';
+    const line = frame ? frame.lineNumber + 1 : 0;
+    const name = frame ? frame.functionName.slice(0, 100) || '(anonymous)' : runtimeName;
+    const key = `${file}:${line}:${name}`;
+    const entry = totals.get(key) || { file, line, function: name, sampledMs: 0 };
+    entry.sampledMs += (profile.timeDeltas?.[index] || 0) / 1000;
+    totals.set(key, entry);
+  }
+  return [...totals.values()].sort((a, b) => b.sampledMs - a.sampledMs).slice(0, 10);
+}
+
+function createRadioCpuDiagnostics(log) {
+  const session = new Session();
+  const post = (method, params = {}) => new Promise((resolve, reject) =>
+    session.post(method, params, (error, result) => error ? reject(error) : resolve(result)));
+  let closed = false, windows = 0;
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    try { await post('Profiler.disable'); } finally { session.disconnect(); }
+  };
+  session.connect();
+  const ready = post('Profiler.enable').then(() => post('Profiler.setSamplingInterval', { interval: 10000 }))
+    .then(() => post('Profiler.start'));
+  const failed = async () => {
+    log.error('[radio-resources] CPU_PROFILE_FAILED');
+    await close().catch(() => log.error('[radio-resources] CPU_PROFILE_STOP_FAILED'));
+  };
+  void ready.catch(failed);
+  return {
+    async sample(maxDelayMs) {
+      if (closed) return;
+      try {
+        await ready;
+        const { profile } = await post('Profiler.stop');
+        if (maxDelayMs > 500) log.info('[radio-cpu-stall]', JSON.stringify({
+          eventLoopMaxMs: maxDelayMs, top: summarizeRadioCpuProfile(profile),
+        }));
+        if (++windows >= 10) await close();
+        else await post('Profiler.start');
+      } catch { await failed(); }
+    },
+    stop: () => { void ready.then(close).catch(failed); },
+  };
+}
 
 export async function readContainerResources() {
   if (process.platform !== 'linux') return { available: false, reason: 'Container quotas are not available on this platform' };
@@ -22,8 +80,9 @@ export async function readContainerResources() {
 
 export function createRadioResourceMetrics({ now = Date.now, cpuUsage = process.cpuUsage,
   memoryUsage = process.memoryUsage, histogram = monitorEventLoopDelay({ resolution: 20 }),
-  readContainer = readContainerResources } = {}) {
+  readContainer = readContainerResources, profileCpu = false, log = console } = {}) {
   histogram.enable();
+  const diagnostics = profileCpu ? createRadioCpuDiagnostics(log) : null;
   let previousAt = now(), previousCpu = cpuUsage(), last = null, previousContainer = null;
   return {
     async sample() {
@@ -37,12 +96,14 @@ export function createRadioResourceMetrics({ now = Date.now, cpuUsage = process.
       }
       last = { at, elapsedMs, cpuCorePercent: (cpu.user + cpu.system - previousCpu.user - previousCpu.system) / (elapsedMs * 10),
         rssBytes: memory.rss, heapUsedBytes: memory.heapUsed, eventLoopP99Ms: histogram.percentile(99) / 1e6,
+        eventLoopMaxMs: histogram.max / 1e6,
         container };
+      await diagnostics?.sample(last.eventLoopMaxMs);
       previousContainer = container;
       previousAt = at; previousCpu = cpu; histogram.reset();
       return last;
     },
     snapshot: () => last,
-    stop: () => histogram.disable(),
+    stop() { histogram.disable(); diagnostics?.stop(); },
   };
 }

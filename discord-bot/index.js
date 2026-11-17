@@ -1621,7 +1621,7 @@ async function main() {
   });
   config.publicBroadcast = publicBroadcast;
   await publicBroadcast.start();
-  const radioResources = createRadioResourceMetrics();
+  const radioResources = createRadioResourceMetrics({ profileCpu: broadcastMode === 'preview' });
   const radioResourceTimer = setInterval(() => {
     void radioResources.sample().then(sample => console.info('[radio-resources]', JSON.stringify(sample)))
       .catch(() => console.error('[radio-resources] SAMPLE_FAILED'));
