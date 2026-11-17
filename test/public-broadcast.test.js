@@ -272,6 +272,74 @@ test('encoder waits for authorized audio, survives wall-clock corrections and fa
   assert.equal(broadcaster.snapshot().reason, 'ENCODER_CLOCK_STALLED');
 });
 
+test('delayed inter-thread PCM cannot extend the existing one-second audio queue allowance', async t => {
+  const { createPublicBroadcast } = await import('../discord-bot/public-broadcast.js');
+  const encoder = new EventEmitter();
+  encoder.stdin = new PassThrough();
+  encoder.kill = () => { encoder.emit('close'); return true; };
+  let wall = 1700000000000, elapsed = 0;
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const broadcaster = createPublicBroadcast({ enabled: true, uploader: { baseUrl: 'https://edge.example' },
+    now: () => wall, monotonicNow: () => elapsed, spawnImpl: () => encoder, log: { error() {} } });
+  await broadcaster.start();
+  t.after(() => broadcaster.stop());
+  broadcaster.setPolicy({ mode: 'live', bookingId: 'live' });
+  broadcaster.liveFrame({ id: 'live' }, {
+    data: new Int16Array(960), channels: 1, sampleRate: 48000, samplesPerChannel: 960,
+  }, -2000);
+  wall += 100; elapsed = 20;
+  t.mock.timers.tick(20);
+  assert.equal(broadcaster.snapshot().reason, 'PCM_BUFFER_LIMIT');
+  assert.equal(broadcaster.snapshot().inputBytes, 0);
+});
+
+test('the real encoder thread survives a blocked application loop without admitting private input', { timeout: 10000 }, async t => {
+  const { createPublicBroadcastWorker } = await import('../discord-bot/public-broadcast-worker.js');
+  const broadcaster = createPublicBroadcastWorker({ enabled: true, edgeUrl: 'https://edge.example', token: 't'.repeat(40) });
+  await broadcaster.start();
+  t.after(() => broadcaster.stop());
+  broadcaster.setPolicy({ mode: 'live', bookingId: 'live' });
+  const frame = { data: new Int16Array(960), channels: 1, sampleRate: 48000, samplesPerChannel: 960 };
+  broadcaster.liveFrame({ id: 'live', rehearsal: true }, frame);
+  await wait(100);
+  assert.equal(broadcaster.snapshot().inputBytes, 0);
+  broadcaster.liveFrame({ id: 'live' }, frame);
+  const deadline = Date.now() + 2000;
+  while (!broadcaster.snapshot().inputBytes && Date.now() < deadline) await wait(20);
+  const before = broadcaster.snapshot().inputBytes;
+  assert.ok(before > 0);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 650);
+  await wait(50);
+  assert.notEqual(broadcaster.snapshot().status, 'unavailable');
+  assert.ok(broadcaster.snapshot().inputBytes - before >= 48000, 'encoding must continue while the parent is blocked');
+  assert.equal(broadcaster.pendingDrain(), true);
+});
+
+test('inter-thread audio backpressure fails explicitly instead of building an unbounded message queue', { timeout: 10000 }, async t => {
+  const { createPublicBroadcastWorker } = await import('../discord-bot/public-broadcast-worker.js');
+  const broadcaster = createPublicBroadcastWorker({ enabled: true, edgeUrl: 'https://edge.example',
+    token: 't'.repeat(40), log: { error() {} } });
+  await broadcaster.start();
+  t.after(() => broadcaster.stop());
+  broadcaster.setPolicy({ mode: 'live', bookingId: 'live' });
+  for (let index = 0; index < 51; index++) broadcaster.liveFrame({ id: 'live' }, {
+    data: new Int16Array(960), channels: 1, sampleRate: 48000, samplesPerChannel: 960,
+  });
+  assert.equal(broadcaster.snapshot().reason, 'PCM_BUFFER_LIMIT');
+});
+
+test('encoder thread failures remain explicit on the parent snapshot and can be shut down', { timeout: 10000 }, async t => {
+  const { createPublicBroadcastWorker } = await import('../discord-bot/public-broadcast-worker.js');
+  const broadcaster = createPublicBroadcastWorker({ enabled: true, edgeUrl: 'https://edge.example',
+    token: 't'.repeat(40), ffmpeg: '/nonexistent/broadcast-ffmpeg' });
+  await broadcaster.start();
+  t.after(() => broadcaster.stop());
+  const deadline = Date.now() + 2000;
+  while (broadcaster.snapshot().status !== 'unavailable' && Date.now() < deadline) await wait(20);
+  assert.equal(broadcaster.snapshot().reason, 'ENCODER_START_FAILED');
+  await broadcaster.stop();
+});
+
 test('real AAC/HLS output preserves ordered adverts, adjacent acts and private-room exclusion', { timeout: 35000 }, async t => {
   const { createPublicBroadcast, parseBroadcastPlaylist } = await import('../discord-bot/public-broadcast.js');
   const { broadcastProgramAt } = await import('../js/public-broadcast-client.mjs');

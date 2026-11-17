@@ -8,7 +8,8 @@ import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
 import { createLiveAudioTransport } from './live-audio-transport.js';
-import { createPublicBroadcast, createBroadcastUploader, createBroadcastStateReader } from './public-broadcast.js';
+import { createBroadcastStateReader } from './public-broadcast.js';
+import { createPublicBroadcastWorker } from './public-broadcast-worker.js';
 import { createRadioResourceMetrics } from './radio-resource-metrics.js';
 import { createLiveRecorder, createLiveRecordingStore, downloadRecordingSegment, fetchCatalogRecordingSource } from './live-recording.js';
 import { createRehearsalService } from './rehearsal.js';
@@ -1613,12 +1614,10 @@ async function main() {
   });
   const broadcastMode = process.env.PUBLIC_BROADCAST_MODE || 'direct';
   if (!['direct', 'preview', 'public'].includes(broadcastMode)) throw new Error('Invalid PUBLIC_BROADCAST_MODE');
-  const publicBroadcast = createPublicBroadcast({
+  const publicBroadcast = createPublicBroadcastWorker({
     enabled: broadcastMode !== 'direct',
-    ...(broadcastMode !== 'direct' ? { uploader: createBroadcastUploader({
-      baseUrl: process.env.PUBLIC_BROADCAST_EDGE_URL,
-      token: process.env.PUBLIC_BROADCAST_UPLOAD_TOKEN,
-    }) } : {}),
+    edgeUrl: process.env.PUBLIC_BROADCAST_EDGE_URL,
+    token: process.env.PUBLIC_BROADCAST_UPLOAD_TOKEN,
   });
   config.publicBroadcast = publicBroadcast;
   await publicBroadcast.start();

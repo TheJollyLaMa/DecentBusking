@@ -113,6 +113,17 @@ replacement worker no longer needs to replay an indefinitely old quiet range.
 This uses the existing required-mirror checkpoint path; failed cursor writes
 remain errors and do not advance the durable boundary. The first catch-up from
 an older checkpoint must still complete before the safe deployment gate opens.
+The deployed cursor repair was read back successfully near the current chain
+head through the existing checkpoint store, with the six batch records retained.
+
+The encoder, Opus decoding, HLS pacing and uploads run in a dedicated Node
+worker thread in the same container, not another service. This keeps unrelated
+bot event-loop stalls out of the audio clock. The parent forwards only the
+selected public source, with bounded in-flight messages; source age across the
+thread boundary and the PCM queue remains limited to one second. The encoder's
+own 500 ms scheduling-stall limit, private-room gates and protected tail remain.
+Public state is requested from the parent through the existing eight-second
+deadline, and worker errors explicitly make the broadcast unavailable.
 
 The client uses native HLS only with a usable programme clock (`getStartDate`),
 otherwise the self-hosted pinned Hls.js bundle. Native playback capability
@@ -200,8 +211,22 @@ Development evidence so far:
   public audio first arrives, rather than charging catalog restoration against
   an unused audio timeline. A regression covers a one-minute startup delay,
   private-input exclusion, UTC corrections and the unchanged real-stall limit.
-  This startup fix still requires hosted revalidation; it does not prove that
-  later stalls cannot occur.
+  This fixes the pre-input startup case; it does not prove that later stalls
+  cannot occur.
+- Hosted revalidation of the startup fix reached ready and decoded all 20 test
+  media elements: audio-start p95 2.000 s, metadata p95 196 ms and delay p95
+  17.055 s. No playback, request, metadata or HTTP 5xx failures occurred.
+- A subsequent actual 200-decoder/600-second exercise used four isolated Chrome
+  pages, not 200 physical browsers. All 200 initially decoded: startup p95
+  1.801 s, metadata p95 213 ms, delay p95 18.326 s. Eleven resource samples
+  measured maximum container CPU 46.8% of its 0.5-core quota, memory 63.7% of
+  512 MiB and event-loop p99 92.2 ms. No HTTP 5xx or realtime room connections
+  occurred. Nevertheless the publisher later hit `ENCODER_CLOCK_STALLED` and
+  all 200 listeners lost the stream; expired objects then produced request
+  and metadata failures. This is a failed continuity exercise, not a pass.
+  The encoder is now isolated from the application's event loop; a real-thread
+  regression blocks the parent for 650 ms while encoding continues, without
+  increasing the encoder's safety threshold. Hosted verification must repeat.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
