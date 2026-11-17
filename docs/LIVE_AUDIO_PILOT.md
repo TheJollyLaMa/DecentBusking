@@ -347,7 +347,9 @@ real audio, consent by the invited person, or an actual room. Live listening req
 both people to participate after deployment and enablement.
 
 The right-side stack is Archive, creator-only Studio, eligible-host DHearse and an
-image-based BigNuten placeholder. The same rehearsal client runs in the side panel
+image-based BigNuten placeholder. Its tabs mirror the left-side tabs: 44px wide,
+6px outer corners, aligned stack tops and the same compact mobile sizing.
+The same rehearsal client runs in the side panel
 using the header signer, and in a popout. Closing/switching waits for microphone
 shutdown acknowledgement; moving to a popout stops embedded audio first and passes
 only the private invitation. During that handoff the previous idle pass is retained
