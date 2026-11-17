@@ -236,7 +236,7 @@ test('an encoder spawn failure stops explicitly and teardown does not hang', asy
   await broadcaster.stop();
 });
 
-test('encoder pacing survives wall-clock corrections but still fails a real scheduling stall', async t => {
+test('encoder waits for authorized audio, survives wall-clock corrections and fails a real scheduling stall', async t => {
   const { createPublicBroadcast } = await import('../discord-bot/public-broadcast.js');
   const encoder = new EventEmitter();
   encoder.stdin = new PassThrough();
@@ -247,11 +247,24 @@ test('encoder pacing survives wall-clock corrections but still fails a real sche
     now: () => wall, monotonicNow: () => elapsed, spawnImpl: () => encoder, log: { error() {} } });
   await broadcaster.start();
   t.after(() => broadcaster.stop());
-  wall += 1000; elapsed = 20;
+  elapsed = 60000;
+  t.mock.timers.tick(20);
+  assert.equal(broadcaster.snapshot().inputBytes, 0);
+  assert.notEqual(broadcaster.snapshot().status, 'unavailable', 'catalog restoration before audio is not a programme stall');
+  broadcaster.setPolicy({ mode: 'live', bookingId: 'live' });
+  broadcaster.liveFrame({ id: 'private', rehearsal: true }, {
+    data: new Int16Array(960), channels: 1, sampleRate: 48000, samplesPerChannel: 960,
+  });
+  t.mock.timers.tick(20);
+  assert.equal(broadcaster.snapshot().inputBytes, 0, 'private audio must not start the programme clock');
+  broadcaster.liveFrame({ id: 'live' }, {
+    data: new Int16Array(960), channels: 1, sampleRate: 48000, samplesPerChannel: 960,
+  });
+  wall += 1000; elapsed += 20;
   t.mock.timers.tick(20);
   assert.equal(broadcaster.snapshot().inputBytes, 3840);
   assert.notEqual(broadcaster.snapshot().status, 'unavailable');
-  wall -= 2000; elapsed = 40;
+  wall -= 2000; elapsed += 20;
   t.mock.timers.tick(20);
   assert.equal(broadcaster.snapshot().inputBytes, 7680);
   elapsed += 600;
