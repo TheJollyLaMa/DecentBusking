@@ -88,15 +88,17 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
   let directory, encoder, decoder, timer, publishTimer, failure = null, stopping = false;
   let startedAt = 0, startedTick = 0, emitted = 0, queuedBytes = 0, publishedAt = 0, publishing = false, encoderClosed = false;
   let protectedUntil = 0;
+  let failureDetails;
   let timelineOffsetMs = null;
   let firstInputAt = null;
   let readPublicState, statePublishedAt = 0, lastInputAt = 0;
   let policy = null, previousPlaylist = '', inputBytes = 0, uploadBytes = 0;
   const runId = randomBytes(16).toString('hex'), queue = [], history = [], uploaded = new Set();
-  const fail = code => {
+  const fail = (code, details) => {
     if (failure || stopping) return;
     failure = code;
-    log.error('[public-broadcast]', code);
+    failureDetails = details;
+    log.error('[public-broadcast]', code, ...(details ? [details] : []));
     clearInterval(timer); clearInterval(publishTimer);
     encoder?.kill();
     queue.length = 0; queuedBytes = 0;
@@ -104,7 +106,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
   function push(bytes, program, receivedAt = monotonicNow()) {
     if (!enabled || !encoder || failure || stopping) return;
     if (bytes.length % 4 || bytes.length > 48000 * 4 || queuedBytes + bytes.length > FRAME_BYTES * 50) {
-      fail('PCM_BUFFER_LIMIT'); return;
+      fail('PCM_BUFFER_LIMIT', { stage: 'pcm', queuedBytes, incomingBytes: bytes.length }); return;
     }
     queue.push({ bytes, program, receivedAt }); queuedBytes += bytes.length;
     if (firstInputAt === null) {
@@ -119,7 +121,8 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     const priming = !history.length && firstInputAt !== null && now() - firstInputAt < 80;
     while (!priming && queue.length && offset < FRAME_BYTES) {
       const entry = queue[0], count = Math.min(entry.bytes.length, FRAME_BYTES - offset);
-      if (monotonicNow() - entry.receivedAt > 1000) { fail('PCM_BUFFER_LIMIT'); return; }
+      const ageMs = monotonicNow() - entry.receivedAt;
+      if (ageMs > 1000) { fail('PCM_BUFFER_LIMIT', { stage: 'source-age', ageMs, queuedBytes }); return; }
       if (!history.length || history.at(-1).playId !== entry.program.playId) {
         history.push(broadcastProgram(entry.program, startedAt + (timelineOffsetMs || 0) + emitted * 20 + offset / 192));
         if (history.length > 64) history.shift();
@@ -203,7 +206,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
       timer = setInterval(() => {
         if (firstInputAt === null) return;
         const due = Math.floor((monotonicNow() - startedTick) / 20) - emitted;
-        if (due > 25) { fail('ENCODER_CLOCK_STALLED'); return; }
+        if (due > 25) { fail('ENCODER_CLOCK_STALLED', { stage: 'encoder-clock', behindFrames: due, queuedBytes }); return; }
         for (let i = 0; i < due && !failure; i++) emitFrame();
       }, 20);
       publishTimer = setInterval(() => { void publish(); }, 500);
@@ -237,7 +240,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
       return { enabled: true, transport: 'hls', status: failure ? 'unavailable'
         : history.length && publishedAt && now() - publishedAt < 12000 && (!readPublicState || statePublishedAt && now() - statePublishedAt < 12000) &&
           now() - startedAt >= 20000 ? 'ready' : 'buffering',
-      reason: failure, url: `${uploader.baseUrl}/hls/${runId}/index.m3u8`,
+      reason: failure, ...(failureDetails ? { reasonDetails: failureDetails } : {}), url: `${uploader.baseUrl}/hls/${runId}/index.m3u8`,
       ...(readPublicState ? { stateUrl: `${uploader.baseUrl}/hls/${runId}/state.json` } : {}),
       delaySeconds: { min: 10, max: 20 }, publishedAt,
       programHistory: history.slice(Math.max(0, cutoff)),

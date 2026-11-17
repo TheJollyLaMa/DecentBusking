@@ -290,6 +290,7 @@ test('delayed inter-thread PCM cannot extend the existing one-second audio queue
   wall += 100; elapsed = 20;
   t.mock.timers.tick(20);
   assert.equal(broadcaster.snapshot().reason, 'PCM_BUFFER_LIMIT');
+  assert.equal(broadcaster.snapshot().reasonDetails.stage, 'source-age');
   assert.equal(broadcaster.snapshot().inputBytes, 0);
 });
 
@@ -315,17 +316,35 @@ test('the real encoder thread survives a blocked application loop without admitt
   assert.equal(broadcaster.pendingDrain(), true);
 });
 
-test('inter-thread audio backpressure fails explicitly instead of building an unbounded message queue', { timeout: 10000 }, async t => {
+test('worker-owned credits release without parent acknowledgments while real backlog stays bounded', { timeout: 10000 }, async t => {
   const { createPublicBroadcastWorker } = await import('../discord-bot/public-broadcast-worker.js');
+  let credits;
+  class Thread extends EventEmitter {
+    constructor(_url, { workerData }) {
+      super(); credits = workerData.pendingFrames;
+      queueMicrotask(() => this.emit('message', { type: 'ready',
+        snapshot: { enabled: true, transport: 'hls', status: 'buffering' } }));
+    }
+    postMessage(message) { if (message.type === 'stop') queueMicrotask(() => this.emit('exit', 0)); }
+  }
   const broadcaster = createPublicBroadcastWorker({ enabled: true, edgeUrl: 'https://edge.example',
-    token: 't'.repeat(40), log: { error() {} } });
+    token: 't'.repeat(40), log: { error() {} }, WorkerImpl: Thread });
   await broadcaster.start();
   t.after(() => broadcaster.stop());
   broadcaster.setPolicy({ mode: 'live', bookingId: 'live' });
-  for (let index = 0; index < 51; index++) broadcaster.liveFrame({ id: 'live' }, {
-    data: new Int16Array(960), channels: 1, sampleRate: 48000, samplesPerChannel: 960,
-  });
+  const feed = count => {
+    for (let index = 0; index < count; index++) broadcaster.liveFrame({ id: 'live' }, {
+      data: new Int16Array(960), channels: 1, sampleRate: 48000, samplesPerChannel: 960,
+    });
+  };
+  feed(50);
+  assert.notEqual(broadcaster.snapshot().status, 'unavailable');
+  Atomics.sub(credits, 0, 50);
+  feed(50);
+  assert.notEqual(broadcaster.snapshot().status, 'unavailable', 'worker progress must not wait for a busy parent to process ACK events');
+  feed(1);
   assert.equal(broadcaster.snapshot().reason, 'PCM_BUFFER_LIMIT');
+  assert.deepEqual(broadcaster.snapshot().reasonDetails, { stage: 'ipc', pendingFrames: 50 });
 });
 
 test('encoder thread failures remain explicit on the parent snapshot and can be shut down', { timeout: 10000 }, async t => {

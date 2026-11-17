@@ -5,21 +5,24 @@ const monotonicNow = () => Number(process.hrtime.bigint()) / 1e6;
 const MAX_PENDING_FRAMES = 50;
 
 export function createPublicBroadcastWorker({ enabled = false, edgeUrl, token,
-  ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg', log = console } = {}) {
+  ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg', log = console, WorkerImpl = Worker } = {}) {
   if (enabled) createBroadcastUploader({ baseUrl: edgeUrl, token });
-  let thread, starting, resolveStart, stopping = false, exited = false, pendingFrames = 0, failure = null;
+  const pendingFrames = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  let thread, starting, resolveStart, stopping = false, exited = false, failure = null, failureDetails;
   let reader, policy, protectedUntil = 0;
   let latest = enabled ? { enabled: true, transport: 'hls', status: 'buffering', reason: null } : { enabled: false };
-  const fail = code => {
+  const fail = (code, details) => {
     if (failure || stopping) return;
     failure = code;
-    log.error('[public-broadcast]', code);
+    failureDetails = details;
+    log.error('[public-broadcast]', code, ...(details ? [details] : []));
     thread?.postMessage({ type: 'stop' });
   };
   const sendAudio = message => {
     if (!thread || stopping || failure || latest.status === 'unavailable') return false;
-    if (pendingFrames >= MAX_PENDING_FRAMES) { fail('PCM_BUFFER_LIMIT'); return false; }
-    pendingFrames++;
+    const pending = Atomics.load(pendingFrames, 0);
+    if (pending >= MAX_PENDING_FRAMES) { fail('PCM_BUFFER_LIMIT', { stage: 'ipc', pendingFrames: pending }); return false; }
+    Atomics.add(pendingFrames, 0, 1);
     thread.postMessage({ ...message, receivedAt: monotonicNow() });
     return true;
   };
@@ -29,13 +32,11 @@ export function createPublicBroadcastWorker({ enabled = false, edgeUrl, token,
       if (!enabled) return Promise.resolve();
       return starting ||= new Promise(resolve => {
         resolveStart = resolve;
-        thread = new Worker(new URL(import.meta.url), { workerData: { edgeUrl, token, ffmpeg } });
+        thread = new WorkerImpl(new URL(import.meta.url), { workerData: { edgeUrl, token, ffmpeg, pendingFrames } });
         thread.on('message', message => {
           if (message.type === 'snapshot' || message.type === 'ready') {
             latest = message.snapshot;
             if (message.type === 'ready') resolve();
-          } else if (message.type === 'ack') {
-            pendingFrames--;
           } else if (message.type === 'state') {
             latest = message.snapshot;
             Promise.resolve().then(() => reader()).then(state => {
@@ -67,7 +68,8 @@ export function createPublicBroadcastWorker({ enabled = false, edgeUrl, token,
         displayName: booking.displayName, wallet: booking.wallet }, frame })) protectedUntil = Date.now() + 40000;
     },
     snapshot() {
-      return failure ? { ...latest, enabled: true, transport: 'hls', status: 'unavailable', reason: failure } : latest;
+      return failure ? { ...latest, enabled: true, transport: 'hls', status: 'unavailable', reason: failure,
+        ...(failureDetails ? { reasonDetails: failureDetails } : {}) } : latest;
     },
     pendingDrain: () => enabled && Date.now() < protectedUntil,
     async stop() {
@@ -100,7 +102,7 @@ if (!isMainThread) {
     if (message.type === 'radio' || message.type === 'live') {
       if (message.type === 'radio') broadcaster.radioPacket(Buffer.from(message.packet), message.track, message.receivedAt);
       else broadcaster.liveFrame(message.booking, message.frame, message.receivedAt);
-      parentPort.postMessage({ type: 'ack' });
+      Atomics.sub(workerData.pendingFrames, 0, 1);
     } else if (message.type === 'policy') broadcaster.setPolicy(message.policy);
     else if (message.type === 'reader') broadcaster.setStateReader(() => new Promise((resolve, reject) => {
       const id = ++nextRequest;
