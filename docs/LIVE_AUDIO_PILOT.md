@@ -142,7 +142,12 @@ The standalone room remains compatible, but the panel has no dedicated-room link
 `recording-preview` exposes only verified public source analysis and a revision
 counter, not previous server drafts, consent signatures or release history.
 Catalog analysis streams bounded 48 kHz PCM without pinning chunks or saving the
-journal. There is one concurrent analysis, a 15-second new-analysis admission
+journal. Before decoding, the original is streamed to a private, bounded
+temporary file (100 MB maximum), then removed on success or failure. MP4/M4A
+files can store metadata after their audio; decoding a non-seekable input pipe
+fails for these otherwise valid recordings. Both preview and approved
+publication use the seekable file, with network input protocols disabled in
+the decoder. There is one concurrent analysis, a 15-second new-analysis admission
 interval and a four-entry/ten-minute memory cache; new analysis pauses during
 live capture/deployment. Signed publication uses the existing encrypted journal,
 bounded exports and independent admin mint queue. Gateway download preserves
@@ -166,7 +171,8 @@ cover creator-only discovery, stale wallet/search results, local close/switch
 flushes, shared-cut sample bounds and longer catalog save/approval responses.
 Unsigned-flow repair adapts those same `e092966` modules and the existing v1
 publication proof rather than introducing a second editor or approval protocol.
-Tests exercise no-write preview, one-signature confirmation, wrong artist/origin,
+Tests exercise trailing-metadata MP4 decoding without writes, no-write preview,
+one-signature confirmation, wrong artist/origin,
 restored proofs, idempotent retries and explicit local-storage failures. A real
 artist's final confirmation and production mint are not established by fixtures.
 
