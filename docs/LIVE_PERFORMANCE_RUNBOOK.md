@@ -153,11 +153,16 @@ check.
    nobody ends it, the server closes it after about a minute as the normal
    producer-finished ending, timed at the later of the declaration and the last
    audio. That is never an audio-loss cancellation, so no fault slate or
-   recovery-ads window runs. If the producer's **End** lands more than five
-   seconds after the audio stopped, the recording is flagged incomplete and its
-   radio title gains "(partial recording)", because the recorder compares captured
-   seconds with the set's actual window. An approved encore withdraws the finished
-   declaration, so a silent room is again treated as an audio fault. Evidence:
+   recovery-ads window runs. With legacy recording segments, if the producer's
+   **End** lands more than five seconds after the audio stopped, the recording is
+   flagged incomplete and its radio title gains "(partial recording)", because
+   the recorder compares captured
+   seconds with the set's actual window. With frame-timed segments enabled (see
+   rollout below), capture is compared with the first-to-last audio window:
+   a quiet 30-second wait for **End** alone does not make the recording partial.
+   Actual capture gaps, capture failures and abnormal endings still do.
+   An approved encore withdraws the finished declaration, so a silent room is
+   again treated as an audio fault. Evidence:
    `node --test test/night-simulation.test.js` replays a two-act night on a fake
    clock; it is a simulation of this server's state machine, not a live-audio test.
 
@@ -306,6 +311,20 @@ the public set, not just at its end. A worker crash can lose up to the current
 the mint queue. Review that title and listen before signing the mint. Processing
 errors are logged under `[live-recording]` and retried; do not re-submit a duplicate
 or bypass the deployment handoff while finalization is pending.
+
+**Frame-timing rollout (#357):** `LIVE_RECORDING_FRAME_TIMES_ENABLED` defaults
+off. First deploy the compatible segment reader to every worker that can restore
+the encrypted journal; leave this flag unset. Only after those readers are in
+place, enable `LIVE_RECORDING_FRAME_TIMES_ENABLED=true` to persist each live
+segment's `firstFrameAt` and `lastFrameAt` (UTC milliseconds, including the final
+frame's sample duration). Fully timed recordings use that audio window with the
+existing five-second tolerance; legacy or mixed segments retain the room-window
+fallback. This measures received audio, not whether an unheard note was intended.
+Restarted captures remain interrupted. Catalog imports, sample offsets, performer
+permission and public-release approval are unchanged.
+To stop writing new metadata, unset the flag; this does not remove existing
+metadata. Roll back only to a compatible reader once timed segments exist, or
+older workers may reject the journal. Do not edit the journal to force rollback.
 
 Tonight's audience target is 90 public live listeners. Main-radio browsers
 currently join LiveKit for live audio even when they never open this room.

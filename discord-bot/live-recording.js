@@ -263,8 +263,11 @@ export function validateRecordingState(state) {
       'draft', 'releaseChoice', 'releaseApproval', 'releases']) ||
         typeof r.bookingId !== 'string' || ids.has(r.bookingId) || !/^0x[0-9a-f]{40}$/i.test(r.wallet || '') ||
         !consentValid || !catalogValid || !Array.isArray(r.segments) || r.segments.length > 500 ||
-        r.segments.some(s => !keysOnly(s, ['cid', 'bytes', 'waveform']) || !safeCid(s.cid) || !Number.isSafeInteger(s.bytes) || s.bytes <= 0 ||
+        r.segments.some(s => !keysOnly(s, ['cid', 'bytes', 'waveform', 'firstFrameAt', 'lastFrameAt']) || !safeCid(s.cid) || !Number.isSafeInteger(s.bytes) || s.bytes <= 0 ||
           s.bytes > BYTES_PER_SECOND * 30 || s.bytes % 2 !== 0 ||
+          (s.firstFrameAt !== undefined || s.lastFrameAt !== undefined) &&
+            (!Number.isSafeInteger(s.firstFrameAt) || s.firstFrameAt < 0 ||
+              !Number.isSafeInteger(s.lastFrameAt) || s.lastFrameAt <= s.firstFrameAt) ||
           s.waveform !== undefined && (!Array.isArray(s.waveform) || s.waveform.length > 120 ||
             s.waveform.some(point => !Array.isArray(point) || point.length !== 2 ||
               point.some(value => !Number.isFinite(value) || value < -1 || value > 1) || point[0] > point[1]))) ||
@@ -457,16 +460,18 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
   encode = encodeRecording, encodeRange = encodeRecordingRange, downloadSource,
   decodeSource = decodeCatalogRecording, getRelease = () => null,
   now = () => Date.now(), log = console, segmentSeconds = 30, resumeDelayMs = 0,
+  persistFrameTimes = process.env.LIVE_RECORDING_FRAME_TIMES_ENABLED === 'true',
   finalizationTimeoutMs = 120000 } = {}) {
   if (!Number.isInteger(segmentSeconds) || segmentSeconds < 1 || segmentSeconds > 30) throw Error('Invalid recording segment length');
   const available = enabled && !!store && !!upload && !!download && !!submitRelease;
   let state, initializing, tail = Promise.resolve(), working = false, buffered = 0;
-  const captureErrors = new Map(), finalizationErrors = new Map(), finalizationTasks = new Map();
+  const captureErrors = new Map(), interruptedCaptures = new Set(), finalizationErrors = new Map(), finalizationTasks = new Map();
   const editTasks = new Map(), catalogEditTasks = new Map(), catalogApprovalTasks = new Map();
   const previewCache = new Map(), publicationTasks = new Map();
   let previewTask, previewRetryAt = 0;
   let initializationError = '';
   let chunks = [], bytes = 0, activeId, lastFrameAt = 0;
+  let segmentFirstFrameAt, segmentLastFrameAt;
   let deployment = null, preparingDeployment = false;
   // A replaced worker may still be retrying during deploy overlap; let it exit before resuming its checkpoint.
   const resumeAt = now() + resumeDelayMs;
@@ -848,6 +853,8 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
   function flush() {
     if (!bytes) return;
     const pcm = Buffer.concat(chunks, bytes), id = activeId;
+    const timing = persistFrameTimes ? { firstFrameAt: segmentFirstFrameAt, lastFrameAt: segmentLastFrameAt } : {};
+    const interrupted = record(id)?.interrupted || interruptedCaptures.has(id);
     chunks = []; bytes = 0; buffered++;
     void serial(async () => {
       try {
@@ -857,7 +864,8 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
         const cid = uri.replace(/^ipfs:\/\//, '');
         if (!safeCid(cid)) throw Error('Invalid recording segment CID');
         const next = structuredClone(state), target = next.recordings.find(r => r.bookingId === id);
-        target.segments.push({ cid, bytes: pcm.length, waveform: waveformFor(pcm) });
+        target.segments.push({ cid, bytes: pcm.length, waveform: waveformFor(pcm), ...timing });
+        if (interrupted) target.interrupted = true;
         target.status = 'recording'; await save(next);
       } finally { buffered--; }
     }, { bookingId: id });
@@ -1052,8 +1060,14 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       if (buffered >= 4) { captureErrors.set(booking.id, 'Recording upload backlog exceeded; capture stopped'); log.error('[live-recording]', captureErrors.get(booking.id)); return; }
       if (activeId && activeId !== booking.id) { captureErrors.set(booking.id, 'Another live recording is active'); log.error('[live-recording]', captureErrors.get(booking.id)); return; }
       activeId = booking.id;
-      if (lastFrameAt && at - lastFrameAt > 2000) r.interrupted = true;
+      if (lastFrameAt && at - lastFrameAt > 2000) {
+        r.interrupted = true;
+        interruptedCaptures.add(booking.id);
+      }
       lastFrameAt = at;
+      if (!bytes) segmentFirstFrameAt = at;
+      // Include the final frame's samples, not the producer's later room-close time.
+      segmentLastFrameAt = at + Math.ceil(frame.data.length / RATE * 1000);
       const data = Buffer.from(new Uint8Array(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength));
       chunks.push(data); bytes += data.length;
       if (bytes >= BYTES_PER_SECOND * segmentSeconds) flush();
@@ -1095,9 +1109,13 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
               finalizationTasks.delete(`${booking.id}:encode`);
               finalizationTasks.delete(`${booking.id}:upload`);
             }
+            const timedSegments = r.segments.every(s => s.firstFrameAt !== undefined && s.lastFrameAt !== undefined);
+            const expectedSeconds = timedSegments
+              ? (Math.max(...r.segments.map(s => s.lastFrameAt)) - Math.min(...r.segments.map(s => s.firstFrameAt))) / 1000
+              : (liveBroadcastEnd(booking) - liveBroadcastStart(booking)) / 1000;
             const incomplete = !!(r.interrupted || captureErrors.has(booking.id) ||
               booking.broadcast && booking.broadcast.endReason !== 'producer-finished' ||
-              result.durationSeconds < (liveBroadcastEnd(booking) - liveBroadcastStart(booking)) / 1000 - 5);
+              result.durationSeconds < expectedSeconds - 5);
             await serial(async () => {
               const next = structuredClone(state), target = next.recordings.find(r => r.bookingId === booking.id);
               target.status = 'ready'; target.incomplete = incomplete; target.error = ''; await save(next);
