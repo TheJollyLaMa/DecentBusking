@@ -5,6 +5,7 @@ import { bindLiveFeedbackRoom, bindTogether } from './live-feedback.mjs?v=202611
 import { createPrivateRoomListener } from './private-room-listener.mjs?v=20261114-allocated-stage';
 import { bindLiveBroadcastControls } from './live-broadcast-controls.mjs?v=20261114-allocated-stage';
 import { performerAllocationAccess } from './performer-room.mjs?v=20261114-allocated-stage';
+import { safeBindProducerListenerTelemetry } from './producer-listener-telemetry.mjs';
 
 const el = id => document.getElementById(id);
 const serviceUrl = String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
@@ -82,7 +83,8 @@ async function selectBooking(id) {
       if (current === generation) invalidate(reason || 'Private pass expired or was revoked. Reconnect the owner wallet for this booking.');
     },
     onState: state => { if (current === generation) { privateState = state; controls(); } },
-  }), bindLiveFeedbackRoom({ container: el('desk-listener-signals'), serviceUrl, bookingId: id }));
+  }), bindTogether(bindLiveFeedbackRoom({ container: el('desk-listener-signals'), serviceUrl, bookingId: id }),
+    safeBindProducerListenerTelemetry({ container: el('desk-listener-telemetry'), serviceUrl, bookingId: id })));
   direction.setSession(pass());
   broadcastControls = bindLiveBroadcastControls({
     container: el('desk-broadcast-controls'), serviceUrl, bookingId: id,

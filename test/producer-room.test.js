@@ -6,7 +6,7 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 
 async function fixture() {
   let time = 100000, account = 'owner', walletChanged, pagehide, requestFailure = false;
-  const elements = new Map(), calls = [], bindings = [], timers = [];
+  const elements = new Map(), calls = [], bindings = [], telemetryBindings = [], timers = [];
   const el = id => {
     if (!elements.has(id)) elements.set(id, { value: '', textContent: '', hidden: false, disabled: false, events: {},
       addEventListener(name, handler) { this.events[name] = handler; }, replaceChildren(...nodes) { this.children = nodes; } });
@@ -41,7 +41,15 @@ async function fixture() {
         : { role: 'owner', token: `${input.challengeId}-pass`, expiresAt: 800000, state: { bookingId: input.challengeId } };
     },
     bindLiveFeedbackRoom: () => ({ setSession() {}, dispose() {} }),
-    bindTogether: primary => primary,
+    safeBindProducerListenerTelemetry: options => {
+      const binding = { bookingId: options.bookingId, session: null, disposed: false,
+        setSession(session) { this.session = session; }, dispose() { this.disposed = true; this.session = null; } };
+      telemetryBindings.push(binding); return binding;
+    },
+    bindTogether: (primary, secondary) => ({
+      setSession(session) { primary.setSession(session); secondary.setSession(session); },
+      dispose() { primary.dispose(); secondary.dispose(); },
+    }),
     bindLiveDirection: options => {
       const binding = { options, session: null, disposed: false,
         setSession(session) { this.session = session; options.onState(session ? { bookingId: options.bookingId } : null); },
@@ -57,7 +65,7 @@ async function fixture() {
   const source = (await fs.readFile(require.resolve('../js/producer-room.mjs'), 'utf8')).replace(/^import .*;\n/gm, '');
   vm.runInNewContext(source, context);
   await settle();
-  return { el, calls, bindings, timers,
+  return { el, calls, bindings, telemetryBindings, timers,
     async click(id) { await el(id).events.click(); await settle(); },
     async select(id) { el('desk-booking').value = id; el('desk-booking').events.change(); await settle(); },
     changeWallet(value) { account = value; walletChanged([value]); },
@@ -80,11 +88,13 @@ test('separate passes are cached only in memory and are cleared on wallet change
   const f = await fixture();
   await f.click('desk-authorize');
   assert.equal(f.el('desk-listen').disabled, false);
+  assert.equal(f.telemetryBindings.at(-1).session.token, 'a-pass');
   await f.click('desk-listen');
   assert.deepEqual(f.calls.find(call => call.audio === 'connect'), { audio: 'connect', token: 'a-pass', bookingId: 'a' });
   await f.select('b');
   assert.equal(f.el('desk-listen').disabled, true);
   assert.equal(f.bindings.at(-1).session, null);
+  assert.equal(f.telemetryBindings.at(-1).session, null);
   await f.click('desk-authorize');
   assert.equal(f.calls.filter(call => call.path === 'challenge').length, 2);
   await f.select('a');
@@ -93,10 +103,12 @@ test('separate passes are cached only in memory and are cleared on wallet change
   f.changeWallet('different');
   assert.equal(f.el('desk-listen').disabled, true);
   assert.equal(f.bindings.at(-1).session, null);
+  assert.equal(f.telemetryBindings.at(-1).session, null);
   await f.select('b');
   assert.equal(f.el('desk-listen').disabled, true);
   f.end();
   assert.equal(f.bindings.at(-1).disposed, true);
+  assert.equal(f.telemetryBindings.at(-1).disposed, true);
 });
 
 test('expired passes and unavailable schedule disable private entry with explicit guidance', async () => {

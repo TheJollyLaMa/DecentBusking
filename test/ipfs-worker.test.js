@@ -104,6 +104,23 @@ test('public radio origins can send anonymous live feedback but cannot access pr
   });
 });
 
+test('listener telemetry uses the public-listen origin policy, not the wider radio-origin policy', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const site = 'https://busking.example', widget = 'https://widget.example', inputs = [];
+  const handler = createWorkerRequestHandler({ allowedOrigins: [site], radioAllowedOrigins: [widget],
+    ownerWallet: Wallet.createRandom().address,
+    listenerTelemetry: { trustedProxyHops: 0, submit(input) { inputs.push(input); return { ok: true }; } } });
+  await withServer(handler, async base => {
+    const url = `${base}/api/live-audio/telemetry`, body = JSON.stringify({ event: 'connect' });
+    const call = origin => fetch(url, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body });
+    assert.equal((await call(widget)).status, 403);
+    const accepted = await call(site);
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.headers.get('cache-control'), 'no-store');
+    assert.equal(inputs.length, 1);
+  });
+});
+
 test('DJuke top earners endpoint returns indexed payouts or an explicit unavailable response', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const data = { chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address: Wallet.createRandom().address, totalUnits: '225000' }] };

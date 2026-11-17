@@ -1,4 +1,5 @@
 import { listenerAudioStatus } from './live-audio.mjs?v=20261114-allocated-stage';
+import { sharedPageListenerTelemetry } from './live-listener-telemetry.mjs';
 
 let sdkPromise;
 export function loadLiveAudioSdk(serviceUrl) {
@@ -34,9 +35,11 @@ export async function roomRequest(serviceUrl, path, input, token, fetchImpl = fe
 }
 
 export function createLiveAudioListener({ audio, serviceUrl, onStatus, sdkLoader = loadLiveAudioSdk,
-  request = roomRequest, now = () => Date.now() }) {
+  request = roomRequest, now = () => Date.now(), telemetry = sharedPageListenerTelemetry(serviceUrl) }) {
   let room, track, state, stateAt = 0, lastPacketAt = 0, packets = 0;
   let generation = 0, connecting = false, retryAt = 0, timer, blocked = false, checking = false;
+  const source = {};
+  const record = (method, ...args) => { try { return telemetry?.[method]?.(...args); } catch { return undefined; } };
   const report = reason => onStatus?.({
     status: listenerAudioStatus({ phase: state?.phase, serverStatus: now() - stateAt > 12_000 ? 'RECONNECTING' : state?.status,
       connected: room?.state === 'connected', playing: !audio.paused && !blocked,
@@ -60,7 +63,10 @@ export function createLiveAudioListener({ audio, serviceUrl, onStatus, sdkLoader
           count += Number(entry.packetsReceived || 0);
         }
       });
-      if (count > packets) lastPacketAt = now();
+      if (count > packets) {
+        lastPacketAt = now();
+        if (!audio.paused && !audio.muted && (audio.volume === undefined || audio.volume > 0) && !blocked) record('audio', source);
+      }
       packets = count;
       report();
     } catch { report('Live audio is reconnecting'); }
@@ -70,9 +76,12 @@ export function createLiveAudioListener({ audio, serviceUrl, onStatus, sdkLoader
     if (connecting || room || now() < retryAt || !state?.armed || state.phase !== 'live') return;
     connecting = true;
     const current = ++generation;
+    const beganAt = now();
     try {
       const sdk = await sdkLoader(serviceUrl);
-      const grant = await request(serviceUrl, 'listen', { bookingId: state.bookingId });
+      const telemetryPageId = record('grantPageId') ?? (telemetry?.grantPageId ? null : telemetry?.pageId);
+      const grant = await request(serviceUrl, 'listen', { bookingId: state.bookingId,
+        ...(telemetryPageId ? { telemetryPageId } : {}) });
       if (current !== generation) return;
       const next = new sdk.Room({ adaptiveStream: false, dynacast: false });
       room = next;
@@ -94,13 +103,16 @@ export function createLiveAudioListener({ audio, serviceUrl, onStatus, sdkLoader
       next.on(sdk.RoomEvent.TrackUnsubscribed, remote => {
         if (track === remote) { track.detach(audio); track = null; lastPacketAt = 0; report(); }
       });
-      next.on(sdk.RoomEvent.Reconnecting, () => { lastPacketAt = 0; report(); });
+      next.on(sdk.RoomEvent.Reconnecting, () => { lastPacketAt = 0; record('suspend', source); report(); });
+      if (sdk.RoomEvent.Reconnected) next.on(sdk.RoomEvent.Reconnected, () => record('resumed', source, 'transport'));
       next.on(sdk.RoomEvent.Disconnected, () => {
         if (current !== generation) return;
+        record('suspend', source);
         track?.detach(audio); track = null; room = null; lastPacketAt = 0; retryAt = now() + 5000; report();
       });
       await next.connect(grant.url, grant.token, { autoSubscribe: false });
       if (current !== generation) { await next.disconnect(); return; }
+      record('join', source, grant.telemetryToken, state.bookingId, beganAt);
       for (const participant of next.remoteParticipants.values()) {
         for (const publication of participant.trackPublications.values()) subscribe(publication, participant);
       }
@@ -108,14 +120,15 @@ export function createLiveAudioListener({ audio, serviceUrl, onStatus, sdkLoader
       report();
     } catch (error) {
       if (current === generation) {
-        await disconnect();
+        await disconnect(true);
         retryAt = now() + 5000;
         report(error.message);
       }
     } finally { if (current === generation) connecting = false; }
   }
-  async function disconnect() {
+  async function disconnect(preserveTelemetry = false) {
     ++generation; connecting = false; clearInterval(timer);
+    if (!preserveTelemetry) record('leave', source);
     const previous = room; room = null;
     track?.detach(audio); track = null; audio.pause(); audio.srcObject = null; lastPacketAt = 0;
     await previous?.disconnect().catch(() => {});

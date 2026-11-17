@@ -3,6 +3,7 @@ import { createCommunityReminder, deserializeCommunityReminders } from './commun
 import { createLiveBookings } from './live-bookings.js';
 import { createLiveAudioService, createLiveAudioWatchdogTick } from './live-audio.js';
 import { createLiveFeedback, parseTrustedProxyHops } from './live-feedback.js';
+import { createListenerTelemetry } from './live-listener-telemetry.js';
 import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
@@ -1645,8 +1646,13 @@ async function main() {
     readLiveTips: options => tipLedger && tipLedgerReady ? tipLedger.getLiveTips(options) : null,
     limits: { trustedProxyHops: parseTrustedProxyHops(process.env.LIVE_FEEDBACK_TRUSTED_PROXY_HOPS) },
   });
+  const listenerTelemetry = createListenerTelemetry({
+    resolveState: () => liveAudio.feedbackState(),
+    trustedProxyHops: parseTrustedProxyHops(process.env.LIVE_FEEDBACK_TRUSTED_PROXY_HOPS),
+  });
   const liveAudio = createLiveAudioService({
     feedback: liveFeedback,
+    listenerTelemetry,
     withBroadcastHandoff: apply => {
       const session = getActiveJukeLoopSession();
       if (!session) throw new Error('Radio handoff is unavailable');
@@ -1782,6 +1788,7 @@ async function main() {
     liveBookings,
     liveAudio,
     liveFeedback,
+    listenerTelemetry,
     rehearsal,
     alchemyWebhook,
     checkpointMirror,
@@ -2493,6 +2500,7 @@ async function main() {
     let exitCode = 0;
     discordAbort.abort();
     liveFeedback.close();
+    listenerTelemetry.close();
     try {
       await liveAudio.stop();
       await recorder.flush();

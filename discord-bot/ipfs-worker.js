@@ -301,6 +301,7 @@ export function createWorkerRequestHandler({
   liveBookings,
   liveAudio,
   liveFeedback,
+  listenerTelemetry,
   rehearsal,
   getEarnings,
   getDjukeTopEarners,
@@ -498,6 +499,11 @@ export function createWorkerRequestHandler({
       if (requestUrl.pathname === '/api/live-audio/feedback') {
         const { handleLiveFeedbackRequest } = await import('./live-feedback.js');
         await handleLiveFeedbackRequest(request, response, { feedback: liveFeedback, allowedOrigins: [...radioOrigins] });
+        return;
+      }
+      if (requestUrl.pathname === '/api/live-audio/telemetry') {
+        const { handleListenerTelemetry } = await import('./live-listener-telemetry.js');
+        await handleListenerTelemetry(request, response, { telemetry: listenerTelemetry, allowedOrigins });
         return;
       }
       if (requestUrl.pathname.startsWith('/api/live-audio/')) {

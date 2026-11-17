@@ -48,7 +48,7 @@ export function createLiveAudioFileStore(path) {
 
 export function createLiveAudioService({ getBookings, ownerWallet, transport, store, recorder, onPolicy = () => {},
   onCancel, now = () => Date.now(), verify = verifyMessage, checkpointTimeoutMs = 45_000, programs = {},
-  withBroadcastHandoff, feedback, resolveCatalogRecording } = {}) {
+  withBroadcastHandoff, feedback, listenerTelemetry, resolveCatalogRecording } = {}) {
   const owner = address(ownerWallet);
   const challenges = new Map(), sessions = new Map(), frames = new Map(), reservations = new Map();
   const direction = createLiveDirection({ now });
@@ -250,6 +250,22 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       console.warn('[live-feedback] Private feedback snapshot unavailable:', error?.name || 'Error');
       throw new LiveDirectionError('FEEDBACK_UNAVAILABLE', 'Listener feedback is unavailable; retry shortly', 503);
     }
+  }
+  function telemetryCommand(token, input, origin) {
+    if (!configured || failed || stopped || !listenerTelemetry) {
+      throw new LiveDirectionError('TELEMETRY_UNAVAILABLE', 'Listener telemetry is unavailable', 503);
+    }
+    let session;
+    try { session = auth(token, origin); }
+    catch { throw new LiveDirectionError('TELEMETRY_AUTH_EXPIRED', 'Room authorization expired; reconnect your wallet', 401); }
+    if (session.role !== 'owner' || session.wallet !== owner) {
+      throw new LiveDirectionError('TELEMETRY_DENIED', 'Owner authorization required', 403);
+    }
+    if (input.action !== 'telemetry-snapshot' || Object.keys(input).some(key => key !== 'action')) {
+      throw new LiveDirectionError('TELEMETRY_INVALID', 'Invalid listener telemetry request', 400);
+    }
+    try { return listenerTelemetry.snapshot(session.bookingId); }
+    catch { throw new LiveDirectionError('TELEMETRY_UNAVAILABLE', 'Listener telemetry is unavailable for this public show', 503); }
   }
   async function directionCommand(token, input, origin) {
     if (!configured || failed || stopped) throw new LiveDirectionError('DIRECTION_UNAVAILABLE', 'Private direction is unavailable', 503);
@@ -672,6 +688,9 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       if (typeof command?.action === 'string' && command.action.startsWith('feedback-')) {
         return feedbackCommand(token, command, origin);
       }
+      if (typeof command?.action === 'string' && command.action.startsWith('telemetry-')) {
+        return telemetryCommand(token, command, origin);
+      }
       if (sessions.get(token)?.scope === 'catalog-recording-edit') {
         await run(initialize);
         let session = auth(token, origin);
@@ -803,7 +822,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       if (!b || !bookingVerification(b).fresh) throw new LiveAudioError('Live booking verification is unavailable');
       return publicState(b, recordFor(b.id));
     },
-    async listener(bookingId) {
+    async listener(bookingId, telemetryPageId) {
       return run(async () => {
         await initialize();
         const b = await findBooking(bookingId, true), record = recordFor(b.id);
@@ -816,7 +835,9 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         if (reservations.size >= (transport.listenerLimit || 10)) throw new LiveAudioError('Live listener admission busy; retry in 30 seconds');
         const result = await transport.listener(mediaBooking(b));
         reservations.set(opaque(), now() + 30_000);
-        return result;
+        let telemetryToken;
+        try { telemetryToken = listenerTelemetry?.issue(bookingId, telemetryPageId); } catch { /* Listening remains independent of telemetry. */ }
+        return telemetryToken ? { ...result, telemetryToken } : result;
       });
     },
     prepareDeployment: lease => run(async () => {

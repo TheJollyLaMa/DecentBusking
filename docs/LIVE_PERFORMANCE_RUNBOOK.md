@@ -126,6 +126,65 @@ live-tip test. Keep #341 open until a guest and authorized performer/operator
 exercise the flow in a real show, including a real verified tip and public-audio
 check.
 
+### Public listener telemetry and rehearsal evidence (#362 / #348)
+
+With matching site and worker code, select the **currently public** live booking
+and use its existing owner pass on the production desk. The telemetry panel
+reports observed active page connections, peak, reconnects in up to the last
+hour, and approximate time-to-first-audio histogram percentiles. Use **Export
+aggregate evidence** while the show is still live and the snapshot is fresh;
+the JSON contains aggregates only. There is no post-show retrieval: save the
+export before the public set ends. Another selected booking, stale verification,
+expired authorization, malformed responses, and network/service errors show
+unavailable, not a healthy zero. The observation start in the export is when
+this worker first observed the show, not necessarily its beginning. A worker
+restart resets the measurements. The last aggregate stays in memory until a
+different show is observed or the worker stops; it is not checkpointed.
+
+Counts are an estimate of participating pages, not unique people, actual
+capacity, or a full census. A tab with several tracked audio sources shares one
+lease; separate tabs/reloads do not. The browser sends connect only after its
+public room connects, and first audio only when playback is unpaused and
+unmuted with nonzero element volume and inbound audio packets advance. Duration
+starts before obtaining the listener grant, ends at the first qualifying stats
+check (normally one-second resolution), and is omitted after 120 seconds.
+The p50/p95 are upper bounds of fixed histogram buckets, not exact durations.
+Packets and element playback cannot establish that sound reached speakers or a
+person heard it; silent input, OS mute and device routing are not detected.
+Reconnects count completed page-level reconnections, not failed attempts.
+The last-hour number sums 60 one-minute buckets, omitting the oldest partial
+minute; reason totals are since observation start. Empty samples have unavailable
+percentiles. Independently monitor the public return.
+
+The page creates a random ID in memory only, and obtains an opaque telemetry
+token only alongside an admitted public listener grant. Neither is linked to a
+wallet, account or profile. Accepted event sequence and lease state, including
+the random page ID, token, last sequence, connection/first-audio flags, last
+activity time and short-lived leave tombstones, remain only in worker memory for
+45 seconds after the last accepted event, swept at least every five seconds; at
+most 2,000 such records exist. They are not an event history. Heartbeats normally
+run every 15 seconds. A missed leave,
+suspended tab, failed network request or worker restart can under- or over-count
+until expiry; a prolonged outage may leave the page unmeasured until a new
+public grant. A rapid replacement while the preceding leave is still pending
+can also be unmeasured rather than delay audio. No local storage, raw event
+history, audio, chat, user agent, wallet or IP is stored in telemetry records
+or exports. In-memory rate limiting uses a process-random HMAC of the request
+network (IPv6 grouped by /64) and rolling hit times for at most 60 seconds, with
+a five-second cleanup sweep and 2,000 network keys. Defaults are 300 events/network/minute and 6,000
+globally/minute; rate limits and admission can drop real reports. The same
+trusted proxy configuration as feedback must match the actual deployment.
+Native HTTP, hosting and providers may still see source IPs in access logs;
+this feature does not configure or control those logs.
+
+Tokens and origin checks deter arbitrary event submission but do not prove
+unique humans, real hearing or prevent a client that can obtain public grants
+from inflating counts. Private rehearsals and soundchecks do not issue these
+public telemetry grants. Metrics do not affect attendance, credit, recording,
+payments or broadcast policy. Local simulated clients are not the #348 staging
+ramp or evidence of any listener capacity; complete the separately approved
+real rehearsal and predeployment checks before relying on these measurements.
+
 ### Explicit allocated-stage controls
 
 1. Authorize the current booking with the existing owner wallet, then **Enable
