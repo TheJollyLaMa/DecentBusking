@@ -77,7 +77,7 @@ document.addEventListener('click', event => {
   const booking = event.target.closest('[data-recording-edit]');
   if (!booking) return;
   const bookingId = booking.dataset.recordingEdit || '';
-  if (!/^[a-zA-Z0-9_-]{1,120}$/.test(bookingId)) return;
+  if (!/^[a-zA-Z0-9:_-]{1,120}$/.test(bookingId)) return;
   event.preventDefault();
   openEditor([['booking', bookingId]], booking);
 });
