@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const fs = require('node:fs/promises');
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
-async function fixture() {
+async function fixture(payoutPolicy = 'pilot-guaranteed-v1') {
   let time = 100000, account = 'owner', walletChanged, pagehide, requestFailure = false;
   const elements = new Map(), calls = [], bindings = [], telemetryBindings = [], timers = [];
   const el = id => {
@@ -13,7 +13,7 @@ async function fixture() {
     return elements.get(id);
   };
   const bookings = ['a', 'b'].map((id, index) => ({
-    id, mode: 'phase1', payoutPolicy: 'pilot-guaranteed-v1', stewardApproved: true, status: 'funded', acknowledged: true,
+    id, mode: 'phase1', payoutPolicy, stewardApproved: true, status: 'funded', acknowledged: true,
     displayName: `Artist ${id}`, startUtc: new Date(90000 + index * 100000).toISOString(),
     endUtc: new Date(900000 + index * 100000).toISOString(),
   }));
@@ -82,6 +82,16 @@ test('public roster renders before authorization and selected-room changes never
   assert.match(f.el('desk-selected').textContent, /Artist b/);
   assert.match(f.el('desk-program').textContent, /Artist a/);
   assert.equal(f.calls.some(call => call.path === 'challenge'), false);
+});
+
+test('asset-version bookings appear in the producer roster but still require a booking-scoped owner pass', async () => {
+  const f = await fixture('asset-guaranteed-v1');
+  assert.match(f.el('desk-selected').textContent, /Artist a/);
+  assert.equal(f.el('desk-listen').disabled, true);
+  await f.click('desk-authorize');
+  assert.equal(f.el('desk-listen').disabled, false);
+  assert.equal(f.calls.find(call => call.path === 'challenge').input.bookingId, 'a');
+  f.end();
 });
 
 test('separate passes are cached only in memory and are cleared on wallet change', async () => {

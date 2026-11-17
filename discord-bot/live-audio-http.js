@@ -47,7 +47,7 @@ export async function handleLiveAudioRequest(request, response, { service, allow
     else if (url.pathname === '/api/live-audio/control') {
       const token = String(request.headers.authorization || '').replace(/^Bearer /, '');
       send(200, await service.command(token, input, origin));
-    } else if (url.pathname === '/api/live-audio/listen') send(200, await service.listener(input.bookingId, input.telemetryPageId));
+    } else if (url.pathname === '/api/live-audio/listen') send(200, await service.listener(input.bookingId, input.telemetryPageId, input.transport));
     else send(404, { error: 'Unknown room route' });
   } catch (error) {
     // Never return provider errors: they can contain stream keys, tokens or signed URLs.

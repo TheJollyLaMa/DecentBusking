@@ -11,6 +11,7 @@ import { createRadioAdTransition } from './radio-ad-transition.mjs?v=20261030-ad
 import { DEVERT_MAX_AD_SECONDS } from './devert-scheduler.mjs';
 import { createLiveAudioListener, createLiveAudioFaultSlate } from './live-audio-client.mjs';
 import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
+import { createPublicBroadcastListener, getAudibleBroadcast } from './public-broadcast-client.mjs';
 
 const POLL_MS = 8_000;
 const FADE_IN_MS = 600;
@@ -24,6 +25,9 @@ let _liveAudioListener = null, _liveAudioActive = false, _liveAudioPolicy = null
 let _publisherPresence = null, _stopPublisherWatch = null, _liveReturnSuppressed = false, _liveReturnProtectionError = '';
 const SELF_RETURN_MESSAGE = 'Your public live return is muted while you publish from this browser. Use your headphone/direct monitor; other listeners still hear you.';
 let _liveFaultSlate = null, _lastLiveFault = null;
+let _publicBroadcastListener = null, _publicBroadcastActive = false;
+let _publicBroadcastStateUrl = null;
+let _publicBroadcastStateStamp = 0, _publicBroadcastStateProgressAt = 0;
 // After a song ends, poll quickly so the next one starts right after the JukeLoop changeover gap.
 const HANDOFF_POLL_MS = 750;
 const HANDOFF_WINDOW_MS = 30_000;
@@ -265,7 +269,16 @@ function _setRadioState(state) {
 }
 
 export function getRadioStateSnapshot() {
-  return _cloneRadioState(_radioState);
+  const state = _cloneRadioState(_radioState);
+  if (state?.publicBroadcast?.selected) {
+    const audible = getAudibleBroadcast();
+    state.publicBroadcast = { ...state.publicBroadcast, audible };
+    if (!audible?.program.live || audible.program.bookingId !== state.liveAudio?.bookingId) {
+      state.liveAudio = { configured: true, phase: 'unavailable', status: 'BUFFERED',
+        reason: 'Listener signals pause while buffered audio differs from the current studio act' };
+    }
+  }
+  return state;
 }
 
 export function formatMainRadioAdCountdown(countdown, { disconnected = false, compact = false } = {}) {
@@ -304,6 +317,10 @@ export function formatMainRadioAdCountdown(countdown, { disconnected = false, co
 
 function _renderMainRadioAdCountdown() {
   if (!_adCountdownEl) return;
+  if (_radioState?.publicBroadcast?.selected && _mode === 'radio') {
+    _adCountdownEl.textContent = 'Buffered broadcast · approximately 10–20 seconds behind the studio';
+    return;
+  }
   const disconnected = _radioState?.mainRadioAdCountdown?.reason === 'disconnected';
   const text = formatMainRadioAdCountdown(_radioState?.mainRadioAdCountdown, { disconnected, compact: true });
   if (_adCountdownEl.textContent !== text) _adCountdownEl.textContent = text;
@@ -564,7 +581,27 @@ export function initRadioSync() {
   _publisherPresence = createLivePublisherPresence({ serviceUrl: _radioUrl().replace(/\/api\/radio$/, '') });
   _stopPublisherWatch?.();
   _stopPublisherWatch = _publisherPresence.watch(() => {
+    if (_applyPublicBroadcastState()) return;
     if (_radioState?.liveAudio) _applyLiveAudioState(_radioState.liveAudio);
+  });
+  _publicBroadcastListener = createPublicBroadcastListener({
+    audio: _audioPlayer, serviceUrl: _radioUrl().replace(/\/api\/radio$/, ''),
+    onStatus: ({ blocked, failed, reason }) => {
+      if (!_publicBroadcastActive) return;
+      _setActivity(reason || 'Buffered radio: approximately 10–20 seconds behind the studio');
+      _playBtn?.classList.toggle('hidden', !blocked && !failed);
+    },
+    onProgram: program => {
+      if (!_publicBroadcastActive) return;
+      _radio = program.live ? null : { ...program, uploader: program.artist };
+      _setLabel(program.live ? '🔴 Live broadcast · buffered' : '📻 Radio broadcast · buffered');
+      _setTrack(program.title, program.artist);
+      _renderSponsorTag(null);
+      _renderVoting();
+      _broadcastNowPlaying({ ...program, source: 'radio',
+        audioUrl: _radioState?.publicBroadcast?.url || '', mediaType: 'application/vnd.apple.mpegurl' });
+      _broadcastRadioState();
+    },
   });
   _liveAudioListener = createLiveAudioListener({
     audio: _audioPlayer, serviceUrl: _radioUrl().replace(/\/api\/radio$/, ''),
@@ -624,6 +661,9 @@ export function setDevertListenMode(mode) {
   if (_mode !== 'radio') return mode === 'radio';
   _loadedPlayId = null;
   if (mode === 'ads-only') {
+    if (_publicBroadcastActive) {
+      _publicBroadcastListener?.stop(); _publicBroadcastActive = false;
+    }
     _setLabel('🎟️ DVert Ads Only');
     _fadeMainRadioOut();
     _setTrack('Ads Only', '');
@@ -642,6 +682,9 @@ export function setDevertListenMode(mode) {
 /** Play a user-selected archive track; the radio stays muted until returnToRadio(). */
 export function playArchiveTrack({ title, artist, audioUrl, mediaType, nft = null, sessionId = null, onEnded = null }) {
   if (!_audio) return;
+  if (_publicBroadcastActive) {
+    _publicBroadcastListener?.stop(); _publicBroadcastActive = false;
+  }
   if (_liveAudioActive) {
     _liveAudioActive = false; void _liveAudioListener?.disconnect(); _liveFaultSlate?.stop();
   }
@@ -699,17 +742,39 @@ function _radioUrl() {
 async function _poll() {
   clearTimeout(_pollTimer);
   try {
-    const state = await readRadioState({ radioUrl: _radioUrl() });
+    const fromCdn = !!_publicBroadcastStateUrl;
+    const state = await readRadioState({ radioUrl: _publicBroadcastStateUrl || _radioUrl() });
+    const broadcast = state.publicBroadcast;
+    _publicBroadcastStateUrl = null;
+    if (broadcast?.selected && broadcast.stateUrl) {
+      const stateUrl = new URL(broadcast.stateUrl), mediaUrl = new URL(broadcast.url);
+      if (stateUrl.protocol !== 'https:' || stateUrl.origin !== mediaUrl.origin ||
+          stateUrl.pathname !== mediaUrl.pathname.replace(/index\.m3u8$/, 'state.json') ||
+          stateUrl.search || stateUrl.hash || stateUrl.username || stateUrl.password) {
+        throw new Error('Invalid public broadcast state address');
+      }
+      if (!Number.isFinite(state.serverTime)) throw new Error('Public broadcast state has no verified clock');
+      if (!fromCdn || state.serverTime > _publicBroadcastStateStamp) {
+        _publicBroadcastStateStamp = state.serverTime;
+        _publicBroadcastStateProgressAt = performance.now();
+      } else if (performance.now() - _publicBroadcastStateProgressAt > 12000) {
+        throw new Error('Public broadcast state stopped updating');
+      }
+      _publicBroadcastStateUrl = stateUrl.href;
+    }
     _radioReachable = true;
     _setRadioState(state);
     _activeShowId = state.activeShow?.id || null;
-    _radio = state.nowPlaying ? { ...state.nowPlaying, receivedAt: performance.now() } : null;
+    if (!state.publicBroadcast?.selected) _radio = state.nowPlaying ? { ...state.nowPlaying, receivedAt: performance.now() } : null;
     _upNext = state.upNext && typeof state.upNext === 'object' ? state.upNext : null;
-    _applyLiveAudioState(state.liveAudio);
-    if (!_liveAudioPolicy || _liveAudioPolicy.mode === 'radio') _detectNewUploads(Array.isArray(state.recent) ? state.recent : [], state.serverTime);
+    if (!_applyPublicBroadcastState()) _applyLiveAudioState(state.liveAudio);
+    if (!state.publicBroadcast?.selected && (!_liveAudioPolicy || _liveAudioPolicy.mode === 'radio')) {
+      _detectNewUploads(Array.isArray(state.recent) ? state.recent : [], state.serverTime);
+    }
     if (_mode === 'radio') _syncRadio();
     _maybePreload();
   } catch (err) {
+    _publicBroadcastStateUrl = null;
     console.warn('[radio] Could not reach the JukeLoop radio:', err.message);
     _setRadioState({
       mainRadioAdCountdown: { status: 'unavailable', reason: 'disconnected' },
@@ -767,6 +832,38 @@ function _detectNewUploads(recent, serverTime) {
 }
 
 // ── Radio mirroring ───────────────────────────────────────────────────────
+
+function _applyPublicBroadcastState() {
+  const broadcast = _radioState?.publicBroadcast;
+  const active = broadcast?.selected && _mode !== 'archive' && _devertListenMode !== 'ads-only';
+  if (!active) {
+    if (_publicBroadcastActive) {
+      _publicBroadcastListener?.stop(); _publicBroadcastActive = false; _loadedPlayId = null;
+    }
+    return false;
+  }
+  if (!_publicBroadcastActive) {
+    _stopAudio(); void _liveAudioListener?.disconnect();
+    _liveAudioActive = false; _liveFaultSlate?.stop(); _liveAudioPolicy = null;
+    _clearTakeover(); _takeoverQueue.length = 0; _discardPreload();
+    _publicBroadcastActive = true; _mode = 'radio'; _radio = null; _loadedPlayId = null;
+    _audio = _audioPlayer || _audio; _fadeLevel = 1; _applyRadioVolume();
+    _setLabel('📻 Buffered radio broadcast');
+    _notifyRadioSourceMode();
+  }
+  const audible = getAudibleBroadcast();
+  const bookingIds = [audible?.program.bookingId, _radioState?.liveAudio?.bookingId].filter(Boolean);
+  let suppressed = false;
+  try { suppressed = bookingIds.some(id => _publisherPresence?.isPublishing(id) === true); }
+  catch { suppressed = true; }
+  if (suppressed) {
+    _publicBroadcastListener?.stop();
+    _setLabel('Your buffered return is muted');
+    _setActivity(SELF_RETURN_MESSAGE);
+    _playBtn?.classList.add('hidden');
+  } else _publicBroadcastListener?.update(broadcast);
+  return true;
+}
 
 function _applyLiveAudioState(state) {
   _liveAudioPolicy = state?.policy || null;
@@ -858,6 +955,7 @@ function _liveLabel() {
 }
 
 function _syncRadio(message) {
+  if (_applyPublicBroadcastState()) return;
   if (_applyLiveAudioState(_radioState?.liveAudio)) return;
   _setLabel(_liveLabel());
   _renderVoting();
@@ -1032,6 +1130,7 @@ function _clearTakeover() {
 }
 
 function _onEnded(event) {
+  if (_publicBroadcastActive) return;
   if (_liveAudioActive) return;
   if (event?.target && event.target !== _audio) return;
   if (_mode === 'radio' && !_radioAd && _loadedPlayId && _loadedPlayId === _endedRadioAdPlayId) return;
@@ -1103,6 +1202,7 @@ function _scheduleRadioAdLimit() {
 
 function _armRadioAd(nowPlaying, offset) {
   _clearRadioAd();
+  if (_publicBroadcastActive) return;
   if (_mode !== 'radio' || !nowPlaying?.isDevert) return;
   const remainingMs = Math.max(0, DEVERT_MAX_AD_SECONDS - Math.max(offset, _audio.currentTime || 0)) * 1000;
   _radioAd = { playId: nowPlaying.playId, deadline: performance.now() + remainingMs, timer: null };
@@ -1380,6 +1480,7 @@ function _preloadAllowed() {
 }
 
 function _maybePreload() {
+  if (_publicBroadcastActive) { _discardPreload(); return; }
   if (_liveAudioActive) { _discardPreload(); return; }
   if (!_preloadAllowed()) {
     _discardPreload();
@@ -1530,6 +1631,11 @@ function _stopAudio() {
 }
 
 async function _unlock() {
+  if (_publicBroadcastActive) {
+    try { await _publicBroadcastListener?.play(); }
+    catch { _setActivity('The buffered broadcast could not play. Tap Play to retry.'); }
+    return;
+  }
   if (_liveAudioActive) {
     if (_liveReturnSuppressed) { _setActivity(SELF_RETURN_MESSAGE); return; }
     try { await _liveAudioListener?.play(); } catch { _setActivity('Tap Play again when the live audio connection is ready'); }

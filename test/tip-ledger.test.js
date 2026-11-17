@@ -223,6 +223,62 @@ test('historical booking reader reuses the real escrow ABI and exact booking key
   assert.equal(booking.performer.toLowerCase(), recipient);
 });
 
+test('historical asset bookings use their own exact configured contract and signed terms, never legacy fallback', async () => {
+  const { createHistoricalTipBookingReader, LIVE_ASSETS_ESCROW_ABI } = await import('../discord-bot/tip-context.js');
+  const iface = new ethers.Interface(LIVE_ASSETS_ESCROW_ABI);
+  assert.throws(() => createHistoricalTipBookingReader({ assetEscrowAddress: router }), /identities/);
+  const terms = { performer: recipient, asset: sender, amount: '20000000', showStart: '100', showEnd: '200',
+    reviewWindow: '3600', termsHash: ethers.id('terms'), collection, tokenId: '75', quantity: '1', giftTreasury: sender };
+  let identity = { bookingId: 'friday:fixture', version: 'assets-v1', chainId: 8453, escrowAddress: router, terms };
+  let calls = 0, feeStatus = 1;
+  const reader = createHistoricalTipBookingReader({
+    escrowAddress: sender, assetEscrowAddress: router,
+    resolveBookingIdentity: async () => identity,
+    provider: { getNetwork: async () => ({ chainId: 8453n }), call: async transaction => {
+      calls++;
+      assert.equal(transaction.to.toLowerCase(), router);
+      assert.equal(transaction.blockTag, 17);
+      assert.equal(transaction.data, iface.encodeFunctionData('bookings', [ethers.id('friday:fixture')]));
+      return iface.encodeFunctionResult('bookings', [[Object.values(terms), sender, feeStatus, 1]]);
+    } },
+  });
+  assert.equal((await reader('friday:fixture', 17)).performer.toLowerCase(), recipient);
+  feeStatus = 6;
+  assert.equal((await reader('friday:fixture', 17)).eligible, false);
+  feeStatus = 1;
+  identity = { ...identity, terms: { ...terms, quantity: '2' } };
+  await assert.rejects(reader('friday:fixture', 17), /terms/);
+  identity = { ...identity, terms: { ...terms, quantity: null } };
+  await assert.rejects(reader('friday:fixture', 17), /terms/);
+  identity = { ...identity, escrowAddress: sender };
+  await assert.rejects(reader('friday:fixture', 17), /identity/);
+  identity = { ...identity, escrowAddress: router, bookingId: 'other' };
+  await assert.rejects(reader('friday:fixture', 17), /identity/);
+  identity = { ...identity, version: 'unknown' };
+  await assert.rejects(reader('friday:fixture', 17), /identity/);
+  identity = null;
+  await assert.rejects(reader('friday:fixture', 17), /unavailable/);
+  assert.equal(calls, 4);
+});
+
+test('canonical identity resolver preserves legacy receipt-block lookup and fails closed on unknown identity', async () => {
+  const { createHistoricalTipBookingReader } = await import('../discord-bot/tip-context.js');
+  let identity = { bookingId: 'show', version: 'legacy-usdc-v1', chainId: 8453, escrowAddress: router };
+  const reader = createHistoricalTipBookingReader({ escrowAddress: router,
+    contract: { bookings: async (key, options) => {
+      assert.equal(key, ethers.id('show'));
+      assert.equal(options.blockTag, 12);
+      return { status: 1, performer: recipient };
+    } },
+    resolveBookingIdentity: async () => identity,
+  });
+  assert.equal((await reader('show', 12)).performer, recipient);
+  identity = { ...identity, chainId: 1 };
+  await assert.rejects(reader('show', 12), /identity/);
+  identity = { ...identity, chainId: 8453, version: 'assets-v1' };
+  await assert.rejects(reader('show', 12), /identity/);
+});
+
 test('chain changes during source lookup cannot strand orphaned tips behind a newly advanced cursor', async () => {
   let changeChain;
   const { ledger, add, state } = await fixture({ resolveContext: async () => {

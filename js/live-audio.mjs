@@ -18,7 +18,7 @@ export function parseLiveAudioPrograms(value = '{}') {
 }
 
 export function liveAudioRoomUrl(booking, now = Date.now()) {
-  if (!booking?.id || booking.mode !== 'phase1' || booking.payoutPolicy !== 'pilot-guaranteed-v1' ||
+  if (!booking?.id || booking.mode !== 'phase1' || !['pilot-guaranteed-v1', 'asset-guaranteed-v1'].includes(booking.payoutPolicy) ||
       booking.status !== 'funded' || booking.acknowledged !== true || booking.cancelled ||
       !Number.isFinite(Date.parse(booking.startUtc)) || !(Date.parse(booking.endUtc) > now)) return null;
   return `live-room.html?booking=${encodeURIComponent(booking.id)}`;

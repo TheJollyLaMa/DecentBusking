@@ -1,6 +1,6 @@
 export function performerRoomUrl(booking, now = Date.now()) {
   const allocated = booking?.broadcastCompletion?.known === true && booking.broadcastCompletion.pending === true;
-  if (!booking?.id || booking.mode !== 'phase1' || booking.payoutPolicy !== 'pilot-guaranteed-v1' ||
+  if (!booking?.id || booking.mode !== 'phase1' || !['pilot-guaranteed-v1', 'asset-guaranteed-v1'].includes(booking.payoutPolicy) ||
       !booking.stewardApproved || booking.cancelled ||
       !['draft', 'funded', ...(allocated ? ['approved', 'paid'] : [])].includes(booking.status) ||
       !Number.isFinite(Date.parse(booking.startUtc)) || !Number.isFinite(Date.parse(booking.endUtc)) ||
@@ -38,7 +38,7 @@ export function verifiedPerformerFinish(booking, state) {
 
 export async function resolvePerformerReentry(booking, { serviceUrl, fetchImpl = fetch, now = () => Date.now() }) {
   const completion = booking?.broadcastCompletion;
-  const eligible = booking?.id && booking.mode === 'phase1' && booking.payoutPolicy === 'pilot-guaranteed-v1' &&
+  const eligible = booking?.id && booking.mode === 'phase1' && ['pilot-guaranteed-v1', 'asset-guaranteed-v1'].includes(booking.payoutPolicy) &&
     booking.acknowledged === true && !booking.cancelled && ['funded', 'approved', 'paid'].includes(booking.status) &&
     Number.isFinite(Date.parse(booking.startUtc)) && Date.parse(booking.endUtc) > Date.parse(booking.startUtc);
   if (!eligible || !completion || completion.known === true && completion.pending === false ||

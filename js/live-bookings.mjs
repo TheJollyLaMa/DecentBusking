@@ -26,10 +26,61 @@ export const LIVE_ESCROW_ABI = [
  'event BookingRefunded(bytes32 indexed bookingId,address indexed funder,uint256 amount,string reasonUri,bytes32 termsHash)',
  'event BookingCancelled(bytes32 indexed bookingId,uint256 killFee,string reasonUri,bytes32 termsHash)',
 ];
+export const LIVE_ASSET_VERSION = 'assets-v1';
+export const LIVE_ASSET_POLICY = 'asset-guaranteed-v1';
+export const LIVE_ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+export const LIVE_ASSET_ESCROW_ABI = [
+ 'function bookings(bytes32) view returns (((address performer,address asset,uint256 amount,uint64 showStart,uint64 showEnd,uint32 reviewWindow,bytes32 termsHash,address collection,uint256 tokenId,uint256 quantity,address giftTreasury) terms,address funder,uint8 feeStatus,uint8 giftStatus))',
+ 'function approvedTokens(address) view returns (bool)',
+ 'function createBooking(bytes32, (address performer,address asset,uint256 amount,uint64 showStart,uint64 showEnd,uint32 reviewWindow,bytes32 termsHash,address collection,uint256 tokenId,uint256 quantity,address giftTreasury), string) payable',
+ 'function approvePerformance(bytes32,string)', 'function platformFault(bytes32,string)', 'function noShow(bytes32,string)',
+ 'function markUnperformedGift(bytes32,string)', 'function releaseGift(bytes32)', 'function returnGift(bytes32)',
+ 'function refund(bytes32)', 'function performerCancel(bytes32,string)', 'function claim(bytes32)',
+ 'event Funded(bytes32 indexed bookingId,address indexed performer,address indexed funder,(address performer,address asset,uint256 amount,uint64 showStart,uint64 showEnd,uint32 reviewWindow,bytes32 termsHash,address collection,uint256 tokenId,uint256 quantity,address giftTreasury) terms,string termsUri)',
+ 'event FeeDecision(bytes32 indexed bookingId,uint8 status,string reasonUri)',
+ 'event FeeSettled(bytes32 indexed bookingId,uint8 status,address indexed recipient,uint256 amount)',
+ 'event GiftDecision(bytes32 indexed bookingId,uint8 status,string reasonUri)',
+ 'event GiftSettled(bytes32 indexed bookingId,uint8 status,address indexed recipient,address collection,uint256 tokenId,uint256 quantity)',
+ 'event Recovery(bytes32 indexed bookingId,address indexed recipient,bool fee,bool gift,string reasonUri)',
+];
+export function assetBookingTerms(b) {
+ return { performer:b.wallet, asset:b.assetAddress, amount:b.amountUnits,
+  showStart:Date.parse(b.startUtc)/1000, showEnd:Date.parse(b.endUtc)/1000, reviewWindow:b.reviewWindow,
+  termsHash:b.termsHash, collection:b.gift?.collection || LIVE_ZERO_ADDRESS,
+  tokenId:b.gift?.tokenId || '0', quantity:b.gift?.quantity || '0', giftTreasury:b.gift?.treasury || LIVE_ZERO_ADDRESS };
+}
+export function matchesAssetBooking(b, onchain, funder) {
+ const expected = assetBookingTerms(b), actual = onchain?.terms;
+ if (!actual || String(onchain.funder).toLowerCase() !== String(funder).toLowerCase()) return false;
+ return ['performer','asset','termsHash','collection','giftTreasury'].every(k => String(actual[k]).toLowerCase() === String(expected[k]).toLowerCase()) &&
+  ['amount','showStart','showEnd','reviewWindow','tokenId','quantity'].every(k => {
+   try { return BigInt(actual[k]) === BigInt(expected[k]); } catch { return false; }
+  });
+}
+export function formatLiveAsset(units, decimals, symbol) {
+ const raw = String(units);
+ if (!/^(0|[1-9]\d*)$/.test(raw) || !Number.isInteger(decimals) || decimals < 0 || decimals > 36) return 'Unavailable';
+ const padded = raw.padStart(decimals + 1, '0');
+ const whole = decimals ? padded.slice(0, -decimals) : padded;
+ const fraction = decimals ? padded.slice(-decimals).replace(/0+$/, '') : '';
+ return `${whole}${fraction ? `.${fraction}` : ''} ${symbol}`;
+}
 export function liveAuthorization({ address, origin, issuedAt, command }) {
  return ['DecentBusking Live Performance authorization v1', `Wallet: ${address.toLowerCase()}`, `Origin: ${origin}`, `Issued: ${issuedAt}`, `Command: ${JSON.stringify(command)}`].join('\n');
 }
 export function liveAcknowledgement(b) {
+ if (b.escrowVersion === LIVE_ASSET_VERSION) {
+  const t = assetBookingTerms(b);
+  return ['DecentBusking asset booking agreement v1', `Booking: ${b.id}`, `Performer: ${b.wallet}`,
+   `Occurrence: ${b.eventId}`, `Slot: ${b.startUtc}/${b.endUtc}`,
+   `Chain: Base 8453; escrow: ${b.escrowAddress}`,
+   `Fee: ${formatLiveAsset(b.amountUnits, b.assetDecimals, b.assetSymbol)}; address: ${b.assetAddress}; raw units: ${b.amountUnits}; decimals: ${b.assetDecimals}`,
+   `Gift: ${t.collection}; token ID: ${t.tokenId}; quantity: ${t.quantity}; return treasury: ${t.giftTreasury}`,
+   `Review window: ${b.reviewWindow} seconds after booked end. The full fixed fee is guaranteed despite platform or rehearsal faults and cannot be claimed before booked end; after review it may be claimed without producer approval.`,
+   'Producer performance approval enables a separate producer-paid gift release. Gift delivery requires an actual confirmed transfer and is independently retryable. Performer cancellation before start or no-show during review refunds the fee and returns unearned gift; platform fault retains the full fee and returns the unearned gift. Unperformed gifts may be returned after review without clawing back vested fees. Gifts do not expire.',
+   'The administrator can recover reserved or earned fee and gift assets to any address; recovery can defeat this guarantee. The producer remains responsible for any shortfall. No fee-on-transfer, rebasing or unusual tokens are supported.',
+   `Agreement version: ${b.termsVersion}`, `Pinned agreement: ${b.termsUri}`, `Terms fingerprint: ${b.termsHash}`].join('\n');
+ }
  if (b.payoutPolicy === LIVE_PILOT_POLICY) {
   return [
    'DecentBusking Live Performance pilot agreement v1',
@@ -121,10 +172,17 @@ export function bookingGroup(b, now = Date.now()) {
 }
 export function claimState(b, escrowAddress, wallet, now = Date.now()) {
  if (b.mode !== 'phase1') return { enabled: false, label: 'Community-fund booking; ask the steward about payment after review' };
- if (!escrowAddress) return { enabled: false, label: 'Booking escrow is not configured' };
+ if (b.escrowVersion && b.escrowVersion !== LIVE_ASSET_VERSION) return { enabled:false, label:'Unknown escrow version; payment unavailable' };
+ if (!escrowAddress || b.escrowVersion === LIVE_ASSET_VERSION && String(escrowAddress).toLowerCase() !== String(b.escrowAddress).toLowerCase()) return { enabled: false, label: 'Booking escrow is not configured or available' };
  if (String(wallet).toLowerCase() !== b.wallet.toLowerCase()) return { enabled: false, label: 'Connect performer wallet' };
  if (b.status === 'paid' || b.status === 'refunded') return { enabled: false, label: b.status === 'paid' ? 'Claimed' : 'Refunded' };
+ if (b.escrowVersion === LIVE_ASSET_VERSION && ['refunding','recovered'].includes(b.status)) return { enabled:false, label:b.status === 'recovered' ? 'Fee recovered by administrator; not paid' : 'Fee refund pending' };
  if (['draft', 'failed', 'funding pending'].includes(b.status)) return { enabled: false, label: 'No confirmed escrow funding; no payment to claim' };
+ if (b.escrowVersion === LIVE_ASSET_VERSION) {
+  const enabled = now >= Date.parse(b.endUtc) && (b.status === 'approved' ||
+   b.status === 'funded' && now >= Date.parse(b.endUtc) + b.reviewWindow * 1000);
+  return { enabled, label: enabled ? 'Claim payment' : 'Awaiting producer approval or review window' };
+ }
  if (now > Date.parse(b.claimDeadline)) return { enabled: false, label: 'Claim deadline passed; unclaimed funds require expiry/refund reconciliation' };
  const automaticAt = Date.parse(b.endUtc) + b.reviewWindow * 1000;
  const automatic = b.status === 'funded' && now >= automaticAt;
@@ -141,12 +199,13 @@ function liveBookingDate(value) {
 function liveBookingMoney(units) { return `$${(Number(units || 0) / 1e6).toFixed(2)} USDC`; }
 export function liveBookingRows(bookings = [], { walletRenderer, now = Date.now() } = {}) {
  return bookings.map(b => {
-  const status = b.cancelled ? 'Canceled' : b.status === 'draft' && Date.parse(b.startUtc) <= now ? 'Invitation expired · no confirmed funding'
+  const status = b.cancelled && b.escrowVersion === LIVE_ASSET_VERSION ? `Schedule canceled · fee ${b.status}` : b.cancelled ? 'Canceled' : b.status === 'draft' && Date.parse(b.startUtc) <= now ? 'Invitation expired · no confirmed funding'
    : b.acknowledged && b.status === 'draft' ? 'Accepted · awaiting funding'
-   : ({ draft:'Draft invitation', funded:'Funded', approved:'Payment approved', paid:'Paid', refunded:'Refunded',
+   : ({ draft:'Draft invitation', funded:'Funded', approved:'Payment approved', paid:'Paid', refunded:'Refunded', refunding:'Refund pending', recovered:'Fee recovered · not paid',
       'funding pending':'Funding pending', failed:'Needs review' }[b.status] || b.status);
   const terms = b.termsUri ? `<a href="${escapeLive(b.termsUri.replace('ipfs://','https://gateway.pinata.cloud/ipfs/'))}" target="_blank" rel="noopener noreferrer">📄 Read ${escapeLive(b.termsVersion)} terms</a>` : '';
-  const policyText = livePerformancePolicyText(b);
+  const assetVersion = b.escrowVersion === LIVE_ASSET_VERSION;
+  const policyText = assetVersion ? 'Fixed guaranteed fee; platform/rehearsal faults do not reduce it. Administrator recovery can defeat custody.' : livePerformancePolicyText(b);
   const policy = policyText ? `<p>🎙️ ${escapeLive(policyText)}</p>` : '';
   const additional = b.additionalOffer ? `<p>Outside performance escrow: ${escapeLive(b.additionalOffer)}</p>` : '';
   const performance = b.payoutPolicy === LIVE_PILOT_POLICY && b.decision
@@ -155,7 +214,14 @@ export function liveBookingRows(bookings = [], { walletRenderer, now = Date.now(
    ? `<p>Verified live music: ${b.decision.liveMusicMinutes} minutes · approved ${liveBookingMoney(b.approvedUnits)}.</p>` : '';
   const transactions = Object.values(b.transactions || {}).filter(tx => tx?.hash).map(tx =>
    `<p>${escapeLive(tx.action || 'Transaction')} · ${escapeLive(tx.status || 'submitted')} · <a href="https://basescan.org/tx/${escapeLive(tx.hash)}" target="_blank" rel="noopener noreferrer">View receipt</a></p>`).join('');
-  const technical = `<details class="live-booking-technical"><summary>Technical details</summary><p>Occurrence: <code>${escapeLive(b.eventId)}</code></p><p>Terms fingerprint: <code>${escapeLive(b.termsHash)}</code></p>${transactions}</details>`;
-  return `<article class="live-booking" data-booking-id="${escapeLive(b.id)}"><header><strong>${escapeLive(b.displayName || b.ens || b.wallet)}</strong> · ${walletRenderer ? walletRenderer(b) : `<a href="https://basescan.org/address/${escapeLive(b.wallet)}" target="_blank" rel="noopener noreferrer">${escapeLive(b.ens || b.wallet)}</a>`} <span class="live-status">${escapeLive(status)}</span></header><p>🗓 ${escapeLive(liveBookingDate(b.startUtc))}–${escapeLive(new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', timeStyle:'short' }).format(new Date(b.endUtc)))} ET</p><p>💵 ${b.payoutPolicy === LIVE_PILOT_POLICY ? 'Guaranteed pilot fee' : 'Maximum fee'}: ${escapeLive(liveBookingMoney(b.amountUnits))} · ${b.mode === 'phase0' ? 'community fund (not escrowed)' : 'per-booking escrow; see confirmed funding status'}</p>${policy}${additional}${performance}${terms}<p>📅 Community calendar: ${escapeLive(b.scheduleStatus || 'Not linked yet')}${b.cancelled && b.cancellationReason ? ` · ${escapeLive(b.cancellationReason)}` : ''}</p>${b.reason ? `<p>📝 ${escapeLive(b.reason)}</p>` : ''}${b.remainderDisposition ? `<p>Remainder: ${escapeLive(b.remainderDisposition)}</p>` : ''}${technical}</article>`;
+  const assetDetails = assetVersion ? `<p>Base escrow: <code>${escapeLive(b.escrowAddress)}</code><br>Asset: <code>${escapeLive(b.assetAddress)}</code> · ${escapeLive(b.amountUnits)} raw units · ${escapeLive(b.assetDecimals)} decimals${b.gift ? `<br>Gift return treasury: <code>${escapeLive(b.gift.treasury)}</code>` : ''}</p>` : '';
+  const technical = `<details class="live-booking-technical"><summary>Technical details</summary><p>Occurrence: <code>${escapeLive(b.eventId)}</code></p><p>Terms fingerprint: <code>${escapeLive(b.termsHash)}</code></p>${assetDetails}${transactions}</details>`;
+  const localGiftPending = typeof localStorage !== 'undefined' && localStorage.getItem(`live-pending:${b.id}:giftRelease`);
+  const localFundingPending = typeof localStorage !== 'undefined' && localStorage.getItem(`live-pending:${b.id}:funding`);
+  const giftState = !['received','returned','recovered'].includes(b.giftStatus) && (b.transactions?.giftRelease?.status === 'pending' || localGiftPending)
+   ? 'release pending; not yet received' : (b.status === 'funding pending' || localFundingPending && ['draft','failed'].includes(b.status))
+   ? 'funding pending; not yet reserved' : b.giftStatus || 'not funded';
+  const gift = assetVersion && b.gift ? `<p>🎁 Gift: ${escapeLive(giftState)} · ${escapeLive(b.gift.quantity)} × token ${escapeLive(b.gift.tokenId)} at <code>${escapeLive(b.gift.collection)}</code>. Approval is not delivery.</p>` : '';
+  return `<article class="live-booking" data-booking-id="${escapeLive(b.id)}"><header><strong>${escapeLive(b.displayName || b.ens || b.wallet)}</strong> · ${walletRenderer ? walletRenderer(b) : `<a href="https://basescan.org/address/${escapeLive(b.wallet)}" target="_blank" rel="noopener noreferrer">${escapeLive(b.ens || b.wallet)}</a>`} <span class="live-status">${escapeLive(status)}</span></header><p>🗓 ${escapeLive(liveBookingDate(b.startUtc))}–${escapeLive(new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', timeStyle:'short' }).format(new Date(b.endUtc)))} ET</p><p>💵 ${assetVersion || b.payoutPolicy === LIVE_PILOT_POLICY ? 'Guaranteed fee' : 'Maximum fee'}: ${escapeLive(assetVersion ? formatLiveAsset(b.amountUnits, b.assetDecimals, b.assetSymbol) : liveBookingMoney(b.amountUnits))} · ${b.mode === 'phase0' ? 'community fund (not escrowed)' : 'per-booking escrow; see confirmed funding status'}</p>${policy}${gift}${additional}${performance}${terms}<p>📅 Community calendar: ${escapeLive(b.scheduleStatus || 'Not linked yet')}${b.cancelled && b.cancellationReason ? ` · ${escapeLive(b.cancellationReason)}` : ''}</p>${b.reason ? `<p>📝 ${escapeLive(b.reason)}</p>` : ''}${b.remainderDisposition ? `<p>Remainder: ${escapeLive(b.remainderDisposition)}</p>` : ''}${technical}</article>`;
  }).join('');
 }

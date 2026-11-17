@@ -1,8 +1,29 @@
 import { radioEndpoint, readRadioState } from './radio-client.mjs';
+import { getAudibleBroadcast, broadcastProgramAt } from './public-broadcast-client.mjs';
 
 export async function readLiveTipTarget({ serviceUrl, expectedBookingId, fetchImpl = fetch,
-  signal = AbortSignal.timeout(10000) }) {
+  signal = AbortSignal.timeout(10000), audibleBroadcast = getAudibleBroadcast() }) {
   const state = await readRadioState({ radioUrl: radioEndpoint(serviceUrl), fetchImpl, signal });
+  if (state.publicBroadcast?.selected) {
+    if (!audibleBroadcast || !Number.isFinite(state.serverTime) ||
+        state.serverTime - audibleBroadcast.at > 120000 || audibleBroadcast.at > state.serverTime) {
+      throw new Error('Buffered radio timing is unavailable. Play the broadcast before choosing its live performer.');
+    }
+    const program = broadcastProgramAt(state.publicBroadcast.programHistory, audibleBroadcast.at);
+    if (!program || program.playId !== audibleBroadcast.program.playId) {
+      throw new Error('The audible broadcast changed. Close and reopen the hat to verify its recipient.');
+    }
+    if (!program.live) {
+      if (expectedBookingId) throw new Error('The audible live performance ended. Close and reopen the hat.');
+      return null;
+    }
+    if (!program.bookingId || expectedBookingId && expectedBookingId !== program.bookingId ||
+        !/^0x[0-9a-f]{40}$/i.test(program.performer?.wallet || '') ||
+        /^0x0{40}$/i.test(program.performer.wallet) || !program.performer.artist?.trim() || !program.performer.title?.trim()) {
+      throw new Error('The audible performer recipient is unavailable or has changed. Close and reopen the hat.');
+    }
+    return Object.freeze({ bookingId: program.bookingId, ...program.performer });
+  }
   const live = state.liveAudio;
   const liveSlot = live?.policy?.mode === 'live' || live?.phase === 'live' ||
     state.activeShow?.type === 'live_performance';

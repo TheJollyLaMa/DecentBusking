@@ -2,6 +2,10 @@
 
 This is an **audio-first, disabled-until-configured** room implementation. It does not create an account, subscribe to a plan, deploy, publish an invitation, record media, or move money. A funded, acknowledged `pilot-guaranteed-v1` booking supplies the identity, start and end. No wallet address or Friday timestamp is hardcoded.
 
+For the separately gated larger-audience transport, its costs and acceptance
+limits, see [Public broadcast operating guide](PUBLIC_BROADCAST.md). That path
+does not enlarge the interactive studio's LiveKit participant allowance.
+
 The agreed pilot is Friday **November 13, 2026, 21:00–21:20 America/New_York** (`2026-11-14T02:00:00Z`–`02:20:00Z`), following Friday Hype. Its private checks are **20:00 and 20:45 ET**. These are operator acceptance targets, not a calendar creation performed by this change.
 
 ## Reuse / transport decision

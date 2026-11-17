@@ -1,7 +1,7 @@
 import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=20261117-lease-recovery';
 import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from './live-recording-consent.mjs?v=20261114-allocated-stage';
 import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261114-allocated-stage';
-import { performerRoomSign, performerAllocationAccess, verifiedPerformerFinish } from './performer-room.mjs?v=20261116-curtain';
+import { performerRoomSign, performerAllocationAccess, verifiedPerformerFinish } from './performer-room.mjs?v=20261117-booking-assets';
 import { bindInputMonitor } from './input-monitor.mjs?v=20261116-feedback';
 import { bindBoothSetup, SHOW_MODES } from './booth-setup.mjs?v=20261116-feedback';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
@@ -417,7 +417,7 @@ async function refreshBooking() {
       if (!response.ok) throw new Error('Booking unavailable');
       const state = await response.json();
       const selected = state.bookings?.find(item => item.id === bookingId);
-      if (!selected || selected.mode !== 'phase1' || selected.payoutPolicy !== 'pilot-guaranteed-v1' || !selected.stewardApproved) {
+      if (!selected || selected.mode !== 'phase1' || !['pilot-guaranteed-v1', 'asset-guaranteed-v1'].includes(selected.payoutPolicy) || !selected.stewardApproved) {
         throw new Error('Open the room from your performance invitation');
       }
       booking = selected;
