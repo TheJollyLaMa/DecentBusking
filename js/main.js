@@ -6,6 +6,7 @@ import { initStage } from './stage.js?v=20261030-ad-cutoff';
 import { initSpace } from './space.js?v=20261030-ad-cutoff';
 import { initTutorial } from './tutorial.js?v=20261116-promotions';
 import { initDBusker } from './dbusker.mjs?v=20261029-signpost';
+import './recording-edit-panel.mjs?v=20261118-side-editor';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.
 

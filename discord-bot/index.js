@@ -62,7 +62,9 @@ import { currentPayrollPeriod, payrollPeriodFromKey, PAYROLL_TIME_ZONE } from '.
 import { loadConfig }    from './config.js';
 import { uploadToIPFS, createIpfsUploader }  from './ipfs.js';
 import { backfillIpfsPins } from './ipfs-backfill.js';
-import { syncMintedTracksFromChain, createVerifiedMintQueueReader, discoverPinataMetadataGateway, readOwnedDevertAds, resolveDevertCampaignMedia, resolveApprovedDevertCampaignMedia } from './mint-sync.js';
+import { syncMintedTracksFromChain, createVerifiedMintQueueReader, discoverPinataMetadataGateway,
+  audioCidFromMetadata, buildGatewayUrl, readOwnedDevertAds, resolveDevertCampaignMedia,
+  resolveApprovedDevertCampaignMedia } from './mint-sync.js';
 import { nftCatalogPage } from '../js/nft-loader.js';
 import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, verifyDjukePlaylistWorker, DJUKE_ABI, DJUKE_PLAYLIST_WORKER_ABI } from './djuke.js';
@@ -108,6 +110,7 @@ import {
   addTrack,
   submitMediaTrack,
   submitLiveRecordingRelease,
+  submitCatalogRecordingRelease,
   getTrackById,
   getTrackId,
   getPlaylist,
@@ -1619,6 +1622,7 @@ async function main() {
     enabled: recordingEnabled, store: recordingStore, upload: recordingUpload, resumeDelayMs: 180000,
     submitRelease: async release => {
       if (!playlistReady) throw new Error('Recording mint queue is waiting for durable playlist restore');
+      if (release.catalogSource) return submitCatalogRecordingRelease(release);
       const artwork = await fs.promises.readFile(new URL('../img/D_Busker.jpeg', import.meta.url));
       const artworkCid = (await recordingUpload(artwork, 'DBusker-community-artwork.jpeg', 'image/jpeg')).replace(/^ipfs:\/\//, '');
       return submitLiveRecordingRelease({ ...release, booking: { ...release.booking, artworkCid } });
@@ -1627,6 +1631,12 @@ async function main() {
     download: async cid => {
       const gateway = await discoverDedicatedGateway(config) || config.ipfsGateway;
       return downloadRecordingSegment(cid, { gateway });
+    },
+    downloadSource: async cid => {
+      const gateway = await discoverDedicatedGateway(config) || config.ipfsGateway;
+      return fetch(buildGatewayUrl(gateway, cid), {
+        signal: AbortSignal.timeout(180_000), redirect: 'error',
+      });
     },
   });
   if (recordingEnabled && !recorder.available) throw new Error('Recording enabled without durable storage');
@@ -1645,6 +1655,44 @@ async function main() {
     programs: parseLiveAudioPrograms(process.env.LIVE_AUDIO_PROGRAMS || '{}'),
     ownerWallet: config.mintOwnerWallet,
     getBookings: () => liveBookings.getState(),
+    resolveCatalogRecording: async nftId => {
+      if (!playlistReady) throw new Error('Playlist is restoring');
+      if (Date.now() - _nftCatalogCheckedAt >= 60_000 || !_nftCatalog) {
+        await syncMintedTracks(config, { required: true });
+      }
+      if (!_nftCatalog) throw new Error('NFT catalog is unavailable');
+      const nft = _nftCatalog.find(item =>
+        `${item.chainId || 8453}:${String(item.contractAddress || '').toLowerCase()}:${item.tokenId}`.toLowerCase() ===
+        String(nftId || '').toLowerCase());
+      if (!nft) throw new Error('NFT is not in the verified configured-collection catalog');
+      const configured = [config.nftContractAddress, ...(config.nftContractAddresses || [])]
+        .filter(Boolean).map(value => value.toLowerCase());
+      if (!configured.includes(String(nft.contractAddress || '').toLowerCase())) {
+        throw new Error('NFT collection is not configured for DecentBusking');
+      }
+      const reviewed = _contentReview ? _contentReview.apply(nft) : nft;
+      if (reviewed?.moderationBlocked || reviewed?.playable === false) {
+        throw new Error('This catalog item is unavailable for editing while content review is active');
+      }
+      const sourceCid = audioCidFromMetadata(nft);
+      if (!sourceCid || sourceCid.includes('/')) throw new Error('Catalog audio must be a directly-addressed IPFS file');
+      const artistWallet = /^0x[0-9a-f]{40}$/i.test(nft.artist || '') ? nft.artist : nft.creator;
+      if (!/^0x[0-9a-f]{40}$/i.test(artistWallet || '')) throw new Error('NFT does not contain a verified artist wallet');
+      const mediaType = mediaTypeFor(nft.audioUrl || nft.animation_url || '', nft.mediaType || '');
+      if (!mediaType.startsWith('audio/')) throw new Error('Only audio files can be edited; this catalog media type is unsupported');
+      const artworkCid = audioCidFromMetadata({ audioUrl: nft.image || '' });
+      const artistName = nft.artistName ||
+        nft.description?.match(/^Shared through DecentJukebox by (.+)$/)?.[1] || '';
+      return {
+        nftId: `${nft.chainId || 8453}:${String(nft.contractAddress).toLowerCase()}:${Number(nft.tokenId)}`,
+        chainId: nft.chainId || 8453, contractAddress: String(nft.contractAddress).toLowerCase(),
+        tokenId: Number(nft.tokenId), artistWallet: artistWallet.toLowerCase(),
+        ...(artistName ? { artistName: String(artistName).slice(0, 100) } : {}),
+        sourceCid, title: String(nft.name || nft.title || `Track #${nft.tokenId}`).slice(0, 200),
+        mediaType,
+        ...(artworkCid && !artworkCid.includes('/') ? { artworkCid } : {}),
+      };
+    },
     store: liveAudioStore, recorder,
     transport: createLiveAudioTransport({
       enabled: process.env.LIVE_AUDIO_ENABLED === 'true',

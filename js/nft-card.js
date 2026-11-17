@@ -21,6 +21,22 @@ export function canEditCreatorSplits(nft = {}, walletAddress = '') {
   return creator === wallet || recipients.includes(wallet);
 }
 
+export function canEditCatalogRecording(nft = {}, walletAddress = '') {
+  const wallet = String(walletAddress || '').toLowerCase();
+  const artist = /^0x[0-9a-f]{40}$/i.test(nft.artist || '')
+    ? String(nft.artist).toLowerCase() : String(nft.creator || '').toLowerCase();
+  const source = String(nft.audioUrl || nft.animation_url || '');
+  const cid = source.match(/^ipfs:\/\/([^/?#]+)$/i)?.[1] ||
+    source.match(/^https:\/\/[^/]+\/ipfs\/([^/?#]+)$/i)?.[1] || '';
+  return /^0x[0-9a-f]{40}$/.test(wallet) && artist === wallet &&
+    (nft.chainId ?? 8453) === 8453 &&
+    /^0x[0-9a-f]{40}$/i.test(nft.contractAddress || '') &&
+    nft.tokenId !== undefined && nft.tokenId !== null && nft.tokenId !== '' &&
+    Number.isSafeInteger(Number(nft.tokenId)) && Number(nft.tokenId) >= 0 &&
+    /^[a-zA-Z0-9]{20,120}$/.test(cid) &&
+    String(nft.mediaType || 'audio/mpeg').startsWith('audio/');
+}
+
 // NFT currently shown in the single view; previews and purchases are handled explicitly.
 let _cardNft = null;
 const _creditProfileCache = new Map();
@@ -346,6 +362,8 @@ function _buildCardHTML(nft) {
     <div class="nft-card-actions">
       <button class="nft-playlist-btn nft-buy-btn" type="button">+ Playlist</button>
       <button class="nft-watchlist-btn nft-buy-btn" type="button" aria-pressed="false" title="Save to watchlist">👀 Save</button>
+      ${canEditCatalogRecording(nft, window._wallet?.address)
+        ? `<button class="nft-recording-edit-btn nft-buy-btn" type="button" data-catalog-recording-edit="${_esc(`${nft.chainId || 8453}:${nft.contractAddress.toLowerCase()}:${Number(nft.tokenId)}`)}">Edit / split</button>` : ''}
       <button class="content-review-flag nft-buy-btn" type="button" data-content-report data-contract="${_esc(contractAddress)}"
         data-token="${_esc(String(nft.tokenId))}" data-title="${_esc(nft.name || nft.title || 'This NFT')}" title="Flag for admin review" aria-label="Flag this recording for admin review">⚑</button>
     </div>

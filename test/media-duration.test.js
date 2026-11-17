@@ -32,6 +32,28 @@ test('real FFmpeg decodes exact audio durations on both sides of the ten-minute 
   await assert.rejects(probeMediaDuration(`http://127.0.0.1:${server.address().port}/600000?truncated`), /probe failed/);
 });
 
+test('sample-range duration proof is source-bound and keeps the strict 600-second threshold', async () => {
+  const { recordingSampleRangeProof, verifiedRecordingDuration, recordingDurationReason } =
+    await import('../js/radio-duration.mjs');
+  for (const [samples, longForm] of [[28_800_000, false], [28_800_048, true]]) {
+    const track = {
+      ipfsCid: 'cut-output-cid', durationSamples: samples, sampleRate: 48_000,
+      durationSeconds: samples / 48_000,
+      catalogRecording: { sourceCid: 'original-source-cid', startSample: 120, endSample: 120 + samples },
+    };
+    track.durationVerification = recordingSampleRangeProof(track, {
+      sourceCid: 'original-source-cid', startSample: 120, endSample: 120 + samples,
+    });
+    assert.equal(verifiedRecordingDuration(track), samples / 48_000);
+    assert.equal(recordingDurationReason(track, { longForm: true }) === null, longForm);
+    assert.equal(recordingDurationReason(track, { longForm: false }) === null, !longForm);
+    assert.equal(verifiedRecordingDuration({ ...track, durationSamples: samples - 1 }), null);
+    assert.throws(() => recordingSampleRangeProof(track, {
+      sourceCid: 'other-source-cid', startSample: 120, endSample: 120 + samples,
+    }), /Invalid sample-derived/);
+  }
+});
+
 test('backfill is bounded, serialized, persistent and retryable; failed probes never create short eligibility', async () => {
   const { createDurationBackfill } = await import('../discord-bot/media-duration.js');
   const { recordingDurationProof, verifiedRecordingDuration } = await import('../js/radio-duration.mjs');

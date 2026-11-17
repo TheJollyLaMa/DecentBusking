@@ -7,6 +7,7 @@ import { createLiveDirection, LiveDirectionError } from './live-direction.js';
 import { liveBroadcastTiming, liveBroadcastEnd } from '../js/live-broadcast.mjs';
 import { validateLiveAudioState } from './live-audio-store.js';
 import { planBroadcastCommand } from './live-broadcast-control.js';
+import { catalogRecordingAuthorizationMessage } from '../js/live-recording-edit.mjs';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const address = value => /^0x[0-9a-f]{40}$/i.test(value || '') ? value.toLowerCase() : '';
@@ -29,7 +30,7 @@ export function createLiveAudioFileStore(path) {
 
 export function createLiveAudioService({ getBookings, ownerWallet, transport, store, recorder, onPolicy = () => {},
   onCancel, now = () => Date.now(), verify = verifyMessage, checkpointTimeoutMs = 45_000, programs = {},
-  withBroadcastHandoff, feedback } = {}) {
+  withBroadcastHandoff, feedback, resolveCatalogRecording } = {}) {
   const owner = address(ownerWallet);
   const challenges = new Map(), sessions = new Map(), frames = new Map(), reservations = new Map();
   const direction = createLiveDirection({ now });
@@ -38,6 +39,31 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
   let bookingRefresh, bookingsLoaded = false, bookingVerificationFailed = false, stopped = false;
   let checkpointWrite = null, failedBroadcast = null;
   const configured = !!owner && !!store && transport?.ready === true;
+  async function getCatalogRecording(nftId) {
+    if (typeof resolveCatalogRecording !== 'function') throw new LiveAudioError('Catalog recording lookup is unavailable');
+    let source;
+    try { source = await resolveCatalogRecording(nftId); }
+    catch { throw new LiveAudioError('Verified NFT catalog source is unavailable; retry after catalog refresh'); }
+    if (!source || source.nftId?.toLowerCase() !== String(nftId || '').toLowerCase() ||
+        source.chainId !== 8453 || !/^8453:0x[0-9a-f]{40}:\d{1,20}$/i.test(source.nftId || '') ||
+        !/^0x[0-9a-f]{40}$/i.test(source.contractAddress || '') ||
+        !Number.isSafeInteger(source.tokenId) || source.tokenId < 0 ||
+        source.nftId.toLowerCase() !== `8453:${source.contractAddress.toLowerCase()}:${source.tokenId}` ||
+        !/^0x[0-9a-f]{40}$/i.test(source.artistWallet || '') ||
+        !/^[a-zA-Z0-9]{20,120}$/.test(source.sourceCid || '') ||
+        typeof source.title !== 'string' || !source.title.trim() ||
+        typeof source.mediaType !== 'string' || !source.mediaType.startsWith('audio/')) {
+      throw new LiveAudioError('Verified catalog item is not a supported DecentBusking audio source');
+    }
+    return { ...source, nftId: source.nftId.toLowerCase(), contractAddress: source.contractAddress.toLowerCase(),
+      artistWallet: source.artistWallet.toLowerCase() };
+  }
+  const sameCatalogSource = (first, second) => first?.nftId === second?.nftId &&
+    first?.sourceCid === second?.sourceCid && first?.artistWallet === second?.artistWallet &&
+    first?.chainId === second?.chainId && first?.contractAddress === second?.contractAddress &&
+    first?.tokenId === second?.tokenId && first?.title === second?.title &&
+    first?.artistName === second?.artistName && first?.mediaType === second?.mediaType &&
+    first?.artworkCid === second?.artworkCid;
   const outroSeconds = b => programs[b.id]?.outroSeconds ?? 300;
   const policyFor = (record, b) => {
     const p = liveAudioPolicy(record, b, now(), Object.hasOwn(programs, b.id) ? programs[b.id] : null);
@@ -460,12 +486,32 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
   }
   return {
     get configured() { return configured && !failed; },
-    async challenge({ bookingId, wallet, scope = 'room' }, origin) {
+    async challenge({ bookingId, nftId, wallet, scope = 'room' }, origin) {
+      if (scope === 'catalog-recording-edit') {
+        await run(initialize);
+        const who = address(wallet);
+        if (!who) throw new LiveAudioError('Connect the artist wallet for this recording');
+        for (const [key, challenge] of challenges) if (challenge.expiresAt <= now()) challenges.delete(key);
+        if (challenges.size >= 128) throw new LiveAudioError('Too many room challenges; retry shortly');
+        const source = await getCatalogRecording(nftId);
+        if (who !== source.artistWallet) throw new LiveAudioError('Only the artist wallet recorded in this NFT may edit its audio');
+        if (!recorder?.available) throw new LiveAudioError('Catalog recording editing is not configured');
+        const nonce = opaque(), expiresAt = now() + 120_000;
+        const message = catalogRecordingAuthorizationMessage({
+          nftId: source.nftId, wallet: who, origin, nonce, expiresAt, sourceCid: source.sourceCid,
+        });
+        for (const [key, challenge] of challenges) if (challenge.expiresAt <= now()) challenges.delete(key);
+        if (challenges.size >= 128) throw new LiveAudioError('Too many room challenges; retry shortly');
+        challenges.set(nonce, { nftId: source.nftId, source, who, origin, nonce, message, expiresAt, scope });
+        return { challengeId: nonce, message };
+      }
       return run(async () => {
         await initialize();
         const b = await findBooking(bookingId, true);
         const who = address(wallet);
-        if (!who || (who !== owner && who !== address(b.wallet))) throw new LiveAudioError('Only this booking performer or configured owner may enter backstage');
+        if (!who || (who !== owner && who !== address(b.wallet))) {
+          throw new LiveAudioError('Only this booking performer or configured owner may enter backstage');
+        }
         for (const [key, challenge] of challenges) if (challenge.expiresAt <= now()) challenges.delete(key);
         if (challenges.size >= 128) throw new LiveAudioError('Too many room challenges; retry shortly');
         if (scope === 'recording-edit') {
@@ -499,6 +545,34 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       });
     },
     async authorize({ challengeId, signature }, origin) {
+      if (challenges.get(challengeId)?.scope === 'catalog-recording-edit') {
+        const c = await run(async () => {
+          await initialize();
+          const challenge = challenges.get(challengeId);
+          if (!challenge || challenge.origin !== origin || challenge.expiresAt <= now()) {
+            throw new LiveAudioError('Room challenge expired or already used');
+          }
+          if (address(verify(challenge.message, signature)) !== challenge.who) {
+            throw new LiveAudioError('Room signature does not match the catalog artist wallet');
+          }
+          challenges.delete(challengeId);
+          return challenge;
+        });
+        const source = await getCatalogRecording(c.nftId);
+        if (!sameCatalogSource(c.source, source) || c.who !== source.artistWallet) {
+          throw new LiveAudioError('The verified NFT source changed; reopen the recording editor and sign again');
+        }
+        const state = await recorder?.prepareCatalogEdit(source, {
+          origin: c.origin, nonce: c.nonce, expiresAt: c.expiresAt, signature,
+        });
+        if (!state?.available) throw new LiveAudioError('This catalog recording could not be prepared for editing');
+        const token = opaque(), sessionExpiresAt = now() + 15 * 60_000;
+        for (const [key, session] of sessions) if (session.expiresAt <= now()) sessions.delete(key);
+        if (sessions.size >= 32) throw new LiveAudioError('Room session limit reached');
+        sessions.set(token, { nftId: source.nftId, source, wallet: c.who,
+          role: 'performer', scope: 'catalog-recording-edit', origin, expiresAt: sessionExpiresAt });
+        return { token, role: 'performer', expiresAt: sessionExpiresAt, state };
+      }
       return run(async () => {
         await initialize();
         const c = challenges.get(challengeId);
@@ -545,9 +619,36 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       if (typeof command?.action === 'string' && command.action.startsWith('feedback-')) {
         return feedbackCommand(token, command, origin);
       }
+      if (sessions.get(token)?.scope === 'catalog-recording-edit') {
+        await run(initialize);
+        let session = auth(token, origin);
+        if (!['catalog-recording-edit-state', 'catalog-recording-edit-save', 'catalog-recording-edit-approve'].includes(command.action)) {
+          throw new LiveAudioError('This pass permits only edits to its verified catalog recording');
+        }
+        if (recorder?.deploymentPaused?.()) throw new LiveAudioError('Recording editing is paused for a verified deployment handoff');
+        const source = await getCatalogRecording(session.nftId);
+        session = auth(token, origin);
+        if (!sameCatalogSource(session.source, source) || session.wallet !== source.artistWallet) {
+          throw new LiveAudioError('Catalog source attribution changed; reopen and reauthorize the recording');
+        }
+        if (recorder?.deploymentPaused?.()) throw new LiveAudioError('Recording editing is paused for a verified deployment handoff');
+        if (command.action === 'catalog-recording-edit-state') {
+          if (Object.keys(command).some(key => key !== 'action')) throw new LiveAudioError('Invalid catalog recording edit request');
+          return recorder.catalogEditState(source);
+        }
+        if (command.action === 'catalog-recording-edit-save') {
+          if (Object.keys(command).some(key => !['action', 'draft'].includes(key))) throw new LiveAudioError('Invalid catalog recording edit request');
+          return recorder.saveCatalogEdit(source, command.draft, session.wallet);
+        }
+        if (Object.keys(command).some(key => !['action', 'choice', 'issuedAt', 'signature'].includes(key))) {
+          throw new LiveAudioError('Invalid catalog recording approval request');
+        }
+        return recorder.approveCatalogEdit(source, command, session.wallet, origin);
+      }
       return run(async () => {
         await initialize();
-        const session = auth(token, origin), b = await findBooking(session.bookingId, !['state', 'cancel'].includes(command.action));
+        const session = auth(token, origin);
+        const b = await findBooking(session.bookingId, !['state', 'cancel'].includes(command.action));
         if (session.scope === 'recording-edit') {
           if (session.wallet !== address(b.wallet) || !recordingReleaseEligible(b) ||
               !['recording-edit-state', 'recording-edit-save', 'recording-edit-approve'].includes(command.action)) {

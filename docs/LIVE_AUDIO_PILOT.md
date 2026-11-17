@@ -106,6 +106,22 @@ no token or source is edited in place. The booked performer remains artist,
 royalty receiver and tip wallet under existing defaults. No collaborator split
 is inferred or added.
 
+The same `recording-edit.html` room is also embedded in the archive's right-side
+panel and remains available as a dedicated page. A verified configured-collection
+NFT card offers **Edit / split** only to its metadata-attributed artist wallet.
+The server re-resolves the NFT from the chain-synced catalog, checks moderation
+and audio media type, and binds authorization and each publication approval to
+the NFT identity and original source CID; arbitrary CIDs are not accepted. The
+attributed artist wallet (not a current ERC-721 holder lookup) is the edit
+authority. Catalog audio must be a directly addressed IPFS file, at most 100 MB
+and 120 minutes, and must decode successfully into bounded 48 kHz mono segments.
+The draft starts with three or four named cuts, can be adjusted to three or four,
+and autosaves to the existing encrypted recording journal. Closing or switching
+the panel flushes pending edits before it hides or replaces the room. A full-set
+approval and a cut approval are separate wallet signatures; only approved cuts
+are exported as new MP3 releases. Existing NFT/source media are unchanged, the
+artist remains recipient and tip wallet, and no collaborator payout is inferred.
+
 The existing admin panel still requires a genuine owner-signed mint and verified
 chain reconciliation. A durable replay-pending marker prioritizes the approved
 full-set recording only in normal rotation after the five-minute outro, behind

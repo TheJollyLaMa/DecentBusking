@@ -8,9 +8,13 @@ const read = file => readFileSync(join(root, file), 'utf8');
 
 test('recording release room exposes accessible review and explicit performer choices', () => {
   const html = read('recording-edit.html');
+  const index = read('index.html');
   const editor = read('js/live-recording-editor.mjs');
+  const panel = read('js/recording-edit-panel.mjs');
   const profile = read('js/live-performance-profile.mjs');
+  const cards = read('js/nft-card.js');
   const css = read('css/live-recording-edit.css');
+  const appCss = read('css/styles.css');
 
   for (const control of ['recording-edit-audio', 'recording-edit-waveform', 'recording-edit-save',
     'recording-edit-defer', 'recording-edit-full', 'recording-edit-split']) assert.ok(html.includes(control));
@@ -20,8 +24,58 @@ test('recording release room exposes accessible review and explicit performer ch
   assert.match(editor, /scope: 'recording-edit'/);
   assert.match(editor, /signMessage\(message\)/);
   assert.match(editor, /recording-edit-approve/);
+  assert.match(editor, /catalog-recording-edit/);
+  assert.match(editor, /markDraftChanged/);
+  assert.match(editor, /flush-recording-draft/);
+  assert.match(editor, /validateCatalogRecordingDraft/);
   assert.match(editor, /sourceSamples/);
   assert.match(profile, /recording-edit\.html\?booking=/);
   assert.match(profile, /Review your live recording/);
   assert.match(css, /@media/);
+  assert.match(index, /id="recording-edit-panel"/);
+  assert.match(index, /id="recording-edit-frame"/);
+  assert.match(panel, /data-recording-edit/);
+  assert.match(panel, /data-catalog-recording-edit/);
+  assert.match(panel, /decentbusking:flush-recording-draft/);
+  assert.match(cards, /canEditCatalogRecording/);
+  assert.match(appCss, /#recording-edit-panel\.is-open/);
+});
+
+test('recording side panel opens canonical booking IDs without accepting malformed links', () => {
+  const { runInNewContext } = require('node:vm');
+  const handlers = new Map();
+  const elements = {
+    'recording-edit-panel': { classList: { contains: () => false, toggle() {} }, setAttribute() {} },
+    'recording-edit-frame': { src: 'about:blank' },
+    'recording-edit-panel-close': { addEventListener() {}, focus() {} },
+    'recording-edit-dedicated': {},
+  };
+  runInNewContext(read('js/recording-edit-panel.mjs'), {
+    document: {
+      getElementById: name => elements[name],
+      addEventListener: (name, handler) => handlers.set(name, handler),
+    },
+    window: { addEventListener() {} },
+    location: { href: 'https://example.test/DecentBusking/', origin: 'https://example.test' },
+    URL, setTimeout, clearTimeout,
+  });
+  const bookingId = 'friday-live-performance:2026-11-13:withinthevacuum';
+  const trigger = { dataset: { recordingEdit: bookingId } };
+  let prevented = false;
+  const click = () => handlers.get('click')({
+    target: { closest: selector => selector === '[data-recording-edit]' ? trigger : null },
+    preventDefault() { prevented = true; },
+  });
+  click();
+  const openedUrl = elements['recording-edit-frame'].src;
+  assert.equal(new URL(openedUrl).searchParams.get('booking'), bookingId);
+  assert.equal(prevented, true);
+  assert.equal(elements['recording-edit-panel'].inert, false);
+  assert.equal(elements['recording-edit-dedicated'].href, new URL(openedUrl).pathname + new URL(openedUrl).search);
+
+  trigger.dataset.recordingEdit = 'invalid/<booking>';
+  prevented = false;
+  click();
+  assert.equal(prevented, false);
+  assert.equal(elements['recording-edit-frame'].src, openedUrl);
 });

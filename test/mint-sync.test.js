@@ -381,6 +381,8 @@ test('CLI mint metadata matches the Admin panel format', async () => {
     mintedAt: '2026-10-03T00:00:00.000Z',
   });
   assert.equal(buildTrackMetadata({ ...track, artworkCid: 'bafy-art' }, '0xowner').image, 'ipfs://bafy-art');
+  const catalogRecording = { sourceNftId: '8453:0xabc:7', sourceCid: 'bafy-source', startSample: 0, endSample: 48000 };
+  assert.deepEqual(buildTrackMetadata({ ...track, catalogRecording }, '0xowner').catalogRecording, catalogRecording);
   const video = buildTrackMetadata({ ...track, filename: 'performance.mp4', mediaType: 'video/mp4',
     tipWallet: '0xtip', parentTokenId: 12 }, '0xowner');
   assert.equal(video.videoUrl, 'ipfs://bafy-audio');

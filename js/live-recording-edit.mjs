@@ -50,6 +50,55 @@ export function validateRecordingDraft(draft, totalSamples) {
   return { revision: draft.revision, albumTitle: draft.albumTitle.trim(), songs };
 }
 
+export function validateCatalogRecordingDraft(draft, totalSamples) {
+  const normalized = validateRecordingDraft(draft, totalSamples);
+  if (normalized.songs.length > 4) throw Error('A catalog recording can have at most four cuts');
+  return normalized;
+}
+
+function validCatalogIdentity(nftId) {
+  return typeof nftId === 'string' && /^8453:0x[0-9a-f]{40}:\d{1,20}$/i.test(nftId);
+}
+
+export function catalogRecordingAuthorizationMessage({ nftId, wallet, origin, nonce, expiresAt, sourceCid }) {
+  if (!validCatalogIdentity(nftId) || !/^0x[0-9a-f]{40}$/i.test(wallet || '') ||
+      typeof origin !== 'string' || !/^https?:\/\/[^/\s]+$/i.test(origin) ||
+      !/^[a-f0-9]{64}$/i.test(nonce || '') || !Number.isSafeInteger(expiresAt) ||
+      !/^[a-zA-Z0-9]{20,120}$/.test(sourceCid || '')) throw Error('Invalid catalog recording authorization');
+  return [
+    'DecentBusking catalog recording edit authorization v1',
+    `NFT identity: ${nftId.toLowerCase()}`,
+    `Artist: ${wallet.toLowerCase()}`,
+    `Origin: ${origin}`,
+    `Source CID: ${sourceCid}`,
+    `Nonce: ${nonce.toLowerCase()}`,
+    `Expires at: ${new Date(expiresAt).toISOString()}`,
+    'This pass allows only editing this artist-attributed source. It does not approve an export, mint, payment, collaborator royalty, or transaction.',
+  ].join('\n');
+}
+
+export function catalogRecordingReleaseApprovalMessage({ nftId, wallet, origin, sourceCid, sourceSamples,
+  choice, draft, issuedAt }) {
+  if (!validCatalogIdentity(nftId) || !/^0x[0-9a-f]{40}$/i.test(wallet || '') ||
+      typeof origin !== 'string' || !origin || !/^[a-zA-Z0-9]{20,120}$/.test(sourceCid || '') ||
+      !Number.isSafeInteger(sourceSamples) || sourceSamples <= 0 ||
+      !['full', 'split', 'defer'].includes(choice) || !Number.isSafeInteger(issuedAt)) {
+    throw Error('Invalid catalog recording release approval');
+  }
+  return [
+    'DecentBusking catalog recording publication approval v1',
+    `NFT identity: ${nftId.toLowerCase()}`,
+    `Artist: ${wallet.toLowerCase()}`,
+    `Origin: ${origin}`,
+    `Source CID: ${sourceCid}`,
+    `Source samples: ${sourceSamples}`,
+    `Choice: ${choice}`,
+    `Draft: ${JSON.stringify(draft)}`,
+    `Issued at: ${new Date(issuedAt).toISOString()}`,
+    'The original NFT and media remain immutable. Each requested full-set or cut release is a separate publication linked to this source. This does not grant collaborator rights, approve minting, or authorize a transaction.',
+  ].join('\n');
+}
+
 export function recordingReleaseApprovalMessage({ bookingId, wallet, origin, sourceCid, sourceSamples,
   choice, draft, issuedAt, incomplete = false }) {
   if (typeof bookingId !== 'string' || !bookingId || !/^0x[0-9a-f]{40}$/i.test(wallet || '') ||
