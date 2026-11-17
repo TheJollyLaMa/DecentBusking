@@ -7,7 +7,7 @@ import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
 import { createLiveAudioPinataStore } from './live-audio-store.js';
 import { createLiveAudioTransport } from './live-audio-transport.js';
-import { createLiveRecorder, createLiveRecordingStore, downloadRecordingSegment } from './live-recording.js';
+import { createLiveRecorder, createLiveRecordingStore, downloadRecordingSegment, fetchCatalogRecordingSource } from './live-recording.js';
 import { createRehearsalService } from './rehearsal.js';
 import { createRehearsalStore } from './rehearsal-store.js';
 import { createPromotions } from './promotions.js';
@@ -1634,8 +1634,8 @@ async function main() {
     },
     downloadSource: async cid => {
       const gateway = await discoverDedicatedGateway(config) || config.ipfsGateway;
-      return fetch(buildGatewayUrl(gateway, cid), {
-        signal: AbortSignal.timeout(180_000), redirect: 'error',
+      return fetchCatalogRecordingSource(cid, {
+        gateways: [gateway, config.ipfsGateway, 'https://gateway.pinata.cloud/ipfs/'],
       });
     },
   });
@@ -1719,6 +1719,7 @@ async function main() {
   }
   const rehearsal = createRehearsalService({
     ownerWallet: config.mintOwnerWallet, store: rehearsalStore,
+    getBookings: () => liveBookings.getState(),
     // Defaults: thejollylama.eth and decentagency.eth.
     engineerWallets: (process.env.REHEARSAL_ENGINEER_WALLETS ||
       '0x807061DF657A7697c04045dA7d16D941861cAABc,0xcAeEd8422fB5682C298B7F0971906d446fFd4e7a').split(',').map(w => w.trim()),

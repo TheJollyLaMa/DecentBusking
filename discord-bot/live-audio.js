@@ -486,6 +486,41 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
   }
   return {
     get configured() { return configured && !failed; },
+    async previewRecording(input) {
+      if (Object.keys(input).some(key => !['bookingId', 'nftId', 'wallet'].includes(key)) ||
+          Boolean(input.bookingId) === Boolean(input.nftId)) throw new LiveAudioError('Choose one recording to preview.');
+      const who = address(input.wallet);
+      if (!who) throw new LiveAudioError('Connect the artist wallet in the page header.');
+      await run(initialize);
+      if (input.nftId) {
+        const source = await getCatalogRecording(input.nftId);
+        if (who !== source.artistWallet) throw new LiveAudioError('Only the credited artist can open this recording in the studio.');
+        return recorder.previewCatalogEdit(source);
+      }
+      const booking = await findBooking(input.bookingId, true);
+      if (who !== address(booking.wallet) || !recordingReleaseEligible(booking)) {
+        throw new LiveAudioError('Only the booked performer can open this recording in the studio.');
+      }
+      return recorder.previewEdit(mediaBooking(booking));
+    },
+    async publishRecording(input, origin) {
+      if (Object.keys(input).some(key => !['bookingId', 'nftId', 'wallet', 'sourceCid', 'sourceSamples',
+        'choice', 'draft', 'issuedAt', 'signature'].includes(key)) ||
+          Boolean(input.bookingId) === Boolean(input.nftId)) throw new LiveAudioError('Invalid recording confirmation.');
+      const who = address(input.wallet);
+      if (!who) throw new LiveAudioError('Connect the artist wallet before confirming.');
+      await run(initialize);
+      if (input.nftId) {
+        const source = await getCatalogRecording(input.nftId);
+        if (who !== source.artistWallet) throw new LiveAudioError('Only the credited artist can confirm this recording.');
+        return recorder.publishCatalogEdit(source, input, who, origin);
+      }
+      const booking = await findBooking(input.bookingId, true);
+      if (who !== address(booking.wallet) || !recordingReleaseEligible(booking)) {
+        throw new LiveAudioError('Only the booked performer can confirm this recording.');
+      }
+      return recorder.publishEdit(mediaBooking(booking), input, who, origin);
+    },
     async challenge({ bookingId, nftId, wallet, scope = 'room' }, origin) {
       if (scope === 'catalog-recording-edit') {
         await run(initialize);

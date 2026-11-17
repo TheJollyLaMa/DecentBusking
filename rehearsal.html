@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
   <title>DecentBusking · Rehearsal room</title>
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-shared-room">
   <script src="decent.config.js"></script>
@@ -12,7 +13,7 @@
     <img src="img/D_Busker.jpeg" width="56" height="56" alt="DBusker, your friendly stage companion">
     <div><p class="rehearsal-eyebrow">DECENTBUSKING · REHEARSAL ROOM</p>
       <h1>The rehearsal room</h1>
-      <p id="rehearsal-intro">A shared practice room that belongs to nobody. Bring your band, and an engineer may drop in. No pressure.</p>
+      <p id="rehearsal-intro">Your own private practice stage. Start a rehearsal, send its invitation link to your band, and get comfortable before show day.</p>
     </div>
   </header>
   <div class="studio-signal-strip" aria-hidden="true"><span>♫</span><span>🎙</span><span>✦</span><span>♬</span><span>◉</span></div>
@@ -22,12 +23,13 @@
     <h2>1 · Make yourself at home</h2>
     <details class="room-entry-info">
       <summary aria-label="Why sign to enter?">i</summary>
-      <p>Anyone with this link can sign in with any wallet and join whoever is already practising. Up to six people at a time. Signing proves you control the wallet and gives this browser a pass that stays valid while this page is open.</p>
+      <p>Administrators and anyone who has accepted a live-performance invitation can start a room at any time. Bandmates with that room's unique link can sign in with any wallet. Up to six people per room.</p>
       <p>No gas, payment, token approval or booking acceptance. Your private key never leaves your wallet. This signature also confirms consent to private live audio with whoever is in the room—not recording or public broadcast.</p>
-      <p>Lost this page? Open the same link and sign in again. You land back in the running session. Nobody owns the room; engineers can remove someone or close the session.</p>
+      <p>Each rehearsal has a separate private link. Keep it private. The host and engineers can remove someone or close the room. Links expire when everyone leaves, at the four-hour limit, or after a worker restart.</p>
     </details>
-    <p>Sign in with any wallet to enter. No payment or transaction.</p>
-    <button id="join-room" type="button" disabled>Sign in and enter the room</button>
+    <p>Start your rehearsal, or use a host's room-specific link to join as a guest. No payment or transaction.</p>
+    <button id="join-room" type="button" disabled>Sign consent and enter</button>
+    <a href="rehearsal.html" rel="noreferrer">Start a new rehearsal instead</a>
   </section>
   <section id="controls" class="rehearsal-card" hidden>
     <h2>2 · Let's hear you</h2>
@@ -66,7 +68,7 @@
       <h3>Who's here</h3>
       <pre id="people" role="status" aria-live="polite">Nobody else is here yet.</pre>
       <div id="engineer-tools" hidden>
-        <label for="remove-who">Engineer: remove someone from this session</label>
+        <label for="remove-who">Host / engineer: remove someone from this session</label>
         <select id="remove-who"><option value="">Choose someone…</option></select>
         <button id="remove" class="rehearsal-secondary" type="button">Remove</button>
       </div>
@@ -96,19 +98,24 @@
       <div id="remote-audio"></div>
       <p>Starting your microphone also plays everyone else in the room. Listen only plays them without sending your mic. This is separate from hearing your own input. If you're alone, there is nobody else to hear.</p>
     </details>
+    <section class="rehearsal-card" aria-label="Invite your band">
+      <p id="invitation"></p>
+      <label for="invite-link">This rehearsal's private invitation link</label>
+      <input id="invite-link" type="url" readonly spellcheck="false">
+      <button id="copy-invite" type="button">Copy band invitation</button>
+      <p id="deadline"></p>
+    </section>
     <details class="rehearsal-details">
       <summary>Your session & help</summary>
-      <p id="invitation"></p>
-      <p id="deadline"></p>
       <p>If your pass ends, sign in again; you rejoin the same session. If the mic is blocked, allow microphone access in your browser's site settings, then retry. If your meter stays still, check the selected input and interface gain.</p>
-      <p>Use the same stable stage link for practice and show day. At T−70, backstage requires fresh wallet authorization and a new connection. A real show still needs both soundchecks and the operator's confirmation.</p>
+      <p>This link is for rehearsal only. Show day uses the contracted performance's own stage link, fresh wallet authorization and both real soundchecks.</p>
     </details>
-    <button id="end" type="button" hidden>Engineer: close this session for everyone</button>
+    <button id="end" type="button" hidden>Host / engineer: close this rehearsal</button>
   </section>
   <details class="rehearsal-details rehearsal-footnote">
     <summary>About this private room</summary>
     <p>Practice does not accept a booking, move money or count as a Friday soundcheck.</p>
-    <p>A session opens when the first person signs in and closes when everyone has left, after four hours, or when an engineer closes it. Closure is best-effort while the worker is down: browsers stop at the deadline, and the worker deletes the room after recovery.</p>
+    <p>A separate room opens when an eligible host signs in and closes when everyone leaves, after four hours, or when the host or an engineer closes it. Worker restart ends existing invitations. Closure is best-effort while the worker is down: browsers stop at the deadline, and the worker deletes the room after recovery.</p>
   </details>
   <aside class="studio-helper" aria-label="DBusker's soundcheck tips">
     <img src="img/D_Busker.jpeg" width="48" height="48" alt="DBusker">
@@ -125,6 +132,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/rehearsal.mjs?v=20261116-shared-room"></script>
+  <script type="module" src="js/rehearsal.mjs?v=20261117-private-rooms"></script>
 </body>
 </html>

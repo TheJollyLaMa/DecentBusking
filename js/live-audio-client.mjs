@@ -17,6 +17,7 @@ export async function roomRequest(serviceUrl, path, input, token, fetchImpl = fe
   const response = await fetchImpl(`${serviceUrl.replace(/\/$/, '')}/api/live-audio/${path}`, {
     method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(input),         signal: AbortSignal.timeout(
+      ['recording-preview', 'recording-publish'].includes(path) ||
       ['recording-edit-save', 'recording-edit-approve',
         'catalog-recording-edit-save', 'catalog-recording-edit-approve'].includes(input.action) ? 180_000
         : path === 'session' || input.action?.startsWith('broadcast-') ||

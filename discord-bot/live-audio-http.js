@@ -40,7 +40,9 @@ export async function handleLiveAudioRequest(request, response, { service, allow
     if (!allowed) { send(403, { error: 'Room origin is not allowed' }); return true; }
     if (request.method !== 'POST') { send(405, { error: 'Room action requires POST' }); return true; }
     const input = await body(request);
-    if (url.pathname === '/api/live-audio/challenge') send(200, await service.challenge(input, origin));
+    if (url.pathname === '/api/live-audio/recording-preview') send(200, await service.previewRecording(input, origin));
+    else if (url.pathname === '/api/live-audio/recording-publish') send(200, await service.publishRecording(input, origin));
+    else if (url.pathname === '/api/live-audio/challenge') send(200, await service.challenge(input, origin));
     else if (url.pathname === '/api/live-audio/session') send(200, await service.authorize(input, origin));
     else if (url.pathname === '/api/live-audio/control') {
       const token = String(request.headers.authorization || '').replace(/^Bearer /, '');
@@ -49,6 +51,13 @@ export async function handleLiveAudioRequest(request, response, { service, allow
     else send(404, { error: 'Unknown room route' });
   } catch (error) {
     // Never return provider errors: they can contain stream keys, tokens or signed URLs.
+    if (!(error instanceof LiveAudioError)) console.warn('[live-audio] Request failed:', {
+      route: ['/api/live-audio/recording-preview', '/api/live-audio/recording-publish',
+        '/api/live-audio/session', '/api/live-audio/challenge', '/api/live-audio/control'].includes(url.pathname) ? url.pathname : 'other',
+      kind: ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'AbortError', 'TimeoutError'].includes(error.name) ? error.name : 'Error',
+      code: ['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'ENOENT', 'EACCES',
+        'EPIPE', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET'].includes(error.code) ? error.code : undefined,
+    });
     send(error instanceof LiveDirectionError ? error.status : 400,
       { error: error instanceof LiveAudioError ? error.message : 'Live audio request unavailable; retry or contact the operator',
         ...(error instanceof LiveDirectionError ? { code: error.code } : {}) });

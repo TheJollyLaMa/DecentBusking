@@ -21,16 +21,20 @@ async function fixture(options = {}) {
   const transport = {
     ready: true, async close(b) { calls.push(['close', b.id]); if (options.closeFailure) throw Error('close'); },
     async rehearsalConnect(b, wallet, publish) { calls.push(['connect', b.id, wallet, publish]); return { token: 'secret' }; },
-    async rehearsalRemove(b, wallet) { calls.push(['remove', b.id, wallet]); },
+    async rehearsalRemove(b, wallet) { calls.push(['remove', b.id, wallet]); if (options.removeFailure) throw Error('provider private URL'); },
     async monitor(b, cb) { calls.push(['monitor', b.id]); monitors.push(cb); },
   };
   const service = createRehearsalService({ ownerWallet: owner.address, engineerWallets: [engineer.address],
-    store, transport, now: () => clock.now });
+    store, transport, now: () => clock.now, getBookings: options.getBookings || (async () => ({ bookings:
+      [guest, stranger].map(wallet => ({ wallet: wallet.address, acknowledged: true, cancelled: true, status: 'paid' })) })) });
   async function sign(wallet, input = { action: 'enter' }, requestOrigin = origin) {
     const challenge = await service.challenge({ ...input, wallet: wallet.address }, requestOrigin);
     return service.authorize({ challengeId: challenge.challengeId, signature: await wallet.signMessage(challenge.message) }, requestOrigin);
   }
-  const enter = wallet => sign(wallet);
+  const enter = wallet => {
+    const room = durable.value.rooms.find(r => !r.endedAt && r.expiresAt > clock.now);
+    return sign(wallet, room ? { action: 'join', roomId: room.id } : { action: 'enter' });
+  };
   const cmd = (who, input, requestOrigin = origin) => service.command(who.token, input, requestOrigin);
   return { service, clock, calls, monitors, durable, sign, enter, cmd };
 }
@@ -48,18 +52,61 @@ test('checkpoint budget permits a verified save longer than ten seconds without 
   assert.equal(f.durable.value.rooms.length, 1);
 });
 
-test('any wallet enters one shared room that nobody owns, and a lost page rejoins by signing again', async () => {
+test('host eligibility includes past accepted invitations, never token holdings or an unaccepted booking', async () => {
+  const f = await fixture({ getBookings: async () => ({ bookings: [
+    { wallet: guest.address, acknowledged: true, cancelled: true, status: 'paid' },
+    { wallet: stranger.address, acknowledged: false, status: 'draft' },
+  ] }) });
+  assert.equal((await f.service.eligibility(guest.address)).canHost, true);
+  assert.equal((await f.service.eligibility(owner.address)).canHost, true);
+  assert.equal((await f.service.eligibility(stranger.address)).canHost, false);
+  await assert.rejects(f.sign(stranger, { action: 'create' }), /Only administrators and performers/);
+  await assert.rejects(f.sign(stranger, { action: 'join' }), /complete rehearsal invitation/);
+  const host = await f.sign(guest, { action: 'create' });
+  const invited = await f.sign(stranger, { action: 'join', roomId: host.state.id });
+  assert.equal(invited.role, 'musician', 'link guests need no accepted booking');
+  await f.cmd(host, { action: 'end', confirmed: true });
+  await assert.rejects(f.sign(stranger, { action: 'join', roomId: host.state.id }), /invitation expired/);
+  const broken = await fixture({ getBookings: async () => { throw Error('provider secret'); } });
+  await assert.rejects(broken.service.eligibility(guest.address), /history could not be verified/);
+});
+
+test('separate rehearsals isolate invites, people, microphone grants, removals and closure', async () => {
+  const f = await fixture();
+  const a = await f.sign(guest, { action: 'create' }), b = await f.sign(stranger, { action: 'create' });
+  assert.notEqual(a.state.id, b.state.id);
+  const bandmate = Wallet.createRandom();
+  const joined = await f.sign(bandmate, { action: 'join', roomId: a.state.id });
+  assert.equal((await f.cmd(a, { action: 'state' })).people.length, 2);
+  assert.equal((await f.cmd(b, { action: 'state' })).people.length, 1);
+  await f.cmd(joined, { action: 'connect', publish: true, roomId: b.state.id });
+  assert.equal(f.calls.find(call => call[0] === 'connect')[1], a.state.id, 'a command cannot redirect its room-scoped pass');
+  await assert.rejects(f.sign(bandmate, { action: 'join', roomId: `rehearsal:${'a'.repeat(64)}` }), /invitation expired/);
+  await f.cmd(a, { action: 'remove', wallet: bandmate.address });
+  await assert.rejects(f.cmd(joined, { action: 'state' }), /sign in again/);
+  const inOtherRoom = await f.sign(bandmate, { action: 'join', roomId: b.state.id });
+  assert.equal(inOtherRoom.state.id, b.state.id, 'removal is limited to one rehearsal');
+  await f.cmd(a, { action: 'end', confirmed: true });
+  assert.equal((await f.cmd(b, { action: 'state' })).phase, 'private');
+  assert.ok(f.calls.filter(call => call[0] === 'close').every(call => call[1] !== b.state.id));
+  const failing = await fixture({ removeFailure: true });
+  const host = await failing.enter(owner), member = await failing.enter(guest);
+  await assert.rejects(failing.cmd(host, { action: 'remove', wallet: guest.address }), /active audio removal was not confirmed/);
+  await assert.rejects(failing.cmd(member, { action: 'state' }), /sign in again/);
+});
+
+test('accepted performers host a private rehearsal, invite guests and rejoin its explicit link', async () => {
   const f = await fixture();
   const challenge = await f.service.challenge({ action: 'enter', wallet: guest.address }, origin);
-  assert.match(challenge.message, /SHARED REHEARSAL ROOM/);
-  assert.match(challenge.message, /consent to private live audio with whoever is in this shared room/);
+  assert.match(challenge.message, /PRIVATE REHEARSAL ROOM/);
+  assert.match(challenge.message, /consent to private live audio with the people invited to this rehearsal/);
   assert.match(challenge.message, /No public radio, recording, booking, payment/);
   const g = await f.service.authorize({ challengeId: challenge.challengeId, signature: await guest.signMessage(challenge.message) }, origin);
   const s = await f.enter(stranger), e = await f.enter(engineer);
   assert.equal(new Set([g.state.id, s.state.id, e.state.id]).size, 1);
-  assert.deepEqual([g.role, s.role, e.role], ['musician', 'musician', 'engineer']);
+  assert.deepEqual([g.role, s.role, e.role], ['host', 'musician', 'engineer']);
   assert.equal(f.durable.value.rooms.length, 1);
-  assert.equal(f.durable.value.rooms[0].guest, undefined, 'no wallet is recorded as the room owner or guest');
+  assert.equal(f.durable.value.rooms[0].host, guest.address.toLowerCase());
   const people = (await f.cmd(g, { action: 'state' })).people;
   assert.equal(people.length, 3);
   assert.deepEqual(people.filter(p => p.you).map(p => p.wallet), [guest.address.toLowerCase()]);
@@ -68,7 +115,7 @@ test('any wallet enters one shared room that nobody owns, and a lost page rejoin
   assert.equal(again.state.id, g.state.id, 'a lost page signs in again and lands in the running session');
   assert.equal((await f.cmd(again, { action: 'state' })).people.length, 3, 'one person, not a duplicate');
   for (const action of ['end', 'remove', 'arm']) {
-    await assert.rejects(f.cmd(g, { action, confirmed: true, wallet: stranger.address }), /unauthorized/);
+    await assert.rejects(f.cmd(s, { action, confirmed: true, wallet: guest.address }), /unauthorized/);
   }
   await f.cmd(g, { action: 'connect', publish: true });
   await f.cmd(s, { action: 'connect', publish: true });
@@ -99,7 +146,9 @@ test('passes stay alive while in use, Stop audio keeps the pass, and the session
   assert.equal((await f.cmd(b, { action: 'state' })).people.length, 1, 'others stay when one person leaves');
   await f.cmd(b, { action: 'exit' });
   assert.ok(f.calls.some(c => c[0] === 'close' && c[1] === a.state.id), 'the last person out closes the session');
-  await assert.rejects(f.enter(guest), /still closing/);
+  const next = await f.enter(guest);
+  assert.notEqual(next.state.id, a.state.id, 'a new isolated rehearsal need not wait for another room tombstone');
+  await f.cmd(next, { action: 'exit' });
   f.clock.now += 36_000; await f.service.tick();
   assert.deepEqual(f.durable.value.rooms, []);
 });
@@ -133,7 +182,7 @@ test('origin, replay, identity, four-hour limit and restart fail closed', async 
   await assert.rejects(f.service.authorize({ challengeId: c.challengeId, signature: await owner.signMessage(c.message) }, origin), /expired/);
   const c2 = await f.service.challenge({ action: 'enter', wallet: guest.address }, origin);
   await assert.rejects(f.service.authorize({ challengeId: c2.challengeId, signature: await guest.signMessage(c2.message) }, otherOrigin), /expired/);
-  await assert.rejects(f.service.challenge({ action: 'create', wallet: owner.address }, origin), /Unknown rehearsal action/);
+  await assert.rejects(f.service.challenge({ action: 'public', wallet: owner.address }, origin), /Unknown rehearsal action/);
   const a = await f.enter(owner);
   await assert.rejects(f.cmd(a, { action: 'connect' }, otherOrigin), /sign in again/);
   for (let i = 0; i < 59; i++) { f.clock.now += 4 * 60_000; await f.cmd(a, { action: 'state' }); }
@@ -265,9 +314,9 @@ test('HTTP denies other origins and redacts errors without exposing public liste
   assert.equal((await invoke('listen', origin, service)).code, 404);
 });
 
-test('browser mock signs into the shared room, gates the booth, plays bandmates and shows engineer tools', async t => {
+test('browser mock opens an isolated room, gates the booth, plays invited bandmates and shows host tools', async t => {
   const f = await fixture({ clock: { now: Date.now() } }), saved = new Map(), elements = new Map(), events = {}, calls = [], intervals = [];
-  const keys = ['window', 'document', 'location', 'fetch', 'LivekitClient', 'setInterval', 'Option'];
+  const keys = ['window', 'document', 'location', 'history', 'fetch', 'LivekitClient', 'setInterval', 'Option'];
   for (const key of keys) saved.set(key, global[key]);
   t.after(async () => { events.pagehide?.(); await new Promise(setImmediate); for (const [key, value] of saved) {
     if (value === undefined) delete global[key]; else global[key] = value;
@@ -275,14 +324,18 @@ test('browser mock signs into the shared room, gates the booth, plays bandmates 
   for (const id of ['status', 'join', 'join-room', 'controls', 'invitation', 'deadline', 'end', 'input', 'devices',
     'publish', 'listen', 'leave', 'audio', 'remote-audio', 'people', 'engineer-tools', 'remove-who', 'remove',
     'delivery', 'mic-state', 'mic-level', 'meter-note', 'next-step', 'monitor-toggle', 'monitor-volume', 'monitor-mix', 'monitor-status',
-    'booth-mode', 'booth-radio-off', 'booth-status']) {
+    'booth-mode', 'booth-radio-off', 'booth-status', 'invite-link', 'copy-invite']) {
     elements.set(id, { hidden: false, disabled: false, textContent: '', value: '', dataset: {}, listeners: {}, children: [],
       setAttribute() {}, addEventListener(name, fn) { this.listeners[name] = fn; }, pause() {}, play: async () => {},
       replaceChildren(...items) { this.children = items; }, append(item) { this.children.push(item); } });
   }
   global.Option = class { constructor(text, value) { this.text = text; this.value = value; } };
   global.document = { getElementById: id => elements.get(id) };
-  global.location = { href: 'https://radio.example/rehearsal.html' };
+  global.location = new URL('https://radio.example/rehearsal.html');
+  global.history = { replaceState(_state, _title, url) {
+    const target = new URL(url, global.location.href);
+    assert.match(target.hash, /room=rehearsal/);
+  } };
   let accountChanged;
   global.window = { DecentConfig: { ipfsUploadServiceUrl: 'https://worker.example' },
     ethereum: { async request({ method, params }) {
@@ -327,7 +380,8 @@ test('browser mock signs into the shared room, gates the booth, plays bandmates 
   assert.equal(elements.get('controls').hidden, false);
   assert.equal(elements.get('join').hidden, true);
   assert.match(elements.get('status').textContent, /You're in/);
-  assert.match(elements.get('invitation').textContent, /as an engineer.*rehearsal\.html.*sign in again to rejoin/);
+  assert.match(elements.get('invitation').textContent, /this rehearsal only/);
+  assert.match(elements.get('invite-link').value, /rehearsal\.html#room=rehearsal/);
   assert.equal(elements.get('end').hidden, false);
   assert.equal(elements.get('engineer-tools').hidden, false);
   assert.match(elements.get('people').textContent, /You · engineer/);

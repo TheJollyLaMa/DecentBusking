@@ -17,7 +17,7 @@
       <p id="recording-edit-intro">Preview the preserved original. Keep it as one release, divide it into named cuts, or decide later. Each release needs your explicit approval before it enters the admin mint queue. IPFS audio is public; this editor does not make it private.</p>
     </header>
     <section class="recording-edit-card">
-      <p id="recording-edit-status" role="status" aria-live="polite">Connect the authorized artist wallet to check the recording source and its durable edit journal.</p>
+      <p id="recording-edit-status" role="status" aria-live="polite">Connect the artist wallet to preview and edit without signing. Drafts stay on this device until final publication confirmation.</p>
       <button id="recording-edit-connect" type="button">Connect authorized artist wallet</button>
     </section>
     <section id="recording-edit-loading" class="recording-edit-card recording-edit-loading" role="status" aria-live="polite" hidden>
@@ -44,7 +44,7 @@
       <button id="recording-edit-add-song" type="button">Add cut</button>
       <p class="recording-edit-note">Song exports are MP3 at 192 kb/s, limited to 30 minutes and 45 MB each. Boundaries are measured against the canonical 48 kHz source sample count. Short edge fades and −1 dB headroom reduce clicks and clipping; the original stays unchanged.</p>
       <div class="recording-edit-actions">
-        <button id="recording-edit-save" type="button">Save split draft</button>
+        <button id="recording-edit-save" type="button">Save draft on this device</button>
         <button id="recording-edit-defer" type="button">Decide later</button>
         <button id="recording-edit-full" type="button">Approve full set for mint review</button>
         <button id="recording-edit-split" type="button">Approve split songs for mint review</button>
@@ -53,6 +53,6 @@
       <ul id="recording-edit-releases"></ul>
     </section>
   </main>
-  <script type="module" src="js/live-recording-editor.mjs?v=20261116-studio-polish"></script>
+  <script type="module" src="js/live-recording-editor.mjs?v=20261117-unsigned-studio"></script>
 </body>
 </html>

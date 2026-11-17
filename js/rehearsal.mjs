@@ -1,11 +1,14 @@
 import { loadLiveAudioSdk } from './live-audio-client.mjs';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261116-shared-room';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261117-private-rooms';
 import { bindBoothSetup } from './booth-setup.mjs?v=20261116-shared-room';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 
 const el = id => document.getElementById(id);
 const service = String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
 const practiceBookingId = new URL(location.href).searchParams.get('booking') || '';
+const embedded = new URL(location.href).searchParams.get('embedded') === '1' && !!window.parent && window.parent !== window;
+let inviteRoomId = new URLSearchParams(new URL(location.href).hash.slice(1)).get('room') || '';
+let preservePassOnHide = false;
 const audio = el('audio');
 let session, room, localTrack, generation = 0, disposed = false, polling = false, deadlineTimer;
 let busy = false, requestingAccounts = false;
@@ -51,10 +54,10 @@ function renderDelivery(fresh = false) {
 function renderPeople(state) {
   const list = state?.people || [];
   el('people').textContent = list.length
-    ? list.map(p => `${p.you ? 'You' : p.label}${p.role === 'engineer' ? ' · engineer' : ''}${p.audioFresh ? ' · 🎙 sending' : p.connected ? ' · connected' : ' · signed in'}`).join('\n')
+    ? list.map(p => `${p.you ? 'You' : p.label}${p.role === 'engineer' ? ' · engineer' : p.role === 'host' ? ' · host' : ''}${p.audioFresh ? ' · 🎙 sending' : p.connected ? ' · connected' : ' · signed in'}`).join('\n')
     : 'Nobody else is here yet.';
   const removable = list.filter(p => !p.you && p.role !== 'engineer');
-  el('engineer-tools').hidden = session?.role !== 'engineer';
+  el('engineer-tools').hidden = !['engineer', 'host'].includes(session?.role);
   const chosen = el('remove-who').value;
   el('remove-who').replaceChildren(new Option('Choose someone…', ''), ...removable.map(p => new Option(p.label, p.wallet)));
   el('remove-who').value = removable.some(p => p.wallet === chosen) ? chosen : '';
@@ -106,8 +109,10 @@ async function disconnect(notify = false) {
   if (notify && authorization) await request('control', { action: 'leave' }, authorization.token);
 }
 async function authorize(input) {
-  if (!window.ethereum) throw new Error('MetaMask is unavailable in this room. Open the private practice room in its own tab, unlock MetaMask, and reload.');
-  status('Opening MetaMask... Unlock your wallet and approve connecting this site.');
+  const headerSigner = embedded ? window.parent._wallet?.signer : null;
+  if (embedded && !headerSigner) throw new Error('Connect your wallet in the page header first.');
+  if (!headerSigner && !window.ethereum) throw new Error('Unlock a browser wallet to sign rehearsal consent.');
+  status(headerSigner ? 'Using the connected header wallet…' : 'Opening MetaMask... Unlock your wallet and approve connecting this site.');
   const current = ++generation;
   const previousToken = session?.token; session = null;
   el('controls').hidden = true; clearTimeout(deadlineTimer);
@@ -118,17 +123,18 @@ async function authorize(input) {
   if (gen !== generation || disposed) return;
   let accounts;
   requestingAccounts = true;
-  try { accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }); }
+  try { accounts = headerSigner ? [await headerSigner.getAddress()] : await window.ethereum.request({ method: 'eth_requestAccounts' }); }
   finally { requestingAccounts = false; }
   if (gen !== generation || disposed || current + 1 !== gen) return;
   const wallet = accounts[0];
   if (!wallet) throw new Error('No wallet connected. Unlock MetaMask and choose a wallet.');
   status('Preparing your sign-in...');
-  const challenge = await request('challenge', { ...input, wallet });
+  const challenge = await request('challenge', { ...input, ...(inviteRoomId ? { roomId: inviteRoomId } : {}), wallet });
   if (gen !== generation || disposed) return;
   const hex = `0x${Array.from(new TextEncoder().encode(challenge.message), b => b.toString(16).padStart(2, '0')).join('')}`;
   status('Confirm the rehearsal-room signature in MetaMask. No transaction or gas.');
-  const signature = await window.ethereum.request({ method: 'personal_sign', params: [hex, wallet] });
+  const signature = headerSigner ? await headerSigner.signMessage(challenge.message)
+    : await window.ethereum.request({ method: 'personal_sign', params: [hex, wallet] });
   if (gen !== generation || disposed) return;
   status('Verifying your signature and opening the rehearsal room...');
   const authorized = await request('session', { challengeId: challenge.challengeId, signature });
@@ -136,9 +142,14 @@ async function authorize(input) {
   session = authorized;
   renderControls(); renderDelivery(); renderPeople(authorized.state);
   const link = new URL('rehearsal.html', location.href);
-  el('invitation').textContent = `Signed in${authorized.role === 'engineer' ? ' as an engineer' : ''}. Invite bandmates with ${link.origin}${link.pathname}. If this page closes, open that link and sign in again to rejoin.`;
+  link.hash = new URLSearchParams({ room: authorized.state.id }).toString();
+  inviteRoomId = authorized.state.id;
+  history.replaceState(null, '', `${location.pathname}${location.search}${link.hash}`);
+  if (el('invite-link')) el('invite-link').value = link.href;
+  el('invitation').textContent = 'This link admits bandmates to this rehearsal only. Share it privately; anyone holding it can sign consent and join until the room closes.';
+  if (embedded) window.parent.postMessage({ type: 'decentbusking:rehearsal-room', roomId: inviteRoomId }, location.origin);
   el('deadline').textContent = `This session closes by ${new Date(authorized.state.expiresAt).toLocaleString()}, or sooner when everyone leaves.`;
-  el('end').hidden = authorized.role !== 'engineer'; el('controls').hidden = false;
+  el('end').hidden = !['engineer', 'host'].includes(authorized.role); el('controls').hidden = false;
   deadlineTimer = setTimeout(() => {
     session = null; el('controls').hidden = true;
     void disconnect();
@@ -210,6 +221,11 @@ async function connect(publish) {
   }
 }
 el('join-room').onclick = action(() => authorize({ action: 'enter' }));
+if (el('copy-invite')) el('copy-invite').onclick = action(async () => {
+  if (!session) throw new Error('Start or join a rehearsal before copying its invitation.');
+  await navigator.clipboard.writeText(el('invite-link').value);
+  status('Private invitation copied. Share it only with your bandmates.');
+});
 el('devices').onclick = action(async () => {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   stream.getTracks().forEach(track => track.stop());
@@ -229,7 +245,7 @@ el('leave').onclick = action(async () => {
   status('Microphone off. To try again, choose Start my microphone.');
 });
 el('end').onclick = action(async () => {
-  if (!window.confirm('Close this rehearsal session for everyone? Anyone can sign in again to start a new one.')) return;
+  if (!window.confirm('Close this rehearsal for everyone? Its invite link will stop working.')) return;
   await request('control', { action: 'end', confirmed: true }, session?.token);
   session = null; clearTimeout(deadlineTimer); el('controls').hidden = true; await disconnect(); status('Rehearsal session closed for everyone.');
 });
@@ -261,10 +277,42 @@ window.ethereum?.on?.('accountsChanged', () => {
 });
 window.addEventListener('pagehide', () => {
   disposed = true; const token = session?.token; session = null; clearTimeout(deadlineTimer);
-  if (token) void request('control', { action: 'exit' }, token, true).catch(() => {});
+  if (token && !preservePassOnHide) void request('control', { action: 'exit' }, token, true).catch(() => {});
   void disconnect();
 });
+window.addEventListener('message', async event => {
+  if (!embedded || event.origin !== location.origin || event.source !== window.parent) return;
+  if (event.data?.type === 'decentbusking:rehearsal-wallet-changed') {
+    const token = session?.token; session = null; clearTimeout(deadlineTimer);
+    el('controls').hidden = true;
+    await disconnect();
+    if (token) await request('control', { action: 'exit' }, token).catch(error => status(error.message, true));
+    status('Wallet changed; sign consent again.');
+    return;
+  }
+  if (event.data?.type !== 'decentbusking:close-rehearsal' || typeof event.data.requestId !== 'string') return;
+  try {
+    if (busy) throw new Error('Wait for the current rehearsal action to finish, then retry closing.');
+    const token = session?.token;
+    await disconnect();
+    let warning = '';
+    if (token) {
+      try { await request('control', { action: event.data.handoff ? 'leave' : 'exit' }, token); }
+      catch {
+        warning = 'Microphone and audio stopped. Server sign-out could not be confirmed; the old idle pass expires within five minutes.';
+      }
+    }
+    preservePassOnHide = event.data.handoff === true;
+    session = null; disposed = true; clearTimeout(deadlineTimer);
+    window.parent.postMessage({ type: 'decentbusking:rehearsal-closed', requestId: event.data.requestId,
+      roomId: inviteRoomId, warning }, location.origin);
+  } catch (error) {
+    status(error.message || 'The room could not close. Retry before leaving.', true);
+    window.parent.postMessage({ type: 'decentbusking:rehearsal-close-failed', requestId: event.data.requestId }, location.origin);
+  }
+});
 setInterval(() => { void poll(); }, 2000);
+if (embedded) window.parent.postMessage({ type: 'decentbusking:rehearsal-ready' }, location.origin);
 if (practiceBookingId) {
   el('join').querySelector('h2').textContent = '1 · Your private practice stage';
   document.querySelector('h1').textContent = 'Make yourself at home';
@@ -277,6 +325,7 @@ else {
     const state = await response.json();
     if (!response.ok || !state.configured) throw new Error('Private rehearsal hosting is not enabled.');
     el('join-room').disabled = false;
-    status('Private rehearsal is available. Signing does not send a transaction.');
+    status(inviteRoomId ? 'Invitation ready. Sign consent to join this rehearsal; no booking or payment needed.'
+      : 'Accepted live performers and administrators can start a private rehearsal. Sign consent; no transaction.');
   } catch (error) { status(error.message || 'Private rehearsal unavailable.'); }
 }
