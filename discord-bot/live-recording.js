@@ -27,6 +27,17 @@ const catalogBookingId = nftId => `catalog-${createHash('sha256').update(nftId).
 const catalogBooking = source => ({ id: catalogBookingId(source.nftId), wallet: source.artistWallet,
   title: source.title, displayName: source.artistName || source.artistWallet, artworkCid: source.artworkCid });
 
+function catalogAuthorizationMessage(source) {
+  const authorization = source.authorization;
+  return authorization.kind === 'publication'
+    ? catalogRecordingReleaseApprovalMessage({ nftId: source.nftId, wallet: source.artistWallet,
+      sourceCid: source.sourceCid, ...authorization })
+    : catalogRecordingAuthorizationMessage({
+      nftId: source.nftId, wallet: source.artistWallet, origin: authorization.origin,
+      nonce: authorization.nonce, expiresAt: authorization.expiresAt, sourceCid: source.sourceCid,
+    });
+}
+
 function validateCatalogSource(source) {
   if (!source || !keysOnly(source, ['nftId', 'chainId', 'contractAddress', 'tokenId', 'artistWallet', 'artistName',
     'sourceCid', 'title', 'mediaType', 'tipWallet', 'artworkCid', 'authorization']) ||
@@ -39,23 +50,52 @@ function validateCatalogSource(source) {
       typeof source.mediaType !== 'string' || !source.mediaType.startsWith('audio/') ||
       source.tipWallet !== undefined && !safeAddress(source.tipWallet) ||
       source.artworkCid !== undefined && !safeCid(source.artworkCid) ||
-      !keysOnly(source.authorization, ['origin', 'nonce', 'expiresAt', 'signature']) ||
-      typeof source.authorization.origin !== 'string' || !Number.isSafeInteger(source.authorization.expiresAt) ||
-      !/^[a-f0-9]{64}$/i.test(source.authorization.nonce || '') ||
+      !keysOnly(source.authorization, source.authorization?.kind === 'publication'
+        ? ['kind', 'origin', 'sourceSamples', 'choice', 'draft', 'issuedAt', 'signature']
+        : ['origin', 'nonce', 'expiresAt', 'signature']) ||
+      typeof source.authorization.origin !== 'string' ||
       typeof source.authorization.signature !== 'string' || source.authorization.signature.length > 1000) {
     throw Error('Catalog recording source is unavailable or unsupported');
   }
-  const message = catalogRecordingAuthorizationMessage({
-    nftId: source.nftId, wallet: source.artistWallet, origin: source.authorization.origin,
-    nonce: source.authorization.nonce, expiresAt: source.authorization.expiresAt, sourceCid: source.sourceCid,
-  });
+  if (source.authorization.kind === 'publication') {
+    if (!['full', 'split'].includes(source.authorization.choice)) throw Error('Invalid catalog publication authorization');
+    validateCatalogRecordingDraft(source.authorization.draft, source.authorization.sourceSamples);
+  } else if (!Number.isSafeInteger(source.authorization.expiresAt) ||
+      !/^[a-f0-9]{64}$/i.test(source.authorization.nonce || '')) throw Error('Invalid catalog recording authorization');
+  const message = catalogAuthorizationMessage(source);
   if (verifyMessage(message, source.authorization.signature).toLowerCase() !== source.artistWallet.toLowerCase()) {
     throw Error('Catalog recording edit authorization is invalid');
   }
   return source;
 }
 
-async function decodeCatalogRecording(source, { downloadSource, upload, timeoutMs = 180_000 }) {
+export async function fetchCatalogRecordingSource(cid, { gateways, fetchImpl = fetch, timeoutMs = 180_000,
+  log = console } = {}) {
+  if (!safeCid(cid)) throw new LiveAudioError('Invalid original recording CID');
+  const deadline = Date.now() + timeoutMs;
+  for (const gateway of [...new Set(gateways.filter(Boolean))]) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const base = new URL(gateway);
+    if (base.pathname === '/' || !base.pathname) base.pathname = '/ipfs/';
+    const url = buildGatewayUrl(base.toString(), cid);
+    const headersDeadline = new AbortController();
+    const timer = setTimeout(() => headersDeadline.abort(), Math.min(15000, remaining));
+    try {
+      const response = await fetchImpl(url, {
+        redirect: 'error', signal: AbortSignal.any([headersDeadline.signal, AbortSignal.timeout(remaining)]),
+      });
+      if (response.ok && response.body) return response;
+      await response.body?.cancel();
+      log.warn('[live-recording] Original audio gateway rejected request:', base.hostname, response.status);
+    } catch {
+      log.warn('[live-recording] Original audio gateway network/timeout failure:', base.hostname);
+    } finally { clearTimeout(timer); }
+  }
+  throw new LiveAudioError('The original audio could not be downloaded from its IPFS gateways. Retry shortly; no edit or release was submitted.');
+}
+
+async function decodeCatalogRecording(source, { downloadSource, upload, previewOnly = false, timeoutMs = 180_000 }) {
   if (typeof downloadSource !== 'function') throw Error('Catalog recording source download is unavailable');
   const response = await downloadSource(source.sourceCid);
   if (!response?.ok || !response.body) throw Error(`Original catalog recording is unavailable${response?.status ? ` (${response.status})` : ''}`);
@@ -68,6 +108,17 @@ async function decodeCatalogRecording(source, { downloadSource, upload, timeoutM
   { stdio: ['pipe', 'pipe', 'pipe'] });
   let diagnostics = '', inputError, inputBytes = 0, outputBytes = 0;
   const segments = [];
+  let segmentIndex = 0;
+  const retainSegment = async pcm => {
+    const segment = { bytes: pcm.length, waveform: waveformFor(pcm) };
+    if (!previewOnly) {
+      const uri = await upload(pcmWav(pcm), `catalog-${source.tokenId}-${segmentIndex++}.wav`, 'audio/wav');
+      const cid = uri.replace(/^ipfs:\/\//, '');
+      if (!safeCid(cid)) throw Error('Invalid decoded recording segment CID');
+      segment.cid = cid;
+    }
+    segments.push(segment);
+  };
   child.stderr.on('data', chunk => { diagnostics = (diagnostics + chunk).slice(-2000); });
   child.stdin.on('error', error => { inputError = error; });
   const exited = new Promise((resolve, reject) => {
@@ -89,7 +140,7 @@ async function decodeCatalogRecording(source, { downloadSource, upload, timeoutM
     child.stdin.end();
   })();
   const output = (async () => {
-    let current = Buffer.alloc(CATALOG_SEGMENT_BYTES), filled = 0, segmentIndex = 0;
+    let current = Buffer.alloc(CATALOG_SEGMENT_BYTES), filled = 0;
     for await (const chunk of child.stdout) {
       let offset = 0;
       while (offset < chunk.length) {
@@ -98,10 +149,7 @@ async function decodeCatalogRecording(source, { downloadSource, upload, timeoutM
         filled += take; offset += take; outputBytes += take;
         if (outputBytes > CATALOG_SOURCE_MAX_SAMPLES * 2) throw Error('Decoded recording exceeds the 120-minute processing limit');
         if (filled === CATALOG_SEGMENT_BYTES) {
-          const uri = await upload(pcmWav(current), `catalog-${source.tokenId}-${segmentIndex++}.wav`, 'audio/wav');
-          const cid = uri.replace(/^ipfs:\/\//, '');
-          if (!safeCid(cid)) throw Error('Invalid decoded recording segment CID');
-          segments.push({ cid, bytes: current.length, waveform: waveformFor(current) });
+          await retainSegment(current);
           current = Buffer.alloc(CATALOG_SEGMENT_BYTES); filled = 0;
         }
       }
@@ -109,10 +157,7 @@ async function decodeCatalogRecording(source, { downloadSource, upload, timeoutM
     if (filled) {
       if (filled % 2 !== 0) throw Error('Decoded recording ended on an invalid sample boundary');
       const pcm = current.subarray(0, filled);
-      const uri = await upload(pcmWav(pcm), `catalog-${source.tokenId}-${segmentIndex}.wav`, 'audio/wav');
-      const cid = uri.replace(/^ipfs:\/\//, '');
-      if (!safeCid(cid)) throw Error('Invalid decoded recording segment CID');
-      segments.push({ cid, bytes: pcm.length, waveform: waveformFor(pcm) });
+      await retainSegment(pcm);
     }
   })();
   try {
@@ -196,7 +241,9 @@ export function validateRecordingState(state) {
       try {
         validateCatalogSource(catalog);
         return catalog.artistWallet.toLowerCase() === String(r.wallet || '').toLowerCase() &&
-          r.result?.cid === catalog.sourceCid;
+          r.result?.cid === catalog.sourceCid &&
+          (catalog.authorization.kind !== 'publication' ||
+            catalog.authorization.sourceSamples === recordingSourceSamples(r.segments));
       } catch { return false; }
     })();
     if (!keysOnly(r, ['bookingId', 'wallet', 'consent', 'catalogSource', 'segments', 'status', 'interrupted', 'incomplete', 'result', 'trackId', 'error',
@@ -403,6 +450,8 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
   let state, initializing, tail = Promise.resolve(), working = false, buffered = 0;
   const captureErrors = new Map(), finalizationErrors = new Map(), finalizationTasks = new Map();
   const editTasks = new Map(), catalogEditTasks = new Map(), catalogApprovalTasks = new Map();
+  const previewCache = new Map(), publicationTasks = new Map();
+  let previewTask, previewRetryAt = 0;
   let initializationError = '';
   let chunks = [], bytes = 0, activeId, lastFrameAt = 0;
   let deployment = null, preparingDeployment = false;
@@ -428,8 +477,8 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
     const queued = release.trackId ? getRelease(release.trackId) : null;
     return queued?.mintStatus === 'minted' ? 'minted' : queued?.mintStatus === 'requested' ? 'queued' : release.status;
   };
-  function editState(booking) {
-    const r = record(booking.id), sourceSamples = sourceFor(r);
+  function recordingView(booking, r) {
+    const sourceSamples = sourceFor(r);
     if (!r || !r.result || !sourceSamples || !canEditRecord(r) || !['ready', 'submitted'].includes(r.status)) {
       return { available: false, status: r?.status || 'waiting', error: r?.error || '' };
     }
@@ -469,6 +518,108 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       decision: r.releaseChoice || 'undecided', draft, waveform,
       releases: (r.releases || []).map(release => ({ ...release, status: releaseMintStatus(release) })),
     };
+  }
+  function editState(booking) { return recordingView(booking, record(booking.id)); }
+  function publicPreview(booking, recording) {
+    if (!recording) throw new LiveAudioError('This recording is not ready for preview.');
+    const { consent, ...view } = recordingView(booking, { ...recording, draft: undefined, releases: [] });
+    if (!view.available) throw new LiveAudioError('This recording is not ready for preview.');
+    return { ...view, previewOnly: true, journalRevision: recording.draft?.revision ?? 0, decision: 'undecided' };
+  }
+  async function previewCatalogEdit(source) {
+    if (!available) throw new LiveAudioError('Catalog recording previews are unavailable');
+    await initialize();
+    const booking = catalogBooking(source), current = record(booking.id);
+    if (current) {
+      if (!catalogSourceMatches(current.catalogSource, source)) throw new LiveAudioError('The verified NFT source changed; contact the operator.');
+      return publicPreview(booking, current);
+    }
+    const key = `${source.nftId}:${source.sourceCid}`;
+    for (const [id, entry] of previewCache) if (entry.expiresAt <= now()) previewCache.delete(id);
+    let decoded = previewCache.get(key)?.decoded;
+    if (!decoded) {
+      if (previewTask) {
+        if (previewTask.key !== key) throw new LiveAudioError('Another recording preview is loading. Retry shortly.');
+        decoded = await previewTask.task;
+      } else {
+        if (deploymentPaused() || record(activeId)?.status === 'recording') {
+          throw new LiveAudioError('New previews are paused during live capture or deployment. Retry after the handoff.');
+        }
+        if (now() < previewRetryAt) throw new LiveAudioError('Recording preview rate limit reached. Retry in a few seconds.');
+        previewRetryAt = now() + 15000;
+        const task = Promise.resolve().then(() => decodeSource(source, {
+          downloadSource, previewOnly: true, timeoutMs: finalizationTimeoutMs * 3,
+        })).catch(error => {
+          log.warn('[live-recording] Read-only preview failed:', error instanceof LiveAudioError
+            ? 'source unavailable' : error.code === 'ENOENT' ? 'decoder missing' : 'decoder failure');
+          throw error instanceof LiveAudioError ? error
+            : error.code === 'ENOENT' ? new LiveAudioError('The recording decoder is unavailable on the server. Contact the operator; no upload or release was submitted.')
+            : new LiveAudioError('The original audio preview could not be decoded. No edit, upload or release was submitted; retry or contact the operator.');
+        });
+        previewTask = { key, task };
+        try {
+          decoded = await task;
+          if (previewCache.size >= 4) previewCache.delete(previewCache.keys().next().value);
+          previewCache.set(key, { decoded, expiresAt: now() + 10 * 60000 });
+        } finally { previewTask = null; }
+      }
+    }
+    return publicPreview(booking, { wallet: source.artistWallet, catalogSource: source, segments: decoded.segments,
+      status: 'ready', result: { cid: source.sourceCid, durationSamples: decoded.sourceSamples,
+        sampleRate: RATE, durationSeconds: decoded.sourceSamples / RATE } });
+  }
+  function verifyPublication(booking, source, command, wallet, origin) {
+    const expectedWallet = String(source?.artistWallet || booking.wallet).toLowerCase();
+    if (String(wallet || '').toLowerCase() !== expectedWallet || !['full', 'split'].includes(command.choice) ||
+        !Number.isSafeInteger(command.issuedAt) || Math.abs(now() - command.issuedAt) > 300000 ||
+        command.issuedAt > now() + 30000 || typeof command.signature !== 'string' || command.signature.length > 1000) {
+      throw new LiveAudioError('Publication approval is invalid or expired; review and confirm the edit again.');
+    }
+    const draft = (source ? validateCatalogRecordingDraft : validateRecordingDraft)(command.draft, command.sourceSamples);
+    if (source && command.choice === 'split' && draft.songs.length < 3) {
+      throw new LiveAudioError('A catalog split needs three or four named cuts.');
+    }
+    const message = source
+      ? catalogRecordingReleaseApprovalMessage({ nftId: source.nftId, wallet: expectedWallet, origin,
+        sourceCid: command.sourceCid, sourceSamples: command.sourceSamples, choice: command.choice, draft, issuedAt: command.issuedAt })
+      : recordingReleaseApprovalMessage({ bookingId: booking.id, wallet: expectedWallet, origin,
+        sourceCid: command.sourceCid, sourceSamples: command.sourceSamples, choice: command.choice, draft,
+        issuedAt: command.issuedAt, incomplete: record(booking.id)?.incomplete === true });
+    let recovered;
+    try { recovered = verifyMessage(message, command.signature).toLowerCase(); }
+    catch { throw new LiveAudioError('The publication signature could not be verified. No release was submitted.'); }
+    if (recovered !== expectedWallet) throw new LiveAudioError('Only the credited artist can confirm this publication.');
+    return { draft, fingerprint: createHash('sha256').update(message).digest('hex') };
+  }
+  async function publishRecording(booking, source, command, wallet, origin, saveDraft, approve) {
+    if (!available || deploymentPaused()) throw new LiveAudioError('Recording publication is currently unavailable.');
+    await initialize();
+    const { draft, fingerprint } = verifyPublication(booking, source, command, wallet, origin);
+    const existing = publicationTasks.get(booking.id);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) throw new LiveAudioError('Another edit is being confirmed for this recording. Wait for it to finish.');
+      return existing.task;
+    }
+    const task = (async () => {
+      const preview = source ? await previewCatalogEdit(source) : publicPreview(booking, record(booking.id));
+      if (!preview.available || preview.sourceCid !== command.sourceCid || preview.sourceSamples !== command.sourceSamples) {
+        throw new LiveAudioError('The original recording changed; reopen the preview before confirming.');
+      }
+      const currentDraft = record(booking.id)?.draft;
+      if (JSON.stringify(currentDraft) !== JSON.stringify(draft) && draft.revision !== preview.journalRevision + 1) {
+        throw new LiveAudioError('Another edit changed the journal. Reopen this recording before confirming; your local draft is preserved.');
+      }
+      if (source) await prepareCatalogEdit(source, { kind: 'publication', origin, sourceSamples: command.sourceSamples,
+        choice: command.choice, draft, issuedAt: command.issuedAt, signature: command.signature });
+      if (editState(booking).sourceSamples !== command.sourceSamples) {
+        throw new LiveAudioError('The prepared source duration changed; contact the operator before retrying.');
+      }
+      if (JSON.stringify(editState(booking).draft) !== JSON.stringify(draft)) await saveDraft(draft);
+      return approve();
+    })();
+    publicationTasks.set(booking.id, { fingerprint, task });
+    try { return await task; }
+    finally { publicationTasks.delete(booking.id); }
   }
   async function persistRelease(bookingId, releaseId, mutate) {
     await serial(async () => {
@@ -723,7 +874,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
         throw Error('Another deployment holds the recording handoff');
       }
       if (working || buffered || bytes || activeId || finalizationTasks.size || editTasks.size ||
-          catalogEditTasks.size || catalogApprovalTasks.size) return { ready: false };
+          catalogEditTasks.size || catalogApprovalTasks.size || publicationTasks.size || previewTask) return { ready: false };
       if (bookings.some(b => b.acknowledged && ['funded', 'approved'].includes(b.status) &&
           (!Number.isFinite(Date.parse(b.startUtc)) || !Number.isFinite(Date.parse(b.endUtc))))) {
         throw Error('Booking times unavailable for recording handoff');
@@ -744,7 +895,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       try {
         await tail;
         if (working || buffered || bytes || activeId || finalizationTasks.size || editTasks.size ||
-            catalogEditTasks.size || catalogApprovalTasks.size) return { ready: false };
+            catalogEditTasks.size || catalogApprovalTasks.size || publicationTasks.size || previewTask) return { ready: false };
         const restored = validateRecordingState(await store.restore());
         if (JSON.stringify(restored) !== JSON.stringify(state)) throw Error('Recording handoff checkpoint does not match the canonical recorder');
         if (expiresAt <= now()) throw Error('Recording handoff lease expired during verification');
@@ -767,6 +918,22 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       if (!available) throw new LiveAudioError('Recording editing is unavailable');
       await initialize();
       return editState(booking);
+    },
+    async previewEdit(booking) {
+      if (!available) throw new LiveAudioError('Recording previews are unavailable');
+      await initialize();
+      const current = record(booking.id);
+      if (!current || !canEditRecord(current) || !current.result) throw new LiveAudioError('This recording is not ready for preview.');
+      return publicPreview(booking, current);
+    },
+    previewCatalogEdit,
+    async publishEdit(booking, command, wallet, origin) {
+      return publishRecording(booking, null, command, wallet, origin,
+        draft => this.saveEdit(booking, draft, wallet), () => approveEdit(booking, command, wallet, origin));
+    },
+    async publishCatalogEdit(source, command, wallet, origin) {
+      return publishRecording(catalogBooking(source), source, command, wallet, origin,
+        draft => this.saveCatalogEdit(source, draft, wallet), () => this.approveCatalogEdit(source, command, wallet, origin));
     },
     prepareCatalogEdit,
     async catalogEditState(source) {
@@ -934,7 +1101,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
     },
     deploymentState() { return { ready: (!available || !!state) && !working && !buffered && !bytes &&
       !editTasks.size && !catalogEditTasks.size &&
-      !catalogApprovalTasks.size &&
+      !catalogApprovalTasks.size && !publicationTasks.size && !previewTask &&
       !(state?.recordings.some(r => r.consent?.enabled && ['recording', 'processing'].includes(r.status))) }; },
     async flush() { flush(); await tail; },
   };

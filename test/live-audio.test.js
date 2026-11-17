@@ -140,6 +140,38 @@ test('catalog source decoding does not hold the serialized live-audio watchdog q
   assert.equal(blocked, false);
 });
 
+test('unsigned studio preview checks catalog attribution without blocking the watchdog or authorizing publication', async t => {
+  const source = { nftId: `8453:0x${'1'.repeat(40)}:7`, chainId: 8453,
+    contractAddress: `0x${'1'.repeat(40)}`, tokenId: 7, artistWallet: artist.address.toLowerCase(),
+    sourceCid: 'a'.repeat(46), title: 'Catalog fixture', mediaType: 'audio/mpeg' };
+  let finishPreview, previewStarted, publishInput;
+  const started = new Promise(resolve => { previewStarted = resolve; });
+  const pending = new Promise(resolve => { finishPreview = resolve; });
+  const recorder = { available: true, previewCatalogEdit: async () => { previewStarted(); return pending; },
+    publishCatalogEdit: async (_source, command, wallet, origin) => {
+      publishInput = { command, wallet, origin };
+      return { queued: true };
+    } };
+  const f = await setup({ recorder, resolveCatalogRecording: async () => source });
+  t.after(() => f.service.stop());
+  const input = { nftId: source.nftId, wallet: artist.address };
+  await assert.rejects(f.service.previewRecording({ ...input, wallet: stranger.address }), /Only the credited artist/);
+  const preview = f.service.previewRecording(input);
+  await started;
+  let timer;
+  try {
+    await Promise.race([f.service.current(), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(Error('unsigned preview blocked watchdog')), 500);
+    })]);
+  } finally { clearTimeout(timer); finishPreview({ available: true, previewOnly: true }); }
+  assert.equal((await preview).previewOnly, true);
+  await f.service.publishRecording({ ...input, choice: 'full', signature: 'recorder-must-verify-this' }, ORIGIN);
+  assert.equal(publishInput.command.signature, 'recorder-must-verify-this');
+  assert.equal(publishInput.wallet, artist.address.toLowerCase());
+  assert.equal(publishInput.origin, ORIGIN);
+  await assert.rejects(f.service.previewRecording({ ...input, bookingId: 'mixed-source' }), /Choose one recording/);
+});
+
 test('live deployment handoff serializes verified bookings and blocks controls while the recorder is leased', async () => {
   let paused = false, prepared = [];
   const recorder = {
@@ -653,9 +685,9 @@ test('OBS uses separately enabled WHIP and revokes existing ingress rather than 
 
 test('HTTP room routes require allowed origins, keep private grants no-store, and redact provider errors', async () => {
   const { handleLiveAudioRequest } = await import('../discord-bot/live-audio-http.js');
-  async function call(url, method, origin, input = {}, service = { configured: true }) {
+  async function call(url, method, origin, input = {}, service = { configured: true }, authorization = 'Bearer fixture') {
     const request = Readable.from([JSON.stringify(input)]);
-    Object.assign(request, { url, method, headers: { origin, authorization: 'Bearer fixture' } });
+    Object.assign(request, { url, method, headers: { origin, authorization } });
     const response = { writeHead(status, headers) { this.status = status; this.headers = headers; }, end(body) { this.body = body; } };
     await handleLiveAudioRequest(request, response, { service, allowedOrigins: [ORIGIN] });
     return response;
@@ -664,6 +696,11 @@ test('HTTP room routes require allowed origins, keep private grants no-store, an
   const privateResponse = await call('/api/live-audio/control', 'POST', ORIGIN, { action: 'obs' },
     { configured: true, command: async () => ({ streamKey: 'private' }) });
   assert.equal(privateResponse.headers['cache-control'], 'no-store');
+  const preview = await call('/api/live-audio/recording-preview', 'POST', ORIGIN, { nftId: 'fixture' },
+    { configured: true, previewRecording: async () => ({ previewOnly: true }) }, '');
+  assert.equal(preview.status, 200);
+  assert.equal(preview.headers['cache-control'], 'no-store');
+  assert.equal((await call('/api/live-audio/recording-publish', 'POST', 'https://evil.example')).status, 403);
   const failed = await call('/api/live-audio/listen', 'POST', ORIGIN, {}, {
     configured: true, listener: async () => { throw new Error('upstream rejected token secret-abcd'); },
   });

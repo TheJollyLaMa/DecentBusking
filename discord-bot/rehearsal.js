@@ -12,10 +12,10 @@ export const REHEARSAL_MAX_PEOPLE = 6;
 // A pass stays valid while its page keeps checking in; an abandoned page loses access after this idle window.
 const SESSION_IDLE = 5 * 60_000;
 const HEARTBEAT = 30_000;
-const CONSENT = 'I consent to private live audio with whoever is in this shared room. No public radio, recording, booking, payment, or transaction.';
+const CONSENT = 'I consent to private live audio with the people invited to this rehearsal. No public radio, recording, booking, payment, or transaction.';
 
 export function createRehearsalService({ ownerWallet, engineerWallets = [], transport, store, now = () => Date.now(),
-  verify = verifyMessage, checkpointTimeoutMs = 45_000 } = {}) {
+  getBookings, verify = verifyMessage, checkpointTimeoutMs = 45_000 } = {}) {
   const engineers = new Set([ownerWallet, ...engineerWallets].map(address).filter(Boolean));
   const challenges = new Map(), sessions = new Map(), frames = new Map();
   const monitoring = new Set(), connected = new Map();
@@ -25,8 +25,17 @@ export function createRehearsalService({ ownerWallet, engineerWallets = [], tran
   const booking = room => ({ id: room.id, rehearsal: true, endUtc: new Date(room.expiresAt).toISOString() });
   const lookup = id => state.rooms.find(room => room.id === id);
   const active = room => room && !room.endedAt && room.expiresAt > now();
-  const current = () => state.rooms.find(active);
-  const roleOf = wallet => engineers.has(wallet) ? 'engineer' : 'musician';
+  const roleOf = (wallet, room) => engineers.has(wallet) ? 'engineer' : room?.host === wallet ? 'host' : 'musician';
+  const canManage = (wallet, room) => engineers.has(wallet) || room.host === wallet;
+  async function canHost(wallet) {
+    if (engineers.has(wallet)) return true;
+    if (!getBookings) throw new LiveAudioError('Performer invitation history is unavailable; an administrator can still host.');
+    try {
+      const history = await getBookings();
+      if (!Array.isArray(history?.bookings)) throw Error('Invitation history unavailable');
+      return history.bookings.some(b => address(b.wallet) === wallet && b.acknowledged === true);
+    } catch { throw new LiveAudioError('Performer invitation history could not be verified. Retry shortly.'); }
+  }
   const roomSessions = id => [...sessions.values()].filter(s => s.id === id && s.expiresAt > now());
   async function save(next) {
     let timer;
@@ -98,7 +107,7 @@ export function createRehearsalService({ ownerWallet, engineerWallets = [], tran
     const fresh = frames.get(room.id) || new Map(), byWallet = new Map();
     for (const [token, s] of sessions) {
       if (s.id !== room.id || s.expiresAt <= now()) continue;
-      const entry = byWallet.get(s.wallet) || { wallet: s.wallet, label: short(s.wallet), role: roleOf(s.wallet),
+      const entry = byWallet.get(s.wallet) || { wallet: s.wallet, label: short(s.wallet), role: roleOf(s.wallet, room),
         you: s.wallet === self, connected: false, audioFresh: false };
       entry.connected ||= !!connected.get(room.id)?.has(token);
       entry.audioFresh ||= now() - (fresh.get(`rehearsal:${s.wallet}`) || 0) <= 5000;
@@ -108,7 +117,7 @@ export function createRehearsalService({ ownerWallet, engineerWallets = [], tran
   }
   function publicState(room, self) {
     const list = people(room, self);
-    return { kind: 'shared-rehearsal', id: room.id, expiresAt: room.expiresAt,
+    return { kind: 'private-rehearsal', id: room.id, expiresAt: room.expiresAt,
       phase: active(room) ? 'private' : 'ended', people: list,
       privateAudioFresh: list.some(p => p.you && p.audioFresh),
       anyAudioFresh: list.some(p => p.audioFresh),
@@ -127,19 +136,34 @@ export function createRehearsalService({ ownerWallet, engineerWallets = [], tran
   }
   return {
     get configured() { return configured && !failed; },
+    async eligibility(wallet) {
+      if (!configured || failed) throw new LiveAudioError('Private rehearsal is unavailable');
+      const who = address(wallet);
+      if (!who) throw new LiveAudioError('Connect a valid wallet');
+      return { canHost: await canHost(who) };
+    },
     async challenge(input, origin) {
       return run(async () => {
         await initialize(); await cleanup();
         const who = address(input.wallet);
         if (!who) throw new LiveAudioError('Connect a valid wallet');
-        if (!['enter', 'join', 'practice'].includes(input.action)) throw new LiveAudioError('Unknown rehearsal action');
-        if (current()?.removed?.includes(who)) throw new LiveAudioError('An engineer removed this wallet from the current session');
+        if (!['enter', 'join', 'practice', 'create'].includes(input.action)) throw new LiveAudioError('Unknown rehearsal action');
+        const create = !input.roomId;
+        if (create && input.action === 'join') throw new LiveAudioError('Open the complete rehearsal invitation link.');
+        if (create && !await canHost(who)) throw new LiveAudioError('Only administrators and performers who accepted a live invitation can start rehearsals. Guests need a room invitation link.');
+        const roomId = create ? `rehearsal:${opaque()}` : input.roomId;
+        const room = !create && lookup(roomId);
+        if (!create && (!/^rehearsal:[0-9a-f]{64}$/.test(roomId) || !active(room))) {
+          throw new LiveAudioError('This rehearsal invitation expired or the room closed. Ask the host for a new link.');
+        }
+        if (room?.removed?.includes(who)) throw new LiveAudioError('The host or engineer removed this wallet from this rehearsal');
         for (const [key, c] of challenges) if (c.expiresAt <= now()) challenges.delete(key);
         if (challenges.size >= 128) throw new LiveAudioError('Too many rehearsal challenges');
         const id = opaque(), expiresAt = now() + 120_000;
-        const message = ['DecentBusking SHARED REHEARSAL ROOM sign-in', `Wallet: ${who}`, `Role: ${roleOf(who)}`,
+        const message = ['DecentBusking PRIVATE REHEARSAL ROOM sign-in', `Room: ${roomId}`, `Action: ${create ? 'create' : 'join'}`,
+          `Wallet: ${who}`, `Role: ${create && !engineers.has(who) ? 'host' : roleOf(who, room)}`,
           `Origin: ${origin}`, `Nonce: ${id}`, `Challenge expires: ${new Date(expiresAt).toISOString()}`, CONSENT].join('\n');
-        challenges.set(id, { who, origin, message, expiresAt });
+        challenges.set(id, { who, origin, message, expiresAt, roomId, create });
         return { challengeId: id, message };
       });
     },
@@ -150,21 +174,23 @@ export function createRehearsalService({ ownerWallet, engineerWallets = [], tran
         if (!c || c.origin !== origin || c.expiresAt <= now()) throw new LiveAudioError('Rehearsal challenge expired');
         challenges.delete(challengeId);
         if (address(verify(c.message, signature)) !== c.who) throw new LiveAudioError('Rehearsal signature does not match');
-        let room = current();
-        if (!room) {
-          if (state.rooms.length) throw new LiveAudioError('The last session is still closing; try again in a few seconds');
-          room = { id: `rehearsal:${opaque()}`, expiresAt: now() + REHEARSAL_MAX_DURATION, endedAt: 0, removed: [] };
+        if (sessions.size >= 64) throw new LiveAudioError('Rehearsal session limit reached');
+        let room = lookup(c.roomId);
+        if (c.create) {
+          if (!await canHost(c.who)) throw new LiveAudioError('This wallet is no longer eligible to host.');
+          if (state.rooms.length >= 100) throw new LiveAudioError('Rehearsal room limit reached; wait for old rooms to close.');
+          room = { id: c.roomId, host: c.who, expiresAt: now() + REHEARSAL_MAX_DURATION, endedAt: 0, removed: [] };
           const next = clone(state); next.rooms.push(room); await save(next); room = lookup(room.id);
         }
-        if (room.removed?.includes(c.who)) throw new LiveAudioError('An engineer removed this wallet from the current session');
+        if (!active(room)) throw new LiveAudioError('This rehearsal closed while you were signing. Ask the host for a new link.');
+        if (room.removed?.includes(c.who)) throw new LiveAudioError('The host or engineer removed this wallet from this rehearsal');
         const wallets = new Set(roomSessions(room.id).map(s => s.wallet));
         if (!wallets.has(c.who) && wallets.size >= REHEARSAL_MAX_PEOPLE) {
           throw new LiveAudioError(`The rehearsal room is full (${REHEARSAL_MAX_PEOPLE} people)`);
         }
-        if (sessions.size >= 64) throw new LiveAudioError('Rehearsal session limit reached');
         const token = opaque(), expiresAt = Math.min(room.expiresAt, now() + SESSION_IDLE);
         sessions.set(token, { id: room.id, wallet: c.who, origin, expiresAt });
-        return { token, role: roleOf(c.who), wallet: c.who, expiresAt, state: publicState(room, c.who) };
+        return { token, role: roleOf(c.who, room), wallet: c.who, expiresAt, state: publicState(room, c.who) };
       });
     },
     async command(token, input, origin) {
@@ -190,11 +216,11 @@ export function createRehearsalService({ ownerWallet, engineerWallets = [], tran
           await cleanup();
           return { exited: true };
         }
-        if (input.action === 'end' && roleOf(s.wallet) === 'engineer' && input.confirmed === true) {
+        if (input.action === 'end' && canManage(s.wallet, room) && input.confirmed === true) {
           await endRoom(room.id); await cleanup();
           return { ...publicState({ ...room, endedAt: now() }, s.wallet), phase: 'ended' };
         }
-        if (input.action === 'remove' && roleOf(s.wallet) === 'engineer') {
+        if (input.action === 'remove' && canManage(s.wallet, room)) {
           const target = address(input.wallet);
           if (!target || target === s.wallet || engineers.has(target)) throw new LiveAudioError('Choose another non-engineer person to remove');
           const next = clone(state), stored = next.rooms.find(r => r.id === room.id);
@@ -203,7 +229,12 @@ export function createRehearsalService({ ownerWallet, engineerWallets = [], tran
           for (const [key, other] of sessions) if (other.id === room.id && other.wallet === target) {
             sessions.delete(key); connected.get(room.id)?.delete(key);
           }
-          await transport.rehearsalRemove?.(booking(room), target).catch(() => {});
+          try {
+            if (!transport.rehearsalRemove) throw Error('Participant removal unavailable');
+            await transport.rehearsalRemove(booking(room), target);
+          } catch {
+            throw new LiveAudioError('New access is blocked, but active audio removal was not confirmed. Close this rehearsal for everyone if audio remains.');
+          }
           return publicState(lookup(room.id), s.wallet);
         }
         throw new LiveAudioError('Unknown or unauthorized rehearsal action');
