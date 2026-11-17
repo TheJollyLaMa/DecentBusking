@@ -1,7 +1,7 @@
 import { createRadioAnnouncements, deserializeAnnouncements } from './radio-announcements.js';
 import { createCommunityReminder, deserializeCommunityReminders } from './community-reminder.js';
 import { createLiveBookings } from './live-bookings.js';
-import { createLiveAudioService } from './live-audio.js';
+import { createLiveAudioService, createLiveAudioWatchdogTick } from './live-audio.js';
 import { createLiveFeedback, parseTrustedProxyHops } from './live-feedback.js';
 import { createRadioDeploymentGate } from './radio-deployment.js';
 import { parseLiveAudioPrograms } from '../js/live-audio.mjs';
@@ -1741,14 +1741,7 @@ async function main() {
     setInterval(() => { void tickRehearsal(); }, 1000).unref();
   }
   if (liveAudio.configured) {
-    let ticking = false;
-    const tick = async () => {
-      if (ticking) return;
-      ticking = true;
-      try { await liveAudio.tick(); }
-      catch { console.warn('[live-audio] Room state/receiver unavailable; inspect hosting and durable storage.'); }
-      finally { ticking = false; liveFeedback.sync(); }
-    };
+    const tick = createLiveAudioWatchdogTick({ liveAudio, liveFeedback });
     void tick();
     setInterval(() => { void tick(); }, 1000).unref();
   }

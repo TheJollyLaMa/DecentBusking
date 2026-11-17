@@ -1,5 +1,28 @@
 # Live Performance — operator runbook
 
+## First-night worker logs
+
+These are worker diagnostics, not listener counts or proof of audible playback.
+Identical codes (and HTTP statuses) log immediately on first occurrence, then
+summarize repeats every 60 seconds; recovery flushes pending counts first.
+Client closes are aggregated separately and are not gateway failures. The
+30-second gateway timeout covers response headers, not the full audio download.
+
+| Log | Meaning and operator action |
+| --- | --- |
+| `MEDIA_CLIENT_CLOSED` | Listener ended a download early; normal by itself. Investigate only alongside playback complaints. |
+| `MEDIA_GATEWAY_HTTP status=…` | Gateway rejected a media request; inspect provider status and limits. |
+| `MEDIA_GATEWAY_ERROR` | Gateway fetch or stream failed; check connectivity and provider health. |
+| `MEDIA_GATEWAY_TIMEOUT` | Gateway did not return headers in time; check provider latency. |
+| `MEDIA_GATEWAY_RECOVERED` | A later media response completed after a gateway failure; keep monitoring. |
+| `ROOM_STATE_UNAVAILABLE` | Live room state or receiver tick failed; inspect hosting and durable storage. |
+| `ROOM_STATE_RECOVERED` | A later room tick succeeded; independently verify the live return. |
+| `[rpc] Alchemy budget mode …` | Budget mode changed; inspect the GET `/health` RPC budget summary before operator action. |
+
+`HEAD /health` is a bodyless uptime check; GET `/health` supplies the existing
+provider and RPC summary. Deployment and real-staging verification are separate
+from local tests.
+
 ## Production desk: live-session coordination
 
 The Admin booking card's **Open production desk** link opens

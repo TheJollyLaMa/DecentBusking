@@ -1,7 +1,8 @@
 import { liveAuthorization } from '../js/live-bookings.mjs';
 import { AbiCoder, Contract, Interface, JsonRpcProvider, keccak256, toUtf8Bytes, verifyMessage, verifyTypedData } from 'ethers';
 import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+import { finished, pipeline } from 'node:stream/promises';
+import { createRepeatLog } from './repeat-log.js';
 import { MEDIA_TYPES, mediaTypeFor, normalizeMediaCid, buildSubmissionAuthorizationMessage } from './media.js';
 import { validateLivePerformanceSchedule, validateWeeklyScheduleOverrides, validateRadioProgrammingConflicts } from '../js/radio-schedule.mjs';
 import { buildFundWeeklyArchive } from '../js/fund-archive.mjs';
@@ -324,6 +325,8 @@ export function createWorkerRequestHandler({
   ipfsApiUrl = 'http://127.0.0.1:5001',
   fetchImpl = fetch,
   now = () => Date.now(),
+  mediaGatewayTimeoutMs = 30_000,
+  mediaLog = createRepeatLog(),
 }) {
   const origins = new Set(allowedOrigins);
   const radioOrigins = new Set([...allowedOrigins, ...radioAllowedOrigins]);
@@ -527,6 +530,12 @@ export function createWorkerRequestHandler({
         response.end();
         return;
       }
+      if (request.method === 'HEAD' && requestUrl.pathname === '/health') {
+        response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store',
+          'access-control-allow-origin': '*', vary: 'origin' });
+        response.end();
+        return;
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
         const rpc = getRpcHealth?.();
         sendJson(response, 200, { ok: true, ipfsProvider: pinataJwt ? 'pinata' : 'unconfigured',
@@ -618,23 +627,37 @@ export function createWorkerRequestHandler({
           return;
         }
         const url = await getRadioMediaUrl(cid);
+        if (response.destroyed) {
+          mediaLog.warn('client:closed', '[radio] MEDIA_CLIENT_CLOSED');
+          return;
+        }
         if (!url) {
           sendJson(response, 404, { error: 'Radio recording is unavailable' }, '*');
           return;
         }
         const controller = new AbortController();
-        const abort = () => controller.abort();
+        let clientClosed = false;
+        let upstreamFailed = false;
+        let timedOut = false;
+        const abort = () => {
+          if (!response.writableFinished && !upstreamFailed && !timedOut) clientClosed = true;
+          controller.abort();
+        };
         response.once('close', abort);
-        const timeout = setTimeout(abort, 30_000);
+        const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, mediaGatewayTimeoutMs);
         try {
           const upstream = await fetchImpl(url, {
             headers: request.headers.range ? { range: request.headers.range } : {},
             signal: controller.signal,
           });
           clearTimeout(timeout);
+          if (clientClosed) {
+            await upstream.body?.cancel();
+            throw new Error('Client closed media response');
+          }
           if (![200, 206, 416].includes(upstream.status)) {
             await upstream.body?.cancel();
-            console.warn(`[radio] Media gateway returned HTTP ${upstream.status}`);
+            mediaLog.warn(`gateway:http:${upstream.status}`, `[radio] MEDIA_GATEWAY_HTTP status=${upstream.status}`);
             sendJson(response, 502, { error: 'Radio media gateway is unavailable' }, '*');
             return;
           }
@@ -650,12 +673,22 @@ export function createWorkerRequestHandler({
           response.writeHead(upstream.status, headers);
           if (upstream.body) {
             const media = Readable.fromWeb(upstream.body);
-            media.on('error', error => console.warn('[radio] Upstream media stream failed:', error.message));
+            media.on('error', () => { if (!clientClosed) upstreamFailed = true; });
             await pipeline(media, response);
-          } else response.end();
+          } else {
+            response.end();
+            await finished(response);
+          }
+          mediaLog.recover('gateway:', '[radio] MEDIA_GATEWAY_RECOVERED');
         } catch (error) {
+          if (clientClosed) {
+            mediaLog.warn('client:closed', '[radio] MEDIA_CLIENT_CLOSED');
+          } else if (timedOut) {
+            mediaLog.warn('gateway:timeout', '[radio] MEDIA_GATEWAY_TIMEOUT');
+          } else {
+            mediaLog.warn('gateway:error', '[radio] MEDIA_GATEWAY_ERROR');
+          }
           if (!response.destroyed) {
-            console.warn('[radio] Media stream failed:', error.name);
             if (response.headersSent) response.destroy();
             else sendJson(response, 502, { error: 'Radio media stream failed' }, '*');
           }

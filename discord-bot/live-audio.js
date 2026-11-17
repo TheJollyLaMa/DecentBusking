@@ -8,11 +8,29 @@ import { liveBroadcastTiming, liveBroadcastEnd } from '../js/live-broadcast.mjs'
 import { validateLiveAudioState } from './live-audio-store.js';
 import { planBroadcastCommand } from './live-broadcast-control.js';
 import { catalogRecordingAuthorizationMessage } from '../js/live-recording-edit.mjs';
+import { createRepeatLog } from './repeat-log.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const address = value => /^0x[0-9a-f]{40}$/i.test(value || '') ? value.toLowerCase() : '';
 const opaque = () => randomBytes(32).toString('hex');
 const START_EARLY_MS = 70 * 60_000;
+
+export function createLiveAudioWatchdogTick({ liveAudio, liveFeedback, log = createRepeatLog() }) {
+  let ticking = false;
+  return async () => {
+    if (ticking) return;
+    ticking = true;
+    try {
+      await liveAudio.tick();
+      log.recover('room:', '[live-audio] ROOM_STATE_RECOVERED');
+    } catch {
+      log.warn('room:unavailable', '[live-audio] ROOM_STATE_UNAVAILABLE; inspect hosting and durable storage.');
+    } finally {
+      ticking = false;
+      liveFeedback.sync();
+    }
+  };
+}
 
 export function createLiveAudioFileStore(path) {
   if (!path) return null;

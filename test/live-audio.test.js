@@ -13,6 +13,32 @@ const booking = () => ({ id: 'existing-funded-booking', wallet: artist.address, 
   title: 'Private fixture', startUtc: new Date(START).toISOString(), endUtc: new Date(START + 20 * 60_000).toISOString(),
   status: 'funded', acknowledged: true, payoutPolicy: 'pilot-guaranteed-v1', amountUnits: '20000000' });
 
+test('live watchdog summarizes repeated startup failures and reports recovery', async () => {
+  const { createLiveAudioWatchdogTick } = await import('../discord-bot/live-audio.js');
+  const { createRepeatLog } = await import('../discord-bot/repeat-log.js');
+  const lines = [];
+  let timer, failing = true, syncs = 0;
+  const log = createRepeatLog({
+    log: { warn: line => lines.push(line), info: line => lines.push(line) },
+    setTimer: callback => { timer = callback; return 1; }, clearTimer: () => { timer = null; },
+  });
+  const tick = createLiveAudioWatchdogTick({
+    liveAudio: { tick: async () => { if (failing) throw new Error('private details'); } },
+    liveFeedback: { sync: () => { syncs++; } }, log,
+  });
+  for (let i = 0; i < 16; i++) await tick();
+  assert.equal(lines.length, 1);
+  timer();
+  assert.match(lines[1], /repeated 15 times/);
+  await tick();
+  failing = false;
+  await tick();
+  assert.match(lines[2], /repeated 1 times/);
+  assert.equal(lines[3], '[live-audio] ROOM_STATE_RECOVERED');
+  assert.equal(syncs, 18);
+  assert.ok(!lines.some(line => line.includes('private details')));
+});
+
 test('approved program hits exact Top10/ad/live/ad/radio boundaries without altering booked time', async () => {
   const { liveAudioPolicy, applyLiveAudioShow, parseLiveAudioPrograms } = await import('../js/live-audio.mjs');
   const b = booking(), record = { armed: true, checks: {} }, end = Date.parse(b.endUtc);
