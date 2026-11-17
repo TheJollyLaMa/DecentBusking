@@ -46,6 +46,7 @@ export function createDjukePlaylistBatchReconciler({ provider, contract, restore
     throw new Error('Durable DJuke playlist batch reconciliation requires a contract, start block, and checkpoint store');
   }
   let nextBlock = startBlock;
+  let savedNextBlock = startBlock;
   let batches = new Map();
   let initialized = false;
   let task = Promise.resolve();
@@ -53,6 +54,7 @@ export function createDjukePlaylistBatchReconciler({ provider, contract, restore
   const commit = async () => {
     const uri = await save({ schemaVersion: 2, nextBlock, batches: [...batches.values()] });
     if (typeof uri !== 'string' || !uri.startsWith('ipfs://')) throw new Error('Playlist batch checkpoint is not durable');
+    savedNextBlock = nextBlock;
   };
   function apply(log) {
     const { name, args } = log;
@@ -135,6 +137,10 @@ export function createDjukePlaylistBatchReconciler({ provider, contract, restore
           nextBlock = previousBlock;
           throw error;
         }
+      }
+      if (nextBlock - savedNextBlock >= chunkSize) {
+        try { await commit(); }
+        catch (error) { nextBlock = savedNextBlock; throw error; }
       }
       return [...batches.values()].map(batch => structuredClone(batch));
     }),
