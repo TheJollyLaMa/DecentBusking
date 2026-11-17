@@ -192,12 +192,59 @@ test('resource samples report real core-time, bytes and event-loop delay rather 
   const metrics = createRadioResourceMetrics({ now: () => at, cpuUsage: () => ({ user: cpu, system: 0 }),
     memoryUsage: () => ({ rss: 120000000, heapUsed: 20000000 }),
     readContainer: async () => ({ available: false, reason: 'Local fixture' }),
-    histogram: { enable() {}, disable() {}, reset() {}, percentile: () => 123000000 } });
+    histogram: { enable() {}, disable() {}, reset() {}, percentile: () => 123000000, max: 1944000000 } });
   at += 1000; cpu += 500000;
   assert.deepEqual(await metrics.sample(), { at: 2000, elapsedMs: 1000, cpuCorePercent: 50,
-    rssBytes: 120000000, heapUsedBytes: 20000000, eventLoopP99Ms: 123,
+    rssBytes: 120000000, heapUsedBytes: 20000000, eventLoopP99Ms: 123, eventLoopMaxMs: 1944,
     container: { available: false, reason: 'Local fixture' } });
   metrics.stop();
+});
+
+test('CPU stall summaries attribute external leaf work to its radio caller without publishing raw profiles', async () => {
+  const { summarizeRadioCpuProfile } = await import('../discord-bot/radio-resource-metrics.js');
+  const url = new URL('../discord-bot/example.js', `file://${__filename}`).href;
+  const frame = (functionName, url = '', lineNumber = -1) => ({ functionName, url, lineNumber });
+  const result = summarizeRadioCpuProfile({
+    nodes: [
+      { id: 1, callFrame: frame('(root)'), children: [2, 4] },
+      { id: 2, callFrame: frame('checkpoint', url, 41), children: [3] },
+      { id: 3, callFrame: frame('hash', 'node:crypto') },
+      { id: 4, callFrame: frame('(idle)') },
+    ],
+    samples: [3, 3, 4], timeDeltas: [10000, 20000, 5000],
+  });
+  assert.deepEqual(result, [
+    { file: 'example.js', line: 42, function: 'checkpoint', sampledMs: 30 },
+    { file: '(runtime)', line: 0, function: '(idle)', sampledMs: 5 },
+  ]);
+  assert.ok(!JSON.stringify(result).includes('file://'));
+});
+
+test('preview CPU diagnostics stop after ten windows and retain no raw profile in health', async () => {
+  const { createRadioResourceMetrics } = await import('../discord-bot/radio-resource-metrics.js');
+  let at = 0;
+  const logs = [];
+  const metrics = createRadioResourceMetrics({ profileCpu: true, now: () => at,
+    cpuUsage: () => ({ user: 0, system: 0 }), memoryUsage: () => ({ rss: 100, heapUsed: 50 }),
+    histogram: { enable() {}, disable() {}, reset() {}, percentile: () => 0, max: 600000000 },
+    readContainer: async () => ({ available: false }),
+    log: { info: (...args) => logs.push(args), error: (...args) => assert.fail(args.join(' ')) },
+  });
+  try {
+    for (let i = 0; i < 11; i++) {
+      at += 1000;
+      const sample = await metrics.sample();
+      assert.equal(sample.eventLoopMaxMs, 600);
+      assert.equal(sample.profile, undefined);
+    }
+    assert.equal(logs.length, 10);
+    for (const [label, json] of logs) {
+      assert.equal(label, '[radio-cpu-stall]');
+      const summary = JSON.parse(json);
+      assert.ok(summary.top.length <= 10);
+      assert.deepEqual(Object.keys(summary).sort(), ['eventLoopMaxMs', 'top']);
+    }
+  } finally { metrics.stop(); }
 });
 
 test('container headroom normalizes all container CPU and memory against their actual quotas', async () => {
@@ -206,7 +253,7 @@ test('container headroom normalizes all container CPU and memory against their a
   const metrics = createRadioResourceMetrics({
     now: () => at, cpuUsage: () => ({ user: 0, system: 0 }),
     memoryUsage: () => ({ rss: 100, heapUsed: 50 }),
-    histogram: { enable() {}, disable() {}, reset() {}, percentile: () => 0 },
+    histogram: { enable() {}, disable() {}, reset() {}, percentile: () => 0, max: 0 },
     readContainer: async () => ({ available: true, cpuUsageUs: usage, cpuLimitCores: 0.5,
       memoryBytes: 384 * 1024 * 1024, memoryLimitBytes: 512 * 1024 * 1024 }),
   });
