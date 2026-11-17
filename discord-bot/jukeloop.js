@@ -65,7 +65,8 @@ import { playlistTrackReason, radioPlaylistDefinition } from '../js/radio-playli
 import { createTopTenHype } from './top-ten-hype.js';
 import { bufferRadioMedia } from './radio-media-buffer.js';
 import { createDurationBackfill } from './media-duration.js';
-import { recordingDurationReason, verifiedRecordingDuration, recordingMediaIdentity } from '../js/radio-duration.mjs';
+import { recordingDurationReason, verifiedRecordingDuration, recordingMediaIdentity,
+  expectedRecordingMs, radioCompletionDiagnostics } from '../js/radio-duration.mjs';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -921,6 +922,8 @@ export class JukeLoopSession {
           firstWeekBonus: this._nowPlaying.firstWeekBonus,
           announcementId: this._announcementMsg?.id,
         };
+        Object.assign(this._completedPlay, radioCompletionDiagnostics(
+          this._completedPlay.audibleMs, this._nowPlaying.expectedMs));
         if (this._currentDevertAd && (!this._currentDevertAd.paidRequest ||
             (this._currentPaid?.tier === 0 && this._completedPlay.finished))) {
           this._musicSinceAd = 0;
@@ -936,17 +939,18 @@ export class JukeLoopSession {
             ? this.devertPlayback.recordCompetitionAdvertPlay({ campaignId: this._currentDevertAd.campaignId,
                 competitionReward: this._currentDevertAd.competitionReward, startedAt: this._completedPlay.startedAt,
                 radioPlayId: this._nowPlaying.playId, mainRadio: this._currentDevertAd.mainRadio,
-                audibleMs: this._completedPlay.audibleMs })
+                audibleMs: this._completedPlay.audibleMs, expectedMs: this._completedPlay.expectedMs })
             : this._currentDevertAd ? this.devertPlayback.recordCampaignImpression({ campaignId: this._currentDevertAd.campaignId,
                 radioPlayId: this._nowPlaying.playId, mainRadio: this._currentDevertAd.mainRadio,
-                audibleMs: this._completedPlay.audibleMs })
+                audibleMs: this._completedPlay.audibleMs, expectedMs: this._completedPlay.expectedMs })
             : this.devertPlayback.recordCompletedMusicPlay({ playId: this._nowPlaying.playId,
                 audibleMs: this._completedPlay.audibleMs });
           Promise.resolve(durableRecord)
             .catch(error => console.warn('[devert] Durable play record deferred:', error.message));
         } else if (this.devertPlayback?.recordPaidAdvertPlay && this._currentDevertAd) {
           Promise.resolve(this.devertPlayback.recordPaidAdvertPlay({ campaignId: this._currentDevertAd.campaignId,
-            radioPlayId: this._nowPlaying.playId, audibleMs: this._completedPlay.audibleMs }))
+            radioPlayId: this._nowPlaying.playId, audibleMs: this._completedPlay.audibleMs,
+            expectedMs: this._completedPlay.expectedMs }))
             .catch(error => console.warn('[devert] Paid advert play tally deferred:', error.message));
         }
       }
@@ -1912,6 +1916,7 @@ export class JukeLoopSession {
     this._nowPlaying = {
       playId,
       trackId: prepared.track.trackId,
+      expectedMs: expectedRecordingMs(prepared.track),
       title: prepared.track.title,
       uploader: prepared.track.uploader,
       filename: prepared.track.filename || null,
@@ -2251,16 +2256,22 @@ export class JukeLoopSession {
         delete completedPlay.completion;
         completedPlay.finished = media.finished;
         completedPlay.media = media;
-        console.log('[jukeloop] Audio completion:', JSON.stringify({
-          playId: completedPlay.playId, trackId: completedPlay.trackId,
-          requestId: paidRecord?.requestId || null, attempt: paidRecord?.attempts || null,
-          audibleMs: completedPlay.audibleMs, ...media,
-        }));
         if (media.finished && completedPlay.countAdOnCompletion) {
           this._musicSinceAd = 0;
           this._musicPlayCount++;
           this._persistMainRadioAdState();
         }
+      }
+      if (completedPlay) {
+        Object.assign(completedPlay, radioCompletionDiagnostics(completedPlay.audibleMs,
+          completedPlay.expectedMs === undefined ? expectedRecordingMs(trackRef) : completedPlay.expectedMs));
+        console.log('[jukeloop] Audio completion:', JSON.stringify({
+          playId: completedPlay.playId, trackId: completedPlay.trackId,
+          requestId: paidRecord?.requestId || null, attempt: paidRecord?.attempts || null,
+          audibleMs: completedPlay.audibleMs,
+          ...radioCompletionDiagnostics(completedPlay.audibleMs, completedPlay.expectedMs),
+          finished: completedPlay.finished, ...completedPlay.media,
+        }));
       }
       if (longFormSelection && trackRef && completedPlay?.trackId === trackRef.trackId) {
         const seconds = verifiedRecordingDuration(trackRef);
@@ -2275,7 +2286,7 @@ export class JukeLoopSession {
       this._longFormCompletionTask = task;
       try { await task; }
       finally { if (this._longFormCompletionTask === task) this._longFormCompletionTask = null; }
-    } else if (completedPlay?.completion) {
+    } else if (completedPlay) {
       await finish();
     }
 
@@ -2293,7 +2304,9 @@ export class JukeLoopSession {
       await completeLiveRecordingReplay(trackRef.trackId, completedPlay);
       const recorded = recordAudiblePlay(trackRef.trackId, completedPlay);
       if (recorded.counted) {
-        console.log(`[jukeloop] Counted weekly play for "${trackRef.title}" (${recorded.week}, ${Math.round(completedPlay.audibleMs / 1000)}s audible).`);
+        console.log(`[jukeloop] Counted weekly play for "${trackRef.title}" (${recorded.week}, ${Math.round(completedPlay.audibleMs / 1000)}s audible).`,
+          JSON.stringify({ playId: completedPlay.playId, audibleMs: completedPlay.audibleMs,
+            ...radioCompletionDiagnostics(completedPlay.audibleMs, completedPlay.expectedMs) }));
       }
     }
     if (paidRecord && this.djuke) {

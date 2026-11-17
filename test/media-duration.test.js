@@ -4,6 +4,32 @@ const { createServer } = require('node:http');
 const { once } = require('node:events');
 const { verifiedRecording } = require('./helpers/verified-recording');
 
+test('radio completion diagnostics distinguish normal, truncated, unknown and boundary durations', async () => {
+  const { expectedRecordingMs, radioCompletionDiagnostics } = await import('../js/radio-duration.mjs');
+  const track = verifiedRecording({ trackId: 'incident', ipfsCid: 'recording' }, 240);
+  const expectedMs = expectedRecordingMs(track);
+  assert.equal(expectedMs, 240000);
+  for (const [audibleMs, short] of [[221858, true], [237999, true], [238000, false],
+    [240000, false], [241000, false], [0, true]]) {
+    const result = radioCompletionDiagnostics(audibleMs, expectedMs);
+    assert.deepEqual(result, { expectedMs, completionRatio: audibleMs / expectedMs, short, shortToleranceMs: 2000 });
+  }
+  for (const invalid of [undefined, null, 0, -1, NaN, Infinity, '240000', Number.MAX_SAFE_INTEGER + 1]) {
+    assert.deepEqual(radioCompletionDiagnostics(221858, invalid),
+      { expectedMs: null, completionRatio: null, short: null, shortToleranceMs: 2000 });
+  }
+  for (const audibleMs of [undefined, NaN, Infinity, -1]) {
+    const result = radioCompletionDiagnostics(audibleMs, expectedMs);
+    assert.equal(result.completionRatio, null);
+    assert.equal(result.short, null);
+  }
+  assert.equal(expectedRecordingMs({ ...track, ipfsCid: 'different-media' }), null);
+  assert.equal(expectedRecordingMs({ ...track, durationSeconds: 239 }), null);
+  assert.equal(expectedRecordingMs({ durationSeconds: 240 }), null, 'unverified metadata is not evidence');
+  assert.equal(expectedRecordingMs(verifiedRecording({ trackId: 'long-set' }, 1200)), 1200000);
+  assert.equal(radioCompletionDiagnostics(0, 1500).short, false, 'the fixed diagnostic tolerance also applies to tiny clips');
+});
+
 test('real FFmpeg decodes exact audio durations on both sides of the ten-minute boundary', async t => {
   const { probeMediaDuration } = await import('../discord-bot/media-duration.js');
   const { recordingDurationProof, verifiedRecordingDuration, recordingDurationReason } = await import('../js/radio-duration.mjs');

@@ -521,7 +521,89 @@ worker restart before promoting DeVert beyond its initial low-stakes run.
   0.010 repo-dev.
 - Paid requests play ahead of free rotation; fulfillment needs 30 audible seconds,
   happens in the background, and is bound to the exact recording revision played.
-  A failed paid play waits 60 seconds before retrying; free radio never stalls.
+  Failed media lookup uses a 60-second paid-fetch cooldown; under-audible
+  playback stays queued for the next eligible selection (see #359 below).
+
+## Radio completion diagnostics and interrupted paid playback (#359)
+
+Every `[jukeloop] Audio completion` line and counted-weekly-play line includes
+`expectedMs`, `completionRatio`, `short` and `shortToleranceMs`, alongside
+`audibleMs`. Expected time is a **playback-start snapshot** of
+`verifiedRecordingDuration(track)` (`js/radio-duration.mjs`): measured decode,
+live-capture or sample-range proof bound to that exact media. Unverified container
+or catalog duration, changed media, invalid metadata and missing duration yield
+`expectedMs: null`, `completionRatio: null`, `short: null`, never zero or assumed
+completion. Ad metadata without such proof stays unknown; the 120-second advert
+cap is policy, not a fabricated source duration.
+
+`RADIO_SHORT_TOLERANCE_MS = 2000` is a **diagnostic-only** margin matching the
+existing two-second long-form/replay completion margins, without coupling it to
+eligibility. `short: true` means `expectedMs - audibleMs > 2000` (exactly two
+seconds early is tolerated). `completionRatio = audibleMs / expectedMs` is not
+clamped: overruns can exceed 1. Zero audible time with a known duration is a real
+zero ratio; unknown duration is null. For example, 221858 audible ms against
+240000 expected ms is about 0.9244 and short, even if it still qualifies for the
+weekly tally. Operators can count **known-duration plays ending more than two
+seconds short**, reporting unknown-duration plays separately, and inspect
+`reason`, `finished`, decoded and consumed PCM evidence before diagnosing a cause.
+Wall-clock audible time is not proof every browser heard the source or that PCM
+was complete; `short` and decoder `finished` are independent observations.
+
+New playlist `play` history events (including under-30-second attempts), DJuke/
+paid-ad completed-play checkpoints, playlist failed-playback `lastMedia`, and
+DeVert impression/paid/free play receipts retain these diagnostics. Existing
+history is not backfilled. DeVert's hashed music-ID cadence/deduplication lists
+are counters, not a second per-play duration ledger; music evidence lives in
+playlist play history. Existing paid/free advert accounting stays separate.
+
+Source trace: `JukeLoopSession._collectReactions` in `discord-bot/jukeloop.js`,
+`createDjukeRuntime` / `createDjukePlaybackJournal` in `discord-bot/djuke.js`, and
+`createDevertQueueRuntime` in `discord-bot/devert-queue.js`. Current behavior,
+**not changed by these diagnostics**:
+
+- **Ordinary rotation / weekly tally:** at least 30 audible seconds still counts,
+  even on incomplete EOF or `short: true`. Short is not a new exclusion, retry,
+  refund, live-transition or long-form admission rule.
+- **Legacy single-song DJuke:** fewer than 30 audible seconds returns the paid
+  request to pending for the next eligible selection; this completion path does
+  not itself set a retry delay. Failed media lookup uses the separate 60-second
+  paid-fetch cooldown.
+  At least 30 audible seconds can checkpoint/fulfill even when the stream did
+  not finish or is diagnostically short. This differs from paid playlists; do
+  not describe all paid music as requiring clean EOF.
+- **Paid radio playlists:** incomplete or under-30-second playback retries the
+  current song from the beginning, not an audio offset. Three retries follow the
+  initial failed media attempt, with durable per-song counters and 5/10/20-second
+  backoff; the fourth media failure invokes the existing version-specific
+  undelivered suffix/fee refund. See [playlist recovery](DJUKE-PLAYLISTS.md).
+- **Paid DeVert:** the queue adapter requires `finished === true` plus its existing
+  one-second minimum. Incomplete playback stays pending and replays from the
+  beginning. A deliberately capped advert can finish only with the existing
+  120-second decoded/consumed-audio evidence; a timer alone is insufficient.
+  [Paid advert removal/refund rules](DVERT-PAID-QUEUE.md) remain unchanged.
+- **Scheduled handoff / controlled stop:** tagged interruptions release the
+  reservation to pending rather than consuming playlist media retries. Restart
+  restores an in-flight `playing` record as pending and replays the current
+  recording from the beginning; already delivered playlist lanes are not
+  restarted. No main-radio byte/time-offset resume exists. Personal Play's
+  browser resume behavior is separate. Controlled `destroy()` releases the
+  current paid request directly and need not emit a final completion event;
+  missing completion evidence is not proof of delivery.
+- **Charging / settlement:** retries do not purchase again or debit the buyer
+  again. The original on-chain request reserves the payment; delivery records
+  trigger existing fulfillment/settlement. A durable `played` checkpoint retries
+  settlement without replay; a crash before evidence becomes durable can replay
+  audio. This patch changes neither contract charging nor refund amounts.
+
+Reuse: duration verification adapts the existing canonical-duration helpers
+introduced for long-form radio (#352); completion and record writing remain in
+the existing JukeLoop, playlist history and paid/advert journals. No new duration
+probe, storage format, payment mechanism or cross-repository extraction is added.
+
+These are local code/test findings, not a reconstruction of the Nov 14 source
+duration, listener experience, or any particular payment transaction. The old
+log lacks the metadata needed to determine how many seconds that incident
+actually lost. Validate post-deploy logs separately after an approved deployment.
 
 ## Current implementation checkpoint
 
