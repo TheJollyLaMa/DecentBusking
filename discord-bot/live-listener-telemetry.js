@@ -1,22 +1,43 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { activeFeedbackShow, FEEDBACK_CLIENT_ID_PATTERN } from '../js/live-feedback-protocol.mjs';
 import { normalizePeer, peerAddress, rateLimiter, readBody } from './live-feedback.js';
 
 const LEASE_MS = 45_000;
 const MAX_LEASES = 2000;
 const MAX_DURATION = 120_000;
+const RENEWAL_MS = 4 * 60 * 60_000;
 const BOUNDS = [250, 500, 1000, 2000, 5000, 10_000, 30_000, 60_000, MAX_DURATION];
 const REASONS = ['transport', 'disconnected'];
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const increment = value => Math.min(Number.MAX_SAFE_INTEGER, value + 1);
 
-export function createListenerTelemetry({ resolveState, now = Date.now, trustedProxyHops = 1 } = {}) {
+export function createListenerTelemetry({ resolveState, now = Date.now, trustedProxyHops = 1,
+  warn = message => console.warn(message), diagnosticNow = Date.now } = {}) {
   const salt = randomBytes(32);
   const sources = rateLimiter({ windowMs: 60_000, limit: 300, maxKeys: 2000, ttlMs: 60_000 });
   const global = rateLimiter({ windowMs: 60_000, limit: 6000, maxKeys: 1, ttlMs: 60_000 });
   const grants = new Map(), pages = new Map();
-  let data = null, closed = false;
+  let data = null, closed = false, lastWarning = -Infinity;
   const digest = value => createHmac('sha256', salt).update(value).digest('base64url');
+  function reportFailure() {
+    const time = diagnosticNow();
+    if (time < lastWarning || time - lastWarning >= 60_000) {
+      lastWarning = time;
+      try { warn('[listener-telemetry] Telemetry unavailable; audio is unaffected.'); }
+      catch { /* An unavailable logging sink must not interrupt public audio. */ }
+    }
+  }
+  const renewalMac = (live, page, expires) => createHmac('sha256', salt)
+    .update(`renewal\0${live.lifecycle}\0${page}\0${expires}`).digest('base64url');
+  function makeRenewal(live, page, time) {
+    const expires = Math.min(live.endsAt, time + RENEWAL_MS);
+    return `${expires}.${renewalMac(live, page, expires)}`;
+  }
+  function charge(peer, time) {
+    const source = digest(normalizePeer(peer));
+    if (sources.check(source, time) || global.check('all', time)) throw fail(429, 'Telemetry rate limited');
+    sources.charge(source, time); global.charge('all', time);
+  }
   function prune(time) {
     for (const [token, lease] of grants) {
       if (time < lease.touched || time - lease.touched >= LEASE_MS) {
@@ -33,7 +54,7 @@ export function createListenerTelemetry({ resolveState, now = Date.now, trustedP
     if (closed) throw fail(503, 'Listener telemetry unavailable');
     let live;
     try { live = activeFeedbackShow(resolveState()); }
-    catch { throw fail(503, 'Listener telemetry unavailable'); }
+    catch { reportFailure(); throw fail(503, 'Listener telemetry unavailable'); }
     const time = now();
     prune(time);
     if (!live) throw fail(503, 'Current public show cannot be verified');
@@ -63,7 +84,7 @@ export function createListenerTelemetry({ resolveState, now = Date.now, trustedP
       reconnectReasons: { ...data.reasons }, leaseSeconds: LEASE_MS / 1000,
       note: 'Observed page connections, not unique people or proof anyone heard audio. Playback and inbound packets are browser-reported.' };
   }
-  const timer = setInterval(() => { try { prune(now()); } catch {} }, 5000);
+  const timer = setInterval(() => { try { prune(now()); } catch { reportFailure(); } }, 5000);
   timer.unref?.();
   return {
     trustedProxyHops,
@@ -79,6 +100,43 @@ export function createListenerTelemetry({ resolveState, now = Date.now, trustedP
       pages.set(page, token);
       return token;
     },
+    renewal(bookingId, page) {
+      const live = refresh();
+      if (live.bookingId !== bookingId || !pages.has(page)) return null;
+      return makeRenewal(live, page, now());
+    },
+    renew(input, peer) {
+      if (!input || typeof input !== 'object' || Array.isArray(input) ||
+          Object.keys(input).some(key => !['event', 'bookingId', 'pageId', 'renewal'].includes(key)) ||
+          input.event !== 'renew' || typeof input.bookingId !== 'string' ||
+          typeof input.pageId !== 'string' || !FEEDBACK_CLIENT_ID_PATTERN.test(input.pageId) ||
+          typeof input.renewal !== 'string' || !/^[0-9]{1,16}\.[A-Za-z0-9_-]{43}$/.test(input.renewal)) {
+        throw fail(400, 'Invalid telemetry renewal');
+      }
+      const time = now();
+      charge(peer, time);
+      const live = refresh();
+      if (input.bookingId !== live.bookingId) throw fail(409, 'Public show changed');
+      const [expiry, signature] = input.renewal.split('.'), expires = Number(expiry);
+      const expected = renewalMac(live, input.pageId, expiry);
+      if (!Number.isSafeInteger(expires) || expires <= time || expires > time + RENEWAL_MS ||
+          !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) throw fail(403, 'Telemetry renewal expired');
+      let token = pages.get(input.pageId), lease = grants.get(token);
+      if (!lease) {
+        for (const [oldToken, old] of grants) {
+          if (old.page === input.pageId && old.ended) grants.delete(oldToken);
+        }
+        if (grants.size >= MAX_LEASES) throw fail(503, 'Listener telemetry unavailable');
+        token = randomBytes(24).toString('base64url');
+        lease = { page: input.pageId, touched: time, connected: true, ended: false, first: false, sequence: 0 };
+        grants.set(token, lease); pages.set(input.pageId, token);
+      } else {
+        lease.connected = true;
+        lease.touched = time;
+      }
+      data.peak = Math.max(data.peak, [...grants.values()].filter(item => item.connected).length);
+      return { ok: true, token, sequence: lease.sequence, renewal: makeRenewal(live, input.pageId, time) };
+    },
     submit(input, peer) {
       if (!input || typeof input !== 'object' || Array.isArray(input) ||
           Object.keys(input).some(key => !['token', 'bookingId', 'sequence', 'event', 'reason', 'durationMs'].includes(key)) ||
@@ -88,9 +146,8 @@ export function createListenerTelemetry({ resolveState, now = Date.now, trustedP
           (input.event === 'reconnect' ? !REASONS.includes(input.reason) : input.reason !== undefined) ||
           (input.event === 'first-audio' ? !Number.isSafeInteger(input.durationMs) || input.durationMs < 0 ||
             input.durationMs > MAX_DURATION : input.durationMs !== undefined)) throw fail(400, 'Invalid telemetry event');
-      const time = now(), source = digest(normalizePeer(peer));
-      if (sources.check(source, time) || global.check('all', time)) throw fail(429, 'Telemetry rate limited');
-      sources.charge(source, time); global.charge('all', time);
+      const time = now();
+      charge(peer, time);
       const live = refresh();
       if (input.bookingId !== live.bookingId) throw fail(409, 'Public show changed');
       const lease = grants.get(input.token);
@@ -121,7 +178,7 @@ export function createListenerTelemetry({ resolveState, now = Date.now, trustedP
       }
       return { ok: true };
     },
-    snapshot,
+    snapshot, reportFailure,
     close() { closed = true; clearInterval(timer); grants.clear(); pages.clear(); sources.clear(); global.clear(); data = null; },
   };
 }
@@ -147,9 +204,11 @@ export async function handleListenerTelemetry(request, response, { telemetry, al
     const text = await readBody(request, 1024);
     let input;
     try { input = JSON.parse(text); } catch { throw fail(400, 'Invalid telemetry event'); }
-    send(200, telemetry.submit(input, peerAddress(request, telemetry.trustedProxyHops)));
+    const peer = peerAddress(request, telemetry.trustedProxyHops);
+    send(200, input?.event === 'renew' ? telemetry.renew(input, peer) : telemetry.submit(input, peer));
   } catch (error) {
-    const status = [400, 403, 409, 413, 429, 503].includes(error.status) ? error.status : 503;
+    const status = [400, 403, 409, 413, 429, 503].includes(error?.status) ? error.status : 503;
+    if (!error?.status) telemetry.reportFailure?.();
     send(status, { error: status === 503 ? 'Listener telemetry unavailable' : 'Telemetry request rejected' });
   }
 }

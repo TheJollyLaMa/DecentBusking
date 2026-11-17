@@ -1,5 +1,5 @@
 import { listenerAudioStatus } from './live-audio.mjs?v=20261114-allocated-stage';
-import { sharedPageListenerTelemetry } from './live-listener-telemetry.mjs';
+import { sharedPageListenerTelemetry, warnTelemetryUnavailable } from './live-listener-telemetry.mjs?v=20261117-lease-recovery';
 
 let sdkPromise;
 export function loadLiveAudioSdk(serviceUrl) {
@@ -39,7 +39,10 @@ export function createLiveAudioListener({ audio, serviceUrl, onStatus, sdkLoader
   let room, track, state, stateAt = 0, lastPacketAt = 0, packets = 0;
   let generation = 0, connecting = false, retryAt = 0, timer, blocked = false, checking = false;
   const source = {};
-  const record = (method, ...args) => { try { return telemetry?.[method]?.(...args); } catch { return undefined; } };
+  const record = (method, ...args) => {
+    try { return telemetry?.[method]?.(...args); }
+    catch { warnTelemetryUnavailable(); return undefined; }
+  };
   const report = reason => onStatus?.({
     status: listenerAudioStatus({ phase: state?.phase, serverStatus: now() - stateAt > 12_000 ? 'RECONNECTING' : state?.status,
       connected: room?.state === 'connected', playing: !audio.paused && !blocked,
@@ -112,7 +115,7 @@ export function createLiveAudioListener({ audio, serviceUrl, onStatus, sdkLoader
       });
       await next.connect(grant.url, grant.token, { autoSubscribe: false });
       if (current !== generation) { await next.disconnect(); return; }
-      record('join', source, grant.telemetryToken, state.bookingId, beganAt);
+      record('join', source, grant.telemetryToken, state.bookingId, beganAt, grant.telemetryRenewal);
       for (const participant of next.remoteParticipants.values()) {
         for (const publication of participant.trackPublications.values()) subscribe(publication, participant);
       }

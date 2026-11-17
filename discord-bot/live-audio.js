@@ -288,7 +288,10 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       throw new LiveDirectionError('TELEMETRY_INVALID', 'Invalid listener telemetry request', 400);
     }
     try { return listenerTelemetry.snapshot(session.bookingId); }
-    catch { throw new LiveDirectionError('TELEMETRY_UNAVAILABLE', 'Listener telemetry is unavailable for this public show', 503); }
+    catch (error) {
+      if (!error?.status) listenerTelemetry.reportFailure?.();
+      throw new LiveDirectionError('TELEMETRY_UNAVAILABLE', 'Listener telemetry is unavailable for this public show', 503);
+    }
   }
   async function directionCommand(token, input, origin) {
     if (!configured || failed || stopped) throw new LiveDirectionError('DIRECTION_UNAVAILABLE', 'Private direction is unavailable', 503);
@@ -1003,9 +1006,12 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         if (reservations.size >= (transport.listenerLimit || 10)) throw new LiveAudioError('Live listener admission busy; retry in 30 seconds');
         const result = await transport.listener(mediaBooking(b));
         reservations.set(opaque(), now() + 30_000);
-        let telemetryToken;
-        try { telemetryToken = listenerTelemetry?.issue(bookingId, telemetryPageId); } catch { /* Listening remains independent of telemetry. */ }
-        return telemetryToken ? { ...result, telemetryToken } : result;
+        let telemetryToken, telemetryRenewal;
+        try {
+          telemetryToken = listenerTelemetry?.issue(bookingId, telemetryPageId);
+          if (telemetryToken) telemetryRenewal = listenerTelemetry?.renewal(bookingId, telemetryPageId);
+        } catch { listenerTelemetry?.reportFailure?.(); }
+        return telemetryToken ? { ...result, telemetryToken, ...(telemetryRenewal ? { telemetryRenewal } : {}) } : result;
       });
     },
     prepareDeployment: lease => run(async () => {

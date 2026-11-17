@@ -372,6 +372,7 @@ test('telemetry grants require public admission and snapshots require the bookin
   const before = f.persisted();
   const grant = await f.service.listener(f.b.id, page);
   assert.ok(grant.telemetryToken);
+  assert.match(grant.telemetryRenewal, /^[0-9]{1,16}\.[A-Za-z0-9_-]{43}$/);
   listenerTelemetry.submit({ token: grant.telemetryToken, bookingId: f.b.id, sequence: 1, event: 'connect' }, '192.0.2.1');
   assert.equal((await f.service.command(ownerPass.token, { action: 'telemetry-snapshot' }, ORIGIN)).current, 1);
   await assert.rejects(f.service.command(performerPass.token, { action: 'telemetry-snapshot' }, ORIGIN), e => e.status === 403);

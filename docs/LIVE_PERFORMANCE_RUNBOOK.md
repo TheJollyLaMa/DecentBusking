@@ -161,18 +161,50 @@ token only alongside an admitted public listener grant. Neither is linked to a
 wallet, account or profile. Accepted event sequence and lease state, including
 the random page ID, token, last sequence, connection/first-audio flags, last
 activity time and short-lived leave tombstones, remain only in worker memory for
-45 seconds after the last accepted event, swept at least every five seconds; at
-most 2,000 such records exist. They are not an event history. Heartbeats normally
-run every 15 seconds. A missed leave,
-suspended tab, failed network request or worker restart can under- or over-count
-until expiry; a prolonged outage may leave the page unmeasured until a new
-public grant. A rapid replacement while the preceding leave is still pending
-can also be unmeasured rather than delay audio. No local storage, raw event
-history, audio, chat, user agent, wallet or IP is stored in telemetry records
-or exports. In-memory rate limiting uses a process-random HMAC of the request
-network (IPv6 grouped by /64) and rolling hit times for at most 60 seconds, with
-a five-second cleanup sweep and 2,000 network keys. Defaults are 300 events/network/minute and 6,000
-globally/minute; rate limits and admission can drop real reports. The same
+45 seconds after issuance or the last accepted event/renewal, swept on a
+five-second timer subject to scheduler delays; at most 2,000 such records exist.
+They are not an event history. Heartbeats normally
+run every 15 seconds. After admission the page also holds a signed renewal
+capability in memory, bound to that random page ID and public-show lifecycle,
+valid until the earlier of the show end or four hours. The worker verifies it
+with a process-random secret without keeping a separate capability record.
+Renewal rotates the capability and can restore an expired observation without
+requesting another LiveKit seat or incrementing connects. On pagehide the page
+sends leave and clears its lease token; a restored page can renew if its source
+is still connected. The capability and source state remain in that page's
+memory only, not browser storage. A long-running active page renews near expiry;
+an expired capability, changed show or worker restart cannot be renewed, so
+observation remains unavailable until a new public listener grant; browser
+clock skew can also stop renewal early. No automatic extra room seat is opened.
+If a first
+connection arrives after its original lease expires, it can be observed through
+renewal but is conservatively omitted from the connect total.
+
+A missed leave, suspended tab or failed network request can under- or over-count
+until expiry or successful renewal. Renewal and reconnect reports are
+client-asserted: a bearer can renew after leaving, so renewal is not proof of
+a current LiveKit seat. While an active page has a valid capability, automatic
+background recovery retries one renewal operation every 30 seconds until the
+capability expires, with up to two HTTP attempts per operation. An uncertain
+failed reconnect is not replayed as a new event, so reconnect totals can
+under-count. Network/rate errors may leave the page unmeasured. A rapid
+replacement while the preceding leave is still pending can also be unmeasured
+rather than delay audio. No local storage, raw event history, audio, chat, user
+agent, wallet or IP is stored in telemetry records or exports. Unexpected
+failures produce generic, rate-limited worker/browser warnings without request
+identifiers or error details (at most one per minute per worker/browser module
+under a normal clock); playback is independent of telemetry.
+
+For rate limiting, the worker transiently normalizes the source network and
+holds only its process-random HMAC key (IPv6 grouped by /64), last-charge time
+and rolling hit times. Each hit expires from the rolling window after 60 seconds.
+An idle key is removed 60 seconds after its **last charged request**, on a
+subsequent request or the five-second cleanup sweep; scheduler delays can defer
+the sweep. A continuously active network key can remain until activity stops,
+the 2,000-key bound evicts it, or the worker stops, including across shows.
+The salt and all keys are memory-only and reset at worker restart. Defaults are
+300 events/network/minute and 6,000 globally/minute; rate limits and admission
+can drop real reports. The same
 trusted proxy configuration as feedback must match the actual deployment.
 Native HTTP, hosting and providers may still see source IPs in access logs;
 this feature does not configure or control those logs.
