@@ -494,8 +494,9 @@ test('a repeated approved release retries remote queue persistence before claimi
 test('recording journal is encrypted, readback-verified, rejects token fields and restores signed consent', async () => {
   const { createLiveRecordingStore, validateRecordingState } = await import('../discord-bot/live-recording.js');
   const { checkpointContentCid } = await import('../discord-bot/checkpoint-mirror.js');
-  const s = await setup();
+  const s = await setup({ persistFrameTimes: true });
   await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
   const files = [], envelopes = [];
   let serial = 0, gatewayOffline = false;
   const fetchImpl = async (url, init = {}) => {
