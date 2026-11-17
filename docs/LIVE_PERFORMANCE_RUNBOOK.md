@@ -232,7 +232,8 @@ real rehearsal and predeployment checks before relying on these measurements.
    accepted, funded or scheduled booking.
 8. **Quiet endings (#343).** Ask the performer to keep the microphone on until the
    producer ends the set. If a set the performer declared finished goes quiet and
-   nobody ends it, the server closes it after about a minute as the normal
+   nobody ends it, the server closes it after the audio grace (15 seconds under
+   the **undeployed #358 policy**, previously about a minute) as the normal
    producer-finished ending, timed at the later of the declaration and the last
    audio. That is never an audio-loss cancellation, so no fault slate or
    recovery-ads window runs. With legacy recording segments, if the producer's
@@ -247,6 +248,50 @@ real rehearsal and predeployment checks before relying on these measurements.
    again treated as an audio fault. Evidence:
    `node --test test/night-simulation.test.js` replays a two-act night on a fake
    clock; it is a simulation of this server's state machine, not a live-audio test.
+
+### Producer recovery (#358) — UNDEPLOYED / deployment BLOCKED
+
+The owner authorized **15 seconds** for an unfinished set to recover and at most
+**one additional minute cumulative per set**, explicitly granted by the producer.
+This supersedes the older Friday 60-second default. Read the server countdown
+and remaining budget in the stage controls; a reconnect/reload/restart never
+replenishes it. **Grant explicit recovery hold** is separate from encore and
+cannot extend the set's existing authorized end or change guaranteed pay.
+
+Use **Run commercials now** or **Run radio now** rather than waiting in silence.
+These preserve the set until its current deadline; they are not cancellation
+and add no recovery time. The performer can reconnect privately. Only
+**Return recovered performer safely**, after real audio and fresh performer
+readiness, returns from filler at a safe paid-song/advert boundary. At expiry,
+the existing terminal cancellation/fault/advert/radio path runs once. A finished
+declaration still follows #343's normal ending; terminal cancellation cannot
+be undone.
+
+For the next act, open their booking from the roster or **Open paired next
+act**, authorize that exact owner scope, and use the existing private message,
+standby and readiness panel. Opening is not a sent message. No-next-act,
+not-ready, unavailable/denied and expired/stale status must stay honest.
+**Advance paired ready next act** explicitly ends the interrupted original set
+and takes the ready paired performer atomically, even before the original start,
+only with their actual fresh readiness, chosen participation, genuine checks,
+fresh audio, funding/authorization, protected schedules and safe paid boundary.
+It is never automatic; normal **Take** retains its original-start safeguard.
+
+Filler is not the artist's performance or completion evidence. Capture gaps
+remain interrupted/partial. Existing recording permissions are not expanded:
+early-taken audio before the original contracted start is excluded and any
+resulting recording is partial. Consent, release approval, pay and escrow/claim
+rules remain unchanged.
+
+Release requires the [reader-first and mirror checks](LIVE_AUDIO_PILOT.md#producer-recovery-358--local-only--undeployed):
+first deploy compatible readers with `LIVE_AUDIO_RECOVERY_ENABLED` unset/false;
+later, with separate approval, explicitly set `LIVE_AUDIO_GRACE_MS=15000` and
+enable recovery writes. Old decrypted readers reject the optional recovery
+field; the current local mirror client already rejects encrypted live lifecycle
+envelopes, so retain approved hosted-verified storage or approve a separate
+mirror reader upgrade. Never erase the hold journal or bypass
+`node radio-predeploy.js`. Render capacity blocks deployment. Real staging
+audio/OBS/reconnect/messages/paid-boundary/recording checks are **NOT RUN**.
 
 Backstage/monitoring/consent/fee regressions (the original 102-test selection,
 now including Profile re-entry cases):
@@ -425,7 +470,9 @@ Eligible adverts only: if none are available, report waiting, never play a song
 inside these breaks or fabricate delivery/impressions. Existing cancellation
 behavior is separate: a quiet fault slate, recovery adverts, then radio.
 A disconnected microphone is not a successful early finish; the existing
-60-second verified-delivery grace applies. The planned successful end is 21:20.
+verified-delivery grace applies: the **undeployed #358 policy is 15 seconds**
+(plus only explicit bounded producer hold), superseding the older 60-second
+default. The planned successful end is 21:20.
 
 The Top10 animated stage stays mounted through lead-in, actual live audio and
 outro. The live announcement requires fresh independent receiver evidence,

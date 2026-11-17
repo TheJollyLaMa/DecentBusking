@@ -784,9 +784,13 @@ test('standalone backstage entries consistently version allocated-stage helper i
     /live-audio\.mjs\?v=20261114-allocated-stage/);
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
-    assert.ok(source.includes(`${entry}?v=${html === 'live-room.html' ? '20261116-curtain' : '20261117-listener-telemetry'}`));
+    assert.ok(source.includes(`${entry}?v=20261117-producer-recovery`));
     assert.match(source, /live-audio\.css\?v=20261116-booth/);
     assert.doesNotMatch(source, /20261114-direction/);
+  }
+  for (const file of ['live-audio-room.mjs', 'producer-room.mjs']) {
+    assert.match(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'),
+      /live-broadcast-controls\.mjs\?v=20261117-producer-recovery/);
   }
 });
 

@@ -1,6 +1,6 @@
 import { liveBroadcastTiming } from './live-broadcast.mjs';
 
-export const LIVE_AUDIO_GRACE_MS = 60_000;
+export const LIVE_AUDIO_GRACE_MS = 15_000;
 export const LIVE_AUDIO_FRESH_MS = 5_000;
 export const LIVE_AUDIO_SLATE_MS = 5_000;
 export const LIVE_AUDIO_ADS_MS = 10 * 60_000;
@@ -39,6 +39,12 @@ export function liveAudioPolicy(record, booking, now = Date.now(), program = nul
     cancelledAt: record.cancelledAt, reason: record.reason,
     slateEndsAt: record.cancelledAt + LIVE_AUDIO_SLATE_MS,
     advertsEndAt: record.cancelledAt + LIVE_AUDIO_SLATE_MS + LIVE_AUDIO_ADS_MS };
+  }
+  if (record.recovery?.filler && record.lossSince && !record.allocation?.endedAt &&
+      now < (record.allocation ? liveBroadcastTiming(booking, record).authorizedEndAt : end)) {
+    return { ...common, mode: record.recovery.filler, breakKind: 'recovery',
+      recoverable: now < record.recovery.deadline, recoveryDeadline: record.recovery.deadline,
+      ...(record.recovery.filler === 'adverts' ? { advertsEndAt: record.recovery.deadline } : {}) };
   }
   const allocated = liveBroadcastTiming(booking, record);
   if (allocated) {
@@ -93,6 +99,7 @@ export function applyLiveAudioShow(show, policy) {
   }
   if (policy.mode === 'adverts') return { id: `live-${policy.breakKind || 'cancellation'}-ads:${policy.bookingId}`,
     type: 'live_audio_ads', label: policy.breakKind === 'lead-in' ? 'Live show lead-in adverts'
-      : policy.breakKind === 'outro' ? 'Live show outro adverts' : 'DVert cancellation recovery window' };
+      : policy.breakKind === 'outro' ? 'Live show outro adverts'
+        : policy.breakKind === 'recovery' ? 'Producer recovery commercials · performer off air' : 'DVert cancellation recovery window' };
   return { id: 'normal-rotation', type: 'normal_rotation', label: 'Normal Rotation' };
 }

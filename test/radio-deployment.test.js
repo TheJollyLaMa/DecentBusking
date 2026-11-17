@@ -30,6 +30,23 @@ test('producer take waits only for current paid work, retains prepared purchases
   assert.equal(session._paidStartAllowed({}), true, 'failure releases the short admission hold');
 });
 
+test('explicit recovery handoffs wait for the playing advert without interrupting or accounting it twice', async t => {
+  const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
+  const player = new EventEmitter(); player.state = { status: 'playing' };
+  let stops = 0, applied = 0;
+  player.stop = () => { stops++; };
+  const session = new JukeLoopSession({ client: {}, audioPlayer: player, websitePlayback: true });
+  t.after(() => session.destroy());
+  const advert = { campaignId: 'approved-campaign', mainRadio: true };
+  session._currentDevertAd = advert;
+  await assert.rejects(session.withBroadcastHandoff(async () => { applied++; }, { protectAd: true }), /current paid/);
+  assert.equal(session._currentDevertAd, advert);
+  assert.equal(applied, 0); assert.equal(stops, 0);
+  session._currentDevertAd = null;
+  await session.withBroadcastHandoff(async () => { applied++; }, { protectAd: true });
+  assert.equal(applied, 1); assert.equal(stops, 0);
+});
+
 test('waiting allocation projections do not interrupt currently purchased playlist playback', async t => {
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
   const player = new EventEmitter(); player.state = { status: 'playing' };

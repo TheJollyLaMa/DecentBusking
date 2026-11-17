@@ -870,7 +870,11 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       } finally { buffered--; }
     }, { bookingId: id });
   }
-  function stopCapture(booking) {
+  function stopCapture(booking, { interrupted = false } = {}) {
+    if (interrupted && record(booking.id)?.consent.enabled) {
+      record(booking.id).interrupted = true;
+      interruptedCaptures.add(booking.id);
+    }
     if (activeId !== booking.id) return;
     flush(); activeId = null; lastFrameAt = 0;
   }
@@ -929,6 +933,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       return { available, consented: r?.consent.enabled === true,
         consentVersion, consentScope: consentVersion === LIVE_RECORDING_ALLOCATED_CONSENT_VERSION ? 'allocated-set' : 'scheduled-set',
         scopeLimited: !!booking.broadcast && consentVersion !== LIVE_RECORDING_ALLOCATED_CONSENT_VERSION,
+        earlyCaptureExcluded: !!booking.broadcast?.actualStartedAt && booking.broadcast.actualStartedAt < Date.parse(booking.startUtc),
         canChange: available && !deploymentPaused() && now() < liveBroadcastEnd(booking) && !['processing', 'submitted'].includes(r?.status),
         status: r?.status || 'waiting', error: initializationError || captureErrors.get(booking.id) || finalizationErrors.get(booking.id) || r?.error || '',
         editAvailable: !!(r?.result && ['ready', 'submitted'].includes(r.status)),
@@ -1046,6 +1051,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
       const r = record(booking.id), at = now();
       if (!available || !r?.consent.enabled || !['waiting', 'recording'].includes(r.status) ||
           booking.broadcast && !booking.broadcast.actualStartedAt ||
+          at < Date.parse(booking.startUtc) ||
           at < liveBroadcastStart(booking) || at >= liveBroadcastEnd(booking) || captureErrors.has(booking.id)) return;
       if (r.consent.version !== LIVE_RECORDING_ALLOCATED_CONSENT_VERSION &&
           (at < Date.parse(booking.startUtc) || at >= Date.parse(booking.endUtc))) return;
@@ -1114,6 +1120,7 @@ export function createLiveRecorder({ enabled = false, store, upload, download, i
               ? (Math.max(...r.segments.map(s => s.lastFrameAt)) - Math.min(...r.segments.map(s => s.firstFrameAt))) / 1000
               : (liveBroadcastEnd(booking) - liveBroadcastStart(booking)) / 1000;
             const incomplete = !!(r.interrupted || captureErrors.has(booking.id) ||
+              booking.broadcast?.actualStartedAt < Date.parse(booking.startUtc) ||
               booking.broadcast && booking.broadcast.endReason !== 'producer-finished' ||
               result.durationSeconds < expectedSeconds - 5);
             await serial(async () => {

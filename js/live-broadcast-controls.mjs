@@ -12,7 +12,7 @@ export function broadcastTimes(booking, state) {
 }
 
 export function bindLiveBroadcastControls({ container, bookingId, serviceUrl, getSession, getBooking,
-  getCandidates = () => [], getNextPass, onReconnect, onState = () => {}, pollState = true,
+  getCandidates = () => [], getNextPass, onReconnect, onOpenNext, onState = () => {}, pollState = true,
   request = roomRequest, environment = globalThis, now = () => Date.now() }) {
   const doc = container.ownerDocument || document;
   const make = (tag, text) => {
@@ -35,6 +35,8 @@ export function bindLiveBroadcastControls({ container, bookingId, serviceUrl, ge
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
   const contract = make('p'), timing = make('p'), allocation = make('p'), choice = make('p'), passNote = make('p'), recording = make('p');
+  const recovery = make('p'), nextStatus = make('p');
+  let nextReadiness, nextObservedAt = 0, nextReport = '';
   const terms = make('p', 'Original contract times and guaranteed fee do not change. A delayed artist may decline, choose a short set, or choose the full contracted length. A standby acknowledgment is receipt, not permission or a commitment to play.');
   const actions = make('div');
   actions.className = 'room-action-row';
@@ -77,7 +79,8 @@ export function bindLiveBroadcastControls({ container, bookingId, serviceUrl, ge
       try {
         if (uncertain) throw new Error('Resolve the previous uncertain command with Refresh / Retry before submitting another change.');
         if (!confirm(confirmation)) return;
-        const authorization = getSession(), revision = state.broadcast?.revision || 0;
+        const authorization = getSession(), revision = action.startsWith('recovery-')
+          ? state.recovery?.revision || 0 : state.broadcast?.revision || 0;
         busy = true;
         report = 'Preparing booking-scoped stage control…';
         render();
@@ -110,6 +113,54 @@ export function bindLiveBroadcastControls({ container, bookingId, serviceUrl, ge
     const pass = verifiedNext(await getNextPass(nextBookingId), nextBookingId);
     return { nextBookingId, nextToken: pass.token, expectedNextRevision: pass.state?.broadcast?.revision || 0 };
   }, 'Reserve and notify this next act? Their acknowledgment is not required for the scheduling notice. They may choose whether and how long to play; their original guaranteed fee remains unchanged.');
+  const holdLabel = make('label', 'Additional recovery seconds · at most 60 cumulative per set');
+  const hold = make('input');
+  hold.type = 'number'; hold.min = '1'; hold.step = '1'; hold.value = '15';
+  hold.setAttribute('aria-label', 'Additional recovery seconds');
+  holdLabel.append(hold);
+  button('Grant explicit recovery hold', 'recoveryHold', 'recovery-hold', () => {
+    const additionalMs = Number(hold.value) * 1000;
+    if (!Number.isSafeInteger(additionalMs) || additionalMs <= 0 || additionalMs > state.recovery.remainingMs) {
+      throw new Error('Choose a hold within the server-reported remaining cumulative recovery budget.');
+    }
+    return { additionalMs };
+  }, 'Grant this extra recovery time? It consumes the set’s one-minute cumulative budget, never resets on reconnect, and cannot extend authorized airtime or change pay.');
+  button('Run commercials now · keep recovery deadline', 'recoveryFiller', 'recovery-filler',
+    () => ({ mode: 'adverts', confirmed: true }),
+    'Suspend public performer audio and run commercials immediately at a safe program boundary? This does not cancel the set or extend its deadline.');
+  button('Run radio now · keep recovery deadline', 'recoveryFiller', 'recovery-filler',
+    () => ({ mode: 'radio', confirmed: true }),
+    'Suspend public performer audio and run radio immediately at a safe program boundary? This does not cancel the set or extend its deadline.');
+  button('Return recovered performer safely', 'recoveryReturn', 'recovery-return', () => ({ confirmed: true }),
+    'Return only after actual audio recovery and explicit fresh performer readiness? The active paid piece or advert must finish first. Expired sets cannot return.');
+  const checkNext = make('button', 'Check paired next-act readiness');
+  checkNext.type = 'button';
+  checkNext.addEventListener('click', async () => {
+    if (!getNextPass || busy || !fresh()) return;
+    const id = state?.broadcastControl?.nextBookingId;
+    if (!id) { nextReport = 'No paired next act; select and reserve an eligible booking first.'; render(); return; }
+    busy = true; render();
+    try {
+      const pass = verifiedNext(await getNextPass(id), id);
+      const view = await request(serviceUrl, 'control', { action: 'direction-state' }, pass.token);
+      if (disposed || state?.broadcastControl?.nextBookingId !== id) return;
+      if (view.bookingId !== id || !Number.isFinite(view.serverTime)) throw new Error('Next-act verification did not match.');
+      nextReadiness = view; nextObservedAt = now(); nextReport = '';
+    } catch (cause) { nextReadiness = null; nextReport = `Next-act access unavailable / denied / expired: ${cause.message}`; }
+    finally { if (!disposed) { busy = false; render(); } }
+  });
+  const openNext = make('button', 'Open paired next act · private messages / invitation status');
+  openNext.type = 'button';
+  openNext.addEventListener('click', () => {
+    const id = state?.broadcastControl?.nextBookingId;
+    if (id && onOpenNext) onOpenNext(id);
+  });
+  button('Advance paired ready next act · end interrupted set', 'advanceNext', 'advance-next', async () => {
+    const id = state.broadcastControl?.nextBookingId;
+    if (!id || !getNextPass) throw new Error('No authorized paired next act is available.');
+    const pass = verifiedNext(await getNextPass(id), id);
+    return { nextToken: pass.token, expectedNextRevision: pass.state.broadcast?.revision || 0, confirmed: true };
+  }, 'End the interrupted original set irrevocably and explicitly advance its paired next act now? Only their actual fresh readiness, chosen set, soundchecks, funding, protected schedules and safe paid-program boundary permit this. No guaranteed fee changes.');
   const encoreLabel = make('label', 'Additional encore minutes · cumulative maximum 10');
   const encore = make('input');
   encore.type = 'number'; encore.min = '0.1'; encore.step = '0.1'; encore.value = '1';
@@ -175,10 +226,33 @@ export function bindLiveBroadcastControls({ container, bookingId, serviceUrl, ge
     finally { if (!disposed) { busy = false; render(); } }
   });
   container.append(title, status, contract, timing, allocation, choice, passNote, recording, terms,
+    recovery, holdLabel, nextStatus, checkNext, openNext,
     nextLabel, encoreLabel, shortLabel, actions, emergency, retry, refreshButton, reconnect);
   function render() {
     const b = getBooking(), times = broadcastTimes(b, state), broadcast = state?.broadcast, caps = state?.broadcastCapabilities || {};
     const isFresh = fresh(), usable = isFresh && activePass() && !busy;
+    const r = state?.recovery, deadline = r?.deadline;
+    recovery.textContent = !r?.enabled ? 'Recovery controls are unavailable (reader-first rollout is not enabled).'
+      : ['ended', 'cancelled'].includes(state?.phase) ? `Recovery is closed: this set is terminal. Extra hold used ${r.usedMs / 1000}s; unused budget cannot reopen it.`
+      : `Audio-loss recovery: ${r.graceMs / 1000}s default grace; ${deadline
+        ? `${Math.max(0, Math.ceil((deadline - clock()) / 1000))}s until authorized deadline${clock() >= deadline ? ' · EXPIRED / awaiting terminal watchdog' : ''}`
+        : 'no active outage'}. Extra hold used ${r.usedMs / 1000}s; remaining ${r.remainingMs / 1000}s (maximum 60s per set). Public filler: ${r.filler || 'none'}. Filler never grants time or counts as performer audio.`;
+    const nextId = state?.broadcastControl?.nextBookingId;
+    const nextClock = nextReadiness?.serverTime + Math.max(0, now() - nextObservedAt);
+    const nextFresh = nextReadiness?.bookingId === nextId && now() - nextObservedAt <= 12000 &&
+      nextReadiness?.readiness?.expiresAt > nextClock && nextReadiness?.performerPresence?.expiresAt > nextClock;
+    nextStatus.textContent = !nextId ? 'No paired next act. Reserve a funded booking, or use the desk roster to open an upcoming invitation/private thread.'
+      : (nextReport || !nextReadiness) ? nextReport || 'Paired next-act readiness is unverified. Check their private status or open their booking to communicate.'
+        : !nextFresh ? 'Paired next-act readiness is stale / expired; fresh performer confirmation is required.'
+          : nextReadiness.readiness.ready === true ? 'Paired next act explicitly reports ready backstage. Audio, funding and safe transition still require server verification.'
+            : 'Paired next act is not ready / needs help. Do not advance.';
+    checkNext.hidden = !getNextPass;
+    checkNext.disabled = !usable || !nextId;
+    openNext.hidden = !onOpenNext;
+    openNext.disabled = busy || !nextId;
+    holdLabel.hidden = !caps.recoveryHold;
+    hold.max = String((r?.remainingMs || 0) / 1000);
+    hold.disabled = !usable;
     contract.textContent = `Immutable contract: ${time(times.contractStart)} – ${time(times.contractEnd)} New York. Original guaranteed fee unchanged.`;
     timing.textContent = broadcast ? `Effective stage: planned ${time(times.plannedStart)}; actual start ${time(times.actualStart)}; set end ${time(times.setEnd)}; authorized end including encore ${time(times.authorizedEnd)}; actual end ${time(times.actualEnd)}. All times New York.`
       : 'No allocated-stage timing is confirmed. Existing automatic scheduling remains in effect unless the owner explicitly enables an allocation.';
@@ -193,6 +267,7 @@ export function bindLiveBroadcastControls({ container, bookingId, serviceUrl, ge
       ? ` Allocation access extends to ${time(broadcast.accessUntil)}; refresh your allocated pass before its old deadline without stopping your microphone.` : ''}` : 'Connect this booking wallet for private timing controls.';
     recording.textContent = !state?.recording ? 'Recording permission is unavailable; timing controls never grant recording rights.'
       : !state.recording.consented ? 'Recording is off. Stage timing changes do not turn it on.'
+        : state.recording.earlyCaptureExcluded ? 'Early airtime does not expand recording permission. Capture excludes audio before the original scheduled start; any resulting recording is partial.'
         : state.recording.consentVersion === 'dbusk-live-recording-v2'
           ? 'Recording permission v2 covers only the authorized on-air allocated set; private practice and soundchecks remain excluded.'
           : 'Recording scope is the original scheduled set only. Delay/encore capture requires the performer’s explicit v2 permission update in their own room.';
@@ -205,6 +280,9 @@ export function bindLiveBroadcastControls({ container, bookingId, serviceUrl, ge
     for (const item of nodes) {
       item.node.hidden = !caps[item.capability];
       item.node.disabled = !usable || !caps[item.capability];
+      if (['recovery-hold', 'recovery-filler', 'recovery-return', 'advance-next'].includes(item.action)) {
+        item.node.disabled ||= !deadline || clock() >= deadline;
+      }
     }
     reserve.hidden = nextLabel.hidden = !caps.reserveNext || !getNextPass;
     encoreLabel.hidden = !caps.grantEncore;
@@ -237,6 +315,8 @@ export function bindLiveBroadcastControls({ container, bookingId, serviceUrl, ge
     if (disposed) return;
     if (!nextState) { state = null; observedAt = 0; uncertain = null; report = ''; failed = false; render(); return; }
     if (nextState.bookingId !== bookingId) throw new Error('Stage response belongs to another booking.');
+    if (state && nextState.serverTime < state.serverTime ||
+        state?.recovery && nextState.recovery && nextState.recovery.revision < state.recovery.revision) return;
     if (state?.broadcast && nextState.broadcast?.allocationId === state.broadcast.allocationId &&
         nextState.broadcast.revision < state.broadcast.revision) return;
     state = nextState;

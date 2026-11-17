@@ -25,6 +25,7 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
   const rooms = roomClient || (ready ? new RoomServiceClient(host, apiKey, apiSecret, { requestTimeout: 5 }) : null);
   const ingress = ingressClient || (ready ? new IngressClient(host, apiKey, apiSecret, { requestTimeout: 5 }) : null);
   const monitors = new Map();
+  const suspendedListeners = new Set();
   const publisherIdentity = booking => `performer:${booking.wallet.toLowerCase()}`;
   const roomName = booking => booking.rehearsal === true ? rehearsalRoomName(booking.id) : liveAudioRoomName(booking.id);
   const requireReady = () => { if (!ready) throw new LiveAudioError('Live audio hosting is not configured'); };
@@ -62,6 +63,11 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
       if (state.closed) return;
       const room = new Room();
       state.room = room;
+      room.on('participantConnected', participant => {
+        if (suspendedListeners.has(booking.id) && participant.identity.startsWith('listener:')) {
+          void rooms.removeParticipant(roomName(booking), participant.identity).catch(() => {});
+        }
+      });
       const subscribe = (publication, participant) => {
         if (isSource(participant.identity) && publication.kind === TrackKind.KIND_AUDIO) {
           publication.setSubscribed(true);
@@ -103,6 +109,10 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
       console.info('[live-audio-receiver] Independent receiver connected');
       if (state.closed) { await room.disconnect(); return; }
       for (const participant of room.remoteParticipants.values()) {
+        if (suspendedListeners.has(booking.id) && participant.identity.startsWith('listener:')) {
+          await rooms.removeParticipant(roomName(booking), participant.identity);
+          continue;
+        }
         for (const publication of participant.trackPublications.values()) subscribe(publication, participant);
       }
       let packets = 0n, checking = false;
@@ -162,10 +172,21 @@ export function createLiveAudioTransport({ url = '', apiKey = '', apiSecret = ''
     },
     async listener(booking) {
       requireReady();
+      if (suspendedListeners.has(booking.id)) throw new LiveAudioError('This performer is privately recovering; public listening is suspended');
       const participants = await rooms.listParticipants(roomName(booking));
       if (participants.filter(p => p.identity.startsWith('listener:')).length >= listenerLimit) throw new LiveAudioError(`The ${listenerLimit}-listener live room is full`);
       return grant(booking, `listener:${randomUUID()}`);
     },
+    async suspendListeners(booking) {
+      requireReady();
+      suspendedListeners.add(booking.id);
+      const participants = await rooms.listParticipants(roomName(booking));
+      await Promise.all(participants.filter(p => p.identity.startsWith('listener:')).map(async p => {
+        try { await rooms.removeParticipant(roomName(booking), p.identity); }
+        catch (error) { if (error.code !== 'not_found' && error.status !== 404) throw error; }
+      }));
+    },
+    resumeListeners(booking) { suspendedListeners.delete(booking.id); },
     async obs(booking) {
       requireReady();
       if (!ingressEnabled) throw new LiveAudioError('OBS ingress is disabled; hosting quota must be approved first');

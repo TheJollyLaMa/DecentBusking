@@ -1653,10 +1653,12 @@ async function main() {
   const liveAudio = createLiveAudioService({
     feedback: liveFeedback,
     listenerTelemetry,
-    withBroadcastHandoff: apply => {
+    graceMs: Number(process.env.LIVE_AUDIO_GRACE_MS || 15000),
+    recoveryEnabled: process.env.LIVE_AUDIO_RECOVERY_ENABLED === 'true',
+    withBroadcastHandoff: (apply, options) => {
       const session = getActiveJukeLoopSession();
       if (!session) throw new Error('Radio handoff is unavailable');
-      return session.withBroadcastHandoff(apply);
+      return session.withBroadcastHandoff(apply, options);
     },
     programs: parseLiveAudioPrograms(process.env.LIVE_AUDIO_PROGRAMS || '{}'),
     ownerWallet: config.mintOwnerWallet,

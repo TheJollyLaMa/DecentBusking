@@ -2019,8 +2019,8 @@ export class JukeLoopSession {
     return !this._deploymentDraining() && !this._broadcastHandoff && !(this._broadcastRequestedUntil > Date.now());
   }
 
-  async withBroadcastHandoff(apply) {
-    const busy = () => this._currentPaid || this.djuke?.hasActivePlaylist?.() ||
+  async withBroadcastHandoff(apply, { protectAd = false } = {}) {
+    const busy = () => this._currentPaid || protectAd && this._currentDevertAd || this.djuke?.hasActivePlaylist?.() ||
       this.djuke?.getActivePlaylistBatchId?.() != null || this._prepareTask || this._transitionTask ||
       this._paidCompletionTask || this._paidBookkeepingTask || this.djuke?.hasPendingSelection?.() ||
       this._changeoverPrepared?.paid;

@@ -572,7 +572,7 @@ export function initRadioSync() {
       if (!_liveAudioActive || _liveAudioPolicy?.mode !== 'live' || _liveReturnSuppressed) return;
       _setLabel(`${status === 'ON-AIR' ? '🔴' : '⏳'} ${status} · Live audio`);
       _setActivity(_liveReturnProtectionError || reason || (status === 'ON-AIR' ? 'Live audio through the website radio'
-        : 'Retrying the live feed. Cancellation follows 60 seconds without verified audio.'));
+        : 'Retrying the live feed. The server recovery deadline applies (15 seconds by default, plus any explicit producer hold).'));
       _playBtn?.classList.toggle('hidden', !blocked);
     },
   });
@@ -830,7 +830,7 @@ function _applyLiveAudioState(state) {
     _setTrack(_liveAudioPolicy.title, 'Live audio');
     if (!state.armed) {
       _setLabel('OFF-AIR · Live room not ready');
-      _setActivity('The private checks did not arm this slot. Waiting for the 60-second cancellation deadline.');
+      _setActivity('The private checks did not arm this slot. Waiting for the server cancellation deadline (15 seconds by default).');
     }
     _liveAudioListener?.update(state);
     if (_liveReturnProtectionError) _setActivity(_liveReturnProtectionError);
@@ -845,7 +845,8 @@ function _radioPositionS() {
 function _liveLabel() {
   if (_liveAudioPolicy?.mode === 'adverts') return _liveAudioPolicy.breakKind === 'lead-in'
     ? 'Live show starts after this advert break' : _liveAudioPolicy.breakKind === 'outro'
-      ? 'Thanks for listening · Post-show adverts' : 'OFF-AIR · DVert cancellation recovery window';
+      ? 'Thanks for listening · Post-show adverts' : _liveAudioPolicy.breakKind === 'recovery'
+        ? 'Performer recovering privately · Producer commercials' : 'OFF-AIR · DVert cancellation recovery window';
   if (_radioState?.activeShow?.type === 'playlist_show') {
     const fallback = _radio?.playlistShow?.fallback ? _radioState.playlistShow?.fallbackReason : null;
     return `📻 ${_radioState.activeShow.label} · ${fallback ? `Normal rotation (${fallback}) · ` : ''}Vote up OR down!`;

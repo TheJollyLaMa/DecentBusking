@@ -396,22 +396,22 @@ test('private T−60/T−15 checks need fresh receiver audio, correct windows an
   assert.equal(publicView.verifiedAudioAt, null);
 });
 
-test('delivered silence is healthy, a short outage reconnects, and sixty seconds cancels exactly once', async () => {
+test('delivered silence is healthy, a short outage reconnects, and fifteen seconds cancels exactly once', async () => {
   const f = await setup(); await f.prepare();
   f.at(START); f.frame(960); await f.service.tick();
   assert.equal((await f.service.state(f.b.id)).status, 'ON-AIR');
   await f.service.listener(f.b.id);
   f.at(START + 6000);
   assert.equal((await f.service.state(f.b.id)).status, 'RECONNECTING');
-  f.at(START + 59_999); await f.service.tick();
+  f.at(START + 14_999); await f.service.tick();
   assert.equal(f.cancellations.length, 0);
   f.frame(960); await f.service.tick();
-  f.at(START + 119_998); await f.service.tick();
+  f.at(START + 29_998); await f.service.tick();
   assert.equal(f.cancellations.length, 0);
-  f.at(START + 119_999); await f.service.tick();
+  f.at(START + 29_999); await f.service.tick();
   assert.equal(f.cancellations.length, 1);
   assert.equal(f.cancellations[0].b.amountUnits, '20000000');
-  assert.match(f.cancellations[0].reason, /60 seconds.*fee is unchanged/);
+  assert.match(f.cancellations[0].reason, /15 seconds.*fee is unchanged/);
   assert.equal((await f.service.state(f.b.id)).policy.mode, 'fault');
   await f.service.tick(); assert.equal(f.cancellations.length, 1);
   await assert.rejects(f.service.listener(f.b.id), /unavailable/);
@@ -428,12 +428,13 @@ test('stalled booking RPC cannot block the audio deadline; stale verification de
   await f.prepare();
   f.at(START); f.frame(960); await f.service.tick();
   stalled = true;
-  f.at(START + 59_999); await f.service.tick();
+  f.at(START + 31_000); f.frame(960); await f.service.tick();
   const pendingCalls = calls;
   await assert.rejects(f.authorize(artist), /verification unavailable/);
   assert.equal(calls, pendingCalls, 'one in-flight booking refresh is shared');
+  f.at(START + 45_999); await f.service.tick();
   assert.equal(f.cancellations.length, 0);
-  f.at(START + 60_000); await f.service.tick();
+  f.at(START + 46_000); await f.service.tick();
   assert.equal((await f.service.state(b.id)).policy.mode, 'fault');
   assert.equal(f.cancellations.length, 1);
 });
@@ -614,13 +615,13 @@ test('cancelled room persists the bounded slate, ten-minute ad window and origin
   f.at(START + 20 * 60_000); assert.equal((await f.service.state(f.b.id)).policy, null);
 });
 
-test('a funded pilot with missed soundchecks still cancels after sixty seconds instead of leaving radio paused', async () => {
+test('a funded pilot with missed soundchecks still cancels after fifteen seconds instead of leaving radio paused', async () => {
   const f = await setup();
-  f.at(START + 60_000);
+  f.at(START + 15_000);
   await f.service.tick();
   assert.equal(f.persisted().rooms.length, 1);
   assert.equal(f.cancellations.length, 1);
-  assert.match(f.cancellations[0].reason, /not armed within 60 seconds/);
+  assert.match(f.cancellations[0].reason, /not armed within 15 seconds/);
   assert.equal((await f.service.state(f.b.id)).policy.mode, 'fault');
 });
 
@@ -628,18 +629,16 @@ test('restart does not invent healthy audio or reset an expired disconnect deadl
   const f = await setup(); await f.prepare();
   f.at(START); f.frame(960); await f.service.tick();
   f.at(START + 6000); await f.service.tick();
-  f.at(START + 60_000);
+  f.at(START + 15_000);
   const { createLiveAudioService } = await import('../discord-bot/live-audio.js');
   const restarted = createLiveAudioService(f.base);
   assert.equal((await restarted.state(f.b.id)).status, 'RECONNECTING');
   await restarted.tick();
-  assert.equal((await restarted.state(f.b.id)).status, 'RECONNECTING', 'receiver gets a bounded rejoin probe');
-  f.at(START + 65_000); await restarted.tick();
-  assert.equal((await restarted.state(f.b.id)).phase, 'cancelled');
+  assert.equal((await restarted.state(f.b.id)).phase, 'cancelled', 'a known durable deadline gets no restart extension');
   assert.equal(f.cancellations.length, 1);
 });
 
-test('a healthy checkpoint does not turn a short process restart into an invented sixty-second outage', async () => {
+test('a healthy checkpoint does not turn a short process restart into an invented outage', async () => {
   const f = await setup(); await f.prepare();
   f.at(START); f.frame(960); await f.service.tick();
   f.at(START + 60_000);

@@ -9,6 +9,8 @@ import { validateLiveAudioState } from './live-audio-store.js';
 import { planBroadcastCommand } from './live-broadcast-control.js';
 import { catalogRecordingAuthorizationMessage } from '../js/live-recording-edit.mjs';
 import { createRepeatLog } from './repeat-log.js';
+import { MAX_LIVE_AUDIO_GRACE_MS, MAX_LIVE_RECOVERY_HOLD_MS, liveRecoveryDeadline } from '../js/live-recovery.mjs';
+import { planRecoveryCommand } from './live-recovery-control.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const address = value => /^0x[0-9a-f]{40}$/i.test(value || '') ? value.toLowerCase() : '';
@@ -48,11 +50,16 @@ export function createLiveAudioFileStore(path) {
 
 export function createLiveAudioService({ getBookings, ownerWallet, transport, store, recorder, onPolicy = () => {},
   onCancel, now = () => Date.now(), verify = verifyMessage, checkpointTimeoutMs = 45_000, programs = {},
-  withBroadcastHandoff, feedback, listenerTelemetry, resolveCatalogRecording } = {}) {
+  withBroadcastHandoff, feedback, listenerTelemetry, resolveCatalogRecording, graceMs = LIVE_AUDIO_GRACE_MS,
+  recoveryEnabled = false } = {}) {
+  if (!Number.isSafeInteger(graceMs) || graceMs < 1 || graceMs > MAX_LIVE_AUDIO_GRACE_MS) {
+    throw new Error('LIVE_AUDIO_GRACE_MS must be an integer from 1 to 60000 (default 15000)');
+  }
   const owner = address(ownerWallet);
   const challenges = new Map(), sessions = new Map(), frames = new Map(), reservations = new Map();
   const direction = createLiveDirection({ now });
   const monitoring = new Set(), closed = new Set(), restoredAt = new Map(), closing = new Set(), notifying = new Set();
+  const publicSuspensions = new Set();
   let state = null, failed = false, tail = Promise.resolve(), bookings = [], checkedAt = -Infinity;
   let bookingRefresh, bookingsLoaded = false, bookingVerificationFailed = false, stopped = false;
   let checkpointWrite = null, failedBroadcast = null;
@@ -114,6 +121,14 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     if (!configured || failed) throw new LiveAudioError('Live audio unavailable: hosting and durable room state must be configured');
     if (state) return;
     const restored = validateLiveAudioState(await store.restore());
+    if (restored.rooms.some(r => r.recovery && r.lossSince > now())) {
+      throw new LiveAudioError('Recovery journal is ahead of authoritative server time; controls stay closed');
+    }
+    for (const record of restored.rooms.filter(r => r.recovery?.filler && !r.cancelledAt && !r.allocation?.endedAt)) {
+      const b = (await readBookings()).find(item => item.id === record.bookingId);
+      if (!b || typeof transport.suspendListeners !== 'function') throw new LiveAudioError('Recovering public listeners cannot be safely suspended');
+      await transport.suspendListeners(b);
+    }
     state = restored;
     for (const record of state.rooms) restoredAt.set(record.bookingId, now());
   }
@@ -204,6 +219,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     const broadcast = liveBroadcastTiming(b, record);
     const currentFrame = frames.get(b.id) || 0;
     const phase = record?.cancelledAt ? 'cancelled'
+      : record?.recovery?.filler && !record.allocation?.endedAt && now() < liveBroadcastEnd(mediaBooking(b)) ? 'recovering'
       : broadcast ? broadcast.actualEndedAt || now() >= liveBroadcastEnd(mediaBooking(b)) ? 'ended'
         : broadcast.actualStartedAt && record?.armed ? 'live' : 'preflight'
         : now() >= Date.parse(b.endUtc) ? 'ended'
@@ -226,7 +242,13 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         finishedId: record.allocation.finishedId, finishedAt: record.allocation.finishedAt,
         priorityFollowup: record.allocation.priorityFollowup,
       } : null } : {}),
-      ...(privateView ? { checks: record?.checks || {}, privateAudioFresh: fresh,
+      ...(privateView ? { recovery: {
+        enabled: recoveryEnabled, revision: record?.recovery?.revision || 0,
+        usedMs: record?.recovery?.usedMs || 0, remainingMs: MAX_LIVE_RECOVERY_HOLD_MS - (record?.recovery?.usedMs || 0),
+        deadline: record?.lossSince ? Math.min(liveRecoveryDeadline(record, graceMs), liveBroadcastEnd(mediaBooking(b))) : null,
+        filler: record?.recovery?.filler || null,
+        graceMs: record?.recovery?.deadline ? record.recovery.graceMs : graceMs,
+      }, checks: record?.checks || {}, privateAudioFresh: fresh,
         targets: { t60: new Date((broadcast?.plannedStartAt ?? Date.parse(b.startUtc)) - 60 * 60_000).toISOString(),
           t15: new Date((broadcast?.plannedStartAt ?? Date.parse(b.startUtc)) - 15 * 60_000).toISOString() } } : {}) };
   }
@@ -296,6 +318,9 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     const a = recordFor(b.id)?.allocation, t = liveBroadcastTiming(b, recordFor(b.id));
     const ownerRole = session.wallet === owner, performer = session.wallet === address(b.wallet);
     const open = !a?.endedAt && !recordFor(b.id)?.cancelledAt && bookingVerification(b).fresh;
+    const record = recordFor(b.id), deadline = liveRecoveryDeadline(record, graceMs);
+    const recovering = recoveryEnabled && open && !!record?.armed && !!record.lossSince &&
+      now() < deadline && now() < liveBroadcastEnd(mediaBooking(b)) && (!a || !!a.startedAt && !a.finishedAt);
     return {
       enable: ownerRole && open && !a, reserveNext: ownerRole && open && !a?.previousBookingId,
       grantEncore: ownerRole && open && !!a?.startedAt && t.remainingEncoreMs > 0 && now() < t.authorizedEndAt,
@@ -303,9 +328,142 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       declareFinished: performer && open && !!a?.startedAt,
       endBroadcast: ownerRole && open && !!a?.startedAt,
       takeLive: ownerRole && open && !!a && !a.startedAt && ['contracted', 'full', 'short'].includes(a.choice),
+      recoveryHold: ownerRole && recovering && deadline < liveBroadcastEnd(mediaBooking(b)) &&
+        (record.recovery?.usedMs || 0) < MAX_LIVE_RECOVERY_HOLD_MS,
+      recoveryFiller: ownerRole && recovering,
+      recoveryReturn: ownerRole && recovering,
+      advanceNext: ownerRole && recovering && !!a?.nextBookingId,
     };
   }
+  function performerReady(b, session) {
+    const view = direction.command({ booking: mediaBooking(b),
+      session: { ...session, bookingId: b.id, wallet: address(b.wallet), role: 'publisher' },
+      input: { action: 'direction-state' } });
+    return view.readiness.ready === true && view.performerPresence.expiresAt > now();
+  }
+  async function recoveryCommand(session, b, input) {
+    if (!recoveryEnabled) throw new LiveDirectionError('BROADCAST_UNAVAILABLE', 'Recovery controls are not enabled; reader-first deployment is required', 503);
+    // Observe the outage on the same serialized watchdog as normal cancellation. Late commands cannot revive a set.
+    await tickInternal();
+    const plan = () => {
+      auth([...sessions].find(([, s]) => s === session)?.[0], session.origin);
+      funded(b);
+      if (!bookingVerification(b).fresh) throw new LiveDirectionError('BROADCAST_UNAVAILABLE', 'Current booking verification is required', 503);
+      return planRecoveryCommand({ state, booking: b, command: input, wallet: session.wallet, owner,
+        now: now(), graceMs, endAt: liveBroadcastEnd(mediaBooking(b)),
+        audioFresh: !!frames.get(b.id) && now() - frames.get(b.id) <= LIVE_AUDIO_FRESH_MS,
+        ready: performerReady(b, session) });
+    };
+    const response = applied => ({ commandId: input.commandId, applied,
+      state: { ...publicState(b, recordFor(b.id), true), broadcastCapabilities: broadcastCapabilities(b, session) } });
+    if (plan().duplicate) return response(false);
+    const apply = async () => {
+      const planned = plan();
+      if (planned.duplicate) return response(false);
+      if (input.action === 'broadcast-recovery-filler') {
+        if (typeof transport.suspendListeners !== 'function') throw new LiveDirectionError('BROADCAST_UNAVAILABLE', 'Verified public-listener suspension is unavailable', 503);
+        publicSuspensions.add(b.id);
+        try {
+          await transport.suspendListeners(mediaBooking(b));
+          // Suspension is external I/O: recheck expiry, authorization and readiness before committing.
+          const checked = plan();
+          await save(checked.next);
+        } catch (error) {
+          if (!failed && !recordFor(b.id)?.recovery?.filler) transport.resumeListeners?.(mediaBooking(b));
+          throw error;
+        } finally { publicSuspensions.delete(b.id); }
+        recorder?.stopCapture?.(mediaBooking(b), { interrupted: true });
+      } else {
+        await save(planned.next);
+      }
+      onPolicy(canonicalPolicy());
+      if (input.action === 'broadcast-recovery-return') transport.resumeListeners?.(mediaBooking(b));
+      return response(true);
+    };
+    if (input.action !== 'broadcast-recovery-hold') {
+      if (!withBroadcastHandoff) throw new LiveDirectionError('BROADCAST_UNAVAILABLE', 'A verified radio handoff is required', 503);
+      try { return await withBroadcastHandoff(apply, { protectAd: true }); }
+      catch (error) {
+        if (error instanceof LiveAudioError) throw error;
+        throw new LiveDirectionError('BROADCAST_BUSY', 'Recovery handoff waits for the active paid item or pending selection', 409);
+      }
+    }
+    return apply();
+  }
+  async function advanceNextCommand(session, b, input) {
+    if (!recoveryEnabled) throw new LiveDirectionError('BROADCAST_UNAVAILABLE', 'Recovery controls are not enabled', 503);
+    if (session.wallet !== owner) throw new LiveDirectionError('BROADCAST_FORBIDDEN', 'Only the configured producer may advance the next act', 403);
+    if (Object.keys(input).some(k => !['action', 'commandId', 'expectedRevision', 'expectedNextRevision', 'nextToken', 'confirmed'].includes(k)) ||
+        input.confirmed !== true || !/^[a-zA-Z0-9:_-]{8,90}$/.test(input.commandId || '') ||
+        !Number.isSafeInteger(input.expectedNextRevision)) {
+      throw new LiveDirectionError('BROADCAST_CONFLICT', 'Confirm advancing the exact paired next act', 409);
+    }
+    await tickInternal();
+    const nextId = recordFor(b.id)?.allocation?.nextBookingId;
+    if (!nextId) throw new LiveDirectionError('BROADCAST_CONFLICT', 'No paired next act is available', 409);
+    const partner = await findBooking(nextId, true);
+    const plan = () => {
+      auth([...sessions].find(([, s]) => s === session)?.[0], session.origin);
+      const nextSession = auth(input.nextToken, session.origin);
+      if (nextSession.wallet !== owner || nextSession.bookingId !== nextId) throw new LiveDirectionError('BROADCAST_FORBIDDEN', 'Authorize the exact paired next booking with its own owner pass', 403);
+      funded(b); funded(partner);
+      if (!bookingVerification(b).fresh || !bookingVerification(partner).fresh) throw new LiveDirectionError('BROADCAST_UNAVAILABLE', 'Both bookings require fresh verification', 503);
+      const endCommand = { action: 'broadcast-end', commandId: `${input.commandId}:end`,
+        expectedRevision: input.expectedRevision, mode: 'operator-cut', confirmed: true };
+      const ended = planBroadcastCommand({ state, booking: b, bookings, command: endCommand,
+        wallet: owner, owner, now: now(), outroSeconds });
+      if (ended.duplicate) {
+        const taken = planBroadcastCommand({ state, booking: partner, bookings,
+          command: { action: 'broadcast-take', commandId: `${input.commandId}:take`, expectedRevision: input.expectedNextRevision + 1, confirmed: true },
+          wallet: owner, owner, now: now(), audioFresh: true, ready: true, earlyTake: true, outroSeconds });
+        if (!taken.duplicate) throw new LiveDirectionError('BROADCAST_CONFLICT', 'Advance receipt is incomplete', 409);
+        return { duplicate: true, next: state };
+      }
+      const record = recordFor(b.id), deadline = liveRecoveryDeadline(record, graceMs);
+      if (!record.armed || !record.lossSince || record.allocation?.finishedAt || !deadline || now() >= deadline) {
+        throw new LiveDirectionError('BROADCAST_CONFLICT', 'Only an explicitly interrupted, still-recoverable set may be advanced', 409);
+      }
+      const actualNextRevision = recordFor(nextId)?.allocation?.revision;
+      if (input.expectedNextRevision !== actualNextRevision) throw new LiveDirectionError('BROADCAST_CONFLICT', 'Next act changed; refresh its owner pass', 409);
+      // The end command updates its paired timing revision; only this atomic producer advance may start early.
+      const nextRoom = ended.next.rooms.find(r => r.bookingId === nextId);
+      const taken = planBroadcastCommand({ state: ended.next, booking: partner, bookings,
+        command: { action: 'broadcast-take', commandId: `${input.commandId}:take`,
+          expectedRevision: nextRoom.allocation.revision, confirmed: true },
+        wallet: owner, owner, now: now(), outroSeconds, earlyTake: true,
+        audioFresh: !!frames.get(nextId) && now() - frames.get(nextId) <= LIVE_AUDIO_FRESH_MS,
+        ready: performerReady(partner, nextSession) });
+      return taken;
+    };
+    const response = applied => ({ commandId: input.commandId, applied,
+      state: { ...publicState(b, recordFor(b.id), true), broadcastCapabilities: broadcastCapabilities(b, session) } });
+    if (plan().duplicate) return response(false);
+    if (!withBroadcastHandoff || typeof transport.suspendListeners !== 'function') throw new LiveDirectionError('BROADCAST_UNAVAILABLE', 'A verified listener and radio handoff is required', 503);
+    try {
+      return await withBroadcastHandoff(async () => {
+        plan();
+        publicSuspensions.add(b.id);
+        try {
+          await transport.suspendListeners(mediaBooking(b));
+          const planned = plan();
+          await save(planned.next);
+        } catch (error) {
+          if (!failed && !recordFor(b.id)?.recovery?.filler) transport.resumeListeners?.(mediaBooking(b));
+          throw error;
+        } finally { publicSuspensions.delete(b.id); }
+        direction.forget(b.id); recorder?.stopCapture?.(mediaBooking(b)); void cleanup(mediaBooking(b));
+        direction.prune(bookings.map(mediaBooking));
+        onPolicy(canonicalPolicy());
+        return response(true);
+      }, { protectAd: true });
+    } catch (error) {
+      if (error instanceof LiveAudioError) throw error;
+      throw new LiveDirectionError('BROADCAST_BUSY', 'Advance waits for a verified safe paid-program boundary', 409);
+    }
+  }
   async function broadcastCommand(session, b, input) {
+    if (input.action.startsWith('broadcast-recovery-')) return recoveryCommand(session, b, input);
+    if (input.action === 'broadcast-advance-next') return advanceNextCommand(session, b, input);
     if (!bookingVerification(b).fresh) throw new LiveDirectionError('BROADCAST_UNAVAILABLE', 'Current booking verification is required', 503);
     let partner;
     const partnerId = input.action === 'broadcast-reserve-next' ? input.nextBookingId
@@ -376,7 +534,8 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     void transport.monitor(mediaBooking(b), frame => {
       if (!closed.has(b.id) && !recordFor(b.id)?.cancelledAt && frame.samples > 0) frames.set(b.id, now());
     }, frame => {
-      if (recordFor(b.id)?.armed && !recordFor(b.id)?.cancelledAt &&
+      if (recordFor(b.id)?.armed && !recordFor(b.id)?.cancelledAt && !recordFor(b.id)?.allocation?.endedAt &&
+          !recordFor(b.id)?.recovery?.filler && !publicSuspensions.has(b.id) &&
           frames.get(b.id) && now() - frames.get(b.id) <= LIVE_AUDIO_FRESH_MS) recorder?.capture(mediaBooking(b), frame);
     }).catch(() => {}).finally(() => monitoring.delete(b.id));
   }
@@ -473,10 +632,17 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
           const last = frames.get(b.id) || 0;
           const fresh = last > 0 && now() - last <= LIVE_AUDIO_FRESH_MS;
           let lossSince = record.lossSince || 0;
-          if (record.armed && fresh) {
+          const deadline = liveRecoveryDeadline(record, graceMs);
+          const expired = deadline !== null && now() >= deadline &&
+            (record.recovery?.filler || !fresh || last >= deadline);
+          if (record.armed && fresh && !record.recovery?.filler && !expired) {
             if (lossSince) {
               const next = clone(state);
-              Object.assign(next.rooms.find(r => r.bookingId === b.id), { lastVerifiedAt: last, lossSince: 0 });
+              const recovered = next.rooms.find(r => r.bookingId === b.id);
+              Object.assign(recovered, { lastVerifiedAt: last, lossSince: 0 });
+              if (recovered.recovery) {
+                recovered.recovery.deadline = null; recovered.recovery.filler = null; recovered.recovery.revision++;
+              }
               await save(next);
             } else {
               // Healthy packet times are memory-only; durable writes are lifecycle transitions.
@@ -493,17 +659,18 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
           }
           const baseline = record.armed ? lossSince || now() : start;
           const rejoinProbe = record.armed && restoredAt.has(b.id) && now() - restoredAt.get(b.id) < LIVE_AUDIO_FRESH_MS;
-          const quiet = now() >= start && !fresh && !rejoinProbe && now() - baseline >= LIVE_AUDIO_GRACE_MS;
+          const quiet = expired || now() >= start && !fresh && !rejoinProbe && now() >=
+            (record.recovery?.deadline ?? baseline + graceMs);
           if (record.armed && allocation?.startedAt && allocation.finishedAt && quiet) {
             // The performer declared the set finished and then went quiet: a normal ending, not an audio fault.
             const next = clone(state);
             endAllocation(next, b, Math.max(lossSince, allocation.finishedAt), 'producer-finished');
             await save(next);
             direction.forget(b.id); recorder?.stopCapture?.(mediaBooking(b));
-          } else if ((!allocation || allocation.startedAt) && (quiet || (!record.armed && now() - start >= LIVE_AUDIO_GRACE_MS))) {
+          } else if ((!allocation || allocation.startedAt) && (quiet || (!record.armed && now() - start >= graceMs))) {
             await cancel(b, record.armed
-              ? 'Live performance cancelled: no verified delivered audio for 60 seconds. Performer fee is unchanged.'
-              : 'Live performance cancelled: the slot was not armed within 60 seconds. Performer fee is unchanged.');
+              ? `Live performance cancelled: authorized audio recovery deadline expired (${graceMs / 1000} seconds plus any explicit producer hold). Performer fee is unchanged.`
+              : `Live performance cancelled: the slot was not armed within ${graceMs / 1000} seconds. Performer fee is unchanged.`);
           } else startMonitor(b);
         }
       }
@@ -828,7 +995,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         const b = await findBooking(bookingId, true), record = recordFor(b.id);
         funded(b);
         if (!record?.armed || record.cancelledAt || canonicalPolicy()?.bookingId !== b.id || policyFor(record, b)?.mode !== 'live' ||
-            now() < Date.parse(b.startUtc) || now() >= liveBroadcastEnd(mediaBooking(b))) {
+            now() < (liveBroadcastTiming(b, record)?.actualStartedAt ?? Date.parse(b.startUtc)) || now() >= liveBroadcastEnd(mediaBooking(b))) {
           throw new LiveAudioError('Public listening is unavailable; soundchecks are private');
         }
         for (const [id, at] of reservations) if (at <= now()) reservations.delete(id);

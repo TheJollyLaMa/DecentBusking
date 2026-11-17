@@ -25,6 +25,8 @@ Server-only environment names, deliberately without values:
 - `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — **never** browser config, repository files, shared screenshots or logs.
 - `LIVE_AUDIO_STORAGE_KEY` — dedicated 32-byte random hex AES-256-GCM key, privately backed up and never reused from content-review or signing keys. Production uses `createLiveAudioPinataStore`, not an ephemeral file path. Only lifecycle state is allowlisted; no media, tokens or stream keys are persisted. The default requires the checkpoint mirror. `LIVE_AUDIO_CHECKPOINT_MODE=hosted-verified` explicitly uses encrypted Pinata lifecycle checkpoints with verified latest-CID/content readback instead, adapting the private rehearsal store. Missing, ambiguous, unreadable or unverifiable latest state closes media controls. This media-only option changes **no financial, booking, payroll or paid-playback durability requirements**. Lifecycle writes have a bounded 45-second deadline; authorizing/checking/arming clients allow 60 seconds. Healthy packet timestamps stay in memory; only lifecycle transitions write checkpoints.
 - `LIVE_AUDIO_PROGRAMS` — optional JSON keyed by exact booking ID, with integer `leadInSeconds` and `outroSeconds` (0–600). This opts only the specified funded/accepted booking into scheduled advert breaks. It does not fund, arm, pass soundchecks or authorize recording. Invalid configuration stops startup.
+- **#358, UNDEPLOYED:** `LIVE_AUDIO_GRACE_MS=15000` selects the newly authorized 15-second recovery default explicitly. An existing `60000` override must not be mistaken for the new policy. The supported override is an integer 1–60000 ms. No environment changes are performed by this patch.
+- **#358, UNDEPLOYED:** `LIVE_AUDIO_RECOVERY_ENABLED=true` enables explicit producer recovery writes **only after the reader-first sequence below**. It defaults off. The shorter default watchdog does not depend on this control flag.
 - `LIVE_AUDIO_OBS_ENABLED=true` only after independently approving WHIP ingress availability/quota. Otherwise OBS is explicitly unavailable.
 - Browser listener freshness uses `RemoteTrack.getRTCStatsReport()` audio-only inbound RTP counters. LiveKit 2.23's summarized audio `getReceiverStats()` omits `packetsReceived`; neither bytes, video/outbound counters nor concealed samples substitute for received audio packets.
 - Existing owner wallet and allowed-origin configuration must match the website. Do not add a new hardcoded performer identity.
@@ -392,7 +394,112 @@ The index import map redirects the existing radio-controller import URL to one c
 
 Server **ON-AIR** requires fresh decoded audio **and advancing received RTP packets** at the independent worker receiver. Zero-amplitude music silence is valid; speaker activity/nonzero amplitude is not a health test. Browser ON-AIR additionally requires its own advancing audio packets and playing media. A connected socket or published track alone is insufficient. Autoplay blocking says to tap Play. Short failures show **RECONNECTING**.
 
-After **60 seconds without verified delivered audio during the booked slot**, cancellation is irreversible for that booking. Lack of arming also cannot leave a silent reservation indefinitely. An observed outage deadline is checkpointed and survives restart, with a five-second receiver rejoin probe. A previously healthy checkpoint is **not proof** that audio stopped at its old timestamp: after an unobserved process gap, the worker starts an unverified grace period and must receive packets before showing ON-AIR. This avoids irreversible cancellation based on an invented outage. Watchdog scheduling can add a short delay; test the actual hosting environment.
+**#358 policy, UNDEPLOYED:** an unfinished live set gets **15 seconds** to recover
+verified delivered audio, unless the producer explicitly grants extra time. At
+the authorized deadline it follows the existing irreversible cancellation path.
+An unarmed automatic slot also expires after the configured grace. A durable,
+observed loss deadline survives restart **without an extra rejoin extension**.
+A previously healthy checkpoint is not proof of when packets stopped during an
+unobserved process gap: the existing bounded receiver probe and new observed
+grace still apply in that case, without claiming ON-AIR. Watchdog/checkpoint
+latency can delay the visible terminal transition; measure this on actual hosting.
+
+### Producer recovery (#358) — LOCAL ONLY / UNDEPLOYED
+
+The production desk and full operator room share the existing signed,
+booking-scoped stage controls:
+
+- **Grant explicit recovery hold:** choose additional seconds, at most **60
+  seconds cumulative for the entire set**, across all outages. The server stores
+  the used budget and absolute deadline; retries, reconnect, refresh, successful
+  recovery and worker restore cannot reset them. No client deadline is accepted.
+  A hold cannot exceed the existing authorized set end, move contracts, change
+  guaranteed pay, or become an encore. A durable finished declaration still
+  follows the existing normal ending rather than a hold.
+- **Run commercials now / Run radio now:** switch immediately at the existing
+  safe program boundary while the original set remains recoverable until its
+  unchanged deadline. Existing public listener seats are removed; the performer,
+  independent health receiver and private producer remain. A reconnecting
+  performer stays private while filler runs. No filler is artist attendance,
+  soundcheck, performance, recording or completion evidence.
+- **Return recovered performer safely:** explicitly confirm after fresh actual
+  receiver audio and the performer's fresh readiness/presence. It uses the same
+  handoff guard as producer take/end, additionally waiting for a currently
+  playing advert. It cannot interrupt active paid work or resurrect a terminal
+  set. No automatic overtime is granted while a handoff is busy.
+- **Open paired next act / Check paired next-act readiness:** reuse the exact
+  next booking's owner pass, existing invitation/status and private direction
+  thread. The roster also opens unpaired upcoming bookings. Messages are sent
+  only by the existing explicit private-message action; opening a room is not
+  delivery. No-next, unknown/not-ready, stale/expired and denied access stay
+  visible. No external messaging service is added.
+- **Advance paired ready next act:** an explicit, irrevocable interruption of
+  the current recovering set and atomic take of its paired next booking. It
+  requires both owner scopes, actual performer readiness/presence, chosen set,
+  real checks, fresh audio, funding/acknowledgment, no third-booking conflict and
+  the safe paid/advert boundary. This action alone can take the next act before
+  its original start; ordinary take cannot. It does not change escrow terms or
+  auto-start a merely scheduled/standby act.
+
+Recording consent is unchanged. Filler stops/flushes artist capture and marks
+the genuine interruption; returning captures only genuine performer audio.
+Early advancement does **not** broaden existing v1/v2 recording permission:
+pre-contract audio is excluded, and any resulting early-start recording is
+partial. Publication still needs the existing performer release approval.
+
+**Reader and mirror compatibility / deployment blocker:**
+
+1. Deploy compatible readers first with recovery writes disabled. Old version-1
+   rooms without `recovery` restore unchanged. Optional `recovery` has only
+   validated `revision`, `usedMs` (0–60000), `graceMs`, `deadline` and `filler`.
+   It shares the existing bounded broadcast command receipts. Tokens, messages,
+   ingress and financial records are not added to this journal.
+2. The encrypted envelope/AAD/name/tags and room-state version remain unchanged.
+   The older strict decrypted room allowlist **rejects** the new optional field.
+   After enabling writes, rollback must retain a compatible reader; never delete
+   recovery facts or restore an older checkpoint to make rollback work.
+3. Explicitly checked current `checkpoint-mirror-client.js`: its allowlist
+   rejects **both existing and new encrypted live-audio envelopes**, before any
+   Kubo import. This patch does not silently widen that deployed contract.
+   Retain an already approved `LIVE_AUDIO_CHECKPOINT_MODE=hosted-verified`
+   lifecycle configuration (latest encrypted CID/content readback), or obtain a
+   separately approved reader-first mirror upgrade before using mirrored mode.
+   Other financial/paid journals keep all existing mirror requirements.
+4. Only after reader/restore verification and separate deployment approval,
+   explicitly configure `LIVE_AUDIO_GRACE_MS=15000` and enable recovery writes.
+   Existing recording-frame-time reader-first rollout remains separate.
+
+**Nothing here is deployed. Render build capacity is exhausted; deployment is
+BLOCKED.** Do not bypass `node radio-predeploy.js`. No restart, environment
+change, provider stream, real messages, payment, consent or recording was
+performed for these local checks.
+
+Reuse decision: adapt the already integrated `planBroadcastCommand`,
+`createLiveDirection`, `withBroadcastHandoff`, `endAllocation`/`cancel`, and
+recorder interruption/consent boundaries; do not create a second session system.
+The receiving source is local integrated base `e440a1d`; its inherited
+`discord-bot/live-audio.js:tickInternal` quiet-ending foundation and
+`test/night-simulation.test.js:night` are from `d9302ff`. Earlier invitation
+readiness work at `ff4534e` was inspected, not copied over current guaranteed
+booking/authorization policy. All are the same Apache-2.0 repository; no external
+auth, storage, chain, payment or messaging runtime is introduced.
+The receiving tests include `test/live-recovery.test.js` and the three
+`recovery rehearsal` cases in `test/night-simulation.test.js`. The latter use
+real radio/recorder modules on a fake clock, not staging. The existing older
+night cases expect automatic recording intake; that expectation also fails on
+untouched local base `e440a1d` and is not repaired as part of this policy change.
+
+Local validation for this patch: **349/349** focused/audio/stage/recording/
+producer/booking/mirror/paid-boundary regressions passed. The supplemental
+paid-queue/escrow/editor selection passed **138/140**; its two DJuke source-wiring
+assertions also fail unchanged on `e440a1d`. The complete night selection passed
+the **three new recovery cases**, with the **14 existing automatic-intake
+expectations failing identically** on both branches (untouched base: 0/14).
+Four new acceptance cases were also run against unchanged base code and all
+failed there, demonstrating the new coverage is not baseline-green. Separate
+codec checks verified both directions of old-room envelope compatibility and
+the old decrypted reader's rejection of the new recovery field. These are local,
+mocked-provider checks, not a live staging rehearsal.
 
 Cancellation order:
 
@@ -411,7 +518,7 @@ The injected cancellation hook is `onCancel(booking, reason)`. Worker wiring inv
 - T−60/T−15 are private: an unauthenticated listener, wrong wallet, old signature and copied URL cannot hear backstage or publish/control.
 - Ten concurrent listeners plus performer/operator/receiver; late join, refresh, mute and autoplay prompt. Confirm no wallet is required to listen publicly.
 - Measure glass-to-glass latency; proposed pilot target is ≤5 seconds, not a measured capability claim.
-- Keep intentional silence for over sixty seconds: **no cancellation**. Inject 5/30/59-second transport outages: reconnect without cancellation. Inject ≥60 seconds without advancing audio packets: cancel once, revoke ingress, preserve the fee, then observe the exact recovery sequence.
+- Keep intentional silence for over sixty seconds: **no cancellation**. For the undeployed #358 policy, test outages just below and exactly at 15 seconds; hold explicitly, reconnect within the authorized window, and expire an unrecovered hold once. Test both immediate filler choices, safe return behind a paid song/advert, repeated requests/reconnect/restart preserving the one-minute cap, and actual ready/not-ready next-act advance. Real staging checks are **NOT RUN**.
 - Close/restart the worker, fail the checkpoint write, lose the hosting connection, block OBS, switch wallet and revoke source access. A total worker/hosting outage cannot deliver adverts; display unavailable rather than pretend recovery.
 - Verify radio → live → radio has no duplicate sound or stale source; paid DJuke stays queued; ads only run in the cancellation window or normal programming, with actual existing evidence/priority rules.
 - Inspect provider recording/egress and billing settings; verify no recordings or unauthorized spend. No real cloud stream, mic/OBS soundcheck, ten-listener load test or deployment has been completed by local unit tests.
