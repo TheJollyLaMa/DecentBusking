@@ -10,6 +10,8 @@ import { canEditArtwork } from './artwork-update.mjs';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { creatorImageURL, creatorPresentation, resolveCreatorENS } from './creator-profile-data.mjs';
+import { canEditCatalogRecording } from './live-recording-edit.mjs?v=20261116-studio-polish';
+export { canEditCatalogRecording } from './live-recording-edit.mjs?v=20261116-studio-polish';
 
 export function canEditCreatorSplits(nft = {}, walletAddress = '') {
   const wallet = String(walletAddress || '').toLowerCase();
@@ -19,22 +21,6 @@ export function canEditCreatorSplits(nft = {}, walletAddress = '') {
   const recipients = Array.isArray(nft.creatorSplits)
     ? nft.creatorSplits.map(entry => String(entry?.wallet || entry?.address || '').toLowerCase()) : [];
   return creator === wallet || recipients.includes(wallet);
-}
-
-export function canEditCatalogRecording(nft = {}, walletAddress = '') {
-  const wallet = String(walletAddress || '').toLowerCase();
-  const artist = /^0x[0-9a-f]{40}$/i.test(nft.artist || '')
-    ? String(nft.artist).toLowerCase() : String(nft.creator || '').toLowerCase();
-  const source = String(nft.audioUrl || nft.animation_url || '');
-  const cid = source.match(/^ipfs:\/\/([^/?#]+)$/i)?.[1] ||
-    source.match(/^https:\/\/[^/]+\/ipfs\/([^/?#]+)$/i)?.[1] || '';
-  return /^0x[0-9a-f]{40}$/.test(wallet) && artist === wallet &&
-    (nft.chainId ?? 8453) === 8453 &&
-    /^0x[0-9a-f]{40}$/i.test(nft.contractAddress || '') &&
-    nft.tokenId !== undefined && nft.tokenId !== null && nft.tokenId !== '' &&
-    Number.isSafeInteger(Number(nft.tokenId)) && Number(nft.tokenId) >= 0 &&
-    /^[a-zA-Z0-9]{20,120}$/.test(cid) &&
-    String(nft.mediaType || 'audio/mpeg').startsWith('audio/');
 }
 
 // NFT currently shown in the single view; previews and purchases are handled explicitly.

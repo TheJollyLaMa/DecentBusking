@@ -119,7 +119,7 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   host.id = 'dbusker-companion';
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `
-    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261028-credits', import.meta.url).href}">
+    <link rel="stylesheet" href="${new URL('../css/dbusker.css?v=20261116-studio-dock', import.meta.url).href}">
     <div class="greeting" hidden><span>How can I help you, Earthling?</span><button type="button" class="dismiss" aria-label="Dismiss DBusker greeting">Not now</button></div>
     <button type="button" class="launcher" aria-label="Ask DBusker, AI community guide" aria-expanded="false" aria-controls="dbusker-chat">
       <span class="launcher-portrait"><img src="${new URL('../img/D_Busker.jpeg', import.meta.url).href}" alt="" width="58" height="58"></span><span><small>A friendly signal</small>Ask DBusker</span><span class="signal-dot" aria-hidden="true"></span>
@@ -189,6 +189,14 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   const launcher = find('.launcher'), panel = find('section'), status = find('.status');
   const consent = find('input'), signin = find('.signin'), signout = find('.signout');
   const question = find('textarea'), send = find('.send'), transcript = find('.transcript');
+  const dockInStudio = () => {
+    const dock = document.getElementById('recording-edit-companion');
+    const docked = Boolean(dock && document.body.classList.contains('recording-edit-open'));
+    host.toggleAttribute('studio-docked', docked);
+    (docked ? dock : document.body).append(host);
+  };
+  document.addEventListener('recording-editor-toggled', dockInStudio);
+  dockInStudio();
   const mode = find('#dbusker-mode');
   const modeNotes = {
     efficient: 'Efficient selected for your next question. One light-model pass; no deeper pass or automatic retry. Changing mode does not resend a question.',

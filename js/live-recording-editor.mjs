@@ -1,6 +1,7 @@
-import { roomRequest } from './live-audio-client.mjs?v=20261114-allocated-stage';
+import { roomRequest } from './live-audio-client.mjs?v=20261116-studio-polish';
+import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { catalogRecordingReleaseApprovalMessage, recordingReleaseApprovalMessage,
-  validateCatalogRecordingDraft, validateRecordingDraft } from './live-recording-edit.mjs';
+  moveRecordingBoundary, recordingBoundaryRange, validateCatalogRecordingDraft, validateRecordingDraft } from './live-recording-edit.mjs?v=20261116-studio-polish';
 
 const byId = id => document.getElementById(id);
 const params = new URL(location.href).searchParams;
@@ -15,9 +16,16 @@ const audio = byId('recording-edit-audio');
 const canvas = byId('recording-edit-waveform');
 let session, signer, wallet = '', state, draft, busy = false, generation = 0, previewEnd = 0;
 let dirty = false, editVersion = 0, saveTimer, saveInFlight;
+let mediaPending = false, mediaTimer, activeDrag = null;
 
-const report = message => { status.textContent = message; };
-if (embedded) byId('recording-edit-back').hidden = true;
+const report = message => {
+  status.textContent = message;
+  if (busy) byId('recording-edit-loading-message').textContent = message;
+};
+if (embedded) {
+  byId('recording-edit-back').hidden = true;
+  document.body.classList.add('recording-edit-embedded');
+}
 if (!catalogMode) {
   status.textContent = 'Connect the wallet booked for this performance to check its authenticated recording journal.';
   byId('recording-edit-connect').textContent = 'Connect booked performer wallet';
@@ -33,6 +41,8 @@ function markDraftChanged() {
   dirty = true;
   editVersion++;
   clearTimeout(saveTimer);
+  saveTimer = null;
+  if (activeDrag) return;
   saveTimer = setTimeout(() => {
     void saveDraft({ quiet: true }).catch(error => report(error.message || 'Draft autosave failed; keep this editor open and retry.'));
   }, 800);
@@ -42,7 +52,7 @@ const cidUrl = cid => {
   const base = new URL(gateway);
   if (base.protocol !== 'https:' || base.username || base.password || base.hash ||
       !/^[a-zA-Z0-9]{20,120}$/.test(cid || '')) throw new Error('Recording preview gateway is unavailable');
-  return `${base.toString().replace(/\/$/, '')}/ipfs/${cid}`;
+  return buildIpfsGatewayUrls(`ipfs://${cid}`, base.toString())[0];
 };
 const seconds = samples => samples / state.sampleRate;
 const timeText = samples => `${seconds(samples).toFixed(3)}s`;
@@ -75,6 +85,109 @@ function drawWaveform() {
     context.strokeStyle = '#b6e0bf';
     for (const x of [start, end]) { context.beginPath(); context.moveTo(x, 0); context.lineTo(x, height); context.stroke(); }
   }
+  positionHandles();
+}
+
+function positionHandles() {
+  for (const handle of byId('recording-edit-handles').children) {
+    const index = Number(handle.dataset.index), key = handle.dataset.key;
+    const value = draft.songs[index][key];
+    handle.style.left = `${100 * value / state.sourceSamples}%`;
+    handle.setAttribute('aria-valuenow', String(value));
+    handle.setAttribute('aria-valuetext', `${seconds(value).toFixed(3)} seconds`);
+    try {
+      const { min, max } = recordingBoundaryRange(draft, state.sourceSamples, index, key);
+      handle.setAttribute('aria-valuemin', String(min));
+      handle.setAttribute('aria-valuemax', String(max));
+    } catch (error) { report(error.message); }
+  }
+  for (const input of byId('recording-edit-songs').querySelectorAll('[data-time-boundary]')) {
+    input.value = seconds(draft.songs[Number(input.dataset.songIndex)][input.dataset.timeBoundary]).toFixed(3);
+  }
+  draft.songs.forEach((song, index) => {
+    const help = byId(`recording-edit-track-${index + 1}-boundary-help`);
+    if (help) help.textContent = `Exact source samples: ${song.startSample}–${song.endSample}. Preview stops at this song’s end.`;
+  });
+}
+
+function applyBoundary(index, key, sample) {
+  const next = moveRecordingBoundary(draft, state.sourceSamples, index, key, sample);
+  next.songs.forEach((song, offset) => Object.assign(draft.songs[offset], song));
+  drawWaveform();
+}
+
+function renderBoundaryHandles() {
+  const container = byId('recording-edit-handles');
+  container.replaceChildren();
+  draft.songs.forEach((song, index) => {
+    const keys = index > 0 && draft.songs[index - 1].endSample === song.startSample
+      ? ['endSample'] : ['startSample', 'endSample'];
+    for (const key of keys) {
+      const handle = document.createElement('button');
+      handle.type = 'button';
+      handle.className = 'recording-cut-handle';
+      handle.dataset.index = String(index);
+      handle.dataset.key = key;
+      handle.setAttribute('role', 'slider');
+      handle.setAttribute('aria-orientation', 'horizontal');
+      const paired = key === 'endSample' && draft.songs[index + 1]?.startSample === song.endSample;
+      const label = paired ? `Cut between songs ${index + 1} and ${index + 2}`
+        : `Song ${index + 1} ${key === 'startSample' ? 'start' : 'end'}`;
+      handle.setAttribute('aria-label', label);
+      const marker = document.createElement('span');
+      marker.textContent = paired ? `✂ ${index + 1}|${index + 2}` : `${index + 1} ${key === 'startSample' ? 'in' : 'out'}`;
+      handle.append(marker);
+      handle.addEventListener('keydown', event => {
+        if (busy || mediaPending || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        try {
+          const range = recordingBoundaryRange(draft, state.sourceSamples, index, key);
+          const step = state.sampleRate * (event.shiftKey ? 1 : .1);
+          const value = event.key === 'Home' ? range.min : event.key === 'End' ? range.max
+            : draft.songs[index][key] + (event.key === 'ArrowLeft' ? -step : step);
+          applyBoundary(index, key, value);
+          markDraftChanged();
+        } catch (error) { report(error.message); }
+      });
+      handle.addEventListener('pointerdown', event => {
+        if (busy || mediaPending || activeDrag || event.button !== 0) return;
+        event.preventDefault();
+        activeDrag = { pointerId: event.pointerId, boundaries: draft.songs.map(track => ({
+          startSample: track.startSample, endSample: track.endSample,
+        })) };
+        editVersion++;
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        handle.setPointerCapture(event.pointerId);
+        handle.classList.add('is-dragging');
+      });
+      handle.addEventListener('pointermove', event => {
+        if (!activeDrag || activeDrag.pointerId !== event.pointerId) return;
+        try {
+          const rect = canvas.getBoundingClientRect();
+          if (rect.width <= 0) throw Error('The waveform is not visible; reopen the studio');
+          applyBoundary(index, key, (event.clientX - rect.left) / rect.width * state.sourceSamples);
+          dirty = true;
+          editVersion++;
+        } catch (error) { report(error.message); }
+      });
+      const finish = event => {
+        if (!activeDrag || activeDrag.pointerId !== event.pointerId) return;
+        if (event.type === 'pointercancel') activeDrag.boundaries.forEach((boundary, offset) =>
+          Object.assign(draft.songs[offset], boundary));
+        activeDrag = null;
+        if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+        handle.classList.remove('is-dragging');
+        markDraftChanged();
+        drawWaveform();
+      };
+      handle.addEventListener('pointerup', finish);
+      handle.addEventListener('pointercancel', finish);
+      handle.addEventListener('lostpointercapture', event => finish({ type: 'pointercancel', pointerId: event.pointerId }));
+      container.append(handle);
+    }
+  });
+  positionHandles();
 }
 
 function songInput(song, index, key, labelText) {
@@ -89,6 +202,8 @@ function songInput(song, index, key, labelText) {
     input.autocomplete = 'off';
     input.addEventListener('input', () => { song.title = input.value; markDraftChanged(); drawWaveform(); });
   } else {
+    input.dataset.songIndex = String(index);
+    input.dataset.timeBoundary = key;
     input.min = '0'; input.max = seconds(state.sourceSamples).toFixed(3); input.step = '0.001';
     input.value = seconds(song[key]).toFixed(3);
     input.setAttribute('aria-describedby', `recording-edit-track-${index + 1}-boundary-help`);
@@ -99,6 +214,7 @@ function songInput(song, index, key, labelText) {
       input.value = seconds(song[key]).toFixed(3);
       markDraftChanged();
       drawWaveform();
+      renderBoundaryHandles();
     });
   }
   label.append(input);
@@ -144,6 +260,7 @@ function renderSongs() {
     }
     container.append(section);
   });
+  renderBoundaryHandles();
   drawWaveform();
 }
 
@@ -194,9 +311,12 @@ function renderState(next) {
     drawWaveform();
   };
   const preview = cidUrl(state.sourceCid);
-  if (audio.src !== preview) audio.src = preview;
+  if (audio.src !== preview) {
+    setMediaPending(true);
+    audio.src = preview;
+  }
   byId('recording-edit-waveform-note').textContent = state.waveform?.length
-    ? 'Waveform is derived from the preserved PCM capture. Keyboard-accessible start/end time fields set boundaries to the nearest 48 kHz sample.'
+    ? 'Drag the cut lines, or focus a line and use arrow keys (Shift for one-second steps). The start/end fields stay synchronized to exact 48 kHz samples.'
     : 'Waveform samples are unavailable for this older capture; use the accessible time fields and original audio preview.';
   byId('recording-edit-add-song').textContent = catalogMode ? 'Add cut' : 'Add song';
   byId('recording-edit-add-song').disabled = draft.songs.length >= (catalogMode ? 4 : 50);
@@ -211,9 +331,24 @@ function renderState(next) {
 
 function setBusy(value) {
   busy = value;
-  workspace.inert = value;
+  workspace.inert = value || mediaPending;
+  byId('recording-edit-loading').hidden = !value && !mediaPending;
+  workspace.setAttribute('aria-busy', String(value || mediaPending));
+  if (!value && mediaPending) byId('recording-edit-loading-message').textContent = 'Loading the original audio preview…';
   for (const id of ['recording-edit-connect', 'recording-edit-add-song', 'recording-edit-save',
     'recording-edit-defer', 'recording-edit-full', 'recording-edit-split']) byId(id).disabled = value;
+}
+
+function setMediaPending(value) {
+  mediaPending = value;
+  clearTimeout(mediaTimer);
+  if (value) mediaTimer = setTimeout(() => {
+    byId('recording-edit-loading-message').textContent = 'The audio preview is still loading. You can retry without changing your draft.';
+    byId('recording-edit-connect').textContent = 'Retry audio preview';
+    byId('recording-edit-connect').hidden = false;
+  }, 60000);
+  else if (embedded) byId('recording-edit-connect').hidden = true;
+  setBusy(busy);
 }
 
 async function connect() {
@@ -221,27 +356,39 @@ async function connect() {
   if (catalogMode && !/^8453:0x[0-9a-f]{40}:\d{1,20}$/i.test(catalogNftId)) {
     throw new Error('This catalog item has an invalid NFT identity. Open it again from the verified archive.');
   }
-  if (!window.ethereum || !window.ethers) throw new Error('Install or unlock a wallet to continue.');
   const generationAtStart = ++generation;
-  const provider = new window.ethers.BrowserProvider(window.ethereum);
-  signer = await provider.getSigner();
+  if (embedded) {
+    signer = window.parent._wallet?.signer;
+    if (!signer || !window.parent._wallet?.address) throw new Error('Connect your artist wallet in the page header.');
+  } else {
+    if (!window.ethereum || !window.ethers) throw new Error('Install or unlock a wallet to continue.');
+    const provider = new window.ethers.BrowserProvider(window.ethereum);
+    signer = await provider.getSigner();
+  }
   wallet = (await signer.getAddress()).toLowerCase();
+  if (generation !== generationAtStart) throw new Error('Wallet changed; select the recording again.');
+  report('Checking the artist and original recording…');
   const challenge = await roomRequest(serviceUrl, 'challenge', catalogMode
     ? { nftId: catalogNftId, wallet, scope: 'catalog-recording-edit' }
     : { bookingId, wallet, scope: 'recording-edit' });
   if (generation !== generationAtStart) throw new Error('Wallet changed; reconnect to the booked performer account.');
+  report('Authorize access to this recording in your wallet. This is a signature, not a transaction.');
   const signature = await signer.signMessage(challenge.message);
   if (generation !== generationAtStart) throw new Error('Wallet changed; reconnect to the booked performer account.');
-  session = await roomRequest(serviceUrl, 'session', { challengeId: challenge.challengeId, signature });
-  if (generation !== generationAtStart || session.role !== 'performer') {
+  report('Loading the recording and building its waveform. Longer songs can take a little while…');
+  const authorized = await roomRequest(serviceUrl, 'session', { challengeId: challenge.challengeId, signature });
+  if (generation !== generationAtStart) throw new Error('Wallet changed; select the recording again.');
+  if (authorized.role !== 'performer') {
     throw new Error(catalogMode ? 'Only the artist wallet recorded in this NFT may open its edit room.'
       : 'Only the booked performer can open this edit room.');
   }
+  session = authorized;
   renderState(session.state);
 }
 
 async function saveDraft({ quiet = false } = {}) {
   clearTimeout(saveTimer);
+  saveTimer = null;
   if (!dirty) return state;
   if (saveInFlight) {
     await saveInFlight;
@@ -249,19 +396,21 @@ async function saveDraft({ quiet = false } = {}) {
   }
   if (!session?.token || !state?.available) throw new Error('Reconnect the authorized wallet before saving this draft.');
   const version = editVersion;
+  const saveGeneration = generation;
   const next = (catalogMode ? validateCatalogRecordingDraft : validateRecordingDraft)(
     { ...structuredClone(draft), revision: state.draft.revision + 1 }, state.sourceSamples);
   report(quiet ? 'Autosaving this durable split draft…' : 'Saving this durable split draft…');
   const action = catalogMode ? 'catalog-recording-edit-save' : 'recording-edit-save';
   saveInFlight = roomRequest(serviceUrl, 'control', { action, draft: next }, session.token)
     .then(saved => {
+      if (generation !== saveGeneration) throw new Error('Wallet changed; the previous draft is not being opened.');
       state = saved;
-      if (editVersion === version) {
+      if (editVersion === version && !activeDrag) {
         renderState(saved);
         report('Draft saved durably. No audio export or mint request was created.');
       } else {
         dirty = true;
-        if (!saveTimer) saveTimer = setTimeout(() => {
+        if (!saveTimer && !activeDrag) saveTimer = setTimeout(() => {
           void saveDraft({ quiet: true }).catch(error => report(error.message || 'Draft autosave failed; keep this editor open and retry.'));
         }, 800);
       }
@@ -298,6 +447,7 @@ async function approve(choice) {
       action: catalogMode ? 'catalog-recording-edit-approve' : 'recording-edit-approve',
       choice, issuedAt, signature,
     }, session.token);
+    if (generation !== actionGeneration) throw new Error('Wallet changed; select the recording again to check the release journal.');
     renderState(result);
     report(choice === 'defer'
       ? 'Saved. Nothing was exported or added to the mint queue; return here to resume.'
@@ -309,8 +459,19 @@ async function approve(choice) {
 
 byId('recording-edit-connect').addEventListener('click', async () => {
   if (busy) return;
+  if (state?.available && (audio.error || mediaPending)) {
+    byId('recording-edit-connect').hidden = true;
+    setMediaPending(true);
+    audio.load();
+    return;
+  }
   setBusy(true);
-  try { await connect(); } catch (error) { report(error.message || 'Could not open the recording room.'); }
+  report('Opening your recording studio…');
+  try { await connect(); }
+  catch (error) {
+    report(error.message || 'Could not open the recording room.');
+    byId('recording-edit-connect').hidden = false;
+  }
   finally { setBusy(false); }
 });
 byId('recording-edit-save').addEventListener('click', async () => {
@@ -339,19 +500,32 @@ byId('recording-edit-add-song').addEventListener('click', () => {
 });
 audio.addEventListener('play', () => { if (audio.currentTime >= previewEnd) previewEnd = Infinity; });
 audio.addEventListener('timeupdate', () => { if (!audio.paused && audio.currentTime >= previewEnd) audio.pause(); });
+audio.addEventListener('loadedmetadata', () => { setMediaPending(false); drawWaveform(); });
+audio.addEventListener('error', () => {
+  setMediaPending(false);
+  report('The audio preview could not load. Retry the preview; your draft and original recording are unchanged.');
+  byId('recording-edit-connect').hidden = false;
+  byId('recording-edit-connect').textContent = 'Retry audio preview';
+});
 window.addEventListener('resize', drawWaveform);
 window.addEventListener('pagehide', () => { audio.pause(); });
-window.ethereum?.on?.('accountsChanged', () => {
+function invalidateWallet() {
   generation++; session = null; signer = null; wallet = ''; state = null; draft = null;
   dirty = false; clearTimeout(saveTimer);
+  activeDrag = null;
+  audio.pause();
+  audio.removeAttribute('src');
+  setMediaPending(false);
+  setBusy(false);
   workspace.hidden = true;
-  report(catalogMode ? 'Wallet changed. Reconnect the artist wallet recorded in this NFT.'
-    : 'Wallet changed. Reconnect the booked performer wallet to continue.');
-});
+  report('Wallet changed. Choose a recording using the connected artist wallet.');
+}
+if (!embedded) window.ethereum?.on?.('accountsChanged', invalidateWallet);
 
 window.addEventListener('message', async event => {
-  if (!embedded || event.origin !== location.origin || event.source !== window.parent ||
-      event.data?.type !== 'decentbusking:flush-recording-draft') return;
+  if (!embedded || event.origin !== location.origin || event.source !== window.parent) return;
+  if (event.data?.type === 'decentbusking:editor-wallet-changed') { invalidateWallet(); return; }
+  if (event.data?.type !== 'decentbusking:flush-recording-draft') return;
   try {
     while (busy) await new Promise(resolve => setTimeout(resolve, 100));
     await saveDraft();
@@ -366,3 +540,12 @@ window.addEventListener('message', async event => {
     }, location.origin);
   }
 });
+
+if (embedded) {
+  byId('recording-edit-connect').hidden = true;
+  byId('recording-edit-connect').textContent = 'Retry loading recording';
+  window.parent.postMessage({
+    type: 'decentbusking:editor-ready', requestId: params.get('studioRequest'),
+  }, location.origin);
+  byId('recording-edit-connect').click();
+}

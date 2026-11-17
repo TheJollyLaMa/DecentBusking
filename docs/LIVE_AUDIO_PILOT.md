@@ -122,6 +122,30 @@ approval and a cut approval are separate wallet signatures; only approved cuts
 are exported as new MP3 releases. Existing NFT/source media are unchanged, the
 artist remains recipient and tip wallet, and no collaborator payout is inferred.
 
+The right-edge Studio tab is shown after the connected header wallet is verified
+as the credited artist/creator of at least one editable catalog song NFT. Its
+search and pagination show only that wallet's artist-attributed audio, not tokens
+it merely holds or collaborator credits. NFT-card **Edit / split** still opens
+the panel. Embedded authorization reuses the header signer without another
+wallet connection; scoped access and publication signatures remain mandatory.
+Wallet changes clear the panel and discard stale catalog/session responses.
+The standalone room remains compatible, but the panel has no dedicated-room link.
+
+Visible loading covers room authorization, waveform preparation and original
+audio metadata. Preview failures and slow loads offer a retry without altering
+the saved draft. Waveform boundaries support pointer/touch dragging, arrow keys,
+Shift-arrow one-second steps and Home/End. Shared cuts move both adjacent song
+edges; source bounds, neighboring cuts and the 0.5-second/30-minute limits apply.
+The time fields remain synchronized. While the panel is open, the existing
+invitation-gated DBusker is docked in its header as a small avatar; its chat stays
+inside the panel instead of floating over the editing controls.
+
+Studio polish reuse: adapt the existing Busking editor/model, catalog paging,
+header wallet and DBusker host at `3de791a0b61d9bc751bf181d00917f5e80b3bd69`;
+no separate editor or assistant instance is introduced. Receiving-app checks
+cover creator-only discovery, stale wallet/search results, durable close/switch
+flushes, shared-cut sample bounds and longer catalog save/approval responses.
+
 The existing admin panel still requires a genuine owner-signed mint and verified
 chain reconciliation. A durable replay-pending marker prioritizes the approved
 full-set recording only in normal rotation after the five-minute outro, behind

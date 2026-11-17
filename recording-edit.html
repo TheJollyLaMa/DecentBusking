@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DecentBusking · Recording editor</title>
-  <link rel="stylesheet" href="css/live-recording-edit.css">
+  <link rel="stylesheet" href="css/live-recording-edit.css?v=20261116-studio-polish">
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
   <script src="decent.config.js"></script>
 </head>
@@ -20,12 +20,21 @@
       <p id="recording-edit-status" role="status" aria-live="polite">Connect the authorized artist wallet to check the recording source and its durable edit journal.</p>
       <button id="recording-edit-connect" type="button">Connect authorized artist wallet</button>
     </section>
+    <section id="recording-edit-loading" class="recording-edit-card recording-edit-loading" role="status" aria-live="polite" hidden>
+      <span class="recording-loading-disc" aria-hidden="true">🎵</span>
+      <h2>Preparing your studio</h2>
+      <p id="recording-edit-loading-message">Loading the recording and waveform…</p>
+      <p class="recording-edit-muted">Long recordings can take a little while. Your original stays unchanged.</p>
+    </section>
     <section id="recording-edit-workspace" class="recording-edit-card" hidden>
       <h2 id="recording-edit-title">Recording preview</h2>
       <p id="recording-edit-facts"></p>
       <p id="recording-edit-rights" class="recording-edit-note"></p>
       <audio id="recording-edit-audio" controls preload="metadata"></audio>
-      <canvas id="recording-edit-waveform" role="img" aria-label="Waveform of the preserved original recording"></canvas>
+      <div class="recording-waveform-stage">
+        <canvas id="recording-edit-waveform" role="img" aria-label="Waveform of the preserved original recording"></canvas>
+        <div id="recording-edit-handles" aria-label="Draggable song boundaries"></div>
+      </div>
       <p id="recording-edit-waveform-note" class="recording-edit-muted"></p>
       <div class="recording-edit-album">
         <label for="recording-edit-album-title">Album / performance title</label>
@@ -44,6 +53,6 @@
       <ul id="recording-edit-releases"></ul>
     </section>
   </main>
-  <script type="module" src="js/live-recording-editor.mjs?v=20261116-recording-edit"></script>
+  <script type="module" src="js/live-recording-editor.mjs?v=20261116-studio-polish"></script>
 </body>
 </html>

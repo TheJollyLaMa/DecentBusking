@@ -12,6 +12,15 @@
   color-scheme: dark;
 }
 :host([hidden]), [hidden] { display: none !important; }
+:host([studio-docked]) { position: static; z-index: auto; }
+:host([studio-docked]) .launcher { padding: 2px; border-radius: 50%; min-width: 36px; box-shadow: none; animation: none; }
+:host([studio-docked]) .launcher > span:not(.launcher-portrait),
+:host([studio-docked]) .greeting { display: none; }
+:host([studio-docked]) .launcher img { width: 28px; height: 28px; }
+:host([studio-docked]) section {
+  position: absolute; top: 52px; right: 8px; width: calc(100% - 16px);
+  max-height: calc(100% - 64px); z-index: 1;
+}
 * { box-sizing: border-box; }
 button, textarea, input, select { font: inherit; }
 button { cursor: pointer; border: 1px solid #728c9c; border-radius: 12px; background: #172b37; color: #effaff; padding: 9px 13px; transition: background .2s, border-color .2s, box-shadow .2s, transform .2s; }
