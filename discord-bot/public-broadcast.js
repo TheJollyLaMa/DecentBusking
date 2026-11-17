@@ -101,12 +101,12 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     encoder?.kill();
     queue.length = 0; queuedBytes = 0;
   };
-  function push(bytes, program) {
+  function push(bytes, program, receivedAt = monotonicNow()) {
     if (!enabled || !encoder || failure || stopping) return;
     if (bytes.length % 4 || bytes.length > 48000 * 4 || queuedBytes + bytes.length > FRAME_BYTES * 50) {
       fail('PCM_BUFFER_LIMIT'); return;
     }
-    queue.push({ bytes, program }); queuedBytes += bytes.length;
+    queue.push({ bytes, program, receivedAt }); queuedBytes += bytes.length;
     if (firstInputAt === null) {
       firstInputAt = startedAt = now();
       startedTick = monotonicNow();
@@ -119,6 +119,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     const priming = !history.length && firstInputAt !== null && now() - firstInputAt < 80;
     while (!priming && queue.length && offset < FRAME_BYTES) {
       const entry = queue[0], count = Math.min(entry.bytes.length, FRAME_BYTES - offset);
+      if (monotonicNow() - entry.receivedAt > 1000) { fail('PCM_BUFFER_LIMIT'); return; }
       if (!history.length || history.at(-1).playId !== entry.program.playId) {
         history.push(broadcastProgram(entry.program, startedAt + (timelineOffsetMs || 0) + emitted * 20 + offset / 192));
         if (history.length > 64) history.shift();
@@ -210,22 +211,22 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     },
     setPolicy(next) { policy = next; },
     setStateReader(reader) { readPublicState = reader; },
-    radioPacket(packet, track) {
+    radioPacket(packet, track, receivedAt) {
       if (!enabled || failure || stopping || policy?.mode === 'live') return;
       try {
         decoder ||= new OpusScript(48000, 2, OpusScript.Application.AUDIO);
-        push(Buffer.from(decoder.decode(packet)), track);
+        push(Buffer.from(decoder.decode(packet)), track, receivedAt);
         if (track.protected) protectedUntil = now() + 40000;
       } catch { fail('RADIO_DECODE_FAILED'); }
     },
-    liveFrame(booking, frame) {
+    liveFrame(booking, frame, receivedAt) {
       if (!enabled || policy?.mode !== 'live' || policy.bookingId !== booking.id ||
           booking.rehearsal === true || failure || stopping) return;
       try {
         push(stereoPcm(frame), { playId: `live:${booking.id}`, bookingId: booking.id,
           title: booking.title, artist: booking.displayName || booking.title || 'Live performer', live: true,
           performer: { wallet: booking.wallet, artist: booking.displayName || booking.title || 'Live performer',
-            title: booking.title || 'Live performance' } });
+            title: booking.title || 'Live performance' } }, receivedAt);
         protectedUntil = now() + 40000;
       }
       catch { fail('LIVE_PCM_INVALID'); }
