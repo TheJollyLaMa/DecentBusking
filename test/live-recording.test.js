@@ -30,7 +30,7 @@ async function setup(options = {}) {
   };
   const args = { enabled: true, store, upload, download: async cid => blobs.get(cid),
     ingest: async value => { submissions.push(value); return { trackId: `fixture:${value.release.releaseId}` }; },
-    encode: async () => Buffer.from('encoded-fixture'), segmentSeconds: 1, now: () => time,
+    encode: async () => Buffer.from('encoded-fixture'), segmentSeconds: 1, persistFrameTimes: false, now: () => time,
     log: { error: (...args) => errors.push(args.join(' ')) }, ...options };
   const recorder = createLiveRecorder(args);
   const approve = async (choice = 'full', signer = artist, target = recorder) => {
@@ -238,6 +238,111 @@ test('a finalization outage does not mark fully captured audio incomplete or blo
   await s.recorder.consent(next, await s.permission(true, artist, START + 20000, ORIGIN, next), artist.address, ORIGIN);
   s.at(START + 30000); s.recorder.capture(next, frame()); await s.recorder.flush();
   assert.equal(s.state().recordings.find(r => r.bookingId === next.id).segments.length, 1);
+});
+
+test('timed segments exclude a quiet producer ending but retain real capture gaps and abnormal endings', async t => {
+  for (const [label, gap, reason, incomplete, spacing = 1000] of [
+    ['quiet ending', 0, 'producer-finished', false],
+    ['lost audio mid-song', 3, 'producer-finished', true],
+    ['repeated short capture gaps', 0, 'producer-finished', true, 1500],
+    ['cancelled set', 0, 'audio-loss', true],
+  ]) await t.test(label, async () => {
+    const s = await setup({ persistFrameTimes: true, segmentSeconds: 2 });
+    const b = { ...booking, endUtc: new Date(START + 60000).toISOString(),
+      broadcast: { actualStartedAt: START, actualEndedAt: null, authorizedEndAt: START + 60000 } };
+    await s.recorder.consent(b, await s.permission(true, artist, START - 1000, ORIGIN, b), artist.address, ORIGIN);
+    for (let second = 0; second < 20; second++) {
+      s.at(START + second * spacing + (second >= 10 ? gap * 1000 : 0));
+      s.recorder.capture(b, frame());
+      await s.recorder.flush();
+    }
+    const segments = structuredClone(s.state().recordings[0].segments);
+    assert.equal(segments[0].firstFrameAt, START);
+    assert.equal(segments.at(-1).lastFrameAt, START + 19 * spacing + (gap + 1) * 1000);
+    const audioEndedAt = segments.at(-1).lastFrameAt;
+    b.broadcast.actualEndedAt = audioEndedAt + 30000;
+    b.broadcast.endReason = reason;
+    s.at(b.broadcast.actualEndedAt);
+    await s.recorder.tick([b]);
+    assert.equal(s.state().recordings[0].incomplete, incomplete);
+    assert.equal(s.state().recordings[0].result.durationSamples, 20 * 48000);
+    assert.deepEqual(s.state().recordings[0].segments, segments, 'source samples and capture bounds survive finalization');
+    assert.equal(s.submissions.length, 0, 'timing never grants publication permission');
+    await s.approve('full');
+    assert.equal(s.submissions[0].incomplete, incomplete, 'radio handoff uses the same partial label');
+  });
+});
+
+test('legacy and mixed segment journals retain room-window fallback, independent of the writer flag', async t => {
+  const { createLiveRecorder, validateRecordingState } = await import('../discord-bot/live-recording.js');
+  for (const mixed of [false, true]) await t.test(mixed ? 'mixed journal' : 'legacy journal', async () => {
+    const s = await setup({ persistFrameTimes: mixed });
+    await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+    for (let second = 0; second < 2; second++) {
+      s.at(START + second * 1000); s.recorder.capture(booking, frame()); await s.recorder.flush();
+    }
+    const checkpoint = structuredClone(s.state());
+    delete checkpoint.recordings[0].segments[0].firstFrameAt;
+    delete checkpoint.recordings[0].segments[0].lastFrameAt;
+    checkpoint.recordings[0].status = 'waiting';
+    validateRecordingState(checkpoint);
+    await s.store.save(checkpoint);
+    const replacement = createLiveRecorder({ ...s.args, persistFrameTimes: true });
+    await replacement.initialize();
+    s.at(START + 20000); await replacement.tick([booking]);
+    assert.equal(s.state().recordings[0].incomplete, true, 'unknown capture bounds cannot imply a complete recording');
+  });
+});
+
+test('capture gaps remain partial when an earlier segment checkpoint finishes during capture', async () => {
+  const s = await setup({ persistFrameTimes: true, segmentSeconds: 2 });
+  const b = { ...booking, endUtc: new Date(START + 60000).toISOString(),
+    broadcast: { actualStartedAt: START, actualEndedAt: null, authorizedEndAt: START + 60000 } };
+  await s.recorder.consent(b, await s.permission(true, artist, START - 1000, ORIGIN, b), artist.address, ORIGIN);
+  let release, entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const saving = new Promise(resolve => { entered = resolve; });
+  const save = s.store.save;
+  s.store.save = async next => {
+    if (next.recordings[0].segments.length === 1) { entered(); await gate; }
+    await save(next);
+  };
+  s.at(START); s.recorder.capture(b, frame());
+  s.at(START + 1000); s.recorder.capture(b, frame());
+  await saving;
+  s.at(START + 5000); s.recorder.capture(b, frame());
+  release();
+  await new Promise(setImmediate);
+  await s.recorder.flush();
+  b.broadcast.actualEndedAt = START + 36000;
+  b.broadcast.endReason = 'producer-finished';
+  s.at(b.broadcast.actualEndedAt);
+  await s.recorder.tick([b]);
+  assert.equal(s.state().recordings[0].incomplete, true);
+  assert.equal(s.state().recordings[0].result.durationSamples, 3 * 48000);
+});
+
+test('frame timing readers validate paired bounds and writers remain disabled unless enabled', async () => {
+  const { validateRecordingState } = await import('../discord-bot/live-recording.js');
+  const s = await setup({ persistFrameTimes: undefined });
+  await s.recorder.consent(booking, await s.permission(), artist.address, ORIGIN);
+  s.at(START); s.recorder.capture(booking, frame()); await s.recorder.flush();
+  const checkpoint = structuredClone(s.state()), segment = checkpoint.recordings[0].segments[0];
+  assert.equal(segment.firstFrameAt, undefined);
+  assert.equal(segment.lastFrameAt, undefined);
+  segment.firstFrameAt = START; segment.lastFrameAt = START + 1000;
+  assert.doesNotThrow(() => validateRecordingState(checkpoint), 'reader accepts new metadata before writer rollout');
+  for (const bounds of [
+    { firstFrameAt: START }, { lastFrameAt: START + 1000 },
+    { firstFrameAt: -1, lastFrameAt: START }, { firstFrameAt: START, lastFrameAt: START - 1 },
+    { firstFrameAt: START, lastFrameAt: START },
+    { firstFrameAt: START, lastFrameAt: Infinity }, { firstFrameAt: 'now', lastFrameAt: START },
+  ]) {
+    const invalid = structuredClone(checkpoint), target = invalid.recordings[0].segments[0];
+    delete target.firstFrameAt; delete target.lastFrameAt;
+    Object.assign(target, bounds);
+    assert.throws(() => validateRecordingState(invalid), /Invalid recording journal/);
+  }
 });
 
 test('a replacement worker waits out deploy overlap before resuming a processing checkpoint', async () => {
