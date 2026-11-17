@@ -107,7 +107,10 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
       fail('PCM_BUFFER_LIMIT'); return;
     }
     queue.push({ bytes, program }); queuedBytes += bytes.length;
-    firstInputAt ??= now();
+    if (firstInputAt === null) {
+      firstInputAt = startedAt = now();
+      startedTick = monotonicNow();
+    }
     lastInputAt = now();
   }
   function emitFrame() {
@@ -186,8 +189,6 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     async start() {
       if (!enabled || encoder) return;
       directory = await mkdtemp(join(tmpdir(), 'dbusk-hls-'));
-      startedAt = now();
-      startedTick = monotonicNow();
       encoder = spawnImpl(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin',
         '-f', 's16le', '-ar', '48000', '-ac', '2', '-probesize', '32', '-analyzeduration', '0', '-i', 'pipe:0',
         '-vn', '-c:a', 'aac', '-b:a', '128k', '-f', 'hls', '-hls_time', '4',
@@ -199,6 +200,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
       encoder.on('close', () => { encoderClosed = true; });
       encoder.stdin.on('error', () => fail('ENCODER_INPUT_FAILED'));
       timer = setInterval(() => {
+        if (firstInputAt === null) return;
         const due = Math.floor((monotonicNow() - startedTick) / 20) - emitted;
         if (due > 25) { fail('ENCODER_CLOCK_STALLED'); return; }
         for (let i = 0; i < due && !failure; i++) emitFrame();

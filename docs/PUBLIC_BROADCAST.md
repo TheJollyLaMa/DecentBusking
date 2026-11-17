@@ -183,6 +183,18 @@ Development evidence so far:
   neither falsely stop nor freeze encoding, while a genuine scheduling stall
   still triggers the existing safety limit. This fixes a reproducible timing
   defect; it does not establish the cause of the earlier observed stop.
+- Reader release `1ba11c5` is live. The first hosted-preview deployment safely
+  failed its unchanged paid-playback handoff after timeouts and HTTP 520.
+  A subsequent authenticated handoff verified both paid and recording state,
+  and the guarded retry deployed successfully with public selection still off.
+- That hosted preview safety-stopped during catalog restoration, before any
+  programme history existed. It had encoded about 20 seconds of startup
+  silence. The publisher now starts its programme clock only when authorized
+  public audio first arrives, rather than charging catalog restoration against
+  an unused audio timeline. A regression covers a one-minute startup delay,
+  private-input exclusion, UTC corrections and the unchanged real-stall limit.
+  This startup fix still requires hosted revalidation; it does not prove that
+  later stalls cannot occur.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
