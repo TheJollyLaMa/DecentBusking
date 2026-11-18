@@ -172,7 +172,7 @@ test('publication failure identifies the exact stage and safe status without exp
   const broadcaster = createPublicBroadcast({ enabled: true,
     spawnImpl: (_command, args) => { playlist = args.at(-1); return encoder; },
     uploader: { baseUrl: 'https://edge.example', put: async () => {
-      throw Object.assign(new Error('private token and filesystem path'), { status: 503 });
+      throw Object.assign(new Error('private token and filesystem path'), { status: 403 });
     } },
     log: { error: (...args) => messages.push(args) },
   });
@@ -182,8 +182,73 @@ test('publication failure identifies the exact stage and safe status without exp
     await writeFile(playlist, '#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:2026-11-18T00:00:00Z\nsegment-000000000.ts\n');
     for (let count = 0; count < 100 && broadcaster.snapshot().status !== 'unavailable'; count++) await wait(10);
     assert.equal(broadcaster.snapshot().reason, 'EDGE_PUBLISH_FAILED');
-    assert.deepEqual(broadcaster.snapshot().reasonDetails, { stage: 'segment-upload', httpStatus: 503 });
+    assert.deepEqual(broadcaster.snapshot().reasonDetails, { stage: 'segment-upload', httpStatus: 403 });
     assert.ok(!JSON.stringify(messages).includes('private'));
+  } finally { await broadcaster.stop(); }
+});
+
+test('an edge timeout or 503 only defers publication, keeps staging bounded and recovers on the same stream', { timeout: 10000 }, async () => {
+  const { createPublicBroadcast } = await import('../discord-bot/public-broadcast.js');
+  const { readdir, rename, writeFile } = require('node:fs/promises');
+  const { dirname, join } = require('node:path');
+  const encoder = new EventEmitter(), errors = [], warnings = [], puts = [];
+  encoder.stdin = new PassThrough();
+  encoder.kill = () => { encoder.emit('close'); return true; };
+  let playlist, mode = 'down';
+  const attempts = [];
+  const broadcaster = createPublicBroadcast({ enabled: true,
+    spawnImpl: (_command, args) => { playlist = args.at(-1); return encoder; },
+    uploader: { baseUrl: 'https://edge.example', put: async key => {
+      const name = key.split('/')[1];
+      attempts.push(name);
+      if (mode === 'down') throw Object.assign(new Error('private storage detail'), { status: 503 });
+      if (mode === 'slow-playlist' && name === 'index.m3u8') {
+        throw Object.assign(new Error('slow edge'), { name: 'TimeoutError' });
+      }
+      puts.push(name);
+    } },
+    log: { error: (...args) => errors.push(args), warn: (...args) => warnings.push(args) },
+  });
+  const segments = count => Array.from({ length: count }, (_, i) => `segment-${String(i).padStart(9, '0')}.ts`);
+  const publishPlaylist = async names => {
+    for (const name of names) await writeFile(join(dirname(playlist), name), 'audio');
+    await writeFile(`${playlist}.next`, `#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:2026-11-18T00:00:00Z\n${names.join('\n')}\n`);
+    await rename(`${playlist}.next`, playlist);
+  };
+  const until = async (condition, message) => {
+    for (let count = 0; count < 300 && !condition(); count++) await wait(10);
+    assert.ok(condition(), message);
+  };
+  try {
+    await broadcaster.start();
+    await publishPlaylist(segments(1));
+    await until(() => attempts.length >= 2, 'publication must keep retrying while the edge is down');
+    assert.deepEqual(broadcaster.snapshot().publishIssue, { stage: 'segment-upload', httpStatus: 503 });
+    assert.notEqual(broadcaster.snapshot().status, 'unavailable');
+
+    // Twenty segments written during the outage: only the live window and a short tail stay on disk.
+    const all = segments(20);
+    for (const name of all.slice(0, 12)) await writeFile(join(dirname(playlist), name), 'audio');
+    await publishPlaylist(all.slice(12));
+    await until(() => attempts.includes('segment-000000012.ts'), 'the newer playlist must be retried');
+    const staged = (await readdir(dirname(playlist))).filter(name => name.startsWith('segment-')).sort();
+    assert.equal(staged[0], 'segment-000000004.ts');
+
+    mode = 'slow-playlist';
+    await until(() => broadcaster.snapshot().publishIssue?.stage === 'playlist-upload', 'a playlist timeout must defer');
+    assert.deepEqual(broadcaster.snapshot().publishIssue, { stage: 'playlist-upload', errorName: 'TimeoutError' });
+    assert.deepEqual(puts, all.slice(12));
+    assert.notEqual(broadcaster.snapshot().status, 'unavailable');
+
+    mode = 'up';
+    await until(() => puts.includes('index.m3u8'), 'publication must resume on the same stream once the edge recovers');
+    assert.deepEqual(puts, [...all.slice(12), 'index.m3u8']);
+    assert.equal(broadcaster.snapshot().publishIssue, undefined);
+    assert.equal(broadcaster.snapshot().reason, null);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(warnings.map(([code]) => code),
+      ['[public-broadcast] EDGE_PUBLISH_DEFERRED', '[public-broadcast] EDGE_PUBLISH_RECOVERED']);
+    assert.ok(!JSON.stringify(warnings).includes('private'));
   } finally { await broadcaster.stop(); }
 });
 

@@ -62,6 +62,9 @@ export function broadcastProgram(track, at) {
   };
 }
 
+const isTransientEdgeError = error => error instanceof TypeError ||
+  ['AbortError', 'TimeoutError'].includes(error?.name) || [408, 500, 502, 503, 504].includes(error?.status);
+
 export function createBroadcastUploader({ baseUrl, token, fetchImpl = fetch, now = Date.now, log = console }) {
   const base = new URL(baseUrl);
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash ||
@@ -87,9 +90,7 @@ export function createBroadcastUploader({ baseUrl, token, fetchImpl = fetch, now
           if (rejection) throw rejection;
           return;
         } catch (error) {
-          const transient = error instanceof TypeError || ['AbortError', 'TimeoutError'].includes(error?.name) ||
-            [408, 500, 502, 503, 504].includes(error?.status);
-          if (!transient || attempt === 2 || deadline.aborted) throw error;
+          if (!isTransientEdgeError(error) || attempt === 2 || deadline.aborted) throw error;
           log.warn('[public-broadcast] EDGE_UPLOAD_RETRY', { attempt: attempt + 1,
             ...([408, 500, 502, 503, 504].includes(error?.status) ? { httpStatus: error.status } : {}) });
           await wait(250 * (attempt + 1), undefined, { signal: deadline });
@@ -111,6 +112,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
   let firstInputAt = null;
   let readPublicState, statePublishedAt = 0, stateAttemptedAt = 0, lastInputAt = 0;
   let stateTask = null, stateIssue = null, stateIssueLoggedAt = -Infinity;
+  let publishIssue = null, publishIssueLoggedAt = -Infinity;
   let policy = null, previousPlaylist = '', inputBytes = 0, uploadBytes = 0;
   const runId = randomBytes(16).toString('hex'), queue = [], history = [], uploaded = new Set();
   const safeDetails = (stage, error) => ({ stage,
@@ -207,6 +209,14 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
         timelineOffsetMs = firstAt - startedAt;
         for (const program of history) program.at += timelineOffsetMs;
       }
+      // Local staging stays bounded even while the edge is unreachable; the edge enforces expiry after a crash.
+      publicationStage = 'cleanup';
+      const first = Number(names[0].match(/\d+/)[0]);
+      for (const name of await readdir(directory)) {
+        if (/^segment-\d{9}\.ts$/.test(name) && Number(name.match(/\d+/)[0]) < first - 8) {
+          await rm(join(directory, name)); uploaded.delete(name);
+        }
+      }
       for (const name of names) {
         if (uploaded.has(name)) continue;
         publicationStage = 'segment-read';
@@ -220,17 +230,18 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
       await uploader.put(`${runId}/index.m3u8`, Buffer.from(text), 'application/vnd.apple.mpegurl');
       uploadBytes += Buffer.byteLength(text);
       previousPlaylist = text; publishedAt = now();
+      if (publishIssue) log.warn?.('[public-broadcast] EDGE_PUBLISH_RECOVERED');
+      publishIssue = null;
       scheduleState();
-      // Local staging is bounded too; the edge enforces expiry even after a crash.
-      publicationStage = 'cleanup';
-      const first = Number(names[0].match(/\d+/)[0]);
-      for (const name of await readdir(directory)) {
-        if (/^segment-\d{9}\.ts$/.test(name) && Number(name.match(/\d+/)[0]) < first - 8) {
-          await rm(join(directory, name)); uploaded.delete(name);
-        }
-      }
     } catch (error) {
-      fail('EDGE_PUBLISH_FAILED', safeDetails(publicationStage, error));
+      // A slow or briefly unavailable edge only delays publication; the next tick retries and status shows buffering.
+      if (['segment-upload', 'playlist-upload'].includes(publicationStage) && isTransientEdgeError(error)) {
+        publishIssue = safeDetails(publicationStage, error);
+        if (now() - publishIssueLoggedAt >= 60000) {
+          publishIssueLoggedAt = now();
+          log.warn?.('[public-broadcast] EDGE_PUBLISH_DEFERRED', publishIssue);
+        }
+      } else fail('EDGE_PUBLISH_FAILED', safeDetails(publicationStage, error));
     }
     finally { publishing = false; }
   }
@@ -287,6 +298,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
         : history.length && publishedAt && now() - publishedAt < 12000 && (!readPublicState || statePublishedAt && now() - statePublishedAt < 12000) &&
           now() - startedAt >= 20000 ? 'ready' : 'buffering',
       reason: failure, ...(failureDetails ? { reasonDetails: failureDetails } : {}), ...(stateIssue ? { stateIssue } : {}),
+      ...(publishIssue ? { publishIssue } : {}),
       url: `${uploader.baseUrl}/hls/${runId}/index.m3u8`,
       ...(readPublicState ? { stateUrl: `${uploader.baseUrl}/hls/${runId}/state.json` } : {}),
       delaySeconds: { min: 10, max: 20 }, publishedAt,
