@@ -109,9 +109,13 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
   let publicationStage = 'idle';
   let timelineOffsetMs = null;
   let firstInputAt = null;
-  let readPublicState, statePublishedAt = 0, lastInputAt = 0;
+  let readPublicState, statePublishedAt = 0, stateAttemptedAt = 0, lastInputAt = 0;
+  let stateTask = null, stateIssue = null, stateIssueLoggedAt = -Infinity;
   let policy = null, previousPlaylist = '', inputBytes = 0, uploadBytes = 0;
   const runId = randomBytes(16).toString('hex'), queue = [], history = [], uploaded = new Set();
+  const safeDetails = (stage, error) => ({ stage,
+    ...(Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? { httpStatus: error.status } : {}),
+    ...(['AbortError', 'TimeoutError'].includes(error?.name) ? { errorName: error.name } : {}) });
   const fail = (code, details) => {
     if (failure || stopping) return;
     failure = code;
@@ -158,19 +162,33 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     encoder.stdin.write(output);
     inputBytes += output.length; emitted++;
   }
+  // Programme metadata is best-effort: a slow or failed state read must never silence or delay the audio.
   async function publishState() {
-    if (!readPublicState || now() - statePublishedAt < 2000) return;
-    let deadline;
-    publicationStage = 'state-read';
-    const state = await Promise.race([Promise.resolve().then(readPublicState), new Promise((_, reject) => {
-      deadline = setTimeout(() => reject(new Error('Public radio state deadline exceeded')), 8000);
-    })]).finally(() => clearTimeout(deadline));
-    publicationStage = 'state-size';
-    const bytes = Buffer.from(JSON.stringify(state));
-    if (bytes.length > 65536) throw new Error('Public radio state exceeds broadcast size limit');
-    publicationStage = 'state-upload';
-    await uploader.put(`${runId}/state.json`, bytes, 'application/json');
-    statePublishedAt = now(); uploadBytes += bytes.length;
+    let deadline, stage = 'state-read';
+    try {
+      const state = await Promise.race([Promise.resolve().then(readPublicState), new Promise((_, reject) => {
+        deadline = setTimeout(() => reject(new Error('Public radio state deadline exceeded')), 8000);
+      })]).finally(() => clearTimeout(deadline));
+      stage = 'state-size';
+      const bytes = Buffer.from(JSON.stringify(state));
+      if (bytes.length > 65536) throw new Error('Public radio state exceeds broadcast size limit');
+      stage = 'state-upload';
+      await uploader.put(`${runId}/state.json`, bytes, 'application/json');
+      statePublishedAt = now(); uploadBytes += bytes.length;
+      if (stateIssue) log.warn?.('[public-broadcast] STATE_PUBLISH_RECOVERED');
+      stateIssue = null;
+    } catch (error) {
+      stateIssue = safeDetails(stage, error);
+      if (now() - stateIssueLoggedAt >= 60000) {
+        stateIssueLoggedAt = now();
+        log.warn?.('[public-broadcast] STATE_PUBLISH_DEFERRED', stateIssue);
+      }
+    }
+  }
+  function scheduleState() {
+    if (!readPublicState || stateTask || failure || stopping || now() - stateAttemptedAt < 2000) return;
+    stateAttemptedAt = now();
+    stateTask = publishState().finally(() => { stateTask = null; });
   }
   async function publish() {
     if (publishing || failure || stopping) return;
@@ -180,7 +198,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
       publicationStage = 'playlist-read';
       try { text = await readFile(join(directory, 'index.m3u8'), 'utf8'); }
       catch (error) { if (error.code === 'ENOENT') return; throw error; }
-      if (text === previousPlaylist) { await publishState(); return; }
+      if (text === previousPlaylist) { scheduleState(); return; }
       const names = parseBroadcastPlaylist(text);
       if (timelineOffsetMs === null) {
         if (names[0] !== 'segment-000000000.ts') throw new Error('Initial broadcast clock was not observed');
@@ -202,7 +220,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
       await uploader.put(`${runId}/index.m3u8`, Buffer.from(text), 'application/vnd.apple.mpegurl');
       uploadBytes += Buffer.byteLength(text);
       previousPlaylist = text; publishedAt = now();
-      await publishState();
+      scheduleState();
       // Local staging is bounded too; the edge enforces expiry even after a crash.
       publicationStage = 'cleanup';
       const first = Number(names[0].match(/\d+/)[0]);
@@ -212,9 +230,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
         }
       }
     } catch (error) {
-      fail('EDGE_PUBLISH_FAILED', { stage: publicationStage,
-        ...(Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? { httpStatus: error.status } : {}),
-        ...(['AbortError', 'TimeoutError'].includes(error?.name) ? { errorName: error.name } : {}) });
+      fail('EDGE_PUBLISH_FAILED', safeDetails(publicationStage, error));
     }
     finally { publishing = false; }
   }
@@ -270,7 +286,8 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
       return { enabled: true, transport: 'hls', status: failure ? 'unavailable'
         : history.length && publishedAt && now() - publishedAt < 12000 && (!readPublicState || statePublishedAt && now() - statePublishedAt < 12000) &&
           now() - startedAt >= 20000 ? 'ready' : 'buffering',
-      reason: failure, ...(failureDetails ? { reasonDetails: failureDetails } : {}), url: `${uploader.baseUrl}/hls/${runId}/index.m3u8`,
+      reason: failure, ...(failureDetails ? { reasonDetails: failureDetails } : {}), ...(stateIssue ? { stateIssue } : {}),
+      url: `${uploader.baseUrl}/hls/${runId}/index.m3u8`,
       ...(readPublicState ? { stateUrl: `${uploader.baseUrl}/hls/${runId}/state.json` } : {}),
       delaySeconds: { min: 10, max: 20 }, publishedAt,
       programHistory: history.slice(Math.max(0, cutoff)),
@@ -286,7 +303,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
           encoder.once('close', () => { clearTimeout(killTimer); resolve(); });
         });
       }
-      while (publishing) await new Promise(resolve => setTimeout(resolve, 20));
+      while (publishing || stateTask) await new Promise(resolve => setTimeout(resolve, 20));
       decoder?.delete();
       if (directory) await rm(directory, { recursive: true, force: true });
     },

@@ -1820,12 +1820,22 @@ async function main() {
       console.warn(`[promotions] Disabled until public Pinata checkpoints and the persistent journal are ready: ${error.message}`);
     }
   }
+  // Optional listing lookups degrade to their existing unavailable states rather than delaying programme metadata.
+  const boundedStateRead = (read, label) => {
+    let timer;
+    return Promise.race([Promise.resolve().then(read), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after 5000ms`)), 5000);
+    })]).finally(() => clearTimeout(timer));
+  };
   const readPublicRadioState = createBroadcastStateReader(async () => {
     const jukeLoopSession = getActiveJukeLoopSession();
+    const liveAudioState = boundedStateRead(() => liveAudio.current(), 'Live room state').catch(() => ({ configured: false,
+      phase: 'unavailable', status: 'OFF-AIR', performer: null, bookingVerification: { fresh: false, verifiedAt: null },
+      reason: 'Live room control state is unavailable', policy: config.liveAudioPolicy || null }));
     let paidQueue = null;
     if (readDevertQueue) {
       try {
-        paidQueue = await readDevertQueue();
+        paidQueue = await boundedStateRead(readDevertQueue, 'Paid advert queue check');
       } catch (error) {
         console.warn('[devert-queue] Radio queue status unavailable:', error.message);
         paidQueue = { unavailable: true, reason: 'Paid advert queue could not be verified' };
@@ -1843,9 +1853,7 @@ async function main() {
     }
     return {
       publicBroadcast: { ...publicBroadcast.snapshot(), selected: broadcastMode === 'public' },
-      liveAudio: await liveAudio.current().catch(() => ({ configured: false, phase: 'unavailable', status: 'OFF-AIR',
-        performer: null, bookingVerification: { fresh: false, verifiedAt: null },
-        reason: 'Live room control state is unavailable', policy: config.liveAudioPolicy || null })),
+      liveAudio: await liveAudioState,
       ...buildRadioState({
         nowPlaying,
         playback: jukeLoopSession?.getPlaybackStatus() || { status: 'offline', ready: false, reason: discordOfflineReason },

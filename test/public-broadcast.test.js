@@ -187,6 +187,58 @@ test('publication failure identifies the exact stage and safe status without exp
   } finally { await broadcaster.stop(); }
 });
 
+test('failed or stalled programme state never stops or delays audio publication, and recovers', async () => {
+  const { createPublicBroadcast } = await import('../discord-bot/public-broadcast.js');
+  const { rename, writeFile } = require('node:fs/promises');
+  const { dirname, join } = require('node:path');
+  const encoder = new EventEmitter(), errors = [], warnings = [], puts = [];
+  encoder.stdin = new PassThrough();
+  encoder.kill = () => { encoder.emit('close'); return true; };
+  let playlist, wall = 1_000_000, reads = 0, release;
+  const broadcaster = createPublicBroadcast({ enabled: true, now: () => wall,
+    spawnImpl: (_command, args) => { playlist = args.at(-1); return encoder; },
+    uploader: { baseUrl: 'https://edge.example', put: async key => { puts.push(key.split('/')[1]); } },
+    log: { error: (...args) => errors.push(args), warn: (...args) => warnings.push(args) },
+  });
+  broadcaster.setStateReader(() => {
+    reads++;
+    if (reads === 1) throw new Error('Paid advert RPC unavailable');
+    return new Promise(resolve => { release = resolve; });
+  });
+  const publishPlaylist = async segments => {
+    for (const name of segments) await writeFile(join(dirname(playlist), name), 'audio');
+    await writeFile(`${playlist}.next`, `#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:2026-11-18T00:00:00Z\n${segments.join('\n')}\n`);
+    await rename(`${playlist}.next`, playlist);
+  };
+  const until = async (condition, message) => {
+    for (let count = 0; count < 150 && !condition(); count++) await wait(10);
+    assert.ok(condition(), message);
+  };
+  try {
+    await broadcaster.start();
+    await publishPlaylist(['segment-000000000.ts']);
+    await until(() => broadcaster.snapshot().stateIssue, 'state failure must be recorded');
+    assert.deepEqual(broadcaster.snapshot().stateIssue, { stage: 'state-read' });
+    assert.notEqual(broadcaster.snapshot().status, 'unavailable');
+
+    wall += 2001;
+    await until(() => reads === 2, 'state publication must retry after a failure');
+    await publishPlaylist(['segment-000000000.ts', 'segment-000000001.ts']);
+    await until(() => puts.filter(name => name === 'index.m3u8').length === 2,
+      'a stalled state read must not hold back the next segment and playlist');
+    assert.ok(puts.includes('segment-000000001.ts'));
+    assert.ok(!puts.includes('state.json'));
+
+    release({ publicBroadcast: broadcaster.snapshot() });
+    await until(() => puts.includes('state.json'), 'state publication must resume once the read recovers');
+    assert.equal(broadcaster.snapshot().stateIssue, undefined);
+    assert.notEqual(broadcaster.snapshot().status, 'unavailable');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(warnings.map(([code]) => code),
+      ['[public-broadcast] STATE_PUBLISH_DEFERRED', '[public-broadcast] STATE_PUBLISH_RECOVERED']);
+  } finally { await broadcaster.stop(); }
+});
+
 test('native HLS listener never joins LiveKit and follows programme timestamps across an ended live set', async () => {
   const { createPublicBroadcastListener, getAudibleBroadcast } = await import('../js/public-broadcast-client.mjs');
   let time = 50000, paused = true;
