@@ -357,12 +357,13 @@ test('failed or late HLS attachment cannot take over an archive, and never silen
 
 test('native-capable Chrome without a programme clock uses Hls.js for exact audible attribution', async () => {
   const { createPublicBroadcastListener, getAudibleBroadcast } = await import('../js/public-broadcast-client.mjs');
-  let attached = 0;
+  let attached = 0, config;
   const programs = [];
   class Hls {
     static isSupported() { return true; }
     static Events = { ERROR: 'error' };
     playingDate = new Date(26000);
+    constructor(options) { config = options; }
     on() {}
     loadSource() {}
     attachMedia() { attached++; }
@@ -378,6 +379,10 @@ test('native-capable Chrome without a programme clock uses Hls.js for exact audi
   await wait(5);
   client.update(state);
   assert.equal(attached, 1);
+  // Listeners who fall behind must rejoin live inside the 30 s delay budget (4 s segments, ~2–6 s edge lag).
+  assert.ok(config.liveMaxLatencyDurationCount > config.liveSyncDurationCount);
+  assert.ok(config.liveMaxLatencyDurationCount * 4 <= 24);
+  assert.equal(config.maxLiveSyncPlaybackRate, 1);
   assert.equal(programs.at(-1).playId, 'live:a');
   assert.equal(getAudibleBroadcast(40000).at, 26000);
   client.stop();

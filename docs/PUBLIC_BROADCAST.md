@@ -163,7 +163,11 @@ The client uses native HLS only with a usable programme clock (`getStartDate`),
 otherwise the self-hosted pinned Hls.js bundle. Native playback capability
 alone is insufficient to identify the audible performer. The Hls.js initial
 sync target is three segments; playback stays at normal speed rather than
-fast-forwarding a buffered song ending. AAC decoding is required. An embedded
+fast-forwarding a buffered song ending. A listener more than six segments
+(about 24 s) behind the playlist edge, roughly 26-30 s by the clock, jumps back
+to the sync target instead of drifting further. Before 18 Nov the limit was
+unbounded, so every stall added permanent delay (owner choice: jump, not speed
+up). AAC decoding is required. An embedded
 browser without AAC is not evidence that Safari or full Chrome decoded the
 broadcast.
 
@@ -422,6 +426,15 @@ Development evidence so far:
   with or without listeners. A one-second freeze therefore eventually stops a
   zero-tolerance encoder. The owner chose to both skip late audio (above) and
   profile the remaining freezes on the hosted preview.
+- Deployed `45979fc`, 18 Nov 19:30 UTC: the 200/600 run lasted the full
+  600 s without a stop or late-audio skip (startup p95 2.3 s, metadata p95
+  393 ms, CPU max 43.6%, working set max 67.4%, event-loop p99 99 ms). It
+  failed on delay p95 46.9 s and two Cloudflare 503s on `state.json` in one
+  second. The server's newest segment was about 6 s old. Delay grew with run
+  length (17-23 s in short runs, 39-47 s in every 10-minute run) because the
+  player never rejoined live; it now jumps back (above). The CPU profile's
+  largest application function was `periodOf` for radio-history advert
+  tallies, which the site header polls every 15 s per open tab.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
