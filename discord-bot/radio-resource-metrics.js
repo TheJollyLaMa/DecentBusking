@@ -59,17 +59,30 @@ function createRadioCpuDiagnostics(log) {
   };
 }
 
-export async function readContainerResources() {
-  if (process.platform !== 'linux') return { available: false, reason: 'Container quotas are not available on this platform' };
+export async function readContainerResources({ platform = process.platform, read = readFile } = {}) {
+  if (platform !== 'linux') return { available: false, reason: 'Container quotas are not available on this platform' };
   try {
-    const [cpu, quota, memory, limit] = await Promise.all(['cpu.stat', 'cpu.max', 'memory.current', 'memory.max']
-      .map(name => readFile(`/sys/fs/cgroup/${name}`, 'utf8')));
+    const [cpu, quota, memory, limit, stat] = await Promise.all([
+      ...['cpu.stat', 'cpu.max', 'memory.current', 'memory.max'].map(name => read(`/sys/fs/cgroup/${name}`, 'utf8')),
+      read('/sys/fs/cgroup/memory.stat', 'utf8').catch(error => {
+        if (!['ENOENT', 'ENOTDIR'].includes(error.code)) console.warn('[radio-resources] MEMORY_BREAKDOWN_UNREADABLE');
+        return null;
+      }),
+    ]);
     const [allocation, period] = quota.trim().split(/\s+/);
     const usage = cpu.match(/^usage_usec (\d+)$/m);
     if (!usage || !Number.isFinite(Number(memory)) || Number(memory) < 0 ||
         allocation !== 'max' && (!(Number(allocation) > 0) || !(Number(period) > 0)) ||
         limit.trim() !== 'max' && !(Number(limit) > 0)) throw new Error('Invalid container resource counters');
-    return { available: true, cpuUsageUs: Number(usage[1]),
+    let memoryBreakdown = { available: false };
+    if (stat !== null) {
+      const counters = Object.fromEntries([...stat.matchAll(/^([a-z_]+) (\d+)$/gm)].map(([, key, value]) => [key, Number(value)]));
+      if (['anon', 'file', 'inactive_file'].every(key => Number.isSafeInteger(counters[key]) && counters[key] >= 0)) {
+        memoryBreakdown = { available: true, anonymousBytes: counters.anon, fileBytes: counters.file,
+          inactiveFileBytes: counters.inactive_file };
+      } else console.warn('[radio-resources] MEMORY_BREAKDOWN_UNREADABLE');
+    }
+    return { available: true, cpuUsageUs: Number(usage[1]), memoryBreakdown,
       cpuLimitCores: allocation === 'max' ? null : Number(allocation) / Number(period),
       memoryBytes: Number(memory), memoryLimitBytes: limit.trim() === 'max' ? null : Number(limit) };
   } catch (error) {
