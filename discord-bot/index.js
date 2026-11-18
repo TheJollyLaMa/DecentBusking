@@ -1548,7 +1548,7 @@ async function main() {
         uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
         name: 'decentbusking-dmtv-radio.json', tags: { app: 'decentbusking', kind: 'dmtv-radio', schema: '1' },
         serialize: value => value, deserialize: value => value, restoreLatestOnly: true, requireLocalMirror: true,
-        beforeUpload: bytes => checkpointMirror.mirror(bytes) }),
+        beforeUpload: bytes => checkpointMirror.mirror(bytes, { required: true }) }),
       findTrack: async nftId => {
         if (!playlistReady || !_nftCatalog) return null;
         const nft = _nftCatalog.find(item => nftIdentity(item) === nftId);

@@ -98,6 +98,9 @@ for (const snapshot of [
   { schemaVersion: 1, revision: 1, bookings: [{ id: 'friday-live', wallet: `0x${'a'.repeat(40)}` }], escrowScannedThrough: 100 },
   { schemaVersion: 1, occurrences: [] },
   { schemaVersion: 1, deliveries: {}, requests: {} },
+  { version: 1, requests: [{ kind: 'dmtv', requestId: 'dmtv:00000000-0000-4000-8000-000000000001',
+    state: 'reserved', creatorTx: `0x${'1'.repeat(64)}`, fundTx: `0x${'2'.repeat(64)}`,
+    track: { creator: `0x${'3'.repeat(40)}`, nftId: 'video-nft', ipfsCid: 'test-cid' } }] },
   { schemaVersion: 1, instanceId: 'friday', week: 'NY-2026-10-23', startAt: '2026-10-23T23:00:00Z',
     endAt: '2026-10-24T00:00:00Z', capturedAt: '2026-10-23T23:00:00Z', cursor: 0, tracks: [], skipped: [], lastStarted: null },
 ]) {
@@ -131,6 +134,7 @@ test('Mac client rejects unsupported or invalid playback journals before importi
   const { createLocalCheckpointMirrorClient } = await import('../discord-bot/checkpoint-mirror-client.js');
   const { checkpointContentCid } = await import('../discord-bot/checkpoint-mirror.js');
   for (const snapshot of [{ schemaVersion: 2, records: [] }, { schemaVersion: 1, records: [{}] },
+    { version: 1, requests: [{ kind: 'dmtv', state: 'pending' }] },
     { schemaVersion: 1, records: [{ requestId: 'request', state: 'unknown' }] }, { schemaVersion: 1, other: [] },
     { schemaVersion: 2, nextBlock: -1, batches: [] },
     { schemaVersion: 2, nextBlock: 100, batches: [{}] },

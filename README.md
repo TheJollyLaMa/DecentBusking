@@ -100,6 +100,8 @@ only after testing the $2 payment and recovery in a staging site build.
 Before enabling `DMTV_RADIO_PAYMENTS_ENABLED`, provision a stable
 `DMTV_RADIO_CHECKOUT_SECRET`, configure Pinata and the checkpoint mirror, and
 exercise checkout, checkpoint restore, and mixed-source playback in staging.
+Update the connected checkpoint mirror client before enabling checkout so it
+can validate and pin the DMTv journal.
 Use staging-only Pinata and checkpoint-mirror storage; do not share the live
 journal. Keep wallet signing in the wallet, not in the worker.
 Run only one active worker against this checkpoint. Keep the checkout secret

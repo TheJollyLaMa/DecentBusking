@@ -8,6 +8,15 @@ import { dmtvRadioAuthorization } from '../js/dmtv-radio.mjs';
 const hashPattern = /^0x[0-9a-f]{64}$/i;
 const addressPattern = /^0x[0-9a-f]{40}$/i;
 const same = (a, b) => typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
+export function isDmtvRadioCheckpoint(snapshot) {
+  return snapshot?.version === 1 && Array.isArray(snapshot.requests) && snapshot.requests.every(record =>
+    record?.kind === 'dmtv' && /^dmtv:[a-f0-9-]{36}$/i.test(record.requestId) &&
+    ['pending', 'reserved', 'played'].includes(record.state) &&
+    hashPattern.test(record.creatorTx) && hashPattern.test(record.fundTx) &&
+    !same(record.creatorTx, record.fundTx) && addressPattern.test(record.track?.creator) &&
+    typeof record.track.nftId === 'string' && !!record.track.nftId &&
+    typeof record.track.ipfsCid === 'string' && !!record.track.ipfsCid);
+}
 const fundId = id(DMTV_FUND_SLUG);
 const abi = new Interface([
   'event Transfer(address indexed from,address indexed to,uint256 value)',
@@ -47,7 +56,7 @@ export function createDmtvRadioQueue({ provider, store, secret, findTrack, enabl
   async function restore() {
     if (state) return;
     const saved = await store.restore();
-    if (saved != null && (saved.version !== 1 || !Array.isArray(saved.requests))) {
+    if (saved != null && !isDmtvRadioCheckpoint(saved)) {
       throw new Error('Invalid DMTv radio checkpoint.');
     }
     state = (saved?.requests || []).map(record => record.state === 'reserved'
