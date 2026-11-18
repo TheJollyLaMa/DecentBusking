@@ -388,6 +388,23 @@ Development evidence so far:
   timing, failure retry and Discord-enabled VertLoop playback are unchanged.
   These are local measurements and log correlation; hosted 200/600 under the
   amended rule must be repeated after deployment.
+- Deployed `58c7aaa`, 18 Nov 16:09 UTC: idle working set fell to 63-70%
+  (from about 73-81%). The 16:21 200/600 rerun decoded all 200 listeners
+  (startup p95 1.3 s, metadata p95 197 ms, delay p95 17.6 s, CPU max 33.4%,
+  working set max 70.6%, event-loop p99 48 ms, no errors), but it was
+  safety-stopped after 61 s because the publisher reported
+  `EDGE_PUBLISH_FAILED` at `playlist-upload` (`TimeoutError`). That short run
+  is not memory acceptance evidence. Logs show the same permanent stop without
+  listener load at 03:14 (no stage recorded) and 14:12 (`segment-upload`
+  timeout). Each time, public audio stayed unavailable until the next deploy.
+  Now, a segment or playlist upload that times out, fails at the network
+  level or receives 408/5xx from the edge only defers publication. The
+  snapshot reports `publishIssue`, status falls back to buffering after 12 s,
+  the next 500 ms tick retries on the same stream URL, and status returns to
+  ready once the edge accepts uploads. Local staging is trimmed before
+  uploading, so an outage cannot grow it. Authentication, validation, size and
+  encoder failures still fail closed, with no automatic restart. Hosted
+  200/600 must be repeated after deployment.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
@@ -423,6 +440,8 @@ regression; hosted validation remains a separate gate.
 The website-only advert clock adapts the existing `devert-loop.js`
 controller and its injected `createStream` seam; FFmpeg's own header read
 supplies the length because the deployed bundle has no `ffprobe`.
+Edge publish recovery adapts the `stateIssue` deferral from `02d5987` (#400)
+and reuses the uploader's existing transient-error classification.
 Receiving tests include actual FFmpeg AAC decode across advert/A/B/advert,
 wrong/private-room exclusion, delayed tip binding, zero-seat HLS admission,
 state coalescing/expiry, quota normalization and legacy-radio regressions.
