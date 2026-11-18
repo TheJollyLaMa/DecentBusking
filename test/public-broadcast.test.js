@@ -353,6 +353,26 @@ test('container headroom normalizes all container CPU and memory against their a
   metrics.stop();
 });
 
+test('container memory attribution never subtracts file cache from the frozen quota measurement', async () => {
+  const { readContainerResources } = await import('../discord-bot/radio-resource-metrics.js');
+  const counters = { 'cpu.stat': 'usage_usec 1000\n', 'cpu.max': '50000 100000\n',
+    'memory.current': '500000000\n', 'memory.max': '536870912\n',
+    'memory.stat': 'anon 280000000\nfile 200000000\ninactive_file 170000000\n' };
+  const read = async path => counters[path.split('/').at(-1)];
+  const resources = await readContainerResources({ platform: 'linux', read });
+  assert.equal(resources.memoryBytes, 500000000);
+  assert.equal(resources.memoryLimitBytes, 536870912);
+  assert.deepEqual(resources.memoryBreakdown, { available: true, anonymousBytes: 280000000,
+    fileBytes: 200000000, inactiveFileBytes: 170000000 });
+  const missing = await readContainerResources({ platform: 'linux', read: async path => {
+    if (path.endsWith('memory.stat')) throw Object.assign(new Error('Missing optional counter'), { code: 'ENOENT' });
+    return read(path);
+  } });
+  assert.equal(missing.available, true);
+  assert.equal(missing.memoryBytes, resources.memoryBytes);
+  assert.deepEqual(missing.memoryBreakdown, { available: false });
+});
+
 test('an encoder spawn failure stops explicitly and teardown does not hang', async () => {
   const { createPublicBroadcast } = await import('../discord-bot/public-broadcast.js');
   const process = new EventEmitter();

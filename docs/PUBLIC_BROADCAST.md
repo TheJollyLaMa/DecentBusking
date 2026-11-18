@@ -144,6 +144,10 @@ Direct/public modes do not start this diagnostic. Health reports the measured
 event-loop maximum alongside p99, since a rare multi-second pause can be hidden
 by an otherwise healthy percentile. Sampling is diagnostic overhead, not proof
 that a particular function caused a pause.
+Container memory also exposes anonymous, file and inactive-file counters from
+`memory.stat` when available. They attribute usage; the scored percentage still
+uses the original unadjusted `memory.current / memory.max`. Missing optional
+breakdown does not erase otherwise valid quota samples or turn them into passes.
 
 The client uses native HLS only with a usable programme clock (`getStartDate`),
 otherwise the self-hosted pinned Hls.js bundle. Native playback capability
@@ -302,6 +306,11 @@ Development evidence so far:
   an upload timeout versus a state-read or staging failure. The bounded PUT
   retries and safe stage diagnostics above require hosted revalidation; they
   do not retroactively classify that failure or establish readiness.
+- The next HTTP/2 control case was aborted before its scored observation
+  window: actual container memory was 91.6%, subsequently 94.0%, while Node
+  RSS was approximately 270 MiB. It provides no two-minute HTTP/2 comparison.
+  The new breakdown attributes that difference without assuming file cache,
+  redefining memory, relaxing the 75% cap or approving another instance/plan.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
