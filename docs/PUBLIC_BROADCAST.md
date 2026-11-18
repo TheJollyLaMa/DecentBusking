@@ -346,6 +346,19 @@ Development evidence so far:
   generated 8 MiB save now performs one full-state clone rather than two;
   that is not a measurement of hosted peak-memory reduction.
   These further changes still require guarded hosted validation.
+- Unattended, with no listener test running, deployed `5c9c5b2` stopped at
+  2026-11-18 06:53:25 UTC with `EDGE_PUBLISH_FAILED` at `state-read`. The
+  paid-advert chain lookup stalled (its queue selection timed out after 10 s
+  at 06:53:30). The programme-state read waited for that lookup without its own
+  limit, missed its 8-second deadline and permanently stopped audio
+  publication. Programme state is now best-effort and runs beside, not in
+  front of, segment and playlist uploads. A failed or stalled read is retried
+  and reported as `stateIssue`; it no longer stops or delays audio. The paid
+  advert queue and live-room lookups each fall back after 5 s to their
+  existing unavailable messages. A regression proves audio continues through
+  a failed then stalled state read and recovers. Segment/playlist upload
+  failure still fails closed, and the publisher still has no automatic
+  restart.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
