@@ -5,6 +5,55 @@ const { pathToFileURL } = require('node:url');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'ipfs-state.js')).href;
 
+test('checkpoint identity does not retain another serialized copy of a large snapshot', () => {
+  const { spawnSync } = require('node:child_process');
+  const result = spawnSync(process.execPath, ['--expose-gc', '--input-type=module', '-e', `
+    import { createPinataStateStore } from ${JSON.stringify(moduleUrl)};
+    await new Response('{}').json();
+    global.gc();
+    const before = process.memoryUsage().heapUsed;
+    const state = { text: 'x'.repeat(8 * 1024 * 1024) };
+    const store = createPinataStateStore({
+      pinataJwt: 'fixture', retainSnapshots: Infinity, serialize: value => value,
+      fetchImpl: async (_url, input = {}) => new Response(JSON.stringify(input.method === 'POST'
+        ? { data: { cid: 'memory-fixture' } } : { data: { files: [] } })),
+    });
+    await store.save(state);
+    await new Promise(resolve => setImmediate(resolve));
+    global.gc();
+    console.log(JSON.stringify({
+      retainedHeapDeltaBytes: process.memoryUsage().heapUsed - before,
+      inputBytes: state.text.length, uri: store.getLatestSnapshotUri(),
+    }));
+    store.close();
+  `], { encoding: 'utf8', timeout: 20_000 });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  const measured = JSON.parse(result.stdout);
+  assert.equal(measured.inputBytes, 8 * 1024 * 1024);
+  assert.equal(measured.uri, 'ipfs://memory-fixture');
+  assert.ok(measured.retainedHeapDeltaBytes < 21 * 1024 * 1024,
+    `Retained ${measured.retainedHeapDeltaBytes} bytes for an 8 MiB snapshot and its immutable copy`);
+});
+
+test('compact checkpoint identity coalesces equal values without conflating undefined and null', async () => {
+  const { createPinataStateStore } = await import(moduleUrl);
+  let uploads = 0;
+  const store = createPinataStateStore({
+    pinataJwt: 'fixture', retainSnapshots: Infinity, serialize: value => ({ value }),
+    fetchImpl: async (_url, input = {}) => new Response(JSON.stringify(input.method === 'POST'
+      ? { data: { cid: `snapshot-${++uploads}` } } : { data: { files: [] } })),
+  });
+  try {
+    for (const [value, expected] of [[undefined, 1], [undefined, 1], [null, 2], [null, 2],
+      [{ count: 1 }, 3], [{ count: 1 }, 3], [{ count: 2 }, 4]]) {
+      assert.equal(await store.save(value), `ipfs://snapshot-${expected}`);
+      assert.equal(uploads, expected);
+    }
+  } finally {
+    store.close();
+  }
+});
+
 test('paid journal storage requires local mirroring before publication and rejects CID mismatches', async () => {
   const { createPinataStateStore } = await import(moduleUrl);
   assert.throws(() => createPinataStateStore({ pinataJwt: 'test', requireLocalMirror: true }), /local mirror is required/);

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { CID } from 'multiformats/cid';
 import { checkpointContentCid } from './checkpoint-mirror.js';
-import { createWeeklyHistory, stateHistoryEvents, WEEKLY_HISTORY_POLICY } from './checkpoint-history.js';
+import { contentHash, createWeeklyHistory, stateHistoryEvents, WEEKLY_HISTORY_POLICY } from './checkpoint-history.js';
 
 const STATE_FILE_NAME = 'decentbusking-jukeloop-state.json';
 const STATE_KEYVALUES = {
@@ -300,10 +300,10 @@ export function createPinataStateStore({
           if (latestDay && Array.isArray(snapshot._checkpoint.events)) {
             dayEvents.set(latestDay, new Map(snapshot._checkpoint.events.map(event => [event.id, { event, revision: 0 }])));
           }
-          latestKey = requireLocalMirror ? '' : retentionDays ? JSON.stringify([latestValue, snapshot._checkpoint?.events || []]) :
-            JSON.stringify(latestValue);
+          latestKey = requireLocalMirror ? '' : retentionDays ? contentHash([latestValue, snapshot._checkpoint?.events || []]) :
+            contentHash({ value: latestValue });
           latestCapturedAt = Date.parse(latestSnapshotSavedAt) || -Infinity;
-          if (latestDay) savedDays.set(latestDay, { revision: 0, key: latestKey, uri: durableUri });
+          if (retentionDays && latestDay) savedDays.set(latestDay, { revision: 0, key: latestKey, uri: durableUri });
           if (retentionDays && latestDay !== checkpointDay(now())) schedule(latestValue);
           else armTimer();
           if (index > 0) log.warn(`[ipfs-state] Restored older checkpoint ${candidate.cid}; newer snapshot gateways were unavailable.`);
@@ -453,7 +453,8 @@ export function createPinataStateStore({
     if (retentionDays && previous && revision < previous.revision) return durableUri;
     if (retentionDays) addEvents(stateHistoryEvents(tags.kind, value, latestValue, new Date(capturedAt).toISOString()), capturedAt, revision);
     const events = [...(dayEvents.get(day)?.values() || [])].filter(entry => entry.revision <= revision).map(entry => entry.event);
-    const key = retentionDays ? JSON.stringify([value, events]) : JSON.stringify(value);
+    // Wrapping non-daily values keeps undefined distinct from null.
+    const key = retentionDays ? contentHash([value, events]) : contentHash({ value });
     const unchangedUri = retentionDays ? (previous?.key === key ? previous.uri : '') :
       (key === latestKey ? durableUri : '');
     if (unchangedUri) {
@@ -481,7 +482,7 @@ export function createPinataStateStore({
     const cid = await upload(bytes, name, retentionDays ? { ...tags, checkpointPolicy: DAILY_POLICY,
       checkpointDay: day, checkpointTimeZone: CHECKPOINT_TIME_ZONE } : tags, groupId);
     if (requireLocalMirror && mirroredCid !== cid) throw new Error('Local and shared checkpoint CIDs do not match');
-    savedDays.set(day, { revision, key, uri: `ipfs://${cid}` });
+    if (retentionDays) savedDays.set(day, { revision, key, uri: `ipfs://${cid}` });
     if (capturedAt > latestCapturedAt || capturedAt === latestCapturedAt && revision >= latestRevision) {
       latestSnapshotUri = `ipfs://${cid}`;
       latestSnapshotSavedAt = snapshot._checkpoint?.savedAt || snapshot.savedAt || new Date(capturedAt).toISOString();
