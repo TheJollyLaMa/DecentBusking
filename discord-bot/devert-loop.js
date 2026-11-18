@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
 import { AudioPlayerStatus, createAudioPlayer, createAudioResource, entersState,
   joinVoiceChannel, NoSubscriberBehavior, StreamType, VoiceConnectionStatus } from '@discordjs/voice';
@@ -158,11 +159,63 @@ export function createDevertLoopController({ player, playback, voiceChannel, tex
   };
 }
 
+const PCM_BYTES_PER_SECOND = 48_000 * 2 * 2;
+const CLOCK_CHUNK_BYTES = PCM_BYTES_PER_SECOND / 10;
+const websiteAdDurations = new Map();
+
+// Reads only the container header, so long video adverts are not downloaded just to learn their length.
+export function probeAdDurationSeconds(url, { spawnImpl = spawn, timeoutMs = 20_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let stderr = '';
+    const child = spawnImpl(FFMPEG_BIN, ['-nostdin', '-hide_banner', '-analyzeduration', '0', '-probesize', '65536', '-i', url],
+      { stdio: ['ignore', 'ignore', 'pipe'] });
+    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    timer.unref?.();
+    child.stderr.on('data', chunk => { if (stderr.length < 65_536) stderr += chunk; });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('close', () => {
+      clearTimeout(timer);
+      const match = stderr.match(/Duration: (\d+):(\d{2}):(\d{2}(?:\.\d+)?)/);
+      const seconds = match ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : 0;
+      if (seconds > 0) resolve(seconds);
+      else reject(new Error('Advert duration unavailable'));
+    });
+  });
+}
+
+// Website-only adverts have no server-side listener, so the loop needs a clock rather than decoded audio.
+export function createWebsiteAdClock(url, { probeDuration = probeAdDurationSeconds, durations = websiteAdDurations } = {}) {
+  let remainingBytes = null;
+  let loading = null;
+  const pushNext = () => {
+    if (remainingBytes <= 0) { stdout.push(null); return; }
+    const size = Math.min(CLOCK_CHUNK_BYTES, remainingBytes);
+    remainingBytes -= size;
+    stdout.push(Buffer.alloc(size));
+  };
+  const stdout = new Readable({
+    read() {
+      if (remainingBytes !== null) { pushNext(); return; }
+      loading ??= (durations.has(url) ? Promise.resolve(durations.get(url)) : probeDuration(url).then(seconds => {
+        durations.delete(url);
+        durations.set(url, seconds);
+        if (durations.size > 32) durations.delete(durations.keys().next().value);
+        return seconds;
+      })).then(seconds => {
+        if (stdout.destroyed) return;
+        remainingBytes = Math.round(Math.min(seconds, DEVERT_MAX_AD_SECONDS) * PCM_BYTES_PER_SECOND / 4) * 4;
+        pushNext();
+      }, error => stdout.destroy(error));
+    },
+  });
+  return { stdout, kill: () => stdout.destroy() };
+}
+
 export async function startDevertWebsiteLoopWorker({ playback, log = console }) {
   const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
   const controller = createDevertLoopController({
     player, playback, voiceChannel: { name: 'website only (Discord paused)' },
-    recordImpressions: false, log,
+    createStream: createWebsiteAdClock, recordImpressions: false, log,
   });
   await controller.start();
   log.log('[devert-loop] Website-only playback enabled; Discord login, voice, and announcements paused.');

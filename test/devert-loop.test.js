@@ -43,9 +43,11 @@ test('website loop advances without a voice subscriber and exposes no Discord co
   let controllerOptions;
   let started = false;
   const player = {};
+  const createWebsiteAdClock = () => {};
   const context = vm.createContext({
     NoSubscriberBehavior: { Play: 'play' },
     createAudioPlayer: options => { playerOptions = options; return player; },
+    createWebsiteAdClock,
     createDevertLoopController: options => {
       controllerOptions = options;
       return { start: async () => { started = true; }, getState: () => ({ ready: true, nowPlaying: null }) };
@@ -58,6 +60,7 @@ test('website loop advances without a voice subscriber and exposes no Discord co
   assert.equal(started, true);
   assert.equal(playerOptions.behaviors.noSubscriber, 'play');
   assert.equal(controllerOptions.player, player);
+  assert.equal(controllerOptions.createStream, createWebsiteAdClock);
   assert.equal(controllerOptions.textChannel, undefined);
   assert.equal(controllerOptions.recordImpressions, false);
   assert.equal(worker.getState().delivery, 'website');
@@ -105,6 +108,44 @@ test('website-only controller retains browser playback and votes without broadca
   assert.equal(controller.getState().ready, false);
   assert.equal(controller.getState().nowPlaying, null);
   assert.equal(timers.length, 1);
+});
+
+test('website advert clock reads the length once and plays capped silence instead of decoding the advert', async () => {
+  const { createWebsiteAdClock } = await import('../discord-bot/devert-loop.js');
+  const durations = new Map();
+  let probes = 0;
+  const probeDuration = async url => { probes++; return url.endsWith('long') ? 600 : 1.5; };
+  const drain = async stdout => {
+    let bytes = 0, silent = true;
+    for await (const chunk of stdout) { bytes += chunk.length; silent &&= chunk.every(byte => byte === 0); }
+    return { bytes, silent };
+  };
+  assert.deepEqual(await drain(createWebsiteAdClock('https://media.example/ad', { probeDuration, durations }).stdout),
+    { bytes: 1.5 * 192_000, silent: true });
+  await drain(createWebsiteAdClock('https://media.example/ad', { probeDuration, durations }).stdout);
+  assert.equal(probes, 1);
+  assert.equal((await drain(createWebsiteAdClock('https://media.example/long', { probeDuration, durations }).stdout)).bytes,
+    120 * 192_000);
+  const failed = createWebsiteAdClock('https://media.example/broken', {
+    probeDuration: async () => { throw new Error('Advert duration unavailable'); }, durations,
+  });
+  await assert.rejects(drain(failed.stdout), /Advert duration unavailable/);
+});
+
+test('advert length probe reads the container header without decoding output', async () => {
+  const { probeAdDurationSeconds } = await import('../discord-bot/devert-loop.js');
+  const spawnWith = stderrText => (command, args) => {
+    assert.equal(args.includes('pipe:1'), false);
+    const child = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {};
+    setImmediate(() => { child.stderr.emit('data', Buffer.from(stderrText)); child.emit('close', 1); });
+    return child;
+  };
+  assert.equal(await probeAdDurationSeconds('https://media.example/ad',
+    { spawnImpl: spawnWith('  Duration: 00:01:18.01, start: 0.000000, bitrate: 11974 kb/s\n') }), 78.01);
+  await assert.rejects(probeAdDurationSeconds('https://media.example/live', { spawnImpl: spawnWith('  Duration: N/A\n') }),
+    /Advert duration unavailable/);
 });
 
 test('stopping a loop during campaign lookup cannot start later media or announcements', async () => {
