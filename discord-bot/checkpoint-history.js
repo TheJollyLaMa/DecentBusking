@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
+import { setImmediate } from 'node:timers/promises';
+import { JSONParser } from '@streamparser/json';
 
 export const WEEKLY_HISTORY_POLICY = 'weekly-history-v1';
+const HISTORY_CHUNK_BYTES = 64 * 1024;
 
 export function historyWeek(day) {
   const monday = new Date(`${day}T00:00:00Z`);
@@ -31,10 +34,11 @@ function skipSpace(bytes, index) {
   while (index < bytes.length && [0x20, 0x09, 0x0a, 0x0d].includes(bytes[index])) index++;
   return index;
 }
-function valueEnd(bytes, start) {
+async function valueEnd(bytes, start) {
   let depth = 0;
   let inString = false;
   for (let index = start; index < bytes.length; index++) {
+    if (index > start && index % HISTORY_CHUNK_BYTES === 0) await setImmediate();
     const byte = bytes[index];
     if (inString) {
       if (byte === 0x5c) index++;
@@ -54,7 +58,7 @@ function valueEnd(bytes, start) {
   throw new Error('Malformed JSON');
 }
 // Walks one JSON object or array, yielding byte ranges so large values need not be parsed together.
-function* jsonItems(bytes, start, object) {
+async function* jsonItems(bytes, start, object) {
   const [open, close] = object ? [0x7b, 0x7d] : [0x5b, 0x5d];
   let index = skipSpace(bytes, start);
   if (bytes[index] !== open) throw new Error('Malformed JSON');
@@ -64,13 +68,13 @@ function* jsonItems(bytes, start, object) {
     let key;
     if (object) {
       if (bytes[index] !== 0x22) throw new Error('Malformed JSON');
-      const keyEnd = valueEnd(bytes, index);
+      const keyEnd = await valueEnd(bytes, index);
       key = JSON.parse(Buffer.from(bytes.buffer, bytes.byteOffset + index, keyEnd - index).toString());
       index = skipSpace(bytes, keyEnd);
       if (bytes[index] !== 0x3a) throw new Error('Malformed JSON');
       index = skipSpace(bytes, index + 1);
     }
-    const end = valueEnd(bytes, index);
+    const end = await valueEnd(bytes, index);
     yield { key, value: bytes.subarray(index, end) };
     index = skipSpace(bytes, end);
     if (bytes[index] === close) return index + 1;
@@ -78,10 +82,10 @@ function* jsonItems(bytes, start, object) {
     index = skipSpace(bytes, index + 1);
   }
 }
-function jsonMembers(bytes, start = 0, onEnd) {
+async function jsonMembers(bytes, start = 0, onEnd) {
   const members = new Map();
   const iterator = jsonItems(bytes, start, true);
-  for (let step = iterator.next(); ; step = iterator.next()) {
+  for (let step = await iterator.next(); ; step = await iterator.next()) {
     if (step.done) {
       onEnd?.(step.value);
       return members;
@@ -91,19 +95,32 @@ function jsonMembers(bytes, start = 0, onEnd) {
   }
 }
 const parseBytes = bytes => JSON.parse(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length).toString());
-function readArchive(bytes) {
-  const members = jsonMembers(bytes, 0, end => {
+async function checkpointMetadata(bytes) {
+  let checkpoint;
+  // Validate the entire document without rebuilding its cumulative state tree.
+  const parser = new JSONParser({ paths: ['$._checkpoint'], keepStack: false });
+  parser.onValue = ({ value }) => { checkpoint = value; };
+  for (let offset = 0; offset < bytes.length; offset += HISTORY_CHUNK_BYTES) {
+    parser.write(bytes.subarray(offset, offset + HISTORY_CHUNK_BYTES));
+    await setImmediate();
+  }
+  if (!parser.isEnded) parser.end();
+  return checkpoint;
+}
+async function readArchive(bytes) {
+  const members = await jsonMembers(bytes, 0, end => {
     if (skipSpace(bytes, end) !== bytes.length) throw new Error('Malformed JSON');
   });
   const header = {};
   for (const [key, value] of members) if (key !== 'days') header[key] = parseBytes(value);
   const days = members.get('days');
   if (!days || days[0] !== 0x5b) return { ...header, days: undefined };
-  header.days = [...jsonItems(days, 0, false)].map(({ value }) => {
+  header.days = [];
+  for await (const { value } of jsonItems(days, 0, false)) {
     const entry = {};
-    for (const [key, field] of jsonMembers(value)) entry[key] = key === 'snapshot' ? field : parseBytes(field);
-    return entry;
-  });
+    for (const [key, field] of await jsonMembers(value)) entry[key] = key === 'snapshot' ? field : parseBytes(field);
+    header.days.push(entry);
+  }
   return header;
 }
 function archiveChunks(header, days) {
@@ -137,7 +154,7 @@ export function createWeeklyHistory({ name, tags, timeZone, readBytes, readVerif
       for (const file of existing) {
         let previous;
         try {
-          previous = readArchive(await readBytes(file.cid));
+          previous = await readArchive(await readBytes(file.cid));
         } catch {
           throw new Error(`Invalid weekly history ${file.cid}; daily pruning stopped`);
         }
@@ -154,7 +171,7 @@ export function createWeeklyHistory({ name, tags, timeZone, readBytes, readVerif
         for (const entry of previous.days) {
           let checkpoint;
           try {
-            checkpoint = parseBytes(entry.snapshot)?._checkpoint;
+            checkpoint = await checkpointMetadata(entry.snapshot);
           } catch {}
           if (!weekDays(week).includes(entry.day) || !entry.snapshot ||
             checkpoint?.policy !== 'daily-v1' || checkpoint.day !== entry.day || checkpoint.timeZone !== timeZone ||
@@ -178,7 +195,7 @@ export function createWeeklyHistory({ name, tags, timeZone, readBytes, readVerif
         // Verified content addressing proves these are the exact canonical bytes uploaded, so they are archived
         // as-is; re-serializing a week of large parsed states is what exhausted worker memory.
         const bytes = await readVerifiedBytes(file.cid);
-        const checkpoint = JSON.parse(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString())._checkpoint;
+        const checkpoint = await checkpointMetadata(bytes);
         if (checkpoint?.day !== day || checkpoint?.policy !== 'daily-v1' ||
           checkpoint?.timeZone !== timeZone || !Number.isFinite(Date.parse(checkpoint.savedAt))) {
           throw new Error(`Invalid daily history ${file.cid}`);

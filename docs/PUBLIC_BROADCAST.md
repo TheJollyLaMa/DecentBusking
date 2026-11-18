@@ -259,6 +259,21 @@ Development evidence so far:
   its duration alone does not establish a blocking function. The unchanged
   one-second queue limit remains; parent CPU/max-delay diagnostics investigate
   the producer rather than silently dropping audio or raising the limit.
+- The diagnostic release then measured a 1.621 s parent event-loop maximum in
+  the minute of another actual PCM overflow, despite event-loop p99 91 ms.
+  Its CPU aggregate included weekly-history byte scanning and whole-day JSON
+  parsing, plus 2.023 s of garbage-collector samples; memory reached 82.2%.
+  Aggregates identify a measured blocking-work candidate, not an exact
+  sample-by-sample causal trace. Weekly history now yields every 64 KiB while
+  scanning raw archive ranges. A pinned MIT-licensed incremental JSON parser
+  validates the entire daily document but retains only `_checkpoint`, rather
+  than reconstructing each cumulative state just to read its metadata.
+  Archive bytes, hashes, coverage checks, readback verification and fail-closed
+  pruning remain unchanged. Large-history regressions require radio callbacks
+  to run during both daily validation and existing-archive scans; malformed
+  unselected state and later invalid duplicate metadata still fail. This
+  repair requires guarded hosted revalidation; neither memory nor continuity
+  is claimed passed from local tests.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container

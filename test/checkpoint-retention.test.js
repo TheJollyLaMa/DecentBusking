@@ -167,6 +167,59 @@ test('weekly history embeds all seven full daily states and events, readable thr
   assert.equal(savedArchive.days[6].snapshot.count, 7);
 });
 
+test('large daily and archived validation yield to radio work without changing archived bytes', async () => {
+  const { createWeeklyHistory } = await import('../discord-bot/checkpoint-history.js');
+  const { createHash } = require('node:crypto');
+  const checkpoint = { policy: 'daily-v1', day: '2026-10-12', timeZone: 'America/New_York',
+    savedAt: '2026-10-12T16:00:00Z' };
+  const bytes = Buffer.from(JSON.stringify({ records: Array.from({ length: 16000 }, (_, index) =>
+    ({ id: index, text: `${'x'.repeat(240)}\u00e9\\"{}[]` })), _checkpoint: checkpoint }));
+  let archived, uploads = 0, heartbeat = false;
+  const digest = value => createHash('sha256').update(value).digest('hex');
+  const options = { name, tags, timeZone: checkpoint.timeZone,
+    readVerifiedBytes: async () => bytes, readBytes: async () => archived,
+    readDigest: async () => digest(archived), list: async () => archived ? [{ cid: 'weekly' }] : [],
+    upload: async (_name, chunks) => {
+      assert.equal(heartbeat, true, 'daily validation must not monopolize the radio event loop');
+      uploads++;
+      archived = Buffer.concat(chunks);
+      return 'weekly';
+    },
+    remove: async () => assert.fail('The unchanged source/archive must not be deleted'),
+  };
+  const files = [{ cid: 'daily', keyvalues: { checkpointDay: checkpoint.day } }];
+  setImmediate(() => { heartbeat = true; });
+  await createWeeklyHistory(options)(files, '2026-10-20');
+  const entry = JSON.parse(archived).days[0];
+  assert.equal(entry.sha256, digest(bytes));
+  assert.deepEqual(Buffer.from(JSON.stringify(entry.snapshot)), bytes);
+  heartbeat = false;
+  setImmediate(() => { heartbeat = true; });
+  await createWeeklyHistory(options)(files, '2026-10-20');
+  assert.equal(heartbeat, true, 'existing archive scans must also yield to radio work');
+  assert.equal(uploads, 1, 'validation alone must not rewrite a byte-identical archive');
+});
+
+test('incremental history validation still rejects malformed unselected state and later invalid metadata', async () => {
+  const { createWeeklyHistory } = await import('../discord-bot/checkpoint-history.js');
+  const checkpoint = JSON.stringify({ policy: 'daily-v1', day: '2026-10-12',
+    timeZone: 'America/New_York', savedAt: '2026-10-12T16:00:00Z' });
+  for (const raw of [
+    `{"records":[invalid],"_checkpoint":${checkpoint}}`,
+    `{"records":[1,],"_checkpoint":${checkpoint}}`,
+    `{"_checkpoint":${checkpoint}} trailing`,
+    `{"_checkpoint":${checkpoint},"_checkpoint":{}}`,
+    `{"_checkpoint":${checkpoint},"_checkpoint":null}`,
+  ]) {
+    const archive = createWeeklyHistory({ name, tags, timeZone: 'America/New_York',
+      list: async () => [], readVerifiedBytes: async () => Buffer.from(raw),
+      upload: async () => assert.fail('Invalid input must never authorize an archive upload'),
+      remove: async () => assert.fail('Invalid input must never authorize pruning'),
+    });
+    await assert.rejects(archive([{ cid: 'daily', keyvalues: { checkpointDay: '2026-10-12' } }], '2026-10-20'));
+  }
+});
+
 test('new weeks are partial when observations were unavailable, never invented from a cumulative total', async t => {
   const { store, time, api } = await setup(t, '2026-10-17T16:00:00Z', { archiveGroupId: 'archive' });
   await store.save({ count: 1 });
