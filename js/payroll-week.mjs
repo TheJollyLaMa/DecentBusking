@@ -19,8 +19,23 @@ function midnight(civil) {
   throw new Error('Could not resolve New York payroll midnight');
 }
 
+const periodsByKey = new Map();
+const weeksByUtcHour = new Map();
+function remember(cache, key, compute) {
+  if (!cache.has(key)) {
+    const value = compute();
+    if (cache.size >= 4096) cache.clear();
+    cache.set(key, value);
+  }
+  return cache.get(key);
+}
+
 export function payrollPeriodFromKey(key) {
   if (!/^NY-\d{4}-\d{2}-\d{2}$/.test(key || '')) throw new Error('Invalid New York payroll week');
+  return { ...remember(periodsByKey, key, () => computePeriodFromKey(key)) };
+}
+
+function computePeriodFromKey(key) {
   const date = new Date(`${key.slice(3)}T00:00:00Z`);
   if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== key.slice(3) || date.getUTCDay() !== 1) throw new Error('Payroll weeks must start on a valid Monday');
   const end = new Date(date); end.setUTCDate(end.getUTCDate() + 7);
@@ -37,10 +52,14 @@ export function weekNumberFromKey(key) {
 }
 
 export function currentPayrollPeriod(now = Date.now()) {
-  const local = parts(Number(now));
-  const monday = new Date(Date.UTC(local.year, local.month - 1, local.day));
-  monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7);
-  return payrollPeriodFromKey(`NY-${monday.toISOString().slice(0, 10)}`);
+  // New York offsets are whole hours, so every instant in one UTC hour shares a payroll week.
+  const week = remember(weeksByUtcHour, Math.floor(Number(now) / 3600000), () => {
+    const local = parts(Number(now));
+    const monday = new Date(Date.UTC(local.year, local.month - 1, local.day));
+    monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7);
+    return `NY-${monday.toISOString().slice(0, 10)}`;
+  });
+  return payrollPeriodFromKey(week);
 }
 
 export function payrollPeriods(count = 12, now = Date.now()) {

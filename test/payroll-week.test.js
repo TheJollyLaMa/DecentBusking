@@ -23,6 +23,35 @@ test('New York payroll accounts for short and long DST weeks and year rollover',
   assert.equal(payrollPeriods(2, Date.parse('2026-10-08T12:00:00Z'))[0].week, 'NY-2026-09-28');
 });
 
+test('repeated payroll lookups reuse hourly New York weeks without changing boundary or DST answers', async () => {
+  const { currentPayrollPeriod } = await import(url);
+  const reference = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const expected = at => {
+    const monday = new Date(`${reference.format(new Date(at))}T00:00:00Z`);
+    monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7);
+    return `NY-${monday.toISOString().slice(0, 10)}`;
+  };
+  for (const edge of ['2026-03-09T04:00:00Z', '2026-11-02T05:00:00Z', '2026-11-01T06:00:00Z', '2027-03-14T07:00:00Z']) {
+    for (let minute = -90; minute <= 90; minute++) {
+      const at = Date.parse(edge) + minute * 60000 + (minute % 2 ? 59999 : 0);
+      assert.equal(currentPayrollPeriod(at).week, expected(at), new Date(at).toISOString());
+    }
+  }
+  const original = Intl.DateTimeFormat.prototype.formatToParts;
+  let calls = 0;
+  Intl.DateTimeFormat.prototype.formatToParts = function (...args) { calls++; return original.apply(this, args); };
+  try {
+    const start = Date.parse('2026-05-20T10:00:00Z');
+    for (let index = 0; index < 3000; index++) currentPayrollPeriod(start + index * 3000);
+  } finally {
+    Intl.DateTimeFormat.prototype.formatToParts = original;
+  }
+  assert.ok(calls <= 30, `3,000 lookups across three hours formatted ${calls} times`);
+  const period = currentPayrollPeriod(Date.parse('2026-05-20T10:00:00Z'));
+  period.endAt = 'mutated';
+  assert.notEqual(currentPayrollPeriod(Date.parse('2026-05-20T10:00:00Z')).endAt, 'mutated');
+});
+
 test('a paid overlapping UTC receipt blocks New York payments instead of paying twice', async () => {
   const { finalizeRadioAllocation, radioWorkReferenceText, settleRadioAllocation } = await import(pathToFileURL(path.join(__dirname, '../js/radio-payroll.mjs')).href);
   const wallet = `0x${'1'.repeat(40)}`;
