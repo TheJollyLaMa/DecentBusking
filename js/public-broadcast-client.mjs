@@ -119,7 +119,8 @@ export function createPublicBroadcastListener({ audio, serviceUrl, onStatus, onP
         const Hls = await sdkLoader(serviceUrl);
         if (current !== generation) return;
         if (!Hls.isSupported()) throw new Error('This browser does not support the broadcast player');
-        hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: Infinity,
+        // Past six segments (~24 s) behind the playlist edge, jump back to ~12 s instead of drifting; never speed up music.
+        hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 6,
           maxLiveSyncPlaybackRate: 1, maxBufferLength: 30, backBufferLength: 10 });
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (current !== generation) return;
