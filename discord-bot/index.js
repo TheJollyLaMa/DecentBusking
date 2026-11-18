@@ -69,7 +69,7 @@ import { backfillIpfsPins } from './ipfs-backfill.js';
 import { syncMintedTracksFromChain, createVerifiedMintQueueReader, discoverPinataMetadataGateway,
   audioCidFromMetadata, buildGatewayUrl, readOwnedDevertAds, resolveDevertCampaignMedia,
   resolveApprovedDevertCampaignMedia } from './mint-sync.js';
-import { nftCatalogPage } from '../js/nft-loader.js';
+import { nftCatalogPage, nftIdentity } from '../js/nft-loader.js';
 import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, verifyDjukePlaylistWorker, DJUKE_ABI, DJUKE_PLAYLIST_WORKER_ABI } from './djuke.js';
 import { createDevertQueueReader, createDevertQueueRuntime, createDevertQueueCatalogSync, combinePaidQueues } from './devert-queue.js';
@@ -85,6 +85,8 @@ import { createWorkerReserve } from './worker-reserve.js';
 import { createWorkerSigningCoordinator } from './worker-signing.js';
 import { createCalendarRewardWorker } from './calendar-rewards.js';
 import { createPinataStateStore, recoverVerifiedPlaylistBaseline } from './ipfs-state.js';
+import { createDmtvRadioQueue } from './dmtv-queue.js';
+import { dmtvArchiveItems } from '../js/dmtv.mjs';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
 import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
@@ -1536,8 +1538,34 @@ async function main() {
       };
     } else console.warn('[devert-queue] Read-only: scheduler, durable mirror, Pinata and campaign removal state are required.');
   }
-  _radioPaidQueues = (_djukeRuntime || paidAdRuntime)
-    ? combinePaidQueues({ songs: _djukeRuntime, adverts: paidAdRuntime }) : null;
+  const dmtvRadioQueue = checkpointMirror && config.pinataJwt && process.env.DMTV_RADIO_CHECKOUT_SECRET
+    ? createDmtvRadioQueue({
+      provider: getRpcRouter().provider('read', 'dmtv-radio-receipts'),
+      secret: process.env.DMTV_RADIO_CHECKOUT_SECRET,
+      enabled: () => process.env.DMTV_RADIO_PAYMENTS_ENABLED === 'true' &&
+        checkpointMirror.status().available && playlistReady && !!_nftCatalog && !!getActiveJukeLoopSession(),
+      store: createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
+        uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+        name: 'decentbusking-dmtv-radio.json', tags: { app: 'decentbusking', kind: 'dmtv-radio', schema: '1' },
+        serialize: value => value, deserialize: value => value, restoreLatestOnly: true, requireLocalMirror: true,
+        beforeUpload: bytes => checkpointMirror.mirror(bytes, { required: true }) }),
+      findTrack: async nftId => {
+        if (!playlistReady || !_nftCatalog) return null;
+        const nft = _nftCatalog.find(item => nftIdentity(item) === nftId);
+        if (nft?.mediaType !== 'video/mp4') return null;
+        const adState = await readDevertState?.();
+        const [item] = dmtvArchiveItems([nft], adState?.campaigns || []);
+        const cid = item?.videoUrl.match(/^ipfs:\/\/(?:ipfs\/)?([a-z0-9]+)$/i)?.[1];
+        if (!cid) return null;
+        const track = getPlaybackPlaylist().find(track => String(track.ipfsCid || '').replace(/^ipfs:\/\//i, '') === cid);
+        if (!track?.trackId || track.isDevertAd || !item.creator ||
+            ['music-only', 'all-radio'].includes(track.contentReview?.scope)) return null;
+        return { nftId, creator: item.creator, trackId: track.trackId, ipfsCid: cid, title: item.title,
+          filename: track.filename, uploader: track.uploader || item.artist, mediaType: 'video/mp4', videoUrl: item.videoUrl };
+      },
+    }) : null;
+  _radioPaidQueues = (_djukeRuntime || paidAdRuntime || dmtvRadioQueue)
+    ? combinePaidQueues({ songs: _djukeRuntime, adverts: paidAdRuntime, videos: dmtvRadioQueue }) : null;
 
   console.log(`[rpc] Base tiers: ${getRpcRouter().health().tiers.paid} paid, ${getRpcRouter().health().tiers.public} public; consumers: ${getRpcRouter().describe()}`);
   const alchemyWebhook = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY ? createAlchemyWebhook({
@@ -1876,6 +1904,7 @@ async function main() {
   }, { ttlMs: broadcastMode === 'public' ? 1000 : 0 });
   publicBroadcast.setStateReader(readPublicRadioState);
   const requestHandler = createWorkerRequestHandler({
+    dmtvRadioQueue,
     contentReview: _contentReview,
     promotions,
     getMediaGateways: async () => [await discoverDedicatedGateway(config) || config.ipfsGateway],

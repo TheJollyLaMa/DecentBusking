@@ -121,6 +121,29 @@ test('listener telemetry uses the public-listen origin policy, not the wider rad
   });
 });
 
+test('DMTv checkout routes expose readiness and restrict payment submissions to allowed origins', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  const origin = 'https://decentbusking.example';
+  const calls = [];
+  const handler = createWorkerRequestHandler({ allowedOrigins: [origin], ownerWallet: Wallet.createRandom().address,
+    dmtvRadioQueue: {
+      status: async () => ({ enabled: true }),
+      quote: async payload => { calls.push(['quote', payload]); return { ticket: 'mock-ticket' }; },
+      submit: async payload => { calls.push(['submit', payload]); return { requestId: 'mock-request' }; },
+    } });
+  await withServer(handler, async base => {
+    const url = `${base}/api/dmtv/radio`;
+    assert.deepEqual(await (await fetch(url)).json(), { enabled: true });
+    const options = { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: '{}' };
+    const denied = await fetch(`${url}/submit`, { ...options, headers: { ...options.headers, origin: 'https://other.example' } });
+    assert.equal(denied.ok, false);
+    assert.equal(calls.length, 0);
+    assert.deepEqual(await (await fetch(`${url}/quote`, options)).json(), { ticket: 'mock-ticket' });
+    assert.deepEqual(await (await fetch(`${url}/submit`, options)).json(), { requestId: 'mock-request' });
+    assert.deepEqual(calls, [['quote', {}], ['submit', {}]]);
+  });
+});
+
 test('DJuke top earners endpoint returns indexed payouts or an explicit unavailable response', async () => {
   const { createWorkerRequestHandler } = await import(moduleUrl);
   const data = { chainId: 8453, asset: 'USDC', period: 'all-time', earners: [{ address: Wallet.createRandom().address, totalUnits: '225000' }] };

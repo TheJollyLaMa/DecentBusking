@@ -219,9 +219,11 @@ export function createDevertQueueRuntime({ readState, store, contract, isCampaig
   };
 }
 
-export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 10000 }) {
+export function combinePaidQueues({ songs, adverts, videos, log = console, timeoutMs = 10000 }) {
   const selecting = new Set();
   const prepared = new Map();
+  let preferVideo = false;
+  const runtimeFor = record => record.kind === 'devert' ? adverts : record.kind === 'dmtv' ? videos : songs;
   const select = async (runtime, options, label) => {
     if (!runtime) return null;
     if (prepared.has(runtime)) {
@@ -259,7 +261,7 @@ export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 1
     }
   };
   return {
-    async nextPaid({ allowBump = false, includeSongs = true } = {}) {
+    async nextPaid({ allowBump = false, includeSongs = true, includeVideos = includeSongs } = {}) {
       if (songs?.hasActivePlaylist?.()) {
         return includeSongs ? select(songs, undefined, 'djuke') : null;
       }
@@ -267,17 +269,26 @@ export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 1
         const ad = await select(adverts, { allowBump }, 'devert-queue');
         if (ad) return ad;
       }
-      return includeSongs ? select(songs, undefined, 'djuke') : null;
+      const inputs = [[includeSongs && songs, 'djuke'], [includeVideos && videos, 'dmtv']];
+      if (preferVideo) inputs.reverse();
+      for (const [runtime, kind] of inputs) {
+        const request = await select(runtime, undefined, kind);
+        if (request) {
+          preferVideo = kind === 'djuke';
+          return request;
+        }
+      }
+      return null;
     },
-    complete(record, play) { return (record.kind === 'devert' ? adverts : songs).complete(record, play); },
-    fail(record, error) { return (record.kind === 'devert' ? adverts : songs).fail(record, error); },
-    release(record, error) { return (record.kind === 'devert' ? adverts : songs).release(record, error); },
-    retryMedia(record, error) { return songs.retryMedia(record, error); },
+    complete(record, play) { return runtimeFor(record).complete(record, play); },
+    fail(record, error) { return runtimeFor(record).fail(record, error); },
+    release(record, error) { return runtimeFor(record).release(record, error); },
+    retryMedia(record, error) { return runtimeFor(record).retryMedia?.(record, error); },
     hasPendingPlaylist() { return songs?.hasPendingPlaylist?.() === true; },
     hasActivePlaylist() { return songs?.hasActivePlaylist?.() === true; },
     getActivePlaylistBatchId() { return songs?.getActivePlaylistBatchId?.() ?? null; },
-    start(record) { return (record.kind === 'devert' ? adverts : songs).start?.(record); },
-    refreshPlaybackState(record) { return (record.kind === 'devert' ? adverts : songs).refreshPlaybackState?.(); },
+    start(record) { return runtimeFor(record).start?.(record); },
+    refreshPlaybackState(record) { return runtimeFor(record).refreshPlaybackState?.(); },
     hasPendingSelection() { return selecting.size > 0 || prepared.size > 0 ||
       songs?.hasPendingSelection?.() === true || adverts?.hasPendingSelection?.() === true; },
     async prepareForDeployment() {
@@ -293,7 +304,8 @@ export function combinePaidQueues({ songs, adverts, log = console, timeoutMs = 1
         prepared.delete(runtime);
       }
     },
-    hasPlaybackEvidence(record) { return record?.kind !== 'devert' && songs?.hasPlaybackEvidence?.(record) === true; },
-    canPlay(record) { return (record.kind === 'devert' ? adverts : songs).canPlay(record); },
+    hasPlaybackEvidence(record) { return record?.kind !== 'devert' && record?.kind !== 'dmtv' &&
+      songs?.hasPlaybackEvidence?.(record) === true; },
+    canPlay(record) { return record.kind === 'dmtv' ? true : runtimeFor(record).canPlay(record); },
   };
 }

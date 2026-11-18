@@ -272,6 +272,7 @@ export function createWorkerRequestHandler({
   onMintComplete,
   getMintQueue,
   getNftCatalog,
+  dmtvRadioQueue,
   onReviewedAlbumImport,
   creatorProfiles,
   getRadioState,
@@ -801,7 +802,25 @@ export function createWorkerRequestHandler({
           wallet: params.get('wallet') || '',
           before: params.get('before') || '',
           after: params.get('after') || '',
+          media: params.get('media') === 'video' ? 'video' : '',
         }), '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/dmtv/radio') {
+        sendJson(response, 200, dmtvRadioQueue ? await dmtvRadioQueue.status() : { enabled: false }, '*');
+        return;
+      }
+      if (request.method === 'POST' && ['/api/dmtv/radio/quote', '/api/dmtv/radio/submit'].includes(requestUrl.pathname)) {
+        if (!corsOrigin) throw new Error('Origin is not allowed');
+        if (!dmtvRadioQueue) {
+          sendJson(response, 503, { error: 'DMTv radio checkout is unavailable.' }, corsOrigin);
+          return;
+        }
+        const payload = await readJson(request);
+        const result = requestUrl.pathname.endsWith('/quote')
+          ? await dmtvRadioQueue.quote(payload)
+          : await dmtvRadioQueue.submit(payload);
+        sendJson(response, 200, result, corsOrigin);
         return;
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/creator/split-proposals') {

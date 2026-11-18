@@ -8,6 +8,7 @@ import { validateHypeSnapshot } from './top-ten-hype.js';
 import { deserializeAnnouncements } from './radio-announcements.js';
 import { validatePromotionCheckpoint } from './promotions.js';
 import { validateCalendarRewardCheckpoint } from './calendar-rewards.js';
+import { isDmtvRadioCheckpoint } from './dmtv-queue.js';
 
 export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiUrl = 'http://127.0.0.1:5001', fetchImpl = fetch }) {
   const remote = new URL(serviceUrl);
@@ -74,7 +75,8 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
             /^[a-z0-9:_-]{1,100}$/.test(booking.id) && /^0x[0-9a-fA-F]{40}$/.test(booking.wallet));
       }
     }
-    if (!(snapshot.schemaVersion === 1 && (Array.isArray(snapshot.playlist) || playbackJournal)) && !batchJournal && !scheduledCheckpoint) {
+    if (!(snapshot.schemaVersion === 1 && (Array.isArray(snapshot.playlist) || playbackJournal)) &&
+        !batchJournal && !scheduledCheckpoint && !isDmtvRadioCheckpoint(snapshot)) {
       throw new Error('Only supported playlist, playback, playlist-batch or scheduled-production checkpoints may be mirrored');
     }
     const form = new FormData();

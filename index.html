@@ -25,6 +25,7 @@
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css?v=20261117-matched-tabs" />
+  <link rel="stylesheet" href="css/dmtv.css" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
   <link rel="stylesheet" href="css/live-afterparty.css?v=20261117-release-party" />
@@ -97,6 +98,63 @@
     <section><h4>➕ Keep a favorite</h4><p>Use <strong>+</strong> to choose your current draft, a saved named playlist, or ➕ New playlist… (name it inline; 24 songs maximum). Use <strong>👀</strong> to save the song and artist to your profile watchlist. Saved playlist additions publish a new immutable revision; saved copies become your own original. Saving does not buy playback.</p></section>
     <button id="top-ten-instructions-close" type="button">Back to the chart</button>
   </dialog>
+
+  <button id="dmtv-tab" type="button" aria-controls="dmtv-panel" aria-expanded="false" aria-label="Open DMTv video queue" title="Open DMTv">
+    <span class="dmtv-tab-art" aria-hidden="true">
+      <span class="dmtv-tab-tv">
+        <span class="dmtv-tab-antenna"><i></i><i></i></span>
+        <span class="dmtv-tab-tv-emoji">📺</span>
+        <span class="dmtv-tab-screen-logo"><img src="img/dmtv-subvertisement-logo.png" alt="" /></span>
+        <span class="dmtv-tab-coin">🪙</span>
+        <span class="dmtv-tab-cash dmtv-tab-cash-left">💵</span>
+        <span class="dmtv-tab-cash dmtv-tab-cash-right">💵</span>
+      </span>
+      <span class="dmtv-tab-watchers">
+        <span>☿♀︎</span>
+        <span>⚸🜐🜡</span>
+      </span>
+    </span>
+    <span class="dmtv-tab-label">DMTv</span>
+  </button>
+  <aside id="dmtv-panel" aria-label="DMTv video play queue" aria-hidden="true" inert>
+    <div class="dmtv-heading">
+      <div class="dmtv-brand"><img src="img/dmtv-subvertisement-logo.png" alt="DMTv" /><h2>DMTv</h2></div>
+      <button id="dmtv-info" type="button" aria-label="About DMTv" aria-haspopup="dialog" aria-controls="dmtv-instructions">i</button>
+      <button id="dmtv-close" type="button" aria-label="Close DMTv" title="Close DMTv">×</button>
+    </div>
+    <dialog id="dmtv-instructions" aria-labelledby="dmtv-instructions-title">
+      <h3 id="dmtv-instructions-title">📺 About DMTv</h3>
+      <p>🎬 Archive videos on your screen. An ad break follows every 10 videos.</p>
+      <p>🪙 <strong>$2</strong> · Queue here: $1 creator + $1 weekly Playback fund.</p>
+      <p>📻 <strong>$3</strong> · Shared main radio: $1 creator + $2 weekly Playback fund.</p>
+      <form method="dialog"><button>Back to DMTv</button></form>
+    </dialog>
+    <div class="dmtv-top-actions" aria-label="DMTv purchase actions">
+      <button id="dmtv-queue-button" type="button" disabled>
+        <span>Side stream</span><strong>$2 USDC</strong><small>$1 creator · $1 weekly fund</small>
+      </button>
+      <button id="dmtv-takeover-button" type="button" disabled aria-describedby="dmtv-radio-unavailable">
+        <span>Main radio spot</span><strong>$3 USDC</strong><small>$1 creator · $2 weekly fund</small>
+        <small id="dmtv-radio-unavailable">Checking main-radio availability…</small>
+      </button>
+    </div>
+    <p id="dmtv-receipt" class="dmtv-receipt" role="status" aria-live="polite"></p>
+    <section class="dmtv-television" aria-label="DMTv television">
+      <span class="dmtv-antenna" aria-hidden="true"></span>
+      <div class="dmtv-screen-bezel">
+        <video id="dmtv-video-player" muted playsinline preload="none" controls hidden aria-label="DMTv current video"></video>
+        <div id="dmtv-screen-fallback" class="dmtv-screen-fallback">
+          <button id="dmtv-play" type="button" disabled>▶ Watch DMTv</button>
+        </div>
+      </div>
+    </section>
+    <p id="dmtv-now" class="dmtv-now">Tuning into DecentBusking…</p>
+    <p id="dmtv-status" class="dmtv-status" role="status" aria-live="polite">Open DMTv to follow the visual experience queue.</p>
+    <button id="dmtv-retry" type="button" hidden>Retry archive</button>
+    <label class="dmtv-search-label" for="dmtv-search">Search video archive</label>
+    <input id="dmtv-search" type="search" placeholder="Artist or visual experience" autocomplete="off" />
+    <ol id="dmtv-queue" class="dmtv-queue" aria-label="DMTv archive videos"></ol>
+  </aside>
 
   <button id="djuke-tab" type="button" aria-controls="djuke-panel" aria-expanded="false" aria-label="Open DJuke" title="Open DJuke">
     <span class="djuke-tab-mark" aria-hidden="true"><span class="djuke-note djuke-note-left">🎶</span><span class="djuke-note djuke-note-right">🎶</span><span class="djuke-tab-slot">⚸🎰🧞‍♂️</span><span class="djuke-tab-coin">🪙</span></span>
@@ -1034,7 +1092,7 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261117-right-rooms"></script>
+  <script type="module" src="js/main.js?v=20261118-dmtv"></script>
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261117-booking-assets">
