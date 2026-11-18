@@ -562,26 +562,40 @@ test('encoder waits for authorized audio, survives wall-clock corrections and fa
   assert.equal(broadcaster.snapshot().reason, 'ENCODER_CLOCK_STALLED');
 });
 
-test('delayed inter-thread PCM cannot extend the existing one-second audio queue allowance', async t => {
+test('late or bursty PCM is skipped, never encoded late, and cannot extend the one-second allowance', async t => {
   const { createPublicBroadcast } = await import('../discord-bot/public-broadcast.js');
-  const encoder = new EventEmitter();
+  const encoder = new EventEmitter(), written = [], warnings = [];
   encoder.stdin = new PassThrough();
+  encoder.stdin.on('data', chunk => written.push(chunk));
   encoder.kill = () => { encoder.emit('close'); return true; };
   let wall = 1700000000000, elapsed = 0;
   t.mock.timers.enable({ apis: ['setInterval'] });
   const broadcaster = createPublicBroadcast({ enabled: true, uploader: { baseUrl: 'https://edge.example' },
-    now: () => wall, monotonicNow: () => elapsed, spawnImpl: () => encoder, log: { error() {} } });
+    now: () => wall, monotonicNow: () => elapsed, spawnImpl: () => encoder,
+    log: { error() {}, warn: (...args) => warnings.push(args) } });
   await broadcaster.start();
   t.after(() => broadcaster.stop());
   broadcaster.setPolicy({ mode: 'live', bookingId: 'live' });
-  broadcaster.liveFrame({ id: 'live' }, {
-    data: new Int16Array(960), channels: 1, sampleRate: 48000, samplesPerChannel: 960,
-  }, -2000);
+  const frame = value => ({ data: new Int16Array(960).fill(value), channels: 1, sampleRate: 48000, samplesPerChannel: 960 });
+  broadcaster.liveFrame({ id: 'live' }, frame(7), -2000);
   wall += 100; elapsed = 20;
   t.mock.timers.tick(20);
-  assert.equal(broadcaster.snapshot().reason, 'PCM_BUFFER_LIMIT');
-  assert.equal(broadcaster.snapshot().reasonDetails.stage, 'source-age');
-  assert.equal(broadcaster.snapshot().inputBytes, 0);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(broadcaster.snapshot().reason, null);
+  assert.deepEqual(broadcaster.snapshot().programHistory, [], 'skipped audio must not be attributed as broadcast');
+  assert.ok(Buffer.concat(written).every(byte => byte === 0), 'audio older than one second must never reach the encoder');
+  assert.deepEqual(broadcaster.snapshot().lateAudio, { skips: 1, droppedMs: 20, lastStage: 'source-age', lastAt: wall });
+
+  // A 1.2 s burst after a stall keeps only the newest half second, in one skip.
+  for (let index = 1; index <= 60; index++) broadcaster.liveFrame({ id: 'live' }, frame(index));
+  elapsed = 40;
+  t.mock.timers.tick(20);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(broadcaster.snapshot().status === 'unavailable', false);
+  assert.equal(written.at(-1).readInt16LE(0), 27, 'the oldest 26 frames of the burst must be skipped');
+  assert.deepEqual(broadcaster.snapshot().lateAudio, { skips: 2, droppedMs: 540, lastStage: 'pcm', lastAt: wall });
+  assert.deepEqual(warnings.map(([code, details]) => [code, details.stage]),
+    [['[public-broadcast] PCM_LATE_AUDIO_SKIPPED', 'source-age']], 'skip warnings are rate-limited');
 });
 
 test('the real encoder thread survives a blocked application loop without admitting private input', { timeout: 10000 }, async t => {
