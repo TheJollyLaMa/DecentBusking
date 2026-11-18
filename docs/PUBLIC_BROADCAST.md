@@ -435,6 +435,15 @@ Development evidence so far:
   player never rejoined live; it now jumps back (above). The CPU profile's
   largest application function was `periodOf` for radio-history advert
   tallies, which the site header polls every 15 s per open tab.
+- Deployed `4851f4b` (#410 player rejoins live, #411 hourly payroll-week
+  cache), 18 Nov 23:22 UTC: the 23:26 hosted 200/600 run passed every check
+  (all 200 decoded, startup p95 1.7 s, metadata p95 284 ms, delay p95 26.7 s,
+  CPU max 38.4%, working set max 71.2%, event-loop p99 84 ms, no HTTP or
+  request errors, no stalls, no late-audio skips, no edge upload deferrals,
+  production `selected=false`). Per-minute main-loop maxima during the run
+  were about 100-400 ms, against 600-950 ms in the 19:31 run. The Render service builds from Root Directory
+  `discord-bot/`, so commits touching only shared `js/` modules the bot
+  imports did not auto-deploy; this one was deployed manually.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
