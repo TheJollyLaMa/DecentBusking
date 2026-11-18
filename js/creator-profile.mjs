@@ -3,7 +3,7 @@ import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
-import { canEditArtwork } from './artwork-update.mjs';
+import { canEditArtwork } from './artwork-update.mjs?v=20261118-artist-artwork';
 import { approveCreatorSplitProposal, createCreatorSplitProposal, fetchCreatorSplitProposal,
   completeCreatorSplitProposal, reconcileRemovedAlbumTrack } from './creator-split-proposal.mjs?v=20261025-song-splits';
 import { buildAlbumSplitTypedData, buildSongAlbumMigrationTypedData, buildSongSplitTypedData, resolveNftSongId } from './creator-splits.mjs?v=20261025-song-splits';
