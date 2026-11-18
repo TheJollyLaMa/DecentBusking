@@ -12,12 +12,13 @@ const { Interface, Wallet } = createRequire(path.join(__dirname, '../discord-bot
 const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'js', 'artwork-update.mjs')).href;
 const workerUrl = pathToFileURL(path.join(__dirname, '..', 'discord-bot', 'ipfs-worker.js')).href;
 
-test('artwork update metadata only replaces the image and creator wallets are checked directly', async () => {
+test('artwork update metadata only replaces the image and creator or credited artist can edit', async () => {
   const { buildArtworkUpdateAuthorizationMessage, buildArtworkUpdateMetadata, canEditArtwork } = await import(moduleUrl);
   const metadata = { name: 'Track', image: 'ipfs://old', audioUrl: 'ipfs://audio' };
   assert.deepEqual(buildArtworkUpdateMetadata(metadata, 'ipfs://new'), { name: 'Track', image: 'ipfs://new', audioUrl: 'ipfs://audio' });
-  assert.equal(canEditArtwork({ creator: '0xabc' }, '0xabc'), true);
-  assert.equal(canEditArtwork({ creator: '0xabc' }, '0xdef'), false);
+  assert.equal(canEditArtwork({ creator: '0xabc', artist: '0xdef' }, '0xabc'), true);
+  assert.equal(canEditArtwork({ creator: '0xabc', artist: '0xdef' }, '0xdef'), true);
+  assert.equal(canEditArtwork({ creator: '0xabc', artist: '0xdef' }, '0x123'), false);
   assert.match(buildArtworkUpdateAuthorizationMessage({
     address: '0x1111111111111111111111111111111111111111',
     origin: 'https://site.example',
@@ -73,12 +74,13 @@ test('browser artwork uploads sign bare CIDs and the worker accepts current and 
   const { createArtworkUpdateQueue } = await import('../discord-bot/artwork-updates.js');
   const { normalizeMediaCid } = await import('../discord-bot/media.js');
   const creator = Wallet.createRandom();
+  const artist = Wallet.createRandom();
   const stranger = Wallet.createRandom();
   const origin = 'https://busking.example';
   const contractAddress = '0x2222222222222222222222222222222222222222';
   const cid = 'bafybeieupiamdn7e4qmi4hou6zfu4cwluoubn6ppgsqs4rfjydyee7wtnm';
   const cidV0 = 'QmYwAPJzv5CZsnAzt8auVZRnGiRAzN7VwG2DkJk1F2vHjM';
-  const metadata = { name: 'Track', image: 'ipfs://old', animation_url: 'ipfs://audio' };
+  const metadata = { name: 'Track', image: 'ipfs://old', animation_url: 'ipfs://audio', artist: artist.address };
   const iface = new Interface(['function creatorOf(uint256) view returns (address)', 'function uri(uint256) view returns (string)']);
   let creatorChecks = 0;
   const serve = async handler => {
@@ -130,11 +132,13 @@ test('browser artwork uploads sign bare CIDs and the worker accepts current and 
   assert.equal(artworkCid, `ipfs://${cid}`);
   for (const value of [artworkCid, cid, `ipfs://${cidV0}`]) {
     const result = await submitArtworkUpdateRequest({
-      serviceUrl: base, signer: creator, address: creator.address, origin,
+      serviceUrl: base, signer: artist, address: artist.address, origin,
       request: { contractAddress, tokenId: 7, artworkCid: value }, fetchImpl: browserFetch,
     });
     assert.equal(posted.artworkCid, value.replace('ipfs://', ''));
     assert.equal(result.request.newImageCid, normalizeMediaCid(value));
+    assert.equal(result.request.creator, creator.address.toLowerCase());
+    assert.equal(result.request.requestedBy, artist.address);
     assert.deepEqual(uploadedMetadata, { ...metadata, image: `ipfs://${normalizeMediaCid(value)}` });
   }
   const post = body => fetch(`${base}/api/artwork-update`, {
@@ -142,7 +146,7 @@ test('browser artwork uploads sign bare CIDs and the worker accepts current and 
   });
   for (const value of [artworkCid, `ipfs://${cidV0}`]) {
     const body = { ...posted, artworkCid: value, nonce: crypto.randomUUID() };
-    body.signature = await creator.signMessage(buildArtworkUpdateAuthorizationMessage(body));
+    body.signature = await artist.signMessage(buildArtworkUpdateAuthorizationMessage(body));
     const response = await post(body);
     assert.equal(response.status, 200);
     assert.equal((await response.json()).request.newImageCid, normalizeMediaCid(value));
@@ -159,7 +163,13 @@ test('browser artwork uploads sign bare CIDs and the worker accepts current and 
   await assert.rejects(submitArtworkUpdateRequest({
     serviceUrl: base, signer: stranger, address: stranger.address, origin,
     request: { contractAddress, tokenId: 7, artworkCid }, fetchImpl: browserFetch,
-  }), /Only the token creator can request artwork changes/);
+  }), /Only the token creator or credited artist can request artwork changes/);
+  const creatorRequest = await submitArtworkUpdateRequest({
+    serviceUrl: base, signer: creator, address: creator.address, origin,
+    request: { contractAddress, tokenId: 7, artworkCid }, fetchImpl: browserFetch,
+  });
+  assert.equal(creatorRequest.request.creator, creator.address.toLowerCase());
+  assert.equal(creatorRequest.request.requestedBy, creator.address);
   const admin = { address: creator.address, origin, issuedAt: new Date().toISOString() };
   admin.signature = await creator.signMessage(buildAdminAuthorizationMessage(admin));
   const pending = await fetch(`${base}/api/mint-queue`, {
@@ -169,15 +179,17 @@ test('browser artwork uploads sign bare CIDs and the worker accepts current and 
   assert.equal((await pending.json()).requests[0].requestType, 'artwork-update');
 });
 
-test('NFT card places the shared pencil badge beside artwork only for its creator', async () => {
+test('NFT card places the shared pencil badge for the token creator or credited artist', async () => {
   const { canEditArtwork } = await import(moduleUrl);
   const { PENCIL_ICON } = await import('../js/artwork-edit-badge.mjs');
   const source = fs.readFileSync(path.join(__dirname, '../js/nft-card.js'), 'utf8')
-    .replace(/^import .*;$/gm, '').replace(/export /g, '');
+    .replace(/^(?:import|export)\s+[\s\S]*?from\s+['"][^'"]+['"];?\s*/gm, '')
+    .replace(/^export\s+/gm, '');
   const window = { _wallet: { address: '0xabc' } };
-  const context = vm.createContext({ window, document: { addEventListener() {} }, canEditArtwork, PENCIL_ICON, URL });
+  const context = vm.createContext({ window, document: { addEventListener() {} }, canEditArtwork,
+    canEditCatalogRecording: () => false, PENCIL_ICON, URL });
   vm.runInContext(source, context);
-  const nft = { tokenId: 7, creator: '0xabc', image: 'ipfs://art', name: 'Track' };
+  const nft = { tokenId: 7, creator: '0xabc', artist: '0xdef', image: 'ipfs://art', name: 'Track' };
   const html = context._buildCardHTML(nft);
   assert.match(html, /class="nft-detail-artwork">[\s\S]*class="nft-artwork-edit-btn artwork-edit-badge"/);
   assert.match(html, /aria-label="Edit artwork" title="Edit artwork"/);
@@ -185,6 +197,8 @@ test('NFT card places the shared pencil badge beside artwork only for its creato
   assert.doesNotMatch(html, /✏️ Edit artwork/);
   assert.doesNotMatch(html.split('class="nft-card-actions"')[1], /nft-artwork-edit-btn/);
   window._wallet.address = '0xdef';
+  assert.match(context._buildCardHTML(nft), /nft-artwork-edit-btn/);
+  window._wallet.address = '0x123';
   assert.doesNotMatch(context._buildCardHTML(nft), /nft-artwork-edit-btn/);
   window._wallet = null;
   assert.doesNotMatch(context._buildCardHTML(nft), /nft-artwork-edit-btn/);

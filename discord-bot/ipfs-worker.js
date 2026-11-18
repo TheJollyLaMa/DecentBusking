@@ -1447,10 +1447,14 @@ export function createWorkerRequestHandler({
         if (recovered !== body.address.toLowerCase()) throw new Error('Artwork update signature mismatch: check the connected signing wallet and client/worker message format');
         const artworkCid = normalizeMediaCid(body.artworkCid);
         const contract = new Contract(body.contractAddress, NFT_ARTWORK_ABI, rpcProvider || new JsonRpcProvider(rpcUrl));
-        const creator = String(await contract.creatorOf(Number(body.tokenId)).catch(() => '') || '').toLowerCase();
-        if (!creator || creator !== body.address.toLowerCase()) throw new Error('Only the token creator can request artwork changes');
+        const creator = String(await contract.creatorOf(Number(body.tokenId)) || '').toLowerCase();
         const currentUri = await contract.uri(Number(body.tokenId));
         const currentMetadata = await fetchMintMetadata(currentUri, fetchImpl, { attempts: 3 });
+        const artist = String(currentMetadata.artist || '').toLowerCase();
+        const isCreditedArtist = /^0x[0-9a-f]{40}$/.test(artist) && artist === body.address.toLowerCase();
+        if ((!creator || creator !== body.address.toLowerCase()) && !isCreditedArtist) {
+          throw new Error('Only the token creator or credited artist can request artwork changes');
+        }
         const newMetadata = buildArtworkUpdateMetadata(currentMetadata, `ipfs://${artworkCid}`);
         const newMetadataUri = await uploadToIPFS(
           Buffer.from(JSON.stringify(newMetadata, null, 2)),
@@ -1464,7 +1468,8 @@ export function createWorkerRequestHandler({
           tokenId: Number(body.tokenId),
           chainId: Number(body.chainId || 8453),
           contractAddress: body.contractAddress,
-          creator: body.address,
+          creator,
+          requestedBy: body.address,
           requestedAt: new Date().toISOString(),
           oldUri: currentUri,
           oldImageUri: String(currentMetadata.image || ''),

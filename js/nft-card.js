@@ -6,7 +6,7 @@ import { fetchNFTMetaById } from './space.js?v=20261030-ad-cutoff';
 import { buildNftShareUrl } from './nft-loader.js?v=20261012-paging';
 import { returnToRadio } from './radio-sync.js?v=20261030-ad-cutoff';
 import { applyCreatorWatchlistButton, creatorWatchlistEntrySnapshot, isCreatorWatchlisted, toggleCreatorWatchlist } from './watchlist.mjs?v=20261030-ad-cutoff';
-import { canEditArtwork } from './artwork-update.mjs';
+import { canEditArtwork } from './artwork-update.mjs?v=20261118-artist-artwork';
 import { PENCIL_ICON } from './artwork-edit-badge.mjs';
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { creatorImageURL, creatorPresentation, resolveCreatorENS } from './creator-profile-data.mjs';

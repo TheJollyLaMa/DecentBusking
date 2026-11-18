@@ -23,10 +23,9 @@ export function buildArtworkUpdateMetadata(metadata = {}, imageUri) {
 }
 
 export function canEditArtwork(nft = {}, walletAddress = '', linkedWallet = '') {
-  const creator = String(nft.creator || nft.artist || '').toLowerCase();
-  const wallet = String(walletAddress || '').toLowerCase();
-  const linked = String(linkedWallet || '').toLowerCase();
-  return !!creator && (creator === wallet || creator === linked);
+  const authorized = [nft.creator, nft.artist].map(value => String(value || '').toLowerCase()).filter(Boolean);
+  const wallets = [walletAddress, linkedWallet].map(value => String(value || '').toLowerCase()).filter(Boolean);
+  return wallets.some(wallet => authorized.includes(wallet));
 }
 
 export function validateArtworkFile(file) {
@@ -45,7 +44,7 @@ export async function submitArtworkUpdateRequest({
   fetchImpl = globalThis.fetch,
   now = () => Date.now(),
 }) {
-  if (!serviceUrl || !signer || !address) throw new Error('Connect the creator wallet before updating artwork');
+  if (!serviceUrl || !signer || !address) throw new Error('Connect the token creator or credited artist wallet before updating artwork');
   const issuedAt = new Date(now()).toISOString();
   const expiresAt = new Date(now() + 5 * 60 * 1000).toISOString();
   const payload = {

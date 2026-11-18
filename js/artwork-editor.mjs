@@ -1,5 +1,5 @@
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
-import { canEditArtwork, extractArtworkPreviewUri, submitArtworkUpdateRequest, validateArtworkFile } from './artwork-update.mjs';
+import { canEditArtwork, extractArtworkPreviewUri, submitArtworkUpdateRequest, validateArtworkFile } from './artwork-update.mjs?v=20261118-artist-artwork';
 
 let _dialog;
 let _current;
@@ -57,7 +57,7 @@ async function _save() {
   const cfg = window.DecentConfig || {};
   const signer = window._wallet?.signer;
   const address = window._wallet?.address;
-  if (!canEditArtwork(_current, address)) throw new Error('Connect the creator wallet to edit this artwork');
+  if (!canEditArtwork(_current, address)) throw new Error('Connect the token creator or credited artist wallet to edit this artwork');
   const file = _dialog?.querySelector('[data-artwork-file]')?.files?.[0];
   validateArtworkFile(file);
   const uploader = createBrowserIpfsUploader({
