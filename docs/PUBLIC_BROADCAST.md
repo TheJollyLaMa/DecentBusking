@@ -120,8 +120,14 @@ The encoder, Opus decoding, HLS pacing and uploads run in a dedicated Node
 worker thread in the same container, not another service. This keeps unrelated
 bot event-loop stalls out of the audio clock. The parent forwards only the
 selected public source, with bounded in-flight messages; source age across the
-thread boundary and the PCM queue remains limited to one second. The encoder's
-own 500 ms scheduling-stall limit, private-room gates and protected tail remain.
+thread boundary and the PCM queue remains limited to one second. By the
+owner's 18 Nov decision, audio that would exceed that second (a burst after a
+bot stall, or audio older than one second) is skipped down to half a second
+in one go, rather than stopping the station. Skips are logged at most every
+10 s and counted in the snapshot as `lateAudio` (skips, dropped milliseconds,
+last stage), so they stay visible rather than silent. Malformed PCM still fails
+closed. The encoder's own 500 ms scheduling-stall limit, private-room gates and
+protected tail remain.
 In-flight credits are decremented by the worker through a shared atomic counter,
 not by parent-loop acknowledgment callbacks. Otherwise a busy parent can falsely
 count already processed frames as backlogged. Limit failures include a bounded
@@ -405,6 +411,17 @@ Development evidence so far:
   uploading, so an outage cannot grow it. Authentication, validation, size and
   encoder failures still fail closed, with no automatic restart. Hosted
   200/600 must be repeated after deployment.
+- Deployed `29cf745`, 18 Nov 16:51 UTC: at 16:59:37 a real segment upload
+  timed out and publication recovered 2 s later on the same stream. The 17:04
+  200/600 run reached 448 s (startup p95 1.4 s, metadata p95 387 ms, CPU max
+  38.4%, working set max 71.3%, no HTTP errors). It was then safety-stopped by
+  `PCM_BUFFER_LIMIT` at `source-age` (1,004 ms old, 0.9 s queued). In that
+  minute the bot's main loop recorded an 882 ms maximum. Its reported 35.2 s
+  delay p95 and 154 failures include listeners after the publisher stopped.
+  Render logs show 400-600 ms main-loop maxima every few minutes all day,
+  with or without listeners. A one-second freeze therefore eventually stops a
+  zero-tolerance encoder. The owner chose to both skip late audio (above) and
+  profile the remaining freezes on the hosted preview.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container

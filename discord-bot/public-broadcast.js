@@ -8,6 +8,8 @@ import { setTimeout as wait } from 'node:timers/promises';
 import OpusScript from 'opusscript';
 
 const FRAME_BYTES = 48000 * 2 * 2 / 50;
+const PCM_BYTES_PER_MS = 48000 * 2 * 2 / 1000;
+const PCM_MAX_MS = 1000, PCM_SKIP_TO_MS = 500;
 export const BROADCAST_RETENTION_MS = 120000;
 
 export function createBroadcastStateReader(read, { now = Date.now, ttlMs = 1000 } = {}) {
@@ -113,6 +115,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
   let readPublicState, statePublishedAt = 0, stateAttemptedAt = 0, lastInputAt = 0;
   let stateTask = null, stateIssue = null, stateIssueLoggedAt = -Infinity;
   let publishIssue = null, publishIssueLoggedAt = -Infinity;
+  let lateAudio = null, lateAudioLoggedAt = -Infinity;
   let policy = null, previousPlaylist = '', inputBytes = 0, uploadBytes = 0;
   const runId = randomBytes(16).toString('hex'), queue = [], history = [], uploaded = new Set();
   const safeDetails = (stage, error) => ({ stage,
@@ -127,10 +130,29 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     encoder?.kill();
     queue.length = 0; queuedBytes = 0;
   };
+  // Late audio never extends the one-second allowance. A brief stall in the bot skips the stale part in one
+  // go (down to half a second) and is counted, rather than switching the public station off.
+  function skipLateAudio(stage, stale) {
+    const ageMs = Math.round(monotonicNow() - queue[0].receivedAt);
+    let droppedBytes = 0;
+    while (queue.length && stale(queue[0])) {
+      const entry = queue.shift(); queuedBytes -= entry.bytes.length; droppedBytes += entry.bytes.length;
+    }
+    const droppedMs = Math.round(droppedBytes / PCM_BYTES_PER_MS);
+    lateAudio = { skips: (lateAudio?.skips || 0) + 1, droppedMs: (lateAudio?.droppedMs || 0) + droppedMs,
+      lastStage: stage, lastAt: now() };
+    if (now() - lateAudioLoggedAt >= 10000) {
+      lateAudioLoggedAt = now();
+      log.warn?.('[public-broadcast] PCM_LATE_AUDIO_SKIPPED', { stage, ageMs, droppedMs, skips: lateAudio.skips });
+    }
+  }
   function push(bytes, program, receivedAt = monotonicNow()) {
     if (!enabled || !encoder || failure || stopping) return;
-    if (bytes.length % 4 || bytes.length > 48000 * 4 || queuedBytes + bytes.length > FRAME_BYTES * 50) {
+    if (bytes.length % 4 || bytes.length > PCM_BYTES_PER_MS * PCM_MAX_MS) {
       fail('PCM_BUFFER_LIMIT', { stage: 'pcm', queuedBytes, incomingBytes: bytes.length }); return;
+    }
+    if (queue.length && queuedBytes + bytes.length > PCM_BYTES_PER_MS * PCM_MAX_MS) {
+      skipLateAudio('pcm', () => queuedBytes + bytes.length > PCM_BYTES_PER_MS * PCM_SKIP_TO_MS);
     }
     queue.push({ bytes, program, receivedAt }); queuedBytes += bytes.length;
     if (firstInputAt === null) {
@@ -143,10 +165,11 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     const output = Buffer.alloc(FRAME_BYTES);
     let offset = 0;
     const priming = !history.length && firstInputAt !== null && now() - firstInputAt < 80;
+    if (!priming && queue.length && monotonicNow() - queue[0].receivedAt > PCM_MAX_MS) {
+      skipLateAudio('source-age', entry => monotonicNow() - entry.receivedAt > PCM_SKIP_TO_MS);
+    }
     while (!priming && queue.length && offset < FRAME_BYTES) {
       const entry = queue[0], count = Math.min(entry.bytes.length, FRAME_BYTES - offset);
-      const ageMs = monotonicNow() - entry.receivedAt;
-      if (ageMs > 1000) { fail('PCM_BUFFER_LIMIT', { stage: 'source-age', ageMs, queuedBytes }); return; }
       if (!history.length || history.at(-1).playId !== entry.program.playId) {
         history.push(broadcastProgram(entry.program, startedAt + (timelineOffsetMs || 0) + emitted * 20 + offset / 192));
         if (history.length > 64) history.shift();
@@ -299,6 +322,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
           now() - startedAt >= 20000 ? 'ready' : 'buffering',
       reason: failure, ...(failureDetails ? { reasonDetails: failureDetails } : {}), ...(stateIssue ? { stateIssue } : {}),
       ...(publishIssue ? { publishIssue } : {}),
+      ...(lateAudio ? { lateAudio: { ...lateAudio } } : {}),
       url: `${uploader.baseUrl}/hls/${runId}/index.m3u8`,
       ...(readPublicState ? { stateUrl: `${uploader.baseUrl}/hls/${runId}/state.json` } : {}),
       delaySeconds: { min: 10, max: 20 }, publishedAt,
