@@ -311,6 +311,18 @@ Development evidence so far:
   RSS was approximately 270 MiB. It provides no two-minute HTTP/2 comparison.
   The new breakdown attributes that difference without assuming file cache,
   redefining memory, relaxing the 75% cap or approving another instance/plan.
+- The owner chose to retain the $7/month 512 MiB service and optimize first.
+  Checkpoint comparison keys now reuse `checkpoint-history.js:contentHash`
+  (SHA-256) instead of retaining full serialized values. Non-daily stores no
+  longer accumulate an unused per-day identity map. Snapshot bytes, immutable
+  state copies, event identity, required local mirrors and publication ordering
+  are unchanged. An isolated generated 8 MiB snapshot retained 25,208,096 heap
+  bytes before and 16,827,408 after, approximately 8 MiB less; the new memory
+  regression failed before the repair. Median local identity calculation CPU
+  across seven samples increased from 7.451 ms to 19.248 ms for that input.
+  All 66 checkpoint, retention and mirror tests passed. These are local
+  measurements, not proof of actual container headroom or browser continuity;
+  guarded hosted revalidation and the unchanged raw 75% limit still apply.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
@@ -338,6 +350,11 @@ radio audio element and deployment guard. No compatible whole-program HLS
 donor was identified in that inspected scope. The small publisher, edge and
 HLS player are new; no speculative shared framework is extracted.
 Existing Apache-2.0 Busking code and third-party notices remain applicable.
+For compact checkpoint identities, reuse Busking's existing
+`discord-bot/checkpoint-history.js:contentHash` from `973f806`; no new hash
+dependency or shared abstraction is needed. The receiving checkpoint,
+retention and required-mirror tests pass, including the measured retained-heap
+regression; hosted validation remains a separate gate.
 Receiving tests include actual FFmpeg AAC decode across advert/A/B/advert,
 wrong/private-room exclusion, delayed tip binding, zero-seat HLS admission,
 state coalescing/expiry, quota normalization and legacy-radio regressions.
