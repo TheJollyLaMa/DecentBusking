@@ -132,6 +132,15 @@ test('routine bursts coalesce for five minutes, clone their input and skip uncha
   await time.advance(300000);
   assert.equal(api.uploads.length, 1);
   assert.equal(store.getPersistenceState().pending, false);
+  const critical = { schemaVersion: 1, details: { count: 2000 } };
+  const saving = store.save(critical);
+  critical.details.count = -1;
+  await saving;
+  assert.equal(api.uploads.at(-1).snapshot.details.count, 2000);
+  time.jump('2026-10-18T03:59:59Z');
+  await time.advance(1000);
+  assert.equal(api.uploads.at(-1).snapshot._checkpoint.day, '2026-10-18');
+  assert.equal(api.uploads.at(-1).snapshot.details.count, 2000);
 });
 
 test('weekly history embeds all seven full daily states and events, readable three weeks after daily expiry', async t => {

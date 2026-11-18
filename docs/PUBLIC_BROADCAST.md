@@ -136,8 +136,10 @@ Publication errors expose only a bounded stage and HTTP status/timeout name,
 distinguishing state reads, object uploads and local staging without disclosing
 credentials or filesystem errors. Audio age/queue/clock limits do not change.
 
-Preview mode additionally samples the parent CPU at 10 ms for at most ten
-resource windows. Only windows with an event-loop maximum above 500 ms log
+Preview mode samples the parent CPU only when explicitly enabled with
+`PUBLIC_BROADCAST_PROFILE_CPU=true`, at 10 ms for at most ten resource windows.
+Leave it unset for normal, production-equivalent preview measurements. Only
+windows with an event-loop maximum above 500 ms log
 `[radio-cpu-stall]`: a top-ten aggregate of module-relative file, function, line
 and sampled time, never a raw profile, payload, credential or absolute path.
 Direct/public modes do not start this diagnostic. Health reports the measured
@@ -323,6 +325,27 @@ Development evidence so far:
   All 66 checkpoint, retention and mirror tests passed. These are local
   measurements, not proof of actual container headroom or browser continuity;
   guarded hosted revalidation and the unchanged raw 75% limit still apply.
+- Deployed compact identities `17f8515` passed a 20/120 stage (all 20 decoded,
+  startup p95 1.101 s, metadata 315 ms, delay 15.667 s, raw memory max 65.7%)
+  and a default-transport 200/120 stage (startup 2.101 s, metadata 549 ms,
+  delay 19.735 s, memory 68.6%), both without measured errors. The next
+  200/600 observed 600.058 seconds: all decoded, no stalls or fatal playback
+  failures, startup 1.700 s, metadata 611 ms, CPU max 35.7%, raw memory 74.48%,
+  event-loop p99 57.4 ms. It still failed: one HTTP 503, 612 request failures,
+  516 metadata errors and final delay p95 38.746 s. Older harness evidence
+  lacks that 503's URL/body, so its origin is not established.
+- The HTTP/2-only control was safety-stopped after 291.593 seconds at raw
+  memory 75.25%; no HTTP 5xx or metadata errors occurred, but one request
+  failed and delay reached 21.677 s. It is not a full ten-minute comparison
+  or a capacity pass. Normal previews now leave temporary CPU profiling off;
+  always-on quota/event-loop metrics remain. Checkpoint publication also
+  reuses its already-owned immutable capture rather than cloning it again
+  after upload. Caller isolation and quiet-day rollover remain covered.
+  All 89 affected checkpoint, mirror, resource and actual AAC encoder tests
+  pass, including the explicit opt-in/direct/public matrix. An isolated
+  generated 8 MiB save now performs one full-state clone rather than two;
+  that is not a measurement of hosted peak-memory reduction.
+  These further changes still require guarded hosted validation.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
