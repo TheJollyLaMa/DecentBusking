@@ -179,6 +179,30 @@
       "contributorGithub": "TheJollyLaMa",
       "amount": "10",
       "retroactive": true
+    },
+    {
+      "issueRef": "TheJollyLaMa/DecentBusking#412",
+      "currency": "USDC",
+      "fund": "dbusk-repo-dev",
+      "queuedAt": "2026-11-18T23:38:23.558Z",
+      "queuedBy": "TheJollyLaMa",
+      "prNumber": 413,
+      "contributor": "0x807061DF657A7697c04045dA7d16D941861cAABc",
+      "contributorGithub": "TheJollyLaMa",
+      "amount": "5",
+      "role": "implementer"
+    },
+    {
+      "issueRef": "TheJollyLaMa/DecentBusking#412",
+      "currency": "USDC",
+      "fund": "dbusk-repo-dev",
+      "queuedAt": "2026-11-18T23:38:23.558Z",
+      "queuedBy": "TheJollyLaMa",
+      "prNumber": 413,
+      "contributor": "0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f",
+      "contributorGithub": "withinthevacuum",
+      "amount": "5",
+      "role": "bug-catcher"
     }
   ],
   "settled": [

@@ -34,7 +34,8 @@
         "TheJollyLaMa/DecentBusking#181",
         "TheJollyLaMa/DecentBusking#192",
         "TheJollyLaMa/DecentBusking#199",
-        "TheJollyLaMa/DecentBusking#301"
+        "TheJollyLaMa/DecentBusking#301",
+        "TheJollyLaMa/DecentBusking#412"
       ],
       "registeredAt": "2026-04-01T00:00:00.000Z",
       "notes": "Repo owner and maintainer.",
@@ -49,7 +50,7 @@
         "TheJollyLaMa/DecentBusking#192",
         "TheJollyLaMa/DecentBusking#199"
       ],
-      "usdcPending": 11.8
+      "usdcPending": 16.8
     },
     {
       "github": "copilot",
@@ -108,14 +109,18 @@
       "ethPending": 0,
       "issuesClosed": [
         "TheJollyLaMa/DecentBusking#176",
-        "TheJollyLaMa/DecentBusking#195"
+        "TheJollyLaMa/DecentBusking#195",
+        "TheJollyLaMa/DecentBusking#412"
       ],
       "registeredAt": "2026-10-14T18:31:34.269Z",
       "notes": "First outside tester; reported the briefcase upload \"Failed to fetch\" bug (#176). Whitelisted by the maintainer.",
-      "usdcPending": 0.2,
+      "usdcPending": 5.2,
       "usdcEarned": 5,
       "ideasCredited": [
         "TheJollyLaMa/DecentBusking#195"
+      ],
+      "bugsCaught": [
+        "TheJollyLaMa/DecentBusking#412"
       ]
     },
     {
