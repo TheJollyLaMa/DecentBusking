@@ -81,6 +81,92 @@ test('publisher sends segments before their playlist and redacts private headers
     data: new Int16Array([100, -100]) })], [100, 0, 100, 0, 156, 255, 156, 255]);
 });
 
+test('transient object uploads retry identical bytes inside one deadline without disclosing credentials', async () => {
+  const { createBroadcastUploader } = await import('../discord-bot/public-broadcast.js');
+  const calls = [], warnings = [], bytes = Buffer.from('audio'), token = 't'.repeat(40);
+  const uploader = createBroadcastUploader({ baseUrl: 'https://edge.example', token,
+    log: { warn: (...args) => warnings.push(args) },
+    fetchImpl: async (url, input) => {
+      calls.push({ url, input });
+      if (calls.length === 1) throw new TypeError('private request details');
+      return new Response(null, { status: calls.length === 2 ? 503 : 204 });
+    } });
+  await uploader.put(`${'a'.repeat(32)}/segment-000000001.ts`, bytes, 'video/mp2t');
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(call => call.url === calls[0].url && call.input.body === bytes &&
+    call.input.signal === calls[0].input.signal && call.input.redirect === 'error'));
+  assert.equal(warnings.length, 2);
+  assert.ok(!JSON.stringify(warnings).includes('private'));
+  assert.ok(!JSON.stringify(warnings).includes(token));
+  let failedAttempts = 0;
+  const offline = createBroadcastUploader({ baseUrl: 'https://edge.example', token,
+    log: { warn() {} }, fetchImpl: async () => { failedAttempts++; throw new TypeError('Network unavailable'); } });
+  await assert.rejects(offline.put(`${'a'.repeat(32)}/state.json`, bytes, 'application/json'), TypeError);
+  assert.equal(failedAttempts, 3);
+  for (const status of [400, 403, 429]) {
+    let attempts = 0;
+    const denied = createBroadcastUploader({ baseUrl: 'https://edge.example', token,
+      log: { warn: () => assert.fail('Permanent failures must not retry') },
+      fetchImpl: async () => {
+        attempts++;
+        const response = new Response('Denied', { status });
+        if (status === 403) response.body.cancel = async () => { throw new TypeError('Cleanup failed'); };
+        return response;
+      } });
+    await assert.rejects(denied.put(`${'a'.repeat(32)}/state.json`, bytes, 'application/json'),
+      error => error.status === status);
+    assert.equal(attempts, 1);
+  }
+});
+
+test('upload retry never restarts the original eight-second deadline', { timeout: 12000 }, async () => {
+  const { createBroadcastUploader } = await import('../discord-bot/public-broadcast.js');
+  const signals = [];
+  const uploader = createBroadcastUploader({ baseUrl: 'https://edge.example', token: 't'.repeat(40),
+    log: { warn() {} }, fetchImpl: async (_url, input) => {
+      signals.push(input.signal);
+      if (signals.length === 1) return new Response(null, { status: 503 });
+      return new Promise((_resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Shared upload deadline was not honored')), 9000);
+        input.signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(input.signal.reason);
+        }, { once: true });
+      });
+    } });
+  await assert.rejects(uploader.put(`${'a'.repeat(32)}/state.json`, Buffer.from('{}'), 'application/json'),
+    error => error.name === 'TimeoutError');
+  assert.equal(signals.length, 2);
+  assert.equal(signals[0], signals[1]);
+  assert.equal(signals[1].aborted, true);
+});
+
+test('publication failure identifies the exact stage and safe status without exposing the underlying error', async () => {
+  const { createPublicBroadcast } = await import('../discord-bot/public-broadcast.js');
+  const { writeFile } = require('node:fs/promises');
+  const { dirname, join } = require('node:path');
+  const encoder = new EventEmitter(), messages = [];
+  encoder.stdin = new PassThrough();
+  encoder.kill = () => { encoder.emit('close'); return true; };
+  let playlist;
+  const broadcaster = createPublicBroadcast({ enabled: true,
+    spawnImpl: (_command, args) => { playlist = args.at(-1); return encoder; },
+    uploader: { baseUrl: 'https://edge.example', put: async () => {
+      throw Object.assign(new Error('private token and filesystem path'), { status: 503 });
+    } },
+    log: { error: (...args) => messages.push(args) },
+  });
+  try {
+    await broadcaster.start();
+    await writeFile(join(dirname(playlist), 'segment-000000000.ts'), 'audio');
+    await writeFile(playlist, '#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:2026-11-18T00:00:00Z\nsegment-000000000.ts\n');
+    for (let count = 0; count < 100 && broadcaster.snapshot().status !== 'unavailable'; count++) await wait(10);
+    assert.equal(broadcaster.snapshot().reason, 'EDGE_PUBLISH_FAILED');
+    assert.deepEqual(broadcaster.snapshot().reasonDetails, { stage: 'segment-upload', httpStatus: 503 });
+    assert.ok(!JSON.stringify(messages).includes('private'));
+  } finally { await broadcaster.stop(); }
+});
+
 test('native HLS listener never joins LiveKit and follows programme timestamps across an ended live set', async () => {
   const { createPublicBroadcastListener, getAudibleBroadcast } = await import('../js/public-broadcast-client.mjs');
   let time = 50000, paused = true;

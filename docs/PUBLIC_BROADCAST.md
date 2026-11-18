@@ -128,6 +128,13 @@ count already processed frames as backlogged. Limit failures include a bounded
 stage/count diagnostic, distinguishing IPC backlog, PCM size and source age.
 Public state is requested from the parent through the existing eight-second
 deadline, and worker errors explicitly make the broadcast unavailable.
+Object PUTs may retry fast network/408/500/502/503/504 failures at most three
+times with bounded backoff, sharing the original eight-second deadline rather
+than restarting it. Identical object keys/bytes make these retries idempotent.
+Authorization, other client errors and exhausted budgets still fail explicitly.
+Publication errors expose only a bounded stage and HTTP status/timeout name,
+distinguishing state reads, object uploads and local staging without disclosing
+credentials or filesystem errors. Audio age/queue/clock limits do not change.
 
 Preview mode additionally samples the parent CPU at 10 ms for at most ten
 resource windows. Only windows with an event-loop maximum above 500 ms log
@@ -274,6 +281,27 @@ Development evidence so far:
   unselected state and later invalid duplicate metadata still fail. This
   repair requires guarded hosted revalidation; neither memory nor continuity
   is claimed passed from local tests.
+- Deployed history repair `91f3774` passed a 20/60 hosted stage: all decoded,
+  startup p95 1.501 s, metadata p95 154 ms, delay p95 16.546 s, CPU max 31.3%,
+  memory 64.4%, event-loop p99 25.2 ms and no measured errors. The next 200/600
+  run completed all 600 seconds with the producer continuously ready, CPU max
+  43.5%, memory 68.6% and event-loop p99 97.7 ms. Startup p95 2.600 s and
+  metadata p95 1.318 s passed, but 50 players lost control updates, 462 stalls,
+  9,559 metadata errors and 10,060 request failures occurred; delay p95 grew
+  to 40.829 s. This remains a failed acceptance run. Failures clustered in
+  one of four 50-decoder browser contexts; that does not establish a local,
+  transit or CDN root cause.
+- A default-transport diagnostic removed measurement-time browser-driver
+  interception while explicitly disabling browser cache. HTTP/3 carried most
+  responses; one context received about 20 MB versus 134 MB each in the other
+  contexts, and errors persisted. No cached responses or server 5xx occurred.
+  Removing interception did not resolve the problem; transport-forced tests
+  must not be counted as default-browser acceptance passes.
+- The producer later failed publication after about 37 minutes of encoded
+  audio, with no stage in the older error. That observation does not identify
+  an upload timeout versus a state-read or staging failure. The bounded PUT
+  retries and safe stage diagnostics above require hosted revalidation; they
+  do not retroactively classify that failure or establish readiness.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container

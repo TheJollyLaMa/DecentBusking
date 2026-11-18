@@ -4,6 +4,7 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { setTimeout as wait } from 'node:timers/promises';
 import OpusScript from 'opusscript';
 
 const FRAME_BYTES = 48000 * 2 * 2 / 50;
@@ -61,7 +62,7 @@ export function broadcastProgram(track, at) {
   };
 }
 
-export function createBroadcastUploader({ baseUrl, token, fetchImpl = fetch, now = Date.now }) {
+export function createBroadcastUploader({ baseUrl, token, fetchImpl = fetch, now = Date.now, log = console }) {
   const base = new URL(baseUrl);
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash ||
       base.pathname !== '/' || !/^[a-zA-Z0-9_-]{32,200}$/.test(token || '')) {
@@ -71,13 +72,29 @@ export function createBroadcastUploader({ baseUrl, token, fetchImpl = fetch, now
     baseUrl: base.origin,
     async put(key, bytes, type) {
       if (!/^[a-f0-9]{32}\/(?:index\.m3u8|state\.json|segment-\d{9}\.ts)$/.test(key)) throw new Error('Invalid broadcast object');
-      const response = await fetchImpl(`${base.origin}/hls/${key}`, {
-        method: 'PUT', redirect: 'error', signal: AbortSignal.timeout(8000), body: bytes,
-        headers: { authorization: `Bearer ${token}`, 'content-type': type,
-          'x-broadcast-expires-at': String(now() + BROADCAST_RETENTION_MS) },
-      });
-      if (!response.ok) throw new Error(`Broadcast edge upload failed (${response.status})`);
-      await response.body?.cancel();
+      const deadline = AbortSignal.timeout(8000);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const response = await fetchImpl(`${base.origin}/hls/${key}`, {
+            method: 'PUT', redirect: 'error',
+            signal: deadline, body: bytes,
+            headers: { authorization: `Bearer ${token}`, 'content-type': type,
+              'x-broadcast-expires-at': String(now() + BROADCAST_RETENTION_MS) },
+          });
+          const rejection = response.ok ? null : Object.assign(
+            new Error(`Broadcast edge upload failed (${response.status})`), { status: response.status });
+          try { await response.body?.cancel(); } catch (error) { throw rejection || error; }
+          if (rejection) throw rejection;
+          return;
+        } catch (error) {
+          const transient = error instanceof TypeError || ['AbortError', 'TimeoutError'].includes(error?.name) ||
+            [408, 500, 502, 503, 504].includes(error?.status);
+          if (!transient || attempt === 2 || deadline.aborted) throw error;
+          log.warn('[public-broadcast] EDGE_UPLOAD_RETRY', { attempt: attempt + 1,
+            ...([408, 500, 502, 503, 504].includes(error?.status) ? { httpStatus: error.status } : {}) });
+          await wait(250 * (attempt + 1), undefined, { signal: deadline });
+        }
+      }
     },
   };
 }
@@ -89,6 +106,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
   let startedAt = 0, startedTick = 0, emitted = 0, queuedBytes = 0, publishedAt = 0, publishing = false, encoderClosed = false;
   let protectedUntil = 0;
   let failureDetails;
+  let publicationStage = 'idle';
   let timelineOffsetMs = null;
   let firstInputAt = null;
   let readPublicState, statePublishedAt = 0, lastInputAt = 0;
@@ -143,11 +161,14 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
   async function publishState() {
     if (!readPublicState || now() - statePublishedAt < 2000) return;
     let deadline;
+    publicationStage = 'state-read';
     const state = await Promise.race([Promise.resolve().then(readPublicState), new Promise((_, reject) => {
       deadline = setTimeout(() => reject(new Error('Public radio state deadline exceeded')), 8000);
     })]).finally(() => clearTimeout(deadline));
+    publicationStage = 'state-size';
     const bytes = Buffer.from(JSON.stringify(state));
     if (bytes.length > 65536) throw new Error('Public radio state exceeds broadcast size limit');
+    publicationStage = 'state-upload';
     await uploader.put(`${runId}/state.json`, bytes, 'application/json');
     statePublishedAt = now(); uploadBytes += bytes.length;
   }
@@ -156,6 +177,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     publishing = true;
     try {
       let text;
+      publicationStage = 'playlist-read';
       try { text = await readFile(join(directory, 'index.m3u8'), 'utf8'); }
       catch (error) { if (error.code === 'ENOENT') return; throw error; }
       if (text === previousPlaylist) { await publishState(); return; }
@@ -169,23 +191,31 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
       }
       for (const name of names) {
         if (uploaded.has(name)) continue;
+        publicationStage = 'segment-read';
         const bytes = await readFile(join(directory, name));
         if (bytes.length > 256000) throw new Error('Broadcast segment exceeds encoded size limit');
+        publicationStage = 'segment-upload';
         await uploader.put(`${runId}/${name}`, bytes, 'video/mp2t');
         uploadBytes += bytes.length; uploaded.add(name);
       }
+      publicationStage = 'playlist-upload';
       await uploader.put(`${runId}/index.m3u8`, Buffer.from(text), 'application/vnd.apple.mpegurl');
       uploadBytes += Buffer.byteLength(text);
       previousPlaylist = text; publishedAt = now();
       await publishState();
       // Local staging is bounded too; the edge enforces expiry even after a crash.
+      publicationStage = 'cleanup';
       const first = Number(names[0].match(/\d+/)[0]);
       for (const name of await readdir(directory)) {
         if (/^segment-\d{9}\.ts$/.test(name) && Number(name.match(/\d+/)[0]) < first - 8) {
           await rm(join(directory, name)); uploaded.delete(name);
         }
       }
-    } catch { fail('EDGE_PUBLISH_FAILED'); }
+    } catch (error) {
+      fail('EDGE_PUBLISH_FAILED', { stage: publicationStage,
+        ...(Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? { httpStatus: error.status } : {}),
+        ...(['AbortError', 'TimeoutError'].includes(error?.name) ? { errorName: error.name } : {}) });
+    }
     finally { publishing = false; }
   }
   return {
