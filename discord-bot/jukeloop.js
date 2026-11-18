@@ -1425,7 +1425,9 @@ export class JukeLoopSession {
     let paid = isHype || activeShow.type === 'playlist_show' ? null : forcedPaid;
     if (!paid && !fallbackBreak && this.djuke && ((!this._deploymentDraining() && !(this._broadcastRequestedUntil > Date.now())) || playlistOwnsRadio) &&
         activeShow.type !== 'playlist_show' && activeShow.type !== 'weekly_top10' && Date.now() >= this._djukeCooldownUntil) {
-      paid = await this.djuke.nextPaid({ allowBump: normalSlotDue, ...(cancellationAds ? { includeSongs: false } : {}) });
+      paid = await this.djuke.nextPaid({ allowBump: normalSlotDue,
+        ...(cancellationAds ? { includeSongs: false } : {}),
+        ...(normalSlotDue ? { includeVideos: false } : {}) });
       if (paid && !this._paidStartAllowed(paid.record)) {
         await this.djuke.release(paid.record, new Error('Deployment drain holds new paid starts'));
         paid = null;
@@ -1735,7 +1737,8 @@ export class JukeLoopSession {
       const preparedBump = this._preparedNext.paid?.record.kind === 'devert' && this._preparedNext.paid.record.tier === 0;
       const normalSlotDue = !!this._preparedNext.devertAd;
       const paid = await this.djuke.nextPaid({ allowBump: normalSlotDue && !preparedBump,
-        includeSongs: !preparedBump && this._resolveShow().type !== 'live_audio_ads' });
+        includeSongs: !preparedBump && this._resolveShow().type !== 'live_audio_ads',
+        ...(normalSlotDue ? { includeVideos: false } : {}) });
       if (!paid) {
         this._schedulePaidPriorityCheck();
         return this._preparedNext;

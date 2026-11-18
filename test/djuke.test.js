@@ -97,6 +97,16 @@ test('Play Live receipts belong to the profile, not the DJuke drawer', () => {
   assert.match(profileSource, /creator-profile-view-changed/);
 });
 
+test('DJuke registry excludes video entries so DMTv owns visual experiences', async () => {
+  const { djukeCatalog } = await import('../discord-bot/djuke.js');
+  const wallet = '0x1111111111111111111111111111111111111111';
+  const entries = djukeCatalog([
+    { trackId: 'audio', ipfsCid: 'bafyaudio', mintRecipient: wallet, mediaType: 'audio/mpeg' },
+    { trackId: 'mp4', ipfsCid: 'bafyvideo', mintRecipient: wallet, mediaType: 'video/mp4', videoUrl: 'ipfs://bafyvideo' },
+  ]);
+  assert.deepEqual(entries.map(entry => entry.track.trackId), ['audio']);
+});
+
 test('DJuke keeps the 10 percent fund and 90 percent artist split exact', async () => {
   const { quoteDjuke } = await import('../js/djuke.mjs');
   for (const pending of [0, 8, 16, 24, 100]) {

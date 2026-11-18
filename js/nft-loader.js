@@ -1,4 +1,5 @@
 const CACHE_TTL_MS = 60 * 60 * 1000;
+import { dmtvExperienceVideo } from './dmtv.mjs';
 
 export function audioCid(value) {
   return String(value || '').match(/^ipfs:\/\/(?:ipfs\/)?([^/?#]+)/)?.[1] || String(value || '').match(/\/ipfs\/([^/?#]+)/)?.[1] || '';
@@ -74,12 +75,12 @@ export function nftMatchesQuery(nft, query = '') {
   return terms.every(term => text.includes(term));
 }
 
-export function nftCatalogPage(nfts, { query = '', artist = '', wallet = '', before = '', after = '', ...paging } = {}) {
+export function nftCatalogPage(nfts, { query = '', artist = '', wallet = '', before = '', after = '', media = '', ...paging } = {}) {
   const terms = nftSearchTerms(query);
   const lower = after ? Date.parse(after) : null;
   const upper = before ? Date.parse(before) : null;
   if ((after && !Number.isFinite(lower)) || (before && !Number.isFinite(upper))) throw new Error('Invalid timeline dates');
-  const music = nfts.filter(isMusicNft);
+  const music = nfts.filter(media === 'video' ? dmtvExperienceVideo : isMusicNft);
   const artists = [...new Map(music.map(nft => [nftArtistKey(nft), nftArtistLabel(nft)])).entries()]
     .map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
   const matching = music.filter(nft => {

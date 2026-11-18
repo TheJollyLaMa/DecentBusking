@@ -34,6 +34,8 @@ export async function verifyDjukePlaylistWorker({ provider, contract, workerAddr
 
 export function djukeCatalog(playlist) {
   return playlist.filter(track => !track.isDevertAd && !['music-only', 'all-radio'].includes(track.contentReview?.scope) &&
+    !track.videoUrl && !String(track.mediaType || '').startsWith('video/') &&
+    !/\.(mp4|webm|mov|ogv)(?:[?#]|$)/i.test(track.filename || '') &&
     track.ipfsCid && /^0x[0-9a-fA-F]{40}$/.test(track.mintRecipient || '') &&
     (track.source !== 'site' || track.mintStatus === 'minted'))
     .map(track => ({ songId: id(track.trackId), track }));

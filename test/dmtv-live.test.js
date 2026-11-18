@@ -1,0 +1,142 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const ethers = require('../discord-bot/node_modules/ethers');
+
+const type = 'video/mp4';
+const ad = { title: 'DVert', audioURI: 'ipfs://ad-cid', startedAt: '2026-01-01', expiresAt: '2026-02-01' };
+const nfts = [
+  { nftId: 'v', name: 'Visual', artistName: 'Artist', mediaType: type, animation_url: 'ipfs://video-cid' },
+  { nftId: 'a', name: 'Audio', mediaType: 'audio/mp4', animation_url: 'ipfs://audio-cid' },
+  { nftId: 'ad', name: 'Campaign copy', mediaType: type, animation_url: 'https://ipfs.io/ipfs/ad-cid' },
+  { nftId: 'house', name: 'Subvertisement', mediaType: type, animation_url: 'ipfs://house-cid' },
+  { nftId: 'unknown', name: 'Unknown', animation_url: 'ipfs://unknown-cid' },
+];
+
+test('only archive videos are selectable; matching active DVert videos are separate', async () => {
+  const { dmtvArchiveItems, dmtvVideoAds } = await import('../js/dmtv.mjs');
+  assert.deepEqual(dmtvArchiveItems(nfts, [ad]).map(x => [x.title, x.artist]), [['Visual', 'Artist']]);
+  const now = Date.parse('2026-01-15');
+  assert.deepEqual(dmtvVideoAds([ad, ad, { ...ad, audioURI: 'ipfs://audio-cid' }], nfts, now)
+    .map(x => x.videoUrl), [ad.audioURI]);
+  assert.deepEqual(dmtvVideoAds([ad, { ...ad, removed: true }], nfts, Date.parse('2026-02-01')), []);
+});
+
+test('rotation prioritizes paid spots but only inserts an ad after ten completed videos', async () => {
+  const { createDmtvRotation } = await import('../js/dmtv.mjs');
+  const rotation = createDmtvRotation();
+  const archive = [{ nftId: 'a' }, { nftId: 'b' }];
+  const paid = [{ nftId: 'paid', fundTx: 'hash' }];
+  assert.equal(rotation.next(archive, paid, [ad]).nftId, 'paid');
+  for (let i = 0; i < 10; i++) {
+    const item = rotation.next(archive, [], [ad]);
+    assert.equal(item.nftId, archive[i % 2].nftId);
+    rotation.complete(item);
+  }
+  const advert = rotation.next(archive, paid, [ad]);
+  assert.equal(advert.kind, 'ad');
+  rotation.complete(advert);
+  assert.equal(rotation.next(archive, paid, [ad]).nftId, 'paid');
+  for (let i = 0; i < 10; i++) rotation.complete(rotation.next(archive, [], []));
+  assert.equal(rotation.next(archive, [], []).kind, 'house-ad');
+  assert.equal(rotation.next(archive, [], []).kind, 'video');
+});
+
+test('DMTv requires both an exact fund event and the actual USDC transfer', async () => {
+  const { verifyDmtvFundReceipt } = await import('../js/dmtv.mjs');
+  const { SETTLEMENT_ROUTER_ADDRESS: router } = await import('../js/fund-contribution.mjs');
+  const { BASE_USDC_ADDRESS: token } = await import('../js/settlement-funds.mjs');
+  const payer = '0x1111111111111111111111111111111111111111';
+  const iface = new ethers.Interface([
+    'event FundFunded(bytes32 indexed fundId,address indexed asset,address indexed funder,uint256 amount)',
+    'event Transfer(address indexed from,address indexed to,uint256 value)',
+  ]);
+  const funded = { address: router, ...iface.encodeEventLog('FundFunded', [ethers.id('dbusk-playback'), token, payer, 1000000n]) };
+  const transfer = { address: token, ...iface.encodeEventLog('Transfer', [payer, router, 1000000n]) };
+  assert.equal(verifyDmtvFundReceipt({ status: 1, logs: [funded, transfer] }, payer, ethers), 1000000n);
+  for (const receipt of [
+    { status: 1, logs: [funded] },
+    { status: 1, logs: [transfer] },
+    { status: 1, logs: [{ ...funded, address: payer }, transfer] },
+    { status: 0, logs: [funded, transfer] },
+  ]) assert.throws(() => verifyDmtvFundReceipt(receipt, payer, ethers));
+});
+
+test('main-radio checkout persists one wallet-authorized request across restarts', async () => {
+  const { createDmtvRadioQueue } = await import('../discord-bot/dmtv-queue.js');
+  const { dmtvRadioAuthorization } = await import('../js/dmtv-radio.mjs');
+  const { SETTLEMENT_ROUTER_ADDRESS: router } = await import('../js/fund-contribution.mjs');
+  const { BASE_USDC_ADDRESS: token } = await import('../js/settlement-funds.mjs');
+  const wallet = ethers.Wallet.createRandom();
+  const track = { nftId: 'nft', creator: ethers.Wallet.createRandom().address, ipfsCid: 'test-cid', title: 'Video' };
+  const iface = new ethers.Interface([
+    'event FundFunded(bytes32 indexed fundId,address indexed asset,address indexed funder,uint256 amount)',
+    'event Transfer(address indexed from,address indexed to,uint256 value)',
+  ]);
+  const creatorTx = ethers.id('creator');
+  const fundTx = ethers.id('fund');
+  const creatorReceipt = { status: 1, blockNumber: 11, from: wallet.address, to: token, logs: [
+    { address: token, ...iface.encodeEventLog('Transfer', [wallet.address, track.creator, 1000000n]) },
+  ] };
+  const fundReceipt = { status: 1, blockNumber: 12, from: wallet.address, to: router, logs: [
+    { address: token, ...iface.encodeEventLog('Transfer', [wallet.address, router, 2000000n]) },
+    { address: router, ...iface.encodeEventLog('FundFunded', [ethers.id('dbusk-playback'), token, wallet.address, 2000000n]) },
+  ] };
+  let latest = 10;
+  let saved;
+  let enabled = true;
+  const create = () => createDmtvRadioQueue({
+    provider: {
+      getBlockNumber: async () => latest,
+      getTransactionReceipt: async hash => hash === creatorTx ? creatorReceipt : hash === fundTx ? fundReceipt : null,
+    },
+    store: { restore: async () => structuredClone(saved), save: async snapshot => { saved = structuredClone(snapshot); return 'ipfs://checkpoint'; } },
+    secret: 'test-only',
+    findTrack: async () => track,
+    enabled: () => enabled,
+  });
+  const queue = create();
+  const { ticket } = await queue.quote({ payer: wallet.address, nftId: track.nftId });
+  const other = await queue.quote({ payer: wallet.address, nftId: track.nftId });
+  const body = { ticket, creatorTx, fundTx, signature: await wallet.signMessage(dmtvRadioAuthorization(ticket, creatorTx, fundTx)) };
+  latest = 12;
+  await assert.rejects(queue.submit(body), /two Base confirmations/);
+  latest = 13;
+  const completeLogs = fundReceipt.logs;
+  fundReceipt.logs = completeLogs.slice(0, 1);
+  await assert.rejects(queue.submit(body), /receipts do not prove/);
+  fundReceipt.logs = completeLogs;
+  enabled = false;
+  const queued = await queue.submit(body);
+  assert.equal(queued.state, 'pending');
+  const restarted = create();
+  assert.deepEqual(await restarted.submit(body), queued);
+  await assert.rejects(restarted.submit({
+    ...body, ticket: other.ticket, signature: await wallet.signMessage(dmtvRadioAuthorization(other.ticket, creatorTx, fundTx)),
+  }), /already assigned/);
+  const claimed = await restarted.nextPaid();
+  assert.equal(claimed.track.ipfsCid, track.ipfsCid);
+  assert.equal(await restarted.nextPaid(), null);
+  const afterRestart = create();
+  assert.equal((await afterRestart.nextPaid()).record.requestId, queued.requestId);
+  await afterRestart.complete(claimed.record, { playId: 'play', finished: true, audibleMs: 2000 });
+  assert.equal(await create().nextPaid(), null);
+  assert.equal((await create().submit(body)).state, 'played');
+});
+
+test('one scheduler alternates DJuke and DMTv without bypassing DVert priority', async () => {
+  const { combinePaidQueues } = await import('../discord-bot/devert-queue.js');
+  const outcomes = [];
+  function source(kind, ids) {
+    return {
+      async nextPaid() { return ids.length ? { record: { kind, requestId: ids.shift() } } : null; },
+      async complete(record) { outcomes.push(`${kind}:${record.requestId}`); },
+    };
+  }
+  const scheduler = combinePaidQueues({
+    songs: source('djuke', ['song1', 'song2']), videos: source('dmtv', ['video1', 'video2']),
+    adverts: source('devert', ['ad']),
+  });
+  for (let i = 0; i < 5; i++) await scheduler.complete((await scheduler.nextPaid()).record);
+  assert.deepEqual(outcomes, ['devert:ad', 'djuke:song1', 'dmtv:video1', 'djuke:song2', 'dmtv:video2']);
+  assert.equal(await scheduler.nextPaid(), null);
+});
