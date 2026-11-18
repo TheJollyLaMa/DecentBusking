@@ -29,6 +29,7 @@ import { announcePaymentCelebration } from './payment-celebration.mjs';
 import { recordPayrollConfirmation, setPayrollConfirmationStatus } from './payroll-confirmations.mjs?v=20261102-recipient-names';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
 import { formatUsdcUnits } from './usdc-format.mjs?v=20261017-mercury-release';
+import { repositoryWorkReferenceText } from './repository-payroll-status.mjs?v=20261118-verified-backlog';
 
 function _displayTokenAmount(units, currency, decimals) {
   return currency === 'USDC' ? formatUsdcUnits(units) : ethers.formatUnits(units, decimals);
@@ -537,10 +538,7 @@ function _readOnlyRouter() {
 }
 
 function _artWorkReference(entry) {
-  const role = entry.role || 'contributor';
-  const base = `${entry.issueRef}:${entry.contributorGithub}:${role}`;
-  const currency = _entryCurrency(entry);
-  return ethers.keccak256(ethers.toUtf8Bytes(currency === 'ART' ? base : `${base}:${currency}`));
+  return ethers.keccak256(ethers.toUtf8Bytes(repositoryWorkReferenceText(entry)));
 }
 
 async function _switchNetwork(chainId) {

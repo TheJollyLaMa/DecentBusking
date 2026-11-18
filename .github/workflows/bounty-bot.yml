@@ -65,4 +65,6 @@ jobs:
       - name: Notify owner of queued payroll
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/notifyPayrollPending.js
+        run: |
+          npm ci --prefix discord-bot --omit=dev --ignore-scripts
+          node scripts/notifyPayrollPending.js

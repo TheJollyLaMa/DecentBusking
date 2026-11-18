@@ -242,7 +242,7 @@ test('Left Ankh keeps tally and owner-only admin/payroll without a redundant rep
   assert.equal(menu.children[1].hidden, false);
   assert.equal(menu.children[2].hidden, false);
   events.get('payroll-queue-status')({ detail: { count: 3 } });
-  assert.equal(menu.children[2].children[0].textContent, ' - 3 queued');
+  assert.equal(menu.children[2].children[0].textContent, ' - 3 unpaid');
   events.get('payroll-queue-status')({ detail: { error: 'offline' } });
   assert.equal(menu.children[2].children[0].textContent, ' - unavailable');
   wallet.address = `0x${'1'.repeat(40)}`;

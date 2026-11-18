@@ -135,7 +135,7 @@ document.addEventListener('wallet-disconnected', updateAdminItems);
 
 document.addEventListener('payroll-queue-status', event => {
   queueNotice = event.detail.error ? ' - unavailable'
-    : event.detail.count ? ` - ${event.detail.count} queued` : '';
+    : event.detail.count ? ` - ${event.detail.count} unpaid` : '';
   for (const title of _findAllAppTitles()) {
     const notice = title.shadowRoot?.querySelector('[data-payroll-notice]');
     if (notice) notice.textContent = queueNotice;

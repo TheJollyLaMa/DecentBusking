@@ -20,7 +20,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Notify owner of the queued repo-dev backlog
+      - name: Install chain verification dependencies
+        run: npm ci --prefix discord-bot --omit=dev --ignore-scripts
+      - name: Verify unpaid work and notify owner
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/notifyPayrollPending.js

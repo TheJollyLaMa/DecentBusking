@@ -1,9 +1,16 @@
 import { isAdminWallet } from './admin-access.mjs';
+import { getRepositoryPayrollStatus } from './repository-payroll-status.mjs?v=20261118-verified-backlog';
 
 export function initPayrollNotice({ document = globalThis.document, window = globalThis.window,
   isAdmin = () => isAdminWallet(), fetchQueue = () => window.fetch(
     'https://raw.githubusercontent.com/TheJollyLaMa/DecentBusking/main/payroll-queue.json',
     { cache: 'no-store', credentials: 'omit' }),
+  readStatus = async queue => {
+    const response = await window.fetch(new URL('../payroll-assets.json', import.meta.url), { cache: 'no-store', credentials: 'omit' });
+    if (!response.ok) throw new Error(`Payroll assets unavailable (${response.status})`);
+    const config = await response.json();
+    return getRepositoryPayrollStatus({ queue, config, ethers: window.ethers });
+  },
 } = {}) {
   let generation = 0, pending = false;
   const publish = detail => document.dispatchEvent(new window.CustomEvent('payroll-queue-status', { detail }));
@@ -20,10 +27,9 @@ export function initPayrollNotice({ document = globalThis.document, window = glo
       const response = await fetchQueue();
       if (!response.ok) throw new Error(`Payroll queue unavailable (${response.status})`);
       const queue = await response.json();
-      if (!Array.isArray(queue.pending)) throw new Error('Invalid payroll pending queue');
-      const count = queue.pending.filter(entry =>
-        entry && entry.currency && entry.currency !== 'ETH' && !entry.retainedInFund).length;
-      if (attempt === generation && isAdmin()) publish({ count });
+      const status = await readStatus(queue);
+      if (status.verified !== true) throw new Error('Payroll completion is unverified');
+      if (attempt === generation && isAdmin()) publish({ count: status.pending.length });
     } catch (error) {
       if (attempt === generation && isAdmin()) {
         console.warn('[payroll-notice]', error.message);

@@ -60,12 +60,16 @@ test('public helper gates exact copy/GitHub preview, invalidates edits and disca
 test('owner badge polls only while eligible, distinguishes failure, and ignores stale disconnected responses', async () => {
   const dom = new JSDOM('', { pretendToBeVisual: true });
   const { document } = dom.window;
-  let owner = false, calls = 0, resolve;
+  let owner = false, calls = 0, resolve, chainUnavailable = false;
   const notices = [];
   document.addEventListener('payroll-queue-status', event => notices.push(event.detail));
   const stop = initPayrollNotice({
     document, window: dom.window, isAdmin: () => owner,
     fetchQueue: () => { calls++; return new Promise(done => { resolve = done; }); },
+    readStatus: async () => {
+      if (chainUnavailable) throw new Error('Base verification offline');
+      return { verified: true, pending: [{}, {}] };
+    },
   });
   assert.equal(calls, 0);
   owner = true;
@@ -83,6 +87,12 @@ test('owner badge polls only while eligible, distinguishes failure, and ignores 
   owner = true;
   document.dispatchEvent(new dom.window.Event('wallet-connected'));
   resolve({ ok: false, status: 503 });
+  await new Promise(done => setImmediate(done));
+  assert.equal(notices.at(-1).count, null);
+  assert.match(notices.at(-1).error, /unavailable/);
+  chainUnavailable = true;
+  document.dispatchEvent(new dom.window.Event('visibilitychange'));
+  resolve({ ok: true, json: async () => ({ pending: [] }) });
   await new Promise(done => setImmediate(done));
   assert.equal(notices.at(-1).count, null);
   assert.match(notices.at(-1).error, /unavailable/);

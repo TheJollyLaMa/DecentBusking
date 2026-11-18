@@ -40,9 +40,9 @@ const pending = [
   { issueRef: 'TheJollyLaMa/DecentBusking#402', contributorGithub: 'implementer', currency: 'USDC', amount: '0.1' },
   { issueRef: 'TheJollyLaMa/DecentBusking#403', contributorGithub: 'reporter', currency: 'USDC', amount: '0.2' },
 ];
-const queue = { pending: [...pending, { ...pending[0], currency: 'ETH' }], retained: [pending[0]] };
+const status = { verified: true, pending, completed: [], blockNumber: 123 };
 test('backlog notifications total exact supported payable tokens and avoid duplicate issues and unchanged pings', async () => {
-  const alert = buildPayrollAlert(queue, args.repoSlug, args.repositoryOwner);
+  const alert = buildPayrollAlert(status, args.repoSlug, args.repositoryOwner);
   assert.equal(alert.count, 3);
   assert.match(alert.body, /0\.3 USDC/);
   assert.ok(!alert.body.includes('50 ETH'));
@@ -51,20 +51,54 @@ test('backlog notifications total exact supported payable tokens and avoid dupli
     if (!options) return [];
     writes.push({ route, ...JSON.parse(options.body) });
   };
-  await notifyPayrollPending({ queue, owner: 'TheJollyLaMa', repo: 'DecentBusking', request });
+  await notifyPayrollPending({ status, owner: 'TheJollyLaMa', repo: 'DecentBusking', request });
   assert.equal(writes.length, 1);
   assert.deepEqual(writes[0].assignees, ['TheJollyLaMa']);
   const existing = { number: 999, body: alert.body, user: { login: 'github-actions[bot]' }, state: 'open' };
-  const unchanged = await notifyPayrollPending({ queue, owner: 'TheJollyLaMa', repo: 'DecentBusking',
+  const unchanged = await notifyPayrollPending({ status, owner: 'TheJollyLaMa', repo: 'DecentBusking',
     request: async () => [existing] });
   assert.equal(unchanged.changed, false);
   writes.length = 0;
-  await notifyPayrollPending({ queue: { pending: [] }, owner: 'TheJollyLaMa', repo: 'DecentBusking',
+  await notifyPayrollPending({ status: { ...status, pending: [], completed: pending }, owner: 'TheJollyLaMa', repo: 'DecentBusking',
     request: async (route, options) => {
       if (!options) return [existing];
       writes.push(JSON.parse(options.body));
     } });
   assert.equal(writes.length, 1);
+  assert.equal(writes[0].state, 'closed');
+  assert.match(writes[0].body, /No unpaid Base/);
+});
+
+test('verification failures invalidate stale counts and unchanged work never pings on a new checked block', async () => {
+  const alert = buildPayrollAlert(status, args.repoSlug, args.repositoryOwner);
+  const existing = { number: 999, body: alert.body, user: { login: 'github-actions[bot]' }, state: 'open' };
+  const writes = [];
+  const request = async (route, options) => {
+    if (!options) return [existing];
+    writes.push({ route, ...JSON.parse(options.body) });
+  };
+  await notifyPayrollPending({ status: { ...status, blockNumber: 124 }, owner: 'TheJollyLaMa', repo: 'DecentBusking', request });
+  assert.equal(writes.length, 1);
+  assert.ok(!writes[0].route.endsWith('/comments'));
+  writes.length = 0;
+  await notifyPayrollPending({ status: { error: true }, owner: 'TheJollyLaMa', repo: 'DecentBusking', request });
+  assert.equal(writes.length, 1);
+  assert.match(writes[0].title, /unavailable/);
+  assert.ok(!writes[0].body.includes('0 unpaid'));
   assert.equal(writes[0].state, 'open');
-  assert.match(writes[0].body, /No queued Base/);
+  assert.throws(() => buildPayrollAlert({ pending }, args.repoSlug, args.repositoryOwner), /Verified/);
+});
+
+test('verified zero never closes a reported bug or another author’s issue', async () => {
+  const alert = buildPayrollAlert(status, args.repoSlug, args.repositoryOwner);
+  let writes = 0;
+  await notifyPayrollPending({ status: { ...status, pending: [] }, owner: 'TheJollyLaMa', repo: 'DecentBusking',
+    request: async (route, options) => {
+      if (options) { writes++; return; }
+      return [
+        { number: 402, body: 'A reported bug', user: { login: 'github-actions[bot]' }, state: 'open' },
+        { number: 999, body: alert.body, user: { login: 'another-author' }, state: 'open' },
+      ];
+    } });
+  assert.equal(writes, 0);
 });
