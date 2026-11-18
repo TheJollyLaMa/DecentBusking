@@ -7,7 +7,7 @@ const ACCOUNTS_PATH = path.join(__dirname, '..', 'contributor-accounts.json');
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
 const ISSUE_REF_RE = /^[^/]+\/[^/]+#\d+$/;
 const VALID_CURRENCIES = new Set([...SUPPORTED_CURRENCIES, 'ETH']);
-const SUPPORTED_ROLES = new Set(['contributor', 'implementer', 'idea-originator', 'tester']);
+const SUPPORTED_ROLES = new Set(['contributor', 'implementer', 'idea-originator', 'bug-catcher', 'tester']);
 const LEGACY_CUTOFF = Date.parse('2026-09-16T00:00:00.000Z');
 
 function readJson(filePath) {
@@ -77,6 +77,7 @@ for (const [index, contributor] of accounts.contributors.entries()) {
 }
 
 const seen = new Set();
+const bugCatcherCredits = new Set();
 function validateEntry(entry, section, index) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) fail(`${section}[${index}] must be an object`);
   const issueRef = String(entry.issueRef || '').trim();
@@ -106,6 +107,11 @@ function validateEntry(entry, section, index) {
   const key = `${issueRef}:${github.toLowerCase()}:${role}:${currency}`;
   if (seen.has(key)) fail(`duplicate payroll entry detected for ${issueRef} / ${github} / ${currency}`);
   seen.add(key);
+  if (role === 'bug-catcher') {
+    const creditKey = `${issueRef}:${currency}`;
+    if (bugCatcherCredits.has(creditKey)) fail(`duplicate bug-catcher credit detected for ${issueRef} / ${currency}`);
+    bugCatcherCredits.add(creditKey);
+  }
   if (!contributors.has(github.toLowerCase())) fail(`${section}[${index}].contributorGithub is not registered in contributor-accounts.json`);
   const registeredWallet = contributors.get(github.toLowerCase());
   if (section !== 'retained' && registeredWallet === null) fail(`${section}[${index}] cannot be paid: ${github} retains credit in the fund`);

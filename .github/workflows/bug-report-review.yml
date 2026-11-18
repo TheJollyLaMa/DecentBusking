@@ -1,0 +1,47 @@
+name: Review Bug Report
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Bug report issue number
+        required: true
+        type: string
+      outcome:
+        description: Verify the first unique reporter and eligibility before approving (50% bug catcher; existing idea share stays 20%)
+        required: true
+        type: choice
+        options:
+          - approved
+          - duplicate
+          - rejected
+          - spam
+          - self-reported
+          - maintainer-discovered
+      duplicate_of:
+        description: Original issue number (required for duplicate)
+        type: string
+permissions:
+  contents: read
+  issues: write
+jobs:
+  review:
+    if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: decentbusking-art-payroll-queue
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Record owner review and apply credit labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_ISSUE_NUMBER: ${{ inputs.issue_number }}
+          INPUT_OUTCOME: ${{ inputs.outcome }}
+          INPUT_DUPLICATE_OF: ${{ inputs.duplicate_of }}
+        run: node scripts/reviewBugReport.js

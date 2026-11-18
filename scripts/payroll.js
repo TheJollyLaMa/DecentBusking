@@ -3,6 +3,8 @@ const SUPPORTED_CURRENCIES = Object.keys(PAYROLL_ASSET_CONFIG.assets || {});
 const BOUNTY_LABEL_RE = /^bounty:\s*(\d+(?:\.\d+)?)\s*\$?([A-Za-z][A-Za-z0-9]{1,9})$/i;
 const TEST_BOUNTY_LABEL_RE = /^test-bounty:\s*(\d+(?:\.\d+)?)\s*\$?([A-Za-z][A-Za-z0-9]{1,9})$/i;
 const IDEA_CREDIT_LABEL_RE = /^idea-credit:\s*@?([-\w]+)$/i;
+const BUG_CATCHER_LABEL_RE = /^bug-catcher:\s*@?([-\w]+(?:\[bot\])?)$/i;
+const BUG_CATCHER_APPROVED_LABEL = 'bug-catcher-approved';
 const CLOSING_ISSUE_RE = /(?:closes?|fixes?|resolves?)\s+(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#(\d+)/gi;
 const TITLE_ISSUE_RE = /#(\d+)/g;
 const AMOUNT_RE = /^\d+(?:\.\d+)?$/;
@@ -87,6 +89,28 @@ function parseIdeaCredit(issue) {
   return null;
 }
 
+function parseBugCatcherCredit(issue) {
+  const labels = labelNames(issue).map(label => String(label || '').trim());
+  if (!labels.some(label => label.toLowerCase() === BUG_CATCHER_APPROVED_LABEL)) return null;
+  if (labels.some(label => label.toLowerCase() === 'bug-catcher-pending')) {
+    throw new Error('Approved bug-catcher credit cannot keep the pending-review label');
+  }
+  if (labels.some(label => /^bug-catcher-(?:duplicate|rejected|spam|self-reported|maintainer-discovered)$/i.test(label))) {
+    throw new Error('Excluded reports cannot receive bug-catcher approval');
+  }
+  if (!labels.some(label => label.toLowerCase() === 'bug-catcher')) {
+    throw new Error('Approved bug-catcher credit requires the bug-catcher label');
+  }
+  const logins = labels
+    .map(label => label.match(BUG_CATCHER_LABEL_RE)?.[1])
+    .filter(Boolean)
+    .map(normalizeLogin);
+  if (logins.length !== 1) {
+    throw new Error('Approved bug-catcher credit requires exactly one bug-catcher: @username label');
+  }
+  return logins[0];
+}
+
 function extractIssueNumbers({ body = '', title = '', linked = [], override = [] } = {}) {
   const numbers = new Set();
   for (const value of override) {
@@ -129,6 +153,22 @@ function splitIdeaCredit(amount, currency = 'ART', assetRegistry = PAYROLL_ASSET
   return {
     implementer: unitsToAmount(units - originatorUnits, currency, assetRegistry),
     originator: unitsToAmount(originatorUnits, currency, assetRegistry),
+  };
+}
+
+function splitBugCatcherCredit(amount, currency = 'ART', { hasIdea = false } = {}, assetRegistry = PAYROLL_ASSET_CONFIG.assets) {
+  const units = amountToUnits(amount, currency, assetRegistry);
+  const decimals = currencyDecimals(currency, assetRegistry);
+  const divisor = hasIdea ? 10n : 2n;
+  if (units % divisor !== 0n) {
+    throw new Error(`Payout amount cannot be split exactly at ${decimals} decimal places: ${amount}`);
+  }
+  const bugCatcherUnits = units / 2n;
+  const ideaUnits = hasIdea ? units / 5n : 0n;
+  return {
+    implementer: unitsToAmount(units - bugCatcherUnits - ideaUnits, currency, assetRegistry),
+    bugCatcher: unitsToAmount(bugCatcherUnits, currency, assetRegistry),
+    ...(hasIdea ? { originator: unitsToAmount(ideaUnits, currency, assetRegistry) } : {}),
   };
 }
 
@@ -176,6 +216,9 @@ function isDuplicate(queue, candidate) {
 
     const entryGithub = String(entry.contributorGithub || '').trim().toLowerCase();
     const entryRoleName = entryRole(entry);
+    if (entryRoleName === 'bug-catcher' && candidateRole !== 'tester') return true;
+    if ((candidateRole === 'bug-catcher' && entryRoleName === 'tester') ||
+        (candidateRole === 'tester' && entryRoleName === 'bug-catcher')) return false;
     if (entryGithub === candidateGithub) return true;
     if (candidateRole === 'contributor') return false;
     return (entryRoleName === 'implementer' || entryRoleName === 'idea-originator') &&
@@ -206,6 +249,17 @@ function pickWhitelistedTester({ assigneeLogins = [], accounts, commenter = '' }
 function createBountyEntries({ issue, pr, accounts, queue, repoSlug, queuedAt, queuedBy, assetRegistry = PAYROLL_ASSET_CONFIG.assets }) {
   const bounties = parseAmountLabels(issue, BOUNTY_LABEL_RE, assetRegistry);
   if (!bounties.length) return { entries: [], reason: 'missing-bounty-label' };
+  const bugCatcherLogin = parseBugCatcherCredit(issue);
+  const labels = labelNames(issue).map(label => String(label).toLowerCase());
+  const reviewed = labels.some(label => /^bug-catcher-(?:approved|duplicate|rejected|spam|self-reported|maintainer-discovered)$/.test(label));
+  const report = labels.includes('bug') || /^## Bug report\b/m.test(issue.body || '') ||
+    ['What happened?', 'What did you expect?', 'Steps to reproduce'].every(heading => (issue.body || '').includes(`### ${heading}`));
+  if (labels.includes('bug-catcher-pending') || (report && !reviewed)) {
+    return { entries: [], retained: [], reason: 'bug-report-pending-review' };
+  }
+  if (labels.some(label => /^bug-catcher-(?:duplicate|rejected|spam)$/.test(label))) {
+    return { entries: [], retained: [], reason: 'bug-report-ineligible' };
+  }
 
   const prAuthor = normalizeLogin(pr.user && pr.user.login);
   const assignees = (issue.assignees || []).map(assignee => normalizeLogin(assignee.login));
@@ -219,8 +273,35 @@ function createBountyEntries({ issue, pr, accounts, queue, repoSlug, queuedAt, q
   const originator = ideaOriginatorLogin
     ? requireWhitelistedAccount(accounts, [ideaOriginatorLogin], 'idea originator')
     : null;
+  const bugCatcher = bugCatcherLogin
+    ? requireWhitelistedAccount(accounts, [bugCatcherLogin], 'bug catcher')
+    : null;
+  if (bugCatcher) {
+    if (normalizeLogin(bugCatcher.github).toLowerCase() === normalizeLogin(implementer.github).toLowerCase()) {
+      throw new Error('Self-reported fixes cannot receive bug-catcher rewards; record a self-reported review');
+    }
+    if (!issue.user?.login || normalizeLogin(issue.user.login).toLowerCase() !== normalizeLogin(bugCatcher.github).toLowerCase()) {
+      throw new Error('Bug-catcher attribution must match the authenticated issue author');
+    }
+    if (issue.user.login.toLowerCase() === repoSlug.split('/')[0].toLowerCase()) {
+      throw new Error('Maintainer-discovered reports cannot receive bug-catcher rewards');
+    }
+    if ((issue.user?.type === 'Bot' || /bot\]$|^(?:copilot|dbusker)$/i.test(bugCatcher.github)) && !isRetainInFund(bugCatcher)) {
+      throw new Error('AI/bot bug-catcher credit must retain-in-fund');
+    }
+    if (!isRetainInFund(bugCatcher) && !/^0x[0-9a-f]{40}$/i.test(bugCatcher.walletAddress || '')) {
+      throw new Error('Bug catcher has no valid registered payout wallet');
+    }
+  }
   const entries = [];
   for (const bounty of bounties) {
+    if (bugCatcher) {
+      const previous = [...(queue.pending || []), ...(queue.settled || []), ...(queue.retained || [])]
+        .filter(entry => entry.issueRef === issueRef && normalizeCurrency(entry) === bounty.currency && entryRole(entry) !== 'tester');
+      if (previous.length && !previous.some(entry => entryRole(entry) === 'bug-catcher')) {
+        throw new Error('Bounty already allocated without bug-catcher credit; refusing to add a second allocation');
+      }
+    }
     const common = {
       issueRef,
       currency: bounty.currency,
@@ -235,7 +316,21 @@ function createBountyEntries({ issue, pr, accounts, queue, repoSlug, queuedAt, q
       if (blocked) throw new Error(`Refusing to queue a payout for @${account.github}: ${blocked}`);
       return { ...common, contributor: account.walletAddress, contributorGithub: account.github, ...fields };
     };
-    if (originator) {
+    if (bugCatcher) {
+      const split = splitBugCatcherCredit(
+        bounty.amount,
+        bounty.currency,
+        { hasIdea: Boolean(originator) },
+        assetRegistry,
+      );
+      entries.push(
+        forAccount(implementer, { amount: split.implementer, role: 'implementer' }),
+        forAccount(bugCatcher, { amount: split.bugCatcher, role: 'bug-catcher' }),
+      );
+      if (originator) {
+        entries.push(forAccount(originator, { amount: split.originator, role: 'idea-originator' }));
+      }
+    } else if (originator) {
       const split = splitIdeaCredit(bounty.amount, bounty.currency, assetRegistry);
       entries.push(
         forAccount(implementer, { amount: split.implementer, role: 'implementer' }),
@@ -285,6 +380,10 @@ function applyAccountAccrual(accounts, entries) {
       if (!Array.isArray(account.ideasCredited)) account.ideasCredited = [];
       if (!account.ideasCredited.includes(entry.issueRef)) account.ideasCredited.push(entry.issueRef);
     }
+    if (entry.role === 'bug-catcher') {
+      if (!Array.isArray(account.bugsCaught)) account.bugsCaught = [];
+      if (!account.bugsCaught.includes(entry.issueRef)) account.bugsCaught.push(entry.issueRef);
+    }
   }
 }
 
@@ -296,6 +395,10 @@ function applyRetainedAccrual(accounts, entries) {
     updateAccountTotal(account, accountField(currency, 'RetainedInFund'), entry.amount, currency);
     if (!Array.isArray(account.issuesClosed)) account.issuesClosed = [];
     if (!account.issuesClosed.includes(entry.issueRef)) account.issuesClosed.push(entry.issueRef);
+    if (entry.role === 'bug-catcher') {
+      if (!Array.isArray(account.bugsCaught)) account.bugsCaught = [];
+      if (!account.bugsCaught.includes(entry.issueRef)) account.bugsCaught.push(entry.issueRef);
+    }
   }
 }
 
@@ -343,12 +446,15 @@ function settleEntries({
 
 module.exports = {
   BOUNTY_LABEL_RE,
+  BUG_CATCHER_APPROVED_LABEL,
+  BUG_CATCHER_LABEL_RE,
   DBUSK_REPO_FUND,
   PAYROLL_ASSET_CONFIG,
   SUPPORTED_CURRENCIES,
   TEST_BOUNTY_LABEL_RE,
   applyAccountAccrual,
   applyRetainedAccrual,
+  amountToUnits,
   blockedPayoutReason,
   createBountyEntries,
   isRetainInFund,
@@ -360,8 +466,11 @@ module.exports = {
   normalizeCurrency,
   normalizeLogin,
   parseAmountLabel,
+  parseBugCatcherCredit,
   parseIdeaCredit,
   pickWhitelistedTester,
   settleEntries,
+  splitBugCatcherCredit,
   splitIdeaCredit,
+  unitsToAmount,
 };

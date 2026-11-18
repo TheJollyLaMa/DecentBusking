@@ -13,6 +13,7 @@
 // consistent with the app's CSS custom properties.
 import { isAdminWallet } from '../admin-access.mjs';
 
+let queueNotice = '';
 const PAYROLL_LINK_STYLE = `
   .payroll-nav-item {
     list-style: none;
@@ -86,6 +87,13 @@ function _injectPayrollLink(shadowRoot) {
     item.dataset[datasetKey] = '1';
     item.dataset.adminOnly = '1';
     item.textContent = label;
+    if (eventName === 'open-payroll') {
+      const notice = document.createElement('span');
+      notice.dataset.payrollNotice = '1';
+      notice.setAttribute('role', 'status');
+      notice.textContent = queueNotice;
+      item.appendChild(notice);
+    }
     item.hidden = !isAdminWallet();
     item.addEventListener('click', event => {
       event.stopPropagation();
@@ -124,3 +132,12 @@ function updateAdminItems() {
 }
 document.addEventListener('wallet-connected', updateAdminItems);
 document.addEventListener('wallet-disconnected', updateAdminItems);
+
+document.addEventListener('payroll-queue-status', event => {
+  queueNotice = event.detail.error ? ' - unavailable'
+    : event.detail.count ? ` - ${event.detail.count} queued` : '';
+  for (const title of _findAllAppTitles()) {
+    const notice = title.shadowRoot?.querySelector('[data-payroll-notice]');
+    if (notice) notice.textContent = queueNotice;
+  }
+});

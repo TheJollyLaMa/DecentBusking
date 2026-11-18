@@ -154,6 +154,8 @@ export function initDBusker({ document = globalThis.document, window = globalThi
         </div>
       </details>
       <p class="role-note">An AI guide, not a human steward. No transactions or automatic posting. When enabled, read-only Base evidence covers named contracts and blocks, not all activity. Chat access does not enroll you for rewards.</p>
+      <button type="button" class="report-issue">Report a bug on GitHub</button>
+      <p>Ask me for wording, then review it in the local report helper. You submit on GitHub; a maintainer approves reward labels.</p>
       <label class="consent"><input type="checkbox"> I agree to send my questions, recent chat context and requested public-chain evidence to OpenAI.
         For payment questions, this may include my connected wallet address or a public wallet/transaction I ask about, amounts and payment history. Read-only lookups use public Base RPC and the public earnings index.
         Don't share secrets. Chat is kept in server memory for up to 15 minutes; the provider's own retention policy also applies.
@@ -186,6 +188,9 @@ export function initDBusker({ document = globalThis.document, window = globalThi
   host.hidden = true;
   document.body.append(host);
   const find = selector => root.querySelector(selector);
+  find('.report-issue').addEventListener('click', () => {
+    document.dispatchEvent(new window.CustomEvent('open-issue-helper'));
+  });
   const launcher = find('.launcher'), panel = find('section'), status = find('.status');
   const consent = find('input'), signin = find('.signin'), signout = find('.signout');
   const question = find('textarea'), send = find('.send'), transcript = find('.transcript');

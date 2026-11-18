@@ -18,7 +18,9 @@ async function githubRequest(route, options = {}) {
     },
   });
   if (!response.ok) {
-    throw new Error(`GitHub API ${options.method || 'GET'} ${route} failed (${response.status}): ${await response.text()}`);
+    const error = new Error(`GitHub API ${options.method || 'GET'} ${route} failed (${response.status}): ${await response.text()}`);
+    error.status = response.status;
+    throw error;
   }
   if (response.status === 204) return null;
   return response.json();

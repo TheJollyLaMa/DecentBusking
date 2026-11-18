@@ -12,6 +12,17 @@ The bot holds **no on-chain private key**. An authorized owner reviews the queue
 
 The website named-playlist library is separate from Discord `/radio` and `/jukebox`; saved copies pin a revision and attribution. Named radio checkout is not enabled until a compatible DJuke deployment and batch-aware worker are configured. See the [playlist rollout and settlement rules](../docs/DJUKE-PLAYLISTS.md).
 
+## Bug reports go to GitHub
+
+There is no Discord `/bug-report` command or `BUG_REPORT_GITHUB_TOKEN` setup.
+DBusker helps invited visitors word reports; its **Report a bug on GitHub**
+button reviews and sanitizes a local draft, then opens GitHub. Everyone can
+also use the direct GitHub issue form without DBusker or a wallet.
+The reporter submits using their own GitHub account and can share the issue
+link in Discord. Only maintainers approve attribution and reward labels.
+See the [reporter and owner walkthrough](../docs/BUG_REPORTS.md) and
+[payroll rules](../docs/PAYROLL.md). No bot posts an issue on the reporter's behalf.
+
 ## Private live direction foundation
 
 The existing `/api/live-audio/challenge`, `/session`, and `/control` routes

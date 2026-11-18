@@ -4,7 +4,7 @@
 # Periodically scans for open issues that are referenced by merged PRs but were
 # NOT automatically closed (missing "Closes #N" keyword).  When found, posts a
 # maintainer alert on the issue so the team can retroactively queue the payout
-# via the manual-bounty-queue.yml workflow.
+# via the bounty-bot.yml workflow.
 #
 # Triggers:
 #   - Scheduled: every Monday at 09:00 UTC
@@ -50,6 +50,7 @@ jobs:
             // ── Helpers ───────────────────────────────────────────────────────
             const CLOSE_KEYWORDS = /(?:closes?|fixes?|resolves?)\s+(?:[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)?#(\d+)/gi;
             const AUDIT_LABEL    = 'bounty-audit: needs manual close';
+            const { parseAmountLabels } = require('./scripts/payroll');
 
             /** Strip markdown code blocks and inline code from text before scanning. */
             function stripCode(text) {
@@ -117,7 +118,7 @@ jobs:
                 if (issue.pull_request) continue;
 
                 const labels = issue.labels.map(l => l.name);
-                const hasBounty = labels.some(l => /^bounty:\s*[\d.]+\s*ETH$/i.test(l));
+                const hasBounty = parseAmountLabels(issue).length > 0;
                 if (!hasBounty) continue;
 
                 findings.push({ issue, pr, labels });
@@ -167,7 +168,7 @@ jobs:
                   console.warn(`Could not add label to issue #${issueNumber}: ${e.message}`);
                 }
 
-                const bountyLabel = labels.find(l => /^bounty:\s*[\d.]+\s*ETH$/i.test(l));
+                const bountyLabel = parseAmountLabels(issue).map(bounty => bounty.label).join(', ');
                 const commentBody = [
                   '<!-- bounty-audit-alert -->',
                   '## ⚠️ Bounty Audit Alert',
@@ -176,8 +177,8 @@ jobs:
                   '',
                   '**Action required for @TheJollyLaMa:**',
                   `1. Confirm that PR #${pr.number} fully implements this issue.`,
-                  `2. Close this issue manually if confirmed.`,
-                  `3. Use the [**Manual Bounty Queue**](../../actions/workflows/bounty-payout.yml) workflow to retroactively queue the payout:`,
+                  `2. Review bug-catcher attribution first where applicable. Close manually only if complete and closure is authorized.`,
+                  `3. Check the ledger, then use [**Bounty Bot**](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/bounty-bot.yml) recovery if credit is missing:`,
                   `   - Set \`issue_number\` = \`${issueNumber}\``,
                   `   - Set \`pr_number\` = \`${pr.number}\``,
                   '',

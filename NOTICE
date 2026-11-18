@@ -31,6 +31,12 @@ that license; this notice applies to the project from 2026-10-21 onward.
 
 Support the work: https://thejollylama.github.io/DecentMarket/ (Supporter DNFTs)
 
+js/issue-draft.mjs adapts local draft sanitization from
+TheJollyLaMa/BigNuten_Vanilla/js/issueHelper.js.
+Copyright 2025-2026 The Jolly LaMa (TheJollyLaMa) and A Decent Agency contributors.
+Project: https://github.com/TheJollyLaMa/BigNuten_Vanilla
+Licensed under Apache-2.0. Keep this attribution with derivative distributions.
+
 img/SecretPyramid.png is reused unchanged from TheJollyLaMa/DecentEscrow,
 commit 6b7958a6720ac8c335cad433db529c4d4b261dcd, at the brand owner's request.
 Copyright (c) 2025 The Jolly LaMa. MIT License:
