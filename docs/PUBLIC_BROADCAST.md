@@ -147,9 +147,11 @@ event-loop maximum alongside p99, since a rare multi-second pause can be hidden
 by an otherwise healthy percentile. Sampling is diagnostic overhead, not proof
 that a particular function caused a pause.
 Container memory also exposes anonymous, file and inactive-file counters from
-`memory.stat` when available. They attribute usage; the scored percentage still
-uses the original unadjusted `memory.current / memory.max`. Missing optional
-breakdown does not erase otherwise valid quota samples or turn them into passes.
+`memory.stat` when available. Under the owner's 18 Nov rule below, the scored
+percentage is the working set, `(memory.current - inactive_file) / memory.max`,
+which matches Render's memory graph; raw `memory.current / memory.max` is still
+reported. Missing optional breakdown falls back to the raw value; it does not
+erase otherwise valid quota samples or turn them into passes.
 
 The client uses native HLS only with a usable programme clock (`getStartDate`),
 otherwise the self-hosted pinned Hls.js bundle. Native playback capability
@@ -171,6 +173,12 @@ Before the scored staging rehearsal, the operator approved:
   On the inspected 0.5-CPU/512-MB plan, these correspond to 0.35 CPU and 384 MB.
 - Event-loop p99 below 200 ms. Separately measure audible delay against the
   10-20 second HLS target and inspect silence, overlap, reconnects and boundaries.
+
+On 18 Nov 2026 the owner amended two limits: memory is the working set
+(excluding reclaimable inactive file cache) at most 85% of the container
+limit, about 435 MiB of 512 MiB, and audible delay p95 at most 30 seconds.
+The other limits above are unchanged, and the public mode stays unselected
+until the owner confirms it.
 
 `/health.radioResources` reports Node CPU/RSS/heap/event-loop values and Linux
 cgroup v2 container CPU/memory where available. Only container values include
@@ -359,6 +367,27 @@ Development evidence so far:
   a failed then stalled state read and recovers. Segment/playlist upload
   failure still fails closed, and the publisher still has no automatic
   restart.
+- Deployed `02d5987`, 18 Nov: a 50/600 run with a temporary 93% raw limit
+  passed every check except the then 10-20 s delay target (delay p95
+  23.9 s; raw memory max 88.9%, working set 72.8-75.4%). Under the amended
+  rule, 200/600 decoded all 200 listeners with startup p95 1.5 s, metadata p95
+  134 ms, delay p95 17.5 s, CPU max 38.6%, event-loop p99 61 ms and no
+  errors, but was safety-stopped at 317.6 s on a working-set spike to 86.3%.
+  No OOM kill occurred, and the working set returned to 73.5% within minutes.
+- That spike and the smaller 90-second memory saw-tooth were traced to
+  overlapping FFmpeg processes. The website-only VertLoop (Discord paused)
+  decoded every advert purely as a clock nobody hears. Its current campaign
+  is a 117 MB, 78 s 720p MP4, so each play downloaded the whole video. A local
+  replica of that decoder held about 45 MiB plus about 4 MB of socket buffers.
+  Both spikes (08:44 and 10:19 UTC) fell on song or advert changes while that
+  loop was playing, alongside the current song, the prepared next song and the
+  HLS encoder. At 08:44 the main radio was also decoding the same video
+  advert. Website-only adverts now read only the container header for their
+  length (cached per URL, capped at 120 s) and feed the existing player
+  silence for that long, so no decoder or video download remains. Votes,
+  timing, failure retry and Discord-enabled VertLoop playback are unchanged.
+  These are local measurements and log correlation; hosted 200/600 under the
+  amended rule must be repeated after deployment.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
@@ -391,6 +420,9 @@ For compact checkpoint identities, reuse Busking's existing
 dependency or shared abstraction is needed. The receiving checkpoint,
 retention and required-mirror tests pass, including the measured retained-heap
 regression; hosted validation remains a separate gate.
+The website-only advert clock adapts the existing `devert-loop.js`
+controller and its injected `createStream` seam; FFmpeg's own header read
+supplies the length because the deployed bundle has no `ffprobe`.
 Receiving tests include actual FFmpeg AAC decode across advert/A/B/advert,
 wrong/private-room exclusion, delayed tip binding, zero-seat HLS admission,
 state coalescing/expiry, quota normalization and legacy-radio regressions.
