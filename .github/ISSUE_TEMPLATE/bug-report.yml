@@ -1,0 +1,54 @@
+name: Bug report
+description: Report one reproducible problem. Maintainers review attribution and reward eligibility.
+labels: ["bug", "bug-catcher-pending"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One problem per issue. Search open AND closed issues first; add evidence to an existing report rather than filing a duplicate.
+        This issue is public. Do not include private logs, keys, wallet signatures, addresses or other people's information.
+        Your signed-in GitHub account is the reporter identity. No payout wallet is requested here.
+        A maintainer checks the first unique report, whitelist, attribution and bounty. Filing alone does not grant credit or payment.
+  - type: checkboxes
+    id: review
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find this problem.
+          required: true
+        - label: I reviewed this report and any attachments for secrets and private information.
+          required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser, device and page or control
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Optional reviewed public screenshots or evidence

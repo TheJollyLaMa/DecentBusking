@@ -61,3 +61,8 @@ jobs:
           git commit -m "chore: queue payroll token entries"
           git pull --rebase origin main
           git push origin HEAD:main
+
+      - name: Notify owner of queued payroll
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/notifyPayrollPending.js

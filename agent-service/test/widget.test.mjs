@@ -47,6 +47,16 @@ test('disabled widget does not mount, prompt for a wallet, or request the servic
   assert.equal(f.invitationCalls.length, 0);
 });
 
+test('report button opens the local helper without submitting, signing in or copying chat', async t => {
+  const f = await fixture(t);
+  const reports = [];
+  f.document.addEventListener('open-issue-helper', event => reports.push(event.detail));
+  f.root.querySelector('.report-issue').click();
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0], null);
+  assert.equal(f.calls.length, 0);
+});
+
 test('disconnected widget stays hidden and sends no address or request until a Base wallet connects', async t => {
   const f = await fixture(t, true, false), { window, document, root, host } = f;
   assert.equal(host.hidden, true);

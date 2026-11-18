@@ -21,6 +21,7 @@ on:
           - contributor
           - implementer
           - idea-originator
+          - bug-catcher
           - tester
       currency:
         description: Token symbol exactly as shown on the queue entry (optional)
@@ -82,3 +83,8 @@ jobs:
           git commit -m "chore: record confirmed payroll settlement"
           git pull --rebase origin main
           git push origin HEAD:main
+
+      - name: Refresh owner payroll backlog alert
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/notifyPayrollPending.js

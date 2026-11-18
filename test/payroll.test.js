@@ -14,8 +14,10 @@ const {
   normalizeAmount,
   parseAmountLabel,
   parseAmountLabels,
+  parseBugCatcherCredit,
   pickWhitelistedTester,
   settleEntries,
+  splitBugCatcherCredit,
   splitIdeaCredit,
 } = require('../scripts/payroll');
 
@@ -143,6 +145,108 @@ test('splits idea credit exactly 80/20 at eight decimal places', () => {
   ]);
 });
 
+test('bug-catcher credit requires maintainer approval and preserves the 20% idea policy', () => {
+  const reporter = {
+    github: 'withinthevacuum',
+    walletAddress: '0x405Bb3Cdf23833bb27BAD6629b7cd4f01688235f',
+  };
+  const ideaOriginator = {
+    github: 'idea-originator',
+    walletAddress: '0x2222222222222222222222222222222222222222',
+  };
+  const pendingIssue = {
+    number: 402,
+    user: { login: reporter.github },
+    labels: ['bounty: 100 ART', 'bug-catcher-pending', 'bug-catcher: @withinthevacuum'],
+    assignees: [{ login: owner.github }],
+  };
+  assert.equal(parseBugCatcherCredit(pendingIssue), null);
+  const pending = createBountyEntries(fixture({
+    issue: pendingIssue,
+    accounts: { contributors: [{ ...owner }, reporter, ideaOriginator] },
+  }));
+  assert.deepEqual(pending.entries, []);
+  assert.equal(pending.reason, 'bug-report-pending-review');
+
+  assert.deepEqual(splitBugCatcherCredit('100', 'ART'), {
+    implementer: '50',
+    bugCatcher: '50',
+  });
+  assert.deepEqual(splitBugCatcherCredit('100', 'ART', { hasIdea: true }), {
+    implementer: '30',
+    bugCatcher: '50',
+    originator: '20',
+  });
+  assert.throws(() => splitBugCatcherCredit('0.00000001'), /cannot be split exactly/);
+  assert.throws(() => splitBugCatcherCredit('0.00000005', 'ART', { hasIdea: true }), /cannot be split exactly/);
+
+  const approvedIssue = {
+    ...pendingIssue,
+    labels: [
+      ...pendingIssue.labels.filter(label => label !== 'bug-catcher-pending'),
+      'bug-catcher',
+      'bug-catcher-approved',
+      'idea-credit: @idea-originator',
+    ],
+  };
+  const approved = createBountyEntries(fixture({
+    issue: approvedIssue,
+    accounts: { contributors: [{ ...owner }, reporter, ideaOriginator] },
+  }));
+  assert.deepEqual(approved.entries.map(entry => [entry.role, entry.amount]), [
+    ['implementer', '30'],
+    ['bug-catcher', '50'],
+    ['idea-originator', '20'],
+  ]);
+  const reporterAccount = { contributors: [{ ...owner }, reporter, ideaOriginator] };
+  applyAccountAccrual(reporterAccount, approved.entries.filter(entry => entry.role === 'bug-catcher'));
+  assert.deepEqual(reporterAccount.contributors.find(account => account.github === reporter.github).bugsCaught, [
+    'TheJollyLaMa/DecentBusking#402',
+  ]);
+  assert.throws(() => parseBugCatcherCredit({
+    ...approvedIssue,
+    labels: [...approvedIssue.labels, 'bug-catcher: @another-contributor'],
+  }), /exactly one/);
+
+  const repeated = createBountyEntries(fixture({
+    issue: {
+      ...approvedIssue,
+      user: { login: 'another-contributor' },
+      labels: approvedIssue.labels.map(label =>
+        label === 'bug-catcher: @withinthevacuum' ? 'bug-catcher: @another-contributor' : label
+      ),
+    },
+    accounts: {
+      contributors: [{ ...owner }, reporter, ideaOriginator, {
+        github: 'another-contributor',
+        walletAddress: '0x3333333333333333333333333333333333333333',
+      }],
+    },
+    queue: { pending: approved.entries, settled: [], retained: [] },
+  }));
+  assert.equal(repeated.entries.length, 0);
+  assert.equal(repeated.skippedDuplicates, 3);
+
+  const retainedReporter = { github: 'copilot', payoutMode: 'retain-in-fund' };
+  const retainedResult = createBountyEntries(fixture({
+    issue: {
+      ...approvedIssue,
+      number: 403,
+      user: { login: 'copilot', type: 'Bot' },
+      labels: approvedIssue.labels
+        .filter(label => !label.startsWith('idea-credit:'))
+        .map(label => label === 'bug-catcher: @withinthevacuum' ? 'bug-catcher: @copilot' : label),
+    },
+    pr: { number: 15, user: { login: 'other-bot' } },
+    accounts: { contributors: [{ ...owner }, retainedReporter] },
+  }));
+  assert.deepEqual(retainedResult.entries.map(entry => [entry.role, entry.amount]), [['implementer', '50']]);
+  assert.deepEqual(retainedResult.retained.map(entry => [entry.role, entry.amount]), [['bug-catcher', '50']]);
+  const retainedAccounts = { contributors: [{ ...retainedReporter }] };
+  applyRetainedAccrual(retainedAccounts, retainedResult.retained);
+  assert.deepEqual(retainedAccounts.contributors[0].bugsCaught, ['TheJollyLaMa/DecentBusking#403']);
+});
+
 test('currency-aware dedup allows ART beside a historical currency-less ETH entry', () => {
   const legacy = {
     issueRef: 'TheJollyLaMa/DecentBusking#14',
@@ -156,6 +260,45 @@ test('currency-aware dedup allows ART beside a historical currency-less ETH entr
   assert.equal(normalizeCurrency(legacy), 'ETH');
   assert.equal(isDuplicate(queue, art), false);
   assert.equal(isDuplicate(queue, { ...legacy, currency: 'ETH' }), true);
+});
+
+test('bug review holds unlabelled structured reports and refuses conflicting, self or spoofed credit', () => {
+  const reporter = { github: 'reporter', walletAddress: '0x1111111111111111111111111111111111111111' };
+  const base = fixture({ issue: { user: { login: reporter.github } }, accounts: { contributors: [{ ...owner }, reporter] } });
+  const labels = ['bounty: 100 ART', 'bug-catcher', 'bug-catcher: @reporter', 'bug-catcher-approved'];
+  assert.equal(createBountyEntries({ ...base, issue: { ...base.issue, body: '## Bug report\n\nDetails' } }).reason, 'bug-report-pending-review');
+  assert.equal(createBountyEntries({ ...base, issue: { ...base.issue, labels: ['bug', 'bounty: 100 ART'] } }).reason, 'bug-report-pending-review');
+  for (const excluded of ['duplicate', 'rejected', 'spam', 'self-reported', 'maintainer-discovered']) {
+    assert.throws(() => parseBugCatcherCredit({ labels: [...labels, `bug-catcher-${excluded}`] }), /Excluded/);
+  }
+  for (const excluded of ['duplicate', 'rejected', 'spam']) {
+    assert.equal(createBountyEntries({ ...base, issue: { ...base.issue, labels: ['bounty: 100 ART', `bug-catcher-${excluded}`] } }).reason, 'bug-report-ineligible');
+  }
+  assert.throws(() => createBountyEntries({ ...base, issue: { ...base.issue, labels }, pr: { ...base.pr, user: { login: 'reporter' } } }), /Self-reported/);
+  assert.throws(() => createBountyEntries({ ...base, issue: { ...base.issue, labels, user: { login: 'other' } } }), /authenticated issue author/);
+  assert.throws(() => createBountyEntries({ ...base, issue: { ...base.issue, labels, user: undefined } }), /authenticated issue author/);
+  assert.throws(() => createBountyEntries({
+    ...base, pr: { ...base.pr, user: { login: reporter.github } },
+    issue: { ...base.issue, user: { login: owner.github }, labels: labels.map(label => label.replace('@reporter', `@${owner.github}`)) },
+  }), /Maintainer-discovered/);
+  assert.throws(() => createBountyEntries({ ...base, issue: { ...base.issue, labels, user: { login: 'reporter', type: 'Bot' } } }), /retain-in-fund/);
+});
+
+test('bug bounty allocation is frozen across all ledger sections and does not collide with separate testing credit', () => {
+  const reporter = { github: 'reporter', walletAddress: '0x1111111111111111111111111111111111111111' };
+  const base = fixture({
+    accounts: { contributors: [{ ...owner }, reporter] },
+    issue: { user: { login: reporter.github }, labels: ['bounty: 100 ART', 'bug-catcher', 'bug-catcher: @reporter', 'bug-catcher-approved'] },
+  });
+  const result = createBountyEntries(base);
+  assert.deepEqual(result.entries.map(entry => entry.amount), ['50', '50']);
+  for (const section of ['pending', 'settled', 'retained']) {
+    assert.deepEqual(createBountyEntries({ ...base, queue: { [section]: result.entries } }).entries, []);
+    assert.throws(() => createBountyEntries({ ...base, queue: { [section]: [{ ...result.entries[0], amount: '100' }] } }), /already allocated/);
+  }
+  const tester = { ...result.entries[1], role: 'tester', amount: '10' };
+  assert.equal(isDuplicate({ pending: [tester] }, result.entries[1]), false);
+  assert.equal(isDuplicate({ settled: [result.entries[1]] }, tester), false);
 });
 
 test('tester selection honors a completed tester and rejects ambiguity', () => {

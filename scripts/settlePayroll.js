@@ -55,7 +55,7 @@ async function main() {
   const txHash = String(process.env.INPUT_TX_HASH || '').trim();
   if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) throw new Error('tx_hash must be a 32-byte transaction hash');
   if (issueRef && !/^[^/]+\/[^/]+#\d+$/.test(issueRef)) throw new Error('issue_ref must look like owner/repo#123');
-  if (role && !['contributor', 'implementer', 'idea-originator', 'tester'].includes(role)) throw new Error(`unsupported payroll role: ${role}`);
+  if (role && !['contributor', 'implementer', 'idea-originator', 'bug-catcher', 'tester'].includes(role)) throw new Error(`unsupported payroll role: ${role}`);
   if (currency === 'ETH') throw new Error('Legacy ETH cannot be settled by the active Base workflow');
   if (currency && !SUPPORTED_CURRENCIES.includes(currency)) throw new Error(`unsupported payroll asset: ${currency}`);
 

@@ -25,6 +25,12 @@ tutorials, backed by a searchable snapshot of eligible public repo text.
 See [setup, review and privacy boundaries](docs/DBUSKER.md). Access is limited
 to the private trial roster; it does not enroll anyone for community rewards.
 
+**Found a problem?** [File a bug on GitHub](https://github.com/TheJollyLaMa/DecentBusking/issues/new?template=bug-report.yml).
+If you have DBusker pilot access, ask for wording and use its **Report a bug on
+GitHub** button to review/search locally before submitting yourself.
+See the [reporter and maintainer walkthrough](docs/BUG_REPORTS.md).
+File one issue per problem; maintainers, not reporters, approve reward labels.
+
 ## v1.0.0 Supporter release
 
 Approved release terms: **100 editions at 100 Base USDC each**, with a 10%

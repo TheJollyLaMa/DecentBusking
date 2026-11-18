@@ -133,8 +133,21 @@ Use exact labels whose symbol is present in `payroll-assets.json`:
 - `bounty: 25 USDC` or `bounty: 25 $USDC`
 - `test-bounty: 10 SYMBOL` or `test-bounty: 10 $SYMBOL`
 - `idea-credit: @username` for an exact 80% implementer / 20% originator split
+- A maintainer-approved `bug-catcher` plus exactly one `bug-catcher: @username` label, and `bug-catcher-approved`, for a 50% bug-catcher share
 
 New queue entries include the token symbol in `currency` and `fund: dbusk-repo-dev`. `payroll-assets.json` is shared by the Node automation and browser panel. Each asset entry defines its Base ERC-20 address, contract decimals, and maximum ledger precision. ART uses eight ledger decimals and USDC uses six. Idea-credit splits that cannot be represented exactly at the selected token's precision are rejected rather than rounded.
+
+Reporters [submit on GitHub themselves](BUG_REPORTS.md); no dedicated posting token is needed. The issue form/helper requests `bug` and `bug-catcher-pending` (create these repository labels before rollout). The owner uses **Review Bug Report** on `main` to verify the first unique whitelisted reporter, reading the actual GitHub author rather than a claimed handle. The workflow preserves unrelated labels and records approval or duplicate/rejected/spam/self-reported/maintainer-discovered. Approved reports receive `bug-catcher`, `bug-catcher: @author`, and `bug-catcher-approved`; pending and conflicting approval states cannot receive a bounty allocation.
+
+A bounty label and qualifying merged PR are still required. Unreviewed structured reports and `bug` issues are held even if GitHub dropped the requested pending label. Review before merging, or run **Bounty Bot** manual recovery with the merged PR after review. One bug-catcher credit per issue and currency is allowed across pending, settled and retained records. Self-reported fixes cannot receive bug-catcher credit. Once bounty allocation exists, review cannot reassign attribution or add another reporter share; reconcile inconsistencies manually instead. Duplicate/rejected/spam reports receive no bounty allocation even if an old bounty label remains. Self-reported/maintainer-discovered reports may still earn an independently approved implementation bounty, but never a bug-catcher share.
+
+The existing idea-originator policy remains 20%; it is not reduced to the 10% proposed in the #402 implementation comment without a separate policy decision. With an approved bug catcher and an idea-credit label, the bounty is split 50% bug catcher, 20% idea originator, and 30% implementer. With only bug-catcher approval, it is 50% bug catcher / 50% implementer. Idea-only work retains the established 20% / 80% split. Exact ledger precision is required; unrepresentable amounts are rejected instead of rounded. Accounts configured as `retain-in-fund` receive no wallet payout; the credit stays in the fund.
+
+### Owner backlog notifications
+
+**Repo Payroll Alerts** creates/updates one GitHub issue assigned to the owner, mentioning the owner when the payable queue changes. Queue-producing and settlement workflows refresh it after saving the ledger; weekday 14:00 UTC and manual runs reconcile missed updates. Repeated unchanged runs do not comment or ping. It covers configured Base repo-dev rewards only, not retained bot credit, historical ETH, or weekly artist payroll. An empty queue updates the alert rather than closing reported issues. GitHub notification delivery depends on the owner's notification settings.
+
+While the admin wallet is connected, the left menu's Payroll item refreshes a queued-entry count every minute while visible; failures say unavailable, never zero. This count describes the ledger, not proof that each entry remains unpaid on-chain. Open Repo Dev Bot Payouts to check router work references and settle manually. No alert transfers funds or marks entries paid.
 
 To add a future token such as DJuke or DBusk, add its uppercase symbol, Base ERC-20 address, on-chain `decimals`, and `ledgerDecimals` to `payroll-assets.json`, then approve that token on the shared router. After that, labels using the symbol are parsed and settled by the existing flow; no currency-specific code path is required.
 
@@ -177,7 +190,7 @@ The settlement workflow supports these required filters:
 
 - Contributor GitHub username
 - Issue reference such as `TheJollyLaMa/DecentBusking#14`
-- Role (`contributor`, `implementer`, `idea-originator`, or `tester`)
+- Role (`contributor`, `implementer`, `idea-originator`, `bug-catcher`, or `tester`)
 - Currency (a configured Base asset in `payroll-assets.json`)
 - Confirmed transaction hash
 

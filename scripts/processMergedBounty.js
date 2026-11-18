@@ -107,6 +107,7 @@ async function main() {
   const planned = [];
   const plannedRetained = [];
   const results = [];
+  let blockedReports = 0;
   for (const issueNumber of issueNumbers) {
     const issue = await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}`);
     if (issue.pull_request) continue;
@@ -123,6 +124,15 @@ async function main() {
       console.log(`Skipping issue #${issueNumber}: no supported "bounty: <amount> SYMBOL" label.`);
       continue;
     }
+    if (result.reason === 'bug-report-pending-review' || result.reason === 'bug-report-ineligible') {
+      blockedReports++;
+      const message = result.reason === 'bug-report-pending-review'
+        ? `Issue #${issueNumber}: owner bug-report review is pending. No bounty allocated. Review, then recover merged PR #${pr.number}.`
+        : `Issue #${issueNumber}: duplicate/rejected/spam report; no bounty allocated.`;
+      console.warn(`::warning::${message}`);
+      if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${message}\n`);
+      continue;
+    }
     if (isManual) [...result.entries, ...result.retained].forEach(entry => { entry.retroactive = true; });
     result.retained.forEach(entry => { entry.retainedAt = entry.queuedAt; entry.retainedBy = entry.queuedBy; });
     planned.push(...result.entries);
@@ -131,7 +141,7 @@ async function main() {
   }
 
   if (planned.length === 0 && plannedRetained.length === 0) {
-    console.log('No new payroll entries were needed.');
+    console.log(blockedReports ? `No payroll entries queued; ${blockedReports} report(s) blocked above.` : 'No new payroll entries were needed.');
     return;
   }
   queue.pending.push(...planned);

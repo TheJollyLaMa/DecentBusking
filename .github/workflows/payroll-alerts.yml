@@ -1,0 +1,26 @@
+name: Repo Payroll Alerts
+on:
+  schedule:
+    - cron: '0 14 * * 1-5'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: decentbusking-art-payroll-queue
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Notify owner of the queued repo-dev backlog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/notifyPayrollPending.js

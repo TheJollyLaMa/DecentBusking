@@ -209,33 +209,42 @@ test('fund purpose saves JSON to IPFS, fills its URI, and rejects failed or stal
   }
 });
 
-test('Left Ankh has public tally first and owner-only NFT Admin and Payroll in order', () => {
+test('Left Ankh keeps tally and owner-only admin/payroll without a redundant report entry', () => {
   const wallet = { address: null };
   const events = new Map();
   const owner = '0x807061DF657A7697c04045dA7d16D941861cAABc';
   const makeNode = () => ({ dataset: {}, style: {}, children: [], listeners: new Map(),
     appendChild(child) { this.children.push(child); }, addEventListener(name, listener) { this.listeners.set(name, listener); },
+    setAttribute() {},
     querySelector: () => null });
   const menu = makeNode();
   menu.querySelector = selector => selector === '[data-payroll-item]' ? menu.children.find(item => item.dataset.payrollItem) : null;
-  const root = { querySelector: selector => selector === '.ankh-left .dropdown-menu' ? menu : null,
+  const root = { querySelector: selector => selector === '.ankh-left .dropdown-menu' ? menu
+    : selector === '[data-payroll-notice]' ? menu.children[2]?.children[0] : null,
     querySelectorAll: () => menu.children.filter(item => item.dataset.adminOnly), appendChild() {} };
   const title = { shadowRoot: root };
   class AppTitle { render() {} }
+  const dispatched = [];
   const context = vm.createContext({ isAdminWallet: () => wallet.address?.toLowerCase() === owner.toLowerCase(),
+    CustomEvent: class { constructor(type) { this.type = type; } },
     customElements: { get: () => AppTitle },
     document: { createElement: makeNode, querySelectorAll: selector => selector === 'app-title' ? [title] : [],
-      addEventListener: (name, callback) => events.set(name, callback), dispatchEvent() {} },
+      addEventListener: (name, callback) => events.set(name, callback), dispatchEvent(event) { dispatched.push(event.type); } },
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/components/header-payroll-inject.js'), 'utf8').replace(/^import .*;\n/gm, ''), context);
   assert.deepEqual(menu.children.map(item => item.textContent), ['Playback Tally', 'Admin Nft Mint', 'Payroll']);
   assert.equal(menu.children[0].hidden, undefined);
   assert.equal(menu.children[1].hidden, true);
   assert.equal(menu.children[2].hidden, true);
+  assert.deepEqual(dispatched, []);
   wallet.address = owner;
   events.get('wallet-connected')();
   assert.equal(menu.children[1].hidden, false);
   assert.equal(menu.children[2].hidden, false);
+  events.get('payroll-queue-status')({ detail: { count: 3 } });
+  assert.equal(menu.children[2].children[0].textContent, ' - 3 queued');
+  events.get('payroll-queue-status')({ detail: { error: 'offline' } });
+  assert.equal(menu.children[2].children[0].textContent, ' - unavailable');
   wallet.address = `0x${'1'.repeat(40)}`;
   events.get('wallet-connected')();
   assert.equal(menu.children[1].hidden, true);

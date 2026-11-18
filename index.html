@@ -28,8 +28,10 @@
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
   <link rel="stylesheet" href="css/live-afterparty.css?v=20261117-release-party" />
+  <link rel="stylesheet" href="css/issue-helper.css?v=20261118-github-reports" />
   <script type="importmap">
     {"imports":{
+      "./js/dbusker.mjs?v=20261116-studio-polish":"./js/dbusker.mjs?v=20261118-github-reports",
       "./js/radio-sync.js?v=20261030-ad-cutoff":"./js/radio-sync.js?v=20261117-public-hls",
       "./js/live-tip-target.mjs?v=20261114-live-direction":"./js/live-tip-target.mjs?v=20261117-public-hls",
       "./js/stage.js?v=20261030-ad-cutoff":"./js/stage.js?v=20261114-live-direction",
@@ -1020,7 +1022,9 @@
   <script type="module" src="js/components/header.js?v=20261025-header-compat"></script>
 
   <!-- Inject 💸 Payroll link into left ankh header dropdown -->
-  <script type="module" src="js/components/header-payroll-inject.js?v=20261006-owner-payroll"></script>
+  <script type="module" src="js/components/header-payroll-inject.js?v=20261118-github-reports"></script>
+  <script type="module" src="js/issue-helper.mjs?v=20261118-github-reports"></script>
+  <script type="module" src="js/payroll-notice.mjs?v=20261118-github-reports"></script>
 
   <!-- Inject 🔑 Admin link + owner pending mint badge -->
   <script type="module" src="js/components/header-admin-inject.js?v=20261022-action-badges"></script>
