@@ -488,7 +488,8 @@ export function createPinataStateStore({
       latestSnapshotSavedAt = snapshot._checkpoint?.savedAt || snapshot.savedAt || new Date(capturedAt).toISOString();
       durableUri = latestSnapshotUri;
       durableSavedAt = latestSnapshotSavedAt;
-      latestValue = structuredClone(value);
+      // save/schedule already captured this value; quiet rollovers reuse that owned copy.
+      latestValue = value;
       latestKey = key;
       latestDay = day;
       latestCapturedAt = capturedAt;

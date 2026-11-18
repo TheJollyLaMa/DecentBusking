@@ -5,6 +5,26 @@ const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+test('CPU profiling is explicit and preview-only while resource monitoring always starts', () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const { runInNewContext } = require('node:vm');
+  const source = readFileSync(join(__dirname, '../discord-bot/index.js'), 'utf8');
+  const initialization = source.match(/const radioResources = (createRadioResourceMetrics\([\s\S]*?\));/);
+  assert.ok(initialization);
+  for (const broadcastMode of ['direct', 'preview', 'public']) {
+    for (const setting of [undefined, 'false', 'true']) {
+      const calls = [];
+      runInNewContext(initialization[1], {
+        broadcastMode, process: { env: { PUBLIC_BROADCAST_PROFILE_CPU: setting } },
+        createRadioResourceMetrics: options => calls.push(options),
+      });
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].profileCpu, broadcastMode === 'preview' && setting === 'true');
+    }
+  }
+});
+
 test('edge publishes only authenticated, bounded, short-lived objects; expiry is not a public archive', async () => {
   const { handleBroadcastRequest } = await import('../cloudflare/broadcast-worker.mjs');
   const token = 't'.repeat(40), key = `hls/${'a'.repeat(32)}/segment-000000001.ts`;
