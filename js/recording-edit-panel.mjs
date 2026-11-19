@@ -7,6 +7,7 @@ export function initRecordingEditPanel({ document = globalThis.document, window 
   if (!panel) return;
   const byId = id => document.getElementById(id);
   const frame = byId('recording-edit-frame'), tab = byId('recording-edit-tab');
+  tab.hidden = false;
   const closeButton = byId('recording-edit-panel-close'), search = byId('recording-edit-search');
   const list = byId('recording-edit-library'), status = byId('recording-edit-library-status');
   const more = byId('recording-edit-more'), opening = byId('recording-edit-opening');
@@ -64,7 +65,6 @@ export function initRecordingEditPanel({ document = globalThis.document, window 
         songs.push(...found);
       } while (!found.length && nextOffset !== null);
       eligible ||= songs.length > 0;
-      tab.hidden = !eligible;
       renderSongs();
       status.textContent = songs.length ? `${songs.length} editable song${songs.length === 1 ? '' : 's'} loaded. Choose one to open it.`
         : search.value.trim() ? 'No matching songs in your artist catalog.' : 'No editable song NFTs credit this wallet yet.';
@@ -147,17 +147,16 @@ export function initRecordingEditPanel({ document = globalThis.document, window 
     clearFrame();
     address = String(window._wallet?.address || '').toLowerCase();
     eligible = false;
-    tab.hidden = true;
+    search.disabled = !(/^0x[0-9a-f]{40}$/.test(address) && window._wallet?.signer);
     songs = [];
     nextOffset = null;
     search.value = '';
     renderSongs();
-    if (/^0x[0-9a-f]{40}$/.test(address) && window._wallet?.signer) void loadSongs();
+    if (!search.disabled) void loadSongs();
     else status.textContent = 'Connect your artist wallet in the page header to use the studio.';
   }
 
   tab.addEventListener('click', () => {
-    if (!eligible) return;
     if (panel.classList.contains('is-open')) closeButton.click();
     else { returnFocus = tab; setOpen(true); }
   });
@@ -174,6 +173,7 @@ export function initRecordingEditPanel({ document = globalThis.document, window 
     closeButton.click();
   });
   search.addEventListener('input', () => {
+    if (search.disabled) return;
     listAbort?.abort();
     requestVersion++;
     clearTimeout(searchTimer);

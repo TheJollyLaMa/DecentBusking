@@ -338,7 +338,7 @@ test('studio discovers only artist audio across pages and opens canonical bookin
   assert.equal(ui.elements.frame.src, openedUrl);
 });
 
-test('studio hides access for non-creators and ignores old-wallet catalog results', async t => {
+test('studio stays discoverable without granting editor access and ignores old-wallet catalog results', async t => {
   const requests = [];
   const ui = await studio(t, args => new Promise(resolve => requests.push({ ...args, resolve })));
   ui.window._wallet = { address: other, signer: {} };
@@ -352,13 +352,18 @@ test('studio hides access for non-creators and ignores old-wallet catalog result
   ui.document.dispatchEvent(new Event('wallet-connected'));
   requests[2].resolve({ nfts: [song(other)], nextOffset: null });
   await settled();
-  assert.equal(ui.elements.tab.hidden, true);
+  assert.equal(ui.elements.tab.hidden, false);
+  ui.elements.tab.click();
+  assert.equal(ui.elements.panel.inert, false);
   await ui.clickSource('catalog', song().nftId);
   assert.equal(ui.elements.frame.src, 'about:blank');
   ui.window._wallet = {};
   ui.document.dispatchEvent(new Event('wallet-disconnected'));
   assert.equal(ui.elements.library.children.length, 0);
   assert.equal(ui.elements.panel.inert, true);
+  ui.elements.tab.click();
+  assert.equal(ui.elements.panel.inert, false);
+  assert.equal(ui.elements.search.disabled, true);
 });
 
 test('studio authenticates frame messages and retains the panel after failed draft flush', async t => {
