@@ -11,7 +11,7 @@ import { createRadioAdTransition } from './radio-ad-transition.mjs?v=20261030-ad
 import { DEVERT_MAX_AD_SECONDS } from './devert-scheduler.mjs';
 import { createLiveAudioListener, createLiveAudioFaultSlate } from './live-audio-client.mjs';
 import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
-import { createPublicBroadcastListener, getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261118-public-video';
+import { createPublicBroadcastListener, getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261119-quiet-status';
 import { createPublicRadioVideo } from './public-radio-video.mjs';
 
 const POLL_MS = 8_000;
@@ -321,7 +321,7 @@ export function formatMainRadioAdCountdown(countdown, { disconnected = false, co
 function _renderMainRadioAdCountdown() {
   if (!_adCountdownEl) return;
   if (_radioState?.publicBroadcast?.selected && _mode === 'radio') {
-    _adCountdownEl.textContent = 'Buffered broadcast · approximately 10–20 seconds behind the studio';
+    _adCountdownEl.textContent = '';
     return;
   }
   const disconnected = _radioState?.mainRadioAdCountdown?.reason === 'disconnected';
@@ -606,7 +606,7 @@ export function initRadioSync() {
       const audible = playing && !blocked && !failed ? getAudibleBroadcast() : null;
       if (!audible || audible.program.mediaType !== 'video/mp4') publicVideoNotice = '';
       _publicRadioVideo?.update(audible);
-      _setActivity(publicVideoNotice || reason || 'Buffered radio: approximately 10–20 seconds behind the studio');
+      _setActivity(publicVideoNotice || reason || '');
       _playBtn?.classList.toggle('hidden', !blocked && !failed);
     },
     onProgram: program => {

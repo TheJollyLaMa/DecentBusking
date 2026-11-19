@@ -100,8 +100,7 @@ export function createPublicBroadcastListener({ audio, serviceUrl, onStatus, onP
       }
       void observe(program);
     }
-    report(blocked ? 'Tap Play to hear the buffered radio broadcast'
-      : 'Buffered radio: approximately 10–20 seconds behind the studio');
+    report(blocked ? 'Tap Play to hear the buffered radio broadcast' : '');
   }
   async function play() {
     await audio.play(); blocked = false; report();

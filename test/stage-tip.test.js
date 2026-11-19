@@ -254,7 +254,7 @@ test('all cached stage importers resolve to the live-tip controller', () => {
     const references = [...importer.matchAll(/['"](\.\/stage\.js[^'"]*)['"]/g)];
     assert.ok(references.length);
     for (const [, reference] of references) {
-      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261114-live-direction');
+      assert.equal(imports[reference.replace('./', './js/')], './js/stage.js?v=20261119-quiet-status');
     }
   }
 });
