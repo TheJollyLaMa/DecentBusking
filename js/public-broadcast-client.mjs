@@ -94,7 +94,7 @@ export function createPublicBroadcastListener({ audio, serviceUrl, onStatus, onP
     if (!program) audibleBroadcast = null;
     if (program) {
       audibleBroadcast = !audio.paused && audio.readyState >= 2 && !blocked
-        ? { program, at: origin, observedAt: now() } : null;
+        ? { program, at: origin, observedAt: now(), mediaTime: audio.currentTime } : null;
       if (currentProgram?.playId !== program.playId) {
         currentProgram = program; onProgram?.(program);
       }

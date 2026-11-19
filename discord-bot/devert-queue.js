@@ -288,6 +288,7 @@ export function combinePaidQueues({ songs, adverts, videos, log = console, timeo
     hasActivePlaylist() { return songs?.hasActivePlaylist?.() === true; },
     getActivePlaylistBatchId() { return songs?.getActivePlaylistBatchId?.() ?? null; },
     start(record) { return runtimeFor(record).start?.(record); },
+    startPlayback(record, program) { return runtimeFor(record)?.startPlayback?.(record, program); },
     refreshPlaybackState(record) { return runtimeFor(record).refreshPlaybackState?.(); },
     hasPendingSelection() { return selecting.size > 0 || prepared.size > 0 ||
       songs?.hasPendingSelection?.() === true || adverts?.hasPendingSelection?.() === true; },

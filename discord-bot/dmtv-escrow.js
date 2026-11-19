@@ -55,10 +55,10 @@ export function createDmtvEscrowRuntime({ reader, writer, provider, store, resol
       await flushOutcome();
     }
     return {
-      nextPaid: () => run(async () => {
+      nextPaid: ({ acceptNew = true } = {}) => run(async () => {
         await restore();
         await flushOutcome();
-        if (held.has(lane) || await reader.paused()) return null;
+        if (!acceptNew || held.has(lane) || await reader.paused()) return null;
         const latest = await provider.getBlockNumber();
         if (latest < 2) throw new Error('DMTv requires confirmed blocks.');
         const blockTag = latest - 1;
@@ -96,6 +96,11 @@ export function createDmtvEscrowRuntime({ reader, writer, provider, store, resol
       }),
       completePublished: (record, playId) => run(async () => {
         if (lane !== 0 || held.get(lane) !== record || !playId) throw new Error('Invalid DMTv station completion.');
+        held.delete(lane);
+        await recordCompletion(record, playId);
+      }),
+      completeVerifiedRadio: (record, playId) => run(async () => {
+        if (lane !== 1 || held.get(lane) !== record || !playId) throw new Error('Invalid DMTv radio verification.');
         held.delete(lane);
         await recordCompletion(record, playId);
       }),

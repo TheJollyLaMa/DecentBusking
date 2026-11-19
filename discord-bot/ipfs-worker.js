@@ -300,6 +300,7 @@ export function createWorkerRequestHandler({
   onDevertLoopVote,
   getPinnerManifest,
   checkpointMirror,
+  dmtvRadioVerification,
   getRadioHistory,
   getWeeklyPayflow,
   getPaymentLedger,
@@ -527,6 +528,17 @@ export function createWorkerRequestHandler({
             ? await checkpointMirror.claimWait(authorization, requestUrl.searchParams.get('wait') === '0' ? 0 : 10000)
             : checkpointMirror.claim(authorization) }
           : checkpointMirror.acknowledge(authorization, await readJson(request));
+        sendJson(response, 200, result);
+        return;
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/dmtv/radio-verification') {
+        if (!checkpointMirror || !dmtvRadioVerification) {
+          sendJson(response, 404, { error: 'Radio verification is not configured' });
+          return;
+        }
+        checkpointMirror.authorize(String(request.headers.authorization || ''));
+        const result = dmtvRadioVerification.exchange(await readJson(request));
+        response.setHeader('cache-control', 'no-store');
         sendJson(response, 200, result);
         return;
       }
