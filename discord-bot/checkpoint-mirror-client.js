@@ -9,6 +9,7 @@ import { deserializeAnnouncements } from './radio-announcements.js';
 import { validatePromotionCheckpoint } from './promotions.js';
 import { validateCalendarRewardCheckpoint } from './calendar-rewards.js';
 import { isDmtvRadioCheckpoint } from './dmtv-queue.js';
+import { validDmtvEvidence } from './dmtv-escrow.js';
 
 export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiUrl = 'http://127.0.0.1:5001', fetchImpl = fetch }) {
   const remote = new URL(serviceUrl);
@@ -76,7 +77,7 @@ export function createLocalCheckpointMirrorClient({ serviceUrl, secret, ipfsApiU
       }
     }
     if (!(snapshot.schemaVersion === 1 && (Array.isArray(snapshot.playlist) || playbackJournal)) &&
-        !batchJournal && !scheduledCheckpoint && !isDmtvRadioCheckpoint(snapshot)) {
+        !batchJournal && !scheduledCheckpoint && !isDmtvRadioCheckpoint(snapshot) && !validDmtvEvidence(snapshot)) {
       throw new Error('Only supported playlist, playback, playlist-batch or scheduled-production checkpoints may be mirrored');
     }
     const form = new FormData();

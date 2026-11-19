@@ -1,5 +1,5 @@
 /* DMTv — oversized sketch-integrated video side stream */
-:root { --dmtv-width: min(520px, calc(100vw - 44px)); }
+:root { --dmtv-width: min(520px, var(--left-drawer-space)); }
 #dmtv-tab {
   position: fixed;
   z-index: 111;
@@ -47,7 +47,10 @@
   0%,100% { transform:translate(0,4px) rotate(18deg) scale(.78); opacity:.45; }
   50% { transform:translate(4px,-5px) rotate(-12deg) scale(1.05); opacity:1; }
 }
-body.dmtv-open #dmtv-tab { left: var(--dmtv-width); }
+body.top-ten-open #dmtv-tab { left: var(--top-ten-drawer-width); }
+body.djuke-open #dmtv-tab { left: var(--djuke-width); }
+body.devert-open #dmtv-tab { left: var(--devert-width); }
+body.dmtv-open :is(#top-ten-tab, #djuke-tab, #devert-tab, #dmtv-tab) { left: var(--dmtv-width); }
 #dmtv-tab.dmtv-purchase-pulse .dmtv-tab-antenna i:first-child { animation:dmtv-tab-antenna-left .42s ease-in-out 4 alternate; }
 #dmtv-tab.dmtv-purchase-pulse .dmtv-tab-antenna i:last-child { animation:dmtv-tab-antenna-right .42s ease-in-out 4 alternate; }
 #dmtv-tab.dmtv-purchase-pulse .dmtv-tab-cash-left { animation:dmtv-tab-cash-flight-left .9s ease-out 3; }
@@ -72,6 +75,7 @@ body.dmtv-open #dmtv-tab { left: var(--dmtv-width); }
   top: 112px;
   bottom: calc(var(--radio-footer-height,96px) + 8px);
   width: var(--dmtv-width);
+  box-sizing: border-box;
   transform: translateX(-102%);
   transition: transform .32s cubic-bezier(.2,.8,.2,1);
   padding: 12px;
@@ -88,8 +92,8 @@ body.dmtv-open #dmtv-tab { left: var(--dmtv-width); }
 }
 #dmtv-panel.dmtv-open { transform: translateX(0); }
 .dmtv-heading { min-height:70px; display:flex; align-items:flex-start; gap:8px; margin-bottom:5px; }
-.dmtv-brand { display:flex; align-items:center; gap:8px; margin-right:auto; height:62px; }
-.dmtv-brand img { width:min(240px,55vw); height:62px; object-fit:cover; object-position:center 17%; border-radius:5px; filter:saturate(.86) brightness(.86) contrast(1.05); mix-blend-mode:screen; }
+.dmtv-brand { display:flex; align-items:center; gap:8px; margin-right:auto; height:62px; min-width:0; }
+.dmtv-brand img { width:min(240px,55vw); max-width:100%; height:62px; object-fit:cover; object-position:center 17%; border-radius:5px; filter:saturate(.86) brightness(.86) contrast(1.05); mix-blend-mode:screen; }
 .dmtv-brand h2 { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
 #dmtv-close { position:relative; z-index:4; width:36px; height:36px; border:1px solid rgba(225,239,246,.28); border-radius:50%; background:rgba(8,11,28,.66); color:#f6efdd; font-size:1.15rem; cursor:pointer; }
 
@@ -143,8 +147,7 @@ body.dmtv-open #dmtv-tab { left: var(--dmtv-width); }
 }
 
 @media (max-width:600px) {
-  :root { --dmtv-width: min(94vw,520px); }
-  #dmtv-panel { top:112px; bottom:112px; width:min(94vw,520px); }
+  #dmtv-panel { top:112px; bottom:112px; }
   #dmtv-tab { top:calc(var(--left-tab-top) + 202px); width:44px; height:62px; min-height:62px; gap:2px; padding:2px 2px 3px; }
   .dmtv-tab-tv { height:26px; }
   .dmtv-tab-tv-emoji { left:5px; font-size:24px; }

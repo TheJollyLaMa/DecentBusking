@@ -2,6 +2,138 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const ethers = require('../discord-bot/node_modules/ethers');
 
+test('DMTv joins the shared drawer group and does not steal focus when displaced', async t => {
+  const { initDmtv } = await import('../js/dmtv.mjs');
+  const original = { document: global.document, window: global.window };
+  class Element extends EventTarget {
+    attributes = {};
+    classList = { toggle() {} };
+    inert = true;
+    pauses = 0;
+    focused = false;
+    setAttribute(name, value) { this.attributes[name] = value; }
+    pause() { this.pauses++; }
+    focus() { this.focused = true; }
+  }
+  const elements = new Map();
+  const doc = new EventTarget();
+  doc.body = new Element();
+  doc.getElementById = id => {
+    if (!elements.has(id)) elements.set(id, new Element());
+    return elements.get(id);
+  };
+  global.document = doc;
+  global.window = { DecentConfig: {} };
+  const opened = [];
+  doc.addEventListener('left-drawer-open', event => opened.push(event.detail));
+  const cleanup = initDmtv();
+  t.after(() => {
+    try { cleanup(); }
+    finally { Object.assign(global, original); }
+  });
+  const tab = elements.get('dmtv-tab');
+  const panel = elements.get('dmtv-panel');
+  const player = elements.get('dmtv-video-player');
+  for (const neighbor of ['top-ten', 'djuke', 'devert']) {
+    tab.dispatchEvent(new Event('click'));
+    assert.equal(opened.at(-1), 'dmtv');
+    assert.equal(tab.attributes['aria-expanded'], 'true');
+    assert.equal(panel.inert, false);
+    doc.dispatchEvent(new CustomEvent('left-drawer-open', { detail: neighbor }));
+    assert.equal(tab.attributes['aria-expanded'], 'false');
+    assert.equal(panel.inert, true);
+    assert.equal(tab.focused, false);
+  }
+  assert.equal(player.pauses, 3);
+  tab.dispatchEvent(new Event('click'));
+  elements.get('dmtv-close').dispatchEvent(new Event('click'));
+  assert.equal(tab.focused, true);
+});
+
+test('escrow worker restores completed evidence and does not settle interrupted playback', async () => {
+  const { createDmtvEscrowRuntime } = await import('../discord-bot/dmtv-escrow.js');
+  const creator = '0x1111111111111111111111111111111111111111';
+  const track = { trackId: 'track', videoUrl: 'ipfs://example', creator };
+  const request = { status: 1, refundAt: 2000, videoId: ethers.id('nft'), mediaHash: ethers.id(track.videoUrl), creator };
+  let saved;
+  let sends = 0;
+  const make = () => createDmtvEscrowRuntime({
+    reader: { paused: async () => false, head: async () => 0n, tail: async () => 1n, requests: async () => request,
+      videos: async () => ({ ...request, lanes: 3 }) },
+    writer: { fulfill: async (lane, requestId, proof) => {
+      assert.deepEqual(saved.entries[0], { lane, requestId, proof });
+      if (++sends === 1) throw new Error('RPC unavailable');
+      return { wait: async () => { request.status = 2; return { status: 1 }; } };
+    } },
+    provider: { getBlockNumber: async () => 10, getBlock: async () => ({ timestamp: 1000 }) },
+    store: { restore: async () => saved, save: async snapshot => { saved = snapshot; return true; } },
+    resolveTrack: async () => track,
+  }).forLane(1);
+  const queue = make();
+  const { record } = await queue.nextPaid();
+  await queue.complete(record, { trackId: track.trackId, playId: 'partial', expectedMs: 2000, audibleMs: 800, finished: true });
+  assert.equal(sends, 0);
+  const retry = await queue.nextPaid();
+  await assert.rejects(queue.complete(retry.record,
+    { trackId: track.trackId, playId: 'clean', expectedMs: 2000, audibleMs: 2000, finished: true }), /RPC unavailable/);
+  assert.equal(saved.entries.length, 1);
+  assert.equal(await make().nextPaid(), null);
+  assert.deepEqual(saved.entries, []);
+  assert.equal(sends, 2);
+});
+
+test('escrow checkout rejects a changed video before any approval or payment', async () => {
+  const { reserveDmtvVideo } = await import('../js/dmtv-escrow.mjs');
+  const creator = '0x1111111111111111111111111111111111111111';
+  await assert.rejects(reserveDmtvVideo({
+    escrow: { paused: async () => false, quote: async () => 2_000_000n,
+      videos: async () => ({ mediaHash: ethers.id('changed'), creator, lanes: 1 }) },
+    usdc: { allowance: () => assert.fail('Checkout must refuse before accessing the allowance') },
+    lane: 0, videoId: ethers.id('nft'), mediaHash: ethers.id('selected'), creator,
+  }), /no longer available/);
+});
+
+test('shared station publishes real video segments before recording paid completion', { timeout: 20_000 }, async t => {
+  const { spawnSync } = require('node:child_process');
+  if (spawnSync('ffmpeg', ['-version']).error?.code === 'ENOENT') return t.skip('ffmpeg unavailable');
+  const { createServer } = require('node:http');
+  const { createDmtvStation } = await import('../discord-bot/dmtv-station.js');
+  const video = spawnSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'color=s=160x90:r=24:d=6',
+    '-c:v', 'libx264', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']);
+  assert.equal(video.status, 0, video.stderr.toString());
+  const gateway = createServer((request, response) => {
+    response.writeHead(200, { 'content-type': 'video/mp4', 'content-length': video.stdout.length });
+    response.end(video.stdout);
+  });
+  await new Promise(resolve => gateway.listen(0, '127.0.0.1', resolve));
+  let published;
+  let resolveCompletion;
+  const completion = new Promise(resolve => { resolveCompletion = resolve; });
+  const station = createDmtvStation({ gateway: `http://127.0.0.1:${gateway.address().port}/`,
+    queue: { nextPaid: async () => ({ record: {}, track: { title: 'Fixture', videoUrl: 'ipfs://fixture' } }),
+      release: async () => {}, completePublished: async (record, playId) => resolveCompletion(playId) },
+    nextFree: async () => null,
+  });
+  try {
+    station.start();
+    for (let i = 0; i < 50 && !published; i++) {
+      await new Promise(resolve => setTimeout(resolve, 125));
+      published = station.state().current;
+    }
+    assert.ok(published, 'worker should publish a current HLS stream');
+    const manifest = (await station.media(published.playId, 'live.m3u8')).toString();
+    const segment = manifest.match(/^live\d+\.ts$/m)?.[0];
+    assert.ok(segment);
+    assert.ok((await station.media(published.playId, segment)).length > 1000);
+    const playbackId = await Promise.race([completion, new Promise(resolve => setTimeout(resolve, 5000, null).unref())]);
+    assert.equal(playbackId, published.playId);
+    assert.match((await station.media(playbackId, 'live.m3u8')).toString(), /#EXT-X-ENDLIST/);
+  } finally {
+    station.stop();
+    await new Promise(resolve => gateway.close(resolve));
+  }
+});
+
 const type = 'video/mp4';
 const ad = { title: 'DVert', audioURI: 'ipfs://ad-cid', startedAt: '2026-01-01', expiresAt: '2026-02-01' };
 const nfts = [
