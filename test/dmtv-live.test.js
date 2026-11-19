@@ -98,10 +98,15 @@ test('shared station publishes real video segments before recording paid complet
   if (spawnSync('ffmpeg', ['-version']).error?.code === 'ENOENT') return t.skip('ffmpeg unavailable');
   const { createServer } = require('node:http');
   const { createDmtvStation } = await import('../discord-bot/dmtv-station.js');
+  const { resolveStreamableIpfsUrl } = await import('../discord-bot/jukeloop.js');
   const video = spawnSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'color=s=160x90:r=24:d=6',
     '-c:v', 'libx264', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']);
   assert.equal(video.status, 0, video.stderr.toString());
   const gateway = createServer((request, response) => {
+    if (request.url !== '/ipfs/fixture?pinataGatewayToken=fixture-token') {
+      response.writeHead(401).end();
+      return;
+    }
     response.writeHead(200, { 'content-type': 'video/mp4', 'content-length': video.stdout.length });
     response.end(video.stdout);
   });
@@ -109,7 +114,9 @@ test('shared station publishes real video segments before recording paid complet
   let published;
   let resolveCompletion;
   const completion = new Promise(resolve => { resolveCompletion = resolve; });
-  const station = createDmtvStation({ gateway: `http://127.0.0.1:${gateway.address().port}/`,
+  const station = createDmtvStation({
+     resolveMediaUrl: cid => resolveStreamableIpfsUrl(
+       `http://127.0.0.1:${gateway.address().port}/ipfs?pinataGatewayToken=fixture-token`, cid),
     queue: { nextPaid: async () => ({ record: {}, track: { title: 'Fixture', videoUrl: 'ipfs://fixture' } }),
       release: async () => {}, completePublished: async (record, playId) => resolveCompletion(playId) },
     nextFree: async () => null,

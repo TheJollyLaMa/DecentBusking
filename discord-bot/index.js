@@ -1631,7 +1631,8 @@ async function main() {
     dmtvEscrowRadio = laneQueue(1);
     let archiveCursor = 0;
     let adCursor = 0;
-    dmtvStation = createDmtvStation({ queue: laneQueue(0), gateway: config.ipfsGateway,
+    dmtvStation = createDmtvStation({ queue: laneQueue(0),
+      resolveMediaUrl: async cid => resolveStreamableIpfsUrl(await discoverDedicatedGateway(config) || config.ipfsGateway, cid),
       nextFree: async ({ adDue }) => {
         const { archive, ads } = await getArchive();
         if (adDue) return ads.length ? ads[adCursor++ % ads.length] : { houseAd: true, title: 'DMTv station break' };
