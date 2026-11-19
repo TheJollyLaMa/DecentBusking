@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-export function createDmtvStation({ queue, nextFree, gateway, log = console }) {
+export function createDmtvStation({ queue, nextFree, resolveMediaUrl, log = console }) {
   const sessions = new Map();
   let current = null;
   let active = false;
@@ -32,7 +32,9 @@ export function createDmtvStation({ queue, nextFree, gateway, log = console }) {
       } else {
         const cid = track.videoUrl?.match(/^ipfs:\/\/(?:ipfs\/)?([a-z0-9]+)$/i)?.[1];
         if (!cid) throw new Error('DMTv requires canonical IPFS media.');
-        const url = new URL(cid, `${gateway.replace(/\/+$/, '')}/`);
+        const mediaUrl = await resolveMediaUrl(cid);
+        if (!mediaUrl) throw new Error('DMTv media is unavailable from the configured gateways.');
+        const url = new URL(mediaUrl);
         if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname))) {
           throw new Error('DMTv requires an HTTPS media gateway or a loopback test gateway.');
         }
@@ -79,7 +81,10 @@ export function createDmtvStation({ queue, nextFree, gateway, log = console }) {
           clearInterval(publish);
           clearTimeout(deadline);
           child = null;
-          if (code !== 0 || !progress) reject(new Error(`DMTv encoder failed (${code}): ${errors}`));
+          if (code !== 0 || !progress) {
+            const httpStatus = errors.match(/Server returned (\d{3})\b/)?.[1];
+            reject(new Error(`DMTv encoder failed (${code ?? 'terminated'})${httpStatus ? `: upstream HTTP ${httpStatus}` : ''}`));
+          }
           else resolve(true);
         });
       });
