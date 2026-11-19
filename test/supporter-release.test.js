@@ -22,7 +22,7 @@ test('Supporter preparation and announcement use one pinned kit with approved 10
   assert.equal(listing.contract, '0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B');
   assert.equal(listing.tokenId, '75');
   assert.equal(listing.escrowAddress, '0x31b07b83e99A9bdF379bf40225b8A80d3804C89d');
-  assert.equal(listing.listingId, '5');
+  assert.equal(listing.listingId, '22');
   assert.equal(listing.paymentToken, '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
   assert.equal(listing.expectedPriceAmount, '100000000');
 });
