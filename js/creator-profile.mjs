@@ -1,7 +1,8 @@
 import { renderLivePerformances } from './live-performance-profile.mjs?v=20261115-afterparty';
 import { workerEnsProvider } from './ens-client.mjs?v=20261016-ens-worker';
 import { getBaseReadProvider } from './base-chain.mjs?v=20261018-shared-provider';
-import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS } from './creator-profile-data.mjs?v=20261030-ad-cutoff';
+import { buildCreatorAuthorizationMessage, creatorImageURL, creatorPresentation, normalizeCreatorProfile, resolveCreatorENS,
+  normalizeMusicianCareState, musicianCareTotals } from './creator-profile-data.mjs?v=20261119-musician-care';
 import { createBrowserIpfsUploader } from './ipfs-upload.js?v=20261015-mime-sniff';
 import { canEditArtwork } from './artwork-update.mjs?v=20261118-artist-artwork';
 import { approveCreatorSplitProposal, createCreatorSplitProposal, fetchCreatorSplitProposal,
@@ -18,6 +19,23 @@ import { FUND_LABELS, fetchWorkerEarnings, formatAmount, groupLogEarnings, readC
 import { renderTipLedger } from './tip-ledger-ui.mjs';
 
 import { renderWallet } from './wallet-label.mjs';
+
+export function renderMusicianCareSummary(container, profile) {
+  const status = container.querySelector('[data-profile-care-status]');
+  if (!status) return;
+  const list = container.querySelector('[data-profile-care-totals]');
+  list.hidden = true;
+  try {
+    const totals = musicianCareTotals(normalizeMusicianCareState(profile.musicianCare));
+    for (const activity of ['water', 'breathwork', 'chanting', 'vocal']) {
+      container.querySelector(`[data-profile-care-${activity}]`).textContent = activity === 'water'
+        ? `${totals.water.toLocaleString()} ${totals.water === 1 ? 'glass' : 'glasses'}`
+        : `${(Math.round(totals[activity] / 60 * 10) / 10).toLocaleString()} min`;
+    }
+    status.textContent = 'Public logged totals (all time) - DecentBusking widget';
+    list.hidden = false;
+  } catch (error) { status.textContent = `Activity unavailable: ${error.message}`; }
+}
 
 export const CREATOR_ALBUM_ABI = [
   'function getSong(bytes32) view returns ((string audioURI,bool enabled,address[] recipients,uint16[] sharesBps))',
@@ -319,7 +337,7 @@ export function initCreatorProfile() {
   let ensError = '';
   let ensLoading = false;
   let viewingOwnProfile = false;
-  let revision = 0;
+  let revision = 0, careRevision = 0;
   let album = null;
   let selectedAlbumSongs = new Map();
   let selectedAlbumId = '';
@@ -800,6 +818,7 @@ export function initCreatorProfile() {
     for (const kind of ['ens', 'discord', 'uploaded']) renderAvatarBubble(kind);
     for (const field of ['displayName', 'bio']) form.elements.namedItem(field).value = profile[field] || '';
     renderDiscordLinkFlow();
+    renderMusicianCareSummary(dialog, profile);
     setControls();
     renderWatchlist();
     void renderMyNFTs();
@@ -844,10 +863,14 @@ export function initCreatorProfile() {
     return result;
   };
   const loadProfileData = async ({ resolveEns = true } = {}) => {
-    const check = revision;
+    const check = revision, careCheck = careRevision;
     const response = await fetch(`${service()}/api/creator/profile?${new URLSearchParams({ address })}`, { signal: AbortSignal.timeout(15000) }).catch(() => null);
     if (check !== revision) return;
-    if (response?.ok) profile = await response.json();
+    if (response?.ok) {
+      const loaded = await response.json();
+      if (check !== revision) return;
+      profile = careCheck === careRevision ? loaded : { ...loaded, musicianCare: profile.musicianCare };
+    }
     if (editable()) void syncCreatorWatchlist(address).catch(() => {});
     display();
     message(response?.ok ? '' : 'Profile service unavailable; ENS and read-only profile remain available');
@@ -1577,6 +1600,12 @@ export function initCreatorProfile() {
     await loadAlbum();
   }));
   document.addEventListener('open-creator-profile', event => { run(() => open(event.detail)); });
+  document.addEventListener('musician-care-updated', event => {
+    if (!address || event.detail.address !== address.toLowerCase()) return;
+    careRevision++;
+    profile = { ...profile, musicianCare: event.detail.musicianCare };
+    renderMusicianCareSummary(dialog, profile);
+  });
   document.addEventListener('live-booking-state-updated', event => {
     if (dialog.open && address) void loadLivePayments(revision, event.detail.state);
   });

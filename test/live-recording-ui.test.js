@@ -249,6 +249,267 @@ async function rightPanels(t, fetchImpl = async () => ({ ok: true, json: async (
   return { get, document, window, posts, popups, message };
 }
 
+async function careFixture({ now = () => new Date() } = {}) {
+  const { initBigNutenPanel } = await import('../js/bignuten-panel.mjs');
+  const { createCreatorProfiles } = await import('../discord-bot/creator-profiles.js');
+  const { Wallet } = require('node:module').createRequire(join(root, 'discord-bot/package.json'))('ethers');
+  const wallet = Wallet.createRandom();
+  let snapshot, fail = false, loseResponse = false;
+  const options = { now: () => now().getTime(), restore: async () => structuredClone(snapshot),
+    save: async next => { if (fail) throw Error('Checkpoint offline'); snapshot = structuredClone(next); return 'ipfs://care'; } };
+  let store = createCreatorProfiles(options);
+  await store.initialize();
+  const requests = [];
+  async function fetchImpl(url, options = {}) {
+    if (options.method !== 'POST') return { ok: true, json: async () => store.get(new URL(url).searchParams.get('address')) };
+    const body = JSON.parse(options.body);
+    requests.push(body);
+    const result = await store.updateMusicianCare(body, 'https://radio.example');
+    if (loseResponse) { loseResponse = false; throw Error('Response lost'); }
+    return { ok: true, json: async () => result };
+  }
+  async function visit(fetch = fetchImpl) {
+    const elements = new Map(), document = new StudioElement(), window = new StudioElement();
+    const intervals = new Map();
+    let clock = 0, intervalId = 0;
+    const get = id => {
+      if (!elements.has(id)) elements.set(id, new StudioElement());
+      return elements.get(id);
+    };
+    document.getElementById = get;
+    window._wallet = { address: wallet.address, signer: wallet };
+    window.location = { origin: 'https://radio.example' };
+    window.DecentConfig = { ipfsUploadServiceUrl: 'https://worker.example' };
+    window.crypto = globalThis.crypto; window.CustomEvent = CustomEvent;
+    const panel = initBigNutenPanel({ document, window, now, fetchImpl: fetch, timeZone: () => 'UTC',
+      monotonicNow: () => clock, schedule: callback => { intervals.set(++intervalId, callback); return intervalId; },
+      clear: id => intervals.delete(id) });
+    await settled();
+    return { get, document, window, panel, intervals,
+      advance: milliseconds => { clock += milliseconds; for (const tick of [...intervals.values()]) tick(); } };
+  }
+  return { visit, fetchImpl, requests, wallet, setFailure: value => { fail = value; }, loseNextResponse: () => { loseResponse = true; },
+    restart: async () => { store = createCreatorProfiles(options); await store.initialize(); },
+    profile: () => store.get(wallet.address) };
+}
+
+test('BigNuten profile tracking persists water and guided practices across reload and local midnight', async () => {
+  let date = new Date('2026-11-18T23:59:00.000Z');
+  const fixture = await careFixture({ now: () => date }), ui = await fixture.visit();
+  assert.equal(ui.get('bignuten-water-add').disabled, false);
+  assert.equal(ui.get('bignuten-water-remove').disabled, true);
+  for (let count = 0; count < 10; count++) await ui.get('bignuten-water-add').click();
+  assert.equal(ui.get('bignuten-water-total').textContent, '10', 'the eight-glass arc is not a storage cap');
+  assert.equal(ui.get('bignuten-water-fill').getAttribute('stroke-dashoffset'), '0');
+  await ui.get('bignuten-water-remove').click();
+  assert.equal(ui.get('bignuten-water-total').textContent, '9');
+  ui.get('bignuten-heart-select').click();
+  ui.get('bignuten-practice-start').click();
+  ui.advance(60000);
+  await ui.get('bignuten-practice-save').click();
+  assert.equal(ui.get('bignuten-breathwork-total').textContent, '1');
+  ui.get('bignuten-practice-back').click();
+  ui.get('bignuten-throat-select').click();
+  assert.equal(ui.get('bignuten-breath-icon').getAttribute('hidden'), '', 'SVG visibility uses an attribute, not the HTML-only hidden property');
+  ui.get('bignuten-method-chant').click();
+  ui.get('bignuten-practice-start').click();
+  ui.advance(60000);
+  await ui.get('bignuten-practice-save').click();
+  assert.equal(ui.get('bignuten-chanting-total').textContent, '1');
+  ui.get('bignuten-method-hum').click();
+  ui.get('bignuten-practice-start').click();
+  ui.advance(30000);
+  await ui.get('bignuten-practice-save').click();
+  assert.equal(ui.get('bignuten-vocal-total').textContent, '0.5');
+  await fixture.restart();
+  const reloaded = await fixture.visit();
+  assert.equal(reloaded.get('bignuten-water-total').textContent, '9');
+  assert.equal(reloaded.get('bignuten-breathwork-total').textContent, '1');
+  date = new Date('2026-11-19T00:01:00.000Z');
+  await reloaded.panel.refresh();
+  assert.equal(reloaded.get('bignuten-water-total').textContent, '0');
+  assert.equal(reloaded.get('bignuten-water-remove').disabled, true);
+  assert.equal(fixture.profile().musicianCare.entries.length, 13, 'midnight does not erase historical entries');
+});
+
+test('guided breathing uses one clock, skips paused/hidden time and requires explicit completion to log', async () => {
+  const fixture = await careFixture(), ui = await fixture.visit();
+  ui.get('bignuten-heart-select').click();
+  assert.equal(ui.get('bignuten-breath-icon').getAttribute('hidden'), null);
+  ui.get('bignuten-method-extended').click();
+  ui.get('bignuten-practice-start').click();
+  ui.get('bignuten-practice-start').click();
+  assert.equal(ui.intervals.size, 1);
+  assert.equal(ui.get('bignuten-home').hidden, true);
+  ui.advance(2000);
+  assert.equal(ui.get('bignuten-practice-phase').textContent, 'Breathe in');
+  assert.equal(ui.get('bignuten-practice-orb').style.transform, 'scale(0.87)');
+  ui.advance(2000);
+  assert.equal(ui.get('bignuten-practice-phase').textContent, 'Breathe out');
+  assert.equal(ui.get('bignuten-practice-countdown').textContent, '6s');
+  ui.get('bignuten-practice-pause').click();
+  assert.equal(ui.intervals.size, 0);
+  ui.advance(50000);
+  assert.equal(ui.get('bignuten-practice-elapsed').textContent, '00:04');
+  ui.get('bignuten-practice-pause').click();
+  ui.advance(6000);
+  assert.equal(ui.get('bignuten-practice-phase').textContent, 'Breathe in');
+  ui.document.hidden = true;
+  ui.document.dispatchEvent({ type: 'visibilitychange' });
+  assert.equal(ui.intervals.size, 0);
+  ui.advance(300000);
+  ui.document.hidden = false;
+  ui.document.dispatchEvent({ type: 'visibilitychange' });
+  await settled();
+  assert.equal(ui.get('bignuten-practice-elapsed').textContent, '00:10');
+  assert.equal(ui.get('bignuten-practice-pause').textContent, 'Resume');
+  ui.get('bignuten-practice-pause').click();
+  ui.advance(70000);
+  assert.equal(ui.get('bignuten-practice-phase').textContent, 'Minute complete');
+  assert.equal(ui.get('bignuten-practice-elapsed').textContent, '01:00');
+  assert.equal(ui.intervals.size, 0);
+  assert.equal(fixture.requests.length, 0, 'timer completion never triggers a signature or POST');
+  await ui.get('bignuten-practice-save').click();
+  assert.equal(fixture.profile().musicianCare.entries[0].amount, 60);
+  assert.equal(fixture.profile().musicianCare.entries[0].activity, 'breathwork');
+  assert.match(ui.get('bignuten-practice-status').textContent, /Logged 01:00/);
+});
+
+test('guided practice preserves its activity until discarded and clears unfinished time on wallet changes', async () => {
+  const fixture = await careFixture(), ui = await fixture.visit();
+  ui.get('bignuten-heart-select').click();
+  ui.get('bignuten-practice-start').click();
+  ui.advance(6000);
+  ui.get('bignuten-practice-back').click();
+  assert.equal(ui.intervals.size, 0);
+  assert.equal(ui.get('bignuten-home').hidden, false);
+  ui.get('bignuten-throat-select').click();
+  assert.equal(ui.get('bignuten-practice-controls').dataset.kind, 'heart');
+  assert.match(ui.get('bignuten-practice-status').textContent, /Finish or discard/);
+  ui.get('bignuten-practice-discard').click();
+  ui.get('bignuten-practice-back').click();
+  ui.get('bignuten-throat-select').click();
+  ui.get('bignuten-method-trill').click();
+  ui.get('bignuten-practice-start').click();
+  ui.advance(4500);
+  assert.equal(ui.get('bignuten-practice-phase').textContent, 'Brr...');
+  ui.get('bignuten-method-chant').click();
+  assert.equal(ui.get('bignuten-practice-title').textContent, 'Lip trill');
+  ui.window._wallet = { address: other, signer: {} };
+  await ui.document.dispatchEvent({ type: 'wallet-connected' });
+  assert.equal(ui.intervals.size, 0);
+  assert.equal(ui.get('bignuten-practice-elapsed').textContent, '00:00');
+  assert.match(ui.get('bignuten-practice-status').textContent, /Wallet changed/);
+  assert.equal(fixture.requests.length, 0);
+});
+
+test('an unconfirmed guided session stays retryable without changing duration or double logging', async () => {
+  const fixture = await careFixture(), ui = await fixture.visit();
+  ui.get('bignuten-throat-select').click();
+  ui.get('bignuten-practice-start').click();
+  ui.advance(5500);
+  const sign = fixture.wallet.signMessage.bind(fixture.wallet);
+  fixture.wallet.signMessage = async () => { throw Error('Signature rejected'); };
+  await ui.get('bignuten-practice-save').click();
+  assert.equal(ui.get('bignuten-practice-elapsed').textContent, '00:05');
+  assert.equal(ui.get('bignuten-practice-save').disabled, false);
+  assert.equal(ui.intervals.size, 0);
+  assert.equal(fixture.requests.length, 0);
+  fixture.wallet.signMessage = sign;
+  fixture.setFailure(true);
+  await ui.get('bignuten-practice-save').click();
+  assert.equal(ui.get('bignuten-vocal-total').textContent, '0');
+  assert.equal(ui.get('bignuten-practice-discard').disabled, true);
+  fixture.setFailure(false);
+  fixture.loseNextResponse();
+  await ui.get('bignuten-retry').click();
+  ui.advance(600000);
+  await fixture.restart();
+  await ui.panel.refresh();
+  assert.equal(fixture.profile().musicianCare.entries.length, 1);
+  assert.equal(fixture.profile().musicianCare.entries[0].amount, 5);
+  assert.equal(fixture.profile().musicianCare.entries[0].activity, 'vocal');
+  assert.equal(new Set(fixture.requests.map(body => body.entry.id)).size, 1);
+  assert.match(ui.get('bignuten-practice-status').textContent, /Logged 00:05/);
+  assert.equal(ui.get('bignuten-practice-start').disabled, false);
+});
+
+test('BigNuten failed saves retain confirmed totals and retry the same ID after a lost response', async () => {
+  const fixture = await careFixture(), ui = await fixture.visit();
+  fixture.setFailure(true);
+  await ui.get('bignuten-water-add').click();
+  assert.equal(ui.get('bignuten-water-total').textContent, '0');
+  assert.match(ui.get('bignuten-water-status').textContent, /not confirmed/);
+  assert.equal(ui.get('bignuten-water-add').disabled, true);
+  fixture.setFailure(false);
+  fixture.loseNextResponse();
+  await ui.get('bignuten-retry').click();
+  assert.equal(ui.get('bignuten-water-total').textContent, '0');
+  await fixture.restart();
+  await ui.get('bignuten-retry').click();
+  assert.equal(ui.get('bignuten-water-total').textContent, '1');
+  assert.equal(new Set(fixture.requests.map(body => body.entry.id)).size, 1);
+  assert.equal(fixture.profile().musicianCare.entries.length, 1);
+  ui.window._wallet.signer.signMessage = async () => { throw Error('Signature rejected'); };
+  await ui.get('bignuten-water-add').click();
+  assert.match(ui.get('bignuten-water-status').textContent, /Not saved: Signature rejected/);
+  assert.equal(ui.get('bignuten-retry').hidden, true);
+  assert.equal(ui.get('bignuten-water-total').textContent, '1');
+});
+
+test('BigNuten ignores stale loads and signatures after wallet changes, including profile viewing', async () => {
+  const fixture = await careFixture();
+  let resolveLoad;
+  const ui = await fixture.visit(() => new Promise(resolve => { resolveLoad = resolve; }));
+  ui.window._wallet = {};
+  await ui.document.dispatchEvent({ type: 'wallet-disconnected' });
+  resolveLoad({ ok: true, json: async () => fixture.profile() });
+  await settled();
+  assert.equal(ui.get('bignuten-water-total').textContent, '0');
+  assert.equal(ui.get('bignuten-water-add').disabled, true);
+  const signing = await fixture.visit();
+  signing.document.dispatchEvent({ type: 'creator-profile-view-changed', detail: { address: other } });
+  await signing.get('bignuten-water-add').click();
+  assert.equal(fixture.requests.at(-1).address, fixture.wallet.address.toLowerCase(), 'viewing another profile never changes the logging wallet');
+  let finishSignature;
+  signing.window._wallet.signer = { signMessage: () => new Promise(resolve => { finishSignature = resolve; }) };
+  await signing.document.dispatchEvent({ type: 'wallet-connected' });
+  const pending = signing.get('bignuten-water-add').click();
+  signing.window._wallet = { address: other, signer: {} };
+  await signing.document.dispatchEvent({ type: 'wallet-connected' });
+  finishSignature('old-wallet-signature');
+  await pending;
+  assert.equal(fixture.requests.length, 1, 'a stale signature must not submit another entry');
+  assert.equal(signing.get('bignuten-water-total').textContent, '0');
+  const unsupported = await fixture.visit(async () => ({ ok: true, json: async () => ({ address: fixture.wallet.address }) }));
+  assert.equal(unsupported.get('bignuten-water-total').textContent, '--');
+  assert.match(unsupported.get('bignuten-water-status').textContent, /service needs the musician-care update/);
+  assert.equal(unsupported.get('bignuten-water-add').disabled, true);
+});
+
+test('refreshing the signer for the same wallet keeps a pending practice retry and never submits its stale signature', async () => {
+  const fixture = await careFixture(), ui = await fixture.visit();
+  ui.get('bignuten-heart-select').click();
+  ui.get('bignuten-practice-start').click();
+  ui.advance(7000);
+  let finishSignature;
+  ui.window._wallet.signer = { signMessage: () => new Promise(resolve => { finishSignature = resolve; }) };
+  await ui.document.dispatchEvent({ type: 'wallet-connected' });
+  const saving = ui.get('bignuten-practice-save').click();
+  assert.equal(ui.get('bignuten-practice-save').disabled, true);
+  ui.window._wallet = { address: fixture.wallet.address, signer: fixture.wallet };
+  await ui.document.dispatchEvent({ type: 'wallet-connected' });
+  finishSignature('stale-same-wallet-signature');
+  await saving;
+  assert.equal(fixture.requests.length, 0, 'the old signer cannot submit after replacement');
+  assert.equal(ui.get('bignuten-water-total').textContent, '0');
+  assert.equal(ui.get('bignuten-retry').hidden, false, 'the stable pending event remains recoverable');
+  await ui.get('bignuten-retry').click();
+  assert.equal(fixture.profile().musicianCare.entries.length, 1);
+  assert.equal(fixture.profile().musicianCare.entries[0].amount, 7);
+  assert.equal(fixture.profile().musicianCare.entries[0].activity, 'breathwork');
+});
+
 test('right panels wait for the studio draft before switching, and reject stale eligibility', async t => {
   const ui = await rightPanels(t);
   assert.equal(ui.get('rehearsal-tab').hidden, false);
@@ -270,6 +531,23 @@ test('right panels wait for the studio draft before switching, and reject stale 
   finish({ ok: true, json: async () => ({ canHost: true }) });
   await settled();
   assert.equal(stale.get('rehearsal-tab').hidden, true);
+});
+
+test('closing or switching the BigNuten drawer pauses its guide until explicitly resumed', async t => {
+  const ui = await rightPanels(t);
+  t.after(() => ui.get('bignuten-panel-close').click());
+  await ui.get('bignuten-tab').click();
+  ui.get('bignuten-heart-select').click();
+  ui.get('bignuten-practice-start').click();
+  assert.equal(ui.get('bignuten-practice-controls').dataset.running, 'true');
+  await ui.get('bignuten-panel-close').click();
+  assert.equal(ui.get('bignuten-practice-controls').dataset.running, 'false');
+  await ui.get('bignuten-tab').click();
+  assert.equal(ui.get('bignuten-practice-pause').textContent, 'Resume');
+  ui.get('bignuten-practice-pause').click();
+  await ui.get('rehearsal-tab').click();
+  assert.equal(ui.get('bignuten-practice-controls').dataset.running, 'false');
+  assert.equal(ui.get('bignuten-practice-pause').textContent, 'Resume');
 });
 
 test('rehearsal close requires a trusted shutdown acknowledgement and preserves the visible room on failure', async t => {

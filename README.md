@@ -64,6 +64,62 @@ preserved separately, not copied over newer shipped functionality.
 
 ## Come Listen
 
+**BigNuten musician care (#324, local preview):** two unlabeled green/blue
+chakra dots on the body open silent, one-minute guided practices: an expanding
+breath circle (even 4/4 or longer-exhale 4/6, without holds), or a vocal wave
+with humming, lip-trill and Aum/Om cues. A progress ring, active-time clock and
+short prompts guide the practice; there is no generated audio or microphone use.
+Reduced-motion settings keep the icons still while preserving the text cues.
+Pause/resume and Finish & log replace manual minute entry. The minute stops
+automatically but never saves until Finish & log is pressed. Closing the drawer,
+returning to the body, switching drawers or hiding the page pauses the clock;
+only active seconds are logged. Unfinished sessions remain in memory until
+logged/discarded, a wallet change or page reload. Changing practices requires
+finishing or explicitly discarding the current session.
+Above the body, today's water count reads `0/8 glasses of water today`;
+minus/plus flank the semicircle and remove/add one glass. Eight is the display
+reference, not a storage cap. No millilitre conversion is implied.
+
+Logging uses the already-connected wallet and saves directly to its public
+Busking profile through `POST /api/creator/musician-care`. There is no separate
+save checkbox or profile-connect flow. Each entry is wallet-signed (no
+transaction/gas); the signature explains public IPFS history. Totals change
+only after the existing profile checkpoint confirms. A failed save shows an
+error and a retry for the same stable event ID, avoiding duplicate counting.
+Undo retains a correction record so replayed adds cannot resurrect it. The
+normal profile editor cannot overwrite activity. The Profile displays confirmed
+all-time water/practice totals with "DecentBusking widget" provenance.
+
+Each event retains its UTC timestamp, logged time zone and local date. Today's
+view refreshes on reopen, focus and interaction; midnight does not erase
+history. Changing wallets clears the old view and rejects stale loads/signatures.
+An older/unavailable service shows an explicit unavailable state, not fake
+saved totals. Deploy the compatible profile service before the panel.
+
+Automatic cross-app linking and eventual separation of storage responsibilities
+are deferred to [#418](https://github.com/TheJollyLaMa/DecentBusking/issues/418).
+No BigNuten history is imported or synchronized by this implementation.
+
+Reuse decision: adapt the existing right-side drawer and signed creator-profile
+checkpoint service, rather than duplicate storage. Reviewed Canopy's leads and
+[BigNuten's `createWaterIntakeStore`](https://github.com/TheJollyLaMa/BigNuten_Vanilla/blob/f33c4876b9d3ebf6380cc762b666d38e51036aac/js/waterIntake.js);
+adapted its body/chakra geometry and SVG water arc from `index.html` and
+`css/styles.css` at the same commit. Its recovery-backed browser fitness snapshot
+is incompatible with Busking's public IPFS profile service; no full fitness
+database is copied. Both now count glasses. The guided panels additionally
+adapt `createBreathTimer`, `breathState` and the hold-free `sama`/`extended`
+patterns from `js/breathwork.js`, plus the progress-ring presentation in
+`js/breathPractice.js`/`index.html` at that same donor commit (Apache-2.0).
+Busking adds compact vocal cues and uses its existing signed seconds-based
+activity contract, not BigNuten's local session store or reward logic.
+Artwork attribution and
+licensing remain in [the notice](img/BigNuten.NOTICE.txt) and
+[the license](img/BigNuten.LICENSE.txt), without a credit line in the panel.
+Validate signatures, checkpoint/retry persistence, corrections, wallet isolation,
+midnight rollover, guided phase timing, pause/visibility lifecycle and existing drawers with
+`node --test test/creator-profiles.test.js test/live-recording-ui.test.js`,
+plus desktop/mobile browser checks.
+
 The **DJuke** drawer uses a chrome/platinum jukebox with an animated quarter,
 music notes and a dim LCD equalizer driven by the shared live music spectrum.
 DVert uses the same meter behind its prices and animates its tab icons in the

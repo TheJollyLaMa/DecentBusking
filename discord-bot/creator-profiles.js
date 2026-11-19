@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { verifyMessage } from 'ethers';
 import { buildCreatorAuthorizationMessage, buildCreatorWatchlistAuthorizationMessage, buildCreatorPlaylistAuthorizationMessage,
-  buildCreatorPlaylistCopyAuthorizationMessage, normalizeCreatorProfile, normalizeCreatorWatchlistEntry, normalizeNamedPlaylist } from '../js/creator-profile-data.mjs';
+  buildCreatorPlaylistCopyAuthorizationMessage, normalizeCreatorProfile, normalizeCreatorWatchlistEntry, normalizeNamedPlaylist,
+  buildMusicianCareAuthorizationMessage, normalizeMusicianCareEntry, normalizeMusicianCareState, musicianCareTotals } from '../js/creator-profile-data.mjs';
 import { nftIdentity } from '../js/nft-loader.js';
 
 export function createCreatorProfiles({ restore, save, now = () => Date.now() }) {
@@ -30,11 +31,13 @@ export function createCreatorProfiles({ restore, save, now = () => Date.now() })
     return { ...normalized, nftId: watchlistKey(normalized), savedAt: typeof entry.savedAt === 'string' ? entry.savedAt : new Date(now()).toISOString() };
   }).filter((entry, index, list) => list.findIndex(candidate => candidate.nftId === entry.nftId) === index);
   const currentWatchlist = address => normalizeWatchlist(profiles[address]?.watchlist || []);
+  const currentCare = address => normalizeMusicianCareState(profiles[address]?.musicianCare ?? { version: 1, entries: [] });
   const profileRecord = address => {
     const owned = Object.values(playlists).map(record => latestRevision(record))
       .filter(playlist => playlist?.maker === address).sort((a, b) => a.name.localeCompare(b.name));
     const saved = Array.isArray(profiles[address]?.playlists) ? profiles[address].playlists : [];
-    return { ...profiles[address], watchlist: currentWatchlist(address), madePlaylists: owned, playlists: saved };
+    return { ...profiles[address], watchlist: currentWatchlist(address), madePlaylists: owned, playlists: saved,
+      musicianCare: currentCare(address) };
   };
   const latestRevision = record => record?.revisions?.[record.revisions.length - 1] || null;
   const authorizePlaylist = (body, origin, action, copy = false) => {
@@ -106,6 +109,7 @@ export function createCreatorProfiles({ restore, save, now = () => Date.now() })
       }
       for (const [address, profile] of Object.entries(profiles)) {
         profiles[address] = { ...profile, watchlist: currentWatchlist(address) };
+        if (profile.musicianCare) currentCare(address);
       }
       ready = true;
     }),
@@ -146,6 +150,36 @@ export function createCreatorProfiles({ restore, save, now = () => Date.now() })
         : [{ ...entry, nftId: key, savedAt: watchlist.find(item => item.nftId === key)?.savedAt || new Date(now()).toISOString() },
           ...watchlist.filter(item => item.nftId !== key)];
       await persist({ ...profiles, [address]: { ...profiles[address], watchlist: next, updatedAt: new Date(now()).toISOString() } });
+      return { ok: true, profile: { address, ...profileRecord(address) } };
+    }),
+    updateMusicianCare: (body, origin) => serialize(async () => {
+      requireReady();
+      if (!/^0x[0-9a-fA-F]{40}$/.test(body.address || '') ||
+          !['add-musician-care', 'remove-musician-care'].includes(body.action) ||
+          body.visibility !== 'public' || typeof body.nonce !== 'string' ||
+          !/^[a-zA-Z0-9-]{16,80}$/.test(body.nonce) || !Number.isFinite(Date.parse(body.issuedAt)) ||
+          Math.abs(now() - Date.parse(body.issuedAt)) > 300000) {
+        throw new Error('Invalid or expired public musician-care authorization.');
+      }
+      const address = body.address.toLowerCase(), entry = normalizeMusicianCareEntry(body.entry);
+      const message = buildMusicianCareAuthorizationMessage({ ...body, address, origin, entry });
+      if (verifyMessage(message, body.signature).toLowerCase() !== address) throw new Error('Musician-care signature does not match wallet.');
+      if (Date.parse(entry.timestamp) > now() + 60000) throw new Error('Musician-care entry is dated in the future.');
+      const care = currentCare(address), existing = care.entries.find(item => item.id === entry.id);
+      if (existing && JSON.stringify(normalizeMusicianCareEntry(existing)) !== JSON.stringify(entry)) {
+        throw new Error('This musician-care entry ID already identifies a different activity.');
+      }
+      if (body.action === 'remove-musician-care' && !existing) throw new Error('Musician-care entry not found.');
+      // Stable IDs make retries safe even when the checkpoint succeeded but its HTTP response was lost.
+      if ((body.action === 'add-musician-care' && existing) ||
+          (body.action === 'remove-musician-care' && existing.removedAt)) {
+        return { ok: true, profile: { address, ...profileRecord(address) } };
+      }
+      const musicianCare = { version: 1, entries: body.action === 'add-musician-care'
+        ? [...care.entries, { ...entry, removedAt: null }]
+        : care.entries.map(item => item.id === entry.id ? { ...item, removedAt: new Date(now()).toISOString() } : item) };
+      musicianCareTotals(musicianCare);
+      await persist({ ...profiles, [address]: { ...profiles[address], musicianCare, updatedAt: new Date(now()).toISOString() } });
       return { ok: true, profile: { address, ...profileRecord(address) } };
     }),
     discoverPlaylists(query = '') {

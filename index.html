@@ -24,7 +24,7 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261118-dmtv-escrow" />
+  <link rel="stylesheet" href="css/styles.css?v=20261119-guided-care" />
   <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
@@ -547,17 +547,77 @@
   </aside>
   <aside id="bignuten-panel" class="right-utility-panel" aria-label="BigNuten preview" aria-hidden="true" inert>
     <div class="recording-edit-panel-heading">
-      <h2>BigNuten · room to grow</h2>
+      <h2>BigNuten · musician care</h2>
       <button id="bignuten-panel-close" type="button" aria-label="Close BigNuten preview">✕</button>
     </div>
     <div class="bignuten-preview">
-      <img src="img/BigNuten.png" alt="BigNuten" width="220" height="220" loading="lazy">
-      <p class="bignuten-orbit" aria-hidden="true">🌱 · ✦ · 🌿</p>
-      <h3>A little space between sets.</h3>
-      <p>BigNuten has a home here. Its tools are not connected yet.</p>
-      <p>No tracking, health information or cross-app synchronization is enabled in this placeholder.</p>
-      <a href="https://github.com/TheJollyLaMa/BigNuten_Vanilla" target="_blank" rel="noopener noreferrer">Meet the BigNuten project ↗</a>
-      <p class="bignuten-art-credit">Unmodified artwork: The Jolly LaMa / A Decent Agency · <a href="img/BigNuten.LICENSE.txt" target="_blank" rel="noopener noreferrer">CC BY 4.0</a> · <a href="img/BigNuten.NOTICE.txt" target="_blank" rel="noopener noreferrer">Notice</a></p>
+      <div id="bignuten-home">
+        <p class="bignuten-water-reading"><output id="bignuten-water-total" aria-label="Glasses of water logged today" aria-live="polite">0</output>/8 <span>glasses of water today</span></p>
+        <div class="bignuten-body">
+          <img src="img/BigNuten.png" alt="BigNuten body figure" width="1024" height="1536" loading="lazy">
+          <div class="bignuten-meter" role="group" aria-label="Daily water tracker">
+            <button id="bignuten-water-remove" type="button" aria-label="Remove one glass of water" title="Remove one glass" disabled>−</button>
+            <svg viewBox="0 0 200 110" aria-hidden="true">
+              <defs><linearGradient id="bignuten-water-gradient"><stop stop-color="#0077cc"/><stop offset="1" stop-color="#87ceeb"/></linearGradient></defs>
+              <path d="M 10 100 A 90 90 0 0 1 190 100" fill="none" stroke="#0a2a3a" stroke-width="14" stroke-linecap="round"/>
+              <path id="bignuten-water-fill" d="M 10 100 A 90 90 0 0 1 190 100" pathLength="100" fill="none" stroke="url(#bignuten-water-gradient)" stroke-width="14" stroke-linecap="round" stroke-dasharray="100" stroke-dashoffset="100"/>
+            </svg>
+            <button id="bignuten-water-add" type="button" aria-label="Add one glass of water" title="Add one glass" disabled>+</button>
+          </div>
+          <button id="bignuten-throat-select" class="bignuten-chakra bignuten-throat" type="button" aria-label="Open chanting and vocal practice" title="Chanting and vocal practice" aria-pressed="false" aria-controls="bignuten-practice-controls"></button>
+          <button id="bignuten-heart-select" class="bignuten-chakra bignuten-heart" type="button" aria-label="Open breathing guide" title="Breathwork" aria-pressed="false" aria-controls="bignuten-practice-controls"></button>
+        </div>
+      </div>
+      <section id="bignuten-practice-controls" class="bignuten-care-controls" aria-labelledby="bignuten-practice-title" hidden>
+        <div class="bignuten-practice-heading">
+          <button id="bignuten-practice-back" type="button" aria-label="Back to body; pause practice">←</button>
+          <h3 id="bignuten-practice-title">Easy breath</h3>
+          <span id="bignuten-practice-spark" class="bignuten-practice-spark" aria-hidden="true">✦</span>
+          <button id="bignuten-practice-discard" type="button" aria-label="Discard session" title="Discard session" hidden>↺</button>
+        </div>
+        <div id="bignuten-breath-methods" class="bignuten-practice-methods" role="group" aria-label="Breathing pattern">
+          <button id="bignuten-method-even" type="button" aria-pressed="true">Even · 4 / 4</button>
+          <button id="bignuten-method-extended" type="button" aria-pressed="false">Long exhale · 4 / 6</button>
+        </div>
+        <div id="bignuten-voice-methods" class="bignuten-practice-methods" role="group" aria-label="Vocal practice" hidden>
+          <button id="bignuten-method-hum" type="button" aria-pressed="false">Hum</button>
+          <button id="bignuten-method-trill" type="button" aria-pressed="false">Lip trill</button>
+          <button id="bignuten-method-chant" type="button" aria-pressed="false">Aum / Om</button>
+        </div>
+        <div class="bignuten-practice-stage">
+          <svg id="bignuten-practice-ring" viewBox="0 0 120 120" role="progressbar" aria-label="One-minute practice progress" aria-valuemin="0" aria-valuemax="60" aria-valuenow="0">
+            <circle class="bignuten-practice-track" cx="60" cy="60" r="55"/>
+            <circle id="bignuten-practice-progress" cx="60" cy="60" r="55" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/>
+          </svg>
+          <div id="bignuten-practice-orb" class="bignuten-practice-orb">
+            <svg id="bignuten-breath-icon" viewBox="0 0 100 100" aria-hidden="true">
+              <path d="M46 22v31m8-31v31M46 43c-8-6-15-3-21 7-6 10-10 27-6 31 5 5 22-4 27-12V43Zm8 0c8-6 15-3 21 7 6 10 10 27 6 31-5 5-22-4-27-12V43Z"/>
+              <path d="m46 53-13 9m21-9 13 9"/>
+            </svg>
+            <div id="bignuten-voice-icon" class="bignuten-voice-icon" aria-hidden="true" hidden>
+              <span id="bignuten-practice-symbol">mmm</span>
+              <svg id="bignuten-voice-wave" viewBox="0 0 100 28"><path d="M2 14c8 0 8-11 16-11s8 22 16 22S42 3 50 3s8 22 16 22S74 3 82 3s8 11 16 11"/></svg>
+            </div>
+          </div>
+          <span class="bignuten-practice-star bignuten-practice-star-one" aria-hidden="true">✦</span>
+          <span class="bignuten-practice-star bignuten-practice-star-two" aria-hidden="true">✧</span>
+        </div>
+        <p id="bignuten-practice-phase" class="bignuten-practice-phase" aria-live="polite">Ready</p>
+        <p id="bignuten-practice-hint" class="bignuten-practice-hint"></p>
+        <p class="bignuten-practice-clock"><output id="bignuten-practice-elapsed" aria-label="Active practice time" aria-live="off">00:00</output> <span>/ 01:00</span><span id="bignuten-practice-countdown"></span></p>
+        <div class="bignuten-practice-actions">
+          <button id="bignuten-practice-start" type="button">Begin</button>
+          <button id="bignuten-practice-pause" type="button" disabled>Pause</button>
+          <button id="bignuten-practice-save" type="button" disabled>Finish &amp; log</button>
+        </div>
+        <p id="bignuten-practice-status" class="bignuten-note" role="status" aria-live="polite"></p>
+        <p class="bignuten-note">Keep it gentle. Stop if strained, dizzy or uncomfortable.</p>
+        <p id="bignuten-breath-today" class="bignuten-note">Today · <output id="bignuten-breathwork-total">--</output> min breathing</p>
+        <p id="bignuten-voice-today" class="bignuten-note" hidden>Today · <output id="bignuten-chanting-total">--</output> min chanting · <output id="bignuten-vocal-total">--</output> min voice</p>
+      </section>
+      <p id="bignuten-water-status" role="status" aria-live="polite"></p>
+      <button id="bignuten-retry" type="button" hidden>Retry</button>
+      <a id="bignuten-project" href="https://github.com/TheJollyLaMa/BigNuten_Vanilla" target="_blank" rel="noopener noreferrer">Meet the BigNuten project ↗</a>
     </div>
   </aside>
 
@@ -1097,7 +1157,7 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261119-studio-entry"></script>
+  <script type="module" src="js/main.js?v=20261119-guided-care"></script>
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261117-booking-assets">
@@ -1118,7 +1178,7 @@
   <script type="module" src="js/top-ten-board.mjs?v=20261110-live-program"></script>
   <script type="module" src="js/djuke.mjs?v=20261112-playlist-continuity"></script>
   <script type="module" src="js/devert-site.mjs?v=20261107-review"></script>
-  <script type="module" src="js/creator-profile.mjs?v=20261118-artist-artwork"></script>
+  <script type="module" src="js/creator-profile.mjs?v=20261119-musician-care"></script>
   <script type="module" src="js/artwork-editor.mjs?v=20261118-artist-artwork"></script>
   <script type="module" src="js/listens.mjs?v=20261025-seamless-handoff"></script>
   <script type="module" src="js/djuke-playlists-ui.mjs?v=20261025-scheduling-info"></script>
@@ -1180,6 +1240,16 @@
         <p data-profile-ens-note></p>
         <p data-profile-media-note></p>
       </div>
+    </section>
+    <section class="creator-care-summary" aria-labelledby="creator-care-title">
+      <h3 id="creator-care-title">Musician care</h3>
+      <p data-profile-care-status>Loading public activity...</p>
+      <dl data-profile-care-totals hidden>
+        <div><dt>Water</dt><dd data-profile-care-water></dd></div>
+        <div><dt>Breathwork</dt><dd data-profile-care-breathwork></dd></div>
+        <div><dt>Chanting</dt><dd data-profile-care-chanting></dd></div>
+        <div><dt>Vocal practice</dt><dd data-profile-care-vocal></dd></div>
+      </dl>
     </section>
     <details class="creator-dropdown" data-profile-earnings aria-labelledby="creator-earnings-title">
       <summary><span id="creator-earnings-title" class="creator-dropdown-title">Total earnings</span><strong class="creator-earnings-total" data-earnings-total>—</strong></summary>

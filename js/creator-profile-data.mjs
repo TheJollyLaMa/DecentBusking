@@ -11,6 +11,68 @@ export function normalizeCreatorProfile(input = {}) {
   return profile;
 }
 
+export function musicianCareDay(timestamp, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date(timestamp));
+  const value = type => parts.find(part => part.type === type).value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
+export function normalizeMusicianCareEntry(input = {}) {
+  const { id, activity, amount, unit, timestamp, timeZone } = input;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id || '') ||
+      !['water', 'breathwork', 'chanting', 'vocal'].includes(activity) ||
+      !Number.isSafeInteger(amount) || amount <= 0 ||
+      unit !== (activity === 'water' ? 'glasses' : 'seconds') || (activity === 'water' && amount !== 1) ||
+      typeof timestamp !== 'string' || !Number.isFinite(Date.parse(timestamp)) ||
+      new Date(timestamp).toISOString() !== timestamp ||
+      typeof timeZone !== 'string' || !timeZone || timeZone.length > 80) {
+    throw new Error('Invalid musician-care entry: log one glass of water or completed practice in seconds.');
+  }
+  let date;
+  try { date = musicianCareDay(timestamp, timeZone); }
+  catch { throw new Error('Musician-care time zone is invalid.'); }
+  return { version: 1, id: id.toLowerCase(), activity, amount, unit, timestamp, timeZone, date,
+    source: { app: 'decentbusking', surface: 'bignuten-widget' } };
+}
+
+export function normalizeMusicianCareState(input) {
+  if (!input || input.version !== 1 || !Array.isArray(input.entries)) {
+    throw new Error('Musician-care profile tracking is unavailable. The profile service needs the musician-care update.');
+  }
+  const ids = new Set();
+  return { version: 1, entries: input.entries.map(record => {
+    const entry = normalizeMusicianCareEntry(record);
+    if (record.version !== 1 || record.source?.app !== 'decentbusking' ||
+        record.source?.surface !== 'bignuten-widget' || record.date !== entry.date) {
+      throw new Error('Invalid musician-care provenance or local date.');
+    }
+    if (ids.has(entry.id)) throw new Error('Duplicate musician-care entry in profile.');
+    ids.add(entry.id);
+    const removedAt = record.removedAt ?? null;
+    if (removedAt !== null && (typeof removedAt !== 'string' || !Number.isFinite(Date.parse(removedAt)) ||
+        new Date(removedAt).toISOString() !== removedAt)) throw new Error('Invalid musician-care correction.');
+    return { ...entry, removedAt };
+  }) };
+}
+
+export function musicianCareTotals(state, date) {
+  const totals = { water: 0, breathwork: 0, chanting: 0, vocal: 0 };
+  for (const entry of state.entries) {
+    if (entry.removedAt || (date && entry.date !== date)) continue;
+    totals[entry.activity] += entry.amount;
+    if (!Number.isSafeInteger(totals[entry.activity])) throw new Error('Musician-care total exceeds the supported range.');
+  }
+  return totals;
+}
+
+export function buildMusicianCareAuthorizationMessage({ address, origin, action, nonce, issuedAt, visibility, entry }) {
+  return ['DecentBusking public musician-care activity', `Wallet: ${address.toLowerCase()}`, `Origin: ${origin}`,
+    `Action: ${action}`, `Nonce: ${nonce}`, `Issued At: ${issuedAt}`, `Visibility: ${visibility}`,
+    'This activity is public and stored in public IPFS profile history. No blockchain transaction.',
+    `Entry: ${JSON.stringify(normalizeMusicianCareEntry(entry))}`].join('\n');
+}
+
 export function normalizeCreatorWatchlistEntry(input = {}) {
   const chainId = Number(input.chainId ?? 8453);
   const tokenId = Number(input.tokenId);

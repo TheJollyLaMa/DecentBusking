@@ -4099,11 +4099,67 @@ body:has(#dnft-list.is-open) #right-side-tabs { right: var(--right-drawer-width)
 .right-utility-panel .recording-edit-panel-heading { flex-shrink: 0; }
 .right-utility-panel button:focus-visible, .right-utility-panel a:focus-visible { outline: 2px solid #b6e0bf; outline-offset: 3px; }
 body.right-utility-open #dbusker-companion { display: none; }
-.bignuten-preview { flex: 1; overflow: auto; padding: 2rem 1.5rem; text-align: center; color: #ded8eb; line-height: 1.7; }
-.bignuten-preview > img { display: block; width: min(220px, 70%); height: auto; margin: 0 auto; object-fit: contain; }
-.bignuten-preview h3 { font: 500 1.4rem var(--font-display); color: #b6e0bf; }
+.bignuten-preview { flex: 1; min-height: 0; overflow: auto; padding: 1rem 1.25rem; text-align: center; color: #ded8eb; line-height: 1.5; }
+.bignuten-preview h3 { margin: .4rem 0; font: 500 1.2rem var(--font-display); color: #b6e0bf; }
 .bignuten-preview a { color: #b6e0bf; }
-.bignuten-orbit { letter-spacing: .5em; font-size: 1.6rem; }
+.bignuten-water-reading { margin: 0 0 1.5rem; color: #b3f0ed; font-size: 1.1rem; }
+.bignuten-water-reading span { font-size: .85rem; }
+.bignuten-body { position: relative; width: 240px; max-width: 100%; margin: 0 auto; line-height: 0; }
+.bignuten-body > img { display: block; width: 100%; height: auto; opacity: .8; }
+.bignuten-meter { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); width: 140px; line-height: 1; }
+.bignuten-meter svg { display: block; width: 100%; height: auto; overflow: visible; }
+.bignuten-meter button { position: absolute; bottom: -7px; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #87ceeb; font-size: 1.4rem; }
+#bignuten-water-remove { right: calc(100% + 2px); }
+#bignuten-water-add { left: calc(100% + 2px); }
+.bignuten-body .bignuten-chakra { position: absolute; left: 50%; transform: translate(-50%, -50%); width: 24px; height: 24px; min-height: 24px; padding: 0; border: 2px solid var(--chakra-color); border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ffffffb3, var(--chakra-color) 65%); box-shadow: 0 0 20px -5px var(--chakra-color); }
+.bignuten-heart { --chakra-color: #00ff88; top: 30%; }
+.bignuten-throat { --chakra-color: #00bfff; top: 22%; }
+.bignuten-body .bignuten-chakra[aria-pressed="true"] { outline: 2px solid #fff; outline-offset: 3px; }
+.bignuten-care-controls { --practice-color: #69e9ac; --practice-shade: #143b30; padding: 0 0 .4rem; }
+.bignuten-care-controls.is-voice { --practice-color: #79ccff; --practice-shade: #183c64; }
+.bignuten-preview [hidden] { display: none !important; }
+.bignuten-preview button { cursor: pointer; }
+.bignuten-care-controls button, #bignuten-retry { min-height: 44px; padding: .55rem .8rem; border: 1px solid #65cfcb; border-radius: 10px; background: #173c3f; color: #e4fffd; font: inherit; }
+.bignuten-care-controls button:hover:not(:disabled) { background: #205259; }
+.bignuten-preview button:disabled { opacity: .5; cursor: default; }
+#bignuten-water-status { margin: .3rem 0; color: #c8f6df; font-size: .8rem; }
+#bignuten-water-status:empty { display: none; }
+.bignuten-note { color: #bfb4cf; font-size: .75rem; margin: .5rem 0; }
+.bignuten-practice-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.bignuten-practice-heading h3 { color: var(--practice-color); font-size: 1.25rem; }
+.bignuten-practice-heading #bignuten-practice-back { width: 44px; padding: 0; border: 0; background: transparent; font-size: 1.5rem; }
+.bignuten-practice-spark { width: 44px; color: var(--practice-color); }
+.bignuten-practice-methods, .bignuten-practice-actions { display: flex; justify-content: center; gap: .4rem; }
+.bignuten-practice-methods { margin: .4rem 0 .6rem; }
+.bignuten-practice-methods button { flex: 1; padding: .4rem; font-size: .75rem; border-color: #78909c66; background: transparent; }
+.bignuten-practice-methods button[aria-pressed="true"] { border-color: var(--practice-color); background: var(--practice-shade); color: var(--practice-color); }
+.bignuten-practice-stage { width: 166px; height: 166px; margin: .6rem auto; position: relative; display: grid; place-items: center; color: var(--practice-color); }
+#bignuten-practice-ring { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; stroke-width: 1.6; transform: rotate(-90deg); }
+.bignuten-practice-track { stroke: #ffffff19; }
+#bignuten-practice-progress { stroke: var(--practice-color); stroke-linecap: round; transition: stroke-dashoffset 200ms linear; }
+.bignuten-practice-orb { width: 126px; height: 126px; display: grid; place-items: center; border: 1px solid var(--practice-color); border-radius: 50%; background: radial-gradient(circle at 35% 30%, var(--practice-shade), #0c1525); box-shadow: 0 0 28px -8px var(--practice-color), inset 0 0 24px #ffffff0a; transition: transform 200ms linear; }
+#bignuten-breath-icon { width: 80px; height: 80px; fill: #69e9ac14; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.bignuten-voice-icon { display: grid; justify-items: center; gap: .6rem; }
+#bignuten-practice-symbol { font: 500 1.7rem var(--font-display); letter-spacing: .08em; }
+#bignuten-voice-wave { width: 80px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; transition: transform 200ms linear; }
+.bignuten-practice-star { position: absolute; font-size: .8rem; }
+.bignuten-practice-star-one { top: 5px; right: 4px; }
+.bignuten-practice-star-two { bottom: 8px; left: 3px; }
+.bignuten-practice-phase { color: var(--practice-color); font: 500 1.3rem var(--font-display); margin: .4rem 0; }
+.bignuten-practice-hint { color: #d3cede; font-size: .8rem; min-height: 2.8em; margin: .3rem auto; max-width: 270px; }
+.bignuten-practice-clock { display: flex; justify-content: center; gap: .4rem; margin: .5rem 0; font: .9rem ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.bignuten-practice-clock > span { color: #bfb4cf; }
+#bignuten-practice-countdown { margin-left: .4rem; color: var(--practice-color); }
+.bignuten-practice-actions button { padding: .45rem .6rem; font-size: .8rem; }
+#bignuten-practice-start { border-color: var(--practice-color); background: var(--practice-shade); }
+#bignuten-practice-discard { width: 44px; border: 0; padding: 0; background: transparent; font-size: 1.3rem; color: #c9c0d5; }
+#bignuten-practice-status:empty { display: none; }
+.creator-care-summary { padding: 1rem; border: 1px solid #65cfcb66; border-radius: 12px; }
+.creator-care-summary h3 { margin: 0; }
+.creator-care-summary p { font-size: .8rem; color: #bfb4cf; }
+.creator-care-summary dl:not([hidden]) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.creator-care-summary dt { font-size: .8rem; }
+.creator-care-summary dd { margin: .3rem 0 0; overflow-wrap: anywhere; color: #b3f0ed; }
 #right-panel-status, #rehearsal-access-retry {
   position: fixed; right: 70px; top: calc(var(--header-height, 112px) + 8px); z-index: 140;
   max-width: min(420px, calc(100vw - 90px)); margin: 0; padding: .6rem;
@@ -4116,8 +4172,18 @@ body.right-utility-open #dbusker-companion { display: none; }
   #right-side-tabs { gap: 4px; }
   #right-side-tabs > button, #right-side-tabs > #dnft-archive-toggle { height: 62px; min-height: 62px; padding: 3px 2px; gap: 1px; }
   #right-side-tabs button .right-tab-art, #right-side-tabs img { height: 34px; transform: scale(.68); transform-origin: center; }
+  .bignuten-preview { padding: .75rem; }
+  .bignuten-practice-stage { width: 136px; height: 136px; margin: .35rem auto; }
+  .bignuten-practice-orb { width: 106px; height: 106px; }
+  #bignuten-breath-icon { width: 70px; height: 70px; }
+  .bignuten-practice-methods { margin: .2rem 0 .35rem; }
+  .bignuten-practice-phase { font-size: 1.15rem; margin: .2rem 0; }
+  .bignuten-practice-clock { margin: .3rem 0; }
+  .bignuten-care-controls .bignuten-note { font-size: .7rem; margin: .35rem 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   #right-side-tabs, .right-utility-panel { transition: none; }
   #right-side-tabs #recording-edit-tab .studio-reel { animation: none; }
+  .bignuten-practice-orb, #bignuten-voice-wave { transform: none !important; transition: none; }
+  #bignuten-practice-progress { transition: none; }
 }

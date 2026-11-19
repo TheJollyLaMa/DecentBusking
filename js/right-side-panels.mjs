@@ -1,14 +1,18 @@
+import { initBigNutenPanel } from './bignuten-panel.mjs?v=20261119-guided-care';
+
 export function initRightSidePanels({ document = globalThis.document, window = globalThis.window,
   fetchImpl = globalThis.fetch } = {}) {
   const byId = id => document.getElementById(id);
   if (!byId('right-side-tabs')) return;
   const frame = byId('rehearsal-frame'), notice = byId('right-panel-status');
   const tabs = { rehearsal: byId('rehearsal-tab'), bignuten: byId('bignuten-tab') };
+  const bignuten = initBigNutenPanel({ document, window, fetchImpl });
   let active = '', busy = false, eligible = false, walletVersion = 0, returnFocus;
   let ready = false, roomId = '', pendingClose;
   const service = String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
   const say = message => { notice.textContent = message; };
   function show(name) {
+    if (name !== 'bignuten') bignuten?.pause();
     active = name;
     for (const [key, tab] of Object.entries(tabs)) {
       const panel = byId(`${key}-panel`), open = key === name;
@@ -18,6 +22,7 @@ export function initRightSidePanels({ document = globalThis.document, window = g
       tab.setAttribute('aria-expanded', String(open));
     }
     document.body.classList.toggle('right-utility-open', !!name);
+    if (name === 'bignuten') bignuten?.refresh();
     if (name) byId(`${name}-panel-close`).focus();
     else returnFocus?.focus();
   }

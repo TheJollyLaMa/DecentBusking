@@ -115,6 +115,103 @@ test('creator images prefer verified ENS, then uploaded IPFS, then Discord', asy
   assert.equal(await resolveCreatorENS(address, { lookupAddress: async () => 'fake.eth', resolveName: async () => Wallet.createRandom().address }), null);
 });
 
+test('musician care survives checkpoints, retries, corrections and unrelated profile saves', async () => {
+  const { createCreatorProfiles } = await import('../discord-bot/creator-profiles.js');
+  const { buildCreatorAuthorizationMessage, buildMusicianCareAuthorizationMessage, musicianCareTotals } = await import('../js/creator-profile-data.mjs');
+  const wallet = Wallet.createRandom(), origin = 'https://busking.example';
+  let snapshot, writes = 0;
+  const options = { restore: async () => structuredClone(snapshot),
+    save: async next => { snapshot = structuredClone(next); writes++; return 'ipfs://care-checkpoint'; } };
+  let store = createCreatorProfiles(options);
+  await store.initialize();
+  const entry = (activity, amount) => ({ id: crypto.randomUUID(), activity, amount,
+    unit: activity === 'water' ? 'glasses' : 'seconds', timestamp: new Date().toISOString(), timeZone: 'Pacific/Honolulu' });
+  const sign = async (value, action = 'add-musician-care') => {
+    const body = { address: wallet.address, origin, action, entry: value, visibility: 'public',
+      nonce: crypto.randomUUID(), issuedAt: new Date().toISOString() };
+    return { ...body, signature: await wallet.signMessage(buildMusicianCareAuthorizationMessage(body)) };
+  };
+  const water = entry('water', 1), request = await sign(water);
+  await Promise.all([store.updateMusicianCare(request, origin), store.updateMusicianCare(request, origin)]);
+  assert.equal(writes, 1);
+  for (const [activity, amount] of [['water', 1], ['breathwork', 300], ['chanting', 120], ['vocal', 180]]) {
+    await store.updateMusicianCare(await sign(entry(activity, amount)), origin);
+  }
+  store = createCreatorProfiles(options);
+  await store.initialize();
+  await store.updateMusicianCare(await sign(water), origin);
+  assert.equal(writes, 5, 'a retried event does not rewrite or double-count after restart');
+  assert.deepEqual(musicianCareTotals(store.get(wallet.address).musicianCare),
+    { water: 2, breathwork: 300, chanting: 120, vocal: 180 });
+  const profileBody = { address: wallet.address, origin, action: 'save', profile: { displayName: 'Musician', musicianCare: { entries: [] } },
+    nonce: crypto.randomUUID(), issuedAt: new Date().toISOString() };
+  await store.update({ ...profileBody, signature: await wallet.signMessage(buildCreatorAuthorizationMessage(profileBody)) }, origin);
+  assert.equal(store.get(wallet.address).musicianCare.entries.length, 5);
+  const undo = await sign(water, 'remove-musician-care');
+  await store.updateMusicianCare(undo, origin);
+  await store.updateMusicianCare(undo, origin);
+  store = createCreatorProfiles(options);
+  await store.initialize();
+  await store.updateMusicianCare(request, origin);
+  assert.equal(musicianCareTotals(store.get(wallet.address).musicianCare).water, 1, 'replayed add cannot resurrect an undone entry');
+  const recorded = store.get(wallet.address).musicianCare.entries[0];
+  assert.deepEqual(recorded.source, { app: 'decentbusking', surface: 'bignuten-widget' });
+  assert.equal(recorded.timeZone, 'Pacific/Honolulu');
+  assert.ok(recorded.removedAt);
+  assert.equal(store.get(wallet.address).displayName, 'Musician');
+  await assert.rejects(store.updateMusicianCare(await sign({ ...water, activity: 'breathwork', unit: 'seconds' }), origin), /different activity/);
+});
+
+test('musician care rejects tampering and never advances totals before a confirmed checkpoint', async () => {
+  const { createCreatorProfiles } = await import('../discord-bot/creator-profiles.js');
+  const { buildMusicianCareAuthorizationMessage, normalizeMusicianCareEntry } = await import('../js/creator-profile-data.mjs');
+  const wallet = Wallet.createRandom(), origin = 'https://busking.example';
+  let confirm = false;
+  const store = createCreatorProfiles({ restore: async () => null, save: async () => confirm ? 'ipfs://care' : null });
+  await store.initialize();
+  const entry = { id: crypto.randomUUID(), activity: 'water', amount: 1, unit: 'glasses',
+    timestamp: new Date().toISOString(), timeZone: 'UTC' };
+  const body = { address: wallet.address, origin, action: 'add-musician-care', entry, visibility: 'public',
+    nonce: crypto.randomUUID(), issuedAt: new Date().toISOString() };
+  const signed = { ...body, signature: await wallet.signMessage(buildMusicianCareAuthorizationMessage(body)) };
+  await assert.rejects(store.updateMusicianCare({ ...signed, entry: { ...entry, activity: 'breathwork', unit: 'seconds' } }, origin), /does not match/);
+  await assert.rejects(store.updateMusicianCare(signed, 'https://another.example'), /does not match/);
+  await assert.rejects(store.updateMusicianCare({ ...signed, address: Wallet.createRandom().address }, origin), /does not match/);
+  await assert.rejects(store.updateMusicianCare({ ...signed, visibility: 'private' }, origin), /authorization/);
+  await assert.rejects(store.updateMusicianCare({ ...signed, issuedAt: '2000-01-01T00:00:00.000Z' }, origin), /expired/);
+  for (const change of [{ unit: 'mL' }, { amount: -1 }, { amount: 1.5 }, { amount: 2 }, { activity: 'unknown' }, { timeZone: 'Not/AZone' }]) {
+    assert.throws(() => normalizeMusicianCareEntry({ ...entry, ...change }), /Invalid|invalid/);
+  }
+  await assert.rejects(store.updateMusicianCare(signed, origin), /checkpoint did not confirm/);
+  assert.equal(store.get(wallet.address).musicianCare.entries.length, 0);
+  confirm = true;
+  await store.updateMusicianCare(signed, origin);
+  await store.updateMusicianCare(signed, origin);
+  assert.equal(store.get(wallet.address).musicianCare.entries.length, 1);
+  const malformed = createCreatorProfiles({ restore: async () => ({ schemaVersion: 2,
+    profiles: { [wallet.address.toLowerCase()]: { musicianCare: { version: 1, entries: [entry] } } } }), save: async () => { throw Error('Must not overwrite'); } });
+  await assert.rejects(malformed.initialize(), /provenance/);
+});
+
+test('profile care summary shows confirmed totals and explicit unavailable state, not invented zeroes', async () => {
+  const { renderMusicianCareSummary } = await import('../js/creator-profile.mjs');
+  const { normalizeMusicianCareEntry } = await import('../js/creator-profile-data.mjs');
+  const nodes = new Map(), container = { querySelector(selector) {
+    if (!nodes.has(selector)) nodes.set(selector, {});
+    return nodes.get(selector);
+  } };
+  const entry = normalizeMusicianCareEntry({ id: crypto.randomUUID(), activity: 'water', amount: 1,
+    unit: 'glasses', timestamp: new Date().toISOString(), timeZone: 'UTC' });
+  renderMusicianCareSummary(container, { musicianCare: { version: 1, entries: [entry] } });
+  assert.equal(container.querySelector('[data-profile-care-water]').textContent, '1 glass');
+  assert.equal(container.querySelector('[data-profile-care-totals]').hidden, false);
+  renderMusicianCareSummary(container, { musicianCare: { version: 1, entries: [{ ...entry, removedAt: new Date().toISOString() }] } });
+  assert.equal(container.querySelector('[data-profile-care-water]').textContent, '0 glasses');
+  renderMusicianCareSummary(container, {});
+  assert.equal(container.querySelector('[data-profile-care-totals]').hidden, true);
+  assert.match(container.querySelector('[data-profile-care-status]').textContent, /unavailable/);
+});
+
 test('ENS profile reads avatar and optional banner only after forward verification', async () => {
   const { resolveCreatorENS } = await import('../js/creator-profile-data.mjs');
   const address = Wallet.createRandom().address;
@@ -139,7 +236,7 @@ test('collaborator editor validates exact basis points, duplicate wallets and cr
 test('creator HTTP endpoints enforce allowed origins and signed updates without exposing link challenges publicly', async () => {
   const { createCreatorProfiles } = await import('../discord-bot/creator-profiles.js');
   const { createWorkerRequestHandler } = await import('../discord-bot/ipfs-worker.js');
-  const { buildCreatorAuthorizationMessage } = await import('../js/creator-profile-data.mjs');
+  const { buildCreatorAuthorizationMessage, buildMusicianCareAuthorizationMessage } = await import('../js/creator-profile-data.mjs');
   const wallet = Wallet.createRandom(), origin = 'https://busking.example';
   const profiles = createCreatorProfiles({ restore: async () => null, save: async () => 'ipfs://saved' });
   await profiles.initialize();
@@ -161,6 +258,19 @@ test('creator HTTP endpoints enforce allowed origins and signed updates without 
     assert.equal(profile.displayName, 'Creator');
     assert.equal(profile.code, undefined);
     assert.equal(profile.signature, undefined);
+    const care = { ...authorization, action: 'add-musician-care', visibility: 'public',
+      entry: { id: crypto.randomUUID(), activity: 'breathwork', amount: 300, unit: 'seconds',
+        timestamp: new Date().toISOString(), timeZone: 'UTC' } };
+    const careBody = JSON.stringify({ ...care, signature: await wallet.signMessage(buildMusicianCareAuthorizationMessage(care)) });
+    const deniedCare = await fetch(`${base}/api/creator/musician-care`, { method: 'POST',
+      headers: { origin: 'https://untrusted.example', 'content-type': 'application/json' }, body: careBody });
+    assert.equal(deniedCare.status, 400);
+    const savedCare = await fetch(`${base}/api/creator/musician-care`, { method: 'POST',
+      headers: { origin, 'content-type': 'application/json' }, body: careBody });
+    assert.equal(savedCare.status, 200);
+    assert.equal((await savedCare.json()).profile.musicianCare.entries[0].amount, 300);
+    const publicCare = await fetch(`${base}/api/creator/profile?address=${wallet.address}`);
+    assert.equal((await publicCare.json()).musicianCare.entries[0].activity, 'breathwork');
   } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));

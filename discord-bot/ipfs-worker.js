@@ -578,12 +578,14 @@ export function createWorkerRequestHandler({
         sendJson(response, 200, { playlists: creatorProfiles.discoverPlaylists(query) }, '*');
         return;
       }
-      if (request.method === 'POST' && ['/api/creator/profile', '/api/creator/link-discord', '/api/creator/watchlist', '/api/creator/playlists', '/api/creator/playlists/copy'].includes(requestUrl.pathname)) {
+      if (request.method === 'POST' && ['/api/creator/profile', '/api/creator/link-discord', '/api/creator/watchlist', '/api/creator/musician-care', '/api/creator/playlists', '/api/creator/playlists/copy'].includes(requestUrl.pathname)) {
         if (!corsOrigin) throw new Error('Origin is not allowed');
         if (!creatorProfiles) throw new Error('Creator profiles are not configured');
         const body = await readJson(request);
         const result = requestUrl.pathname.endsWith('link-discord')
           ? creatorProfiles.startLink(body, origin)
+          : requestUrl.pathname.endsWith('musician-care')
+            ? await creatorProfiles.updateMusicianCare(body, origin)
           : requestUrl.pathname.endsWith('watchlist')
             ? await creatorProfiles.updateWatchlist(body, origin)
             : requestUrl.pathname.endsWith('/copy')
