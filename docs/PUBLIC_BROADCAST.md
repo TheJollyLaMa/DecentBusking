@@ -444,6 +444,12 @@ Development evidence so far:
   were about 100-400 ms, against 600-950 ms in the 19:31 run. The Render service builds from Root Directory
   `discord-bot/`, so commits touching only shared `js/` modules the bot
   imports did not auto-deploy; this one was deployed manually.
+- After that run the owner approved selecting `public`. At 18 Nov 23:55 UTC
+  `PUBLIC_BROADCAST_MODE=public` was deployed (`6368179`) during ordinary
+  rotation, through the predeploy guard. Headless Chrome on the live site
+  showed the buffered broadcast label and played 15.0 s of audio in 15 s from
+  edge segments. Friday's human rehearsal is the next real-world check.
+  Rollback: set `preview` and deploy.
 
 These observations support the CDN distribution approach, not readiness
 sign-off. The approved decoded-start percentile, actual Render container
