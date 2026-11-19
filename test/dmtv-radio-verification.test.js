@@ -38,6 +38,19 @@ test('radio verifier rejects impossible duration claims and cannot settle an unv
   assert.equal(refunds, 1);
 });
 
+test('sample-derived fractional durations use the same exact half-playback threshold', async () => {
+  const { createDmtvRadioVerification } = await import('../discord-bot/dmtv-radio-verification.js');
+  let time = 0;
+  const verifier = createDmtvRadioVerification({ now: () => time, log: { warn() {} } });
+  verifier.exchange({ version: 1, ready: true });
+  const outcome = verifier.start({ ...program, expectedMs: 2000.5 });
+  const { job } = verifier.exchange({ version: 1, ready: true });
+  assert.ok(job);
+  time = 1001;
+  verifier.exchange({ version: 1, ready: true, result: { id: job.id, syncedMs: 1000.25 } });
+  assert.equal(await outcome, true);
+});
+
 test('50% radio evidence settles once before ingest ends and failure below 50% refunds', async () => {
   const { attachDmtvRadioVerification } = await import('../discord-bot/dmtv-radio-verification.js');
   for (const ok of [true, false]) {

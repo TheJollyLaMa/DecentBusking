@@ -18,7 +18,7 @@ export function createDmtvRadioVerification({ now = Date.now, log = console } = 
     ready,
     start({ playId, ipfsCid, expectedMs }) {
       if (active || !ready() || !playId || !/^[a-z0-9]{20,120}$/i.test(ipfsCid) ||
-          !Number.isSafeInteger(expectedMs) || expectedMs <= 0 || expectedMs > 7_200_000) {
+          !Number.isFinite(expectedMs) || expectedMs <= 0 || expectedMs > 7_200_000) {
         log.warn('[dmtv] Radio video verification could not start');
         return Promise.resolve(false);
       }
