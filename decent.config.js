@@ -69,7 +69,7 @@ window.DecentConfig = {
   // IPFS uploads. This public URL never contains the server-side Pinata JWT.
   ipfsUploadProvider: "pinata",
   ipfsUploadServiceUrl: "https://decentbusking.onrender.com",
-  dmtvEscrowAddress: "",
+  dmtvEscrowAddress: "0x82a21D2039C239d141a26Fa82999bFC2b295aba6",
   ipfsApiUrl: "http://127.0.0.1:5001",
   ipfsGateway: "https://gateway.pinata.cloud/ipfs/",
 
