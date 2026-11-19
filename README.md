@@ -167,8 +167,11 @@ replaces the [original paused escrow](https://basescan.org/address/0x493148973Ba
 Before launch, verify all five funds and register canonical archive IDs
 (`keccak256` of the NFT ID string) with the exact media URI hash and creator.
 Grant the worker fulfiller access. Set `DMTV_ESCROW_ADDRESS` in the worker.
-Keep `dmtvEscrowAddress` on the site blank until the shared stream is healthy
-so the existing free rotation remains available. Update
+The site now points to the automatic-refund escrow. The initial paid catalog
+includes “dMTv DBusker CanWeReallyPartyToday” and “Box of Dead Playing Rain
+compressed”, verified as H.264/AAC through the production radio media endpoint
+and registered for both lanes. Other archive videos retain free rotation;
+paid eligibility requires an explicit on-chain catalog registration. Update
 the existing checkpoint mirror, use one writer per contract, and test the
 shared stream with `DMTV_STATION_ENABLED`. Verify both lanes, refunds,
 and settlement replay through a worker restart before enabling
