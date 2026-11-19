@@ -103,7 +103,7 @@ function _renderWatchlistState({ loading = false, resolving = false, saving = fa
       : state.mode === 'pending'
         ? 'Verifying the exact NFT…'
         : state.mode === 'unavailable'
-          ? _watchlistLookupError || 'Could not match this playback to a verified NFT.'
+          ? _watchlistLookupError || ''
         : state.mode === 'loading'
           ? 'Loading your watchlist…'
           : '';
