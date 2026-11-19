@@ -54,7 +54,7 @@ window.DecentConfig = {
     contract: "0xe63EC9f8228720bAAC2fD528C0A6d06B3Dc5439B",
     tokenId: "75",
     escrowAddress: "0x31b07b83e99A9bdF379bf40225b8A80d3804C89d",
-    listingId: "5",
+    listingId: "22",
     paymentToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     expectedPriceAmount: "100000000",
     chain: {
