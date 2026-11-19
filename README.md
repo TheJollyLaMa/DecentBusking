@@ -170,9 +170,21 @@ Grant the worker fulfiller access. Set `DMTV_ESCROW_ADDRESS` in the worker.
 The site now points to the automatic-refund escrow. The initial paid catalog
 includes “dMTv DBusker CanWeReallyPartyToday” and “Box of Dead Playing Rain
 compressed”, verified as H.264/AAC through the production radio media endpoint
-and registered for both lanes. Other archive videos retain free rotation;
-paid eligibility requires an explicit on-chain catalog registration. Update
-the existing checkpoint mirror, use one writer per contract, and test the
+and registered for both lanes.
+
+Set `DMTV_CATALOG_SYNC_ENABLED=true` and grant the escrow worker `CATALOG_ROLE`
+to backfill paid registrations and keep them current. The worker reconciles
+the same configured Base NFT collections used for DJuke mint reconciliation
+after mint notifications and on a periodic fallback. That covers Discord and
+briefcase uploads, and future video performance releases minted in those
+collections. It verifies the on-chain creator and decodes a video frame
+before adding the $2 lane. The $3 lane additionally requires H.264 MP4 with
+audio and an eligible main-radio playlist entry with verified duration.
+Ads and moderated recordings are excluded. Existing media/creator conflicts
+and deliberately disabled entries are not overwritten. The open DMTv drawer
+refreshes its archive once a minute.
+
+Update the existing checkpoint mirror, use one writer per contract, and test the
 shared stream with `DMTV_STATION_ENABLED`. Verify both lanes, refunds,
 and settlement replay through a worker restart before enabling
 `DMTV_ESCROW_PAYMENTS_ENABLED` and unpausing. Pause the contract as well as

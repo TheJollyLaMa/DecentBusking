@@ -127,6 +127,7 @@ test('shared station publishes real video segments before recording paid complet
   if (spawnSync('ffmpeg', ['-version']).error?.code === 'ENOENT') return t.skip('ffmpeg unavailable');
   const { createServer } = require('node:http');
   const { createDmtvStation } = await import('../discord-bot/dmtv-station.js');
+  const { probeDmtvVideo } = await import('../discord-bot/dmtv-catalog.js');
   const { resolveStreamableIpfsUrl } = await import('../discord-bot/jukeloop.js');
   const video = spawnSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'color=s=160x90:r=24:d=6',
     '-c:v', 'libx264', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']);
@@ -151,6 +152,9 @@ test('shared station publishes real video segments before recording paid complet
     nextFree: async () => null,
   });
   try {
+    assert.deepEqual(await probeDmtvVideo(
+      `http://127.0.0.1:${gateway.address().port}/ipfs/fixture?pinataGatewayToken=fixture-token`),
+    { video: true, radio: false });
     station.start();
     for (let i = 0; i < 50 && !published; i++) {
       await new Promise(resolve => setTimeout(resolve, 125));

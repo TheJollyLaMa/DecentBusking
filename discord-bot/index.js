@@ -89,6 +89,7 @@ import { createPinataStateStore, recoverVerifiedPlaylistBaseline } from './ipfs-
 import { createDmtvRadioQueue } from './dmtv-queue.js';
 import { dmtvArchiveItems, dmtvVideoAds } from '../js/dmtv.mjs';
 import { DMTV_ESCROW_ABI } from '../js/dmtv-escrow.mjs';
+import { createDmtvCatalogRegistrar, dmtvCatalogEntries } from './dmtv-catalog.js';
 import { SETTLEMENT_ROUTER_ADDRESS as DMTV_ROUTER } from '../js/fund-contribution.mjs';
 import { BASE_USDC_ADDRESS as DMTV_USDC } from '../js/settlement-funds.mjs';
 import { createDmtvEscrowRuntime } from './dmtv-escrow.js';
@@ -1575,6 +1576,7 @@ async function main() {
   if (!['direct', 'preview', 'public'].includes(broadcastMode)) throw new Error('Invalid PUBLIC_BROADCAST_MODE');
   const escrowAddress = process.env.DMTV_ESCROW_ADDRESS || '';
   let dmtvStation, dmtvEscrowStatus, dmtvEscrowRadio;
+  let syncDmtvCatalog;
   const dmtvRadioVerification = broadcastMode === 'public' && checkpointMirror ? createDmtvRadioVerification() : null;
   if (/^0x[0-9a-f]{40}$/i.test(escrowAddress) && checkpointMirror && config.pinataJwt && devertSchedulerPrivateKey) {
     const enabled = () => process.env.DMTV_ESCROW_PAYMENTS_ENABLED === 'true';
@@ -1587,14 +1589,41 @@ async function main() {
     const getArchive = async () => {
       if (!_nftCatalog) return { archive: [], ads: [] };
       const state = await readDevertState?.();
-      const catalog = _nftCatalog.map(nft => _contentReview ? _contentReview.apply(nft) : nft)
-        .filter(nft => !['music-only', 'all-radio'].includes(nft.contentReview?.scope));
+      const catalog = _nftCatalog.map(nft => _contentReview ? _contentReview.apply(nft) : nft);
       const blocked = new Set((state?.contentBlockedMedia || []).map(uri => String(uri).match(/(?:ipfs:\/\/|\/ipfs\/)([^/?#]+)/i)?.[1]).filter(Boolean));
       const allowed = item => /^ipfs:\/\/(?:ipfs\/)?[a-z0-9]+$/i.test(item.videoUrl) &&
         !blocked.has(item.videoUrl.split('/').at(-1));
-      return { archive: dmtvArchiveItems(catalog, state?.campaigns || []).filter(allowed),
+      return { archive: dmtvCatalogEntries({ nfts: catalog, playlist: getPlaybackPlaylist(),
+        campaigns: state?.campaigns, blockedMedia: state?.contentBlockedMedia }),
         ads: state?.paused ? [] : dmtvVideoAds(state?.campaigns || [], catalog).filter(allowed) };
     };
+    const resolveMediaUrl = async cid => resolveStreamableIpfsUrl(await discoverDedicatedGateway(config) || config.ipfsGateway, cid);
+    if (process.env.DMTV_CATALOG_SYNC_ENABLED === 'true') {
+      const register = createDmtvCatalogRegistrar({
+        contract: writer, resolveMediaUrl,
+        getCreator: nft => new Contract(nft.contractAddress,
+          ['function creatorOf(uint256) view returns (address)'], provider).creatorOf(nft.tokenId),
+        getEntries: async () => (await getArchive()).archive,
+      });
+      let catalogTask;
+      syncDmtvCatalog = ({ refreshMints = false } = {}) => {
+        if (catalogTask || !playlistReady || !enabled()) return catalogTask;
+        catalogTask = (async () => {
+          if (refreshMints && Date.now() - _nftCatalogCheckedAt >= 120_000) {
+            await syncMintedTracks(config, { required: true });
+          }
+          if (!_nftCatalog) return;
+          if (!await reader.hasRole(await reader.CATALOG_ROLE(), signer.address)) {
+            throw new Error('DMTv escrow worker lacks the catalog role');
+          }
+          await register();
+        })().catch(error => console.warn('[dmtv-catalog] Sync deferred:', error.shortMessage || error.message))
+          .finally(() => { catalogTask = null; });
+        return catalogTask;
+      };
+      setTimeout(() => syncDmtvCatalog({ refreshMints: true }), 30_000).unref();
+      setInterval(budgetPaced(() => syncDmtvCatalog({ refreshMints: true })), 120_000).unref();
+    }
     let readiness;
     let checkedAt = 0;
     const ready = () => {
@@ -1620,13 +1649,11 @@ async function main() {
         serialize: value => value, deserialize: value => value, restoreLatestOnly: true, requireLocalMirror: true,
         beforeUpload: (bytes, options) => checkpointMirror.mirror(bytes, options) }),
       resolveTrack: async (videoId, lane) => {
-        const item = (await getArchive()).archive.find(candidate => id(candidate.nftId) === videoId);
+        const item = (await getArchive()).archive.find(candidate => candidate.videoId === videoId);
         if (!item?.creator) return null;
-        const ipfsCid = item.videoUrl.split('/').at(-1);
-        if (lane === 0) return { ...item, ipfsCid, trackId: item.nftId };
-        const track = getPlaybackPlaylist().find(track => String(track.ipfsCid || '').replace(/^ipfs:\/\//i, '') === ipfsCid);
-        if (!track?.trackId || track.isDevertAd || ['all-radio', 'music-only'].includes(track.contentReview?.scope)) return null;
-        return { ...track, ...item, ipfsCid, mediaType: 'video/mp4' };
+        const { radioTrack, nft, ...video } = item;
+        if (lane === 0) return { ...video, trackId: video.nftId };
+        return radioTrack ? { ...radioTrack, ...video, mediaType: 'video/mp4' } : null;
       },
     });
     const radioVideoAvailable = () => process.env.DMTV_RADIO_VIDEO_ENABLED === 'true' &&
@@ -1643,7 +1670,7 @@ async function main() {
     let archiveCursor = 0;
     let adCursor = 0;
     dmtvStation = createDmtvStation({ queue: laneQueue(0),
-      resolveMediaUrl: async cid => resolveStreamableIpfsUrl(await discoverDedicatedGateway(config) || config.ipfsGateway, cid),
+      resolveMediaUrl,
       nextFree: async ({ adDue }) => {
         const { archive, ads } = await getArchive();
         if (adDue) return ads.length ? ads[adCursor++ % ads.length] : { houseAd: true, title: 'DMTv station break' };
@@ -1674,7 +1701,10 @@ async function main() {
       { label: 'devert', addresses: [process.env.DEVERT_CONTRACT_ADDRESS], refresh: [syncDevertDjukeBoosts, refreshFundLedger] },
       { label: 'djuke', addresses: [djukeAddress], refresh: [syncDevertDjukeBoosts, refreshFundLedger] },
       { label: 'devert-paid-queue', addresses: [paidAdAddress], refresh: [refreshFundLedger] },
-      { label: 'nft', addresses: config.nftContractAddresses || [config.nftContractAddress], refresh: [() => syncMintedTracks(config)] },
+      { label: 'nft', addresses: config.nftContractAddresses || [config.nftContractAddress], refresh: [async () => {
+        await syncMintedTracks(config, { required: true });
+        await syncDmtvCatalog?.();
+      }] },
     ],
   }) : null;
   if (alchemyWebhook) console.log(`[alchemy-webhook] Enabled; chain pollers relaxed to every ${WEBHOOK_SAFETY_POLL_MS / 1000}s as a safety net.`);
