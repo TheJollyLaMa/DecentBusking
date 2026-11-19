@@ -59,12 +59,14 @@ export function dmtvArchiveItems(nfts, campaigns = []) {
   return nfts.flatMap(nft => {
     const videoUrl = dmtvExperienceVideo(nft);
     const nftId = nft.nftId || (nft.contractAddress && nft.tokenId != null ? `${nft.contractAddress}:${nft.tokenId}` : '');
+    const title = nft.name || nft.title || '';
     if (!videoUrl || !nftId || seen.has(nftId) || nft.isDevertAd || adMedia.has(mediaKey(videoUrl)) ||
-        /(?:subvertisement|advertisement)/i.test(nft.name || nft.title || '')) return [];
+        ['music-only', 'all-radio'].includes(nft.contentReview?.scope) ||
+        /(?:subvertisement|advertisement)|^DecentAdvert(?:\b|[0-9_-])/i.test(title)) return [];
     seen.add(nftId);
     const creator = [nft.creator, nft.artist, nft.recipient, nft.tipWallet].find(value => ADDRESS.test(value || '')) || '';
     const artist = [nft.ensName, nft.discordName, nft.artistName, nft.artist].find(value => typeof value === 'string' && value.trim() && !ADDRESS.test(value)) || '';
-    return [{ nftId, creator, artist, videoUrl, title: nft.name || nft.title || `Video #${nft.tokenId}` }];
+    return [{ nftId, creator, artist, videoUrl, title: title || `Video #${nft.tokenId}` }];
   });
 }
 
@@ -443,9 +445,9 @@ export function initDmtv() {
 
   async function loadArchive() {
     if (loadTask) return loadTask;
-    if (catalog.length) return;
     retry.hidden = true;
-    status.textContent = 'Loading archive videos…';
+    const initial = !catalog.length;
+    if (initial) status.textContent = 'Loading archive videos…';
     loadTask = (async () => {
       if (!base) throw new Error('The archive service is not configured.');
       const adsRequest = getJson(base, '/api/devert').catch(error => {
@@ -465,12 +467,18 @@ export function initDmtv() {
       const campaigns = advertState?.campaigns || [];
       const blocked = new Set((advertState?.contentBlockedMedia || []).map(mediaKey));
       catalog = records;
-      archive = dmtvArchiveItems(records, campaigns).filter(item => !blocked.has(mediaKey(item.videoUrl)));
+      const next = dmtvArchiveItems(records, campaigns).filter(item => !blocked.has(mediaKey(item.videoUrl)));
+      const changed = initial || JSON.stringify(archive) !== JSON.stringify(next);
+      archive = next;
       ads = advertState?.paused ? [] : dmtvVideoAds(campaigns, records).filter(ad => !blocked.has(mediaKey(ad.videoUrl)));
       play.disabled = !archive.length;
-      status.textContent = archive.length ? 'Pick a video to queue it, or press ▶ to watch the rotation.' : 'No archive videos are available.';
-      renderArchive();
-      const addresses = [...new Set(archive.filter(item => !item.artist && item.creator).map(item => item.creator))];
+      if (initial) status.textContent = archive.length ? 'Pick a video to queue it, or press ▶ to watch the rotation.' : 'No archive videos are available.';
+      if (selected) {
+        selected = archive.find(item => item.nftId === selected.nftId) || null;
+        updateButtons();
+      }
+      if (changed) renderArchive();
+      const addresses = [...new Set(archive.filter(item => !item.artist && item.creator && !names.has(item.creator)).map(item => item.creator))];
       for (let i = 0; i < addresses.length; i += 5) {
         await Promise.all(addresses.slice(i, i + 5).map(async address => {
           try {
@@ -481,34 +489,13 @@ export function initDmtv() {
           }
         }));
       }
-      if (!selected) renderArchive();
+      if (addresses.length && !selected) renderArchive();
     })().catch(error => {
       status.textContent = `Archive unavailable: ${error.message}. Retry in a moment.`;
       retry.hidden = false;
     })
       .finally(() => { loadTask = null; });
     return loadTask;
-  }
-
-  async function refreshAds() {
-    if (!catalog.length) return;
-    try {
-      const { campaigns, paused, contentBlockedMedia } = await getJson(base, '/api/devert');
-      if (!Array.isArray(campaigns)) throw new Error('Invalid DVert campaigns');
-      const blocked = new Set((contentBlockedMedia || []).map(mediaKey));
-      ads = paused ? [] : dmtvVideoAds(campaigns, catalog).filter(ad => !blocked.has(mediaKey(ad.videoUrl)));
-      const filtered = dmtvArchiveItems(catalog, campaigns).filter(item => !blocked.has(mediaKey(item.videoUrl)));
-      if (archive.map(item => item.nftId).join('|') !== filtered.map(item => item.nftId).join('|')) {
-        archive = filtered;
-        if (selected && !archive.some(item => item.nftId === selected.nftId)) {
-          selected = null;
-          updateButtons();
-        }
-        renderArchive();
-      }
-    } catch (error) {
-      console.warn('[DMTv] Video adverts unavailable:', error.message);
-    }
   }
 
   function stopMedia() {
@@ -605,8 +592,8 @@ export function initDmtv() {
     if (opened) {
       document.dispatchEvent(new CustomEvent('left-drawer-open', { detail: 'dmtv' }));
       void refreshRadio();
-      void (catalog.length ? refreshAds() : loadArchive());
-      advertRefresh = setInterval(() => { void refreshAds(); void refreshRadio(); }, 60_000);
+      void loadArchive();
+      advertRefresh = setInterval(() => { void loadArchive(); void refreshRadio(); }, 60_000);
       if (isEscrow()) sharedTimer = setInterval(syncStation, 4000);
       if (started && current?.kind === 'house-ad') houseBreak();
       else if (started && current) void player.play().catch(() => { status.textContent = 'Press play on the TV to continue.'; });
