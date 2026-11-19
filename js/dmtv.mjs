@@ -5,6 +5,7 @@ import { BASE_USDC_ADDRESS } from './settlement-funds.mjs';
 import { renderWalletAddress, resolveWalletLabel } from './fund-display.mjs';
 import { workerEnsProvider } from './ens-client.mjs';
 import { dmtvRadioAuthorization } from './dmtv-radio.mjs';
+import { DMTV_ESCROW_ABI, reserveDmtvVideo } from './dmtv-escrow.mjs';
 
 export const DMTV_PRICE_UNITS = 2000000n;
 export const DMTV_CREATOR_UNITS = 1000000n;
@@ -271,6 +272,14 @@ export function initDmtv() {
   let started = false;
   let buying = false;
   let radioReady = false;
+  let escrowState;
+  let sharedPlayId;
+  let hls;
+  let hlsLoader;
+  let sharedTimer;
+  const unsettledReservations = new Set();
+  const escrowAddress = () => cfg.dmtvEscrowAddress || '';
+  const isEscrow = () => ADDRESS.test(escrowAddress());
   let selected = null;
   let current = null;
   let archive = [];
@@ -280,14 +289,15 @@ export function initDmtv() {
   let adTimer;
   let loadTask;
 
-  function animateFunds(txHash, amountText) {
+  function animateFunds(txHash, amountText, slugs = ['dbusk-playback']) {
     announcePaymentCelebration({ chainId: 8453, txHash, amountText, assetText: 'USDC',
-      summary: 'DMTv weekly Playback contribution confirmed', txLabel: 'Weekly fund deposit' });
+      summary: 'DMTv weekly fund contribution confirmed', txLabel: 'Weekly fund deposit' });
     if (!opened || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const antenna = panel.querySelector('.dmtv-antenna').getBoundingClientRect();
-    const target = byId('dbusk-playback-button')?.getBoundingClientRect();
-    if (!target?.width) return;
+    const targets = slugs.map(slug => byId(`${slug}-button`)?.getBoundingClientRect()).filter(rect => rect?.width);
+    if (!targets.length) return;
     for (let i = 0; i < (amountText === '2.00' ? 12 : 8); i++) {
+      const target = targets[i % targets.length];
       const cash = document.createElement('span');
       cash.className = 'dmtv-cash-particle';
       cash.setAttribute('aria-hidden', 'true');
@@ -303,15 +313,11 @@ export function initDmtv() {
   }
 
   function updateButtons() {
-    const resume = canResumeRadio();
-    buy.disabled = buying || !selected?.creator || !canBuyPrivate();
+    const resume = !isEscrow() && canResumeRadio();
+    buy.disabled = buying || !selected?.creator || !isEscrow() || !escrowState?.sideReady;
     radioBuy.disabled = buying || !selected?.creator || (!radioReady && !resume);
     radioStatus.textContent = resume ? 'Resume unfinished main-radio checkout'
       : radioReady ? 'Plays in the shared DJuke / DMTv queue' : 'Main-radio checkout unavailable';
-  }
-
-  function canBuyPrivate() {
-    return window.DecentConfig?.dmtvPrivatePaymentsEnabled === true;
   }
 
   function canResumeRadio() {
@@ -327,12 +333,68 @@ export function initDmtv() {
 
   async function refreshRadio() {
     try {
-      radioReady = Boolean(base && (await getJson(base, '/api/dmtv/radio')).enabled === true);
+      if (isEscrow()) {
+        const state = await getJson(base, '/api/dmtv/escrow');
+        escrowState = state.address?.toLowerCase() === escrowAddress().toLowerCase() ? state : null;
+        radioReady = escrowState?.radioReady === true;
+        for (const settlement of escrowState?.settlements || []) {
+          if (!/^0x[0-9a-f]{64}$/i.test(settlement.txHash) ||
+              !unsettledReservations.delete(`${settlement.lane}:${settlement.requestId}`)) continue;
+          animateFunds(settlement.txHash, settlement.lane === 1 ? '2.00' : '1.00',
+            ['dbusk-top10', 'dbusk-playback', 'dbusk-pinners', 'dbusk-repo-dev', 'dbusk-live-performers']);
+        }
+      } else {
+        radioReady = false;
+      }
     } catch (error) {
+      escrowState = null;
       radioReady = false;
       console.warn('[DMTv] Main-radio checkout unavailable:', error.message);
     }
     updateButtons();
+  }
+
+  async function followStation() {
+    await refreshRadio();
+    if (!opened || !started || !isEscrow()) return;
+    const currentPlay = escrowState?.station?.current;
+    if (!currentPlay) {
+      now.textContent = 'Waiting for the shared DMTv stream…';
+      return;
+    }
+    if (sharedPlayId === currentPlay.playId) return;
+    if (!/^\/api\/dmtv\/stream\/[a-f0-9-]{36}\/live\.m3u8$/.test(currentPlay.manifest)) {
+      throw new Error('DMTv returned an invalid stream.');
+    }
+    const url = `${base}${currentPlay.manifest}`;
+    if (!player.canPlayType('application/vnd.apple.mpegurl') && !window.Hls) {
+      hlsLoader ||= new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = `${base}/api/radio/hls-client.js`;
+        script.onload = resolve;
+        script.onerror = () => { hlsLoader = null; script.remove(); reject(new Error('DMTv video player failed to load.')); };
+        document.head.append(script);
+      });
+      await hlsLoader;
+    }
+    if (!opened || !started || sharedPlayId === currentPlay.playId) return;
+    hls?.destroy();
+    if (player.canPlayType('application/vnd.apple.mpegurl')) player.src = url;
+    else {
+      if (!window.Hls?.isSupported()) throw new Error('This browser does not support DMTv streaming.');
+      hls = new window.Hls();
+      hls.loadSource(url);
+      hls.attachMedia(player);
+    }
+    sharedPlayId = currentPlay.playId;
+    now.textContent = `Now on DMTv · ${currentPlay.title}`;
+    player.hidden = false;
+    fallback.hidden = true;
+    void player.play().catch(() => { status.textContent = 'Press play on the TV to continue.'; });
+  }
+
+  function syncStation() {
+    void followStation().catch(error => { status.textContent = error.message; });
   }
 
   function renderArchive() {
@@ -467,6 +529,7 @@ export function initDmtv() {
 
   function advance() {
     if (!opened || !started) return;
+    if (isEscrow()) return syncStation();
     clearTimeout(adTimer);
     const playable = archive.filter(item => !failed.has(item.nftId));
     const byNft = new Map(playable.map(item => [item.nftId, item]));
@@ -500,6 +563,7 @@ export function initDmtv() {
   }
 
   player.addEventListener('ended', () => {
+    if (isEscrow()) return syncStation();
     if (!opened || !started || !current) return;
     rotation.complete(current);
     if (current.fundTx) {
@@ -518,6 +582,10 @@ export function initDmtv() {
     advance();
   });
   player.addEventListener('error', () => {
+    if (isEscrow()) {
+      if (opened && started) status.textContent = 'DMTv playback interrupted. Waiting for the next video.';
+      return;
+    }
     if (!opened || !started || !current || !player.getAttribute('src')) return;
     if (current.kind === 'ad') return houseBreak();
     failed.add(current.nftId);
@@ -525,7 +593,8 @@ export function initDmtv() {
     advance();
   });
 
-  function setOpen(value) {
+  function setOpen(value, { restoreFocus = true } = {}) {
+    if (opened === value) return;
     opened = value;
     panel.classList.toggle('dmtv-open', opened);
     document.body.classList.toggle('dmtv-open', opened);
@@ -533,20 +602,31 @@ export function initDmtv() {
     panel.inert = !opened;
     tab.setAttribute('aria-expanded', String(opened));
     if (opened) {
+      document.dispatchEvent(new CustomEvent('left-drawer-open', { detail: 'dmtv' }));
       void refreshRadio();
       void (catalog.length ? refreshAds() : loadArchive());
       advertRefresh = setInterval(() => { void refreshAds(); void refreshRadio(); }, 60_000);
+      if (isEscrow()) sharedTimer = setInterval(syncStation, 4000);
       if (started && current?.kind === 'house-ad') houseBreak();
       else if (started && current) void player.play().catch(() => { status.textContent = 'Press play on the TV to continue.'; });
     } else {
       player.pause();
       clearTimeout(adTimer);
       clearInterval(advertRefresh);
+      clearInterval(sharedTimer);
+      hls?.destroy();
+      hls = null;
+      sharedPlayId = null;
+      if (isEscrow()) stopMedia();
       if (info.open) info.close();
-      tab.focus();
+      if (restoreFocus) tab.focus();
     }
   }
   tab.addEventListener('click', () => setOpen(!opened));
+  const closeForOtherDrawer = event => {
+    if (event.detail !== 'dmtv') setOpen(false, { restoreFocus: false });
+  };
+  document.addEventListener('left-drawer-open', closeForOtherDrawer);
   byId('dmtv-close').addEventListener('click', () => setOpen(false));
   byId('dmtv-info').addEventListener('click', () => info.showModal());
   retry.addEventListener('click', () => void loadArchive());
@@ -557,16 +637,31 @@ export function initDmtv() {
     advance();
   });
   async function checkout(radio) {
-    if (!radio && !canBuyPrivate()) return;
-    if (!selected || buying || (radio && !radioReady && !canResumeRadio())) return;
+    if (!selected || buying || !(radio ? radioReady || (!isEscrow() && canResumeRadio()) : isEscrow() && escrowState?.sideReady)) return;
     const experience = selected;
     buying = true;
     updateButtons();
     try {
       if (!window._wallet?.signer) await window._wallet?.connect?.();
       if (!window._wallet?.signer || !window.ethers) throw new Error('Connect a Base wallet first.');
-      // Check local persistence before requesting a real payment.
-      if (!radio) localStorage.setItem(QUEUE_KEY, JSON.stringify(readPaidSpots()));
+      if (isEscrow()) {
+        const { signer } = window._wallet;
+        const ethers = window.ethers;
+        await ensureBaseNetwork(signer.provider);
+        const payer = await signer.getAddress();
+        await refreshRadio();
+        if (!(radio ? radioReady : escrowState?.sideReady)) throw new Error('This paid queue is temporarily offline.');
+        if (!navigator.locks) throw new Error('Use a browser with cross-tab purchase protection.');
+        const escrow = new ethers.Contract(escrowAddress(), DMTV_ESCROW_ABI, signer);
+        const usdc = new ethers.Contract(BASE_USDC_ADDRESS, USDC_ABI, signer);
+        const reservation = await navigator.locks.request(paymentKey(payer), () =>
+          reserveDmtvVideo({ escrow, usdc, lane: radio ? 1 : 0, videoId: ethers.id(experience.nftId),
+            mediaHash: ethers.id(experience.videoUrl), creator: experience.creator, payer,
+            onStep: message => { receipt.textContent = message; } }));
+        unsettledReservations.add(`${radio ? 1 : 0}:${reservation.requestId}`);
+        receipt.textContent = `Reserved #${reservation.requestId} for ${radio ? 'main radio' : 'shared DMTv'}. Refund available if unplayed after ${new Date(reservation.refundAt * 1000).toLocaleString()}.`;
+        return;
+      }
       await purchaseSpot({ signer: window._wallet.signer, ethers: window.ethers, experience, radioBase: radio ? base : '',
         onStep: message => { receipt.textContent = message; }, onFund: animateFunds,
         queueSpot: spot => {
@@ -592,5 +687,37 @@ export function initDmtv() {
   }
   buy.addEventListener('click', () => void checkout(false));
   radioBuy.addEventListener('click', () => void checkout(true));
-  return () => setOpen(false);
+  const refundForm = byId('dmtv-refund');
+  if (refundForm) refundForm.hidden = !isEscrow();
+  refundForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!isEscrow() || buying) return;
+    buying = true;
+    updateButtons();
+    try {
+      if (!window._wallet?.signer) await window._wallet?.connect?.();
+      const { signer } = window._wallet || {};
+      if (!signer || !window.ethers) throw new Error('Connect a Base wallet first.');
+      await ensureBaseNetwork(signer.provider);
+      const form = new FormData(refundForm);
+      const requestId = String(form.get('requestId') || '');
+      const lane = Number(form.get('lane'));
+      if (!/^\d{1,78}$/.test(requestId) || ![0, 1].includes(lane)) throw new Error('Enter a valid lane and request number.');
+      const escrow = new window.ethers.Contract(escrowAddress(), DMTV_ESCROW_ABI, signer);
+      await escrow.claimRefund.staticCall(lane, requestId);
+      const tx = await escrow.claimRefund(lane, requestId);
+      receipt.textContent = `Refund submitted: ${tx.hash}`;
+      if ((await tx.wait(2))?.status !== 1) throw new Error('The refund transaction did not confirm.');
+      receipt.textContent = `Refund confirmed: ${tx.hash}`;
+    } catch (error) {
+      receipt.textContent = error.shortMessage || error.message;
+    } finally {
+      buying = false;
+      updateButtons();
+    }
+  });
+  return () => {
+    document.removeEventListener('left-drawer-open', closeForOtherDrawer);
+    setOpen(false, { restoreFocus: false });
+  };
 }

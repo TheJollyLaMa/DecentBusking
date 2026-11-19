@@ -632,7 +632,7 @@ decent-header {
   text-align: center;
 }
 
-:root { --top-ten-drawer-width: min(350px, calc(100vw - 44px)); --left-tab-top: 154px; }
+:root { --left-drawer-space: calc(100vw - 88px); --top-ten-drawer-width: min(350px, var(--left-drawer-space)); --left-tab-top: 154px; }
 #top-ten-tab {
   position: fixed;
   top: var(--left-tab-top);
@@ -797,7 +797,7 @@ body:not(.top-ten-open) .top-ten-spy { animation-play-state: paused; }
 .hype-warning { margin: 6px 0 0; font-size: .66rem; line-height: 1.4; color: #ffd39b; }
 .top-ten-opening-rank { color: #e7c591; font-size: .65rem; }
 #top-ten-panel.is-hype-festival { border-color: #c3a36899; background: linear-gradient(175deg, #191b28fa, #0d171cfa); }
-body.top-ten-festival-open { --top-ten-drawer-width: min(980px, calc(100vw - 44px)); }
+body.top-ten-festival-open { --top-ten-drawer-width: min(980px, var(--left-drawer-space)); }
 #top-ten-panel.is-hype-festival {
   top: max(8px, env(safe-area-inset-top));
   bottom: max(8px, env(safe-area-inset-bottom));
@@ -952,7 +952,7 @@ body.top-ten-festival-open.top-ten-open #top-ten-tab { z-index: 202; }
 .top-ten-net-votes { color: var(--gold); font-size: .95rem; font-weight: 750; }
 .top-ten-vote-label { color: var(--text-dim); font-size: .58rem; }
 @media (max-width: 600px) {
-  :root { --top-ten-drawer-width: min(320px, calc(100vw - 44px)); --left-tab-top: 168px; }
+  :root { --top-ten-drawer-width: min(320px, var(--left-drawer-space)); --left-tab-top: 168px; }
   #top-ten-panel { bottom: max(160px, calc(var(--radio-footer-height, 150px) + 28px)); padding: 12px 10px; }
   #top-ten-panel.is-hype-festival {
     display: flex;
@@ -964,7 +964,7 @@ body.top-ten-festival-open.top-ten-open #top-ten-tab { z-index: 202; }
   .is-hype-festival .top-ten-song { box-sizing: border-box; min-height: 60px; }
 }
 
-:root { --djuke-width: min(360px, calc(100vw - 44px)); }
+:root { --djuke-width: min(360px, var(--left-drawer-space)); }
 #djuke-tab {
   position: fixed; left: 0; top: calc(var(--left-tab-top) + 82px); z-index: 111;
   display: grid; justify-items: center; align-content: center; gap: 4px;
@@ -980,7 +980,7 @@ body.top-ten-festival-open.top-ten-open #top-ten-tab { z-index: 202; }
 .djuke-note-right { right: 2px; transform: rotate(14deg) translateY(-2px); }
 .djuke-tab-slot { position: absolute; top: 17px; left: 50%; transform: translateX(-50%); font-size: 13px; line-height: 1; white-space: nowrap; }
 .djuke-tab-coin { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); font-size: 9px; line-height: 1; }
-:root { --devert-width: min(350px, calc(100vw - 44px)); }
+:root { --devert-width: min(350px, var(--left-drawer-space)); }
 #devert-tab { position: fixed; left: 0; top: calc(var(--left-tab-top) + 186px); z-index: 111; display: grid; justify-items: center; align-content: center; gap: 4px; width: 44px; height: 74px; padding: 6px 3px; border: 1px solid #c49a45; border-left: 0; border-radius: 0 6px 6px 0; color: #fff1c2; background: #392b13; cursor: pointer; transition: left var(--transition); }
 #devert-tab > span:first-child { font-size: 19px; }
 #devert-tab > span:last-child { font-size: .66rem; }
@@ -1183,7 +1183,7 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
   #djuke-panel.is-open .djuke-header-machine .djuke-note, #djuke-panel.is-open #djuke-pay::after { animation: none; }
 }
 
-:root { --devert-width: min(350px, calc(100vw - 44px)); }
+:root { --devert-width: min(350px, var(--left-drawer-space)); }
 #devert-tab {
   position: fixed; left: 0; top: calc(var(--left-tab-top) + 186px); z-index: 111;
   display: grid; justify-items: center; align-content: center; gap: 4px;
@@ -1481,8 +1481,8 @@ body.djuke-open #djuke-tab { left: var(--djuke-width); }
 #community-pin-start { color: #15221c; background: linear-gradient(#d2dbd5, #8e9e94 46%, #63756a 51%, #a6b7ac); }
 #community-pin-cancel { color: #edf4ef; background: #243634; }
 @media (max-width: 600px) {
-  :root { --djuke-width: min(340px, calc(100vw - 44px)); }
-  :root { --devert-width: min(340px, calc(100vw - 44px)); }
+  :root { --djuke-width: min(340px, var(--left-drawer-space)); }
+  :root { --devert-width: min(340px, var(--left-drawer-space)); }
   #djuke-panel { bottom: max(160px, calc(var(--radio-footer-height, 150px) + 28px)); }
   #devert-panel { bottom: max(160px, calc(var(--radio-footer-height, 150px) + 28px)); }
   .djuke-heading { flex-basis: 64px; }

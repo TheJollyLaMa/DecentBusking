@@ -83,36 +83,34 @@ and platform payouts. Unavailable/incomplete indexing is reported explicitly,
 not shown as zero earnings. Deploy both the worker and site for this feature.
 All DJuke decorative animations respect reduced-motion preferences.
 
-**DMTv** is a separate, browser-local rotation of archive videos. The archive
-picker excludes audio and known ads. After ten completed videos, DMTv shows an
-eligible active DVert video when available, otherwise a short DMTv house spot.
-Search and selection do not interrupt the current video. A $2 side-stream spot
-goes next after the current item (or after a due ad break): $1 Base USDC to the
-creator and $1 to weekly Playback. Paid spots and an unfinished purchase are
-saved in the purchasing browser, so use the same browser and wallet to continue.
-The cash animation requires both a matching settlement-router fund event and
-the corresponding confirmed USDC transfer. The two transfers are not atomic.
-The $3 main-radio option requires the DMTv radio worker and durable checkpoints.
-It accepts supported archive MP4s already mapped to the radio playlist. The
-worker verifies the wallet-signed request and both Base receipts before putting
-it in line. It alternates DJuke songs and DMTv videos when both have requests,
-preserving order within each source and keeping due DVert breaks ahead of
-paid music.
-If payment or submission is interrupted, reconnect the same wallet in the
-same browser and select the same video to resume instead of starting over.
-The free panel can ship with both purchase paths off. The site setting
-`dmtvPrivatePaymentsEnabled` defaults to off when omitted; set it to `true`
-only after testing the $2 payment and recovery in a staging site build.
-Before enabling `DMTV_RADIO_PAYMENTS_ENABLED`, provision a stable
-`DMTV_RADIO_CHECKOUT_SECRET`, configure Pinata and the checkpoint mirror, and
-exercise checkout, checkpoint restore, and mixed-source playback in staging.
-Update the connected checkpoint mirror client before enabling checkout so it
-can validate and pin the DMTv journal.
-Use staging-only Pinata and checkpoint-mirror storage; do not share the live
-journal. Keep wallet signing in the wallet, not in the worker.
-Run only one active worker against this checkpoint. Keep the checkout secret
-through payment recovery; disabling new purchases
-does not disable submission of an existing signed checkout.
+**DMTv** excludes audio and known ads from the archive picker. Its tab moves
+with Top 10, DJuke, and DVert; opening one of these drawers closes the others. Without
+escrow configuration it provides a free browser-local rotation. With
+escrow configuration, the drawer follows a shared video HLS stream with
+its own queue and an ad break after ten videos. Main-radio requests instead
+go through the existing DJuke/DVert scheduler and require a video already in
+the main-radio playlist.
+
+The $2 DMTv and $3 main-radio prices reserve Base USDC on-chain. After
+verified station playback the worker checkpoints its proof and settles $1
+to the creator, then splits the remainder equally among Top 10, Playback,
+IPFS Pinner, Repo Dev, and Live Performers. Customers can claim a full
+unsettled refund after 24 hours or after cancellation, even when paused.
+Save the lane and request number from the reservation receipt. New escrow
+purchases do not use the legacy worker quote secret.
+
+The [Base DMTv queue](https://basescan.org/address/0x493148973Ba862CFa1709310c103BDa81dba71fC)
+was deployed paused with verified Base USDC and ArtFi router addresses.
+Before launch, verify all five funds and register canonical archive IDs
+(`keccak256` of the NFT ID string) with the exact media URI hash and creator.
+Grant the worker fulfiller access. Set `DMTV_ESCROW_ADDRESS` in the worker
+and `dmtvEscrowAddress` on the site to that same verified address. Update
+the existing checkpoint mirror, use one writer per contract, and test the
+shared stream with `DMTV_STATION_ENABLED`. Verify both lanes, refunds,
+and settlement replay through a worker restart before enabling
+`DMTV_ESCROW_PAYMENTS_ENABLED` and unpausing. Pause the contract as well as
+disabling the worker flag when suspending purchases: the browser flag alone
+cannot prevent direct on-chain reservations.
 The **Top 10** title also has an **i** dialog explaining net votes, weekly prize
 estimates and closeout, Friday Hype's opening chart, and playlist saves.
 Voting with the radio thumbs-up/down buttons keeps the chart open. Confirmed

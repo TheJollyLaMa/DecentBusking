@@ -86,7 +86,12 @@ import { createWorkerSigningCoordinator } from './worker-signing.js';
 import { createCalendarRewardWorker } from './calendar-rewards.js';
 import { createPinataStateStore, recoverVerifiedPlaylistBaseline } from './ipfs-state.js';
 import { createDmtvRadioQueue } from './dmtv-queue.js';
-import { dmtvArchiveItems } from '../js/dmtv.mjs';
+import { dmtvArchiveItems, dmtvVideoAds } from '../js/dmtv.mjs';
+import { DMTV_ESCROW_ABI } from '../js/dmtv-escrow.mjs';
+import { SETTLEMENT_ROUTER_ADDRESS as DMTV_ROUTER } from '../js/fund-contribution.mjs';
+import { BASE_USDC_ADDRESS as DMTV_USDC } from '../js/settlement-funds.mjs';
+import { createDmtvEscrowRuntime } from './dmtv-escrow.js';
+import { createDmtvStation } from './dmtv-station.js';
 import { resolveAlbumArtist, checkpointReviewedAlbumImport } from './album-import.js';
 import { createCheckpointMirror } from './checkpoint-mirror.js';
 import { buildCommunityPinManifest } from '../js/pinner-rewards.mjs';
@@ -594,7 +599,9 @@ const SLASH_COMMANDS = [
 async function main() {
   const config = loadConfig();
   const calendarRewardsEnabled = process.env.DCAL_REWARDS_ENABLED === 'true';
-  const workerSigning = createWorkerSigningCoordinator({enabled:calendarRewardsEnabled});
+  const workerSigning = createWorkerSigningCoordinator({
+    enabled: calendarRewardsEnabled || process.env.DMTV_ESCROW_PAYMENTS_ENABLED === 'true',
+  });
   config.checkpointStorage = config.pinataJwt ? await ensureCheckpointGroups({ pinataJwt: config.pinataJwt }) : {};
   const discordAbort = new AbortController();
   const discordCooldownStore = config.pinataJwt ? createPinataStateStore({
@@ -1542,8 +1549,7 @@ async function main() {
     ? createDmtvRadioQueue({
       provider: getRpcRouter().provider('read', 'dmtv-radio-receipts'),
       secret: process.env.DMTV_RADIO_CHECKOUT_SECRET,
-      enabled: () => process.env.DMTV_RADIO_PAYMENTS_ENABLED === 'true' &&
-        checkpointMirror.status().available && playlistReady && !!_nftCatalog && !!getActiveJukeLoopSession(),
+      enabled: () => false,
       store: createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
         uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
         name: 'decentbusking-dmtv-radio.json', tags: { app: 'decentbusking', kind: 'dmtv-radio', schema: '1' },
@@ -1564,8 +1570,85 @@ async function main() {
           filename: track.filename, uploader: track.uploader || item.artist, mediaType: 'video/mp4', videoUrl: item.videoUrl };
       },
     }) : null;
-  _radioPaidQueues = (_djukeRuntime || paidAdRuntime || dmtvRadioQueue)
-    ? combinePaidQueues({ songs: _djukeRuntime, adverts: paidAdRuntime, videos: dmtvRadioQueue }) : null;
+  const escrowAddress = process.env.DMTV_ESCROW_ADDRESS || '';
+  let dmtvStation, dmtvEscrowStatus, dmtvEscrowRadio;
+  if (/^0x[0-9a-f]{40}$/i.test(escrowAddress) && checkpointMirror && config.pinataJwt && devertSchedulerPrivateKey) {
+    const enabled = () => process.env.DMTV_ESCROW_PAYMENTS_ENABLED === 'true';
+    const provider = getRpcRouter().provider('critical', 'dmtv-escrow');
+    const signer = workerSigning.wallet(devertSchedulerPrivateKey, provider);
+    const reader = new Contract(escrowAddress, DMTV_ESCROW_ABI, provider);
+    const writer = reader.connect(signer);
+    const kind = `dmtv-escrow-${escrowAddress.toLowerCase()}`;
+    const recentSettlements = [];
+    const getArchive = async () => {
+      if (!_nftCatalog) return { archive: [], ads: [] };
+      const state = await readDevertState?.();
+      const catalog = _nftCatalog.map(nft => _contentReview ? _contentReview.apply(nft) : nft)
+        .filter(nft => !['music-only', 'all-radio'].includes(nft.contentReview?.scope));
+      const blocked = new Set((state?.contentBlockedMedia || []).map(uri => String(uri).match(/(?:ipfs:\/\/|\/ipfs\/)([^/?#]+)/i)?.[1]).filter(Boolean));
+      const allowed = item => /^ipfs:\/\/(?:ipfs\/)?[a-z0-9]+$/i.test(item.videoUrl) &&
+        !blocked.has(item.videoUrl.split('/').at(-1));
+      return { archive: dmtvArchiveItems(catalog, state?.campaigns || []).filter(allowed),
+        ads: state?.paused ? [] : dmtvVideoAds(state?.campaigns || [], catalog).filter(allowed) };
+    };
+    let readiness;
+    let checkedAt = 0;
+    const ready = () => {
+      if (!enabled() || !checkpointMirror.status().available || !_nftCatalog) return false;
+      if (!readiness || Date.now() - checkedAt > 10_000) {
+        checkedAt = Date.now();
+        readiness = (async () => !(await reader.paused()) &&
+          (await reader.paymentToken()).toLowerCase() === DMTV_USDC.toLowerCase() &&
+          (await reader.fundRouter()).toLowerCase() === DMTV_ROUTER.toLowerCase() &&
+          await reader.hasRole(await reader.FULFILLER_ROLE(), signer.address))();
+      }
+      return readiness;
+    };
+    const runtime = createDmtvEscrowRuntime({ reader, writer, provider,
+      onSettled: result => {
+        recentSettlements.push(result);
+        if (recentSettlements.length > 10) recentSettlements.shift();
+      },
+      store: createPinataStateStore({ ...config.checkpointStorage, pinataJwt: config.pinataJwt,
+        uploadUrl: config.pinataApiUrl, filesApiUrl: config.pinataFilesApiUrl, gateway: config.ipfsGateway,
+        name: `${kind}.json`, tags: { app: 'decentbusking', kind, schema: '1' },
+        serialize: value => value, deserialize: value => value, restoreLatestOnly: true, requireLocalMirror: true,
+        beforeUpload: (bytes, options) => checkpointMirror.mirror(bytes, options) }),
+      resolveTrack: async (videoId, lane) => {
+        const item = (await getArchive()).archive.find(candidate => id(candidate.nftId) === videoId);
+        if (!item?.creator) return null;
+        const ipfsCid = item.videoUrl.split('/').at(-1);
+        if (lane === 0) return { ...item, ipfsCid, trackId: item.nftId };
+        const track = getPlaybackPlaylist().find(track => String(track.ipfsCid || '').replace(/^ipfs:\/\//i, '') === ipfsCid);
+        if (!track?.trackId || track.isDevertAd || ['all-radio', 'music-only'].includes(track.contentReview?.scope)) return null;
+        return { ...track, ...item, ipfsCid, mediaType: 'video/mp4' };
+      },
+    });
+    const laneQueue = lane => {
+      const queue = runtime.forLane(lane);
+      return { ...queue, nextPaid: async () => await ready() ? queue.nextPaid() : null };
+    };
+    dmtvEscrowRadio = laneQueue(1);
+    let archiveCursor = 0;
+    let adCursor = 0;
+    dmtvStation = createDmtvStation({ queue: laneQueue(0), gateway: config.ipfsGateway,
+      nextFree: async ({ adDue }) => {
+        const { archive, ads } = await getArchive();
+        if (adDue) return ads.length ? ads[adCursor++ % ads.length] : { houseAd: true, title: 'DMTv station break' };
+        return archive.length ? archive[archiveCursor++ % archive.length] : null;
+      } });
+    dmtvEscrowStatus = async () => {
+      const state = dmtvStation.state();
+      const isReady = await ready();
+      if (isReady) await runtime.checkStorage();
+      return { address: escrowAddress, station: state, settlements: recentSettlements, sideReady: isReady && state.healthy,
+        radioReady: isReady && playlistReady && !!getActiveJukeLoopSession() };
+    };
+    if (process.env.DMTV_STATION_ENABLED === 'true') dmtvStation.start();
+  }
+  const videoQueue = dmtvEscrowRadio || dmtvRadioQueue;
+  _radioPaidQueues = (_djukeRuntime || paidAdRuntime || videoQueue)
+    ? combinePaidQueues({ songs: _djukeRuntime, adverts: paidAdRuntime, videos: videoQueue }) : null;
 
   console.log(`[rpc] Base tiers: ${getRpcRouter().health().tiers.paid} paid, ${getRpcRouter().health().tiers.public} public; consumers: ${getRpcRouter().describe()}`);
   const alchemyWebhook = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY ? createAlchemyWebhook({
@@ -1905,6 +1988,8 @@ async function main() {
   publicBroadcast.setStateReader(readPublicRadioState);
   const requestHandler = createWorkerRequestHandler({
     dmtvRadioQueue,
+    dmtvStation,
+    dmtvEscrowStatus,
     contentReview: _contentReview,
     promotions,
     getMediaGateways: async () => [await discoverDedicatedGateway(config) || config.ipfsGateway],
@@ -2582,6 +2667,7 @@ async function main() {
     console.log(`[jukebox-bot] ${signal} received; flushing IPFS state checkpoint.`);
     let exitCode = 0;
     discordAbort.abort();
+    dmtvStation?.stop();
     liveFeedback.close();
     listenerTelemetry.close();
     try {

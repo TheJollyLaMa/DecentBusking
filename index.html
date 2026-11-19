@@ -24,8 +24,8 @@
   <title>Decent🦚Busking</title>
   <link rel="icon" type="image/svg+xml" href="./img/hat.svg" />
   <link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261117-matched-tabs" />
-  <link rel="stylesheet" href="css/dmtv.css" />
+  <link rel="stylesheet" href="css/styles.css?v=20261118-dmtv-escrow" />
+  <link rel="stylesheet" href="css/dmtv.css?v=20261118-dmtv-escrow" />
   <link rel="stylesheet" href="css/live-audio.css?v=20261116-booth" />
   <link rel="stylesheet" href="css/live-feedback.css?v=20261115-listener-feedback" />
   <link rel="stylesheet" href="css/live-afterparty.css?v=20261117-release-party" />
@@ -71,7 +71,7 @@
   <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
   <!-- App config — must load before modules -->
-  <script src="decent.config.js?v=20261115-tip-router"></script>
+  <script src="decent.config.js?v=20261118-dmtv-escrow"></script>
 </head>
 <body>
 
@@ -124,21 +124,26 @@
     </div>
     <dialog id="dmtv-instructions" aria-labelledby="dmtv-instructions-title">
       <h3 id="dmtv-instructions-title">📺 About DMTv</h3>
-      <p>🎬 Archive videos on your screen. An ad break follows every 10 videos.</p>
-      <p>🪙 <strong>$2</strong> · Queue here: $1 creator + $1 weekly Playback fund.</p>
-      <p>📻 <strong>$3</strong> · Shared main radio: $1 creator + $2 weekly Playback fund.</p>
+      <p>🎬 Archive videos on a separate shared stream, with a break every 10 videos.</p>
+      <p>🪙 <strong>$2</strong> on DMTv · 📻 <strong>$3</strong> on main radio.</p>
+      <p>After playback: $1 to the creator, the rest split across five weekly funds. Unsettled reservations can be refunded after 24 hours.</p>
       <form method="dialog"><button>Back to DMTv</button></form>
     </dialog>
     <div class="dmtv-top-actions" aria-label="DMTv purchase actions">
       <button id="dmtv-queue-button" type="button" disabled>
-        <span>Side stream</span><strong>$2 USDC</strong><small>$1 creator · $1 weekly fund</small>
+        <span>Shared DMTv</span><strong>$2 USDC</strong><small>$1 creator · $0.20 per fund</small>
       </button>
       <button id="dmtv-takeover-button" type="button" disabled aria-describedby="dmtv-radio-unavailable">
-        <span>Main radio spot</span><strong>$3 USDC</strong><small>$1 creator · $2 weekly fund</small>
+        <span>Main radio spot</span><strong>$3 USDC</strong><small>$1 creator · $0.40 per fund</small>
         <small id="dmtv-radio-unavailable">Checking main-radio availability…</small>
       </button>
     </div>
     <p id="dmtv-receipt" class="dmtv-receipt" role="status" aria-live="polite"></p>
+    <form id="dmtv-refund" hidden>
+      <label>Refund queue <select name="lane"><option value="0">DMTv</option><option value="1">Main radio</option></select></label>
+      <label>Request # <input name="requestId" inputmode="numeric" pattern="[0-9]+" required></label>
+      <button type="submit">Claim refund</button>
+    </form>
     <section class="dmtv-television" aria-label="DMTv television">
       <span class="dmtv-antenna" aria-hidden="true"></span>
       <div class="dmtv-screen-bezel">
@@ -1092,7 +1097,7 @@
 
   <!-- Main app entry point -->
   <script type="module" src="js/submission-policy.js?v=20261007-rights-notice"></script>
-  <script type="module" src="js/main.js?v=20261118-dmtv"></script>
+  <script type="module" src="js/main.js?v=20261118-dmtv-escrow"></script>
 
   <!-- Admin role-grant panel -->
   <link rel="stylesheet" href="css/live-performance.css?v=20261117-booking-assets">

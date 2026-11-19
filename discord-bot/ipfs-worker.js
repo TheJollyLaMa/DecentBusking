@@ -273,6 +273,8 @@ export function createWorkerRequestHandler({
   getMintQueue,
   getNftCatalog,
   dmtvRadioQueue,
+  dmtvStation,
+  dmtvEscrowStatus,
   onReviewedAlbumImport,
   creatorProfiles,
   getRadioState,
@@ -808,6 +810,20 @@ export function createWorkerRequestHandler({
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/dmtv/radio') {
         sendJson(response, 200, dmtvRadioQueue ? await dmtvRadioQueue.status() : { enabled: false }, '*');
+        return;
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/dmtv/escrow') {
+        sendJson(response, 200, dmtvEscrowStatus ? await dmtvEscrowStatus() :
+          { address: null, station: null, sideReady: false, radioReady: false }, '*');
+        return;
+      }
+      const dmtvMedia = /^\/api\/dmtv\/stream\/([a-f0-9-]{36})\/(live(?:\.m3u8|\d+\.ts))$/.exec(requestUrl.pathname);
+      if (dmtvMedia && request.method === 'GET') {
+        const bytes = await dmtvStation?.media(dmtvMedia[1], dmtvMedia[2]);
+        if (!bytes) { sendJson(response, 404, { error: 'DMTv segment unavailable' }, '*'); return; }
+        response.writeHead(200, { 'access-control-allow-origin': '*', 'cache-control': 'no-store',
+          'content-type': dmtvMedia[2].endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp2t' });
+        response.end(bytes);
         return;
       }
       if (request.method === 'POST' && ['/api/dmtv/radio/quote', '/api/dmtv/radio/submit'].includes(requestUrl.pathname)) {
