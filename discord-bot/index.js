@@ -1600,6 +1600,7 @@ async function main() {
       if (!readiness || Date.now() - checkedAt > 10_000) {
         checkedAt = Date.now();
         readiness = (async () => !(await reader.paused()) &&
+          await reader.supportsAutomaticRefunds() &&
           (await reader.paymentToken()).toLowerCase() === DMTV_USDC.toLowerCase() &&
           (await reader.fundRouter()).toLowerCase() === DMTV_ROUTER.toLowerCase() &&
           await reader.hasRole(await reader.FULFILLER_ROLE(), signer.address))();

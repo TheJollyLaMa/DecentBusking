@@ -1,4 +1,4 @@
-import { id } from 'ethers';
+import { id, ZeroHash } from 'ethers';
 
 export function validDmtvEvidence(snapshot) {
   return snapshot?.dmtvEscrowEvidence === 1 && Array.isArray(snapshot.entries) &&
@@ -10,6 +10,7 @@ export function createDmtvEscrowRuntime({ reader, writer, provider, store, resol
   let evidence;
   let serial = Promise.resolve();
   const held = new Map();
+  const pendingWrite = new Map();
   const run = fn => {
     const pending = serial.then(fn);
     serial = pending.catch(() => {});
@@ -28,24 +29,35 @@ export function createDmtvEscrowRuntime({ reader, writer, provider, store, resol
   async function settle(entry) {
     const { lane, requestId, proof } = entry;
     const request = await reader.requests(lane, requestId);
-    if (Number(request.status) === 1 && Number(request.refundAt) > (await provider.getBlock('latest')).timestamp) {
-      const tx = await writer.fulfill(lane, requestId, proof);
-      if ((await tx.wait(2))?.status !== 1) throw new Error(`DMTv settlement not confirmed for ${requestId}.`);
-      onSettled?.({ lane, requestId, txHash: tx.hash });
+    const refund = proof === ZeroHash;
+    if (Number(request.status) === 1 && (refund || Number(request.refundAt) > (await provider.getBlock('latest')).timestamp)) {
+      const tx = await (refund ? writer.cancelAndRefund(lane, requestId) : writer.fulfill(lane, requestId, proof));
+      if ((await tx.wait(2))?.status !== 1) throw new Error(`DMTv ${refund ? 'refund' : 'settlement'} not confirmed for ${requestId}.`);
+      if (!refund) onSettled?.({ lane, requestId, txHash: tx.hash });
     }
     await persist(evidence.filter(item => item !== entry));
   }
   function forLane(lane) {
+    async function flushOutcome() {
+      const entry = pendingWrite.get(lane);
+      if (entry) {
+        await persist([...evidence, entry]);
+        pendingWrite.delete(lane);
+      }
+      const prior = evidence.find(item => item.lane === lane);
+      if (prior) await settle(prior);
+    }
+
     async function recordCompletion(record, playId) {
-      const entry = { lane, requestId: record.requestId, proof: id(`dmtv:${lane}:${record.requestId}:${playId}`) };
-      await persist([...evidence, entry]);
-      await settle(entry);
+      // Zero is forbidden as a fulfillment proof and journals a refund instead.
+      pendingWrite.set(lane, { lane, requestId: record.requestId,
+        proof: playId ? id(`dmtv:${lane}:${record.requestId}:${playId}`) : ZeroHash });
+      await flushOutcome();
     }
     return {
       nextPaid: () => run(async () => {
         await restore();
-        const prior = evidence.find(entry => entry.lane === lane);
-        if (prior) await settle(prior);
+        await flushOutcome();
         if (held.has(lane) || await reader.paused()) return null;
         const latest = await provider.getBlockNumber();
         if (latest < 2) throw new Error('DMTv requires confirmed blocks.');
@@ -63,7 +75,8 @@ export function createDmtvEscrowRuntime({ reader, writer, provider, store, resol
               configured.mediaHash !== request.mediaHash ||
               configured.creator.toLowerCase() !== request.creator.toLowerCase() ||
               !(Number(configured.lanes) & (1 << lane))) {
-            throw new Error(`DMTv FIFO head ${cursor} is unavailable; cancellation or refund is required.`);
+            await recordCompletion({ requestId: String(cursor) }, null);
+            return null;
           }
           const record = { kind: 'dmtv', requestId: String(cursor), lane, trackId: track.trackId };
           held.set(lane, record);
@@ -75,7 +88,10 @@ export function createDmtvEscrowRuntime({ reader, writer, provider, store, resol
         if (held.get(lane) !== record) return;
         held.delete(lane);
         if (!play?.finished || play.trackId !== record.trackId || !play.playId ||
-            !(play.expectedMs > 0) || play.audibleMs < play.expectedMs * 0.95) return;
+            !(play.expectedMs > 0) || !(play.audibleMs >= play.expectedMs * 0.95)) {
+          await recordCompletion(record, null);
+          return;
+        }
         await recordCompletion(record, play.playId);
       }),
       completePublished: (record, playId) => run(async () => {
@@ -84,7 +100,11 @@ export function createDmtvEscrowRuntime({ reader, writer, provider, store, resol
         await recordCompletion(record, playId);
       }),
       release: record => run(() => { if (held.get(lane) === record) held.delete(lane); }),
-      fail: record => run(() => { if (held.get(lane) === record) held.delete(lane); }),
+      fail: record => run(async () => {
+        if (held.get(lane) !== record) return;
+        held.delete(lane);
+        await recordCompletion(record, null);
+      }),
       hasPendingSelection: () => held.has(lane),
     };
   }

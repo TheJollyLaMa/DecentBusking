@@ -71,7 +71,7 @@ test('escrow worker restores completed evidence and does not settle interrupted 
   }).forLane(1);
   const queue = make();
   const { record } = await queue.nextPaid();
-  await queue.complete(record, { trackId: track.trackId, playId: 'partial', expectedMs: 2000, audibleMs: 800, finished: true });
+  await queue.release(record);
   assert.equal(sends, 0);
   const retry = await queue.nextPaid();
   await assert.rejects(queue.complete(retry.record,
@@ -82,6 +82,35 @@ test('escrow worker restores completed evidence and does not settle interrupted 
   assert.equal(sends, 2);
 });
 
+test('terminal playback failure journals a refund and retries it after restart without settling', async () => {
+  const { createDmtvEscrowRuntime } = await import('../discord-bot/dmtv-escrow.js');
+  const track = { trackId: 'test', videoUrl: 'ipfs://test', creator: ethers.ZeroAddress };
+  const request = { status: 1, refundAt: 2000, videoId: ethers.id('nft'), mediaHash: ethers.id(track.videoUrl), creator: track.creator };
+  let saved, attempts = 0;
+  const make = () => createDmtvEscrowRuntime({
+    reader: { paused: async () => false, head: async () => 0n, tail: async () => 1n,
+      requests: async () => request, videos: async () => ({ ...request, lanes: 3 }) },
+    writer: {
+      fulfill: async () => assert.fail('failed playback cannot settle'),
+      cancelAndRefund: async (lane, requestId) => {
+        assert.deepEqual(saved.entries[0], { lane, requestId, proof: ethers.ZeroHash });
+        if (++attempts === 1) throw new Error('RPC unavailable');
+        return { wait: async () => { request.status = 4; return { status: 1 }; } };
+      },
+    },
+    provider: { getBlockNumber: async () => 10, getBlock: async () => ({ timestamp: 1000 }) },
+    store: { restore: async () => saved, save: async snapshot => { saved = snapshot; return true; } },
+    resolveTrack: async () => track,
+  }).forLane(1);
+  const queue = make();
+  const { record } = await queue.nextPaid();
+  await assert.rejects(queue.complete(record, {
+    finished: true, trackId: track.trackId, playId: 'partial', expectedMs: 2000, audibleMs: 800,
+  }), /RPC unavailable/);
+  assert.equal(await make().nextPaid(), null);
+  assert.equal(attempts, 2);
+  assert.deepEqual(saved.entries, []);
+});
 test('escrow checkout rejects a changed video before any approval or payment', async () => {
   const { reserveDmtvVideo } = await import('../js/dmtv-escrow.mjs');
   const creator = '0x1111111111111111111111111111111111111111';
