@@ -691,6 +691,47 @@ test('worker-owned credits release without parent acknowledgments while real bac
   assert.deepEqual(broadcaster.snapshot().reasonDetails, { stage: 'ipc', pendingFrames: 50 });
 });
 
+test('encoder backpressure starts a new stream and restores policy and state publishing', async t => {
+  const { createPublicBroadcastWorker } = await import('../discord-bot/public-broadcast-worker.js');
+  const workers = [];
+  class Thread extends EventEmitter {
+    messages = [];
+    constructor(_url, { workerData }) {
+      super();
+      this.credits = workerData.pendingFrames;
+      workers.push(this);
+      this.url = `https://edge.example/hls/run-${workers.length}/index.m3u8`;
+      queueMicrotask(() => this.emit('message', { type: 'ready',
+        snapshot: { status: 'ready', url: this.url } }));
+    }
+    postMessage(message) {
+      this.messages.push(message);
+      if (message.type === 'stop') queueMicrotask(() => this.emit('exit', 0));
+    }
+  }
+  const broadcaster = createPublicBroadcastWorker({ enabled: true, edgeUrl: 'https://edge.example',
+    token: 't'.repeat(40), WorkerImpl: Thread, restartDelayMs: 10, log: { error() {} } });
+  t.after(() => broadcaster.stop());
+  broadcaster.setPolicy({ mode: 'live', bookingId: 'live' });
+  broadcaster.setStateReader(() => ({ nowPlaying: null }));
+  await broadcaster.start();
+  const first = workers[0];
+  Atomics.store(first.credits, 0, 40);
+  first.emit('message', { type: 'snapshot', snapshot: {
+    status: 'unavailable', reason: 'ENCODER_BACKPRESSURE', url: first.url,
+  } });
+  assert.equal(broadcaster.snapshot().reason, 'ENCODER_BACKPRESSURE');
+  for (let i = 0; i < 20 && workers.length < 2; i++) await wait(10);
+  const second = workers[1];
+  assert.ok(second);
+  assert.notEqual(broadcaster.snapshot().url, first.url);
+  assert.deepEqual(second.messages, [{ type: 'policy', policy: { mode: 'live', bookingId: 'live' } }, { type: 'reader' }]);
+  assert.equal(Atomics.load(second.credits, 0), 0);
+  await broadcaster.stop();
+  await wait(30);
+  assert.equal(workers.length, 2);
+});
+
 test('encoder thread failures remain explicit on the parent snapshot and can be shut down', { timeout: 10000 }, async t => {
   const { createPublicBroadcastWorker } = await import('../discord-bot/public-broadcast-worker.js');
   const broadcaster = createPublicBroadcastWorker({ enabled: true, edgeUrl: 'https://edge.example',

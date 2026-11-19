@@ -150,6 +150,9 @@ the main-radio playlist.
 Buffered radio uses the HLS audio clock to synchronize queued video in the
 browser. Keep the main-radio escrow lane and its catalog eligibility off
 until playback and settlement have been verified in production.
+If the HLS encoder fails, the worker replaces it after a short cooldown
+and publishes a new stream URL. Listeners reconnect when that stream is
+ready; they are not switched to a private or direct-room session.
 
 The $2 DMTv and $3 main-radio prices reserve Base USDC on-chain. After
 verified station playback the worker checkpoints its proof and settles $1
