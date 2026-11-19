@@ -91,6 +91,10 @@ its own queue and an ad break after ten videos. Main-radio requests instead
 go through the existing DJuke/DVert scheduler and require a video already in
 the main-radio playlist.
 
+Buffered radio uses the HLS audio clock to synchronize queued video in the
+browser. Keep the main-radio escrow lane and its catalog eligibility off
+until playback and settlement have been verified in production.
+
 The $2 DMTv and $3 main-radio prices reserve Base USDC on-chain. After
 verified station playback the worker checkpoints its proof and settles $1
 to the creator, then splits the remainder equally among Top 10, Playback,

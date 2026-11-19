@@ -56,6 +56,8 @@ export function broadcastProgram(track, at) {
     live: track.live === true,
     ...(track.trackId ? { trackId: String(track.trackId).slice(0, 180) } : {}),
     ...(track.ipfsCid ? { ipfsCid: String(track.ipfsCid).slice(0, 120) } : {}),
+    ...(track.mediaType === 'video/mp4' && !track.live && /^[a-z0-9]{20,120}$/i.test(track.ipfsCid || '')
+      ? { mediaType: 'video/mp4' } : {}),
     isDevert: track.isDevert === true,
     ...(track.performer ? { performer: { wallet: track.performer.wallet,
       artist: String(track.performer.artist || '').slice(0, 100),

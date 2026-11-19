@@ -22,6 +22,13 @@ The new path defaults **off**. Deploying an empty CDN Worker does not select it
 for production listeners. Begin with approved show/rehearsal windows, not 24/7
 encoding.
 
+The public HLS feed remains the main-radio audio clock. When a queued MP4
+reaches that clock, the browser shows its muted video through the existing
+radio media endpoint. An audio-only entry, a live set, or leaving radio
+clears the picture. If the picture fails, audio continues with a visible
+notice. These on-demand video requests use the radio media proxy, not the
+audio CDN, and are not covered by the audio-only capacity measurements below.
+
 ## The separate limits
 
 | Limit | Meaning |
