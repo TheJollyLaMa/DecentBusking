@@ -18,6 +18,29 @@ async function withServer(handler, callback) {
   }
 }
 
+test('DMTv video verification accepts only authenticated mirror-host reports', async () => {
+  const { createWorkerRequestHandler } = await import(moduleUrl);
+  let exchanges = 0;
+  const handler = createWorkerRequestHandler({
+    allowedOrigins: [],
+    ownerWallet: Wallet.createRandom().address,
+    checkpointMirror: { authorize(value) { if (value !== 'Bearer fixture') throw new Error('Verification authorization failed'); } },
+    dmtvRadioVerification: { exchange(body) { exchanges++; return { job: { id: body.id } }; } },
+  });
+  await withServer(handler, async base => {
+    const post = token => fetch(`${base}/api/dmtv/radio-verification`, { method: 'POST',
+      headers: { authorization: token, 'content-type': 'application/json' }, body: JSON.stringify({ id: 'one' }) });
+    const denied = await post('Bearer wrong');
+    assert.equal(denied.status, 400);
+    assert.equal(exchanges, 0);
+    const accepted = await post('Bearer fixture');
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await accepted.json(), { job: { id: 'one' } });
+    assert.equal(exchanges, 1);
+  });
+});
+
 test('widget radio origins can preflight/vote without expanding authenticated API permissions', async () => {
     const { createWorkerRequestHandler } = await import(moduleUrl);
     const origin = 'https://dbusk.decentagency.eth.limo';

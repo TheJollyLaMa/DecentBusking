@@ -175,6 +175,26 @@ and settlement replay through a worker restart before enabling
 `DMTV_ESCROW_PAYMENTS_ENABLED` and unpausing. Pause the contract as well as
 disabling the worker flag when suspending purchases: the browser flag alone
 cannot prevent direct on-chain reservations.
+
+The $3 main-radio lane uses a separate Chrome verifier on the checkpoint
+mirror host. It plays the same public HLS audio and synchronized MP4 picture
+as a listener. Only unique intervals with advancing audio, decoded video
+frames and a shared program clock count. At 50% verified synchronized
+playback, the worker journals fulfillment and settles; failure below 50%
+returns the full $3. Audio-only completion never settles this lane.
+The $2 DMTv station keeps its complete-publication requirement.
+
+Install the worker dependencies on the mirror host, set
+`DMTV_CHROME_EXECUTABLE` to an installed Chrome with AAC/H.264 support, and
+run `npm run dmtv-radio-verifier` alongside (not instead of) the checkpoint
+mirror, with the same `PUBLIC_WORKER_URL` and `CHECKPOINT_MIRROR_SECRET`.
+The browser receives no signing keys or mirror secret. It monitors only the
+requested public play, not listener tabs. Set `DMTV_RADIO_VIDEO_ENABLED=true`
+on the hosted worker only after the verifier has passed playback testing.
+Verifier heartbeats expire after 12 seconds; missing verification prevents
+new paid radio starts. Refund/settlement journals continue retrying when
+new starts are gated. This code does not itself unpause escrow or enable
+public checkout.
 The **Top 10** title also has an **i** dialog explaining net votes, weekly prize
 estimates and closeout, Friday Hype's opening chart, and playlist saves.
 Voting with the radio thumbs-up/down buttons keeps the chart open. Confirmed

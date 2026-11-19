@@ -73,6 +73,7 @@ import { nftCatalogPage, nftIdentity } from '../js/nft-loader.js';
 import { supportsDjukeAlbumsAndGas } from '../js/djuke-version.mjs';
 import { createDjukeQueueReader, createDjukePlaybackJournal, createDjukeRuntime, createDjukeFulfiller, createDjukeSongRegistrar, verifyDjukePlaylistWorker, DJUKE_ABI, DJUKE_PLAYLIST_WORKER_ABI } from './djuke.js';
 import { createDevertQueueReader, createDevertQueueRuntime, createDevertQueueCatalogSync, combinePaidQueues } from './devert-queue.js';
+import { attachDmtvRadioVerification, createDmtvRadioVerification } from './dmtv-radio-verification.js';
 import { devertQueueAbi } from '../js/devert-queue.mjs';
 import { applyDevertDjukeBoosts, createDevertCampaignReader, DEVERT_ABI, normalizeDevertCampaign,
   resolveDevertSchedulerPrivateKey } from './devert.js';
@@ -1574,6 +1575,7 @@ async function main() {
   if (!['direct', 'preview', 'public'].includes(broadcastMode)) throw new Error('Invalid PUBLIC_BROADCAST_MODE');
   const escrowAddress = process.env.DMTV_ESCROW_ADDRESS || '';
   let dmtvStation, dmtvEscrowStatus, dmtvEscrowRadio;
+  const dmtvRadioVerification = broadcastMode === 'public' && checkpointMirror ? createDmtvRadioVerification() : null;
   if (/^0x[0-9a-f]{40}$/i.test(escrowAddress) && checkpointMirror && config.pinataJwt && devertSchedulerPrivateKey) {
     const enabled = () => process.env.DMTV_ESCROW_PAYMENTS_ENABLED === 'true';
     const provider = getRpcRouter().provider('critical', 'dmtv-escrow');
@@ -1627,12 +1629,14 @@ async function main() {
         return { ...track, ...item, ipfsCid, mediaType: 'video/mp4' };
       },
     });
-    const radioVideoAvailable = broadcastMode !== 'public';
+    const radioVideoAvailable = () => process.env.DMTV_RADIO_VIDEO_ENABLED === 'true' &&
+      dmtvRadioVerification?.ready() && config.publicBroadcast?.snapshot().status === 'ready';
     const laneQueue = lane => {
-      const queue = runtime.forLane(lane);
+      const base = runtime.forLane(lane);
+      const queue = lane === 1 && dmtvRadioVerification ? attachDmtvRadioVerification(base, dmtvRadioVerification) : base;
       return { ...queue, nextPaid: async () => {
-        if ((lane === 1 && !radioVideoAvailable) || !(await ready())) return null;
-        return queue.nextPaid();
+        return queue.nextPaid({ acceptNew: Boolean(await ready()) &&
+          (lane === 0 || Boolean(radioVideoAvailable())) });
       } };
     };
     dmtvEscrowRadio = laneQueue(1);
@@ -1650,8 +1654,8 @@ async function main() {
       const isReady = await ready();
       if (isReady) await runtime.checkStorage();
       return { address: escrowAddress, station: state, settlements: recentSettlements, sideReady: isReady && state.healthy,
-        radioReady: isReady && radioVideoAvailable && playlistReady && !!getActiveJukeLoopSession(),
-        ...(radioVideoAvailable ? {} : { radioUnavailableReason: 'Paid video checkout is not yet verified on buffered radio.' }) };
+        radioReady: !!(isReady && radioVideoAvailable() && playlistReady && getActiveJukeLoopSession()),
+        ...(radioVideoAvailable() ? {} : { radioUnavailableReason: 'The public radio video verifier is not ready.' }) };
     };
     if (process.env.DMTV_STATION_ENABLED === 'true') dmtvStation.start();
   }
@@ -2008,6 +2012,7 @@ async function main() {
     rehearsal,
     alchemyWebhook,
     checkpointMirror,
+    dmtvRadioVerification,
     creatorProfiles,
     getDjukeState: readDjukeState ? async () => {
       const state = await readDjukeState();

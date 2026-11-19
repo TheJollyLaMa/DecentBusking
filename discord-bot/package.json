@@ -8,6 +8,7 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "checkpoint-mirror": "node checkpoint-mirror-client.js",
+    "dmtv-radio-verifier": "node dmtv-radio-verifier-client.js",
     "djuke-songs": "node djuke-songs.js",
     "mint-queue": "node mint-queue.js"
   },
@@ -31,6 +32,7 @@
     "livekit-server-sdk": "2.19.2",
     "multiformats": "^13.4.2",
     "opusscript": "^0.0.8",
+    "playwright-core": "^1.56.1",
     "tweetnacl": "^1.0.3"
   }
 }

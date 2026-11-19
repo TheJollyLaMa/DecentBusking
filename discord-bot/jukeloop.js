@@ -1984,6 +1984,7 @@ export class JukeLoopSession {
       };
     }
     this.player.play(prepared.resource);
+    if (this._currentPaid?.kind === 'dmtv') this.djuke?.startPlayback?.(this._currentPaid, this._nowPlaying);
     this._announcePrepared(prepared, playId)
       .catch(error => console.warn('[jukeloop] Now-playing announcement deferred:', error.message));
     console.log(`[jukeloop] Now playing: "${prepared.track.title}" by ${prepared.track.uploader}`);
@@ -2331,7 +2332,12 @@ export class JukeLoopSession {
             ...radioCompletionDiagnostics(completedPlay.audibleMs, completedPlay.expectedMs) }));
       }
     }
-    if (paidRecord && this.djuke) {
+    if (paidRecord?.kind === 'dmtv' && this.djuke) {
+      // Public HLS is buffered; the verifier may still be playing this recording after ingest ends.
+      void this.djuke.complete(paidRecord, completedPlay).catch(() => {
+        console.warn('[dmtv] Radio outcome could not be finalized; escrow journal will retry');
+      });
+    } else if (paidRecord && this.djuke) {
       const play = trackRef && completedPlay?.trackId === trackRef.trackId ? completedPlay : null;
       if (['scheduled_handoff', 'radio_stopped'].includes(play?.media?.interrupted)) {
         await this.djuke.release(paidRecord, new Error(play.media.reason));
