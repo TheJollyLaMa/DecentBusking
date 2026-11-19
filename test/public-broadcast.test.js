@@ -334,6 +334,41 @@ test('native HLS listener never joins LiveKit and follows programme timestamps a
   assert.equal(getAudibleBroadcast(time), null);
 });
 
+test('buffered radio displays queued MP4s on the audible clock without duplicating audio', async () => {
+  const { broadcastProgram } = await import('../discord-bot/public-broadcast.js');
+  const { createPublicRadioVideo } = await import('../js/public-radio-video.mjs');
+  const cid = 'bafybeih44q5ybakgee2gcvdexmh34tesnjjjlb5hf2f77ytlzd5h5xmvui';
+  const video = { muted: false, paused: true, readyState: 4, currentTime: 0, duration: 100,
+    async play() { this.paused = false; }, pause() { this.paused = true; },
+    removeAttribute(name) { delete this[name]; }, load() {} };
+  let visible;
+  const errors = [];
+  const controller = createPublicRadioVideo({ video, mediaUrl: id => `/api/radio/media?cid=${id}`,
+    onActive: active => { visible = active; }, onError: message => errors.push(message) });
+  for (const playId of ['regular', 'requested']) {
+    const program = broadcastProgram({ playId, ipfsCid: cid, mediaType: 'video/mp4',
+      protected: playId === 'requested' }, 10000);
+    controller.update({ program, at: 26500 });
+    await wait(0);
+    assert.equal(video.src, `/api/radio/media?cid=${cid}`);
+    assert.equal(video.muted, true);
+    assert.equal(video.currentTime, 16.5);
+    assert.equal(visible, true);
+    controller.update({ program, at: 31250 });
+    assert.equal(video.currentTime, 21.25, 'rejoining the broadcast corrects the picture clock');
+    controller.update({ program: broadcastProgram({ playId: 'music', mediaType: 'audio/mpeg' }, 32000), at: 32100 });
+    assert.equal(video.src, undefined);
+    assert.equal(video.muted, false);
+    assert.equal(video.paused, true);
+    assert.equal(visible, false);
+  }
+  video.error = {};
+  controller.update({ program: broadcastProgram({ playId: 'broken', ipfsCid: cid, mediaType: 'video/mp4' }, 10000), at: 26500 });
+  assert.equal(visible, false);
+  assert.deepEqual(errors, ['Video unavailable; radio audio continues.']);
+  controller.stop();
+});
+
 test('failed or late HLS attachment cannot take over an archive, and never silently falls back', async () => {
   const { createPublicBroadcastListener } = await import('../js/public-broadcast-client.mjs');
   let resolveSdk, attached = 0;

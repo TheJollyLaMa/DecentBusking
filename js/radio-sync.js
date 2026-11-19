@@ -11,7 +11,8 @@ import { createRadioAdTransition } from './radio-ad-transition.mjs?v=20261030-ad
 import { DEVERT_MAX_AD_SECONDS } from './devert-scheduler.mjs';
 import { createLiveAudioListener, createLiveAudioFaultSlate } from './live-audio-client.mjs';
 import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
-import { createPublicBroadcastListener, getAudibleBroadcast } from './public-broadcast-client.mjs';
+import { createPublicBroadcastListener, getAudibleBroadcast } from './public-broadcast-client.mjs?v=20261118-public-video';
+import { createPublicRadioVideo } from './public-radio-video.mjs';
 
 const POLL_MS = 8_000;
 const FADE_IN_MS = 600;
@@ -41,6 +42,7 @@ const PRELOAD_WAIT_MS = 10_000;
 
 let _audio, _labelEl, _sponsorEl, _titleEl, _artistEl, _activityEl, _adCountdownEl, _playBtn, _radioBtn;
 let _audioPlayer, _videoPlayer, _videoStage, _videoToggle;
+let _publicRadioVideo, _publicRadioVideoActive = false;
 let _videoHidden = false;
 const _sponsorEnsCache = new Map();
 const _sponsorEnsPending = new Map();
@@ -132,7 +134,7 @@ function _renderSponsorTag(sponsor) {
 }
 
 function _renderVideo() {
-  const videoActive = _videoPlayer && _audio === _videoPlayer;
+  const videoActive = _videoPlayer && (_audio === _videoPlayer || _publicRadioVideoActive);
   if (_videoStage) _videoStage.hidden = !videoActive || _videoHidden;
   if (_videoToggle) {
     _videoToggle.classList.toggle('hidden', !videoActive);
@@ -144,6 +146,7 @@ function _renderVideo() {
 
 function _onPause(event) {
   if (_liveAudioActive) return;
+  if (_publicBroadcastActive && event?.target === _videoPlayer) return;
   if (_suppressPauseStop) {
     _suppressPauseStop = false;
     return;
@@ -578,6 +581,18 @@ export function initRadioSync() {
   _playBtn = document.getElementById('now-playing-play-btn');
   _radioBtn = document.getElementById('now-playing-radio-btn');
   if (!_audio || !_radioUrl()) return;
+  let publicVideoNotice = '';
+  if (_videoPlayer) {
+    _publicRadioVideo = createPublicRadioVideo({
+      video: _videoPlayer, mediaUrl: _gatewayUrl,
+      onActive: active => {
+        _publicRadioVideoActive = active;
+        if (active) publicVideoNotice = '';
+        _renderVideo();
+      },
+      onError: message => { publicVideoNotice = message; },
+    });
+  }
   _publisherPresence = createLivePublisherPresence({ serviceUrl: _radioUrl().replace(/\/api\/radio$/, '') });
   _stopPublisherWatch?.();
   _stopPublisherWatch = _publisherPresence.watch(() => {
@@ -586,13 +601,17 @@ export function initRadioSync() {
   });
   _publicBroadcastListener = createPublicBroadcastListener({
     audio: _audioPlayer, serviceUrl: _radioUrl().replace(/\/api\/radio$/, ''),
-    onStatus: ({ blocked, failed, reason }) => {
+    onStatus: ({ blocked, failed, playing, reason }) => {
       if (!_publicBroadcastActive) return;
-      _setActivity(reason || 'Buffered radio: approximately 10–20 seconds behind the studio');
+      const audible = playing && !blocked && !failed ? getAudibleBroadcast() : null;
+      if (!audible || audible.program.mediaType !== 'video/mp4') publicVideoNotice = '';
+      _publicRadioVideo?.update(audible);
+      _setActivity(publicVideoNotice || reason || 'Buffered radio: approximately 10–20 seconds behind the studio');
       _playBtn?.classList.toggle('hidden', !blocked && !failed);
     },
     onProgram: program => {
       if (!_publicBroadcastActive) return;
+      publicVideoNotice = '';
       _radio = program.live ? null : { ...program, uploader: program.artist };
       _setLabel(program.live ? '🔴 Live broadcast · buffered' : '📻 Radio broadcast · buffered');
       _setTrack(program.title, program.artist);
@@ -662,6 +681,7 @@ export function setDevertListenMode(mode) {
   _loadedPlayId = null;
   if (mode === 'ads-only') {
     if (_publicBroadcastActive) {
+      _publicRadioVideo?.stop();
       _publicBroadcastListener?.stop(); _publicBroadcastActive = false;
     }
     _setLabel('🎟️ DVert Ads Only');
@@ -683,6 +703,7 @@ export function setDevertListenMode(mode) {
 export function playArchiveTrack({ title, artist, audioUrl, mediaType, nft = null, sessionId = null, onEnded = null }) {
   if (!_audio) return;
   if (_publicBroadcastActive) {
+    _publicRadioVideo?.stop();
     _publicBroadcastListener?.stop(); _publicBroadcastActive = false;
   }
   if (_liveAudioActive) {
@@ -838,6 +859,7 @@ function _applyPublicBroadcastState() {
   const active = broadcast?.selected && _mode !== 'archive' && _devertListenMode !== 'ads-only';
   if (!active) {
     if (_publicBroadcastActive) {
+      _publicRadioVideo?.stop();
       _publicBroadcastListener?.stop(); _publicBroadcastActive = false; _loadedPlayId = null;
     }
     return false;
@@ -857,6 +879,7 @@ function _applyPublicBroadcastState() {
   try { suppressed = bookingIds.some(id => _publisherPresence?.isPublishing(id) === true); }
   catch { suppressed = true; }
   if (suppressed) {
+    _publicRadioVideo?.stop();
     _publicBroadcastListener?.stop();
     _setLabel('Your buffered return is muted');
     _setActivity(SELF_RETURN_MESSAGE);
@@ -1621,6 +1644,7 @@ function _fadeMainRadioOut(ms = FADE_IN_MS) {
 }
 
 function _stopAudio() {
+  _publicRadioVideo?.stop();
   _clearRadioAd();
   _adTransition?.stop();
   ++_switchToken;

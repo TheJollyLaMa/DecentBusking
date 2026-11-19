@@ -91,6 +91,7 @@ export function createPublicBroadcastListener({ audio, serviceUrl, onStatus, onP
     const origin = hls?.playingDate?.getTime?.() ??
       (typeof audio.getStartDate === 'function' ? audio.getStartDate().getTime() + audio.currentTime * 1000 : NaN);
     const program = broadcastProgramAt(state?.programHistory, origin);
+    if (!program) audibleBroadcast = null;
     if (program) {
       audibleBroadcast = !audio.paused && audio.readyState >= 2 && !blocked
         ? { program, at: origin, observedAt: now() } : null;

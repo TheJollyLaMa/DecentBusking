@@ -317,7 +317,8 @@ export function initDmtv() {
     buy.disabled = buying || !selected?.creator || !isEscrow() || !escrowState?.sideReady;
     radioBuy.disabled = buying || !selected?.creator || (!radioReady && !resume);
     radioStatus.textContent = resume ? 'Resume unfinished main-radio checkout'
-      : radioReady ? 'Plays in the shared DJuke / DMTv queue' : 'Main-radio checkout unavailable';
+      : radioReady ? 'Plays in the shared DJuke / DMTv queue'
+      : escrowState?.radioUnavailableReason || 'Main-radio checkout unavailable';
   }
 
   function canResumeRadio() {

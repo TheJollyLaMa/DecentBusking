@@ -1570,6 +1570,8 @@ async function main() {
           filename: track.filename, uploader: track.uploader || item.artist, mediaType: 'video/mp4', videoUrl: item.videoUrl };
       },
     }) : null;
+  const broadcastMode = process.env.PUBLIC_BROADCAST_MODE || 'direct';
+  if (!['direct', 'preview', 'public'].includes(broadcastMode)) throw new Error('Invalid PUBLIC_BROADCAST_MODE');
   const escrowAddress = process.env.DMTV_ESCROW_ADDRESS || '';
   let dmtvStation, dmtvEscrowStatus, dmtvEscrowRadio;
   if (/^0x[0-9a-f]{40}$/i.test(escrowAddress) && checkpointMirror && config.pinataJwt && devertSchedulerPrivateKey) {
@@ -1624,9 +1626,13 @@ async function main() {
         return { ...track, ...item, ipfsCid, mediaType: 'video/mp4' };
       },
     });
+    const radioVideoAvailable = broadcastMode !== 'public';
     const laneQueue = lane => {
       const queue = runtime.forLane(lane);
-      return { ...queue, nextPaid: async () => await ready() ? queue.nextPaid() : null };
+      return { ...queue, nextPaid: async () => {
+        if ((lane === 1 && !radioVideoAvailable) || !(await ready())) return null;
+        return queue.nextPaid();
+      } };
     };
     dmtvEscrowRadio = laneQueue(1);
     let archiveCursor = 0;
@@ -1643,7 +1649,8 @@ async function main() {
       const isReady = await ready();
       if (isReady) await runtime.checkStorage();
       return { address: escrowAddress, station: state, settlements: recentSettlements, sideReady: isReady && state.healthy,
-        radioReady: isReady && playlistReady && !!getActiveJukeLoopSession() };
+        radioReady: isReady && radioVideoAvailable && playlistReady && !!getActiveJukeLoopSession(),
+        ...(radioVideoAvailable ? {} : { radioUnavailableReason: 'Paid video checkout is not yet verified on buffered radio.' }) };
     };
     if (process.env.DMTV_STATION_ENABLED === 'true') dmtvStation.start();
   }
@@ -1724,8 +1731,6 @@ async function main() {
       updateJukeLoopRadioSchedule({ events, schedule: defaultRadioSchedule(weeklySchedule) });
     },
   });
-  const broadcastMode = process.env.PUBLIC_BROADCAST_MODE || 'direct';
-  if (!['direct', 'preview', 'public'].includes(broadcastMode)) throw new Error('Invalid PUBLIC_BROADCAST_MODE');
   const publicBroadcast = createPublicBroadcastWorker({
     enabled: broadcastMode !== 'direct',
     edgeUrl: process.env.PUBLIC_BROADCAST_EDGE_URL,
