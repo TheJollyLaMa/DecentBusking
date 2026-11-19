@@ -103,8 +103,9 @@ The [Base DMTv queue](https://basescan.org/address/0x493148973Ba862CFa1709310c10
 was deployed paused with verified Base USDC and ArtFi router addresses.
 Before launch, verify all five funds and register canonical archive IDs
 (`keccak256` of the NFT ID string) with the exact media URI hash and creator.
-Grant the worker fulfiller access. Set `DMTV_ESCROW_ADDRESS` in the worker
-and `dmtvEscrowAddress` on the site to that same verified address. Update
+Grant the worker fulfiller access. Set `DMTV_ESCROW_ADDRESS` in the worker.
+Keep `dmtvEscrowAddress` on the site blank until the shared stream is healthy
+so the existing free rotation remains available. Update
 the existing checkpoint mirror, use one writer per contract, and test the
 shared stream with `DMTV_STATION_ENABLED`. Verify both lanes, refunds,
 and settlement replay through a worker restart before enabling
