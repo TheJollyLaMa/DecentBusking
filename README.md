@@ -98,13 +98,16 @@ until playback and settlement have been verified in production.
 The $2 DMTv and $3 main-radio prices reserve Base USDC on-chain. After
 verified station playback the worker checkpoints its proof and settles $1
 to the creator, then splits the remainder equally among Top 10, Playback,
-IPFS Pinner, Repo Dev, and Live Performers. Customers can claim a full
-unsettled refund after 24 hours or after cancellation, even when paused.
+IPFS Pinner, Repo Dev, and Live Performers. For terminal playback failures,
+the worker checkpoints the refund and returns the full amount directly to
+the payer. If the worker never resolves a request, the payer can still claim
+the full amount after 24 hours, even while paused.
 Save the lane and request number from the reservation receipt. New escrow
 purchases do not use the legacy worker quote secret.
 
-The [Base DMTv queue](https://basescan.org/address/0x493148973Ba862CFa1709310c103BDa81dba71fC)
-was deployed paused with verified Base USDC and ArtFi router addresses.
+The [automatic-refund Base DMTv queue](https://basescan.org/address/0x82a21D2039C239d141a26Fa82999bFC2b295aba6)
+was deployed paused with verified Base USDC and ArtFi router addresses. It
+replaces the [original paused escrow](https://basescan.org/address/0x493148973Ba862CFa1709310c103BDa81dba71fC).
 Before launch, verify all five funds and register canonical archive IDs
 (`keccak256` of the NFT ID string) with the exact media URI hash and creator.
 Grant the worker fulfiller access. Set `DMTV_ESCROW_ADDRESS` in the worker.

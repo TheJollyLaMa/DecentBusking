@@ -17,6 +17,7 @@ export function createDmtvStation({ queue, nextFree, resolveMediaUrl, log = cons
     let dir;
     let playId;
     let published = false;
+    let deliveryCompleted = false;
     try {
       const adDue = count >= 10;
       if (!adDue) {
@@ -94,12 +95,17 @@ export function createDmtvStation({ queue, nextFree, resolveMediaUrl, log = cons
       }
       if (active && paid) {
         if (!published) throw new Error('DMTv video never became available during the shared broadcast.');
+        deliveryCompleted = true;
         await queue.completePublished(paid.record, playId);
       }
       if (!adDue) count++;
     } catch (error) {
       healthy = false;
       log.warn(`[dmtv] Playback deferred: ${error.message}`);
+      if (active && paid && !deliveryCompleted) {
+        try { await queue.fail(paid.record); }
+        catch (refundError) { log.warn(`[dmtv] Refund deferred: ${refundError.code || 'checkpoint or transaction unavailable'}`); }
+      }
     } finally {
       if (paid) {
         try { await queue.release(paid.record); }

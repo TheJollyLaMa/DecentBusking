@@ -11,6 +11,8 @@ export const DMTV_ESCROW_ABI = [
   'function requests(uint8,uint256) view returns (bytes32 videoId,bytes32 mediaHash,address payer,address creator,uint64 refundAt,uint8 status)',
   'function requestVideo(uint8,bytes32,bytes32,address) returns (uint256)',
   'function fulfill(uint8,uint256,bytes32)',
+  'function cancelAndRefund(uint8,uint256)',
+  'function supportsAutomaticRefunds() pure returns (bool)',
   'function claimRefund(uint8,uint256)',
   'event VideoRequested(uint8 indexed lane,uint256 indexed requestId,address indexed payer,bytes32 videoId,bytes32 mediaHash,address creator,uint256 amount,uint64 refundAt)',
   'event VideoSettled(uint8 indexed lane,uint256 indexed requestId,bytes32 indexed playbackProof)',
