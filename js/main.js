@@ -8,7 +8,7 @@ import { initTutorial } from './tutorial.js?v=20261116-promotions';
 import { initDmtv } from './dmtv.mjs?v=20261119-dmtv-catalog';
 import { initDBusker } from './dbusker.mjs?v=20261116-studio-polish';
 import './recording-edit-panel.mjs?v=20261119-studio-entry';
-import './right-side-panels.mjs?v=20261119-guided-care';
+import './right-side-panels.mjs?v=20261119-dhearse-retry';
 
 // The shared header (decent-header) web component is loaded in index.html as a CDN module.
 
