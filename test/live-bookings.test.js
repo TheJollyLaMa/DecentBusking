@@ -119,6 +119,11 @@ test('stale create rebases against current state while preserving duplicate occu
  assert.equal(rebased.bookings.length,2);
  assert.equal(rebased.bookings[1].eventId,second.eventId);
  await assert.rejects(f.service.execute({action:'create',id:'live:jose:duplicate',booking:second,revision:0}),/Occurrence already has a booking/);
+ const overlapping={...second,eventId:'friday-live-performance-2110:2026-10-30',startUtc:'2026-10-31T01:10:00Z',endUtc:'2026-10-31T01:30:00Z'};
+ await assert.rejects(f.service.execute({action:'create',id:'live:jose:overlap',booking:overlapping,revision:0}),/overlaps another booking/);
+ const backToBack={...second,eventId:'friday-live-performance-2120:2026-10-30',startUtc:'2026-10-31T01:20:00Z',endUtc:'2026-10-31T01:40:00Z'};
+ const both=await f.service.execute({action:'create',id:'live:jose:second-slot',booking:backToBack,revision:0});
+ assert.deepEqual(both.bookings.slice(1).map(b=>b.eventId),[second.eventId,backToBack.eventId]);
  await assert.rejects(f.service.execute({action:'cancel',id:rebased.bookings[1].id,revision:0,reason:'x',confirm:true}),/Stale/);
 });
 test('invalid ENS/slot/series/policy/terms and undeployed escrow fail closed',async()=>{

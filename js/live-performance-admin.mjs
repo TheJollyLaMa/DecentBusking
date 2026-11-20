@@ -23,15 +23,31 @@ const routerAbi = [
 const erc20Abi = ['function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)'];
 const marketListingAbi = ['function nextListingId() view returns(uint256)',
  'function getListing(uint256) view returns ((address nftContract,uint256 tokenId,uint256 priceETH,address priceToken,uint256 priceAmount,uint256 available,bool active,string note))'];
-export async function assertGiftListingsDelisted(market, gift) {
+// Gift editions come from the funding wallet. Public listings of the same edition may stay
+// active only while the Market itself still holds every listed edition (no oversell).
+export async function assertGiftListingsBacked(market, nft, gift) {
  const total = await market.nextListingId();
  if (total > 2000n) throw new Error('Too many Market listings to verify safely; funding is unavailable');
+ let listed = 0n;
  for (let start = 0; start < Number(total); start += 20) {
    const listings = await Promise.all(Array.from({ length:Math.min(20,Number(total)-start) }, (_,i) => market.getListing(start+i)));
-   if (listings.some(item => item.active && item.nftContract.toLowerCase() === gift.collection.toLowerCase() && item.tokenId === BigInt(gift.tokenId))) {
-     throw new Error('Delist every active Market listing for this exact edition and reconcile sold inventory before funding');
+   for (const item of listings) {
+     if (item.active && item.nftContract.toLowerCase() === gift.collection.toLowerCase() && item.tokenId === BigInt(gift.tokenId)) listed += BigInt(item.available);
    }
  }
+ if (listed > 0n && await nft.balanceOf(market.target, gift.tokenId) < listed) {
+   throw new Error('Active Market listings for this edition are not fully stocked by the Market; reconcile sold inventory before funding');
+ }
+}
+export function liveOccurrenceId(startLocal, bookings = []) {
+ const date = startLocal.slice(0,10);
+ const base = `friday-live-performance:${date}`;
+ return bookings.some(b => b.eventId === base && !b.cancelled)
+   ? `friday-live-performance-${startLocal.slice(11,16).replace(':','')}:${date}` : base;
+}
+export function overlappingLiveBooking(bookings = [], startUtc, endUtc) {
+ const start = Date.parse(startUtc), end = Date.parse(endUtc);
+ return bookings.find(b => !b.cancelled && Date.parse(b.startUtc) < end && start < Date.parse(b.endUtc)) || null;
 }
 const base = () => String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
 export function nextFridayLiveStart(now = Date.now()) {
@@ -245,7 +261,7 @@ async function action(name, b) {
      if (!b.acknowledged || b.cancelled || !['draft','failed'].includes(b.status)) throw new Error('Requires an accepted, unfunded invitation');
      if (localStorage.getItem(`live-pending:${b.id}:funding`) || b.transactions.funding?.status === 'pending') throw new Error('Funding is pending; reconcile instead of resending');
      if (Date.parse(b.startUtc) <= Date.now()) throw new Error('Invitation expired');
-     if (!confirm(`Fund ${formatLiveAsset(b.amountUnits,b.assetDecimals,b.assetSymbol)} on Base for ${b.wallet}? ${b.gift ? 'The exact gift will be transferred into booking custody. First delist ALL overlapping Market listings, reconcile sales, and withdraw unsold stock to this wallet. Do not continue if any listing remains active. ' : ''}Administrator recovery can defeat this guarantee.`)) return;
+     if (!confirm(`Fund ${formatLiveAsset(b.amountUnits,b.assetDecimals,b.assetSymbol)} on Base for ${b.wallet}? ${b.gift ? 'The exact gift will be transferred from this wallet into booking custody. Public Market listings of this edition may stay active only while the Market still holds every listed edition. ' : ''}Administrator recovery can defeat this guarantee.`)) return;
      if (b.assetAddress.toLowerCase() !== LIVE_ZERO_ADDRESS) {
        const token = new w.ethers.Contract(b.assetAddress, [...erc20Abi, 'function decimals() view returns(uint8)', 'function symbol() view returns(string)'], w.signer);
        if (!await contract.approvedTokens(b.assetAddress) || Number(await token.decimals()) !== b.assetDecimals || await token.symbol() !== b.assetSymbol) throw new Error('Token approval or metadata changed; do not fund');
@@ -255,9 +271,11 @@ async function action(name, b) {
      }
      if (b.gift) {
        if (!state.giftTreasuryAddress || state.giftTreasuryAddress.toLowerCase() !== b.gift.treasury.toLowerCase()) throw new Error('Signed gift treasury is no longer configured');
-       const market = new w.ethers.Contract(b.gift.treasury,marketListingAbi,w.provider);
-       await assertGiftListingsDelisted(market,b.gift);
+       const marketAddress = window.DecentConfig?.supporterDnft?.escrowAddress;
+       if (!w.ethers.isAddress(marketAddress || '')) throw new Error('Market contract is not configured; do not fund');
+       const market = new w.ethers.Contract(marketAddress,marketListingAbi,w.provider);
        const nft = new w.ethers.Contract(b.gift.collection, ['function balanceOf(address,uint256) view returns(uint256)', 'function isApprovedForAll(address,address) view returns(bool)', 'function setApprovalForAll(address,bool)'], w.signer);
+       await assertGiftListingsBacked(market,nft,b.gift);
        if (await nft.balanceOf(w.address,b.gift.tokenId) < BigInt(b.gift.quantity)) throw new Error('Funder does not hold the exact unlisted editions');
        if (!await nft.isApprovedForAll(w.address,b.escrowAddress)) {
          if (!confirm('Approve the asset escrow to transfer ALL your editions in this collection? Revoke this operator approval after funding if desired.')) return;
@@ -492,7 +510,7 @@ function mount() {
  <label data-live-token-address hidden>Base ERC-20 contract<input name="assetAddress" placeholder="0x…"></label>
  <label><input name="hasGift" type="checkbox"> Reserve an ERC-1155 gift at funding</label>
  <div data-live-gift-fields hidden><label>Collection on Base<input name="giftCollection" placeholder="0x…"></label><label>Token ID<input name="giftTokenId" inputmode="numeric"></label><label>Quantity<input name="giftQuantity" value="1" inputmode="numeric"></label>
- <p>The configured Market treasury is the signed return recipient. All overlapping listings must be delisted and reconciled before funding. Funding is not yet confirmed.</p></div></details>
+ <p>Gift editions transfer from the funding wallet. The configured gift treasury is the signed return recipient. Public Market listings of this edition may stay active only while the Market holds every listed edition. Funding is not yet confirmed.</p></div></details>
  <input name="fullPayoutLiveMinutes" type="hidden" value="${LIVE_PERFORMANCE_FULL_PAYOUT_MINUTES}">
  <label data-live-additional hidden>Additional pilot offer (public; NOT funded by performance escrow)<textarea name="additionalOffer" maxlength="1000" placeholder="Separate prep-task payments and supporter gift, including their conditions. No private notes."></textarea></label>
  <label>Payment handling<select name="mode"><option value="phase1">🔒 Protected booking escrow (recommended)</option><option value="phase0">🏦 Community fund (earmarked, not escrowed)</option></select></label>
@@ -555,14 +573,16 @@ function mount() {
  });
  section.querySelector('form').onsubmit = event => { event.preventDefault(); guarded(async () => {
    const f = Object.fromEntries(new FormData(section.querySelector('form')));
-   if (!state) state = await api();
+   state = await api();
    const startUtc = newYorkInputToUtc(f.startLocal);
    if (Date.parse(startUtc) <= Date.now()) throw new Error('Choose a future New York start time; expired invitations must be replaced, not reused');
-   const eventId = `friday-live-performance:${f.startLocal.slice(0,10)}`;
    const reviewWindow = Math.round(Number(f.reviewWindowHours) * 3600);
    const cancellationWindow = Math.round(Number(f.cancellationWindowHours) * 3600);
    const termsUri = /^b[a-zA-Z0-9]{20,}$/.test(f.termsUri.trim()) ? `ipfs://${f.termsUri.trim()}` : f.termsUri.trim();
    const endUtc = new Date(Date.parse(startUtc) + Number(f.airtimeMinutes) * 60_000).toISOString();
+   const overlap = overlappingLiveBooking(state.bookings, startUtc, endUtc);
+   if (overlap) throw new Error(`This slot overlaps ${overlap.displayName || overlap.wallet}'s booking; choose a back-to-back start instead`);
+   const eventId = liveOccurrenceId(f.startLocal, state.bookings);
    const booking = { ...f, eventId, airtimeMinutes:Number(f.airtimeMinutes),
    fullPayoutLiveMinutes:Number(f.fullPayoutLiveMinutes), stewardApproved:f.stewardApproved === 'on',
    termsUri,

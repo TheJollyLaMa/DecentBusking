@@ -837,14 +837,13 @@ Booking-linked gift custody/release for next week is tracked in
 [DecentMarket #78](https://github.com/TheJollyLaMa/DecentMarket/issues/78);
 deployment needs explicit approval and must not strand earned cash claims.
 
-An experimental separate Market asset escrow and its feature-gated booking,
-Admin, Profile and historical-tip integration are **undeployed**. Continue
-using the legacy USDC path and the manually reconciled gift procedure above.
+The separate Market asset escrow is deployed on Base at
+`0x64A5CE57c5dA4C35688b72366Ec505E020ec9Ce8`, and the worker reported
+`assetBookingCreationEnabled:true` on 2026-11-20. Legacy USDC bookings keep
+their own escrow and receipts.
 Do not treat a token balance, acceptance or producer approval as proof of
 funding, payment or gift delivery. The new contract explicitly permits
-administrator recovery of reserved or earned assets. Security review, an
-independently reviewed solution to the immutable Market listing limitation,
-and explicit deployment approval are mandatory before use.
+administrator recovery of reserved or earned assets.
 
 The new version signs the exact Base fee asset, quantity and decimals,
 performer, contract, booking and optional edition and return treasury. It is a
@@ -868,12 +867,13 @@ tip reader uses the stored exact contract version and terms at the tip block,
 never a legacy fallback for a new-version booking. Listener timing remains
 independent.
 
-Before any gift funding, Admin checks all matching treasury listings are
-inactive and requires editions physically in the funding wallet. The Market
-withdrawal itself does not update listings: delist all overlapping listings
-and reconcile confirmed sales before withdrawing. The UI check is not atomic,
-can be bypassed by direct contract calls, and cannot stop a later relisting.
-Do not deploy until that limitation has been safely addressed.
+Gift editions transfer from the funding wallet (the connected Admin wallet),
+not from the Market. Before gift funding, Admin requires the editions in that
+wallet and checks that the Market still holds at least the `available` total of
+every active listing for the same edition, so a public sale listing such as
+Supporter listing #22 can stay up. If a withdrawal left a listing
+under-stocked, funding stops until the listing is reconciled. The check is a
+point-in-time UI check, not a contract guarantee.
 
 Reuse decision: adapt the MIT-licensed Market contract's existing custody
 semantics, not its buyer flow; use Busking's `getBaseReadProvider`,
@@ -884,6 +884,19 @@ feature/pinner-allocation worktree and `LivePerformanceEscrow.sol` at
 the public token-75 URI `ipfs://QmZroFCEhaKoctVqW682Uzv5i6WWiQtuWvTAYkQBYfH6TD`,
 not new commemorative art or a new mint. Canopy's agency map was consulted as
 a lead; no speculative cross-repo extraction or public inventory update.
+
+### Two performers on one night
+
+Book each performer as a separate invitation with back-to-back,
+non-overlapping slots (for example 21:00–21:30 and 21:30–22:00 New York).
+The first booking uses `friday-live-performance:<date>`; later bookings that
+night use `friday-live-performance-HHMM:<date>`. Admin and the worker reject
+any slot that overlaps another non-cancelled booking. Each booking has its own
+room, T-60/T-15 soundchecks, escrow funding and claim. The second performer's
+T-15 check falls during the first performer's set, so check that performer
+privately from the producer room. Without a per-booking
+`LIVE_AUDIO_PROGRAMS` entry there is no lead-in or outro; if one is added, keep
+the first performer's outro from running into the next slot.
 
 ### Prep calendar and reuse
 

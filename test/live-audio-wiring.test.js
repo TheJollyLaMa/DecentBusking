@@ -779,7 +779,7 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
     assert.match(source, /live-audio\.mjs\?v=20261114-allocated-stage/);
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /live-performance-admin\.mjs\?v=20261117-booking-assets/);
+  assert.match(html, /live-performance-admin\.mjs\?v=20261120-two-slot-gifts/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261117-booking-assets/);
   assert.match(html, /src="js\/creator-profile\.mjs\?v=20261117-release-party"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261115-afterparty"/);
