@@ -12,6 +12,10 @@ import { publishLiveBookingState } from './live-booking-notifications.mjs?v=2026
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
 import { afterpartyRows } from './live-afterparty.mjs?v=20261117-release-party';
 import { guaranteedReleaseState, guidedGuaranteedRelease, liveBroadcastCompletionPending } from './live-escrow-release.mjs?v=20261115-afterparty';
+// Approved and pinned 2026-11-20; the hash is keccak256 of the exact pinned bytes.
+export const LIVE_ASSET_TERMS_V1 = Object.freeze({ version:'LIVE PERFORMANCE ASSETS v1',
+  uri:'ipfs://bafkreiayf2eh66dr2v22thqv6ygwwdothxdzphfgyeinhdiquiuvas442m',
+  hash:'0x730ca56b2c511b3e5af825f125d79a541a88a27f3e9fa13250c9f25eedd66509' });
 
 const routerAbi = [
  'function funds(bytes32) view returns (string metadataUri,bool active,bool exists)',
@@ -537,9 +541,9 @@ function mount() {
   for (const name of ['reviewWindowHours', 'cancellationWindowHours', 'killFeePercent']) form.elements[name].readOnly = pilot;
   form.elements.reviewWindowHours.value = '24';
   form.elements.cancellationWindowHours.value = assets ? '0' : '8';
-  form.elements.termsVersion.value = assets ? 'LIVE PERFORMANCE ASSETS v1' : pilot ? LIVE_PILOT_TERMS_VERSION : LIVE_APPROVED_TERMS_V2.version;
-  form.elements.termsUri.value = pilot || assets ? '' : LIVE_APPROVED_TERMS_V2.uri;
-  form.elements.termsHash.value = pilot || assets ? '' : LIVE_APPROVED_TERMS_V2.hash;
+  form.elements.termsVersion.value = assets ? LIVE_ASSET_TERMS_V1.version : pilot ? LIVE_PILOT_TERMS_VERSION : LIVE_APPROVED_TERMS_V2.version;
+  form.elements.termsUri.value = assets ? LIVE_ASSET_TERMS_V1.uri : pilot ? '' : LIVE_APPROVED_TERMS_V2.uri;
+  form.elements.termsHash.value = assets ? LIVE_ASSET_TERMS_V1.hash : pilot ? '' : LIVE_APPROVED_TERMS_V2.hash;
   form.elements.stewardApproved.checked = false;
   section.querySelector('[data-live-additional]').hidden = !pilot;
   if (pilot && !form.elements.additionalOffer.value.trim()) form.elements.additionalOffer.value = LIVE_PILOT_COMPANION_OFFER;

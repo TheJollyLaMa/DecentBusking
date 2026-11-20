@@ -230,3 +230,9 @@ test('listing preflight and receipt proof reject wrong inventory and recipient',
  const cancel = f.iface.encodeEventLog(f.iface.getEvent('FeeDecision'),[ethers.id(b.id),4,'ipfs://cancel']);
  assert.equal(verifyAssetCancellationReceipt({status:1,to:escrow,logs:[{...cancel,address:escrow}]},b,ethers),true);
 });
+test('prefilled asset terms hash matches the committed pinned agreement bytes', async () => {
+ const { LIVE_ASSET_TERMS_V1 } = await import('../js/live-performance-admin.mjs');
+ const bytes = require('node:fs').readFileSync(require('node:path').join(__dirname, '../docs/LIVE_PERFORMANCE_ASSET_TERMS_V1.json'));
+ assert.equal(ethers.keccak256(bytes), LIVE_ASSET_TERMS_V1.hash);
+ assert.equal(JSON.parse(bytes).version, LIVE_ASSET_TERMS_V1.version);
+});

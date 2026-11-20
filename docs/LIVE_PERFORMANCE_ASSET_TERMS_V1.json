@@ -1,0 +1,22 @@
+{
+  "title": "DecentBusking Live Performance Asset Agreement v1",
+  "version": "LIVE PERFORMANCE ASSETS v1",
+  "payoutPolicy": "asset-guaranteed-v1",
+  "status": "Steward-approved terms for asset-escrow live bookings once pinned to IPFS; the signed booking names this exact URI and hash.",
+  "scope": "Only a dated booking that names this exact document URI and hash, the asset-guaranteed-v1 policy, the LivePerformanceAssetsEscrow contract on Base (8453), the performer wallet, the booked start and end, the fee asset and raw quantity, and any gift edition and quantity. Those signed booking values are the exact offer; this document sets the rules around them.",
+  "terms": [
+    "Mission: perform a live audio set through DecentBusking website radio in the booked slot. Video, audience size and ticket sales are not required. The start and duration are fixed in the signed invitation.",
+    "Fee: the exact Base asset and raw quantity in the signed booking (for example Base ETH). It is a fixed quantity, not a dollar amount, and its market value may change. The fee is reserved in the booking escrow before the show. Technical or platform problems never reduce it.",
+    "Supporter gift (optional): when the booking names an exact edition and quantity, those editions are moved into the same booking escrow before the show. The gift is separate from the fee. It is delivered after the steward approves the performance and releases the gift.",
+    "Soundchecks: attend private checks 60 and 15 minutes before the booked start. The operator verifies your input and actual listener delivery. Both must pass before going on air. A failed check blocks public broadcast but does not reduce the fee.",
+    "Interruption: listeners see RECONNECTING during recovery. If verified audio delivery stops for 60 consecutive seconds, the broadcast may be cancelled and announced, and normal radio resumes. A broadcast cancellation does not cancel the fee.",
+    "Approval and claim: after the booked end, the steward listens for a performed set and approves it within the review window in the signed booking (24 hours unless stated otherwise). Then the performer claims the fee from their own wallet, paying a small Base ETH gas fee. If the steward makes no decision within the review window, the performer can claim the full fee anyway. The fee has no claim deadline.",
+    "Gift release: after approval, the steward releases the gift to the performer wallet and pays that gas. A performed show is not a reason to withhold the gift. If the steward misses the review window, the steward still approves and releases the gift for a performed show.",
+    "Platform fault: if DecentBusking cannot carry the show, the steward records a platform fault. The full fee stays guaranteed and claimable, and the gift returns to the gift treasury.",
+    "No-show and cancellation: before the booked start, the performer may cancel from their own wallet. That refunds the fee to the funder and returns the gift. If the performer does not perform, the steward may record a no-show only after the booked end and within the review window. That also refunds the fee and returns the gift. These are not penalties beyond losing this booking.",
+    "Administrator recovery: this prototype contract lets the administrator recover reserved or earned assets for emergencies or mistakes. Recovery is shown as recovered, not paid. If recovery, a mistaken decision or any contract action defeats a fee or gift the performer earned under these terms, the steward owes it separately and records proof of that payment.",
+    "Evidence: escrow status, fee claim and gift transfer are public Base transactions. Acceptance, a wallet balance or approval alone is not proof of payment. Operator observations and delivery evidence are reviewed openly; the contract does not hear the performance.",
+    "Content and rights: use original or properly licensed audio. No harassment, hate speech or unlawful content. The performer keeps ownership and grants permission to broadcast this agreed live set. Recording, minting, radio replay, clips, artwork and video need the performer's separate signed recording permission. This agreement grants none by default.",
+    "Changes and disputes: changed dates or terms require a new agreement and fresh consent without cancelling an existing earned obligation. Raise problems directly with the steward and keep private conversations and credentials private. Tips are separate; each party handles its own taxes."
+  ]
+}
