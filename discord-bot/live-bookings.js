@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { Contract, Interface, id, verifyMessage } from 'ethers';
 import {
   LIVE_FUND, LIVE_ROUTER, LIVE_USDC, LIVE_ESCROW_ABI,
@@ -57,9 +58,11 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
   let queue = Promise.resolve();
   const run = fn => { const result = queue.then(fn); queue = result.catch(() => {}); return result; };
   const initialize = () => initialized ||= restore().then(value => { if (value) state = value; });
-  async function commit(next) {
+  async function commit(next, { indexCheckpoint = false } = {}) {
     if (!save) throw new Error('Durable booking storage unavailable; no changes saved');
-    next.revision = state.revision + 1;
+    // A scan cursor can advance while a wallet prompt is open without changing any booking.
+    const changed = !indexCheckpoint || !isDeepStrictEqual(next.bookings, state.bookings);
+    next.revision = state.revision + Number(changed);
     const checkpoint = await save(next);
     if (!/^ipfs:\/\//.test(checkpoint || '')) throw new Error('Booking checkpoint did not confirm');
     state = next;
@@ -205,7 +208,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
       if (from > head) {
         assetIndexCaughtUp = next.assetEscrowScannedThrough === state.assetEscrowScannedThrough;
         if (next.assetEscrowScannedThrough !== state.assetEscrowScannedThrough) {
-          await commit(next);
+          await commit(next, { indexCheckpoint: true });
           for (const b of state.bookings.filter(item => item.escrowVersion === LIVE_ASSET_VERSION && item.scheduleStatus === 'pending')) {
             const pending = clone(state);
             await syncSchedule(pending, pending.bookings.find(item => item.id === b.id));
@@ -223,7 +226,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
       if ((await provider.getBlock(through))?.hash !== before.hash) throw new Error('Asset escrow chain changed during indexing');
       next.assetEscrowScannedThrough = through;
       next.assetEscrowBlockHash = before.hash;
-      await commit(next);
+      await commit(next, { indexCheckpoint: true });
       assetIndexCaughtUp = through >= head;
       for (const b of state.bookings.filter(item => item.escrowVersion === LIVE_ASSET_VERSION && item.scheduleStatus === 'pending')) {
         const pending = clone(state);
@@ -245,7 +248,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
       try { await applyEscrowLog(next, log); } catch (error) { if (!/no matching event/.test(error.message)) throw error; }
     }
     next.escrowScannedThrough = through;
-    await commit(next);
+    await commit(next, { indexCheckpoint: true });
     for (const b of state.bookings.filter(b => b.cancelled && b.scheduleStatus === 'pending')) {
       const pending = clone(state);
       await syncSchedule(pending, pending.bookings.find(item => item.id === b.id));

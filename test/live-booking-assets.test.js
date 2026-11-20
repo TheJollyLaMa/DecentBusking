@@ -14,6 +14,7 @@ async function fixture(enabled = true) {
  const { createLiveBookings } = await import('../discord-bot/live-bookings.js');
  const iface = new ethers.Interface(shared.LIVE_ASSET_ESCROW_ABI);
  let state, head = 99, epoch = 0, logs = [], receipts = new Map(), chain = 8453n, online = true;
+ let schedule = { ready:true,events:[],weeklySchedule:{} };
  const blockHash = n => ethers.id(`block:${epoch}:${n}`);
  const provider = {
   getNetwork:async () => ({ chainId:chain }), getCode:async () => online ? '0x01' : '0x',
@@ -26,8 +27,8 @@ async function fixture(enabled = true) {
   assetReader:async address => address === shared.LIVE_ZERO_ADDRESS
    ? { decimals:18,symbol:'ETH',approved:true } : { decimals:6,symbol:'USDC',approved:address === token },
   save:async value => { state = structuredClone(value); return 'ipfs://checkpoint'; },
-  restore:async () => state, getSchedule:async () => ({ ready:true,events:[],weeklySchedule:{} }),
-  saveSchedule:async () => {},
+  restore:async () => state, getSchedule:async () => schedule,
+  saveSchedule:async next => { schedule = { ...schedule,...next }; },
  };
  const service = createLiveBookings(config);
  const input = { performer:performer.address, displayName:'Artist', title:'Set', eventId:'friday-live-performance:2026-10-23',
@@ -54,7 +55,7 @@ async function fixture(enabled = true) {
   receipts.set(hash,{ status:1,to:escrow,blockNumber:block,blockHash:blockHash(block),logs:[log] });
   return hash;
  }
- return { shared,service,input,create,acknowledge,exec,add,provider,iface, state:() => state,
+ return { shared,service,input,create,acknowledge,exec,add,provider,iface, state:() => state, schedule:() => schedule,
   restart:enabled => createLiveBookings({ ...config,assetBookingsEnabled:enabled }),
   head:n => { head = n; }, chain:n => { chain = n; }, online:v => { online = v; },
   receipt:(hash,value) => { if (value) receipts.set(hash,value); else receipts.delete(hash); },
@@ -85,6 +86,27 @@ test('native ETH is fixed exact units and no gift is falsely reserved', async ()
  assert.match(f.shared.liveAcknowledgement(b), /0\.02 ETH/);
  assert.equal(b.giftStatus,'none');
  assert.equal(f.shared.formatLiveAsset(b.amountUnits,18,'ETH'),'0.02 ETH');
+});
+test('calendar listing survives checkpoint-only Base progress before performer acceptance', async () => {
+ const f = await fixture();
+ const { revision,bookings:[b] } = await f.create({ assetAddress:f.shared.LIVE_ZERO_ADDRESS, assetDecimals:18,
+  assetSymbol:'ETH',amountUnits:'20000000000000000' });
+ f.head(101);
+ const listed = await f.service.execute({ action:'schedule',id:bookingId,revision });
+ assert.equal(f.state().assetEscrowScannedThrough,100);
+ assert.equal(listed.bookings[0].scheduleStatus,'synced');
+ assert.equal(listed.bookings[0].acknowledged,false);
+ assert.deepEqual(f.schedule().events.map(({ id,startUtc,endUtc }) => ({ id,startUtc,endUtc })),
+  [{ id:b.eventId,startUtc:b.startUtc,endUtc:b.endUtc }]);
+});
+test('actual escrow changes still invalidate older signed booking commands', async () => {
+ const f = await fixture(); await f.create(); await f.acknowledge();
+ const { revision,bookings:[b] } = await f.service.getState();
+ f.add(100,'Funded',[ethers.id(bookingId),b.wallet,owner.address,Object.values(f.shared.assetBookingTerms(b)),b.termsUri]);
+ f.head(101);
+ await assert.rejects(f.service.execute({ action:'schedule',id:bookingId,revision }), /Stale booking revision/);
+ assert.equal((await f.service.getState()).bookings[0].status,'funded');
+ assert.equal(f.schedule().events.length,0);
 });
 test('new asset invitations default off independently of an available escrow index', async () => {
  const f = await fixture(false);
