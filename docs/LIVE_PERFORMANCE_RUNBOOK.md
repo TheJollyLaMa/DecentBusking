@@ -841,6 +841,11 @@ The separate Market asset escrow is deployed on Base at
 `0x64A5CE57c5dA4C35688b72366Ec505E020ec9Ce8`, and the worker reported
 `assetBookingCreationEnabled:true` on 2026-11-20. Legacy USDC bookings keep
 their own escrow and receipts.
+Approved asset terms [LIVE_PERFORMANCE_ASSET_TERMS_V1.json](./LIVE_PERFORMANCE_ASSET_TERMS_V1.json)
+are pinned at `ipfs://bafkreiayf2eh66dr2v22thqv6ygwwdothxdzphfgyeinhdiquiuvas442m`,
+hash `0x730ca56b2c511b3e5af825f125d79a541a88a27f3e9fa13250c9f25eedd66509`.
+Admin prefills them for the asset policy. Editing the file requires a new
+version and fresh pin.
 Do not treat a token balance, acceptance or producer approval as proof of
 funding, payment or gift delivery. The new contract explicitly permits
 administrator recovery of reserved or earned assets.
