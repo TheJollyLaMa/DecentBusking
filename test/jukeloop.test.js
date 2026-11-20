@@ -1827,7 +1827,7 @@ test('JukeLoop prepares the next paid request and starts it before prior-play bo
   await new Promise(resolve => setImmediate(resolve));
 
   assert.equal(gaps.length, 1);
-  assert.ok(gaps[0] > 2_000 && gaps[0] <= 2_500, `changeover gap was ${gaps[0]}ms`);
+  assert.ok(gaps[0] >= 5_500 && gaps[0] <= 6_000, `changeover gap was ${gaps[0]}ms`);
   assert.equal(played.length, 1);
   assert.equal(session._currentPaid, secondPaid);
   assert.equal(session._currentTrack, paidTrack);
@@ -1927,6 +1927,21 @@ test('radio state publishes the prepared next item with its changeover start tim
   assert.equal(prepared.upNext.mediaType, 'audio/mpeg');
   assert.equal('startsAt' in prepared.upNext, false);
   assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).upNext, null);
+});
+
+test('five gentle gong gap assets exist and rotate predictably', async () => {
+  const { GONG_GAP_ASSET_COUNT, gongGapAssetPath } = await import('../discord-bot/jukeloop.js');
+  assert.equal(GONG_GAP_ASSET_COUNT, 5);
+  const paths = [];
+  for (let index = 0; index < GONG_GAP_ASSET_COUNT; index++) {
+    const asset = gongGapAssetPath(index);
+    assert.equal(fs.existsSync(asset), true);
+    assert.equal(fs.statSync(asset).size > 100000, true);
+    paths.push(asset);
+  }
+  assert.equal(new Set(paths).size, 5);
+  assert.equal(gongGapAssetPath(5), gongGapAssetPath(0));
+  assert.equal(paths.some(asset => asset.endsWith('gong-gap-2.wav')), false);
 });
 
 test('JukeLoop waits out the changeover gap while publishing the next item, and drops it if the show changes', async (t) => {
