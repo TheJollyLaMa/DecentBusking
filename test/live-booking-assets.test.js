@@ -236,3 +236,71 @@ test('prefilled asset terms hash matches the committed pinned agreement bytes', 
  assert.equal(ethers.keccak256(bytes), LIVE_ASSET_TERMS_V1.hash);
  assert.equal(JSON.parse(bytes).version, LIVE_ASSET_TERMS_V1.version);
 });
+test('gift funding rechecks Market backing after operator approval before sending ETH', async t => {
+ const f = await fixture();
+ const created = (await f.create({ assetAddress:f.shared.LIVE_ZERO_ADDRESS, assetDecimals:18,
+  assetSymbol:'ETH', amountUnits:'20000000000000000' })).bookings[0];
+ const booking = { ...created, acknowledged:true, startUtc:new Date(Date.now()+3600_000).toISOString(),
+  endUtc:new Date(Date.now()+4800_000).toISOString() };
+ const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../js/live-performance-admin.mjs'), 'utf8')
+  .replace(/^import[\s\S]*?from '[^']+';\n/gm, '').replace(/^export /gm, '');
+ for (const losesBacking of [false,true]) await t.test(losesBacking ? 'inventory changed during approval' : 'active listing remains fully backed', async () => {
+  const marketAddress = '0x5555555555555555555555555555555555555555';
+  let stock = 77n, checks = 0, approvals = 0;
+  const funding = [], commands = [], pending = new Map(), hash = ethers.id('funding fixture');
+  const initialState = { assetEscrowConfigured:true, assetEscrowAddress:escrow, giftTreasuryAddress:treasury,
+   revision:0, bookings:[booking] };
+  const market = { target:marketAddress, nextListingId:async () => { checks++; return 1n; },
+   getListing:async () => ({ active:true,nftContract:collection,tokenId:75n,available:77n }) };
+  const nft = {
+   balanceOf:async address => {
+    assert.ok([marketAddress,owner.address].includes(address));
+    return address === marketAddress ? stock : 12n;
+   },
+   isApprovedForAll:async () => false,
+   setApprovalForAll:async (operator, allowed) => {
+    assert.equal(operator,escrow); assert.equal(allowed,true); approvals++;
+    return { wait:async () => { if (losesBacking) stock = 76n; } };
+   },
+  };
+  const contracts = {
+   [marketAddress]:market, [collection]:nft,
+   [escrow]:{ createBooking:async (...args) => { funding.push(args); return { hash,wait:async () => ({hash}) }; } },
+  };
+  const signer = { getAddress:async () => owner.address, signMessage:async () => 'fixture-signature' };
+  const run = () => require('node:vm').runInNewContext(`${source}
+   state = initialState;
+   section = { querySelector: () => ({ textContent:'' }) };
+   render = () => {};
+   action('fund', booking);`, {
+    ...f.shared, initialState, booking,
+    window:{ ethereum:{}, DecentConfig:{ supporterDnft:{escrowAddress:marketAddress} }, ethers:{ ...ethers,
+     BrowserProvider:class { async getSigner() { return signer; } async getNetwork() { return {chainId:8453n}; } },
+     Contract:function(address) { assert.ok(contracts[address],`Unexpected contract: ${address}`); return contracts[address]; },
+    } },
+    isAdminWallet:address => address === owner.address,
+    document:{ readyState:'loading',addEventListener(){},dispatchEvent(){} }, CustomEvent:class {},
+    location:new URL('https://radio.example'), confirm:() => true, publishLiveBookingState(){},
+    localStorage:{ getItem:key => pending.get(key) ?? null, setItem:(key,value) => pending.set(key,value),
+     removeItem:key => pending.delete(key) },
+    fetch:async (_url, options) => {
+     const {command} = JSON.parse(options.body); commands.push(command);
+     return { ok:true,json:async () => ({ ...initialState,bookings:[{...booking,
+      transactions:{funding:{status:commands.length === 1 ? 'pending' : 'confirmed'}}}] }) };
+    },
+   });
+  if (losesBacking) await assert.rejects(run(), /not fully stocked/);
+  else {
+   await run();
+   assert.equal(funding[0][0],ethers.id(booking.id));
+   assert.deepEqual(funding[0][1],f.shared.assetBookingTerms(booking));
+   assert.equal(funding[0][2],booking.termsUri);
+   assert.equal(funding[0][3].value,booking.amountUnits);
+  }
+  assert.equal(checks,2);
+  assert.equal(approvals,1);
+  assert.equal(funding.length,losesBacking ? 0 : 1);
+  assert.equal(commands.length,losesBacking ? 0 : 2);
+  assert.equal(pending.size,0);
+ });
+});
