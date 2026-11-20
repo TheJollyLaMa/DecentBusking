@@ -198,14 +198,27 @@ test('on-chain performer cancellation updates the calendar and does not invent a
  assert.equal(canceled.scheduleStatus,'synced');
  assert.doesNotMatch(f.shared.liveBookingRows([canceled]), /Gift: returned/);
 });
+test('a second performer on the same night gets its own slot occurrence and cannot overlap', async () => {
+ const { liveOccurrenceId, overlappingLiveBooking } = await import('../js/live-performance-admin.mjs');
+ const first = { eventId:'friday-live-performance:2026-11-20', startUtc:'2026-11-21T02:00:00Z', endUtc:'2026-11-21T02:30:00Z', displayName:'A' };
+ assert.equal(liveOccurrenceId('2026-11-20T21:00', []), 'friday-live-performance:2026-11-20');
+ assert.equal(liveOccurrenceId('2026-11-20T21:30', [first]), 'friday-live-performance-2130:2026-11-20');
+ assert.equal(liveOccurrenceId('2026-11-20T21:30', [{ ...first, cancelled:true }]), 'friday-live-performance:2026-11-20');
+ assert.equal(overlappingLiveBooking([first], '2026-11-21T02:30:00Z', '2026-11-21T03:00:00Z'), null);
+ assert.equal(overlappingLiveBooking([first], '2026-11-21T02:20:00Z', '2026-11-21T02:50:00Z'), first);
+});
 test('listing preflight and receipt proof reject wrong inventory and recipient', async () => {
  const f = await fixture();
- const { assertGiftListingsDelisted } = await import('../js/live-performance-admin.mjs');
+ const { assertGiftListingsBacked } = await import('../js/live-performance-admin.mjs');
  const { verifyAssetFeeReceipt, verifyAssetCancellationReceipt, assetReceiptCanonical } = await import('../js/live-performance-profile.mjs');
  const gift = f.input.gift;
- const listing = { active:true,nftContract:collection,tokenId:75n };
- await assert.rejects(assertGiftListingsDelisted({nextListingId:async()=>1n,getListing:async()=>listing},gift), /Delist/);
- await assertGiftListingsDelisted({nextListingId:async()=>1n,getListing:async()=>({...listing,active:false})},gift);
+ const listing = { active:true,nftContract:collection,tokenId:75n,available:77n };
+ const market = { target:'0x31b07b83e99A9bdF379bf40225b8A80d3804C89d', nextListingId:async()=>2n,
+  getListing:async i => i ? { ...listing, tokenId:76n } : listing };
+ const held = n => ({ balanceOf:async (owner,id) => owner === market.target && BigInt(id) === 75n ? n : 0n });
+ await assertGiftListingsBacked(market,held(77n),gift);
+ await assert.rejects(assertGiftListingsBacked(market,held(76n),gift), /not fully stocked/);
+ await assertGiftListingsBacked({...market,getListing:async()=>({...listing,active:false})},held(0n),gift);
  await f.create(); const b = (await f.service.getState()).bookings[0];
  const event = f.iface.encodeEventLog(f.iface.getEvent('FeeSettled'),[ethers.id(b.id),3,b.wallet,b.amountUnits]);
  const receipt = {status:1,to:escrow,logs:[{...event,address:escrow}]};

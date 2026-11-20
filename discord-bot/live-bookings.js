@@ -363,6 +363,9 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
         const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(start);
         if (!eventId.endsWith(`:${localDate}`)) throw new Error('Occurrence date must match the New York show date');
         if (next.bookings.some(item => item.eventId === eventId && !item.cancelled)) throw new Error('Occurrence already has a booking');
+        if (next.bookings.some(item => !item.cancelled && Date.parse(item.startUtc) < end && start < Date.parse(item.endUtc))) {
+          throw new Error('Show slot overlaps another booking; book back-to-back slots instead');
+        }
         const assets = input.escrowVersion === LIVE_ASSET_VERSION;
         if (input.escrowVersion !== undefined && !assets) throw new Error('Unknown escrow version');
         const amount = required(input.amountUnits, assets ? 'Asset amount' : 'USDC amount', assets ? 78 : 24);
