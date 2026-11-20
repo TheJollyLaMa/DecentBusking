@@ -877,8 +877,10 @@ not from the Market. Before gift funding, Admin requires the editions in that
 wallet and checks that the Market still holds at least the `available` total of
 every active listing for the same edition, so a public sale listing such as
 Supporter listing #22 can stay up. If a withdrawal left a listing
-under-stocked, funding stops until the listing is reconciled. The check is a
-point-in-time UI check, not a contract guarantee.
+under-stocked, funding stops until the listing is reconciled. Admin repeats
+the Market backing check after operator approval, immediately before sending
+the funding transaction. These are point-in-time UI checks, not a contract
+guarantee.
 
 Reuse decision: adapt the MIT-licensed Market contract's existing custody
 semantics, not its buyer flow; use Busking's `getBaseReadProvider`,

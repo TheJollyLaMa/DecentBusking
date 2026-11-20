@@ -273,24 +273,25 @@ async function action(name, b) {
          const tx = await token.approve(b.escrowAddress,b.amountUnits); await tx.wait(2); await w.check();
        }
      }
+     let giftMarket, giftNft;
      if (b.gift) {
        if (!state.giftTreasuryAddress || state.giftTreasuryAddress.toLowerCase() !== b.gift.treasury.toLowerCase()) throw new Error('Signed gift treasury is no longer configured');
        const marketAddress = window.DecentConfig?.supporterDnft?.escrowAddress;
        if (!w.ethers.isAddress(marketAddress || '')) throw new Error('Market contract is not configured; do not fund');
-       const market = new w.ethers.Contract(marketAddress,marketListingAbi,w.provider);
-       const nft = new w.ethers.Contract(b.gift.collection, ['function balanceOf(address,uint256) view returns(uint256)', 'function isApprovedForAll(address,address) view returns(bool)', 'function setApprovalForAll(address,bool)'], w.signer);
-       await assertGiftListingsBacked(market,nft,b.gift);
-       if (await nft.balanceOf(w.address,b.gift.tokenId) < BigInt(b.gift.quantity)) throw new Error('Funder does not hold the exact unlisted editions');
-       if (!await nft.isApprovedForAll(w.address,b.escrowAddress)) {
+       giftMarket = new w.ethers.Contract(marketAddress,marketListingAbi,w.provider);
+       giftNft = new w.ethers.Contract(b.gift.collection, ['function balanceOf(address,uint256) view returns(uint256)', 'function isApprovedForAll(address,address) view returns(bool)', 'function setApprovalForAll(address,bool)'], w.signer);
+       await assertGiftListingsBacked(giftMarket,giftNft,b.gift);
+       if (await giftNft.balanceOf(w.address,b.gift.tokenId) < BigInt(b.gift.quantity)) throw new Error('Funder does not hold the exact unlisted editions');
+       if (!await giftNft.isApprovedForAll(w.address,b.escrowAddress)) {
          if (!confirm('Approve the asset escrow to transfer ALL your editions in this collection? Revoke this operator approval after funding if desired.')) return;
-         const tx = await nft.setApprovalForAll(b.escrowAddress,true); await tx.wait(2); await w.check();
+         const tx = await giftNft.setApprovalForAll(b.escrowAddress,true); await tx.wait(2); await w.check();
        }
      }
      await w.check();
      if (Date.parse(b.startUtc) <= Date.now()) throw new Error('Invitation expired during approvals');
      await transaction(b,'funding', async () => {
        await w.check();
-       if (b.gift) await assertGiftListingsDelisted(new w.ethers.Contract(b.gift.treasury,marketListingAbi,w.provider),b.gift);
+       if (b.gift) await assertGiftListingsBacked(giftMarket,giftNft,b.gift);
        if (b.assetAddress.toLowerCase() !== LIVE_ZERO_ADDRESS && !await contract.approvedTokens(b.assetAddress)) throw new Error('Token is no longer approved');
        return contract.createBooking(bookingId,assetBookingTerms(b),b.termsUri,
          { value:b.assetAddress.toLowerCase() === LIVE_ZERO_ADDRESS ? b.amountUnits : 0 });
