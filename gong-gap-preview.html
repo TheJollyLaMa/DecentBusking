@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DecentBusking Inter-Song Gong Preview</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #08110f; color: #d9efe6; }
+    body { max-width: 760px; margin: 0 auto; padding: 32px 18px 60px; }
+    h1 { font-size: 24px; margin-bottom: 6px; }
+    p { color: #a9c2ba; line-height: 1.5; }
+    .variant { display:grid; grid-template-columns:54px 1fr; gap:14px; align-items:center;
+      padding:16px 0; border-top:1px solid #29443b; }
+    .number { width:54px;height:54px;border-radius:50%;border:1px solid #638579;
+      display:grid;place-items:center;font-size:19px;color:#bff2d7;background:#10201b; }
+    audio { width:100%; margin-top:8px; }
+    button { border:1px solid #638579;border-radius:999px;background:#10201b;color:#d9efe6;
+      padding:10px 16px;font:inherit;cursor:pointer; }
+    .play-all { margin:16px 0 8px; }
+  </style>
+</head>
+<body>
+  <h1>Inter-Song Gong / Bell / Chime</h1>
+  <p>Five 6-second padded boundaries. Each starts quietly and fades out gently.</p>
+  <button class="play-all" type="button" id="play-all">Play all variants in sequence</button>
+  <div id="variants"></div>
+  <script>
+    const variants = document.getElementById('variants');
+    const players = [];
+    const sourceNumbers = [1, 3, 4, 5, 6];
+    for (let [position, sourceNumber] of sourceNumbers.entries()) {
+      const index = position + 1;
+      const row = document.createElement('section');
+      row.className = 'variant';
+      row.innerHTML = `<div class="number">${index}</div><div><strong>Boundary variant ${index}</strong>
+        <audio controls preload="metadata" src="discord-bot/gong-gap-assets/gong-gap-${sourceNumber}.mp3"></audio></div>`;
+      variants.append(row);
+      players.push(row.querySelector('audio'));
+    }
+    document.getElementById('play-all').addEventListener('click', async () => {
+      for (const player of players) {
+        player.pause();
+        player.currentTime = 0;
+      }
+      for (const player of players) {
+        await player.play().catch(() => {});
+        await new Promise(resolve => {
+          player.onended = resolve;
+          setTimeout(resolve, 6500);
+        });
+      }
+    });
+  </script>
+</body>
+</html>

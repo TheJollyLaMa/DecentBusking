@@ -336,8 +336,11 @@ Other unexpected contract failures still surface as errors.
 At track transitions, overdue adverts are checked again before prefetched music
 starts, because a slot can unlock after prefetch. Already prepared paid DJuke
 requests retain priority; lookup failures keep music playing and are logged.
-Between ordinary songs the bot waits `CHANGEOVER_GAP_MS` (6 s) before starting the
-next prepared track, and `GET /api/radio` publishes it as `upNext` (`trackId`,
+Between ordinary songs the bot plays one of five gentle six-second gong gaps,
+rotated in order, and waits `CHANGEOVER_GAP_MS` (6 s) before starting the next
+prepared track. The gap assets live under `discord-bot/gong-gap-assets/`.
+Paid playlists remain gapless. Live performances and active songs are not
+replaced or shortened. `GET /api/radio` publishes the prepared item as `upNext` (`trackId`,
 `title`, `ipfsCid`, `mediaType`, `videoUrl`, `isDevert`, plus `startsAt` /
 `startsInMs` during the gap). The website preloads `upNext` into an in-memory
 Blob (≤ 80 MB; skipped for Save-Data/2G, blocked autoplay, ads-only and archive

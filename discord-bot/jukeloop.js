@@ -22,6 +22,7 @@
 
 import { spawn } from 'child_process';
 import { Transform } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { getAddress } from 'ethers';
 import { MessageFlags } from 'discord.js';
 import { DEVERT_MAX_AD_SECONDS, DEVERT_SONGS_PER_MAIN_AD } from '../js/devert-scheduler.mjs';
@@ -79,6 +80,13 @@ const NEXT_TRACK_READY_TIMEOUT_MS = 20_000;
 export const PLAYBACK_RECOVERY_TIMEOUT_MS = 120_000;
 /** Intentional recovery padding between ordinary songs. Paid playlists stay gapless. */
 export const CHANGEOVER_GAP_MS = 6_000;
+export const GONG_GAP_ASSET_COUNT = 5;
+export function gongGapAssetPath(index) {
+  const sourceNumbers = [1, 3, 4, 5, 6];
+  const position = ((Number.isInteger(index) ? index : 0) % GONG_GAP_ASSET_COUNT + GONG_GAP_ASSET_COUNT) % GONG_GAP_ASSET_COUNT;
+  const number = sourceNumbers[position];
+  return fileURLToPath(new URL(`./gong-gap-assets/gong-gap-${number}.wav`, import.meta.url));
+}
 const DJUKE_PREFETCH_POLL_MS = 5_000;
 const PAID_FETCH_RETRY_MS = 60_000;
 const MAIN_RADIO_STATE_SCHEMA_VERSION = 1;
@@ -863,6 +871,8 @@ export class JukeLoopSession {
     /** Earliest time the next item may start, and the item waiting out that changeover gap. */
     this._changeoverAt = 0;
     this._changeoverPrepared = null;
+    this._changeoverGapIndex = 0;
+    this._changeoverGapPlaying = false;
     /** True while the queued advert break was picked early and still needs the current song to count. */
     this._breakAwaitingUnlock = false;
     this.connection   = null;
@@ -907,6 +917,15 @@ export class JukeLoopSession {
     this.player.on(AudioPlayerStatus.Idle, oldState => {
       clearTimeout(this._adCutoffTimer);
       this._adCutoffTimer = null;
+      if (this._changeoverGapPlaying) {
+        this._changeoverGapPlaying = false;
+        if (!this._destroyed) {
+          this._playNext().catch(error =>
+            console.error('[jukeloop] Unhandled error in _playNext:', error),
+          );
+        }
+        return;
+      }
       if (this._nowPlaying?.audible) {
         const audio = this._activeAudio;
         if (audio && oldState?.resource && oldState.resource !== audio.resource) {
@@ -966,13 +985,17 @@ export class JukeLoopSession {
         .catch(error => console.warn('[jukeloop] Previous-track bookkeeping deferred:', error.message))
         .finally(() => { if (this._paidBookkeepingTask === bookkeeping) this._paidBookkeepingTask = null; });
       if (hadPaid) this._paidBookkeepingTask = bookkeeping;
+      const gapAllowed = !this._currentDevertAd &&
+        (!hadPaid || this._currentPaid?.playlistBatchId === undefined);
       this._currentDevertAd = null;
       this._nowPlaying = null;
       const activeShow = this._resolveShow();
       if (!this._destroyed && activeShow.type !== 'live_performance') {
-        this._playNext().catch((err) =>
-          console.error('[jukeloop] Unhandled error in _playNext:', err),
-        );
+        if (!gapAllowed || !this._startChangeoverGap()) {
+          this._playNext().catch((err) =>
+            console.error('[jukeloop] Unhandled error in _playNext:', err),
+          );
+        }
       }
     });
 
@@ -1993,6 +2016,32 @@ export class JukeLoopSession {
 
   _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  _startChangeoverGap() {
+    if (!this._discordOutputsAttached && !this.publicBroadcast?.enabled) return false;
+    let source;
+    try {
+      source = createFFmpegStream(gongGapAssetPath(this._changeoverGapIndex++), {});
+    } catch (error) {
+      console.warn('[jukeloop] Inter-song gap asset unavailable:', error.message);
+      return false;
+    }
+    const index = (this._changeoverGapIndex - 1) % GONG_GAP_ASSET_COUNT;
+    const resource = createAudioResource(source.stream, { inputType: StreamType.Raw });
+    const playId = `gap:${Date.now()}:${index + 1}`;
+    const program = { playId, title: 'Gentle inter-song gong', artist: '', isDevert: false };
+    if (this.websitePlayback && this.publicBroadcast?.enabled && typeof resource.read === 'function') {
+      const read = resource.read.bind(resource);
+      resource.read = () => {
+        const packet = read();
+        if (packet && !this._destroyed) this.publicBroadcast.radioPacket(packet, program);
+        return packet;
+      };
+    }
+    this._changeoverGapPlaying = true;
+    this.player.play(resource);
+    return true;
   }
 
   /** Hold the prepared item until the changeover gap ends; null if the radio mode changed meanwhile. */

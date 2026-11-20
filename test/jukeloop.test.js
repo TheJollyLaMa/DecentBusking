@@ -1929,6 +1929,21 @@ test('radio state publishes the prepared next item with its changeover start tim
   assert.equal(buildRadioState({ nowPlaying: null, playlist: [] }).upNext, null);
 });
 
+test('five gentle gong gap assets exist and rotate predictably', async () => {
+  const { GONG_GAP_ASSET_COUNT, gongGapAssetPath } = await import('../discord-bot/jukeloop.js');
+  assert.equal(GONG_GAP_ASSET_COUNT, 5);
+  const paths = [];
+  for (let index = 0; index < GONG_GAP_ASSET_COUNT; index++) {
+    const asset = gongGapAssetPath(index);
+    assert.equal(fs.existsSync(asset), true);
+    assert.equal(fs.statSync(asset).size > 100000, true);
+    paths.push(asset);
+  }
+  assert.equal(new Set(paths).size, 5);
+  assert.equal(gongGapAssetPath(5), gongGapAssetPath(0));
+  assert.equal(paths.some(asset => asset.endsWith('gong-gap-2.wav')), false);
+});
+
 test('JukeLoop waits out the changeover gap while publishing the next item, and drops it if the show changes', async (t) => {
   const { JukeLoopSession, CHANGEOVER_GAP_MS } = await import('../discord-bot/jukeloop.js');
   for (const scenario of ['starts-after-gap', 'show-changed']) {
