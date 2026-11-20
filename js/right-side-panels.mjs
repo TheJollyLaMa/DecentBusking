@@ -7,7 +7,7 @@ export function initRightSidePanels({ document = globalThis.document, window = g
   const frame = byId('rehearsal-frame'), notice = byId('right-panel-status');
   const tabs = { rehearsal: byId('rehearsal-tab'), bignuten: byId('bignuten-tab') };
   const bignuten = initBigNutenPanel({ document, window, fetchImpl });
-  let active = '', busy = false, eligible = false, walletVersion = 0, returnFocus;
+  let active = '', busy = false, eligible = false, retryAccess = false, walletVersion = 0, returnFocus;
   let ready = false, roomId = '', pendingClose;
   const service = String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
   const say = message => { notice.textContent = message; };
@@ -89,7 +89,12 @@ export function initRightSidePanels({ document = globalThis.document, window = g
     return warning;
   }
   for (const name of Object.keys(tabs)) {
-    tabs[name].addEventListener('click', action(() => open(name)));
+    tabs[name].addEventListener('click', action(async () => {
+      if (name === 'rehearsal' && !eligible) {
+        if (!retryAccess || !await checkRehearsalAccess(walletVersion)) return;
+      }
+      return open(name);
+    }));
     byId(`${name}-panel-close`).addEventListener('click', action(closeUtility));
   }
   byId('rehearsal-popout').addEventListener('click', () => {
@@ -141,17 +146,15 @@ export function initRightSidePanels({ document = globalThis.document, window = g
       void action(closeUtility)();
     }
   });
-  async function walletChanged() {
-    const version = ++walletVersion;
-    eligible = false; tabs.rehearsal.hidden = true;
-    byId('rehearsal-access-retry').hidden = true;
-    if (active === 'rehearsal') {
-      frame.contentWindow?.postMessage({ type: 'decentbusking:rehearsal-wallet-changed' }, window.location.origin);
-      pendingClose?.finish(false);
-      clearFrame(); show('');
-    }
+  function setRehearsalAccess(canHost, retry = false) {
+    eligible = canHost;
+    retryAccess = retry;
+    tabs.rehearsal.hidden = !canHost && !retry;
+    tabs.rehearsal.setAttribute('aria-label', retry ? 'Retry DHearse access check' : 'Open DHearse rehearsal room');
+  }
+  async function checkRehearsalAccess(version) {
     const wallet = String(window._wallet?.address || '').toLowerCase();
-    if (!/^0x[0-9a-f]{40}$/.test(wallet) || !window._wallet?.signer) return;
+    if (!/^0x[0-9a-f]{40}$/.test(wallet) || !window._wallet?.signer) return false;
     try {
       const response = await fetchImpl(`${service}/api/private-rehearsal/eligibility`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ wallet }),
@@ -159,15 +162,26 @@ export function initRightSidePanels({ document = globalThis.document, window = g
       });
       const data = await response.json();
       if (!response.ok || typeof data.canHost !== 'boolean') throw Error(data.error || 'Performer eligibility response is unavailable.');
-      if (version !== walletVersion) return;
-      eligible = data.canHost; tabs.rehearsal.hidden = !eligible;
+      if (version !== walletVersion) return false;
+      setRehearsalAccess(data.canHost);
+      return data.canHost;
     } catch (error) {
-      if (version !== walletVersion) return;
-      say(`DHearse access could not be checked: ${error.message}`);
-      byId('rehearsal-access-retry').hidden = false;
+      if (version !== walletVersion) return false;
+      setRehearsalAccess(false, true);
+      console.warn('[DHearse] Access check failed:', error.message);
+      return false;
     }
   }
-  byId('rehearsal-access-retry').addEventListener('click', () => { say(''); void walletChanged(); });
+  function walletChanged() {
+    const version = ++walletVersion;
+    setRehearsalAccess(false);
+    if (active === 'rehearsal') {
+      frame.contentWindow?.postMessage({ type: 'decentbusking:rehearsal-wallet-changed' }, window.location.origin);
+      pendingClose?.finish(false);
+      clearFrame(); show('');
+    }
+    void checkRehearsalAccess(version);
+  }
   document.addEventListener('wallet-connected', walletChanged);
   document.addEventListener('wallet-disconnected', walletChanged);
   void walletChanged();

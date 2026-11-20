@@ -533,6 +533,40 @@ test('right panels wait for the studio draft before switching, and reject stale 
   assert.equal(stale.get('rehearsal-tab').hidden, true);
 });
 
+test('DHearse tab silently retries a failed access check and opens on success', async t => {
+  let attempts = 0;
+  const ui = await rightPanels(t, async url => {
+    if (!url.endsWith('/api/private-rehearsal/eligibility')) return { ok: false };
+    if (++attempts < 3) throw new TypeError('Failed to fetch');
+    return { ok: true, json: async () => ({ canHost: true }) };
+  });
+  const tab = ui.get('rehearsal-tab');
+  assert.equal(tab.hidden, false);
+  assert.match(tab.getAttribute('aria-label'), /retry/i);
+  assert.equal(ui.get('right-panel-status').textContent ?? '', '');
+  await tab.click();
+  assert.equal(ui.get('rehearsal-frame').src, 'about:blank');
+  assert.equal(tab.hidden, false);
+  assert.equal(ui.get('right-panel-status').textContent ?? '', '');
+  await tab.click();
+  assert.equal(attempts, 3);
+  assert.match(ui.get('rehearsal-frame').src, /rehearsal\.html\?embedded=1$/);
+  assert.equal(tab.getAttribute('aria-expanded'), 'true');
+});
+
+test('DHearse retry hides the tab without opening if the wallet is ineligible', async t => {
+  let attempts = 0;
+  const ui = await rightPanels(t, async url => {
+    if (!url.endsWith('/api/private-rehearsal/eligibility')) return { ok: false };
+    if (++attempts === 1) throw new TypeError('Failed to fetch');
+    return { ok: true, json: async () => ({ canHost: false }) };
+  });
+  await ui.get('rehearsal-tab').click();
+  assert.equal(ui.get('rehearsal-tab').hidden, true);
+  assert.equal(ui.get('rehearsal-frame').src, 'about:blank');
+  assert.equal(ui.get('right-panel-status').textContent ?? '', '');
+});
+
 test('closing or switching the BigNuten drawer pauses its guide until explicitly resumed', async t => {
   const ui = await rightPanels(t);
   t.after(() => ui.get('bignuten-panel-close').click());

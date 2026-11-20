@@ -355,6 +355,8 @@ both people to participate after deployment and enablement.
 The right-side stack is Archive, creator-only Studio, eligible-host DHearse and an
 image-based BigNuten placeholder. Its tabs mirror the left-side tabs: 44px wide,
 6px outer corners, aligned stack tops and the same compact mobile sizing.
+If the DHearse access check fails, the tab itself retries the check and opens
+the room on success. A confirmed ineligible wallet does not see the tab.
 The same rehearsal client runs in the side panel
 using the header signer, and in a popout. Closing/switching waits for microphone
 shutdown acknowledgement; moving to a popout stops embedded audio first and passes
