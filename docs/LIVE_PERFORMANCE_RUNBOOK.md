@@ -355,6 +355,16 @@ permission for delay / encore** action requires a fresh performer signature and
 an explicit v2 server confirmation. Declined, unavailable or legacy-only responses
 never widen the previous permission. Published IPFS audio cannot be recalled.
 
+After going off air, the performer can open the Studio from the room.
+Profile also offers the right-side Studio for ended asset and pilot bookings.
+Preview unlocks after processing. An unfinished edit saved in the current
+browser shows a resume reminder in Profile. Saving a draft or leaving it
+unfinished cannot approve release, mint, or change performance pay. An artist
+may approve the full set, approve named cuts, or publish nothing. Admin mint
+review is separate. Verified recordings over ten minutes are eligible only in
+Long-form Hour, not regular rotation; shorter minted cuts can qualify for
+regular rotation under the usual programming rules.
+
 Reuse: the desk and shared direction card adapt this repository's
 `live-audio-room.mjs` listener/action patterns, `roomRequest`, booking links and
 `live-audio.css` at `0cae70d` (monitoring PR #354). Canopy's curated offers/needs

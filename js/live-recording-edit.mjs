@@ -3,6 +3,25 @@ export const LIVE_RECORDING_MIN_RELEASE_SAMPLES = LIVE_RECORDING_SAMPLE_RATE / 2
 export const LIVE_RECORDING_MAX_SONG_SAMPLES = LIVE_RECORDING_SAMPLE_RATE * 30 * 60;
 export const LIVE_RECORDING_MAX_SONGS = 50;
 
+const draftPrefix = (wallet, id) => `decentbusking:recording-draft:v1:${wallet.toLowerCase()}:${id}:`;
+export const recordingDraftKey = (wallet, id, cid) => `${draftPrefix(wallet, id)}${cid}`;
+
+export function hasLocalRecordingDraft(storage, wallet, bookingId) {
+  const prefix = draftPrefix(wallet, bookingId);
+  for (let i = 0; i < (storage?.length ?? 0); i++) {
+    const key = storage.key(i);
+    if (!key?.startsWith(prefix) || !/^[a-z0-9]+$/i.test(key.slice(prefix.length))) continue;
+    try {
+      const saved = JSON.parse(storage.getItem(key));
+      if (saved?.schema === 1 && saved.draft?.songs?.length > 0) return true;
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      console.warn('Could not read the saved recording draft.', error.name);
+    }
+  }
+  return false;
+}
+
 const validTitle = (value, limit) => typeof value === 'string' &&
   value.trim().length > 0 && value.trim().length <= limit && !/[\u0000-\u001f\u007f]/.test(value);
 

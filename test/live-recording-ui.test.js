@@ -85,7 +85,7 @@ const song = (wallet = artist, tokenId = 1) => ({
 });
 const settled = () => new Promise(resolve => setImmediate(resolve));
 
-async function recordingEditor(t, { storage = new Map(), request, sign } = {}) {
+async function recordingEditor(t, { storage = new Map(), request, sign, bookingId } = {}) {
   const { runInNewContext } = require('node:vm');
   const model = require('../js/live-recording-edit.mjs');
   const gateway = require('../js/ipfs-gateway.js');
@@ -96,7 +96,7 @@ async function recordingEditor(t, { storage = new Map(), request, sign } = {}) {
   };
   const preview = { available: true, previewOnly: true, journalRevision: 0, wallet: artist,
     sourceCid: 'a'.repeat(46), sourceSamples: 288000, sampleRate: 48000, durationSeconds: 6,
-    catalogSource: { nftId: song().nftId }, releases: [], waveform: [], decision: 'undecided',
+    ...(bookingId ? {} : { catalogSource: { nftId: song().nftId } }), releases: [], waveform: [], decision: 'undecided',
     draft: { revision: 0, albumTitle: 'Original', songs: [0, 1, 2].map(index => ({
       title: `Cut ${index + 1}`, startSample: index * 96000, endSample: (index + 1) * 96000,
     })) } };
@@ -106,10 +106,11 @@ async function recordingEditor(t, { storage = new Map(), request, sign } = {}) {
   } };
   window.parent = { _wallet: { address: artist, signer }, postMessage: value => posts.push(value) };
   window.DecentConfig = { ipfsUploadServiceUrl: 'https://service.example' };
-  window.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
+  window.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value),
+    removeItem: key => storage.delete(key) };
   const document = { body: new StudioElement(), getElementById: get,
     createElement: () => new StudioElement(), createTextNode: () => new StudioElement() };
-  const location = new URL(`https://radio.example/recording-edit.html?catalog=${song().nftId}`);
+  const location = new URL(`https://radio.example/recording-edit.html?${bookingId ? `booking=${bookingId}` : `catalog=${song().nftId}`}`);
   const code = read('js/live-recording-editor.mjs').replace(/^import[\s\S]*?from '[^']+';\n/gm, '');
   runInNewContext(code, { ...model, ...gateway, window, document, location, URL, structuredClone, console,
     setTimeout: (callback, delay) => { const timer = setTimeout(callback, delay); timers.add(timer); return timer; },
@@ -126,6 +127,30 @@ async function recordingEditor(t, { storage = new Map(), request, sign } = {}) {
   get('recording-edit-audio').dispatchEvent({ type: 'loadedmetadata' });
   return { get: id => get(`recording-edit-${id}`), window, calls, signatures, storage, posts };
 }
+
+test('live Studio keeps the resume draft until the signed release succeeds', async t => {
+  let fail = true;
+  const ui = await recordingEditor(t, { bookingId: 'live:studio',
+    request: (path, input, preview) => {
+      if (path === 'recording-preview') return preview;
+      if (fail) throw new Error('Try again');
+      return { ...preview, previewOnly: false, draft: input.draft };
+    } });
+  ui.get('album-title').value = 'Live set';
+  ui.get('album-title').oninput();
+  await ui.get('defer').click();
+  await settled();
+  assert.equal(ui.storage.size, 1);
+  assert.equal(ui.signatures.length, 0);
+  await ui.get('full').click();
+  await settled();
+  assert.equal(ui.storage.size, 1);
+  fail = false;
+  await ui.get('full').click();
+  await settled();
+  assert.equal(ui.storage.size, 0);
+  assert.equal(ui.signatures.length, 1, 'retrying the same release does not request another signature');
+});
 
 test('editor opens and saves locally without signing; only final confirmation signs once', async t => {
   const ui = await recordingEditor(t);

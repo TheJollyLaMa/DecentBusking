@@ -22,7 +22,7 @@ const at = ms => `T${ms >= START ? '+' : '-'}${Math.floor(Math.abs(ms - START) /
 
 // Real production modules on a fake clock: the live-audio service (state machine, policy, admission), the real
 // recorder, the real JukeLoopSession radio. Only transport, storage, uploads and wall-clock time are doubles.
-async function night(t, { programs = { 'act-a': PROGRAM, 'act-b': PROGRAM }, recovery = false } = {}) {
+async function night(t, { programs = { 'act-a': PROGRAM, 'act-b': PROGRAM }, recovery = false, assets = false } = {}) {
   const clock = { now: START - 75 * MIN };
   t.mock.method(Date, 'now', () => clock.now);
   const { createLiveAudioService } = await import('../discord-bot/live-audio.js');
@@ -31,8 +31,9 @@ async function night(t, { programs = { 'act-a': PROGRAM, 'act-b': PROGRAM }, rec
   const { JukeLoopSession } = await import('../discord-bot/jukeloop.js');
   const iso = ms => new Date(ms).toISOString();
   const booking = (id, start) => ({ id, eventId: `friday-live:${id}`, wallet: wallets[id].address, title: `Act ${id}`,
-    displayName: `Act ${id}`, startUtc: iso(start), endUtc: iso(start + 20 * MIN), payoutPolicy: 'pilot-guaranteed-v1',
-    status: 'funded', acknowledged: true, amountUnits: '20000000', mode: 'phase1' });
+    displayName: `Act ${id}`, startUtc: iso(start), endUtc: iso(start + 20 * MIN),
+    payoutPolicy: assets ? 'asset-guaranteed-v1' : 'pilot-guaranteed-v1',
+    status: 'funded', acknowledged: true, amountUnits: assets ? '20000000000000000' : '20000000', mode: 'phase1' });
   const world = {
     bookings: [booking('act-a', START), booking('act-b', START + 20 * MIN)],
     saved: { version: 1, rooms: [] }, journal: { version: 1, recordings: [] },
@@ -235,8 +236,8 @@ const upTo = async n => {
 };
 // What listeners hear, from act A's lead-in onward.
 const show = n => n.timeline().slice(n.timeline().indexOf('lead-in:act-a'));
-const published = (n, id) => n.world.ingests.find(i => i.id === id);
-const outcomes = n => n.world.ingests.map(i => [i.id, i.incomplete]);
+const prepared = n => n.world.journal.recordings.filter(r => r.status === 'ready' && r.result?.cid);
+const outcomes = n => prepared(n).map(r => [r.bookingId, r.incomplete]);
 const SMOOTH = ['lead-in:act-a', 'radio:waiting', 'live:act-a', 'outro:act-a', 'lead-in:act-b', 'radio:waiting', 'live:act-b', 'outro:act-b', 'radio'];
 const OVERRUN = ['lead-in:act-a', 'radio:waiting', 'live:act-a', 'outro:act-a', 'radio:waiting', 'live:act-b', 'outro:act-b', 'radio'];
 // Rules every night must keep, however the performers and the desk behave.
@@ -244,16 +245,17 @@ async function soundNight(n) {
   await n.settle();
   assert.deepEqual(n.world.violations, [], 'airtime never overlaps and the guaranteed terms never change');
   assert.deepEqual(n.world.errors, []);
-  const ids = n.world.ingests.map(i => i.id);
-  assert.equal(new Set(ids).size, ids.length, 'each recording is published once');
+  const ids = prepared(n).map(r => r.bookingId);
+  assert.equal(new Set(ids).size, ids.length, 'each recording is prepared once');
+  assert.deepEqual(n.world.ingests, [], 'no automatic mint intake before performer release approval');
   assert.equal(new Set(n.world.closed.map(c => c.id)).size, n.world.closed.length, 'each room is closed once');
   assert.equal(n.timeline().at(-1), 'radio', 'the radio is back in normal rotation');
-  assert.ok(n.world.journal.recordings.every(r => ['submitted', 'empty'].includes(r.status)), 'no recording is left half-finished');
+  assert.ok(n.world.journal.recordings.every(r => ['ready', 'empty'].includes(r.status)), 'no recording is left processing');
   assert.equal((await n.lease('handoff-night-end')).ready, true, 'a deployment can safely start');
 }
 
 test('act A finishes early: a clean handoff to act B, then the ads and radio resume exactly once', async t => {
-  const n = await night(t); await upTo(n);
+  const n = await night(t, { assets: true }); await upTo(n);
   await n.advance(START + 14 * MIN);
   await n.finishAct('act-a', n.passes.ownerA, n.passes.artistA);
   await n.advance(START + 19 * MIN);
@@ -265,6 +267,11 @@ test('act A finishes early: a clean handoff to act B, then the ads and radio res
   assert.deepEqual(show(n), SMOOTH);
   assert.deepEqual(n.world.cuts, [], 'nobody is cut off mid-song');
   assert.deepEqual(outcomes(n), [['act-a', false], ['act-b', false]]);
+  for (const b of n.world.bookings) {
+    const preview = await n.proc.service.previewRecording({ bookingId: b.id, wallet: b.wallet });
+    assert.equal(preview.previewOnly, true);
+    assert.ok(preview.sourceSamples > 0);
+  }
   assert.deepEqual(n.world.closed.map(c => c.id), ['act-a', 'act-b']);
   await soundNight(n);
 });
@@ -339,7 +346,7 @@ test('the delayed act declines: nothing is published for it, the radio resumes a
   await n.advance(START + 90 * MIN);
   assert.equal(early.ready, true, 'a declined act leaves nothing pending, so a deployment may start straight away');
   assert.equal(n.room('act-b').allocation.endReason, 'declined');
-  assert.equal(published(n, 'act-b'), undefined, 'a declined act has nothing to publish');
+  assert.ok(!prepared(n).some(r => r.bookingId === 'act-b'), 'a declined act has nothing to publish');
   assert.deepEqual(show(n), ['lead-in:act-a', 'radio:waiting', 'live:act-a', 'outro:act-a', 'radio']);
   assert.deepEqual(n.world.cuts, []);
   assert.deepEqual(outcomes(n), [['act-a', false]]);

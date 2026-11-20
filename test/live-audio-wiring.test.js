@@ -44,6 +44,27 @@ function dom(t) {
 }
 const descendants = node => [node, ...(node.children || []).flatMap(descendants)];
 
+test('ended ETH booking offers the Studio and a same-browser draft reminder without requiring payment', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const { recordingDraftKey } = await import('../js/live-recording-edit.mjs');
+  const make = dom(t);
+  const b = { ...booking(), id: 'asset:artist', escrowVersion: 'assets-v1', payoutPolicy: 'asset-guaranteed-v1',
+    assetSymbol: 'ETH', assetDecimals: 18, amountUnits: '20000000000000000' };
+  const key = recordingDraftKey(wallet, b.id, 'bafyexample');
+  const otherKey = recordingDraftKey(otherWallet, b.id, 'bafyexample');
+  const saved = new Map([[otherKey, JSON.stringify({ schema: 1, draft: { songs: [{}] } })]]);
+  window.localStorage = { get length() { return saved.size; }, key: i => [...saved.keys()][i], getItem: k => saved.get(k) };
+  const container = make('div');
+  const render = () => renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example', bookingState: { bookings: [b] } });
+  await render();
+  const studio = () => descendants(container).filter(node => node.attributes?.['data-recording-edit'] === b.id).at(-1);
+  assert.match(studio().textContent, /Review your live recording/);
+  saved.set(key, saved.get(otherKey));
+  await render();
+  assert.equal(studio().textContent, 'Resume saved recording edit');
+  assert.ok(descendants(container).some(node => /does not affect your performance pay.*Long-form Hour/.test(node.textContent)));
+});
+
 test('audience feedback follows essential performer and operator audio controls', () => {
   const performer = fs.readFileSync(path.join(__dirname, '../live-room.html'), 'utf8');
   const producer = fs.readFileSync(path.join(__dirname, '../producer-room.html'), 'utf8');
@@ -786,7 +807,7 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   assert.match(html, /live-performance\.css\?v=20261117-booking-assets/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/live-performance-profile.mjs?v=20261115-afterparty'],
-    './js/live-performance-profile.mjs?v=20261117-booking-assets');
+    './js/live-performance-profile.mjs?v=20261120-afterparty-studio');
   assert.equal(map.imports['./js/live-bookings.mjs?v=20261108-live-audio-pilot'],
     './js/live-bookings.mjs?v=20261117-booking-assets');
   for (const suffix of ['20261110-wallet-practice', '20261114-allocated-stage', '20261116-curtain']) {
@@ -831,7 +852,7 @@ test('standalone backstage and main-page imports load compatible recovery helper
   }
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
-    assert.ok(source.includes(`${entry}?v=20261117-booking-assets`));
+    assert.ok(source.includes(`${entry}?v=${entry === 'live-audio-room.mjs' ? '20261120-afterparty-studio' : '20261117-booking-assets'}`));
     assert.match(source, /live-audio\.css\?v=20261116-booth/);
     assert.doesNotMatch(source, /20261114-direction/);
   }

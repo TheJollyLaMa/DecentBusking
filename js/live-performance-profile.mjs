@@ -1,5 +1,6 @@
 import { announcePaymentCelebration } from './payment-celebration.mjs';
-import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, LIVE_ASSET_VERSION, LIVE_ASSET_ESCROW_ABI, matchesAssetBooking, formatLiveAsset, claimState, liveAcknowledgement, liveBookingRows, livePerformancePolicyText } from './live-bookings.mjs?v=20261108-live-audio-pilot';
+import { LIVE_ESCROW_ABI, LIVE_PILOT_POLICY, LIVE_ASSET_POLICY, LIVE_ASSET_VERSION, LIVE_ASSET_ESCROW_ABI, matchesAssetBooking, formatLiveAsset, claimState, liveAcknowledgement, liveBookingRows, livePerformancePolicyText } from './live-bookings.mjs?v=20261108-live-audio-pilot';
+import { hasLocalRecordingDraft } from './live-recording-edit.mjs?v=20261120-afterparty-studio';
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
 import { performerRoomUrl, resolvePerformerReentry } from './performer-room.mjs?v=20261116-curtain';
 import { renderPerformerGift } from './performer-gift.mjs?v=20261114-performer-encore';
@@ -341,17 +342,6 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        article.append(stageStatus);
      }
      article.append(amount, nextStatus);
-     if (afterparty && !b.cancelled) {
-       const editRoom = document.createElement('p');
-       const editLink = document.createElement('a');
-       editLink.href = `recording-edit.html?booking=${encodeURIComponent(b.id)}`;
-       editLink.textContent = '🎛 Review your live recording';
-       editLink.setAttribute('data-recording-edit', b.id);
-       const note = document.createElement('small');
-       note.textContent = 'If you opted in, preview the original and choose a full-set release, split-song releases, or decide later. Nothing enters the mint queue until you approve each release.';
-       editRoom.append(editLink, document.createElement('br'), note);
-       article.append(editRoom);
-     }
      const verifiedReentry = ['active', 'ended'].includes(reentry.status) ? reentry : null;
      const rows = afterpartyRows(b, {
        audience: 'performer', now: Date.now(), reentry: verifiedReentry,
@@ -373,6 +363,27 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
      const checklist = renderAfterpartyChecklist(rows, { documentRef: document });
      if (checklist) article.append(checklist);
    } else if (!compact) article.innerHTML = liveBookingRows([b]);
+   const assetStudio = assetVersion && !stagePending && b.mode === 'phase1' && b.payoutPolicy === LIVE_ASSET_POLICY &&
+     b.acknowledged && ['funded', 'approved', 'paid'].includes(b.status) &&
+     (completion.state === 'verified' || Date.parse(b.endUtc) <= Date.now());
+   if ((afterparty || assetStudio) && !b.cancelled && connected.toLowerCase() === b.wallet.toLowerCase()) {
+     let unfinished = false, draftUnavailable = false;
+     try { unfinished = hasLocalRecordingDraft(window.localStorage, connected, b.id); }
+     catch { draftUnavailable = true; }
+     const editRoom = document.createElement('p');
+     const editLink = document.createElement('a');
+     editLink.href = `recording-edit.html?booking=${encodeURIComponent(b.id)}`;
+     editLink.textContent = unfinished ? 'Resume saved recording edit' : '🎛 Review your live recording';
+     editLink.setAttribute('data-recording-edit', b.id);
+     const note = document.createElement('small');
+     const next = unfinished
+       ? 'You have an unfinished edit saved in this browser. Resume it or leave it for later.'
+       : draftUnavailable ? 'This browser could not check for a saved edit.'
+         : 'If you opted in, you can preview the recording once it finishes processing.';
+     note.textContent = `${next} Release is optional and does not affect your performance pay. Nothing is minted without release approval and admin review. Recordings over 10 minutes are eligible only in Long-form Hour after minting. Minted songs under 10 minutes can qualify for regular rotation.`;
+     editRoom.append(editLink, document.createElement('br'), note);
+     article.append(editRoom);
+   }
    if (!compact && b.mode === 'phase1' && b.status === 'draft' && !b.cancelled) {
      article.append(renderPerformerBookingInvite({ booking: b, state, wallet, serviceUrl, ethers, fetchImpl }));
    }
