@@ -9,7 +9,7 @@ import OpusScript from 'opusscript';
 
 const FRAME_BYTES = 48000 * 2 * 2 / 50;
 const PCM_BYTES_PER_MS = 48000 * 2 * 2 / 1000;
-const PCM_MAX_MS = 1000, PCM_SKIP_TO_MS = 500;
+const PCM_MAX_MS = 60_000;
 export const BROADCAST_RETENTION_MS = 120000;
 
 export function createBroadcastStateReader(read, { now = Date.now, ttlMs = 1000 } = {}) {
@@ -66,6 +66,21 @@ export function broadcastProgram(track, at) {
   };
 }
 
+export function dropBroadcastBoundaryTail(queue, previousRadioPlayId, nextProgram) {
+  if (nextProgram?.live || !previousRadioPlayId ||
+      !nextProgram?.playId || nextProgram.playId === previousRadioPlayId) return 0;
+  let droppedBytes = 0;
+  for (let index = 0; index < queue.length;) {
+    if (queue[index].program?.playId === previousRadioPlayId) {
+      droppedBytes += queue[index].bytes?.length || 0;
+      queue.splice(index, 1);
+    } else {
+      index++;
+    }
+  }
+  return droppedBytes;
+}
+
 const isTransientEdgeError = error => error instanceof TypeError ||
   ['AbortError', 'TimeoutError'].includes(error?.name) || [408, 500, 502, 503, 504].includes(error?.status);
 
@@ -118,6 +133,7 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
   let stateTask = null, stateIssue = null, stateIssueLoggedAt = -Infinity;
   let publishIssue = null, publishIssueLoggedAt = -Infinity;
   let lateAudio = null, lateAudioLoggedAt = -Infinity;
+  let queuedRadioProgramId = null;
   let policy = null, previousPlaylist = '', inputBytes = 0, uploadBytes = 0;
   const runId = randomBytes(16).toString('hex'), queue = [], history = [], uploaded = new Set();
   const safeDetails = (stage, error) => ({ stage,
@@ -132,20 +148,20 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     encoder?.kill();
     queue.length = 0; queuedBytes = 0;
   };
-  // Late audio never extends the one-second allowance. A brief stall in the bot skips the stale part in one
-  // go (down to half a second) and is counted, rather than switching the public station off.
-  function skipLateAudio(stage, stale) {
-    const ageMs = Math.round(monotonicNow() - queue[0].receivedAt);
-    let droppedBytes = 0;
-    while (queue.length && stale(queue[0])) {
-      const entry = queue.shift(); queuedBytes -= entry.bytes.length; droppedBytes += entry.bytes.length;
-    }
+  function catchUpAtBoundary(nextProgram) {
+    if (nextProgram?.live || queuedRadioProgramId == null) return;
+    const droppedBytes = dropBroadcastBoundaryTail(queue, queuedRadioProgramId, nextProgram);
+    queuedBytes = queue.reduce((sum, entry) => sum + entry.bytes.length, 0);
+    if (!droppedBytes) return;
     const droppedMs = Math.round(droppedBytes / PCM_BYTES_PER_MS);
-    lateAudio = { skips: (lateAudio?.skips || 0) + 1, droppedMs: (lateAudio?.droppedMs || 0) + droppedMs,
-      lastStage: stage, lastAt: now() };
+    lateAudio = { skips: (lateAudio?.skips || 0) + 1,
+      droppedMs: (lateAudio?.droppedMs || 0) + droppedMs,
+      lastStage: 'song-boundary', lastAt: now() };
     if (now() - lateAudioLoggedAt >= 10000) {
       lateAudioLoggedAt = now();
-      log.warn?.('[public-broadcast] PCM_LATE_AUDIO_SKIPPED', { stage, ageMs, droppedMs, skips: lateAudio.skips });
+      log.warn?.('[public-broadcast] PCM_BOUNDARY_CATCHUP', {
+        stage: 'song-boundary', droppedMs, skips: lateAudio.skips,
+      });
     }
   }
   function push(bytes, program, receivedAt = monotonicNow()) {
@@ -153,10 +169,12 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     if (bytes.length % 4 || bytes.length > PCM_BYTES_PER_MS * PCM_MAX_MS) {
       fail('PCM_BUFFER_LIMIT', { stage: 'pcm', queuedBytes, incomingBytes: bytes.length }); return;
     }
-    if (queue.length && queuedBytes + bytes.length > PCM_BYTES_PER_MS * PCM_MAX_MS) {
-      skipLateAudio('pcm', () => queuedBytes + bytes.length > PCM_BYTES_PER_MS * PCM_SKIP_TO_MS);
-    }
+    if (!program.live) catchUpAtBoundary(program);
     queue.push({ bytes, program, receivedAt }); queuedBytes += bytes.length;
+    if (!program.live) queuedRadioProgramId = program.playId;
+    if (queuedBytes > PCM_BYTES_PER_MS * PCM_MAX_MS) {
+      fail('PCM_BUFFER_LIMIT', { stage: 'pcm-buffer', queuedBytes, incomingBytes: bytes.length }); return;
+    }
     if (firstInputAt === null) {
       firstInputAt = startedAt = now();
       startedTick = monotonicNow();
@@ -167,9 +185,6 @@ export function createPublicBroadcast({ enabled = false, uploader, ffmpeg = proc
     const output = Buffer.alloc(FRAME_BYTES);
     let offset = 0;
     const priming = !history.length && firstInputAt !== null && now() - firstInputAt < 80;
-    if (!priming && queue.length && monotonicNow() - queue[0].receivedAt > PCM_MAX_MS) {
-      skipLateAudio('source-age', entry => monotonicNow() - entry.receivedAt > PCM_SKIP_TO_MS);
-    }
     while (!priming && queue.length && offset < FRAME_BYTES) {
       const entry = queue[0], count = Math.min(entry.bytes.length, FRAME_BYTES - offset);
       if (!history.length || history.at(-1).playId !== entry.program.playId) {

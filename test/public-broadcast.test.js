@@ -414,13 +414,44 @@ test('native-capable Chrome without a programme clock uses Hls.js for exact audi
   await wait(5);
   client.update(state);
   assert.equal(attached, 1);
-  // Listeners who fall behind must rejoin live inside the 30 s delay budget (4 s segments, ~2–6 s edge lag).
+  // Keep normal-speed playback and accept a larger live-buffer target; catch-up happens only in a boundary gap.
   assert.ok(config.liveMaxLatencyDurationCount > config.liveSyncDurationCount);
-  assert.ok(config.liveMaxLatencyDurationCount * 4 <= 24);
+  assert.ok(config.liveMaxLatencyDurationCount * 4 >= 60);
   assert.equal(config.maxLiveSyncPlaybackRate, 1);
   assert.equal(programs.at(-1).playId, 'live:a');
   assert.equal(getAudibleBroadcast(40000).at, 26000);
   client.stop();
+});
+
+test('HLS catch-up is allowed only during an explicit inter-song gap', async () => {
+  const { catchUpAtBroadcastGap } = await import('../js/public-broadcast-client.mjs');
+  const audio = { currentTime: 10 };
+  const hls = { latency: 20, liveSyncPosition: 30 };
+  assert.equal(catchUpAtBroadcastGap({ hls, audio,
+    program: { playId: 'gap:12' } }), true);
+  assert.equal(audio.currentTime, 30);
+  audio.currentTime = 10;
+  assert.equal(catchUpAtBroadcastGap({ hls, audio,
+    program: { playId: 'song:123', live: false } }), false);
+  assert.equal(audio.currentTime, 10);
+  hls.latency = 3;
+  assert.equal(catchUpAtBroadcastGap({ hls, audio,
+    program: { playId: 'gap:13' } }), false);
+  assert.equal(audio.currentTime, 10);
+});
+
+test('boundary recovery removes only the previous ordinary-song tail, never live PCM', async () => {
+  const { dropBroadcastBoundaryTail } = await import('../discord-bot/public-broadcast.js');
+  const ordinary = { program: { playId: 'song-a', live: false }, bytes: Buffer.alloc(40) };
+  const live = { program: { playId: 'live-b', live: true, bookingId: 'b' }, bytes: Buffer.alloc(80) };
+  const queue = [ordinary, live];
+  assert.equal(dropBroadcastBoundaryTail(queue, 'song-a',
+    { playId: 'live-b', live: true }), 0);
+  assert.equal(queue.length, 2, 'live performance is never trimmed at a live handoff');
+  assert.equal(dropBroadcastBoundaryTail(queue, 'song-a',
+    { playId: 'song-b', live: false }), 40);
+  assert.deepEqual(queue.map(entry => entry.program.playId), ['live-b'],
+    'the old ordinary-song tail is removed while live audio remains');
 });
 
 test('unsupported AAC reports a browser capability failure without pointless recovery or a LiveKit fallback', async () => {
@@ -602,7 +633,7 @@ test('encoder waits for authorized audio, survives wall-clock corrections and fa
   assert.equal(broadcaster.snapshot().reason, 'ENCODER_CLOCK_STALLED');
 });
 
-test('late or bursty PCM is skipped, never encoded late, and cannot extend the one-second allowance', async t => {
+test('late or bursty live PCM is buffered and never cut mid-performance', async t => {
   const { createPublicBroadcast } = await import('../discord-bot/public-broadcast.js');
   const encoder = new EventEmitter(), written = [], warnings = [];
   encoder.stdin = new PassThrough();
@@ -622,20 +653,18 @@ test('late or bursty PCM is skipped, never encoded late, and cannot extend the o
   t.mock.timers.tick(20);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(broadcaster.snapshot().reason, null);
-  assert.deepEqual(broadcaster.snapshot().programHistory, [], 'skipped audio must not be attributed as broadcast');
-  assert.ok(Buffer.concat(written).every(byte => byte === 0), 'audio older than one second must never reach the encoder');
-  assert.deepEqual(broadcaster.snapshot().lateAudio, { skips: 1, droppedMs: 20, lastStage: 'source-age', lastAt: wall });
+  assert.equal(broadcaster.snapshot().lateAudio, undefined, 'live performance is never silently cut');
+  assert.notEqual(Buffer.concat(written).length, 0, 'a late live frame is buffered instead of discarded');
 
-  // A 1.2 s burst after a stall keeps only the newest half second, in one skip.
+  // A 1.2 s live burst remains contiguous rather than taking a mid-performance cut.
   for (let index = 1; index <= 60; index++) broadcaster.liveFrame({ id: 'live' }, frame(index));
   elapsed = 40;
   t.mock.timers.tick(20);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(broadcaster.snapshot().status === 'unavailable', false);
-  assert.equal(written.at(-1).readInt16LE(0), 27, 'the oldest 26 frames of the burst must be skipped');
-  assert.deepEqual(broadcaster.snapshot().lateAudio, { skips: 2, droppedMs: 540, lastStage: 'pcm', lastAt: wall });
-  assert.deepEqual(warnings.map(([code, details]) => [code, details.stage]),
-    [['[public-broadcast] PCM_LATE_AUDIO_SKIPPED', 'source-age']], 'skip warnings are rate-limited');
+  assert.ok(written.at(-1).length > 0, 'live frames remain in the buffered encoder tail');
+  assert.equal(broadcaster.snapshot().lateAudio, undefined);
+  assert.deepEqual(warnings, []);
 });
 
 test('the real encoder thread survives a blocked application loop without admitting private input', { timeout: 10000 }, async t => {

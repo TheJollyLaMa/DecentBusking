@@ -1827,7 +1827,7 @@ test('JukeLoop prepares the next paid request and starts it before prior-play bo
   await new Promise(resolve => setImmediate(resolve));
 
   assert.equal(gaps.length, 1);
-  assert.ok(gaps[0] > 2_000 && gaps[0] <= 2_500, `changeover gap was ${gaps[0]}ms`);
+  assert.ok(gaps[0] >= 5_500 && gaps[0] <= 6_000, `changeover gap was ${gaps[0]}ms`);
   assert.equal(played.length, 1);
   assert.equal(session._currentPaid, secondPaid);
   assert.equal(session._currentTrack, paidTrack);

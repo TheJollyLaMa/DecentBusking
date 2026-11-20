@@ -127,14 +127,15 @@ The encoder, Opus decoding, HLS pacing and uploads run in a dedicated Node
 worker thread in the same container, not another service. This keeps unrelated
 bot event-loop stalls out of the audio clock. The parent forwards only the
 selected public source, with bounded in-flight messages; source age across the
-thread boundary and the PCM queue remains limited to one second. By the
-owner's 18 Nov decision, audio that would exceed that second (a burst after a
-bot stall, or audio older than one second) is skipped down to half a second
-in one go, rather than stopping the station. Skips are logged at most every
-10 s and counted in the snapshot as `lateAudio` (skips, dropped milliseconds,
-last stage), so they stay visible rather than silent. Malformed PCM still fails
-closed. The encoder's own 500 ms scheduling-stall limit, private-room gates and
-protected tail remain.
+thread boundary is not used to cut an active song, and the PCM queue is bounded
+at sixty seconds of audio for the same stalled-main-loop protection. By the
+owner's 20 Nov boundary-sync decision, ordinary songs are not cut when a bot
+stall leaves late PCM. A bounded six-second changeover space is the recovery
+window: queued tail PCM from the previous ordinary song can be retired only at
+that track boundary. Live performance PCM and active ordinary-song PCM are
+never silently shortened. The browser stays at normal playback speed and can
+rejoin only during explicit gap metadata. Malformed PCM still fails closed.
+The encoder's scheduling-stall limit, private-room gates and protected tail remain.
 In-flight credits are decremented by the worker through a shared atomic counter,
 not by parent-loop acknowledgment callbacks. Otherwise a busy parent can falsely
 count already processed frames as backlogged. Limit failures include a bounded
@@ -294,9 +295,9 @@ Development evidence so far:
   queued plus a 3,840-byte incoming frame, not an IPC-credit failure.
   Programme history also showed a gap and return within the same recording,
   not solely a song transition. A contemporaneous request took 1.944 s, but
-  its duration alone does not establish a blocking function. The unchanged
-  one-second queue limit remains; parent CPU/max-delay diagnostics investigate
-  the producer rather than silently dropping audio or raising the limit.
+  its duration alone does not establish a blocking function. Active-song audio
+  now remains intact; boundary-only recovery and parent CPU diagnostics investigate
+  the producer rather than silently cutting music.
 - The diagnostic release then measured a 1.621 s parent event-loop maximum in
   the minute of another actual PCM overflow, despite event-loop p99 91 ms.
   Its CPU aggregate included weekly-history byte scanning and whole-day JSON
@@ -430,9 +431,9 @@ Development evidence so far:
   minute the bot's main loop recorded an 882 ms maximum. Its reported 35.2 s
   delay p95 and 154 failures include listeners after the publisher stopped.
   Render logs show 400-600 ms main-loop maxima every few minutes all day,
-  with or without listeners. A one-second freeze therefore eventually stops a
-  zero-tolerance encoder. The owner chose to both skip late audio (above) and
-  profile the remaining freezes on the hosted preview.
+  with or without listeners. The 20 Nov boundary-sync change keeps active songs
+  intact and confines controlled catch-up to ordinary-song changeovers; it also
+  leaves the remaining freezes visible for hosted diagnostics.
 - Deployed `45979fc`, 18 Nov 19:30 UTC: the 200/600 run lasted the full
   600 s without a stop or late-audio skip (startup p95 2.3 s, metadata p95
   393 ms, CPU max 43.6%, working set max 67.4%, event-loop p99 99 ms). It

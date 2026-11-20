@@ -77,8 +77,8 @@ const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
 const FADE_IN_SECONDS = 0.6;
 const NEXT_TRACK_READY_TIMEOUT_MS = 20_000;
 export const PLAYBACK_RECOVERY_TIMEOUT_MS = 120_000;
-/** Silence between songs so website listeners can start the next track from 0:00 together. */
-export const CHANGEOVER_GAP_MS = 2_500;
+/** Intentional recovery padding between ordinary songs. Paid playlists stay gapless. */
+export const CHANGEOVER_GAP_MS = 6_000;
 const DJUKE_PREFETCH_POLL_MS = 5_000;
 const PAID_FETCH_RETRY_MS = 60_000;
 const MAIN_RADIO_STATE_SCHEMA_VERSION = 1;

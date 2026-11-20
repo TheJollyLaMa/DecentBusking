@@ -336,7 +336,7 @@ Other unexpected contract failures still surface as errors.
 At track transitions, overdue adverts are checked again before prefetched music
 starts, because a slot can unlock after prefetch. Already prepared paid DJuke
 requests retain priority; lookup failures keep music playing and are logged.
-Between items the bot waits `CHANGEOVER_GAP_MS` (2.5 s) before starting the
+Between ordinary songs the bot waits `CHANGEOVER_GAP_MS` (6 s) before starting the
 next prepared track, and `GET /api/radio` publishes it as `upNext` (`trackId`,
 `title`, `ipfsCid`, `mediaType`, `videoUrl`, `isDevert`, plus `startsAt` /
 `startsInMs` during the gap). The website preloads `upNext` into an in-memory

@@ -115,7 +115,7 @@ paid journal/runtime and the normal radio prefetcher. It blocks settlement until
 all twelve songs have played and fails the fifth song's first completion checkpoint.
 It checks twelve starts/deliveries exactly once and in order, one source download
 per song, no refund, and transitions below two seconds with the intentional
-2.5-second radio changeover sleep stubbed out. It does not inject successful audio
+paid-playlist gapless handoff stubbed out. It does not inject successful audio
 completion verdicts or establish production latency under slow durable storage.
 Separate tests cover broken/oversized/timed-out downloads, retryable checkpoint
 failures, main-request priority and safe suffix refunds.

@@ -32,6 +32,17 @@ export function broadcastProgramAt(history, at) {
   return history?.findLast(entry => Number.isFinite(entry.at) && entry.at <= at) || null;
 }
 
+export function catchUpAtBroadcastGap({ hls, audio, program, latencyLimitSeconds = 8 }) {
+  if (!hls || !audio || !String(program?.playId || '').startsWith('gap:')) return false;
+  const latency = Number(hls.latency);
+  const livePosition = Number(hls.liveSyncPosition);
+  if (!Number.isFinite(latency) || !Number.isFinite(livePosition) ||
+      latency <= latencyLimitSeconds || !Number.isFinite(audio.currentTime) ||
+      livePosition <= audio.currentTime) return false;
+  audio.currentTime = livePosition;
+  return true;
+}
+
 export function createPublicBroadcastListener({ audio, serviceUrl, onStatus, onProgram,
   sdkLoader = loadHlsSdk, now = Date.now, request = roomRequest,
   telemetry = sharedPageListenerTelemetry(serviceUrl) }) {
@@ -84,8 +95,8 @@ export function createPublicBroadcastListener({ audio, serviceUrl, onStatus, onP
     }
     if (!audio.paused && !blocked && now() - lastProgressAt > 12000) {
       audibleBroadcast = null; record('suspend', source);
-      if (now() - lastProgressAt > 30000) fail('The broadcast playlist stalled. Tap Play to retry; no live-room seat was joined.');
-      else report('The broadcast has stalled; waiting for audio without switching to a live-room seat');
+      if (now() - lastProgressAt > 120000) fail('The broadcast playlist stopped responding. Tap Play to retry; no live-room seat was joined.');
+      else report('The broadcast has stalled; waiting for the boundary instead of skipping music');
       return;
     }
     const origin = hls?.playingDate?.getTime?.() ??
@@ -93,6 +104,7 @@ export function createPublicBroadcastListener({ audio, serviceUrl, onStatus, onP
     const program = broadcastProgramAt(state?.programHistory, origin);
     if (!program) audibleBroadcast = null;
     if (program) {
+      catchUpAtBroadcastGap({ hls, audio, program });
       audibleBroadcast = !audio.paused && audio.readyState >= 2 && !blocked
         ? { program, at: origin, observedAt: now(), mediaTime: audio.currentTime } : null;
       if (currentProgram?.playId !== program.playId) {
@@ -119,8 +131,9 @@ export function createPublicBroadcastListener({ audio, serviceUrl, onStatus, onP
         const Hls = await sdkLoader(serviceUrl);
         if (current !== generation) return;
         if (!Hls.isSupported()) throw new Error('This browser does not support the broadcast player');
-        // Past six segments (~24 s) behind the playlist edge, jump back to ~12 s instead of drifting; never speed up music.
-        hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 6,
+        // Stay at normal speed and never cut an active song. The bounded
+        // HLS gap metadata is the only place where a listener can rejoin live.
+        hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 24,
           maxLiveSyncPlaybackRate: 1, maxBufferLength: 30, backBufferLength: 10 });
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (current !== generation) return;
