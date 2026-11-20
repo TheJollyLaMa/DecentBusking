@@ -1,7 +1,7 @@
 import { roomRequest } from './live-audio-client.mjs?v=20261117-unsigned-studio';
 import { buildIpfsGatewayUrls } from './ipfs-gateway.js';
 import { catalogRecordingReleaseApprovalMessage, recordingReleaseApprovalMessage,
-  moveRecordingBoundary, recordingBoundaryRange, validateCatalogRecordingDraft, validateRecordingDraft } from './live-recording-edit.mjs?v=20261116-studio-polish';
+  moveRecordingBoundary, recordingBoundaryRange, recordingDraftKey, validateCatalogRecordingDraft, validateRecordingDraft } from './live-recording-edit.mjs?v=20261120-afterparty-studio';
 
 const byId = id => document.getElementById(id);
 const params = new URL(location.href).searchParams;
@@ -392,7 +392,7 @@ async function connect() {
 }
 
 function draftStorageKey(recording = state) {
-  return `decentbusking:recording-draft:v1:${wallet}:${catalogNftId || bookingId}:${recording.sourceCid}`;
+  return recordingDraftKey(wallet, catalogNftId || bookingId, recording.sourceCid);
 }
 
 async function saveDraft({ quiet = false } = {}) {
@@ -447,7 +447,15 @@ async function approve(choice) {
     const result = await roomRequest(serviceUrl, 'recording-publish', pendingPublication.command);
     if (generation !== actionGeneration) throw new Error('Wallet changed; select the recording again to check the release journal.');
     pendingPublication = null;
+    const publishedDraftKey = draftStorageKey();
     renderState({ ...result, journalRevision: result.draft.revision });
+    if (!catalogMode) {
+      try { window.localStorage.removeItem(publishedDraftKey); }
+      catch {
+        report('Your release was queued for admin mint review, but this browser could not clear the local draft reminder.');
+        return;
+      }
+    }
     report('Your confirmed release(s) are queued for separate admin mint review. The original NFT and audio remain unchanged.');
   } catch (error) {
     report(error.message || 'Recording release action failed; reload the durable journal before retrying.');

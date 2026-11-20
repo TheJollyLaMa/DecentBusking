@@ -323,6 +323,18 @@ function renderAfterparty(state) {
   container.hidden = !checklist;
   clear();
   if (checklist) container.append?.(checklist);
+  if (state?.phase === 'ended' && !booking.cancelled && wallet && wallet.toLowerCase() === booking.wallet?.toLowerCase()) {
+    const next = document.createElement('p');
+    const link = document.createElement('a');
+    link.href = `recording-edit.html?booking=${encodeURIComponent(booking.id)}`;
+    link.textContent = 'Open your recording Studio';
+    next.append(link);
+    const note = document.createElement('small');
+    note.textContent = ' If you opted in, your recording opens when processing finishes. Editing and release are optional and do not affect your pay.';
+    next.append(note);
+    container.hidden = false;
+    container.append(next);
+  }
 }
 function stageTime(minutes = 0) {
   return new Intl.DateTimeFormat('en-US', {
