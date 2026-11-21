@@ -110,6 +110,41 @@ test('live audio is fail-closed without explicit hosting and durable state', asy
   await assert.rejects(service.listener('anything'), /unavailable/);
 });
 
+test('pre-show asset index outages do not permanently cancel a funded room', async t => {
+  const f = await setup();
+  t.after(() => f.service.stop());
+  f.b.payoutPolicy = 'asset-guaranteed-v1';
+  await f.authorize();
+  f.b.status = 'unavailable';
+  await f.service.tick();
+  assert.equal(f.persisted().rooms[0].cancelledAt, undefined);
+  assert.equal((await f.service.state(f.b.id)).bookingVerification.fresh, false);
+  await assert.rejects(f.authorize(artist), /funded/);
+  f.b.status = 'funded';
+  assert.equal((await f.authorize(artist)).state.status, 'OFF-AIR');
+});
+
+test('only the owner can reopen a verified pre-show asset closure, with clean checks', async t => {
+  const f = await setup();
+  t.after(() => f.service.stop());
+  f.b.payoutPolicy = 'asset-guaranteed-v1';
+  const reason = 'Live performance cancelled: booking is no longer available.';
+  await f.store.save({ version: 1, rooms: [{ bookingId: f.b.id, armed: false,
+    checks: { t60: new Date(START - 62 * 60_000).toISOString() },
+    cancelledAt: START - 61 * 60_000, reason, lastVerifiedAt: 0 }] });
+  await assert.rejects(f.authorize(artist), /only the owner/);
+  const challenge = await f.service.challenge({ bookingId: f.b.id, wallet: owner.address }, ORIGIN);
+  assert.match(challenge.message, /PRIVATE soundchecks only/);
+  const recovered = await f.service.authorize({ challengeId: challenge.challengeId,
+    signature: await owner.signMessage(challenge.message) }, ORIGIN);
+  assert.equal(recovered.state.status, 'OFF-AIR');
+  assert.equal(recovered.state.armed, false);
+  assert.deepEqual(f.persisted().rooms[0].checks, {});
+  assert.equal(f.persisted().rooms[0].cancelledAt, undefined);
+  assert.equal((await f.authorize(artist)).role, 'publisher');
+  await assert.rejects(f.service.listener(f.b.id), /not on air|unavailable/i);
+});
+
 test('funded asset-version booking can authorize its exact performer without weakening funding gate', async t => {
   let status = 'funded';
   const f = await setup({ getBookings: async () => ({ bookings:[{ ...booking(), payoutPolicy:'asset-guaranteed-v1', status }] }) });
