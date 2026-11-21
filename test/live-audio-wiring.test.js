@@ -44,6 +44,53 @@ function dom(t) {
 }
 const descendants = node => [node, ...(node.children || []).flatMap(descendants)];
 
+test('backstage waits for a slow booking lookup and reports an exhausted deadline explicitly', async t => {
+  const { runInNewContext } = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../js/live-audio-room.mjs'), 'utf8');
+  const refreshSource = source.slice(source.indexOf('async function refreshBooking()'),
+    source.indexOf("byId('room-authorize').onclick"));
+  for (const delay of [15000, 61000]) {
+    await t.test(`booking response after ${delay}ms`, async t => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const nodes = new Map(), messages = [];
+      const b = { ...booking(), stewardApproved: true };
+      const context = {
+        refreshing: false, disposed: false, bookingId: b.id, serviceUrl: 'https://worker.example',
+        booking: null, session: null, broadcastState: null, observedAt: 0, practiceMode: false, actionPending: false,
+        Date: { now: () => NOW, parse: Date.parse },
+        AbortSignal: { timeout(ms) {
+          const controller = new AbortController();
+          setTimeout(() => controller.abort(new DOMException('signal timed out', 'TimeoutError')), ms);
+          return controller.signal;
+        } },
+        byId(id) { if (!nodes.has(id)) nodes.set(id, { disabled: true }); return nodes.get(id); },
+        status: message => messages.push(message), renderSign() {}, performerAllocationAccess: () => false,
+        broadcastControls: { update() {} },
+        fetch: async (url, { signal }) => {
+          if (url.endsWith('/api/live-bookings')) await new Promise((resolve, reject) => {
+            setTimeout(resolve, delay);
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          });
+          return { ok: true, json: async () => url.endsWith('/api/live-bookings')
+            ? { bookings: [b] } : { configured: true } };
+        },
+      };
+      const loading = runInNewContext(`${refreshSource}\nrefreshBooking();`, context);
+      t.mock.timers.tick(Math.min(delay, 60000));
+      await loading;
+      if (delay < 60000) {
+        assert.equal(nodes.get('room-authorize').disabled, false);
+        assert.equal(context.booking.id, b.id);
+        assert.match(messages.at(-1), /Backstage is ready/);
+      } else {
+        assert.equal(nodes.get('room-authorize').disabled, true);
+        assert.equal(context.booking, null);
+        assert.match(messages.at(-1), /Booking verification timed out.*Retrying automatically/);
+      }
+    });
+  }
+});
+
 test('ended ETH booking offers the Studio and a same-browser draft reminder without requiring payment', async t => {
   const [, { renderLivePerformances }] = await modules;
   const { recordingDraftKey } = await import('../js/live-recording-edit.mjs');
@@ -852,7 +899,7 @@ test('standalone backstage and main-page imports load compatible recovery helper
   }
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
-    assert.ok(source.includes(`${entry}?v=${entry === 'live-audio-room.mjs' ? '20261120-afterparty-studio' : '20261117-booking-assets'}`));
+    assert.ok(source.includes(`${entry}?v=${entry === 'live-audio-room.mjs' ? '20261120-booking-load' : '20261117-booking-assets'}`));
     assert.match(source, /live-audio\.css\?v=20261116-booth/);
     assert.doesNotMatch(source, /20261114-direction/);
   }
