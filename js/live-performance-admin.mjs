@@ -12,6 +12,7 @@ import { publishLiveBookingState } from './live-booking-notifications.mjs?v=2026
 import { liveAudioRoomUrl } from './live-audio.mjs?v=20261114-allocated-stage';
 import { afterpartyRows } from './live-afterparty.mjs?v=20261117-release-party';
 import { guaranteedReleaseState, guidedGuaranteedRelease, liveBroadcastCompletionPending } from './live-escrow-release.mjs?v=20261115-afterparty';
+import { readAssetApprovalInput, pinAssetReview } from './live-asset-review.mjs?v=20261121-typed-review';
 // Approved and pinned 2026-11-20; the hash is keccak256 of the exact pinned bytes.
 export const LIVE_ASSET_TERMS_V1 = Object.freeze({ version:'LIVE PERFORMANCE ASSETS v1',
   uri:'ipfs://bafkreiayf2eh66dr2v22thqv6ygwwdothxdzphfgyeinhdiquiuvas442m',
@@ -54,6 +55,8 @@ export function overlappingLiveBooking(bookings = [], startUtc, endUtc) {
  return bookings.find(b => !b.cancelled && Date.parse(b.startUtc) < end && start < Date.parse(b.endUtc)) || null;
 }
 const base = () => String(window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
+// Marks a failure that happened before any transaction was submitted, so the panel can say so.
+const notSent = message => Object.assign(new Error(message), { nothingSent: true });
 export function nextFridayLiveStart(now = Date.now()) {
  const localDate = utcToNewYorkInput(new Date(now).toISOString()).slice(0, 10);
  const date = new Date(`${localDate}T12:00:00Z`);
@@ -178,7 +181,7 @@ export function renderLivePerformanceAdminBooking(b, now = Date.now()) {
   <a data-live-release-report${b.reportUri ? ` href="https://gateway.pinata.cloud/ipfs/${escapeLive(b.reportUri.replace(/^ipfs:\/\//, ''))}" target="_blank" rel="noopener"` : ' hidden'}>Read public fee report</a>
   <output data-live-release-status role="status" aria-live="polite"></output>
   </section>` : '';
- return `${liveBookingRows([b])}${renderLiveBroadcastCompletion(b)}${renderAfterpartyStatus(b, now)}${room}<div data-live-actions="${escapeLive(b.id)}">${releaseCard}<details class="live-booking-actions"><summary>${release ? 'Advanced · booking & manual review' : '🛠️ Booking actions'}</summary><div>${bookingActionButtons(b)}</div></details></div>`;
+ return `${liveBookingRows([b])}${renderLiveBroadcastCompletion(b)}${renderAfterpartyStatus(b, now)}${room}<div data-live-actions="${escapeLive(b.id)}">${releaseCard}<details class="live-booking-actions"><summary>${release ? 'Advanced · booking & manual review' : '🛠️ Booking actions'}</summary><div>${bookingActionButtons(b)}</div></details><output class="live-action-status" data-live-action-status role="status" aria-live="polite"></output></div>`;
 }
 export function renderLiveBroadcastCompletion(b) {
  if (!Object.hasOwn(b, 'broadcastCompletion')) return '';
@@ -300,7 +303,7 @@ async function action(name, b) {
    }
    if (!matchesAssetBooking(b,await contract.bookings(bookingId),w.address)) throw new Error('On-chain booking differs from the accepted terms or funder');
    const methods = {
-     assetApprove:['approve','approvePerformance','Performance review report IPFS URI; approval enables independent producer-paid gift release'],
+     assetApprove:['approve','approvePerformance','Type a short public review of this performance (for example: fantastic!).\n\nIt is saved to IPFS automatically, so no link is needed. Your wallet then asks for a free upload signature and the approval transaction. Approving unlocks the performer’s claim; any gift is released separately.'],
      giftRelease:['giftRelease','releaseGift','Release the approved gift to the exact booked performer?'],
      assetFault:['fault','platformFault','Platform fault/cancellation report IPFS URI (full fee remains guaranteed; unearned gift returns)'],
      assetNoShow:['noShow','noShow','Performer no-show report IPFS URI (not for platform/rehearsal faults)'],
@@ -311,12 +314,28 @@ async function action(name, b) {
    const [txAction, method, question] = methods[name];
    if (localStorage.getItem(`live-pending:${b.id}:${txAction}`) || b.transactions[txAction]?.status === 'pending') throw new Error('Transaction pending; reconcile instead of resending');
    const takesReport = ['assetApprove','assetFault','assetNoShow','assetUnperformed'].includes(name);
-   if (name === 'assetApprove' && liveBroadcastCompletionPending(b)) throw new Error('Actual broadcast completion is pending or unavailable; do not approve performance');
-   const reason = takesReport ? prompt(question) : null;
-   if (takesReport && !/^ipfs:\/\/[a-zA-Z0-9]+(?:\/[^\s]*)?$/.test(reason || '')) throw new Error('A pinned IPFS report is required');
+   if (name === 'assetApprove' && liveBroadcastCompletionPending(b)) throw notSent('Actual broadcast completion is pending or unavailable; do not approve performance');
+   let reason = takesReport ? prompt(question) : null;
+   if (name === 'assetApprove') {
+     const input = readAssetApprovalInput(reason);
+     if (!input) return 'Cancelled. Nothing was sent.';
+     try { await contract[method].staticCall(bookingId, input.uri || 'ipfs://approval-check'); }
+     catch (error) {
+       throw notSent(error.code === 'CALL_EXCEPTION'
+         ? `Base says this approval would be rejected right now (${error.shortMessage || error.message}).`
+         : `Could not check the approval on Base (${error.shortMessage || error.message}).`);
+     }
+     reason = input.uri;
+     if (!reason) {
+       showStatus(b.id, 'Saving your review to IPFS. Approve the free upload signature in your wallet…');
+       reason = await pinAssetReview({ booking: b, review: input.review, serviceUrl: base(), signer: w.signer, address: w.address, origin: location.origin });
+       showStatus(b.id, 'Review saved. Confirm the approval transaction in your wallet…');
+     }
+   } else if (takesReport && !/^ipfs:\/\/[a-zA-Z0-9]+(?:\/[^\s]*)?$/.test(reason || '')) throw notSent('A pinned IPFS report is required');
    if (!takesReport && !confirm(question)) return;
    await w.check();
    await transaction(b,txAction,async () => { await w.check(); return takesReport ? contract[method](bookingId,reason) : contract[method](bookingId); });
+   if (name === 'assetApprove') return `✅ Approved on Base. Review saved at ${reason}. ${b.gift ? 'The performer can now claim the fee from Profile; release the gift separately.' : 'The performer can now claim the fee from Profile.'}`;
    return;
  }
  if (name === 'priorityInvite') {
@@ -472,22 +491,26 @@ async function action(name, b) {
    if (reasonUri) await transaction(b, 'cancel', w => new w.ethers.Contract(state.escrowAddress, LIVE_ESCROW_ABI, w.signer).cancel(w.ethers.id(b.id), reasonUri));
  }
 }
+function showStatus(bookingId, message, reveal = false) {
+ section.querySelector('[data-live-status]').textContent = message;
+ const card = [...section.querySelectorAll('[data-live-actions]')].find(node => node.dataset.liveActions === bookingId);
+ const output = card?.querySelector('[data-live-release-status], [data-live-action-status]');
+ if (output) { output.textContent = message; if (reveal) output.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+}
 async function guarded(fn, bookingId) {
  if (busy) return;
  busy = true;
  const controls = [...section.querySelectorAll('[data-live-action]')].map(button => [button, button.disabled]);
  for (const [button] of controls) button.disabled = true;
- const feedback = message => {
-  section.querySelector('[data-live-status]').textContent = message;
-  const card = [...section.querySelectorAll('[data-live-actions]')].find(node => node.dataset.liveActions === bookingId);
-  const output = card?.querySelector('[data-live-release-status]');
-  if (output) { output.textContent = message; output.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
- };
+ const feedback = message => showStatus(bookingId, message, true);
  try {
   const result = await fn();
   feedback(typeof result === 'string' ? result : 'Action completed. Refresh to verify the latest booking state.');
  }
- catch (error) { feedback(`${error.shortMessage || error.message}. Refresh/reconcile before retrying; submitted transactions may still be pending.`); }
+ catch (error) {
+  const reason = error.shortMessage || error.message;
+  feedback(error.nothingSent ? `Nothing was sent. ${reason}` : `${reason}. Refresh/reconcile before retrying; submitted transactions may still be pending.`);
+ }
  finally { busy = false; for (const [button, disabled] of controls) button.disabled = disabled; }
 }
 function mount() {

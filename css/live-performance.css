@@ -42,6 +42,8 @@
 .live-booking-actions { margin: .35rem 0 .75rem; padding: .15rem .65rem .65rem; }
 .live-booking-actions > div { display: flex; flex-wrap: wrap; gap: .35rem; }
 .live-booking-actions button { margin: 0; }
+.live-action-status { display: block; margin: 0 0 .75rem; padding: .7rem .8rem; border: 1px solid #91e2ce; border-radius: 8px; background: #10241b; color: #fff; font-weight: 700; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.live-action-status:empty { display: none; }
 .live-booking-empty { padding: .5rem .75rem; color: #c7c3b8; }
 .live-booking-invite { display: grid; gap: .5rem; border-top: 1px solid #8886; margin-top: .5rem; padding-top: .5rem; overflow-wrap: anywhere; }
 .live-booking-invite p { margin: .2rem 0; }
