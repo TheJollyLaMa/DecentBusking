@@ -272,7 +272,15 @@ export function renderPerformerBookingInvite({ booking: b, wallet, serviceUrl, e
  invitation.append(button, status);
  return invitation;
 }
-export async function renderLivePerformances({ container, wallet, serviceUrl, ethers, onReceipt = () => {}, fetchImpl = fetch, bookingState }) {
+function feePicture(path) {
+ const image = document.createElement('img');
+ image.src = new URL(`../img/${path}`, import.meta.url).href;
+ image.alt = '';
+ image.width = image.height = 44;
+ return image;
+}
+
+export async function renderLivePerformances({ container, wallet, serviceUrl, ethers, onReceipt = () => {}, onRefresh, fetchImpl = fetch, bookingState }) {
  if (!container || !serviceUrl) return;
  let state = bookingState;
  if (!state) {
@@ -282,7 +290,8 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
    if (!response.ok) throw new Error('Live performance bookings unavailable');
    state = await response.json();
  }
- const bookings = state.bookings.filter(b => b.wallet.toLowerCase() === wallet.toLowerCase());
+ const bookings = state.bookings.filter(b => b.wallet.toLowerCase() === wallet.toLowerCase())
+   .sort((a, b) => Date.parse(b.startUtc) - Date.parse(a.startUtc));
  const curtains = [];
  container.innerHTML = '';
  for (const b of bookings) {
@@ -300,8 +309,42 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
    const claim = claimState(b, assetVersion ? (state.assetEscrowConfigured ? state.assetEscrowAddress : '') : state.escrowAddress, connected);
    const pendingHash = connected.toLowerCase() === b.wallet.toLowerCase() && !['paid', 'refunded'].includes(b.status)
      ? localStorage.getItem(`live-claim:${b.id}`) : null;
-   let nextStatus;
-   if ((afterparty || stagePending) && !assetVersion) {
+   const paymentCard = assetVersion && b.mode === 'phase1' && Date.parse(b.endUtc) <= Date.now() &&
+     connected.toLowerCase() === b.wallet.toLowerCase() && !['draft', 'failed'].includes(b.status);
+   let nextStatus, feeActions, feeDetails;
+   if (paymentCard) {
+     const amount = formatLiveAsset(b.amountUnits, b.assetDecimals, b.assetSymbol);
+     const configured = state.assetEscrowConfigured && state.assetEscrowAddress?.toLowerCase() === b.escrowAddress?.toLowerCase();
+     const confirmedState = configured && ['funded','approved','paid','refunded','refunding','recovered'].includes(b.status);
+     article.className = 'live-performer-next live-fee-card';
+     article.setAttribute('data-fee-state', confirmedState ? b.status : 'unavailable');
+     const date = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', month:'short', day:'numeric', year:'numeric' });
+     const label = document.createElement('p');
+     label.textContent = `Performance pay · ${date.format(new Date(b.startUtc))}`;
+     const title = document.createElement('h3');
+     title.textContent = `${amount} · Base`;
+     nextStatus = document.createElement('output');
+     nextStatus.setAttribute('role', 'status');
+     const unlock = Date.parse(b.endUtc) + b.reviewWindow * 1000;
+     const unlockTime = new Intl.DateTimeFormat('en-US', {
+       timeZone:'America/New_York', dateStyle:'medium', timeStyle:'short',
+     });
+     nextStatus.textContent = pendingHash ? 'Claim submitted. Check it; don’t send again.'
+       : !confirmedState ? 'Payment status unavailable. No payment confirmed.'
+       : claim.enabled ? 'Ready to claim. Your booked wallet needs a little Base ETH for gas.'
+       : b.status === 'funded' && Number.isFinite(unlock)
+         ? `🔒 Funded, not paid.\nClaim opens ${unlockTime.format(new Date(unlock))} ET, or sooner with producer approval.`
+         : b.status === 'paid' ? 'Paid to your booked wallet.' : claim.label;
+     feeActions = document.createElement('div');
+     feeActions.className = 'live-fee-actions';
+     feeDetails = document.createElement('details');
+     const summary = document.createElement('summary'); summary.textContent = 'Booking & receipts';
+     const info = document.createElement('div'); info.innerHTML = liveBookingRows([b]);
+     const technical = info.querySelector?.('.live-booking-technical');
+     if (technical) technical.replaceWith(...Array.from(technical.children).slice(1));
+     feeDetails.append(summary, info);
+     article.append(label, title, nextStatus, feeActions);
+   } else if ((afterparty || stagePending) && !assetVersion) {
      article.className = 'live-performer-next';
      article.setAttribute('data-live-next-step', b.id);
      article.setAttribute('data-action-needed', String(stagePending || claim.enabled || !!pendingHash));
@@ -383,8 +426,16 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        : draftUnavailable ? 'This browser could not check for a saved edit.'
          : 'If you opted in, you can preview the recording once it finishes processing.';
      note.textContent = `${next} Release is optional and does not affect your performance pay. Nothing is minted without release approval and admin review. Recordings over 10 minutes are eligible only in Long-form Hour after minting. Minted songs under 10 minutes can qualify for regular rotation.`;
-     editRoom.append(editLink, document.createElement('br'), note);
-     article.append(editRoom);
+     if (paymentCard) {
+       editLink.className = 'live-fee-tile';
+       editLink.textContent = unfinished ? 'Resume recording edit' : 'Review recording';
+       editLink.append(feePicture('D_Busker.jpeg'));
+       feeActions.append(editLink);
+       feeDetails.append(note);
+     } else {
+       editRoom.append(editLink, document.createElement('br'), note);
+       article.append(editRoom);
+     }
    }
    if (!compact && b.mode === 'phase1' && b.status === 'draft' && !b.cancelled) {
      article.append(renderPerformerBookingInvite({ booking: b, state, wallet, serviceUrl, ethers, fetchImpl }));
@@ -418,7 +469,9 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
    button.type = 'button'; button.disabled = !claim.enabled && !pendingHash;
    button.className = afterparty ? 'live-performer-claim' : '';
    const amount = (Number(b.approvedUnits || b.amountUnits) / 1e6).toFixed(2);
-   button.textContent = pendingHash ? 'Check pending claim' : afterparty && claim.enabled ? `Claim $${amount} USDC` : claim.label;
+   button.textContent = pendingHash ? 'Check pending claim'
+     : paymentCard && claim.enabled ? `Claim ${formatLiveAsset(b.amountUnits, b.assetDecimals, b.assetSymbol)}`
+       : afterparty && claim.enabled ? `Claim $${amount} USDC` : claim.label;
    button.onclick = async () => {
      button.disabled = true;
      if (refresh) refresh.disabled = true;
@@ -490,13 +543,21 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
        if (refresh) refresh.disabled = false;
      }
    };
-   if ((afterparty || stagePending) && !assetVersion) {
+   if (paymentCard) {
+     if (claim.enabled || pendingHash) {
+       button.className = 'live-fee-tile live-fee-primary';
+       button.append(feePicture('guitar-case.svg'));
+       feeActions.prepend(button);
+     }
+     article.append(feeDetails);
+   } else if ((afterparty || stagePending) && !assetVersion) {
      if (claim.enabled || pendingHash) article.append(button);
      refresh = document.createElement('button');
      refresh.type = 'button'; refresh.className = 'live-performer-refresh';
      refresh.textContent = stagePending ? 'Refresh stage & payment status' : 'Refresh payment status';
      refresh.onclick = async () => {
        if (article.getAttribute('data-live-claim-busy') === 'true') return;
+       if (onRefresh) { await onRefresh(); return; }
        refresh.disabled = true;
        try { const activateCurtains = await renderLivePerformances({ container, wallet, serviceUrl, ethers, onReceipt, fetchImpl }); activateCurtains?.(); }
        catch (error) { nextStatus.textContent = `${stagePending ? 'Stage/payment' : 'Payment'} status unavailable: ${error.message}`; refresh.disabled = false; }

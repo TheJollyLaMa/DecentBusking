@@ -30,6 +30,7 @@ function dom(t) {
   const createElement = tag => ({
     tag, children: [], attributes: {}, textContent: '', innerHTML: '',
     append(...children) { this.children.push(...children); },
+    prepend(...children) { this.children.unshift(...children); },
     replaceChildren(...children) { this.children = children; },
     setAttribute(name, value) { this.attributes[name] = value; },
     getAttribute(name) { return this.attributes[name]; },
@@ -129,11 +130,46 @@ test('ended ETH booking offers the Studio and a same-browser draft reminder with
   const render = () => renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example', bookingState: { bookings: [b] } });
   await render();
   const studio = () => descendants(container).filter(node => node.attributes?.['data-recording-edit'] === b.id).at(-1);
-  assert.match(studio().textContent, /Review your live recording/);
+  assert.equal(studio().textContent, 'Review recording');
+  assert.equal(studio().children[0].tag, 'img');
   saved.set(key, saved.get(otherKey));
   await render();
-  assert.equal(studio().textContent, 'Resume saved recording edit');
+  assert.equal(studio().textContent, 'Resume recording edit');
   assert.ok(descendants(container).some(node => /does not affect your performance pay.*Long-form Hour/.test(node.textContent)));
+});
+
+test('asset fee shows the exact unlock time, a single claim action only when eligible, and no resend for pending or paid', async t => {
+  const [, { renderLivePerformances }] = await modules;
+  const make = dom(t);
+  let now = Date.parse('2026-11-21T16:00:00Z');
+  t.mock.method(Date, 'now', () => now);
+  const b = { ...booking(), id:'show-eth', startUtc:'2026-11-21T02:25:00Z', endUtc:'2026-11-21T02:45:00Z',
+    escrowVersion:'assets-v1', payoutPolicy:'asset-guaranteed-v1', escrowAddress:otherWallet,
+    assetDecimals:18, assetSymbol:'ETH', amountUnits:'20000000000000000' };
+  const render = async (status, configured = true) => {
+    const container = make('div');
+    await renderLivePerformances({ container, wallet, serviceUrl:'worker',
+      bookingState:{ bookings:[{ ...b, status }], assetEscrowAddress:otherWallet, assetEscrowConfigured:configured } });
+    const nodes = descendants(container.children[0]);
+    return { status:nodes.find(n => n.tag === 'output').textContent, buttons:nodes.filter(n => n.tag === 'button') };
+  };
+  const waiting = await render('funded');
+  assert.match(waiting.status, /Funded, not paid\.\nClaim opens Nov 21, 2026, 9:45 PM ET.*producer approval/);
+  assert.equal(waiting.buttons.length, 0);
+  const ready = await render('approved');
+  assert.deepEqual(ready.buttons.map(b => b.textContent), ['Claim 0.02 ETH']);
+  assert.equal(ready.buttons[0].disabled, false);
+  assert.equal(ready.buttons[0].children[0].tag, 'img');
+  const unavailable = await render('funded', false);
+  assert.match(unavailable.status, /unavailable/);
+  assert.equal(unavailable.buttons.length, 0);
+  now = Date.parse('2026-11-22T02:45:00Z');
+  assert.equal((await render('funded')).buttons[0].textContent, 'Claim 0.02 ETH');
+  localStorage.getItem = k => k === 'live-claim:show-eth' ? 'saved-hash' : null;
+  assert.deepEqual((await render('approved')).buttons.map(b => b.textContent), ['Check pending claim']);
+  const paid = await render('paid');
+  assert.match(paid.status, /Paid to your booked wallet/);
+  assert.equal(paid.buttons.length, 0);
 });
 
 test('audience feedback follows essential performer and operator audio controls', () => {
@@ -854,6 +890,7 @@ test('performer afterparty uses a verified early stage ending when the booking s
 test('post-show waiting card gives ownership of next step without a disabled claim button or false payment', async t => {
   const [, { renderLivePerformances }] = await modules;
   const createElement = dom(t), container = createElement('section');
+  t.mock.method(Date, 'now', () => Date.parse('2026-11-14T02:21:00Z'));
   const b = { ...booking(), status: 'funded', endUtc: new Date(Date.now() - 60000).toISOString() };
   await renderLivePerformances({ container, wallet, serviceUrl: 'https://worker.example',
     bookingState: { bookings: [b], escrowAddress: otherWallet } });
@@ -876,12 +913,12 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /live-performance-admin\.mjs\?v=20261120-gift-funding-check/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261117-booking-assets/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261121-payment-access"/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261121-payment-first"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261115-afterparty"/);
-  assert.match(html, /live-performance\.css\?v=20261117-booking-assets/);
+  assert.match(html, /live-performance\.css\?v=20261121-payment-first/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/live-performance-profile.mjs?v=20261115-afterparty'],
-    './js/live-performance-profile.mjs?v=20261121-payment-access');
+    './js/live-performance-profile.mjs?v=20261121-payment-first');
   assert.equal(map.imports['./js/live-bookings.mjs?v=20261108-live-audio-pilot'],
     './js/live-bookings.mjs?v=20261117-booking-assets');
   for (const suffix of ['20261110-wallet-practice', '20261114-allocated-stage', '20261116-curtain']) {

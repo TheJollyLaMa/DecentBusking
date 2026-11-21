@@ -100,7 +100,7 @@ as they fill and checkpointed with verified encrypted readback. At most four
 segment uploads can queue; a failure stops capture explicitly, not the live show.
 Already public segments cannot be recalled. A crash can lose the current unpinned
 segment; restored/gapped/truncated recordings are labelled partial, never complete.
-Profile shows **Live performances · payment and recording** above Total earnings.
+After the booked end, the connected performer's Profile puts their current asset fee immediately below the title, ahead of identity, care, tips and older shows. The card shows the booking date, amount and chain. A funded fee is not paid: the card gives the exact automatic claim time in New York, or offers **Claim [amount]** if the producer has already approved. A saved claim offers only a receipt check, not another send. **Review recording** is a separate picture link, never a prerequisite. One **Booking & receipts** control holds proof and terms. Other bookings remain in **Live performances · payment and recording** above Total earnings.
 Payment-card loading is single-flight: the 15-second refresh does not discard an
 unfinished load. Loading and unavailable states remain visible, and booking
 requests time out after 60 seconds. Asset escrow history must finish verified

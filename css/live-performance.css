@@ -116,6 +116,15 @@
 .live-performer-next :is(button,summary):focus-visible{outline:3px solid #f0c040;outline-offset:3px}
 @keyframes live-next-arrive{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @media(prefers-reduced-motion:reduce){.live-performer-next{animation:none}}
+.live-fee-card{gap:.55rem}
+.live-fee-card>p:first-child{font-size:.85rem;font-weight:700;color:#ddcdab}
+.live-fee-card>h3{font:750 clamp(1.6rem,5vw,2.1rem)/1.15 system-ui}
+.live-fee-actions{display:flex;flex-wrap:wrap;gap:.65rem}
+#creator-profile .live-fee-tile{min-height:54px;display:inline-flex;flex-direction:row-reverse;align-items:center;justify-content:center;gap:.65rem;padding:.35rem .85rem;border:1px solid #958b71;border-radius:12px;color:#f0e6c8;background:#231d2d;font:700 1rem/1.2 system-ui;text-decoration:none;cursor:pointer}
+#creator-profile .live-fee-primary{background:#b9f49b;color:#10241b;border-color:#b9f49b}
+.live-fee-tile img{object-fit:contain;border-radius:7px}
+.live-fee-tile:focus-visible{outline:3px solid #f0c040;outline-offset:3px}
+.live-fee-card details>summary{cursor:pointer}
 .live-encore{box-sizing:border-box;margin:1.2rem 0;padding:clamp(1rem,4vw,1.6rem);border:1px solid #e6ca8c80;border-radius:22px;background:radial-gradient(ellipse at 85% 0,#8247e533,transparent 65%),#171025;color:#f0e6c8;overflow-wrap:anywhere}
 .live-encore h3{margin:.4rem 0 1rem;font:400 clamp(1.6rem,5vw,2.1rem)/1.2 Georgia,serif;color:#f3d996}
 .live-encore p{line-height:1.6}

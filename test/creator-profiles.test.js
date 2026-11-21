@@ -11,7 +11,7 @@ test('slow Profile payment loads survive periodic refresh and retain visible fai
     source.indexOf('  const link = (href, text)', source.indexOf('  const livePerformances')));
   const node = () => ({
     textContent: '', children: [], setAttribute() {}, append(...items) { this.children.push(...items); },
-    replaceChildren(...items) { this.children = items; }, querySelector() { return null; }, contains() { return false; },
+    replaceChildren(...items) { this.children = items; }, querySelector() { return null; }, querySelectorAll() { return []; }, contains() { return false; },
   });
   const inserted = [], disclosure = { parentElement: { insertBefore: item => inserted.push(item) } };
   let resolve, reject, calls = 0;
