@@ -66,6 +66,45 @@ test('off by default; starts only the supplied track at a safe local gain', asyn
   assert.equal(f.track.readyState, 'live');
 });
 
+test('broadcast mono processor owns only its output and rebuilds on an input restart', async () => {
+  const { createBroadcastMonoProcessor } = await import('../js/input-publish-mix.mjs');
+  const f = await fixture(), outputs = [];
+  const processor = createBroadcastMonoProcessor({ MediaStream: f.MediaStream });
+  function context() {
+    const audio = new f.AudioContext();
+    audio.createMediaStreamDestination = () => {
+      const track = { stops: 0, stop() { this.stops++; } };
+      const destination = { disconnect() {}, stream: { getAudioTracks: () => [track], getTracks: () => [track] } };
+      outputs.push({ track, destination });
+      return destination;
+    };
+    return audio;
+  }
+  const first = context();
+  await processor.init({ track: f.track, audioContext: first });
+  assert.deepEqual(first.gainNode.connections, [outputs[0].destination]);
+  assert.notEqual(first.gainNode.connections[0], first.destination, 'never create an audible local return');
+  assert.equal(processor.processedTrack, outputs[0].track);
+  const second = context();
+  await processor.restart({ track: f.track, audioContext: second });
+  assert.equal(outputs[0].track.stops, 1);
+  assert.equal(first.source.disconnects, 1);
+  assert.equal(processor.processedTrack, outputs[1].track);
+  await processor.destroy();
+  await processor.destroy();
+  assert.equal(outputs[1].track.stops, 1);
+  assert.equal(processor.processedTrack, undefined);
+  assert.equal(first.closes + second.closes, 0, 'the processor must not close SDK-owned contexts');
+});
+
+test('broadcast mono fails explicitly without a running audio context', async () => {
+  const { createBroadcastMonoProcessor } = await import('../js/input-publish-mix.mjs');
+  const f = await fixture({ resume: async () => {} });
+  const processor = createBroadcastMonoProcessor({ MediaStream: f.MediaStream });
+  await assert.rejects(processor.init({ track: f.track, audioContext: new f.AudioContext() }), /could not start/);
+  assert.equal(processor.processedTrack, undefined);
+});
+
 test('stop disconnects both nodes immediately and closes once; restart replaces the input', async () => {
   const f = await fixture();
   await f.monitor.start({ mediaStreamTrack: f.track }, 0.1);

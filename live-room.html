@@ -91,6 +91,12 @@
       </fieldset>
       <label>Microphone / audio interface <select id="room-input" aria-label="Audio input"><option value="">Default audio input</option></select></label>
       <button id="room-devices" type="button">Allow microphone and list inputs</button>
+      <label for="room-publish-mix">Transmitted mix · what the operator and radio hear</label>
+      <select id="room-publish-mix">
+        <option value="stereo">Stereo · keep input 1 left / input 2 right</option>
+        <option value="mono">Voice + guitar · centered mono in both ears</option>
+      </select>
+      <p class="studio-note">Choose before publishing. Mono combines both inputs; it does not turn on headphone monitoring. To change an active feed, coordinate with the operator before stopping and republishing.</p>
       <div class="room-action-row">
         <button id="room-publish" class="rehearsal-primary" type="button">Publish browser audio</button>
         <button id="room-stop" type="button">Stop microphone</button>
@@ -205,6 +211,6 @@
       </details>
     </div>
   </aside>
-  <script type="module" src="js/live-audio-room.mjs?v=20261120-booking-load"></script>
+  <script type="module" src="js/live-audio-room.mjs?v=20261120-transmit-mono"></script>
 </body>
 </html>

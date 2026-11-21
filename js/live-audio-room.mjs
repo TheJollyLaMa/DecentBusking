@@ -2,7 +2,8 @@ import { loadLiveAudioSdk, roomRequest } from './live-audio-client.mjs?v=2026111
 import { liveRecordingConsentMessage, LIVE_RECORDING_CONSENT_VERSION, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } from './live-recording-consent.mjs?v=20261114-allocated-stage';
 import { bindLiveRecordingOption } from './live-recording-option.mjs?v=20261114-allocated-stage';
 import { performerRoomSign, performerAllocationAccess, verifiedPerformerFinish } from './performer-room.mjs?v=20261117-booking-assets';
-import { bindInputMonitor } from './input-monitor.mjs?v=20261116-feedback';
+import { bindInputMonitor } from './input-monitor.mjs?v=20261120-transmit-mono';
+import { createBroadcastMonoProcessor } from './input-publish-mix.mjs?v=20261120-transmit-mono';
 import { bindBoothSetup, SHOW_MODES } from './booth-setup.mjs?v=20261116-feedback';
 import { createInputMeter } from './input-meter.mjs?v=20261110-studio-monitor';
 import { createLivePublisherPresence } from './live-publisher-presence.mjs?v=20261114-monitor-mix';
@@ -23,7 +24,7 @@ let actionPending = false;
 let activeAction = null;
 let curtainId = null;
 const actionButtons = ['room-authorize', 'room-devices', 'room-publish', 'room-stop', 'room-monitor',
-  'room-check60', 'room-check15', 'room-arm', 'room-obs', 'room-cancel'];
+  'room-check60', 'room-check15', 'room-arm', 'room-obs', 'room-cancel', 'room-publish-mix'];
 const meter = createInputMeter({
   level: byId('room-mic-level'), state: byId('room-mic-state'), note: byId('room-meter-note'),
 });
@@ -42,6 +43,7 @@ const booth = bindBoothSetup({
 });
 function renderBoothGate() {
   byId('room-publish').disabled = !booth.ready();
+  byId('room-publish-mix').disabled = actionPending || !!localTrack;
 }
 renderBoothGate();
 const direction = bindTogether(bindLiveDirection({
@@ -182,6 +184,8 @@ async function disconnect() {
   await previous?.disconnect().catch(() => {});
 }
 async function connect(publish) {
+  const inputMix = byId('room-publish-mix').value;
+  if (publish && !['stereo', 'mono'].includes(inputMix)) throw new Error('Choose stereo or centered mono for the transmitted mix.');
   await disconnect();
   byId('room-listen-status').textContent = publish ? 'Connecting your microphone…' : 'Connecting to the performer…';
   const generation = connectionGeneration, authorization = session;
@@ -218,6 +222,7 @@ async function connect(publish) {
       releaseReturnProtection();
       void headphones.stop();
       void meter.stop();
+      renderBoothGate();
       byId('room-listen-status').textContent = 'Disconnected. Click Listen to private soundcheck to reconnect.';
       status('RECONNECTING — reconnect this input; the server recovery deadline still applies (15 seconds by default; only the producer may grant a bounded hold)');
     }
@@ -226,11 +231,19 @@ async function connect(publish) {
     await next.connect(grant.url, grant.token, { autoSubscribe: false });
     if (!current()) { await next.disconnect(); return false; }
     if (publish) {
-      const capture = await sdk.createLocalAudioTrack({
+      if (inputMix === 'mono') await next.startAudio();
+      if (!current()) { await next.disconnect(); return false; }
+      const captureOptions = {
         deviceId: byId('room-input').value || undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false,
-      });
+      };
+      const capture = inputMix === 'mono'
+        ? (await next.localParticipant.createTracks({ audio: { ...captureOptions, channelCount: 2 }, video: false }))[0]
+        : await sdk.createLocalAudioTrack(captureOptions);
+      if (!capture) throw new Error('No microphone track was created.');
       if (!current()) { capture.stop(); await next.disconnect(); return false; }
       localTrack = capture;
+      if (inputMix === 'mono') await capture.setProcessor(createBroadcastMonoProcessor());
+      if (!current()) { capture.stop(); await next.disconnect(); return false; }
       const protectedReturn = publisherPresence.start(bookingId);
       capture.mediaStreamTrack?.addEventListener('ended', () => {
         if (localTrack === capture) releaseReturnProtection();
@@ -241,7 +254,7 @@ async function connect(publish) {
       await next.localParticipant.publishTrack(capture, { source: sdk.Track.Source.Microphone,
         dtx: false, red: true, audioPreset: { maxBitrate: 128000 }, forceStereo: true });
       if (!current()) { capture.stop(); await next.disconnect(); return false; }
-      status('Browser audio published privately. Public radio opens only after the owner arms the scheduled slot.');
+      status(`Browser audio published privately · ${inputMix === 'mono' ? 'voice + instrument centered in both channels' : 'stereo input preserved'}. Public radio still requires operator clearance.`);
     } else {
       for (const participant of next.remoteParticipants.values()) {
         for (const publication of participant.trackPublications.values()) subscribe(publication, participant);

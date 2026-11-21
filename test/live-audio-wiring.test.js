@@ -899,7 +899,7 @@ test('standalone backstage and main-page imports load compatible recovery helper
   }
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
-    assert.ok(source.includes(`${entry}?v=${entry === 'live-audio-room.mjs' ? '20261120-booking-load' : '20261117-booking-assets'}`));
+    assert.ok(source.includes(`${entry}?v=${entry === 'live-audio-room.mjs' ? '20261120-transmit-mono' : '20261117-booking-assets'}`));
     assert.match(source, /live-audio\.css\?v=20261116-booth/);
     assert.doesNotMatch(source, /20261114-direction/);
   }
