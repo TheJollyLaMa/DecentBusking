@@ -145,6 +145,34 @@ test('only the owner can reopen a verified pre-show asset closure, with clean ch
   await assert.rejects(f.service.listener(f.b.id), /not on air|unavailable/i);
 });
 
+test('owner recovery after T−60 delays the full set so both checks, arming and take can run again', async t => {
+  const f = await setup();
+  t.after(() => f.service.stop());
+  f.b.payoutPolicy = 'asset-guaranteed-v1';
+  await f.store.save({ version: 1, rooms: [{ bookingId: f.b.id, armed: false, checks: {}, cancelNoticePending: true,
+    cancelledAt: START - 61 * 60_000, reason: 'Live performance cancelled: booking is no longer available.', lastVerifiedAt: 0 }] });
+  f.at(START - 30 * 60_000);
+  await f.service.tick();
+  assert.equal(f.cancellations.length, 0, 'a recoverable pre-show closure never re-cancels the funded booking');
+  const challenge = await f.service.challenge({ bookingId: f.b.id, wallet: owner.address }, ORIGIN);
+  assert.match(challenge.message, /Delayed start/);
+  const auth = await f.service.authorize({ challengeId: challenge.challengeId,
+    signature: await owner.signMessage(challenge.message) }, ORIGIN);
+  const allocation = f.persisted().rooms[0].allocation;
+  assert.ok(allocation.plannedStartAt >= START + 30 * 60_000 && allocation.durationMs === 20 * 60_000);
+  assert.ok(auth.expiresAt > allocation.plannedStartAt + allocation.durationMs);
+  f.frame(960);
+  await f.service.command(auth.token, { action: 'check', check: 't60', confirmed: true }, ORIGIN);
+  f.at(START + 2 * 60_000);
+  await f.service.tick();
+  assert.equal(f.persisted().rooms[0].cancelledAt, undefined, 'the delayed room is not cancelled at the original start');
+  f.at(allocation.plannedStartAt - 10 * 60_000); f.frame(960);
+  await f.service.command(auth.token, { action: 'check', check: 't15', confirmed: true }, ORIGIN);
+  await f.service.command(auth.token, { action: 'arm' }, ORIGIN);
+  assert.equal(f.persisted().rooms[0].armed, true);
+  assert.equal(f.cancellations.length, 0);
+});
+
 test('funded asset-version booking can authorize its exact performer without weakening funding gate', async t => {
   let status = 'funded';
   const f = await setup({ getBookings: async () => ({ bookings:[{ ...booking(), payoutPolicy:'asset-guaranteed-v1', status }] }) });
