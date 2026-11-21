@@ -424,8 +424,9 @@ function renderSign() {
 async function refreshBooking() {
     if (refreshing || disposed || !bookingId || !serviceUrl) return;
     refreshing = true;
+      if (!booking && !session) status('Verifying your booking... This can take up to 60 seconds. Leave this tab open.');
     try {
-      const response = await fetch(`${serviceUrl}/api/live-bookings`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+        const response = await fetch(`${serviceUrl}/api/live-bookings`, { cache: 'no-store', signal: AbortSignal.timeout(60000) });
       if (!response.ok) throw new Error('Booking unavailable');
       const state = await response.json();
       const selected = state.bookings?.find(item => item.id === bookingId);
@@ -459,7 +460,9 @@ async function refreshBooking() {
     } catch (error) {
       broadcastState = null; observedAt = 0;
       byId('room-authorize').disabled = true;
-      status(error.message || 'Room unavailable; retry shortly.');
+      status(error.name === 'TimeoutError'
+        ? 'Booking verification timed out. Retrying automatically; leave this tab open. Your microphone has not been stopped.'
+        : error.message || 'Room unavailable; retry shortly.');
       renderSign();
     } finally { refreshing = false; }
 }

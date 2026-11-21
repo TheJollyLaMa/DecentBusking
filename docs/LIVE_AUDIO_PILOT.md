@@ -70,6 +70,8 @@ or activate a broadcast.
 
 Booking verification refreshes in the background rather than blocking the media watchdog on RPC/indexing. Initial access remains unavailable until a snapshot loads; verification older than thirty seconds denies new authorization, publishing and listener grants. Existing room health/cancellation continues using its previously verified booking and original end. Operator cancellation remains available with the existing room session. Test booking-service failure as well as media transport failure.
 
+Backstage booking verification allows up to 60 seconds for the escrow-backed booking list. Leave the tab open while it loads; a timeout is reported explicitly and retried automatically. A loading timeout does not stop an already-published microphone.
+
 Once enabled, the worker prepares eligible funded pilot rooms at T−70, even if nobody opens backstage; a missed soundcheck cannot leave radio paused indefinitely. Stop/revoke an existing OBS input before disabling ingress configuration. Switching to browser publishing while ingress is enabled revokes the old OBS key.
 
 Never enable project-wide automatic egress/recording. Consented scheduled-set
