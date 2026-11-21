@@ -326,3 +326,177 @@ test('gift funding rechecks Market backing after operator approval before sendin
   assert.equal(pending.size,0);
  });
 });
+
+const reviewBooking = {
+ id:bookingId, wallet:performer.address, title:'Set', startUtc:'2026-10-24T01:00:00Z', endUtc:'2026-10-24T01:20:00Z',
+ termsUri:'ipfs://assetterms', termsHash:ethers.id('fresh asset terms'), escrowAddress:escrow,
+ assetAddress:'0x0000000000000000000000000000000000000000', assetSymbol:'ETH', assetDecimals:18, amountUnits:'20000000000000000',
+ gift:{ collection,tokenId:'75',quantity:'1',treasury },
+};
+function memoryStorage() {
+ const values = new Map();
+ return { values, getItem:key => values.get(key) ?? null, setItem:(key,value) => values.set(key,value) };
+}
+test('asset approval takes a typed review or an existing ipfs link and refuses anything else before sending', async () => {
+ const { readAssetApprovalInput, ASSET_REVIEW_MAX_CHARACTERS } = await import('../js/live-asset-review.mjs');
+ assert.equal(readAssetApprovalInput(null),null);
+ assert.deepEqual(readAssetApprovalInput('  fantastic!  '),{ review:'fantastic!' });
+ assert.deepEqual(readAssetApprovalInput('great\n  set'),{ review:'great set' });
+ assert.deepEqual(readAssetApprovalInput(' ipfs://bafyexisting/report.json '),{ uri:'ipfs://bafyexisting/report.json' });
+ const longest = 'é'.repeat(ASSET_REVIEW_MAX_CHARACTERS);
+ assert.deepEqual(readAssetApprovalInput(longest),{ review:longest });
+ for (const [input,message] of [['',/Type a short review/],['   ',/Type a short review/],['ipfs://',/incomplete/],
+  ['ipfs://two words',/incomplete/],[`${longest}!`,/500 characters/]]) {
+  assert.throws(() => readAssetApprovalInput(input),error => error.nothingSent === true && message.test(error.message));
+ }
+});
+test('a typed review is pinned once as stable JSON and the saved link is reused on retry', async () => {
+ const { pinAssetReview, assetReviewReport } = await import('../js/live-asset-review.mjs');
+ const storage = memoryStorage(), uploads = [];
+ const upload = async file => { uploads.push({ name:file.name,type:file.type,text:await file.text() }); return `ipfs://bafyreview${uploads.length}`; };
+ const pin = review => pinAssetReview({ booking:reviewBooking,review,storage,upload });
+ assert.equal(await pin('fantastic!'),'ipfs://bafyreview1');
+ assert.equal(await pin('fantastic!'),'ipfs://bafyreview1');
+ assert.equal(uploads.length,1);
+ assert.deepEqual({ name:uploads[0].name,type:uploads[0].type },{ name:'asset-performance-review.json',type:'application/json' });
+ assert.equal(uploads[0].text,`${JSON.stringify(assetReviewReport(reviewBooking,'fantastic!'),null,2)}\n`);
+ const report = JSON.parse(uploads[0].text);
+ assert.equal(report.review,'fantastic!');
+ assert.equal(report.bookingId,bookingId);
+ assert.equal(report.performerWallet,performer.address);
+ assert.equal(report.asset.amountUnits,'20000000000000000');
+ assert.deepEqual(report.gift,{ collection,tokenId:'75',quantity:'1' });
+ assert.equal(await pin('fantastic, thank you!'),'ipfs://bafyreview2');
+ assert.equal(uploads.length,2);
+ const blocked = { getItem() { throw new Error('storage blocked'); }, setItem() { throw new Error('storage blocked'); } };
+ assert.equal(await pinAssetReview({ booking:reviewBooking,review:'fantastic!',storage:blocked,upload:async () => 'ipfs://bafyunsaved' }),'ipfs://bafyunsaved');
+});
+test('review pinning signs the free owner upload authorization and says plainly that nothing was sent when it fails', async t => {
+ t.mock.method(console,'warn',() => {});
+ const { pinAssetReview } = await import('../js/live-asset-review.mjs');
+ const requests = [], signed = [];
+ const replies = list => async (url,options) => { requests.push({ url,options }); return list.shift(); };
+ const signer = { signMessage:async message => { signed.push(message); return 'fixture-signature'; } };
+ const pin = (fetchImpl, overrides = {}) => pinAssetReview({ booking:reviewBooking,review:'fantastic!',serviceUrl:'https://worker.example',
+  signer,address:owner.address,origin:'https://radio.example',fetchImpl,storage:overrides.storage || memoryStorage(),...overrides });
+ const storage = memoryStorage();
+ const uri = await pin(replies([
+  { ok:true,json:async () => ({ url:'https://uploads.example/pin' }) },
+  { ok:true,json:async () => ({ data:{ cid:'bafyrealreview' } }) },
+ ]),{ storage });
+ assert.equal(uri,'ipfs://bafyrealreview');
+ assert.equal(requests[0].url,'https://worker.example/api/ipfs/upload-url');
+ const authorization = JSON.parse(requests[0].options.body);
+ assert.deepEqual({ address:authorization.address,origin:authorization.origin,name:authorization.name,type:authorization.type,signature:authorization.signature },
+  { address:owner.address,origin:'https://radio.example',name:'asset-performance-review.json',type:'application/json',signature:'fixture-signature' });
+ assert.match(signed[0],/File: asset-performance-review\.json/);
+ assert.equal(requests[1].url,'https://uploads.example/pin');
+ assert.equal(requests[1].options.body.get('file').name,'asset-performance-review.json');
+ assert.equal(JSON.parse(storage.values.get(`live-asset-review:${bookingId}`)).uri,uri);
+
+ const failed = memoryStorage();
+ const declined = { signMessage:async () => { throw Object.assign(new Error('user rejected action'),{ code:'ACTION_REJECTED' }); } };
+ await assert.rejects(pin(replies([]),{ signer:declined,storage:failed }),error => error.nothingSent === true && /declined the free upload signature/.test(error.message));
+ await assert.rejects(pin(replies([{ ok:false,status:403,text:async () => JSON.stringify({ error:'Only the owner wallet can upload' }) }]),{ storage:failed }),
+  error => error.nothingSent === true && /Saving the review to IPFS failed.*Only the owner wallet can upload/.test(error.message));
+ await assert.rejects(pinAssetReview({ booking:reviewBooking,review:'fantastic!',storage:failed,upload:async () => 'https://example.com/not-ipfs' }),
+  error => error.nothingSent === true && /did not return a valid IPFS link/.test(error.message));
+ assert.equal(failed.values.size,0);
+});
+test('Approve performance saves a typed review to IPFS and only then asks for the approval transaction', async t => {
+ const f = await fixture();
+ const { readAssetApprovalInput, pinAssetReview } = await import('../js/live-asset-review.mjs');
+ const { liveBroadcastCompletionPending } = await import('../js/live-escrow-release.mjs');
+ const created = (await f.create({ assetAddress:f.shared.LIVE_ZERO_ADDRESS,assetDecimals:18,assetSymbol:'ETH',amountUnits:'20000000000000000' })).bookings[0];
+ const booking = { ...created,acknowledged:true,transactions:{},broadcastCompletion:{ known:true,pending:false } };
+ const id = ethers.id(booking.id), hash = ethers.id('approval fixture'), storage = memoryStorage();
+ const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../js/live-performance-admin.mjs'), 'utf8')
+  .replace(/^import[\s\S]*?from '[^']+';\n/gm, '').replace(/^export /gm, '');
+ function run(actionName, { answer,rejectSimulation = false,target = booking } = {}) {
+  const calls = [], prompts = [], statuses = [], reports = [], commands = [];
+  const sendable = label => Object.assign(async (...args) => { calls.push([label,...args]); return { hash,wait:async () => ({ hash }) }; }, {
+   staticCall:async (...args) => {
+    calls.push([`${label}.check`,...args]);
+    if (rejectSimulation) throw Object.assign(new Error('execution reverted'),{ code:'CALL_EXCEPTION',shortMessage:'execution reverted: InvalidState' });
+   },
+  });
+  const contract = { bookings:async () => ({ funder:owner.address,terms:f.shared.assetBookingTerms(booking) }),
+   approvePerformance:sendable('approve'), platformFault:sendable('fault'), noShow:sendable('noShow'), markUnperformedGift:sendable('unperformed') };
+  const signer = { getAddress:async () => owner.address, signMessage:async () => 'fixture-signature' };
+  const line = { set textContent(value) { statuses.push(value); } };
+  const card = { dataset:{ liveActions:booking.id }, querySelector:() => ({ set textContent(value) { statuses.push(`card: ${value}`); }, scrollIntoView() {} }) };
+  const initialState = { assetEscrowConfigured:true,assetEscrowAddress:escrow,giftTreasuryAddress:treasury,revision:0,bookings:[target] };
+  const done = require('node:vm').runInNewContext(`${source}
+   state = initialState;
+   section = { querySelector: () => line, querySelectorAll: () => [card] };
+   render = () => {};
+   action(actionName, target);`, {
+   ...f.shared, initialState, target, actionName, line, card, readAssetApprovalInput, liveBroadcastCompletionPending,
+   pinAssetReview:args => {
+    calls.push(['pin',args.review,args.serviceUrl,args.address,args.origin,args.booking.id]);
+    return pinAssetReview({ ...args,storage,upload:async file => { reports.push(JSON.parse(await file.text())); return 'ipfs://bafyreview'; } });
+   },
+   window:{ ethereum:{}, DecentConfig:{ ipfsUploadServiceUrl:'https://worker.example' }, ethers:{ ...ethers,
+    BrowserProvider:class { async getSigner() { return signer; } async getNetwork() { return {chainId:8453n}; } },
+    Contract:function(address) { assert.equal(address,escrow); return contract; },
+   } },
+   isAdminWallet:address => address === owner.address,
+   document:{ readyState:'loading',addEventListener(){},dispatchEvent(){} }, CustomEvent:class {},
+   location:new URL('https://radio.example'), confirm:() => true, prompt:question => { prompts.push(question); return answer; },
+   publishLiveBookingState(){},
+   localStorage:{ getItem:() => null,setItem(){},removeItem(){} },
+   fetch:async (_url,options) => {
+    commands.push(JSON.parse(options.body).command);
+    return { ok:true,json:async () => ({ ...initialState,bookings:[{ ...target,
+     transactions:{ approve:{ status:commands.length === 1 ? 'pending' : 'confirmed' } } }] }) };
+   },
+  });
+  return { done,calls,prompts,statuses,reports,commands };
+ }
+ const refused = (message) => error => error.nothingSent === true && message.test(error.message);
+
+ await t.test('a typed review is saved first and the approval carries the saved link', async () => {
+  const r = run('assetApprove',{ answer:'  fantastic! ' });
+  const message = await r.done;
+  assert.match(r.prompts[0],/Type a short public review/);
+  assert.deepEqual(r.calls.map(call => call[0]),['approve.check','pin','approve']);
+  assert.deepEqual(r.calls[0].slice(1),[id,'ipfs://approval-check']);
+  assert.deepEqual(r.calls[1].slice(1),['fantastic!','https://worker.example',owner.address,'https://radio.example',booking.id]);
+  assert.deepEqual(r.calls[2].slice(1),[id,'ipfs://bafyreview']);
+  assert.equal(r.reports[0].review,'fantastic!');
+  assert.match(message,/Approved on Base\. Review saved at ipfs:\/\/bafyreview\..*release the gift separately/);
+  assert.ok(r.statuses.some(status => /^card: Saving your review to IPFS/.test(status)));
+  assert.equal(r.commands.length,2);
+ });
+ await t.test('a pasted ipfs link is approved as-is without another upload', async () => {
+  const r = run('assetApprove',{ answer:' ipfs://bafyexisting ' });
+  await r.done;
+  assert.deepEqual(r.calls,[['approve.check',id,'ipfs://bafyexisting'],['approve',id,'ipfs://bafyexisting']]);
+  assert.equal(r.reports.length,0);
+ });
+ await t.test('cancelling or typing nothing sends nothing', async () => {
+  const cancelled = run('assetApprove',{ answer:null });
+  assert.equal(await cancelled.done,'Cancelled. Nothing was sent.');
+  const blank = run('assetApprove',{ answer:'   ' });
+  await assert.rejects(blank.done,refused(/Type a short review/));
+  assert.deepEqual([...cancelled.calls,...blank.calls],[]);
+ });
+ await t.test('a refused simulation stops before any upload or transaction', async () => {
+  const r = run('assetApprove',{ answer:'fantastic!',rejectSimulation:true });
+  await assert.rejects(r.done,refused(/would be rejected right now.*InvalidState/));
+  assert.deepEqual(r.calls.map(call => call[0]),['approve.check']);
+  assert.equal(r.reports.length,0);
+ });
+ await t.test('an unfinished broadcast blocks approval before asking anything', async () => {
+  const r = run('assetApprove',{ answer:'fantastic!',target:{ ...booking,broadcastCompletion:{ known:false,pending:true } } });
+  await assert.rejects(r.done,refused(/broadcast completion is pending/));
+  assert.deepEqual([r.prompts,r.calls],[[],[]]);
+ });
+ await t.test('fault, no-show and unperformed reports still require an ipfs link', async () => {
+  for (const name of ['assetFault','assetNoShow','assetUnperformed']) {
+   const r = run(name,{ answer:'sorry about that' });
+   await assert.rejects(r.done,refused(/pinned IPFS report is required/));
+   assert.deepEqual(r.calls,[]);
+  }
+ });
+});

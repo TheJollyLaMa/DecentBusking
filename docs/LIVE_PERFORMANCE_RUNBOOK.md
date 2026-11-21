@@ -878,6 +878,20 @@ faults retain the full fee. Recovery appears as recovered, not paid. No gift
 expiry is automatic. Asset history must be caught up and canonical before
 new controls are enabled; failure is shown as unavailable.
 
+Admin → Live Performance → the booking → **Booking actions** → **Approve
+performance** takes a plain typed review of up to 500 characters (for example
+`fantastic!`). Admin saves it to IPFS as a small JSON report
+(`decentbusking-asset-performance-review-v1`) after one free upload signature
+from the owner wallet, then sends `approvePerformance` with that link. The
+report holds the booking, performer, fee asset and optional gift, the review
+text and an evidence limit; it carries no timestamp, so the same review for the
+same booking produces the same bytes and a saved link is reused on retry.
+Admin simulates the approval on Base first, so a refused approval never uploads
+or sends anything. A pasted `ipfs://` link still works and skips the upload.
+Platform-fault, no-show and unperformed-gift reports still require an existing
+pinned `ipfs://` link. A repeated approval reverts and cannot pay twice. Errors
+that stop before a transaction begin with “Nothing was sent.”
+
 After review and explicit authorization only, configure the verified
 `LIVE_PERFORMANCE_ASSET_ESCROW_ADDRESS`, its exact
 `LIVE_PERFORMANCE_ASSET_ESCROW_START_BLOCK` and the verified

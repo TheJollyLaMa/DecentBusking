@@ -911,11 +911,11 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
     assert.match(source, /live-audio\.mjs\?v=20261114-allocated-stage/);
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /live-performance-admin\.mjs\?v=20261120-gift-funding-check/);
+  assert.match(html, /live-performance-admin\.mjs\?v=20261121-typed-review/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261117-booking-assets/);
   assert.match(html, /src="js\/creator-profile\.mjs\?v=20261121-payment-first"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261115-afterparty"/);
-  assert.match(html, /live-performance\.css\?v=20261121-payment-first/);
+  assert.match(html, /live-performance\.css\?v=20261121-action-status/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/live-performance-profile.mjs?v=20261115-afterparty'],
     './js/live-performance-profile.mjs?v=20261121-payment-first');
