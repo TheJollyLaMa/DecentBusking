@@ -90,8 +90,19 @@ export function initTopTenBoard() {
   let hypeEndTimer;
   let wasOpenBeforeHype = false;
   let autoOpenedInstance = null;
-  let lastReport = null;
-  let lastWeekly = null;
+  const cachedReport = (() => {
+    try {
+      const saved = JSON.parse(globalThis.sessionStorage?.getItem('decentbusking:weekly-top-ten') || 'null');
+      if (!saved?.report?.week || !Array.isArray(saved.report.tracks) ||
+          !Number.isFinite(saved.savedAt) || Date.now() - saved.savedAt > 7 * 24 * 60 * 60_000) return null;
+      return saved;
+    } catch (error) {
+      console.warn('[top-ten] Saved chart unavailable:', error.message);
+      return null;
+    }
+  })();
+  let lastReport = cachedReport?.report || null;
+  let lastWeekly = cachedReport?.weekly || null;
   let lastFunds = null;
   let fundRevision = 0;
   let lastNowPlaying = null;
@@ -204,6 +215,7 @@ export function initTopTenBoard() {
     panel.setAttribute('aria-hidden', 'false');
     document.body.classList.add('top-ten-open');
     document.dispatchEvent(new CustomEvent('left-drawer-open', { detail: 'top-ten' }));
+    if (lastReport) render(lastReport, lastNowPlaying, lastWeekly);
     refresh();
   };
   const endHype = () => {
@@ -393,46 +405,107 @@ export function initTopTenBoard() {
     }
     syncFlights();
   };
+  const cacheReport = (report, weekly) => {
+    try {
+      globalThis.sessionStorage?.setItem('decentbusking:weekly-top-ten', JSON.stringify({
+        savedAt: Date.now(), report, weekly,
+      }));
+    } catch (error) {
+      console.warn('[top-ten] Chart cache unavailable:', error.message);
+    }
+  };
+  const requestJson = async (url, label) => {
+    const controller = new AbortController();
+    let deadline;
+    const timedOut = new Promise((_, reject) => {
+      deadline = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`${label} timed out`));
+      }, 8000);
+    });
+    try {
+      return await Promise.race([
+        timedOut,
+        fetch(url, { cache: 'no-store', signal: controller.signal }).then(async response => ({
+          response, body: await response.json(),
+        })),
+      ]);
+    } finally {
+      clearTimeout(deadline);
+    }
+  };
+  const showRefreshError = message => {
+    status.textContent = `${message}. ${lastReport ? 'Showing the last saved chart; retrying.' : 'Try again while this panel is open.'}`;
+    if (lastReport) return;
+    const explanation = el('p', 'top-ten-empty', 'The weekly chart is unavailable right now.');
+    const retry = el('button', 'top-ten-retry', 'Retry loading chart');
+    retry.type = 'button';
+    retry.addEventListener('click', refresh);
+    content.replaceChildren(explanation, retry);
+  };
   async function refresh() {
     clearTimeout(timer);
     const request = ++generation;
     if (!isOpen()) return;
     const service = (window.DecentConfig?.ipfsUploadServiceUrl || '').replace(/\/$/, '');
     if (!service) { status.textContent = 'JukeLoop service is not configured.'; return; }
-    status.textContent = 'Loading this week’s song votes…';
+    status.textContent = lastReport ? 'Refreshing this week’s song votes…' : 'Loading this week’s song votes…';
     const startingFundRevision = fundRevision;
-    try {
-      const [historyResponse, radioResponse, weeklyResponse, fundsResponse] = await Promise.all([
-        fetch(`${service}/api/radio/history?weeks=1&calendar=new-york`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }),
-        fetch(`${service}/api/radio`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }),
-        fetch(`${service}/api/payroll/weekly`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }).catch(() => null),
-        fetch(`${service}/api/funds`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }).catch(() => null),
-      ]);
-      const [history, radio, weeklyState, fundsState] = await Promise.all([
-        historyResponse.json(), radioResponse.json(),
-        weeklyResponse?.json().catch(() => null) ?? null,
-        fundsResponse?.json().catch(() => null) ?? null,
-      ]);
-      if (request !== generation || !isOpen()) return;
-      if (!historyResponse.ok) throw new Error(history.error || `Weekly votes unavailable (${historyResponse.status})`);
-      if (!radioResponse.ok) throw new Error(radio.error || `Live track unavailable (${radioResponse.status})`);
-      if (startingFundRevision === fundRevision) {
-        lastFunds = fundsResponse?.ok && fundsState?.funds?.['dbusk-top10'] ? fundsState : {
-          funds: { 'dbusk-top10': { balanceUnits: null, balanceAvailable: false } },
-        };
-      }
-      applyRadioState(radio);
-      const report = (history.weeks || []).find(entry => entry.current) || (history.weeks || []).at(-1);
-      const payroll = startingFundRevision === fundRevision ? (weeklyResponse?.ok ? weeklyState : null) : lastFunds?.weekly;
-      const weekly = payroll?.ready && !payroll.lastError && payroll.currentPeriod?.week === report?.week &&
-        /^\d+$/.test(String(payroll.funds?.top10?.budgetUnits ?? '')) ? payroll : null;
-      if (!report) { header.textContent = 'Weekly vote chart'; content.replaceChildren(el('p', 'top-ten-empty', 'Weekly song votes are not available yet.')); }
-      else render(report, radio.nowPlaying, weekly);
+    const historyTask = requestJson(`${service}/api/radio/history?weeks=1&calendar=new-york`, 'Weekly chart request')
+      .then(({ response, body }) => {
+        if (!response.ok) throw new Error(body.error || `Weekly votes unavailable (${response.status})`);
+        if (request !== generation || !isOpen()) return;
+        const report = (body.weeks || []).find(entry => entry.current) || (body.weeks || []).at(-1);
+        if (!report) {
+          lastReport = null;
+          lastWeekly = null;
+          try { globalThis.sessionStorage?.removeItem('decentbusking:weekly-top-ten'); }
+          catch (error) { console.warn('[top-ten] Stale chart cache could not be cleared:', error.message); }
+          header.textContent = 'Weekly vote chart';
+          content.replaceChildren(el('p', 'top-ten-empty', 'Weekly song votes are not available yet.'));
+          status.textContent = '';
+          return;
+        }
+        render(report, lastNowPlaying, lastWeekly);
+        cacheReport(report, lastWeekly);
+        status.textContent = 'Chart loaded. Updating live and prize data…';
+      });
+    const radioTask = requestJson(`${service}/api/radio`, 'Live track request')
+      .then(({ response, body }) => {
+        if (!response.ok) throw new Error(body.error || `Live track unavailable (${response.status})`);
+        if (request !== generation || !isOpen()) return;
+        applyRadioState(body);
+        if (lastReport) render(lastReport, body.nowPlaying || null, lastWeekly);
+      });
+    const weeklyTask = requestJson(`${service}/api/payroll/weekly`, 'Prize data request').catch(() => null);
+    const fundsTask = requestJson(`${service}/api/funds`, 'Fund data request').catch(() => null);
+    const [historyResult, radioResult] = await Promise.allSettled([historyTask, radioTask]);
+    if (request !== generation || !isOpen()) return;
+    if (historyResult.status === 'rejected') showRefreshError(historyResult.reason.message);
+    else if (radioResult.status === 'rejected') status.textContent = `${radioResult.reason.message}. The weekly chart is available; retrying live data.`;
+    const [weeklyResult, fundsResult] = await Promise.all([weeklyTask, fundsTask]);
+    if (request !== generation || !isOpen()) return;
+    if (startingFundRevision === fundRevision) {
+      const fundsState = fundsResult?.response.ok ? fundsResult.body : null;
+      lastFunds = fundsState?.funds?.['dbusk-top10'] ? fundsState : {
+        funds: { 'dbusk-top10': { balanceUnits: null, balanceAvailable: false } },
+      };
+    }
+    const weeklyState = weeklyResult?.response.ok ? weeklyResult.body : null;
+    const weekly = startingFundRevision === fundRevision
+      ? weeklyState?.ready && !weeklyState.lastError && weeklyState.currentPeriod?.week === lastReport?.week &&
+        /^\d+$/.test(String(weeklyState.funds?.top10?.budgetUnits ?? '')) ? weeklyState : null
+      : lastFunds?.weekly;
+    if (weekly !== undefined) lastWeekly = weekly;
+    if (lastReport) {
+      render(lastReport, lastNowPlaying, weekly);
+      cacheReport(lastReport, weekly);
+    }
+    if (lastReport && historyResult.status === 'fulfilled' && radioResult.status === 'fulfilled') {
       status.textContent = weekly && fundBudgetFor({ ...lastFunds, weekly }, 'dbusk-top10').budgetUnits != null
         ? '' : 'Prize estimates are unavailable. Song votes are current.';
-    } catch (error) {
-      if (request !== generation || !isOpen()) return;
-      status.textContent = `${error.message}. Retrying while this panel is open.`;
+    } else if (!lastReport && historyResult.status === 'fulfilled') {
+      status.textContent = '';
     }
     if (isOpen()) timer = setTimeout(refresh, 15000);
   }

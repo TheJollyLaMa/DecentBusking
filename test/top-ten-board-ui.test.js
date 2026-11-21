@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 test('Hype pins the real chart, updates live ranks independently, and restores drawer state at handoff', async t => {
-  const globals = ['document', 'window', 'fetch', 'setTimeout', 'clearTimeout'];
+  const globals = ['document', 'window', 'fetch', 'setTimeout', 'clearTimeout', 'sessionStorage'];
   const original = Object.fromEntries(globals.map(key => [key, global[key]]));
   t.after(() => { for (const key of globals) global[key] = original[key]; });
   class Node extends EventTarget {
@@ -23,6 +23,7 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
       };
     }
     append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
+    appendChild(node) { this.append(node); return node; }
     before(node) { node.parent = this.parent; this.parent.children.splice(this.parent.children.indexOf(this), 0, node); }
     after(node) { node.parent = this.parent; this.parent.children.splice(this.parent.children.indexOf(this) + 1, 0, node); }
     remove() { this.parent.children = this.parent.children.filter(node => node !== this); }
@@ -35,7 +36,14 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
       const names = selector.split(',').map(part => part.trim().replace(/^\./, '').split('[')[0]);
       return this.children.flatMap(child => [...(names.some(name => child.classList.contains(name)) ? [child] : []), ...child.querySelectorAll(selector)]);
     }
-    querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+    querySelector(selector) {
+      const found = this.querySelectorAll(selector)[0];
+      if (found || this.id !== 'payment-celebration-root' || !selector.startsWith('.payment-')) return found || null;
+      const paymentNode = new Node();
+      paymentNode.className = selector.slice(1);
+      this.append(paymentNode);
+      return paymentNode;
+    }
     getBoundingClientRect() { return { top: 0, bottom: 60, left: 0, width: 400, height: 60 }; }
     focus() { document.activeElement = this; }
     showModal() { this.open = true; }
@@ -52,6 +60,7 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
   panel.append(heading, ids['top-ten-status'], ids['top-ten-content']);
   ids['top-ten-tab'].setAttribute('aria-expanded', 'false');
   const doc = new EventTarget();
+  doc.head = new Node();
   doc.body = new Node();
   doc.body.append(ids['top-ten-tab'], panel);
   doc.getElementById = id => ids[id] || null;
@@ -78,17 +87,30 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
   let funds = { ready: true, funds: { 'dbusk-top10': { balanceUnits: '21000000', balanceAvailable: true } } };
   let fundsAvailable = true;
   let delayedFunds = null;
+  let requestsHang = false;
   global.fetch = async url => {
+    if (requestsHang) return new Promise(() => {});
     if (url.includes('/api/funds') && delayedFunds) await delayedFunds;
     return { ok: !url.includes('/api/funds') || fundsAvailable, json: async () => url.includes('/history')
       ? { weeks: [{ current: true, week: 'NY-2026-10-12', tracks }] }
       : url.includes('/payroll') ? weekly : url.includes('/funds') ? funds : radio };
   };
+  const stored = new Map();
+  global.sessionStorage = {
+    getItem: key => stored.get(key) || null,
+    setItem: (key, value) => stored.set(key, value),
+    removeItem: key => stored.delete(key),
+  };
+  global.sessionStorage.setItem('decentbusking:weekly-top-ten', JSON.stringify({
+    savedAt: Date.now(),
+    report: { current: true, week: 'NY-2026-10-12', tracks },
+  }));
   const { initTopTenBoard } = await import('../js/top-ten-board.mjs');
   initTopTenBoard();
   const publish = () => doc.dispatchEvent(new CustomEvent('dbusk-radio-state', { detail: radio }));
   const settle = async () => { await new Promise(resolve => setImmediate(resolve)); };
   publish();
+  assert.equal(panel.querySelectorAll('.top-ten-song').length, 2, 'the saved chart renders before any network refresh completes');
   await settle();
   assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'true');
   assert.equal(ids['top-ten-panel-close'].getAttribute('aria-disabled'), null, 'Hype panel can be minimized');
@@ -209,8 +231,17 @@ test('Hype pins the real chart, updates live ranks independently, and restores d
   doc.dispatchEvent(new CustomEvent('dbusk-radio-vote-recorded'));
   await settle();
   assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'false', 'a vote confirmation does not reopen a closed panel');
+  requestsHang = true;
   ids['top-ten-tab'].dispatchEvent(new Event('click'));
   await settle();
+  assert.equal(panel.querySelectorAll('.top-ten-song').length, 2, 'opening the tab never hides the retained chart while requests refresh');
+  assert.equal(ids['top-ten-tab'].getAttribute('aria-expanded'), 'true');
+  for (const timeout of [...timers.values()].filter(timer => timer.delay === 8000)) timeout.callback();
+  await settle();
+  await settle();
+  assert.match(ids['top-ten-status'].textContent, /timed out/);
+  assert.equal(panel.querySelectorAll('.top-ten-song').length, 2, 'a timed-out refresh keeps the saved chart visible');
+  requestsHang = false;
   radio = { serverTime: now, activeShow: { id: 'friday-top10-hype' }, topTenHype: { ...hype, endAt: new Date(now + 2000).toISOString() } };
   publish();
   const deadline = [...timers.values()].find(timer => timer.delay === 2000);
