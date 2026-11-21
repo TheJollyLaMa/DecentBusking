@@ -426,7 +426,7 @@ test('binding stop during start prevents stale status and checkbox updates', asy
   assert.deepEqual(f.contexts[0].source.connections, []);
 });
 
-test('backstage and practice expose and bind the same opt-in mix with refreshed module URLs', async () => {
+test('backstage and practice expose and bind the same opt-in mix with versioned module URLs', async () => {
   const { readFile } = require('node:fs/promises');
   for (const [page, module, id] of [
     ['live-room.html', 'live-audio-room.mjs', 'room-monitor-mix'],
@@ -439,7 +439,8 @@ test('backstage and practice expose and bind the same opt-in mix with refreshed 
     assert.ok(source.includes(`mix: ${page === 'live-room.html' ? 'byId' : 'el'}('${id}')`));
     const version = source.match(/input-monitor\.mjs\?v=([^']+)/)?.[1];
     assert.ok(version);
-    assert.ok(html.includes(`src="js/${module}?v=${version}"`), 'Entry and shared monitor cache versions advance together');
+    assert.match(html, new RegExp(`src="js/${module.replaceAll('.', '\\.')}\\?v=[^"]+"`),
+      'Entry and shared monitor have independent cache versions');
   }
 });
 

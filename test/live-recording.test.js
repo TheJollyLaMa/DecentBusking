@@ -93,6 +93,47 @@ test('revocation is durable, rejects replay and does not publish an opted-out re
   assert.equal(s.recorder.deploymentState().ready, true);
 });
 
+test('private maintenance release preserves opt-out across deployment and accepts fresh allocated recording consent', async () => {
+  const s = await setup();
+  const b = { ...booking, acknowledged: true, status: 'funded', broadcast: {
+    actualStartedAt: null, actualEndedAt: null, plannedStartAt: START + 60000, accessUntil: START + 180000,
+  } };
+  s.at(START + 30000);
+  await s.recorder.consent(b, await s.permission(true, artist, START + 30000, ORIGIN, b), artist.address, ORIGIN);
+  s.at(START + 31000);
+  await s.recorder.consent(b, await s.permission(false, artist, START + 31000, ORIGIN, b), artist.address, ORIGIN);
+  const lease = { id: 'preflight-maintenance', expiresAt: START + 150000, bookings: [b] };
+  assert.deepEqual(await s.recorder.prepareDeployment(lease), { ready: false }, 'Open allocated slot still prevents replacement');
+  b.broadcast.actualEndedAt = START + 31000;
+  assert.deepEqual(await s.recorder.prepareDeployment(lease), { ready: true, recordingCheckpointVerified: true });
+  const { createLiveRecorder } = await import('../discord-bot/live-recording.js');
+  const { liveRecordingConsentMessage, LIVE_RECORDING_ALLOCATED_CONSENT_VERSION } = await import('../js/live-recording-consent.mjs');
+  const replacement = createLiveRecorder(s.args);
+  await replacement.initialize();
+  b.broadcast.actualEndedAt = null;
+  assert.equal(replacement.status(b).consented, false);
+  s.at(START + 32000);
+  const input = { enabled: true, issuedAt: START + 32000, consentVersion: LIVE_RECORDING_ALLOCATED_CONSENT_VERSION };
+  input.signature = await artist.signMessage(liveRecordingConsentMessage({ bookingId: b.id, wallet: b.wallet,
+    origin: ORIGIN, issuedAt: input.issuedAt, enabled: true, version: input.consentVersion }));
+  await replacement.consent(b, input, artist.address, ORIGIN);
+  replacement.capture(b, frame()); await replacement.flush();
+  assert.equal(s.blobs.size, 0, 'Reopened private audio is still not recorded');
+  b.broadcast.actualStartedAt = START + 32000;
+  b.broadcast.authorizedEndAt = START + 52000;
+  replacement.capture(b, frame()); await replacement.flush();
+  assert.equal(s.blobs.size, 1, 'Fresh consent records the actually started delayed set');
+  assert.equal(s.submissions.length, 0);
+  s.at(START + 33000);
+  b.broadcast.actualEndedAt = START + 33000;
+  b.broadcast.endReason = 'producer-finished';
+  await replacement.tick([b]);
+  assert.equal(replacement.status(b).editAvailable, true, 'The recovered recording opens in the afterparty editor');
+  assert.equal(s.submissions.length, 0, 'Finishing still requires a separate performer release approval');
+  await s.approve('full', artist, replacement);
+  assert.equal(s.submissions.length, 1);
+});
+
 test('failed consent persistence captures nothing; failed finalization retries without duplicate ingestion', async () => {
   const s = await setup();
   const original = s.store.save;

@@ -91,6 +91,30 @@ test('backstage waits for a slow booking lookup and reports an exhausted deadlin
   }
 });
 
+test('cancelling a late first-check confirmation neither submits nor reports a saved check', async () => {
+  const { runInNewContext } = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../js/live-audio-room.mjs'), 'utf8');
+  const handlers = source.slice(source.indexOf("for (const [id, check] of [['room-check60'"),
+    source.indexOf("byId('room-arm').onclick"));
+  const nodes = new Map(), commands = [], saved = [];
+  let confirmed = false;
+  runInNewContext(handlers, {
+    actionPending: false, broadcastState: { lateFirstCheckAllowed: true },
+    remoteTrack: {}, audio: { paused: false }, window: { confirm: () => confirmed },
+    byId(id) { if (!nodes.has(id)) nodes.set(id, {}); return nodes.get(id); },
+    command: async input => { commands.push(input); return {}; }, render() {},
+    perform: (fn, _pending, success) => async () => { await fn(); saved.push(success); },
+  });
+  await nodes.get('room-check60').onclick({});
+  assert.equal(commands.length, 0);
+  assert.equal(saved.length, 0);
+  confirmed = true;
+  await nodes.get('room-check60').onclick({});
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].lateConfirmed, true);
+  assert.equal(saved.length, 1);
+});
+
 test('ended ETH booking offers the Studio and a same-browser draft reminder without requiring payment', async t => {
   const [, { renderLivePerformances }] = await modules;
   const { recordingDraftKey } = await import('../js/live-recording-edit.mjs');
@@ -899,7 +923,7 @@ test('standalone backstage and main-page imports load compatible recovery helper
   }
   for (const [html, entry] of [['live-room.html', 'live-audio-room.mjs'], ['producer-room.html', 'producer-room.mjs']]) {
     const source = fs.readFileSync(path.join(__dirname, '..', html), 'utf8');
-    assert.ok(source.includes(`${entry}?v=${entry === 'live-audio-room.mjs' ? '20261120-transmit-mono' : '20261117-booking-assets'}`));
+    assert.ok(source.includes(`${entry}?v=${entry === 'live-audio-room.mjs' ? '20261120-private-preflight' : '20261117-booking-assets'}`));
     assert.match(source, /live-audio\.css\?v=20261116-booth/);
     assert.doesNotMatch(source, /20261114-direction/);
   }
