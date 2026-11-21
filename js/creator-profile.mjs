@@ -889,21 +889,31 @@ export function initCreatorProfile() {
   const earningsList = dialog.querySelector('[data-earnings-list]');
   const livePerformances = document.createElement('section');
   livePerformances.className = 'creator-live-performances';
+  const liveHeading = document.createElement('h3');
+  liveHeading.textContent = 'Live performances · payment and recording';
+  const liveStatus = document.createElement('output');
+  liveStatus.setAttribute('role', 'status');
+  liveStatus.setAttribute('aria-live', 'polite');
+  livePerformances.append(liveHeading, liveStatus);
   const earningsDisclosure = dialog.querySelector('[data-profile-earnings]');
   earningsDisclosure?.parentElement?.insertBefore(livePerformances, earningsDisclosure);
   const tipReceipts = document.createElement('section');
   earningsDisclosure?.parentElement?.insertBefore(tipReceipts, earningsDisclosure);
   let liveRevision = 0;
   let livePaymentLoad;
+  let livePaymentPending = false;
   let liveReleaseTimer;
   dialog.addEventListener('close', () => { clearInterval(liveReleaseTimer); liveReleaseTimer = null; });
   const loadLivePayments = async (check, bookingState, passive = false) => {
+    if (livePaymentPending) return;
     if (livePerformances.querySelector('[data-live-claim-busy="true"]')) return;
     const canReplace = () => !passive || (dialog.open && viewingOwnProfile && !document.hidden &&
       !livePerformances.contains(document.activeElement));
     if (!canReplace()) return;
+    livePaymentPending = true;
     const generation = ++liveRevision, target = address;
     const contents = document.createElement('div');
+    liveStatus.textContent = 'Checking your performance payment and recording…';
     try {
       let liveReceipt;
       const activateCurtains = await renderLivePerformances({ container: contents, wallet: target,
@@ -911,13 +921,18 @@ export function initCreatorProfile() {
         onReceipt: entry => { liveReceipt = entry; } });
       if (dialog.open && check === revision && generation === liveRevision && target === address && canReplace() &&
           !livePerformances.querySelector('[data-live-claim-busy="true"]')) {
-        livePerformances.replaceChildren(contents);
+        liveStatus.textContent = '';
+        livePerformances.replaceChildren(liveHeading, liveStatus, contents);
         activateCurtains?.();
       }
       return liveReceipt;
     } catch (error) {
       if (dialog.open && check === revision && generation === liveRevision && canReplace() &&
-          !livePerformances.querySelector('[data-live-claim-busy="true"]')) livePerformances.textContent = `Live payment status unavailable: ${error.message}`;
+          !livePerformances.querySelector('[data-live-claim-busy="true"]')) {
+        liveStatus.textContent = `Live payment status unavailable: ${error.message}. Retrying automatically; no payment is assumed.`;
+      }
+    } finally {
+      livePaymentPending = false;
     }
   };
   const link = (href, text) => Object.assign(document.createElement('a'), { href, textContent: text, target: '_blank', rel: 'noopener noreferrer' });
@@ -1001,7 +1016,8 @@ export function initCreatorProfile() {
     clearDiscordLinkTimers();
     discordLinkExpiryAt = 0;
     const check = ++revision;
-    livePerformances.replaceChildren();
+    livePerformances.replaceChildren(liveHeading, liveStatus);
+    liveStatus.textContent = 'Checking your performance payment and recording…';
     livePaymentLoad = loadLivePayments(check);
     renderTipLedger({ container: tipReceipts, config: config(), address: target, ethers: window.ethers,
       isCurrent: () => check === revision && target === address });

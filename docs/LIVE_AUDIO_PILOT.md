@@ -100,6 +100,13 @@ as they fill and checkpointed with verified encrypted readback. At most four
 segment uploads can queue; a failure stops capture explicitly, not the live show.
 Already public segments cannot be recalled. A crash can lose the current unpinned
 segment; restored/gapped/truncated recordings are labelled partial, never complete.
+Profile shows **Live performances · payment and recording** above Total earnings.
+Payment-card loading is single-flight: the 15-second refresh does not discard an
+unfinished load. Loading and unavailable states remain visible, and booking
+requests time out after 60 seconds. Asset escrow history must finish verified
+indexing before approval or claim controls become available; a button click or
+an NFT balance is not proof that the fee was paid.
+
 At the end, ffmpeg (`FFMPEG_PATH`, otherwise `ffmpeg`, as for ordinary radio)
 streams the persisted segments into a 192 kbps MP3. Finalization retries from
 the durable manifest, but does not create a mint request. The booked performer
