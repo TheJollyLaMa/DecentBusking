@@ -367,16 +367,17 @@ function renderFlow() {
   const closed = ['cancelled', 'ended', 'unavailable'].includes(state?.phase) || beforeStart <= 0;
   for (const [check, minutes] of [['t60', 60], ['t15', 15]]) {
     const suffix = check.slice(1), passed = !!state?.checks?.[check];
-    const inWindow = check === 't60' ? beforeStart >= 40 * 60000 && beforeStart <= 70 * 60000
+    const lateFirst = check === 't60' && state?.lateFirstCheckAllowed === true;
+    const inWindow = check === 't60' ? lateFirst || beforeStart >= 40 * 60000 && beforeStart <= 70 * 60000
       : beforeStart > 0 && beforeStart <= 25 * 60000;
-    byId(`room-time${suffix}`).textContent = `${stageTime(minutes)} New York`;
+    byId(`room-time${suffix}`).textContent = state?.lateFirstCheckAllowed ? 'Now · before Take live' : `${stageTime(minutes)} New York`;
     byId(`room-step${suffix}`).setAttribute('data-state', passed ? 'passed' : 'pending');
     const saving = actionPending && activeAction === `room-check${suffix}`;
     byId(`room-step${suffix}-status`).textContent = saving ? 'Saving your check… up to 60 seconds'
       : passed ? '✓ PASSED · saved' : closed ? 'Check window closed'
       : inWindow ? 'Ready · hear voice and music, then confirm' : `Waiting · ${stageTime(minutes)} check`;
     byId(`room-check${suffix}`).textContent = saving ? 'Saving…'
-      : passed ? `✓ T−${minutes} check passed` : `I heard the T−${minutes} check`;
+      : passed ? `✓ T−${minutes} check passed` : lateFirst ? 'Confirm a late first soundcheck now' : `I heard the T−${minutes} check`;
     byId(`room-check${suffix}`).disabled = actionPending || !session || stale || passed || closed || !inWindow;
   }
   byId('room-time-start').textContent = `${stageTime()} New York`;
@@ -394,7 +395,7 @@ function renderFlow() {
   byId('room-next-step').textContent = state?.phase === 'cancelled' ? 'Broadcast cancelled. Performer fee unchanged.'
     : state?.phase === 'ended' ? 'Broadcast ended. Original guaranteed fee unchanged.'
       : state?.broadcast ? state.broadcast.phase === 'waiting'
-        ? state.armed ? `Checks cleared. Await the artist’s set choice and owner’s explicit Take live at or after ${stageTime()} New York.`
+        ? state.armed ? 'Checks cleared. The artist chooses their set and confirms Ready backstage; the owner then uses Take live. The server verifies the permitted handoff.'
           : `Complete both real checks before the effective planned start, ${stageTime()} New York. Arming does not automatically take this allocated act live.`
         : 'Allocated stage is live. Use the separate authorized timing and durable finish controls.'
       : state?.armed ? `All cleared. Keep audio connected for ${stageTime()} radio.`
@@ -456,7 +457,8 @@ async function refreshBooking() {
       const liveState = await liveResponse.json();
       if (!liveResponse.ok || !liveState.configured) throw new Error(liveState.error || 'Live audio hosting unavailable');
       const allocated = performerAllocationAccess(booking, liveState, Date.now(), Date.now());
-      if ((!allocated && (booking.status !== 'funded' || Date.parse(booking.endUtc) <= Date.now())) || !booking.acknowledged || booking.cancelled) {
+      const recoverable = liveState.preflightRecoveryAvailable === true && liveState.bookingVerification?.fresh === true;
+      if ((!allocated && !recoverable && (booking.status !== 'funded' || Date.parse(booking.endUtc) <= Date.now())) || !booking.acknowledged || booking.cancelled) {
         broadcastState = liveState; observedAt = Date.now(); renderSign();
         renderCurtain(liveState);
         byId('room-authorize').disabled = true;
@@ -469,7 +471,9 @@ async function refreshBooking() {
       }
       renderSign();
       byId('room-authorize').disabled = actionPending || !!session;
-      if (!session) status('Backstage is ready. Connect your invited wallet to soundcheck.');
+      if (!session) status(recoverable
+        ? 'The owner can connect and sign to replace this declined, never-aired allocation. Both checks and a new performer choice are required.'
+        : 'Backstage is ready. Connect your invited wallet to soundcheck.');
     } catch (error) {
       broadcastState = null; observedAt = 0;
       byId('room-authorize').disabled = true;
@@ -538,11 +542,18 @@ byId('room-obs').onclick = perform(async () => {
   byId('room-obs-secret').textContent = `WHIP server: ${result.whipEndpoint}\n${result.notice}`;
 });
 for (const [id, check] of [['room-check60', 't60'], ['room-check15', 't15']]) {
-  byId(id).onclick = perform(async () => {
+  const confirmCheck = perform(async () => {
     if (!remoteTrack || audio.paused) throw new Error('Listen to the private feed before confirming');
-    render(await command({ action: 'check', check, confirmed: true }));
+    const lateFirst = check === 't60' && broadcastState?.lateFirstCheckAllowed === true;
+    render(await command({ action: 'check', check, confirmed: true, ...(lateFirst ? { lateConfirmed: true } : {}) }));
   }, `Saving T−${check.slice(1)} soundcheck… Please wait (up to 60 seconds).`,
   `✓ T−${check.slice(1)} soundcheck PASSED · saved.`);
+  byId(id).onclick = event => {
+    if (actionPending) return;
+    if (check === 't60' && broadcastState?.lateFirstCheckAllowed === true &&
+        !window.confirm('Confirm that you actually heard voice and instrument now, despite missing the original first-check window? A separate final listening check with newly delivered audio is still required. No check is backdated and no airtime is authorized by this confirmation.')) return;
+    return confirmCheck(event);
+  };
 }
 byId('room-arm').onclick = perform(async () => render(await command({ action: 'arm' })),
   () => broadcastState?.broadcast ? 'Saving allocated-stage readiness… Please wait (up to 60 seconds).'

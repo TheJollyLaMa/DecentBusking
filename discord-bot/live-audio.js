@@ -218,6 +218,21 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     return preShowAvailabilityClosure(b, record) && b.status === 'funded' && bookingVerification(b).fresh &&
       now() < Date.parse(b.endUtc);
   }
+  function recoverableDeclinedPreflight(b, record) {
+    const a = record?.allocation;
+    return b.status === 'funded' && bookingVerification(b).fresh && !record?.cancelledAt &&
+      !!a?.endedAt && a.endReason === 'declined' && !a.startedAt && !a.previousBookingId && !a.nextBookingId &&
+      now() < liveBroadcastTiming(b, record).accessUntil && (record.broadcastCommands?.length || 0) < 128;
+  }
+  function checkPreflightConflict(b, plannedStartAt) {
+    const end = plannedStartAt + Date.parse(b.endUtc) - Date.parse(b.startUtc);
+    if (bookings.some(other => {
+      if (other.id === b.id || other.cancelled || !['funded', 'approved', 'paid'].includes(other.status)) return false;
+      const timing = liveBroadcastTiming(other, recordFor(other.id));
+      const start = timing?.actualStartedAt ?? timing?.plannedStartAt ?? Date.parse(other.startUtc);
+      return start < end && liveBroadcastEnd(mediaBooking(other)) > plannedStartAt;
+    })) throw new LiveAudioError('The replacement preflight conflicts with another funded performance');
+  }
   // After the original T−60 window has passed, recovery holds the full contracted length at a later
   // effective start so both soundchecks can happen again. Contract times, fee and escrow are unchanged.
   function recoveryDelayedStart(b) {
@@ -245,6 +260,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     return { configured: configured && !failed, serverTime: now(), bookingId: b.id, title: b.title,
       performer: { wallet: address(b.wallet), artist: b.displayName || b.title || 'Live performer', title: b.title || 'Live performance' },
       bookingVerification: bookingVerification(b),
+      preflightRecoveryAvailable: recoverableDeclinedPreflight(b, record),
       broadcast,
       startUtc: b.startUtc, endUtc: b.endUtc, phase, armed: !!record?.armed,
       status: phase === 'live' ? fresh ? 'ON-AIR' : 'RECONNECTING' : 'OFF-AIR',
@@ -259,7 +275,9 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         finishedId: record.allocation.finishedId, finishedAt: record.allocation.finishedAt,
         priorityFollowup: record.allocation.priorityFollowup,
       } : null } : {}),
-      ...(privateView ? { recovery: {
+      ...(privateView ? { lateFirstCheckAllowed: !!broadcast && !broadcast.actualStartedAt && !broadcast.actualEndedAt &&
+        !record?.cancelledAt && !record?.armed && broadcast.plannedStartAt > now() &&
+        broadcast.plannedStartAt - now() <= 25 * 60_000, recovery: {
         enabled: recoveryEnabled, revision: record?.recovery?.revision || 0,
         usedMs: record?.recovery?.usedMs || 0, remainingMs: MAX_LIVE_RECOVERY_HOLD_MS - (record?.recovery?.usedMs || 0),
         deadline: record?.lossSince ? Math.min(liveRecoveryDeadline(record, graceMs), liveBroadcastEnd(mediaBooking(b))) : null,
@@ -795,13 +813,20 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
           return { challengeId: id, message };
         }
         if (scope !== 'room') throw new LiveAudioError('Unknown live audio authorization scope');
-        windowOpen(b);
+        const preflightRecord = recordFor(b.id);
+        const reopenPreflight = who === owner && recoverableDeclinedPreflight(b, preflightRecord);
+        if (!reopenPreflight) windowOpen(b);
         const id = opaque(), expiresAt = now() + 120_000;
         const broadcast = liveBroadcastTiming(b, recordFor(b.id));
         const record = recordFor(b.id);
         const recoverCancelledAt = who === owner && recoverablePreShowClosure(b, record) ? record.cancelledAt : null;
         const delayedStart = recoverCancelledAt ? recoveryDelayedStart(b) : null;
-        const accessUntil = broadcast?.accessUntil ?? (delayedStart
+        const preflightStart = reopenPreflight ? Math.ceil((now() + 15 * 60_000) / 60_000) * 60_000 : null;
+        if (preflightStart) checkPreflightConflict(b, preflightStart);
+        const accessUntil = preflightStart
+          ? liveBroadcastTiming(b, { allocation: { plannedStartAt: preflightStart, startedAt: null,
+            durationMs: Date.parse(b.endUtc) - Date.parse(b.startUtc), encoreMs: 0 } }).accessUntil
+          : broadcast?.accessUntil ?? (delayedStart
           ? liveBroadcastTiming(b, { allocation: { id: 'pending', revision: 1, plannedStartAt: delayedStart + 300_000, startedAt: null,
             durationMs: Date.parse(b.endUtc) - Date.parse(b.startUtc), encoreMs: 0 } }).accessUntil
           : Date.parse(b.endUtc));
@@ -811,9 +836,13 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
           `Room authorization until: ${new Date(accessUntil).toISOString()}`,
           ...(recoverCancelledAt ? ['Reopen this verified booking for PRIVATE soundchecks only. Both checks must be completed again.',
             ...(delayedStart ? [`Delayed start: the full contracted set moves to about ${new Date(delayedStart).toISOString()}. The performer may decline or shorten; the guaranteed fee is unchanged.`] : [])] : []),
+          ...(preflightStart ? [`Replace the declined, never-aired allocation with PRIVATE preflight at ${new Date(preflightStart).toISOString()}.`,
+            'Both real listening checks must be repeated. The performer must choose participation again before Take live.',
+            'This does not reopen a completed performance or authorize a no-show, recording, payout, or forfeiture.'] : []),
           'Owner broadcast direction affects airtime only. Pair changes require the next booking owner pass. Original contract times and fees are unchanged.',
           'Audio room access only. No transaction, recording, payout or financial authorization.'].join('\n');
-        challenges.set(id, { bookingId, who, origin, message, expiresAt, accessUntil, allocationId: broadcast?.allocationId || null, recoverCancelledAt });
+        challenges.set(id, { bookingId, who, origin, message, expiresAt, accessUntil, allocationId: broadcast?.allocationId || null,
+          recoverCancelledAt, preflightStart, preflightRevision: reopenPreflight ? preflightRecord.allocation.revision : null });
         return { challengeId: id, message };
       });
     },
@@ -865,10 +894,33 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
           sessions.set(token, { bookingId: b.id, wallet: c.who, role: 'performer', scope: 'recording-edit', origin, expiresAt });
           return { token, role: 'performer', expiresAt, state };
         }
-        windowOpen(b);
+        if (!c.preflightStart) windowOpen(b);
         const currentAllocation = liveBroadcastTiming(b, recordFor(b.id));
         if ((currentAllocation?.allocationId || null) !== c.allocationId) throw new LiveAudioError('Allocation changed; sign its current room scope');
         const record = recordFor(b.id);
+        if (c.preflightStart) {
+          if (c.who !== owner || !recoverableDeclinedPreflight(b, record) ||
+              record.allocation.revision !== c.preflightRevision || now() >= c.preflightStart) {
+            throw new LiveAudioError('Private preflight recovery changed or expired; the owner must sign again');
+          }
+          if (closing.has(b.id) || notifying.has(b.id)) throw new LiveAudioError('Room cleanup is still in progress; retry authorization');
+          checkPreflightConflict(b, c.preflightStart);
+          const next = clone(state), r = next.rooms.find(item => item.bookingId === b.id);
+          r.allocation = validateLiveAllocation({ ...r.allocation,
+            id: `allocation:${createHash('sha256').update(`preflight:${c.allocationId}:${challengeId}`).digest('hex')}`,
+            revision: 1, plannedStartAt: c.preflightStart, endedAt: null, endReason: null,
+            durationMs: Date.parse(b.endUtc) - Date.parse(b.startUtc), choice: 'pending', choiceAt: null,
+            delayNotifiedAt: now(), finishedId: null, finishedAt: null, priorityFollowup: false,
+          });
+          Object.assign(r, { armed: false, checks: {}, lastVerifiedAt: 0, lossSince: 0 });
+          r.broadcastCommands ||= [];
+          r.broadcastCommands.push({ id: `preflight-reopen:${challengeId}`,
+            hash: createHash('sha256').update(c.message).digest('hex') });
+          await save(next);
+          for (const [token, session] of sessions) if (session.bookingId === b.id) sessions.delete(token);
+          direction.forget(b.id);
+          closed.delete(b.id); frames.delete(b.id); restoredAt.delete(b.id);
+        }
         if (record?.cancelledAt) {
           if (c.who !== owner || c.recoverCancelledAt !== record.cancelledAt || !recoverablePreShowClosure(b, record)) {
             throw new LiveAudioError('This live room is cancelled; only the owner may recover an eligible pre-show booking');
@@ -999,10 +1051,18 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         }
         if (command.action === 'check') {
           const beforeStart = (liveBroadcastTiming(b, record)?.plannedStartAt ?? Date.parse(b.startUtc)) - now();
+          const lateFirst = command.check === 't60' && command.lateConfirmed === true &&
+            record.allocation && !record.allocation.startedAt && !record.allocation.endedAt && !record.armed &&
+            beforeStart > 0 && beforeStart <= 25 * 60_000;
           const valid = command.check === 't60' ? beforeStart >= 40 * 60_000 && beforeStart <= 70 * 60_000
             : command.check === 't15' && beforeStart > 0 && beforeStart <= 25 * 60_000;
-          if (!valid || command.confirmed !== true) throw new LiveAudioError('Confirm the matching T−60/T−15 private listening check in its window');
+          if ((!valid && !lateFirst) || command.confirmed !== true) throw new LiveAudioError('Confirm the matching T−60/T−15 private listening check in its window');
           if (!frames.get(b.id) || now() - frames.get(b.id) > LIVE_AUDIO_FRESH_MS) throw new LiveAudioError('No fresh audio has reached the independent worker receiver');
+          if (command.check === 't15' && record.checks.t60 &&
+              Date.parse(record.checks.t60) > (liveBroadcastTiming(b, record)?.plannedStartAt ?? Date.parse(b.startUtc)) - 40 * 60_000 &&
+              frames.get(b.id) <= Date.parse(record.checks.t60)) {
+            throw new LiveAudioError('Wait for newly delivered audio after the late first check, then listen and confirm the final check');
+          }
           const next = clone(state);
           next.rooms.find(r => r.bookingId === b.id).checks[command.check] = new Date(now()).toISOString();
           await save(next);

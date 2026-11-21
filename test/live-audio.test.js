@@ -173,6 +173,87 @@ test('owner recovery after T−60 delays the full set so both checks, arming and
   assert.equal(f.cancellations.length, 0);
 });
 
+test('declined never-aired allocation can restart privately with owner signature, new artist choice and two real late checks', async t => {
+  const f = await setup({ withBroadcastHandoff: async apply => apply() });
+  t.after(() => f.service.stop());
+  f.b.payoutPolicy = 'asset-guaranteed-v1';
+  const originalTerms = JSON.stringify(f.b);
+  await f.store.save({ version: 1, rooms: [{ bookingId: f.b.id, armed: false, checks: {}, lastVerifiedAt: 0,
+    cancelledAt: START - 61 * 60_000, reason: 'Live performance cancelled: booking is no longer available.' }] });
+  f.at(START - 30 * 60_000);
+  const oldOwner = await f.authorize(), oldArtist = await f.authorize(artist);
+  const send = (pass, input) => f.service.command(pass.token, input, ORIGIN);
+  await send(oldArtist, { action: 'broadcast-choice', commandId: 'release-old-preflight', expectedRevision: 1, choice: 'decline' });
+  await f.service.tick();
+  f.at(START + 25 * 60_000);
+  assert.equal((await f.service.state(f.b.id)).preflightRecoveryAvailable, true);
+  await assert.rejects(f.authorize(artist), /Room opens/);
+  const challenge = await f.service.challenge({ bookingId: f.b.id, wallet: owner.address }, ORIGIN);
+  assert.match(challenge.message, /Replace the declined, never-aired allocation/);
+  const op = await f.service.authorize({ challengeId: challenge.challengeId,
+    signature: await owner.signMessage(challenge.message) }, ORIGIN);
+  assert.equal(op.state.status, 'OFF-AIR');
+  assert.equal(op.state.broadcastControl.choice, 'pending');
+  assert.equal(op.state.lateFirstCheckAllowed, true);
+  assert.deepEqual(op.state.checks, {});
+  assert.notEqual(op.state.broadcast.allocationId, oldOwner.state.broadcast.allocationId);
+  await assert.rejects(send(oldOwner, { action: 'arm' }), /expired/);
+  await assert.rejects(send(op, { action: 'check', check: 't60', confirmed: true }), /matching/);
+  await assert.rejects(send(op, { action: 'check', check: 't60', confirmed: true, lateConfirmed: true }), /No fresh audio/);
+  const performer = await f.authorize(artist);
+  await assert.rejects(send(performer, { action: 'check', check: 't60', confirmed: true, lateConfirmed: true }), /configured owner/);
+  f.frame(960);
+  await send(op, { action: 'check', check: 't60', confirmed: true, lateConfirmed: true });
+  await assert.rejects(send(op, { action: 'check', check: 't15', confirmed: true }), /newly delivered audio/);
+  f.at(START + 25 * 60_000 + 1000); f.frame(960);
+  await send(op, { action: 'check', check: 't15', confirmed: true });
+  await send(op, { action: 'arm' });
+  await assert.rejects(send(op, { action: 'broadcast-take', commandId: 'take-before-new-choice', expectedRevision: 1, confirmed: true }), /chosen/);
+  await send(performer, { action: 'broadcast-choice', commandId: 'new-artist-consent', expectedRevision: 1, choice: 'full' });
+  const direction = await send(performer, { action: 'direction-state' });
+  await send(performer, { action: 'direction-readiness', epoch: direction.epoch,
+    expectedRevision: direction.revision, commandId: 'new-artist-ready', ready: true });
+  const taken = await send(op, { action: 'broadcast-take', commandId: 'new-actual-take', expectedRevision: 2, confirmed: true });
+  assert.equal(taken.state.phase, 'live');
+  assert.equal(taken.state.broadcast.authorizedEndAt - taken.state.broadcast.actualStartedAt, 20 * 60_000);
+  assert.equal((await f.service.listener(f.b.id)).token, 'read-only-fixture');
+  f.at(START + 26 * 60_000); f.frame(960);
+  await send(performer, { action: 'broadcast-finished', commandId: 'new-artist-finished', expectedRevision: 3 });
+  const ended = await send(op, { action: 'broadcast-end', commandId: 'new-owner-ended', expectedRevision: 4, confirmed: true, mode: 'normal' });
+  assert.equal(ended.state.broadcast.endReason, 'producer-finished');
+  assert.equal(ended.state.preflightRecoveryAvailable, false, 'an actually aired performance cannot be reopened');
+  assert.equal(JSON.stringify(f.b), originalTerms);
+  assert.equal(f.cancellations.length, 0, 'preflight release and replacement never cancel the guaranteed booking');
+});
+
+test('private preflight recovery rechecks settlement, funded conflicts and expiry before saving', async t => {
+  const others = [];
+  const f = await setup({ getBookings: async () => ({ bookings: [f.b, ...others] }) });
+  t.after(() => f.service.stop());
+  f.b.payoutPolicy = 'asset-guaranteed-v1';
+  const allocation = { id: 'released-preflight', revision: 2, plannedStartAt: START + 30 * 60_000,
+    startedAt: null, endedAt: START - 20 * 60_000, endReason: 'declined', durationMs: 20 * 60_000,
+    encoreMs: 0, choice: 'decline', choiceAt: START - 20 * 60_000, previousBookingId: null, nextBookingId: null,
+    delayNotifiedAt: null, finishedId: null, finishedAt: null, priorityFollowup: false };
+  await f.store.save({ version: 1, rooms: [{ bookingId: f.b.id, armed: false, checks: {}, lastVerifiedAt: 0, allocation }] });
+  f.at(START + 25 * 60_000);
+  const challenge = await f.service.challenge({ bookingId: f.b.id, wallet: owner.address }, ORIGIN);
+  f.b.status = 'paid';
+  await assert.rejects(f.service.authorize({ challengeId: challenge.challengeId,
+    signature: await owner.signMessage(challenge.message) }, ORIGIN), /recovery changed/);
+  assert.deepEqual(f.persisted().rooms[0].allocation, allocation);
+  f.b.status = 'funded';
+  others.push({ ...f.b, id: 'protected-next-act', startUtc: new Date(START + 40 * 60_000).toISOString(),
+    endUtc: new Date(START + 60 * 60_000).toISOString() });
+  await f.service.tick();
+  await assert.rejects(f.authorize(), /conflicts with another funded/);
+  others.length = 0;
+  f.at(START + 62 * 60_000);
+  assert.equal((await f.service.state(f.b.id)).preflightRecoveryAvailable, false);
+  await assert.rejects(f.authorize(), /Room opens/);
+  assert.deepEqual(f.persisted().rooms[0].allocation, allocation);
+});
+
 test('funded asset-version booking can authorize its exact performer without weakening funding gate', async t => {
   let status = 'funded';
   const f = await setup({ getBookings: async () => ({ bookings:[{ ...booking(), payoutPolicy:'asset-guaranteed-v1', status }] }) });
