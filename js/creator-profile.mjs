@@ -897,42 +897,53 @@ export function initCreatorProfile() {
   livePerformances.append(liveHeading, liveStatus);
   const earningsDisclosure = dialog.querySelector('[data-profile-earnings]');
   earningsDisclosure?.parentElement?.insertBefore(livePerformances, earningsDisclosure);
+  const feeSpotlight = document.createElement('section');
+  feeSpotlight.setAttribute('aria-label', 'Your performance pay');
+  feeSpotlight.hidden = true;
+  const profileCard = dialog.querySelector('.creator-profile-card');
+  profileCard.parentElement.insertBefore(feeSpotlight, profileCard);
+  const paymentBusy = () => [feeSpotlight, livePerformances].some(section => section.querySelector('[data-live-claim-busy="true"]'));
+  const paymentFocused = () => [feeSpotlight, livePerformances].some(section => section.contains(document.activeElement));
   const tipReceipts = document.createElement('section');
   earningsDisclosure?.parentElement?.insertBefore(tipReceipts, earningsDisclosure);
   let liveRevision = 0;
   let livePaymentLoad;
-  let livePaymentPending = false;
+  let pendingProfileRevision;
   let liveReleaseTimer;
   dialog.addEventListener('close', () => { clearInterval(liveReleaseTimer); liveReleaseTimer = null; });
   const loadLivePayments = async (check, bookingState, passive = false) => {
-    if (livePaymentPending) return;
-    if (livePerformances.querySelector('[data-live-claim-busy="true"]')) return;
+    if (pendingProfileRevision === check || paymentBusy()) return;
     const canReplace = () => !passive || (dialog.open && viewingOwnProfile && !document.hidden &&
-      !livePerformances.contains(document.activeElement));
+      !paymentFocused());
     if (!canReplace()) return;
-    livePaymentPending = true;
+    pendingProfileRevision = check;
     const generation = ++liveRevision, target = address;
     const contents = document.createElement('div');
-    liveStatus.textContent = 'Checking your performance payment and recording…';
+    if (feeSpotlight.hidden) liveStatus.textContent = 'Checking your performance payment and recording…';
     try {
       let liveReceipt;
       const activateCurtains = await renderLivePerformances({ container: contents, wallet: target,
         serviceUrl: config().ipfsUploadServiceUrl || '', ethers: window.ethers, bookingState,
-        onReceipt: entry => { liveReceipt = entry; } });
-      if (dialog.open && check === revision && generation === liveRevision && target === address && canReplace() &&
-          !livePerformances.querySelector('[data-live-claim-busy="true"]')) {
+        onReceipt: entry => { liveReceipt = entry; },
+        onRefresh: () => loadLivePayments(check) });
+      if (dialog.open && check === revision && generation === liveRevision && target === address && canReplace() && !paymentBusy()) {
+        const cards = [...contents.querySelectorAll('.live-fee-card')];
+        const current = cards.find(card => !['paid', 'refunded', 'recovered'].includes(card.dataset.feeState)) || cards[0];
+        feeSpotlight.replaceChildren(...(current ? [current] : []));
+        feeSpotlight.hidden = !current;
         liveStatus.textContent = '';
         livePerformances.replaceChildren(liveHeading, liveStatus, contents);
+        livePerformances.hidden = !contents.childElementCount;
         activateCurtains?.();
       }
       return liveReceipt;
     } catch (error) {
-      if (dialog.open && check === revision && generation === liveRevision && canReplace() &&
-          !livePerformances.querySelector('[data-live-claim-busy="true"]')) {
+      if (dialog.open && check === revision && generation === liveRevision && canReplace() && !paymentBusy()) {
+        livePerformances.hidden = false;
         liveStatus.textContent = `Live payment status unavailable: ${error.message}. Retrying automatically; no payment is assumed.`;
       }
     } finally {
-      livePaymentPending = false;
+      if (pendingProfileRevision === check) pendingProfileRevision = undefined;
     }
   };
   const link = (href, text) => Object.assign(document.createElement('a'), { href, textContent: text, target: '_blank', rel: 'noopener noreferrer' });
@@ -1016,6 +1027,9 @@ export function initCreatorProfile() {
     clearDiscordLinkTimers();
     discordLinkExpiryAt = 0;
     const check = ++revision;
+    feeSpotlight.replaceChildren();
+    feeSpotlight.hidden = true;
+    livePerformances.hidden = false;
     livePerformances.replaceChildren(liveHeading, liveStatus);
     liveStatus.textContent = 'Checking your performance payment and recording…';
     livePaymentLoad = loadLivePayments(check);
@@ -1024,8 +1038,7 @@ export function initCreatorProfile() {
     if (!dialog.open) dialog.showModal();
     if (!liveReleaseTimer) liveReleaseTimer = setInterval(() => {
       if (!dialog.open || !viewingOwnProfile || document.hidden ||
-          livePerformances.contains(document.activeElement) ||
-          livePerformances.querySelector('[data-live-claim-busy="true"]')) return;
+          paymentFocused() || paymentBusy()) return;
       void loadLivePayments(revision, undefined, true);
     }, 15_000);
     document.dispatchEvent(new CustomEvent('creator-profile-view-changed', { detail: { address } }));
@@ -1627,6 +1640,8 @@ export function initCreatorProfile() {
   });
   document.addEventListener('wallet-connected', event => {
     revision++;
+    feeSpotlight.replaceChildren();
+    feeSpotlight.hidden = true;
     livePerformances.querySelectorAll('.live-curtain-call,.live-release-party').forEach(curtain => curtain.remove());
     setControls();
     if (dialog.open && viewingOwnProfile) void run(() => open({}));
@@ -1639,6 +1654,8 @@ export function initCreatorProfile() {
   document.getElementById('djuke-profile')?.addEventListener('click', () => { run(() => open({})); });
   document.addEventListener('wallet-disconnected', () => {
     revision++;
+    feeSpotlight.replaceChildren();
+    feeSpotlight.hidden = true;
     livePerformances.querySelectorAll('.live-curtain-call,.live-release-party').forEach(curtain => curtain.remove());
     setControls();
   });
