@@ -276,7 +276,9 @@ export async function renderLivePerformances({ container, wallet, serviceUrl, et
  if (!container || !serviceUrl) return;
  let state = bookingState;
  if (!state) {
-   const response = await fetchImpl(`${serviceUrl.replace(/\/$/,'')}/api/live-bookings`, { cache:'no-store' });
+   const response = await fetchImpl(`${serviceUrl.replace(/\/$/,'')}/api/live-bookings`, {
+     cache:'no-store', signal: AbortSignal.timeout(60000),
+   });
    if (!response.ok) throw new Error('Live performance bookings unavailable');
    state = await response.json();
  }

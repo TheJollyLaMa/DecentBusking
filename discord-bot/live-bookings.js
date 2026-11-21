@@ -46,6 +46,17 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
   const escrow = escrowAddress ? new Contract(escrowAddress, LIVE_ESCROW_ABI, provider) : null;
   const assetEscrow = assetEscrowAddress ? new Contract(assetEscrowAddress, LIVE_ASSET_ESCROW_ABI, provider) : null;
   let assetIndexCaughtUp = !assetEscrowAddress;
+  const refreshAssetIndex = async () => {
+    try {
+      await indexAssetEscrow();
+    } catch (error) {
+      assetIndexCaughtUp = false;
+      console.warn('[live-bookings] Asset escrow indexing failed:', {
+        name: error.name,
+        code: error.code,
+      });
+    }
+  };
   const readAsset = assetReader || (async asset => {
     if ((await provider.getNetwork()).chainId !== 8453n) throw new Error('Asset booking requires Base');
     if (lower(asset) === lower(LIVE_ZERO_ADDRESS)) return { decimals:18, symbol:'ETH', approved:true };
@@ -328,7 +339,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
       await initialize();
       const target = state.bookings.find(item => item.id === command.id);
       if (command.booking?.escrowVersion === LIVE_ASSET_VERSION || target?.escrowVersion === LIVE_ASSET_VERSION) {
-        try { await indexAssetEscrow(); } catch { assetIndexCaughtUp = false; }
+        await refreshAssetIndex();
         if (!assetIndexCaughtUp) throw new Error('Asset escrow history is unavailable or still catching up');
       }
       // Creating a booking is safe to rebase: this serialized handler rechecks the
@@ -562,7 +573,7 @@ export function createLiveBookings({ provider, ownerWallet, escrowAddress = '', 
         acknowledged: !!acknowledgements, acknowledgedAt: acknowledgements?.at || null })) };
   }
   async function getState() { return run(async () => { await initialize(); await indexEscrow();
-    try { await indexAssetEscrow(); } catch { assetIndexCaughtUp = false; }
+    await refreshAssetIndex();
     return publicState();
   }); }
   async function getBookingIdentity(bookingId) {

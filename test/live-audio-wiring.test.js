@@ -197,7 +197,10 @@ test('Profile renders a booking-specific performer entry without changing summar
   assert.equal(claim.disabled, true);
   assert.match(claim.textContent, /Awaiting review/);
   assert.deepEqual(b, before);
-  assert.deepEqual(requests, [{ url: 'https://worker.example/api/live-bookings', options: { cache: 'no-store' } }]);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, 'https://worker.example/api/live-bookings');
+  assert.equal(requests[0].options.cache, 'no-store');
+  assert.ok(requests[0].options.signal instanceof AbortSignal);
 });
 
 test('Profile omits room entries for unfunded, cancelled, ended and incompatible bookings', async t => {
@@ -873,12 +876,12 @@ test('Profile/Admin and index preserve live-audio-pilot cache references', async
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /live-performance-admin\.mjs\?v=20261120-gift-funding-check/);
   assert.match(html, /live-booking-notifications\.mjs\?v=20261117-booking-assets/);
-  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261117-release-party"/);
+  assert.match(html, /src="js\/creator-profile\.mjs\?v=20261121-payment-access"/);
   assert.match(html, /src="js\/radio-schedule-ui\.mjs\?v=20261115-afterparty"/);
   assert.match(html, /live-performance\.css\?v=20261117-booking-assets/);
   const map = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
   assert.equal(map.imports['./js/live-performance-profile.mjs?v=20261115-afterparty'],
-    './js/live-performance-profile.mjs?v=20261120-afterparty-studio');
+    './js/live-performance-profile.mjs?v=20261121-payment-access');
   assert.equal(map.imports['./js/live-bookings.mjs?v=20261108-live-audio-pilot'],
     './js/live-bookings.mjs?v=20261117-booking-assets');
   for (const suffix of ['20261110-wallet-practice', '20261114-allocated-stage', '20261116-curtain']) {

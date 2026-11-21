@@ -3,6 +3,52 @@ const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const { Wallet } = createRequire(require('node:path').join(__dirname, '../discord-bot/package.json'))('ethers');
 
+test('slow Profile payment loads survive periodic refresh and retain visible failure status', async () => {
+  const { readFileSync } = require('node:fs');
+  const { runInNewContext } = require('node:vm');
+  const source = readFileSync(require('node:path').join(__dirname, '../js/creator-profile.mjs'), 'utf8');
+  const loader = source.slice(source.indexOf("  const livePerformances = document.createElement('section');"),
+    source.indexOf('  const link = (href, text)', source.indexOf('  const livePerformances')));
+  const node = () => ({
+    textContent: '', children: [], setAttribute() {}, append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; }, querySelector() { return null; }, contains() { return false; },
+  });
+  const inserted = [], disclosure = { parentElement: { insertBefore: item => inserted.push(item) } };
+  let resolve, reject, calls = 0;
+  const context = {
+    document: { createElement: node, hidden: false },
+    dialog: { open: true, querySelector: () => disclosure, addEventListener() {} },
+    viewingOwnProfile: true, revision: 1, address: 'performer', config: () => ({ ipfsUploadServiceUrl: 'worker' }),
+    window: { ethers: {} },
+    renderLivePerformances: ({ container }) => {
+      calls++;
+      return new Promise((done, fail) => {
+        resolve = () => { container.textContent = 'Verified booking and claim action'; done(); };
+        reject = fail;
+      });
+    },
+  };
+  runInNewContext(`${loader}\nglobalThis.load = loadLivePayments;`, context);
+  const section = inserted[0];
+  const first = context.load(1);
+  assert.match(section.children[0].textContent, /Live performances/);
+  assert.match(section.children[1].textContent, /Checking/);
+  await context.load(1, undefined, true);
+  assert.equal(calls, 1, 'a periodic refresh must not invalidate or duplicate the active load');
+  resolve();
+  await first;
+  assert.equal(section.children[2].textContent, 'Verified booking and claim action');
+  const failed = context.load(1, undefined, true);
+  reject(new Error('Booking service unavailable'));
+  await failed;
+  assert.match(section.children[1].textContent, /unavailable.*Retrying automatically/);
+  assert.equal(section.children[2].textContent, 'Verified booking and claim action');
+  const retry = context.load(1, undefined, true);
+  resolve();
+  await retry;
+  assert.equal(section.children[1].textContent, '');
+});
+
 test('earnings and payment sections reuse collapsed profile dropdowns with padded bodies', () => {
   const fs = require('node:fs');
   const path = require('node:path');
