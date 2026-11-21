@@ -12,6 +12,14 @@
  * setMix('stereo' | 'mono') changes only the local headphone mix.
  * Await start()/stop() and surface failures to the user.
  */
+export function configureInputMix(gain, mix) {
+  if (!['stereo', 'mono'].includes(mix)) throw new TypeError('Choose stereo or mono audio mixing.');
+  gain.channelCount = mix === 'mono' ? 1 : 2;
+  gain.channelCountMode = mix === 'mono' ? 'explicit' : 'max';
+  // Speaker downmix averages stereo L/R; mono input retains its level.
+  gain.channelInterpretation = 'speakers';
+}
+
 export function createInputMonitor(environment = globalThis) {
   let generation = 0;
   let active = null;
@@ -19,10 +27,7 @@ export function createInputMonitor(environment = globalThis) {
   let mix = 'stereo';
 
   function configureMix(gain) {
-    gain.channelCount = mix === 'mono' ? 1 : 2;
-    gain.channelCountMode = mix === 'mono' ? 'explicit' : 'max';
-    // Speaker downmix averages stereo L/R; mono input retains its level.
-    gain.channelInterpretation = 'speakers';
+    configureInputMix(gain, mix);
   }
 
   function setMix(value) {
