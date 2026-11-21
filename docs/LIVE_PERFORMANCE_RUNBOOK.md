@@ -40,6 +40,14 @@ before opening the next. Mute public radio in other tabs/devices; use headphones
 Use **Open full soundcheck room** for the existing actual check/arm workflow.
 Private practice remains separately authorized in its existing rehearsal room.
 
+If an unfired asset booking was closed before its booked start because booking
+verification was unavailable, check that it is still accepted, funded, and not
+cancelled. Reconnect the configured owner to the full soundcheck room. Only
+sign a recovery message that explicitly says it reopens the booking for
+private soundchecks. Have the performer reconnect and run both checks again
+within their official windows. This does not reopen ended or allocated sets,
+change escrow, or take the room on air.
+
 Owner and performer share one booking-private text thread using their existing
 backstage passes. The owner can cue **another song** or **wrap up after this
 song**, and notify the next performer of a possible delay or standby. The

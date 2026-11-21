@@ -16,6 +16,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
 const address = value => /^0x[0-9a-f]{40}$/i.test(value || '') ? value.toLowerCase() : '';
 const opaque = () => randomBytes(32).toString('hex');
 const START_EARLY_MS = 70 * 60_000;
+const BOOKING_UNAVAILABLE_REASON = 'Live performance cancelled: booking is no longer available.';
 const INITIAL_ARM_ALLOWANCE_MS = 60_000;
 
 export function createLiveAudioWatchdogTick({ liveAudio, liveFeedback, log = createRepeatLog() }) {
@@ -208,6 +209,12 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     }
   }
   function recordFor(id) { return state?.rooms.find(r => r.bookingId === id); }
+  function recoverablePreShowClosure(b, record) {
+    const start = Date.parse(b.startUtc);
+    return b.payoutPolicy === 'asset-guaranteed-v1' && b.status === 'funded' &&
+      bookingVerification(b).fresh && !record?.allocation && record?.cancelledAt > 0 &&
+      record.cancelledAt < start && now() < start && record.reason === BOOKING_UNAVAILABLE_REASON;
+  }
   function bookingVerification(b) {
     const eligible = !b || !!address(b.wallet) && (recordFor(b.id)?.allocation ? ['funded', 'approved', 'paid'].includes(b.status) : b.status === 'funded') && !b.cancelled &&
       b.acknowledged === true && ['pilot-guaranteed-v1', 'asset-guaranteed-v1'].includes(b.payoutPolicy) &&
@@ -632,8 +639,12 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         direction.forget(b.id); recorder?.stopCapture?.(mediaBooking(b));
       }
       if (!record.cancelledAt && now() < end && now() >= start - START_EARLY_MS) {
+        // The asset index can temporarily mask a funded booking. Keep pre-show audio private
+        // and require fresh verification for grants rather than permanently closing the room.
+        if (!b.cancelled && b.payoutPolicy === 'asset-guaranteed-v1' && b.status === 'unavailable' &&
+            !allocation?.startedAt && now() < start) continue;
         if (b.cancelled || !(allocation ? ['funded', 'approved', 'paid'].includes(b.status) : b.status === 'funded')) {
-          await cancel(b, 'Live performance cancelled: booking is no longer available.', 'operator-cut');
+          await cancel(b, BOOKING_UNAVAILABLE_REASON, 'operator-cut');
         }
         else {
           const last = frames.get(b.id) || 0;
@@ -776,14 +787,17 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         windowOpen(b);
         const id = opaque(), expiresAt = now() + 120_000;
         const broadcast = liveBroadcastTiming(b, recordFor(b.id));
+        const record = recordFor(b.id);
+        const recoverCancelledAt = who === owner && recoverablePreShowClosure(b, record) ? record.cancelledAt : null;
         const accessUntil = broadcast?.accessUntil ?? Date.parse(b.endUtc);
         const message = ['DecentBusking live audio room authorization', `Booking: ${b.id}`, `Wallet: ${who}`,
           `Origin: ${origin}`, `Nonce: ${id}`, `Expires: ${new Date(expiresAt).toISOString()}`,
           `Broadcast allocation: ${broadcast?.allocationId || 'original booked slot'}`,
           `Room authorization until: ${new Date(accessUntil).toISOString()}`,
+          ...(recoverCancelledAt ? ['Reopen this verified booking for PRIVATE soundchecks only. Both checks must be completed again.'] : []),
           'Owner broadcast direction affects airtime only. Pair changes require the next booking owner pass. Original contract times and fees are unchanged.',
           'Audio room access only. No transaction, recording, payout or financial authorization.'].join('\n');
-        challenges.set(id, { bookingId, who, origin, message, expiresAt, accessUntil, allocationId: broadcast?.allocationId || null });
+        challenges.set(id, { bookingId, who, origin, message, expiresAt, accessUntil, allocationId: broadcast?.allocationId || null, recoverCancelledAt });
         return { challengeId: id, message };
       });
     },
@@ -838,7 +852,21 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         windowOpen(b);
         const currentAllocation = liveBroadcastTiming(b, recordFor(b.id));
         if ((currentAllocation?.allocationId || null) !== c.allocationId) throw new LiveAudioError('Allocation changed; sign its current room scope');
-        if (recordFor(b.id)?.cancelledAt) throw new LiveAudioError('This live room has been cancelled and cannot reopen');
+        const record = recordFor(b.id);
+        if (record?.cancelledAt) {
+          if (c.who !== owner || c.recoverCancelledAt !== record.cancelledAt || !recoverablePreShowClosure(b, record)) {
+            throw new LiveAudioError('This live room is cancelled; only the owner may recover an eligible pre-show booking');
+          }
+          if (closing.has(b.id) || notifying.has(b.id)) throw new LiveAudioError('Room cleanup is still in progress; retry authorization');
+          const next = clone(state);
+          next.rooms[next.rooms.findIndex(item => item.bookingId === b.id)] = {
+            bookingId: b.id, armed: false, checks: {}, lastVerifiedAt: 0,
+          };
+          await save(next);
+          closed.delete(b.id);
+          frames.delete(b.id);
+          restoredAt.delete(b.id);
+        }
         if (!recordFor(b.id)) {
           const next = clone(state);
           next.rooms.push({ bookingId: b.id, armed: false, checks: {}, lastVerifiedAt: 0 });
