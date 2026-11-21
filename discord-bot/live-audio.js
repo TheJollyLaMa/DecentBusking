@@ -1,10 +1,10 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFile, writeFile, rename } from 'node:fs/promises';
 import { verifyMessage } from 'ethers';
 import { liveAudioPolicy, LIVE_AUDIO_GRACE_MS, LIVE_AUDIO_FRESH_MS } from '../js/live-audio.mjs';
 import { LiveAudioError } from './live-audio-errors.js';
 import { createLiveDirection, LiveDirectionError } from './live-direction.js';
-import { liveBroadcastTiming, liveBroadcastEnd } from '../js/live-broadcast.mjs';
+import { liveBroadcastTiming, liveBroadcastEnd, validateLiveAllocation } from '../js/live-broadcast.mjs';
 import { validateLiveAudioState } from './live-audio-store.js';
 import { planBroadcastCommand } from './live-broadcast-control.js';
 import { catalogRecordingAuthorizationMessage } from '../js/live-recording-edit.mjs';
@@ -16,6 +16,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
 const address = value => /^0x[0-9a-f]{40}$/i.test(value || '') ? value.toLowerCase() : '';
 const opaque = () => randomBytes(32).toString('hex');
 const START_EARLY_MS = 70 * 60_000;
+const RECOVERY_DELAY_MS = 60 * 60_000;
 const BOOKING_UNAVAILABLE_REASON = 'Live performance cancelled: booking is no longer available.';
 const INITIAL_ARM_ALLOWANCE_MS = 60_000;
 
@@ -209,11 +210,19 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
     }
   }
   function recordFor(id) { return state?.rooms.find(r => r.bookingId === id); }
+  function preShowAvailabilityClosure(b, record) {
+    return b.payoutPolicy === 'asset-guaranteed-v1' && !record?.allocation && record?.cancelledAt > 0 &&
+      record.cancelledAt < Date.parse(b.startUtc) && record.reason === BOOKING_UNAVAILABLE_REASON;
+  }
   function recoverablePreShowClosure(b, record) {
-    const start = Date.parse(b.startUtc);
-    return b.payoutPolicy === 'asset-guaranteed-v1' && b.status === 'funded' &&
-      bookingVerification(b).fresh && !record?.allocation && record?.cancelledAt > 0 &&
-      record.cancelledAt < start && now() < start && record.reason === BOOKING_UNAVAILABLE_REASON;
+    return preShowAvailabilityClosure(b, record) && b.status === 'funded' && bookingVerification(b).fresh &&
+      now() < Date.parse(b.endUtc);
+  }
+  // After the original T−60 window has passed, recovery holds the full contracted length at a later
+  // effective start so both soundchecks can happen again. Contract times, fee and escrow are unchanged.
+  function recoveryDelayedStart(b) {
+    if (now() <= Date.parse(b.startUtc) - 40 * 60_000) return null;
+    return Math.ceil((now() + RECOVERY_DELAY_MS) / 300_000) * 300_000;
   }
   function bookingVerification(b) {
     const eligible = !b || !!address(b.wallet) && (recordFor(b.id)?.allocation ? ['funded', 'approved', 'paid'].includes(b.status) : b.status === 'funded') && !b.cancelled &&
@@ -695,7 +704,9 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
       const updated = recordFor(b.id);
       if (updated.cancelledAt || updated.allocation?.endedAt || now() >= end) {
         void cleanup(b);
-        if (updated.cancelNoticePending) notifyCancellation(b, updated.reason);
+        // A pre-show availability closure is recoverable and the booking itself is still funded:
+        // repeatedly cancelling it would hold cleanup open and block the owner's recovery.
+        if (updated.cancelNoticePending && (b.cancelled || !preShowAvailabilityClosure(b, updated))) notifyCancellation(b, updated.reason);
       }
     }
     void recorder?.tick(bookings.map(mediaBooking));
@@ -789,12 +800,17 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         const broadcast = liveBroadcastTiming(b, recordFor(b.id));
         const record = recordFor(b.id);
         const recoverCancelledAt = who === owner && recoverablePreShowClosure(b, record) ? record.cancelledAt : null;
-        const accessUntil = broadcast?.accessUntil ?? Date.parse(b.endUtc);
+        const delayedStart = recoverCancelledAt ? recoveryDelayedStart(b) : null;
+        const accessUntil = broadcast?.accessUntil ?? (delayedStart
+          ? liveBroadcastTiming(b, { allocation: { id: 'pending', revision: 1, plannedStartAt: delayedStart + 300_000, startedAt: null,
+            durationMs: Date.parse(b.endUtc) - Date.parse(b.startUtc), encoreMs: 0 } }).accessUntil
+          : Date.parse(b.endUtc));
         const message = ['DecentBusking live audio room authorization', `Booking: ${b.id}`, `Wallet: ${who}`,
           `Origin: ${origin}`, `Nonce: ${id}`, `Expires: ${new Date(expiresAt).toISOString()}`,
           `Broadcast allocation: ${broadcast?.allocationId || 'original booked slot'}`,
           `Room authorization until: ${new Date(accessUntil).toISOString()}`,
-          ...(recoverCancelledAt ? ['Reopen this verified booking for PRIVATE soundchecks only. Both checks must be completed again.'] : []),
+          ...(recoverCancelledAt ? ['Reopen this verified booking for PRIVATE soundchecks only. Both checks must be completed again.',
+            ...(delayedStart ? [`Delayed start: the full contracted set moves to about ${new Date(delayedStart).toISOString()}. The performer may decline or shorten; the guaranteed fee is unchanged.`] : [])] : []),
           'Owner broadcast direction affects airtime only. Pair changes require the next booking owner pass. Original contract times and fees are unchanged.',
           'Audio room access only. No transaction, recording, payout or financial authorization.'].join('\n');
         challenges.set(id, { bookingId, who, origin, message, expiresAt, accessUntil, allocationId: broadcast?.allocationId || null, recoverCancelledAt });
@@ -858,9 +874,15 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
             throw new LiveAudioError('This live room is cancelled; only the owner may recover an eligible pre-show booking');
           }
           if (closing.has(b.id) || notifying.has(b.id)) throw new LiveAudioError('Room cleanup is still in progress; retry authorization');
-          const next = clone(state);
+          const next = clone(state), start = Date.parse(b.startUtc), plannedStartAt = recoveryDelayedStart(b);
           next.rooms[next.rooms.findIndex(item => item.bookingId === b.id)] = {
             bookingId: b.id, armed: false, checks: {}, lastVerifiedAt: 0,
+            ...(plannedStartAt ? { allocation: validateLiveAllocation({
+              id: `allocation:${createHash('sha256').update(`recovery:${b.id}:${record.cancelledAt}`).digest('hex')}`,
+              revision: 1, plannedStartAt, startedAt: null, endedAt: null, endReason: null,
+              durationMs: Date.parse(b.endUtc) - start, encoreMs: 0, choice: 'contracted', choiceAt: null,
+              previousBookingId: null, nextBookingId: null, delayNotifiedAt: now(), finishedId: null,
+              finishedAt: null, priorityFollowup: false }) } : {}),
           };
           await save(next);
           closed.delete(b.id);
@@ -875,7 +897,7 @@ export function createLiveAudioService({ getBookings, ownerWallet, transport, st
         const token = opaque(), role = c.who === owner ? 'owner' : 'publisher';
         for (const [key, session] of sessions) if (session.expiresAt <= now()) sessions.delete(key);
         if (sessions.size >= 32) throw new LiveAudioError('Room session limit reached');
-        const expiresAt = Math.min(c.accessUntil, currentAllocation?.accessUntil ?? Date.parse(b.endUtc));
+        const expiresAt = Math.min(c.accessUntil, liveBroadcastTiming(b, recordFor(b.id))?.accessUntil ?? Date.parse(b.endUtc));
         sessions.set(token, { bookingId: b.id, wallet: c.who, role, origin, expiresAt });
         startMonitor(b);
         return { token, role, canPublish: c.who === address(b.wallet), expiresAt,
