@@ -204,6 +204,10 @@ test('entry points expose the admin section and public offer while suppressing a
   assert.match(admin, /mountPublicPromotion\(\)/);
   assert.match(tutorial, /\.has\('promotion'\)\) return/);
   assert.match(ui, /newYorkInputToUtc/);
+  assert.match(ui, /data-promo-curated/);
+  assert.match(ui, /\['referral', 'musician-referral'\]\.includes/);
+  assert.match(ui, /calendarOptions\.campaignId/);
+  assert.match(ui, /calendarOptions\.endsAt\) input\('claimDeadline'\)/);
   assert.doesNotMatch(ui, /channels\/.*messages|api\/radio\/announcements\/send/);
   assert.match(ui, /target.type === 'submit'/);
   const payrollVersions = [...html.matchAll(/js\/payroll\.js\?v=([a-z0-9-]+)/g)].map(match => match[1]);

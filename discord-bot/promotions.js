@@ -663,6 +663,13 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
           const fund = input.fund || PROMOTIONS_FUND;
           if (!isPromotionsFund(fund)) throw new Error('Use a dedicated dbusk-promotionals fund, not artist, pinner or repo funds');
           if (new Set([...next.campaigns.map(c => c.fund), fund]).size > 20) throw new Error('At most 20 dedicated promotional funds are supported');
+          const curatedReferrers = input.curatedReferrers === undefined
+            ? campaign?.curatedReferrers || []
+            : (() => {
+              if (!Array.isArray(input.curatedReferrers) || input.curatedReferrers.length > 50 ||
+                  input.curatedReferrers.some(item => !isAddress(item) || /^0x0{40}$/i.test(item))) throw new Error('Curated referrers must be 0–50 valid wallets');
+              return [...new Set(input.curatedReferrers.map(address))];
+            })();
           let qualification = {};
           if (input.template === 'album') {
             if (!Number.isSafeInteger(input.minOriginalTracks) || input.minOriginalTracks < 1 || input.minOriginalTracks > 1000) {
@@ -685,7 +692,7 @@ export function createPromotions({ restore, save, getCheckpointUri = () => '', p
               throw new Error('The musician referral pilot must use $25 per conversion, a $150 budget, and six conversions');
             }
             qualification = { campaignConfigId: MUSICIAN_REFERRAL_PILOT.id,
-              curatedReferrers: campaign?.curatedReferrers || [], amendments: campaign?.amendments || [],
+              curatedReferrers, amendments: campaign?.amendments || [],
               supporterToken: campaign?.supporterToken || { status: 'eligibility-only', eligibleWallets: [],
                 note: 'No exact edition or authority is configured; no NFT may be minted or transferred.' } };
           } else if (input.template === 'sponsor') {

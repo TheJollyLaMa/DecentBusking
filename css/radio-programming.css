@@ -15,6 +15,7 @@
 .radio-programming-calendar button:focus-visible, .radio-programming-calendar input:focus-visible, .radio-programming-calendar select:focus-visible { outline: 3px solid #f4d380; outline-offset: 2px; z-index: 5; }
 .radio-programming-calendar button:disabled { cursor: not-allowed; opacity: .5; }
 .radio-calendar-presets .radio-calendar-chip { background: #214f51; border-color: #65aaa4; cursor: grab; }
+.radio-calendar-presets .radio-calendar-chip.is-referral { background: #5a3d75; border-color: #d5a8ff; cursor: grab; }
 .radio-calendar-hint { color: #c3d0df; font-size: .85rem; line-height: 1.5; margin: 8px 0; }
 .radio-calendar-status { color: #c0e6cf; font-size: .88rem; min-height: 1.5em; margin: 8px 0; }
 .radio-calendar-status.error { color: #ffb5ae; }
@@ -39,6 +40,14 @@
 .radio-calendar-event.is-partial span, .radio-calendar-event.is-partial small { display: none; }
 .radio-programming-calendar .radio-calendar-event.is-once { background: #4b3b67; border-color: #baa1eb; }
 .radio-programming-calendar .radio-calendar-event.is-live { background: #654633; border-color: #edbd85; }
+.radio-programming-calendar .radio-calendar-event.is-referral-campaign {
+  top: 0; left: 3px; right: 3px; z-index: 4; min-height: 42px;
+  background: linear-gradient(135deg, #4b3268, #274d57);
+  border-color: #d5a8ff; cursor: pointer;
+}
+
+.promotion-calendar-editor-dialog { width: min(980px, 94vw); max-height: 92vh; overflow: auto; }
+.promotion-calendar-editor-close { position: sticky; top: 0; float: right; z-index: 3; }
 .radio-calendar-editor { margin-top: 18px; padding: 18px; background: var(--calendar-soft); border: 1px solid #64748b; border-radius: 16px; display: grid; gap: 14px; }
 .radio-calendar-editor h4, .radio-calendar-editor p { margin: 0; }
 .radio-calendar-editor label { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: #e2eaf3; font-size: .9rem; }

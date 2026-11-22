@@ -1,6 +1,7 @@
 import { radioCalendarOccurrences, utcToNewYorkInput, newYorkInputToUtc } from './radio-calendar.mjs?v=20261024-programming-calendar';
 import { RADIO_PLAYLISTS } from './radio-playlists.mjs?v=20261116-longform';
 import { upsertLivePerformanceEvent, validateWeeklyScheduleOverrides, validateRadioProgrammingConflicts } from './radio-schedule.mjs?v=20261116-longform';
+import { openPromotionCalendarEditor } from './promotions-ui.mjs?v=20261122-musician-referral';
 
 const zone = 'America/New_York';
 const dateLabel = new Intl.DateTimeFormat('en-US', { timeZone: zone, weekday: 'short', month: 'short', day: 'numeric' });
@@ -231,9 +232,21 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
       chip.addEventListener('dragstart', e => { drag = { preset: preset.id }; e.dataTransfer.setData('text/plain', preset.id); });
       palette.append(chip);
     }
-    palette.append(button('+ Live block', () => edit(null, null, 'live')));
+    const referral = button('🤝 Referral campaign', () => {
+      const start = newYorkInputToUtc(`${selectedDay}T09:00`);
+      openPromotionCalendarEditor({ startsAt: start, endsAt: new Date(Date.parse(start) + 14 * 86400000).toISOString() });
+    });
+    referral.className = 'radio-calendar-chip is-referral';
+    referral.draggable = true;
+    referral.addEventListener('dragstart', e => { drag = { referral: true }; e.dataTransfer.setData('text/plain', 'referral'); });
+    palette.append(referral, button('+ Live block', () => edit(null, null, 'live')));
     root.append(palette, node('p', 'Drag a preset onto a time, or click any slot. Drag a show to move it; click to edit. Background time is normal rotation. Weekly cards repeat; dated cards play once.', 'radio-calendar-hint'));
-    status = node('p', data().reminders?.error ? `Discord reminder needs attention: ${data().reminders.error}` : 'Automatic @everyone reminders: 5 minutes before each show, unless switched off.', 'radio-calendar-status');
+    status = node('p', data().promotionEventsError
+      ? `Referral campaigns unavailable: ${data().promotionEventsError}`
+      : data().reminders?.error
+        ? `Discord reminder needs attention: ${data().reminders.error}`
+        : 'Automatic @everyone reminders: 5 minutes before each show, unless switched off.', 'radio-calendar-status');
+    status.classList.toggle('error', !!data().promotionEventsError);
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
     root.append(status);
@@ -272,6 +285,10 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
           if (!drag || busy) return;
           try {
             if (drag.event) await move(drag.event, `${day}T${time}`);
+            else if (drag.referral) openPromotionCalendarEditor({
+              startsAt: newYorkInputToUtc(`${day}T09:00`),
+              endsAt: new Date(Date.parse(newYorkInputToUtc(`${day}T09:00`)) + 14 * 86400000).toISOString(),
+            });
             else edit(null, `${day}T${time}`, drag.preset);
           } catch (error) { say(error.message, true); }
           drag = null;
@@ -304,6 +321,19 @@ export function mountRadioProgrammingCalendar(root, { getSchedule, save, isCurre
         });
         card.addEventListener('dragend', () => { card.style.pointerEvents = ''; drag = null; });
         timeline.append(card);
+      }
+      for (const event of (data().promotionEvents || []).filter(item => item.status === 'published' &&
+        Date.parse(item.startUtc) < dayEnd && Date.parse(item.endUtc) > dayStart)) {
+        const campaign = button('', () => openPromotionCalendarEditor({
+          startsAt: event.startUtc, endsAt: event.endUtc, campaignId: event.id,
+        }));
+        campaign.className = 'radio-calendar-event is-referral-campaign';
+        campaign.style.top = '0';
+        campaign.style.height = `${slotHeight}px`;
+        campaign.title = `${event.title} · ${event.remainingAwards || 0} slots remaining · multiday`;
+        campaign.append(node('strong', event.title),
+          node('span', `🤝 ${event.remainingAwards || 0} slots · multiday`));
+        timeline.append(campaign);
       }
       column.append(timeline); grid.append(column);
     }
