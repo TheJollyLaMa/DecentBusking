@@ -862,6 +862,7 @@ export class JukeLoopSession {
     this._endingAudio = null;
     this._audioCompletionTask = null;
     this._preparedNext = null;
+    this._priorityMintTrack = null;
     this._prepareTask = null;
     this._paidPollTimer = null;
     this._primeRetryTimer = null;
@@ -1182,6 +1183,33 @@ export class JukeLoopSession {
   setSchedule(schedule) {
     this.schedule = Array.isArray(schedule) ? schedule : defaultRadioSchedule();
     this._syncScheduledShow();
+  }
+
+  queueMintedNext(track) {
+    if (!track || track.mintStatus !== 'minted' || !track.ipfsCid || this._destroyed ||
+        this._currentTrack?.trackId === track.trackId) return false;
+    const show = this._resolveShow();
+    if (show.type !== 'normal_rotation' || this._priorityMintTrack?.trackId === track.trackId ||
+        this._preparedNext?.track?.trackId === track.trackId) return false;
+    this._priorityMintTrack = track;
+    const prepared = this._preparedNext;
+    if (prepared && !prepared.paid && !prepared.devertAd && !prepared.hype &&
+        !prepared.playlistShow && !prepared.liveReplay) {
+      this._preparedNext = null;
+      this._disposePrepared(prepared, 'Freshly minted song takes the next ordinary music slot');
+      this._preparationEpoch++;
+    } else if (!prepared && this._prepareTask) {
+      this._preparationEpoch++;
+      this._prepareTask.finally(() => {
+        if (this._priorityMintTrack && !this._destroyed &&
+            this.player.state.status === AudioPlayerStatus.Playing) this._primeNext();
+      });
+    }
+    if (this.player.state.status === AudioPlayerStatus.Playing) this._primeNext();
+    else if (this._started && this.player.state.status === AudioPlayerStatus.Idle) {
+      void this._playNext().catch(error => console.warn('[jukeloop] Fresh mint playback deferred:', error.message));
+    }
+    return true;
   }
 
   _syncScheduledShow({ requestPlayback = true } = {}) {
@@ -1527,18 +1555,22 @@ export class JukeLoopSession {
       return null;
     }
 
-    const replayCandidate = activeShow.type === 'normal_rotation' && !paid && !devertAd && !playlistOwnsRadio && !options.skipLiveReplay
+    const priorityMint = activeShow.type === 'normal_rotation' && !paid && !devertAd &&
+      !playlistOwnsRadio && this._priorityMintTrack;
+    const replayCandidate = activeShow.type === 'normal_rotation' && !paid && !devertAd && !playlistOwnsRadio && !priorityMint && !options.skipLiveReplay
       ? pendingLiveRecordingReplay() : null;
     const liveReplay = replayCandidate?.trackId !== this._currentTrack?.trackId ? replayCandidate : null;
     // Nothing to play → wait and retry
-    if (!isHype && !playlistSelection && !paid && !devertAd && !liveReplay && this._queue.length === 0) {
+    if (!isHype && !playlistSelection && !paid && !devertAd && !liveReplay && !priorityMint && this._queue.length === 0) {
       this._sendPlaybackNotice('📭 The JukeLoop playlist is empty.\n' +
         (this.textChannel ? 'Post audio files (MP3, M4A, etc.) in <#' + this.textChannel.id + '> to add tracks!' : 'Waiting for playable recordings.'));
       return null;
     }
 
-    const track = hypeSelection ? hypeSelection.track : playlistSelection ? playlistSelection.track : paid ? paid.track : devertAd ? devertAd.track : liveReplay || this._queue[this._queueIndex];
-    const queueIndex = !hypeSelection && !playlistSelection && !paid && !devertAd && !liveReplay ? this._queueIndex : null;
+    const track = hypeSelection ? hypeSelection.track : playlistSelection ? playlistSelection.track : paid ? paid.track
+      : devertAd ? devertAd.track : priorityMint || liveReplay || this._queue[this._queueIndex];
+    const queueIndex = !hypeSelection && !playlistSelection && !paid && !devertAd && !priorityMint && !liveReplay
+      ? this._queueIndex : null;
     const longForm = !!playlistSelection &&
       radioPlaylistDefinition(playlistSelection.playlistId, playlistSelection.playlistDefinition).selector === 'long-form';
     const durationReason = !devertAd && paid?.record.kind !== 'devert'
@@ -1555,6 +1587,7 @@ export class JukeLoopSession {
       if (playlistSelection) await this._playlistShow.advance(playlistSelection, durationReason);
       else if (liveReplay) return this._prepareNextPlayback(null, { ...options, skipLiveReplay: true });
       else this._queueIndex++;
+      if (priorityMint?.trackId === track?.trackId) this._priorityMintTrack = null;
       return this._prepareNextPlayback(null, options);
     }
     if (!this.isContentAllowed(track, !!devertAd || paid?.record.kind === 'devert')) {
@@ -1572,6 +1605,7 @@ export class JukeLoopSession {
       } else if (hypeSelection) {
         return this._skipHype(hypeSelection, 'Recording excluded by content review', options);
       } else this._queueIndex++;
+      if (priorityMint?.trackId === track?.trackId) this._priorityMintTrack = null;
       return this._prepareNextPlayback(null, options);
     }
 
@@ -1633,6 +1667,7 @@ export class JukeLoopSession {
         await this.djuke.fail(paid.record, new Error('Paid recording could not be fetched')).catch(() => {});
         return this._prepareNextPlayback(null, options);
       }
+      if (priorityMint?.trackId === track.trackId) this._priorityMintTrack = null;
       if (queueIndex !== null) this._queueIndex++;
       return this._prepareNextPlayback(null, options);
     }
@@ -1657,7 +1692,7 @@ export class JukeLoopSession {
       }
       const resource = createAudioResource(stream, { inputType: StreamType.Raw });
       return { track, paid, devertAd, queueIndex, url, resource, ffmpegProcess, completion, liveReplay: !!liveReplay, hype: hypeSelection, playlistShow: playlistSelection,
-        longForm,
+        priorityMint: priorityMint?.trackId || null, longForm,
         playlistShowContext: activeShow.type === 'playlist_show'
           ? { title: activeShow.label, instanceId: activeShow.instanceId, fallback: !playlistSelection && !devertAd } : null };
     } catch (err) {
@@ -1688,6 +1723,7 @@ export class JukeLoopSession {
         throw err;
       }
       this._sendPlaybackNotice(`⚠️ Skipping **${track.title}**: ${err.message}`);
+      if (priorityMint?.trackId === track.trackId) this._priorityMintTrack = null;
       if (queueIndex !== null) this._queueIndex++;
       return this._prepareNextPlayback(null, options);
     }
@@ -1894,6 +1930,10 @@ export class JukeLoopSession {
       return false;
     }
     const show = this.getShowState().activeShow;
+    if (prepared.priorityMint && show.type !== 'normal_rotation') {
+      this._disposePrepared(prepared, 'Fresh-mint priority waits for normal rotation');
+      return false;
+    }
     if (!prepared.devertAd && prepared.paid?.record.kind !== 'devert') {
       const designated = show.type === 'playlist_show' && prepared.playlistShow?.instanceId === show.instanceId &&
         radioPlaylistDefinition(show.playlistId, show.playlistDefinition).selector === 'long-form';
@@ -1938,6 +1978,9 @@ export class JukeLoopSession {
     this._currentDevertAd = prepared.devertAd;
     if (prepared.devertAd && !prepared.devertAd.paidRequest) this._breakAwaitingUnlock = false;
     this._currentTrack = prepared.track;
+    if (prepared.priorityMint && this._priorityMintTrack?.trackId === prepared.priorityMint) {
+      this._priorityMintTrack = null;
+    }
     this._currentLongFormSelection = prepared.longForm ? prepared.playlistShow : null;
     this._announcementMsg = null;
     this._announcementContext = null;

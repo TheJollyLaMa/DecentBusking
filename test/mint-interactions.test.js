@@ -75,7 +75,7 @@ test('private wallet submissions use uploaded artwork or the profile image and o
     const artwork = { name: 'cover.jpg', contentType: 'image/jpeg', size: 10 * 1024 * 1024 };
     let queued;
     let persisted = false;
-    let deferred;
+    const replies = [];
     let reply;
     const handler = createMintRequestInteractionHandler({ getPlaylist: () => [track],
       getDefaultArtwork: async () => { assert.equal(customArtwork, false); return 'bafy-avatar'; },
@@ -84,9 +84,11 @@ test('private wallet submissions use uploaded artwork or the profile image and o
       waitForPersistence: async () => { persisted = true; } });
     await handler({ isModalSubmit: () => true, customId: `mint-wallet:${mintRequestKey(track.trackId)}`, user: { id: 'artist' },
       fields: { getTextInputValue: id => id === 'artist-wallet' ? wallet : '', getUploadedFiles: () => customArtwork ? { first: () => artwork } : null },
-      deferReply: async options => { deferred = options; }, editReply: async options => { assert.equal(persisted, true); reply = options; } });
+      reply: async options => { replies.push(options); },
+      editReply: async options => { assert.equal(persisted, true); reply = options; } });
     assert.deepEqual(queued, ['video', 'artist', wallet, customArtwork ? 'bafy-cover' : 'bafy-avatar']);
-    assert.equal(deferred.flags, 64);
+    assert.equal(replies[0].flags, 64);
+    assert.match(replies[0].content, /Saving/);
     assert.match(reply.content, /No NFT has been minted yet/);
     assert.match(reply.content, customArtwork ? /uploaded image/ : /Discord profile image/);
   }
@@ -128,10 +130,48 @@ test('artwork CID submissions reuse IPFS images without a file upload or profile
       waitForPersistence: async () => {} });
     await handler({ isModalSubmit: () => true, customId: `mint-wallet:${mintRequestKey(track.trackId)}`, user: { id: 'artist' },
       fields: { getTextInputValue: id => id === 'artist-wallet' ? wallet : value, getUploadedFiles: () => null },
-      deferReply: async () => {}, editReply: async options => { reply = options; } });
+      reply: async () => {}, editReply: async options => { reply = options; } });
     assert.deepEqual(queued, ['video', 'artist', wallet, cid]);
     assert.match(reply.content, /your IPFS image/);
   }
+});
+
+test('a saved mint request stays successful when the final Discord edit is rate-limited', async () => {
+  const { createMintRequestInteractionHandler } = await import(interactionsUrl);
+  const { mintRequestKey } = await import(embedUrl);
+  const track = { trackId: 'video', title: 'Video', uploaderId: 'artist', ipfsCid: 'bafy-video',
+    pinStatus: 'pinned', mintStatus: 'unminted' };
+  let persisted = false;
+  let followup;
+  const handler = createMintRequestInteractionHandler({
+    getPlaylist: () => [track],
+    getDefaultArtwork: async () => 'bafy-avatar',
+    requestTrackMint: () => ({ ...track, artworkCid: 'bafy-avatar', mintStatus: 'requested' }),
+    waitForPersistence: async () => { persisted = true; },
+  });
+  await handler({
+    isModalSubmit: () => true, customId: `mint-wallet:${mintRequestKey(track.trackId)}`,
+    user: { id: 'artist' },
+    fields: { getTextInputValue: id => id === 'artist-wallet' ? `0x${'1'.repeat(40)}` : '',
+      getUploadedFiles: () => null },
+    reply: async () => {}, editReply: async () => { assert.equal(persisted, true); throw Object.assign(new Error('rate limited'), { status: 429 }); },
+    followUp: async payload => { followup = payload; },
+  });
+  assert.match(followup.content, /saved and is pending owner approval/);
+  assert.equal(followup.flags, 64);
+});
+
+test('an already-requested Discord track tells the uploader not to click again', async () => {
+  const { createMintRequestInteractionHandler } = await import(interactionsUrl);
+  const { mintRequestKey } = await import(embedUrl);
+  const track = { trackId: 'video', title: 'Video', uploaderId: 'artist', ipfsCid: 'bafy-video',
+    pinStatus: 'pinned', mintStatus: 'requested' };
+  let message;
+  const handler = createMintRequestInteractionHandler({ getPlaylist: () => [track] });
+  await handler({ isButton: () => true, customId: `mint-request:${mintRequestKey(track.trackId)}`,
+    user: { id: 'artist' }, reply: async payload => { message = payload; } });
+  assert.match(message.content, /already in the owner approval queue/);
+  assert.match(message.content, /Nothing else to click/);
 });
 
 test('invalid artwork CIDs and conflicting artwork sources are rejected without queue changes', async () => {
@@ -168,12 +208,32 @@ test('failed artwork uploads queue nothing, are logged, and tell the uploader to
       requestTrackMint: () => { queued = true; return track; }, waitForPersistence: async () => {} });
     await handler({ isModalSubmit: () => true, customId: `mint-wallet:${mintRequestKey(track.trackId)}`, user: { id: 'artist' },
       fields: { getTextInputValue: id => id === 'artist-wallet' ? `0x${'1'.repeat(40)}` : '', getUploadedFiles: () => ({ first: () => artwork }) },
-      deferReply: async () => {}, editReply: async options => { reply = options; } });
+      reply: async () => {}, editReply: async options => { reply = options; } });
   } finally { console.warn = originalWarn; }
   assert.equal(queued, false);
   assert.match(reply.content, /Pinata upload failed \(408\)/);
   assert.match(reply.content, /Nothing was queued.*Request NFT.*again/s);
   assert.ok(warnings.some(line => /\[mint-request\] Track dollar request failed/.test(line)));
+});
+
+test('an unknown persistence result never tells the uploader the request was absent', async () => {
+  const { createMintRequestInteractionHandler } = await import(interactionsUrl);
+  const { mintRequestKey } = await import(embedUrl);
+  const track = { trackId: 'video', title: 'Video', uploaderId: 'artist', ipfsCid: 'bafy-audio',
+    pinStatus: 'pinned', mintStatus: 'unminted' };
+  let reply;
+  const handler = createMintRequestInteractionHandler({
+    getPlaylist: () => [track],
+    getDefaultArtwork: async () => 'bafy-artwork',
+    requestTrackMint: () => ({ ...track, mintStatus: 'requested' }),
+    waitForPersistence: async () => { throw new Error('checkpoint unknown'); },
+  });
+  await handler({ isModalSubmit: () => true, customId: `mint-wallet:${mintRequestKey(track.trackId)}`,
+    user: { id: 'artist' }, fields: { getTextInputValue: id => id === 'artist-wallet' ? `0x${'1'.repeat(40)}` : '',
+      getUploadedFiles: () => null }, reply: async () => {}, editReply: async payload => { reply = payload; } });
+  assert.match(reply.content, /may already be saved/);
+  assert.match(reply.content, /Do not click again/);
+  assert.doesNotMatch(reply.content, /Nothing was queued/);
 });
 
 test('choosing Song acknowledges the click and removes the choice buttons before archiving', () => {

@@ -1015,6 +1015,7 @@ async function main() {
     });
     const completedTrack = completeTrackMint(trackId, { tokenId, txHash, contractAddress: verified.contractAddress });
     if (!completedTrack) throw new Error('Mint request could not be reconciled');
+    getActiveJukeLoopSession()?.queueMintedNext?.(completedTrack);
     return completedTrack;
   };
 
@@ -3234,6 +3235,11 @@ async function startWebsiteRadio(client, config) {
     });
     if (config.liveAudioPolicy) session.setLiveAudioPolicy?.(config.liveAudioPolicy);
     await session.start();
+    const recentMint = getPlaylist()
+      .filter(track => track.mintStatus === 'minted' && track.plays === 0 && Number.isFinite(Date.parse(track.mintedAt)) &&
+        Date.now() - Date.parse(track.mintedAt) < 30 * 60_000)
+      .sort((first, second) => Date.parse(second.mintedAt) - Date.parse(first.mintedAt))[0];
+    if (recentMint) session.queueMintedNext?.(recentMint);
     session.client = config.getDiscordClient?.() || client;
     _jukeLoopRestartAttempts.delete(config.jukeLoopTextChannelId);
     console.log('[jukeloop] Website broadcast started independently of Discord.');
